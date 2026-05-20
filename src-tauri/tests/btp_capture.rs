@@ -55,12 +55,15 @@ fn real_tournament_capture_parses_to_snapshot() {
             .find(|m| m.id == id)
             .unwrap_or_else(|| panic!("Match {id} fehlt"))
     };
+    let names = |team: &[model::BtpPlayer]| -> Vec<String> {
+        team.iter().map(|p| p.name.clone()).collect()
+    };
 
     // Beendetes Match mit Ergebnis: Bernd unterliegt Ulla 2:21, 5:21.
     let finished = by_id(19);
     assert_eq!(finished.status, MatchStatus::Finished);
-    assert_eq!(finished.team1, ["Bernd"]);
-    assert_eq!(finished.team2, ["Ulla"]);
+    assert_eq!(names(&finished.team1), ["Bernd"]);
+    assert_eq!(names(&finished.team2), ["Ulla"]);
     assert_eq!(finished.sets, [(2, 21), (5, 21)]);
     assert_eq!(finished.winner, Some(2));
 
@@ -68,8 +71,8 @@ fn real_tournament_capture_parses_to_snapshot() {
     let on_court = by_id(22);
     assert_eq!(on_court.status, MatchStatus::OnCourt);
     assert_eq!(on_court.court.as_deref(), Some("1"));
-    assert_eq!(on_court.team1, ["Anne"]);
-    assert_eq!(on_court.team2, ["Hilde"]);
+    assert_eq!(names(&on_court.team1), ["Anne"]);
+    assert_eq!(names(&on_court.team2), ["Hilde"]);
 
     // Gesamtverteilung der Zustände.
     let count = |s: MatchStatus| snapshot.matches.iter().filter(|m| m.status == s).count();

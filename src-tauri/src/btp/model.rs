@@ -21,6 +21,17 @@ pub enum MatchStatus {
     Finished,
 }
 
+/// Ein Spieler einer Paarung.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtpPlayer {
+    /// Anzeigename ("Vorname Nachname" bzw. nur Nachname).
+    pub name: String,
+    /// Lizenznummer (BTP `MemberID`, z. B. "08-010493"), falls vorhanden.
+    pub member_id: Option<String>,
+    /// Nationalität als ISO-Code (BTP `Country`, z. B. "GER"), falls vorhanden.
+    pub nationality: Option<String>,
+}
+
 /// Eine anzeigbare Paarung.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BtpMatch {
@@ -29,9 +40,9 @@ pub struct BtpMatch {
     pub draw_name: String,
     /// Runden-/Spielbezeichnung, z. B. "G1".
     pub round_name: String,
-    /// Spielernamen Team 1 (ein Name bei Einzel, zwei bei Doppel).
-    pub team1: Vec<String>,
-    pub team2: Vec<String>,
+    /// Team 1 (ein Spieler bei Einzel, zwei bei Doppel).
+    pub team1: Vec<BtpPlayer>,
+    pub team2: Vec<BtpPlayer>,
     /// Court-Name, falls dem Match ein Court zugewiesen ist.
     pub court: Option<String>,
     /// Satz-Ergebnisse als (Team1, Team2)-Punkte.
@@ -75,8 +86,8 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
 
 // --- Lookup-Tabellen ------------------------------------------------------
 
-/// PlayerID → Anzeigename.
-fn player_map(t: &[Node]) -> HashMap<i64, String> {
+/// PlayerID → Spielerdaten.
+fn player_map(t: &[Node]) -> HashMap<i64, BtpPlayer> {
     let mut map = HashMap::new();
     let Some(players) = xml::find(t, "Players") else {
         return map;
@@ -92,7 +103,14 @@ fn player_map(t: &[Node]) -> HashMap<i64, String> {
         } else {
             format!("{first} {last}")
         };
-        map.insert(id, name);
+        map.insert(
+            id,
+            BtpPlayer {
+                name,
+                member_id: child_str(p, "MemberID").map(String::from),
+                nationality: child_str(p, "Country").map(String::from),
+            },
+        );
     }
     map
 }
@@ -159,7 +177,7 @@ fn id_name_map(t: &[Node], container: &str) -> HashMap<i64, String> {
 
 fn parse_matches(
     t: &[Node],
-    players: &HashMap<i64, String>,
+    players: &HashMap<i64, BtpPlayer>,
     entries: &HashMap<i64, Vec<i64>>,
     slots: &HashMap<i64, i64>,
     courts: &HashMap<i64, String>,
@@ -202,14 +220,14 @@ fn parse_matches(
     out
 }
 
-/// Löst die `From`-PlanningID über Slot → Entry → Player zu Spielernamen auf.
+/// Löst die `From`-PlanningID über Slot → Entry → Player zu den Spielern auf.
 /// Leerer Vec, wenn die Kette nicht aufgeht (z. B. noch offener KO-Platz).
 fn resolve_team(
     planning_id: Option<i64>,
     slots: &HashMap<i64, i64>,
     entries: &HashMap<i64, Vec<i64>>,
-    players: &HashMap<i64, String>,
-) -> Vec<String> {
+    players: &HashMap<i64, BtpPlayer>,
+) -> Vec<BtpPlayer> {
     let Some(planning) = planning_id else {
         return Vec::new();
     };
@@ -367,8 +385,11 @@ mod tests {
                                     Node::integer("ID", 1),
                                     Node::string("Lastname", "Müller"),
                                     Node::string("Firstname", "Anna"),
+                                    Node::string("MemberID", "08-001234"),
+                                    Node::string("Country", "GER"),
                                 ],
                             ),
+                            // Spieler 2 ohne MemberID/Country.
                             Node::group(
                                 "Player",
                                 vec![
@@ -420,7 +441,12 @@ mod tests {
         )];
         let snapshot = parse_snapshot(&tree).unwrap();
         assert_eq!(snapshot.matches.len(), 1);
-        assert_eq!(snapshot.matches[0].team1, ["Anna Müller", "Ben Schmidt"]);
+        let team1 = &snapshot.matches[0].team1;
+        let names: Vec<&str> = team1.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Anna Müller", "Ben Schmidt"]);
+        assert_eq!(team1[0].member_id.as_deref(), Some("08-001234"));
+        assert_eq!(team1[0].nationality.as_deref(), Some("GER"));
+        assert_eq!(team1[1].member_id, None);
         assert!(snapshot.matches[0].team2.is_empty());
     }
 }
