@@ -55,6 +55,8 @@ pub struct AppState {
     pub tablet: Arc<TabletState>,
     /// Handle des laufenden Tablet-Servers, falls aktiv.
     pub tablet_server: Mutex<Option<JoinHandle<()>>>,
+    /// Handle des Diagnose-Log-Uploads, falls aktiv.
+    pub log_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 fn now_ms() -> u64 {
@@ -137,6 +139,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
     }
 
+    // Vor dem Move von `config` in den Tablet-Server merken.
+    let upload_logs = config.upload_logs;
+    let install_id = config.install_id.clone();
+
     let tablet = state.tablet.clone();
 
     // Poll-Push-Schleife BTP → Badhub.
@@ -179,6 +185,25 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         });
         *server_slot = Some(server_handle);
     }
+    drop(server_slot);
+
+    // Optionaler Diagnose-Log-Upload (nur wenn vom Nutzer aktiviert).
+    if upload_logs {
+        let mut log_slot = state
+            .log_task
+            .lock()
+            .expect("Log-Task-Mutex nicht vergiftet");
+        if log_slot.is_none() {
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                *log_slot = Some(tauri::async_runtime::spawn(crate::log_upload::upload_loop(
+                    push::build_client(),
+                    log_dir,
+                    install_id,
+                )));
+            }
+        }
+    }
+
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus {
         running: true,
         kind: "idle".to_string(),
@@ -203,6 +228,14 @@ pub fn stop_sync(state: State<'_, AppState>) {
         .tablet_server
         .lock()
         .expect("Tablet-Server-Mutex nicht vergiftet")
+        .take()
+    {
+        handle.abort();
+    }
+    if let Some(handle) = state
+        .log_task
+        .lock()
+        .expect("Log-Task-Mutex nicht vergiftet")
         .take()
     {
         handle.abort();

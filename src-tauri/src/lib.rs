@@ -2,6 +2,7 @@ pub mod badhub;
 pub mod btp;
 pub mod commands;
 pub mod config;
+pub mod log_upload;
 pub mod sync;
 pub mod tablet;
 

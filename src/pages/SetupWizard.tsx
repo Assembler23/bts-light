@@ -49,6 +49,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [badhubUrl, setBadhubUrl] = useState(initialConfig.badhub.url);
   const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
+  const [uploadLogs, setUploadLogs] = useState(initialConfig.upload_logs);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -72,6 +73,8 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         password: btpPassword.trim() ? btpPassword.trim() : null,
       },
       badhub,
+      upload_logs: uploadLogs,
+      install_id: initialConfig.install_id,
     };
   }
 
@@ -190,6 +193,24 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
           />
         </section>
       )}
+
+      {/* Diagnose */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">Diagnose</h2>
+        <label className="flex items-start gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={uploadLogs}
+            onChange={(e) => setUploadLogs(e.currentTarget.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Diagnose-Logs automatisch an badhub senden – hilft, Fehler zu
+            finden und zu beheben. Enthält nur technische Daten (keine
+            Spielernamen).
+          </span>
+        </label>
+      </section>
 
       {saveError && <p className="text-sm text-red-700">{saveError}</p>}
 

@@ -50,6 +50,14 @@ impl Default for BadhubConfig {
 pub struct AppConfig {
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
+    /// Opt-in: Diagnose-Logs automatisch an badhub.de hochladen, damit
+    /// Fehler über alle Installationen hinweg auswertbar sind.
+    #[serde(default)]
+    pub upload_logs: bool,
+    /// Zufällige, dauerhafte Installations-ID (vom Frontend erzeugt) –
+    /// ordnet hochgeladene Logs einer Installation zu.
+    #[serde(default)]
+    pub install_id: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,6 +119,8 @@ mod tests {
                 password: "token123".to_string(),
                 live_url: "https://badhub.de/live?t=test".to_string(),
             },
+            upload_logs: true,
+            install_id: "inst-abc123".to_string(),
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

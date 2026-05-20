@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadConfig } from "./api";
+import { loadConfig, saveConfig } from "./api";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { Dashboard } from "./pages/Dashboard";
 import { SetupWizard } from "./pages/SetupWizard";
@@ -16,6 +16,8 @@ function defaultConfig(): AppConfig {
       password: "",
       live_url: "",
     },
+    upload_logs: false,
+    install_id: "",
   };
 }
 
@@ -26,6 +28,12 @@ function App() {
   useEffect(() => {
     loadConfig()
       .then((c) => {
+        // Installations-ID einmalig erzeugen – sie ordnet hochgeladene
+        // Diagnose-Logs einer Installation zu.
+        if (!c.install_id) {
+          c = { ...c, install_id: crypto.randomUUID() };
+          void saveConfig(c);
+        }
         setConfig(c);
         // Ist bereits ein Badhub-Passwort hinterlegt, gilt die App als
         // eingerichtet und zeigt direkt das Dashboard.

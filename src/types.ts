@@ -16,6 +16,10 @@ export interface BadhubConfig {
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
+  /** Opt-in: Diagnose-Logs automatisch an badhub.de hochladen. */
+  upload_logs: boolean;
+  /** Zufällige, dauerhafte Installations-ID (Frontend erzeugt sie). */
+  install_id: string;
 }
 
 export interface SyncStatus {
