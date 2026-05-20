@@ -55,8 +55,7 @@ jobs:
           files: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip
-            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip.sig
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
 
   # Lädt die Release-Assets, baut latest.json und schiebt alles nach
   # badhub.de. Läuft auf Linux, weil rsync/ssh dort problemlos verfügbar
@@ -78,17 +77,18 @@ jobs:
           ls -la rel
 
       # Tauri-2-Updater-Manifest. signature = Inhalt der .sig-Datei,
-      # url = die badhub.de-Adresse des .nsis.zip-Updater-Artefakts.
+      # url = die badhub.de-Adresse des NSIS-Installers (-setup.exe) – das
+      # ist unter Windows zugleich das Updater-Artefakt.
       - name: latest.json erzeugen
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          ZIP=$(cd rel && ls *-setup.nsis.zip | head -1)
-          SIG=$(cat "rel/${ZIP}.sig")
+          SETUP=$(cd rel && ls *-setup.exe | head -1)
+          SIG=$(cat "rel/${SETUP}.sig")
           jq -n \
             --arg version "$VERSION" \
             --arg sig "$SIG" \
-            --arg url "https://badhub.de/download/bts-light/${ZIP}" \
+            --arg url "https://badhub.de/download/bts-light/${SETUP}" \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{version: $version,
               notes: ("BTS Light " + $version),
@@ -112,5 +112,4 @@ jobs:
           rsync -av \
             rel/latest.json \
             rel/*-setup.exe \
-            rel/*-setup.nsis.zip \
             badhub@178.104.221.177:/var/www/badhub/public/download/bts-light/

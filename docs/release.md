@@ -16,7 +16,8 @@ Release veröffentlicht wird und wie das Auto-Update funktioniert.
   Artefakte, die zum eingebauten Public Key in `tauri.conf.json` passen.
 - Offline ist kein Fehler – ohne Internet bleibt das Banner einfach aus.
 
-Der Windows-Updater nutzt das **NSIS**-Artefakt (`*-setup.nsis.zip`).
+Der Windows-Updater nutzt den **NSIS-Installer** (`*-setup.exe`); dessen
+`.sig`-Signatur steht inline im `latest.json`.
 Die `.msi` bleibt nur für manuelle Installationen.
 
 ## Einen Release veröffentlichen
