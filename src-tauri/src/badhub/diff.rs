@@ -71,6 +71,8 @@ mod tests {
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
             id,
+            draw_id: 1,
+            planning_id: 1000 + id,
             draw_name: "HE".to_string(),
             round_name: "G1".to_string(),
             match_num: Some(id),
@@ -97,6 +99,7 @@ mod tests {
         BtpSnapshot {
             tournament_name: "T".to_string(),
             matches,
+            courts: Vec::new(),
         }
     }
 

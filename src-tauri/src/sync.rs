@@ -137,8 +137,11 @@ mod tests {
     fn snapshot() -> BtpSnapshot {
         BtpSnapshot {
             tournament_name: "T".to_string(),
+            courts: Vec::new(),
             matches: vec![BtpMatch {
                 id: 1,
+                draw_id: 1,
+                planning_id: 1001,
                 draw_name: "HE".to_string(),
                 round_name: "G1".to_string(),
                 match_num: Some(1),

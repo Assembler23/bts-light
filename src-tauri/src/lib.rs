@@ -3,6 +3,7 @@ pub mod btp;
 pub mod commands;
 pub mod config;
 pub mod sync;
+pub mod tablet;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};

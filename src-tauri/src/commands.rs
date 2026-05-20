@@ -1,7 +1,7 @@
 //! Tauri-Commands – die Brücke zwischen der WebView-Oberfläche und dem
 //! Rust-Kern. Enthält außerdem die Hintergrund-Polling-Schleife.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -13,6 +13,7 @@ use crate::badhub::push;
 use crate::btp::client;
 use crate::config::AppConfig;
 use crate::sync::{SyncEngine, SyncOutcome};
+use crate::tablet::state::TabletState;
 
 /// Abstand zwischen zwei Poll-Push-Zyklen.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -50,6 +51,10 @@ pub struct AppState {
     pub status: Mutex<SyncStatus>,
     /// Handle der laufenden Polling-Schleife, falls aktiv.
     pub sync_task: Mutex<Option<JoinHandle<()>>>,
+    /// Geteilter Zustand zwischen Sync-Loop und Tablet-Server.
+    pub tablet: Arc<TabletState>,
+    /// Handle des laufenden Tablet-Servers, falls aktiv.
+    pub tablet_server: Mutex<Option<JoinHandle<()>>>,
 }
 
 fn now_ms() -> u64 {

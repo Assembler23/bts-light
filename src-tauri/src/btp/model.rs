@@ -61,6 +61,11 @@ pub struct BtpPlayer {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BtpMatch {
     pub id: i64,
+    /// Draw-ID des Matches – zusammen mit `planning_id` adressiert es das
+    /// Match beim Zurückschreiben nach BTP (`SENDUPDATE`).
+    pub draw_id: i64,
+    /// Planungsposition des Matches im Draw (`Match.PlanningID`).
+    pub planning_id: i64,
     /// Name der Auslosung, z. B. "HE".
     pub draw_name: String,
     /// Runden-/Spielbezeichnung, z. B. "G1".
@@ -90,6 +95,9 @@ pub struct BtpMatch {
 pub struct BtpSnapshot {
     pub tournament_name: String,
     pub matches: Vec<BtpMatch>,
+    /// Alle Court-Namen des Turniers (BTP-Reihenfolge), auch leere Courts –
+    /// damit der Tablet-Server jedem Court eine Adresse zuordnen kann.
+    pub courts: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,9 +119,15 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     let courts = court_map(t);
     let draws = draw_map(t);
 
+    // Court-Namen nach CourtID sortiert – das ergibt die BTP-Anlegereihenfolge.
+    let mut court_pairs: Vec<(&i64, &String)> = courts.iter().collect();
+    court_pairs.sort_by_key(|(id, _)| **id);
+    let court_names: Vec<String> = court_pairs.into_iter().map(|(_, n)| n.clone()).collect();
+
     Ok(BtpSnapshot {
         tournament_name: setting_str(t, 1001).unwrap_or_default(),
         matches: parse_matches(t, &players, &entries, &slots, &courts, &draws),
+        courts: court_names,
     })
 }
 
@@ -249,6 +263,8 @@ fn parse_matches(
         };
         out.push(BtpMatch {
             id: child_int(m, "ID").unwrap_or_default(),
+            draw_id: draw_id.unwrap_or_default(),
+            planning_id: child_int(m, "PlanningID").unwrap_or_default(),
             draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
