@@ -1,5 +1,6 @@
 pub mod badhub;
 pub mod btp;
+pub mod commands;
 pub mod config;
 pub mod sync;
 
@@ -12,7 +13,13 @@ fn app_version() -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![app_version])
+        .manage(commands::AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            commands::load_config,
+            commands::save_config,
+            commands::test_btp,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
