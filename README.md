@@ -31,6 +31,13 @@ Badhub-Passwort eintragen – fertig.
   Tablets im Hallen-WLAN hängen: Punkte zählen, Live-Score an den
   Liveticker, Endergebnis zurück nach BTP. Details:
   [docs/tablet.md](docs/tablet.md).
+- **Diagnose-Logs** – tägliche Logdatei lokal (Dashboard-Button „Logs
+  öffnen"); optional ein opt-in automatischer Upload an badhub.de zur
+  zentralen Fehlerauswertung über alle Installationen. Details:
+  [docs/logging.md](docs/logging.md).
+- **Single-Instance** – bts-light läuft pro Rechner nur einmal; ein
+  zweiter Start holt das bestehende Fenster nach vorn (sonst kollidierte
+  der Tablet-Server-Port).
 
 Offen: signierter Windows-Installer (Code-Signing-Zertifikat). Bis dahin
 zeigt Windows beim ersten Start eine SmartScreen-Warnung – über „Weitere

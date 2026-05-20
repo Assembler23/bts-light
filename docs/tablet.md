@@ -64,6 +64,15 @@ Tablet Court 3 ─┘          (axum :8088)   ├─▶ badhub Liveticker (live)
 - In **BTP müssen Netzwerk-Edits erlaubt** sein, sonst lehnt BTP den
   `SENDUPDATE` ab – das Tablet zeigt dann einen Fehler.
 
+## Fehlersuche
+
+- bts-light läuft pro Rechner **nur einmal** (Single-Instance). Ein
+  zweiter Start würde sonst den Tablet-Server-Port 8088 blockieren.
+- Der Server protokolliert ausgelieferte Tablet-Seiten, Tablet
+  verbunden/getrennt und Match-Zuweisungen ins Log – siehe
+  [logging.md](logging.md). Steht dort kein „Tablet verbunden", erreicht
+  das Tablet den Server nicht (WLAN/Firewall prüfen).
+
 ## Bekannte Vereinfachungen
 
 - Spielsystem ist fest **Best-of-3 bis 21** (BTP liefert das Format nicht
