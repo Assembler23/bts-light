@@ -1,0 +1,1191 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Spielzettel</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
+      background: #0f172a; color: #f8fafc;
+      -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+    }
+    .app { display: flex; flex-direction: column; height: 100dvh; min-height: 100vh; }
+    header {
+      display: flex; align-items: center; gap: .6rem;
+      padding: .35rem .8rem; background: #1e293b; border-bottom: 1px solid #334155;
+      font-size: .85rem; flex-shrink: 0;
+    }
+    .header-info { flex: 1; min-width: 0; }
+    .header-undo {
+      flex: 0 0 auto;
+      width: 2.6rem; height: 2.6rem;
+      padding: 0; min-height: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; font-weight: 700; line-height: 1;
+      background: #475569; color: #f8fafc;
+      border: 0; border-radius: .5rem; cursor: pointer;
+      touch-action: manipulation;
+    }
+    .header-undo:disabled { opacity: .35; cursor: not-allowed; }
+    .header-undo:active:not(:disabled) { background: #64748b; }
+    .court-label { font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+    .event-label { opacity: .7; }
+    .conn { display: flex; align-items: center; gap: .4rem; font-size: .75rem; }
+    .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #64748b; }
+    .dot.ok { background: #22c55e; }
+    .dot.bad { background: #ef4444; }
+    .empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1rem; opacity: .4; padding: 2rem;
+      text-align: center; font-size: 1.1rem;
+    }
+
+    /* ─── Hauptbereich: Score + Court + Plus-Buttons ──────────────────── */
+    .main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .play {
+      flex: 1; display: grid;
+      grid-template-columns: 1fr 3fr 1fr;
+      gap: .5rem; padding: .5rem; min-height: 0;
+    }
+    .plus-btn {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border-radius: .75rem; cursor: pointer; font-weight: 800;
+      transition: background 80ms ease;
+      padding: 1rem .25rem;
+    }
+    .plus-btn .plus { font-size: 4.5rem; line-height: 1; }
+    .plus-btn .label { font-size: .85rem; opacity: .85; margin-top: .5rem; letter-spacing: .05em; text-transform: uppercase; }
+    .plus-left { background: #1e3a8a; }
+    .plus-left:active { background: #1e40af; }
+    .plus-right { background: #831843; }
+    .plus-right:active { background: #9d174d; }
+
+    /* Court + Score Block in der Mitte */
+    .center { display: flex; flex-direction: column; min-height: 0; gap: .35rem; }
+    .score-board {
+      display: flex; align-items: center; justify-content: center;
+      background: #020617; padding: .25rem .5rem .25rem .25rem; gap: .5rem;
+      border-radius: .5rem; border: 1px solid #1e293b; flex-shrink: 0;
+    }
+    .score-stack { display: flex; flex-direction: column; align-items: center; gap: .1rem; flex: 1; }
+    /* Undo-Button im Score-Board: groß und kontrastreich, sitzt mittig auf
+       dem Bildschirm und kann nicht von Safari-Bottom-Bars oder dem Home-
+       Indicator abgeschnitten werden. Heller Amber-Ton + Glow für klare
+       Sichtbarkeit auf dem dunklen Score-Board. */
+    .board-undo {
+      flex: 0 0 auto;
+      width: 4.5rem; height: 4.5rem;
+      padding: 0; min-height: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 2.8rem; font-weight: 800; line-height: 1;
+      background: #fbbf24; color: #0f172a;
+      border: 2px solid #fde68a;
+      border-radius: .75rem; cursor: pointer;
+      touch-action: manipulation;
+      box-shadow: 0 0 0 3px rgba(251, 191, 36, .25), 0 4px 12px rgba(0,0,0,.4);
+    }
+    .board-undo:disabled {
+      opacity: 1; cursor: not-allowed;
+      background: #475569; color: #94a3b8;
+      border-color: #334155;
+      box-shadow: none;
+    }
+    .board-undo:active:not(:disabled) { background: #f59e0b; transform: scale(.96); }
+    .current-score {
+      font-size: 2.2rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums;
+      display: flex; gap: .6rem; align-items: baseline;
+    }
+    .current-score .left-score { color: #93c5fd; }
+    .current-score .right-score { color: #fda4af; }
+    .current-score .colon { opacity: .4; font-size: 1.7rem; color: #f8fafc; }
+    .current-set-label { font-size: .7rem; opacity: .6; letter-spacing: .05em; text-transform: uppercase; }
+    .set-history { display: flex; gap: .5rem; font-size: .8rem; opacity: .65; font-variant-numeric: tabular-nums; flex-wrap: wrap; justify-content: center; }
+
+    /* Badminton-Court mit echten Linien-Markierungen.
+       Maße im Original: 13.40 × 6.10 m → viewBox 134 × 61 (1 Einheit = 0.1 m).
+       Lines: outer doubles boundary, Netz, Short Service Line (1.98m von Netz),
+       Long Service Line Doppel (0.76m vor Backline), Singles-Sidelines (0.46m
+       innen), Mittellinie (verbindet Short Service Line mit Backline). */
+    .court-wrapper {
+      flex: 1; min-height: 0;
+      container-type: size;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* Größtmöglicher Court, der in beide Achsen passt:
+       width = min(verfügbare Breite, verfügbare Höhe × Seitenverhältnis 134:61).
+       Damit füllt der Court entweder Wrapper-Breite oder Wrapper-Höhe vollständig. */
+    .court {
+      position: relative;
+      width: min(100cqw, calc(100cqh * 134 / 61));
+      aspect-ratio: 134 / 61;
+      background: #15803d;
+      border-radius: .35rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 2px #f8fafc;
+    }
+    .court-lines {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none; z-index: 1;
+    }
+    .court-lines .line { stroke: #f8fafc; stroke-width: .4; fill: none; vector-effect: non-scaling-stroke; }
+    .court-lines .net  { stroke: #0f172a; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+    .court .cell {
+      display: flex; align-items: center; justify-content: center;
+      padding: .25rem; text-align: center;
+      position: relative;
+      font-weight: 600; color: #f8fafc;
+      z-index: 2;
+      transition: background-color 120ms ease;
+    }
+    .court .cell.server { background: rgba(251, 191, 36, .22); }
+    .court .cell.server::after {
+      content: '';
+      position: absolute;
+      width: 1.2rem; height: 1.2rem;
+      border-radius: 50%;
+      background: #fbbf24;
+      box-shadow: 0 0 0 3px rgba(251, 191, 36, .45);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    /* Punkt visuell beim Spielfeld-Innenwinkel (Netz + Mittellinie) platzieren */
+    .court #cell-leftTop.server::after    { bottom: .4rem; right: .4rem; }
+    .court #cell-leftBottom.server::after { top: .4rem;    right: .4rem; }
+    .court #cell-rightTop.server::after    { bottom: .4rem; left: .4rem; }
+    .court #cell-rightBottom.server::after { top: .4rem;    left: .4rem; }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(251, 191, 36, .45); }
+      50%      { box-shadow: 0 0 0 8px rgba(251, 191, 36, .15); }
+    }
+    .court .cell .player-name {
+      font-size: clamp(.8rem, 1.8vw, 1.2rem);
+      text-shadow: 0 1px 2px rgba(0,0,0,.6);
+      line-height: 1.15; word-break: keep-all; hyphens: none;
+      max-width: 100%;
+    }
+    .court .team-label-left, .court .team-label-right {
+      position: absolute; top: .25rem; font-size: .7rem; opacity: .9;
+      letter-spacing: .05em; text-transform: uppercase;
+      pointer-events: none; z-index: 3;
+      text-shadow: 0 1px 2px rgba(0,0,0,.6);
+    }
+    .court .team-label-left { left: .5rem; color: #93c5fd; }
+    .court .team-label-right { right: .5rem; color: #fda4af; }
+
+    /* ─── Footer mit Aktionen ────────────────────────────────────────── */
+    footer {
+      display: flex; gap: .5rem; padding: .6rem;
+      padding-bottom: max(.6rem, env(safe-area-inset-bottom));
+      background: #0b1220; flex-shrink: 0;
+      border-top: 1px solid #334155;
+    }
+    button {
+      flex: 1; padding: 1rem .8rem; font-size: 1.05rem; font-weight: 700;
+      background: #475569; color: #f8fafc; border: 0; border-radius: .5rem;
+      cursor: pointer; touch-action: manipulation; font-family: inherit;
+      min-height: 3rem;
+    }
+    button:disabled { opacity: .55; cursor: not-allowed; background: #1e293b; color: #64748b; }
+    button.primary { background: #16a34a; }
+    button.primary:disabled { background: #1f2937; color: #94a3b8; }
+    button.danger { background: #b91c1c; }
+
+    /* ─── Setup-Modal ────────────────────────────────────────────────── */
+    .modal {
+      position: fixed; inset: 0; background: rgba(2,6,23,.94);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1.5rem; padding: 2rem; text-align: center;
+      z-index: 10;
+    }
+    .modal.visible { display: flex; }
+    .modal .title { font-size: 1.4rem; font-weight: 700; }
+    .modal .subtitle { font-size: .9rem; opacity: .65; margin-top: -.8rem; }
+    .modal .options {
+      display: flex; flex-wrap: wrap; gap: .75rem;
+      justify-content: center; max-width: 60rem; width: 100%;
+    }
+    .modal .opt {
+      flex: 1 1 14rem; min-width: 12rem; max-width: 24rem;
+      padding: 1.25rem 1rem;
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: .75rem;
+      font-size: 1.1rem; font-weight: 600;
+      cursor: pointer;
+    }
+    .modal .opt:active { background: #334155; }
+    .modal .opt.team-a { border-color: #3b82f6; }
+    .modal .opt.team-b { border-color: #ec4899; }
+    .modal .opt .partner { font-size: .8rem; opacity: .65; margin-top: .3rem; font-weight: 400; }
+    .modal .opt .club { font-size: .75rem; opacity: .55; margin-top: .25rem; font-weight: 400; }
+
+    /* ─── Finish-Overlay ─────────────────────────────────────────────── */
+    .match-finished-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.85);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1rem; padding: 2rem; text-align: center;
+      z-index: 10;
+    }
+    .match-finished-overlay.visible { display: flex; }
+    .winner-banner { font-size: 1.8rem; font-weight: 800; color: #fbbf24; }
+    .set-summary { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+    .submit-status { font-size: .9rem; opacity: .7; min-height: 1.2em; }
+
+    @media (orientation: portrait) {
+      /* Hochformat: Buttons sehr schmal — Hinweis zum Drehen einblenden? */
+      .play { grid-template-columns: 1fr 2fr 1fr; }
+      .plus-btn .plus { font-size: 3rem; }
+      .plus-btn .label { font-size: .7rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <button
+      type="button"
+      id="undo-btn-top"
+      class="header-undo"
+      disabled
+      aria-label="Letzten Punkt zurück"
+      title="Letzten Punkt zurück"
+    >↩</button>
+    <div class="header-info">
+      <div class="court-label">__COURT_LABEL__</div>
+      <div class="event-label" id="event-label">— kein Match —</div>
+    </div>
+    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
+  </header>
+
+  <div class="main" id="main">
+    <div class="empty" id="empty-view">
+      <div style="font-size:2.5rem">🏸</div>
+      <div>Warte auf Match-Zuweisung durch die Turnierleitung…</div>
+      <div style="font-size:.85rem;opacity:.6">Tablet bleibt aktiv, sobald ein Match zugewiesen wird startet die Zähltafel automatisch.</div>
+    </div>
+
+    <div id="play-view" class="play" style="display:none">
+      <div class="plus-btn plus-left" id="plus-left">
+        <div class="plus">+1</div>
+        <div class="label">Links</div>
+      </div>
+
+      <div class="center">
+        <div class="score-board">
+          <button
+            type="button"
+            id="undo-btn-board"
+            class="board-undo"
+            disabled
+            aria-label="Letzten Punkt zurück"
+            title="Letzten Punkt zurück"
+          >↩</button>
+          <div class="score-stack">
+            <div class="current-set-label" id="current-set-label">Satz 1</div>
+            <div class="current-score">
+              <span id="score-left" class="left-score">0</span>
+              <span class="colon">:</span>
+              <span id="score-right" class="right-score">0</span>
+            </div>
+            <div class="set-history" id="set-history"></div>
+          </div>
+        </div>
+
+        <div class="court-wrapper">
+          <div class="court" id="court">
+            <svg class="court-lines" viewBox="0 0 134 61" preserveAspectRatio="none">
+              <!-- Doppel-Long-Service-Line (0.76 m vor Backline = bei x=7.6 / 126.4) -->
+              <line class="line" x1="7.6"   y1="0"  x2="7.6"   y2="61" />
+              <line class="line" x1="126.4" y1="0"  x2="126.4" y2="61" />
+              <!-- Short Service Line (1.98 m vor Netz = bei x=47.2 / 86.8) -->
+              <line class="line" x1="47.2"  y1="0"  x2="47.2"  y2="61" />
+              <line class="line" x1="86.8"  y1="0"  x2="86.8"  y2="61" />
+              <!-- Singles-Sidelines (0.46 m innen) -->
+              <line class="line" x1="0"   y1="4.6"  x2="134" y2="4.6"  />
+              <line class="line" x1="0"   y1="56.4" x2="134" y2="56.4" />
+              <!-- Mittellinie (zwischen Short Service Line und Backline pro Seite) -->
+              <line class="line" x1="0"     y1="30.5" x2="47.2" y2="30.5" />
+              <line class="line" x1="86.8"  y1="30.5" x2="134"  y2="30.5" />
+              <!-- Netz -->
+              <line class="net"  x1="67"    y1="0"    x2="67"   y2="61" />
+            </svg>
+            <div class="team-label-left" id="team-label-left"></div>
+            <div class="team-label-right" id="team-label-right"></div>
+            <!-- 4 Service-Courts: leftTop, rightTop, leftBottom, rightBottom -->
+            <div class="cell" id="cell-leftTop"><span class="player-name"></span></div>
+            <div class="cell" id="cell-rightTop"><span class="player-name"></span></div>
+            <div class="cell" id="cell-leftBottom"><span class="player-name"></span></div>
+            <div class="cell" id="cell-rightBottom"><span class="player-name"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="plus-btn plus-right" id="plus-right">
+        <div class="plus">+1</div>
+        <div class="label">Rechts</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <button id="undo-btn-bottom" disabled>↩ Letzten Punkt zurück</button>
+    <button id="finish-btn" class="primary" disabled>Match beenden →</button>
+  </footer>
+</div>
+
+<!-- Setup-Modal: Aufschläger + (bei Doppel) Annehmer -->
+<div class="modal" id="setup-modal">
+  <div class="title" id="setup-title">Wer schlägt zuerst auf?</div>
+  <div class="subtitle" id="setup-subtitle"></div>
+  <div class="options" id="setup-options"></div>
+</div>
+
+<!-- Mid-Game-Seitenwechsel-Banner (Entscheidungssatz bei 11) -->
+<div id="switch-toast" style="
+  position: fixed; left: 50%; bottom: 5.5rem; transform: translateX(-50%);
+  background: #f59e0b; color: #1f2937; padding: 1rem 2rem;
+  border-radius: 1rem; font-size: 1.4rem; font-weight: 800;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 20;
+  display: none; text-align: center;
+">
+  ↔ SEITENWECHSEL — Spieler die Hälften tauschen
+</div>
+
+<!-- Diagnose-Modal (5× Tap auf den Connection-Dot öffnet das) -->
+<div id="diag-modal" style="
+  position: fixed; inset: 0; background: rgba(2,6,23,.94); z-index: 30;
+  display: none; flex-direction: column; padding: .75rem;
+">
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.25rem .5rem">
+    <strong style="font-size:1rem">🔧 Tablet-Diagnose</strong>
+    <button id="diag-close" style="background:#475569;color:#f8fafc;border:0;border-radius:.4rem;padding:.4rem .8rem;font-weight:600;font-size:.85rem;cursor:pointer">Schließen</button>
+  </div>
+  <div style="display:flex; gap:.4rem; padding:.4rem .5rem; flex-wrap:wrap; font-size:.75rem; color:#94a3b8">
+    <span id="diag-meta"></span>
+  </div>
+  <div style="display:flex; gap:.4rem; padding:.25rem .5rem .5rem">
+    <button id="diag-download" style="background:#0ea5e9;color:#fff;border:0;border-radius:.4rem;padding:.4rem .8rem;font-weight:600;font-size:.85rem;cursor:pointer">⬇ Download .txt</button>
+    <button id="diag-copy" style="background:#475569;color:#f8fafc;border:0;border-radius:.4rem;padding:.4rem .8rem;font-weight:600;font-size:.85rem;cursor:pointer">📋 Kopieren</button>
+    <button id="diag-clear" style="background:#b91c1c;color:#fff;border:0;border-radius:.4rem;padding:.4rem .8rem;font-weight:600;font-size:.85rem;cursor:pointer">🗑 Leeren</button>
+  </div>
+  <pre id="diag-log" style="
+    flex:1; min-height:0; overflow:auto;
+    background:#0f172a; color:#e2e8f0; padding:.5rem;
+    border-radius:.4rem; font-size:.7rem; font-family:ui-monospace,Menlo,monospace;
+    white-space:pre-wrap; word-break:break-word; margin:0;
+  "></pre>
+</div>
+
+<!-- Match-Ende-Overlay -->
+<div class="match-finished-overlay" id="finished-overlay">
+  <div class="winner-banner" id="winner-banner"></div>
+  <div class="set-summary" id="set-summary"></div>
+  <div class="submit-status" id="submit-status"></div>
+  <button class="primary" id="submit-btn">Ergebnis übermitteln</button>
+  <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
+</div>
+
+<script type="module">
+// ───────────────────────────────────────────────────────────────────────
+// Tablet-UI Phase 5.47a (+ Court-Visualisierung & BWF-Aufschlagrotation)
+//
+// Datenmodell:
+//   - Es gibt zwei "Side"s: 'left' und 'right' (Court-Hälften, Bildschirm).
+//     Welches Team auf welcher Seite steht, ergibt sich beim Setup aus dem
+//     vom Bediener gewählten Aufschläger: Aufschläger-Team steht standardmäßig
+//     LINKS — Annehmer-Team RECHTS. (Score-Schreiber sitzen i.d.R. seitlich;
+//     das ist eine willkürliche, aber konsistente Konvention.)
+//   - Pro Side speichern wir { rightSC: PlayerId, leftSC: PlayerId }.
+//     Im Einzel ist beides dieselbe Person.
+//   - Aufschläger steht im rechten Service-Court seines Teams bei geradem
+//     Score-of-server, im linken Service-Court bei ungeradem.
+//   - Bei Punkt für aufschlagendes Team: Spieler des aufschlagenden Teams
+//     tauschen rightSC ↔ leftSC. Side-out: anderes Team kommt zum Aufschlag,
+//     keine Positionstausche im neuen aufschlagenden Team.
+//
+//   - history speichert vollständige State-Snapshots zur sauberen Undo.
+// ───────────────────────────────────────────────────────────────────────
+
+const COURT_LABEL = '__COURT_LABEL__';
+
+// ─────────────────────────── Diagnose-Log ──────────────────────────────
+// Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,
+// match_cleared, score-Update-Versuche, Submit-Versuche, Render-Fehler.
+// Lebt in localStorage → überlebt Browser-Crash + ist später als .txt
+// herunterladbar (5× Tap auf den Connection-Dot oben rechts öffnet das
+// Diagnose-Modal).
+const LOG_MAX = 300;
+const LOG_KEY = `badhub.tablet.log.${COURT_LABEL}`;
+const LOG = [];
+try {
+  const raw = localStorage.getItem(LOG_KEY);
+  if (raw) {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) LOG.push(...arr.slice(-LOG_MAX));
+  }
+} catch { /* corrupted — start fresh */ }
+function tlog(level, event, detail) {
+  const e = { t: Date.now(), level, event };
+  if (detail !== undefined) e.d = detail;
+  LOG.push(e);
+  while (LOG.length > LOG_MAX) LOG.shift();
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); } catch { /* quota voll */ }
+  try { console.log(`[${new Date(e.t).toISOString()}] ${level} ${event}`, detail ?? ''); } catch {}
+}
+tlog('info', 'tablet_boot', { courtLabel: COURT_LABEL, ua: navigator.userAgent });
+
+const STATE = {
+  match: /** @type {null | {matchId:number, teamA:any[], teamB:any[], eventLabel:string, roundIndex:number, bestOfSets:number, targetScore:number}} */ (null),
+  setsCompleted: /** @type {{left:number,right:number}[]} */ ([]),
+  currentSet: { left: 0, right: 0 },
+  history: /** @type {object[]} */ ([]),
+  finished: false,
+  submitting: false,
+  submittedOk: false,
+
+  // Welches der ursprünglichen Teams ('a' / 'b') steht auf welcher Seite ('left' / 'right')
+  teamOnSide: /** @type {{a:'left'|'right', b:'left'|'right'} | null} */ (null),
+  // Spielerpositionen pro Side
+  positions: /** @type {{ left:{rightSC:number,leftSC:number}, right:{rightSC:number,leftSC:number} } | null} */ (null),
+  // Welche Side schlägt gerade auf
+  servingSide: /** @type {'left'|'right'|null} */ (null),
+
+  setup: /** @type {'pending'|'choose-side'|'choose-server'|'choose-receiver'|'playing'} */ ('pending'),
+  // Während Setup-Schritt 2: gewählter Aufschläger-Spieler + sein Team
+  pendingServer: /** @type {null | { player:any, fromTeamKey:'a'|'b' }} */ (null),
+  // BWF-Regel: Im Entscheidungssatz tauschen die Spieler bei 11 Punkten
+  // einmalig die Court-Seiten (egal welches Team führt). Wir merken uns,
+  // ob das in diesem Match schon erfolgt ist.
+  midGameSwitchDone: /** @type {boolean} */ (false),
+};
+
+const els = {
+  eventLabel: document.getElementById('event-label'),
+  connDot: document.getElementById('conn-dot'),
+  connText: document.getElementById('conn-text'),
+  emptyView: document.getElementById('empty-view'),
+  playView: document.getElementById('play-view'),
+  plusLeft: document.getElementById('plus-left'),
+  plusRight: document.getElementById('plus-right'),
+  scoreLeft: document.getElementById('score-left'),
+  scoreRight: document.getElementById('score-right'),
+  currentSetLabel: document.getElementById('current-set-label'),
+  setHistory: document.getElementById('set-history'),
+  court: document.getElementById('court'),
+  cellLeftTop: document.getElementById('cell-leftTop'),
+  cellRightTop: document.getElementById('cell-rightTop'),
+  cellLeftBottom: document.getElementById('cell-leftBottom'),
+  cellRightBottom: document.getElementById('cell-rightBottom'),
+  teamLabelLeft: document.getElementById('team-label-left'),
+  teamLabelRight: document.getElementById('team-label-right'),
+  undoBtns: /** @type {HTMLButtonElement[]} */ ([
+    document.getElementById('undo-btn-board'),
+    document.getElementById('undo-btn-top'),
+    document.getElementById('undo-btn-bottom'),
+  ].filter(Boolean)),
+  finishBtn: document.getElementById('finish-btn'),
+  setupModal: document.getElementById('setup-modal'),
+  setupTitle: document.getElementById('setup-title'),
+  setupSubtitle: document.getElementById('setup-subtitle'),
+  setupOptions: document.getElementById('setup-options'),
+  finishedOverlay: document.getElementById('finished-overlay'),
+  winnerBanner: document.getElementById('winner-banner'),
+  setSummary: document.getElementById('set-summary'),
+  submitStatus: document.getElementById('submit-status'),
+  submitBtn: document.getElementById('submit-btn'),
+  reopenBtn: document.getElementById('reopen-btn'),
+};
+
+// ─────────────────────────────── WebSocket ────────────────────────────
+
+let ws = null;
+let reconnectAttempt = 0;
+
+function connect() {
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  ws = new WebSocket(wsUrl);
+  els.connDot.classList.remove('ok', 'bad');
+  els.connText.textContent = 'verbinde…';
+
+  ws.onopen = () => {
+    reconnectAttempt = 0;
+    els.connDot.classList.add('ok');
+    els.connText.textContent = 'verbunden';
+    tlog('info', 'ws_open');
+    ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtLabel: COURT_LABEL }));
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
+    if (msg.type === 'match_assigned') { tlog('info', 'match_assigned', { matchId: msg.match?.matchId }); loadMatch(msg.match); }
+    else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearMatch(); }
+  };
+  ws.onclose = (ev) => {
+    els.connDot.classList.remove('ok');
+    els.connDot.classList.add('bad');
+    els.connText.textContent = 'getrennt — neuer Versuch…';
+    tlog('warn', 'ws_close', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
+    scheduleReconnect();
+  };
+  ws.onerror = () => { tlog('error', 'ws_error'); };
+}
+
+function scheduleReconnect() {
+  reconnectAttempt++;
+  const delayMs = Math.min(30_000, 1000 * Math.pow(2, Math.min(5, reconnectAttempt - 1)));
+  setTimeout(connect, delayMs);
+}
+
+function sendScoreUpdate() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !STATE.match || !STATE.teamOnSide) return;
+  // Score-Update an den Director zurück: in Team-A/B-Koordinaten umrechnen
+  const sideOfA = STATE.teamOnSide.a;
+  const swap = (s) => sideOfA === 'left'
+    ? { a: s.left, b: s.right }
+    : { a: s.right, b: s.left };
+  const setsHistory = STATE.setsCompleted.map(swap);
+  const current = swap(STATE.currentSet);
+  const setsA = setsHistory.filter(s => s.a > s.b).length;
+  const setsB = setsHistory.filter(s => s.b > s.a).length;
+  // Wer schlägt gerade auf? servingSide ist 'left'/'right', mapping auf 'a'/'b':
+  const servingTeam = STATE.servingSide
+    ? (STATE.servingSide === STATE.teamOnSide.a ? 'a' : 'b')
+    : null;
+  ws.send(JSON.stringify({
+    type: 'score_update',
+    courtLabel: COURT_LABEL,
+    scoreA: current.a, scoreB: current.b,
+    currentSet: setsHistory.length + 1,
+    setsA, setsB,
+    setsHistory,
+    servingTeam,
+  }));
+}
+
+// ─────────────────────────────── BWF-Regel-Logik ──────────────────────
+
+function capForTarget(target) {
+  if (target === 21) return 30;
+  if (target === 15) return 20;
+  if (target === 11) return 15;
+  return target + 5;
+}
+
+function setWinnerSide(setScore, target) {
+  if (target >= 99) return null;
+  const cap = capForTarget(target);
+  const { left, right } = setScore;
+  if (left >= cap) return 'left';
+  if (right >= cap) return 'right';
+  if (left >= target && left - right >= 2) return 'left';
+  if (right >= target && right - left >= 2) return 'right';
+  return null;
+}
+
+function requiredSetsToWin(bestOfSets) { return Math.ceil(bestOfSets / 2); }
+
+function matchWinnerSide() {
+  if (!STATE.match) return null;
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const left = STATE.setsCompleted.filter(s => s.left > s.right).length;
+  const right = STATE.setsCompleted.filter(s => s.right > s.left).length;
+  if (left >= need) return 'left';
+  if (right >= need) return 'right';
+  return null;
+}
+
+function isDoubles() {
+  return STATE.match && (STATE.match.teamA.length >= 2 || STATE.match.teamB.length >= 2);
+}
+
+let switchToastTimer = null;
+function showSwitchToast() {
+  const el = document.getElementById('switch-toast');
+  if (!el) return;
+  el.style.display = 'block';
+  if (switchToastTimer) clearTimeout(switchToastTimer);
+  switchToastTimer = setTimeout(() => { el.style.display = 'none'; }, 6000);
+}
+
+// ─────────────────────────────── State-Mutationen ─────────────────────
+
+// ─────────────────────────── localStorage-Persistenz ────────────────────
+// Damit der Zähl-Stand einen Tablet-Browser-Reload überlebt. Schlüssel ist
+// court-spezifisch — beim Geräte-Tausch oder Court-Wechsel wird der State
+// nicht ungewollt vermischt. submittedOk + submitting werden NICHT
+// persistiert (Browser-spezifisch); pendingServer wird auch ignoriert weil
+// der User-Tap auf den Setup-Modal eh interaktiv läuft.
+const PERSIST_KEY = `badhub.tablet.state.${COURT_LABEL}`;
+
+function persistState() {
+  if (!STATE.match) return; // ohne match nichts sinnvolles zu persistieren
+  try {
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({
+      match: STATE.match,
+      setsCompleted: STATE.setsCompleted,
+      currentSet: STATE.currentSet,
+      teamOnSide: STATE.teamOnSide,
+      positions: STATE.positions,
+      servingSide: STATE.servingSide,
+      setup: STATE.setup,
+      finished: STATE.finished,
+      midGameSwitchDone: STATE.midGameSwitchDone,
+      // history wird bewusst NICHT persistiert — Undo nach Reload ist nicht
+      // unterstützt, vermeidet ein riesiges Storage-Object.
+    }));
+  } catch { /* QuotaExceeded o.ä. — Persistenz ist Bonus, kein Blocker */ }
+}
+
+function clearPersistedState() {
+  try { localStorage.removeItem(PERSIST_KEY); } catch { /* ignore */ }
+}
+
+function restorePersistedState() {
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if (!raw) return false;
+    const p = JSON.parse(raw);
+    if (!p || !p.match) return false;
+    STATE.match = p.match;
+    STATE.setsCompleted = Array.isArray(p.setsCompleted) ? p.setsCompleted : [];
+    STATE.currentSet = p.currentSet ?? { left: 0, right: 0 };
+    STATE.teamOnSide = p.teamOnSide ?? null;
+    STATE.positions = p.positions ?? null;
+    STATE.servingSide = p.servingSide ?? null;
+    STATE.setup = p.setup ?? 'playing';
+    STATE.finished = !!p.finished;
+    STATE.midGameSwitchDone = !!p.midGameSwitchDone;
+    return true;
+  } catch { return false; }
+}
+
+function loadMatch(match) {
+  // Idempotent gegen Reconnect/Re-Push: wenn der Server ein match_assigned
+  // mit derselben matchId schickt, behalten wir unseren bestehenden Stand
+  // (sonst würde nach jedem WS-Drop der Zähl-Stand auf 0:0 zurückspringen).
+  if (STATE.match && STATE.match.matchId === match.matchId) return;
+  STATE.match = match;
+  STATE.setsCompleted = [];
+  STATE.currentSet = { left: 0, right: 0 };
+  STATE.history = [];
+  STATE.finished = false;
+  STATE.submittedOk = false;
+  STATE.teamOnSide = null;
+  STATE.positions = null;
+  STATE.servingSide = null;
+  STATE.setup = 'choose-side';
+  STATE.pendingServer = null;
+  STATE.midGameSwitchDone = false;
+  persistState();
+  render();
+}
+
+// Setup Schritt 1: User wählt, welches Team auf der linken Court-Hälfte steht.
+// (Die jeweils andere Mannschaft landet automatisch rechts.)
+function chooseSide(teamKeyOnLeft) {
+  STATE.teamOnSide = teamKeyOnLeft === 'a'
+    ? { a: 'left', b: 'right' }
+    : { a: 'right', b: 'left' };
+  STATE.setup = 'choose-server';
+  persistState();
+  render();
+}
+
+function clearMatch() {
+  STATE.match = null;
+  STATE.setsCompleted = [];
+  STATE.currentSet = { left: 0, right: 0 };
+  STATE.history = [];
+  STATE.finished = false;
+  STATE.submittedOk = false;
+  STATE.teamOnSide = null;
+  STATE.positions = null;
+  STATE.servingSide = null;
+  STATE.setup = 'pending';
+  STATE.pendingServer = null;
+  STATE.midGameSwitchDone = false;
+  clearPersistedState();
+  render();
+}
+
+// Setup Schritt 1: Aufschläger gewählt. Im Einzel direkt finalisieren,
+// im Doppel danach Annehmer-Wahl anzeigen.
+function chooseServer(player, fromTeamKey) {
+  STATE.pendingServer = { player, fromTeamKey };
+  const otherTeamKey = fromTeamKey === 'a' ? 'b' : 'a';
+  if (!isDoubles()) {
+    // Einzel: Annehmer ist der einzige Spieler im anderen Team
+    finalizeSetup(player, fromTeamKey, STATE.match[otherTeamKey === 'a' ? 'teamA' : 'teamB'][0], otherTeamKey);
+    return;
+  }
+  STATE.setup = 'choose-receiver';
+  render();
+}
+
+// Setup Schritt 2 (Doppel): Annehmer gewählt → Positionen ableiten
+function chooseReceiver(receiver, fromTeamKey) {
+  if (!STATE.pendingServer) return;
+  finalizeSetup(STATE.pendingServer.player, STATE.pendingServer.fromTeamKey, receiver, fromTeamKey);
+}
+
+function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
+  if (!STATE.teamOnSide) return; // sollte nicht passieren — Seitenwahl ist Schritt 1
+  const serverSide = STATE.teamOnSide[serverTeamKey];
+  const receiverSide = STATE.teamOnSide[receiverTeamKey];
+
+  // Im rechten Service-Court (Score gerade, also 0:0) steht der Aufschläger,
+  // diagonal gegenüber der Annehmer. Im Doppel stehen die Partner jeweils im
+  // linken Service-Court. Im Einzel ist „leftSC == rightSC" derselbe Spieler.
+  const serverTeamPlayers = STATE.match[serverTeamKey === 'a' ? 'teamA' : 'teamB'];
+  const receiverTeamPlayers = STATE.match[receiverTeamKey === 'a' ? 'teamA' : 'teamB'];
+  const serverPartner = serverTeamPlayers.find(p => p.id !== server.id) ?? server;
+  const receiverPartner = receiverTeamPlayers.find(p => p.id !== receiver.id) ?? receiver;
+  STATE.positions = {
+    [serverSide]:   { rightSC: server.id,   leftSC: serverPartner.id   },
+    [receiverSide]: { rightSC: receiver.id, leftSC: receiverPartner.id },
+  };
+  STATE.servingSide = serverSide;
+  STATE.setup = 'playing';
+  STATE.pendingServer = null;
+  persistState();
+  render();
+  sendScoreUpdate();
+}
+
+function snapshot() {
+  return {
+    setsCompleted: STATE.setsCompleted.map(s => ({ ...s })),
+    currentSet: { ...STATE.currentSet },
+    positions: STATE.positions ? {
+      left: { ...STATE.positions.left },
+      right: { ...STATE.positions.right },
+    } : null,
+    servingSide: STATE.servingSide,
+    finished: STATE.finished,
+    midGameSwitchDone: STATE.midGameSwitchDone,
+  };
+}
+
+function restoreSnapshot(snap) {
+  STATE.setsCompleted = snap.setsCompleted.map(s => ({ ...s }));
+  STATE.currentSet = { ...snap.currentSet };
+  STATE.positions = snap.positions ? {
+    left: { ...snap.positions.left },
+    right: { ...snap.positions.right },
+  } : null;
+  STATE.servingSide = snap.servingSide;
+  STATE.finished = snap.finished;
+  if (typeof snap.midGameSwitchDone === 'boolean') {
+    STATE.midGameSwitchDone = snap.midGameSwitchDone;
+  }
+}
+
+function addPointOnSide(side) {
+  if (!STATE.match || STATE.finished || STATE.setup !== 'playing' || !STATE.positions) return;
+
+  // Snapshot vor Mutation für Undo
+  STATE.history.push(snapshot());
+  if (STATE.history.length > 50) STATE.history.shift();
+
+  STATE.currentSet[side] += 1;
+
+  // BWF-Service-Update
+  if (side === STATE.servingSide) {
+    // Aufschlagendes Team hat gewonnen → Spieler tauschen Service-Courts
+    const t = STATE.positions[side];
+    [t.rightSC, t.leftSC] = [t.leftSC, t.rightSC];
+  } else {
+    // Side-Out: anderes Team kommt zum Aufschlag, keine Positionswechsel
+    STATE.servingSide = side;
+  }
+
+  // BWF Mid-Game-Switch im Entscheidungssatz: sobald EIN Team 11 Punkte
+  // erreicht, tauschen die Spieler die Court-Seiten (einmalig). Trigger
+  // läuft bevor wir auf Satz-Ende prüfen — wenn der 11. Punkt gleichzeitig
+  // den Satz beendet, hat das Setspielen-Swap eh Vorrang.
+  //
+  // Schleifchenturnier (bestOfSets === 1) ist ausgenommen: dort gibt's nur
+  // einen Satz, kein „Decider" im klassischen Sinne. Bei bestOfSets > 1
+  // greift die Regel nur im LETZTEN möglichen Satz.
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const setsLeft = STATE.setsCompleted.filter(s => s.left > s.right).length;
+  const setsRight = STATE.setsCompleted.filter(s => s.right > s.left).length;
+  const isDecider = STATE.match.bestOfSets > 1
+    && setsLeft === need - 1 && setsRight === need - 1;
+  const reached11 = STATE.currentSet.left === 11 || STATE.currentSet.right === 11;
+  let triggeredMidGameSwitch = false;
+  if (isDecider && reached11 && !STATE.midGameSwitchDone) {
+    swapSides();
+    STATE.midGameSwitchDone = true;
+    triggeredMidGameSwitch = true;
+  }
+
+  // Satz-Ende?
+  const winnerOfSet = setWinnerSide(STATE.currentSet, STATE.match.targetScore);
+  if (winnerOfSet) {
+    STATE.setsCompleted.push({ ...STATE.currentSet });
+    STATE.currentSet = { left: 0, right: 0 };
+    // Beim Satzwechsel werden die Seiten getauscht (BWF: ab dem 11. Punkt
+    // im Entscheidungssatz auch noch ein zusätzlicher Seitenwechsel — wir
+    // implementieren erstmal nur den Satz-Seitenwechsel)
+    swapSides();
+  }
+
+  if (matchWinnerSide()) STATE.finished = true;
+  persistState();
+  render();
+  sendScoreUpdate();
+  if (triggeredMidGameSwitch) showSwitchToast();
+}
+
+// Komplettes Seitentauschen: physikalisch wechseln die Spieler die Court-
+// Hälfte. Damit „links" und „rechts" für die Anzeige weiterhin der Realität
+// entsprechen, müssen alle seitenbezogenen State-Werte gespiegelt werden:
+//   - positions (Spieler-Positionen)
+//   - teamOnSide (welches Team ist links/rechts)
+//   - currentSet (laufende Punkte folgen den Spielern)
+//   - setsCompleted (Historie wird in der NEUEN Orientierung dargestellt,
+//     damit "links" konsistent das jetzt-links-stehende Team zeigt — wichtig
+//     auch für sendScoreUpdate, das setsHistory in A/B-Koordinaten umrechnet
+//     anhand der AKTUELLEN teamOnSide-Map)
+//   - servingSide (der Aufschläger bleibt physikalisch derselbe Spieler, aber
+//     er steht jetzt auf der anderen Hälfte)
+//
+// Wird sowohl beim Satzende aufgerufen (Sätze-1-2-Switch) als auch beim BWF-
+// Mid-Game-Switch bei 11 Punkten im Decider.
+function swapSides() {
+  if (!STATE.teamOnSide || !STATE.positions) return;
+  STATE.teamOnSide = { a: flip(STATE.teamOnSide.a), b: flip(STATE.teamOnSide.b) };
+  STATE.positions = { left: STATE.positions.right, right: STATE.positions.left };
+  STATE.currentSet = { left: STATE.currentSet.right, right: STATE.currentSet.left };
+  STATE.setsCompleted = STATE.setsCompleted.map(s => ({ left: s.right, right: s.left }));
+  STATE.servingSide = flip(STATE.servingSide ?? 'left');
+}
+
+function flip(side) { return side === 'left' ? 'right' : 'left'; }
+
+function undo() {
+  if (!STATE.match || STATE.history.length === 0 || STATE.finished) return;
+  restoreSnapshot(STATE.history.pop());
+  persistState();
+  render();
+  sendScoreUpdate();
+}
+
+function finishManually() {
+  STATE.history.push(snapshot());
+  STATE.finished = true;
+  if (STATE.currentSet.left > 0 || STATE.currentSet.right > 0) {
+    STATE.setsCompleted.push({ ...STATE.currentSet });
+    STATE.currentSet = { left: 0, right: 0 };
+  }
+  persistState();
+  render();
+}
+
+function reopen() {
+  if (STATE.history.length > 0) {
+    restoreSnapshot(STATE.history.pop());
+  } else {
+    STATE.finished = false;
+  }
+  STATE.submittedOk = false;
+  persistState();
+  render();
+}
+
+async function submit() {
+  if (!STATE.match || STATE.submitting || !STATE.teamOnSide) return;
+  STATE.submitting = true;
+  els.submitStatus.textContent = 'Übertrage…';
+  els.submitBtn.disabled = true;
+  // Sets in Team-A/B-Koordinaten umrechnen (Director-DB kennt nur Team A/B)
+  const sideOfA = STATE.teamOnSide.a;
+  const sets = STATE.setsCompleted.map(s => sideOfA === 'left'
+    ? { a: s.left, b: s.right }
+    : { a: s.right, b: s.left });
+  tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets });
+  try {
+    const res = await fetch('/result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    STATE.submittedOk = true;
+    els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
+    els.submitBtn.disabled = true;
+    tlog('info', 'submit_ok', { matchId: STATE.match.matchId });
+  } catch (err) {
+    els.submitStatus.textContent = `Fehler: ${err.message} · nochmal versuchen?`;
+    els.submitBtn.disabled = false;
+    tlog('error', 'submit_fail', { matchId: STATE.match?.matchId, error: String(err) });
+  } finally {
+    STATE.submitting = false;
+  }
+}
+
+// ─────────────────────────────── Render ───────────────────────────────
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function playerById(id) {
+  if (!STATE.match) return null;
+  return STATE.match.teamA.find(p => p.id === id) ?? STATE.match.teamB.find(p => p.id === id);
+}
+
+function renderSetupModal() {
+  if (!STATE.match || STATE.setup === 'playing' || STATE.setup === 'pending') {
+    els.setupModal.classList.remove('visible');
+    return;
+  }
+  els.setupModal.classList.add('visible');
+  if (STATE.setup === 'choose-side') {
+    els.setupTitle.textContent = 'Welches Team steht links?';
+    els.setupSubtitle.textContent = 'Tippe das Team an, das auf der linken Court-Hälfte spielt.';
+    const teamAName = STATE.match.teamA.map(p => p.name).join(' / ');
+    const teamBName = STATE.match.teamB.map(p => p.name).join(' / ');
+    els.setupOptions.innerHTML =
+      `<div class="opt team-a" data-team="a">${escapeHtml(teamAName)}</div>` +
+      `<div class="opt team-b" data-team="b">${escapeHtml(teamBName)}</div>`;
+    [...els.setupOptions.children].forEach(node => {
+      node.addEventListener('click', () => chooseSide(node.dataset.team));
+    });
+  } else if (STATE.setup === 'choose-server') {
+    els.setupTitle.textContent = 'Wer schlägt zuerst auf?';
+    els.setupSubtitle.textContent = 'Tippe auf den Spieler, der das Match eröffnet.';
+    const opts = [
+      ...STATE.match.teamA.map(p => ({ player: p, teamKey: 'a' })),
+      ...STATE.match.teamB.map(p => ({ player: p, teamKey: 'b' })),
+    ];
+    els.setupOptions.innerHTML = opts.map((o, i) =>
+      `<div class="opt team-${o.teamKey}" data-i="${i}">${escapeHtml(o.player.name)}${
+        renderPartnerHint(o.teamKey, o.player.id)
+      }</div>`
+    ).join('');
+    [...els.setupOptions.children].forEach((node, i) => {
+      node.addEventListener('click', () => chooseServer(opts[i].player, opts[i].teamKey));
+    });
+  } else if (STATE.setup === 'choose-receiver') {
+    els.setupTitle.textContent = 'Wer nimmt den Aufschlag an?';
+    els.setupSubtitle.textContent = 'Tippe auf den Annehmer im gegnerischen Team.';
+    if (!STATE.pendingServer) return;
+    const otherTeamKey = STATE.pendingServer.fromTeamKey === 'a' ? 'b' : 'a';
+    const otherTeam = STATE.match[otherTeamKey === 'a' ? 'teamA' : 'teamB'];
+    els.setupOptions.innerHTML = otherTeam.map((p, i) =>
+      `<div class="opt team-${otherTeamKey}" data-i="${i}">${escapeHtml(p.name)}</div>`
+    ).join('');
+    [...els.setupOptions.children].forEach((node, i) => {
+      node.addEventListener('click', () => chooseReceiver(otherTeam[i], otherTeamKey));
+    });
+  }
+}
+
+function renderPartnerHint(teamKey, playerId) {
+  const team = STATE.match[teamKey === 'a' ? 'teamA' : 'teamB'];
+  if (team.length < 2) return '';
+  const partner = team.find(p => p.id !== playerId);
+  if (!partner) return '';
+  return `<div class="partner">mit ${escapeHtml(partner.name)}</div>`;
+}
+
+function renderCourt() {
+  // Alle 4 Zellen leeren
+  for (const cell of [els.cellLeftTop, els.cellRightTop, els.cellLeftBottom, els.cellRightBottom]) {
+    cell.classList.remove('server');
+    cell.querySelector('.player-name').textContent = '';
+  }
+  if (!STATE.positions || !STATE.teamOnSide || !STATE.match) {
+    els.teamLabelLeft.textContent = '';
+    els.teamLabelRight.textContent = '';
+    return;
+  }
+  // Team-Labels (Klub/Name-Gruppe) pro Seite
+  const teamAName = STATE.match.teamA.map(p => p.name).join(' / ');
+  const teamBName = STATE.match.teamB.map(p => p.name).join(' / ');
+  const sideOfA = STATE.teamOnSide.a;
+  els.teamLabelLeft.textContent = sideOfA === 'left' ? teamAName : teamBName;
+  els.teamLabelRight.textContent = sideOfA === 'left' ? teamBName : teamAName;
+
+  // Spieler-Sicht → Bildschirm-Mapping (Vogelperspektive, Court horizontal,
+  // Netz vertikal in der Mitte):
+  //
+  //   Linker Spieler schaut zum Netz nach RECHTS → seine rechte Hand zeigt
+  //   visuell nach UNTEN. Sein RECHTER SC = unten links auf dem Bildschirm.
+  //   Sein LINKER SC = oben links.
+  //
+  //   Rechter Spieler schaut zum Netz nach LINKS → seine rechte Hand zeigt
+  //   visuell nach OBEN. Sein RECHTER SC = oben rechts. Sein LINKER SC =
+  //   unten rechts.
+  //
+  // Diagonal: linker-rechter-SC (unten links) ↔ rechter-rechter-SC (oben
+  // rechts). Das ist die Aufschlag-Diagonale bei geradem Score.
+  setPlayer(els.cellLeftTop,    STATE.positions.left.leftSC);
+  setPlayer(els.cellLeftBottom, STATE.positions.left.rightSC);
+  setPlayer(els.cellRightTop,   STATE.positions.right.rightSC);
+  setPlayer(els.cellRightBottom,STATE.positions.right.leftSC);
+
+  // Aufschläger-Highlight: gelblicher Hintergrund des Service-Courts plus
+  // pulsierender gelber Punkt im Innenwinkel (Netz + Mittellinie) der Zelle.
+  if (STATE.servingSide && STATE.setup === 'playing' && !STATE.finished) {
+    const scoreServer = STATE.currentSet[STATE.servingSide];
+    const inRightSC = scoreServer % 2 === 0;
+    let serverCell;
+    if (STATE.servingSide === 'left') {
+      serverCell = inRightSC ? els.cellLeftBottom : els.cellLeftTop;
+    } else {
+      serverCell = inRightSC ? els.cellRightTop : els.cellRightBottom;
+    }
+    serverCell.classList.add('server');
+  }
+}
+
+function setPlayer(cell, playerId) {
+  const p = playerById(playerId);
+  cell.querySelector('.player-name').textContent = p ? p.name : '';
+}
+
+function render() {
+  // Setup-Modal hat Priorität
+  renderSetupModal();
+
+  if (!STATE.match) {
+    els.eventLabel.textContent = '— kein Match —';
+    els.emptyView.style.display = '';
+    els.playView.style.display = 'none';
+    els.finishedOverlay.classList.remove('visible');
+    els.undoBtns.forEach(b => b.disabled = true);
+    els.finishBtn.disabled = true;
+    return;
+  }
+  els.eventLabel.textContent = STATE.match.eventLabel;
+  els.emptyView.style.display = 'none';
+  els.playView.style.display = '';
+
+  // Score (in Side-Koordinaten)
+  els.scoreLeft.textContent = STATE.currentSet.left;
+  els.scoreRight.textContent = STATE.currentSet.right;
+  els.currentSetLabel.textContent =
+    `Satz ${STATE.setsCompleted.length + 1} · best of ${STATE.match.bestOfSets} · bis ${STATE.match.targetScore >= 99 ? 'Zeit' : STATE.match.targetScore}`;
+  els.setHistory.innerHTML = STATE.setsCompleted.map((s, i) =>
+    `<span class="pip">${i+1}: <strong>${s.left}:${s.right}</strong></span>`
+  ).join('');
+
+  renderCourt();
+
+  const undoDisabled = STATE.history.length === 0 || STATE.finished || STATE.setup !== 'playing';
+  els.undoBtns.forEach(b => b.disabled = undoDisabled);
+  els.finishBtn.disabled = STATE.finished || STATE.setsCompleted.length === 0 || STATE.setup !== 'playing';
+
+  if (STATE.finished) {
+    const winnerSide = matchWinnerSide();
+    let teamLabel = '— manueller Abschluss —';
+    if (winnerSide && STATE.teamOnSide && STATE.match) {
+      const winnerTeamKey = STATE.teamOnSide.a === winnerSide ? 'a' : 'b';
+      teamLabel = STATE.match[winnerTeamKey === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ');
+    }
+    els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
+    els.setSummary.textContent = STATE.setsCompleted.map(s => `${s.left}:${s.right}`).join(' · ');
+    els.finishedOverlay.classList.add('visible');
+    if (!STATE.submittedOk) {
+      els.submitBtn.disabled = false;
+      els.submitStatus.textContent = '';
+    }
+  } else {
+    els.finishedOverlay.classList.remove('visible');
+  }
+}
+
+// ─────────────────────────────── Wiring ───────────────────────────────
+
+els.plusLeft.addEventListener('click', () => addPointOnSide('left'));
+els.plusRight.addEventListener('click', () => addPointOnSide('right'));
+els.undoBtns.forEach(b => b.addEventListener('click', undo));
+els.finishBtn.addEventListener('click', finishManually);
+els.submitBtn.addEventListener('click', submit);
+els.reopenBtn.addEventListener('click', reopen);
+
+document.addEventListener('dblclick', (e) => e.preventDefault());
+document.body.addEventListener('touchmove', (e) => {
+  if (e.scale !== 1) e.preventDefault();
+}, { passive: false });
+
+// ─────────────────────────────── Diagnose-Modal ────────────────────────
+// 5× Tap auf den Connection-Dot oben rechts öffnet das Diagnose-Modal.
+// Ist bewusst „versteckt", damit der Spielbetrieb davon nichts mitbekommt —
+// Spielleitung kann's bei Bedarf öffnen und den Log per Download/Copy an
+// die Experten weitergeben.
+const diagModal = document.getElementById('diag-modal');
+const diagLog = document.getElementById('diag-log');
+const diagMeta = document.getElementById('diag-meta');
+let diagTapCount = 0;
+let diagTapTimer = null;
+els.connDot.addEventListener('click', () => {
+  diagTapCount += 1;
+  if (diagTapTimer) clearTimeout(diagTapTimer);
+  diagTapTimer = setTimeout(() => { diagTapCount = 0; }, 1500);
+  if (diagTapCount >= 5) {
+    diagTapCount = 0;
+    openDiagModal();
+  }
+});
+function formatLog() {
+  return LOG.map(e => {
+    const d = e.d !== undefined ? ' ' + JSON.stringify(e.d) : '';
+    return `[${new Date(e.t).toISOString()}] ${e.level.padEnd(5)} ${e.event}${d}`;
+  }).join('\n');
+}
+function openDiagModal() {
+  diagMeta.textContent = `Court: ${COURT_LABEL} · WS: ${ws && ws.readyState === 1 ? 'verbunden' : 'getrennt'} · Einträge: ${LOG.length} · UA: ${navigator.userAgent.slice(0, 60)}`;
+  diagLog.textContent = formatLog();
+  diagModal.style.display = 'flex';
+}
+document.getElementById('diag-close').addEventListener('click', () => {
+  diagModal.style.display = 'none';
+});
+document.getElementById('diag-download').addEventListener('click', () => {
+  const txt = `Tablet-Diagnose · ${COURT_LABEL}\nUA: ${navigator.userAgent}\nGeneriert: ${new Date().toISOString()}\n\n${formatLog()}\n`;
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tablet-diag-${COURT_LABEL.replace(/\s+/g, '_')}-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+document.getElementById('diag-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(formatLog());
+    document.getElementById('diag-copy').textContent = '✓ kopiert';
+    setTimeout(() => { document.getElementById('diag-copy').textContent = '📋 Kopieren'; }, 1500);
+  } catch {
+    document.getElementById('diag-copy').textContent = '✕ Fehler';
+  }
+});
+document.getElementById('diag-clear').addEventListener('click', () => {
+  LOG.length = 0;
+  try { localStorage.removeItem(LOG_KEY); } catch {}
+  diagLog.textContent = '';
+  diagMeta.textContent = `Court: ${COURT_LABEL} · Einträge: 0`;
+});
+
+// Vor dem WS-Connect: ggf. gespeicherten State aus dem letzten Browser-Run
+// wiederherstellen (Reload, App-Switch, etc). Wir geben das DOM einmal sofort
+// damit der User keinen leeren Bildschirm sieht.
+restorePersistedState();
+render();
+connect();
+</script>
+</body>
+</html>

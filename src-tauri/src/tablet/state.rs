@@ -68,14 +68,15 @@ impl TabletState {
             .cloned()
     }
 
-    /// Tablet hat sich für einen Court verbunden.
+    /// Tablet hat sich für einen Court verbunden. `match_id` startet auf 0 –
+    /// den echten Wert setzt der erste `record_score`.
     pub fn attach_tablet(&self, court: &str) {
-        let match_id = self.match_for_court(court).map(|m| m.id).unwrap_or(0);
-        let mut courts = self.courts.write().unwrap();
-        courts
+        self.courts
+            .write()
+            .unwrap()
             .entry(court.to_string())
             .or_insert(CourtSession {
-                match_id,
+                match_id: 0,
                 sets: Vec::new(),
                 connected: true,
             })

@@ -27,6 +27,10 @@ Badhub-Passwort eintragen – fertig.
   neue Versionen und installiert sie auf Wunsch selbst (signierte
   Tauri-Updater-Artefakte, Hosting auf badhub.de). Release- und
   Update-Ablauf: [docs/release.md](docs/release.md).
+- **Tablet-Spielzettel** – eingebetteter Server, an dem Schiedsrichter-
+  Tablets im Hallen-WLAN hängen: Punkte zählen, Live-Score an den
+  Liveticker, Endergebnis zurück nach BTP. Details:
+  [docs/tablet.md](docs/tablet.md).
 
 Offen: signierter Windows-Installer (Code-Signing-Zertifikat). Bis dahin
 zeigt Windows beim ersten Start eine SmartScreen-Warnung – über „Weitere

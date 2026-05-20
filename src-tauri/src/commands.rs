@@ -137,12 +137,17 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
     }
 
+    let tablet = state.tablet.clone();
+
+    // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
+    let sync_config = config.clone();
+    let sync_tablet = tablet.clone();
     let handle = tauri::async_runtime::spawn(async move {
         let http = push::build_client();
         let mut engine = SyncEngine::new();
         loop {
-            let outcome = engine.run_once(&config, &http).await;
+            let outcome = engine.run_once(&sync_config, &http, &sync_tablet).await;
             let mut status = status_from(&outcome);
             status.running = true;
             *app_handle
@@ -153,8 +158,27 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     });
-
     *slot = Some(handle);
+    drop(slot); // sync_task-Lock freigeben, bevor tablet_server gelockt wird
+
+    // Eingebetteter Tablet-Server (Spielzettel) – läuft mit der Sync-Schleife.
+    let mut server_slot = state
+        .tablet_server
+        .lock()
+        .expect("Tablet-Server-Mutex nicht vergiftet");
+    if server_slot.is_none() {
+        let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
+            tablet,
+            config,
+            push::build_client(),
+        ));
+        let server_handle = tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::tablet::server::run(ctx).await {
+                tracing::error!("Tablet-Server beendet: {e}");
+            }
+        });
+        *server_slot = Some(server_handle);
+    }
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus {
         running: true,
         kind: "idle".to_string(),
@@ -164,7 +188,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     Ok(())
 }
 
-/// Stoppt die Hintergrund-Polling-Schleife.
+/// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.
 #[tauri::command]
 pub fn stop_sync(state: State<'_, AppState>) {
     if let Some(handle) = state
@@ -175,7 +199,33 @@ pub fn stop_sync(state: State<'_, AppState>) {
     {
         handle.abort();
     }
+    if let Some(handle) = state
+        .tablet_server
+        .lock()
+        .expect("Tablet-Server-Mutex nicht vergiftet")
+        .take()
+    {
+        handle.abort();
+    }
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
+}
+
+/// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
+#[derive(Serialize)]
+pub struct TabletInfo {
+    /// LAN-Adresse `<ip>:<port>` des Tablet-Servers.
+    pub server_host: String,
+    /// Alle Courts mit aktuellem Match, Live-Stand und Tablet-Status.
+    pub courts: Vec<crate::tablet::state::CourtOverview>,
+}
+
+/// Liefert die Felder-Übersicht für die Turnierleitung.
+#[tauri::command]
+pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
+    TabletInfo {
+        server_host: crate::tablet::server::lan_host(),
+        courts: state.tablet.overview(),
+    }
 }
 
 /// Liefert den aktuellen Sync-Status für das Dashboard.

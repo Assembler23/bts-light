@@ -3,9 +3,10 @@ import { loadConfig } from "./api";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { Dashboard } from "./pages/Dashboard";
 import { SetupWizard } from "./pages/SetupWizard";
+import { TabletPanel } from "./pages/TabletPanel";
 import type { AppConfig } from "./types";
 
-type View = "loading" | "wizard" | "dashboard";
+type View = "loading" | "wizard" | "dashboard" | "tablets";
 
 function defaultConfig(): AppConfig {
   return {
@@ -52,8 +53,15 @@ function App() {
         />
       );
     }
+    if (view === "tablets") {
+      return <TabletPanel onBack={() => setView("dashboard")} />;
+    }
     return (
-      <Dashboard config={config} onReconfigure={() => setView("wizard")} />
+      <Dashboard
+        config={config}
+        onReconfigure={() => setView("wizard")}
+        onOpenTablets={() => setView("tablets")}
+      />
     );
   }
 

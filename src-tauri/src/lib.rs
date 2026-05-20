@@ -66,6 +66,7 @@ pub fn run() {
             commands::stop_sync,
             commands::get_status,
             commands::open_live_view,
+            commands::tablet_overview,
         ])
         .setup(|app| {
             setup_tray(app.handle())?;

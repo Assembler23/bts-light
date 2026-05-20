@@ -1,7 +1,7 @@
 // Typsichere Wrapper um die Tauri-Commands (src-tauri/src/commands.rs).
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, SyncStatus } from "./types";
+import type { AppConfig, SyncStatus, TabletInfo } from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
 
@@ -24,3 +24,7 @@ export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 /** Öffnet die Live-Seite im Browser. display: null | "monitor" | "next". */
 export const openLiveView = (display: string | null): Promise<void> =>
   invoke("open_live_view", { display });
+
+/** Tablet-Server-Adresse + Felder-Übersicht für die Turnierleitung. */
+export const tabletOverview = (): Promise<TabletInfo> =>
+  invoke("tablet_overview");

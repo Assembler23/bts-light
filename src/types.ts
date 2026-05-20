@@ -25,3 +25,21 @@ export interface SyncStatus {
   message: string;
   updated_at_ms: number;
 }
+
+/** Eine Court-Zeile der Felder-Übersicht (Rust: tablet::state::CourtOverview). */
+export interface CourtOverview {
+  court: string;
+  /** Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match. */
+  match_name: string;
+  team1: string[];
+  team2: string[];
+  /** Satzstand als [Team1, Team2]-Paare. */
+  sets: [number, number][];
+  tablet_connected: boolean;
+}
+
+/** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */
+export interface TabletInfo {
+  server_host: string;
+  courts: CourtOverview[];
+}

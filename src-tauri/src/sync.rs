@@ -14,6 +14,7 @@ use crate::badhub::push;
 use crate::btp::client;
 use crate::btp::model::{BtpSnapshot, MatchStatus};
 use crate::config::AppConfig;
+use crate::tablet::state::TabletState;
 
 /// Aktuelle Zeit in Unix-Millisekunden.
 fn now_ms() -> u64 {
@@ -79,7 +80,16 @@ impl SyncEngine {
     }
 
     /// Führt einen vollständigen Poll-Push-Zyklus aus.
-    pub async fn run_once(&mut self, config: &AppConfig, http: &reqwest::Client) -> SyncOutcome {
+    ///
+    /// `tablet` bekommt den frischen BTP-Snapshot (Court→Match-Auflösung für
+    /// den Tablet-Server); Courts mit aktivem Tablet treiben anschließend
+    /// ihren Live-Score selbst – ihr Satzstand überschreibt den BTP-Poll.
+    pub async fn run_once(
+        &mut self,
+        config: &AppConfig,
+        http: &reqwest::Client,
+        tablet: &TabletState,
+    ) -> SyncOutcome {
         let mut snapshot = match client::fetch_snapshot(
             &config.btp.host,
             config.btp.port,
@@ -92,6 +102,10 @@ impl SyncEngine {
         };
 
         self.stamp_finished(&mut snapshot);
+        // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
+        // tablet-getriebener Courts überschreiben.
+        tablet.set_snapshot(snapshot.clone());
+        tablet.apply_tablet_scores(&mut snapshot);
         let update = self.plan(&snapshot);
         match push::push_update(http, &config.badhub.url, &config.badhub.password, &update).await {
             Ok(()) => {

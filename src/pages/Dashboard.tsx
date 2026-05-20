@@ -6,6 +6,7 @@ import type { AppConfig, SyncStatus } from "../types";
 interface Props {
   config: AppConfig;
   onReconfigure: () => void;
+  onOpenTablets: () => void;
 }
 
 function dotColor(status: SyncStatus): string {
@@ -22,7 +23,7 @@ function ago(ms: number): string {
   return `vor ${Math.round(secs / 60)} min`;
 }
 
-export function Dashboard({ config, onReconfigure }: Props) {
+export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const { phase: updatePhase, checkNow } = useUpdate();
@@ -149,6 +150,12 @@ export function Dashboard({ config, onReconfigure }: Props) {
             className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
           >
             Einstellungen ändern
+          </button>
+          <button
+            onClick={onOpenTablets}
+            className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
+          >
+            Tablet-Spielzettel
           </button>
           <button
             onClick={handleCheckUpdate}
