@@ -105,6 +105,36 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64) -> TsetMessage {
     }
 }
 
+/// Eine kleine `tupdate_match`-Nachricht – nur Match-ID und Satzstand.
+/// Wird gesendet, wenn sich ausschließlich der Punktestand geändert hat.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct TupdateMessage {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    #[serde(rename = "match")]
+    pub match_update: TupdateMatch,
+    pub rid: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct TupdateMatch {
+    #[serde(rename = "_id")]
+    pub id: String,
+    pub s: Vec<[i64; 2]>,
+}
+
+/// Baut eine `tupdate_match`-Nachricht für ein Match mit geändertem Score.
+pub fn build_tupdate(m: &BtpMatch, rid: u64) -> TupdateMessage {
+    TupdateMessage {
+        kind: "tupdate_match",
+        match_update: TupdateMatch {
+            id: match_id(m.id),
+            s: m.sets.iter().map(|&(a, b)| [a, b]).collect(),
+        },
+        rid,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
