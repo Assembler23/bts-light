@@ -130,9 +130,8 @@ export function TabletPanel({ onBack }: Props) {
             <img
               src={qrUrl(zoomCourt)}
               alt=""
-              width={300}
-              height={300}
               className="bg-white"
+              style={{ width: "min(72vw, 72vh)", height: "min(72vw, 72vh)" }}
             />
             <div className="mt-3 text-lg font-semibold">{zoomCourt}</div>
             <div className="mt-1 max-w-[20rem] break-all text-sm text-slate-500">
