@@ -242,15 +242,25 @@ async fn result(
         duration_mins: 0,
     };
 
+    tracing::info!(
+        "Ergebnis vom Tablet: Court '{}', Match {}, Sätze {:?} – schreibe nach BTP",
+        body.court_label,
+        m.id,
+        update.sets
+    );
     match write_result_to_btp(&ctx.config, &update).await {
         Ok(()) => {
             ctx.tablet.clear_court(&body.court_label);
+            tracing::info!("BTP-Schreiben OK: Match {}", m.id);
             Json(ResultResponse {
                 ok: true,
                 error: None,
             })
         }
-        Err(e) => err(&e),
+        Err(e) => {
+            tracing::warn!("BTP-Schreiben fehlgeschlagen (Match {}): {e}", m.id);
+            err(&e)
+        }
     }
 }
 

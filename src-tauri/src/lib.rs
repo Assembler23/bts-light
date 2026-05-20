@@ -14,6 +14,33 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Richtet das Datei-Logging ein: eine tägliche Logdatei `bts-light.log`
+/// im App-Log-Verzeichnis. Fehlschläge sind unkritisch – die App läuft
+/// auch ohne Log weiter.
+fn init_logging(app: &AppHandle) {
+    let Ok(dir) = app.path().app_log_dir() else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let file = tracing_appender::rolling::daily(&dir, "bts-light.log");
+    let _ = tracing_subscriber::fmt()
+        .with_writer(file)
+        .with_ansi(false)
+        .try_init();
+}
+
+/// Öffnet das Log-Verzeichnis im Datei-Manager.
+#[tauri::command]
+fn open_log_dir(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<String>)
+        .map_err(|e| e.to_string())
+}
+
 /// Holt das Hauptfenster nach vorn (aus dem Tray heraus).
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -67,8 +94,11 @@ pub fn run() {
             commands::get_status,
             commands::open_live_view,
             commands::tablet_overview,
+            open_log_dir,
         ])
         .setup(|app| {
+            init_logging(app.handle());
+            tracing::info!("bts-light v{} gestartet", env!("CARGO_PKG_VERSION"));
             setup_tray(app.handle())?;
             Ok(())
         })

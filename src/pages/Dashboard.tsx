@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getStatus, openLiveView, startSync, stopSync } from "../api";
+import { getStatus, openLiveView, openLogDir, startSync, stopSync } from "../api";
 import { useUpdate } from "../components/UpdateBanner";
 import type { AppConfig, SyncStatus } from "../types";
 
@@ -163,6 +163,12 @@ export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
             className="rounded-lg bg-slate-200 px-4 py-2 text-sm disabled:opacity-50"
           >
             Nach Update prüfen
+          </button>
+          <button
+            onClick={() => void openLogDir()}
+            className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
+          >
+            Logs öffnen
           </button>
         </div>
         {updateMsg !== "" && (

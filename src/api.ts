@@ -28,3 +28,6 @@ export const openLiveView = (display: string | null): Promise<void> =>
 /** Tablet-Server-Adresse + Felder-Übersicht für die Turnierleitung. */
 export const tabletOverview = (): Promise<TabletInfo> =>
   invoke("tablet_overview");
+
+/** Öffnet das Log-Verzeichnis im Datei-Manager. */
+export const openLogDir = (): Promise<void> => invoke("open_log_dir");
