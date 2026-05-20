@@ -11,14 +11,20 @@ Badhub-Passwort eintragen – fertig.
 
 ## Status
 
-**Phase 1 – BTP-Protokoll (in Arbeit).** Der Wire-Codec (Framing + gzip),
-der VISUALXML-Codec und die Request-Builder sind implementiert und durch
-Tests abgesichert. Das TP-Network-Protokoll ist in
-[docs/btp_protocol.md](docs/btp_protocol.md) spezifiziert.
+**Phase 4 – App-Oberfläche (in Arbeit).** Der gesamte Funktionskern
+steht und ist getestet:
 
-Offen: der Snapshot-Parser (`model.rs`) und der TCP-Client (`client.rs`) –
-beide entstehen gegen echte BTP-Mitschnitte (siehe
-[tools/capture-btp.ps1](tools/capture-btp.ps1)).
+- **BTP-Anbindung** – TP-Network-Protokoll (Wire-Codec, VISUALXML,
+  TCP-Client), gegen echte Turnier-Mitschnitte verifiziert. Spezifikation:
+  [docs/btp_protocol.md](docs/btp_protocol.md).
+- **Badhub-Payload** – Übersetzung in das `tset`/`tupdate_match`-Format
+  inkl. Snapshot-Diff.
+- **HTTP-Push** – Versand an `live_update.php`, end-to-end gegen
+  badhub.de verifiziert.
+- **Sync-Engine** – kompletter Poll-Push-Zyklus mit Resend-on-failure.
+
+In Arbeit ist die Bedien-Oberfläche: Setup-Wizard, Dashboard,
+System-Tray, Hintergrund-Polling.
 
 ## Stack
 

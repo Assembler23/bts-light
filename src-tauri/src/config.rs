@@ -44,3 +44,78 @@ pub struct AppConfig {
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Konfiguration konnte nicht gelesen werden: {0}")]
+    Read(std::io::Error),
+    #[error("Konfiguration konnte nicht geschrieben werden: {0}")]
+    Write(std::io::Error),
+    #[error("Konfiguration ist beschädigt: {0}")]
+    Parse(#[from] serde_json::Error),
+}
+
+impl AppConfig {
+    /// Lädt die Konfiguration aus einer JSON-Datei. Fehlt die Datei, wird
+    /// die Default-Konfiguration zurückgegeben (erster Start).
+    pub fn load_from(path: &std::path::Path) -> Result<AppConfig, ConfigError> {
+        match std::fs::read_to_string(path) {
+            Ok(json) => Ok(serde_json::from_str(&json)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AppConfig::default()),
+            Err(e) => Err(ConfigError::Read(e)),
+        }
+    }
+
+    /// Schreibt die Konfiguration als JSON. Fehlende Verzeichnisse werden
+    /// angelegt.
+    pub fn save_to(&self, path: &std::path::Path) -> Result<(), ConfigError> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(ConfigError::Write)?;
+        }
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json).map_err(ConfigError::Write)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_file_yields_default_config() {
+        let path = std::env::temp_dir().join("bts-light-does-not-exist-xyz.json");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(AppConfig::load_from(&path).unwrap(), AppConfig::default());
+    }
+
+    #[test]
+    fn save_then_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.json");
+
+        let config = AppConfig {
+            btp: BtpConfig {
+                host: "192.168.1.50".to_string(),
+                port: 9901,
+                password: Some("geheim".to_string()),
+            },
+            badhub: BadhubConfig {
+                url: "https://badhub.de/api/live_update.php".to_string(),
+                password: "token123".to_string(),
+            },
+        };
+        config.save_to(&path).unwrap();
+        assert_eq!(AppConfig::load_from(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn corrupt_file_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{ kaputt").unwrap();
+        assert!(matches!(
+            AppConfig::load_from(&path),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+}
