@@ -3,6 +3,7 @@
 //! Die Fixtures stammen aus einem realen BTP (Test-Turnier "Test BTS Light"),
 //! aufgezeichnet mit `tools/capture-btp.ps1`.
 
+use bts_light_lib::btp::model::{self, MatchStatus};
 use bts_light_lib::btp::proto;
 use bts_light_lib::btp::xml;
 
@@ -36,4 +37,43 @@ fn real_tournament_capture_decodes() {
     // Das Test-Turnier hat fünf Spieler.
     let players = xml::find(tournament.children(), "Players").expect("Players-Gruppe");
     assert_eq!(players.children().len(), 5);
+}
+
+#[test]
+fn real_tournament_capture_parses_to_snapshot() {
+    let nodes = proto::decode_response(TOURNAMENT).expect("dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+
+    assert_eq!(snapshot.tournament_name, "Test BTS Light");
+    // 25 Match-Einträge im XML, davon 10 echte Paarungen (IsMatch=true).
+    assert_eq!(snapshot.matches.len(), 10);
+
+    let by_id = |id: i64| {
+        snapshot
+            .matches
+            .iter()
+            .find(|m| m.id == id)
+            .unwrap_or_else(|| panic!("Match {id} fehlt"))
+    };
+
+    // Beendetes Match mit Ergebnis: Bernd unterliegt Ulla 2:21, 5:21.
+    let finished = by_id(19);
+    assert_eq!(finished.status, MatchStatus::Finished);
+    assert_eq!(finished.team1, ["Bernd"]);
+    assert_eq!(finished.team2, ["Ulla"]);
+    assert_eq!(finished.sets, [(2, 21), (5, 21)]);
+    assert_eq!(finished.winner, Some(2));
+
+    // Laufendes Match: Anne gegen Hilde auf Court "1".
+    let on_court = by_id(22);
+    assert_eq!(on_court.status, MatchStatus::OnCourt);
+    assert_eq!(on_court.court.as_deref(), Some("1"));
+    assert_eq!(on_court.team1, ["Anne"]);
+    assert_eq!(on_court.team2, ["Hilde"]);
+
+    // Gesamtverteilung der Zustände.
+    let count = |s: MatchStatus| snapshot.matches.iter().filter(|m| m.status == s).count();
+    assert_eq!(count(MatchStatus::Finished), 2);
+    assert_eq!(count(MatchStatus::OnCourt), 2);
+    assert_eq!(count(MatchStatus::Scheduled), 6);
 }

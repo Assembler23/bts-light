@@ -103,6 +103,14 @@ impl Value {
             _ => None,
         }
     }
+
+    /// Wert als Boolean, falls es ein Bool-Wert ist.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
 }
 
 /// Findet den ersten Knoten mit der gegebenen ID in einer Knotenliste.
