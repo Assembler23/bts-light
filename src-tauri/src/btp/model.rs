@@ -347,4 +347,80 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn resolves_doubles_pairing_over_slot_and_entry() {
+        // Doppel-Entry mit zwei Spielern; das Match verweist über From1 auf
+        // den Teilnehmer-Slot (PlanningID 100 → Entry 10). From2 fehlt – das
+        // Gegner-Team bleibt leer (wie bei einem Freilos).
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![
+                    Node::group(
+                        "Players",
+                        vec![
+                            Node::group(
+                                "Player",
+                                vec![
+                                    Node::integer("ID", 1),
+                                    Node::string("Lastname", "Müller"),
+                                    Node::string("Firstname", "Anna"),
+                                ],
+                            ),
+                            Node::group(
+                                "Player",
+                                vec![
+                                    Node::integer("ID", 2),
+                                    Node::string("Lastname", "Schmidt"),
+                                    Node::string("Firstname", "Ben"),
+                                ],
+                            ),
+                        ],
+                    ),
+                    Node::group(
+                        "Entries",
+                        vec![Node::group(
+                            "Entry",
+                            vec![
+                                Node::integer("ID", 10),
+                                Node::integer("Player1ID", 1),
+                                Node::integer("Player2ID", 2),
+                            ],
+                        )],
+                    ),
+                    Node::group(
+                        "Matches",
+                        vec![
+                            // Teilnehmer-Slot.
+                            Node::group(
+                                "Match",
+                                vec![
+                                    Node::integer("PlanningID", 100),
+                                    Node::integer("EntryID", 10),
+                                ],
+                            ),
+                            // Echtes Match, verweist per From1 auf den Slot.
+                            Node::group(
+                                "Match",
+                                vec![
+                                    Node::integer("ID", 5),
+                                    Node::Item {
+                                        id: "IsMatch".to_string(),
+                                        value: Value::Bool(true),
+                                    },
+                                    Node::integer("From1", 100),
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            )],
+        )];
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.matches.len(), 1);
+        assert_eq!(snapshot.matches[0].team1, ["Anna Müller", "Ben Schmidt"]);
+        assert!(snapshot.matches[0].team2.is_empty());
+    }
 }
