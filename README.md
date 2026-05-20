@@ -11,8 +11,14 @@ Badhub-Passwort eintragen – fertig.
 
 ## Status
 
-**Phase 0 – Skeleton.** Lauffähiges Tauri-Grundgerüst, noch ohne
-BTP-Anbindung. Siehe Roadmap im Implementierungsplan.
+**Phase 1 – BTP-Protokoll (in Arbeit).** Der Wire-Codec (Framing + gzip),
+der VISUALXML-Codec und die Request-Builder sind implementiert und durch
+Tests abgesichert. Das TP-Network-Protokoll ist in
+[docs/btp_protocol.md](docs/btp_protocol.md) spezifiziert.
+
+Offen: der Snapshot-Parser (`model.rs`) und der TCP-Client (`client.rs`) –
+beide entstehen gegen echte BTP-Mitschnitte (siehe
+[tools/capture-btp.ps1](tools/capture-btp.ps1)).
 
 ## Stack
 
@@ -37,6 +43,8 @@ npm run tauri build  # Produktions-Build (Installer)
 bts-light/
 ├── src/            # React-Frontend (WebView-Inhalt)
 ├── src-tauri/      # Rust-Kern + Tauri-Konfiguration
+├── tools/          # Entwicklungs-Werkzeuge (BTP-Capture-Skript)
+├── docs/           # Protokoll-Spezifikation
 └── .github/        # CI
 ```
 

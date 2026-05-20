@@ -15,7 +15,7 @@ function App() {
         Liveticker-Brücke zwischen BTP und badhub.de
       </p>
       <span className="rounded-full bg-slate-200 px-3 py-1 text-xs text-slate-600">
-        v{version || "…"} · Phase 0 – Skeleton
+        v{version || "…"} · Phase 1 – BTP-Protokoll
       </span>
     </main>
   );
