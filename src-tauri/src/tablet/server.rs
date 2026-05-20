@@ -153,9 +153,17 @@ async fn qr_svg(Path(label): Path<String>) -> impl IntoResponse {
                 .render::<qrcode::render::svg::Color>()
                 .min_dimensions(220, 220)
                 .build();
-            ([(header::CONTENT_TYPE, "image/svg+xml; charset=utf-8")], svg).into_response()
+            (
+                [(header::CONTENT_TYPE, "image/svg+xml; charset=utf-8")],
+                svg,
+            )
+                .into_response()
         }
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "QR-Erzeugung fehlgeschlagen").into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "QR-Erzeugung fehlgeschlagen",
+        )
+            .into_response(),
     }
 }
 
@@ -352,10 +360,7 @@ fn match_brief(m: &BtpMatch) -> MatchBrief {
     }
 }
 
-async fn ws_upgrade(
-    ws: WebSocketUpgrade,
-    State(ctx): State<Arc<ServerCtx>>,
-) -> impl IntoResponse {
+async fn ws_upgrade(ws: WebSocketUpgrade, State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, ctx))
 }
 
@@ -409,12 +414,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
 
 /// Sendet `match_assigned`/`match_cleared`, sobald sich das Match des
 /// Courts gegenüber dem zuletzt gemeldeten Stand geändert hat.
-async fn push_match(
-    court: &str,
-    ctx: &ServerCtx,
-    socket: &mut WebSocket,
-    last: &mut Option<i64>,
-) {
+async fn push_match(court: &str, ctx: &ServerCtx, socket: &mut WebSocket, last: &mut Option<i64>) {
     let current = ctx.tablet.match_for_court(court);
     let current_id = current.as_ref().map(|m| m.id);
     if current_id == *last {
@@ -434,13 +434,7 @@ async fn push_match(
 
 /// Verarbeitet einen Live-Punktestand vom Tablet: merken + an den
 /// Liveticker pushen.
-async fn handle_score(
-    court: &str,
-    score_a: i64,
-    score_b: i64,
-    history: &[SetAb],
-    ctx: &ServerCtx,
-) {
+async fn handle_score(court: &str, score_a: i64, score_b: i64, history: &[SetAb], ctx: &ServerCtx) {
     let Some(m) = ctx.tablet.match_for_court(court) else {
         return;
     };
@@ -479,9 +473,6 @@ mod tests {
 
     #[test]
     fn html_escape_neutralizes_markup_and_quotes() {
-        assert_eq!(
-            html_escape("a<b>&\"'c"),
-            "a&lt;b&gt;&amp;&quot;&#39;c"
-        );
+        assert_eq!(html_escape("a<b>&\"'c"), "a&lt;b&gt;&amp;&quot;&#39;c");
     }
 }

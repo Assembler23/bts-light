@@ -87,11 +87,7 @@ pub struct MatchUpdate {
 /// Fertige Wire-Bytes für einen `SENDUPDATE`-Request – schreibt ein
 /// Ergebnis zurück nach BTP. `session_key` stammt aus der LOGIN-Antwort,
 /// `password` nur, wenn das BTP-Turnier passwortgeschützt ist.
-pub fn update_request(
-    update: &MatchUpdate,
-    session_key: &str,
-    password: Option<&str>,
-) -> Vec<u8> {
+pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<&str>) -> Vec<u8> {
     let sets: Vec<Node> = update
         .sets
         .iter()

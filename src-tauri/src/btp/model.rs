@@ -570,10 +570,7 @@ mod tests {
             vec![Node::group(
                 "Tournament",
                 vec![
-                    Node::group(
-                        "Players",
-                        vec![player(1, "Anna"), player(2, "Hilde")],
-                    ),
+                    Node::group("Players", vec![player(1, "Anna"), player(2, "Hilde")]),
                     Node::group("Entries", vec![entry(10, 1), entry(20, 2)]),
                     Node::group(
                         "Matches",
