@@ -11,8 +11,7 @@ Badhub-Passwort eintragen – fertig.
 
 ## Status
 
-**Phase 4 – App-Oberfläche (in Arbeit).** Der gesamte Funktionskern
-steht und ist getestet:
+**App funktionsfähig.** Funktionskern und Oberfläche stehen:
 
 - **BTP-Anbindung** – TP-Network-Protokoll (Wire-Codec, VISUALXML,
   TCP-Client), gegen echte Turnier-Mitschnitte verifiziert. Spezifikation:
@@ -22,9 +21,12 @@ steht und ist getestet:
 - **HTTP-Push** – Versand an `live_update.php`, end-to-end gegen
   badhub.de verifiziert.
 - **Sync-Engine** – kompletter Poll-Push-Zyklus mit Resend-on-failure.
+- **Oberfläche** – Setup-Wizard (BVBB-Preset oder manuell), Dashboard
+  mit Live-Status, System-Tray mit Hintergrundbetrieb.
 
-In Arbeit ist die Bedien-Oberfläche: Setup-Wizard, Dashboard,
-System-Tray, Hintergrund-Polling.
+Offen (Phase 5): signierter Installer, Auto-Update, Auto-Start mit dem
+System. Ein unsignierter Windows-Installer entsteht über den
+GitHub-Actions-Workflow „Windows-Installer bauen".
 
 ## Stack
 
