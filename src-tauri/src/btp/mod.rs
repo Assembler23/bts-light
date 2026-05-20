@@ -2,5 +2,6 @@
 //!
 //! Siehe `docs/btp_protocol.md` für die Protokoll-Spezifikation.
 
+pub mod proto;
 pub mod wire;
 pub mod xml;

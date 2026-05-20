@@ -38,6 +38,78 @@ pub enum Node {
     Item { id: String, value: Value },
 }
 
+impl Node {
+    /// Konstruiert einen `GROUP`-Knoten.
+    pub fn group(id: impl Into<String>, children: Vec<Node>) -> Node {
+        Node::Group {
+            id: id.into(),
+            children,
+        }
+    }
+
+    /// Konstruiert ein `ITEM` mit String-Wert.
+    pub fn string(id: impl Into<String>, value: impl Into<String>) -> Node {
+        Node::Item {
+            id: id.into(),
+            value: Value::String(value.into()),
+        }
+    }
+
+    /// Konstruiert ein `ITEM` mit Integer-Wert.
+    pub fn integer(id: impl Into<String>, value: i64) -> Node {
+        Node::Item {
+            id: id.into(),
+            value: Value::Integer(value),
+        }
+    }
+
+    /// ID dieses Knotens.
+    pub fn id(&self) -> &str {
+        match self {
+            Node::Group { id, .. } | Node::Item { id, .. } => id,
+        }
+    }
+
+    /// Kinder eines `GROUP`-Knotens; leer bei einem `ITEM`.
+    pub fn children(&self) -> &[Node] {
+        match self {
+            Node::Group { children, .. } => children,
+            Node::Item { .. } => &[],
+        }
+    }
+
+    /// Wert eines `ITEM`-Knotens; `None` bei einer `GROUP`.
+    pub fn value(&self) -> Option<&Value> {
+        match self {
+            Node::Item { value, .. } => Some(value),
+            Node::Group { .. } => None,
+        }
+    }
+}
+
+impl Value {
+    /// Wert als String, falls es ein String-Wert ist.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Wert als Integer, falls es ein Integer-Wert ist.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Value::Integer(i) => Some(*i),
+            _ => None,
+        }
+    }
+}
+
+/// Findet den ersten Knoten mit der gegebenen ID in einer Knotenliste.
+pub fn find<'a>(nodes: &'a [Node], id: &str) -> Option<&'a Node> {
+    nodes.iter().find(|n| n.id() == id)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum XmlError {
     #[error("XML-Fehler: {0}")]
