@@ -10,10 +10,10 @@ use serde::Serialize;
 
 use crate::btp::model::{BtpMatch, BtpSnapshot, MatchResult, MatchStatus};
 
-/// Zeitfenster für „zuletzt beendet" – Matches älter als 4 h fallen raus.
-const RECENT_FINISHED_WINDOW_MS: u64 = 4 * 60 * 60 * 1000;
-/// Höchstzahl der „zuletzt beendet"-Einträge.
-const RECENT_FINISHED_LIMIT: usize = 10;
+/// Höchstzahl der beendeten Matches im `tset`. Großzügig bemessen, damit an
+/// einem Turniertag praktisch alle Spiele erscheinen; deckelt nur extrem
+/// große Turniere, damit das Payload nicht unbegrenzt wächst.
+const FINISHED_LIMIT: usize = 500;
 /// Höchstzahl der „in Vorbereitung"-Einträge.
 const UPCOMING_LIMIT: usize = 15;
 
@@ -129,19 +129,20 @@ fn to_upcoming_match(m: &BtpMatch) -> TsetMatch {
     }
 }
 
-/// Beendete Matches der letzten 4 Stunden, neueste zuerst, max. 10.
-fn recent_finished(snapshot: &BtpSnapshot, now_ms: u64) -> Vec<TsetMatch> {
+/// Alle beendeten Matches des laufenden Turniertags, neueste zuerst.
+///
+/// `finished_at` wird ausschließlich während des laufenden bts-light-Betriebs
+/// gesetzt – die Liste umfasst damit alle an diesem Tag gespielten Matches.
+/// `FINISHED_LIMIT` greift nur als Schutz bei extrem großen Turnieren.
+fn recent_finished(snapshot: &BtpSnapshot) -> Vec<TsetMatch> {
     let mut finished: Vec<&BtpMatch> = snapshot
         .matches
         .iter()
         .filter(|m| m.status == MatchStatus::Finished && m.winner.is_some())
-        .filter(|m| match m.finished_at {
-            Some(ts) => ts + RECENT_FINISHED_WINDOW_MS >= now_ms,
-            None => false,
-        })
+        .filter(|m| m.finished_at.is_some())
         .collect();
     finished.sort_by_key(|m| std::cmp::Reverse(m.finished_at));
-    finished.truncate(RECENT_FINISHED_LIMIT);
+    finished.truncate(FINISHED_LIMIT);
     finished.iter().map(|m| to_finished_match(m)).collect()
 }
 
@@ -160,7 +161,7 @@ fn upcoming(snapshot: &BtpSnapshot) -> Vec<TsetMatch> {
 }
 
 /// Baut die `tset`-Nachricht aus einem Snapshot.
-pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, now_ms: u64) -> TsetMessage {
+pub fn build_tset(snapshot: &BtpSnapshot, rid: u64) -> TsetMessage {
     let on_court: Vec<&BtpMatch> = snapshot
         .matches
         .iter()
@@ -183,7 +184,7 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, now_ms: u64) -> TsetMessage 
             tournament_name: snapshot.tournament_name.clone(),
             courts,
             matches: on_court.iter().map(|m| to_tset_match(m)).collect(),
-            recent_finished_matches: recent_finished(snapshot, now_ms),
+            recent_finished_matches: recent_finished(snapshot),
             upcoming_matches: upcoming(snapshot),
         },
         rid,
@@ -262,7 +263,7 @@ mod tests {
                 sample_match(3, MatchStatus::Scheduled, None),
             ],
         };
-        let tset = build_tset(&snapshot, 7, NOW);
+        let tset = build_tset(&snapshot, 7);
         assert_eq!(tset.kind, "tset");
         assert_eq!(tset.rid, 7);
         assert_eq!(tset.event.matches.len(), 1);
@@ -277,7 +278,7 @@ mod tests {
             tournament_name: "T".to_string(),
             matches: vec![sample_match(14, MatchStatus::OnCourt, Some("1"))],
         };
-        let m = &build_tset(&snapshot, 1, NOW).event.matches[0];
+        let m = &build_tset(&snapshot, 1).event.matches[0];
         assert_eq!(m.id, "btp_14");
         assert_eq!(m.n, "HE G1");
         assert_eq!(m.s, vec![[21, 19], [21, 15]]);
@@ -288,24 +289,31 @@ mod tests {
     }
 
     #[test]
-    fn recent_finished_keeps_recent_and_drops_old() {
-        let mut fresh = sample_match(1, MatchStatus::Finished, None);
-        fresh.winner = Some(1);
-        fresh.finished_at = Some(NOW - 60_000); // vor 1 Minute
-        let mut stale = sample_match(2, MatchStatus::Finished, None);
-        stale.winner = Some(2);
-        stale.finished_at = Some(NOW - 5 * 60 * 60 * 1000); // vor 5 Stunden
+    fn recent_finished_keeps_all_matches_of_the_day() {
+        // Kein Zeitfenster mehr: auch früh am Tag beendete Matches bleiben in
+        // der Liste, solange bts-light läuft. Nur Matches ohne Zeitstempel
+        // (noch nicht von der Sync-Engine erfasst) fallen raus.
+        let mut early = sample_match(1, MatchStatus::Finished, None);
+        early.winner = Some(1);
+        early.finished_at = Some(NOW - 8 * 60 * 60 * 1000); // vor 8 Stunden
+        let mut late = sample_match(2, MatchStatus::Finished, None);
+        late.winner = Some(2);
+        late.finished_at = Some(NOW - 60_000); // vor 1 Minute
+        let mut unstamped = sample_match(3, MatchStatus::Finished, None);
+        unstamped.winner = Some(1);
+        unstamped.finished_at = None;
 
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
-            matches: vec![fresh, stale],
+            matches: vec![early, late, unstamped],
         };
-        let event = build_tset(&snapshot, 1, NOW).event;
-        assert_eq!(event.recent_finished_matches.len(), 1);
-        let m = &event.recent_finished_matches[0];
-        assert_eq!(m.id, "btp_1");
-        assert_eq!(m.end_ts, Some(NOW - 60_000));
-        assert_eq!(m.team1_won, Some(true));
+        let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
+        // early + late bleiben, unstamped fällt raus; neueste zuerst.
+        assert_eq!(finished.len(), 2);
+        assert_eq!(finished[0].id, "btp_2");
+        assert_eq!(finished[1].id, "btp_1");
+        assert_eq!(finished[0].team1_won, Some(false));
+        assert_eq!(finished[1].end_ts, Some(NOW - 8 * 60 * 60 * 1000));
     }
 
     #[test]
@@ -321,7 +329,7 @@ mod tests {
             tournament_name: "T".to_string(),
             matches: vec![a, b],
         };
-        let finished = build_tset(&snapshot, 1, NOW).event.recent_finished_matches;
+        let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
         assert_eq!(finished[0].id, "btp_2");
         assert_eq!(finished[1].id, "btp_1");
     }
@@ -335,7 +343,7 @@ mod tests {
                 sample_match(6, MatchStatus::OnCourt, Some("1")),
             ],
         };
-        let upcoming = build_tset(&snapshot, 1, NOW).event.upcoming_matches;
+        let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
         assert_eq!(upcoming.len(), 1);
         assert_eq!(upcoming[0].id, "btp_5");
         assert_eq!(upcoming[0].match_num, Some(5));
@@ -347,7 +355,7 @@ mod tests {
             tournament_name: "T".to_string(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
-        let json = serde_json::to_string(&build_tset(&snapshot, 42, NOW)).unwrap();
+        let json = serde_json::to_string(&build_tset(&snapshot, 42)).unwrap();
         assert!(json.contains(r#""type":"tset""#));
         assert!(json.contains(r#""recent_finished_matches":[]"#));
         assert!(json.contains(r#""upcoming_matches":[]"#));
@@ -370,7 +378,7 @@ mod tests {
             tournament_name: "T".to_string(),
             matches: vec![walkover, regular],
         };
-        let finished = build_tset(&snapshot, 1, NOW).event.recent_finished_matches;
+        let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
         let by_id = |id: &str| finished.iter().find(|m| m.id == id).unwrap();
         assert_eq!(by_id("btp_1").outcome, Some("walkover"));
         assert_eq!(by_id("btp_2").outcome, None);

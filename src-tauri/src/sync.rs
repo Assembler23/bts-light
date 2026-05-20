@@ -112,7 +112,7 @@ impl SyncEngine {
 
     /// Plant das nächste Update gegen den zuletzt gesendeten Stand.
     fn plan(&self, current: &BtpSnapshot) -> Update {
-        diff(self.last_pushed.as_ref(), current, self.rid, now_ms())
+        diff(self.last_pushed.as_ref(), current, self.rid)
     }
 
     /// Nach erfolgreichem Push: Stand merken, Request-ID erhöhen.
