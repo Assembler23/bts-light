@@ -81,6 +81,12 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single-Instance MUSS das erste Plugin sein. Verhindert eine
+        // zweite bts-light-Instanz – sonst kollidiert deren Tablet-Server
+        // mit dem Port 8088 der schon laufenden Instanz.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
