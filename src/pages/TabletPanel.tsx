@@ -14,6 +14,7 @@ interface Props {
  */
 export function TabletPanel({ onBack }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
+  const [zoomCourt, setZoomCourt] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -34,6 +35,10 @@ export function TabletPanel({ onBack }: Props) {
 
   const host = info?.server_host ?? "";
   const courts = info?.courts ?? [];
+  const courtUrl = (court: string) =>
+    `http://${host}/court/${encodeURIComponent(court)}`;
+  const qrUrl = (court: string) =>
+    `http://${host}/qr/${encodeURIComponent(court)}`;
 
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-6 p-6 text-slate-800">
@@ -67,36 +72,39 @@ export function TabletPanel({ onBack }: Props) {
               Tablet-Adressen
             </h2>
             <p className="text-xs text-slate-500">
-              Am Spielfeld diese Adresse im Browser öffnen oder den QR-Code
-              scannen. Jedes Feld bekommt ein eigenes Tablet; Tablet und
-              dieser PC müssen im selben WLAN sein.
+              Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
+              scannen (auf den QR tippen zeigt ihn groß). Tablet und dieser
+              PC müssen im selben WLAN sein.
             </p>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-              {courts.map((c) => {
-                const path = encodeURIComponent(c.court);
-                return (
-                  <div
-                    key={c.court}
-                    className="flex items-center gap-2 rounded-lg border border-slate-200 p-2"
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {courts.map((c) => (
+                <div
+                  key={c.court}
+                  className="flex items-center gap-3 rounded-lg border border-slate-200 p-2"
+                >
+                  <button
+                    onClick={() => setZoomCourt(c.court)}
+                    title="QR groß anzeigen"
+                    className="shrink-0 rounded bg-white"
                   >
                     <img
-                      src={`http://${host}/qr/${path}`}
+                      src={qrUrl(c.court)}
                       alt=""
-                      width={56}
-                      height={56}
-                      className="shrink-0 rounded bg-white"
+                      width={64}
+                      height={64}
+                      className="block"
                     />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">
-                        {c.court}
-                      </div>
-                      <div className="truncate text-[11px] text-slate-400">
-                        /court/{c.court}
-                      </div>
+                  </button>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {c.court}
+                    </div>
+                    <div className="truncate text-xs text-slate-500">
+                      {courtUrl(c.court)}
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </section>
 
@@ -111,6 +119,30 @@ export function TabletPanel({ onBack }: Props) {
             </div>
           </section>
         </>
+      )}
+
+      {zoomCourt !== null && (
+        <div
+          onClick={() => setZoomCourt(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+        >
+          <div className="flex flex-col items-center rounded-xl bg-white p-6 text-center">
+            <img
+              src={qrUrl(zoomCourt)}
+              alt=""
+              width={300}
+              height={300}
+              className="bg-white"
+            />
+            <div className="mt-3 text-lg font-semibold">{zoomCourt}</div>
+            <div className="mt-1 max-w-[20rem] break-all text-sm text-slate-500">
+              {courtUrl(zoomCourt)}
+            </div>
+            <div className="mt-3 text-xs text-slate-400">
+              Zum Schließen tippen
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );
