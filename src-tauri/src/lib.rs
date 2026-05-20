@@ -4,9 +4,49 @@ pub mod commands;
 pub mod config;
 pub mod sync;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, WindowEvent};
+
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Holt das Hauptfenster nach vorn (aus dem Tray heraus).
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Richtet das System-Tray-Icon mit Kontextmenü ein.
+fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "BTS Light öffnen", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
+
+    TrayIconBuilder::new()
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .expect("Fenster-Icon ist konfiguriert"),
+        )
+        .tooltip("BTS Light")
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::DoubleClick { .. } = event {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,6 +63,18 @@ pub fn run() {
             commands::stop_sync,
             commands::get_status,
         ])
+        .setup(|app| {
+            setup_tray(app.handle())?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Das Schließen-Kreuz beendet die App nicht, sondern minimiert
+            // sie ins Tray – der Liveticker läuft im Hintergrund weiter.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
