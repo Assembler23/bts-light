@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write # nötig, um das Release anzulegen
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +24,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
       - name: Install frontend dependencies
         run: npm ci
@@ -29,11 +32,19 @@ jobs:
       - name: Build app + installer
         run: npm run tauri build
 
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
+      # Release-Assets statt Build-Artefakte – sie zählen nicht zur
+      # Actions-Artefakt-Quota und lassen sich direkt herunterladen.
+      - name: Publish to GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          name: bts-light-windows
-          path: |
+          tag_name: dev-build
+          name: BTS Light – Entwicklungs-Build
+          body: >
+            Unsignierter Test-Build. Beim Start zeigt Windows „Windows hat
+            Ihren PC geschützt" – über „Weitere Informationen → Trotzdem
+            ausführen" bestätigen.
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
