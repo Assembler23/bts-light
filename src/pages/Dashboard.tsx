@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getStatus, openLiveView, startSync, stopSync } from "../api";
+import { useUpdate } from "../components/UpdateBanner";
 import type { AppConfig, SyncStatus } from "../types";
 
 interface Props {
@@ -24,6 +25,24 @@ function ago(ms: number): string {
 export function Dashboard({ config, onReconfigure }: Props) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const { phase: updatePhase, checkNow } = useUpdate();
+  const [updateChecked, setUpdateChecked] = useState(false);
+
+  async function handleCheckUpdate() {
+    setUpdateChecked(true);
+    await checkNow();
+  }
+
+  // Rückmeldung nur nach einem manuellen Klick zeigen – der Auto-Check
+  // beim Start soll hier keine Meldung hinterlassen.
+  function updateMessage(): string {
+    if (!updateChecked) return "";
+    if (updatePhase === "checking") return "Prüfe auf Update …";
+    if (updatePhase === "available") return "Update verfügbar – siehe Banner oben.";
+    if (updatePhase === "current") return "Aktuell auf dem neuesten Stand.";
+    if (updatePhase === "error") return "Update-Prüfung fehlgeschlagen (offline?).";
+    return "";
+  }
 
   useEffect(() => {
     let active = true;
@@ -64,6 +83,8 @@ export function Dashboard({ config, onReconfigure }: Props) {
       </main>
     );
   }
+
+  const updateMsg = updateMessage();
 
   return (
     <main className="mx-auto flex min-h-full max-w-xl flex-col gap-6 p-6 text-slate-800">
@@ -113,21 +134,33 @@ export function Dashboard({ config, onReconfigure }: Props) {
         </section>
       )}
 
-      <div className="flex gap-3">
-        <button
-          onClick={toggle}
-          disabled={busy}
-          className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white
-                     disabled:opacity-50"
-        >
-          {status.running ? "Stoppen" : "Starten"}
-        </button>
-        <button
-          onClick={onReconfigure}
-          className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
-        >
-          Einstellungen ändern
-        </button>
+      <div>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={toggle}
+            disabled={busy}
+            className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white
+                       disabled:opacity-50"
+          >
+            {status.running ? "Stoppen" : "Starten"}
+          </button>
+          <button
+            onClick={onReconfigure}
+            className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
+          >
+            Einstellungen ändern
+          </button>
+          <button
+            onClick={handleCheckUpdate}
+            disabled={updatePhase === "checking"}
+            className="rounded-lg bg-slate-200 px-4 py-2 text-sm disabled:opacity-50"
+          >
+            Nach Update prüfen
+          </button>
+        </div>
+        {updateMsg !== "" && (
+          <p className="mt-2 text-xs text-slate-500">{updateMsg}</p>
+        )}
       </div>
     </main>
   );

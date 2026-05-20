@@ -1,6 +1,8 @@
-name: Windows-Installer bauen
+name: Release bauen & veröffentlichen
 
-# Manuell auslösbar (Actions-Tab → "Run workflow") und bei Versions-Tags.
+# Versions-Tags (v0.2.0, v1.0.0 …) lösen einen vollständigen Release aus:
+# Build → Signatur → GitHub-Release → Upload nach badhub.de (Auto-Update).
+# workflow_dispatch ist nur ein Trockenlauf (baut, veröffentlicht nicht).
 on:
   workflow_dispatch:
   push:
@@ -10,7 +12,7 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write # nötig, um das Release anzulegen
+      contents: write # nötig, um das GitHub-Release anzulegen
     steps:
       - uses: actions/checkout@v4
 
@@ -26,25 +28,89 @@ jobs:
           workspaces: src-tauri
           cache-on-failure: true
 
-      - name: Install frontend dependencies
+      - name: Frontend-Abhängigkeiten installieren
         run: npm ci
 
-      - name: Build app + installer
+      # createUpdaterArtifacts (tauri.conf.json) erzeugt zusätzlich das
+      # signierte *-setup.nsis.zip + .sig. Ohne die Signing-Secrets schlägt
+      # der Build fehl – sie müssen im Repo gesetzt sein.
+      - name: App + Installer bauen (signiert)
         run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # Release-Assets statt Build-Artefakte – sie zählen nicht zur
-      # Actions-Artefakt-Quota und lassen sich direkt herunterladen.
-      - name: Publish to GitHub release
+      # GitHub-Release dient als Changelog/Backup UND als Transportmedium
+      # für den Linux-Publish-Job (kein upload-artifact → keine Quota).
+      - name: GitHub-Release anlegen
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: dev-build
-          name: BTS Light – Entwicklungs-Build
+          tag_name: ${{ github.ref_name }}
+          name: BTS Light ${{ github.ref_name }}
           body: >
-            Unsignierter Test-Build. Beim Start zeigt Windows „Windows hat
-            Ihren PC geschützt" – über „Weitere Informationen → Trotzdem
-            ausführen" bestätigen.
-          prerelease: true
+            Automatischer Release. Auto-Update bezieht diese Version über
+            badhub.de/download/bts-light/.
           fail_on_unmatched_files: true
           files: |
             src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip
+            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip.sig
+
+  # Lädt die Release-Assets, baut latest.json und schiebt alles nach
+  # badhub.de. Läuft auf Linux, weil rsync/ssh dort problemlos verfügbar
+  # sind (Windows-Runner haben kein rsync).
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Release-Assets holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rel
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" --dir rel
+          ls -la rel
+
+      # Tauri-2-Updater-Manifest. signature = Inhalt der .sig-Datei,
+      # url = die badhub.de-Adresse des .nsis.zip-Updater-Artefakts.
+      - name: latest.json erzeugen
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP=$(cd rel && ls *-setup.nsis.zip | head -1)
+          SIG=$(cat "rel/${ZIP}.sig")
+          jq -n \
+            --arg version "$VERSION" \
+            --arg sig "$SIG" \
+            --arg url "https://badhub.de/download/bts-light/${ZIP}" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $version,
+              notes: ("BTS Light " + $version),
+              pub_date: $date,
+              platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' \
+            > rel/latest.json
+          cat rel/latest.json
+
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # latest.json trägt die Signatur bereits inline – die separate
+      # .sig-Datei wird vom Updater nicht abgefragt und nicht hochgeladen.
+      - name: Nach badhub.de hochladen
+        run: |
+          set -euo pipefail
+          rsync -av \
+            rel/latest.json \
+            rel/*-setup.exe \
+            rel/*-setup.nsis.zip \
+            badhub@178.104.221.177:/var/www/badhub/public/download/bts-light/

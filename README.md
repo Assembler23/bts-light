@@ -23,10 +23,15 @@ Badhub-Passwort eintragen – fertig.
 - **Sync-Engine** – kompletter Poll-Push-Zyklus mit Resend-on-failure.
 - **Oberfläche** – Setup-Wizard (BVBB-Preset oder manuell), Dashboard
   mit Live-Status, System-Tray mit Hintergrundbetrieb.
+- **Auto-Update** – die App prüft beim Start und per Dashboard-Button auf
+  neue Versionen und installiert sie auf Wunsch selbst (signierte
+  Tauri-Updater-Artefakte, Hosting auf badhub.de). Release- und
+  Update-Ablauf: [docs/release.md](docs/release.md).
 
-Offen (Phase 5): signierter Installer, Auto-Update, Auto-Start mit dem
-System. Ein unsignierter Windows-Installer entsteht über den
-GitHub-Actions-Workflow „Windows-Installer bauen".
+Offen: signierter Windows-Installer (Code-Signing-Zertifikat). Bis dahin
+zeigt Windows beim ersten Start eine SmartScreen-Warnung – über „Weitere
+Informationen → Trotzdem ausführen" bestätigen. Das Auto-Update ist davon
+unabhängig (eigenes Signaturschlüsselpaar).
 
 ## Stack
 

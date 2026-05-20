@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { loadConfig } from "./api";
+import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { Dashboard } from "./pages/Dashboard";
 import { SetupWizard } from "./pages/SetupWizard";
 import type { AppConfig } from "./types";
@@ -32,28 +33,37 @@ function App() {
       .catch(() => setView("wizard"));
   }, []);
 
-  if (view === "loading") {
+  function renderView() {
+    if (view === "loading") {
+      return (
+        <main className="flex h-full items-center justify-center text-slate-400">
+          Lädt …
+        </main>
+      );
+    }
+    if (view === "wizard") {
+      return (
+        <SetupWizard
+          initialConfig={config}
+          onDone={(c) => {
+            setConfig(c);
+            setView("dashboard");
+          }}
+        />
+      );
+    }
     return (
-      <main className="flex h-full items-center justify-center text-slate-400">
-        Lädt …
-      </main>
-    );
-  }
-
-  if (view === "wizard") {
-    return (
-      <SetupWizard
-        initialConfig={config}
-        onDone={(c) => {
-          setConfig(c);
-          setView("dashboard");
-        }}
-      />
+      <Dashboard config={config} onReconfigure={() => setView("wizard")} />
     );
   }
 
   return (
-    <Dashboard config={config} onReconfigure={() => setView("wizard")} />
+    <UpdateProvider>
+      <div className="flex h-full flex-col">
+        <UpdateBanner />
+        <div className="min-h-0 flex-1 overflow-auto">{renderView()}</div>
+      </div>
+    </UpdateProvider>
   );
 }
 
