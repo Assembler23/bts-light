@@ -1,24 +1,51 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { loadConfig } from "./api";
+import { Dashboard } from "./pages/Dashboard";
+import { SetupWizard } from "./pages/SetupWizard";
+import type { AppConfig } from "./types";
+
+type View = "loading" | "wizard" | "dashboard";
+
+function defaultConfig(): AppConfig {
+  return {
+    btp: { host: "127.0.0.1", port: 9901, password: null },
+    badhub: { url: "https://badhub.de/api/live_update.php", password: "" },
+  };
+}
 
 function App() {
-  const [version, setVersion] = useState("");
+  const [view, setView] = useState<View>("loading");
+  const [config, setConfig] = useState<AppConfig>(defaultConfig());
 
   useEffect(() => {
-    invoke<string>("app_version").then(setVersion).catch(() => setVersion("?"));
+    loadConfig()
+      .then((c) => {
+        setConfig(c);
+        // Ist bereits ein Badhub-Passwort hinterlegt, gilt die App als
+        // eingerichtet und zeigt direkt das Dashboard.
+        setView(c.badhub.password ? "dashboard" : "wizard");
+      })
+      .catch(() => setView("wizard"));
   }, []);
 
-  return (
-    <main className="flex h-full flex-col items-center justify-center gap-3 bg-slate-50 text-slate-800">
-      <h1 className="text-3xl font-semibold tracking-tight">BTS Light</h1>
-      <p className="text-sm text-slate-500">
-        Liveticker-Brücke zwischen BTP und badhub.de
-      </p>
-      <span className="rounded-full bg-slate-200 px-3 py-1 text-xs text-slate-600">
-        v{version || "…"} · Phase 1 – BTP-Protokoll
-      </span>
-    </main>
-  );
+  if (view === "loading") {
+    return (
+      <main className="flex h-full items-center justify-center text-slate-400">
+        Lädt …
+      </main>
+    );
+  }
+
+  if (view === "wizard") {
+    return (
+      <SetupWizard
+        initialConfig={config}
+        onDone={() => setView("dashboard")}
+      />
+    );
+  }
+
+  return <Dashboard onReconfigure={() => setView("wizard")} />;
 }
 
 export default App;
