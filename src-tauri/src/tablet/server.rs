@@ -140,6 +140,7 @@ async fn index(State(ctx): State<Arc<ServerCtx>>) -> Html<String> {
 
 /// Liefert die Tablet-UI für einen Court (kein Caching – immer frisch).
 async fn court_page(Path(label): Path<String>) -> impl IntoResponse {
+    tracing::info!("Tablet-Seite ausgeliefert für Court '{label}'");
     let body = TABLET_HTML.replace("__COURT_LABEL__", &html_escape(&label));
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
@@ -391,6 +392,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                         match serde_json::from_str::<TabletMsg>(text.as_str()) {
                             Ok(TabletMsg::Identify { court_label }) => {
                                 ctx.tablet.attach_tablet(&court_label);
+                                tracing::info!("Tablet verbunden für Court '{court_label}'");
                                 court = Some(court_label);
                                 last_match = None;
                                 if let Some(c) = &court {
@@ -419,6 +421,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
 
     if let Some(c) = &court {
         ctx.tablet.detach_tablet(c);
+        tracing::info!("Tablet getrennt für Court '{c}'");
     }
 }
 
@@ -432,10 +435,16 @@ async fn push_match(court: &str, ctx: &ServerCtx, socket: &mut WebSocket, last: 
     }
     *last = current_id;
     let msg = match &current {
-        Some(m) => ServerMsg::MatchAssigned {
-            match_brief: match_brief(m),
-        },
-        None => ServerMsg::MatchCleared,
+        Some(m) => {
+            tracing::info!("Court '{court}': Match {} ans Tablet zugewiesen", m.id);
+            ServerMsg::MatchAssigned {
+                match_brief: match_brief(m),
+            }
+        }
+        None => {
+            tracing::info!("Court '{court}': Match-Zuweisung aufgehoben");
+            ServerMsg::MatchCleared
+        }
     };
     if let Ok(json) = serde_json::to_string(&msg) {
         let _ = socket.send(Message::Text(Utf8Bytes::from(json))).await;
