@@ -167,16 +167,24 @@ fn entry_map(t: &[Node]) -> HashMap<i64, Vec<i64>> {
     map
 }
 
-/// PlanningID eines Teilnehmer-Slots → EntryID.
-fn slot_map(t: &[Node]) -> HashMap<i64, i64> {
+/// (DrawID, PlanningID) eines Teilnehmer-Slots → EntryID.
+///
+/// PlanningIDs sind nur INNERHALB eines Draws eindeutig – BTP vergibt z. B.
+/// in jedem Draw die Slots 1000, 2000, 3000 … Ohne die DrawID im Schlüssel
+/// überschreiben sich gleichnamige Slots verschiedener Draws gegenseitig und
+/// Paarungen lösen zu fremden Spielern auf ("Hilde gegen Hilde").
+fn slot_map(t: &[Node]) -> HashMap<(i64, i64), i64> {
     let mut map = HashMap::new();
     let Some(matches) = xml::find(t, "Matches") else {
         return map;
     };
     for m in matches.children() {
-        if let (Some(planning), Some(entry)) = (child_int(m, "PlanningID"), child_int(m, "EntryID"))
-        {
-            map.insert(planning, entry);
+        if let (Some(draw), Some(planning), Some(entry)) = (
+            child_int(m, "DrawID"),
+            child_int(m, "PlanningID"),
+            child_int(m, "EntryID"),
+        ) {
+            map.insert((draw, planning), entry);
         }
     }
     map
@@ -212,7 +220,7 @@ fn parse_matches(
     t: &[Node],
     players: &HashMap<i64, BtpPlayer>,
     entries: &HashMap<i64, Vec<i64>>,
-    slots: &HashMap<i64, i64>,
+    slots: &HashMap<(i64, i64), i64>,
     courts: &HashMap<i64, String>,
     draws: &HashMap<i64, String>,
 ) -> Vec<BtpMatch> {
@@ -226,7 +234,10 @@ fn parse_matches(
         if child_bool(m, "IsMatch") != Some(true) {
             continue;
         }
-        let resolve = |planning: Option<i64>| resolve_team(planning, slots, entries, players);
+        // From1/From2 verweisen auf Slots im SELBEN Draw wie das Match.
+        let draw_id = child_int(m, "DrawID");
+        let resolve =
+            |planning: Option<i64>| resolve_team(draw_id, planning, slots, entries, players);
         let court = child_int(m, "CourtID").and_then(|id| courts.get(&id).cloned());
         let winner = child_int(m, "Winner").and_then(|w| u8::try_from(w).ok());
         let status = if winner.is_some() {
@@ -238,7 +249,7 @@ fn parse_matches(
         };
         out.push(BtpMatch {
             id: child_int(m, "ID").unwrap_or_default(),
-            draw_name: child_int(m, "DrawID")
+            draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
             round_name: child_str(m, "RoundName").unwrap_or_default().to_string(),
@@ -258,17 +269,20 @@ fn parse_matches(
 }
 
 /// Löst die `From`-PlanningID über Slot → Entry → Player zu den Spielern auf.
-/// Leerer Vec, wenn die Kette nicht aufgeht (z. B. noch offener KO-Platz).
+/// Der Slot wird im Draw des Matches gesucht (PlanningIDs sind nur dort
+/// eindeutig). Leerer Vec, wenn die Kette nicht aufgeht (z. B. noch offener
+/// KO-Platz).
 fn resolve_team(
+    draw_id: Option<i64>,
     planning_id: Option<i64>,
-    slots: &HashMap<i64, i64>,
+    slots: &HashMap<(i64, i64), i64>,
     entries: &HashMap<i64, Vec<i64>>,
     players: &HashMap<i64, BtpPlayer>,
 ) -> Vec<BtpPlayer> {
-    let Some(planning) = planning_id else {
+    let (Some(draw), Some(planning)) = (draw_id, planning_id) else {
         return Vec::new();
     };
-    let Some(entry_id) = slots.get(&planning) else {
+    let Some(entry_id) = slots.get(&(draw, planning)) else {
         return Vec::new();
     };
     let Some(player_ids) = entries.get(entry_id) else {
@@ -455,6 +469,7 @@ mod tests {
                             Node::group(
                                 "Match",
                                 vec![
+                                    Node::integer("DrawID", 1),
                                     Node::integer("PlanningID", 100),
                                     Node::integer("EntryID", 10),
                                 ],
@@ -464,6 +479,7 @@ mod tests {
                                 "Match",
                                 vec![
                                     Node::integer("ID", 5),
+                                    Node::integer("DrawID", 1),
                                     Node::Item {
                                         id: "IsMatch".to_string(),
                                         value: Value::Bool(true),
@@ -485,5 +501,80 @@ mod tests {
         assert_eq!(team1[0].nationality.as_deref(), Some("GER"));
         assert_eq!(team1[1].member_id, None);
         assert!(snapshot.matches[0].team2.is_empty());
+    }
+
+    /// Regression: zwei Draws verwenden beide den Slot PlanningID 100. Ohne
+    /// DrawID im Slot-Schlüssel lösen beide Matches zum selben Spieler auf
+    /// ("Hilde gegen Hilde"). Jedes Match muss den Slot seines eigenen Draws
+    /// treffen.
+    #[test]
+    fn slots_with_same_planning_id_in_different_draws_do_not_collide() {
+        let is_match = || Node::Item {
+            id: "IsMatch".to_string(),
+            value: Value::Bool(true),
+        };
+        let player = |id, name| {
+            Node::group(
+                "Player",
+                vec![Node::integer("ID", id), Node::string("Lastname", name)],
+            )
+        };
+        let entry = |id, player_id| {
+            Node::group(
+                "Entry",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("Player1ID", player_id),
+                ],
+            )
+        };
+        let slot = |draw, planning, entry_id| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("DrawID", draw),
+                    Node::integer("PlanningID", planning),
+                    Node::integer("EntryID", entry_id),
+                ],
+            )
+        };
+        let pairing = |id, draw, from| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("DrawID", draw),
+                    is_match(),
+                    Node::integer("From1", from),
+                ],
+            )
+        };
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![
+                    Node::group(
+                        "Players",
+                        vec![player(1, "Anna"), player(2, "Hilde")],
+                    ),
+                    Node::group("Entries", vec![entry(10, 1), entry(20, 2)]),
+                    Node::group(
+                        "Matches",
+                        vec![
+                            // Beide Draws nutzen Slot-PlanningID 100.
+                            slot(1, 100, 10),
+                            slot(2, 100, 20),
+                            pairing(5, 1, 100),
+                            pairing(6, 2, 100),
+                        ],
+                    ),
+                ],
+            )],
+        )];
+        let snapshot = parse_snapshot(&tree).unwrap();
+        let team1_name = |i: usize| snapshot.matches[i].team1[0].name.as_str();
+        assert_eq!(team1_name(0), "Anna");
+        assert_eq!(team1_name(1), "Hilde");
     }
 }

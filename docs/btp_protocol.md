@@ -174,6 +174,35 @@ jedes Set  → ITEM "T1" (Integer), ITEM "T2" (Integer)
 Kein Satz-Sieger-Flag – wird aus den Punkten abgeleitet. `Winner` (1/2) ist ein
 separates Match-Feld.
 
+## Teilnehmer-Auflösung (From → Slot → Entry → Player)
+
+`Matches` enthält zweierlei Einträge:
+
+- **Teilnehmer-Slots** – tragen `PlanningID` + `EntryID`, aber kein
+  `IsMatch=true`. Sie ordnen einer Planungsposition einen `Entry` zu.
+- **Echte Paarungen** – tragen `IsMatch=true` und verweisen über
+  `From1`/`From2` auf die `PlanningID` zweier Slots. Jede Round-Robin-Paarung
+  taucht zusätzlich gespiegelt (ohne `IsMatch`) auf; diese Spiegel werden
+  verworfen.
+
+Auflösungskette einer Paarung:
+
+```
+Match.From1 → Slot.PlanningID → Slot.EntryID → Entry.Player{1,2}ID → Player
+```
+
+**Wichtig – PlanningIDs sind nur pro Draw eindeutig.** BTP vergibt in jedem
+Draw dieselben Slot-PlanningIDs (1000, 2000, 3000 …). Der Slot-Lookup muss
+daher mit `(DrawID, PlanningID)` geschlüsselt werden; `From1`/`From2` zeigen
+immer auf einen Slot im selben Draw wie das Match. Ein globaler, nur über
+`PlanningID` geschlüsselter Lookup lässt Slots verschiedener Draws
+kollidieren – Folge: Paarungen lösen zu fremden Spielern auf ("Hilde gegen
+Hilde"). In einem 116-Draw-Turnier waren so 95 % aller Teilnehmer falsch.
+
+In einem KO-Draw bekommt eine beendete Paarung selbst eine `EntryID` (den
+Sieger) zugewiesen und wirkt damit als Feeder-Slot für die nächste Runde –
+derselbe `(DrawID, PlanningID)`-Lookup deckt das mit ab.
+
 ## Fehlerfälle
 
 - **Falsches Passwort:** LOGIN liefert trotzdem `Action ID="REPLY"`, aber
