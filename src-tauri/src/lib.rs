@@ -1,3 +1,4 @@
+pub mod badhub;
 pub mod btp;
 
 #[tauri::command]
