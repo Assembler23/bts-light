@@ -1,5 +1,7 @@
 pub mod badhub;
 pub mod btp;
+pub mod config;
+pub mod sync;
 
 #[tauri::command]
 fn app_version() -> String {
