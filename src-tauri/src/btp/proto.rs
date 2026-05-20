@@ -22,11 +22,19 @@ pub enum ProtoError {
     LoginRejected,
     #[error("Login-Antwort enthält keinen Session-Schlüssel")]
     NoSessionKey,
+    #[error("BTP hat das Schreiben abgelehnt (Result != 1) – Netzwerk-Edits in BTP aktiv?")]
+    UpdateRejected,
 }
 
 /// Baut die gemeinsamen Top-Level-Knoten aller Requests.
-fn base_request(action: &str, password: Option<&str>) -> Vec<Node> {
+///
+/// `session_key` ist nur bei schreibenden Requests (`SENDUPDATE`) gesetzt –
+/// er stammt aus der LOGIN-Antwort und landet als `Unicode` in `Action`.
+fn base_request(action: &str, password: Option<&str>, session_key: Option<&str>) -> Vec<Node> {
     let mut action_children = vec![Node::string("ID", action)];
+    if let Some(key) = session_key {
+        action_children.push(Node::string("Unicode", key));
+    }
     if let Some(pw) = password {
         action_children.push(Node::string("Password", pw));
     }
@@ -45,12 +53,81 @@ fn base_request(action: &str, password: Option<&str>) -> Vec<Node> {
 
 /// Fertige Wire-Bytes für einen `LOGIN`-Request.
 pub fn login_request(password: Option<&str>) -> Vec<u8> {
-    wire::encode_message(&xml::encode(&base_request("LOGIN", password)))
+    wire::encode_message(&xml::encode(&base_request("LOGIN", password, None)))
 }
 
 /// Fertige Wire-Bytes für einen `SENDTOURNAMENTINFO`-Request.
 pub fn tournament_info_request(password: Option<&str>) -> Vec<u8> {
-    wire::encode_message(&xml::encode(&base_request("SENDTOURNAMENTINFO", password)))
+    wire::encode_message(&xml::encode(&base_request(
+        "SENDTOURNAMENTINFO",
+        password,
+        None,
+    )))
+}
+
+/// Ein nach BTP zurückzuschreibendes Match-Ergebnis (Einzel-Draw, keine
+/// Liga). Das Match wird über `btp_match_id` + `draw_id` + `planning_id`
+/// eindeutig adressiert.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchUpdate {
+    /// BTP-interne Match-ID (`Match.ID`).
+    pub btp_match_id: i64,
+    /// Draw, in dem das Match liegt (`Match.DrawID`).
+    pub draw_id: i64,
+    /// Planungsposition des Matches im Draw (`Match.PlanningID`).
+    pub planning_id: i64,
+    /// Satz-Ergebnisse als (Team1, Team2)-Punkte, in Spielreihenfolge.
+    pub sets: Vec<(i64, i64)>,
+    /// `true`, wenn Team 1 gewonnen hat (BTP `Winner` = 1, sonst 2).
+    pub team1_won: bool,
+    /// Spieldauer in Minuten; 0, falls unbekannt.
+    pub duration_mins: i64,
+}
+
+/// Fertige Wire-Bytes für einen `SENDUPDATE`-Request – schreibt ein
+/// Ergebnis zurück nach BTP. `session_key` stammt aus der LOGIN-Antwort,
+/// `password` nur, wenn das BTP-Turnier passwortgeschützt ist.
+pub fn update_request(
+    update: &MatchUpdate,
+    session_key: &str,
+    password: Option<&str>,
+) -> Vec<u8> {
+    let sets: Vec<Node> = update
+        .sets
+        .iter()
+        .map(|&(t1, t2)| {
+            Node::group(
+                "Set",
+                vec![Node::integer("T1", t1), Node::integer("T2", t2)],
+            )
+        })
+        .collect();
+
+    let match_node = Node::group(
+        "Match",
+        vec![
+            Node::integer("ID", update.btp_match_id),
+            Node::group("Sets", sets),
+            Node::integer("Winner", if update.team1_won { 1 } else { 2 }),
+            // ScoreStatus 0 = regulär ausgespielt. Walkover/Aufgabe wären
+            // 1/2/3 – vorerst nicht unterstützt.
+            Node::integer("ScoreStatus", 0),
+            Node::integer("Duration", update.duration_mins),
+            Node::integer("Status", 0),
+            Node::integer("DrawID", update.draw_id),
+            Node::integer("PlanningID", update.planning_id),
+        ],
+    );
+
+    let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
+    nodes.push(Node::group(
+        "Update",
+        vec![Node::group(
+            "Tournament",
+            vec![Node::group("Matches", vec![match_node])],
+        )],
+    ));
+    wire::encode_message(&xml::encode(&nodes))
 }
 
 /// Dekodiert eine Wire-Antwort zu VISUALXML-Knoten.
@@ -85,6 +162,30 @@ pub fn parse_login_response(nodes: &[Node]) -> Result<String, ProtoError> {
         .and_then(Value::as_str)
         .ok_or(ProtoError::NoSessionKey)?;
     Ok(key.to_string())
+}
+
+/// Wertet eine `SENDUPDATE`-Antwort aus. `Ok(())` nur bei `Result == 1`;
+/// alles andere bedeutet, dass BTP das Schreiben nicht übernommen hat.
+pub fn parse_update_response(nodes: &[Node]) -> Result<(), ProtoError> {
+    let action = xml::find(nodes, "Action").ok_or(ProtoError::NoAction)?;
+    let children = action.children();
+
+    let reply = xml::find(children, "ID")
+        .and_then(Node::value)
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if reply != "REPLY" {
+        return Err(ProtoError::UnexpectedReply(reply.to_string()));
+    }
+
+    if xml::find(children, "Result")
+        .and_then(Node::value)
+        .and_then(Value::as_int)
+        != Some(1)
+    {
+        return Err(ProtoError::UpdateRejected);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -180,6 +281,110 @@ mod tests {
         assert!(matches!(
             parse_login_response(&reply),
             Err(ProtoError::NoSessionKey)
+        ));
+    }
+
+    // --- SENDUPDATE -------------------------------------------------------
+
+    fn child_int(nodes: &[Node], id: &str) -> Option<i64> {
+        xml::find(nodes, id)?.value()?.as_int()
+    }
+
+    fn sample_update() -> MatchUpdate {
+        MatchUpdate {
+            btp_match_id: 42,
+            draw_id: 7,
+            planning_id: 1003,
+            sets: vec![(21, 19), (21, 15)],
+            team1_won: true,
+            duration_mins: 28,
+        }
+    }
+
+    /// Kinder des `Match`-Knotens aus einer SENDUPDATE-Wire-Nachricht.
+    fn match_node(wire_bytes: &[u8]) -> Vec<Node> {
+        let nodes = decode_response(wire_bytes).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        let matches = xml::find(tournament.children(), "Matches").unwrap();
+        xml::find(matches.children(), "Match")
+            .unwrap()
+            .children()
+            .to_vec()
+    }
+
+    #[test]
+    fn update_request_uses_sendupdate_action_with_session_key() {
+        let action = action_of(&update_request(&sample_update(), "SESSION-9", None));
+        assert_eq!(child_str(&action, "ID"), Some("SENDUPDATE"));
+        assert_eq!(child_str(&action, "Unicode"), Some("SESSION-9"));
+        assert!(xml::find(&action, "Password").is_none());
+    }
+
+    #[test]
+    fn update_request_includes_password_when_set() {
+        let action = action_of(&update_request(&sample_update(), "S", Some("geheim")));
+        assert_eq!(child_str(&action, "Password"), Some("geheim"));
+    }
+
+    #[test]
+    fn update_request_encodes_match_identity_and_result() {
+        let m = match_node(&update_request(&sample_update(), "S", None));
+        assert_eq!(child_int(&m, "ID"), Some(42));
+        assert_eq!(child_int(&m, "DrawID"), Some(7));
+        assert_eq!(child_int(&m, "PlanningID"), Some(1003));
+        assert_eq!(child_int(&m, "Winner"), Some(1));
+        assert_eq!(child_int(&m, "Duration"), Some(28));
+        assert_eq!(child_int(&m, "ScoreStatus"), Some(0));
+        assert_eq!(child_int(&m, "Status"), Some(0));
+    }
+
+    #[test]
+    fn update_request_winner_is_two_when_team1_lost() {
+        let mut u = sample_update();
+        u.team1_won = false;
+        let m = match_node(&update_request(&u, "S", None));
+        assert_eq!(child_int(&m, "Winner"), Some(2));
+    }
+
+    #[test]
+    fn update_request_encodes_every_set_in_order() {
+        let m = match_node(&update_request(&sample_update(), "S", None));
+        let sets = xml::find(&m, "Sets").unwrap();
+        let set_nodes = sets.children();
+        assert_eq!(set_nodes.len(), 2);
+        assert_eq!(child_int(set_nodes[0].children(), "T1"), Some(21));
+        assert_eq!(child_int(set_nodes[0].children(), "T2"), Some(19));
+        assert_eq!(child_int(set_nodes[1].children(), "T1"), Some(21));
+        assert_eq!(child_int(set_nodes[1].children(), "T2"), Some(15));
+    }
+
+    /// Baut eine SENDUPDATE-Antwort als Knotenbaum.
+    fn update_reply(id: &str, result: i64) -> Vec<Node> {
+        vec![Node::group(
+            "Action",
+            vec![Node::string("ID", id), Node::integer("Result", result)],
+        )]
+    }
+
+    #[test]
+    fn parse_update_success_is_ok() {
+        assert!(parse_update_response(&update_reply("REPLY", 1)).is_ok());
+    }
+
+    #[test]
+    fn parse_update_rejected_when_result_not_one() {
+        assert!(matches!(
+            parse_update_response(&update_reply("REPLY", 0)),
+            Err(ProtoError::UpdateRejected)
+        ));
+    }
+
+    #[test]
+    fn parse_update_unexpected_reply_id() {
+        assert!(matches!(
+            parse_update_response(&update_reply("ERROR", 1)),
+            Err(ProtoError::UnexpectedReply(id)) if id == "ERROR"
         ));
     }
 }

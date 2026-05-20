@@ -108,7 +108,8 @@ Drei Action-IDs:
 
 - **`LOGIN`** – Authentifizierung, liefert Session-Key.
 - **`SENDTOURNAMENTINFO`** – kompletter Turnier-Snapshot.
-- **`SENDUPDATE`** – Ergebnis zurückschreiben (für bts-light Phase 1 nicht nötig).
+- **`SENDUPDATE`** – ein Match-Ergebnis zurück nach BTP schreiben (siehe
+  Abschnitt „Schreiben: SENDUPDATE").
 
 `SENDUPDATE` benötigt zusätzlich `Action.Unicode` (Session-Key aus LOGIN) und
 einen `Update`-Container.
@@ -202,6 +203,51 @@ Hilde"). In einem 116-Draw-Turnier waren so 95 % aller Teilnehmer falsch.
 In einem KO-Draw bekommt eine beendete Paarung selbst eine `EntryID` (den
 Sieger) zugewiesen und wirkt damit als Feeder-Slot für die nächste Runde –
 derselbe `(DrawID, PlanningID)`-Lookup deckt das mit ab.
+
+## Schreiben: SENDUPDATE
+
+`SENDUPDATE` schreibt ein Match-Ergebnis zurück nach BTP – die Grundlage
+für den digitalen Spielzettel (Tablet → bts-light → BTP).
+
+Request-Aufbau (zusätzlich zum Nachrichten-Skelett):
+
+```
+Action  { ID: "SENDUPDATE", Unicode: <session-key> [, Password: <pw>] }
+Update {
+  Tournament {
+    Matches {                       (bei Liga stattdessen PlayerMatches)
+      Match {
+        ID:          <BTP-Match-ID>
+        Sets { Set { T1, T2 } ... } (ein Set-Knoten je Satz, Spielreihenfolge)
+        Winner:      1 | 2
+        ScoreStatus: 0              (0 = regulär; 1/2/3 = Walkover/Aufgabe/Disq.)
+        Status:      0
+        Duration:    <Minuten>
+        DrawID:      <Draw des Matches>
+        PlanningID:  <Planungsposition im Draw>
+      }
+    }
+  }
+}
+```
+
+- Das Match wird über `ID` + `DrawID` + `PlanningID` adressiert.
+- `Sets` enthält je Satz einen `Set`-Knoten mit `T1`/`T2` (Punkte Team 1/2).
+- Antwort wie beim Login: `Action.ID = "REPLY"`, Erfolg bei
+  `Action.Result == 1`.
+- Jeder `SENDUPDATE` läuft über eine eigene, frische TCP-Verbindung.
+
+**Voraussetzungen / Caveats:**
+
+- BTP muss Netzwerk-Edits zulassen (Einstellung im BTP) – sonst antwortet
+  es mit `Result != 1`.
+- Kein Konflikt-Check: „last write wins". Ein zwischenzeitlich in BTP
+  manuell geändertes Ergebnis wird überschrieben.
+- Liga-Matches (`PlayerMatches`, Port 9911) sind noch nicht abgedeckt –
+  sie tragen statt `DrawID`/`PlanningID` Felder wie `TeamMatchID`,
+  `MatchTypeID`, `Team1Player1ID` usw.
+- Implementierung: [src-tauri/src/btp/proto.rs](../src-tauri/src/btp/proto.rs)
+  (`update_request`, `parse_update_response`, `MatchUpdate`).
 
 ## Fehlerfälle
 
