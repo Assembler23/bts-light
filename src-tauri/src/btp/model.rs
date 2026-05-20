@@ -40,6 +40,8 @@ pub struct BtpMatch {
     pub draw_name: String,
     /// Runden-/Spielbezeichnung, z. B. "G1".
     pub round_name: String,
+    /// Spielnummer (BTP `MatchNr`), falls vergeben.
+    pub match_num: Option<i64>,
     /// Team 1 (ein Spieler bei Einzel, zwei bei Doppel).
     pub team1: Vec<BtpPlayer>,
     pub team2: Vec<BtpPlayer>,
@@ -50,6 +52,10 @@ pub struct BtpMatch {
     /// Sieger: 1 oder 2, falls entschieden.
     pub winner: Option<u8>,
     pub status: MatchStatus,
+    /// Zeitpunkt (Unix-Millisekunden), zu dem das Match erstmals als
+    /// beendet erkannt wurde. BTP liefert keinen End-Zeitstempel – dieses
+    /// Feld wird von der Sync-Engine gesetzt, nicht vom Parser.
+    pub finished_at: Option<u64>,
 }
 
 /// Aufbereiteter Turnier-Stand aus einer `SENDTOURNAMENTINFO`-Antwort.
@@ -209,12 +215,15 @@ fn parse_matches(
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
             round_name: child_str(m, "RoundName").unwrap_or_default().to_string(),
+            match_num: child_int(m, "MatchNr").filter(|&n| n > 0),
             team1: resolve(child_int(m, "From1")),
             team2: resolve(child_int(m, "From2")),
             court,
             sets: parse_sets(m),
             winner,
             status,
+            // BTP liefert keinen End-Zeitstempel; die Sync-Engine setzt das.
+            finished_at: None,
         });
     }
     out

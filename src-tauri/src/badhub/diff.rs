@@ -22,15 +22,18 @@ pub enum Update {
 }
 
 /// Vergleicht den vorigen mit dem aktuellen Snapshot.
-pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64) -> Update {
+///
+/// `now_ms` wird für den `tset`-Aufbau benötigt (Zeitfenster der zuletzt
+/// beendeten Matches).
+pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64, now_ms: u64) -> Update {
     let Some(prev) = prev else {
         // Erster Snapshot – immer ein voller tset.
-        return Update::Full(build_tset(current, rid));
+        return Update::Full(build_tset(current, rid, now_ms));
     };
 
     // Strukturelle Änderung an der Court-Belegung → voller tset.
     if court_assignment(prev) != court_assignment(current) {
-        return Update::Full(build_tset(current, rid));
+        return Update::Full(build_tset(current, rid, now_ms));
     }
 
     // Gleiche Matches auf gleichen Courts: nur Punktestände vergleichen.
@@ -44,7 +47,7 @@ pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64) -> Upda
         [] => Update::None,
         [m] => Update::Single(build_tupdate(m, rid)),
         // Mehrere gleichzeitige Änderungen → der Einfachheit halber voll.
-        _ => Update::Full(build_tset(current, rid)),
+        _ => Update::Full(build_tset(current, rid, now_ms)),
     }
 }
 
@@ -68,11 +71,15 @@ mod tests {
     use super::*;
     use crate::btp::model::BtpPlayer;
 
+    /// Fester Bezugszeitpunkt für die Tests.
+    const NOW: u64 = 1_700_000_000_000;
+
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
             id,
             draw_name: "HE".to_string(),
             round_name: "G1".to_string(),
+            match_num: Some(id),
             team1: vec![BtpPlayer {
                 name: "A".to_string(),
                 member_id: None,
@@ -87,6 +94,7 @@ mod tests {
             sets,
             winner: None,
             status: MatchStatus::OnCourt,
+            finished_at: None,
         }
     }
 
@@ -100,21 +108,21 @@ mod tests {
     #[test]
     fn first_snapshot_is_always_full() {
         let current = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
-        assert!(matches!(diff(None, &current, 1), Update::Full(_)));
+        assert!(matches!(diff(None, &current, 1, NOW), Update::Full(_)));
     }
 
     #[test]
     fn unchanged_snapshot_sends_nothing() {
         let a = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
         let b = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
-        assert_eq!(diff(Some(&a), &b, 1), Update::None);
+        assert_eq!(diff(Some(&a), &b, 1, NOW), Update::None);
     }
 
     #[test]
     fn single_score_change_yields_tupdate() {
         let a = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
         let b = snapshot(vec![match_on_court(1, "1", vec![(6, 3)])]);
-        match diff(Some(&a), &b, 9) {
+        match diff(Some(&a), &b, 9, NOW) {
             Update::Single(msg) => {
                 assert_eq!(msg.match_update.id, "btp_1");
                 assert_eq!(msg.match_update.s, vec![[6, 3]]);
@@ -132,7 +140,7 @@ mod tests {
             match_on_court(1, "1", vec![(5, 3)]),
             match_on_court(2, "2", vec![(0, 0)]),
         ]);
-        assert!(matches!(diff(Some(&a), &b, 1), Update::Full(_)));
+        assert!(matches!(diff(Some(&a), &b, 1, NOW), Update::Full(_)));
     }
 
     #[test]
@@ -145,6 +153,6 @@ mod tests {
             match_on_court(1, "1", vec![(6, 3)]),
             match_on_court(2, "2", vec![(2, 3)]),
         ]);
-        assert!(matches!(diff(Some(&a), &b, 1), Update::Full(_)));
+        assert!(matches!(diff(Some(&a), &b, 1, NOW), Update::Full(_)));
     }
 }
