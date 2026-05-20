@@ -9,6 +9,8 @@ export interface BtpConfig {
 export interface BadhubConfig {
   url: string;
   password: string;
+  /** Öffentliche Live-Seite, z. B. https://badhub.de/live?t=bvbb */
+  live_url: string;
 }
 
 export interface AppConfig {

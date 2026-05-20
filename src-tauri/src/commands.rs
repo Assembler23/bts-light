@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::badhub::push;
 use crate::btp::client;
@@ -180,4 +181,33 @@ pub fn get_status(state: State<'_, AppState>) -> SyncStatus {
         .lock()
         .expect("Status-Mutex nicht vergiftet")
         .clone()
+}
+
+/// Öffnet die öffentliche Live-Seite im Standard-Browser.
+///
+/// `display` wählt die Ansicht: `None` = Liveticker, `Some("monitor")` =
+/// Hallen-Monitor, `Some("next")` = Aufruf-Anzeige.
+#[tauri::command]
+pub fn open_live_view(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    display: Option<String>,
+) -> Result<(), String> {
+    let live_url = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .badhub
+        .live_url
+        .clone();
+    if live_url.is_empty() {
+        return Err("Für dieses Turnier ist keine Live-Seite hinterlegt.".to_string());
+    }
+    let url = match display {
+        Some(view) => format!("{live_url}&display={view}"),
+        None => live_url,
+    };
+    app.opener()
+        .open_url(url, None::<String>)
+        .map_err(|e| e.to_string())
 }

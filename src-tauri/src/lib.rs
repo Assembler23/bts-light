@@ -62,6 +62,7 @@ pub fn run() {
             commands::start_sync,
             commands::stop_sync,
             commands::get_status,
+            commands::open_live_view,
         ])
         .setup(|app| {
             setup_tray(app.handle())?;

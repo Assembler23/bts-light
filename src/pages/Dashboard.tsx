@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { getStatus, startSync, stopSync } from "../api";
-import type { SyncStatus } from "../types";
+import { getStatus, openLiveView, startSync, stopSync } from "../api";
+import type { AppConfig, SyncStatus } from "../types";
 
 interface Props {
+  config: AppConfig;
   onReconfigure: () => void;
 }
 
@@ -20,7 +21,7 @@ function ago(ms: number): string {
   return `vor ${Math.round(secs / 60)} min`;
 }
 
-export function Dashboard({ onReconfigure }: Props) {
+export function Dashboard({ config, onReconfigure }: Props) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -83,6 +84,34 @@ export function Dashboard({ onReconfigure }: Props) {
           Letzter Stand: {ago(status.updated_at_ms)}
         </p>
       </section>
+
+      {config.badhub.live_url !== "" && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Anzeigen im Browser öffnen
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => openLiveView(null)}
+              className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm"
+            >
+              Liveticker
+            </button>
+            <button
+              onClick={() => openLiveView("monitor")}
+              className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm"
+            >
+              Hallen-Monitor
+            </button>
+            <button
+              onClick={() => openLiveView("next")}
+              className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm"
+            >
+              Nächste Spiele
+            </button>
+          </div>
+        </section>
+      )}
 
       <div className="flex gap-3">
         <button

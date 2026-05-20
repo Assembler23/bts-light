@@ -24,9 +24,15 @@ impl Default for BtpConfig {
 /// Verbindungsdaten für den Badhub-Liveticker-Endpunkt.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BadhubConfig {
+    /// Push-Endpunkt (`live_update.php`).
     pub url: String,
     /// Bearer-Token aus dem Badhub-Liveticker-Admin.
     pub password: String,
+    /// Öffentliche Live-Seite, z. B. `https://badhub.de/live?t=bvbb`.
+    /// Leer, wenn nicht hinterlegt. `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub live_url: String,
 }
 
 impl Default for BadhubConfig {
@@ -34,6 +40,7 @@ impl Default for BadhubConfig {
         Self {
             url: "https://badhub.de/api/live_update.php".to_string(),
             password: String::new(),
+            live_url: String::new(),
         }
     }
 }
@@ -102,6 +109,7 @@ mod tests {
             badhub: BadhubConfig {
                 url: "https://badhub.de/api/live_update.php".to_string(),
                 password: "token123".to_string(),
+                live_url: "https://badhub.de/live?t=test".to_string(),
             },
         };
         config.save_to(&path).unwrap();

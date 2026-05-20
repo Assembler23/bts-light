@@ -5,7 +5,7 @@ import type { AppConfig } from "../types";
 
 interface Props {
   initialConfig: AppConfig;
-  onDone: () => void;
+  onDone: (config: AppConfig) => void;
 }
 
 type TestState =
@@ -48,6 +48,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [btpPassword, setBtpPassword] = useState(initialConfig.btp.password ?? "");
   const [badhubUrl, setBadhubUrl] = useState(initialConfig.badhub.url);
   const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
+  const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -58,7 +59,11 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
     const preset = findPreset(presetId);
     const badhub =
       isManual || !preset
-        ? { url: badhubUrl.trim(), password: badhubPassword.trim() }
+        ? {
+            url: badhubUrl.trim(),
+            password: badhubPassword.trim(),
+            live_url: badhubLiveUrl.trim(),
+          }
         : preset.badhub;
     return {
       btp: {
@@ -88,9 +93,10 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
     setSaving(true);
     setSaveError("");
     try {
-      await saveConfig(buildConfig());
+      const config = buildConfig();
+      await saveConfig(config);
       await startSync();
-      onDone();
+      onDone(config);
     } catch (e) {
       setSaveError(String(e));
       setSaving(false);
@@ -120,7 +126,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
             }`}
           >
             <div className="font-medium">{preset.label}</div>
-            <div className="text-xs text-slate-500">{preset.liveUrl}</div>
+            <div className="text-xs text-slate-500">{preset.badhub.live_url}</div>
           </button>
         ))}
         <button
@@ -175,6 +181,12 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
             value={badhubPassword}
             onChange={setBadhubPassword}
             type="password"
+          />
+          <Field
+            label="Live-Seite (URL, optional)"
+            value={badhubLiveUrl}
+            onChange={setBadhubLiveUrl}
+            placeholder="https://badhub.de/live?t=…"
           />
         </section>
       )}

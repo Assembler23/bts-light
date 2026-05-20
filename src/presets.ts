@@ -11,8 +11,6 @@ export interface Preset {
   id: string;
   label: string;
   badhub: BadhubConfig;
-  /** Öffentliche Live-Seite, nur zur Anzeige. */
-  liveUrl: string;
 }
 
 export const PRESETS: Preset[] = [
@@ -22,8 +20,8 @@ export const PRESETS: Preset[] = [
     badhub: {
       url: "https://badhub.de/api/live_update.php",
       password: "b09bc3e4334732191a999c8e",
+      live_url: "https://badhub.de/live?t=bvbb",
     },
-    liveUrl: "https://badhub.de/live?t=bvbb",
   },
 ];
 

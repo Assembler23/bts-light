@@ -9,7 +9,11 @@ type View = "loading" | "wizard" | "dashboard";
 function defaultConfig(): AppConfig {
   return {
     btp: { host: "127.0.0.1", port: 9901, password: null },
-    badhub: { url: "https://badhub.de/api/live_update.php", password: "" },
+    badhub: {
+      url: "https://badhub.de/api/live_update.php",
+      password: "",
+      live_url: "",
+    },
   };
 }
 
@@ -40,12 +44,17 @@ function App() {
     return (
       <SetupWizard
         initialConfig={config}
-        onDone={() => setView("dashboard")}
+        onDone={(c) => {
+          setConfig(c);
+          setView("dashboard");
+        }}
       />
     );
   }
 
-  return <Dashboard onReconfigure={() => setView("wizard")} />;
+  return (
+    <Dashboard config={config} onReconfigure={() => setView("wizard")} />
+  );
 }
 
 export default App;
