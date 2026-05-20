@@ -21,6 +21,31 @@ pub enum MatchStatus {
     Finished,
 }
 
+/// Wie ein Match entschieden wurde (BTP-Feld `ScoreStatus`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchResult {
+    /// Regulär ausgespielt.
+    Normal,
+    /// Kampfloser Sieg (Walkover) – kein Spiel stattgefunden.
+    Walkover,
+    /// Aufgabe während des Spiels.
+    Retired,
+    /// Disqualifikation.
+    Disqualified,
+}
+
+impl MatchResult {
+    /// Leitet das Ergebnis aus dem BTP-Feld `ScoreStatus` ab.
+    fn from_score_status(score_status: i64) -> MatchResult {
+        match score_status {
+            1 => MatchResult::Walkover,
+            2 => MatchResult::Retired,
+            3 => MatchResult::Disqualified,
+            _ => MatchResult::Normal,
+        }
+    }
+}
+
 /// Ein Spieler einer Paarung.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtpPlayer {
@@ -51,6 +76,8 @@ pub struct BtpMatch {
     pub sets: Vec<(i64, i64)>,
     /// Sieger: 1 oder 2, falls entschieden.
     pub winner: Option<u8>,
+    /// Art der Entscheidung (normal, Walkover, Aufgabe, Disqualifikation).
+    pub result: MatchResult,
     pub status: MatchStatus,
     /// Zeitpunkt (Unix-Millisekunden), zu dem das Match erstmals als
     /// beendet erkannt wurde. BTP liefert keinen End-Zeitstempel – dieses
@@ -221,6 +248,7 @@ fn parse_matches(
             court,
             sets: parse_sets(m),
             winner,
+            result: MatchResult::from_score_status(child_int(m, "ScoreStatus").unwrap_or(0)),
             status,
             // BTP liefert keinen End-Zeitstempel; die Sync-Engine setzt das.
             finished_at: None,

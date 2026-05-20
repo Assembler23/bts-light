@@ -69,7 +69,7 @@ fn court_assignment(snapshot: &BtpSnapshot) -> BTreeMap<i64, Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::BtpPlayer;
+    use crate::btp::model::{BtpPlayer, MatchResult};
 
     /// Fester Bezugszeitpunkt für die Tests.
     const NOW: u64 = 1_700_000_000_000;
@@ -93,6 +93,7 @@ mod tests {
             court: Some(court.to_string()),
             sets,
             winner: None,
+            result: MatchResult::Normal,
             status: MatchStatus::OnCourt,
             finished_at: None,
         }

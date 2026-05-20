@@ -132,7 +132,7 @@ impl SyncEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::{BtpMatch, BtpPlayer, MatchStatus};
+    use crate::btp::model::{BtpMatch, BtpPlayer, MatchResult, MatchStatus};
 
     fn snapshot() -> BtpSnapshot {
         BtpSnapshot {
@@ -155,6 +155,7 @@ mod tests {
                 court: Some("1".to_string()),
                 sets: vec![(5, 3)],
                 winner: None,
+                result: MatchResult::Normal,
                 status: MatchStatus::OnCourt,
                 finished_at: None,
             }],

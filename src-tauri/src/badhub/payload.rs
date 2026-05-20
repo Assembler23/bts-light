@@ -8,7 +8,7 @@
 
 use serde::Serialize;
 
-use crate::btp::model::{BtpMatch, BtpSnapshot, MatchStatus};
+use crate::btp::model::{BtpMatch, BtpSnapshot, MatchResult, MatchStatus};
 
 /// Zeitfenster für „zuletzt beendet" – Matches älter als 4 h fallen raus.
 const RECENT_FINISHED_WINDOW_MS: u64 = 4 * 60 * 60 * 1000;
@@ -69,6 +69,10 @@ pub struct TsetMatch {
     /// Spielnummer (nur bei anstehenden Matches).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub match_num: Option<i64>,
+    /// Nicht-regulärer Ausgang: "walkover" | "retired" | "disqualified".
+    /// Fehlt bei regulär ausgespielten Matches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<&'static str>,
 }
 
 /// Stabile, turnierweit eindeutige Match-ID für den Badhub-Payload.
@@ -93,14 +97,26 @@ fn to_tset_match(m: &BtpMatch) -> TsetMatch {
         end_ts: None,
         team1_won: None,
         match_num: None,
+        outcome: None,
     }
 }
 
-/// Konvertierung für ein beendetes Match (mit Ende-Zeit und Sieger).
+/// Payload-Wert für die Ergebnisart; `None` bei regulärem Ausgang.
+fn outcome_str(result: MatchResult) -> Option<&'static str> {
+    match result {
+        MatchResult::Normal => None,
+        MatchResult::Walkover => Some("walkover"),
+        MatchResult::Retired => Some("retired"),
+        MatchResult::Disqualified => Some("disqualified"),
+    }
+}
+
+/// Konvertierung für ein beendetes Match (mit Ende-Zeit, Sieger, Ausgang).
 fn to_finished_match(m: &BtpMatch) -> TsetMatch {
     TsetMatch {
         end_ts: m.finished_at,
         team1_won: m.winner.map(|w| w == 1),
+        outcome: outcome_str(m.result),
         ..to_tset_match(m)
     }
 }
@@ -231,6 +247,7 @@ mod tests {
             court: court.map(String::from),
             sets: vec![(21, 19), (21, 15)],
             winner: None,
+            result: MatchResult::Normal,
             status,
             finished_at: None,
         }
@@ -337,5 +354,25 @@ mod tests {
         // Laufende Matches tragen keine Zusatzfelder.
         assert!(!json.contains("end_ts"));
         assert!(!json.contains("match_num"));
+    }
+
+    #[test]
+    fn finished_walkover_carries_outcome() {
+        let mut walkover = sample_match(1, MatchStatus::Finished, None);
+        walkover.winner = Some(1);
+        walkover.result = MatchResult::Walkover;
+        walkover.finished_at = Some(NOW - 60_000);
+        let mut regular = sample_match(2, MatchStatus::Finished, None);
+        regular.winner = Some(2);
+        regular.finished_at = Some(NOW - 60_000);
+
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            matches: vec![walkover, regular],
+        };
+        let finished = build_tset(&snapshot, 1, NOW).event.recent_finished_matches;
+        let by_id = |id: &str| finished.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(by_id("btp_1").outcome, Some("walkover"));
+        assert_eq!(by_id("btp_2").outcome, None);
     }
 }
