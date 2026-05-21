@@ -82,6 +82,10 @@ pub enum TabletMsg {
     /// Das Tablet möchte einen bereits belegten Court übernehmen.
     #[serde(rename = "take_over")]
     TakeOver,
+    /// Voller Spielzustand des Tablets als JSON-String – der Server hält
+    /// ihn vor, damit ein übernehmendes Gerät das laufende Spiel bekommt.
+    #[serde(rename = "state_sync")]
+    StateSync { state: String },
 }
 
 /// Nachrichten vom Server an das Tablet.
@@ -105,6 +109,10 @@ pub enum ServerMsg {
     /// gesperrt – kein Zählen mehr möglich.
     #[serde(rename = "session_superseded")]
     SessionSuperseded,
+    /// Spielzustand für ein Tablet, das einen Court übernimmt – damit es
+    /// das laufende Spiel fortsetzt statt bei 0:0 zu beginnen.
+    #[serde(rename = "state_restore")]
+    StateRestore { state: String },
 }
 
 /// Endergebnis-Body, den das Tablet per `POST …/result` schickt.

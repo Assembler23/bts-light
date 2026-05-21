@@ -260,6 +260,23 @@
     .set-summary { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
     .submit-status { font-size: .9rem; opacity: .7; min-height: 1.2em; }
 
+    /* ─── Sieger-Wahl bei Aufgabe ────────────────────────────────────── */
+    .retire-pick-label { font-size: 1rem; opacity: .75; margin-bottom: .6rem; }
+    .retire-options {
+      display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center;
+    }
+    .retire-btn {
+      flex: 1 1 13rem; min-width: 11rem;
+      padding: 1.4rem 1rem;
+      font-size: 1.25rem; font-weight: 700; color: #f8fafc;
+      border: 2px solid; border-radius: .75rem;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .retire-btn.team-a { background: #1e3a8a; border-color: #3b82f6; }
+    .retire-btn.team-a:active { background: #1e40af; }
+    .retire-btn.team-b { background: #831843; border-color: #ec4899; }
+    .retire-btn.team-b:active { background: #9d174d; }
+
     /* ─── Pausen-Overlay (offizielle BWF-Intervalle) ─────────────────── */
     .break-overlay {
       position: fixed; inset: 0; background: rgba(2,6,23,.94);
@@ -458,12 +475,10 @@
   <div class="winner-banner" id="winner-banner"></div>
   <div class="set-summary" id="set-summary"></div>
   <div class="retire-pick" id="retire-pick" style="display:none">
-    <div style="font-size:.95rem;opacity:.7;margin-bottom:.5rem">
-      Aufgabe — wer gewinnt das Match?
-    </div>
-    <div class="options">
-      <div class="opt team-a" id="retire-winner-a"></div>
-      <div class="opt team-b" id="retire-winner-b"></div>
+    <div class="retire-pick-label">Aufgabe — wer gewinnt das Match?</div>
+    <div class="retire-options">
+      <button class="retire-btn team-a" id="retire-winner-a"></button>
+      <button class="retire-btn team-b" id="retire-winner-b"></button>
     </div>
   </div>
   <div class="submit-status" id="submit-status"></div>
@@ -706,6 +721,13 @@ function connect() {
     else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearMatch(); }
     else if (msg.type === 'court_occupied') { tlog('info', 'court_occupied'); STATE.occupied = true; render(); }
     else if (msg.type === 'session_superseded') { tlog('warn', 'session_superseded'); STATE.locked = true; STATE.occupied = false; render(); }
+    else if (msg.type === 'state_restore') {
+      tlog('info', 'state_restore');
+      try {
+        const p = JSON.parse(msg.state);
+        if (p) { applyPersistedState(p); persistState(); render(); }
+      } catch (e) { tlog('warn', 'state_restore_failed', String(e)); }
+    }
   };
   ws.onclose = (ev) => {
     els.connDot.classList.remove('ok');
@@ -971,36 +993,73 @@ const PERSIST_KEY = `badhub.tablet.state.${COURT_LABEL}`;
 
 function persistState() {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
-  // Übermittlung, das muss einen Reload überleben.
+  // Übermittlung, das muss einen Reload überleben. history wird bewusst
+  // NICHT gesichert (Undo nach Reload nicht unterstützt).
   if (!STATE.match && !STATE.pendingResult) return;
-  try {
-    localStorage.setItem(PERSIST_KEY, JSON.stringify({
-      match: STATE.match,
-      setsCompleted: STATE.setsCompleted,
-      currentSet: STATE.currentSet,
-      teamOnSide: STATE.teamOnSide,
-      positions: STATE.positions,
-      servingSide: STATE.servingSide,
-      setup: STATE.setup,
-      finished: STATE.finished,
-      midGameSwitchDone: STATE.midGameSwitchDone,
-      pause: STATE.pause,
-      intervalDoneThisGame: STATE.intervalDoneThisGame,
-      submittedOk: STATE.submittedOk,
-      pendingResult: STATE.pendingResult,
-      startedAt: STATE.startedAt,
-      alertInjury: STATE.alertInjury,
-      alertOfficial: STATE.alertOfficial,
-      retired: STATE.retired,
-      retiredWinner: STATE.retiredWinner,
-      // history wird bewusst NICHT persistiert — Undo nach Reload ist nicht
-      // unterstützt, vermeidet ein riesiges Storage-Object.
-    }));
-  } catch { /* QuotaExceeded o.ä. — Persistenz ist Bonus, kein Blocker */ }
+  const snap = {
+    match: STATE.match,
+    setsCompleted: STATE.setsCompleted,
+    currentSet: STATE.currentSet,
+    teamOnSide: STATE.teamOnSide,
+    positions: STATE.positions,
+    servingSide: STATE.servingSide,
+    setup: STATE.setup,
+    finished: STATE.finished,
+    midGameSwitchDone: STATE.midGameSwitchDone,
+    pause: STATE.pause,
+    intervalDoneThisGame: STATE.intervalDoneThisGame,
+    submittedOk: STATE.submittedOk,
+    pendingResult: STATE.pendingResult,
+    startedAt: STATE.startedAt,
+    alertInjury: STATE.alertInjury,
+    alertOfficial: STATE.alertOfficial,
+    retired: STATE.retired,
+    retiredWinner: STATE.retiredWinner,
+  };
+  const json = JSON.stringify(snap);
+  try { localStorage.setItem(PERSIST_KEY, json); } catch { /* QuotaExceeded o.ä. */ }
+  // Stand an den Server spiegeln, damit ein übernehmendes Gerät das
+  // laufende Spiel bekommt (nur als aktives Tablet sinnvoll).
+  if (ws && ws.readyState === WebSocket.OPEN
+      && STATE.match && !STATE.locked && !STATE.occupied) {
+    ws.send(JSON.stringify({ type: 'state_sync', state: json }));
+  }
 }
 
 function clearPersistedState() {
   try { localStorage.removeItem(PERSIST_KEY); } catch { /* ignore */ }
+}
+
+// Übernimmt einen gespeicherten oder per Übernahme empfangenen Zustand.
+function applyPersistedState(p) {
+  STATE.match = p.match ?? null;
+  STATE.setsCompleted = Array.isArray(p.setsCompleted) ? p.setsCompleted : [];
+  STATE.currentSet = p.currentSet ?? { left: 0, right: 0 };
+  STATE.teamOnSide = p.teamOnSide ?? null;
+  STATE.positions = p.positions ?? null;
+  STATE.servingSide = p.servingSide ?? null;
+  STATE.setup = p.setup ?? 'playing';
+  STATE.finished = !!p.finished;
+  STATE.midGameSwitchDone = !!p.midGameSwitchDone;
+  STATE.intervalDoneThisGame = !!p.intervalDoneThisGame;
+  // Behandlungspause (ohne Countdown) immer übernehmen; eine BWF-Pause
+  // nur, wenn ihre Zeit noch nicht abgelaufen ist.
+  if (p.pause && p.pause.kind === 'injury') {
+    STATE.pause = p.pause;
+  } else if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > Date.now()) {
+    STATE.pause = p.pause;
+    if (breakTimer) clearInterval(breakTimer);
+    breakTimer = setInterval(tickBreak, 250);
+  } else {
+    STATE.pause = null;
+  }
+  STATE.submittedOk = !!p.submittedOk;
+  STATE.pendingResult = p.pendingResult ?? null;
+  STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
+  STATE.alertInjury = !!p.alertInjury;
+  STATE.alertOfficial = !!p.alertOfficial;
+  STATE.retired = !!p.retired;
+  STATE.retiredWinner = p.retiredWinner ?? null;
 }
 
 function restorePersistedState() {
@@ -1010,34 +1069,7 @@ function restorePersistedState() {
     const p = JSON.parse(raw);
     // Auch ohne Match wiederherstellen, wenn noch ein Ergebnis offen ist.
     if (!p || (!p.match && !p.pendingResult)) return false;
-    STATE.match = p.match ?? null;
-    STATE.setsCompleted = Array.isArray(p.setsCompleted) ? p.setsCompleted : [];
-    STATE.currentSet = p.currentSet ?? { left: 0, right: 0 };
-    STATE.teamOnSide = p.teamOnSide ?? null;
-    STATE.positions = p.positions ?? null;
-    STATE.servingSide = p.servingSide ?? null;
-    STATE.setup = p.setup ?? 'playing';
-    STATE.finished = !!p.finished;
-    STATE.midGameSwitchDone = !!p.midGameSwitchDone;
-    STATE.intervalDoneThisGame = !!p.intervalDoneThisGame;
-    // Behandlungspause (ohne Countdown) immer übernehmen; eine BWF-Pause
-    // nur, wenn ihre Zeit noch nicht abgelaufen ist.
-    if (p.pause && p.pause.kind === 'injury') {
-      STATE.pause = p.pause;
-    } else if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > Date.now()) {
-      STATE.pause = p.pause;
-      if (breakTimer) clearInterval(breakTimer);
-      breakTimer = setInterval(tickBreak, 250);
-    } else {
-      STATE.pause = null;
-    }
-    STATE.submittedOk = !!p.submittedOk;
-    STATE.pendingResult = p.pendingResult ?? null;
-    STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
-    STATE.alertInjury = !!p.alertInjury;
-    STATE.alertOfficial = !!p.alertOfficial;
-    STATE.retired = !!p.retired;
-    STATE.retiredWinner = p.retiredWinner ?? null;
+    applyPersistedState(p);
     return true;
   } catch { return false; }
 }

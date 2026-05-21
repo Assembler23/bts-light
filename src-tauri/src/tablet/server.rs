@@ -343,6 +343,9 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     ctx.tablet.attach_tablet(&c);
                                     last_match = None;
                                     tracing::info!("Tablet übernimmt Court '{c}'");
+                                    if let Some(state) = ctx.tablet.court_state(&c) {
+                                        send_msg(&mut socket, &ServerMsg::StateRestore { state }).await;
+                                    }
                                     push_match(&c, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }
@@ -359,6 +362,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             Ok(TabletMsg::Alert { injury, official }) => {
                                 if let (Some(c), Some(_)) = (&court, my_token) {
                                     ctx.tablet.record_alert(c, injury, official);
+                                }
+                            }
+                            Ok(TabletMsg::StateSync { state }) => {
+                                if let (Some(c), Some(_)) = (&court, my_token) {
+                                    ctx.tablet.set_court_state(c, state);
                                 }
                             }
                             Err(_) => {}

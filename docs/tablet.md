@@ -102,8 +102,9 @@ Match-Ende-Overlay manuell den Sieger. Das Ergebnis geht mit dem Status
 Pro Court schiedst genau **ein** Tablet aktiv. Öffnet ein zweites Gerät
 denselben Court, zeigt es „Dieses Feld wird bereits geschiedst" mit einem
 **Übernehmen**-Button – gedacht für den Geräte-Tausch, etwa wenn ein
-Tablet ausfällt. Nach der Übernahme ist das alte Gerät gesperrt und kann
-nicht mehr zählen.
+Tablet ausfällt. Das übernehmende Gerät setzt das **laufende Spiel mit
+aktuellem Stand** fort (das aktive Tablet spiegelt seinen Stand dafür
+laufend an den Server). Nach der Übernahme ist das alte Gerät gesperrt.
 
 ## Einrichtung im Turnier
 

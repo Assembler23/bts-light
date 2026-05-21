@@ -68,6 +68,9 @@ pub struct TabletState {
     active: RwLock<HashMap<String, u64>>,
     /// Fortlaufender Zähler, vergibt eindeutige Court-Tokens.
     token_seq: AtomicU64,
+    /// Court → gespiegelter Spielzustand (JSON) des aktiven Tablets –
+    /// wird einem übernehmenden Gerät übergeben.
+    court_state: RwLock<HashMap<String, String>>,
 }
 
 impl TabletState {
@@ -194,6 +197,19 @@ impl TabletState {
         if active.get(court) == Some(&token) {
             active.remove(court);
         }
+    }
+
+    /// Spiegelt den Spielzustand des aktiven Tablets am Court.
+    pub fn set_court_state(&self, court: &str, state: String) {
+        self.court_state
+            .write()
+            .unwrap()
+            .insert(court.to_string(), state);
+    }
+
+    /// Liefert den gespiegelten Spielzustand eines Courts (für die Übernahme).
+    pub fn court_state(&self, court: &str) -> Option<String> {
+        self.court_state.read().unwrap().get(court).cloned()
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).

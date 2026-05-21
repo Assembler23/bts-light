@@ -55,6 +55,9 @@ const MAX_PENDING_PER_NS: usize = 16;
 /// Maximale Länge eines Court-Namens (Schutz gegen überlange Frames).
 const MAX_COURT_LABEL_LEN: usize = 128;
 
+/// Maximale Größe eines gespiegelten Spielzustands (Schutz gegen Missbrauch).
+const MAX_STATE_LEN: usize = 64 * 1024;
+
 type Tx = mpsc::UnboundedSender<Message>;
 
 /// Ein Namespace: ein bts-light-Host und seine Tablets.
@@ -63,6 +66,9 @@ struct Namespace {
     host: Option<Tx>,
     /// Court-Name → Sende-Ende zur Tablet-WebSocket.
     tablets: HashMap<String, Tx>,
+    /// Court-Name → zuletzt gespiegelter Spielzustand (JSON) des aktiven
+    /// Tablets – wird einem übernehmenden Gerät übergeben.
+    court_state: HashMap<String, String>,
     /// Offene Ergebnis-Übermittlungen: `req_id` → wartender HTTP-Handler.
     pending: HashMap<u64, oneshot::Sender<ResultResponse>>,
     /// Fortlaufende Request-ID für Ergebnis-Übermittlungen.
@@ -74,6 +80,7 @@ impl Namespace {
         Self {
             host: None,
             tablets: HashMap::new(),
+            court_state: HashMap::new(),
             pending: HashMap::new(),
             next_req: 1,
         }
@@ -345,6 +352,11 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     forward_alert(&broker, &ns, c, injury, official).await;
                                 }
                             }
+                            Ok(TabletMsg::StateSync { state }) => {
+                                if let (Some(c), true) = (&court, active) {
+                                    store_court_state(&broker, &ns, c, state).await;
+                                }
+                            }
                             Err(_) => {}
                         }
                     }
@@ -418,10 +430,27 @@ async fn take_over_court(broker: &Broker, ns: &str, court: &str, tx: &Tx) {
     if let Some(old) = namespace.tablets.insert(court.to_string(), tx.clone()) {
         let _ = old.send(text(&ServerMsg::SessionSuperseded));
     }
+    // Laufenden Spielstand an das übernehmende Tablet übergeben.
+    if let Some(state) = namespace.court_state.get(court) {
+        let _ = tx.send(text(&ServerMsg::StateRestore {
+            state: state.clone(),
+        }));
+    }
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::TabletConnected {
             court_label: court.to_string(),
         }));
+    }
+}
+
+/// Speichert den gespiegelten Spielzustand des aktiven Tablets am Court.
+async fn store_court_state(broker: &Broker, ns: &str, court: &str, state: String) {
+    if state.len() > MAX_STATE_LEN {
+        return;
+    }
+    let mut map = broker.namespaces.lock().await;
+    if let Some(namespace) = map.get_mut(ns) {
+        namespace.court_state.insert(court.to_string(), state);
     }
 }
 
