@@ -1,4 +1,16 @@
 import { useEffect, useState } from "react";
+import {
+  FolderOpen,
+  ListOrdered,
+  type LucideIcon,
+  Monitor,
+  Play,
+  Radio,
+  RefreshCw,
+  SlidersHorizontal,
+  Square,
+  Tablet,
+} from "lucide-react";
 import { getStatus, openLiveView, openLogDir, startSync, stopSync } from "../api";
 import { useUpdate } from "../components/UpdateBanner";
 import type { AppConfig, SyncStatus } from "../types";
@@ -11,9 +23,9 @@ interface Props {
 
 function dotColor(status: SyncStatus): string {
   if (!status.running) return "bg-slate-400";
-  if (status.kind === "ok") return "bg-green-500";
+  if (status.kind === "ok") return "bg-emerald-500";
   if (status.kind === "idle") return "bg-amber-400";
-  return "bg-red-500";
+  return "bg-rose-500";
 }
 
 function ago(ms: number): string {
@@ -21,6 +33,36 @@ function ago(ms: number): string {
   const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (secs < 60) return `vor ${secs} s`;
   return `vor ${Math.round(secs / 60)} min`;
+}
+
+/** Einheitlicher Aktions-Button mit Icon, Beschriftung und Tooltip. */
+function ActionButton(props: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  variant?: "default" | "start" | "stop";
+}) {
+  const variant = props.variant ?? "default";
+  const styles = {
+    default: "bg-slate-100 text-slate-700 hover:bg-slate-200",
+    start: "bg-emerald-600 text-white hover:bg-emerald-700",
+    stop: "bg-rose-600 text-white hover:bg-rose-700",
+  }[variant];
+  const Icon = props.icon;
+  return (
+    <button
+      onClick={props.onClick}
+      disabled={props.disabled}
+      title={props.title}
+      className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm
+                  font-medium transition-colors disabled:opacity-50 ${styles}`}
+    >
+      <Icon size={16} strokeWidth={2} />
+      {props.label}
+    </button>
+  );
 }
 
 export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
@@ -86,17 +128,27 @@ export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
   }
 
   const updateMsg = updateMessage();
+  const cloudMode = config.connection_mode === "cloud";
 
   return (
-    <main className="mx-auto flex min-h-full max-w-xl flex-col gap-6 p-6 text-slate-800">
-      <header>
-        <h1 className="text-2xl font-semibold">BTS Light</h1>
-        <p className="text-sm text-slate-500">Liveticker-Status</p>
+    <main className="mx-auto flex min-h-full max-w-xl flex-col gap-5 p-6 text-slate-800">
+      <header className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 text-lg">
+          🏸
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold leading-tight">BTS Light</h1>
+          <p className="text-sm text-slate-500">Liveticker-Status</p>
+        </div>
       </header>
 
-      <section className="rounded-xl border border-slate-200 p-5">
-        <div className="flex items-center gap-3">
-          <span className={`h-3 w-3 rounded-full ${dotColor(status)}`} />
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2.5">
+          <span
+            className={`h-3 w-3 rounded-full ${dotColor(status)} ${
+              status.running && status.kind === "ok" ? "animate-pulse" : ""
+            }`}
+          />
           <span className="font-medium">
             {status.running ? "Liveticker aktiv" : "Gestoppt"}
           </span>
@@ -113,68 +165,79 @@ export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
             Anzeigen im Browser öffnen
           </h2>
           <div className="flex flex-wrap gap-2">
-            <button
+            <ActionButton
+              icon={Radio}
+              label="Liveticker"
               onClick={() => openLiveView(null)}
-              className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm"
-            >
-              Liveticker
-            </button>
-            <button
+              title="Öffentliche Liveticker-Seite im Browser öffnen"
+            />
+            <ActionButton
+              icon={Monitor}
+              label="Hallen-Monitor"
               onClick={() => openLiveView("monitor")}
-              className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm"
-            >
-              Hallen-Monitor
-            </button>
-            <button
+              title="Großbild-Ansicht für einen Hallen-Monitor"
+            />
+            <ActionButton
+              icon={ListOrdered}
+              label="Nächste Spiele"
               onClick={() => openLiveView("next")}
-              className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm"
-            >
-              Nächste Spiele
-            </button>
+              title="Aufruf-Anzeige der als Nächstes anstehenden Spiele"
+            />
           </div>
         </section>
       )}
 
-      <div>
-        <div className="flex flex-wrap gap-3">
-          <button
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">Steuerung</h2>
+        <div className="flex flex-wrap gap-2.5">
+          <ActionButton
+            icon={status.running ? Square : Play}
+            label={status.running ? "Stoppen" : "Starten"}
             onClick={toggle}
             disabled={busy}
-            className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white
-                       disabled:opacity-50"
-          >
-            {status.running ? "Stoppen" : "Starten"}
-          </button>
-          <button
+            variant={status.running ? "stop" : "start"}
+            title={
+              status.running
+                ? "Liveticker und Tablet-Server anhalten"
+                : "Liveticker starten – BTP wird verbunden"
+            }
+          />
+          <ActionButton
+            icon={SlidersHorizontal}
+            label="Einstellungen"
             onClick={onReconfigure}
-            className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
-          >
-            Einstellungen ändern
-          </button>
-          <button
+            title="BTP-Verbindung, Verband und Tablet-Verbindungsart ändern"
+          />
+          <ActionButton
+            icon={Tablet}
+            label="Tablet-Spielzettel"
             onClick={onOpenTablets}
-            className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
-          >
-            Tablet-Spielzettel
-          </button>
-          <button
+            title={
+              cloudMode
+                ? "Tablet-Adressen und Felder-Übersicht (Cloud-Modus)"
+                : "Tablet-Adressen und Felder-Übersicht. Bekommen die Tablets " +
+                  "im Hallen-WLAN keine Verbindung (z. B. Firewall)? Dann in " +
+                  "den Einstellungen auf den Cloud-Modus umstellen."
+            }
+          />
+          <ActionButton
+            icon={RefreshCw}
+            label="Nach Update prüfen"
             onClick={handleCheckUpdate}
             disabled={updatePhase === "checking"}
-            className="rounded-lg bg-slate-200 px-4 py-2 text-sm disabled:opacity-50"
-          >
-            Nach Update prüfen
-          </button>
-          <button
+            title="Auf eine neue BTS-Light-Version prüfen"
+          />
+          <ActionButton
+            icon={FolderOpen}
+            label="Logs öffnen"
             onClick={() => void openLogDir()}
-            className="rounded-lg bg-slate-200 px-4 py-2 text-sm"
-          >
-            Logs öffnen
-          </button>
+            title="Den Ordner mit den Diagnose-Logdateien öffnen"
+          />
         </div>
         {updateMsg !== "" && (
-          <p className="mt-2 text-xs text-slate-500">{updateMsg}</p>
+          <p className="mt-1 text-xs text-slate-500">{updateMsg}</p>
         )}
-      </div>
+      </section>
     </main>
   );
 }

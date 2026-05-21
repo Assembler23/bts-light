@@ -8,6 +8,7 @@ import {
 } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { Download } from "lucide-react";
 
 type Phase =
   | "idle"
@@ -91,7 +92,8 @@ export function UpdateBanner() {
 
   return (
     <div className="flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm text-amber-900">
-      <span>
+      <span className="flex items-center gap-2">
+        <Download size={16} className="shrink-0" />
         Update verfügbar{update ? ` (v${update.version})` : ""} – neue
         Funktionen &amp; Fehlerbehebungen.
       </span>
@@ -99,7 +101,7 @@ export function UpdateBanner() {
         onClick={() => void install()}
         disabled={phase === "downloading"}
         className="shrink-0 rounded-lg bg-amber-500 px-3 py-1 font-medium text-white
-                   disabled:opacity-60"
+                   transition-colors hover:bg-amber-600 disabled:opacity-60"
       >
         {phase === "downloading"
           ? "Wird installiert …"

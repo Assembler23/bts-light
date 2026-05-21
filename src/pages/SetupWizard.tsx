@@ -1,4 +1,15 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import {
+  Check,
+  Cloud,
+  KeyRound,
+  type LucideIcon,
+  Server,
+  Stethoscope,
+  Target,
+  Wifi,
+  X,
+} from "lucide-react";
 import { saveConfig, startSync, testBtp } from "../api";
 import { PRESETS, findPreset } from "../presets";
 import type { AppConfig, ConnectionMode } from "../types";
@@ -15,6 +26,64 @@ type TestState =
   | { kind: "error"; message: string };
 
 const MANUAL = "manual";
+
+/** Abschnitts-Überschrift mit Icon. */
+function SectionHeader({
+  icon: Icon,
+  children,
+}: {
+  icon: LucideIcon;
+  children: ReactNode;
+}) {
+  return (
+    <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+      <Icon size={16} className="text-slate-400" />
+      {children}
+    </h2>
+  );
+}
+
+/** Eine Auswahlkachel mit Icon, Titel, Beschreibung und Aktiv-Markierung. */
+function ChoiceCard(props: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const Icon = props.icon;
+  return (
+    <button
+      onClick={props.onClick}
+      className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-left
+                  transition-colors ${
+                    props.active
+                      ? "border-slate-800 bg-white shadow-sm"
+                      : "border-slate-300 bg-white hover:border-slate-400"
+                  }`}
+    >
+      <span
+        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center
+                    rounded-lg ${
+                      props.active
+                        ? "bg-slate-800 text-white"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+      >
+        <Icon size={16} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{props.title}</span>
+        <span className="block text-xs text-slate-500">
+          {props.description}
+        </span>
+      </span>
+      {props.active && (
+        <Check size={16} className="mt-1 shrink-0 text-slate-800" />
+      )}
+    </button>
+  );
+}
 
 /** Ein beschriftetes Eingabefeld. */
 function Field(props: {
@@ -34,7 +103,7 @@ function Field(props: {
         value={props.value}
         placeholder={props.placeholder}
         onChange={(e) => props.onChange(e.currentTarget.value)}
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
                    focus:border-slate-500 focus:outline-none"
       />
     </label>
@@ -110,46 +179,45 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
 
   return (
     <main className="mx-auto flex min-h-full max-w-xl flex-col gap-6 p-6 text-slate-800">
-      <header>
-        <h1 className="text-2xl font-semibold">BTS Light einrichten</h1>
-        <p className="text-sm text-slate-500">
-          Verbinde dein Turnier (BTP) mit dem Badhub-Liveticker.
-        </p>
+      <header className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 text-lg">
+          🏸
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold leading-tight">
+            BTS Light einrichten
+          </h1>
+          <p className="text-sm text-slate-500">
+            Verbinde dein Turnier (BTP) mit dem Badhub-Liveticker.
+          </p>
+        </div>
       </header>
 
       {/* Schritt 1: Verband / Ziel */}
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">1 · Liveticker-Ziel</h2>
+        <SectionHeader icon={Target}>1 · Liveticker-Ziel</SectionHeader>
         {PRESETS.map((preset) => (
-          <button
+          <ChoiceCard
             key={preset.id}
+            icon={Target}
+            title={preset.label}
+            description={preset.badhub.live_url}
+            active={presetId === preset.id}
             onClick={() => setPresetId(preset.id)}
-            className={`rounded-lg border px-4 py-3 text-left text-sm ${
-              presetId === preset.id
-                ? "border-slate-800 bg-slate-50"
-                : "border-slate-300"
-            }`}
-          >
-            <div className="font-medium">{preset.label}</div>
-            <div className="text-xs text-slate-500">{preset.badhub.live_url}</div>
-          </button>
+          />
         ))}
-        <button
+        <ChoiceCard
+          icon={KeyRound}
+          title="Anderes Turnier (manuell)"
+          description="Badhub-URL und Passwort selbst eintragen"
+          active={isManual}
           onClick={() => setPresetId(MANUAL)}
-          className={`rounded-lg border px-4 py-3 text-left text-sm ${
-            isManual ? "border-slate-800 bg-slate-50" : "border-slate-300"
-          }`}
-        >
-          <div className="font-medium">Anderes Turnier (manuell)</div>
-          <div className="text-xs text-slate-500">
-            Badhub-URL und Passwort selbst eintragen
-          </div>
-        </button>
+        />
       </section>
 
       {/* Schritt 2: BTP-Verbindung */}
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-slate-700">2 · BTP-Verbindung</h2>
+        <SectionHeader icon={Server}>2 · BTP-Verbindung</SectionHeader>
         <Field label="BTP-Adresse" value={host} onChange={setHost} placeholder="127.0.0.1" />
         <Field label="Port" value={port} onChange={setPort} type="number" />
         <Field
@@ -161,25 +229,27 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         <button
           onClick={runTest}
           disabled={test.kind === "testing" || host.trim() === ""}
-          className="self-start rounded-lg bg-slate-200 px-3 py-1.5 text-sm
-                     disabled:opacity-50"
+          className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                     text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
         >
           {test.kind === "testing" ? "Teste …" : "Verbindung testen"}
         </button>
         {test.kind === "ok" && (
-          <p className="text-sm text-green-700">
-            ✓ BTP gefunden – Turnier „{test.tournament}"
+          <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+            <Check size={16} /> BTP gefunden – Turnier „{test.tournament}"
           </p>
         )}
         {test.kind === "error" && (
-          <p className="text-sm text-red-700">✗ {test.message}</p>
+          <p className="flex items-start gap-1.5 text-sm text-rose-700">
+            <X size={16} className="mt-0.5 shrink-0" /> {test.message}
+          </p>
         )}
       </section>
 
       {/* Schritt 3: Badhub (nur manuell) */}
       {isManual && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-slate-700">3 · Badhub-Zugang</h2>
+          <SectionHeader icon={KeyRound}>3 · Badhub-Zugang</SectionHeader>
           <Field label="Badhub-URL" value={badhubUrl} onChange={setBadhubUrl} />
           <Field
             label="Badhub-Passwort"
@@ -198,44 +268,30 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
 
       {/* Tablet-Verbindung */}
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">
-          Tablet-Verbindung
-        </h2>
+        <SectionHeader icon={Wifi}>Tablet-Verbindung</SectionHeader>
         <p className="text-xs text-slate-500">
           Wie erreichen die Schiedsrichter-Tablets diesen PC? Lässt sich
           später in den Einstellungen umstellen.
         </p>
-        <button
+        <ChoiceCard
+          icon={Wifi}
+          title="LAN – lokales Netz"
+          description="Tablets verbinden sich direkt im Hallen-WLAN. Schnell und offline – braucht aber einen freigegebenen Port (Windows-Firewall)."
+          active={mode === "lan"}
           onClick={() => setMode("lan")}
-          className={`rounded-lg border px-4 py-3 text-left text-sm ${
-            mode === "lan" ? "border-slate-800 bg-slate-50" : "border-slate-300"
-          }`}
-        >
-          <div className="font-medium">LAN – lokales Netz</div>
-          <div className="text-xs text-slate-500">
-            Tablets verbinden sich direkt im Hallen-WLAN. Schnell und offline –
-            braucht aber einen freigegebenen Port (Windows-Firewall).
-          </div>
-        </button>
-        <button
+        />
+        <ChoiceCard
+          icon={Cloud}
+          title="Über badhub.de – Cloud"
+          description="Tablets und PC verbinden sich nur nach außen. Funktioniert auch hinter gesperrten Firmen-Firewalls – Internet vorausgesetzt."
+          active={mode === "cloud"}
           onClick={() => setMode("cloud")}
-          className={`rounded-lg border px-4 py-3 text-left text-sm ${
-            mode === "cloud"
-              ? "border-slate-800 bg-slate-50"
-              : "border-slate-300"
-          }`}
-        >
-          <div className="font-medium">Über badhub.de – Cloud</div>
-          <div className="text-xs text-slate-500">
-            Tablets und PC verbinden sich nur nach außen. Funktioniert auch
-            hinter gesperrten Firmen-Firewalls – Internet vorausgesetzt.
-          </div>
-        </button>
+        />
       </section>
 
       {/* Diagnose */}
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">Diagnose</h2>
+        <SectionHeader icon={Stethoscope}>Diagnose</SectionHeader>
         <label className="flex items-start gap-2 text-sm text-slate-600">
           <input
             type="checkbox"
@@ -251,13 +307,13 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         </label>
       </section>
 
-      {saveError && <p className="text-sm text-red-700">{saveError}</p>}
+      {saveError && <p className="text-sm text-rose-700">{saveError}</p>}
 
       <button
         onClick={saveAndStart}
         disabled={!canSave || saving}
         className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-medium text-white
-                   disabled:opacity-50"
+                   transition-colors hover:bg-slate-900 disabled:opacity-50"
       >
         {saving ? "Wird gestartet …" : "Speichern & Liveticker starten"}
       </button>

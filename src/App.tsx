@@ -76,7 +76,7 @@ function App() {
 
   return (
     <UpdateProvider>
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col bg-slate-50">
         <UpdateBanner />
         <div className="min-h-0 flex-1 overflow-auto">{renderView()}</div>
       </div>
