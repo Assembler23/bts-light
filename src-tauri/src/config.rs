@@ -45,6 +45,19 @@ impl Default for BadhubConfig {
     }
 }
 
+/// Verbindungsart für die Schiedsrichter-Tablets.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConnectionMode {
+    /// Eingebetteter Server im Hallen-LAN (schnell, offline – braucht aber
+    /// einen offenen eingehenden Port 8088).
+    #[default]
+    Lan,
+    /// Über den Cloud-Relay auf badhub.de – funktioniert auch hinter
+    /// gesperrten Firmen-Firewalls (nur ausgehende Verbindungen).
+    Cloud,
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
@@ -55,9 +68,14 @@ pub struct AppConfig {
     #[serde(default)]
     pub upload_logs: bool,
     /// Zufällige, dauerhafte Installations-ID (vom Frontend erzeugt) –
-    /// ordnet hochgeladene Logs einer Installation zu.
+    /// ordnet hochgeladene Logs einer Installation zu und ist zugleich der
+    /// Namespace im Cloud-Relay.
     #[serde(default)]
     pub install_id: String,
+    /// Verbindungsart für die Tablets (LAN oder Cloud). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub connection_mode: ConnectionMode,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -121,6 +139,7 @@ mod tests {
             },
             upload_logs: true,
             install_id: "inst-abc123".to_string(),
+            connection_mode: ConnectionMode::Cloud,
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

@@ -1,9 +1,15 @@
-//! Eingebetteter HTTP+WebSocket-Server für die Schiedsrichter-Tablets.
+//! Eingebetteter HTTP+WebSocket-Server für die Schiedsrichter-Tablets
+//! (LAN-Modus).
 //!
 //! bts-light ist damit der zentrale Hub: Tablets laden die Spielzettel-UI,
 //! binden sich an einen Court, bekommen das von BTP zugewiesene Match,
 //! zählen Punkte (Live-Score → Liveticker) und schreiben am Spielende das
 //! Ergebnis via `SENDUPDATE` zurück nach BTP.
+//!
+//! Im Cloud-Modus läuft dieser Server nicht – stattdessen verbindet sich
+//! [`crate::tablet::relay_client`] ausgehend zum Relay. Die Kernlogik
+//! ([`ServerCtx`], [`process_result`], [`handle_score`], [`match_brief`])
+//! ist `pub(crate)` und wird von beiden Modi geteilt.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -15,7 +21,11 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
+
+use relay_proto::{
+    html_escape, path_encode, MatchBrief, PlayerBrief, ResultBody, ResultResponse, ServerMsg,
+    SetAb, TabletMsg,
+};
 
 use crate::badhub::diff::Update;
 use crate::badhub::payload::build_tupdate;
@@ -29,7 +39,8 @@ use crate::tablet::state::TabletState;
 /// Fester Port des Tablet-Servers im Hallen-LAN.
 pub const TABLET_PORT: u16 = 8088;
 
-/// Geteilter Kontext aller HTTP-/WS-Handler.
+/// Geteilter Kontext der Tablet-Logik – im LAN-Modus von den HTTP-/WS-
+/// Handlern genutzt, im Cloud-Modus vom Relay-Client.
 pub struct ServerCtx {
     pub tablet: Arc<TabletState>,
     config: AppConfig,
@@ -78,31 +89,6 @@ pub fn lan_host() -> String {
         Ok(ip) => format!("{ip}:{TABLET_PORT}"),
         Err(_) => format!("localhost:{TABLET_PORT}"),
     }
-}
-
-/// Minimaler Prozent-Encoder für einen URL-Pfad-Abschnitt.
-fn path_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-/// Escapt auch `'`, weil `__COURT_LABEL__` in `tablet.html` sowohl in
-/// HTML-Text als auch in einem JS-String-Literal landet – ohne `'`-Escape
-/// könnte ein Court-Name mit Apostroph das Literal aufbrechen.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 // ─────────────────────────────── HTTP-Routen ──────────────────────────────
@@ -178,61 +164,41 @@ async fn health(State(ctx): State<Arc<ServerCtx>>) -> Json<serde_json::Value> {
 
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
 
-#[derive(Deserialize, Clone, Copy)]
-struct SetAb {
-    a: i64,
-    b: i64,
-}
-
-#[derive(Deserialize)]
-struct ResultBody {
-    #[serde(rename = "matchId")]
-    match_id: i64,
-    #[serde(rename = "courtLabel")]
-    court_label: String,
-    sets: Vec<SetAb>,
-}
-
-#[derive(Serialize)]
-struct ResultResponse {
-    ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
 /// Nimmt das Endergebnis vom Tablet entgegen und schreibt es nach BTP.
 async fn result(
     State(ctx): State<Arc<ServerCtx>>,
     Json(body): Json<ResultBody>,
 ) -> Json<ResultResponse> {
-    let err = |msg: &str| {
-        Json(ResultResponse {
-            ok: false,
-            error: Some(msg.to_string()),
-        })
-    };
+    Json(process_result(&ctx, &body).await)
+}
 
+/// Validiert ein Endergebnis vom Tablet und schreibt es per `SENDUPDATE`
+/// nach BTP. Von beiden Modi genutzt: vom LAN-`/result`-Handler und vom
+/// Cloud-Relay-Client. Die Validierung ist zugleich die Sicherheits-
+/// Mitigation des Cloud-Modus (Match-ID muss zum Court-Match passen,
+/// Satzstand plausibel).
+pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
     let Some(m) = ctx.tablet.match_for_court(&body.court_label) else {
-        return err("Kein Match auf diesem Court.");
+        return ResultResponse::err("Kein Match auf diesem Court.");
     };
     if m.id != body.match_id {
-        return err("Das Match auf dem Court hat inzwischen gewechselt.");
+        return ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.");
     }
 
     let sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
     if sets.is_empty() || sets.len() > 9 {
-        return err("Ungültige Satzanzahl.");
+        return ResultResponse::err("Ungültige Satzanzahl.");
     }
     if sets
         .iter()
         .any(|&(a, b)| !(0..=99).contains(&a) || !(0..=99).contains(&b))
     {
-        return err("Ungültiger Satzstand.");
+        return ResultResponse::err("Ungültiger Satzstand.");
     }
     let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
     let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
     if team1_sets == team2_sets {
-        return err("Unentschiedener Satzstand – kein Sieger ermittelbar.");
+        return ResultResponse::err("Unentschiedener Satzstand – kein Sieger ermittelbar.");
     }
     let update = proto::MatchUpdate {
         btp_match_id: m.id,
@@ -253,14 +219,11 @@ async fn result(
         Ok(()) => {
             ctx.tablet.clear_court(&body.court_label);
             tracing::info!("BTP-Schreiben OK: Match {}", m.id);
-            Json(ResultResponse {
-                ok: true,
-                error: None,
-            })
+            ResultResponse::ok()
         }
         Err(e) => {
             tracing::warn!("BTP-Schreiben fehlgeschlagen (Match {}): {e}", m.id);
-            err(&e)
+            ResultResponse::err(e)
         }
     }
 }
@@ -291,64 +254,9 @@ async fn write_result_to_btp(
 
 // ─────────────────────────────── WebSocket ────────────────────────────────
 
-/// Nachrichten vom Tablet.
-#[derive(Deserialize)]
-#[serde(tag = "type")]
-enum TabletMsg {
-    #[serde(rename = "identify")]
-    Identify {
-        #[serde(rename = "courtLabel")]
-        court_label: String,
-    },
-    #[serde(rename = "score_update")]
-    ScoreUpdate {
-        #[serde(rename = "scoreA")]
-        score_a: i64,
-        #[serde(rename = "scoreB")]
-        score_b: i64,
-        #[serde(rename = "setsHistory", default)]
-        sets_history: Vec<SetAb>,
-    },
-}
-
-/// Nachrichten an das Tablet (Schema wie bei badhub-tournament).
-#[derive(Serialize)]
-#[serde(tag = "type")]
-enum ServerMsg {
-    #[serde(rename = "match_assigned")]
-    MatchAssigned {
-        #[serde(rename = "match")]
-        match_brief: MatchBrief,
-    },
-    #[serde(rename = "match_cleared")]
-    MatchCleared,
-}
-
-#[derive(Serialize)]
-struct MatchBrief {
-    #[serde(rename = "matchId")]
-    match_id: i64,
-    #[serde(rename = "teamA")]
-    team_a: Vec<PlayerBrief>,
-    #[serde(rename = "teamB")]
-    team_b: Vec<PlayerBrief>,
-    #[serde(rename = "eventLabel")]
-    event_label: String,
-    #[serde(rename = "bestOfSets")]
-    best_of_sets: i64,
-    #[serde(rename = "targetScore")]
-    target_score: i64,
-}
-
-#[derive(Serialize)]
-struct PlayerBrief {
-    id: i64,
-    name: String,
-}
-
 /// Baut die Match-Kurzinfo fürs Tablet. BTP liefert das Spielsystem nicht
 /// zuverlässig – Standard ist Best-of-3 bis 21 (Badminton-Normalfall).
-fn match_brief(m: &BtpMatch) -> MatchBrief {
+pub(crate) fn match_brief(m: &BtpMatch) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
             .iter()
@@ -452,8 +360,14 @@ async fn push_match(court: &str, ctx: &ServerCtx, socket: &mut WebSocket, last: 
 }
 
 /// Verarbeitet einen Live-Punktestand vom Tablet: merken + an den
-/// Liveticker pushen.
-async fn handle_score(court: &str, score_a: i64, score_b: i64, history: &[SetAb], ctx: &ServerCtx) {
+/// Liveticker pushen. Von LAN-Server und Cloud-Relay-Client genutzt.
+pub(crate) async fn handle_score(
+    court: &str,
+    score_a: i64,
+    score_b: i64,
+    history: &[SetAb],
+    ctx: &ServerCtx,
+) {
     let Some(m) = ctx.tablet.match_for_court(court) else {
         return;
     };
@@ -477,21 +391,5 @@ async fn handle_score(court: &str, score_a: i64, score_b: i64, history: &[SetAb]
     .await
     {
         tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn path_encode_escapes_spaces_and_keeps_safe_chars() {
-        assert_eq!(path_encode("Feld 1"), "Feld%201");
-        assert_eq!(path_encode("Court-3"), "Court-3");
-    }
-
-    #[test]
-    fn html_escape_neutralizes_markup_and_quotes() {
-        assert_eq!(html_escape("a<b>&\"'c"), "a&lt;b&gt;&amp;&quot;&#39;c");
     }
 }

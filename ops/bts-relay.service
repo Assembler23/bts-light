@@ -1,0 +1,29 @@
+# systemd-Unit für den bts-relay-Cloud-Relay.
+#
+# Installation auf dem Hetzner-Server (einmalig):
+#   sudo cp ops/bts-relay.service /etc/systemd/system/
+#   sudo mkdir -p /opt/bts-relay && sudo chown badhub:badhub /opt/bts-relay
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now bts-relay
+#
+# Damit der CI-Deploy den Dienst neu starten darf, eine sudoers-Regel
+# anlegen (z. B. /etc/sudoers.d/bts-relay):
+#   badhub ALL=(root) NOPASSWD: /usr/bin/systemctl restart bts-relay
+
+[Unit]
+Description=bts-relay - Cloud-Relay fuer den BTS-Light-Tablet-Spielzettel
+After=network.target
+
+[Service]
+Type=simple
+User=badhub
+# Port, auf dem nginx den Relay erreicht (siehe nginx-bts-relay.conf).
+Environment=PORT=8090
+# Oeffentliche Basis-URL fuer die QR-Codes.
+Environment=PUBLIC_BASE=https://badhub.de/bts-relay
+ExecStart=/opt/bts-relay/bts-relay
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

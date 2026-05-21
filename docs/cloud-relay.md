@@ -1,0 +1,144 @@
+# Cloud-Relay – Tablets durch jede Firewall
+
+Der digitale Tablet-Spielzettel ([tablet.md](tablet.md)) betreibt im
+LAN-Modus einen Server auf dem Turnier-PC (Port 8088), an den sich die
+Tablets **eingehend** hängen. Auf IT-verwalteten Rechnern blockiert die
+Windows-Firewall diesen eingehenden Port – der Turnierleiter hat keine
+Admin-Rechte, das zu ändern. Manche Hallen-WLANs isolieren zusätzlich die
+Geräte voneinander. Folge: die Tablets erreichen bts-light nicht.
+
+Der **Cloud-Modus** löst das: Tablet ↔ bts-light läuft nicht mehr direkt,
+sondern über einen Relay-Dienst auf badhub.de. bts-light **und** die
+Tablets verbinden sich nur noch *nach außen* – eine ausgehende Verbindung
+lässt jede Firmen-IT durch (es ist nichts anderes als Surfen). Kein
+eingehender Port, keine Admin-Rechte, kein WLAN-Gefummel.
+
+```
+Tablet (Browser) ──außen──▶  badhub.de/bts-relay  ◀──außen── bts-light ──▶ BTP (lokal)
+```
+
+Der BTP-Schreibweg bleibt lokal auf dem PC: Ein vom Tablet übermitteltes
+Ergebnis reicht der Relay an bts-light durch, das es per `SENDUPDATE` nach
+BTP schreibt – exakt wie im LAN-Modus.
+
+## Umschalten
+
+Die Verbindungsart steht im Setup-Wizard unter **„Tablet-Verbindung"**:
+
+- **LAN – lokales Netz** – schnell und offline, braucht aber den
+  freigegebenen Port 8088.
+- **Über badhub.de – Cloud** – funktioniert auch hinter gesperrten
+  Firewalls, braucht Internet.
+
+Der Wechsel greift beim nächsten Stoppen/Starten des Livetickers (kein
+Live-Umschalten mitten im Betrieb). Beide Wege bleiben dauerhaft nutzbar.
+
+**Traffic** ist minimal: pro Punkt ein WebSocket-Frame von wenigen hundert
+Byte – auch bei 20–30 Feldern vernachlässigbar.
+
+## Architektur
+
+`bts-light` ist ein Cargo-Workspace aus drei Crates:
+
+| Crate | Zweck |
+|---|---|
+| `src-tauri` | die Tauri-Desktop-App (bts-light selbst) |
+| `relay` | der Relay-Dienst – Binary `bts-relay` |
+| `relay-proto` | die geteilten JSON-Wire-Typen beider Seiten |
+
+Der Relay ist ein reiner WebSocket-Broker ohne Persistenz. Jede
+bts-light-Installation hat über ihre `install_id` (zufällige UUID aus der
+App-Konfiguration) einen eigenen **Namespace** – Turniere kollidieren
+nicht. Pro Namespace gibt es genau einen „Host" (bts-light) und beliebig
+viele Tablets, je an einen Court gebunden.
+
+Die Tablet-URL im Cloud-Modus:
+`https://badhub.de/bts-relay/<install_id>/court/<court>`
+
+### Endpunkte des Relays
+
+Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
+
+| Route | Zweck |
+|---|---|
+| `GET /{ns}/court/{label}` | Tablet-Spielzettel-UI (dieselbe `tablet.html` wie die App) |
+| `GET /{ns}/qr/{label}` | QR-Code (SVG) auf die öffentliche Court-URL |
+| `GET /{ns}/ws` | Tablet-WebSocket |
+| `GET /{ns}/host-ws` | bts-light-Host-WebSocket (ausgehend) |
+| `POST /{ns}/result` | Endergebnis vom Tablet → an den Host weitergereicht |
+| `GET /health` | Status-Schnappschuss |
+
+### Datenfluss
+
+1. bts-light verbindet sich im Cloud-Modus ausgehend zu
+   `wss://badhub.de/bts-relay/<install_id>/host-ws`.
+2. Ein Tablet öffnet `…/court/<court>` und verbindet seine WebSocket. Der
+   Relay meldet dem Host `tablet_connected`.
+3. Der Host pusht alle 2 s die Court→Match-Zuweisung; der Relay leitet sie
+   an das jeweilige Tablet.
+4. Jeder Punkt am Tablet → `score_update` → Relay → Host → Liveticker.
+5. „Ergebnis übermitteln" → `POST …/result` → Relay reicht es per
+   WebSocket-Frame an den Host → bts-light schreibt per `SENDUPDATE` nach
+   BTP und antwortet mit `ResultAck`.
+
+Reconnect: bts-light verbindet bei Abriss mit Backoff (1 s → 30 s) neu,
+Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
+
+## Sicherheit
+
+- Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die
+  heutige LAN-URL. Der Relay weist Namespaces ab, die nicht wie eine
+  kanonische UUID aussehen.
+- Genau **ein Host pro Namespace**: eine zweite Host-Verbindung wird
+  serverseitig abgewiesen → kein Host-Takeover.
+- bts-light validiert jedes eingehende Ergebnis (`process_result`):
+  Match-ID muss zum aktuellen Court-Match passen, Satzstand plausibel.
+  Diese Prüfung ist dieselbe wie im LAN-Modus.
+- Broker-Limits gegen Überlast: maximale Anzahl Namespaces, Tablets je
+  Namespace und gleichzeitig offener Ergebnis-Übermittlungen.
+
+## Deployment
+
+Der Relay läuft als systemd-Dienst auf dem Hetzner-Server (`178.104.221.177`)
+hinter nginx.
+
+**Binary** – wird per GitHub-Actions gebaut und deployt
+(`.github/workflows/relay-deploy.yml`, Trigger: Änderungen an `relay/`,
+`relay-proto/` oder `tablet.html` auf `main`, plus `workflow_dispatch`).
+Reproduzierbar gebaut, kein Rust-Toolchain auf dem Prod-Server nötig.
+
+**Einmalige Server-Einrichtung:**
+
+```sh
+# Verzeichnis anlegen, dem Deploy-User schreibbar
+sudo mkdir -p /opt/bts-relay && sudo chown badhub:badhub /opt/bts-relay
+
+# systemd-Unit installieren
+sudo cp ops/bts-relay.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bts-relay
+
+# sudoers: badhub darf den Dienst neu starten (für den CI-Deploy)
+echo 'badhub ALL=(root) NOPASSWD: /usr/bin/systemctl restart bts-relay' \
+  | sudo tee /etc/sudoers.d/bts-relay
+```
+
+**nginx** – den `location /bts-relay/`-Block aus `ops/nginx-bts-relay.conf`
+in den `badhub.de`-Server-Block (Port 443) übernehmen, plus den
+`map $http_upgrade $connection_upgrade`-Block im `http{}`-Kontext. Danach
+`sudo nginx -t && sudo systemctl reload nginx`.
+
+Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
+`PUBLIC_BASE` (Default `https://badhub.de/bts-relay`).
+
+## Fehlersuche
+
+- `https://badhub.de/bts-relay/health` antwortet mit `{"ok":true,…}` →
+  Relay läuft und ist über nginx erreichbar.
+- `journalctl -u bts-relay -f` zeigt Host-/Tablet-Verbindungen und
+  Namespace-Aktivität.
+- Tablet erreicht die Seite, aber „verbinde…" bleibt → bts-light ist im
+  Cloud-Modus nicht verbunden (App-Log prüfen: „Mit Cloud-Relay
+  verbunden") oder ein zweiter Host belegt den Namespace.
+- Ergebnis-Übermittlung meldet „Zeitüberschreitung" → bts-light hat nicht
+  geantwortet; meist BTP-seitig (Netzwerk-Edits in BTP nicht erlaubt).

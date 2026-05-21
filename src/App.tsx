@@ -18,6 +18,7 @@ function defaultConfig(): AppConfig {
     },
     upload_logs: false,
     install_id: "",
+    connection_mode: "lan",
   };
 }
 

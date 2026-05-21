@@ -1,0 +1,15 @@
+[package]
+name = "bts-relay"
+version = "0.1.0"
+description = "Cloud-Relay zwischen Schiedsrichter-Tablets und bts-light"
+edition = "2021"
+
+[dependencies]
+relay-proto = { path = "../relay-proto" }
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }

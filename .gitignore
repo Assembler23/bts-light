@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Rust (Cargo-Workspace – Build-Verzeichnis liegt seit dem Relay-Umbau
+# im Repo-Root)
+/target
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

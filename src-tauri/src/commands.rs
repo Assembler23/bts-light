@@ -11,7 +11,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::badhub::push;
 use crate::btp::client;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ConnectionMode};
 use crate::sync::{SyncEngine, SyncOutcome};
 use crate::tablet::state::TabletState;
 
@@ -53,8 +53,10 @@ pub struct AppState {
     pub sync_task: Mutex<Option<JoinHandle<()>>>,
     /// Geteilter Zustand zwischen Sync-Loop und Tablet-Server.
     pub tablet: Arc<TabletState>,
-    /// Handle des laufenden Tablet-Servers, falls aktiv.
+    /// Handle des laufenden Tablet-Servers (LAN-Modus), falls aktiv.
     pub tablet_server: Mutex<Option<JoinHandle<()>>>,
+    /// Handle des laufenden Relay-Clients (Cloud-Modus), falls aktiv.
+    pub relay_task: Mutex<Option<JoinHandle<()>>>,
     /// Handle des Diagnose-Log-Uploads, falls aktiv.
     pub log_task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -138,10 +140,14 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     if config.badhub.password.is_empty() {
         return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
     }
+    if config.connection_mode == ConnectionMode::Cloud && config.install_id.is_empty() {
+        return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
+    }
 
-    // Vor dem Move von `config` in den Tablet-Server merken.
+    // Vor dem Move von `config` in den Tablet-Kontext merken.
     let upload_logs = config.upload_logs;
     let install_id = config.install_id.clone();
+    let mode = config.connection_mode;
 
     let tablet = state.tablet.clone();
 
@@ -167,25 +173,41 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     *slot = Some(handle);
     drop(slot); // sync_task-Lock freigeben, bevor tablet_server gelockt wird
 
-    // Eingebetteter Tablet-Server (Spielzettel) – läuft mit der Sync-Schleife.
-    let mut server_slot = state
-        .tablet_server
-        .lock()
-        .expect("Tablet-Server-Mutex nicht vergiftet");
-    if server_slot.is_none() {
-        let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
-            tablet,
-            config,
-            push::build_client(),
-        ));
-        let server_handle = tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::tablet::server::run(ctx).await {
-                tracing::error!("Tablet-Server beendet: {e}");
+    // Geteilter Tablet-Kontext – je nach Modus betreibt ihn der
+    // eingebettete Server (LAN) oder der Relay-Client (Cloud).
+    let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
+        tablet,
+        config,
+        push::build_client(),
+    ));
+    match mode {
+        ConnectionMode::Lan => {
+            let mut server_slot = state
+                .tablet_server
+                .lock()
+                .expect("Tablet-Server-Mutex nicht vergiftet");
+            if server_slot.is_none() {
+                let ctx = ctx.clone();
+                *server_slot = Some(tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::tablet::server::run(ctx).await {
+                        tracing::error!("Tablet-Server beendet: {e}");
+                    }
+                }));
             }
-        });
-        *server_slot = Some(server_handle);
+        }
+        ConnectionMode::Cloud => {
+            let mut relay_slot = state
+                .relay_task
+                .lock()
+                .expect("Relay-Task-Mutex nicht vergiftet");
+            if relay_slot.is_none() {
+                let ctx = ctx.clone();
+                *relay_slot = Some(tauri::async_runtime::spawn(
+                    crate::tablet::relay_client::run(ctx, install_id.clone()),
+                ));
+            }
+        }
     }
-    drop(server_slot);
 
     // Optionaler Diagnose-Log-Upload (nur wenn vom Nutzer aktiviert).
     if upload_logs {
@@ -233,6 +255,14 @@ pub fn stop_sync(state: State<'_, AppState>) {
         handle.abort();
     }
     if let Some(handle) = state
+        .relay_task
+        .lock()
+        .expect("Relay-Task-Mutex nicht vergiftet")
+        .take()
+    {
+        handle.abort();
+    }
+    if let Some(handle) = state
         .log_task
         .lock()
         .expect("Log-Task-Mutex nicht vergiftet")
@@ -246,17 +276,36 @@ pub fn stop_sync(state: State<'_, AppState>) {
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
 #[derive(Serialize)]
 pub struct TabletInfo {
-    /// LAN-Adresse `<ip>:<port>` des Tablet-Servers.
+    /// LAN-Adresse `<ip>:<port>` des Tablet-Servers (nur LAN-Modus relevant).
     pub server_host: String,
+    /// Verbindungsart: `"lan"` oder `"cloud"`.
+    pub mode: String,
+    /// Im Cloud-Modus die öffentliche Relay-Basis-URL
+    /// (`https://badhub.de/bts-relay/<install_id>`), sonst leer.
+    pub relay_base: String,
     /// Alle Courts mit aktuellem Match, Live-Stand und Tablet-Status.
     pub courts: Vec<crate::tablet::state::CourtOverview>,
 }
 
-/// Liefert die Felder-Übersicht für die Turnierleitung.
+/// Liefert Verbindungsart, Tablet-Adressen-Basis und die Felder-Übersicht.
 #[tauri::command]
 pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let (mode, relay_base) = match config.connection_mode {
+        ConnectionMode::Lan => ("lan".to_string(), String::new()),
+        ConnectionMode::Cloud => (
+            "cloud".to_string(),
+            format!("https://badhub.de/bts-relay/{}", config.install_id),
+        ),
+    };
     TabletInfo {
         server_host: crate::tablet::server::lan_host(),
+        mode,
+        relay_base,
         courts: state.tablet.overview(),
     }
 }

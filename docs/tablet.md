@@ -24,6 +24,21 @@ Tablet Court 3 ─┘          (axum :8088)   ├─▶ badhub Liveticker (live)
   den Live-Score; sonst weiter das BTP-Polling. So überschreibt der
   5-Sekunden-Poll nie den Tablet-Stand.
 
+## Verbindungsart: LAN oder Cloud
+
+Die Tablets erreichen bts-light auf zwei Wegen – umschaltbar im
+Setup-Wizard unter „Tablet-Verbindung":
+
+- **LAN** – der hier beschriebene eingebettete Server. Schnell und
+  offline, braucht aber den freigegebenen eingehenden Port 8088.
+- **Cloud** – über einen Relay auf badhub.de; funktioniert auch hinter
+  gesperrten Firmen-Firewalls (nur ausgehende Verbindungen). Details:
+  [cloud-relay.md](cloud-relay.md).
+
+Dieses Dokument beschreibt den LAN-Modus. Im Cloud-Modus sind Daten- und
+BTP-Schreibweg identisch – nur die Strecke Tablet ↔ bts-light läuft über
+den Relay statt direkt.
+
 ## Endpunkte des Tablet-Servers
 
 | Route | Zweck |
@@ -60,7 +75,8 @@ Tablet Court 3 ─┘          (axum :8088)   ├─▶ badhub Liveticker (live)
 - Tablet und bts-light-PC im **selben WLAN**.
 - **Windows-Firewall**: beim ersten Start fragt Windows, ob der Zugriff
   erlaubt werden soll – „Zugriff zulassen" (private Netze). Ohne Freigabe
-  erreichen die Tablets bts-light nicht.
+  erreichen die Tablets bts-light nicht. Auf gesperrten Turnier-PCs ohne
+  Admin-Rechte hilft stattdessen der Cloud-Modus ([cloud-relay.md](cloud-relay.md)).
 - In **BTP müssen Netzwerk-Edits erlaubt** sein, sonst lehnt BTP den
   `SENDUPDATE` ab – das Tablet zeigt dann einen Fehler.
 

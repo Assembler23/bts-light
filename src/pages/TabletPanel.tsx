@@ -34,11 +34,17 @@ export function TabletPanel({ onBack }: Props) {
   }, []);
 
   const host = info?.server_host ?? "";
+  const isCloud = (info?.mode ?? "lan") === "cloud";
+  const relayBase = info?.relay_base ?? "";
   const courts = info?.courts ?? [];
   const courtUrl = (court: string) =>
-    `http://${host}/court/${encodeURIComponent(court)}`;
+    isCloud
+      ? `${relayBase}/court/${encodeURIComponent(court)}`
+      : `http://${host}/court/${encodeURIComponent(court)}`;
   const qrUrl = (court: string) =>
-    `http://${host}/qr/${encodeURIComponent(court)}`;
+    isCloud
+      ? `${relayBase}/qr/${encodeURIComponent(court)}`
+      : `http://${host}/qr/${encodeURIComponent(court)}`;
 
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-6 p-6 text-slate-800">
@@ -53,7 +59,9 @@ export function TabletPanel({ onBack }: Props) {
           <h1 className="text-2xl font-semibold">Tablet-Spielzettel</h1>
           <p className="text-sm text-slate-500">
             {courts.length > 0
-              ? `${courts.length} Spielfelder · Server ${host}`
+              ? `${courts.length} Spielfelder · ${
+                  isCloud ? "über badhub.de (Cloud)" : `lokales Netz ${host}`
+                }`
               : "Einrichtung & Felder-Übersicht"}
           </p>
         </div>
@@ -73,8 +81,10 @@ export function TabletPanel({ onBack }: Props) {
             </h2>
             <p className="text-xs text-slate-500">
               Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
-              scannen (auf den QR tippen zeigt ihn groß). Tablet und dieser
-              PC müssen im selben WLAN sein.
+              scannen (auf den QR tippen zeigt ihn groß).{" "}
+              {isCloud
+                ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
+                : "Tablet und dieser PC müssen im selben WLAN sein."}
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {courts.map((c) => (

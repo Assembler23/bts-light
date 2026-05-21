@@ -25,7 +25,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: .
           cache-on-failure: true
 
       - name: Frontend-Abhängigkeiten installieren
@@ -52,10 +52,12 @@ jobs:
             Automatischer Release. Auto-Update bezieht diese Version über
             badhub.de/download/bts-light/.
           fail_on_unmatched_files: true
+          # Cargo-Workspace: das Build-Verzeichnis liegt im Repo-Root
+          # (target/), nicht mehr unter src-tauri/.
           files: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
 
   # Lädt die Release-Assets, baut latest.json und schiebt alles nach
   # badhub.de. Läuft auf Linux, weil rsync/ssh dort problemlos verfügbar

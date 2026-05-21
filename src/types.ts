@@ -13,6 +13,9 @@ export interface BadhubConfig {
   live_url: string;
 }
 
+/** Verbindungsart für die Schiedsrichter-Tablets. */
+export type ConnectionMode = "lan" | "cloud";
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
@@ -20,6 +23,8 @@ export interface AppConfig {
   upload_logs: boolean;
   /** Zufällige, dauerhafte Installations-ID (Frontend erzeugt sie). */
   install_id: string;
+  /** Verbindungsart für die Tablets: LAN (lokal) oder Cloud (über badhub.de). */
+  connection_mode: ConnectionMode;
 }
 
 export interface SyncStatus {
@@ -45,5 +50,9 @@ export interface CourtOverview {
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */
 export interface TabletInfo {
   server_host: string;
+  /** "lan" oder "cloud". */
+  mode: ConnectionMode;
+  /** Im Cloud-Modus die öffentliche Relay-Basis-URL, sonst leer. */
+  relay_base: string;
   courts: CourtOverview[];
 }

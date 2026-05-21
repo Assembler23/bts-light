@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { saveConfig, startSync, testBtp } from "../api";
 import { PRESETS, findPreset } from "../presets";
-import type { AppConfig } from "../types";
+import type { AppConfig, ConnectionMode } from "../types";
 
 interface Props {
   initialConfig: AppConfig;
@@ -50,6 +50,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
   const [uploadLogs, setUploadLogs] = useState(initialConfig.upload_logs);
+  const [mode, setMode] = useState<ConnectionMode>(initialConfig.connection_mode);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -75,6 +76,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       badhub,
       upload_logs: uploadLogs,
       install_id: initialConfig.install_id,
+      connection_mode: mode,
     };
   }
 
@@ -193,6 +195,43 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
           />
         </section>
       )}
+
+      {/* Tablet-Verbindung */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Tablet-Verbindung
+        </h2>
+        <p className="text-xs text-slate-500">
+          Wie erreichen die Schiedsrichter-Tablets diesen PC? Lässt sich
+          später in den Einstellungen umstellen.
+        </p>
+        <button
+          onClick={() => setMode("lan")}
+          className={`rounded-lg border px-4 py-3 text-left text-sm ${
+            mode === "lan" ? "border-slate-800 bg-slate-50" : "border-slate-300"
+          }`}
+        >
+          <div className="font-medium">LAN – lokales Netz</div>
+          <div className="text-xs text-slate-500">
+            Tablets verbinden sich direkt im Hallen-WLAN. Schnell und offline –
+            braucht aber einen freigegebenen Port (Windows-Firewall).
+          </div>
+        </button>
+        <button
+          onClick={() => setMode("cloud")}
+          className={`rounded-lg border px-4 py-3 text-left text-sm ${
+            mode === "cloud"
+              ? "border-slate-800 bg-slate-50"
+              : "border-slate-300"
+          }`}
+        >
+          <div className="font-medium">Über badhub.de – Cloud</div>
+          <div className="text-xs text-slate-500">
+            Tablets und PC verbinden sich nur nach außen. Funktioniert auch
+            hinter gesperrten Firmen-Firewalls – Internet vorausgesetzt.
+          </div>
+        </button>
+      </section>
 
       {/* Diagnose */}
       <section className="flex flex-col gap-2">

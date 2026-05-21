@@ -415,6 +415,12 @@
 
 const COURT_LABEL = '__COURT_LABEL__';
 
+// Basis-Pfad der Server-Endpunkte: alles vor "/court/<label>".
+//   LAN   → ""  (Endpunkte /ws, /result direkt am eingebetteten Server)
+//   Cloud → "/bts-relay/<install_id>"  (der Relay leitet weiter)
+// So funktioniert dieselbe Datei für beide Verbindungsarten.
+const BASE_PATH = location.pathname.replace(/\/court\/[^/]*\/?$/, '');
+
 // ─────────────────────────── Diagnose-Log ──────────────────────────────
 // Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,
 // match_cleared, score-Update-Versuche, Submit-Versuche, Render-Fehler.
@@ -509,7 +515,7 @@ let ws = null;
 let reconnectAttempt = 0;
 
 function connect() {
-  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + BASE_PATH + '/ws';
   ws = new WebSocket(wsUrl);
   els.connDot.classList.remove('ok', 'bad');
   els.connText.textContent = 'verbinde…';
@@ -913,7 +919,7 @@ async function submit() {
     : { a: s.right, b: s.left });
   tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets });
   try {
-    const res = await fetch('/result', {
+    const res = await fetch(BASE_PATH + '/result', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets }),

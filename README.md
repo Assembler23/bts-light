@@ -31,6 +31,10 @@ Badhub-Passwort eintragen – fertig.
   Tablets im Hallen-WLAN hängen: Punkte zählen, Live-Score an den
   Liveticker, Endergebnis zurück nach BTP. Details:
   [docs/tablet.md](docs/tablet.md).
+- **Cloud-Relay** – die Tablets erreichen bts-light wahlweise direkt im
+  LAN oder über einen Relay auf badhub.de. Der Cloud-Weg funktioniert
+  auch hinter gesperrten Firmen-Firewalls (nur ausgehende Verbindungen) –
+  umschaltbar im Setup. Details: [docs/cloud-relay.md](docs/cloud-relay.md).
 - **Diagnose-Logs** – tägliche Logdatei lokal (Dashboard-Button „Logs
   öffnen"); optional ein opt-in automatischer Upload an badhub.de zur
   zentralen Fehlerauswertung über alle Installationen. Details:
@@ -64,13 +68,18 @@ npm run tauri build  # Produktions-Build (Installer)
 ## Projektstruktur
 
 ```
-bts-light/
+bts-light/          # Cargo-Workspace
 ├── src/            # React-Frontend (WebView-Inhalt)
-├── src-tauri/      # Rust-Kern + Tauri-Konfiguration
+├── src-tauri/      # Rust-Kern + Tauri-Konfiguration (die App)
+├── relay/          # Cloud-Relay-Dienst (Binary bts-relay)
+├── relay-proto/    # geteilte JSON-Wire-Typen App ↔ Relay
+├── ops/            # systemd-/nginx-Vorlagen für den Relay
 ├── tools/          # Entwicklungs-Werkzeuge (BTP-Capture-Skript)
-├── docs/           # Protokoll-Spezifikation
+├── docs/           # Protokoll- & Feature-Doku
 └── .github/        # CI
 ```
+
+Der Relay baut sich separat: `cargo build --release -p bts-relay`.
 
 ## Arbeitsweise
 

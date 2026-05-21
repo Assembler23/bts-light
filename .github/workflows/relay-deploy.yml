@@ -1,0 +1,55 @@
+name: Relay bauen & deployen
+
+# Baut die bts-relay-Binary (Linux) und schiebt sie auf den Hetzner-Server.
+# Läuft bei Änderungen am Relay-Code auf main, plus manuell.
+#
+# Voraussetzungen auf dem Server (einmalig, siehe docs/cloud-relay.md):
+#   - Verzeichnis /opt/bts-relay/ existiert, dem badhub-User schreibbar
+#   - systemd-Unit bts-relay.service installiert (ops/bts-relay.service)
+#   - sudoers: badhub darf `systemctl restart bts-relay` ohne Passwort
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "relay/**"
+      - "relay-proto/**"
+      - "src-tauri/assets/tablet.html"
+      - ".github/workflows/relay-deploy.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      # -p bts-relay baut nur den Relay (+ relay-proto) – die Tauri-App
+      # wird nicht angefasst, es braucht also keine GTK/WebKit-System-Libs.
+      - name: Relay bauen (Release)
+        run: cargo build --release -p bts-relay
+
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # Erst .new hochladen, dann atomar umbenennen + Dienst neu starten –
+      # so läuft die alte Binary bis zum Restart-Moment weiter.
+      - name: Binary hochladen & Dienst neu starten
+        run: |
+          set -euo pipefail
+          rsync -av target/release/bts-relay \
+            badhub@178.104.221.177:/opt/bts-relay/bts-relay.new
+          ssh badhub@178.104.221.177 \
+            'mv /opt/bts-relay/bts-relay.new /opt/bts-relay/bts-relay \
+             && sudo systemctl restart bts-relay \
+             && sleep 2 \
+             && curl -sf http://127.0.0.1:8090/health'

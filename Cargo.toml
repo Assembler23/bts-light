@@ -1,0 +1,10 @@
+# Cargo-Workspace-Wurzel. Hält drei Crates zusammen:
+#   - src-tauri    die Tauri-Desktop-App (BTS Light selbst)
+#   - relay        der Cloud-Relay-Dienst (bts-relay, läuft auf badhub.de)
+#   - relay-proto  die geteilten JSON-Wire-Typen beider Seiten
+#
+# Eigenes Mini-Crate für das Protokoll, damit src-tauri nicht die
+# Relay-Server-Abhängigkeiten zieht und der Relay nicht Tauri.
+[workspace]
+resolver = "2"
+members = ["src-tauri", "relay", "relay-proto"]

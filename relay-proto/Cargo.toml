@@ -1,0 +1,11 @@
+[package]
+name = "relay-proto"
+version = "0.1.0"
+description = "Geteilte JSON-Wire-Typen zwischen bts-light und dem Cloud-Relay"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
