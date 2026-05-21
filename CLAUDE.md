@@ -80,6 +80,7 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | `src-tauri/src/tablet/server.rs`, `assets/tablet.html` | `docs/tablet.md` |
 | `src-tauri/src/tablet/relay_client.rs`, `relay/`, `relay-proto/` | `docs/cloud-relay.md` |
 | Walkover (`tablet/state.rs`, `server.rs`, `commands.rs` `walkover_*`) | `docs/walkover.md` |
+| Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`) | `docs/announcements.md` |
 | `src-tauri/src/log_upload.rs` | `docs/logging.md` |
 | `.github/workflows/*`, Release-Ablauf | `docs/release.md` |
 | jede veröffentlichte Version | `docs/changelog.md` |

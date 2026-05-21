@@ -7,12 +7,15 @@ import {
   Server,
   Stethoscope,
   Target,
+  Volume2,
   Wifi,
   X,
 } from "lucide-react";
 import { saveConfig, startSync, stopSync, testBtp } from "../api";
+import { playTestAnnouncement } from "../io/announcer";
 import { PRESETS, findPreset } from "../presets";
-import type { AppConfig, ConnectionMode } from "../types";
+import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
+import type { AnnounceLanguageMode, AppConfig, ConnectionMode } from "../types";
 
 interface Props {
   initialConfig: AppConfig;
@@ -120,6 +123,15 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
   const [uploadLogs, setUploadLogs] = useState(initialConfig.upload_logs);
   const [mode, setMode] = useState<ConnectionMode>(initialConfig.connection_mode);
+  const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
+  const [annLang, setAnnLang] = useState<AnnounceLanguageMode>(
+    initialConfig.announce.language_mode,
+  );
+  const [annVoiceDe, setAnnVoiceDe] = useState(initialConfig.announce.voice_de);
+  const [annVoiceEn, setAnnVoiceEn] = useState(initialConfig.announce.voice_en);
+  const [annRate, setAnnRate] = useState(initialConfig.announce.rate);
+  const [annGong, setAnnGong] = useState(initialConfig.announce.gong);
+  const voices = useAvailableVoices();
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -146,6 +158,14 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       upload_logs: uploadLogs,
       install_id: initialConfig.install_id,
       connection_mode: mode,
+      announce: {
+        enabled: annEnabled,
+        language_mode: annLang,
+        voice_de: annVoiceDe,
+        voice_en: annVoiceEn,
+        rate: annRate,
+        gong: annGong,
+      },
     };
   }
 
@@ -293,6 +313,147 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
           active={mode === "cloud"}
           onClick={() => setMode("cloud")}
         />
+      </section>
+
+      {/* Sprachansagen */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Volume2}>Sprachansagen</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Sagt jedes Spiel an, das in BTP auf ein Feld gezogen wird – mit
+          Gong, Feldnummer, Disziplin und Paarung.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={annEnabled}
+            onChange={(e) => setAnnEnabled(e.currentTarget.checked)}
+          />
+          Sprachansagen aktivieren
+        </label>
+
+        {annEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            {/* Sprache */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-slate-600">
+                Sprache
+              </span>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["de", "Deutsch"],
+                    ["en", "Englisch"],
+                    ["auto", "Automatisch"],
+                  ] as const
+                ).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setAnnLang(val)}
+                    className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                      annLang === val
+                        ? "border-slate-800 bg-slate-800 text-white"
+                        : "border-slate-300 bg-white text-slate-600 hover:border-slate-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {annLang === "auto" && (
+                <p className="text-xs text-slate-500">
+                  Englisch, sobald mindestens die Hälfte der Spieler auf dem
+                  Feld international ist – sonst Deutsch.
+                </p>
+              )}
+            </div>
+
+            {/* Stimmen */}
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-600">
+                Deutsche Stimme
+              </span>
+              <select
+                value={annVoiceDe}
+                onChange={(e) => setAnnVoiceDe(e.currentTarget.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+                           focus:border-slate-500 focus:outline-none"
+              >
+                <option value="">Standardstimme</option>
+                {voicesForLang(voices, "de").map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-600">
+                Englische Stimme
+              </span>
+              <select
+                value={annVoiceEn}
+                onChange={(e) => setAnnVoiceEn(e.currentTarget.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+                           focus:border-slate-500 focus:outline-none"
+              >
+                <option value="">Standardstimme</option>
+                {voicesForLang(voices, "en").map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Geschwindigkeit */}
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-600">
+                Geschwindigkeit: {annRate.toFixed(1)}×
+              </span>
+              <input
+                type="range"
+                min={0.5}
+                max={1.5}
+                step={0.1}
+                value={annRate}
+                onChange={(e) => setAnnRate(Number(e.currentTarget.value))}
+                className="w-full"
+              />
+            </label>
+
+            {/* Gong */}
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={annGong}
+                onChange={(e) => setAnnGong(e.currentTarget.checked)}
+              />
+              Gong vor der Ansage
+            </label>
+
+            {/* Test */}
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() =>
+                  void playTestAnnouncement(annLang === "en" ? "en" : "de", {
+                    rate: annRate,
+                    voiceURI:
+                      (annLang === "en" ? annVoiceEn : annVoiceDe) || undefined,
+                    gong: annGong,
+                  })
+                }
+                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                           text-slate-700 transition-colors hover:bg-slate-200"
+              >
+                Test-Ansage abspielen
+              </button>
+              <p className="text-xs text-slate-500">
+                Vor dem Turnier einmal drücken – das schaltet die Tonausgabe
+                am Rechner frei.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Diagnose */}

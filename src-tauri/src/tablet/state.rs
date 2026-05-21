@@ -10,7 +10,7 @@ use std::sync::RwLock;
 
 use serde::Serialize;
 
-use crate::btp::model::{BtpMatch, BtpSnapshot, MatchStatus};
+use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchStatus};
 
 /// Akkustand eines Tablets. Liefern nur Android-/Chrome-Tablets – iPads
 /// (Safari) geben den Akkustand grundsätzlich nicht her.
@@ -43,10 +43,19 @@ struct CourtSession {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct CourtOverview {
     pub court: String,
+    /// BTP-Match-ID des aktuellen Spiels (0 = kein Match). Damit erkennt
+    /// die Oberfläche, wenn ein Feld ein neues Spiel bekommt (Sprachansage).
+    pub match_id: i64,
     /// Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match.
     pub match_name: String,
+    /// Disziplin des aktuellen Matches (für die Sprachansage).
+    pub discipline: Discipline,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
+    /// Nationalitäten von Team 1, parallel zu `team1` (leerer String,
+    /// wenn unbekannt) – Grundlage der automatischen DE/EN-Ansage.
+    pub team1_nationalities: Vec<String>,
+    pub team2_nationalities: Vec<String>,
     /// Aktueller Satzstand – vom Tablet, falls aktiv, sonst aus BTP.
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
@@ -365,8 +374,14 @@ impl TabletState {
                     (_, Some(mm)) => mm.sets.clone(),
                     _ => Vec::new(),
                 };
+                let nationalities = |team: &[crate::btp::model::BtpPlayer]| {
+                    team.iter()
+                        .map(|p| p.nationality.clone().unwrap_or_default())
+                        .collect::<Vec<String>>()
+                };
                 CourtOverview {
                     court: court.clone(),
+                    match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m
                         .map(|mm| {
                             format!("{} {}", mm.draw_name, mm.round_name)
@@ -374,12 +389,15 @@ impl TabletState {
                                 .to_string()
                         })
                         .unwrap_or_default(),
+                    discipline: m.map(|mm| mm.discipline).unwrap_or(Discipline::Unknown),
                     team1: m
                         .map(|mm| mm.team1.iter().map(|p| p.name.clone()).collect())
                         .unwrap_or_default(),
                     team2: m
                         .map(|mm| mm.team2.iter().map(|p| p.name.clone()).collect())
                         .unwrap_or_default(),
+                    team1_nationalities: m.map(|mm| nationalities(&mm.team1)).unwrap_or_default(),
+                    team2_nationalities: m.map(|mm| nationalities(&mm.team2)).unwrap_or_default(),
                     sets,
                     tablet_connected,
                     battery: session.and_then(|s| s.battery),
@@ -410,6 +428,7 @@ mod tests {
             draw_id: 1,
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
+            discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(id),
             team1: vec![player("Anna")],

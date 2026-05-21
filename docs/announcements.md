@@ -1,0 +1,88 @@
+# Sprachansagen für Feld-Aufrufe
+
+Wird in BTP ein Spiel auf ein Feld gezogen, spielt bts-light auf dem
+Turnier-PC eine gesprochene Ansage ab: **Gong → „Feld X" → Disziplin →
+Paarung → „Feld X"**. Deutsch oder Englisch, wählbare Stimmen,
+einstellbares Tempo. Eingeführt in v0.6.0.
+
+## Funktionsweise
+
+- **Technik:** Browser-Web-Speech-API (`speechSynthesis`) im WebView; der
+  Gong wird per Web Audio API synthetisiert. Geräte-lokal, kein externer
+  Dienst. Die Ansage spielt über die Lautsprecher des Turnier-PCs, auch
+  wenn das Fenster ins Tray minimiert ist.
+- **Auslöser:** Die immer eingehängte Komponente
+  [`MatchAnnouncer`](../src/components/MatchAnnouncer.tsx) pollt alle 2 s
+  `tablet_overview()` und merkt sich pro Feld die `match_id`. Der **erste
+  Poll ist die Baseline** — bereits laufende Spiele werden nicht
+  nachträglich angesagt. Danach löst jede neue `match_id` auf einem Feld
+  eine Ansage aus. Eine Match-ID wird im 5-s-Fenster nicht doppelt
+  angesagt.
+- **Engine:** [`src/io/announcer.ts`](../src/io/announcer.ts) — portiert
+  aus der Schwester-App badhub-tournament.
+
+## Disziplin
+
+Die Disziplin (Herren-/Dameneinzel, Herren-/Damendoppel, Mixed) kommt aus
+dem BTP-**Event**, nicht aus dem Draw-Namen. Auflösungskette im Parser
+([`btp/model.rs`](../src-tauri/src/btp/model.rs)):
+`Match.DrawID → Draw.EventID → Event{GameTypeID, GenderID}`.
+
+- `GameTypeID`: 1 = Einzel, 2 = Doppel.
+- `GenderID`: 1 = Herren, 2 = Damen, 3 = Mixed.
+
+Lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
+in der Ansage weggelassen.
+
+## Sprache: Deutsch / Englisch / Automatisch
+
+Einstellbar im Setup unter „Sprachansagen":
+
+- **Deutsch** / **Englisch** — feste Sprache.
+- **Automatisch** — Englisch, sobald **mindestens die Hälfte** der Spieler
+  auf dem Feld international ist, sonst Deutsch. International =
+  Nationalität gesetzt und ≠ `GER`. Praktisch: Einzel ab 1 von 2, Doppel
+  ab 2 von 4 ausländischen Spielern.
+
+## Feld-Bezeichnung
+
+Endet das BTP-Court-Label auf einer Zahl (`"1"`, `"Feld 2"`, `"Court 3"`),
+wird „Feld <Zahlwort>" gesprochen (Zahl als Wort, sonst spricht der
+Browser „Feld erste"). Bei frei benannten Feldern (`"Center Court"`) wird
+das Label wörtlich gesprochen.
+
+## Tonausgabe freischalten (WebView2)
+
+Windows-WebView2 startet die Tonausgabe erst nach einer Nutzergeste. Der
+**Test-Knopf** in den Einstellungen ist diese Geste; zusätzlich schaltet
+ein einmaliger Klick irgendwo im Fenster das Audio frei. Empfehlung: vor
+dem Turnier einmal die Test-Ansage drücken.
+
+## Einstellungen (`AppConfig.announce`)
+
+| Feld | Bedeutung |
+|---|---|
+| `enabled` | Ansagen an/aus (Default aus) |
+| `language_mode` | `de` · `en` · `auto` |
+| `voice_de` / `voice_en` | bevorzugte Stimme je Sprache (`voiceURI`), leer = Browser-Standard |
+| `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8) |
+| `gong` | Gong vor der Ansage (Default an) |
+
+## Bekannte Grenzen
+
+- Der 2-s-Poll kann ein extrem kurz belegtes und sofort wieder geräumtes
+  Feld verpassen — für reguläre Feld-Aufrufe unkritisch.
+- Verfügbare Stimmen hängen vom Windows-System ab; ist die gewählte
+  Stimme auf dem Rechner nicht vorhanden, nutzt der Browser seine
+  Standardstimme.
+
+## Beteiligte Dateien
+
+- `src-tauri/src/btp/model.rs` — `Discipline`, Event-Parsing.
+- `src-tauri/src/tablet/state.rs` — `CourtOverview` (`match_id`,
+  `discipline`, Nationalitäten).
+- `src-tauri/src/config.rs` — `AnnounceConfig`.
+- `src/io/announcer.ts` — Gong + Sprachsynthese.
+- `src/state/useAvailableVoices.ts` — System-Stimmen.
+- `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
+- `src/pages/SetupWizard.tsx` — Einstellungen.

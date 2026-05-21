@@ -3,13 +3,13 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-21, nach Release v0.5.0.
+> Stand: 2026-05-21, v0.6.0 (Sprachansagen) auf Branch `feat/sprachansagen`.
 
 ## Als Nächstes
 
-- **v0.5.0 im Turnierbetrieb testen** — Walkover nach Aufgabe, Heartbeat
-  und der Über-Dialog auf dem Windows-Turnierrechner. Beobachtungen
-  zurückspielen, bevor neue Features dazukommen.
+- **v0.6.0 (Sprachansagen) im Turnierbetrieb testen** — Branch-Build auf
+  dem Windows-Turnierrechner: Feld-Aufruf-Ansage, Disziplin, DE/EN-Auto.
+  Erst nach erfolgreichem Test nach `main` mergen und `v0.6.0` taggen.
 - **Repo-Umbenennung** → Anzeigename „badhub BTP controller", GitHub-Repo
   `badhub-btp-controller`. Wichtig: Tauri-`identifier` `de.badhub.btslight`
   und der Updater-Pfad `download/bts-light/` bleiben **stabil**, sonst

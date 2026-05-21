@@ -58,8 +58,53 @@ pub enum ConnectionMode {
     Cloud,
 }
 
+/// Sprachmodus der gesprochenen Feld-Ansagen.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AnnounceLanguageMode {
+    /// Immer Deutsch ansagen.
+    De,
+    /// Immer Englisch ansagen.
+    En,
+    /// Automatisch: Englisch, wenn mindestens die Hälfte der Spieler auf
+    /// dem Feld international ist (Nationalität gesetzt und ≠ `GER`).
+    #[default]
+    Auto,
+}
+
+/// Einstellungen für die gesprochene Ansage neu aufs Feld gezogener Spiele.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AnnounceConfig {
+    /// Sind Ansagen aktiv?
+    pub enabled: bool,
+    /// Sprachmodus (Deutsch / Englisch / Automatisch).
+    pub language_mode: AnnounceLanguageMode,
+    /// Bevorzugte deutsche Stimme (`voiceURI`); leer = Browser-Standard.
+    pub voice_de: String,
+    /// Bevorzugte englische Stimme (`voiceURI`); leer = Browser-Standard.
+    pub voice_en: String,
+    /// Sprech-Geschwindigkeit (sinnvoll 0,5–1,5).
+    pub rate: f64,
+    /// Gong vor der Ansage abspielen?
+    pub gong: bool,
+}
+
+impl Default for AnnounceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            language_mode: AnnounceLanguageMode::Auto,
+            voice_de: String::new(),
+            voice_en: String::new(),
+            rate: 0.8,
+            gong: true,
+        }
+    }
+}
+
 /// Gesamte App-Konfiguration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
@@ -76,6 +121,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub connection_mode: ConnectionMode,
+    /// Einstellungen der gesprochenen Feld-Ansagen. `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub announce: AnnounceConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -140,9 +189,37 @@ mod tests {
             upload_logs: true,
             install_id: "inst-abc123".to_string(),
             connection_mode: ConnectionMode::Cloud,
+            announce: AnnounceConfig {
+                enabled: true,
+                language_mode: AnnounceLanguageMode::En,
+                voice_de: "voice-de-1".to_string(),
+                voice_en: "voice-en-1".to_string(),
+                rate: 1.1,
+                gong: false,
+            },
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn config_without_announce_key_loads_with_defaults() {
+        // Ältere config.json kennt den announce-Block nicht – er muss mit
+        // den Default-Werten geladen werden, statt das Laden scheitern zu
+        // lassen.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(loaded.announce, AnnounceConfig::default());
+        assert!(!loaded.announce.enabled);
+        assert_eq!(loaded.announce.rate, 0.8);
+        assert!(loaded.announce.gong);
     }
 
     #[test]

@@ -8,6 +8,8 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::btp::xml::{self, Node};
 
 /// Spielzustand eines Matches.
@@ -46,6 +48,41 @@ impl MatchResult {
     }
 }
 
+/// Disziplin eines Matches, aus dem BTP-Event abgeleitet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Discipline {
+    /// Herreneinzel.
+    MensSingles,
+    /// Dameneinzel.
+    WomensSingles,
+    /// Herrendoppel.
+    MensDoubles,
+    /// Damendoppel.
+    WomensDoubles,
+    /// Gemischtes Doppel.
+    Mixed,
+    /// Nicht bestimmbar (Event fehlt oder unbekannte IDs).
+    #[default]
+    Unknown,
+}
+
+impl Discipline {
+    /// Leitet die Disziplin aus den BTP-Event-Feldern ab.
+    /// `GameTypeID`: 1 = Einzel, 2 = Doppel. `GenderID`: 1 = Herren,
+    /// 2 = Damen, 3 = Mixed.
+    fn from_event(game_type_id: i64, gender_id: i64) -> Discipline {
+        match (game_type_id, gender_id) {
+            (_, 3) => Discipline::Mixed,
+            (1, 1) => Discipline::MensSingles,
+            (1, 2) => Discipline::WomensSingles,
+            (2, 1) => Discipline::MensDoubles,
+            (2, 2) => Discipline::WomensDoubles,
+            _ => Discipline::Unknown,
+        }
+    }
+}
+
 /// Ein Spieler einer Paarung.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtpPlayer {
@@ -68,6 +105,8 @@ pub struct BtpMatch {
     pub planning_id: i64,
     /// Name der Auslosung, z. B. "HE".
     pub draw_name: String,
+    /// Disziplin des Matches (aus dem BTP-Event abgeleitet).
+    pub discipline: Discipline,
     /// Runden-/Spielbezeichnung, z. B. "G1".
     pub round_name: String,
     /// Spielnummer (BTP `MatchNr`), falls vergeben.
@@ -124,6 +163,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     let slots = slot_map(t);
     let courts = court_map(t);
     let draws = draw_map(t);
+    let disciplines = draw_discipline_map(t);
 
     // Court-Namen nach CourtID sortiert – das ergibt die BTP-Anlegereihenfolge.
     let mut court_pairs: Vec<(&i64, &String)> = courts.iter().collect();
@@ -132,7 +172,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
 
     Ok(BtpSnapshot {
         tournament_name: setting_str(t, 1001).unwrap_or_default(),
-        matches: parse_matches(t, &players, &entries, &slots, &courts, &draws),
+        matches: parse_matches(t, &players, &entries, &slots, &courts, &draws, &disciplines),
         courts: court_names,
     })
 }
@@ -220,6 +260,40 @@ fn draw_map(t: &[Node]) -> HashMap<i64, String> {
     id_name_map(t, "Draws")
 }
 
+/// DrawID → Disziplin. BTP führt die Disziplin am Event (`GameTypeID` +
+/// `GenderID`); jeder Draw verweist per `EventID` auf sein Event.
+fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
+    // EventID → Disziplin.
+    let mut events: HashMap<i64, Discipline> = HashMap::new();
+    if let Some(group) = xml::find(t, "Events") {
+        for e in group.children() {
+            if let Some(id) = child_int(e, "ID") {
+                let game = child_int(e, "GameTypeID").unwrap_or(0);
+                let gender = child_int(e, "GenderID").unwrap_or(0);
+                events.insert(id, Discipline::from_event(game, gender));
+            }
+        }
+    }
+    // DrawID → Disziplin (über die EventID des Draws).
+    let mut map = HashMap::new();
+    if let Some(group) = xml::find(t, "Draws") {
+        for d in group.children() {
+            if let (Some(draw_id), Some(event_id)) =
+                (child_int(d, "ID"), child_int(d, "EventID"))
+            {
+                map.insert(
+                    draw_id,
+                    events
+                        .get(&event_id)
+                        .copied()
+                        .unwrap_or(Discipline::Unknown),
+                );
+            }
+        }
+    }
+    map
+}
+
 /// Generische ID→Name-Tabelle für Container mit gleichförmigen Einträgen.
 fn id_name_map(t: &[Node], container: &str) -> HashMap<i64, String> {
     let mut map = HashMap::new();
@@ -236,6 +310,7 @@ fn id_name_map(t: &[Node], container: &str) -> HashMap<i64, String> {
 
 // --- Match-Parsing --------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn parse_matches(
     t: &[Node],
     players: &HashMap<i64, BtpPlayer>,
@@ -243,6 +318,7 @@ fn parse_matches(
     slots: &HashMap<(i64, i64), i64>,
     courts: &HashMap<i64, String>,
     draws: &HashMap<i64, String>,
+    disciplines: &HashMap<i64, Discipline>,
 ) -> Vec<BtpMatch> {
     let mut out = Vec::new();
     let Some(matches) = xml::find(t, "Matches") else {
@@ -276,6 +352,9 @@ fn parse_matches(
             draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
+            discipline: draw_id
+                .and_then(|id| disciplines.get(&id).copied())
+                .unwrap_or(Discipline::Unknown),
             round_name: child_str(m, "RoundName").unwrap_or_default().to_string(),
             match_num: child_int(m, "MatchNr").filter(|&n| n > 0),
             team1,
@@ -603,5 +682,82 @@ mod tests {
         let team1_name = |i: usize| snapshot.matches[i].team1[0].name.as_str();
         assert_eq!(team1_name(0), "Anna");
         assert_eq!(team1_name(1), "Hilde");
+    }
+
+    #[test]
+    fn discipline_resolves_over_draw_and_event() {
+        // Match → Draw 1 → Event 7 (GameTypeID 2, GenderID 3) → Mixed.
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![
+                    Node::group(
+                        "Events",
+                        vec![Node::group(
+                            "Event",
+                            vec![
+                                Node::integer("ID", 7),
+                                Node::integer("GameTypeID", 2),
+                                Node::integer("GenderID", 3),
+                            ],
+                        )],
+                    ),
+                    Node::group(
+                        "Draws",
+                        vec![Node::group(
+                            "Draw",
+                            vec![
+                                Node::integer("ID", 1),
+                                Node::integer("EventID", 7),
+                                Node::string("Name", "GD"),
+                            ],
+                        )],
+                    ),
+                    Node::group(
+                        "Matches",
+                        vec![Node::group(
+                            "Match",
+                            vec![
+                                Node::integer("ID", 5),
+                                Node::integer("DrawID", 1),
+                                Node::Item {
+                                    id: "IsMatch".to_string(),
+                                    value: Value::Bool(true),
+                                },
+                            ],
+                        )],
+                    ),
+                ],
+            )],
+        )];
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.matches[0].discipline, Discipline::Mixed);
+    }
+
+    #[test]
+    fn discipline_unknown_when_event_missing() {
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![Node::group(
+                    "Matches",
+                    vec![Node::group(
+                        "Match",
+                        vec![
+                            Node::integer("ID", 5),
+                            Node::integer("DrawID", 1),
+                            Node::Item {
+                                id: "IsMatch".to_string(),
+                                value: Value::Bool(true),
+                            },
+                        ],
+                    )],
+                )],
+            )],
+        )];
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.matches[0].discipline, Discipline::Unknown);
     }
 }

@@ -82,7 +82,7 @@ impl SyncEngine {
     /// der letzte Push länger als [`HEARTBEAT_AFTER`] zurückliegt.
     fn heartbeat_due(&self) -> bool {
         self.last_push_at
-            .map_or(true, |t| t.elapsed() >= HEARTBEAT_AFTER)
+            .is_none_or(|t| t.elapsed() >= HEARTBEAT_AFTER)
     }
 
     /// Stempelt beendete Matches: Beim ersten Erkennen eines Siegers wird
@@ -175,7 +175,7 @@ impl SyncEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::{BtpMatch, BtpPlayer, MatchResult, MatchStatus};
+    use crate::btp::model::{BtpMatch, BtpPlayer, Discipline, MatchResult, MatchStatus};
 
     fn snapshot() -> BtpSnapshot {
         BtpSnapshot {
@@ -186,6 +186,7 @@ mod tests {
                 draw_id: 1,
                 planning_id: 1001,
                 draw_name: "HE".to_string(),
+                discipline: Discipline::MensSingles,
                 round_name: "G1".to_string(),
                 match_num: Some(1),
                 team1: vec![BtpPlayer {

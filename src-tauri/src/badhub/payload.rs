@@ -224,7 +224,7 @@ pub fn build_tupdate(m: &BtpMatch, rid: u64) -> TupdateMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::BtpPlayer;
+    use crate::btp::model::{BtpPlayer, Discipline};
 
     /// Fester Bezugszeitpunkt für die Tests.
     const NOW: u64 = 1_700_000_000_000;
@@ -243,6 +243,7 @@ mod tests {
             draw_id: 1,
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
+            discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(id),
             team1: vec![player("Anna Müller", Some("08-001234"), Some("GER"))],

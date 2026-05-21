@@ -1,0 +1,262 @@
+// Gesprochene Feld-Ansage beim Aufruf eines Spiels auf einen Court.
+//
+// Browser-nativ: Web Audio API für den Gong + SpeechSynthesisUtterance fürs
+// TTS. Keine externen Dienste, keine Daten verlassen das Gerät. Portiert aus
+// badhub-tournament (src/io/announcer.ts) und an das bts-light-Ansageformat
+// angepasst: Gong → Feld → Disziplin → Paarung → Feld.
+//
+// WebView2 (Windows) startet den AudioContext oft erst nach einer
+// Nutzergeste — der Test-Knopf in den Einstellungen und ein einmaliger
+// globaler Klick-Listener schalten das Audio für die Session frei.
+
+import type { Discipline } from "../types";
+
+export type AnnounceLang = "de" | "en";
+
+export interface AnnounceMatchInput {
+  /** Court-Label wie BTP es liefert, z. B. "1", "Feld 2", "Center Court". */
+  courtLabel: string;
+  /** Disziplin des Matches. */
+  discipline: Discipline;
+  /** Spieler-Namen Team A (1 bei Einzel, 2 bei Doppel/Mixed). */
+  teamANames: string[];
+  /** Spieler-Namen Team B. */
+  teamBNames: string[];
+}
+
+export interface AnnounceOptions {
+  /** Sprech-Geschwindigkeit; fällt sonst auf DEFAULT_SPEECH_RATE zurück. */
+  rate?: number;
+  /** Voice-URI der gewünschten Stimme; sonst OS-Default für die Sprache. */
+  voiceURI?: string;
+  /** Gong vor der Ansage abspielen? Default true. */
+  gong?: boolean;
+}
+
+// Synthesizer-Gong über Web Audio. Zwei kurze Sinus-Töne (hoch → tiefer) mit
+// kleinem Decay, ähnlich einem Hotel-Gong. Liefert eine Promise, die
+// resolved, wenn der Gong durchgespielt ist — damit die Sprache erst danach
+// startet.
+async function playGong(ctx: AudioContext): Promise<void> {
+  const now = ctx.currentTime;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.4, now + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+  gain.connect(ctx.destination);
+
+  const o1 = ctx.createOscillator();
+  o1.type = "sine";
+  o1.frequency.value = 880; // A5
+  o1.connect(gain);
+  o1.start(now);
+  o1.stop(now + 0.6);
+
+  const o2 = ctx.createOscillator();
+  o2.type = "sine";
+  o2.frequency.value = 587.33; // D5
+  o2.connect(gain);
+  o2.start(now + 0.18);
+  o2.stop(now + 1.1);
+
+  // Erst auflösen, wenn die Gain-Hülle ausgeklungen ist (~1,2 s) – sonst
+  // setzt die Sprachausgabe noch in den Gong-Nachklang ein.
+  return new Promise((resolve) => {
+    setTimeout(resolve, 1250);
+  });
+}
+
+// Reusable AudioContext — Browser-Limit von 1–6 contexts pro Tab; einer reicht.
+let cachedCtx: AudioContext | null = null;
+function getAudioContext(): AudioContext {
+  if (cachedCtx == null) {
+    cachedCtx = new (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext)();
+  }
+  return cachedCtx;
+}
+
+// Schaltet das Audio frei (WebView2/Browser starten den AudioContext nur
+// nach einer Nutzergeste). Bei jedem echten Klick im Fenster aufrufbar.
+export function unlockAudio(): void {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") void ctx.resume();
+  } catch {
+    // AudioContext nicht verfügbar – ignorieren.
+  }
+}
+
+// Sprech-Geschwindigkeit. Browser-Default ist 1.0 (oft zu schnell für eine
+// Hallen-Durchsage). 0.8 ist ein guter Mittelweg.
+export const DEFAULT_SPEECH_RATE = 0.8;
+
+function clampRate(rate: number | undefined): number {
+  if (rate == null || !Number.isFinite(rate)) return DEFAULT_SPEECH_RATE;
+  // Unter 0.5 wird es unverständlich tieftönend, über 1.5 hetzt es.
+  if (rate < 0.5) return 0.5;
+  if (rate > 1.5) return 1.5;
+  return rate;
+}
+
+// Einzelne Utterance in die Queue stellen. Mehrere hintereinander ergeben
+// durch die Browser-Atempause natürliche Sprechpausen.
+function queueUtterance(
+  text: string,
+  lang: AnnounceLang,
+  rate: number,
+  voiceURI?: string,
+): void {
+  if (typeof window.speechSynthesis === "undefined" || !text.trim()) return;
+  const u = new SpeechSynthesisUtterance(text.trim());
+  u.lang = lang === "de" ? "de-DE" : "en-US";
+  u.rate = clampRate(rate);
+  u.pitch = 1;
+  u.volume = 1;
+  if (voiceURI) {
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find((v) => v.voiceURI === voiceURI);
+    if (match) u.voice = match;
+  }
+  window.speechSynthesis.speak(u);
+}
+
+// Browser-TTS spricht "Feld 1" gern als "Feld erste" (Ordinal-Heuristik).
+// Kleine Zahlen daher als Wort ausschreiben.
+const NUMBER_WORDS_DE = [
+  "", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht",
+  "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn",
+  "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig",
+];
+const NUMBER_WORDS_EN = [
+  "", "one", "two", "three", "four", "five", "six", "seven", "eight",
+  "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+];
+
+function numberWord(n: number, lang: AnnounceLang): string {
+  if (!Number.isFinite(n) || n < 1) return String(n);
+  const idx = Math.floor(n);
+  const list = lang === "de" ? NUMBER_WORDS_DE : NUMBER_WORDS_EN;
+  return idx < list.length ? list[idx] : String(idx);
+}
+
+// BTP-Court-Labels sind frei benennbar ("1", "Feld 2", "Center Court").
+// Endet das Label auf einer Zahl, sprechen wir "Feld <Zahlwort>"; sonst das
+// Label wörtlich (kein "Feld Center Court").
+function resolveCourtPhrase(label: string, lang: AnnounceLang): string {
+  const trimmed = label.trim();
+  const m = trimmed.match(/(\d{1,3})\s*$/);
+  if (m) {
+    const word = numberWord(Number(m[1]), lang);
+    return lang === "de" ? `Feld ${word}` : `Court ${word}`;
+  }
+  return trimmed;
+}
+
+function disciplineWord(d: Discipline, lang: AnnounceLang): string {
+  const words: Record<AnnounceLang, Record<Discipline, string>> = {
+    de: {
+      mens_singles: "Herreneinzel",
+      womens_singles: "Dameneinzel",
+      mens_doubles: "Herrendoppel",
+      womens_doubles: "Damendoppel",
+      mixed: "Mixed",
+      unknown: "",
+    },
+    en: {
+      mens_singles: "Men's Singles",
+      womens_singles: "Women's Singles",
+      mens_doubles: "Men's Doubles",
+      womens_doubles: "Women's Doubles",
+      mixed: "Mixed",
+      unknown: "",
+    },
+  };
+  return words[lang][d] ?? "";
+}
+
+function joinNames(names: string[], lang: AnnounceLang): string {
+  const clean = names.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (clean.length === 0) return "";
+  if (clean.length === 1) return clean[0];
+  const connector = lang === "de" ? " und " : " and ";
+  return clean.slice(0, -1).join(", ") + connector + clean[clean.length - 1];
+}
+
+// Baut die Ansage als Liste kurzer Segmente: Gong → Feld → Disziplin →
+// Paarung → Feld. Jedes Segment ist eine eigene Utterance — Browser-TTS
+// spricht kurze Stücke deutlich klarer und macht natürliche Pausen.
+export function buildAnnouncementSegments(
+  input: AnnounceMatchInput,
+  lang: AnnounceLang,
+): string[] {
+  const court = resolveCourtPhrase(input.courtLabel, lang);
+  const teamA = joinNames(input.teamANames, lang);
+  const teamB = joinNames(input.teamBNames, lang);
+  const versus = lang === "de" ? "gegen" : "versus";
+  const disc = disciplineWord(input.discipline, lang);
+
+  const segments: string[] = [`${court}.`];
+  if (disc) segments.push(`${disc}.`);
+  if (teamA) segments.push(`${teamA}.`);
+  if (teamB) segments.push(`${versus} ${teamB}.`);
+  segments.push(`${court}.`);
+  return segments;
+}
+
+// Spielt Gong + spricht die Ansage. Wirft NICHT bei fehlendem
+// SpeechSynthesis-Support, läuft dann nur als Gong durch.
+export async function playAnnouncement(
+  input: AnnounceMatchInput,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): Promise<void> {
+  if (opts.gong !== false) {
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+        } catch {
+          // ignore
+        }
+      }
+      await playGong(ctx);
+    } catch {
+      // Gong fehlgeschlagen → trotzdem versuchen zu sprechen.
+    }
+  }
+
+  if (typeof window.speechSynthesis === "undefined") return;
+  const rate = clampRate(opts.rate);
+  for (const segment of buildAnnouncementSegments(input, lang)) {
+    queueUtterance(segment, lang, rate, opts.voiceURI);
+  }
+}
+
+// Test-Ansage für die Einstellungen — feste Beispieldaten, damit der Klang
+// vor dem Turnier prüfbar ist (und der Klick das WebView2-Audio entsperrt).
+export async function playTestAnnouncement(
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): Promise<void> {
+  await playAnnouncement(
+    {
+      courtLabel: "2",
+      discipline: "mens_doubles",
+      teamANames: ["Anna Müller", "Bert Klein"],
+      teamBNames: ["Clara Wolf", "Dirk Stein"],
+    },
+    lang,
+    opts,
+  );
+}
+
+// Stoppt alle laufenden Ansagen — z. B. wenn die Ansagen abgeschaltet werden.
+export function cancelAnnouncements(): void {
+  if (typeof window.speechSynthesis !== "undefined") {
+    window.speechSynthesis.cancel();
+  }
+}
