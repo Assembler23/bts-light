@@ -115,6 +115,13 @@ pub struct ResultBody {
     #[serde(rename = "courtLabel")]
     pub court_label: String,
     pub sets: Vec<SetAb>,
+    /// Aufgabe (Retired): das Match wurde abgebrochen. Der Sieger ist dann
+    /// nicht aus den Sätzen ableitbar, sondern steht in `winner`.
+    #[serde(default)]
+    pub retired: bool,
+    /// Sieger-Team (1 oder 2) bei Aufgabe; sonst aus den Sätzen bestimmt.
+    #[serde(default)]
+    pub winner: Option<i64>,
 }
 
 /// Antwort auf eine Ergebnis-Übermittlung.
@@ -205,6 +212,10 @@ pub enum RelayFrame {
         #[serde(rename = "matchId")]
         match_id: i64,
         sets: Vec<SetAb>,
+        #[serde(default)]
+        retired: bool,
+        #[serde(default)]
+        winner: Option<i64>,
     },
     /// Akkustand eines Tablets.
     Battery {
@@ -334,6 +345,16 @@ mod tests {
             court_label: "Feld 1".into(),
             match_id: 18,
             sets: vec![SetAb { a: 21, b: 0 }, SetAb { a: 0, b: 21 }],
+            retired: false,
+            winner: None,
+        });
+        roundtrip(&RelayFrame::Result {
+            req_id: 10,
+            court_label: "Feld 2".into(),
+            match_id: 19,
+            sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 5, b: 5 }],
+            retired: true,
+            winner: Some(1),
         });
     }
 

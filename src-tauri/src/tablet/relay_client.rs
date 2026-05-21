@@ -137,11 +137,15 @@ async fn handle_frame(
             court_label,
             match_id,
             sets,
+            retired,
+            winner,
         } => {
             let body = ResultBody {
                 match_id,
                 court_label,
                 sets,
+                retired,
+                winner,
             };
             let resp = process_result(ctx, &body).await;
             let _ = tx.send(text(&HostFrame::ResultAck {

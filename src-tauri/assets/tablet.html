@@ -457,6 +457,15 @@
 <div class="match-finished-overlay" id="finished-overlay">
   <div class="winner-banner" id="winner-banner"></div>
   <div class="set-summary" id="set-summary"></div>
+  <div class="retire-pick" id="retire-pick" style="display:none">
+    <div style="font-size:.95rem;opacity:.7;margin-bottom:.5rem">
+      Aufgabe — wer gewinnt das Match?
+    </div>
+    <div class="options">
+      <div class="opt team-a" id="retire-winner-a"></div>
+      <div class="opt team-b" id="retire-winner-b"></div>
+    </div>
+  </div>
   <div class="submit-status" id="submit-status"></div>
   <button class="primary" id="submit-btn">Ergebnis übermitteln</button>
   <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
@@ -467,6 +476,9 @@
   <div class="break-title" id="break-title"></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
   <button class="primary" id="break-skip">Weiterspielen</button>
+  <button class="danger" id="break-abort" style="display:none">
+    Spiel abbrechen · Aufgabe
+  </button>
   <div class="break-hint">
     Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — sonst geht
     es nach Ablauf der Zeit automatisch weiter.
@@ -570,7 +582,10 @@ const STATE = {
   submittedOk: false,
   // Noch nicht bestätigtes Endergebnis – wird im Hintergrund wiederholt,
   // bis der Server ok:true meldet. { matchId, courtLabel, sets } | null.
-  pendingResult: /** @type {null | {matchId:number, courtLabel:string, sets:object[]}} */ (null),
+  pendingResult: /** @type {null | object} */ (null),
+  // Aufgabe (Retired): Match wurde abgebrochen, Sieger manuell gewählt.
+  retired: /** @type {boolean} */ (false),
+  retiredWinner: /** @type {'a'|'b'|null} */ (null),
 
   // Welches der ursprünglichen Teams ('a' / 'b') steht auf welcher Seite ('left' / 'right')
   teamOnSide: /** @type {{a:'left'|'right', b:'left'|'right'} | null} */ (null),
@@ -653,6 +668,10 @@ const els = {
   occupiedOverlay: document.getElementById('occupied-overlay'),
   takeoverBtn: document.getElementById('takeover-btn'),
   lockedOverlay: document.getElementById('locked-overlay'),
+  breakAbort: document.getElementById('break-abort'),
+  retirePick: document.getElementById('retire-pick'),
+  retireWinnerA: document.getElementById('retire-winner-a'),
+  retireWinnerB: document.getElementById('retire-winner-b'),
 };
 
 // ─────────────────────────────── WebSocket ────────────────────────────
@@ -858,7 +877,27 @@ function renderBreak() {
       ? 'Pause bei 11 Punkten'
       : 'Satzpause';
   }
+  // „Spiel abbrechen" nur in der Behandlungspause anbieten.
+  els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
   els.breakOverlay.classList.add('visible');
+}
+
+// „Spiel abbrechen" in der Behandlungspause → Match per Aufgabe beenden.
+// Der laufende Satz wird als Teilstand übernommen, der Sieger danach im
+// Match-Ende-Overlay manuell gewählt.
+function abortMatchRetired() {
+  if (!STATE.match) return;
+  if (STATE.pause) endBreak(); // Behandlungspause + Verletzungs-Meldung beenden
+  if (STATE.currentSet.left > 0 || STATE.currentSet.right > 0) {
+    STATE.setsCompleted.push({ ...STATE.currentSet });
+    STATE.currentSet = { left: 0, right: 0 };
+  }
+  STATE.finished = true;
+  STATE.retired = true;
+  STATE.retiredWinner = null;
+  tlog('info', 'match_retired');
+  persistState();
+  render();
 }
 
 // ─────────────────────── Meldungen an die Turnierleitung ───────────────
@@ -952,6 +991,8 @@ function persistState() {
       startedAt: STATE.startedAt,
       alertInjury: STATE.alertInjury,
       alertOfficial: STATE.alertOfficial,
+      retired: STATE.retired,
+      retiredWinner: STATE.retiredWinner,
       // history wird bewusst NICHT persistiert — Undo nach Reload ist nicht
       // unterstützt, vermeidet ein riesiges Storage-Object.
     }));
@@ -995,6 +1036,8 @@ function restorePersistedState() {
     STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
     STATE.alertInjury = !!p.alertInjury;
     STATE.alertOfficial = !!p.alertOfficial;
+    STATE.retired = !!p.retired;
+    STATE.retiredWinner = p.retiredWinner ?? null;
     return true;
   } catch { return false; }
 }
@@ -1022,6 +1065,8 @@ function loadMatch(match) {
   STATE.startedAt = null;
   STATE.alertInjury = false;
   STATE.alertOfficial = false;
+  STATE.retired = false;
+  STATE.retiredWinner = null;
   sendAlert();
   persistState();
   render();
@@ -1057,6 +1102,8 @@ function clearMatch() {
   STATE.startedAt = null;
   STATE.alertInjury = false;
   STATE.alertOfficial = false;
+  STATE.retired = false;
+  STATE.retiredWinner = null;
   sendAlert();
   clearPersistedState();
   render();
@@ -1260,6 +1307,8 @@ function reopen() {
   }
   STATE.submittedOk = false;
   STATE.pendingResult = null;
+  STATE.retired = false;
+  STATE.retiredWinner = null;
   if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
   persistState();
   render();
@@ -1275,14 +1324,20 @@ const RESULT_RETRY_MS = 5000;
 
 function submit() {
   if (!STATE.match || !STATE.teamOnSide || STATE.pendingResult) return;
+  if (STATE.retired && !STATE.retiredWinner) return; // Sieger muss feststehen
   // Sets in Team-A/B-Koordinaten umrechnen (Director-DB kennt nur A/B).
   const sideOfA = STATE.teamOnSide.a;
   const sets = STATE.setsCompleted.map(s => sideOfA === 'left'
     ? { a: s.left, b: s.right }
     : { a: s.right, b: s.left });
-  STATE.pendingResult = { matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets };
+  const body = { matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets };
+  if (STATE.retired) {
+    body.retired = true;
+    body.winner = STATE.retiredWinner === 'a' ? 1 : 2;
+  }
+  STATE.pendingResult = body;
   STATE.submittedOk = false;
-  tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets });
+  tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired });
   persistState();
   render();
   trySubmitPending();
@@ -1503,15 +1558,29 @@ function render() {
   els.finishBtn.disabled = STATE.finished || STATE.setsCompleted.length === 0 || STATE.setup !== 'playing';
 
   if (STATE.finished) {
-    const winnerSide = matchWinnerSide();
-    let teamLabel = '— manueller Abschluss —';
-    if (winnerSide && STATE.teamOnSide && STATE.match) {
-      const winnerTeamKey = STATE.teamOnSide.a === winnerSide ? 'a' : 'b';
-      teamLabel = STATE.match[winnerTeamKey === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ');
+    const teamName = (key) => STATE.match
+      ? STATE.match[key === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ')
+      : '';
+    if (STATE.retired) {
+      els.winnerBanner.textContent = STATE.retiredWinner
+        ? `🏆 ${teamName(STATE.retiredWinner)} · Aufgabe`
+        : 'Spiel abgebrochen — Aufgabe';
+      els.retirePick.style.display = STATE.retiredWinner ? 'none' : '';
+      els.retireWinnerA.textContent = teamName('a');
+      els.retireWinnerB.textContent = teamName('b');
+    } else {
+      const winnerSide = matchWinnerSide();
+      let teamLabel = '— manueller Abschluss —';
+      if (winnerSide && STATE.teamOnSide && STATE.match) {
+        const winnerTeamKey = STATE.teamOnSide.a === winnerSide ? 'a' : 'b';
+        teamLabel = teamName(winnerTeamKey);
+      }
+      els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
+      els.retirePick.style.display = 'none';
     }
-    els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
     els.setSummary.textContent = STATE.setsCompleted.map(s => `${s.left}:${s.right}`).join(' · ');
     els.finishedOverlay.classList.add('visible');
+    const needWinner = STATE.retired && !STATE.retiredWinner;
     if (STATE.submittedOk) {
       els.submitBtn.disabled = true;
       els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
@@ -1519,11 +1588,12 @@ function render() {
       els.submitBtn.disabled = true;
       els.submitStatus.textContent = 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.';
     } else {
-      els.submitBtn.disabled = false;
-      els.submitStatus.textContent = '';
+      els.submitBtn.disabled = needWinner;
+      els.submitStatus.textContent = needWinner ? 'Bitte zuerst den Sieger wählen.' : '';
     }
   } else {
     els.finishedOverlay.classList.remove('visible');
+    els.retirePick.style.display = 'none';
   }
 }
 
@@ -1540,6 +1610,9 @@ els.injuryBtn.addEventListener('click', startInjury);
 els.megaphoneBtn.addEventListener('click', openMegaphoneModal);
 els.megaphoneConfirm.addEventListener('click', confirmMegaphone);
 els.megaphoneCancel.addEventListener('click', () => els.megaphoneModal.classList.remove('visible'));
+els.breakAbort.addEventListener('click', abortMatchRetired);
+els.retireWinnerA.addEventListener('click', () => { STATE.retiredWinner = 'a'; persistState(); render(); });
+els.retireWinnerB.addEventListener('click', () => { STATE.retiredWinner = 'b'; persistState(); render(); });
 els.takeoverBtn.addEventListener('click', () => {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'take_over' }));
   tlog('info', 'take_over');

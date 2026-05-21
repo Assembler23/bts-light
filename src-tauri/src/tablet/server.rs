@@ -186,7 +186,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     }
 
     let sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
-    if sets.is_empty() || sets.len() > 9 {
+    if sets.len() > 9 {
         return ResultResponse::err("Ungültige Satzanzahl.");
     }
     if sets
@@ -195,18 +195,33 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     {
         return ResultResponse::err("Ungültiger Satzstand.");
     }
-    let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
-    let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
-    if team1_sets == team2_sets {
-        return ResultResponse::err("Unentschiedener Satzstand – kein Sieger ermittelbar.");
-    }
+    // Sieger + ScoreStatus: bei Aufgabe (retired) ist der Sieger explizit
+    // angegeben, sonst wird er aus den Sätzen abgeleitet.
+    let (team1_won, score_status) = if body.retired {
+        match body.winner {
+            Some(1) => (true, 2),
+            Some(2) => (false, 2),
+            _ => return ResultResponse::err("Aufgabe ohne gültigen Sieger."),
+        }
+    } else {
+        if sets.is_empty() {
+            return ResultResponse::err("Ungültige Satzanzahl.");
+        }
+        let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
+        let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
+        if team1_sets == team2_sets {
+            return ResultResponse::err("Unentschiedener Satzstand – kein Sieger ermittelbar.");
+        }
+        (team1_sets > team2_sets, 0)
+    };
     let update = proto::MatchUpdate {
         btp_match_id: m.id,
         draw_id: m.draw_id,
         planning_id: m.planning_id,
         sets,
-        team1_won: team1_sets > team2_sets,
+        team1_won,
         duration_mins: 0,
+        score_status,
     };
 
     tracing::info!(

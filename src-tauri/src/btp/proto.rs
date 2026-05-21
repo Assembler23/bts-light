@@ -82,6 +82,8 @@ pub struct MatchUpdate {
     pub team1_won: bool,
     /// Spieldauer in Minuten; 0, falls unbekannt.
     pub duration_mins: i64,
+    /// BTP `ScoreStatus`: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
+    pub score_status: i64,
 }
 
 /// Fertige Wire-Bytes für einen `SENDUPDATE`-Request – schreibt ein
@@ -105,9 +107,8 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
             Node::integer("ID", update.btp_match_id),
             Node::group("Sets", sets),
             Node::integer("Winner", if update.team1_won { 1 } else { 2 }),
-            // ScoreStatus 0 = regulär ausgespielt. Walkover/Aufgabe wären
-            // 1/2/3 – vorerst nicht unterstützt.
-            Node::integer("ScoreStatus", 0),
+            // ScoreStatus: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
+            Node::integer("ScoreStatus", update.score_status),
             Node::integer("Duration", update.duration_mins),
             Node::integer("Status", 0),
             Node::integer("DrawID", update.draw_id),
@@ -294,6 +295,7 @@ mod tests {
             sets: vec![(21, 19), (21, 15)],
             team1_won: true,
             duration_mins: 28,
+            score_status: 0,
         }
     }
 

@@ -252,6 +252,8 @@ async fn result(
             court_label: body.court_label.clone(),
             match_id: body.match_id,
             sets: body.sets.clone(),
+            retired: body.retired,
+            winner: body.winner,
         };
         if host.send(text(&frame)).is_err() {
             namespace.pending.remove(&req_id);

@@ -80,13 +80,22 @@ In der Kopfzeile rechts gibt es zwei Melde-Buttons:
 
 - **✚ Verletzung/Behandlung** – unterbricht das Spiel (Behandlungspause
   ohne Countdown, „Weiterspielen" hebt sie auf). Das Feld wird in der
-  bts-light-Felder-Übersicht rot hervorgehoben.
+  bts-light-Felder-Übersicht rot hervorgehoben. In der Behandlungspause
+  gibt es zusätzlich **„Spiel abbrechen"** (siehe unten).
 - **📣 Turnierleitung rufen** – Popup (deutsch/englisch) mit Bestätigung;
   meldet, dass ein Offizieller ans Feld soll.
 
 Beide Meldungen erscheinen zusätzlich in einer **app-weiten Leiste** in
 bts-light – auf jeder Seite, mit Feldnummer. Aufgelöst werden sie am
 Tablet (Behandlung „Weiterspielen" bzw. Meldung zurücknehmen).
+
+## Spiel abbrechen (Aufgabe)
+
+Gibt ein:e Spieler:in verletzungsbedingt auf, beendet **„Spiel abbrechen"**
+in der Behandlungspause das Match. Der laufende Satz wird als Teilstand
+übernommen (z. B. 21:10, dann 5:5), danach wählt der Schiedsrichter im
+Match-Ende-Overlay manuell den Sieger. Das Ergebnis geht mit dem Status
+**Aufgabe** (`ScoreStatus = 2`, „retired") nach BTP.
 
 ## Tablet-Übernahme
 
