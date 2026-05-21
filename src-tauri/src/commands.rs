@@ -350,11 +350,15 @@ pub fn open_live_view(
 }
 
 /// Öffnet eine externe `https`-URL im Standardbrowser – für die
-/// Mitwirkenden-Links im Über-Dialog.
+/// Mitwirkenden-Links im Über-Dialog. Erlaubt nur saubere `https`-URLs
+/// (Schema-Prefix, keine Steuerzeichen/Leerzeichen), damit kein
+/// präparierter String an die OS-Shell durchgereicht wird.
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    if !url.starts_with("https://") {
-        return Err("Nur https-Links sind erlaubt.".to_string());
+    let is_clean_https = url.starts_with("https://")
+        && !url.contains(|c: char| c.is_control() || c == ' ');
+    if !is_clean_https {
+        return Err("Nur reguläre https-Links sind erlaubt.".to_string());
     }
     app.opener()
         .open_url(url, None::<String>)
