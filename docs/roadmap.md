@@ -27,6 +27,13 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   `softprops/action-gh-release@v2`) — vor dem erzwungenen Node-24-Umstieg
   (ab 2026-06-02) aktualisieren. Außerdem leitet GitHub `windows-latest`
   ab 2026-06-15 auf `windows-2025` um — Build dort gegenprüfen.
+- **Changelog pro Version sichtbar machen.** [`docs/changelog.md`](changelog.md)
+  pflegt die Versionshistorie bereits, ist aber nirgends für Nutzer
+  sichtbar — das Auto-Update zeigt aktuell nur „BTS Light X.Y.Z". Ziel:
+  den Changelog-Eintrag der jeweiligen Version in die Update-Meldung
+  (`latest.json` → `notes`) und in die GitHub-Release-Notes übernehmen,
+  optional ein „Was ist neu"-Hinweis in der App. So sieht man, was sich
+  von Version zu Version geändert hat.
 
 ## Feature-Wünsche
 
