@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { loadConfig, saveConfig } from "./api";
 import { AlertBanner } from "./components/AlertBanner";
 import { Footer } from "./components/Footer";
+import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { WalkoverPanel } from "./components/WalkoverPanel";
 import { Dashboard } from "./pages/Dashboard";
@@ -22,6 +23,14 @@ function defaultConfig(): AppConfig {
     upload_logs: false,
     install_id: "",
     connection_mode: "lan",
+    announce: {
+      enabled: false,
+      language_mode: "auto",
+      voice_de: "",
+      voice_en: "",
+      rate: 0.8,
+      gong: true,
+    },
   };
 }
 
@@ -85,6 +94,7 @@ function App() {
         <div className="min-h-0 flex-1 overflow-auto">{renderView()}</div>
         <Footer />
         <WalkoverPanel />
+        <MatchAnnouncer announce={config.announce} />
       </div>
     </UpdateProvider>
   );

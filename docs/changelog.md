@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.6.0
+
+- **Sprachansagen für Feld-Aufrufe**: Wird in BTP ein Spiel auf ein Feld
+  gezogen, sagt bts-light es über die PC-Lautsprecher an – Gong, Feld,
+  Disziplin (Herren-/Dameneinzel, Herren-/Damendoppel, Mixed) und die
+  Paarung. Deutsch, Englisch oder automatisch (Englisch, wenn mindestens
+  die Hälfte der Spieler international ist); Stimmen und Tempo einstellbar.
+  Details: [announcements.md](announcements.md).
+
 ## v0.5.0
 
 - **Kampflose Wertung nach Aufgabe**: Gibt eine Mannschaft während eines

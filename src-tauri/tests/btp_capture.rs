@@ -3,7 +3,7 @@
 //! Die Fixtures stammen aus einem realen BTP (Test-Turnier "Test BTS Light"),
 //! aufgezeichnet mit `tools/capture-btp.ps1`.
 
-use bts_light_lib::btp::model::{self, MatchStatus};
+use bts_light_lib::btp::model::{self, Discipline, MatchStatus};
 use bts_light_lib::btp::proto;
 use bts_light_lib::btp::xml;
 
@@ -73,6 +73,10 @@ fn real_tournament_capture_parses_to_snapshot() {
     assert_eq!(on_court.court.as_deref(), Some("1"));
     assert_eq!(names(&on_court.team1), ["Anne"]);
     assert_eq!(names(&on_court.team2), ["Hilde"]);
+
+    // Disziplin aus dem BTP-Event abgeleitet: das Test-Turnier ist ein
+    // Herreneinzel (Event GameTypeID=1, GenderID=1).
+    assert_eq!(on_court.discipline, Discipline::MensSingles);
 
     // Gesamtverteilung der Zustände.
     let count = |s: MatchStatus| snapshot.matches.iter().filter(|m| m.status == s).count();

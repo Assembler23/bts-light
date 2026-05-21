@@ -151,16 +151,21 @@ zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
-`NACHNAME Vorname`), `Country` (Nationalität).
+`NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w).
 
 **Court:** `ID`, `Name`, `MatchID`, `SubMatchID`.
 
 **Official:** `ID`, `Name`, `FirstName` (Schreibweise weicht von Player ab),
 `Country`.
 
-**Event:** `ID`, `Name`, `GameTypeID` (1 = Einzel, 2 = Doppel).
+**Event:** `ID`, `Name`, `GameTypeID` (1 = Einzel, 2 = Doppel),
+`GenderID` (1 = Herren, 2 = Damen, 3 = Mixed).
 **Draw:** `ID`, `Name`, `EventID`. **Entry:** `ID`, `Player1ID`, `Player2ID`.
 **Team:** `ID`, `Name`.
+
+Die **Disziplin** eines Matches ergibt sich aus dem Event seines Draws:
+`Match.DrawID → Draw.EventID → Event{GameTypeID, GenderID}`. Der Draw-Name
+allein (z. B. „Gruppe A") trägt sie nicht.
 
 ## Score
 

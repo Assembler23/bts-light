@@ -16,6 +16,25 @@ export interface BadhubConfig {
 /** Verbindungsart für die Schiedsrichter-Tablets. */
 export type ConnectionMode = "lan" | "cloud";
 
+/** Sprachmodus der Feld-Ansagen (Rust: config::AnnounceLanguageMode). */
+export type AnnounceLanguageMode = "de" | "en" | "auto";
+
+/** Einstellungen der gesprochenen Feld-Ansagen (Rust: config::AnnounceConfig). */
+export interface AnnounceConfig {
+  /** Ansagen aktiv? */
+  enabled: boolean;
+  /** Deutsch / Englisch / Automatisch. */
+  language_mode: AnnounceLanguageMode;
+  /** Bevorzugte deutsche Stimme (voiceURI); leer = Browser-Standard. */
+  voice_de: string;
+  /** Bevorzugte englische Stimme (voiceURI); leer = Browser-Standard. */
+  voice_en: string;
+  /** Sprech-Geschwindigkeit (0,5–1,5). */
+  rate: number;
+  /** Gong vor der Ansage abspielen? */
+  gong: boolean;
+}
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
@@ -25,6 +44,8 @@ export interface AppConfig {
   install_id: string;
   /** Verbindungsart für die Tablets: LAN (lokal) oder Cloud (über badhub.de). */
   connection_mode: ConnectionMode;
+  /** Einstellungen der gesprochenen Feld-Ansagen. */
+  announce: AnnounceConfig;
 }
 
 export interface SyncStatus {
@@ -35,13 +56,29 @@ export interface SyncStatus {
   updated_at_ms: number;
 }
 
+/** Disziplin eines Matches (Rust: btp::model::Discipline). */
+export type Discipline =
+  | "mens_singles"
+  | "womens_singles"
+  | "mens_doubles"
+  | "womens_doubles"
+  | "mixed"
+  | "unknown";
+
 /** Eine Court-Zeile der Felder-Übersicht (Rust: tablet::state::CourtOverview). */
 export interface CourtOverview {
   court: string;
+  /** BTP-Match-ID des aktuellen Spiels (0 = kein Match). */
+  match_id: number;
   /** Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match. */
   match_name: string;
+  /** Disziplin des aktuellen Matches. */
+  discipline: Discipline;
   team1: string[];
   team2: string[];
+  /** Nationalitäten parallel zu team1 (leerer String = unbekannt). */
+  team1_nationalities: string[];
+  team2_nationalities: string[];
   /** Satzstand als [Team1, Team2]-Paare. */
   sets: [number, number][];
   tablet_connected: boolean;

@@ -66,7 +66,7 @@ fn court_assignment(snapshot: &BtpSnapshot) -> BTreeMap<i64, Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::{BtpPlayer, MatchResult};
+    use crate::btp::model::{BtpPlayer, Discipline, MatchResult};
 
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
@@ -74,6 +74,7 @@ mod tests {
             draw_id: 1,
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
+            discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(id),
             team1: vec![BtpPlayer {
