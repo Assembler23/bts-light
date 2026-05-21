@@ -128,6 +128,17 @@ impl TabletState {
         *self.snapshot.write().unwrap() = Some(snapshot);
     }
 
+    /// Turniername des aktuellen Snapshots (leer, falls noch keiner geladen
+    /// ist) – für die Leerlauf-Anzeige des Court-Monitors.
+    pub fn tournament_name(&self) -> String {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.tournament_name.clone())
+            .unwrap_or_default()
+    }
+
     /// Alle Court-Namen des Turniers (für die Tablet-Adressen/QR-Codes).
     pub fn court_names(&self) -> Vec<String> {
         self.snapshot
@@ -407,6 +418,56 @@ impl TabletState {
             })
             .collect()
     }
+
+    /// Monitor-relevante Daten eines Feldes: das aktuelle Match mit
+    /// effektivem Satzstand (Tablet-getrieben falls aktiv, sonst aus BTP)
+    /// und der gespiegelte Tablet-Spielzustand (Aufschlag/Pause). Vom
+    /// Court-Monitor-Endpunkt genutzt.
+    pub fn monitor_court(&self, court: &str) -> MonitorCourt {
+        let guard = self.snapshot.read().unwrap();
+        let tournament_name = guard
+            .as_ref()
+            .map(|s| s.tournament_name.clone())
+            .unwrap_or_default();
+        let current_match = guard.as_ref().and_then(|snap| {
+            snap.matches
+                .iter()
+                .find(|m| {
+                    m.status == MatchStatus::OnCourt && m.court.as_deref() == Some(court)
+                })
+                .cloned()
+        });
+        drop(guard);
+        let sets = match &current_match {
+            Some(mm) => {
+                let courts = self.courts.read().unwrap();
+                match courts.get(court) {
+                    Some(s) if s.connected && s.match_id == mm.id => s.sets.clone(),
+                    _ => mm.sets.clone(),
+                }
+            }
+            None => Vec::new(),
+        };
+        MonitorCourt {
+            tournament_name,
+            current_match,
+            sets,
+            court_state: self.court_state(court),
+        }
+    }
+}
+
+/// Monitor-relevante Daten eines Feldes (Rückgabe von
+/// [`TabletState::monitor_court`]). Reiner Transport – nicht serialisiert.
+pub struct MonitorCourt {
+    /// Turniername (für die Werbe-/Leerlauf-Anzeige).
+    pub tournament_name: String,
+    /// Aktuelles Match auf dem Feld, falls eines zugewiesen ist.
+    pub current_match: Option<BtpMatch>,
+    /// Effektiver Satzstand (Tablet-getrieben falls aktiv, sonst BTP).
+    pub sets: Vec<(i64, i64)>,
+    /// Gespiegelter Tablet-Spielzustand (JSON-String), falls vorhanden.
+    pub court_state: Option<String>,
 }
 
 #[cfg(test)]
@@ -520,6 +581,26 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court == "Court 2").unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    #[test]
+    fn monitor_court_returns_match_with_effective_sets() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some("Court 1"), MatchStatus::OnCourt)],
+            vec!["Court 1", "Court 2"],
+        ));
+        // Ohne Tablet: Satzstand aus BTP (match_on setzt sets = [(5,3)]).
+        let mc = st.monitor_court("Court 1");
+        assert_eq!(mc.tournament_name, "T");
+        assert_eq!(mc.current_match.as_ref().unwrap().id, 1);
+        assert_eq!(mc.sets, vec![(5, 3)]);
+        assert!(mc.court_state.is_none());
+        // Mit Tablet-Score: der Satzstand kommt vom Tablet.
+        st.record_score("Court 1", 1, vec![(21, 19), (8, 4)]);
+        assert_eq!(st.monitor_court("Court 1").sets, vec![(21, 19), (8, 4)]);
+        // Leeres Feld: kein Match.
+        assert!(st.monitor_court("Court 2").current_match.is_none());
     }
 
     #[test]

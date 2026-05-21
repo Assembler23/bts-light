@@ -2,6 +2,7 @@
 //! HTTP+WebSocket-Server (LAN-Modus) und der Relay-Client (Cloud-Modus).
 
 pub mod assets;
+pub mod monitor;
 pub mod relay_client;
 pub mod server;
 pub mod state;

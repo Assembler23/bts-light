@@ -30,6 +30,11 @@ pub struct SetAb {
 pub struct PlayerBrief {
     pub id: i64,
     pub name: String,
+    /// Nationalität als ISO-/IOC-Code (z. B. "GER") – Grundlage der
+    /// Landesflagge auf dem Court-Monitor. `#[serde(default)]` hält
+    /// ältere Frames ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub nationality: Option<String>,
 }
 
 /// Match-Kurzinfo fürs Tablet (Schema wie bei badhub-tournament).
@@ -47,6 +52,113 @@ pub struct MatchBrief {
     pub best_of_sets: i64,
     #[serde(rename = "targetScore")]
     pub target_score: i64,
+    /// Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed`, …;
+    /// leer = unbekannt) – der Court-Monitor lokalisiert ihn selbst.
+    /// `#[serde(default)]` hält ältere Frames lesbar.
+    #[serde(default)]
+    pub discipline: String,
+    /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Monitor-Fußzeile.
+    #[serde(rename = "matchNumber", default)]
+    pub match_number: Option<i64>,
+}
+
+// ─────────────────────────── Court-Monitor ────────────────────────────────
+//
+// Die read-only TV-Anzeige am Spielfeld (`monitor.html`) pollt `…/state`
+// und bekommt diesen [`MonitorState`]. LAN-Server und Relay erzeugen ihn
+// identisch, damit der Monitor in beiden Modi dieselbe Seite ist.
+
+/// Ein Spieler in der Monitor-Anzeige: Name + Nationalität (für die Flagge).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorPlayer {
+    pub name: String,
+    #[serde(default)]
+    pub nationality: Option<String>,
+}
+
+/// Das aktuelle Match eines Feldes für die Monitor-Anzeige.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorMatch {
+    #[serde(rename = "matchId")]
+    pub match_id: i64,
+    /// Disziplin als snake_case-Schlüssel; der Monitor lokalisiert selbst.
+    pub discipline: String,
+    /// Auslosung + Runde, z. B. "HE G1" – für die Fußzeile.
+    #[serde(rename = "eventLabel")]
+    pub event_label: String,
+    #[serde(rename = "matchNumber", default)]
+    pub match_number: Option<i64>,
+    pub team1: Vec<MonitorPlayer>,
+    pub team2: Vec<MonitorPlayer>,
+    /// Satzstand in Team-Koordinaten (abgeschlossene Sätze + laufender Satz).
+    pub sets: Vec<SetAb>,
+}
+
+/// Anzeige-Optionen des Court-Monitors (vom Tool gesetzt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorConfig {
+    #[serde(rename = "adIntervalS")]
+    pub ad_interval_s: i64,
+    #[serde(rename = "showDiscipline")]
+    pub show_discipline: bool,
+    #[serde(rename = "showRound")]
+    pub show_round: bool,
+    #[serde(rename = "showMatchNumber")]
+    pub show_match_number: bool,
+    #[serde(rename = "showTimer")]
+    pub show_timer: bool,
+}
+
+impl Default for MonitorConfig {
+    fn default() -> Self {
+        Self {
+            ad_interval_s: 10,
+            show_discipline: true,
+            show_round: true,
+            show_match_number: true,
+            show_timer: true,
+        }
+    }
+}
+
+/// Ein hochgeladenes Werbebild – Base64-kodiert, damit es in ein
+/// JSON-Frame passt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdUpload {
+    #[serde(rename = "contentType")]
+    pub content_type: String,
+    /// Bilddaten, Base64 (Standard-Alphabet).
+    pub data: String,
+}
+
+/// Court-Monitor-Datensatz, den der bts-light-Host zum Relay hochlädt –
+/// damit Cloud-Monitore Werbung und Anzeige-Konfiguration bekommen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorUpload {
+    pub config: MonitorConfig,
+    #[serde(rename = "tournamentName", default)]
+    pub tournament_name: String,
+    pub ads: Vec<AdUpload>,
+}
+
+/// Vollständiger Anzeige-Zustand eines Feldes, den `monitor.html` pollt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MonitorState {
+    #[serde(rename = "courtLabel")]
+    pub court_label: String,
+    #[serde(rename = "tournamentName", default)]
+    pub tournament_name: String,
+    /// Aktuelles Match, oder `null` wenn das Feld frei ist (→ Werbemodus).
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none", default)]
+    pub match_info: Option<MonitorMatch>,
+    /// Roher Tablet-Spielzustand (`court_state`) als JSON-String, falls ein
+    /// Tablet das Feld zählt – liefert Aufschlag-Seite und Pause/Timer.
+    /// `monitor.html` parst ihn selbst.
+    #[serde(rename = "courtState", skip_serializing_if = "Option::is_none", default)]
+    pub court_state: Option<String>,
+    pub config: MonitorConfig,
+    /// Kennungen der Werbebilder; der Monitor lädt sie über `../../ads/<id>`.
+    pub ads: Vec<String>,
 }
 
 // ─────────────────────────── Tablet ↔ Server ──────────────────────────────
@@ -319,14 +431,18 @@ mod tests {
                 team_a: vec![PlayerBrief {
                     id: 1,
                     name: "Anna".into(),
+                    nationality: Some("GER".into()),
                 }],
                 team_b: vec![PlayerBrief {
                     id: 11,
                     name: "Ben".into(),
+                    nationality: None,
                 }],
                 event_label: "HE G1".into(),
                 best_of_sets: 3,
                 target_score: 21,
+                discipline: "mens_singles".into(),
+                match_number: Some(14),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -363,6 +479,51 @@ mod tests {
             sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 5, b: 5 }],
             retired: true,
             winner: Some(1),
+        });
+    }
+
+    #[test]
+    fn monitor_state_and_upload_roundtrip() {
+        let state = MonitorState {
+            court_label: "Feld 3".into(),
+            tournament_name: "Test-Cup".into(),
+            match_info: Some(MonitorMatch {
+                match_id: 14,
+                discipline: "mens_singles".into(),
+                event_label: "HE G2".into(),
+                match_number: Some(14),
+                team1: vec![MonitorPlayer {
+                    name: "Anna".into(),
+                    nationality: Some("GER".into()),
+                }],
+                team2: vec![MonitorPlayer {
+                    name: "Hilde".into(),
+                    nationality: None,
+                }],
+                sets: vec![SetAb { a: 21, b: 18 }, SetAb { a: 11, b: 7 }],
+            }),
+            court_state: Some(r#"{"servingSide":"left"}"#.into()),
+            config: MonitorConfig::default(),
+            ads: vec!["0".into(), "1".into()],
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains(r#""match":{"#));
+        roundtrip(&state);
+        // Leeres Feld: `match` wird weggelassen (→ Werbemodus).
+        let idle = MonitorState {
+            match_info: None,
+            ..state
+        };
+        let json = serde_json::to_string(&idle).unwrap();
+        assert!(!json.contains(r#""match""#));
+        roundtrip(&idle);
+        roundtrip(&MonitorUpload {
+            config: MonitorConfig::default(),
+            tournament_name: "Test-Cup".into(),
+            ads: vec![AdUpload {
+                content_type: "image/png".into(),
+                data: "AAAA".into(),
+            }],
         });
     }
 

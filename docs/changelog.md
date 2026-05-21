@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.7.0
+
+- **Court-Monitor – TV-Anzeige am Spielfeld**: Pro Feld eine read-only
+  Anzeige (Raspberry Pi, 32"–55"), die zwischen zwei Zuständen umschaltet:
+  Werbung im Leerlauf, Match-Ansicht sobald ein Spiel aufs Feld kommt. Die
+  Match-Ansicht („A — Geteilt") zeigt Spielernamen mit Landesflaggen, den
+  Satzstand, die aufschlagende Mannschaft (eingefärbt) und einen
+  Retro-Pausen-Countdown im Klappanzeigen-Stil. Werbebilder werden im Tool
+  hochgeladen (ein gemeinsamer Satz für alle Felder); Wechsel-Intervall und
+  Anzeige-Optionen sind einstellbar. Funktioniert im LAN- und im
+  Cloud-Modus. Details: [court-monitor.md](court-monitor.md).
+
 ## v0.6.0
 
 - **Sprachansagen für Feld-Aufrufe**: Wird in BTP ein Spiel auf ein Feld

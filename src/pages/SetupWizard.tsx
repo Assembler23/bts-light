@@ -1,17 +1,28 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   Check,
   Cloud,
   KeyRound,
   type LucideIcon,
+  Monitor,
   Server,
   Stethoscope,
   Target,
+  Trash2,
   Volume2,
   Wifi,
   X,
 } from "lucide-react";
-import { saveConfig, startSync, stopSync, testBtp } from "../api";
+import { open } from "@tauri-apps/plugin-dialog";
+import {
+  addCourtAd,
+  listCourtAds,
+  removeCourtAd,
+  saveConfig,
+  startSync,
+  stopSync,
+  testBtp,
+} from "../api";
 import { playTestAnnouncement } from "../io/announcer";
 import { PRESETS, findPreset } from "../presets";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
@@ -131,10 +142,26 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [annVoiceEn, setAnnVoiceEn] = useState(initialConfig.announce.voice_en);
   const [annRate, setAnnRate] = useState(initialConfig.announce.rate);
   const [annGong, setAnnGong] = useState(initialConfig.announce.gong);
+  const cm = initialConfig.court_monitor;
+  const [cmEnabled, setCmEnabled] = useState(cm.enabled);
+  const [cmInterval, setCmInterval] = useState(cm.ad_interval_s);
+  const [cmDiscipline, setCmDiscipline] = useState(cm.show_discipline);
+  const [cmRound, setCmRound] = useState(cm.show_round);
+  const [cmMatchNumber, setCmMatchNumber] = useState(cm.show_match_number);
+  const [cmTimer, setCmTimer] = useState(cm.show_timer);
+  const [ads, setAds] = useState<string[]>([]);
+  const [adError, setAdError] = useState("");
   const voices = useAvailableVoices();
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // Hinterlegte Werbebilder beim Öffnen laden.
+  useEffect(() => {
+    listCourtAds()
+      .then(setAds)
+      .catch(() => {});
+  }, []);
 
   const isManual = presetId === MANUAL;
 
@@ -166,7 +193,47 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         rate: annRate,
         gong: annGong,
       },
+      court_monitor: {
+        enabled: cmEnabled,
+        ad_interval_s: cmInterval,
+        show_discipline: cmDiscipline,
+        show_round: cmRound,
+        show_match_number: cmMatchNumber,
+        show_timer: cmTimer,
+      },
     };
+  }
+
+  /** Lässt den Nutzer Werbebilder wählen und übernimmt sie sofort. */
+  async function pickAds() {
+    setAdError("");
+    try {
+      const sel = await open({
+        multiple: true,
+        filters: [
+          { name: "Bilder", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
+        ],
+      });
+      if (!sel) return;
+      const paths = Array.isArray(sel) ? sel : [sel];
+      for (const p of paths) {
+        await addCourtAd(p);
+      }
+      setAds(await listCourtAds());
+    } catch (e) {
+      setAdError(String(e));
+    }
+  }
+
+  /** Entfernt ein hinterlegtes Werbebild. */
+  async function deleteAd(file: string) {
+    setAdError("");
+    try {
+      await removeCourtAd(file);
+      setAds(await listCourtAds());
+    } catch (e) {
+      setAdError(String(e));
+    }
   }
 
   const canSave =
@@ -451,6 +518,122 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
                 Vor dem Turnier einmal drücken – das schaltet die Tonausgabe
                 am Rechner frei.
               </p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Court-Monitor */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Monitor}>Court-Monitor</SectionHeader>
+        <p className="text-xs text-slate-500">
+          TV-Anzeige am Spielfeld (Raspberry Pi): Werbung im Leerlauf, die
+          Match-Ansicht sobald ein Spiel aufs Feld kommt. Die Monitor-Adressen
+          stehen auf der Tablet-Spielzettel-Seite.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={cmEnabled}
+            onChange={(e) => setCmEnabled(e.currentTarget.checked)}
+          />
+          Court-Monitor aktivieren
+        </label>
+
+        {cmEnabled && (
+          <div className="mt-1 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4">
+            {/* Werbebilder */}
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-slate-600">
+                Werbebilder
+              </span>
+              <p className="text-xs text-slate-500">
+                Werden im Leerlauf nacheinander gezeigt – ein gemeinsamer Satz
+                für alle Felder.
+              </p>
+              {ads.length > 0 && (
+                <ul className="flex flex-col gap-1">
+                  {ads.map((file, i) => (
+                    <li
+                      key={file}
+                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
+                    >
+                      <span className="flex-1 truncate text-slate-600">
+                        Werbebild {i + 1}
+                      </span>
+                      <button
+                        onClick={() => void deleteAd(file)}
+                        title="Werbebild entfernen"
+                        className="rounded p-1 text-slate-400 transition-colors
+                                   hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                onClick={() => void pickAds()}
+                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                           text-slate-700 transition-colors hover:bg-slate-200"
+              >
+                Werbebild hinzufügen …
+              </button>
+              {adError && <p className="text-xs text-rose-700">{adError}</p>}
+            </div>
+
+            {/* Wechsel-Intervall */}
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-600">
+                Wechsel-Intervall: {cmInterval} s
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={30}
+                step={1}
+                value={cmInterval}
+                onChange={(e) => setCmInterval(Number(e.currentTarget.value))}
+                className="w-full"
+              />
+            </label>
+
+            {/* Anzeige-Optionen */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-slate-600">Anzeige</span>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmDiscipline}
+                  onChange={(e) => setCmDiscipline(e.currentTarget.checked)}
+                />
+                Disziplin in der Kopfzeile
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmRound}
+                  onChange={(e) => setCmRound(e.currentTarget.checked)}
+                />
+                Runde in der Fußzeile
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmMatchNumber}
+                  onChange={(e) => setCmMatchNumber(e.currentTarget.checked)}
+                />
+                Spielnummer in der Fußzeile
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmTimer}
+                  onChange={(e) => setCmTimer(e.currentTarget.checked)}
+                />
+                Pausen-Countdown (Retro-Klappanzeige)
+              </label>
             </div>
           </div>
         )}

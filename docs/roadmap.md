@@ -51,12 +51,10 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
 
 ## Geplant (später)
 
-- **Court-Monitore — TV am Spielfeld (Raspberry Pi).** Read-only TV-Anzeige
-  pro Feld (32"–55"): Werbung im Leerlauf, Match-Ansicht sobald ein Spiel
-  aufs Feld kommt. Layout-Entwurf **„A — Geteilt"** gewählt. Ausgearbeitetes
-  Konzept inkl. Datenfluss, Werbemodus und Konfiguration:
-  [court-monitor.md](court-monitor.md). 2-Felder-pro-TV-Modus später.
-  Nächster Schritt: Umsetzung planen + bauen (offene Punkte siehe Konzept).
+- **Court-Monitor: 2-Felder-pro-TV-Modus.** Der Court-Monitor ist mit
+  v0.7.0 für ein Feld pro TV umgesetzt ([court-monitor.md](court-monitor.md)).
+  Offen bleibt die Option, zwei benachbarte Felder auf einem großen TV
+  darzustellen (`…/display?courts=3,4`).
 
 ## Bekannte Einschränkungen / technische Schuld
 

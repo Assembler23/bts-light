@@ -32,6 +32,22 @@ darf eigenständig nachgebaut werden.
 - Quellcode aus phihag/bts oder letilo/bts kopieren, übersetzen oder Zeile für
   Zeile nachbilden – auch nicht sprachübersetzt (JS → Rust).
 
+## Länderflaggen (Court-Monitor)
+
+Der Court-Monitor zeigt SVG-Länderflaggen (`src-tauri/assets/flags/`, je
+Datei nach IOC-3-Buchstaben-Code). Der Satz stammt aus dem
+`static/flags/`-Verzeichnis von
+[letilo/bts](https://github.com/letilo/bts).
+
+Es handelt sich um schlichte SVG-Darstellungen amtlicher Staatsflaggen –
+keine Programm-Logik, kein Quellcode. Flaggendesigns sind als
+Hoheitszeichen regelmäßig gemeinfrei; die einfachen Vektor-Nachzeichnungen
+erreichen keine Schöpfungshöhe. Da das Quell-Repo keine ausdrückliche
+Lizenz führt (siehe oben), ist dies bewusst eine Asset-Übernahme im selben
+Graubereich. Der Satz ist gekapselt (Anzeige strikt per `<iso>.svg`) und
+lässt sich jederzeit gegen eine ausdrücklich lizenzierte
+Flaggen-Sammlung austauschen.
+
 ## Drittanbieter-Komponenten
 
 Abhängigkeiten werden über Cargo (`src-tauri/Cargo.toml`) und npm

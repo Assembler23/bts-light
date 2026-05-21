@@ -35,6 +35,23 @@ export interface AnnounceConfig {
   gong: boolean;
 }
 
+/** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
+export interface CourtMonitorConfig {
+  /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der
+   *  Monitor-Adressen – die Anzeige-Seite ist immer erreichbar. */
+  enabled: boolean;
+  /** Wechsel-Intervall der Werbebilder im Leerlauf (Sekunden). */
+  ad_interval_s: number;
+  /** Disziplin in der Kopfzeile anzeigen? */
+  show_discipline: boolean;
+  /** Runde in der Fußzeile anzeigen? */
+  show_round: boolean;
+  /** Spielnummer in der Fußzeile anzeigen? */
+  show_match_number: boolean;
+  /** Pausen-Countdown (Retro-Klappanzeige) anzeigen? */
+  show_timer: boolean;
+}
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
@@ -46,6 +63,8 @@ export interface AppConfig {
   connection_mode: ConnectionMode;
   /** Einstellungen der gesprochenen Feld-Ansagen. */
   announce: AnnounceConfig;
+  /** Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld). */
+  court_monitor: CourtMonitorConfig;
 }
 
 export interface SyncStatus {

@@ -1,8 +1,7 @@
 # Court-Monitor — TV-Anzeige am Spielfeld
 
-> **Status: Konzept / geplant.** Dieses Dokument bereitet das Feature vor —
-> Layout, Datenfluss, Konfiguration. Implementierung folgt nach Freigabe.
-> Roadmap: [roadmap.md](roadmap.md) → „Court-Monitore".
+> **Status: umgesetzt in v0.7.0.** Read-only TV-Anzeige pro Feld. Offen
+> bleibt der 2-Felder-pro-TV-Modus → [roadmap.md](roadmap.md).
 
 ## Ziel
 
@@ -10,11 +9,12 @@ Pro Spielfeld ein TV (32"–55"), betrieben von einem **Raspberry Pi** im
 Vollbild-Browser. Zwei Zustände, automatisch umgeschaltet:
 
 - **Kein Spiel auf dem Feld** → **Werbung** (rotierende Bilder).
-- **Spiel auf dem Feld** → **Match-Ansicht** (gewähltes Layout unten).
+- **Spiel auf dem Feld** → **Match-Ansicht** (Layout „A — Geteilt").
 
-Reine Anzeige (read-only) — der Monitor schreibt nie etwas zurück.
+Reine Anzeige (read-only) — der Monitor schreibt nie etwas zurück. Er
+pollt im Sekundentakt einen `…/state`-Endpunkt.
 
-## Gewähltes Layout: „A — Geteilt"
+## Layout „A — Geteilt"
 
 Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
 
@@ -35,82 +35,123 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
   Sätze als kleinere Spalte daneben.
 - **Doppel:** zwei Namen je Hälfte gestapelt, eine Flagge pro Spieler.
 - **Aufschlag:** Der **Satzstand der aufschlagenden Mannschaft wird
-  farblich hervorgehoben** (zusätzlich ein `●`-Marker am Spieler) — so ist
-  von weitem sofort sichtbar, wer Aufschlag hat.
-- **Fußzeile:** Runde + Spielnummer (optional abschaltbar).
-- Alles über `vh`/`vw` skaliert → füllt jeden TV 32"–55" ohne Anpassung.
+  farblich hervorgehoben** (zusätzlich ein `●`-Marker am Spieler).
+- **Fußzeile:** Runde + Spielnummer (je einzeln abschaltbar).
+- Alles über `vh`/`vw`/`vmin` skaliert → füllt jeden TV 32"–55" ohne
+  Anpassung.
 
-## Datenquelle
+Die Anzeige-Seite ist `src-tauri/assets/monitor.html` — eine
+eigenständige HTML/CSS/JS-Datei, read-only Geschwister von `tablet.html`.
 
-bts-light hat alle nötigen Daten bereits — kein neuer Datenweg. Pro Feld
-liefert `tablet_overview()` ein `CourtOverview` mit:
+## Datenfluss
 
-- `match_id` (0 = kein Spiel → Werbemodus), `match_name`, `discipline`,
-- `team1` / `team2` (Namen), `team1_nationalities` / `team2_nationalities`
-  (für die Flaggen — kam mit den Sprachansagen dazu),
-- `sets` (Satzstand, tablet-getrieben wenn ein Tablet zählt).
+Der Monitor braucht **keinen neuen Datenweg** — alle Daten liegen schon
+vor:
 
-**Flaggen:** Nationalität ist ein ISO-Code (`GER`, `POL`, …). badhub hat
-bereits SVG-Länderflaggen (`public/assets/flags/`); diese als Asset in
-bts-light bündeln, Anzeige per ISO-Code → `<iso>.svg`.
+- Der LAN-Server bzw. der Relay kennt pro Feld das aktuelle Match
+  (`MatchBrief`, seit v0.7.0 mit `discipline`, `matchNumber` und je
+  Spieler `nationality`) und den Satzstand.
+- Zählt ein Tablet das Feld, spiegelt es laufend seinen vollen
+  Spielzustand (`court_state`) an den Server/Relay — darin stehen
+  Aufschlag-Seite und Pause. Der Monitor liest diesen Zustand **rein
+  lesend** mit.
 
-## Architektur
+`monitor.html` baut die Anzeige aus dem `…/state`-JSON
+([`relay_proto::MonitorState`](../relay-proto/src/lib.rs)): Match-Info +
+roher `court_state` + Konfiguration + Werbebild-Liste.
 
-- Eine eigene Anzeige-Seite, **read-only Geschwister von `tablet.html`** —
-  vom LAN-Server **und** vom Relay pro Feld ausgeliefert (wie `tablet.html`
-  heute, damit der Monitor in LAN und Cloud funktioniert).
-- Route z. B. `GET /court/<label>/display` bzw. `/<ns>/court/<label>/display`.
-- Die Seite bezieht den Court-Status (Match, Score) über denselben Weg wie
-  das Tablet — aber rein lesend, nie sendend.
-- **Raspberry Pi:** Chromium im Kiosk-/Vollbildmodus, Autostart auf die
-  Monitor-URL des Feldes. Kurzanleitung kommt mit der Umsetzung.
-- **2-Felder-Modus** (zwei benachbarte Felder auf einem großen TV): später,
-  als `…/display?courts=3,4`. Nicht Teil der ersten Version.
+### Verhalten ohne `court_state` (kein zählendes Tablet)
+
+| Wert            | Tablet zählt        | kein Tablet              |
+|-----------------|---------------------|--------------------------|
+| Satzstand       | live vom Tablet     | aus BTP (LAN) / 0:0 (Cloud) |
+| Aufschlag       | angezeigt           | nicht angezeigt          |
+| Pausen-Timer    | angezeigt           | nicht angezeigt          |
+
+## Endpunkte
+
+Alle Routen gibt es doppelt — vom LAN-Server **und** vom Relay,
+damit der Monitor in beiden Modi dieselbe Seite ist. `monitor.html`
+nutzt durchweg **relative URLs**, daher funktioniert sie unter beiden
+Pfaden ohne Anpassung.
+
+| Zweck            | LAN                          | Cloud                                |
+|------------------|------------------------------|--------------------------------------|
+| Anzeige-Seite    | `/court/{label}/display`     | `/{ns}/court/{label}/display`        |
+| Status (Poll)    | `/court/{label}/state`       | `/{ns}/court/{label}/state`          |
+| Flaggen          | `/flags/{code}.svg`          | `/{ns}/flags/{code}.svg`             |
+| Werbebild        | `/ads/{datei}`               | `/{ns}/ads/{index}`                  |
+| Werbe-Upload     | —                            | `POST /{ns}/monitor` (Host → Relay)  |
 
 ## Werbung (Leerlauf)
 
-Läuft kein Spiel (`match_id == 0`), zeigt der Monitor Werbung. Festgelegt:
+Läuft kein Spiel, zeigt der Monitor Werbung:
 
-- In den Einstellungen ein Abschnitt **„Court-Monitor"** — Werbebilder
-  werden **direkt im Tool hochgeladen** (Bilddateien), Wechsel-Intervall
-  (Default 10 s).
-- **Ein gemeinsamer Werbesatz** für alle Monitore.
-- Bilder liegen im App-Datenverzeichnis von bts-light und werden vom
-  Server/Relay mit ausgeliefert.
-- **Fallback** ohne konfigurierte Werbung: neutrale Seite mit Turniername /
-  „Kein Spiel auf diesem Feld".
-- Kommt ein Spiel aufs Feld, wechselt der Monitor automatisch zur
-  Match-Ansicht; wird das Feld frei, zurück zur Werbung.
+- Werbebilder werden **direkt im Tool** hochgeladen (Setup → Abschnitt
+  „Court-Monitor"). **Ein gemeinsamer Werbesatz** für alle Monitore.
+- Sie liegen im App-Datenverzeichnis unter `court-ads/`; der LAN-Server
+  liefert sie aus `/ads/` aus.
+- **Cloud-Modus:** bts-light lädt die Bilder nach dem Verbinden per
+  `POST /{ns}/monitor` zum Relay hoch (Base64-JSON) und prüft alle 30 s
+  per Fingerabdruck auf Änderungen. Ad-Änderungen erreichen Cloud-Monitore
+  daher binnen ~30 s.
+- Wechsel-Intervall einstellbar (Default 10 s).
+- **Fallback** ohne konfigurierte Werbung: neutrale Seite mit Turniername
+  und „Kein Spiel auf diesem Feld".
 
-## Konfiguration im Tool
+## Pausen-Timer (Retro-Klappanzeige)
 
-Neuer Einstellungs-Abschnitt **„Court-Monitor"**:
+Läuft eine Pause (`court_state.pause`), zeigt der Monitor einen
+**Countdown im Split-Flap-Stil** (Klappanzeige wie eine alte
+Flughafentafel). Greift bei den BWF-Satzpausen (Countdown) und bei
+Behandlungspausen (ohne Countdown). Im Tool ein-/abschaltbar.
 
-- Pro Feld die **Monitor-Adresse** anzeigen (analog zu den Tablet-Adressen
-  in der Tablet-Spielzettel-Seite) — zum Eintragen am Pi.
-- Werbebilder verwalten + Wechsel-Intervall.
-- Anzeige-Optionen: Disziplin / Runde / Spielnummer ein-/ausblenden.
+## Konfiguration
 
-## Timer
+Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tauri/src/config.rs)):
 
-Laufende Pausen zeigt der Monitor als **Countdown im Retro-Stil** — eine
-Klappanzeige (Split-Flap) wie eine alte Flughafentafel, die herunterzählt.
-Greift bei den BWF-Satzpausen und bei Behandlungspausen. Im Tool
-ein- und ausschaltbar.
+- **Aktivieren** — blendet die Monitor-Adressen in der Oberfläche ein.
+- **Werbebilder** — hinzufügen/entfernen (JPG, PNG, WEBP, GIF; ≤ 8 MB je
+  Bild).
+- **Wechsel-Intervall** — 3–30 s.
+- **Anzeige-Optionen** — Disziplin / Runde / Spielnummer / Pausen-Timer
+  je einzeln ein-/ausblenden.
 
-## Festgelegt
+Die Monitor-Adressen je Feld stehen auf der Tablet-Spielzettel-Seite
+(Zeile „Monitor") — dort zum Eintragen am Pi kopieren.
 
-- **Werbung:** Upload direkt im Tool, ein gemeinsamer Werbesatz für alle
-  Monitore (siehe oben).
-- **Aufschlag:** wird angezeigt — Satzstand der aufschlagenden Mannschaft
-  eingefärbt + `●`-Marker. Setzt voraus, dass der Aufschläger im
-  Court-Status mitgeführt wird (heute nur am Tablet bekannt) — in der
-  Umsetzung zu ergänzen.
-- **Timer:** Teil der ersten Version, Retro-Klappanzeige (siehe oben).
+## Raspberry Pi — Kiosk-Einrichtung
+
+1. Raspberry Pi OS installieren, Chromium ist vorhanden.
+2. Mauszeiger ausblenden: `sudo apt install unclutter`.
+3. Autostart auf die feldspezifische Display-URL, z. B.:
+   ```
+   chromium-browser --kiosk --noerrdialogs --disable-infobars \
+     http://<bts-light-ip>:8088/court/Feld%203/display
+   ```
+4. Bildschirmschoner / DPMS deaktivieren (`xset s off -dpms`).
+
+Der Pi steht üblicherweise im selben Hallen-LAN wie der bts-light-PC →
+LAN-Adresse genügt. Ist der PC-Port gesperrt, die Cloud-Adresse
+(`https://badhub.de/bts-relay/<install_id>/court/<label>/display`)
+verwenden.
+
+## Flaggen
+
+Nationalität ist ein IOC-Code (`GER`, `POL`, …). bts-light bündelt einen
+SVG-Flaggensatz (`src-tauri/assets/flags/`, ins Binary kompiliert),
+Anzeige per `<code>.svg`. Fehlt der Code, zeigt der Monitor den Namen
+ohne Flagge. Herkunft/Lizenz: [`NOTICE.md`](../NOTICE.md).
 
 ## Lizenz-Hinweis
 
 Visuelle Referenz war `phihag/bup` (u. a. PR #43, Einzelturnier-Display).
-Davon wird nur die **Idee** übernommen — **kein Code** kopiert, da die
-bup-Lizenz unklar ist (kommerzielle Lizenzdateien im Repo). Diese Anzeige
-ist eine eigenständige Clean-Room-Umsetzung.
+Davon wurde nur die **Idee** übernommen — **kein Code**, da die
+bup-Lizenz unklar ist. Diese Anzeige ist eine eigenständige
+Clean-Room-Umsetzung.
+
+## Nicht umgesetzt
+
+- **2-Felder-pro-TV-Modus** (`…/display?courts=3,4`) — siehe
+  [roadmap.md](roadmap.md).
+- **Pro-Feld unterschiedliche Werbung** — bewusst ein gemeinsamer Satz.

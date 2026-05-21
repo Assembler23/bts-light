@@ -103,6 +103,39 @@ impl Default for AnnounceConfig {
     }
 }
 
+/// Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld, Raspberry Pi).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CourtMonitorConfig {
+    /// Ist die Court-Monitor-Anzeige eingerichtet/aktiv? Steuert nur die
+    /// Sichtbarkeit der Monitor-Adressen in der Oberfläche – die
+    /// Anzeige-Seite selbst ist immer erreichbar.
+    pub enabled: bool,
+    /// Wechsel-Intervall der Werbebilder im Leerlauf (Sekunden).
+    pub ad_interval_s: i64,
+    /// Disziplin in der Kopfzeile anzeigen?
+    pub show_discipline: bool,
+    /// Runde in der Fußzeile anzeigen?
+    pub show_round: bool,
+    /// Spielnummer in der Fußzeile anzeigen?
+    pub show_match_number: bool,
+    /// Pausen-Countdown (Retro-Klappanzeige) anzeigen?
+    pub show_timer: bool,
+}
+
+impl Default for CourtMonitorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ad_interval_s: 10,
+            show_discipline: true,
+            show_round: true,
+            show_match_number: true,
+            show_timer: true,
+        }
+    }
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -125,6 +158,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub announce: AnnounceConfig,
+    /// Einstellungen der Court-Monitor-Anzeige. `#[serde(default)]` hält
+    /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub court_monitor: CourtMonitorConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -197,6 +234,14 @@ mod tests {
                 rate: 1.1,
                 gong: false,
             },
+            court_monitor: CourtMonitorConfig {
+                enabled: true,
+                ad_interval_s: 8,
+                show_discipline: false,
+                show_round: true,
+                show_match_number: false,
+                show_timer: true,
+            },
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
@@ -220,6 +265,11 @@ mod tests {
         assert!(!loaded.announce.enabled);
         assert_eq!(loaded.announce.rate, 0.8);
         assert!(loaded.announce.gong);
+        // Ebenso der court_monitor-Block – ältere config.json kennt ihn nicht.
+        assert_eq!(loaded.court_monitor, CourtMonitorConfig::default());
+        assert!(!loaded.court_monitor.enabled);
+        assert_eq!(loaded.court_monitor.ad_interval_s, 10);
+        assert!(loaded.court_monitor.show_timer);
     }
 
     #[test]
