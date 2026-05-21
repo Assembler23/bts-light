@@ -34,7 +34,9 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
   links; der **laufende Satzstand** ganz rechts am größten; abgeschlossene
   Sätze als kleinere Spalte daneben.
 - **Doppel:** zwei Namen je Hälfte gestapelt, eine Flagge pro Spieler.
-- **Aufschlag:** Markierung (`●`) am aufschlagenden Spieler.
+- **Aufschlag:** Der **Satzstand der aufschlagenden Mannschaft wird
+  farblich hervorgehoben** (zusätzlich ein `●`-Marker am Spieler) — so ist
+  von weitem sofort sichtbar, wer Aufschlag hat.
 - **Fußzeile:** Runde + Spielnummer (optional abschaltbar).
 - Alles über `vh`/`vw` skaliert → füllt jeden TV 32"–55" ohne Anpassung.
 
@@ -67,11 +69,12 @@ bts-light bündeln, Anzeige per ISO-Code → `<iso>.svg`.
 
 ## Werbung (Leerlauf)
 
-Läuft kein Spiel (`match_id == 0`), zeigt der Monitor Werbung. Vorschlag:
+Läuft kein Spiel (`match_id == 0`), zeigt der Monitor Werbung. Festgelegt:
 
 - In den Einstellungen ein Abschnitt **„Court-Monitor"** — Werbebilder
-  hinzufügen/entfernen (Bilddateien), Wechsel-Intervall (Default 10 s).
-- v1: **ein gemeinsamer Werbesatz** für alle Monitore (einfachste Lösung).
+  werden **direkt im Tool hochgeladen** (Bilddateien), Wechsel-Intervall
+  (Default 10 s).
+- **Ein gemeinsamer Werbesatz** für alle Monitore.
 - Bilder liegen im App-Datenverzeichnis von bts-light und werden vom
   Server/Relay mit ausgeliefert.
 - **Fallback** ohne konfigurierte Werbung: neutrale Seite mit Turniername /
@@ -88,17 +91,22 @@ Neuer Einstellungs-Abschnitt **„Court-Monitor"**:
 - Werbebilder verwalten + Wechsel-Intervall.
 - Anzeige-Optionen: Disziplin / Runde / Spielnummer ein-/ausblenden.
 
-## Offene Punkte (vor der Umsetzung zu klären)
+## Timer
 
-1. **Werbung** — Bild-Upload direkt im Tool oder ein Ordner? Ein Satz für
-   alle Monitore (v1-Vorschlag) oder pro Feld? Wechsel-Intervall fix oder
-   einstellbar?
-2. **Aufschlag-Anzeige (`●`)** — der Aufschläger ist aktuell nur am Tablet
-   bekannt, nicht im `CourtOverview`. In v1 weglassen oder den Court-Status
-   um das Feld erweitern?
-3. **Timer** — soll der Monitor Pausen/Countdowns zeigen (wie `phihag/bup`
-   PR #43)? Behandlungspause ist über `CourtOverview.injury` schon da; die
-   BWF-Satzpausen liegen nur am Tablet.
+Laufende Pausen zeigt der Monitor als **Countdown im Retro-Stil** — eine
+Klappanzeige (Split-Flap) wie eine alte Flughafentafel, die herunterzählt.
+Greift bei den BWF-Satzpausen und bei Behandlungspausen. Im Tool
+ein- und ausschaltbar.
+
+## Festgelegt
+
+- **Werbung:** Upload direkt im Tool, ein gemeinsamer Werbesatz für alle
+  Monitore (siehe oben).
+- **Aufschlag:** wird angezeigt — Satzstand der aufschlagenden Mannschaft
+  eingefärbt + `●`-Marker. Setzt voraus, dass der Aufschläger im
+  Court-Status mitgeführt wird (heute nur am Tablet bekannt) — in der
+  Umsetzung zu ergänzen.
+- **Timer:** Teil der ersten Version, Retro-Klappanzeige (siehe oben).
 
 ## Lizenz-Hinweis
 
