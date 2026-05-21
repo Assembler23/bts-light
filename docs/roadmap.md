@@ -49,11 +49,22 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   Tablets ein „Host offline"-Signal schicken, damit das Tablet ehrlich
   „Warte auf Turnier-PC" anzeigt.
 
-## Zurückgestellt
+## Geplant (später)
 
-- **Teil B — Einzel-Court-TVs über Raspberry Pi.** Pro Spielfeld ein
-  kleiner Bildschirm, der den Live-Stand des Courts zeigt. Aus dem
-  Cloud-Relay-Konzept ausgeklammert, noch nicht geplant.
+- **Court-Monitore — TV am Spielfeld (Raspberry Pi).** Eine read-only
+  Monitor-Ansicht von bts-light: pro Feld ein TV (**32"–55"**), betrieben
+  von einem **Raspberry Pi** im Vollbild-Browser.
+  - **1-Feld-Modus** — ein Feld bildschirmfüllend (Riesen-Satzstand).
+  - **2-Felder-Modus** — zwei *nebeneinanderliegende* Felder geteilt auf
+    einem großen TV; spart Hardware und ist oft ausreichend.
+  - Inhalt: Feldnummer, Disziplin, Paarung, Satzstand, optional Timer.
+  - **Eigene Clean-Room-Ansicht** — ein read-only Geschwister von
+    `tablet.html`, pro Feld vom Server/Relay ausgeliefert, `vh`-skaliert.
+    bts-light hat die Daten bereits (`match_for_court`, Live-Score,
+    Disziplin). **Nicht** aus `phihag/bup` kopieren — Lizenz unklar
+    (kommerzielle Lizenzdateien im Repo).
+  - Visuelle Referenz: `phihag/bup` PR #43 (Einzelturnier-Display für
+    kleine Monitore) — Vorbild, aber eigenständig und schöner umgesetzt.
 
 ## Bekannte Einschränkungen / technische Schuld
 
