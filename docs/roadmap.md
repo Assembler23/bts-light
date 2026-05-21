@@ -28,6 +28,22 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   (ab 2026-06-02) aktualisieren. Außerdem leitet GitHub `windows-latest`
   ab 2026-06-15 auf `windows-2025` um — Build dort gegenprüfen.
 
+## Feature-Wünsche
+
+Von der Turnierleitung gewünscht, noch nicht eingeplant:
+
+- **Aufgaben- & Walkover-Übersicht.** Eine Seite bzw. Kachel in bts-light,
+  die während des Turniers alle Aufgaben und alle daraus gewerteten
+  Walkovers auflistet — Überblick für die Turnierleitung.
+- **Walkover zurücknehmen.** Eine kampflose Wertung wieder rückgängig
+  machen können (Match in BTP zurück auf offen / `ScoreStatus = 0`),
+  falls sie versehentlich oder falsch gesetzt wurde.
+- **Tablet-Verbindungsanzeige im Cloud-Modus.** Schließt bts-light, bleibt
+  das Tablet mit dem Relay verbunden und zeigt weiter „verbunden" — es
+  erfährt nicht, dass der Host (bts-light) weg ist. Der Relay sollte den
+  Tablets ein „Host offline"-Signal schicken, damit das Tablet ehrlich
+  „Warte auf Turnier-PC" anzeigt.
+
 ## Zurückgestellt
 
 - **Teil B — Einzel-Court-TVs über Raspberry Pi.** Pro Spielfeld ein
