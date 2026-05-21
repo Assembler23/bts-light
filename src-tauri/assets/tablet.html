@@ -482,8 +482,10 @@ const STATE = {
   currentSet: { left: 0, right: 0 },
   history: /** @type {object[]} */ ([]),
   finished: false,
-  submitting: false,
   submittedOk: false,
+  // Noch nicht bestätigtes Endergebnis – wird im Hintergrund wiederholt,
+  // bis der Server ok:true meldet. { matchId, courtLabel, sets } | null.
+  pendingResult: /** @type {null | {matchId:number, courtLabel:string, sets:object[]}} */ (null),
 
   // Welches der ursprünglichen Teams ('a' / 'b') steht auf welcher Seite ('left' / 'right')
   teamOnSide: /** @type {{a:'left'|'right', b:'left'|'right'} | null} */ (null),
@@ -743,7 +745,9 @@ function renderBreak() {
 const PERSIST_KEY = `badhub.tablet.state.${COURT_LABEL}`;
 
 function persistState() {
-  if (!STATE.match) return; // ohne match nichts sinnvolles zu persistieren
+  // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
+  // Übermittlung, das muss einen Reload überleben.
+  if (!STATE.match && !STATE.pendingResult) return;
   try {
     localStorage.setItem(PERSIST_KEY, JSON.stringify({
       match: STATE.match,
@@ -757,6 +761,8 @@ function persistState() {
       midGameSwitchDone: STATE.midGameSwitchDone,
       pause: STATE.pause,
       intervalDoneThisGame: STATE.intervalDoneThisGame,
+      submittedOk: STATE.submittedOk,
+      pendingResult: STATE.pendingResult,
       // history wird bewusst NICHT persistiert — Undo nach Reload ist nicht
       // unterstützt, vermeidet ein riesiges Storage-Object.
     }));
@@ -772,8 +778,9 @@ function restorePersistedState() {
     const raw = localStorage.getItem(PERSIST_KEY);
     if (!raw) return false;
     const p = JSON.parse(raw);
-    if (!p || !p.match) return false;
-    STATE.match = p.match;
+    // Auch ohne Match wiederherstellen, wenn noch ein Ergebnis offen ist.
+    if (!p || (!p.match && !p.pendingResult)) return false;
+    STATE.match = p.match ?? null;
     STATE.setsCompleted = Array.isArray(p.setsCompleted) ? p.setsCompleted : [];
     STATE.currentSet = p.currentSet ?? { left: 0, right: 0 };
     STATE.teamOnSide = p.teamOnSide ?? null;
@@ -792,6 +799,8 @@ function restorePersistedState() {
     } else {
       STATE.pause = null;
     }
+    STATE.submittedOk = !!p.submittedOk;
+    STATE.pendingResult = p.pendingResult ?? null;
     return true;
   } catch { return false; }
 }
@@ -1046,38 +1055,61 @@ function reopen() {
     STATE.finished = false;
   }
   STATE.submittedOk = false;
+  STATE.pendingResult = null;
+  if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
   persistState();
   render();
 }
 
-async function submit() {
-  if (!STATE.match || STATE.submitting || !STATE.teamOnSide) return;
-  STATE.submitting = true;
-  els.submitStatus.textContent = 'Übertrage…';
-  els.submitBtn.disabled = true;
-  // Sets in Team-A/B-Koordinaten umrechnen (Director-DB kennt nur Team A/B)
+// ─────────────────────────── Ergebnis-Übermittlung ────────────────────
+// Robust: einmal getippt, wird das Ergebnis im Hintergrund alle paar
+// Sekunden wiederholt, bis der Server es WIRKLICH bestätigt (ok:true).
+// Übersteht Netzausfälle, bts-light-Reconnects, Moduswechsel und einen
+// Tablet-Reload – das offene Ergebnis liegt in localStorage.
+let resultRetryTimer = null;
+const RESULT_RETRY_MS = 5000;
+
+function submit() {
+  if (!STATE.match || !STATE.teamOnSide || STATE.pendingResult) return;
+  // Sets in Team-A/B-Koordinaten umrechnen (Director-DB kennt nur A/B).
   const sideOfA = STATE.teamOnSide.a;
   const sets = STATE.setsCompleted.map(s => sideOfA === 'left'
     ? { a: s.left, b: s.right }
     : { a: s.right, b: s.left });
+  STATE.pendingResult = { matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets };
+  STATE.submittedOk = false;
   tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets });
+  persistState();
+  render();
+  trySubmitPending();
+}
+
+// Versucht das offene Ergebnis zu übermitteln; bei Misserfolg plant es
+// sich selbst neu, bis der Server ok:true bestätigt.
+async function trySubmitPending() {
+  if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
+  const pr = STATE.pendingResult;
+  if (!pr) return;
   try {
     const res = await fetch(BASE_PATH + '/result', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets }),
+      body: JSON.stringify(pr),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
+    // mit HTTP 200 – die echte Aussage steht im Body-Feld ok.
+    const data = await res.json().catch(() => ({ ok: false, error: 'ungültige Antwort' }));
+    if (!data.ok) throw new Error(data.error || 'Übermittlung abgelehnt');
+    STATE.pendingResult = null;
     STATE.submittedOk = true;
-    els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
-    els.submitBtn.disabled = true;
-    tlog('info', 'submit_ok', { matchId: STATE.match.matchId });
+    tlog('info', 'submit_ok', { matchId: pr.matchId });
+    persistState();
+    render();
   } catch (err) {
-    els.submitStatus.textContent = `Fehler: ${err.message} · nochmal versuchen?`;
-    els.submitBtn.disabled = false;
-    tlog('error', 'submit_fail', { matchId: STATE.match?.matchId, error: String(err) });
-  } finally {
-    STATE.submitting = false;
+    tlog('warn', 'submit_retry', { matchId: pr.matchId, error: String(err) });
+    render();
+    resultRetryTimer = setTimeout(trySubmitPending, RESULT_RETRY_MS);
   }
 }
 
@@ -1263,7 +1295,13 @@ function render() {
     els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
     els.setSummary.textContent = STATE.setsCompleted.map(s => `${s.left}:${s.right}`).join(' · ');
     els.finishedOverlay.classList.add('visible');
-    if (!STATE.submittedOk) {
+    if (STATE.submittedOk) {
+      els.submitBtn.disabled = true;
+      els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
+    } else if (STATE.pendingResult) {
+      els.submitBtn.disabled = true;
+      els.submitStatus.textContent = 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.';
+    } else {
       els.submitBtn.disabled = false;
       els.submitStatus.textContent = '';
     }
@@ -1355,6 +1393,8 @@ restorePersistedState();
 render();
 connect();
 setupBattery();
+// Hing beim letzten Mal noch ein Ergebnis in der Übermittlung? Weiter damit.
+if (STATE.pendingResult) trySubmitPending();
 </script>
 </body>
 </html>
