@@ -349,6 +349,18 @@ pub fn open_live_view(
         .map_err(|e| e.to_string())
 }
 
+/// Öffnet eine externe `https`-URL im Standardbrowser – für die
+/// Mitwirkenden-Links im Über-Dialog.
+#[tauri::command]
+pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("Nur https-Links sind erlaubt.".to_string());
+    }
+    app.opener()
+        .open_url(url, None::<String>)
+        .map_err(|e| e.to_string())
+}
+
 // ───────────────────────────── Walkover nach Aufgabe ──────────────────────
 
 /// Ein Walkover-Vorschlag samt der aktuell noch offenen Kandidaten-Spiele.

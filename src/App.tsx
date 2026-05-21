@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { loadConfig, saveConfig } from "./api";
 import { AlertBanner } from "./components/AlertBanner";
+import { Footer } from "./components/Footer";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { WalkoverPanel } from "./components/WalkoverPanel";
 import { Dashboard } from "./pages/Dashboard";
@@ -82,6 +83,7 @@ function App() {
         <UpdateBanner />
         <AlertBanner />
         <div className="min-h-0 flex-1 overflow-auto">{renderView()}</div>
+        <Footer />
         <WalkoverPanel />
       </div>
     </UpdateProvider>

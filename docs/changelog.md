@@ -14,6 +14,13 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   dann gehen sie mit `ScoreStatus = 1` nach BTP. Maßgeblich ist nur die
   Disziplin der Aufgabe; spielt ein Doppelpartner in einer anderen
   Disziplin mit anderem Partner, bleibt das unberührt.
+- **Heartbeat**: bts-light meldet sich auch im Leerlauf alle 60 s beim
+  Liveticker. So erkennt badhub.de ein laufendes Turnier zuverlässig als
+  „live" – und kennzeichnet es als beendet, sobald bts-light geschlossen
+  wird (kein Heartbeat mehr).
+- **Versionsanzeige & Mitwirkende**: Fußzeile mit der installierten
+  Version und ein „Über"-Dialog, der die Pioniere der BTS-Community
+  würdigt – Philipp Hagemeister (Idee & Begründung), Tobias Lehr, letilo.
 
 ## v0.4.6
 

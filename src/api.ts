@@ -38,6 +38,13 @@ export const tabletOverview = (): Promise<TabletInfo> =>
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
 
+/** Installierte App-Version (Rust: CARGO_PKG_VERSION). */
+export const appVersion = (): Promise<string> => invoke("app_version");
+
+/** Öffnet eine externe https-URL im Standardbrowser. */
+export const openExternal = (url: string): Promise<void> =>
+  invoke("open_external", { url });
+
 /** Offene Walkover-Vorschläge nach Aufgaben (Aufgabe → restliche Spiele). */
 export const walkoverProposals = (): Promise<WalkoverProposal[]> =>
   invoke("walkover_proposals");

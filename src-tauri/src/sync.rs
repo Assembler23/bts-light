@@ -7,7 +7,7 @@
 //! BTP und werden bei jedem Zyklus neu abgefragt.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::badhub::diff::{diff, Update};
 use crate::badhub::push;
@@ -15,6 +15,13 @@ use crate::btp::client;
 use crate::btp::model::{BtpSnapshot, MatchStatus};
 use crate::config::AppConfig;
 use crate::tablet::state::TabletState;
+
+/// Abstand der Heartbeats: Hat sich am Turnierstand >60 s nichts geändert,
+/// sendet die Sync-Engine trotzdem einen vollen `tset` als Lebenszeichen.
+/// So erkennt badhub.de ein laufendes Turnier als „live", auch wenn gerade
+/// keine Punkte fallen — und meldet es als beendet, sobald bts-light
+/// schließt und die Heartbeats ausbleiben.
+const HEARTBEAT_AFTER: Duration = Duration::from_secs(60);
 
 /// Aktuelle Zeit in Unix-Millisekunden.
 fn now_ms() -> u64 {
@@ -50,6 +57,9 @@ pub struct SyncEngine {
     /// erkannt wurde. BTP liefert keinen End-Zeitstempel, deshalb wird er
     /// hier über die Zyklen hinweg gemerkt.
     finished_at: HashMap<i64, u64>,
+    /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
+    /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
+    last_push_at: Option<Instant>,
 }
 
 impl Default for SyncEngine {
@@ -64,7 +74,15 @@ impl SyncEngine {
             last_pushed: None,
             rid: 1,
             finished_at: HashMap::new(),
+            last_push_at: None,
         }
+    }
+
+    /// Ist ein Heartbeat fällig? `true`, wenn noch nie gepusht wurde oder
+    /// der letzte Push länger als [`HEARTBEAT_AFTER`] zurückliegt.
+    fn heartbeat_due(&self) -> bool {
+        self.last_push_at
+            .map_or(true, |t| t.elapsed() >= HEARTBEAT_AFTER)
     }
 
     /// Stempelt beendete Matches: Beim ersten Erkennen eines Siegers wird
@@ -106,7 +124,15 @@ impl SyncEngine {
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());
         tablet.apply_tablet_scores(&mut snapshot);
-        let update = self.plan(&snapshot);
+        // Heartbeat: Ist regulär nichts zu senden, aber seit dem letzten
+        // Push >60 s vergangen, wird ein voller `tset` als Lebenszeichen
+        // erzwungen (Diff gegen `None`). badhub frischt damit `updated_at`
+        // auf und erkennt das Turnier als aktiv.
+        let update = match self.plan(&snapshot) {
+            Update::None if self.heartbeat_due() => diff(None, &snapshot, self.rid),
+            other => other,
+        };
+        let sent_something = !matches!(update, Update::None);
         match push::push_update(http, &config.badhub.url, &config.badhub.password, &update).await {
             Ok(()) => {
                 let outcome = match update {
@@ -114,6 +140,9 @@ impl SyncEngine {
                     Update::Single(_) => SyncOutcome::PushedUpdate,
                     Update::None => SyncOutcome::Idle,
                 };
+                if sent_something {
+                    self.last_push_at = Some(Instant::now());
+                }
                 self.on_success(snapshot);
                 outcome
             }
@@ -203,5 +232,15 @@ mod tests {
         // … nach einem Push-Fehler aber wird wieder voll gesendet.
         engine.on_failure();
         assert!(matches!(engine.plan(&snapshot()), Update::Full(_)));
+    }
+
+    #[test]
+    fn heartbeat_due_until_a_push_happened() {
+        let mut engine = SyncEngine::new();
+        // Noch nie gepusht → Heartbeat fällig.
+        assert!(engine.heartbeat_due());
+        // Direkt nach einem Push → noch kein Heartbeat fällig.
+        engine.last_push_at = Some(Instant::now());
+        assert!(!engine.heartbeat_due());
     }
 }
