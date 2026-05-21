@@ -51,20 +51,12 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
 
 ## Geplant (später)
 
-- **Court-Monitore — TV am Spielfeld (Raspberry Pi).** Eine read-only
-  Monitor-Ansicht von bts-light: pro Feld ein TV (**32"–55"**), betrieben
-  von einem **Raspberry Pi** im Vollbild-Browser.
-  - **1-Feld-Modus** — ein Feld bildschirmfüllend (Riesen-Satzstand).
-  - **2-Felder-Modus** — zwei *nebeneinanderliegende* Felder geteilt auf
-    einem großen TV; spart Hardware und ist oft ausreichend.
-  - Inhalt: Feldnummer, Disziplin, Paarung, Satzstand, optional Timer.
-  - **Eigene Clean-Room-Ansicht** — ein read-only Geschwister von
-    `tablet.html`, pro Feld vom Server/Relay ausgeliefert, `vh`-skaliert.
-    bts-light hat die Daten bereits (`match_for_court`, Live-Score,
-    Disziplin). **Nicht** aus `phihag/bup` kopieren — Lizenz unklar
-    (kommerzielle Lizenzdateien im Repo).
-  - Visuelle Referenz: `phihag/bup` PR #43 (Einzelturnier-Display für
-    kleine Monitore) — Vorbild, aber eigenständig und schöner umgesetzt.
+- **Court-Monitore — TV am Spielfeld (Raspberry Pi).** Read-only TV-Anzeige
+  pro Feld (32"–55"): Werbung im Leerlauf, Match-Ansicht sobald ein Spiel
+  aufs Feld kommt. Layout-Entwurf **„A — Geteilt"** gewählt. Ausgearbeitetes
+  Konzept inkl. Datenfluss, Werbemodus und Konfiguration:
+  [court-monitor.md](court-monitor.md). 2-Felder-pro-TV-Modus später.
+  Nächster Schritt: Umsetzung planen + bauen (offene Punkte siehe Konzept).
 
 ## Bekannte Einschränkungen / technische Schuld
 
