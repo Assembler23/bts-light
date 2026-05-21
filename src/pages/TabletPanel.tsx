@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Cloud, Info, Wifi } from "lucide-react";
+import {
+  ArrowLeft,
+  Battery,
+  BatteryCharging,
+  BatteryWarning,
+  Cloud,
+  Info,
+  Wifi,
+} from "lucide-react";
 import { tabletOverview } from "../api";
 import type { CourtOverview, TabletInfo } from "../types";
 
@@ -203,13 +211,16 @@ function CourtCard({ court }: { court: CourtOverview }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-medium">{court.court}</span>
-        <span className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              court.tablet_connected ? "bg-emerald-500" : "bg-slate-300"
-            }`}
-          />
-          {court.tablet_connected ? "Tablet" : "kein Tablet"}
+        <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+          {court.battery && <BatteryBadge battery={court.battery} />}
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                court.tablet_connected ? "bg-emerald-500" : "bg-slate-300"
+              }`}
+            />
+            {court.tablet_connected ? "Tablet" : "kein Tablet"}
+          </span>
         </span>
       </div>
       {hasMatch ? (
@@ -236,5 +247,34 @@ function CourtCard({ court }: { court: CourtOverview }) {
         <div className="mt-1 text-sm text-slate-400">frei</div>
       )}
     </div>
+  );
+}
+
+/** Akkustand-Anzeige eines Tablets (nur Android/Chrome liefern ihn). */
+function BatteryBadge({
+  battery,
+}: {
+  battery: { percent: number; charging: boolean };
+}) {
+  const { percent, charging } = battery;
+  const color =
+    percent < 20
+      ? "text-rose-600"
+      : percent < 50
+        ? "text-amber-600"
+        : "text-slate-500";
+  const Icon = charging
+    ? BatteryCharging
+    : percent < 20
+      ? BatteryWarning
+      : Battery;
+  return (
+    <span
+      className={`flex items-center gap-1 tabular-nums ${color}`}
+      title={charging ? "Tablet-Akku (lädt)" : "Tablet-Akku"}
+    >
+      <Icon size={14} />
+      {percent}%
+    </span>
   );
 }

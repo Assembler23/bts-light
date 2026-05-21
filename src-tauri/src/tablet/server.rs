@@ -312,6 +312,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     handle_score(c, score_a, score_b, &sets_history, &ctx).await;
                                 }
                             }
+                            Ok(TabletMsg::Battery { percent, charging }) => {
+                                if let Some(c) = &court {
+                                    ctx.tablet.record_battery(c, percent, charging);
+                                }
+                            }
                             Err(_) => {}
                         }
                     }

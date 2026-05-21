@@ -45,6 +45,8 @@ export interface CourtOverview {
   /** Satzstand als [Team1, Team2]-Paare. */
   sets: [number, number][];
   tablet_connected: boolean;
+  /** Akkustand des Tablets (Android/Chrome) – null bei iPads/Safari. */
+  battery: { percent: number; charging: boolean } | null;
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

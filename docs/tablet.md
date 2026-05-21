@@ -60,6 +60,19 @@ den Relay statt direkt.
    meldet sich per LOGIN an und schreibt das Match mit `SENDUPDATE` zurück
    nach BTP (siehe [btp_protocol.md](btp_protocol.md)).
 
+## Am Tablet: Pausen, Court-Grafik, Akkustand
+
+- **Offizielle Pausen** (BWF): Bei 11 Punkten im Satz blendet das Tablet
+  eine 60-Sekunden-Pause ein, zwischen den Sätzen eine 2-Minuten-Pause –
+  je mit Countdown. „Weiterspielen" beendet die Pause früher; bei 0 geht
+  es automatisch weiter. Während der Pause ist die Zähltafel gesperrt.
+- **Court-Grafik**: zeigt Aufschläger (gelb markiert) und Annehmer auf
+  dem Spielfeld – im Einzel ein Name je Hälfte, im Doppel zwei.
+- **Akkustand**: Android-Tablets (Chrome) melden ihren Akkustand an die
+  Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
+  Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
+  Datenschutzgründen nicht her; dort bleibt die Anzeige leer.
+
 ## Einrichtung im Turnier
 
 1. In bts-light den Liveticker starten (BTP muss verbunden sein) – der

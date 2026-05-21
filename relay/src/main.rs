@@ -313,6 +313,11 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     forward_score(&broker, &ns, c, score_a, score_b, sets_history).await;
                                 }
                             }
+                            Ok(TabletMsg::Battery { percent, charging }) => {
+                                if let Some(c) = &court {
+                                    forward_battery(&broker, &ns, c, percent, charging).await;
+                                }
+                            }
                             Err(_) => {}
                         }
                     }
@@ -405,6 +410,18 @@ async fn forward_score(
             score_a,
             score_b,
             sets_history,
+        }));
+    }
+}
+
+/// Leitet den Akkustand eines Tablets an den Host weiter.
+async fn forward_battery(broker: &Broker, ns: &str, court: &str, percent: i64, charging: bool) {
+    let map = broker.namespaces.lock().await;
+    if let Some(host) = map.get(ns).and_then(|n| n.host.as_ref()) {
+        let _ = host.send(text(&RelayFrame::Battery {
+            court_label: court.to_string(),
+            percent,
+            charging,
         }));
     }
 }

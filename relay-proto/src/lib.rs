@@ -72,6 +72,9 @@ pub enum TabletMsg {
         #[serde(rename = "setsHistory", default)]
         sets_history: Vec<SetAb>,
     },
+    /// Akkustand des Tablets (nur Android/Chrome – iPads liefern ihn nicht).
+    #[serde(rename = "battery")]
+    Battery { percent: i64, charging: bool },
 }
 
 /// Nachrichten vom Server an das Tablet.
@@ -187,6 +190,13 @@ pub enum RelayFrame {
         #[serde(rename = "matchId")]
         match_id: i64,
         sets: Vec<SetAb>,
+    },
+    /// Akkustand eines Tablets.
+    Battery {
+        #[serde(rename = "courtLabel")]
+        court_label: String,
+        percent: i64,
+        charging: bool,
     },
 }
 

@@ -10,7 +10,7 @@ import {
   Wifi,
   X,
 } from "lucide-react";
-import { saveConfig, startSync, testBtp } from "../api";
+import { saveConfig, startSync, stopSync, testBtp } from "../api";
 import { PRESETS, findPreset } from "../presets";
 import type { AppConfig, ConnectionMode } from "../types";
 
@@ -169,6 +169,12 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
     try {
       const config = buildConfig();
       await saveConfig(config);
+      // Sync sauber neu starten, damit ein geänderter Modus (LAN/Cloud)
+      // sicher übernommen wird – ein laufender Sync würde sonst weiterlaufen.
+      // Kurze Pause, damit der alte Tablet-Server den Port freigibt, bevor
+      // der neue ihn bindet.
+      await stopSync();
+      await new Promise((r) => setTimeout(r, 400));
       await startSync();
       onDone(config);
     } catch (e) {

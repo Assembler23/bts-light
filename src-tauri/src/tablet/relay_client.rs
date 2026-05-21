@@ -118,6 +118,13 @@ async fn handle_frame(
         } => {
             handle_score(&court_label, score_a, score_b, &sets_history, ctx).await;
         }
+        RelayFrame::Battery {
+            court_label,
+            percent,
+            charging,
+        } => {
+            ctx.tablet.record_battery(&court_label, percent, charging);
+        }
         RelayFrame::Result {
             req_id,
             court_label,

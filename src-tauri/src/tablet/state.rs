@@ -11,6 +11,16 @@ use serde::Serialize;
 
 use crate::btp::model::{BtpMatch, BtpSnapshot, MatchStatus};
 
+/// Akkustand eines Tablets. Liefern nur Android-/Chrome-Tablets – iPads
+/// (Safari) geben den Akkustand grundsätzlich nicht her.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct TabletBattery {
+    /// Ladestand in Prozent (0–100).
+    pub percent: i64,
+    /// Lädt das Tablet gerade?
+    pub charging: bool,
+}
+
 /// Laufende Tablet-Sitzung an einem Court.
 #[derive(Debug, Clone)]
 struct CourtSession {
@@ -20,6 +30,8 @@ struct CourtSession {
     sets: Vec<(i64, i64)>,
     /// Ist die WebSocket-Verbindung des Tablets offen?
     connected: bool,
+    /// Zuletzt gemeldeter Akkustand (falls das Tablet ihn liefert).
+    battery: Option<TabletBattery>,
 }
 
 /// Eine Court-Zeile für die Felder-Übersicht der Turnierleitung.
@@ -33,6 +45,8 @@ pub struct CourtOverview {
     /// Aktueller Satzstand – vom Tablet, falls aktiv, sonst aus BTP.
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
+    /// Akkustand des Tablets, falls es ihn liefert (Android/Chrome).
+    pub battery: Option<TabletBattery>,
 }
 
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
@@ -79,6 +93,7 @@ impl TabletState {
                 match_id: 0,
                 sets: Vec::new(),
                 connected: true,
+                battery: None,
             })
             .connected = true;
     }
@@ -97,9 +112,24 @@ impl TabletState {
             match_id,
             sets: Vec::new(),
             connected: true,
+            battery: None,
         });
         session.match_id = match_id;
         session.sets = sets;
+    }
+
+    /// Akkustand des Tablets an einem Court übernehmen.
+    pub fn record_battery(&self, court: &str, percent: i64, charging: bool) {
+        let mut courts = self.courts.write().unwrap();
+        courts
+            .entry(court.to_string())
+            .or_insert(CourtSession {
+                match_id: 0,
+                sets: Vec::new(),
+                connected: true,
+                battery: None,
+            })
+            .battery = Some(TabletBattery { percent, charging });
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
@@ -175,6 +205,7 @@ impl TabletState {
                         .unwrap_or_default(),
                     sets,
                     tablet_connected,
+                    battery: session.and_then(|s| s.battery),
                 }
             })
             .collect()

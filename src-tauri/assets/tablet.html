@@ -238,6 +238,24 @@
     .set-summary { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
     .submit-status { font-size: .9rem; opacity: .7; min-height: 1.2em; }
 
+    /* ─── Pausen-Overlay (offizielle BWF-Intervalle) ─────────────────── */
+    .break-overlay {
+      position: fixed; inset: 0; background: rgba(2,6,23,.94);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1.25rem; padding: 2rem; text-align: center;
+      z-index: 15;
+    }
+    .break-overlay.visible { display: flex; }
+    .break-title {
+      font-size: 1.5rem; font-weight: 700; color: #38bdf8;
+      letter-spacing: .03em; text-transform: uppercase;
+    }
+    .break-countdown {
+      font-size: 5.5rem; font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums; color: #f8fafc;
+    }
+    .break-hint { font-size: .85rem; opacity: .55; max-width: 22rem; }
+
     @media (orientation: portrait) {
       /* Hochformat: Buttons sehr schmal — Hinweis zum Drehen einblenden? */
       .play { grid-template-columns: 1fr 2fr 1fr; }
@@ -392,6 +410,17 @@
   <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
 </div>
 
+<!-- Pausen-Overlay: offizielle BWF-Intervalle mit Countdown -->
+<div class="break-overlay" id="break-overlay">
+  <div class="break-title" id="break-title"></div>
+  <div class="break-countdown" id="break-countdown">1:00</div>
+  <button class="primary" id="break-skip">Weiterspielen</button>
+  <div class="break-hint">
+    Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — sonst geht
+    es nach Ablauf der Zeit automatisch weiter.
+  </div>
+</div>
+
 <script type="module">
 // ───────────────────────────────────────────────────────────────────────
 // Tablet-UI Phase 5.47a (+ Court-Visualisierung & BWF-Aufschlagrotation)
@@ -470,6 +499,11 @@ const STATE = {
   // einmalig die Court-Seiten (egal welches Team führt). Wir merken uns,
   // ob das in diesem Match schon erfolgt ist.
   midGameSwitchDone: /** @type {boolean} */ (false),
+
+  // Laufende offizielle Pause: { kind:'eleven'|'game', endsAt:<ms> } oder null.
+  pause: /** @type {null | {kind:'eleven'|'game', endsAt:number}} */ (null),
+  // Wurde die 60-s-Pause bei 11 Punkten in DIESEM Satz schon ausgelöst?
+  intervalDoneThisGame: /** @type {boolean} */ (false),
 };
 
 const els = {
@@ -507,6 +541,10 @@ const els = {
   submitStatus: document.getElementById('submit-status'),
   submitBtn: document.getElementById('submit-btn'),
   reopenBtn: document.getElementById('reopen-btn'),
+  breakOverlay: document.getElementById('break-overlay'),
+  breakTitle: document.getElementById('break-title'),
+  breakCountdown: document.getElementById('break-countdown'),
+  breakSkip: document.getElementById('break-skip'),
 };
 
 // ─────────────────────────────── WebSocket ────────────────────────────
@@ -526,6 +564,7 @@ function connect() {
     els.connText.textContent = 'verbunden';
     tlog('info', 'ws_open');
     ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtLabel: COURT_LABEL }));
+    if (sendBattery) sendBattery();
   };
   ws.onmessage = (ev) => {
     let msg;
@@ -575,6 +614,29 @@ function sendScoreUpdate() {
   }));
 }
 
+// ─────────────────────────────── Akkustand ────────────────────────────
+// Battery Status API – nur Android/Chrome. Auf iPads/Safari ist
+// navigator.getBattery nicht vorhanden; dann bleibt das Feature stumm.
+let sendBattery = null;
+function setupBattery() {
+  if (!navigator.getBattery) return;
+  navigator.getBattery().then((bat) => {
+    sendBattery = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'battery',
+          percent: Math.round(bat.level * 100),
+          charging: bat.charging,
+        }));
+      }
+    };
+    bat.addEventListener('levelchange', sendBattery);
+    bat.addEventListener('chargingchange', sendBattery);
+    sendBattery();
+    setInterval(sendBattery, 120000); // Fallback alle 2 Min
+  }).catch(() => { /* nicht verfügbar – Feature bleibt stumm */ });
+}
+
 // ─────────────────────────────── BWF-Regel-Logik ──────────────────────
 
 function capForTarget(target) {
@@ -620,6 +682,56 @@ function showSwitchToast() {
   switchToastTimer = setTimeout(() => { el.style.display = 'none'; }, 6000);
 }
 
+// ─────────────────────────────── Pausen (BWF-Intervalle) ──────────────
+// Offizielle Intervalle: 60 s sobald ein Team 11 Punkte erreicht, 120 s
+// zwischen den Sätzen. Während der Pause ist die Zähltafel gesperrt; bei 0
+// geht es automatisch weiter, „Weiterspielen" beendet die Pause früher.
+const BREAK_SECONDS = { eleven: 60, game: 120 };
+let breakTimer = null;
+
+function startBreak(kind) {
+  STATE.pause = { kind, endsAt: Date.now() + BREAK_SECONDS[kind] * 1000 };
+  if (breakTimer) clearInterval(breakTimer);
+  breakTimer = setInterval(tickBreak, 250);
+  tlog('info', 'break_start', { kind });
+  persistState();
+  render();
+}
+
+function endBreak() {
+  if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  if (STATE.pause) tlog('info', 'break_end', { kind: STATE.pause.kind });
+  STATE.pause = null;
+  persistState();
+  render();
+}
+
+// 4×/s: aktualisiert den Countdown; bei 0 endet die Pause automatisch.
+function tickBreak() {
+  if (!STATE.pause) {
+    if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+    return;
+  }
+  if (Date.now() >= STATE.pause.endsAt) {
+    endBreak();
+    return;
+  }
+  renderBreak();
+}
+
+function renderBreak() {
+  if (!STATE.pause) {
+    els.breakOverlay.classList.remove('visible');
+    return;
+  }
+  const secs = Math.max(0, Math.round((STATE.pause.endsAt - Date.now()) / 1000));
+  els.breakCountdown.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  els.breakTitle.textContent = STATE.pause.kind === 'eleven'
+    ? 'Pause bei 11 Punkten'
+    : 'Satzpause';
+  els.breakOverlay.classList.add('visible');
+}
+
 // ─────────────────────────────── State-Mutationen ─────────────────────
 
 // ─────────────────────────── localStorage-Persistenz ────────────────────
@@ -643,6 +755,8 @@ function persistState() {
       setup: STATE.setup,
       finished: STATE.finished,
       midGameSwitchDone: STATE.midGameSwitchDone,
+      pause: STATE.pause,
+      intervalDoneThisGame: STATE.intervalDoneThisGame,
       // history wird bewusst NICHT persistiert — Undo nach Reload ist nicht
       // unterstützt, vermeidet ein riesiges Storage-Object.
     }));
@@ -668,6 +782,16 @@ function restorePersistedState() {
     STATE.setup = p.setup ?? 'playing';
     STATE.finished = !!p.finished;
     STATE.midGameSwitchDone = !!p.midGameSwitchDone;
+    STATE.intervalDoneThisGame = !!p.intervalDoneThisGame;
+    // Laufende Pause nur übernehmen, wenn ihre Zeit noch nicht abgelaufen
+    // ist — sonst hinge nach einem Reload eine tote Pause fest.
+    if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > Date.now()) {
+      STATE.pause = p.pause;
+      if (breakTimer) clearInterval(breakTimer);
+      breakTimer = setInterval(tickBreak, 250);
+    } else {
+      STATE.pause = null;
+    }
     return true;
   } catch { return false; }
 }
@@ -689,6 +813,9 @@ function loadMatch(match) {
   STATE.setup = 'choose-side';
   STATE.pendingServer = null;
   STATE.midGameSwitchDone = false;
+  STATE.intervalDoneThisGame = false;
+  STATE.pause = null;
+  if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   persistState();
   render();
 }
@@ -717,6 +844,9 @@ function clearMatch() {
   STATE.setup = 'pending';
   STATE.pendingServer = null;
   STATE.midGameSwitchDone = false;
+  STATE.intervalDoneThisGame = false;
+  STATE.pause = null;
+  if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   clearPersistedState();
   render();
 }
@@ -794,6 +924,7 @@ function restoreSnapshot(snap) {
 }
 
 function addPointOnSide(side) {
+  if (STATE.pause) return; // während einer offiziellen Pause keine Punkte
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing' || !STATE.positions) return;
 
   // Snapshot vor Mutation für Undo
@@ -833,22 +964,34 @@ function addPointOnSide(side) {
     triggeredMidGameSwitch = true;
   }
 
+  // Offizielle Pause merken – erst nach Render/Score-Push starten.
+  let triggeredBreak = null;
+  // 60-s-Intervall, sobald ein Team in diesem Satz erstmals 11 erreicht.
+  if (reached11 && !STATE.intervalDoneThisGame) {
+    STATE.intervalDoneThisGame = true;
+    triggeredBreak = 'eleven';
+  }
+
   // Satz-Ende?
   const winnerOfSet = setWinnerSide(STATE.currentSet, STATE.match.targetScore);
   if (winnerOfSet) {
     STATE.setsCompleted.push({ ...STATE.currentSet });
     STATE.currentSet = { left: 0, right: 0 };
-    // Beim Satzwechsel werden die Seiten getauscht (BWF: ab dem 11. Punkt
-    // im Entscheidungssatz auch noch ein zusätzlicher Seitenwechsel — wir
-    // implementieren erstmal nur den Satz-Seitenwechsel)
+    // Neuer Satz → das 11-Punkte-Intervall ist wieder möglich.
+    STATE.intervalDoneThisGame = false;
+    // Beim Satzwechsel werden die Seiten getauscht.
     swapSides();
   }
 
   if (matchWinnerSide()) STATE.finished = true;
+  // 120-s-Satzpause, wenn ein Satz endete und das Match weiterläuft.
+  if (winnerOfSet && !STATE.finished) triggeredBreak = 'game';
+
   persistState();
   render();
   sendScoreUpdate();
   if (triggeredMidGameSwitch) showSwitchToast();
+  if (triggeredBreak) startBreak(triggeredBreak);
 }
 
 // Komplettes Seitentauschen: physikalisch wechseln die Spieler die Court-
@@ -1080,6 +1223,7 @@ function setPlayer(cell, playerId) {
 function render() {
   // Setup-Modal hat Priorität
   renderSetupModal();
+  renderBreak();
 
   if (!STATE.match) {
     els.eventLabel.textContent = '— kein Match —';
@@ -1136,6 +1280,7 @@ els.undoBtns.forEach(b => b.addEventListener('click', undo));
 els.finishBtn.addEventListener('click', finishManually);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
+els.breakSkip.addEventListener('click', endBreak);
 
 document.addEventListener('dblclick', (e) => e.preventDefault());
 document.body.addEventListener('touchmove', (e) => {
@@ -1209,6 +1354,7 @@ document.getElementById('diag-clear').addEventListener('click', () => {
 restorePersistedState();
 render();
 connect();
+setupBattery();
 </script>
 </body>
 </html>
