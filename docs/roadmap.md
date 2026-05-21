@@ -3,13 +3,11 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-21, v0.6.0 (Sprachansagen) auf Branch `feat/sprachansagen`.
+> Stand: 2026-05-21, nach Release v0.6.0 (Sprachansagen, im Turnierbetrieb
+> bestätigt).
 
 ## Als Nächstes
 
-- **v0.6.0 (Sprachansagen) im Turnierbetrieb testen** — Branch-Build auf
-  dem Windows-Turnierrechner: Feld-Aufruf-Ansage, Disziplin, DE/EN-Auto.
-  Erst nach erfolgreichem Test nach `main` mergen und `v0.6.0` taggen.
 - **Repo-Umbenennung** → Anzeigename „badhub BTP controller", GitHub-Repo
   `badhub-btp-controller`. Wichtig: Tauri-`identifier` `de.badhub.btslight`
   und der Updater-Pfad `download/bts-light/` bleiben **stabil**, sonst
@@ -69,3 +67,14 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   zeigt „Nicht mehr live" erst nach 10 Min. Die 10-Min-Schwelle ist
   bewusst lose gehalten, solange Nicht-Heartbeat-Quellen (`letilo/bts`)
   pushen können. Angleichen, sobald bts-light die einzige Quelle ist.
+- **Keine Frontend-Tests.** Der Rust-Kern ist per `cargo test` abgedeckt;
+  die React-Seite (u. a. `announcer.ts` — Court-Phrase, Ansage-Segmente,
+  Auto-Sprach-Regel) hat kein Test-Setup. badhub-tournament nutzt Vitest
+  inkl. `announcer.test.ts` — das ließe sich übernehmen.
+- **Alte Liveticker-Test-Turniere.** `lehiero`, `christian-zum-test` und
+  die Legacy-Zeile `default` stehen in `liveticker_tournaments` noch auf
+  `is_active = 1` und machen `/live` ohne `?t=` mehrdeutig. Im
+  Liveticker-Admin auf inaktiv setzen.
+- **`docs/ops/deployment.md` teils veraltet** (badhub-Repo): Der Abschnitt
+  „Deploy: Produktion" beschreibt noch das KAS-`deploy_prod.sh`, obwohl
+  Prod längst über `deploy_hetzner.sh` auf Hetzner läuft.
