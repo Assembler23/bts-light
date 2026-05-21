@@ -59,3 +59,14 @@ export const confirmWalkover = (
 /** Verwirft einen Walkover-Vorschlag, ohne ihn umzusetzen. */
 export const dismissWalkover = (proposalId: string): Promise<void> =>
   invoke("dismiss_walkover", { proposalId });
+
+/** Übernimmt ein gewähltes Werbebild in das Court-Monitor-Verzeichnis. */
+export const addCourtAd = (path: string): Promise<string> =>
+  invoke("add_court_ad", { path });
+
+/** Entfernt ein Werbebild aus dem Court-Monitor-Verzeichnis. */
+export const removeCourtAd = (file: string): Promise<void> =>
+  invoke("remove_court_ad", { file });
+
+/** Listet die hinterlegten Court-Monitor-Werbebilder. */
+export const listCourtAds = (): Promise<string[]> => invoke("list_court_ads");

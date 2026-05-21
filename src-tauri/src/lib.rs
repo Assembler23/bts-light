@@ -90,6 +90,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
             app_version,
@@ -105,6 +106,9 @@ pub fn run() {
             commands::walkover_proposals,
             commands::dismiss_walkover,
             commands::confirm_walkover,
+            commands::add_court_ad,
+            commands::remove_court_ad,
+            commands::list_court_ads,
             open_log_dir,
         ])
         .setup(|app| {

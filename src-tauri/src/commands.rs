@@ -93,6 +93,15 @@ fn config_path(app: &AppHandle) -> std::path::PathBuf {
         .join("config.json")
 }
 
+/// Verzeichnis der hochgeladenen Court-Monitor-Werbebilder im
+/// App-Datenverzeichnis des Betriebssystems.
+fn monitor_ad_dir(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join(crate::tablet::monitor::AD_DIR_NAME)
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -175,10 +184,15 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 
     // Geteilter Tablet-Kontext – je nach Modus betreibt ihn der
     // eingebettete Server (LAN) oder der Relay-Client (Cloud).
+    let monitor_dir = monitor_ad_dir(&app);
+    let _ = std::fs::create_dir_all(&monitor_dir);
+    let cfg_path = config_path(&app);
     let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
         tablet,
         config,
         push::build_client(),
+        monitor_dir,
+        cfg_path,
     ));
     match mode {
         ConnectionMode::Lan => {
@@ -468,4 +482,55 @@ pub async fn confirm_walkover(
         tablet.remove_walkover_proposal(&proposal_id);
     }
     Ok(WalkoverResult { written, errors })
+}
+
+// ───────────────────────────── Court-Monitor-Werbung ──────────────────────
+
+/// Obergrenze für ein einzelnes Werbebild (8 MB).
+const MAX_AD_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Übernimmt ein im Datei-Dialog gewähltes Werbebild in das
+/// `court-ads`-Verzeichnis. `path` ist der absolute Pfad der Quelldatei;
+/// der Zielname wird mit Zeitstempel selbst vergeben (kein Pfad-Traversal
+/// über den Originalnamen). Liefert den vergebenen Dateinamen zurück.
+#[tauri::command]
+pub fn add_court_ad(app: AppHandle, path: String) -> Result<String, String> {
+    let src = std::path::PathBuf::from(&path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| ["jpg", "jpeg", "png", "webp", "gif"].contains(&e.as_str()))
+        .ok_or("Nur Bilddateien (JPG, PNG, WEBP, GIF) sind erlaubt.")?;
+    let meta = std::fs::metadata(&src).map_err(|e| format!("Datei nicht lesbar: {e}"))?;
+    if !meta.is_file() {
+        return Err("Die Auswahl ist keine Datei.".to_string());
+    }
+    if meta.len() > MAX_AD_BYTES {
+        return Err("Das Bild ist größer als 8 MB.".to_string());
+    }
+    let dir = monitor_ad_dir(&app);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Verzeichnis fehlt: {e}"))?;
+    let name = format!("ad-{}.{ext}", now_ms());
+    std::fs::copy(&src, dir.join(&name)).map_err(|e| format!("Kopieren fehlgeschlagen: {e}"))?;
+    tracing::info!("Court-Monitor: Werbebild '{name}' hinzugefügt");
+    Ok(name)
+}
+
+/// Entfernt ein Werbebild aus dem `court-ads`-Verzeichnis.
+#[tauri::command]
+pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
+    if !crate::tablet::monitor::is_safe_image_name(&file) {
+        return Err("Ungültiger Dateiname.".to_string());
+    }
+    std::fs::remove_file(monitor_ad_dir(&app).join(&file))
+        .map_err(|e| format!("Löschen fehlgeschlagen: {e}"))?;
+    tracing::info!("Court-Monitor: Werbebild '{file}' entfernt");
+    Ok(())
+}
+
+/// Listet die aktuell hinterlegten Werbebild-Dateinamen.
+#[tauri::command]
+pub fn list_court_ads(app: AppHandle) -> Vec<String> {
+    crate::tablet::monitor::list_ads(&monitor_ad_dir(&app))
 }

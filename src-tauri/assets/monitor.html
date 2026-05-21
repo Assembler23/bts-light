@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Court-Monitor</title>
+  <style>
+    /*
+     * Court-Monitor – read-only TV-Anzeige am Spielfeld (Layout „A — Geteilt").
+     * Reine Anzeige: pollt `./state`, schreibt nie zurück. Alle Maße in
+     * vw/vh/vmin → füllt jeden TV 32"–55" ohne Anpassung.
+     */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
+      background: #0f172a; color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      cursor: none;
+    }
+    #root { position: relative; width: 100vw; height: 100vh; }
+
+    /* ─── Werbe-/Leerlauf-Ansicht ─────────────────────────────────────── */
+    #ad-view {
+      position: absolute; inset: 0; display: none;
+      align-items: center; justify-content: center; background: #000;
+    }
+    #ad-view.show { display: flex; }
+    #ad-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    #ad-fallback {
+      display: none; flex-direction: column; align-items: center; gap: 2vh;
+      text-align: center; padding: 6vmin;
+    }
+    #ad-fallback.show { display: flex; }
+    #ad-fallback .tn { font-size: 5vmin; font-weight: 800; opacity: .9; }
+    #ad-fallback .sub { font-size: 3.4vmin; opacity: .45; letter-spacing: .04em; }
+
+    /* ─── Match-Ansicht ───────────────────────────────────────────────── */
+    #match-view { position: absolute; inset: 0; display: none; flex-direction: column; }
+    #match-view.show { display: flex; }
+
+    header.bar {
+      flex: 0 0 auto; display: flex; align-items: baseline; gap: 2vmin;
+      padding: 1.6vh 3vw; background: #1e293b; border-bottom: .3vh solid #334155;
+    }
+    header.bar .court {
+      font-size: 4vmin; font-weight: 900; letter-spacing: .08em;
+      text-transform: uppercase; color: #fbbf24;
+    }
+    header.bar .discipline {
+      margin-left: auto; font-size: 3.4vmin; font-weight: 700; opacity: .85;
+    }
+
+    .half {
+      flex: 1 1 0; display: flex; align-items: center;
+      gap: 3vw; padding: 0 4vw; min-height: 0;
+    }
+    .divider { flex: 0 0 auto; height: .35vh; background: #334155; }
+
+    .players { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1.4vh; min-width: 0; }
+    .player { display: flex; align-items: center; gap: 2.4vw; min-width: 0; }
+    .flag {
+      flex: 0 0 auto; width: 11vmin; height: 6.6vmin; object-fit: cover;
+      border-radius: .6vmin; background: #334155;
+      box-shadow: 0 0 0 .25vmin rgba(255,255,255,.12);
+    }
+    .flag.hidden { visibility: hidden; }
+    .name {
+      font-size: 6.4vmin; font-weight: 800; line-height: 1.05;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .players.doubles .name { font-size: 4.8vmin; }
+    .serve-dot {
+      flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
+      opacity: 0; transition: opacity .15s;
+    }
+    .serve-dot.on { opacity: 1; }
+
+    /* Satzstand rechts: abgeschlossene Sätze klein, laufender Satz groß. */
+    .scores { flex: 0 0 auto; display: flex; align-items: center; gap: 2.4vw; }
+    .sets-done { display: flex; gap: 1.4vw; }
+    .set-done {
+      font-size: 5vmin; font-weight: 700; opacity: .4;
+      font-variant-numeric: tabular-nums;
+    }
+    .set-current {
+      font-size: 15vmin; font-weight: 900; line-height: .95;
+      font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center;
+      padding: 0 2.2vw; border-radius: 1.4vmin;
+      color: #f8fafc; background: #020617;
+      box-shadow: inset 0 0 0 .3vmin #1e293b;
+    }
+    .set-current.serving {
+      color: #0f172a; background: #fbbf24;
+      box-shadow: inset 0 0 0 .3vmin #fde68a, 0 0 4vmin rgba(251,191,36,.35);
+    }
+
+    footer.bar {
+      flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 1.5vw;
+      padding: 1.2vh 3vw; background: #1e293b; border-top: .3vh solid #334155;
+      font-size: 2.8vmin; font-weight: 600; opacity: .65;
+    }
+    footer.bar .dot-sep { opacity: .5; }
+    footer.bar:empty { display: none; }
+
+    /* ─── Retro-Pausen-Timer (Split-Flap, „Flughafentafel") ───────────── */
+    #timer-overlay {
+      position: absolute; inset: 0; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 4vh; background: rgba(2,6,23,.93);
+    }
+    #timer-overlay.show { display: flex; }
+    #timer-overlay .label {
+      font-size: 5vmin; font-weight: 800; letter-spacing: .12em;
+      text-transform: uppercase; color: #fbbf24;
+    }
+    .flaps { display: flex; gap: 1.2vmin; }
+    .flap {
+      position: relative; width: 13vmin; height: 19vmin;
+      background: #18202e; border-radius: 1.4vmin;
+      box-shadow: 0 1vmin 3vmin rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15vmin; font-weight: 900; line-height: 1;
+      font-variant-numeric: tabular-nums; color: #f1f5f9;
+      overflow: hidden;
+    }
+    /* Waagerechte Teilungslinie der Klappanzeige. */
+    .flap::after {
+      content: ""; position: absolute; left: 0; right: 0; top: 50%;
+      height: .5vmin; background: #0b0f17; transform: translateY(-50%);
+    }
+    .flap.colon { width: 6vmin; background: transparent; box-shadow: none; }
+    .flap.colon::after { display: none; }
+    .flap.flip { animation: flap-flip .32s ease-in; }
+    @keyframes flap-flip {
+      0%   { transform: rotateX(0deg);   filter: brightness(1); }
+      49%  { transform: rotateX(-88deg); filter: brightness(.45); }
+      50%  { transform: rotateX(88deg);  filter: brightness(.45); }
+      100% { transform: rotateX(0deg);   filter: brightness(1); }
+    }
+
+    #offline {
+      position: absolute; left: 1.5vw; bottom: 1.5vh;
+      font-size: 2.2vmin; color: #ef4444; opacity: 0; transition: opacity .3s;
+    }
+    #offline.show { opacity: .8; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="ad-view">
+      <img id="ad-img" alt="" />
+      <div id="ad-fallback">
+        <div class="tn" id="fallback-tn">bts-light</div>
+        <div class="sub">Kein Spiel auf diesem Feld</div>
+      </div>
+    </div>
+
+    <div id="match-view">
+      <header class="bar">
+        <span class="court" id="court-label">__COURT_LABEL__</span>
+        <span class="discipline" id="discipline"></span>
+      </header>
+      <section class="half" id="half1"></section>
+      <div class="divider"></div>
+      <section class="half" id="half2"></section>
+      <footer class="bar" id="footer"></footer>
+    </div>
+
+    <div id="timer-overlay">
+      <div class="label" id="timer-label">Pause</div>
+      <div class="flaps" id="timer-flaps"></div>
+    </div>
+
+    <div id="offline">Verbindung unterbrochen</div>
+  </div>
+
+  <script>
+  "use strict";
+  // Feldname – wird vom ersten /state-Poll gesetzt. Bewusst NICHT als
+  // Platzhalter in dieses JS-Literal gebacken (nur in den HTML-Span oben,
+  // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
+  // aufbrechen kann.
+  var COURT_LABEL = "";
+
+  var DISCIPLINE_DE = {
+    mens_singles: "Herreneinzel",
+    womens_singles: "Dameneinzel",
+    mens_doubles: "Herrendoppel",
+    womens_doubles: "Damendoppel",
+    mixed: "Mixed"
+  };
+
+  var els = {
+    adView: document.getElementById("ad-view"),
+    adImg: document.getElementById("ad-img"),
+    adFallback: document.getElementById("ad-fallback"),
+    fallbackTn: document.getElementById("fallback-tn"),
+    matchView: document.getElementById("match-view"),
+    courtLabel: document.getElementById("court-label"),
+    discipline: document.getElementById("discipline"),
+    half1: document.getElementById("half1"),
+    half2: document.getElementById("half2"),
+    footer: document.getElementById("footer"),
+    timerOverlay: document.getElementById("timer-overlay"),
+    timerLabel: document.getElementById("timer-label"),
+    timerFlaps: document.getElementById("timer-flaps"),
+    offline: document.getElementById("offline")
+  };
+
+  // ─── Werbe-Rotation ──────────────────────────────────────────────────
+  var adState = { urls: [], idx: 0, intervalS: 10, timer: null, key: "" };
+
+  // Asset-URLs sind bewusst relativ mit fester Tiefe `../../`: Die Seite
+  // wird unter `/court/{label}/display` (LAN) bzw.
+  // `/{ns}/court/{label}/display` (Cloud) ausgeliefert – zwei Ebenen hoch
+  // trifft in beiden Fällen die `ads/`- und `flags/`-Routen. `state` wird
+  // als direktes Geschwister (`./state`) gepollt.
+  function adUrl(id) { return "../../ads/" + encodeURIComponent(id); }
+
+  function applyAds(adIds, intervalS) {
+    var key = adIds.join("|") + "@" + intervalS;
+    if (key === adState.key) return; // unverändert – Rotation nicht stören
+    adState.key = key;
+    adState.urls = adIds.map(adUrl);
+    adState.intervalS = intervalS > 0 ? intervalS : 10;
+    adState.idx = 0;
+    if (adState.timer) { clearInterval(adState.timer); adState.timer = null; }
+    if (adState.urls.length > 1) {
+      adState.timer = setInterval(rotateAd, adState.intervalS * 1000);
+    }
+    renderAd();
+  }
+
+  function rotateAd() {
+    if (adState.urls.length === 0) return;
+    adState.idx = (adState.idx + 1) % adState.urls.length;
+    renderAd();
+  }
+
+  function renderAd() {
+    if (adState.urls.length > 0) {
+      els.adImg.src = adState.urls[adState.idx];
+      els.adImg.style.display = "";
+      els.adFallback.classList.remove("show");
+    } else {
+      els.adImg.style.display = "none";
+      els.adImg.removeAttribute("src");
+      els.adFallback.classList.add("show");
+    }
+  }
+
+  // ─── Helfer ──────────────────────────────────────────────────────────
+  function flagEl(nat) {
+    var img = document.createElement("img");
+    img.className = "flag";
+    var code = (nat || "").trim().toUpperCase();
+    if (code) {
+      img.src = "../../flags/" + encodeURIComponent(code) + ".svg";
+      img.onerror = function () { img.classList.add("hidden"); };
+    } else {
+      img.classList.add("hidden");
+    }
+    return img;
+  }
+
+  // Baut eine Bildschirmhälfte für ein Team. `players` = [{name,nationality}],
+  // `done` = abgeschlossene Satzwerte dieses Teams, `current` = laufender
+  // Satzwert, `serving` = schlägt dieses Team auf?
+  function renderHalf(host, players, done, current, serving) {
+    host.textContent = "";
+    var pBox = document.createElement("div");
+    pBox.className = "players" + (players.length > 1 ? " doubles" : "");
+    players.forEach(function (p) {
+      var row = document.createElement("div");
+      row.className = "player";
+      row.appendChild(flagEl(p.nationality));
+      var name = document.createElement("span");
+      name.className = "name";
+      name.textContent = p.name || "—";
+      row.appendChild(name);
+      var dot = document.createElement("span");
+      dot.className = "serve-dot" + (serving ? " on" : "");
+      dot.textContent = "●";
+      row.appendChild(dot);
+      pBox.appendChild(row);
+    });
+    host.appendChild(pBox);
+
+    var scores = document.createElement("div");
+    scores.className = "scores";
+    var doneBox = document.createElement("div");
+    doneBox.className = "sets-done";
+    done.forEach(function (v) {
+      var d = document.createElement("div");
+      d.className = "set-done";
+      d.textContent = String(v);
+      doneBox.appendChild(d);
+    });
+    scores.appendChild(doneBox);
+    var cur = document.createElement("div");
+    cur.className = "set-current" + (serving ? " serving" : "");
+    cur.textContent = String(current);
+    scores.appendChild(cur);
+    host.appendChild(scores);
+  }
+
+  // ─── Match-Ansicht ───────────────────────────────────────────────────
+  function renderMatch(state) {
+    var m = state.match;
+    var cfg = state.config || {};
+
+    els.courtLabel.textContent = state.courtLabel || COURT_LABEL;
+    var discKey = m.discipline || "";
+    els.discipline.textContent =
+      cfg.showDiscipline !== false ? (DISCIPLINE_DE[discKey] || "") : "";
+
+    // Satzstand aufteilen: letzter Eintrag = laufender Satz, Rest = fertig.
+    var sets = Array.isArray(m.sets) ? m.sets : [];
+    var current = sets.length > 0 ? sets[sets.length - 1] : { a: 0, b: 0 };
+    var doneSets = sets.slice(0, Math.max(0, sets.length - 1));
+    var done1 = doneSets.map(function (s) { return s.a; });
+    var done2 = doneSets.map(function (s) { return s.b; });
+
+    // Aufschlag aus dem gespiegelten Tablet-Zustand bestimmen.
+    var serving = servingTeam(state.courtState);
+
+    renderHalf(els.half1, m.team1 || [], done1, current.a, serving === 1);
+    renderHalf(els.half2, m.team2 || [], done2, current.b, serving === 2);
+
+    // Fußzeile: Runde + Spielnummer (je nach Konfiguration).
+    els.footer.textContent = "";
+    var parts = [];
+    if (cfg.showRound !== false && m.eventLabel) parts.push(m.eventLabel);
+    if (cfg.showMatchNumber !== false && m.matchNumber) {
+      parts.push("Spiel " + m.matchNumber);
+    }
+    parts.forEach(function (txt, i) {
+      if (i > 0) {
+        var sep = document.createElement("span");
+        sep.className = "dot-sep";
+        sep.textContent = "·";
+        els.footer.appendChild(sep);
+      }
+      var span = document.createElement("span");
+      span.textContent = txt;
+      els.footer.appendChild(span);
+    });
+  }
+
+  // Liefert 1 (Team 1), 2 (Team 2) oder null aus dem Tablet-courtState.
+  function servingTeam(courtStateJson) {
+    if (!courtStateJson) return null;
+    var cs;
+    try { cs = JSON.parse(courtStateJson); } catch (e) { return null; }
+    if (!cs || !cs.servingSide || !cs.teamOnSide) return null;
+    return cs.teamOnSide.a === cs.servingSide ? 1 : 2;
+  }
+
+  // ─── Retro-Pausen-Timer ──────────────────────────────────────────────
+  var PAUSE_LABEL = { eleven: "Pause", game: "Satzpause", injury: "Behandlung" };
+  var lastFlapText = "";
+
+  function renderTimer(state) {
+    var cfg = state.config || {};
+    if (cfg.showTimer === false) { hideTimer(); return; }
+    var cs = null;
+    try { cs = state.courtState ? JSON.parse(state.courtState) : null; }
+    catch (e) { cs = null; }
+    var pause = cs && cs.pause;
+    if (!pause) { hideTimer(); return; }
+
+    els.timerOverlay.classList.add("show");
+    els.timerLabel.textContent = PAUSE_LABEL[pause.kind] || "Pause";
+    var text;
+    if (typeof pause.endsAt === "number") {
+      var secs = Math.max(0, Math.round((pause.endsAt - Date.now()) / 1000));
+      var mm = Math.floor(secs / 60);
+      var ss = secs % 60;
+      text = mm + ":" + (ss < 10 ? "0" + ss : ss);
+    } else {
+      // Behandlungspause ohne Countdown.
+      text = "——";
+    }
+    renderFlaps(text);
+  }
+
+  function hideTimer() {
+    els.timerOverlay.classList.remove("show");
+    lastFlapText = "";
+  }
+
+  // Zeichnet die Klappanzeige; geänderte Stellen bekommen die Flip-Animation.
+  function renderFlaps(text) {
+    var rebuild = text.length !== els.timerFlaps.children.length;
+    if (rebuild) {
+      els.timerFlaps.textContent = "";
+      for (var i = 0; i < text.length; i++) {
+        var flap = document.createElement("div");
+        flap.className = "flap" + (text[i] === ":" ? " colon" : "");
+        flap.textContent = text[i];
+        els.timerFlaps.appendChild(flap);
+      }
+    } else {
+      for (var j = 0; j < text.length; j++) {
+        var el = els.timerFlaps.children[j];
+        if (el.textContent !== text[j]) {
+          el.textContent = text[j];
+          if (text[j] !== ":") {
+            el.classList.remove("flip");
+            void el.offsetWidth; // Reflow → Animation neu starten
+            el.classList.add("flip");
+          }
+        }
+      }
+    }
+    lastFlapText = text;
+  }
+
+  // ─── Poll-Schleife ───────────────────────────────────────────────────
+  var lastState = null;
+
+  function applyState(state) {
+    lastState = state;
+    if (state.courtLabel) {
+      COURT_LABEL = state.courtLabel;
+      document.title = "Court-Monitor – " + state.courtLabel;
+    }
+    var cfg = state.config || {};
+    els.fallbackTn.textContent = state.tournamentName || "bts-light";
+
+    if (state.match) {
+      // Spiel auf dem Feld → Match-Ansicht.
+      els.matchView.classList.add("show");
+      els.adView.classList.remove("show");
+      if (adState.timer) { clearInterval(adState.timer); adState.timer = null; }
+      adState.key = "";
+      renderMatch(state);
+      renderTimer(state);
+    } else {
+      // Leeres Feld → Werbung.
+      els.adView.classList.add("show");
+      els.matchView.classList.remove("show");
+      hideTimer();
+      applyAds(Array.isArray(state.ads) ? state.ads : [], cfg.adIntervalS || 10);
+    }
+  }
+
+  function poll() {
+    fetch("state", { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (state) {
+        els.offline.classList.remove("show");
+        applyState(state);
+      })
+      .catch(function () {
+        // Aussetzer tolerieren: letzten Stand halten, nur Hinweis zeigen.
+        els.offline.classList.add("show");
+      });
+  }
+
+  // Den Pausen-Countdown jede Sekunde unabhängig vom Poll aktualisieren.
+  setInterval(function () {
+    if (lastState && lastState.match) renderTimer(lastState);
+  }, 1000);
+
+  poll();
+  setInterval(poll, 1000);
+  </script>
+</body>
+</html>

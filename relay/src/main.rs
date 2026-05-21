@@ -19,21 +19,40 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine;
+use include_dir::{include_dir, Dir};
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use relay_proto::{
-    html_escape, path_encode, HostFrame, RelayFrame, ResultBody, ResultResponse, ServerMsg,
-    TabletMsg,
+    html_escape, path_encode, HostFrame, MatchBrief, MonitorConfig, MonitorMatch, MonitorPlayer,
+    MonitorState, MonitorUpload, PlayerBrief, RelayFrame, ResultBody, ResultResponse, ServerMsg,
+    SetAb, TabletMsg,
 };
 
 /// Die Tablet-Spielzettel-UI – dieselbe Datei wie in der bts-light-App.
 const TABLET_HTML: &str = include_str!("../../src-tauri/assets/tablet.html");
+
+/// Die Court-Monitor-Anzeige – dieselbe Datei wie in der bts-light-App.
+const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
+
+/// Gebündelte SVG-Länderflaggen (IOC-Code → `<code>.svg`), ausgeliefert
+/// unter `/{ns}/flags/{file}`.
+static FLAGS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../src-tauri/assets/flags");
+
+/// Obergrenze gleichzeitiger Werbebilder je Namespace.
+const MAX_ADS: usize = 24;
+
+/// Obergrenze der Gesamtgröße aller Werbebilder eines Namespace (12 MB).
+const MAX_ADS_TOTAL: usize = 12 * 1024 * 1024;
+
+/// Body-Limit der Werbe-Upload-Route – Base64 bläht die Rohdaten ~+33 % auf.
+const MONITOR_UPLOAD_LIMIT: usize = 20 * 1024 * 1024;
 
 /// Obergrenze gleichzeitiger Tablets je Namespace (einfacher Missbrauchs-
 /// Schutz – ein reales Turnier hat höchstens ~30 Felder).
@@ -60,6 +79,20 @@ const MAX_STATE_LEN: usize = 64 * 1024;
 
 type Tx = mpsc::UnboundedSender<Message>;
 
+/// Ein hochgeladenes Werbebild im Speicher (Content-Type + Rohbytes).
+struct AdImage {
+    content_type: String,
+    bytes: Vec<u8>,
+}
+
+/// Court-Monitor-Datensatz eines Namespace: Anzeige-Konfiguration und
+/// Werbebilder, vom bts-light-Host hochgeladen.
+struct MonitorBundle {
+    config: MonitorConfig,
+    tournament_name: String,
+    ads: Vec<AdImage>,
+}
+
 /// Ein Namespace: ein bts-light-Host und seine Tablets.
 struct Namespace {
     /// Sende-Ende zur Host-WebSocket (bts-light), falls verbunden.
@@ -69,6 +102,12 @@ struct Namespace {
     /// Court-Name → zuletzt gespiegelter Spielzustand (JSON) des aktiven
     /// Tablets – wird einem übernehmenden Gerät übergeben.
     court_state: HashMap<String, String>,
+    /// Court-Name → aktuelles Match (für die Court-Monitor-Anzeige).
+    court_matches: HashMap<String, MatchBrief>,
+    /// Court-Name → Satzstand in Team-Koordinaten (für die Monitor-Anzeige).
+    court_scores: HashMap<String, Vec<SetAb>>,
+    /// Court-Monitor-Konfiguration + Werbebilder, falls hochgeladen.
+    monitor: Option<MonitorBundle>,
     /// Offene Ergebnis-Übermittlungen: `req_id` → wartender HTTP-Handler.
     pending: HashMap<u64, oneshot::Sender<ResultResponse>>,
     /// Fortlaufende Request-ID für Ergebnis-Übermittlungen.
@@ -81,12 +120,19 @@ impl Namespace {
             host: None,
             tablets: HashMap::new(),
             court_state: HashMap::new(),
+            court_matches: HashMap::new(),
+            court_scores: HashMap::new(),
+            monitor: None,
             pending: HashMap::new(),
             next_req: 1,
         }
     }
 
-    /// Leer = kann aus der Namespace-Tabelle entfernt werden.
+    /// Leer = kann aus der Namespace-Tabelle entfernt werden. Der
+    /// Court-Monitor-Datensatz (`monitor`) zählt hier bewusst NICHT mit:
+    /// ohne Host gibt es nichts anzuzeigen, und der Host lädt ihn nach
+    /// einem Reconnect binnen 30 s erneut hoch. Ihn zu behalten würde nur
+    /// Speicher belegen, falls ein Host endgültig weg ist.
     fn is_empty(&self) -> bool {
         self.host.is_none() && self.tablets.is_empty() && self.pending.is_empty()
     }
@@ -148,7 +194,15 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/{ns}/court/{label}", get(court_page))
+        .route("/{ns}/court/{label}/display", get(monitor_page))
+        .route("/{ns}/court/{label}/state", get(monitor_state))
         .route("/{ns}/qr/{label}", get(qr_svg))
+        .route("/{ns}/flags/{file}", get(flag_route))
+        .route("/{ns}/ads/{idx}", get(ad_image))
+        .route(
+            "/{ns}/monitor",
+            post(monitor_upload).layer(DefaultBodyLimit::max(MONITOR_UPLOAD_LIMIT)),
+        )
         .route("/{ns}/ws", get(tablet_ws))
         .route("/{ns}/host-ws", get(host_ws))
         .route("/{ns}/result", post(result))
@@ -216,6 +270,188 @@ async fn qr_svg(
             "QR-Erzeugung fehlgeschlagen",
         )
             .into_response(),
+    }
+}
+
+// ─────────────────────────────── Court-Monitor ────────────────────────────
+
+/// Liefert die Court-Monitor-Anzeige (read-only TV) für ein Feld.
+async fn monitor_page(Path((ns, label)): Path<(String, String)>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    tracing::info!("Court-Monitor-Seite ausgeliefert für Court '{label}'");
+    let body = MONITOR_HTML.replace("__COURT_LABEL__", &html_escape(&label));
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// Anzeige-Zustand eines Feldes, vom Monitor im Sekundentakt gepollt.
+async fn monitor_state(
+    State(broker): State<Broker>,
+    Path((ns, label)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let map = broker.namespaces.lock().await;
+    let state = match map.get(&ns) {
+        Some(namespace) => build_monitor_state(namespace, &label),
+        // Kein Host verbunden: leerer Zustand → der Monitor zeigt die
+        // neutrale Leerlauf-Seite.
+        None => MonitorState {
+            court_label: label,
+            tournament_name: String::new(),
+            match_info: None,
+            court_state: None,
+            config: MonitorConfig::default(),
+            ads: Vec::new(),
+        },
+    };
+    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+}
+
+/// Baut den Monitor-Anzeige-Zustand aus dem gespeicherten Namespace-Stand.
+fn build_monitor_state(namespace: &Namespace, court: &str) -> MonitorState {
+    let monitor = namespace.monitor.as_ref();
+    let match_info = namespace.court_matches.get(court).map(|mb| MonitorMatch {
+        match_id: mb.match_id,
+        discipline: mb.discipline.clone(),
+        event_label: mb.event_label.clone(),
+        match_number: mb.match_number,
+        team1: mb.team_a.iter().map(monitor_player).collect(),
+        team2: mb.team_b.iter().map(monitor_player).collect(),
+        sets: namespace
+            .court_scores
+            .get(court)
+            .cloned()
+            .unwrap_or_default(),
+    });
+    MonitorState {
+        court_label: court.to_string(),
+        tournament_name: monitor
+            .map(|m| m.tournament_name.clone())
+            .unwrap_or_default(),
+        match_info,
+        court_state: namespace.court_state.get(court).cloned(),
+        config: monitor.map(|m| m.config).unwrap_or_default(),
+        ads: monitor
+            .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
+            .unwrap_or_default(),
+    }
+}
+
+fn monitor_player(p: &PlayerBrief) -> MonitorPlayer {
+    MonitorPlayer {
+        name: p.name.clone(),
+        nationality: p.nationality.clone(),
+    }
+}
+
+/// Liefert eine gebündelte SVG-Länderflagge (`/{ns}/flags/GER.svg`).
+async fn flag_route(Path((ns, file)): Path<(String, String)>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    if file.is_empty() || file.contains(['/', '\\']) || file.contains("..") {
+        return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
+    }
+    match FLAGS.get_file(&file) {
+        Some(f) => (
+            [
+                (header::CONTENT_TYPE, "image/svg+xml"),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            f.contents(),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "Flagge nicht gefunden").into_response(),
+    }
+}
+
+/// Liefert ein hochgeladenes Werbebild eines Namespace (per Index).
+async fn ad_image(
+    State(broker): State<Broker>,
+    Path((ns, idx)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let Ok(i) = idx.parse::<usize>() else {
+        return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
+    };
+    // Bytes unter dem Lock herauskopieren, dann den Lock fallen lassen –
+    // ein mehrere MB großes memcpy darf nicht den Namespace-Mutex halten.
+    let ad = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns)
+            .and_then(|n| n.monitor.as_ref())
+            .and_then(|m| m.ads.get(i))
+            .map(|ad| (ad.content_type.clone(), ad.bytes.clone()))
+    };
+    match ad {
+        Some((content_type, bytes)) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "no-store".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
+    }
+}
+
+/// Nimmt den Court-Monitor-Datensatz (Konfiguration + Werbebilder) vom
+/// bts-light-Host entgegen. Nur erlaubt, solange der Host verbunden ist –
+/// das verhindert das Anlegen von Namespaces ohne Host.
+///
+/// Bewusst ohne eigenes Auth-Token: Wer den 128-Bit-UUID-Namespace kennt,
+/// darf hochladen – dasselbe Vertrauensmodell wie für die übrigen
+/// Namespace-Routen. Worst Case ist das Überschreiben der Werbebilder
+/// eines bekannten Turniers; kein Code, keine Ergebnis-Schreibrechte.
+async fn monitor_upload(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Json(upload): Json<MonitorUpload>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace");
+    }
+    let mut ads = Vec::new();
+    let mut total = 0usize;
+    for ad in upload.ads.into_iter().take(MAX_ADS) {
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(ad.data.as_bytes())
+        else {
+            continue;
+        };
+        total += bytes.len();
+        if total > MAX_ADS_TOTAL {
+            break;
+        }
+        ads.push(AdImage {
+            content_type: sanitize_content_type(&ad.content_type),
+            bytes,
+        });
+    }
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(&ns) else {
+        return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
+    };
+    namespace.monitor = Some(MonitorBundle {
+        config: upload.config,
+        tournament_name: upload.tournament_name,
+        ads,
+    });
+    tracing::info!("Namespace '{ns}': Court-Monitor-Datensatz aktualisiert");
+    (StatusCode::OK, "ok")
+}
+
+/// Lässt nur die erwarteten Bild-MIME-Typen durch (der Header kommt vom
+/// Host und landet ungeprüft im Content-Type der Auslieferung).
+fn sanitize_content_type(ct: &str) -> String {
+    match ct {
+        "image/png" | "image/webp" | "image/gif" | "image/jpeg" => ct.to_string(),
+        _ => "image/jpeg".to_string(),
     }
 }
 
@@ -479,17 +715,29 @@ async fn detach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) {
     }
 }
 
-/// Leitet einen Live-Score von einem Tablet an den Host weiter.
+/// Leitet einen Live-Score von einem Tablet an den Host weiter und merkt
+/// ihn zugleich für die Court-Monitor-Anzeige.
 async fn forward_score(
     broker: &Broker,
     ns: &str,
     court: &str,
     score_a: i64,
     score_b: i64,
-    sets_history: Vec<relay_proto::SetAb>,
+    sets_history: Vec<SetAb>,
 ) {
-    let map = broker.namespaces.lock().await;
-    if let Some(host) = map.get(ns).and_then(|n| n.host.as_ref()) {
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(ns) else {
+        return;
+    };
+    // Vollständige Satzliste (abgeschlossene Sätze + laufender Satz) für
+    // die Court-Monitor-Anzeige merken.
+    let mut sets = sets_history.clone();
+    sets.push(SetAb {
+        a: score_a,
+        b: score_b,
+    });
+    namespace.court_scores.insert(court.to_string(), sets);
+    if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::ScoreUpdate {
             court_label: court.to_string(),
             score_a,
@@ -630,11 +878,22 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             court_label,
             match_brief,
         } => {
+            // Für die Court-Monitor-Anzeige merken. Ein Match-Wechsel setzt
+            // den alten Satzstand/Spielzustand zurück (der Host pusht
+            // `MatchAssigned` nur bei echtem Wechsel).
+            namespace
+                .court_matches
+                .insert(court_label.clone(), match_brief.clone());
+            namespace.court_scores.remove(&court_label);
+            namespace.court_state.remove(&court_label);
             if let Some(t) = namespace.tablets.get(&court_label) {
                 let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
             }
         }
         HostFrame::MatchCleared { court_label } => {
+            namespace.court_matches.remove(&court_label);
+            namespace.court_scores.remove(&court_label);
+            namespace.court_state.remove(&court_label);
             if let Some(t) = namespace.tablets.get(&court_label) {
                 let _ = t.send(text(&ServerMsg::MatchCleared));
             }
@@ -668,14 +927,18 @@ mod tests {
             team_a: vec![PlayerBrief {
                 id: 1,
                 name: "Anna".into(),
+                nationality: Some("GER".into()),
             }],
             team_b: vec![PlayerBrief {
                 id: 11,
                 name: "Ben".into(),
+                nationality: None,
             }],
             event_label: "HE G1".into(),
             best_of_sets: 3,
             target_score: 21,
+            discipline: "mens_singles".into(),
+            match_number: Some(14),
         }
     }
 

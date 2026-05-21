@@ -11,6 +11,7 @@
 //! ([`ServerCtx`], [`process_result`], [`handle_score`], [`match_brief`])
 //! ist `pub(crate)` und wird von beiden Modi geteilt.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,8 +33,9 @@ use crate::badhub::payload::build_tupdate;
 use crate::badhub::push;
 use crate::btp::model::BtpMatch;
 use crate::btp::{client, proto};
-use crate::config::AppConfig;
-use crate::tablet::assets::TABLET_HTML;
+use crate::config::{AppConfig, CourtMonitorConfig};
+use crate::tablet::assets::{self, TABLET_HTML};
+use crate::tablet::monitor;
 use crate::tablet::state::TabletState;
 
 /// Fester Port des Tablet-Servers im Hallen-LAN.
@@ -44,25 +46,46 @@ pub const TABLET_PORT: u16 = 8088;
 pub struct ServerCtx {
     pub tablet: Arc<TabletState>,
     config: AppConfig,
-    http: reqwest::Client,
+    pub(crate) http: reqwest::Client,
     /// Request-IDs für Liveticker-Pushes. Eigener Zähler – Badhub spiegelt
     /// `rid` nur zurück, dedupliziert nicht; eine Kollision mit dem
     /// Sync-Loop wäre folgenlos.
     rid: AtomicU64,
+    /// Verzeichnis der hochgeladenen Court-Monitor-Werbebilder (`court-ads`).
+    pub monitor_dir: PathBuf,
+    /// Pfad zur `config.json` – der Court-Monitor lädt seine Konfiguration
+    /// frisch von dort, damit Änderungen im Tool ohne Neustart greifen.
+    config_path: PathBuf,
 }
 
 impl ServerCtx {
-    pub fn new(tablet: Arc<TabletState>, config: AppConfig, http: reqwest::Client) -> Self {
+    pub fn new(
+        tablet: Arc<TabletState>,
+        config: AppConfig,
+        http: reqwest::Client,
+        monitor_dir: PathBuf,
+        config_path: PathBuf,
+    ) -> Self {
         Self {
             tablet,
             config,
             http,
             rid: AtomicU64::new(1),
+            monitor_dir,
+            config_path,
         }
     }
 
     fn next_rid(&self) -> u64 {
         self.rid.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Lädt die aktuelle Court-Monitor-Konfiguration frisch von der Platte.
+    /// Schlägt das Lesen fehl, gelten die Default-Werte.
+    pub fn monitor_config(&self) -> CourtMonitorConfig {
+        AppConfig::load_from(&self.config_path)
+            .map(|c| c.court_monitor)
+            .unwrap_or_default()
     }
 }
 
@@ -72,7 +95,11 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/court/{label}", get(court_page))
+        .route("/court/{label}/display", get(monitor_page))
+        .route("/court/{label}/state", get(monitor_state))
         .route("/qr/{label}", get(qr_svg))
+        .route("/flags/{file}", get(flag_route))
+        .route("/ads/{file}", get(ad_image))
         .route("/health", get(health))
         .route("/result", post(result))
         .route("/ws", get(ws_upgrade))
@@ -160,6 +187,63 @@ async fn health(State(ctx): State<Arc<ServerCtx>>) -> Json<serde_json::Value> {
         "ok": true,
         "courts": ctx.tablet.overview(),
     }))
+}
+
+// ─────────────────────────────── Court-Monitor ────────────────────────────
+
+/// Liefert die Court-Monitor-Anzeige (read-only TV) für ein Feld.
+async fn monitor_page(Path(label): Path<String>) -> impl IntoResponse {
+    tracing::info!("Court-Monitor-Seite ausgeliefert für Court '{label}'");
+    let body = assets::MONITOR_HTML.replace("__COURT_LABEL__", &html_escape(&label));
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
+}
+
+/// Anzeige-Zustand eines Feldes, vom Monitor im Sekundentakt gepollt.
+async fn monitor_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(label): Path<String>,
+) -> impl IntoResponse {
+    let court = ctx.tablet.monitor_court(&label);
+    let config = ctx.monitor_config();
+    let ads = monitor::list_ads(&ctx.monitor_dir);
+    let state = monitor::build_monitor_state(label, court, &config, ads);
+    ([(header::CACHE_CONTROL, "no-store")], Json(state))
+}
+
+/// Liefert eine gebündelte SVG-Länderflagge (`/flags/GER.svg`).
+async fn flag_route(Path(file): Path<String>) -> impl IntoResponse {
+    match assets::flag_svg(&file) {
+        Some(bytes) => (
+            [
+                (header::CONTENT_TYPE, "image/svg+xml"),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "Flagge nicht gefunden").into_response(),
+    }
+}
+
+/// Liefert ein hochgeladenes Werbebild aus dem `court-ads`-Verzeichnis.
+async fn ad_image(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(file): Path<String>,
+) -> impl IntoResponse {
+    if !monitor::is_safe_image_name(&file) {
+        return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
+    }
+    match tokio::fs::read(ctx.monitor_dir.join(&file)).await {
+        Ok(bytes) => (
+            [
+                (header::CONTENT_TYPE, monitor::image_mime(&file)),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
+    }
 }
 
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
@@ -330,6 +414,7 @@ pub(crate) fn match_brief(m: &BtpMatch) -> MatchBrief {
             .map(|(i, p)| PlayerBrief {
                 id: base + i as i64,
                 name: p.name.clone(),
+                nationality: p.nationality.clone(),
             })
             .collect()
     };
@@ -342,6 +427,8 @@ pub(crate) fn match_brief(m: &BtpMatch) -> MatchBrief {
             .to_string(),
         best_of_sets: 3,
         target_score: 21,
+        discipline: m.discipline.as_str().to_string(),
+        match_number: m.match_num,
     }
 }
 

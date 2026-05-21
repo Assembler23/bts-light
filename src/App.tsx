@@ -31,6 +31,14 @@ function defaultConfig(): AppConfig {
       rate: 0.8,
       gong: true,
     },
+    court_monitor: {
+      enabled: false,
+      ad_interval_s: 10,
+      show_discipline: true,
+      show_round: true,
+      show_match_number: true,
+      show_timer: true,
+    },
   };
 }
 

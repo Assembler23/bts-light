@@ -81,6 +81,20 @@ impl Discipline {
             _ => Discipline::Unknown,
         }
     }
+
+    /// snake_case-Schlüssel der Disziplin – identisch zur serde-Form, für
+    /// die Wire-Typen ([`relay_proto::MatchBrief`]). Der Court-Monitor und
+    /// die Sprachansage lokalisieren ihn selbst.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Discipline::MensSingles => "mens_singles",
+            Discipline::WomensSingles => "womens_singles",
+            Discipline::MensDoubles => "mens_doubles",
+            Discipline::WomensDoubles => "womens_doubles",
+            Discipline::Mixed => "mixed",
+            Discipline::Unknown => "unknown",
+        }
+    }
 }
 
 /// Ein Spieler einer Paarung.
