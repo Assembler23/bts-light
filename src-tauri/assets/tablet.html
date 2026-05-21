@@ -1032,25 +1032,42 @@ function renderCourt() {
   //   Rechter Spieler schaut zum Netz nach LINKS → seine rechte Hand zeigt
   //   visuell nach OBEN. Sein RECHTER SC = oben rechts. Sein LINKER SC =
   //   unten rechts.
-  //
-  // Diagonal: linker-rechter-SC (unten links) ↔ rechter-rechter-SC (oben
-  // rechts). Das ist die Aufschlag-Diagonale bei geradem Score.
-  setPlayer(els.cellLeftTop,    STATE.positions.left.leftSC);
-  setPlayer(els.cellLeftBottom, STATE.positions.left.rightSC);
-  setPlayer(els.cellRightTop,   STATE.positions.right.rightSC);
-  setPlayer(els.cellRightBottom,STATE.positions.right.leftSC);
+
+  // Aufschläger- und Annehmer-Zelle aus dem Score des aufschlagenden Teams
+  // ableiten (gerader Score → rechter Service-Court). Der Annehmer steht
+  // diagonal gegenüber.
+  let serverCell = null;
+  let receiverCell = null;
+  if (STATE.servingSide) {
+    const scoreServer = STATE.currentSet[STATE.servingSide];
+    const inRightSC = scoreServer % 2 === 0;
+    if (STATE.servingSide === 'left') {
+      serverCell   = inRightSC ? els.cellLeftBottom : els.cellLeftTop;
+      receiverCell = inRightSC ? els.cellRightTop   : els.cellRightBottom;
+    } else {
+      serverCell   = inRightSC ? els.cellRightTop   : els.cellRightBottom;
+      receiverCell = inRightSC ? els.cellLeftBottom : els.cellLeftTop;
+    }
+  }
+
+  if (isDoubles()) {
+    // Doppel: zwei Spieler je Hälfte – einer je Service-Court.
+    setPlayer(els.cellLeftTop,    STATE.positions.left.leftSC);
+    setPlayer(els.cellLeftBottom, STATE.positions.left.rightSC);
+    setPlayer(els.cellRightTop,   STATE.positions.right.rightSC);
+    setPlayer(els.cellRightBottom,STATE.positions.right.leftSC);
+  } else if (serverCell && receiverCell) {
+    // Einzel: nur EIN Spieler je Hälfte. Sein Name gehört in genau die
+    // Service-Zelle, in der er gerade aufschlägt bzw. annimmt – nicht in
+    // beide Zellen der Hälfte (sonst stünde der Name doppelt).
+    const receiverSide = STATE.servingSide === 'left' ? 'right' : 'left';
+    setPlayer(serverCell,   STATE.positions[STATE.servingSide].rightSC);
+    setPlayer(receiverCell, STATE.positions[receiverSide].rightSC);
+  }
 
   // Aufschläger-Highlight: gelblicher Hintergrund des Service-Courts plus
   // pulsierender gelber Punkt im Innenwinkel (Netz + Mittellinie) der Zelle.
-  if (STATE.servingSide && STATE.setup === 'playing' && !STATE.finished) {
-    const scoreServer = STATE.currentSet[STATE.servingSide];
-    const inRightSC = scoreServer % 2 === 0;
-    let serverCell;
-    if (STATE.servingSide === 'left') {
-      serverCell = inRightSC ? els.cellLeftBottom : els.cellLeftTop;
-    } else {
-      serverCell = inRightSC ? els.cellRightTop : els.cellRightBottom;
-    }
+  if (serverCell && STATE.setup === 'playing' && !STATE.finished) {
     serverCell.classList.add('server');
   }
 }
