@@ -99,29 +99,10 @@ Match-Ende-Overlay manuell den Sieger. Das Ergebnis geht mit dem Status
 
 ## Kampflose Wertung nach Aufgabe
 
-Eine Aufgabe betrifft oft mehr als das laufende Spiel: In einer Gruppe
-(Round Robin) hat die aufgebende Mannschaft meist noch weitere Spiele,
-die sie nicht mehr antreten kann.
-
-Sobald eine Aufgabe nach BTP geschrieben ist, prüft bts-light, ob die
-aufgebende Mannschaft **in derselben Disziplin** noch ungespielte Spiele
-mit feststehendem Gegner hat. Wenn ja, erscheint im bts-light-Fenster ein
-Hinweis-Fenster „Aufgabe – kampflose Wertung":
-
-- Es listet alle restlichen Spiele dieser Mannschaft in der Disziplin.
-- Die Turnierleitung wählt die Spiele aus (standardmäßig alle markiert)
-  und bestätigt mit „kampflos werten".
-- Jedes bestätigte Spiel geht als Walkover (`ScoreStatus = 1`) nach BTP –
-  die aufgebende Mannschaft verliert, der Gegner gewinnt kampflos.
-
-Maßgeblich ist die **Disziplin/Auslosung** der Aufgabe (BTP-`EntryID`):
-Gibt im Doppel ein:e Spieler:in auf, kann die Doppelpaarung nicht weiter
-antreten – spielt der gesunde Partner aber Einzel oder Mixed mit anderem
-Partner, läuft das unberührt weiter (eigene Auslosung, eigene `EntryID`).
-
-Schlägt das Schreiben einzelner Spiele fehl (z. B. BTP kurz nicht
-erreichbar), bleibt das Fenster für einen erneuten Versuch stehen;
-bereits gewertete Spiele fallen dabei von selbst heraus.
+Nach einer Aufgabe schlägt bts-light vor, die restlichen Spiele der
+aufgebenden Mannschaft in derselben Disziplin kampflos (Walkover) für den
+jeweiligen Gegner zu werten. Eigenes Feature-Dokument:
+[walkover.md](walkover.md).
 
 ## Tablet-Übernahme
 

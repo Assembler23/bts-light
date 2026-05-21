@@ -43,10 +43,12 @@ Badhub-Passwort eintragen – fertig.
   zweiter Start holt das bestehende Fenster nach vorn (sonst kollidierte
   der Tablet-Server-Port).
 
-Offen: signierter Windows-Installer (Code-Signing-Zertifikat). Bis dahin
-zeigt Windows beim ersten Start eine SmartScreen-Warnung – über „Weitere
-Informationen → Trotzdem ausführen" bestätigen. Das Auto-Update ist davon
-unabhängig (eigenes Signaturschlüsselpaar).
+Noch nicht signiert: Der Windows-Installer hat kein Code-Signing-
+Zertifikat, daher zeigt Windows beim ersten Start eine SmartScreen-Warnung
+– über „Weitere Informationen → Trotzdem ausführen" bestätigen. Das
+Auto-Update ist davon unabhängig (eigenes Signaturschlüsselpaar).
+
+Offene Punkte und geplante Arbeiten: [docs/roadmap.md](docs/roadmap.md).
 
 ## Stack
 

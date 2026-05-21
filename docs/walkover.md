@@ -1,0 +1,94 @@
+# Kampflose Wertung nach Aufgabe (Walkover)
+
+Gibt eine Mannschaft mitten im Spiel auf, betrifft das oft mehr als die
+eine Begegnung: In einer Gruppe (Round Robin) hat die aufgebende
+Mannschaft meist noch weitere Spiele, die sie nicht mehr antreten kann.
+bts-light schlägt der Turnierleitung vor, diese Spiele kampflos
+(Walkover) für den jeweiligen Gegner zu werten.
+
+Eingeführt in v0.5.0.
+
+## Ablauf
+
+1. **Aufgabe** — am Tablet beendet „Spiel abbrechen" das Match per
+   Aufgabe (`ScoreStatus = 2`, siehe [tablet.md](tablet.md)). Das Ergebnis
+   geht über `process_result` nach BTP.
+2. **Vorschlag** — nach dem erfolgreichen BTP-Schreiben prüft
+   `register_walkover_proposal` (`tablet/server.rs`), ob die aufgebende
+   Mannschaft in derselben Disziplin noch ungespielte Spiele hat. Wenn ja,
+   wird ein `WalkoverProposal` im geteilten `TabletState` hinterlegt.
+3. **Anzeige** — das Frontend (`WalkoverPanel.tsx`) pollt alle 4 s die
+   offenen Vorschläge und blendet ein Modal „Aufgabe – kampflose Wertung"
+   ein: die Liste der betroffenen Spiele, standardmäßig alle ausgewählt.
+4. **Bestätigung** — die Turnierleitung wählt die Spiele und bestätigt.
+   Erst dann schreibt `confirm_walkover` für jedes Spiel einen kampflosen
+   Sieg nach BTP.
+
+## Scope: nur die Disziplin der Aufgabe
+
+Maßgeblich ist die BTP-**`EntryID`**. Ein Entry ist eine Mannschaft
+*innerhalb einer Auslosung* (Einzel-Spieler:in oder Doppelpaarung). Damit
+ist der Scope automatisch korrekt:
+
+- Gibt im **Doppel** ein:e Spieler:in auf, kann die Doppelpaarung nicht
+  weiter antreten — alle restlichen Spiele *dieses* Entrys werden
+  vorgeschlagen.
+- Spielt der gesunde Partner zusätzlich Einzel oder Mixed mit einem
+  **anderen** Partner, ist das ein **anderer Entry** mit eigener `EntryID`
+  und bleibt vollständig unberührt.
+
+## Datenmodell
+
+`BtpMatch` (`btp/model.rs`) trägt seit v0.5.0 `entry1_id` / `entry2_id`
+(0 = Platz noch offen). Der Parser löst sie über Slot → Entry auf.
+
+`tablet/state.rs`:
+
+- `WalkoverCandidate` — ein kampflos wertbares Spiel: `match_id`,
+  `draw_id`, `planning_id`, `round_name`, `opponent`, `retired_is_team1`.
+- `WalkoverProposal` — `id` (= `EntryID` als String), `entry_id`,
+  `retired_team`, `draw_name`, `created_at_ms`.
+
+`TabletState` hält die offenen Vorschläge in `walkovers`. Die
+Kandidaten-Spiele werden **nicht** gespeichert, sondern bei jeder Abfrage
+frisch aus dem Snapshot ermittelt (`walkover_candidates`) — so fallen
+bereits gewertete Spiele von selbst heraus.
+
+`walkover_candidates(entry_id)` liefert alle Matches mit Status
+`Scheduled`, an denen der Entry beteiligt ist **und** der Gegner schon
+feststeht (offene KO-Plätze werden übersprungen).
+
+## Tauri-Commands (`commands.rs`)
+
+| Command | Zweck |
+|---|---|
+| `walkover_proposals` | Offene Vorschläge + live aufgelöste Kandidaten. Vorschläge ohne verbleibende Kandidaten werden aufgeräumt. |
+| `confirm_walkover(proposal_id, match_ids)` | Schreibt für die ausgewählten Spiele einen Walkover nach BTP. |
+| `dismiss_walkover(proposal_id)` | Verwirft einen Vorschlag ohne Wertung. |
+
+`confirm_walkover` baut je Spiel ein `proto::MatchUpdate` mit
+`score_status = 1` (Walkover), leerer Satzliste und `team1_won` = die
+jeweils **nicht** aufgebende Seite, und schreibt es per `SENDUPDATE`
+(`write_result_to_btp`).
+
+## Sicherheit & Robustheit
+
+- **Schreib-Grenze:** `confirm_walkover` löst die Kandidaten erneut live
+  aus dem Snapshot auf und schreibt nur Spiele, die **sowohl** in der
+  Anfrage **als auch** in der aktuellen Kandidatenliste stehen. Eine
+  beliebige Match-ID lässt sich darüber nicht werten.
+- **Leere Auswahl** entfernt den Vorschlag nicht (Schutz gegen
+  versehentliches Verwerfen).
+- **Teilfehler:** Schlägt das Schreiben einzelner Spiele fehl (z. B. BTP
+  kurz nicht erreichbar), bleibt der Vorschlag stehen; beim nächsten
+  Versuch fallen die bereits gewerteten Spiele automatisch heraus.
+
+## Beteiligte Dateien
+
+- `src-tauri/src/btp/model.rs` — `entry1_id`/`entry2_id` auf `BtpMatch`.
+- `src-tauri/src/tablet/state.rs` — `WalkoverProposal`/`WalkoverCandidate`,
+  Speicherung, `walkover_candidates`.
+- `src-tauri/src/tablet/server.rs` — `register_walkover_proposal` in
+  `process_result`.
+- `src-tauri/src/commands.rs` — die drei Walkover-Commands.
+- `src/components/WalkoverPanel.tsx` — das Bestätigungs-Modal.
