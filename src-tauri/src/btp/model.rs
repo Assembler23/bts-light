@@ -75,6 +75,12 @@ pub struct BtpMatch {
     /// Team 1 (ein Spieler bei Einzel, zwei bei Doppel).
     pub team1: Vec<BtpPlayer>,
     pub team2: Vec<BtpPlayer>,
+    /// EntryID von Team 1 – identifiziert die Mannschaft draw-weit
+    /// eindeutig (0, falls der Platz noch offen ist). Damit lassen sich
+    /// nach einer Aufgabe die übrigen Spiele derselben Mannschaft finden.
+    pub entry1_id: i64,
+    /// EntryID von Team 2 (0, falls der Platz noch offen ist).
+    pub entry2_id: i64,
     /// Court-Name, falls dem Match ein Court zugewiesen ist.
     pub court: Option<String>,
     /// Satz-Ergebnisse als (Team1, Team2)-Punkte.
@@ -261,6 +267,8 @@ fn parse_matches(
         } else {
             MatchStatus::Scheduled
         };
+        let (entry1_id, team1) = resolve(child_int(m, "From1"));
+        let (entry2_id, team2) = resolve(child_int(m, "From2"));
         out.push(BtpMatch {
             id: child_int(m, "ID").unwrap_or_default(),
             draw_id: draw_id.unwrap_or_default(),
@@ -270,8 +278,10 @@ fn parse_matches(
                 .unwrap_or_default(),
             round_name: child_str(m, "RoundName").unwrap_or_default().to_string(),
             match_num: child_int(m, "MatchNr").filter(|&n| n > 0),
-            team1: resolve(child_int(m, "From1")),
-            team2: resolve(child_int(m, "From2")),
+            team1,
+            team2,
+            entry1_id,
+            entry2_id,
             court,
             sets: parse_sets(m),
             winner,
@@ -284,30 +294,31 @@ fn parse_matches(
     out
 }
 
-/// Löst die `From`-PlanningID über Slot → Entry → Player zu den Spielern auf.
-/// Der Slot wird im Draw des Matches gesucht (PlanningIDs sind nur dort
-/// eindeutig). Leerer Vec, wenn die Kette nicht aufgeht (z. B. noch offener
-/// KO-Platz).
+/// Löst die `From`-PlanningID über Slot → Entry → Player auf und liefert
+/// `(EntryID, Spieler)`. Der Slot wird im Draw des Matches gesucht
+/// (PlanningIDs sind nur dort eindeutig). `(0, [])`, wenn die Kette nicht
+/// aufgeht (z. B. noch offener KO-Platz).
 fn resolve_team(
     draw_id: Option<i64>,
     planning_id: Option<i64>,
     slots: &HashMap<(i64, i64), i64>,
     entries: &HashMap<i64, Vec<i64>>,
     players: &HashMap<i64, BtpPlayer>,
-) -> Vec<BtpPlayer> {
+) -> (i64, Vec<BtpPlayer>) {
     let (Some(draw), Some(planning)) = (draw_id, planning_id) else {
-        return Vec::new();
+        return (0, Vec::new());
     };
     let Some(entry_id) = slots.get(&(draw, planning)) else {
-        return Vec::new();
+        return (0, Vec::new());
     };
     let Some(player_ids) = entries.get(entry_id) else {
-        return Vec::new();
+        return (*entry_id, Vec::new());
     };
-    player_ids
+    let team = player_ids
         .iter()
         .filter_map(|id| players.get(id).cloned())
-        .collect()
+        .collect();
+    (*entry_id, team)
 }
 
 /// Liest die Satz-Ergebnisse aus dem `Sets`-Container eines Matches.
@@ -517,6 +528,9 @@ mod tests {
         assert_eq!(team1[0].nationality.as_deref(), Some("GER"));
         assert_eq!(team1[1].member_id, None);
         assert!(snapshot.matches[0].team2.is_empty());
+        // EntryID von Team 1 ist aufgelöst, Team 2 bleibt offen (0).
+        assert_eq!(snapshot.matches[0].entry1_id, 10);
+        assert_eq!(snapshot.matches[0].entry2_id, 0);
     }
 
     /// Regression: zwei Draws verwenden beide den Slot PlanningID 100. Ohne

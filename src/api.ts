@@ -1,7 +1,13 @@
 // Typsichere Wrapper um die Tauri-Commands (src-tauri/src/commands.rs).
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, SyncStatus, TabletInfo } from "./types";
+import type {
+  AppConfig,
+  SyncStatus,
+  TabletInfo,
+  WalkoverProposal,
+  WalkoverResult,
+} from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
 
@@ -31,3 +37,18 @@ export const tabletOverview = (): Promise<TabletInfo> =>
 
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
+
+/** Offene Walkover-Vorschläge nach Aufgaben (Aufgabe → restliche Spiele). */
+export const walkoverProposals = (): Promise<WalkoverProposal[]> =>
+  invoke("walkover_proposals");
+
+/** Wertet die ausgewählten Spiele kampflos (Walkover) nach BTP. */
+export const confirmWalkover = (
+  proposalId: string,
+  matchIds: number[],
+): Promise<WalkoverResult> =>
+  invoke("confirm_walkover", { proposalId, matchIds });
+
+/** Verwirft einen Walkover-Vorschlag, ohne ihn umzusetzen. */
+export const dismissWalkover = (proposalId: string): Promise<void> =>
+  invoke("dismiss_walkover", { proposalId });

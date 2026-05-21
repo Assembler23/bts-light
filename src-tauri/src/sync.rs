@@ -169,6 +169,8 @@ mod tests {
                     member_id: None,
                     nationality: None,
                 }],
+                entry1_id: 0,
+                entry2_id: 0,
                 court: Some("1".to_string()),
                 sets: vec![(5, 3)],
                 winner: None,

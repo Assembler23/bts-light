@@ -101,6 +101,9 @@ pub fn run() {
             commands::get_status,
             commands::open_live_view,
             commands::tablet_overview,
+            commands::walkover_proposals,
+            commands::dismiss_walkover,
+            commands::confirm_walkover,
             open_log_dir,
         ])
         .setup(|app| {

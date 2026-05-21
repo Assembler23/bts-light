@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.5.0
+
+- **Kampflose Wertung nach Aufgabe**: Gibt eine Mannschaft während eines
+  Spiels auf und hat in derselben Disziplin noch weitere, ungespielte
+  Spiele, blendet bts-light ein Fenster ein und schlägt vor, diese
+  kampflos (Walkover) für den jeweiligen Gegner zu werten. Die
+  Turnierleitung wählt die betroffenen Spiele aus und bestätigt – erst
+  dann gehen sie mit `ScoreStatus = 1` nach BTP. Maßgeblich ist nur die
+  Disziplin der Aufgabe; spielt ein Doppelpartner in einer anderen
+  Disziplin mit anderem Partner, bleibt das unberührt.
+
 ## v0.4.6
 
 - **Kopier-Button** für die Tablet-Adressen in der Tablet-Spielzettel-

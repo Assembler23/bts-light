@@ -234,6 +234,12 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         Ok(()) => {
             ctx.tablet.clear_court(&body.court_label);
             tracing::info!("BTP-Schreiben OK: Match {}", m.id);
+            // Nach einer Aufgabe: prüfen, ob die aufgebende Mannschaft in
+            // derselben Disziplin noch Spiele hat, und der Turnierleitung
+            // einen Walkover-Vorschlag hinterlegen.
+            if body.retired {
+                register_walkover_proposal(ctx, &m, team1_won);
+            }
             ResultResponse::ok()
         }
         Err(e) => {
@@ -243,8 +249,53 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     }
 }
 
-/// LOGIN → Session-Schlüssel → `SENDUPDATE`.
-async fn write_result_to_btp(
+/// Hinterlegt nach einer Aufgabe einen Walkover-Vorschlag für die
+/// restlichen Spiele der aufgebenden Mannschaft – aber nur, wenn es in
+/// derselben Disziplin überhaupt noch wertbare Spiele gibt.
+fn register_walkover_proposal(ctx: &ServerCtx, m: &BtpMatch, team1_won: bool) {
+    // Die aufgebende Mannschaft ist der Verlierer der Begegnung.
+    let (entry_id, retired_players) = if team1_won {
+        (m.entry2_id, &m.team2)
+    } else {
+        (m.entry1_id, &m.team1)
+    };
+    if entry_id == 0 {
+        return; // Mannschaft nicht eindeutig auflösbar
+    }
+    if ctx.tablet.walkover_candidates(entry_id).is_empty() {
+        return; // keine weiteren Spiele – kein Vorschlag nötig
+    }
+    let retired_team = retired_players
+        .iter()
+        .map(|p| p.name.clone())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    tracing::info!(
+        "Aufgabe Entry {entry_id} ({retired_team}, {}) – Walkover-Vorschlag hinterlegt",
+        m.draw_name
+    );
+    ctx.tablet
+        .add_walkover_proposal(crate::tablet::state::WalkoverProposal {
+            id: entry_id.to_string(),
+            entry_id,
+            retired_team,
+            draw_name: m.draw_name.clone(),
+            created_at_ms: now_ms(),
+        });
+}
+
+/// Aktuelle Unix-Zeit in Millisekunden.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// LOGIN → Session-Schlüssel → `SENDUPDATE`. Schreibt ein einzelnes
+/// Match-Ergebnis nach BTP – auch für kampflose Wertungen (Walkover)
+/// aus der Turnierleitung wiederverwendet.
+pub(crate) async fn write_result_to_btp(
     config: &AppConfig,
     update: &proto::MatchUpdate,
 ) -> Result<(), String> {

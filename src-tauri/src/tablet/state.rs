@@ -58,6 +58,44 @@ pub struct CourtOverview {
     pub official_call: bool,
 }
 
+/// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
+/// (Walkover) für den Gegner gewertet werden kann.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WalkoverCandidate {
+    /// BTP-Match-ID.
+    pub match_id: i64,
+    /// Draw des Matches (`Match.DrawID`) – fürs Zurückschreiben nach BTP.
+    pub draw_id: i64,
+    /// Planungsposition im Draw (`Match.PlanningID`).
+    pub planning_id: i64,
+    /// Runden-/Spielbezeichnung, z. B. "G3".
+    pub round_name: String,
+    /// Anzeigename des Gegners, der den kampflosen Sieg erhielte.
+    pub opponent: String,
+    /// Steht die aufgebende Mannschaft auf Seite 1 des Matches? Bestimmt
+    /// den Sieger des Walkovers (immer die jeweils andere Seite).
+    pub retired_is_team1: bool,
+}
+
+/// Vorschlag, nach einer Aufgabe die restlichen Spiele derselben
+/// Mannschaft in derselben Disziplin kampflos zu werten. Die konkreten
+/// Kandidaten-Spiele werden bei Bedarf frisch aus dem Snapshot ermittelt
+/// ([`TabletState::walkover_candidates`]) – so fallen bereits gewertete
+/// Spiele von selbst heraus.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WalkoverProposal {
+    /// Stabile ID des Vorschlags (= EntryID der aufgebenden Mannschaft).
+    pub id: String,
+    /// EntryID der aufgebenden Mannschaft.
+    pub entry_id: i64,
+    /// Anzeigename der aufgebenden Mannschaft.
+    pub retired_team: String,
+    /// Name der Disziplin/Auslosung, in der aufgegeben wurde, z. B. "HE".
+    pub draw_name: String,
+    /// Zeitpunkt der Aufgabe (Unix-Millisekunden).
+    pub created_at_ms: u64,
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -71,6 +109,8 @@ pub struct TabletState {
     /// Court → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
     court_state: RwLock<HashMap<String, String>>,
+    /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
+    walkovers: RwLock<Vec<WalkoverProposal>>,
 }
 
 impl TabletState {
@@ -217,6 +257,63 @@ impl TabletState {
         self.courts.write().unwrap().remove(court);
     }
 
+    /// Hinterlegt einen Walkover-Vorschlag. Je EntryID gibt es höchstens
+    /// einen – ein erneuter für dieselbe Mannschaft ersetzt den alten.
+    pub fn add_walkover_proposal(&self, proposal: WalkoverProposal) {
+        let mut list = self.walkovers.write().unwrap();
+        list.retain(|p| p.entry_id != proposal.entry_id);
+        list.push(proposal);
+    }
+
+    /// Alle offenen Walkover-Vorschläge.
+    pub fn walkover_proposals(&self) -> Vec<WalkoverProposal> {
+        self.walkovers.read().unwrap().clone()
+    }
+
+    /// Entfernt einen Walkover-Vorschlag (umgesetzt oder verworfen).
+    pub fn remove_walkover_proposal(&self, id: &str) {
+        self.walkovers.write().unwrap().retain(|p| p.id != id);
+    }
+
+    /// Noch nicht gespielte Matches einer Mannschaft (per EntryID) – die
+    /// Kandidaten für eine kampflose Wertung nach deren Aufgabe. Nur Spiele
+    /// mit bereits feststehendem Gegner; offene KO-Plätze bleiben außen vor.
+    pub fn walkover_candidates(&self, entry_id: i64) -> Vec<WalkoverCandidate> {
+        if entry_id == 0 {
+            return Vec::new();
+        }
+        let guard = self.snapshot.read().unwrap();
+        let Some(snap) = guard.as_ref() else {
+            return Vec::new();
+        };
+        snap.matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Scheduled)
+            .filter_map(|m| {
+                let retired_is_team1 = m.entry1_id == entry_id;
+                if !retired_is_team1 && m.entry2_id != entry_id {
+                    return None;
+                }
+                let opponent = if retired_is_team1 { &m.team2 } else { &m.team1 };
+                if opponent.is_empty() {
+                    return None; // Gegner steht noch nicht fest
+                }
+                Some(WalkoverCandidate {
+                    match_id: m.id,
+                    draw_id: m.draw_id,
+                    planning_id: m.planning_id,
+                    round_name: m.round_name.clone(),
+                    opponent: opponent
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(" / "),
+                    retired_is_team1,
+                })
+            })
+            .collect()
+    }
+
     /// Courts mit verbundenem Tablet – diese treiben ihren Live-Score selbst.
     pub fn active_courts(&self) -> Vec<String> {
         self.courts
@@ -317,6 +414,8 @@ mod tests {
             match_num: Some(id),
             team1: vec![player("Anna")],
             team2: vec![player("Ben")],
+            entry1_id: 10,
+            entry2_id: 20,
             court: court.map(String::from),
             sets: vec![(5, 3)],
             winner: None,
@@ -402,5 +501,48 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court == "Court 2").unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    #[test]
+    fn walkover_candidates_lists_scheduled_matches_of_the_entry() {
+        let st = TabletState::default();
+        // match_on setzt entry1_id = 10, entry2_id = 20.
+        st.set_snapshot(snapshot(
+            vec![
+                match_on(1, Some("Court 1"), MatchStatus::OnCourt), // läuft – kein Kandidat
+                match_on(2, None, MatchStatus::Scheduled),
+                match_on(3, None, MatchStatus::Scheduled),
+            ],
+            vec!["Court 1"],
+        ));
+        let cands = st.walkover_candidates(10);
+        let ids: Vec<i64> = cands.iter().map(|c| c.match_id).collect();
+        assert_eq!(ids, vec![2, 3]);
+        assert!(cands.iter().all(|c| c.retired_is_team1));
+        assert_eq!(cands[0].opponent, "Ben");
+        // Fremde Entry → keine Kandidaten; Entry 0 (unaufgelöst) ebenfalls.
+        assert!(st.walkover_candidates(999).is_empty());
+        assert!(st.walkover_candidates(0).is_empty());
+    }
+
+    #[test]
+    fn walkover_proposal_is_unique_per_entry_and_removable() {
+        let st = TabletState::default();
+        let mk = |entry: i64| WalkoverProposal {
+            id: entry.to_string(),
+            entry_id: entry,
+            retired_team: "X".to_string(),
+            draw_name: "HE".to_string(),
+            created_at_ms: 0,
+        };
+        st.add_walkover_proposal(mk(10));
+        st.add_walkover_proposal(mk(10)); // ersetzt – kein Duplikat
+        assert_eq!(st.walkover_proposals().len(), 1);
+        st.add_walkover_proposal(mk(20));
+        assert_eq!(st.walkover_proposals().len(), 2);
+        st.remove_walkover_proposal("10");
+        let rest = st.walkover_proposals();
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].entry_id, 20);
     }
 }

@@ -348,3 +348,108 @@ pub fn open_live_view(
         .open_url(url, None::<String>)
         .map_err(|e| e.to_string())
 }
+
+// ───────────────────────────── Walkover nach Aufgabe ──────────────────────
+
+/// Ein Walkover-Vorschlag samt der aktuell noch offenen Kandidaten-Spiele.
+#[derive(Serialize)]
+pub struct WalkoverProposalView {
+    pub id: String,
+    pub retired_team: String,
+    pub draw_name: String,
+    pub created_at_ms: u64,
+    pub candidates: Vec<crate::tablet::state::WalkoverCandidate>,
+}
+
+/// Liefert die offenen Walkover-Vorschläge. Vorschläge, deren Spiele
+/// inzwischen alle gewertet wurden, werden dabei aufgeräumt.
+#[tauri::command]
+pub fn walkover_proposals(state: State<'_, AppState>) -> Vec<WalkoverProposalView> {
+    let mut views = Vec::new();
+    for p in state.tablet.walkover_proposals() {
+        let candidates = state.tablet.walkover_candidates(p.entry_id);
+        if candidates.is_empty() {
+            state.tablet.remove_walkover_proposal(&p.id);
+            continue;
+        }
+        views.push(WalkoverProposalView {
+            id: p.id,
+            retired_team: p.retired_team,
+            draw_name: p.draw_name,
+            created_at_ms: p.created_at_ms,
+            candidates,
+        });
+    }
+    views
+}
+
+/// Verwirft einen Walkover-Vorschlag, ohne ihn umzusetzen.
+#[tauri::command]
+pub fn dismiss_walkover(state: State<'_, AppState>, proposal_id: String) {
+    state.tablet.remove_walkover_proposal(&proposal_id);
+}
+
+/// Ergebnis einer Walkover-Bestätigung.
+#[derive(Serialize)]
+pub struct WalkoverResult {
+    /// Anzahl erfolgreich nach BTP geschriebener kampfloser Wertungen.
+    pub written: i64,
+    /// Fehlermeldungen der nicht geschriebenen Spiele.
+    pub errors: Vec<String>,
+}
+
+/// Schreibt für die ausgewählten Spiele einen kampflosen Sieg (Walkover)
+/// nach BTP: die aufgebende Mannschaft verliert, der Gegner gewinnt
+/// (`ScoreStatus = 1`, keine Sätze). Der Vorschlag wird nur entfernt, wenn
+/// alle Spiele geschrieben wurden – sonst bleibt er für einen erneuten
+/// Versuch stehen (bereits gewertete Spiele fallen von selbst heraus).
+#[tauri::command]
+pub async fn confirm_walkover(
+    state: State<'_, AppState>,
+    proposal_id: String,
+    match_ids: Vec<i64>,
+) -> Result<WalkoverResult, String> {
+    // Ohne Auswahl nichts tun – insbesondere den Vorschlag nicht entfernen.
+    if match_ids.is_empty() {
+        return Ok(WalkoverResult {
+            written: 0,
+            errors: Vec::new(),
+        });
+    }
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let tablet = state.tablet.clone();
+
+    let proposal = tablet
+        .walkover_proposals()
+        .into_iter()
+        .find(|p| p.id == proposal_id)
+        .ok_or("Der Walkover-Vorschlag ist nicht mehr vorhanden.")?;
+    let candidates = tablet.walkover_candidates(proposal.entry_id);
+
+    let mut written = 0i64;
+    let mut errors = Vec::new();
+    for cand in candidates.iter().filter(|c| match_ids.contains(&c.match_id)) {
+        let update = crate::btp::proto::MatchUpdate {
+            btp_match_id: cand.match_id,
+            draw_id: cand.draw_id,
+            planning_id: cand.planning_id,
+            sets: Vec::new(),
+            // Sieger ist die jeweils NICHT aufgebende Mannschaft.
+            team1_won: !cand.retired_is_team1,
+            duration_mins: 0,
+            score_status: 1, // 1 = Walkover
+        };
+        match crate::tablet::server::write_result_to_btp(&config, &update).await {
+            Ok(()) => written += 1,
+            Err(e) => errors.push(format!("{}: {e}", cand.round_name)),
+        }
+    }
+    if errors.is_empty() {
+        tablet.remove_walkover_proposal(&proposal_id);
+    }
+    Ok(WalkoverResult { written, errors })
+}

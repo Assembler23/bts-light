@@ -86,6 +86,8 @@ mod tests {
                 member_id: None,
                 nationality: None,
             }],
+            entry1_id: 0,
+            entry2_id: 0,
             court: Some(court.to_string()),
             sets,
             winner: None,

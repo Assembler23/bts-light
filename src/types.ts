@@ -62,3 +62,35 @@ export interface TabletInfo {
   relay_base: string;
   courts: CourtOverview[];
 }
+
+/** Ein kampflos wertbares Spiel (Rust: tablet::state::WalkoverCandidate). */
+export interface WalkoverCandidate {
+  match_id: number;
+  draw_id: number;
+  planning_id: number;
+  /** Runden-/Spielbezeichnung, z. B. "G3". */
+  round_name: string;
+  /** Anzeigename des Gegners, der den kampflosen Sieg erhielte. */
+  opponent: string;
+  /** Steht die aufgebende Mannschaft auf Seite 1 des Matches? */
+  retired_is_team1: boolean;
+}
+
+/** Walkover-Vorschlag nach einer Aufgabe (Rust: commands::WalkoverProposalView). */
+export interface WalkoverProposal {
+  id: string;
+  /** Anzeigename der aufgebenden Mannschaft. */
+  retired_team: string;
+  /** Disziplin/Auslosung der Aufgabe, z. B. "HE". */
+  draw_name: string;
+  created_at_ms: number;
+  candidates: WalkoverCandidate[];
+}
+
+/** Ergebnis einer Walkover-Bestätigung (Rust: commands::WalkoverResult). */
+export interface WalkoverResult {
+  /** Anzahl erfolgreich nach BTP geschriebener kampfloser Wertungen. */
+  written: number;
+  /** Fehlermeldungen der nicht geschriebenen Spiele. */
+  errors: string[];
+}

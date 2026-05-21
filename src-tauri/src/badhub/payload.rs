@@ -247,6 +247,8 @@ mod tests {
             match_num: Some(id),
             team1: vec![player("Anna Müller", Some("08-001234"), Some("GER"))],
             team2: vec![player("Ben Schmidt", None, None)],
+            entry1_id: 0,
+            entry2_id: 0,
             court: court.map(String::from),
             sets: vec![(21, 19), (21, 15)],
             winner: None,
