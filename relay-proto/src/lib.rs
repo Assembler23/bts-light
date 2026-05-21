@@ -154,7 +154,11 @@ pub struct MonitorState {
     /// Roher Tablet-Spielzustand (`court_state`) als JSON-String, falls ein
     /// Tablet das Feld zählt – liefert Aufschlag-Seite und Pause/Timer.
     /// `monitor.html` parst ihn selbst.
-    #[serde(rename = "courtState", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "courtState",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub court_state: Option<String>,
     pub config: MonitorConfig,
     /// Kennungen der Werbebilder; der Monitor lädt sie über `../../ads/<id>`.

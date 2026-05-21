@@ -292,9 +292,7 @@ fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
     let mut map = HashMap::new();
     if let Some(group) = xml::find(t, "Draws") {
         for d in group.children() {
-            if let (Some(draw_id), Some(event_id)) =
-                (child_int(d, "ID"), child_int(d, "EventID"))
-            {
+            if let (Some(draw_id), Some(event_id)) = (child_int(d, "ID"), child_int(d, "EventID")) {
                 map.insert(
                     draw_id,
                     events

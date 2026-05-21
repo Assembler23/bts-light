@@ -432,9 +432,7 @@ impl TabletState {
         let current_match = guard.as_ref().and_then(|snap| {
             snap.matches
                 .iter()
-                .find(|m| {
-                    m.status == MatchStatus::OnCourt && m.court.as_deref() == Some(court)
-                })
+                .find(|m| m.status == MatchStatus::OnCourt && m.court.as_deref() == Some(court))
                 .cloned()
         });
         drop(guard);

@@ -420,8 +420,7 @@ async fn monitor_upload(
     let mut ads = Vec::new();
     let mut total = 0usize;
     for ad in upload.ads.into_iter().take(MAX_ADS) {
-        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(ad.data.as_bytes())
-        else {
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(ad.data.as_bytes()) else {
             continue;
         };
         total += bytes.len();

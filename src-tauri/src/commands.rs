@@ -369,8 +369,8 @@ pub fn open_live_view(
 /// präparierter String an die OS-Shell durchgereicht wird.
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    let is_clean_https = url.starts_with("https://")
-        && !url.contains(|c: char| c.is_control() || c == ' ');
+    let is_clean_https =
+        url.starts_with("https://") && !url.contains(|c: char| c.is_control() || c == ' ');
     if !is_clean_https {
         return Err("Nur reguläre https-Links sind erlaubt.".to_string());
     }
@@ -462,7 +462,10 @@ pub async fn confirm_walkover(
 
     let mut written = 0i64;
     let mut errors = Vec::new();
-    for cand in candidates.iter().filter(|c| match_ids.contains(&c.match_id)) {
+    for cand in candidates
+        .iter()
+        .filter(|c| match_ids.contains(&c.match_id))
+    {
         let update = crate::btp::proto::MatchUpdate {
             btp_match_id: cand.match_id,
             draw_id: cand.draw_id,
