@@ -47,6 +47,10 @@ export interface CourtOverview {
   tablet_connected: boolean;
   /** Akkustand des Tablets (Android/Chrome) – null bei iPads/Safari. */
   battery: { percent: number; charging: boolean } | null;
+  /** Verletzung/Behandlung läuft an diesem Court. */
+  injury: boolean;
+  /** Die Turnierleitung wurde an diesen Court gerufen. */
+  official_call: boolean;
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

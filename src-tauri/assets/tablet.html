@@ -32,6 +32,28 @@
     }
     .header-undo:disabled { opacity: .35; cursor: not-allowed; }
     .header-undo:active:not(:disabled) { background: #64748b; }
+    /* Verletzungs- und Megafon-Button rechts in der Kopfzeile. */
+    .header-btn {
+      flex: 0 0 auto;
+      width: 2.6rem; height: 2.6rem;
+      padding: 0; min-height: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; line-height: 1; color: #f8fafc;
+      border: 0; border-radius: .5rem; cursor: pointer;
+      touch-action: manipulation;
+    }
+    .header-btn.injury { background: #7f1d1d; }
+    .header-btn.injury:active { background: #991b1b; }
+    .header-btn.injury.on { background: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,.4); }
+    .header-btn.megaphone { background: #78350f; }
+    .header-btn.megaphone:active { background: #92400e; }
+    .header-btn.megaphone.on { background: #f59e0b; color: #1f2937; box-shadow: 0 0 0 3px rgba(245,158,11,.4); }
+    .header-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .match-clock {
+      flex: 0 0 auto; font-variant-numeric: tabular-nums;
+      font-size: .95rem; font-weight: 600; opacity: .8;
+      min-width: 3rem; text-align: right;
+    }
     .court-label { font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
     .event-label { opacity: .7; }
     .conn { display: flex; align-items: center; gap: .4rem; font-size: .75rem; }
@@ -256,6 +278,19 @@
     }
     .break-hint { font-size: .85rem; opacity: .55; max-width: 22rem; }
 
+    /* ─── Belegt-/Gesperrt-Overlay (Tablet-Übernahme) ────────────────── */
+    .lock-overlay {
+      position: fixed; inset: 0; background: rgba(2,6,23,.96);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1rem; padding: 2rem; text-align: center;
+      z-index: 25;
+    }
+    .lock-overlay.visible { display: flex; }
+    .lock-icon { font-size: 3rem; }
+    .lock-title { font-size: 1.4rem; font-weight: 700; }
+    .lock-text { font-size: .95rem; opacity: .65; max-width: 24rem; line-height: 1.45; }
+    .megaphone-text { max-width: 30rem; opacity: .7; font-size: .95rem; line-height: 1.45; }
+
     @media (orientation: portrait) {
       /* Hochformat: Buttons sehr schmal — Hinweis zum Drehen einblenden? */
       .play { grid-template-columns: 1fr 2fr 1fr; }
@@ -279,6 +314,23 @@
       <div class="court-label">__COURT_LABEL__</div>
       <div class="event-label" id="event-label">— kein Match —</div>
     </div>
+    <div class="match-clock" id="match-clock"></div>
+    <button
+      type="button"
+      id="injury-btn"
+      class="header-btn injury"
+      disabled
+      aria-label="Verletzung / Behandlung"
+      title="Verletzung / Behandlung — Spiel unterbrechen"
+    >✚</button>
+    <button
+      type="button"
+      id="megaphone-btn"
+      class="header-btn megaphone"
+      disabled
+      aria-label="Turnierleitung rufen"
+      title="Turnierleitung ans Feld rufen"
+    >📣</button>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
   </header>
 
@@ -421,6 +473,39 @@
   </div>
 </div>
 
+<!-- Megafon-Popup: Turnierleitung ans Feld rufen -->
+<div class="modal" id="megaphone-modal">
+  <div class="title" id="megaphone-title"></div>
+  <div class="subtitle" id="megaphone-subtitle"></div>
+  <div class="megaphone-text" id="megaphone-text"></div>
+  <div class="options">
+    <div class="opt" id="megaphone-confirm"></div>
+    <div class="opt" id="megaphone-cancel">Abbrechen · Cancel</div>
+  </div>
+</div>
+
+<!-- Belegt-Overlay: Court wird bereits von einem anderen Gerät geschiedst -->
+<div class="lock-overlay" id="occupied-overlay">
+  <div class="lock-icon">🔒</div>
+  <div class="lock-title">Dieses Feld wird bereits geschiedst</div>
+  <div class="lock-text">
+    Ein anderes Gerät zählt gerade auf diesem Court. Übernimm nur, wenn du
+    sicher bist — z. B. wenn das andere Tablet ausgefallen ist. Danach kann
+    das andere Gerät nicht mehr zählen.
+  </div>
+  <button class="danger" id="takeover-btn">Court übernehmen</button>
+</div>
+
+<!-- Gesperrt-Overlay: dieses Tablet wurde von einem anderen Gerät abgelöst -->
+<div class="lock-overlay" id="locked-overlay">
+  <div class="lock-icon">🔒</div>
+  <div class="lock-title">Dieses Gerät ist gesperrt</div>
+  <div class="lock-text">
+    Dieses Feld wird jetzt von einem anderen Gerät geschiedst. Zählen ist
+    hier nicht mehr möglich.
+  </div>
+</div>
+
 <script type="module">
 // ───────────────────────────────────────────────────────────────────────
 // Tablet-UI Phase 5.47a (+ Court-Visualisierung & BWF-Aufschlagrotation)
@@ -502,10 +587,19 @@ const STATE = {
   // ob das in diesem Match schon erfolgt ist.
   midGameSwitchDone: /** @type {boolean} */ (false),
 
-  // Laufende offizielle Pause: { kind:'eleven'|'game', endsAt:<ms> } oder null.
-  pause: /** @type {null | {kind:'eleven'|'game', endsAt:number}} */ (null),
+  // Laufende Pause/Unterbrechung: kind 'eleven'|'game' (mit Countdown) oder
+  // 'injury' (Behandlung, ohne Countdown). null = keine Pause.
+  pause: /** @type {null | {kind:'eleven'|'game'|'injury', endsAt:number|null}} */ (null),
   // Wurde die 60-s-Pause bei 11 Punkten in DIESEM Satz schon ausgelöst?
   intervalDoneThisGame: /** @type {boolean} */ (false),
+  // Matchstart (ms) für die Spieldauer-Anzeige.
+  startedAt: /** @type {number|null} */ (null),
+  // Meldungen an die Turnierleitung.
+  alertInjury: /** @type {boolean} */ (false),
+  alertOfficial: /** @type {boolean} */ (false),
+  // Tablet-Übernahme: gesperrt (abgelöst) bzw. passiv (Court belegt).
+  locked: /** @type {boolean} */ (false),
+  occupied: /** @type {boolean} */ (false),
 };
 
 const els = {
@@ -547,6 +641,18 @@ const els = {
   breakTitle: document.getElementById('break-title'),
   breakCountdown: document.getElementById('break-countdown'),
   breakSkip: document.getElementById('break-skip'),
+  matchClock: document.getElementById('match-clock'),
+  injuryBtn: document.getElementById('injury-btn'),
+  megaphoneBtn: document.getElementById('megaphone-btn'),
+  megaphoneModal: document.getElementById('megaphone-modal'),
+  megaphoneTitle: document.getElementById('megaphone-title'),
+  megaphoneSubtitle: document.getElementById('megaphone-subtitle'),
+  megaphoneText: document.getElementById('megaphone-text'),
+  megaphoneConfirm: document.getElementById('megaphone-confirm'),
+  megaphoneCancel: document.getElementById('megaphone-cancel'),
+  occupiedOverlay: document.getElementById('occupied-overlay'),
+  takeoverBtn: document.getElementById('takeover-btn'),
+  lockedOverlay: document.getElementById('locked-overlay'),
 };
 
 // ─────────────────────────────── WebSocket ────────────────────────────
@@ -565,14 +671,22 @@ function connect() {
     els.connDot.classList.add('ok');
     els.connText.textContent = 'verbunden';
     tlog('info', 'ws_open');
+    // Übernahme-Status neu vom Server bestimmen lassen.
+    STATE.locked = false;
+    STATE.occupied = false;
     ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtLabel: COURT_LABEL }));
     if (sendBattery) sendBattery();
+    // Aktive Meldungen nach einem Reconnect erneut melden.
+    if (STATE.alertInjury || STATE.alertOfficial) sendAlert();
+    render();
   };
   ws.onmessage = (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
     if (msg.type === 'match_assigned') { tlog('info', 'match_assigned', { matchId: msg.match?.matchId }); loadMatch(msg.match); }
     else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearMatch(); }
+    else if (msg.type === 'court_occupied') { tlog('info', 'court_occupied'); STATE.occupied = true; render(); }
+    else if (msg.type === 'session_superseded') { tlog('warn', 'session_superseded'); STATE.locked = true; STATE.occupied = false; render(); }
   };
   ws.onclose = (ev) => {
     els.connDot.classList.remove('ok');
@@ -692,9 +806,10 @@ const BREAK_SECONDS = { eleven: 60, game: 120 };
 let breakTimer = null;
 
 function startBreak(kind) {
-  STATE.pause = { kind, endsAt: Date.now() + BREAK_SECONDS[kind] * 1000 };
-  if (breakTimer) clearInterval(breakTimer);
-  breakTimer = setInterval(tickBreak, 250);
+  const secs = BREAK_SECONDS[kind]; // undefined bei 'injury' – kein Countdown
+  STATE.pause = { kind, endsAt: secs ? Date.now() + secs * 1000 : null };
+  if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  if (STATE.pause.endsAt) breakTimer = setInterval(tickBreak, 250);
   tlog('info', 'break_start', { kind });
   persistState();
   render();
@@ -702,7 +817,14 @@ function startBreak(kind) {
 
 function endBreak() {
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
-  if (STATE.pause) tlog('info', 'break_end', { kind: STATE.pause.kind });
+  if (STATE.pause) {
+    tlog('info', 'break_end', { kind: STATE.pause.kind });
+    // Behandlungspause beendet → Verletzungs-Meldung zurücknehmen.
+    if (STATE.pause.kind === 'injury' && STATE.alertInjury) {
+      STATE.alertInjury = false;
+      sendAlert();
+    }
+  }
   STATE.pause = null;
   persistState();
   render();
@@ -710,7 +832,7 @@ function endBreak() {
 
 // 4×/s: aktualisiert den Countdown; bei 0 endet die Pause automatisch.
 function tickBreak() {
-  if (!STATE.pause) {
+  if (!STATE.pause || !STATE.pause.endsAt) {
     if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
     return;
   }
@@ -726,12 +848,76 @@ function renderBreak() {
     els.breakOverlay.classList.remove('visible');
     return;
   }
-  const secs = Math.max(0, Math.round((STATE.pause.endsAt - Date.now()) / 1000));
-  els.breakCountdown.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-  els.breakTitle.textContent = STATE.pause.kind === 'eleven'
-    ? 'Pause bei 11 Punkten'
-    : 'Satzpause';
+  if (STATE.pause.kind === 'injury') {
+    els.breakTitle.textContent = 'Behandlungspause';
+    els.breakCountdown.textContent = '✚';
+  } else {
+    const secs = Math.max(0, Math.round((STATE.pause.endsAt - Date.now()) / 1000));
+    els.breakCountdown.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    els.breakTitle.textContent = STATE.pause.kind === 'eleven'
+      ? 'Pause bei 11 Punkten'
+      : 'Satzpause';
+  }
   els.breakOverlay.classList.add('visible');
+}
+
+// ─────────────────────── Meldungen an die Turnierleitung ───────────────
+// Verletzung (✚) unterbricht das Spiel und meldet es; Megafon (📣) ruft
+// die Turnierleitung ans Feld. Beides erscheint auch in bts-light.
+function sendAlert() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'alert',
+      injury: STATE.alertInjury,
+      official: STATE.alertOfficial,
+    }));
+  }
+  tlog('info', 'alert', { injury: STATE.alertInjury, official: STATE.alertOfficial });
+}
+
+function startInjury() {
+  if (STATE.pause || STATE.locked || STATE.occupied || !STATE.match) return;
+  STATE.alertInjury = true;
+  sendAlert();
+  startBreak('injury'); // ruft persistState + render
+}
+
+function openMegaphoneModal() {
+  if (!STATE.match || STATE.locked || STATE.occupied) return;
+  if (STATE.alertOfficial) {
+    els.megaphoneTitle.textContent = 'Turnierleitung wurde gerufen';
+    els.megaphoneSubtitle.textContent = 'An official has been called';
+    els.megaphoneText.textContent =
+      'Ist die Sache erledigt? Dann kannst du die Meldung zurücknehmen. · '
+      + 'Resolved? You can cancel the call.';
+    els.megaphoneConfirm.textContent = 'Meldung zurücknehmen · Cancel call';
+  } else {
+    els.megaphoneTitle.textContent = 'Turnierleitung rufen?';
+    els.megaphoneSubtitle.textContent = 'Call an official to the court?';
+    els.megaphoneText.textContent =
+      'Es wird eine Meldung an die Turnierleitung gesendet, dass an diesem '
+      + 'Feld ein Offizieller benötigt wird. · A message will be sent to the '
+      + 'tournament desk that an official is needed at this court.';
+    els.megaphoneConfirm.textContent = 'Turnierleitung rufen · Call official';
+  }
+  els.megaphoneModal.classList.add('visible');
+}
+
+function confirmMegaphone() {
+  STATE.alertOfficial = !STATE.alertOfficial;
+  sendAlert();
+  els.megaphoneModal.classList.remove('visible');
+  render();
+}
+
+// Laufende Spieldauer in der Kopfzeile (MM:SS ab Matchstart).
+function renderClock() {
+  if (STATE.startedAt && STATE.match && !STATE.finished) {
+    const s = Math.max(0, Math.floor((Date.now() - STATE.startedAt) / 1000));
+    els.matchClock.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  } else {
+    els.matchClock.textContent = '';
+  }
 }
 
 // ─────────────────────────────── State-Mutationen ─────────────────────
@@ -763,6 +949,9 @@ function persistState() {
       intervalDoneThisGame: STATE.intervalDoneThisGame,
       submittedOk: STATE.submittedOk,
       pendingResult: STATE.pendingResult,
+      startedAt: STATE.startedAt,
+      alertInjury: STATE.alertInjury,
+      alertOfficial: STATE.alertOfficial,
       // history wird bewusst NICHT persistiert — Undo nach Reload ist nicht
       // unterstützt, vermeidet ein riesiges Storage-Object.
     }));
@@ -790,9 +979,11 @@ function restorePersistedState() {
     STATE.finished = !!p.finished;
     STATE.midGameSwitchDone = !!p.midGameSwitchDone;
     STATE.intervalDoneThisGame = !!p.intervalDoneThisGame;
-    // Laufende Pause nur übernehmen, wenn ihre Zeit noch nicht abgelaufen
-    // ist — sonst hinge nach einem Reload eine tote Pause fest.
-    if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > Date.now()) {
+    // Behandlungspause (ohne Countdown) immer übernehmen; eine BWF-Pause
+    // nur, wenn ihre Zeit noch nicht abgelaufen ist.
+    if (p.pause && p.pause.kind === 'injury') {
+      STATE.pause = p.pause;
+    } else if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > Date.now()) {
       STATE.pause = p.pause;
       if (breakTimer) clearInterval(breakTimer);
       breakTimer = setInterval(tickBreak, 250);
@@ -801,6 +992,9 @@ function restorePersistedState() {
     }
     STATE.submittedOk = !!p.submittedOk;
     STATE.pendingResult = p.pendingResult ?? null;
+    STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
+    STATE.alertInjury = !!p.alertInjury;
+    STATE.alertOfficial = !!p.alertOfficial;
     return true;
   } catch { return false; }
 }
@@ -825,6 +1019,10 @@ function loadMatch(match) {
   STATE.intervalDoneThisGame = false;
   STATE.pause = null;
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  STATE.startedAt = null;
+  STATE.alertInjury = false;
+  STATE.alertOfficial = false;
+  sendAlert();
   persistState();
   render();
 }
@@ -856,6 +1054,10 @@ function clearMatch() {
   STATE.intervalDoneThisGame = false;
   STATE.pause = null;
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  STATE.startedAt = null;
+  STATE.alertInjury = false;
+  STATE.alertOfficial = false;
+  sendAlert();
   clearPersistedState();
   render();
 }
@@ -899,6 +1101,8 @@ function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
   STATE.servingSide = serverSide;
   STATE.setup = 'playing';
   STATE.pendingServer = null;
+  // Spieldauer ab jetzt zählen (nur beim ersten Setup setzen).
+  if (!STATE.startedAt) STATE.startedAt = Date.now();
   persistState();
   render();
   sendScoreUpdate();
@@ -1256,6 +1460,19 @@ function render() {
   // Setup-Modal hat Priorität
   renderSetupModal();
   renderBreak();
+  renderClock();
+
+  // Tablet-Übernahme-Overlays (auch ohne Match relevant: passives Tablet).
+  els.occupiedOverlay.classList.toggle('visible', STATE.occupied && !STATE.locked);
+  els.lockedOverlay.classList.toggle('visible', STATE.locked);
+
+  // Verletzungs-/Megafon-Button: nur bei laufendem Match, nicht gesperrt.
+  const canSignal = !!STATE.match && STATE.setup === 'playing'
+    && !STATE.locked && !STATE.occupied;
+  els.injuryBtn.disabled = !canSignal;
+  els.megaphoneBtn.disabled = !canSignal;
+  els.injuryBtn.classList.toggle('on', STATE.alertInjury);
+  els.megaphoneBtn.classList.toggle('on', STATE.alertOfficial);
 
   if (!STATE.match) {
     els.eventLabel.textContent = '— kein Match —';
@@ -1319,6 +1536,19 @@ els.finishBtn.addEventListener('click', finishManually);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
+els.injuryBtn.addEventListener('click', startInjury);
+els.megaphoneBtn.addEventListener('click', openMegaphoneModal);
+els.megaphoneConfirm.addEventListener('click', confirmMegaphone);
+els.megaphoneCancel.addEventListener('click', () => els.megaphoneModal.classList.remove('visible'));
+els.takeoverBtn.addEventListener('click', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'take_over' }));
+  tlog('info', 'take_over');
+  STATE.occupied = false;
+  STATE.locked = false;
+  render();
+});
+// Spieldauer-Uhr im Sekundentakt aktualisieren.
+setInterval(renderClock, 1000);
 
 document.addEventListener('dblclick', (e) => e.preventDefault());
 document.body.addEventListener('touchmove', (e) => {

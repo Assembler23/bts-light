@@ -125,6 +125,13 @@ async fn handle_frame(
         } => {
             ctx.tablet.record_battery(&court_label, percent, charging);
         }
+        RelayFrame::Alert {
+            court_label,
+            injury,
+            official,
+        } => {
+            ctx.tablet.record_alert(&court_label, injury, official);
+        }
         RelayFrame::Result {
             req_id,
             court_label,

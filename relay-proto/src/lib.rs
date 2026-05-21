@@ -75,6 +75,13 @@ pub enum TabletMsg {
     /// Akkustand des Tablets (nur Android/Chrome – iPads liefern ihn nicht).
     #[serde(rename = "battery")]
     Battery { percent: i64, charging: bool },
+    /// Aktueller Meldungs-Zustand des Courts (vollständig, nicht inkrementell):
+    /// Verletzung/Behandlung und/oder Turnierleitung gerufen.
+    #[serde(rename = "alert")]
+    Alert { injury: bool, official: bool },
+    /// Das Tablet möchte einen bereits belegten Court übernehmen.
+    #[serde(rename = "take_over")]
+    TakeOver,
 }
 
 /// Nachrichten vom Server an das Tablet.
@@ -90,6 +97,14 @@ pub enum ServerMsg {
     /// Der Court hat aktuell kein Match.
     #[serde(rename = "match_cleared")]
     MatchCleared,
+    /// Der Court wird bereits von einem anderen Gerät geschiedst – dieses
+    /// Tablet bleibt passiv, bis der Nutzer „Übernehmen" tippt.
+    #[serde(rename = "court_occupied")]
+    CourtOccupied,
+    /// Dieses Tablet wurde von einem anderen Gerät übernommen und ist nun
+    /// gesperrt – kein Zählen mehr möglich.
+    #[serde(rename = "session_superseded")]
+    SessionSuperseded,
 }
 
 /// Endergebnis-Body, den das Tablet per `POST …/result` schickt.
@@ -197,6 +212,13 @@ pub enum RelayFrame {
         court_label: String,
         percent: i64,
         charging: bool,
+    },
+    /// Meldungs-Zustand eines Courts (Verletzung / Turnierleitung gerufen).
+    Alert {
+        #[serde(rename = "courtLabel")]
+        court_label: String,
+        injury: bool,
+        official: bool,
     },
 }
 

@@ -206,9 +206,24 @@ function CourtCard({ court }: { court: CourtOverview }) {
   const team1 = court.team1.join(" / ") || "—";
   const team2 = court.team2.join(" / ") || "—";
   const hasMatch = court.match_name !== "" || court.team1.length > 0;
+  const cardClass = court.injury
+    ? "border-rose-400 bg-rose-50"
+    : court.official_call
+      ? "border-amber-400 bg-amber-50"
+      : "border-slate-200 bg-white";
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`rounded-lg border p-3 shadow-sm ${cardClass}`}>
+      {(court.injury || court.official_call) && (
+        <div className="mb-1 flex flex-wrap gap-x-3 text-xs font-semibold">
+          {court.injury && (
+            <span className="text-rose-700">✚ Verletzung / Behandlung</span>
+          )}
+          {court.official_call && (
+            <span className="text-amber-700">📣 Turnierleitung gerufen</span>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-medium">{court.court}</span>
         <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500">

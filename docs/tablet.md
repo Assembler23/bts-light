@@ -66,12 +66,35 @@ den Relay statt direkt.
   eine 60-Sekunden-Pause ein, zwischen den Sätzen eine 2-Minuten-Pause –
   je mit Countdown. „Weiterspielen" beendet die Pause früher; bei 0 geht
   es automatisch weiter. Während der Pause ist die Zähltafel gesperrt.
+- **Spieldauer**: läuft als MM:SS in der Kopfzeile ab Matchstart.
 - **Court-Grafik**: zeigt Aufschläger (gelb markiert) und Annehmer auf
   dem Spielfeld – im Einzel ein Name je Hälfte, im Doppel zwei.
 - **Akkustand**: Android-Tablets (Chrome) melden ihren Akkustand an die
   Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
   Datenschutzgründen nicht her; dort bleibt die Anzeige leer.
+
+## Meldungen an die Turnierleitung
+
+In der Kopfzeile rechts gibt es zwei Melde-Buttons:
+
+- **✚ Verletzung/Behandlung** – unterbricht das Spiel (Behandlungspause
+  ohne Countdown, „Weiterspielen" hebt sie auf). Das Feld wird in der
+  bts-light-Felder-Übersicht rot hervorgehoben.
+- **📣 Turnierleitung rufen** – Popup (deutsch/englisch) mit Bestätigung;
+  meldet, dass ein Offizieller ans Feld soll.
+
+Beide Meldungen erscheinen zusätzlich in einer **app-weiten Leiste** in
+bts-light – auf jeder Seite, mit Feldnummer. Aufgelöst werden sie am
+Tablet (Behandlung „Weiterspielen" bzw. Meldung zurücknehmen).
+
+## Tablet-Übernahme
+
+Pro Court schiedst genau **ein** Tablet aktiv. Öffnet ein zweites Gerät
+denselben Court, zeigt es „Dieses Feld wird bereits geschiedst" mit einem
+**Übernehmen**-Button – gedacht für den Geräte-Tausch, etwa wenn ein
+Tablet ausfällt. Nach der Übernahme ist das alte Gerät gesperrt und kann
+nicht mehr zählen.
 
 ## Einrichtung im Turnier
 

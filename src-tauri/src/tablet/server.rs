@@ -283,11 +283,22 @@ async fn ws_upgrade(ws: WebSocketUpgrade, State(ctx): State<Arc<ServerCtx>>) -> 
     ws.on_upgrade(move |socket| handle_socket(socket, ctx))
 }
 
-/// Eine Tablet-Verbindung: empfängt identify/score_update, pusht alle 2 s
-/// das aktuell von BTP zugewiesene Match.
+/// Sendet eine `ServerMsg` über den Tablet-Socket.
+async fn send_msg(socket: &mut WebSocket, msg: &ServerMsg) {
+    if let Ok(json) = serde_json::to_string(msg) {
+        let _ = socket.send(Message::Text(Utf8Bytes::from(json))).await;
+    }
+}
+
+/// Eine Tablet-Verbindung: empfängt identify/score_update/alert, pusht alle
+/// 2 s das aktuell von BTP zugewiesene Match. Pro Court schiedst genau ein
+/// Tablet aktiv – ein zweites Gerät kann den Court übernehmen.
 async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     let mut court: Option<String> = None;
     let mut last_match: Option<i64> = None;
+    // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
+    let mut my_token: Option<u64> = None;
+    let mut superseded = false;
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -299,22 +310,40 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                     Message::Text(text) => {
                         match serde_json::from_str::<TabletMsg>(text.as_str()) {
                             Ok(TabletMsg::Identify { court_label }) => {
-                                ctx.tablet.attach_tablet(&court_label);
-                                tracing::info!("Tablet verbunden für Court '{court_label}'");
-                                court = Some(court_label);
+                                court = Some(court_label.clone());
                                 last_match = None;
-                                if let Some(c) = &court {
-                                    push_match(c, &ctx, &mut socket, &mut last_match).await;
+                                if ctx.tablet.court_occupied(&court_label) {
+                                    tracing::info!("Court '{court_label}' belegt – Tablet wartet auf Übernahme");
+                                    send_msg(&mut socket, &ServerMsg::CourtOccupied).await;
+                                } else {
+                                    my_token = Some(ctx.tablet.claim_court(&court_label));
+                                    ctx.tablet.attach_tablet(&court_label);
+                                    tracing::info!("Tablet verbunden für Court '{court_label}'");
+                                    push_match(&court_label, &ctx, &mut socket, &mut last_match).await;
+                                }
+                            }
+                            Ok(TabletMsg::TakeOver) => {
+                                if let (Some(c), None, false) = (court.clone(), my_token, superseded) {
+                                    my_token = Some(ctx.tablet.claim_court(&c));
+                                    ctx.tablet.attach_tablet(&c);
+                                    last_match = None;
+                                    tracing::info!("Tablet übernimmt Court '{c}'");
+                                    push_match(&c, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }
                             Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
-                                if let Some(c) = &court {
+                                if let (Some(c), Some(_)) = (&court, my_token) {
                                     handle_score(c, score_a, score_b, &sets_history, &ctx).await;
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
                                 if let Some(c) = &court {
                                     ctx.tablet.record_battery(c, percent, charging);
+                                }
+                            }
+                            Ok(TabletMsg::Alert { injury, official }) => {
+                                if let (Some(c), Some(_)) = (&court, my_token) {
+                                    ctx.tablet.record_alert(c, injury, official);
                                 }
                             }
                             Err(_) => {}
@@ -325,16 +354,27 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 }
             }
             _ = ticker.tick() => {
-                if let Some(c) = &court {
-                    push_match(c, &ctx, &mut socket, &mut last_match).await;
+                if let (Some(c), Some(token)) = (court.clone(), my_token) {
+                    if ctx.tablet.is_court_active(&c, token) {
+                        push_match(&c, &ctx, &mut socket, &mut last_match).await;
+                    } else {
+                        my_token = None;
+                        superseded = true;
+                        tracing::info!("Tablet für Court '{c}' wurde abgelöst");
+                        send_msg(&mut socket, &ServerMsg::SessionSuperseded).await;
+                    }
                 }
             }
         }
     }
 
-    if let Some(c) = &court {
-        ctx.tablet.detach_tablet(c);
-        tracing::info!("Tablet getrennt für Court '{c}'");
+    // Aufräumen: nur das noch aktive Tablet gibt den Court frei.
+    if let (Some(c), Some(token)) = (&court, my_token) {
+        if ctx.tablet.is_court_active(c, token) {
+            ctx.tablet.detach_tablet(c);
+            ctx.tablet.release_court(c, token);
+            tracing::info!("Tablet getrennt für Court '{c}'");
+        }
     }
 }
 

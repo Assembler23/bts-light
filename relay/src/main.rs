@@ -291,6 +291,9 @@ async fn tablet_ws(
 async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let mut court: Option<String> = None;
+    // Schiedst dieses Tablet den Court aktiv? Passive Tablets warten auf
+    // „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
+    let mut active = false;
     let mut ping = tokio::time::interval(HEARTBEAT);
 
     loop {
@@ -301,21 +304,43 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     Message::Text(t) => {
                         match serde_json::from_str::<TabletMsg>(t.as_str()) {
                             Ok(TabletMsg::Identify { court_label }) => {
-                                if !attach_tablet(&broker, &ns, &court_label, &tx).await {
-                                    let _ = socket.send(Message::Close(None)).await;
-                                    break;
+                                match attach_tablet(&broker, &ns, &court_label, &tx).await {
+                                    AttachResult::Active => {
+                                        tracing::info!("Tablet verbunden: Namespace '{ns}', Court '{court_label}'");
+                                        active = true;
+                                        court = Some(court_label);
+                                    }
+                                    AttachResult::Occupied => {
+                                        tracing::info!("Court '{court_label}' belegt – Tablet wartet auf Übernahme");
+                                        let _ = tx.send(text(&ServerMsg::CourtOccupied));
+                                        court = Some(court_label);
+                                    }
+                                    AttachResult::Rejected => {
+                                        let _ = socket.send(Message::Close(None)).await;
+                                        break;
+                                    }
                                 }
-                                tracing::info!("Tablet verbunden: Namespace '{ns}', Court '{court_label}'");
-                                court = Some(court_label);
+                            }
+                            Ok(TabletMsg::TakeOver) => {
+                                if let (Some(c), false) = (court.clone(), active) {
+                                    take_over_court(&broker, &ns, &c, &tx).await;
+                                    active = true;
+                                    tracing::info!("Tablet übernimmt Court '{c}' (Namespace '{ns}')");
+                                }
                             }
                             Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
-                                if let Some(c) = &court {
+                                if let (Some(c), true) = (&court, active) {
                                     forward_score(&broker, &ns, c, score_a, score_b, sets_history).await;
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
-                                if let Some(c) = &court {
+                                if let (Some(c), true) = (&court, active) {
                                     forward_battery(&broker, &ns, c, percent, charging).await;
+                                }
+                            }
+                            Ok(TabletMsg::Alert { injury, official }) => {
+                                if let (Some(c), true) = (&court, active) {
+                                    forward_alert(&broker, &ns, c, injury, official).await;
                                 }
                             }
                             Err(_) => {}
@@ -337,28 +362,42 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
         }
     }
 
-    if let Some(c) = &court {
+    // Nur das aktive Tablet räumt seinen Court-Eintrag ab.
+    if let (Some(c), true) = (&court, active) {
         detach_tablet(&broker, &ns, c, &tx).await;
         tracing::info!("Tablet getrennt: Namespace '{ns}', Court '{c}'");
     }
 }
 
-/// Registriert ein Tablet an seinem Court. `false`, wenn ein Limit
-/// erreicht ist (überlanger Court-Name, Namespace- oder Tablet-Limit).
-async fn attach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) -> bool {
+/// Ergebnis eines Tablet-Verbindungsversuchs an einem Court.
+enum AttachResult {
+    /// Das Tablet schiedst diesen Court nun aktiv.
+    Active,
+    /// Der Court ist belegt – das Tablet bleibt passiv (Übernahme möglich).
+    Occupied,
+    /// Abgewiesen, weil ein Limit erreicht ist.
+    Rejected,
+}
+
+/// Versucht, ein Tablet als aktiv schiedsendes Gerät an einem Court zu
+/// registrieren. Ist der Court schon belegt, bleibt das Tablet passiv.
+async fn attach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) -> AttachResult {
     if court.len() > MAX_COURT_LABEL_LEN {
         tracing::warn!("Namespace '{ns}': überlanger Court-Name abgewiesen");
-        return false;
+        return AttachResult::Rejected;
     }
     let mut map = broker.namespaces.lock().await;
     if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
         tracing::warn!("Namespace-Limit erreicht – Tablet für '{ns}' abgewiesen");
-        return false;
+        return AttachResult::Rejected;
     }
     let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
-    if namespace.tablets.len() >= MAX_TABLETS_PER_NS && !namespace.tablets.contains_key(court) {
+    if namespace.tablets.contains_key(court) {
+        return AttachResult::Occupied;
+    }
+    if namespace.tablets.len() >= MAX_TABLETS_PER_NS {
         tracing::warn!("Namespace '{ns}' am Tablet-Limit – Court '{court}' abgewiesen");
-        return false;
+        return AttachResult::Rejected;
     }
     namespace.tablets.insert(court.to_string(), tx.clone());
     if let Some(host) = &namespace.host {
@@ -366,7 +405,22 @@ async fn attach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) -> bool 
             court_label: court.to_string(),
         }));
     }
-    true
+    AttachResult::Active
+}
+
+/// Übernimmt einen belegten Court für ein bisher passives Tablet – das
+/// zuvor aktive Tablet wird mit `SessionSuperseded` gesperrt.
+async fn take_over_court(broker: &Broker, ns: &str, court: &str, tx: &Tx) {
+    let mut map = broker.namespaces.lock().await;
+    let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
+    if let Some(old) = namespace.tablets.insert(court.to_string(), tx.clone()) {
+        let _ = old.send(text(&ServerMsg::SessionSuperseded));
+    }
+    if let Some(host) = &namespace.host {
+        let _ = host.send(text(&RelayFrame::TabletConnected {
+            court_label: court.to_string(),
+        }));
+    }
 }
 
 /// Entfernt das Tablet wieder – nur, wenn der eingetragene Sender noch
@@ -422,6 +476,18 @@ async fn forward_battery(broker: &Broker, ns: &str, court: &str, percent: i64, c
             court_label: court.to_string(),
             percent,
             charging,
+        }));
+    }
+}
+
+/// Leitet den Meldungs-Zustand eines Courts an den Host weiter.
+async fn forward_alert(broker: &Broker, ns: &str, court: &str, injury: bool, official: bool) {
+    let map = broker.namespaces.lock().await;
+    if let Some(host) = map.get(ns).and_then(|n| n.host.as_ref()) {
+        let _ = host.send(text(&RelayFrame::Alert {
+            court_label: court.to_string(),
+            injury,
+            official,
         }));
     }
 }

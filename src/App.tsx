@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { loadConfig, saveConfig } from "./api";
+import { AlertBanner } from "./components/AlertBanner";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { Dashboard } from "./pages/Dashboard";
 import { SetupWizard } from "./pages/SetupWizard";
@@ -78,6 +79,7 @@ function App() {
     <UpdateProvider>
       <div className="flex h-full flex-col bg-slate-50">
         <UpdateBanner />
+        <AlertBanner />
         <div className="min-h-0 flex-1 overflow-auto">{renderView()}</div>
       </div>
     </UpdateProvider>

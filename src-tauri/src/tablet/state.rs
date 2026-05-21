@@ -5,6 +5,7 @@
 //! sich ein `Arc<TabletState>`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 use serde::Serialize;
@@ -32,6 +33,10 @@ struct CourtSession {
     connected: bool,
     /// Zuletzt gemeldeter Akkustand (falls das Tablet ihn liefert).
     battery: Option<TabletBattery>,
+    /// Verletzung/Behandlung – das Tablet hat das Spiel unterbrochen.
+    injury: bool,
+    /// Die Turnierleitung wurde an dieses Feld gerufen.
+    official: bool,
 }
 
 /// Eine Court-Zeile für die Felder-Übersicht der Turnierleitung.
@@ -47,6 +52,10 @@ pub struct CourtOverview {
     pub tablet_connected: bool,
     /// Akkustand des Tablets, falls es ihn liefert (Android/Chrome).
     pub battery: Option<TabletBattery>,
+    /// Verletzung/Behandlung läuft an diesem Court.
+    pub injury: bool,
+    /// Die Turnierleitung wurde an diesen Court gerufen.
+    pub official_call: bool,
 }
 
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
@@ -54,6 +63,11 @@ pub struct CourtOverview {
 pub struct TabletState {
     snapshot: RwLock<Option<BtpSnapshot>>,
     courts: RwLock<HashMap<String, CourtSession>>,
+    /// Court → Token des aktuell schiedsenden Tablets (LAN-Tablet-Übernahme).
+    /// Fehlt der Eintrag, ist der Court frei.
+    active: RwLock<HashMap<String, u64>>,
+    /// Fortlaufender Zähler, vergibt eindeutige Court-Tokens.
+    token_seq: AtomicU64,
 }
 
 impl TabletState {
@@ -94,6 +108,8 @@ impl TabletState {
                 sets: Vec::new(),
                 connected: true,
                 battery: None,
+                injury: false,
+                official: false,
             })
             .connected = true;
     }
@@ -113,6 +129,8 @@ impl TabletState {
             sets: Vec::new(),
             connected: true,
             battery: None,
+            injury: false,
+            official: false,
         });
         session.match_id = match_id;
         session.sets = sets;
@@ -128,8 +146,54 @@ impl TabletState {
                 sets: Vec::new(),
                 connected: true,
                 battery: None,
+                injury: false,
+                official: false,
             })
             .battery = Some(TabletBattery { percent, charging });
+    }
+
+    /// Meldungs-Zustand (Verletzung / Turnierleitung gerufen) des Courts setzen.
+    pub fn record_alert(&self, court: &str, injury: bool, official: bool) {
+        let mut courts = self.courts.write().unwrap();
+        let session = courts.entry(court.to_string()).or_insert(CourtSession {
+            match_id: 0,
+            sets: Vec::new(),
+            connected: true,
+            battery: None,
+            injury: false,
+            official: false,
+        });
+        session.injury = injury;
+        session.official = official;
+    }
+
+    /// Beansprucht den Court für ein Tablet und gibt dessen Token zurück.
+    /// Ein bereits aktives Tablet wird dadurch abgelöst (Tablet-Übernahme).
+    pub fn claim_court(&self, court: &str) -> u64 {
+        let token = self.token_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        self.active
+            .write()
+            .unwrap()
+            .insert(court.to_string(), token);
+        token
+    }
+
+    /// Ist `token` noch das aktive Tablet dieses Courts?
+    pub fn is_court_active(&self, court: &str, token: u64) -> bool {
+        self.active.read().unwrap().get(court) == Some(&token)
+    }
+
+    /// Wird der Court bereits von einem Tablet geschiedst?
+    pub fn court_occupied(&self, court: &str) -> bool {
+        self.active.read().unwrap().contains_key(court)
+    }
+
+    /// Gibt den Court frei – nur, wenn `token` noch der aktive ist.
+    pub fn release_court(&self, court: &str, token: u64) {
+        let mut active = self.active.write().unwrap();
+        if active.get(court) == Some(&token) {
+            active.remove(court);
+        }
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
@@ -206,6 +270,8 @@ impl TabletState {
                     sets,
                     tablet_connected,
                     battery: session.and_then(|s| s.battery),
+                    injury: session.map(|s| s.injury).unwrap_or(false),
+                    official_call: session.map(|s| s.official).unwrap_or(false),
                 }
             })
             .collect()
