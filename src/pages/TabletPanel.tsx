@@ -4,7 +4,9 @@ import {
   Battery,
   BatteryCharging,
   BatteryWarning,
+  Check,
   Cloud,
+  Copy,
   Info,
   Wifi,
 } from "lucide-react";
@@ -150,7 +152,7 @@ export function TabletPanel({ onBack }: Props) {
                       className="block"
                     />
                   </button>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">
                       {c.court}
                     </div>
@@ -158,6 +160,7 @@ export function TabletPanel({ onBack }: Props) {
                       {courtUrl(c.court)}
                     </div>
                   </div>
+                  <CopyUrlButton url={courtUrl(c.court)} />
                 </div>
               ))}
             </div>
@@ -262,6 +265,34 @@ function CourtCard({ court }: { court: CourtOverview }) {
         <div className="mt-1 text-sm text-slate-400">frei</div>
       )}
     </div>
+  );
+}
+
+/** Kleiner Button, der eine Tablet-Adresse in die Zwischenablage kopiert. */
+function CopyUrlButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* Zwischenablage nicht verfügbar – ignorieren */
+    }
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Adresse kopieren"
+      className="shrink-0 rounded-md p-1.5 text-slate-400 transition-colors
+                 hover:bg-slate-100 hover:text-slate-700"
+    >
+      {copied ? (
+        <Check size={16} className="text-emerald-600" />
+      ) : (
+        <Copy size={16} />
+      )}
+    </button>
   );
 }
 
