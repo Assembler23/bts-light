@@ -253,8 +253,11 @@
       color: #94a3b8; margin-top: .2rem;
     }
     .modal .subtitle .s-en { display: block; font-style: italic; }
-    /* Zurück-Schritt im Setup-Assistenten. */
+    /* Zurück-Schritt im Setup-Assistenten. `flex: 0 0 auto` hebt das
+       `flex: 1` der Basis-Button-Regel auf – im Modal (Flex-Spalte) würde
+       der Button sonst die ganze Höhe füllen. */
     .modal .setup-back {
+      flex: 0 0 auto; align-self: center;
       margin-top: .25rem; padding: .7rem 1.8rem;
       font-size: 1rem; font-weight: 600;
     }

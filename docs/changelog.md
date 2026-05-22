@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.12
+
+- **Spielzettel: Zurück-Button im Setup war riesig.** Der „← Zurück ·
+  Back"-Button im Aufstellungs-Assistenten füllte durch eine geerbte
+  Flex-Regel die ganze Höhe des Fensters. Jetzt eine normal große
+  Schaltfläche.
+
 ## v0.9.11
 
 - **Court-Monitor: Spielernamen aus BTP exakt getrennt.** Der Monitor
