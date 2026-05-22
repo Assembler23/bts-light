@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.14
+
+- **Spiele „in Vorbereitung" aufrufen.** Neuer Tab „In Vorbereitung" im
+  Tablet-Spielzettel: Die Turnierleitung wählt eingeplante Spiele aus und
+  ruft sie in die Vorbereitung – bei Mehr-Hallen-Turnieren je Halle. Ein
+  aufgerufenes Spiel erscheint auf der Aufruf-Anzeige des Livetickers
+  (`/live?display=next`) hervorgehoben mit „vor X Min aufgerufen", damit
+  die Spieler rechtzeitig in die richtige Halle gehen. Der Aufruf lässt
+  sich zurücknehmen; kommt das Spiel aufs Feld, verschwindet er von
+  selbst. BTP kennt keinen Vorbereitungs-Zustand – bts-light verwaltet
+  ihn selbst, wie die Walkover-Vorschläge.
+
 ## v0.9.13
 
 - **LAN und Cloud gleichzeitig.** Die Verbindungsart war bisher ein

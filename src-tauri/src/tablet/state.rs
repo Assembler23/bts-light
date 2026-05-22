@@ -137,6 +137,20 @@ pub struct WalkoverProposal {
     pub created_at_ms: u64,
 }
 
+/// Ein von der Turnierleitung „in Vorbereitung" gerufenes Spiel. BTP kennt
+/// keinen Vorbereitungs-Zustand – bts-light verwaltet ihn selbst, genau wie
+/// die Walkover-Vorschläge. Je Match gibt es höchstens einen Aufruf.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PreparationCall {
+    /// BTP-Match-ID des gerufenen Spiels.
+    pub match_id: i64,
+    /// LocationID der Halle, für die gerufen wurde; `None` bei einem
+    /// hallenunabhängigen Aufruf (Ein-Hallen-Turnier).
+    pub location_id: Option<i64>,
+    /// Zeitpunkt des Aufrufs (Unix-Millisekunden).
+    pub called_at_ms: u64,
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -153,6 +167,8 @@ pub struct TabletState {
     court_state: RwLock<HashMap<i64, String>>,
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
+    /// „In Vorbereitung" gerufene Spiele (je Match-ID höchstens einer).
+    preparation_calls: RwLock<Vec<PreparationCall>>,
     /// Geräte-ID → Live-Zustand der Court-Monitore (zuletzt gesehen +
     /// offener Fernbefehl). Im LAN-Modus vom Server gepflegt.
     monitor_live: RwLock<HashMap<String, MonitorLive>>,
@@ -165,6 +181,12 @@ impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
         *self.snapshot.write().unwrap() = Some(snapshot);
+    }
+
+    /// Kopie des aktuellen BTP-Snapshots (oder `None`, falls noch keiner
+    /// geladen ist) – für Commands, die den Stand frisch auswerten.
+    pub fn snapshot_clone(&self) -> Option<BtpSnapshot> {
+        self.snapshot.read().unwrap().clone()
     }
 
     /// Turniername des aktuellen Snapshots (leer, falls noch keiner geladen
@@ -405,6 +427,67 @@ impl TabletState {
                 })
             })
             .collect()
+    }
+
+    // ─────────────────────────── Spiele in Vorbereitung ───────────────────
+
+    /// Hinterlegt einen „in Vorbereitung"-Aufruf. Je Match-ID gibt es
+    /// höchstens einen – ein erneuter für dasselbe Match ersetzt den alten.
+    pub fn add_preparation_call(&self, call: PreparationCall) {
+        let mut list = self.preparation_calls.write().unwrap();
+        list.retain(|c| c.match_id != call.match_id);
+        list.push(call);
+    }
+
+    /// Alle aktuell gerufenen „in Vorbereitung"-Spiele.
+    pub fn preparation_calls(&self) -> Vec<PreparationCall> {
+        self.preparation_calls.read().unwrap().clone()
+    }
+
+    /// Entfernt den Aufruf eines Matches (zurückgenommen).
+    pub fn remove_preparation_call(&self, match_id: i64) {
+        self.preparation_calls
+            .write()
+            .unwrap()
+            .retain(|c| c.match_id != match_id);
+    }
+
+    /// Stempelt die aktiven Vorbereitungs-Aufrufe in den Snapshot. Aufrufe,
+    /// deren Match nicht mehr ruf-bar ist (auf Court gewechselt, beendet,
+    /// verschwunden oder eine Mannschaft nicht mehr gesetzt), werden dabei
+    /// verworfen – so bleiben keine Geister-Aufrufe stehen. Für jeden
+    /// überlebenden Aufruf werden die transienten Felder
+    /// `preparation_call_ts` und `preparation_hall` des zugehörigen Matches
+    /// gesetzt.
+    pub fn apply_preparation_calls(&self, snapshot: &mut BtpSnapshot) {
+        let mut calls = self.preparation_calls.write().unwrap();
+        // Match-IDs, die im Snapshot noch ruf-bar sind: eingeplant und mit
+        // zwei feststehenden Mannschaften – dieselbe Bedingung wie die
+        // Kandidaten-Liste, damit kein Aufruf ohne sichtbares Match bleibt.
+        let callable: std::collections::HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| {
+                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+            })
+            .map(|m| m.id)
+            .collect();
+        // Aufrufe ohne (noch) ruf-bares Match fallen heraus.
+        calls.retain(|c| callable.contains(&c.match_id));
+        for call in calls.iter() {
+            // Hallenname aus der LocationID auflösen (None → kein Halleneintrag).
+            let hall = call.location_id.and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.clone())
+            });
+            if let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == call.match_id) {
+                m.preparation_call_ts = Some(call.called_at_ms);
+                m.preparation_hall = hall;
+            }
+        }
     }
 
     /// Felder (CourtIDs) mit verbundenem Tablet – diese treiben ihren
@@ -649,6 +732,8 @@ mod tests {
             result: MatchResult::Normal,
             status,
             finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
         }
     }
 
@@ -870,6 +955,82 @@ mod tests {
         // Fremde Entry → keine Kandidaten; Entry 0 (unaufgelöst) ebenfalls.
         assert!(st.walkover_candidates(999).is_empty());
         assert!(st.walkover_candidates(0).is_empty());
+    }
+
+    #[test]
+    fn preparation_call_is_unique_per_match_and_removable() {
+        let st = TabletState::default();
+        let mk = |match_id: i64| PreparationCall {
+            match_id,
+            location_id: None,
+            called_at_ms: 1000,
+        };
+        st.add_preparation_call(mk(5));
+        st.add_preparation_call(mk(5)); // ersetzt – kein Duplikat
+        assert_eq!(st.preparation_calls().len(), 1);
+        st.add_preparation_call(mk(6));
+        assert_eq!(st.preparation_calls().len(), 2);
+        st.remove_preparation_call(5);
+        let rest = st.preparation_calls();
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].match_id, 6);
+    }
+
+    #[test]
+    fn apply_preparation_calls_drops_calls_for_non_scheduled_matches() {
+        use crate::btp::model::BtpLocation;
+        let st = TabletState::default();
+        // Match 2 ist eingeplant, Match 1 läuft (OnCourt).
+        let mut snap = snapshot(
+            vec![
+                match_on(1, Some(101), MatchStatus::OnCourt),
+                match_on(2, None, MatchStatus::Scheduled),
+            ],
+            vec![(101, "Court 1")],
+        );
+        snap.locations = vec![BtpLocation {
+            id: 7,
+            name: "Halle A".to_string(),
+        }];
+        // Aufruf für ein laufendes Match (1) und ein eingeplantes (2).
+        st.add_preparation_call(PreparationCall {
+            match_id: 1,
+            location_id: None,
+            called_at_ms: 1000,
+        });
+        st.add_preparation_call(PreparationCall {
+            match_id: 2,
+            location_id: Some(7),
+            called_at_ms: 2000,
+        });
+        st.apply_preparation_calls(&mut snap);
+        // Aufruf für Match 1 fällt heraus (kein Geister-Aufruf).
+        let remaining: Vec<i64> = st.preparation_calls().iter().map(|c| c.match_id).collect();
+        assert_eq!(remaining, vec![2]);
+        // Match 1 trägt keinen Stempel, Match 2 schon.
+        let m1 = snap.matches.iter().find(|m| m.id == 1).unwrap();
+        let m2 = snap.matches.iter().find(|m| m.id == 2).unwrap();
+        assert_eq!(m1.preparation_call_ts, None);
+        assert_eq!(m2.preparation_call_ts, Some(2000));
+        assert_eq!(m2.preparation_hall.as_deref(), Some("Halle A"));
+    }
+
+    #[test]
+    fn apply_preparation_calls_leaves_hall_none_without_location() {
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![match_on(3, None, MatchStatus::Scheduled)],
+            vec![(101, "Court 1")],
+        );
+        st.add_preparation_call(PreparationCall {
+            match_id: 3,
+            location_id: None,
+            called_at_ms: 500,
+        });
+        st.apply_preparation_calls(&mut snap);
+        let m = &snap.matches[0];
+        assert_eq!(m.preparation_call_ts, Some(500));
+        assert_eq!(m.preparation_hall, None);
     }
 
     #[test]

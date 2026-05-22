@@ -543,6 +543,162 @@ pub async fn confirm_walkover(
     Ok(WalkoverResult { written, errors })
 }
 
+// ───────────────────────────── Spiele in Vorbereitung ─────────────────────
+
+/// Daten zu einem bereits ausgesprochenen „in Vorbereitung"-Aufruf.
+#[derive(Serialize)]
+pub struct PreparationCallInfo {
+    /// LocationID der Halle, für die gerufen wurde; `null` bei einem
+    /// hallenunabhängigen Aufruf (Ein-Hallen-Turnier).
+    pub location_id: Option<i64>,
+    /// Aufgelöster Hallenname; leer, wenn ohne Halle gerufen wurde.
+    pub hall: String,
+    /// Zeitpunkt des Aufrufs (Unix-Millisekunden).
+    pub called_at_ms: u64,
+}
+
+/// Ein eingeplantes Spiel, das „in Vorbereitung" gerufen werden kann –
+/// für die Frontend-Liste auf dem „In Vorbereitung"-Tab.
+#[derive(Serialize)]
+pub struct PreparationCandidate {
+    /// BTP-Match-ID.
+    pub match_id: i64,
+    /// Anzeigename, z. B. "HE G1".
+    pub label: String,
+    /// Team 1 (Spielernamen mit " / " verbunden).
+    pub team1: String,
+    /// Team 2 (Spielernamen mit " / " verbunden).
+    pub team2: String,
+    /// Spielnummer (BTP `MatchNr`), falls vergeben.
+    pub match_num: Option<i64>,
+    /// Aufruf-Daten, falls das Match bereits gerufen wurde; sonst `null`.
+    pub call: Option<PreparationCallInfo>,
+}
+
+/// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
+/// Hallen des Turniers (für das hallenweise Aufrufen im Frontend).
+#[derive(Serialize)]
+pub struct PreparationView {
+    /// Eingeplante, ruf-bare Spiele – gerufene zuerst, dann nach Spielnummer.
+    pub candidates: Vec<PreparationCandidate>,
+    /// Hallen des Turniers (BTP `Locations`). Ab zwei Einträgen blendet das
+    /// Frontend die Hallen-Auswahl ein.
+    pub locations: Vec<PreparationLocation>,
+}
+
+/// Eine Halle des Turniers für die Frontend-Auswahl.
+#[derive(Serialize)]
+pub struct PreparationLocation {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Liefert die ruf-baren Spiele und die Hallen des Turniers. Kandidaten
+/// sind alle eingeplanten Matches mit zwei feststehenden Mannschaften;
+/// bereits gerufene stehen vorn, danach nach Spielnummer (ohne Nummer
+/// zuletzt). Reiner Lesepfad – nicht mehr ruf-bare Matches erscheinen
+/// einfach nicht in der Liste, ihre Aufrufe räumt der Sync-Lauf
+/// (`apply_preparation_calls` in `run_once`) auf.
+#[tauri::command]
+pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
+    let tablet = &state.tablet;
+    let Some(snapshot) = tablet.snapshot_clone() else {
+        return PreparationView {
+            candidates: Vec::new(),
+            locations: Vec::new(),
+        };
+    };
+    let calls = tablet.preparation_calls();
+
+    let mut candidates: Vec<PreparationCandidate> = snapshot
+        .matches
+        .iter()
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
+        // Nur echte Paarungen – beide Mannschaften müssen feststehen.
+        .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
+        .map(|m| {
+            let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
+                let hall = c.location_id.and_then(|lid| {
+                    snapshot
+                        .locations
+                        .iter()
+                        .find(|l| l.id == lid)
+                        .map(|l| l.name.clone())
+                });
+                PreparationCallInfo {
+                    location_id: c.location_id,
+                    hall: hall.unwrap_or_default(),
+                    called_at_ms: c.called_at_ms,
+                }
+            });
+            PreparationCandidate {
+                match_id: m.id,
+                label: format!("{} {}", m.draw_name, m.round_name)
+                    .trim()
+                    .to_string(),
+                team1: m
+                    .team1
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(" / "),
+                team2: m
+                    .team2
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(" / "),
+                match_num: m.match_num,
+                call,
+            }
+        })
+        .collect();
+    // Gerufene zuerst, danach nach Spielnummer (ohne Nummer zuletzt).
+    candidates.sort_by_key(|c| {
+        (
+            c.call.is_none(),
+            c.match_num.unwrap_or(i64::MAX),
+            c.match_id,
+        )
+    });
+
+    let locations = snapshot
+        .locations
+        .iter()
+        .map(|l| PreparationLocation {
+            id: l.id,
+            name: l.name.clone(),
+        })
+        .collect();
+
+    PreparationView {
+        candidates,
+        locations,
+    }
+}
+
+/// Ruft die ausgewählten Spiele „in Vorbereitung". `location_id` bindet den
+/// Aufruf an eine Halle (oder `None` bei einem hallenunabhängigen Aufruf).
+#[tauri::command]
+pub fn call_preparation(state: State<'_, AppState>, match_ids: Vec<i64>, location_id: Option<i64>) {
+    let now = now_ms();
+    for match_id in match_ids {
+        state
+            .tablet
+            .add_preparation_call(crate::tablet::state::PreparationCall {
+                match_id,
+                location_id,
+                called_at_ms: now,
+            });
+    }
+}
+
+/// Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück.
+#[tauri::command]
+pub fn retract_preparation(state: State<'_, AppState>, match_id: i64) {
+    state.tablet.remove_preparation_call(match_id);
+}
+
 // ───────────────────────────── Court-Monitor-Werbung ──────────────────────
 
 /// Obergrenze für ein einzelnes Werbebild (8 MB).

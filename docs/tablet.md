@@ -127,6 +127,20 @@ aufgebenden Mannschaft in derselben Disziplin kampflos (Walkover) für den
 jeweiligen Gegner zu werten. Eigenes Feature-Dokument:
 [walkover.md](walkover.md).
 
+## Spiele in Vorbereitung aufrufen
+
+Der Tablet-Spielzettel hat einen Tab **„In Vorbereitung"**: Die
+Turnierleitung wählt dort eingeplante Spiele (feststehende Paarung, noch
+nicht auf einem Feld) aus und ruft sie „in die Vorbereitung". Bei einem
+Mehr-Hallen-Turnier lässt sich je Aufruf die Halle wählen, sodass die
+Spieler rechtzeitig in die richtige Halle gehen.
+
+Ein aufgerufenes Spiel wird im Liveticker-Push mit einem Zeitstempel
+markiert und erscheint auf der Aufruf-Anzeige (`/live?display=next`)
+hervorgehoben („vor X Min aufgerufen"). Der Aufruf lässt sich
+zurücknehmen; kommt das Spiel auf ein Feld, verschwindet er automatisch.
+BTP kennt keinen Vorbereitungs-Zustand – bts-light verwaltet ihn selbst.
+
 ## Tablet-Übernahme
 
 Pro Court schiedst genau **ein** Tablet aktiv. Öffnet ein zweites Gerät

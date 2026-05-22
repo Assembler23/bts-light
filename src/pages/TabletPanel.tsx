@@ -9,11 +9,13 @@ import {
   Copy,
   Info,
   LayoutGrid,
+  Megaphone,
   QrCode,
   Wifi,
 } from "lucide-react";
 import { tabletOverview } from "../api";
 import type { CourtOverview, TabletInfo } from "../types";
+import { PreparationPanel } from "./PreparationPanel";
 
 interface Props {
   onBack: () => void;
@@ -31,10 +33,10 @@ interface CourtAddress {
 }
 
 /**
- * Tablet-Spielzettel-Seite mit zwei Tabs: „Übersicht" zeigt den Live-Stand
+ * Tablet-Spielzettel-Seite mit drei Tabs: „Übersicht" zeigt den Live-Stand
  * aller Felder (Tablet-Verbindung, Akku) für die Turnierleitung;
- * „QR-Codes" die Adressen/QR-Codes zum Einrichten der Tablets. Beide
- * Bereiche sind Raster – sie skalieren bis zu 20–30 Spielfeldern. Pollt
+ * „In Vorbereitung" ruft eingeplante Spiele in die Vorbereitung;
+ * „QR-Codes" die Adressen/QR-Codes zum Einrichten der Tablets. Pollt
  * den Tablet-Server alle 2 s.
  */
 export function TabletPanel({ onBack }: Props) {
@@ -45,7 +47,9 @@ export function TabletPanel({ onBack }: Props) {
     court: CourtOverview;
     address: CourtAddress;
   } | null>(null);
-  const [tab, setTab] = useState<"overview" | "qr">("overview");
+  const [tab, setTab] = useState<"overview" | "preparation" | "qr">(
+    "overview",
+  );
 
   useEffect(() => {
     let active = true;
@@ -151,6 +155,18 @@ export function TabletPanel({ onBack }: Props) {
               Übersicht
             </button>
             <button
+              onClick={() => setTab("preparation")}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3.5
+                          py-2 text-sm font-medium transition-colors ${
+                            tab === "preparation"
+                              ? "border-slate-800 text-slate-800"
+                              : "border-transparent text-slate-500 hover:text-slate-700"
+                          }`}
+            >
+              <Megaphone size={15} />
+              In Vorbereitung
+            </button>
+            <button
               onClick={() => setTab("qr")}
               className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3.5
                           py-2 text-sm font-medium transition-colors ${
@@ -181,6 +197,8 @@ export function TabletPanel({ onBack }: Props) {
               ))}
             </section>
           )}
+
+          {tab === "preparation" && <PreparationPanel />}
 
           {tab === "qr" && (
             <section className="flex flex-col gap-3">

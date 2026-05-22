@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
   MonitorDeviceInfo,
+  PreparationView,
   SyncStatus,
   TabletInfo,
   WalkoverProposal,
@@ -60,6 +61,21 @@ export const confirmWalkover = (
 /** Verwirft einen Walkover-Vorschlag, ohne ihn umzusetzen. */
 export const dismissWalkover = (proposalId: string): Promise<void> =>
   invoke("dismiss_walkover", { proposalId });
+
+/** Ruf-bare Spiele + Hallen des Turniers für den „In Vorbereitung"-Tab. */
+export const preparationCandidates = (): Promise<PreparationView> =>
+  invoke("preparation_candidates");
+
+/** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
+export const callPreparation = (
+  matchIds: number[],
+  locationId: number | null,
+): Promise<void> =>
+  invoke("call_preparation", { matchIds, locationId });
+
+/** Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück. */
+export const retractPreparation = (matchId: number): Promise<void> =>
+  invoke("retract_preparation", { matchId });
 
 /** Übernimmt ein gewähltes Werbebild in das Court-Monitor-Verzeichnis. */
 export const addCourtAd = (path: string): Promise<string> =>

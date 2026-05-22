@@ -33,6 +33,13 @@ pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64) -> Upda
         return Update::Full(build_tset(current, rid));
     }
 
+    // Geänderte „in Vorbereitung"-Aufrufe → voller tset. Ohne diesen Check
+    // würde ein neuer/zurückgenommener Aufruf erst beim nächsten Heartbeat
+    // (bis zu 60 s) gesendet.
+    if preparation_calls(prev) != preparation_calls(current) {
+        return Update::Full(build_tset(current, rid));
+    }
+
     // Gleiche Matches auf gleichen Courts: nur Punktestände vergleichen.
     let prev_sets: BTreeMap<i64, &Vec<(i64, i64)>> =
         on_court(prev).map(|m| (m.id, &m.sets)).collect();
@@ -60,6 +67,22 @@ fn on_court(snapshot: &BtpSnapshot) -> impl Iterator<Item = &BtpMatch> {
 fn court_assignment(snapshot: &BtpSnapshot) -> BTreeMap<i64, Option<String>> {
     on_court(snapshot)
         .map(|m| (m.id, m.court.clone()))
+        .collect()
+}
+
+/// Fingerabdruck der „in Vorbereitung"-Aufrufe: Match-ID → (Aufruf-Zeit,
+/// Halle), nur für tatsächlich gerufene Matches. Ändert er sich, muss ein
+/// voller tset gesendet werden, damit der Aufruf sofort beim Monitor
+/// ankommt. Die Halle gehört dazu, damit auch ein reiner Hallen-Wechsel
+/// (gleiche Aufruf-Zeit) erkannt wird.
+fn preparation_calls(snapshot: &BtpSnapshot) -> BTreeMap<i64, (u64, Option<&str>)> {
+    snapshot
+        .matches
+        .iter()
+        .filter_map(|m| {
+            m.preparation_call_ts
+                .map(|ts| (m.id, (ts, m.preparation_hall.as_deref())))
+        })
         .collect()
 }
 
@@ -100,6 +123,8 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::OnCourt,
             finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
         }
     }
 
@@ -149,6 +174,32 @@ mod tests {
             match_on_court(2, "2", vec![(0, 0)]),
         ]);
         assert!(matches!(diff(Some(&a), &b, 1), Update::Full(_)));
+    }
+
+    #[test]
+    fn changed_preparation_call_yields_full() {
+        // Ein eingeplantes Match, das in einem Zyklus gerufen wird, muss
+        // sofort einen vollen tset auslösen – nicht erst beim Heartbeat.
+        let mut uncalled = match_on_court(1, "1", vec![(0, 0)]);
+        uncalled.status = MatchStatus::Scheduled;
+        uncalled.court = None;
+        let mut called = uncalled.clone();
+        called.preparation_call_ts = Some(1_700_000_000_000);
+
+        let before = snapshot(vec![uncalled.clone()]);
+        let after = snapshot(vec![called]);
+        // Aufruf neu gesetzt → voller tset.
+        assert!(matches!(diff(Some(&before), &after, 1), Update::Full(_)));
+        // Kein Aufruf in beiden Snapshots → nichts senden.
+        assert!(matches!(
+            diff(Some(&snapshot(vec![uncalled.clone()])), &before, 1),
+            Update::None
+        ));
+        // Aufruf zurückgenommen (vorher gerufen, jetzt nicht mehr) → voller tset.
+        let mut still_called = uncalled.clone();
+        still_called.preparation_call_ts = Some(1_700_000_000_000);
+        let a = snapshot(vec![still_called]);
+        assert!(matches!(diff(Some(&a), &before, 1), Update::Full(_)));
     }
 
     #[test]

@@ -77,6 +77,17 @@ pub struct TsetMatch {
     /// Fehlt bei regulär ausgespielten Matches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<&'static str>,
+    /// Zeitpunkt (Unix-Millisekunden), zu dem die Turnierleitung das Match
+    /// „in Vorbereitung" gerufen hat (nur bei anstehenden Matches). Der
+    /// `display=next`-Monitor zeigt damit „vor X Min aufgerufen". Der
+    /// Wire-Feldname `preparation_call_ts` wird von badhub.de wörtlich
+    /// gelesen – nicht umbenennen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preparation_call_ts: Option<u64>,
+    /// Halle, für die der Aufruf gilt (nur bei hallenweise gerufenen
+    /// Matches). Fehlt bei hallenunabhängigen Aufrufen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hall: Option<String>,
 }
 
 /// Stabile, turnierweit eindeutige Match-ID für den Badhub-Payload.
@@ -102,6 +113,8 @@ fn to_tset_match(m: &BtpMatch) -> TsetMatch {
         team1_won: None,
         match_num: None,
         outcome: None,
+        preparation_call_ts: None,
+        hall: None,
     }
 }
 
@@ -125,10 +138,13 @@ fn to_finished_match(m: &BtpMatch) -> TsetMatch {
     }
 }
 
-/// Konvertierung für ein anstehendes Match (mit Spielnummer).
+/// Konvertierung für ein anstehendes Match (mit Spielnummer und – falls
+/// von der Turnierleitung gerufen – Vorbereitungs-Zeitstempel und Halle).
 fn to_upcoming_match(m: &BtpMatch) -> TsetMatch {
     TsetMatch {
         match_num: m.match_num,
+        preparation_call_ts: m.preparation_call_ts,
+        hall: m.preparation_hall.clone(),
         ..to_tset_match(m)
     }
 }
@@ -158,8 +174,16 @@ fn upcoming(snapshot: &BtpSnapshot) -> Vec<TsetMatch> {
         .filter(|m| m.status == MatchStatus::Scheduled)
         .filter(|m| !m.team1.is_empty() || !m.team2.is_empty())
         .collect();
-    // Nach Spielnummer; Matches ohne Nummer hinten anstellen.
-    scheduled.sort_by_key(|m| m.match_num.unwrap_or(i64::MAX));
+    // Gerufene Matches („in Vorbereitung") zuerst, damit ein Aufruf nie aus
+    // dem UPCOMING_LIMIT fällt; danach nach Spielnummer (ohne Nummer hinten).
+    // Ist nichts gerufen, ist `is_some()` überall false und die Sortierung
+    // degeneriert exakt zur bisherigen Spielnummern-Reihenfolge.
+    scheduled.sort_by_key(|m| {
+        (
+            m.preparation_call_ts.is_none(),
+            m.match_num.unwrap_or(i64::MAX),
+        )
+    });
     scheduled.truncate(UPCOMING_LIMIT);
     scheduled.iter().map(|m| to_upcoming_match(m)).collect()
 }
@@ -269,6 +293,8 @@ mod tests {
             result: MatchResult::Normal,
             status,
             finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
         }
     }
 
@@ -380,6 +406,56 @@ mod tests {
         assert_eq!(upcoming.len(), 1);
         assert_eq!(upcoming[0].id, "btp_5");
         assert_eq!(upcoming[0].match_num, Some(5));
+    }
+
+    #[test]
+    fn upcoming_puts_called_matches_first_and_carries_hall() {
+        // Match 9 hat eine kleinere Spielnummer, aber Match 5 ist gerufen –
+        // der Aufruf muss trotz höherer Nummer vorne stehen.
+        let mut called = sample_match(5, MatchStatus::Scheduled, None);
+        called.match_num = Some(50);
+        called.preparation_call_ts = Some(NOW - 120_000);
+        called.preparation_hall = Some("Halle 2".to_string());
+        let mut uncalled = sample_match(9, MatchStatus::Scheduled, None);
+        uncalled.match_num = Some(9);
+
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            matches: vec![uncalled, called],
+        };
+        let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
+        assert_eq!(upcoming.len(), 2);
+        // Gerufenes Match zuerst, trotz höherer Spielnummer.
+        assert_eq!(upcoming[0].id, "btp_5");
+        assert_eq!(upcoming[0].preparation_call_ts, Some(NOW - 120_000));
+        assert_eq!(upcoming[0].hall.as_deref(), Some("Halle 2"));
+        // Nicht gerufenes Match dahinter, ohne Vorbereitungs-Felder.
+        assert_eq!(upcoming[1].id, "btp_9");
+        assert_eq!(upcoming[1].preparation_call_ts, None);
+        assert_eq!(upcoming[1].hall, None);
+    }
+
+    #[test]
+    fn upcoming_order_unchanged_when_nothing_is_called() {
+        // Ohne Aufrufe degeneriert die Sortierung exakt zur Spielnummern-
+        // Reihenfolge – das alte Verhalten bleibt unverändert.
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            matches: vec![
+                sample_match(7, MatchStatus::Scheduled, None),
+                sample_match(3, MatchStatus::Scheduled, None),
+            ],
+        };
+        let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
+        // sample_match setzt match_num = id → nach Nummer sortiert: 3, 7.
+        assert_eq!(upcoming[0].id, "btp_3");
+        assert_eq!(upcoming[1].id, "btp_7");
     }
 
     #[test]

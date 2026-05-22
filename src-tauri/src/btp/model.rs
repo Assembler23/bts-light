@@ -181,6 +181,15 @@ pub struct BtpMatch {
     /// beendet erkannt wurde. BTP liefert keinen End-Zeitstempel – dieses
     /// Feld wird von der Sync-Engine gesetzt, nicht vom Parser.
     pub finished_at: Option<u64>,
+    /// Zeitpunkt (Unix-Millisekunden), zu dem die Turnierleitung das Match
+    /// „in Vorbereitung" gerufen hat. Transientes Feld: BTP kennt keinen
+    /// Vorbereitungs-Zustand – der Parser schreibt immer `None`, gesetzt
+    /// wird es ausschließlich von [`crate::tablet::state::TabletState::apply_preparation_calls`].
+    pub preparation_call_ts: Option<u64>,
+    /// Halle, für die der Aufruf gilt (aufgelöster `Location`-Name), falls
+    /// hallenweise gerufen wurde. Transientes Feld wie `preparation_call_ts`:
+    /// der Parser schreibt immer `None`.
+    pub preparation_hall: Option<String>,
 }
 
 /// Aufbereiteter Turnier-Stand aus einer `SENDTOURNAMENTINFO`-Antwort.
@@ -520,6 +529,10 @@ fn parse_matches(
             status,
             // BTP liefert keinen End-Zeitstempel; die Sync-Engine setzt das.
             finished_at: None,
+            // Vorbereitungs-Zustand ist bts-light-eigen; setzt
+            // apply_preparation_calls, nicht der Parser.
+            preparation_call_ts: None,
+            preparation_hall: None,
         });
     }
     out

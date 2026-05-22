@@ -183,3 +183,41 @@ export interface WalkoverResult {
   /** Fehlermeldungen der nicht geschriebenen Spiele. */
   errors: string[];
 }
+
+/** Daten eines ausgesprochenen „in Vorbereitung"-Aufrufs
+ *  (Rust: commands::PreparationCallInfo). */
+export interface PreparationCallInfo {
+  /** LocationID der Halle, für die gerufen wurde; null = hallenunabhängig. */
+  location_id: number | null;
+  /** Aufgelöster Hallenname; leer, wenn ohne Halle gerufen wurde. */
+  hall: string;
+  /** Zeitpunkt des Aufrufs (Unix-Millisekunden). */
+  called_at_ms: number;
+}
+
+/** Ein „in Vorbereitung" ruf-bares Spiel (Rust: commands::PreparationCandidate). */
+export interface PreparationCandidate {
+  match_id: number;
+  /** Anzeigename, z. B. "HE G1". */
+  label: string;
+  /** Team 1 (Spielernamen mit " / " verbunden). */
+  team1: string;
+  /** Team 2 (Spielernamen mit " / " verbunden). */
+  team2: string;
+  /** Spielnummer (BTP MatchNr), falls vergeben. */
+  match_num: number | null;
+  /** Aufruf-Daten, falls das Spiel bereits gerufen wurde; sonst null. */
+  call: PreparationCallInfo | null;
+}
+
+/** Eine Halle des Turniers (Rust: commands::PreparationLocation). */
+export interface PreparationLocation {
+  id: number;
+  name: string;
+}
+
+/** Ruf-bare Spiele + Hallen des Turniers (Rust: commands::PreparationView). */
+export interface PreparationView {
+  candidates: PreparationCandidate[];
+  locations: PreparationLocation[];
+}

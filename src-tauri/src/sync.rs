@@ -146,6 +146,9 @@ impl SyncEngine {
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());
         tablet.apply_tablet_scores(&mut snapshot);
+        // „In Vorbereitung" gerufene Spiele in den Snapshot stempeln, damit
+        // der Aufruf-Zeitstempel im nächsten Push an badhub.de mitgeht.
+        tablet.apply_preparation_calls(&mut snapshot);
         // Heartbeat: Ist regulär nichts zu senden, aber seit dem letzten
         // Push >60 s vergangen, wird ein voller `tset` als Lebenszeichen
         // erzwungen (Diff gegen `None`). badhub frischt damit `updated_at`
@@ -236,6 +239,8 @@ mod tests {
                 result: MatchResult::Normal,
                 status: MatchStatus::OnCourt,
                 finished_at: None,
+                preparation_call_ts: None,
+                preparation_hall: None,
             }],
         }
     }
