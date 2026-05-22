@@ -10,10 +10,10 @@ const CREDITS = [
   {
     name: "Philipp Hagemeister",
     url: "https://github.com/phihag",
-    role: "Hatte die Idee und begründete das BTS-Projekt vor Jahren – das Fundament, auf dem bts-light steht.",
+    role: "Visionär einer digitalen Turnierausrichtung.",
   },
   {
-    name: "Tobias Lehr",
+    name: "Tim Lehr",
     url: "https://github.com/tlehr",
     role: "Pflege und Weiterentwicklung von BTS.",
   },
