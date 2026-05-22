@@ -23,6 +23,7 @@ import {
   stopSync,
   testBtp,
 } from "../api";
+import { MonitorPreview } from "../components/MonitorPreview";
 import { playTestAnnouncement } from "../io/announcer";
 import { PRESETS, findPreset } from "../presets";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
@@ -602,6 +603,17 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
             {/* Anzeige-Optionen */}
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-slate-600">Anzeige</span>
+              {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
+              <MonitorPreview
+                showDiscipline={cmDiscipline}
+                showRound={cmRound}
+                showMatchNumber={cmMatchNumber}
+                showTimer={cmTimer}
+              />
+              <p className="mb-1 text-xs text-slate-500">
+                Vorschau – ändert sich mit den Häkchen. Der Pausen-Countdown
+                erscheint am Monitor nur während einer Spielpause.
+              </p>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input
                   type="checkbox"

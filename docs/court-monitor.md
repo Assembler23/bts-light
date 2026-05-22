@@ -115,7 +115,8 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
   Bild).
 - **Wechsel-Intervall** — 3–30 s.
 - **Anzeige-Optionen** — Disziplin / Runde / Spielnummer / Pausen-Timer
-  je einzeln ein-/ausblenden.
+  je einzeln ein-/ausblenden. Eine Live-Vorschau im Setup zeigt die
+  Wirkung jeder Option sofort.
 
 Die Monitor-Adressen je Feld stehen auf der Tablet-Spielzettel-Seite
 (Zeile „Monitor") — dort zum Eintragen am Pi kopieren.
