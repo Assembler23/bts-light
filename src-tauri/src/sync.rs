@@ -60,6 +60,9 @@ pub struct SyncEngine {
     /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
     /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
     last_push_at: Option<Instant>,
+    /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
+    /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
+    last_topology: Option<(usize, usize, usize)>,
 }
 
 impl Default for SyncEngine {
@@ -75,6 +78,7 @@ impl SyncEngine {
             rid: 1,
             finished_at: HashMap::new(),
             last_push_at: None,
+            last_topology: None,
         }
     }
 
@@ -118,6 +122,24 @@ impl SyncEngine {
             Ok(snapshot) => snapshot,
             Err(e) => return SyncOutcome::BtpError(e.to_string()),
         };
+
+        // Turnier-Topologie ins Diagnose-Log – nur bei Änderung, damit es
+        // den Log nicht jeden Poll-Zyklus flutet. Zeigt u. a., ob ein
+        // Mehr-Hallen-Turnier korrekt erkannt wurde.
+        let topology = (
+            snapshot.locations.len(),
+            snapshot.court_infos.len(),
+            snapshot.matches.len(),
+        );
+        if self.last_topology != Some(topology) {
+            tracing::info!(
+                "BTP-Snapshot: {} Hallen, {} Felder, {} Matches",
+                topology.0,
+                topology.1,
+                topology.2
+            );
+            self.last_topology = Some(topology);
+        }
 
         self.stamp_finished(&mut snapshot);
         // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
@@ -181,6 +203,8 @@ mod tests {
         BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![BtpMatch {
                 id: 1,
                 draw_id: 1,
@@ -202,6 +226,7 @@ mod tests {
                 entry1_id: 0,
                 entry2_id: 0,
                 court: Some("1".to_string()),
+                court_id: None,
                 sets: vec![(5, 3)],
                 winner: None,
                 result: MatchResult::Normal,

@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.4
+
+- **Vorbereitung Mehr-Hallen-Unterstützung (Schritt 1/7).** bts-light liest
+  jetzt die Standorte (Hallen) und die Feld-IDs aus BTP aus — Grundlage
+  dafür, dass Turniere in mehreren Hallen künftig automatisch nach Halle
+  getrennt angezeigt werden. Noch keine sichtbare Änderung; der Fahrplan
+  steht in [roadmap.md](roadmap.md).
+- **Diagnose-Log: Turnier-Topologie.** Das Log nennt bei jeder Änderung
+  „N Hallen, M Felder, K Matches" — hilft bei Einrichtung und Fehlersuche.
+
 ## v0.9.3
 
 - **Court-Monitor: Spielernamen im Broadcast-Stil.** Namen erscheinen

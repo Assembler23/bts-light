@@ -251,6 +251,7 @@ mod tests {
             entry1_id: 0,
             entry2_id: 0,
             court: court.map(String::from),
+            court_id: None,
             sets: vec![(21, 19), (21, 15)],
             winner: None,
             result: MatchResult::Normal,
@@ -264,6 +265,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "Test-Turnier".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![
                 sample_match(1, MatchStatus::OnCourt, Some("Feld 9")),
                 sample_match(3, MatchStatus::Scheduled, None),
@@ -283,6 +286,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![sample_match(14, MatchStatus::OnCourt, Some("1"))],
         };
         let m = &build_tset(&snapshot, 1).event.matches[0];
@@ -313,6 +318,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![early, late, unstamped],
         };
         let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
@@ -336,6 +343,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![a, b],
         };
         let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
@@ -348,6 +357,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![
                 sample_match(5, MatchStatus::Scheduled, None),
                 sample_match(6, MatchStatus::OnCourt, Some("1")),
@@ -364,6 +375,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
         let json = serde_json::to_string(&build_tset(&snapshot, 42)).unwrap();
@@ -388,6 +401,8 @@ mod tests {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
             matches: vec![walkover, regular],
         };
         let finished = build_tset(&snapshot, 1).event.recent_finished_matches;

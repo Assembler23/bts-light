@@ -90,6 +90,7 @@ mod tests {
             entry1_id: 0,
             entry2_id: 0,
             court: Some(court.to_string()),
+            court_id: None,
             sets,
             winner: None,
             result: MatchResult::Normal,
@@ -103,6 +104,8 @@ mod tests {
             tournament_name: "T".to_string(),
             matches,
             courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
         }
     }
 

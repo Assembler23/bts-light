@@ -3,8 +3,32 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-22, nach Release v0.9.0 (Court-Monitor inkl. TV-Verwaltung
-> und mDNS).
+> Stand: 2026-05-22, nach Release v0.9.3. In Arbeit: Mehr-Hallen-
+> Unterstützung (siehe unten).
+
+## In Arbeit: Mehr-Hallen-Unterstützung (Standorte/Locations)
+
+Turniere in mehreren Hallen sollen automatisch erkannt und in allen
+Ansichten nach Halle getrennt werden. BTP liefert die Hallen (`Locations`)
+und je Feld eine `LocationID` mit — bts-light liest das künftig aus
+(siehe [btp_protocol.md](btp_protocol.md)). **Wichtig:** Feldnamen
+wiederholen sich über Hallen hinweg (Halle 1 Feld 1 und Halle 2 Feld 1) —
+die Feld-Identität wird daher von der Namens- auf die stabile
+BTP-`CourtID` umgestellt. Umsetzung in 7 Schritten:
+
+1. **BTP-Modell liest Locations** — `BtpLocation`/`BtpCourt`-Typen,
+   `LocationID` + `SortOrder` je Feld, `BtpMatch.court_id`. Rein intern,
+   gegen echten Zwei-Hallen-Mitschnitt getestet. ✅ erledigt
+2. **Feld-Identität intern auf CourtID** — behebt die Verwechslung
+   doppelter Feldnamen (LAN-Pfad: Tablet-Server, Geräte-Zuweisung).
+3. **Relay & Cloud-Pfad** — Wire-Typen + Relay auf CourtID.
+4. **Tablet- & Monitor-Anzeige** — Court-Monitor zeigt „Halle 2 · Feld 6".
+5. **Dashboard nach Hallen gruppiert** — Felder, Adressen, Geräte-Zuweisung.
+6. **Hallen-Übersichts-Bildschirm** — ein TV pro Halle mit allen Feldern.
+7. **Aufräumen** — Übergangs-Code (Namen-Fallback) entfernen.
+
+Geräte-Hinweis: Bei Schritt 2 müssen Tablet-/Monitor-Kopplungen einmalig
+neu zugewiesen werden (die alte Zuordnung hing am Feldnamen).
 
 ## Als Nächstes
 

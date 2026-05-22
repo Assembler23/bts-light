@@ -589,6 +589,7 @@ mod tests {
             entry1_id: 10,
             entry2_id: 20,
             court: court.map(String::from),
+            court_id: None,
             sets: vec![(5, 3)],
             winner: None,
             result: MatchResult::Normal,
@@ -602,6 +603,8 @@ mod tests {
             tournament_name: "T".to_string(),
             matches,
             courts: courts.into_iter().map(String::from).collect(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
         }
     }
 

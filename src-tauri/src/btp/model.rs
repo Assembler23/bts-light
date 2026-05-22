@@ -108,6 +108,30 @@ pub struct BtpPlayer {
     pub nationality: Option<String>,
 }
 
+/// Ein Standort/eine Halle des Turniers (BTP `Location`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtpLocation {
+    /// Stabile BTP-interne LocationID.
+    pub id: i64,
+    /// Anzeigename, z. B. „Halle 1".
+    pub name: String,
+}
+
+/// Ein Spielfeld des Turniers (BTP `Court`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtpCourt {
+    /// Stabile BTP-interne CourtID – die Feld-Identität. Feldnamen können
+    /// sich über Hallen hinweg wiederholen, die ID nicht.
+    pub id: i64,
+    /// Anzeigename, z. B. „1" oder „Feld 3".
+    pub name: String,
+    /// LocationID der Halle, der das Feld zugeordnet ist; `None`, wenn das
+    /// Feld keiner Location zugeordnet ist.
+    pub location_id: Option<i64>,
+    /// Sortierreihenfolge innerhalb der Halle (BTP `SortOrder`).
+    pub sort_order: i64,
+}
+
 /// Eine anzeigbare Paarung.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BtpMatch {
@@ -134,8 +158,12 @@ pub struct BtpMatch {
     pub entry1_id: i64,
     /// EntryID von Team 2 (0, falls der Platz noch offen ist).
     pub entry2_id: i64,
-    /// Court-Name, falls dem Match ein Court zugewiesen ist.
+    /// Court-Name, falls dem Match ein Court zugewiesen ist. Achtung: bei
+    /// Mehr-Hallen-Turnieren nicht eindeutig – für Identität `court_id`.
     pub court: Option<String>,
+    /// CourtID (stabile Feld-Identität) des zugewiesenen Felds; `None`,
+    /// wenn das Match keinem Feld zugewiesen ist.
+    pub court_id: Option<i64>,
     /// Satz-Ergebnisse als (Team1, Team2)-Punkte.
     pub sets: Vec<(i64, i64)>,
     /// Sieger: 1 oder 2, falls entschieden.
@@ -157,6 +185,13 @@ pub struct BtpSnapshot {
     /// Alle Court-Namen des Turniers (BTP-Reihenfolge), auch leere Courts –
     /// damit der Tablet-Server jedem Court eine Adresse zuordnen kann.
     pub courts: Vec<String>,
+    /// Standorte/Hallen des Turniers (BTP `Locations`). Leer bei Turnieren
+    /// ohne Standort-Angabe; ab zwei Einträgen liegt ein Mehr-Hallen-
+    /// Turnier vor.
+    pub locations: Vec<BtpLocation>,
+    /// Alle Felder mit Identität (CourtID), Hallen-Zuordnung und
+    /// Sortierreihenfolge – sortiert nach Halle und BTP-`SortOrder`.
+    pub court_infos: Vec<BtpCourt>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -188,6 +223,8 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
         tournament_name: setting_str(t, 1001).unwrap_or_default(),
         matches: parse_matches(t, &players, &entries, &slots, &courts, &draws, &disciplines),
         courts: court_names,
+        locations: location_list(t),
+        court_infos: court_list(t),
     })
 }
 
@@ -269,6 +306,49 @@ fn court_map(t: &[Node]) -> HashMap<i64, String> {
     id_name_map(t, "Courts")
 }
 
+/// Standorte/Hallen in BTP-Dokumentreihenfolge.
+fn location_list(t: &[Node]) -> Vec<BtpLocation> {
+    let Some(group) = xml::find(t, "Locations") else {
+        return Vec::new();
+    };
+    group
+        .children()
+        .iter()
+        .filter_map(|n| {
+            Some(BtpLocation {
+                id: child_int(n, "ID")?,
+                name: child_str(n, "Name").unwrap_or_default().to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Alle Felder mit Hallen-Zuordnung, sortiert nach LocationID und
+/// BTP-`SortOrder` (so liegen die Felder hallenweise gruppiert vor).
+fn court_list(t: &[Node]) -> Vec<BtpCourt> {
+    let Some(group) = xml::find(t, "Courts") else {
+        return Vec::new();
+    };
+    let mut courts: Vec<BtpCourt> = group
+        .children()
+        .iter()
+        .filter_map(|n| {
+            Some(BtpCourt {
+                id: child_int(n, "ID")?,
+                name: child_str(n, "Name").unwrap_or_default().to_string(),
+                location_id: child_int(n, "LocationID"),
+                sort_order: child_int(n, "SortOrder").unwrap_or(0),
+            })
+        })
+        .collect();
+    // Nach Halle (LocationID) und SortOrder gruppieren; die CourtID als
+    // dritter Schlüssel macht die Reihenfolge bei fehlendem SortOrder
+    // deterministisch. Felder ohne LocationID sortieren zuerst – in echten
+    // BTP-Daten trägt jedes Feld eine LocationID.
+    courts.sort_by_key(|c| (c.location_id, c.sort_order, c.id));
+    courts
+}
+
 /// DrawID → Draw-Name.
 fn draw_map(t: &[Node]) -> HashMap<i64, String> {
     id_name_map(t, "Draws")
@@ -346,11 +426,15 @@ fn parse_matches(
         let draw_id = child_int(m, "DrawID");
         let resolve =
             |planning: Option<i64>| resolve_team(draw_id, planning, slots, entries, players);
-        let court = child_int(m, "CourtID").and_then(|id| courts.get(&id).cloned());
+        let court_id = child_int(m, "CourtID");
+        let court = court_id.and_then(|id| courts.get(&id).cloned());
         let winner = child_int(m, "Winner").and_then(|w| u8::try_from(w).ok());
+        // „Auf dem Feld" hängt an der CourtID, nicht am aufgelösten Namen:
+        // eine CourtID, die (noch) in keinem Courts-Eintrag steht, ist
+        // trotzdem eine Feld-Zuweisung.
         let status = if winner.is_some() {
             MatchStatus::Finished
-        } else if court.is_some() {
+        } else if court_id.is_some() {
             MatchStatus::OnCourt
         } else {
             MatchStatus::Scheduled
@@ -374,6 +458,7 @@ fn parse_matches(
             entry1_id,
             entry2_id,
             court,
+            court_id,
             sets: parse_sets(m),
             winner,
             result: MatchResult::from_score_status(child_int(m, "ScoreStatus").unwrap_or(0)),
@@ -481,6 +566,9 @@ mod tests {
         let snapshot = parse_snapshot(&tree).unwrap();
         assert_eq!(snapshot.tournament_name, "Leeres Turnier");
         assert!(snapshot.matches.is_empty());
+        // Fehlende Locations-/Courts-Gruppen ergeben leere Listen, kein Fehler.
+        assert!(snapshot.locations.is_empty());
+        assert!(snapshot.court_infos.is_empty());
     }
 
     #[test]

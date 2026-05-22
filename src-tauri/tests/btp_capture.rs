@@ -9,6 +9,9 @@ use bts_light_lib::btp::xml;
 
 const LOGIN: &[u8] = include_bytes!("fixtures/btp-login.bin");
 const TOURNAMENT: &[u8] = include_bytes!("fixtures/btp-tournament.bin");
+/// Echter Zwei-Hallen-Mitschnitt: 11 Felder, Hallen „Halle 1" / „Halle 2",
+/// Feldnamen wiederholen sich über die Hallen.
+const TOURNAMENT_2HALLS: &[u8] = include_bytes!("fixtures/btp-tournament-2halls.bin");
 
 #[test]
 fn real_login_capture_yields_session_key() {
@@ -83,4 +86,95 @@ fn real_tournament_capture_parses_to_snapshot() {
     assert_eq!(count(MatchStatus::Finished), 2);
     assert_eq!(count(MatchStatus::OnCourt), 2);
     assert_eq!(count(MatchStatus::Scheduled), 6);
+}
+
+#[test]
+fn single_hall_capture_has_one_location() {
+    // Ein-Hallen-Turniere tragen genau eine Location ("Main Location") –
+    // damit greift die Hallen-Trennung (erst ab zwei Locations) hier nicht.
+    let nodes = proto::decode_response(TOURNAMENT).expect("dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+    assert_eq!(snapshot.locations.len(), 1);
+    assert_eq!(snapshot.locations[0].name, "Main Location");
+    assert_eq!(snapshot.court_infos.len(), 4);
+}
+
+#[test]
+fn two_hall_capture_parses_locations_and_courts() {
+    // Mehr-Hallen-Turnier: BTP liefert die Standorte und je Feld eine
+    // LocationID. Die Feldnamen wiederholen sich über die Hallen – nur
+    // die CourtID ist eindeutig.
+    let nodes = proto::decode_response(TOURNAMENT_2HALLS).expect("dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+
+    // Zwei Hallen.
+    assert_eq!(snapshot.locations.len(), 2);
+    let location = |id: i64| {
+        snapshot
+            .locations
+            .iter()
+            .find(|l| l.id == id)
+            .map(|l| l.name.as_str())
+    };
+    assert_eq!(location(1), Some("Halle 1"));
+    assert_eq!(location(4), Some("Halle 2"));
+
+    // 11 Felder: 4 in Halle 1, 7 in Halle 2.
+    assert_eq!(snapshot.court_infos.len(), 11);
+    let in_hall = |loc: i64| {
+        snapshot
+            .court_infos
+            .iter()
+            .filter(|c| c.location_id == Some(loc))
+            .count()
+    };
+    assert_eq!(in_hall(1), 4);
+    assert_eq!(in_hall(4), 7);
+
+    // „1" gibt es in beiden Hallen – Feldnamen sind NICHT eindeutig, die
+    // CourtID schon. Das ist der Kern der Mehr-Hallen-Unterstützung.
+    let ones: Vec<_> = snapshot
+        .court_infos
+        .iter()
+        .filter(|c| c.name == "1")
+        .collect();
+    assert_eq!(ones.len(), 2);
+    assert_ne!(ones[0].id, ones[1].id);
+
+    // Felder liegen hallenweise gruppiert vor (erst Halle 1, dann Halle 2).
+    let loc_order: Vec<_> = snapshot.court_infos.iter().map(|c| c.location_id).collect();
+    assert_eq!(
+        loc_order,
+        vec![
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+        ]
+    );
+
+    // Jedes einem Feld zugewiesene Match referenziert eine bekannte CourtID.
+    let on_court = snapshot
+        .matches
+        .iter()
+        .filter(|m| m.court_id.is_some())
+        .count();
+    assert!(
+        on_court >= 1,
+        "mind. ein Match sollte einem Feld zugewiesen sein"
+    );
+    for m in snapshot.matches.iter().filter(|m| m.court_id.is_some()) {
+        let cid = m.court_id.unwrap();
+        assert!(
+            snapshot.court_infos.iter().any(|c| c.id == cid),
+            "court_id {cid} muss zu einem bekannten Feld gehören"
+        );
+    }
 }
