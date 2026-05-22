@@ -56,6 +56,25 @@ pub enum ConnectionMode {
     /// Über den Cloud-Relay auf badhub.de – funktioniert auch hinter
     /// gesperrten Firmen-Firewalls (nur ausgehende Verbindungen).
     Cloud,
+    /// LAN **und** Cloud gleichzeitig – z. B. ein Zwei-Hallen-Turnier, bei
+    /// dem die Haupthalle die Tablets per LAN anbindet und die zweite Halle
+    /// über den Cloud-Relay. Beide Wege laufen für dieselbe Turnierinstanz.
+    /// Eigener `rename`, damit die Wire-Form `"lan+cloud"` ist – `"lan"`
+    /// und `"cloud"` bleiben unverändert.
+    #[serde(rename = "lan+cloud")]
+    LanAndCloud,
+}
+
+impl ConnectionMode {
+    /// Ist der LAN-Pfad aktiv (eingebetteter Server + mDNS)?
+    pub fn lan_enabled(self) -> bool {
+        matches!(self, ConnectionMode::Lan | ConnectionMode::LanAndCloud)
+    }
+
+    /// Ist der Cloud-Pfad aktiv (Relay-Client)?
+    pub fn cloud_enabled(self) -> bool {
+        matches!(self, ConnectionMode::Cloud | ConnectionMode::LanAndCloud)
+    }
 }
 
 /// Sprachmodus der gesprochenen Feld-Ansagen.
@@ -284,6 +303,62 @@ mod tests {
         assert!(!loaded.court_monitor.enabled);
         assert_eq!(loaded.court_monitor.ad_interval_s, 10);
         assert!(loaded.court_monitor.show_timer);
+    }
+
+    #[test]
+    fn lan_and_cloud_mode_save_then_load_roundtrip() {
+        // Der neue Doppelmodus muss verlustfrei gespeichert und geladen
+        // werden – die Wire-Form ist `"lan+cloud"`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let config = AppConfig {
+            connection_mode: ConnectionMode::LanAndCloud,
+            ..AppConfig::default()
+        };
+        config.save_to(&path).unwrap();
+        let json = std::fs::read_to_string(&path).unwrap();
+        assert!(json.contains(r#""connection_mode": "lan+cloud""#));
+        assert_eq!(AppConfig::load_from(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn legacy_cloud_mode_string_still_loads() {
+        // Regression: eine bestehende config.json mit "connection_mode":
+        // "cloud" muss unverändert als Cloud geladen werden.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "connection_mode":"cloud"}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(loaded.connection_mode, ConnectionMode::Cloud);
+        // Und ebenso "lan".
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "connection_mode":"lan"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            AppConfig::load_from(&path).unwrap().connection_mode,
+            ConnectionMode::Lan
+        );
+    }
+
+    #[test]
+    fn connection_mode_enable_flags_truth_table() {
+        // lan_enabled()/cloud_enabled() für alle drei Varianten.
+        assert!(ConnectionMode::Lan.lan_enabled());
+        assert!(!ConnectionMode::Lan.cloud_enabled());
+        assert!(!ConnectionMode::Cloud.lan_enabled());
+        assert!(ConnectionMode::Cloud.cloud_enabled());
+        assert!(ConnectionMode::LanAndCloud.lan_enabled());
+        assert!(ConnectionMode::LanAndCloud.cloud_enabled());
     }
 
     #[test]

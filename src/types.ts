@@ -13,8 +13,9 @@ export interface BadhubConfig {
   live_url: string;
 }
 
-/** Verbindungsart für die Schiedsrichter-Tablets. */
-export type ConnectionMode = "lan" | "cloud";
+/** Verbindungsart für die Schiedsrichter-Tablets. `"lan+cloud"` betreibt
+ *  beide Wege gleichzeitig (z. B. Zwei-Hallen-Turnier). */
+export type ConnectionMode = "lan" | "cloud" | "lan+cloud";
 
 /** Sprachmodus der Feld-Ansagen (Rust: config::AnnounceLanguageMode). */
 export type AnnounceLanguageMode = "de" | "en" | "auto";
@@ -138,11 +139,16 @@ export interface CourtOverview {
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */
 export interface TabletInfo {
+  /** LAN-Adresse des Tablet-Servers; leer, wenn der LAN-Pfad inaktiv ist. */
   server_host: string;
-  /** "lan" oder "cloud". */
+  /** "lan", "cloud" oder "lan+cloud". */
   mode: ConnectionMode;
-  /** Im Cloud-Modus die öffentliche Relay-Basis-URL, sonst leer. */
+  /** Öffentliche Relay-Basis-URL; leer, wenn der Cloud-Pfad inaktiv ist. */
   relay_base: string;
+  /** Ist der LAN-Pfad aktiv? Im Doppelmodus sind beide Flags true. */
+  lan_enabled: boolean;
+  /** Ist der Cloud-Pfad aktiv? */
+  cloud_enabled: boolean;
   courts: CourtOverview[];
 }
 

@@ -30,6 +30,11 @@ Die Verbindungsart steht im Setup-Wizard unter **„Tablet-Verbindung"**:
 - **Über badhub.de – Cloud** – funktioniert auch hinter gesperrten
   Firewalls, braucht Internet.
 
+Beide Kacheln lassen sich **gleichzeitig** aktivieren – für Zwei-Hallen-
+Turniere: Haupthalle per LAN, zweite Halle per Cloud. bts-light startet
+dann LAN-Server und Relay-Verbindung zusammen; der Spielzettel zeigt je
+Feld beide QR-Codes.
+
 Der Wechsel greift beim nächsten Stoppen/Starten des Livetickers (kein
 Live-Umschalten mitten im Betrieb). Beide Wege bleiben dauerhaft nutzbar.
 

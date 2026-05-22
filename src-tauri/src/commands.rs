@@ -161,7 +161,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     if config.badhub.password.is_empty() {
         return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
     }
-    if config.connection_mode == ConnectionMode::Cloud && config.install_id.is_empty() {
+    if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
         return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
     }
 
@@ -208,42 +208,44 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         cfg_path,
         assignments_path,
     ));
-    match mode {
-        ConnectionMode::Lan => {
-            let mut server_slot = state
-                .tablet_server
-                .lock()
-                .expect("Tablet-Server-Mutex nicht vergiftet");
-            if server_slot.is_none() {
-                let ctx = ctx.clone();
-                *server_slot = Some(tauri::async_runtime::spawn(async move {
-                    if let Err(e) = crate::tablet::server::run(ctx).await {
-                        tracing::error!("Tablet-Server beendet: {e}");
-                    }
-                }));
-            }
-            drop(server_slot);
-            // mDNS-Bekanntgabe (`bts-light.local`) – damit Tablets und
-            // Monitore den PC ohne feste IP finden. Fehler ist unkritisch.
-            let mut mdns_slot = state.mdns.lock().expect("mDNS-Mutex nicht vergiftet");
-            if mdns_slot.is_none() {
-                match crate::tablet::mdns::advertise() {
-                    Ok(daemon) => *mdns_slot = Some(daemon),
-                    Err(e) => tracing::warn!("mDNS-Bekanntgabe fehlgeschlagen: {e}"),
+    // LAN und Cloud sind unabhängig voneinander schaltbar – im
+    // Doppelmodus (`LanAndCloud`) laufen beide Wege für dieselbe
+    // Turnierinstanz parallel. `lan_enabled()`/`cloud_enabled()` liefern
+    // für die reinen Modi exakt dieselbe Wahl wie zuvor das `match`.
+    if mode.lan_enabled() {
+        let mut server_slot = state
+            .tablet_server
+            .lock()
+            .expect("Tablet-Server-Mutex nicht vergiftet");
+        if server_slot.is_none() {
+            let ctx = ctx.clone();
+            *server_slot = Some(tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::tablet::server::run(ctx).await {
+                    tracing::error!("Tablet-Server beendet: {e}");
                 }
+            }));
+        }
+        drop(server_slot);
+        // mDNS-Bekanntgabe (`bts-light.local`) – damit Tablets und
+        // Monitore den PC ohne feste IP finden. Fehler ist unkritisch.
+        let mut mdns_slot = state.mdns.lock().expect("mDNS-Mutex nicht vergiftet");
+        if mdns_slot.is_none() {
+            match crate::tablet::mdns::advertise() {
+                Ok(daemon) => *mdns_slot = Some(daemon),
+                Err(e) => tracing::warn!("mDNS-Bekanntgabe fehlgeschlagen: {e}"),
             }
         }
-        ConnectionMode::Cloud => {
-            let mut relay_slot = state
-                .relay_task
-                .lock()
-                .expect("Relay-Task-Mutex nicht vergiftet");
-            if relay_slot.is_none() {
-                let ctx = ctx.clone();
-                *relay_slot = Some(tauri::async_runtime::spawn(
-                    crate::tablet::relay_client::run(ctx, install_id.clone()),
-                ));
-            }
+    }
+    if mode.cloud_enabled() {
+        let mut relay_slot = state
+            .relay_task
+            .lock()
+            .expect("Relay-Task-Mutex nicht vergiftet");
+        if relay_slot.is_none() {
+            let ctx = ctx.clone();
+            *relay_slot = Some(tauri::async_runtime::spawn(
+                crate::tablet::relay_client::run(ctx, install_id.clone()),
+            ));
         }
     }
 
@@ -322,13 +324,20 @@ pub fn stop_sync(state: State<'_, AppState>) {
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
 #[derive(Serialize)]
 pub struct TabletInfo {
-    /// LAN-Adresse `<ip>:<port>` des Tablet-Servers (nur LAN-Modus relevant).
+    /// LAN-Adresse `<ip>:<port>` des Tablet-Servers – gesetzt, sobald der
+    /// LAN-Pfad aktiv ist (`Lan` oder `LanAndCloud`), sonst leer.
     pub server_host: String,
-    /// Verbindungsart: `"lan"` oder `"cloud"`.
+    /// Verbindungsart: `"lan"`, `"cloud"` oder `"lan+cloud"`.
     pub mode: String,
-    /// Im Cloud-Modus die öffentliche Relay-Basis-URL
-    /// (`https://badhub.de/bts-relay/<install_id>`), sonst leer.
+    /// Öffentliche Relay-Basis-URL (`https://badhub.de/bts-relay/<install_id>`)
+    /// – gesetzt, sobald der Cloud-Pfad aktiv ist (`Cloud` oder
+    /// `LanAndCloud`), sonst leer.
     pub relay_base: String,
+    /// Ist der LAN-Pfad aktiv? Im Doppelmodus zeigt die Oberfläche LAN- und
+    /// Cloud-Adresse parallel.
+    pub lan_enabled: bool,
+    /// Ist der Cloud-Pfad aktiv?
+    pub cloud_enabled: bool,
     /// Alle Courts mit aktuellem Match, Live-Stand und Tablet-Status.
     pub courts: Vec<crate::tablet::state::CourtOverview>,
 }
@@ -341,17 +350,32 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
-    let (mode, relay_base) = match config.connection_mode {
-        ConnectionMode::Lan => ("lan".to_string(), String::new()),
-        ConnectionMode::Cloud => (
-            "cloud".to_string(),
-            format!("https://badhub.de/bts-relay/{}", config.install_id),
-        ),
+    let lan_enabled = config.connection_mode.lan_enabled();
+    let cloud_enabled = config.connection_mode.cloud_enabled();
+    // LAN- und Cloud-Adresse werden unabhängig befüllt: im Doppelmodus
+    // sind beide gesetzt, im reinen Modus genau eine – wie bisher.
+    let server_host = if lan_enabled {
+        crate::tablet::server::lan_host()
+    } else {
+        String::new()
     };
+    let relay_base = if cloud_enabled {
+        format!("https://badhub.de/bts-relay/{}", config.install_id)
+    } else {
+        String::new()
+    };
+    let mode = match config.connection_mode {
+        ConnectionMode::Lan => "lan",
+        ConnectionMode::Cloud => "cloud",
+        ConnectionMode::LanAndCloud => "lan+cloud",
+    }
+    .to_string();
     TabletInfo {
-        server_host: crate::tablet::server::lan_host(),
+        server_host,
         mode,
         relay_base,
+        lan_enabled,
+        cloud_enabled,
         courts: state.tablet.overview(),
     }
 }
@@ -574,7 +598,7 @@ pub fn list_court_ads(app: AppHandle) -> Vec<String> {
 
 /// Liefert die Court-Monitor-Geräte für die Verwaltungsseite. Im LAN-Modus
 /// lokal aus Zuweisungen + Live-Pollzeiten gebaut, im Cloud-Modus die vom
-/// Relay gemeldete Liste.
+/// Relay gemeldete Liste, im Doppelmodus beide vereint.
 #[tauri::command]
 pub fn monitor_devices(app: AppHandle, state: State<'_, AppState>) -> Vec<MonitorDeviceInfo> {
     let mode = state
@@ -582,14 +606,20 @@ pub fn monitor_devices(app: AppHandle, state: State<'_, AppState>) -> Vec<Monito
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .connection_mode;
+    // LAN-Liste: lokal aus Feld-Zuweisungen + Live-Pollzeiten.
+    let lan_devices = || {
+        let assignments = crate::tablet::monitor::read_assignments(&monitor_assignments_path(&app));
+        let court_names = state.tablet.court_name_map();
+        let seen = state.tablet.monitor_live_seen();
+        relay_proto::build_device_list(&assignments, &court_names, &seen, now_ms())
+    };
     match mode {
         ConnectionMode::Cloud => state.tablet.relay_monitor_devices(),
-        ConnectionMode::Lan => {
-            let assignments =
-                crate::tablet::monitor::read_assignments(&monitor_assignments_path(&app));
-            let court_names = state.tablet.court_name_map();
-            let seen = state.tablet.monitor_live_seen();
-            relay_proto::build_device_list(&assignments, &court_names, &seen, now_ms())
+        ConnectionMode::Lan => lan_devices(),
+        // Doppelmodus: LAN- und Cloud-Liste vereinen (Dedup über die
+        // Geräte-ID, Online-Status der Quellen ge-ODER-t).
+        ConnectionMode::LanAndCloud => {
+            relay_proto::merge_device_lists(&lan_devices(), &state.tablet.relay_monitor_devices())
         }
     }
 }

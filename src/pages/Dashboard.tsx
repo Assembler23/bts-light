@@ -135,7 +135,17 @@ export function Dashboard({
   }
 
   const updateMsg = updateMessage();
-  const cloudMode = config.connection_mode === "cloud";
+  // Der Tablet-Tooltip unterscheidet drei Fälle: reiner Cloud-Modus,
+  // Doppelmodus und reiner LAN-Modus.
+  const tabletTitle =
+    config.connection_mode === "cloud"
+      ? "Tablet-Adressen und Felder-Übersicht (Cloud-Modus)"
+      : config.connection_mode === "lan+cloud"
+        ? "Tablet-Adressen und Felder-Übersicht (LAN + Cloud parallel) – " +
+          "je Feld stehen LAN- und Cloud-Adresse bereit."
+        : "Tablet-Adressen und Felder-Übersicht. Bekommen die Tablets " +
+          "im Hallen-WLAN keine Verbindung (z. B. Firewall)? Dann in " +
+          "den Einstellungen auf den Cloud-Modus umstellen.";
 
   return (
     <main className="mx-auto flex min-h-full max-w-xl flex-col gap-5 p-6 text-slate-800">
@@ -219,13 +229,7 @@ export function Dashboard({
             icon={Tablet}
             label="Tablet-Spielzettel"
             onClick={onOpenTablets}
-            title={
-              cloudMode
-                ? "Tablet-Adressen und Felder-Übersicht (Cloud-Modus)"
-                : "Tablet-Adressen und Felder-Übersicht. Bekommen die Tablets " +
-                  "im Hallen-WLAN keine Verbindung (z. B. Firewall)? Dann in " +
-                  "den Einstellungen auf den Cloud-Modus umstellen."
-            }
+            title={tabletTitle}
           />
           <ActionButton
             icon={Tv}

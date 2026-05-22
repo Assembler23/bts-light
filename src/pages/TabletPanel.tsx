@@ -19,6 +19,17 @@ interface Props {
   onBack: () => void;
 }
 
+/** Eine adressierbare Verbindung eines Felds: ein Verbindungsweg mit
+ *  Court-URL und QR-URL. Im Doppelmodus hat ein Feld zwei davon. */
+interface CourtAddress {
+  /** Verbindungsweg – steuert Badge und Icon. */
+  kind: "lan" | "cloud";
+  /** Adresse, die am Spielfeld im Browser geöffnet wird. */
+  courtUrl: string;
+  /** URL des QR-Code-Bilds. */
+  qrUrl: string;
+}
+
 /**
  * Tablet-Spielzettel-Seite mit zwei Tabs: „Übersicht" zeigt den Live-Stand
  * aller Felder (Tablet-Verbindung, Akku) für die Turnierleitung;
@@ -28,8 +39,12 @@ interface Props {
  */
 export function TabletPanel({ onBack }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
-  // Das groß angezeigte Feld der QR-Zoom-Ansicht (per CourtID).
-  const [zoomCourt, setZoomCourt] = useState<CourtOverview | null>(null);
+  // Die groß angezeigte QR-Zoom-Ansicht: Feld + die angetippte Adresse
+  // (im Doppelmodus hat ein Feld LAN und Cloud).
+  const [zoom, setZoom] = useState<{
+    court: CourtOverview;
+    address: CourtAddress;
+  } | null>(null);
   const [tab, setTab] = useState<"overview" | "qr">("overview");
 
   useEffect(() => {
@@ -50,18 +65,37 @@ export function TabletPanel({ onBack }: Props) {
   }, []);
 
   const host = info?.server_host ?? "";
-  const isCloud = (info?.mode ?? "lan") === "cloud";
   const relayBase = info?.relay_base ?? "";
+  // LAN und Cloud sind unabhängig schaltbar – im Doppelmodus beide aktiv.
+  // Fallback bei noch nicht geladenem `info`: LAN, wie bisher.
+  const lanEnabled = info?.lan_enabled ?? true;
+  const cloudEnabled = info?.cloud_enabled ?? false;
+  // Reiner Cloud-Modus → der LAN-spezifische Firewall-Hinweis entfällt.
+  const cloudOnly = cloudEnabled && !lanEnabled;
   const courts = info?.courts ?? [];
-  // Die URL adressiert das Feld über seine stabile CourtID.
-  const courtUrl = (courtId: number) =>
-    isCloud
-      ? `${relayBase}/court/${courtId}`
-      : `http://${host}/court/${courtId}`;
-  const qrUrl = (courtId: number) =>
-    isCloud
-      ? `${relayBase}/qr/${courtId}`
-      : `http://${host}/qr/${courtId}`;
+  // Pro Feld die Liste seiner Verbindungs-Adressen (CourtID-basiert). Im
+  // Einzelmodus genau ein Eintrag – die Seite rendert dann wie zuvor.
+  const courtAddresses = (courtId: number): CourtAddress[] => {
+    const list: CourtAddress[] = [];
+    if (lanEnabled) {
+      list.push({
+        kind: "lan",
+        courtUrl: `http://${host}/court/${courtId}`,
+        qrUrl: `http://${host}/qr/${courtId}`,
+      });
+    }
+    if (cloudEnabled) {
+      list.push({
+        kind: "cloud",
+        courtUrl: `${relayBase}/court/${courtId}`,
+        qrUrl: `${relayBase}/qr/${courtId}`,
+      });
+    }
+    return list;
+  };
+  // Im Doppelmodus zwei QR-Codes je Feld – dann eine Spalte, damit beide
+  // nebeneinander Platz haben. Einzelmodus: zweispalt wie bisher.
+  const bothModes = lanEnabled && cloudEnabled;
 
   // Hallenweise Gruppierung: je Halle eine Gruppe mit Überschrift. Felder
   // ohne Halle – Ein-Hallen-Turnier oder (im Mehr-Hallen-Fall) nicht
@@ -91,22 +125,7 @@ export function TabletPanel({ onBack }: Props) {
               : "Einrichtung & Felder-Übersicht"}
           </p>
         </div>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1
-                      text-xs font-medium ${
-                        isCloud
-                          ? "bg-sky-100 text-sky-700"
-                          : "bg-slate-200 text-slate-600"
-                      }`}
-          title={
-            isCloud
-              ? "Cloud-Modus: Tablets verbinden über badhub.de"
-              : "LAN-Modus: Tablets verbinden im lokalen Netz"
-          }
-        >
-          {isCloud ? <Cloud size={14} /> : <Wifi size={14} />}
-          {isCloud ? "Cloud" : "LAN"}
-        </span>
+        <ModeBadge lanEnabled={lanEnabled} cloudEnabled={cloudEnabled} />
       </header>
 
       {courts.length === 0 ? (
@@ -165,8 +184,9 @@ export function TabletPanel({ onBack }: Props) {
 
           {tab === "qr" && (
             <section className="flex flex-col gap-3">
-              {/* Firewall-Hinweis – nur im LAN-Modus relevant. */}
-              {!isCloud && (
+              {/* Firewall-Hinweis – nur sinnvoll, solange überhaupt ein
+                  LAN-Weg aktiv ist (reiner Cloud-Modus = kein Hinweis). */}
+              {!cloudOnly && (
                 <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900">
                   <Info size={18} className="mt-0.5 shrink-0 text-amber-500" />
                   <p>
@@ -187,21 +207,26 @@ export function TabletPanel({ onBack }: Props) {
               <p className="text-xs text-slate-500">
                 Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
                 scannen (auf den QR tippen zeigt ihn groß).{" "}
-                {isCloud
-                  ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
-                  : "Tablet und dieser PC müssen im selben WLAN sein."}
+                {bothModes
+                  ? "Je Feld stehen LAN- und Cloud-Adresse bereit – die passende für die jeweilige Halle wählen."
+                  : cloudOnly
+                    ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
+                    : "Tablet und dieser PC müssen im selben WLAN sein."}
               </p>
               {courtGroups.map((g) => (
                 <div key={g.location} className="flex flex-col gap-2">
                   <HallHeading name={g.location} />
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div
+                    className={`grid grid-cols-1 gap-2 ${
+                      bothModes ? "" : "sm:grid-cols-2"
+                    }`}
+                  >
                     {g.courts.map((c) => (
                       <QrCard
                         key={c.court_id}
                         court={c}
-                        qrUrl={qrUrl(c.court_id)}
-                        courtUrl={courtUrl(c.court_id)}
-                        onZoom={() => setZoomCourt(c)}
+                        addresses={courtAddresses(c.court_id)}
+                        onZoom={(address) => setZoom({ court: c, address })}
                       />
                     ))}
                   </div>
@@ -212,21 +237,24 @@ export function TabletPanel({ onBack }: Props) {
         </>
       )}
 
-      {zoomCourt !== null && (
+      {zoom !== null && (
         <div
-          onClick={() => setZoomCourt(null)}
+          onClick={() => setZoom(null)}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
         >
           <div className="flex flex-col items-center rounded-xl bg-white p-6 text-center">
             <img
-              src={qrUrl(zoomCourt.court_id)}
+              src={zoom.address.qrUrl}
               alt=""
               className="bg-white"
               style={{ width: "min(72vw, 72vh)", height: "min(72vw, 72vh)" }}
             />
-            <div className="mt-3 text-lg font-semibold">{zoomCourt.court}</div>
+            <div className="mt-3 flex items-center gap-2 text-lg font-semibold">
+              {zoom.court.court}
+              {bothModes && <AddressBadge kind={zoom.address.kind} />}
+            </div>
             <div className="mt-1 max-w-[20rem] break-all text-sm text-slate-500">
-              {courtUrl(zoomCourt.court_id)}
+              {zoom.address.courtUrl}
             </div>
             <div className="mt-3 text-xs text-slate-400">
               Zum Schließen tippen
@@ -272,33 +300,102 @@ function HallHeading({ name }: { name: string }) {
   );
 }
 
-/** Eine QR-Code-Karte mit Feldname, Adresse und Kopier-Button. */
+/**
+ * Eine QR-Code-Karte für ein Feld. `addresses` ist die Liste der
+ * Verbindungswege: im Einzelmodus ein Eintrag (rendert exakt wie zuvor),
+ * im Doppelmodus zwei – dann je Weg ein QR-Code mit „LAN"-/„Cloud"-Badge.
+ */
 function QrCard({
   court,
-  qrUrl,
-  courtUrl,
+  addresses,
   onZoom,
 }: {
   court: CourtOverview;
-  qrUrl: string;
-  courtUrl: string;
-  onZoom: () => void;
+  addresses: CourtAddress[];
+  onZoom: (address: CourtAddress) => void;
 }) {
+  const both = addresses.length > 1;
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
-      <button
-        onClick={onZoom}
-        title="QR-Code groß anzeigen"
-        className="shrink-0 rounded bg-white"
-      >
-        <img src={qrUrl} alt="" width={64} height={64} className="block" />
-      </button>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{court.court}</div>
-        <div className="truncate text-xs text-slate-500">{courtUrl}</div>
-      </div>
-      <CopyUrlButton url={courtUrl} />
+    <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+      <div className="truncate px-1 text-sm font-medium">{court.court}</div>
+      {addresses.map((addr) => (
+        <div key={addr.kind} className="flex items-center gap-3">
+          <button
+            onClick={() => onZoom(addr)}
+            title="QR-Code groß anzeigen"
+            className="shrink-0 rounded bg-white"
+          >
+            <img
+              src={addr.qrUrl}
+              alt=""
+              width={64}
+              height={64}
+              className="block"
+            />
+          </button>
+          <div className="min-w-0 flex-1">
+            {both && <AddressBadge kind={addr.kind} />}
+            <div className="truncate text-xs text-slate-500">
+              {addr.courtUrl}
+            </div>
+          </div>
+          <CopyUrlButton url={addr.courtUrl} />
+        </div>
+      ))}
     </div>
+  );
+}
+
+/** Kleines „LAN"-/„Cloud"-Badge zur Kennzeichnung eines Verbindungswegs. */
+function AddressBadge({ kind }: { kind: "lan" | "cloud" }) {
+  const cloud = kind === "cloud";
+  return (
+    <span
+      className={`mb-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5
+                  text-[10px] font-medium ${
+                    cloud
+                      ? "bg-sky-100 text-sky-700"
+                      : "bg-slate-200 text-slate-600"
+                  }`}
+    >
+      {cloud ? <Cloud size={11} /> : <Wifi size={11} />}
+      {cloud ? "Cloud" : "LAN"}
+    </span>
+  );
+}
+
+/**
+ * Verbindungsart-Badge im Seitenkopf. Zeigt im Doppelmodus „LAN + Cloud",
+ * sonst genau einen Weg – wie bisher.
+ */
+function ModeBadge({
+  lanEnabled,
+  cloudEnabled,
+}: {
+  lanEnabled: boolean;
+  cloudEnabled: boolean;
+}) {
+  const both = lanEnabled && cloudEnabled;
+  const cloudOnly = cloudEnabled && !lanEnabled;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1
+                  text-xs font-medium ${
+                    cloudOnly
+                      ? "bg-sky-100 text-sky-700"
+                      : "bg-slate-200 text-slate-600"
+                  }`}
+      title={
+        both
+          ? "Doppelmodus: Tablets verbinden per LAN und über badhub.de"
+          : cloudOnly
+            ? "Cloud-Modus: Tablets verbinden über badhub.de"
+            : "LAN-Modus: Tablets verbinden im lokalen Netz"
+      }
+    >
+      {cloudOnly ? <Cloud size={14} /> : <Wifi size={14} />}
+      {both ? "LAN + Cloud" : cloudOnly ? "Cloud" : "LAN"}
+    </span>
   );
 }
 

@@ -287,8 +287,9 @@ pub fn device_code(device_id: &str) -> String {
 /// Feld-Zuweisungen (Geräte-ID → CourtID) und dem Live-Zustand (`seen`:
 /// Geräte-ID → Zeitpunkt des letzten Polls in ms). `court_names` löst die
 /// CourtID auf einen Anzeigenamen auf – fehlt eine ID darin, bleibt der
-/// Anzeigename leer (das Gerät bleibt trotzdem in der Liste). Zugewiesene
-/// Geräte zuerst (nach Feldname).
+/// Anzeigename leer (das Gerät bleibt trotzdem in der Liste). Sortiert nach
+/// Feldname, dann Code – noch nicht zugewiesene Geräte (`court = None`)
+/// stehen damit zuerst, weil `None` vor `Some(_)` sortiert.
 pub fn build_device_list(
     assignments: &HashMap<String, i64>,
     court_names: &HashMap<i64, String>,
@@ -316,6 +317,32 @@ pub fn build_device_list(
             }
         })
         .collect();
+    out.sort_by(|a, b| a.court.cmp(&b.court).then(a.code.cmp(&b.code)));
+    out
+}
+
+/// Vereint zwei Monitor-Gerätelisten zu einer – für den Doppelmodus
+/// (`LanAndCloud`), in dem die „Court-Monitore"-Seite die lokal gebaute
+/// LAN-Liste und die vom Relay gemeldete Cloud-Liste zusammenführt. Geräte
+/// werden über [`MonitorDeviceInfo::id`] dedupliziert; taucht ein Gerät in
+/// beiden Listen auf, gilt es als online, sobald **eine** der beiden
+/// Quellen es online meldet (`online`-Flag wird ge-ODER-t). Die übrigen
+/// Felder stammen aus dem ersten Vorkommen (LAN zuerst). Die Ausgabe ist
+/// sortiert wie [`build_device_list`] (nach Feldname, dann Code – noch nicht
+/// zugewiesene Geräte zuerst, weil `None` vor `Some(_)` sortiert).
+pub fn merge_device_lists(
+    lan: &[MonitorDeviceInfo],
+    cloud: &[MonitorDeviceInfo],
+) -> Vec<MonitorDeviceInfo> {
+    let mut out: Vec<MonitorDeviceInfo> = Vec::new();
+    for dev in lan.iter().chain(cloud.iter()) {
+        if let Some(existing) = out.iter_mut().find(|d| d.id == dev.id) {
+            // Gerät schon bekannt → Online-Status der Quellen vereinen.
+            existing.online = existing.online || dev.online;
+        } else {
+            out.push(dev.clone());
+        }
+    }
     out.sort_by(|a, b| a.court.cmp(&b.court).then(a.code.cmp(&b.code)));
     out
 }
@@ -786,6 +813,85 @@ mod tests {
         assert!(fresh.online);
         assert_eq!(fresh.court_id, None);
         assert_eq!(fresh.court, None);
+    }
+
+    #[test]
+    fn merge_device_lists_dedups_by_id_and_ors_online() {
+        // Hilfskonstruktor für ein knappes Gerät.
+        let dev = |id: &str, court: Option<&str>, online: bool| MonitorDeviceInfo {
+            id: id.to_string(),
+            code: device_code(id),
+            court_id: court.map(|_| 1),
+            court: court.map(|c| c.to_string()),
+            online,
+        };
+        // LAN: Feld-1-Gerät online, gemeinsames Gerät offline.
+        let lan = vec![
+            dev("dev-lan-1", Some("Feld 1"), true),
+            dev("dev-both", Some("Feld 2"), false),
+        ];
+        // Cloud: gemeinsames Gerät online, eigenes Gerät offline.
+        let cloud = vec![
+            dev("dev-both", Some("Feld 2"), true),
+            dev("dev-cloud-1", Some("Feld 3"), false),
+        ];
+        let merged = merge_device_lists(&lan, &cloud);
+        // Drei distinkte Geräte – das gemeinsame nur einmal.
+        assert_eq!(merged.len(), 3);
+        // Das in beiden Listen geführte Gerät ist online (OR der Quellen).
+        let both = merged.iter().find(|d| d.id == "dev-both").unwrap();
+        assert!(both.online);
+        // Reine LAN-/Cloud-Geräte bleiben mit ihrem Status erhalten.
+        assert!(merged.iter().find(|d| d.id == "dev-lan-1").unwrap().online);
+        assert!(
+            !merged
+                .iter()
+                .find(|d| d.id == "dev-cloud-1")
+                .unwrap()
+                .online
+        );
+        // Stabil nach Feldname sortiert.
+        assert_eq!(
+            merged.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            ["dev-lan-1", "dev-both", "dev-cloud-1"]
+        );
+    }
+
+    #[test]
+    fn merge_device_lists_sorts_unassigned_devices_first() {
+        // Vertrag: ein noch nicht zugewiesenes Gerät (court = None) sortiert
+        // VOR zugewiesenen, weil `None` vor `Some(_)` ordnet. Pinnt die im
+        // Docstring zugesicherte Reihenfolge fest.
+        let dev = |id: &str, court: Option<&str>| MonitorDeviceInfo {
+            id: id.to_string(),
+            code: device_code(id),
+            court_id: court.map(|_| 1),
+            court: court.map(|c| c.to_string()),
+            online: false,
+        };
+        let lan = vec![dev("dev-assigned", Some("Feld 1"))];
+        let cloud = vec![dev("dev-free", None)];
+        let merged = merge_device_lists(&lan, &cloud);
+        assert_eq!(
+            merged.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            ["dev-free", "dev-assigned"]
+        );
+    }
+
+    #[test]
+    fn merge_device_lists_handles_empty_inputs() {
+        // Einzelmodus: eine der beiden Listen ist leer – die andere geht
+        // unverändert (nur stabil sortiert) durch.
+        let lan = vec![MonitorDeviceInfo {
+            id: "dev-x".into(),
+            code: device_code("dev-x"),
+            court_id: None,
+            court: None,
+            online: true,
+        }];
+        assert_eq!(merge_device_lists(&lan, &[]), lan);
+        assert_eq!(merge_device_lists(&[], &lan), lan);
+        assert!(merge_device_lists(&[], &[]).is_empty());
     }
 
     #[test]

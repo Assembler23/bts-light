@@ -48,15 +48,18 @@ export function CourtMonitorPanel({ onBack }: Props) {
     };
   }, []);
 
-  const isCloud = (info?.mode ?? "lan") === "cloud";
-  // Im LAN-Modus der feste mDNS-Name (muss zu MDNS_HOST + TABLET_PORT im
+  // LAN und Cloud sind unabhängig schaltbar – im Doppelmodus beide aktiv.
+  const lanEnabled = info?.lan_enabled ?? true;
+  const cloudEnabled = info?.cloud_enabled ?? false;
+  const cloudOnly = cloudEnabled && !lanEnabled;
+  const bothModes = lanEnabled && cloudEnabled;
+  // Im LAN-Pfad der feste mDNS-Name (muss zu MDNS_HOST + TABLET_PORT im
   // Rust-Kern passen) – so braucht es keine feste IP. Die IP-Adresse dient
   // nur als Rückfall, falls der Name im Netz nicht aufgelöst wird.
-  const monitorUrl = isCloud
-    ? `${info?.relay_base ?? ""}/monitor`
-    : "http://bts-light.local:8088/monitor";
+  const lanMonitorUrl = "http://bts-light.local:8088/monitor";
+  const cloudMonitorUrl = `${info?.relay_base ?? ""}/monitor`;
   const fallbackUrl =
-    !isCloud && info?.server_host ? `http://${info.server_host}/monitor` : "";
+    lanEnabled && info?.server_host ? `http://${info.server_host}/monitor` : "";
   // Felder mit Identität (CourtID) und Anzeigename – die Zuweisung nutzt
   // die CourtID, das <select> zeigt den Namen.
   const courts: CourtOverview[] = info?.courts ?? [];
@@ -101,31 +104,49 @@ export function CourtMonitorPanel({ onBack }: Props) {
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs
                       font-medium ${
-                        isCloud
+                        cloudOnly
                           ? "bg-sky-100 text-sky-700"
                           : "bg-slate-200 text-slate-600"
                       }`}
         >
-          {isCloud ? <Cloud size={14} /> : <Wifi size={14} />}
-          {isCloud ? "Cloud" : "LAN"}
+          {cloudOnly ? <Cloud size={14} /> : <Wifi size={14} />}
+          {bothModes ? "LAN + Cloud" : cloudOnly ? "Cloud" : "LAN"}
         </span>
       </header>
 
-      {/* Einrichtungs-Adresse für alle Pis */}
+      {/* Einrichtungs-Adresse(n) für alle Pis */}
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-slate-700">
           Einrichtung am Raspberry Pi
         </h2>
         <p className="text-xs text-slate-500">
-          Alle Monitore bekommen <span className="font-medium">dieselbe</span>{" "}
-          Adresse – im Chromium-Kiosk öffnen. Das Gerät zeigt dann einen Code;
-          ordne es unten einem Feld zu.
+          {bothModes
+            ? "Je nach Halle die LAN- oder die Cloud-Adresse im Chromium-Kiosk öffnen. Das Gerät zeigt dann einen Code; ordne es unten einem Feld zu."
+            : "Alle Monitore bekommen "}
+          {!bothModes && (
+            <>
+              <span className="font-medium">dieselbe</span> Adresse – im
+              Chromium-Kiosk öffnen. Das Gerät zeigt dann einen Code; ordne es
+              unten einem Feld zu.
+            </>
+          )}
         </p>
-        <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <Tv size={18} className="shrink-0 text-slate-400" />
-          <code className="min-w-0 flex-1 truncate text-sm">{monitorUrl}</code>
-          <CopyButton url={monitorUrl} />
-        </div>
+        {/* Im Doppelmodus beide Adressen mit Badge, sonst genau eine –
+            das Layout bleibt im Einzelmodus unverändert. */}
+        {lanEnabled && (
+          <MonitorAddressRow
+            url={lanMonitorUrl}
+            kind="lan"
+            showBadge={bothModes}
+          />
+        )}
+        {cloudEnabled && (
+          <MonitorAddressRow
+            url={cloudMonitorUrl}
+            kind="cloud"
+            showBadge={bothModes}
+          />
+        )}
         {fallbackUrl && (
           <p className="text-xs text-slate-400">
             Falls der Name <code>bts-light.local</code> im Netz nicht
@@ -280,6 +301,43 @@ function DeviceRow({
         <RefreshCw size={15} />
         Neu laden
       </button>
+    </div>
+  );
+}
+
+/**
+ * Eine Monitor-Einrichtungs-Adresse: Icon, Adresse, Kopier-Button und –
+ * im Doppelmodus (`showBadge`) – ein „LAN"-/„Cloud"-Badge. Einzelmodus:
+ * `showBadge=false`, die Zeile sieht aus wie zuvor.
+ */
+function MonitorAddressRow({
+  url,
+  kind,
+  showBadge,
+}: {
+  url: string;
+  kind: "lan" | "cloud";
+  showBadge: boolean;
+}) {
+  const cloud = kind === "cloud";
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+      <Tv size={18} className="shrink-0 text-slate-400" />
+      {showBadge && (
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2
+                      py-0.5 text-[10px] font-medium ${
+                        cloud
+                          ? "bg-sky-100 text-sky-700"
+                          : "bg-slate-200 text-slate-600"
+                      }`}
+        >
+          {cloud ? <Cloud size={11} /> : <Wifi size={11} />}
+          {cloud ? "Cloud" : "LAN"}
+        </span>
+      )}
+      <code className="min-w-0 flex-1 truncate text-sm">{url}</code>
+      <CopyButton url={url} />
     </div>
   );
 }

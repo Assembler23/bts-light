@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.13
+
+- **LAN und Cloud gleichzeitig.** Die Verbindungsart war bisher ein
+  Entweder-oder. Für Zwei-Hallen-Turniere lässt sich jetzt **beides
+  zusammen** aktivieren: die Haupthalle (mit bts-light + BTP) bindet ihre
+  Tablets und Monitore lokal per LAN an, eine zweite Halle übers
+  Cloud-Relay (Internet) — beides für dieselbe Turnier-Instanz. Im
+  Einrichtungs-Assistenten sind LAN und Cloud nun zwei einzeln
+  schaltbare Kacheln. Bei Doppelbetrieb zeigt der Tablet-Spielzettel je
+  Feld beide QR-Codes (LAN und Cloud), die Court-Monitore-Seite beide
+  Adressen, und die Geräteliste führt die Geräte beider Hallen zusammen.
+  Reine LAN- oder reine Cloud-Turniere verhalten sich unverändert;
+  bestehende Konfigurationen laden weiter.
+
 ## v0.9.12
 
 - **Spielzettel: Zurück-Button im Setup war riesig.** Der „← Zurück ·

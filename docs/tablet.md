@@ -35,6 +35,12 @@ Setup-Wizard unter „Tablet-Verbindung":
   gesperrten Firmen-Firewalls (nur ausgehende Verbindungen). Details:
   [cloud-relay.md](cloud-relay.md).
 
+LAN und Cloud sind zwei einzeln schaltbare Kacheln – **beide zusammen**
+sind erlaubt: Bei einem Zwei-Hallen-Turnier bindet die Haupthalle ihre
+Tablets per LAN an, eine zweite Halle übers Cloud-Relay. Bei diesem
+Doppelbetrieb zeigt der Spielzettel je Feld beide QR-Codes (je einer pro
+Weg); ein Tablet wählt seinen Weg über den gescannten QR-Code.
+
 Dieses Dokument beschreibt den LAN-Modus. Im Cloud-Modus sind Daten- und
 BTP-Schreibweg identisch – nur die Strecke Tablet ↔ bts-light läuft über
 den Relay statt direkt.

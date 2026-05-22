@@ -3,8 +3,8 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-22, nach Release v0.9.3. In Arbeit: Mehr-Hallen-
-> Unterstützung (siehe unten).
+> Stand: 2026-05-22, nach Release v0.9.13. Mehr-Hallen-Unterstützung
+> (Schritte 1–6) ausgeliefert; offen ist nur noch Schritt 7 (Aufräumen).
 
 ## In Arbeit: Mehr-Hallen-Unterstützung (Standorte/Locations)
 
@@ -77,6 +77,11 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   erfährt nicht, dass der Host (bts-light) weg ist. Der Relay sollte den
   Tablets ein „Host offline"-Signal schicken, damit das Tablet ehrlich
   „Warte auf Turnier-PC" anzeigt.
+- **Pausen-Buttons auf dem Tablet vereinheitlichen.** Die Buttons für
+  Verletzungs-/Behandlungspause und der „Weiterspielen"-Button, mit dem
+  eine laufende Pause beendet wird, sind uneinheitlich in Beschriftung,
+  Größe und Anordnung. Über alle Pausen-Typen hinweg angleichen, damit
+  die Bedienung im Spielbetrieb eindeutig ist.
 
 ## Court-Monitor — offene Punkte
 
@@ -112,6 +117,12 @@ verliehen):
   (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
 - **2-Felder-pro-TV-Modus.** Zwei benachbarte Felder auf einem großen TV
   (`…/display?courts=3,4`).
+- **Entschiedenes Match klar anzeigen — kein Geister-Satz.** Steht der
+  Sieger fest (z. B. 2:0 im Best-of-3), rendert der Court-Monitor weiterhin
+  eine leere dritte Satz-Spalte (0:0), als käme noch ein Satz. Sobald das
+  Ergebnis feststeht: keine weitere Satz-Spalte mehr zeigen, die gespielten
+  Sätze hervorheben und unmissverständlich kenntlich machen, wer gewonnen
+  hat (Sieger-Markierung).
 
 ## Bekannte Einschränkungen / technische Schuld
 

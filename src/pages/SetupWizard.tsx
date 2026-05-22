@@ -100,6 +100,62 @@ function ChoiceCard(props: {
   );
 }
 
+/**
+ * Eine unabhängig an-/abschaltbare Kachel (Icon, Titel, Beschreibung) –
+ * für Verbindungswege, die sich kombinieren lassen. Anders als
+ * `ChoiceCard` ist sie ein echter Schalter (eine Checkbox), nicht Teil
+ * einer Einfachauswahl.
+ */
+function ToggleCard(props: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  const Icon = props.icon;
+  return (
+    <button
+      onClick={props.onToggle}
+      role="switch"
+      aria-checked={props.active}
+      className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-left
+                  transition-colors ${
+                    props.active
+                      ? "border-slate-800 bg-white shadow-sm"
+                      : "border-slate-300 bg-white hover:border-slate-400"
+                  }`}
+    >
+      <span
+        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center
+                    rounded-lg ${
+                      props.active
+                        ? "bg-slate-800 text-white"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+      >
+        <Icon size={16} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{props.title}</span>
+        <span className="block text-xs text-slate-500">
+          {props.description}
+        </span>
+      </span>
+      <span
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center
+                    rounded border ${
+                      props.active
+                        ? "border-slate-800 bg-slate-800 text-white"
+                        : "border-slate-300 bg-white"
+                    }`}
+      >
+        {props.active && <Check size={14} />}
+      </span>
+    </button>
+  );
+}
+
 /** Ein beschriftetes Eingabefeld. */
 function Field(props: {
   label: string;
@@ -134,7 +190,14 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
   const [uploadLogs, setUploadLogs] = useState(initialConfig.upload_logs);
-  const [mode, setMode] = useState<ConnectionMode>(initialConfig.connection_mode);
+  // LAN und Cloud sind unabhängig schaltbar – aus dem gespeicherten
+  // connection_mode abgeleitet ("lan+cloud" → beide an).
+  const [lanEnabled, setLanEnabled] = useState(
+    initialConfig.connection_mode !== "cloud",
+  );
+  const [cloudEnabled, setCloudEnabled] = useState(
+    initialConfig.connection_mode !== "lan",
+  );
   const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
   const [annLang, setAnnLang] = useState<AnnounceLanguageMode>(
     initialConfig.announce.language_mode,
@@ -169,6 +232,10 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
 
   const isManual = presetId === MANUAL;
 
+  // Die beiden Modus-Schalter zurück auf einen connection_mode abbilden.
+  const connectionMode: ConnectionMode =
+    lanEnabled && cloudEnabled ? "lan+cloud" : cloudEnabled ? "cloud" : "lan";
+
   function buildConfig(): AppConfig {
     const preset = findPreset(presetId);
     const badhub =
@@ -188,7 +255,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       badhub,
       upload_logs: uploadLogs,
       install_id: initialConfig.install_id,
-      connection_mode: mode,
+      connection_mode: connectionMode,
       announce: {
         enabled: annEnabled,
         language_mode: annLang,
@@ -245,7 +312,9 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
 
   const canSave =
     host.trim() !== "" &&
-    (!isManual || (badhubUrl.trim() !== "" && badhubPassword.trim() !== ""));
+    (!isManual || (badhubUrl.trim() !== "" && badhubPassword.trim() !== "")) &&
+    // Mindestens ein Tablet-Verbindungsweg muss aktiv sein.
+    (lanEnabled || cloudEnabled);
 
   async function runTest() {
     setTest({ kind: "testing" });
@@ -370,23 +439,31 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       <section className="flex flex-col gap-2">
         <SectionHeader icon={Wifi}>Tablet-Verbindung</SectionHeader>
         <p className="text-xs text-slate-500">
-          Wie erreichen die Schiedsrichter-Tablets diesen PC? Lässt sich
-          später in den Einstellungen umstellen.
+          Wie erreichen die Schiedsrichter-Tablets diesen PC? Beide Wege
+          lassen sich zusammen aktivieren – etwa für ein Zwei-Hallen-Turnier
+          (eine Halle per LAN, die andere über die Cloud). Lässt sich später
+          in den Einstellungen umstellen.
         </p>
-        <ChoiceCard
+        <ToggleCard
           icon={Wifi}
           title="LAN – lokales Netz"
           description="Tablets verbinden sich direkt im Hallen-WLAN. Schnell und offline – braucht aber einen freigegebenen Port (Windows-Firewall)."
-          active={mode === "lan"}
-          onClick={() => setMode("lan")}
+          active={lanEnabled}
+          onToggle={() => setLanEnabled((v) => !v)}
         />
-        <ChoiceCard
+        <ToggleCard
           icon={Cloud}
           title="Über badhub.de – Cloud"
           description="Tablets und PC verbinden sich nur nach außen. Funktioniert auch hinter gesperrten Firmen-Firewalls – Internet vorausgesetzt."
-          active={mode === "cloud"}
-          onClick={() => setMode("cloud")}
+          active={cloudEnabled}
+          onToggle={() => setCloudEnabled((v) => !v)}
         />
+        {!lanEnabled && !cloudEnabled && (
+          <p className="flex items-start gap-1.5 text-xs text-rose-700">
+            <X size={14} className="mt-0.5 shrink-0" />
+            Mindestens einen Verbindungsweg aktivieren.
+          </p>
+        )}
       </section>
 
       {/* Sprachansagen */}
