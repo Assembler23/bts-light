@@ -22,6 +22,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Obergrenze verfolgter Monitor-Geräte (Missbrauchs-Schutz). Bei
+/// Überschreitung wird das am längsten nicht gesehene Gerät verdrängt.
+const MAX_MONITOR_DEVICES: usize = 128;
+
 /// Flüchtiger Live-Zustand eines Court-Monitor-Geräts (nicht persistiert –
 /// die Feld-Zuweisungen liegen in `monitor-assignments.json`).
 #[derive(Debug, Clone, Default)]
@@ -483,9 +487,19 @@ impl TabletState {
     // ─────────────────────────── Court-Monitor-Geräte ─────────────────────
 
     /// Registriert einen Monitor-Poll (setzt „zuletzt gesehen") und liefert
-    /// den offenen Fernbefehl des Geräts zurück.
+    /// den offenen Fernbefehl des Geräts zurück. Bei erreichter Obergrenze
+    /// wird das am längsten nicht gesehene Gerät verdrängt.
     pub fn record_monitor_poll(&self, device_id: &str) -> Option<MonitorCommand> {
         let mut live = self.monitor_live.write().unwrap();
+        if !live.contains_key(device_id) && live.len() >= MAX_MONITOR_DEVICES {
+            if let Some(oldest) = live
+                .iter()
+                .min_by_key(|(_, l)| l.last_seen_ms)
+                .map(|(id, _)| id.clone())
+            {
+                live.remove(&oldest);
+            }
+        }
         let entry = live.entry(device_id.to_string()).or_default();
         entry.last_seen_ms = now_ms();
         entry.command

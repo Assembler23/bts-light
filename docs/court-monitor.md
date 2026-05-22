@@ -121,6 +121,13 @@ Im Cloud-Modus pusht der bts-light-Host die Feld-Zuweisungen + Fernbefehle
 alle ~3 s (nur bei Änderung) an `…/monitor/control` und holt von
 `…/monitor-devices` die Geräteliste für die „Court-Monitore"-Seite.
 
+**Zugriffsschutz:** Alle Relay-Namespace-Routen haben bewusst kein eigenes
+Token – das Zugangsmerkmal ist die 128-Bit-UUID des Namespace
+(`install_id`). Wer sie kennt, kann Werbung/Zuweisungen überschreiben oder
+ein „Neu laden"/„Identifizieren" auslösen; mehr nicht (die Befehle sind
+ein geschlossenes Enum). Das ist dasselbe Modell wie für die Tablet- und
+Werbe-Routen und für eine zugangsfreie Plug-and-play-App akzeptiert.
+
 ## Werbung (Leerlauf)
 
 Läuft kein Spiel, zeigt der Monitor Werbung:

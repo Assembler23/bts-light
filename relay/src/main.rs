@@ -299,7 +299,8 @@ fn now_ms() -> u64 {
 
 /// Rendert `monitor.html` mit den Platzhaltern. `__BASE__` ist der
 /// Namespace-Präfix – so lösen sich Flaggen, Werbung und State-Abfrage
-/// relativ korrekt auf.
+/// relativ korrekt auf. `ns` ist hier bereits durch `valid_namespace`
+/// geprüft (nur Hex + Bindestriche) → unbedenklich im JS-String-Literal.
 fn render_monitor_html(mode: &str, ns: &str, court_label: &str) -> String {
     MONITOR_HTML
         .replace("__MODE__", mode)
@@ -367,12 +368,22 @@ async fn monitor_device_state(
         let state = empty_monitor_state(String::new());
         return ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response();
     };
-    // Poll registrieren (mit Geräte-Obergrenze gegen Missbrauch).
-    if namespace.monitor_seen.contains_key(&q.device)
-        || namespace.monitor_seen.len() < MAX_MONITOR_DEVICES
+    // Poll registrieren. Bei erreichter Obergrenze das am längsten nicht
+    // gesehene Gerät verdrängen – so sperrt der Missbrauchs-Schutz keine
+    // echten Geräte nach Geräte-Wechseln dauerhaft aus.
+    if !namespace.monitor_seen.contains_key(&q.device)
+        && namespace.monitor_seen.len() >= MAX_MONITOR_DEVICES
     {
-        namespace.monitor_seen.insert(q.device.clone(), now_ms());
+        if let Some(oldest) = namespace
+            .monitor_seen
+            .iter()
+            .min_by_key(|(_, &ts)| ts)
+            .map(|(id, _)| id.clone())
+        {
+            namespace.monitor_seen.remove(&oldest);
+        }
     }
+    namespace.monitor_seen.insert(q.device.clone(), now_ms());
     let command = namespace.monitor_control.commands.get(&q.device).copied();
     let assigned = namespace
         .monitor_control
@@ -390,6 +401,11 @@ async fn monitor_device_state(
 
 /// Nimmt die Geräte-Steuerdaten (Feld-Zuweisungen + Fernbefehle) vom
 /// bts-light-Host entgegen. Nur erlaubt, solange der Host verbunden ist.
+///
+/// Wie alle Namespace-Routen bewusst ohne eigenes Auth-Token: der
+/// 128-Bit-UUID-Namespace ist das Zugangsmerkmal. Worst Case ist ein
+/// erzwungenes „Neu laden"/„Identifizieren" eines bekannten Turniers –
+/// die Befehle sind ein geschlossenes Enum, kein Code.
 async fn monitor_control_upload(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
