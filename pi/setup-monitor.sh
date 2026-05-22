@@ -52,6 +52,16 @@ cat > "$HOME/.local/bin/bts-monitor.sh" <<EOF
 # Startet den Court-Monitor im Vollbild – aufgerufen vom Autostart.
 URL="$URL"
 
+# Geräte-ID aus der Pi-Hardware-Seriennummer (letzte 8 Stellen). Sie wird
+# bei jedem Start frisch gelesen – so bleibt jeder Pi eindeutig, auch
+# wenn die SD-Karte von einem Master-Image geklont wurde.
+SERIAL="\$(tr -d '\\0' < /sys/firmware/devicetree/base/serial-number 2>/dev/null || true)"
+[ -z "\$SERIAL" ] && SERIAL="\$(awk '/^Serial/{print \$NF}' /proc/cpuinfo 2>/dev/null || true)"
+[ -z "\$SERIAL" ] && SERIAL="\$(hostname)"
+DEVICE="\$(printf '%s' "\$SERIAL" | tail -c 8)"
+SEP="?"; case "\$URL" in *\\?*) SEP="&" ;; esac
+FULL_URL="\${URL}\${SEP}device=\${DEVICE}"
+
 # Falls der Pi den Strom verloren hat: Chromiums „Wiederherstellen?"-
 # Frage unterdrücken, indem der Absturz-Marker zurückgesetzt wird.
 PREF="\$HOME/.config/chromium/Default/Preferences"
@@ -66,7 +76,7 @@ exec "$BROWSER" \\
   --kiosk --incognito --noerrdialogs --disable-infobars \\
   --disable-session-crashed-bubble --no-first-run \\
   --check-for-update-interval=31536000 \\
-  "\$URL"
+  "\$FULL_URL"
 EOF
 chmod +x "$HOME/.local/bin/bts-monitor.sh"
 

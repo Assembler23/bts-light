@@ -267,8 +267,16 @@
   // aufbrechen kann.
   var COURT_LABEL = "";
 
-  // Stabile Geräte-ID (nur Geräte-Modus): einmal erzeugt, in localStorage.
-  function ensureDeviceId() {
+  // Geräte-ID (nur Geräte-Modus). Bevorzugt aus dem URL-Parameter
+  // `?device=` – der Pi-Kiosk setzt dort seine Hardware-Seriennummer ein,
+  // damit eine geklonte SD-Karte trotzdem je Pi eindeutig bleibt. Fehlt
+  // der Parameter (z. B. Aufruf direkt im Browser), eine zufällige,
+  // dauerhafte ID in localStorage.
+  function resolveDeviceId() {
+    try {
+      var fromUrl = new URLSearchParams(window.location.search).get("device");
+      if (fromUrl) return fromUrl;
+    } catch (e) {}
     var k = "bts-monitor-device-id";
     var id = "";
     try { id = localStorage.getItem(k) || ""; } catch (e) {}
@@ -280,7 +288,7 @@
     }
     return id;
   }
-  var DEVICE_ID = MODE === "device" ? ensureDeviceId() : "";
+  var DEVICE_ID = MODE === "device" ? resolveDeviceId() : "";
 
   // Adresse der State-Abfrage: Geräte-Modus fragt mit der Geräte-ID,
   // der feste Modus leitet sie aus dem eigenen Pfad ab (…/display → …/state).

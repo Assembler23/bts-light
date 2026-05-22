@@ -117,10 +117,11 @@ Da alle Monitore dieselbe Adresse nutzen, ist jeder weitere Pi schnell:
 
 - **Einzeln:** Schritte 1–4 wiederholen (beim Imager einfach einen
   anderen Hostnamen vergeben, z. B. `monitor-2`).
-- **Schneller per Klonen:** Eine fertig eingerichtete SD-Karte mit dem
-  Raspberry Pi Imager (oder dem „SD Card Copier" auf dem Pi) auf weitere
-  Karten kopieren. Jeder Pi vergibt sich beim ersten Start automatisch
-  eine **eigene** Geräte-ID — du musst nichts umstellen.
+- **Schneller per Klonen (Master-Image):** Eine fertig eingerichtete
+  SD-Karte ist dein Master. Sie auf weitere Karten kopieren (Raspberry Pi
+  Imager, oder der „SD Card Copier" auf dem Pi). Jeder Pi meldet sich
+  automatisch mit seiner **eigenen Hardware-Seriennummer** — die geklonte
+  Karte bleibt also je Pi eindeutig, du musst nichts umstellen.
 
 ## Tipps & Problemlösung
 

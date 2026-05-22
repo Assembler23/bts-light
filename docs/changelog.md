@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.8.1
+
+- **Court-Monitor: stabile Geräte-ID per Pi-Seriennummer.** Der Pi-Kiosk
+  übergibt jetzt die Hardware-Seriennummer als Geräte-ID. Damit lässt
+  sich eine fertig eingerichtete SD-Karte beliebig auf weitere Pis
+  klonen, ohne dass sich Geräte eine ID teilen – die Grundlage für ein
+  „Master-Image" zur einfachen Verteilung. Anleitung:
+  [pi-setup.md](pi-setup.md).
+
 ## v0.8.0
 
 - **TV-Verwaltung für die Court-Monitore.** Monitore sind jetzt generische
