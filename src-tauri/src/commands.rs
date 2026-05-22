@@ -61,6 +61,8 @@ pub struct AppState {
     pub relay_task: Mutex<Option<JoinHandle<()>>>,
     /// Handle des Diagnose-Log-Uploads, falls aktiv.
     pub log_task: Mutex<Option<JoinHandle<()>>>,
+    /// Laufende mDNS-Bekanntgabe (`bts-light.local`, nur LAN-Modus).
+    pub mdns: Mutex<Option<mdns_sd::ServiceDaemon>>,
 }
 
 fn now_ms() -> u64 {
@@ -220,6 +222,16 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                     }
                 }));
             }
+            drop(server_slot);
+            // mDNS-Bekanntgabe (`bts-light.local`) – damit Tablets und
+            // Monitore den PC ohne feste IP finden. Fehler ist unkritisch.
+            let mut mdns_slot = state.mdns.lock().expect("mDNS-Mutex nicht vergiftet");
+            if mdns_slot.is_none() {
+                match crate::tablet::mdns::advertise() {
+                    Ok(daemon) => *mdns_slot = Some(daemon),
+                    Err(e) => tracing::warn!("mDNS-Bekanntgabe fehlgeschlagen: {e}"),
+                }
+            }
         }
         ConnectionMode::Cloud => {
             let mut relay_slot = state
@@ -295,6 +307,14 @@ pub fn stop_sync(state: State<'_, AppState>) {
         .take()
     {
         handle.abort();
+    }
+    if let Some(daemon) = state
+        .mdns
+        .lock()
+        .expect("mDNS-Mutex nicht vergiftet")
+        .take()
+    {
+        let _ = daemon.shutdown();
     }
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
 }

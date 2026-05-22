@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.0
+
+- **Court-Monitor: fester Name `bts-light.local` (mDNS).** Der Turnier-PC
+  meldet sich im LAN-Modus unter dem festen Namen `bts-light.local` im
+  Netz. Tablets und Court-Monitore erreichen ihn darüber, **ohne seine
+  IP-Adresse zu kennen** – es braucht keine feste IP mehr, weder im
+  Router noch am Laptop. Die Monitor-Adresse
+  `http://bts-light.local:8088/monitor` ist damit in jedem Turnier-WLAN
+  dieselbe – die Grundlage für ein Master-Image, das ohne Anpassung auf
+  jedem Pi läuft. Details: [court-monitor.md](court-monitor.md).
+
 ## v0.8.2
 
 - **Court-Monitor: Satzstand bleibt bei kurzem Tablet-Aussetzer stehen.**
