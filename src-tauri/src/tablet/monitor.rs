@@ -89,7 +89,9 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
 }
 
 /// Baut den vollständigen Anzeige-Zustand eines Feldes (LAN-Pfad).
+/// `court_id` ist die Feld-Identität, `court_label` der Anzeigename.
 pub fn build_monitor_state(
+    court_id: i64,
     court_label: String,
     court: MonitorCourt,
     config: &CourtMonitorConfig,
@@ -108,6 +110,7 @@ pub fn build_monitor_state(
         sets,
     });
     MonitorState {
+        court_id,
         court_label,
         tournament_name: court.tournament_name,
         match_info,
@@ -130,19 +133,28 @@ fn player(p: &BtpPlayer) -> MonitorPlayer {
 // ─────────────────────────── Geräte-Verwaltung ────────────────────────────
 
 /// Dateiname der Monitor-Feld-Zuweisungen (im App-Config-Verzeichnis).
-pub const MONITOR_ASSIGN_FILE: &str = "monitor-assignments.json";
+///
+/// `…-v2`: die Zuweisungen sind seit der CourtID-Umstellung
+/// `Geräte-ID → CourtID` (vorher `Geräte-ID → Feldname`). Der neue
+/// Dateiname trennt die Formate sauber – eine ältere bts-light-Version
+/// liest die v2-Datei nicht (sie kennt nur `monitor-assignments.json`) und
+/// stürzt damit nicht über die geänderten Werttypen. Eine bestehende
+/// v1-Datei wird ignoriert: die Monitor-Geräte müssen ihren Feldern einmal
+/// neu zugeordnet werden (bewusst in Kauf genommen, einmalig).
+pub const MONITOR_ASSIGN_FILE: &str = "monitor-assignments-v2.json";
 
-/// Liest die Geräte→Feld-Zuweisungen aus der JSON-Datei. Fehlt oder
-/// klemmt die Datei, ist die Zuweisung leer (kein Fehler).
-pub fn read_assignments(path: &Path) -> HashMap<String, String> {
+/// Liest die Geräte→Feld-Zuweisungen (Geräte-ID → CourtID) aus der
+/// JSON-Datei. Fehlt oder klemmt die Datei, ist die Zuweisung leer (kein
+/// Fehler).
+pub fn read_assignments(path: &Path) -> HashMap<String, i64> {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default()
 }
 
-/// Schreibt die Geräte→Feld-Zuweisungen als JSON.
-pub fn write_assignments(path: &Path, map: &HashMap<String, String>) -> std::io::Result<()> {
+/// Schreibt die Geräte→Feld-Zuweisungen (Geräte-ID → CourtID) als JSON.
+pub fn write_assignments(path: &Path, map: &HashMap<String, i64>) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -154,6 +166,7 @@ pub fn write_assignments(path: &Path, map: &HashMap<String, String>) -> std::io:
 /// Monitor zeigt damit die Kopplungs-Seite mit seinem Code.
 pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
     MonitorState {
+        court_id: 0,
         court_label: String::new(),
         tournament_name: String::new(),
         match_info: None,
@@ -193,9 +206,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(MONITOR_ASSIGN_FILE);
         assert!(read_assignments(&path).is_empty()); // fehlende Datei → leer
+                                                     // Zuweisungen sind nun Geräte-ID → CourtID.
         let mut map = HashMap::new();
-        map.insert("dev-1".to_string(), "Feld 3".to_string());
+        map.insert("dev-1".to_string(), 103i64);
         write_assignments(&path, &map).unwrap();
         assert_eq!(read_assignments(&path), map);
+    }
+
+    #[test]
+    fn read_assignments_ignores_old_v1_name_format() {
+        // Eine v1-Datei (Geräte-ID → Feldname als String) darf die v2-
+        // Deserialisierung nicht zum Absturz bringen – sie ergibt leer.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_ASSIGN_FILE);
+        std::fs::write(&path, r#"{"dev-1":"Feld 3"}"#).unwrap();
+        assert!(read_assignments(&path).is_empty());
     }
 }

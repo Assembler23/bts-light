@@ -11,7 +11,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { assignMonitor, monitorCommand, monitorDevices, tabletOverview } from "../api";
-import type { MonitorDeviceInfo, TabletInfo } from "../types";
+import type { CourtOverview, MonitorDeviceInfo, TabletInfo } from "../types";
 
 interface Props {
   onBack: () => void;
@@ -57,7 +57,9 @@ export function CourtMonitorPanel({ onBack }: Props) {
     : "http://bts-light.local:8088/monitor";
   const fallbackUrl =
     !isCloud && info?.server_host ? `http://${info.server_host}/monitor` : "";
-  const courts = (info?.courts ?? []).map((c) => c.court);
+  // Felder mit Identität (CourtID) und Anzeigename – die Zuweisung nutzt
+  // die CourtID, das <select> zeigt den Namen.
+  const courts: CourtOverview[] = info?.courts ?? [];
 
   async function refresh() {
     try {
@@ -67,9 +69,9 @@ export function CourtMonitorPanel({ onBack }: Props) {
     }
   }
 
-  async function assign(deviceId: string, court: string) {
+  async function assign(deviceId: string, courtId: number | null) {
     try {
-      await assignMonitor(deviceId, court || null);
+      await assignMonitor(deviceId, courtId);
       await refresh();
     } catch {
       /* ignorieren */
@@ -151,7 +153,7 @@ export function CourtMonitorPanel({ onBack }: Props) {
                 key={d.id}
                 device={d}
                 courts={courts}
-                onAssign={(court) => void assign(d.id, court)}
+                onAssign={(courtId) => void assign(d.id, courtId)}
                 onIdentify={() => void monitorCommand(d.id, "identify")}
                 onReload={() => void monitorCommand(d.id, "reload")}
               />
@@ -171,17 +173,27 @@ function DeviceRow({
   onReload,
 }: {
   device: MonitorDeviceInfo;
-  courts: string[];
-  onAssign: (court: string) => void;
+  courts: CourtOverview[];
+  onAssign: (courtId: number | null) => void;
   onIdentify: () => void;
   onReload: () => void;
 }) {
+  // Optionen des <select>: value = CourtID (Identität), Text = Feldname.
   // Falls einem Gerät ein Feld zugewiesen ist, das nicht (mehr) in der
   // Court-Liste steht, trotzdem als Option führen.
-  const options =
-    device.court && !courts.includes(device.court)
-      ? [device.court, ...courts]
-      : courts;
+  const options: { id: number; label: string }[] = courts.map((c) => ({
+    id: c.court_id,
+    label: c.court,
+  }));
+  if (
+    device.courtId !== null &&
+    !options.some((o) => o.id === device.courtId)
+  ) {
+    options.unshift({
+      id: device.courtId,
+      label: device.court ?? `Feld ${device.courtId}`,
+    });
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -199,15 +211,18 @@ function DeviceRow({
       </span>
 
       <select
-        value={device.court ?? ""}
-        onChange={(e) => onAssign(e.currentTarget.value)}
+        value={device.courtId ?? ""}
+        onChange={(e) => {
+          const v = e.currentTarget.value;
+          onAssign(v === "" ? null : Number(v));
+        }}
         className="ml-auto rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
                    focus:border-slate-500 focus:outline-none"
       >
         <option value="">— kein Feld —</option>
-        {options.map((c) => (
-          <option key={c} value={c}>
-            {c}
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
           </option>
         ))}
       </select>

@@ -567,9 +567,14 @@
 //   - history speichert vollständige State-Snapshots zur sauberen Undo.
 // ───────────────────────────────────────────────────────────────────────
 
+// Feld-Identität: COURT_ID ist die stabile BTP-CourtID (Zahl) – sie
+// adressiert das Feld in allen Server-Frames und localStorage-Schlüsseln.
+// COURT_LABEL ist nur der Anzeigename; Feldnamen wiederholen sich bei
+// Mehr-Hallen-Turnieren, die CourtID nicht.
+const COURT_ID = Number('__COURT_ID__') || 0;
 const COURT_LABEL = '__COURT_LABEL__';
 
-// Basis-Pfad der Server-Endpunkte: alles vor "/court/<label>".
+// Basis-Pfad der Server-Endpunkte: alles vor "/court/<id>".
 //   LAN   → ""  (Endpunkte /ws, /result direkt am eingebetteten Server)
 //   Cloud → "/bts-relay/<install_id>"  (der Relay leitet weiter)
 // So funktioniert dieselbe Datei für beide Verbindungsarten.
@@ -582,7 +587,9 @@ const BASE_PATH = location.pathname.replace(/\/court\/[^/]*\/?$/, '');
 // herunterladbar (5× Tap auf den Connection-Dot oben rechts öffnet das
 // Diagnose-Modal).
 const LOG_MAX = 300;
-const LOG_KEY = `badhub.tablet.log.${COURT_LABEL}`;
+// localStorage-Schlüssel je Feld – per CourtID, damit gleichnamige Felder
+// eines Mehr-Hallen-Turniers nicht denselben Log teilen.
+const LOG_KEY = `badhub.tablet.log.${COURT_ID}`;
 const LOG = [];
 try {
   const raw = localStorage.getItem(LOG_KEY);
@@ -599,7 +606,7 @@ function tlog(level, event, detail) {
   try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); } catch { /* quota voll */ }
   try { console.log(`[${new Date(e.t).toISOString()}] ${level} ${event}`, detail ?? ''); } catch {}
 }
-tlog('info', 'tablet_boot', { courtLabel: COURT_LABEL, ua: navigator.userAgent });
+tlog('info', 'tablet_boot', { courtId: COURT_ID, courtLabel: COURT_LABEL, ua: navigator.userAgent });
 
 const STATE = {
   match: /** @type {null | {matchId:number, teamA:any[], teamB:any[], eventLabel:string, roundIndex:number, bestOfSets:number, targetScore:number}} */ (null),
@@ -722,7 +729,8 @@ function connect() {
     // Übernahme-Status neu vom Server bestimmen lassen.
     STATE.locked = false;
     STATE.occupied = false;
-    ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtLabel: COURT_LABEL }));
+    // Identität ist die CourtID; der Feldname geht nur informativ mit.
+    ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtId: COURT_ID, courtLabel: COURT_LABEL }));
     if (sendBattery) sendBattery();
     // Aktive Meldungen nach einem Reconnect erneut melden.
     if (STATE.alertInjury || STATE.alertOfficial) sendAlert();
@@ -776,6 +784,7 @@ function sendScoreUpdate() {
     : null;
   ws.send(JSON.stringify({
     type: 'score_update',
+    courtId: COURT_ID,
     courtLabel: COURT_LABEL,
     scoreA: current.a, scoreB: current.b,
     currentSet: setsHistory.length + 1,
@@ -999,11 +1008,12 @@ function renderClock() {
 
 // ─────────────────────────── localStorage-Persistenz ────────────────────
 // Damit der Zähl-Stand einen Tablet-Browser-Reload überlebt. Schlüssel ist
-// court-spezifisch — beim Geräte-Tausch oder Court-Wechsel wird der State
-// nicht ungewollt vermischt. submittedOk + submitting werden NICHT
+// feld-spezifisch (per CourtID) — beim Geräte-Tausch oder Feld-Wechsel wird
+// der State nicht ungewollt vermischt, und gleichnamige Felder eines Mehr-
+// Hallen-Turniers teilen ihn nicht. submittedOk + submitting werden NICHT
 // persistiert (Browser-spezifisch); pendingServer wird auch ignoriert weil
 // der User-Tap auf den Setup-Modal eh interaktiv läuft.
-const PERSIST_KEY = `badhub.tablet.state.${COURT_LABEL}`;
+const PERSIST_KEY = `badhub.tablet.state.${COURT_ID}`;
 
 function persistState() {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
@@ -1393,7 +1403,7 @@ function submit() {
   const sets = STATE.setsCompleted.map(s => sideOfA === 'left'
     ? { a: s.left, b: s.right }
     : { a: s.right, b: s.left });
-  const body = { matchId: STATE.match.matchId, courtLabel: COURT_LABEL, sets };
+  const body = { matchId: STATE.match.matchId, courtId: COURT_ID, courtLabel: COURT_LABEL, sets };
   if (STATE.retired) {
     body.retired = true;
     body.winner = STATE.retiredWinner === 'a' ? 1 : 2;

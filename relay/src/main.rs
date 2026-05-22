@@ -71,9 +71,6 @@ const MAX_NAMESPACES: usize = 2000;
 /// Obergrenze offener Ergebnis-Übermittlungen je Namespace.
 const MAX_PENDING_PER_NS: usize = 16;
 
-/// Maximale Länge eines Court-Namens (Schutz gegen überlange Frames).
-const MAX_COURT_LABEL_LEN: usize = 128;
-
 /// Maximale Größe eines gespiegelten Spielzustands (Schutz gegen Missbrauch).
 const MAX_STATE_LEN: usize = 64 * 1024;
 
@@ -97,15 +94,18 @@ struct MonitorBundle {
 struct Namespace {
     /// Sende-Ende zur Host-WebSocket (bts-light), falls verbunden.
     host: Option<Tx>,
-    /// Court-Name → Sende-Ende zur Tablet-WebSocket.
-    tablets: HashMap<String, Tx>,
-    /// Court-Name → zuletzt gespiegelter Spielzustand (JSON) des aktiven
+    /// CourtID → Sende-Ende zur Tablet-WebSocket.
+    tablets: HashMap<i64, Tx>,
+    /// CourtID → zuletzt gespiegelter Spielzustand (JSON) des aktiven
     /// Tablets – wird einem übernehmenden Gerät übergeben.
-    court_state: HashMap<String, String>,
-    /// Court-Name → aktuelles Match (für die Court-Monitor-Anzeige).
-    court_matches: HashMap<String, MatchBrief>,
-    /// Court-Name → Satzstand in Team-Koordinaten (für die Monitor-Anzeige).
-    court_scores: HashMap<String, Vec<SetAb>>,
+    court_state: HashMap<i64, String>,
+    /// CourtID → aktuelles Match (für die Court-Monitor-Anzeige).
+    court_matches: HashMap<i64, MatchBrief>,
+    /// CourtID → Satzstand in Team-Koordinaten (für die Monitor-Anzeige).
+    court_scores: HashMap<i64, Vec<SetAb>>,
+    /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
+    /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
+    court_labels: HashMap<i64, String>,
     /// Court-Monitor-Konfiguration + Werbebilder, falls hochgeladen.
     monitor: Option<MonitorBundle>,
     /// Geräte-Steuerung (Feld-Zuweisungen + Fernbefehle), vom Host gepusht.
@@ -127,6 +127,7 @@ impl Namespace {
             court_state: HashMap::new(),
             court_matches: HashMap::new(),
             court_scores: HashMap::new(),
+            court_labels: HashMap::new(),
             monitor: None,
             monitor_control: MonitorControl::default(),
             monitor_seen: HashMap::new(),
@@ -200,14 +201,14 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/{ns}/court/{label}", get(court_page))
-        .route("/{ns}/court/{label}/display", get(monitor_page))
-        .route("/{ns}/court/{label}/state", get(monitor_state))
+        .route("/{ns}/court/{id}", get(court_page))
+        .route("/{ns}/court/{id}/display", get(monitor_page))
+        .route("/{ns}/court/{id}/state", get(monitor_state))
         .route("/{ns}/monitor", get(monitor_device_page))
         .route("/{ns}/monitor/state", get(monitor_device_state))
         .route("/{ns}/monitor/control", post(monitor_control_upload))
         .route("/{ns}/monitor-devices", get(monitor_devices_list))
-        .route("/{ns}/qr/{label}", get(qr_svg))
+        .route("/{ns}/qr/{id}", get(qr_svg))
         .route("/{ns}/flags/{file}", get(flag_route))
         .route("/{ns}/ads/{idx}", get(ad_image))
         .route(
@@ -240,20 +241,35 @@ async fn health(State(broker): State<Broker>) -> Json<serde_json::Value> {
     }))
 }
 
-/// Liefert die Tablet-UI für einen Court (kein Caching – immer frisch).
-async fn court_page(Path((ns, label)): Path<(String, String)>) -> impl IntoResponse {
+/// Liefert die Tablet-UI für ein Feld (per CourtID; kein Caching – immer
+/// frisch). Der Feldname für die Anzeige stammt – falls bekannt – aus dem
+/// Namespace; sonst bleibt er leer und wird vom ersten Server-Frame
+/// nachgeliefert.
+async fn court_page(
+    State(broker): State<Broker>,
+    Path((ns, court_id)): Path<(String, i64)>,
+) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    tracing::info!("Tablet-Seite ausgeliefert für Court '{label}'");
-    let body = TABLET_HTML.replace("__COURT_LABEL__", &html_escape(&label));
+    tracing::info!("Tablet-Seite ausgeliefert für Feld {court_id}");
+    let label = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns)
+            .and_then(|n| n.court_labels.get(&court_id).cloned())
+            .unwrap_or_default()
+    };
+    let body = TABLET_HTML
+        .replace("__COURT_ID__", &court_id.to_string())
+        .replace("__COURT_LABEL__", &html_escape(&label));
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
-/// QR-Code (SVG), der auf die öffentliche Tablet-URL des Courts zeigt.
+/// QR-Code (SVG), der auf die öffentliche Tablet-URL des Felds (per
+/// CourtID) zeigt.
 async fn qr_svg(
     State(broker): State<Broker>,
-    Path((ns, label)): Path<(String, String)>,
+    Path((ns, court_id)): Path<(String, i64)>,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
@@ -262,7 +278,7 @@ async fn qr_svg(
         "{}/{}/court/{}",
         broker.public_base,
         path_encode(&ns),
-        path_encode(&label)
+        court_id
     );
     match qrcode::QrCode::new(url.as_bytes()) {
         Ok(code) => {
@@ -320,14 +336,21 @@ fn render_monitor_html(mode: &str, base: &str, court_label: &str) -> String {
         .replace("__COURT_LABEL__", &html_escape(court_label))
 }
 
-/// Liefert die Court-Monitor-Anzeige fest für ein Feld (`/court/X/display`).
+/// Liefert die Court-Monitor-Anzeige fest für ein Feld
+/// (`/court/{id}/display`, per CourtID).
 async fn monitor_page(
     State(broker): State<Broker>,
-    Path((ns, label)): Path<(String, String)>,
+    Path((ns, court_id)): Path<(String, i64)>,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
+    let label = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns)
+            .and_then(|n| n.court_labels.get(&court_id).cloned())
+            .unwrap_or_default()
+    };
     let body = render_monitor_html("fixed", &monitor_base(&broker.public_base, &ns), &label);
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
@@ -344,19 +367,20 @@ async fn monitor_device_page(
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
-/// Anzeige-Zustand eines fest verdrahteten Feldes, im Sekundentakt gepollt.
+/// Anzeige-Zustand eines fest verdrahteten Feldes (per CourtID), im
+/// Sekundentakt gepollt.
 async fn monitor_state(
     State(broker): State<Broker>,
-    Path((ns, label)): Path<(String, String)>,
+    Path((ns, court_id)): Path<(String, i64)>,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     let map = broker.namespaces.lock().await;
     let state = match map.get(&ns) {
-        Some(namespace) => build_monitor_state(namespace, &label),
+        Some(namespace) => build_monitor_state(namespace, court_id),
         // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
-        None => empty_monitor_state(label),
+        None => empty_monitor_state(court_id, String::new()),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
 }
@@ -383,7 +407,7 @@ async fn monitor_device_state(
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(&ns) else {
         // Host nicht verbunden – das Gerät zeigt die Leerlauf-Seite.
-        let state = empty_monitor_state(String::new());
+        let state = empty_monitor_state(0, String::new());
         return ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response();
     };
     // Poll registrieren. Bei erreichter Obergrenze das am längsten nicht
@@ -407,9 +431,9 @@ async fn monitor_device_state(
         .monitor_control
         .assignments
         .get(&q.device)
-        .cloned();
+        .copied();
     let mut state = match assigned {
-        Some(court) => build_monitor_state(namespace, &court),
+        Some(court_id) => build_monitor_state(namespace, court_id),
         None => unassigned_state(&q.device),
     };
     state.command = command;
@@ -452,6 +476,7 @@ async fn monitor_devices_list(
     let devices: Vec<MonitorDeviceInfo> = match map.get(&ns) {
         Some(n) => relay_proto::build_device_list(
             &n.monitor_control.assignments,
+            &n.court_labels,
             &n.monitor_seen,
             now_ms(),
         ),
@@ -461,8 +486,9 @@ async fn monitor_devices_list(
 }
 
 /// Leerer Monitor-Zustand (kein Match, keine Werbung) – Leerlauf-Anzeige.
-fn empty_monitor_state(court_label: String) -> MonitorState {
+fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
     MonitorState {
+        court_id,
         court_label,
         tournament_name: String::new(),
         match_info: None,
@@ -480,33 +506,42 @@ fn unassigned_state(device_id: &str) -> MonitorState {
     MonitorState {
         unassigned: true,
         device_code: device_code(device_id),
-        ..empty_monitor_state(String::new())
+        ..empty_monitor_state(0, String::new())
     }
 }
 
-/// Baut den Monitor-Anzeige-Zustand aus dem gespeicherten Namespace-Stand.
-fn build_monitor_state(namespace: &Namespace, court: &str) -> MonitorState {
+/// Baut den Monitor-Anzeige-Zustand aus dem gespeicherten Namespace-Stand
+/// (für ein Feld per CourtID).
+fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
     let monitor = namespace.monitor.as_ref();
-    let match_info = namespace.court_matches.get(court).map(|mb| MonitorMatch {
-        match_id: mb.match_id,
-        discipline: mb.discipline.clone(),
-        event_label: mb.event_label.clone(),
-        match_number: mb.match_number,
-        team1: mb.team_a.iter().map(monitor_player).collect(),
-        team2: mb.team_b.iter().map(monitor_player).collect(),
-        sets: namespace
-            .court_scores
-            .get(court)
+    let match_info = namespace
+        .court_matches
+        .get(&court_id)
+        .map(|mb| MonitorMatch {
+            match_id: mb.match_id,
+            discipline: mb.discipline.clone(),
+            event_label: mb.event_label.clone(),
+            match_number: mb.match_number,
+            team1: mb.team_a.iter().map(monitor_player).collect(),
+            team2: mb.team_b.iter().map(monitor_player).collect(),
+            sets: namespace
+                .court_scores
+                .get(&court_id)
+                .cloned()
+                .unwrap_or_default(),
+        });
+    MonitorState {
+        court_id,
+        court_label: namespace
+            .court_labels
+            .get(&court_id)
             .cloned()
             .unwrap_or_default(),
-    });
-    MonitorState {
-        court_label: court.to_string(),
         tournament_name: monitor
             .map(|m| m.tournament_name.clone())
             .unwrap_or_default(),
         match_info,
-        court_state: namespace.court_state.get(court).cloned(),
+        court_state: namespace.court_state.get(&court_id).cloned(),
         config: monitor.map(|m| m.config.clone()).unwrap_or_default(),
         ads: monitor
             .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
@@ -668,6 +703,7 @@ async fn result(
         namespace.pending.insert(req_id, ack_tx);
         let frame = RelayFrame::Result {
             req_id,
+            court_id: body.court_id,
             court_label: body.court_label.clone(),
             match_id: body.match_id,
             sets: body.sets.clone(),
@@ -707,12 +743,13 @@ async fn tablet_ws(
         .into_response()
 }
 
-/// Eine Tablet-Verbindung: meldet sich für einen Court an, leitet
-/// Score-Updates an den Host weiter, empfängt Match-Zuweisungen.
+/// Eine Tablet-Verbindung: meldet sich für ein Feld (per CourtID) an,
+/// leitet Score-Updates an den Host weiter, empfängt Match-Zuweisungen.
 async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
-    let mut court: Option<String> = None;
-    // Schiedst dieses Tablet den Court aktiv? Passive Tablets warten auf
+    // Feld-Identität dieser Verbindung: die CourtID, sobald `identify` kam.
+    let mut court: Option<i64> = None;
+    // Schiedst dieses Tablet das Feld aktiv? Passive Tablets warten auf
     // „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
     let mut active = false;
     let mut ping = tokio::time::interval(HEARTBEAT);
@@ -724,17 +761,17 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                 match msg {
                     Message::Text(t) => {
                         match serde_json::from_str::<TabletMsg>(t.as_str()) {
-                            Ok(TabletMsg::Identify { court_label }) => {
-                                match attach_tablet(&broker, &ns, &court_label, &tx).await {
+                            Ok(TabletMsg::Identify { court_id, .. }) => {
+                                match attach_tablet(&broker, &ns, court_id, &tx).await {
                                     AttachResult::Active => {
-                                        tracing::info!("Tablet verbunden: Namespace '{ns}', Court '{court_label}'");
+                                        tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
                                         active = true;
-                                        court = Some(court_label);
+                                        court = Some(court_id);
                                     }
                                     AttachResult::Occupied => {
-                                        tracing::info!("Court '{court_label}' belegt – Tablet wartet auf Übernahme");
+                                        tracing::info!("Feld {court_id} belegt – Tablet wartet auf Übernahme");
                                         let _ = tx.send(text(&ServerMsg::CourtOccupied));
-                                        court = Some(court_label);
+                                        court = Some(court_id);
                                     }
                                     AttachResult::Rejected => {
                                         let _ = socket.send(Message::Close(None)).await;
@@ -743,29 +780,29 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                 }
                             }
                             Ok(TabletMsg::TakeOver) => {
-                                if let (Some(c), false) = (court.clone(), active) {
-                                    take_over_court(&broker, &ns, &c, &tx).await;
+                                if let (Some(c), false) = (court, active) {
+                                    take_over_court(&broker, &ns, c, &tx).await;
                                     active = true;
-                                    tracing::info!("Tablet übernimmt Court '{c}' (Namespace '{ns}')");
+                                    tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
                                 }
                             }
                             Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
-                                if let (Some(c), true) = (&court, active) {
+                                if let (Some(c), true) = (court, active) {
                                     forward_score(&broker, &ns, c, score_a, score_b, sets_history).await;
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
-                                if let (Some(c), true) = (&court, active) {
+                                if let (Some(c), true) = (court, active) {
                                     forward_battery(&broker, &ns, c, percent, charging).await;
                                 }
                             }
                             Ok(TabletMsg::Alert { injury, official }) => {
-                                if let (Some(c), true) = (&court, active) {
+                                if let (Some(c), true) = (court, active) {
                                     forward_alert(&broker, &ns, c, injury, official).await;
                                 }
                             }
                             Ok(TabletMsg::StateSync { state }) => {
-                                if let (Some(c), true) = (&court, active) {
+                                if let (Some(c), true) = (court, active) {
                                     store_court_state(&broker, &ns, c, state).await;
                                 }
                             }
@@ -789,100 +826,113 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     }
 
     // Nur das aktive Tablet räumt seinen Court-Eintrag ab.
-    if let (Some(c), true) = (&court, active) {
+    if let (Some(c), true) = (court, active) {
         detach_tablet(&broker, &ns, c, &tx).await;
-        tracing::info!("Tablet getrennt: Namespace '{ns}', Court '{c}'");
+        tracing::info!("Tablet getrennt: Namespace '{ns}', Feld {c}");
     }
 }
 
-/// Ergebnis eines Tablet-Verbindungsversuchs an einem Court.
+/// Ergebnis eines Tablet-Verbindungsversuchs an einem Feld.
 enum AttachResult {
-    /// Das Tablet schiedst diesen Court nun aktiv.
+    /// Das Tablet schiedst dieses Feld nun aktiv.
     Active,
-    /// Der Court ist belegt – das Tablet bleibt passiv (Übernahme möglich).
+    /// Das Feld ist belegt – das Tablet bleibt passiv (Übernahme möglich).
     Occupied,
     /// Abgewiesen, weil ein Limit erreicht ist.
     Rejected,
 }
 
-/// Versucht, ein Tablet als aktiv schiedsendes Gerät an einem Court zu
-/// registrieren. Ist der Court schon belegt, bleibt das Tablet passiv.
-async fn attach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) -> AttachResult {
-    if court.len() > MAX_COURT_LABEL_LEN {
-        tracing::warn!("Namespace '{ns}': überlanger Court-Name abgewiesen");
-        return AttachResult::Rejected;
-    }
+/// Liefert den bekannten Feldnamen (Anzeige) eines Felds im Namespace –
+/// leer, solange der Host noch kein Frame für dieses Feld geschickt hat.
+fn label_of(namespace: &Namespace, court_id: i64) -> String {
+    namespace
+        .court_labels
+        .get(&court_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Versucht, ein Tablet als aktiv schiedsendes Gerät an einem Feld (per
+/// CourtID) zu registrieren. Ist das Feld schon belegt, bleibt das Tablet
+/// passiv.
+async fn attach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> AttachResult {
     let mut map = broker.namespaces.lock().await;
     if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
         tracing::warn!("Namespace-Limit erreicht – Tablet für '{ns}' abgewiesen");
         return AttachResult::Rejected;
     }
     let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
-    if namespace.tablets.contains_key(court) {
+    if namespace.tablets.contains_key(&court_id) {
         return AttachResult::Occupied;
     }
     if namespace.tablets.len() >= MAX_TABLETS_PER_NS {
-        tracing::warn!("Namespace '{ns}' am Tablet-Limit – Court '{court}' abgewiesen");
+        tracing::warn!("Namespace '{ns}' am Tablet-Limit – Feld {court_id} abgewiesen");
         return AttachResult::Rejected;
     }
-    namespace.tablets.insert(court.to_string(), tx.clone());
+    namespace.tablets.insert(court_id, tx.clone());
+    let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::TabletConnected {
-            court_label: court.to_string(),
+            court_id,
+            court_label,
         }));
     }
     AttachResult::Active
 }
 
-/// Übernimmt einen belegten Court für ein bisher passives Tablet – das
+/// Übernimmt ein belegtes Feld für ein bisher passives Tablet – das
 /// zuvor aktive Tablet wird mit `SessionSuperseded` gesperrt.
-async fn take_over_court(broker: &Broker, ns: &str, court: &str, tx: &Tx) {
+async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
     let mut map = broker.namespaces.lock().await;
     let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
-    if let Some(old) = namespace.tablets.insert(court.to_string(), tx.clone()) {
+    if let Some(old) = namespace.tablets.insert(court_id, tx.clone()) {
         let _ = old.send(text(&ServerMsg::SessionSuperseded));
     }
     // Laufenden Spielstand an das übernehmende Tablet übergeben.
-    if let Some(state) = namespace.court_state.get(court) {
+    if let Some(state) = namespace.court_state.get(&court_id) {
         let _ = tx.send(text(&ServerMsg::StateRestore {
             state: state.clone(),
         }));
     }
+    let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::TabletConnected {
-            court_label: court.to_string(),
+            court_id,
+            court_label,
         }));
     }
 }
 
-/// Speichert den gespiegelten Spielzustand des aktiven Tablets am Court.
-async fn store_court_state(broker: &Broker, ns: &str, court: &str, state: String) {
+/// Speichert den gespiegelten Spielzustand des aktiven Tablets am Feld.
+async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: String) {
     if state.len() > MAX_STATE_LEN {
         return;
     }
     let mut map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get_mut(ns) {
-        namespace.court_state.insert(court.to_string(), state);
+        namespace.court_state.insert(court_id, state);
     }
 }
 
 /// Entfernt das Tablet wieder – nur, wenn der eingetragene Sender noch
-/// unserer ist (ein Reconnect auf denselben Court darf nichts wegräumen).
-async fn detach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) {
+/// unserer ist (ein Reconnect auf dasselbe Feld darf nichts wegräumen).
+async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(ns) else {
         return;
     };
     let still_ours = namespace
         .tablets
-        .get(court)
+        .get(&court_id)
         .map(|t| t.same_channel(tx))
         .unwrap_or(false);
     if still_ours {
-        namespace.tablets.remove(court);
+        namespace.tablets.remove(&court_id);
+        let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
             let _ = host.send(text(&RelayFrame::TabletDisconnected {
-                court_label: court.to_string(),
+                court_id,
+                court_label,
             }));
         }
     }
@@ -896,7 +946,7 @@ async fn detach_tablet(broker: &Broker, ns: &str, court: &str, tx: &Tx) {
 async fn forward_score(
     broker: &Broker,
     ns: &str,
-    court: &str,
+    court_id: i64,
     score_a: i64,
     score_b: i64,
     sets_history: Vec<SetAb>,
@@ -912,10 +962,12 @@ async fn forward_score(
         a: score_a,
         b: score_b,
     });
-    namespace.court_scores.insert(court.to_string(), sets);
+    namespace.court_scores.insert(court_id, sets);
+    let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::ScoreUpdate {
-            court_label: court.to_string(),
+            court_id,
+            court_label,
             score_a,
             score_b,
             sets_history,
@@ -924,23 +976,32 @@ async fn forward_score(
 }
 
 /// Leitet den Akkustand eines Tablets an den Host weiter.
-async fn forward_battery(broker: &Broker, ns: &str, court: &str, percent: i64, charging: bool) {
+async fn forward_battery(broker: &Broker, ns: &str, court_id: i64, percent: i64, charging: bool) {
     let map = broker.namespaces.lock().await;
-    if let Some(host) = map.get(ns).and_then(|n| n.host.as_ref()) {
-        let _ = host.send(text(&RelayFrame::Battery {
-            court_label: court.to_string(),
-            percent,
-            charging,
-        }));
+    if let Some(namespace) = map.get(ns) {
+        let court_label = label_of(namespace, court_id);
+        if let Some(host) = namespace.host.as_ref() {
+            let _ = host.send(text(&RelayFrame::Battery {
+                court_id,
+                court_label,
+                percent,
+                charging,
+            }));
+        }
     }
 }
 
-/// Leitet den Meldungs-Zustand eines Courts an den Host weiter.
-async fn forward_alert(broker: &Broker, ns: &str, court: &str, injury: bool, official: bool) {
+/// Leitet den Meldungs-Zustand eines Felds an den Host weiter.
+async fn forward_alert(broker: &Broker, ns: &str, court_id: i64, injury: bool, official: bool) {
     let map = broker.namespaces.lock().await;
-    if let Some(host) = map.get(ns).and_then(|n| n.host.as_ref()) {
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    let court_label = label_of(namespace, court_id);
+    if let Some(host) = namespace.host.as_ref() {
         let _ = host.send(text(&RelayFrame::Alert {
-            court_label: court.to_string(),
+            court_id,
+            court_label,
             injury,
             official,
         }));
@@ -983,9 +1044,12 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
         namespace.host = Some(tx.clone());
         // Schon verbundene Tablets nachmelden, damit der Host ihre Matches
         // sofort pusht.
-        for court in namespace.tablets.keys() {
+        let connected: Vec<i64> = namespace.tablets.keys().copied().collect();
+        for court_id in connected {
+            let court_label = label_of(namespace, court_id);
             let _ = tx.send(text(&RelayFrame::TabletConnected {
-                court_label: court.clone(),
+                court_id,
+                court_label,
             }));
         }
     }
@@ -1051,34 +1115,45 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
     };
     match frame {
         HostFrame::MatchAssigned {
+            court_id,
             court_label,
             match_brief,
         } => {
+            // Feldname (Anzeige) merken – der Monitor liest ihn.
+            if !court_label.is_empty() {
+                namespace.court_labels.insert(court_id, court_label);
+            }
             // Satzstand/Spielzustand nur bei einem ECHTEN Match-Wechsel
             // zurücksetzen. Ein erneutes `MatchAssigned` fürs selbe Match
             // (z. B. nach einem kurzen Tablet-Reconnect) darf den Monitor
             // nicht auf 0:0 zurückwerfen.
             let same_match = namespace
                 .court_matches
-                .get(&court_label)
+                .get(&court_id)
                 .map(|m| m.match_id == match_brief.match_id)
                 .unwrap_or(false);
             if !same_match {
-                namespace.court_scores.remove(&court_label);
-                namespace.court_state.remove(&court_label);
+                namespace.court_scores.remove(&court_id);
+                namespace.court_state.remove(&court_id);
             }
             namespace
                 .court_matches
-                .insert(court_label.clone(), match_brief.clone());
-            if let Some(t) = namespace.tablets.get(&court_label) {
+                .insert(court_id, match_brief.clone());
+            if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
             }
         }
-        HostFrame::MatchCleared { court_label } => {
-            namespace.court_matches.remove(&court_label);
-            namespace.court_scores.remove(&court_label);
-            namespace.court_state.remove(&court_label);
-            if let Some(t) = namespace.tablets.get(&court_label) {
+        HostFrame::MatchCleared {
+            court_id,
+            court_label,
+        } => {
+            if !court_label.is_empty() {
+                namespace.court_labels.insert(court_id, court_label);
+            }
+            namespace.court_matches.remove(&court_id);
+            namespace.court_scores.remove(&court_id);
+            namespace.court_state.remove(&court_id);
+            if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchCleared));
             }
         }
@@ -1143,25 +1218,26 @@ mod tests {
         }
     }
 
-    /// Legt einen Namespace mit einem Tablet an und gibt dessen Empfangsende
-    /// zurück.
-    async fn broker_with_tablet(court: &str) -> (Broker, mpsc::UnboundedReceiver<Message>) {
+    /// Legt einen Namespace mit einem Tablet an (an Feld `court_id`) und
+    /// gibt dessen Empfangsende zurück.
+    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::UnboundedReceiver<Message>) {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let (tx, rx) = mpsc::unbounded_channel();
         let mut map = broker.namespaces.lock().await;
         let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
-        ns.tablets.insert(court.to_string(), tx);
+        ns.tablets.insert(court_id, tx);
         drop(map);
         (broker, rx)
     }
 
     #[tokio::test]
     async fn host_match_assigned_reaches_the_courts_tablet() {
-        let (broker, mut rx) = broker_with_tablet("Feld 1").await;
+        let (broker, mut rx) = broker_with_tablet(101).await;
         handle_host_frame(
             &broker,
             "ns1",
             HostFrame::MatchAssigned {
+                court_id: 101,
                 court_label: "Feld 1".into(),
                 match_brief: brief(7),
             },
@@ -1182,16 +1258,46 @@ mod tests {
 
     #[tokio::test]
     async fn host_frame_for_unknown_court_is_dropped() {
-        let (broker, mut rx) = broker_with_tablet("Feld 1").await;
+        let (broker, mut rx) = broker_with_tablet(101).await;
         handle_host_frame(
             &broker,
             "ns1",
             HostFrame::MatchCleared {
+                court_id: 999,
                 court_label: "Feld 99".into(),
             },
         )
         .await;
-        assert!(rx.try_recv().is_err(), "fremder Court bekommt nichts");
+        assert!(rx.try_recv().is_err(), "fremdes Feld bekommt nichts");
+    }
+
+    /// Mehr-Hallen-Regression: zwei Felder heißen beide „1", haben aber
+    /// verschiedene CourtIDs. Ein `MatchAssigned` für das eine Feld darf
+    /// nur dessen Tablet erreichen, nicht das des gleichnamigen Felds.
+    #[tokio::test]
+    async fn host_frame_routes_by_court_id_not_name() {
+        let broker = Broker::new("x".into());
+        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.tablets.insert(101, tx_a); // Halle 1 · Feld „1"
+            ns.tablets.insert(401, tx_b); // Halle 2 · Feld „1"
+        }
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 401,
+                court_label: "1".into(),
+                match_brief: brief(7),
+            },
+        )
+        .await;
+        // Nur das Tablet von Feld 401 bekommt das Match.
+        assert!(rx_b.try_recv().is_ok(), "Feld 401 bekommt das Match");
+        assert!(rx_a.try_recv().is_err(), "Feld 101 bleibt unberührt");
     }
 
     #[tokio::test]
@@ -1200,9 +1306,8 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
-            ns.court_matches.insert("Feld 1".into(), brief(7));
-            ns.court_scores
-                .insert("Feld 1".into(), vec![SetAb { a: 21, b: 15 }]);
+            ns.court_matches.insert(101, brief(7));
+            ns.court_scores.insert(101, vec![SetAb { a: 21, b: 15 }]);
         }
         // Erneutes MatchAssigned fürs SELBE Match (Tablet-Reconnect) →
         // der gemerkte Satzstand bleibt erhalten.
@@ -1210,15 +1315,14 @@ mod tests {
             &broker,
             "ns1",
             HostFrame::MatchAssigned {
+                court_id: 101,
                 court_label: "Feld 1".into(),
                 match_brief: brief(7),
             },
         )
         .await;
         assert_eq!(
-            broker.namespaces.lock().await["ns1"]
-                .court_scores
-                .get("Feld 1"),
+            broker.namespaces.lock().await["ns1"].court_scores.get(&101),
             Some(&vec![SetAb { a: 21, b: 15 }])
         );
         // Echter Match-Wechsel → Satzstand wird zurückgesetzt.
@@ -1226,6 +1330,7 @@ mod tests {
             &broker,
             "ns1",
             HostFrame::MatchAssigned {
+                court_id: 101,
                 court_label: "Feld 1".into(),
                 match_brief: brief(9),
             },
@@ -1233,7 +1338,7 @@ mod tests {
         .await;
         assert!(!broker.namespaces.lock().await["ns1"]
             .court_scores
-            .contains_key("Feld 1"));
+            .contains_key(&101));
     }
 
     #[tokio::test]
@@ -1267,7 +1372,7 @@ mod tests {
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
             ns.host = Some(host_tx);
         }
-        forward_score(&broker, "ns1", "Feld 1", 11, 9, vec![]).await;
+        forward_score(&broker, "ns1", 101, 11, 9, vec![]).await;
         let msg = host_rx.try_recv().expect("Host bekommt den Score");
         let Message::Text(t) = msg else {
             panic!("Text-Frame erwartet")
@@ -1276,7 +1381,8 @@ mod tests {
         assert_eq!(
             parsed,
             RelayFrame::ScoreUpdate {
-                court_label: "Feld 1".into(),
+                court_id: 101,
+                court_label: String::new(),
                 score_a: 11,
                 score_b: 9,
                 sets_history: vec![],

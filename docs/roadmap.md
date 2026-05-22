@@ -20,8 +20,8 @@ BTP-`CourtID` umgestellt. Umsetzung in 7 Schritten:
    `LocationID` + `SortOrder` je Feld, `BtpMatch.court_id`. Rein intern,
    gegen echten Zwei-Hallen-Mitschnitt getestet. ✅ erledigt
 2. **Feld-Identität intern auf CourtID** — behebt die Verwechslung
-   doppelter Feldnamen (LAN-Pfad: Tablet-Server, Geräte-Zuweisung).
-3. **Relay & Cloud-Pfad** — Wire-Typen + Relay auf CourtID.
+   doppelter Feldnamen. ✅ erledigt
+3. **Relay & Cloud-Pfad** — Wire-Typen + Relay auf CourtID. ✅ erledigt
 4. **Tablet- & Monitor-Anzeige** — Court-Monitor zeigt „Halle 2 · Feld 6".
 5. **Dashboard nach Hallen gruppiert** — Felder, Adressen, Geräte-Zuweisung.
 6. **Hallen-Übersichts-Bildschirm** — ein TV pro Halle mit allen Feldern.

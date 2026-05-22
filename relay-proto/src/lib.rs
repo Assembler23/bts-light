@@ -9,7 +9,14 @@
 //!    Unterschied.
 //! 2. **bts-light-Host ↔ Relay** ([`HostFrame`], [`RelayFrame`]). Der
 //!    Relay multiplext mehrere Tablets über eine einzige Host-Verbindung,
-//!    deshalb trägt hier jedes Frame ein `courtLabel`.
+//!    deshalb trägt hier jedes Frame eine Feld-Identität.
+//!
+//! **Feld-Identität:** Jedes court-bezogene Frame trägt `courtId` (die
+//! stabile BTP-CourtID, `i64`) als Identität und `courtLabel` (den
+//! Feldnamen) nur noch für die Anzeige. Feldnamen wiederholen sich bei
+//! Mehr-Hallen-Turnieren – die CourtID nicht. Alle `courtId`-Felder tragen
+//! `#[serde(default)]`, damit ältere Relays/Clients ohne dieses Feld noch
+//! deserialisieren (sie fallen dann auf CourtID 0 zurück).
 //!
 //! Beim Verändern der Renames aufpassen: `tablet.html` und der
 //! verifizierte LAN-Pfad hängen exakt an dieser Wire-Form.
@@ -167,6 +174,10 @@ pub struct MonitorUpload {
 /// Vollständiger Anzeige-Zustand eines Feldes, den `monitor.html` pollt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonitorState {
+    /// Stabile BTP-CourtID des angezeigten Felds (Identität).
+    #[serde(rename = "courtId", default)]
+    pub court_id: i64,
+    /// Feldname (Anzeige), z. B. „1" oder „Feld 3".
     #[serde(rename = "courtLabel")]
     pub court_label: String,
     #[serde(rename = "tournamentName", default)]
@@ -225,7 +236,10 @@ pub struct MonitorDeviceInfo {
     pub id: String,
     /// Kurz-Code (erste Zeichen der ID), wie ihn der TV anzeigt.
     pub code: String,
-    /// Zugewiesenes Feld, falls eines gesetzt ist.
+    /// CourtID des zugewiesenen Felds (Identität), falls eines gesetzt ist.
+    #[serde(rename = "courtId", default)]
+    pub court_id: Option<i64>,
+    /// Feldname (Anzeige) des zugewiesenen Felds, falls eines gesetzt ist.
     #[serde(default)]
     pub court: Option<String>,
     /// Hat sich das Gerät zuletzt gemeldet (kürzlich gepollt)?
@@ -237,8 +251,9 @@ pub struct MonitorDeviceInfo {
 /// werden (anders als [`MonitorUpload`] mit den Werbebildern).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorControl {
-    /// Geräte-ID → zugewiesenes Feld.
-    pub assignments: HashMap<String, String>,
+    /// Geräte-ID → CourtID des zugewiesenen Felds.
+    #[serde(default)]
+    pub assignments: HashMap<String, i64>,
     /// Geräte-ID → offener Fernbefehl.
     pub commands: HashMap<String, MonitorCommand>,
 }
@@ -259,10 +274,14 @@ pub fn device_code(device_id: &str) -> String {
 }
 
 /// Baut die Monitor-Geräteliste für die „Court-Monitore"-Seite aus den
-/// Feld-Zuweisungen und dem Live-Zustand (`seen`: Geräte-ID → Zeitpunkt
-/// des letzten Polls in ms). Zugewiesene Geräte zuerst (nach Feld).
+/// Feld-Zuweisungen (Geräte-ID → CourtID) und dem Live-Zustand (`seen`:
+/// Geräte-ID → Zeitpunkt des letzten Polls in ms). `court_names` löst die
+/// CourtID auf einen Anzeigenamen auf – fehlt eine ID darin, bleibt der
+/// Anzeigename leer (das Gerät bleibt trotzdem in der Liste). Zugewiesene
+/// Geräte zuerst (nach Feldname).
 pub fn build_device_list(
-    assignments: &HashMap<String, String>,
+    assignments: &HashMap<String, i64>,
+    court_names: &HashMap<i64, String>,
     seen: &HashMap<String, u64>,
     now_ms: u64,
 ) -> Vec<MonitorDeviceInfo> {
@@ -276,10 +295,12 @@ pub fn build_device_list(
         .into_iter()
         .map(|id| {
             let last_seen = seen.get(id).copied().unwrap_or(0);
+            let court_id = assignments.get(id).copied();
             MonitorDeviceInfo {
                 id: id.clone(),
                 code: device_code(id),
-                court: assignments.get(id).cloned(),
+                court_id,
+                court: court_id.and_then(|cid| court_names.get(&cid).cloned()),
                 online: last_seen > 0
                     && now_ms.saturating_sub(last_seen) <= MONITOR_ONLINE_WINDOW_MS,
             }
@@ -295,10 +316,15 @@ pub fn build_device_list(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TabletMsg {
-    /// Erstes Frame: das Tablet bindet sich an seinen Court.
+    /// Erstes Frame: das Tablet bindet sich an seinen Court (per CourtID).
     #[serde(rename = "identify")]
     Identify {
-        #[serde(rename = "courtLabel")]
+        /// CourtID des Felds (Identität).
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        /// Feldname (Anzeige) – nur informativ, die Routing-Identität ist
+        /// `court_id`.
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
     },
     /// Laufender Punktestand des aktuellen Satzes plus die schon
@@ -360,7 +386,11 @@ pub enum ServerMsg {
 pub struct ResultBody {
     #[serde(rename = "matchId")]
     pub match_id: i64,
-    #[serde(rename = "courtLabel")]
+    /// CourtID des Felds (Identität).
+    #[serde(rename = "courtId", default)]
+    pub court_id: i64,
+    /// Feldname (Anzeige) – die Routing-Identität ist `court_id`.
+    #[serde(rename = "courtLabel", default)]
     pub court_label: String,
     pub sets: Vec<SetAb>,
     /// Aufgabe (Retired): das Match wurde abgebrochen. Der Sieger ist dann
@@ -406,14 +436,18 @@ impl ResultResponse {
 pub enum HostFrame {
     /// Court hat ein Match bekommen – an das zugehörige Tablet weiterleiten.
     MatchAssigned {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
         #[serde(rename = "match")]
         match_brief: MatchBrief,
     },
     /// Court-Match aufgehoben.
     MatchCleared {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
     },
     /// Antwort auf eine zuvor weitergeleitete Ergebnis-Übermittlung.
@@ -432,17 +466,23 @@ pub enum HostFrame {
 pub enum RelayFrame {
     /// Ein Tablet hat sich für diesen Court verbunden.
     TabletConnected {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
     },
     /// Das Tablet dieses Courts ist getrennt.
     TabletDisconnected {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
     },
     /// Live-Punktestand von einem Tablet.
     ScoreUpdate {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
         #[serde(rename = "scoreA")]
         score_a: i64,
@@ -455,7 +495,9 @@ pub enum RelayFrame {
     Result {
         #[serde(rename = "reqId")]
         req_id: u64,
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
         #[serde(rename = "matchId")]
         match_id: i64,
@@ -467,14 +509,18 @@ pub enum RelayFrame {
     },
     /// Akkustand eines Tablets.
     Battery {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
         percent: i64,
         charging: bool,
     },
     /// Meldungs-Zustand eines Courts (Verletzung / Turnierleitung gerufen).
     Alert {
-        #[serde(rename = "courtLabel")]
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "courtLabel", default)]
         court_label: String,
         injury: bool,
         official: bool,
@@ -524,11 +570,26 @@ mod tests {
 
     #[test]
     fn tablet_msg_identify_wire_form() {
+        let json = r#"{"type":"identify","role":"tablet","courtId":7,"courtLabel":"Feld 1"}"#;
+        let msg: TabletMsg = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg,
+            TabletMsg::Identify {
+                court_id: 7,
+                court_label: "Feld 1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn tablet_msg_identify_without_court_id_defaults_to_zero() {
+        // Älteres Tablet ohne courtId-Feld bleibt deserialisierbar.
         let json = r#"{"type":"identify","role":"tablet","courtLabel":"Feld 1"}"#;
         let msg: TabletMsg = serde_json::from_str(json).unwrap();
         assert_eq!(
             msg,
             TabletMsg::Identify {
+                court_id: 0,
                 court_label: "Feld 1".to_string()
             }
         );
@@ -538,7 +599,7 @@ mod tests {
     fn tablet_msg_score_update_ignores_extra_fields() {
         // tablet.html schickt zusätzlich currentSet/setsA/servingTeam – die
         // dürfen den Parser nicht stören.
-        let json = r#"{"type":"score_update","courtLabel":"x","scoreA":21,"scoreB":19,
+        let json = r#"{"type":"score_update","courtId":3,"courtLabel":"x","scoreA":21,"scoreB":19,
             "currentSet":2,"setsA":1,"setsB":0,"setsHistory":[{"a":21,"b":15}],"servingTeam":"a"}"#;
         let msg: TabletMsg = serde_json::from_str(json).unwrap();
         assert_eq!(
@@ -582,6 +643,7 @@ mod tests {
     #[test]
     fn host_and_relay_frames_roundtrip() {
         roundtrip(&HostFrame::MatchCleared {
+            court_id: 2,
             court_label: "Feld 2".into(),
         });
         roundtrip(&HostFrame::ResultAck {
@@ -590,10 +652,12 @@ mod tests {
             error: Some("BTP abgelehnt".into()),
         });
         roundtrip(&RelayFrame::TabletConnected {
+            court_id: 3,
             court_label: "Feld 3".into(),
         });
         roundtrip(&RelayFrame::Result {
             req_id: 9,
+            court_id: 1,
             court_label: "Feld 1".into(),
             match_id: 18,
             sets: vec![SetAb { a: 21, b: 0 }, SetAb { a: 0, b: 21 }],
@@ -602,6 +666,7 @@ mod tests {
         });
         roundtrip(&RelayFrame::Result {
             req_id: 10,
+            court_id: 2,
             court_label: "Feld 2".into(),
             match_id: 19,
             sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 5, b: 5 }],
@@ -611,8 +676,23 @@ mod tests {
     }
 
     #[test]
+    fn host_frame_without_court_id_defaults_to_zero() {
+        // Älterer Relay schickt ein Frame ohne courtId – bleibt lesbar.
+        let json = r#"{"type":"match_cleared","courtLabel":"Feld 2"}"#;
+        let frame: HostFrame = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            frame,
+            HostFrame::MatchCleared {
+                court_id: 0,
+                court_label: "Feld 2".into(),
+            }
+        );
+    }
+
+    #[test]
     fn monitor_state_and_upload_roundtrip() {
         let state = MonitorState {
+            court_id: 3,
             court_label: "Feld 3".into(),
             tournament_name: "Test-Cup".into(),
             match_info: Some(MonitorMatch {
@@ -669,22 +749,28 @@ mod tests {
 
     #[test]
     fn build_device_list_merges_assignments_and_seen() {
+        // Zuweisungen sind nun CourtID-basiert; court_names löst sie auf.
         let mut assign = HashMap::new();
-        assign.insert("dev-online".to_string(), "Feld 1".to_string());
-        assign.insert("dev-offline".to_string(), "Feld 2".to_string());
+        assign.insert("dev-online".to_string(), 101i64);
+        assign.insert("dev-offline".to_string(), 102i64);
+        let mut court_names = HashMap::new();
+        court_names.insert(101i64, "Feld 1".to_string());
+        court_names.insert(102i64, "Feld 2".to_string());
         let mut seen = HashMap::new();
         seen.insert("dev-online".to_string(), 10_000u64);
         // Gesehen, aber noch keinem Feld zugewiesen.
         seen.insert("dev-new".to_string(), 9_500u64);
-        let list = build_device_list(&assign, &seen, 12_000);
+        let list = build_device_list(&assign, &court_names, &seen, 12_000);
         assert_eq!(list.len(), 3);
         let online = list.iter().find(|d| d.id == "dev-online").unwrap();
         assert!(online.online);
+        assert_eq!(online.court_id, Some(101));
         assert_eq!(online.court.as_deref(), Some("Feld 1"));
         // Zugewiesen, aber nie gepollt → offline.
         assert!(!list.iter().find(|d| d.id == "dev-offline").unwrap().online);
         let fresh = list.iter().find(|d| d.id == "dev-new").unwrap();
         assert!(fresh.online);
+        assert_eq!(fresh.court_id, None);
         assert_eq!(fresh.court, None);
     }
 

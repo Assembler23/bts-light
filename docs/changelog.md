@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.6
+
+- **Mehr-Hallen-Unterstützung: Felder eindeutig per BTP-ID (Schritt 2–3/7).**
+  bts-light unterscheidet Spielfelder jetzt über ihre stabile BTP-interne
+  ID statt über den Feldnamen — durchgängig in Tablet-Server, Relay und
+  Oberfläche. Damit verschmelzen bei Mehr-Hallen-Turnieren „Halle 1 ·
+  Feld 1" und „Halle 2 · Feld 1" nicht mehr; alle Felder funktionieren
+  unabhängig. Ein-Hallen-Turniere verhalten sich unverändert.
+- **Einmalig nach diesem Update:** Die Court-Monitor-Geräte müssen ihren
+  Feldern einmal neu zugewiesen werden (die alte Zuordnung hing am
+  Feldnamen). Die Geräte erscheinen automatisch wieder in der Geräteliste.
+  Tablets, die während des Updates geöffnet bleiben, einmal neu laden.
+
 ## v0.9.5
 
 - **Tablet-Spielzettel: zwei Tabs.** Die Seite ist jetzt in „Übersicht"

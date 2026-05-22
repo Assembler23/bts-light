@@ -77,9 +77,9 @@ async fn serve(
 
     let (mut sink, mut read) = stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
-    // Court → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
+    // CourtID → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
     // 2-s-Ticker unverändert dasselbe Match immer wieder pusht.
-    let mut last_match: HashMap<String, Option<i64>> = HashMap::new();
+    let mut last_match: HashMap<i64, Option<i64>> = HashMap::new();
     let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Court-Monitor-Upload: erster Tick feuert sofort → Werbung/Konfig
@@ -238,47 +238,51 @@ async fn handle_frame(
     ctx: &Arc<ServerCtx>,
     frame: RelayFrame,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<String, Option<i64>>,
+    last_match: &mut HashMap<i64, Option<i64>>,
 ) {
     match frame {
-        RelayFrame::TabletConnected { court_label } => {
-            ctx.tablet.attach_tablet(&court_label);
-            tracing::info!("Tablet verbunden für Court '{court_label}' (Cloud)");
+        RelayFrame::TabletConnected { court_id, .. } => {
+            ctx.tablet.attach_tablet(court_id);
+            tracing::info!("Tablet verbunden für Feld {court_id} (Cloud)");
             // Sofort das aktuelle Match nachschieben (statt 2 s zu warten).
-            last_match.remove(&court_label);
-            push_court(ctx, &court_label, tx, last_match);
+            last_match.remove(&court_id);
+            push_court(ctx, court_id, tx, last_match);
         }
-        RelayFrame::TabletDisconnected { court_label } => {
-            ctx.tablet.detach_tablet(&court_label);
-            tracing::info!("Tablet getrennt für Court '{court_label}' (Cloud)");
+        RelayFrame::TabletDisconnected { court_id, .. } => {
+            ctx.tablet.detach_tablet(court_id);
+            tracing::info!("Tablet getrennt für Feld {court_id} (Cloud)");
             // `last_match` bewusst NICHT entfernen – sonst pusht der nächste
             // Ticker ein unnötiges `MatchAssigned`. Ein Reconnect setzt es
             // ohnehin zurück und schiebt das Match dann frisch nach.
         }
         RelayFrame::ScoreUpdate {
-            court_label,
+            court_id,
             score_a,
             score_b,
             sets_history,
+            ..
         } => {
-            handle_score(&court_label, score_a, score_b, &sets_history, ctx).await;
+            handle_score(court_id, score_a, score_b, &sets_history, ctx).await;
         }
         RelayFrame::Battery {
-            court_label,
+            court_id,
             percent,
             charging,
+            ..
         } => {
-            ctx.tablet.record_battery(&court_label, percent, charging);
+            ctx.tablet.record_battery(court_id, percent, charging);
         }
         RelayFrame::Alert {
-            court_label,
+            court_id,
             injury,
             official,
+            ..
         } => {
-            ctx.tablet.record_alert(&court_label, injury, official);
+            ctx.tablet.record_alert(court_id, injury, official);
         }
         RelayFrame::Result {
             req_id,
+            court_id,
             court_label,
             match_id,
             sets,
@@ -287,6 +291,7 @@ async fn handle_frame(
         } => {
             let body = ResultBody {
                 match_id,
+                court_id,
                 court_label,
                 sets,
                 retired,
@@ -302,49 +307,59 @@ async fn handle_frame(
     }
 }
 
-/// Schiebt das aktuelle Match eines Courts ans Tablet – nur, wenn es sich
-/// gegenüber dem zuletzt gemeldeten Stand geändert hat.
+/// Schiebt das aktuelle Match eines Felds (per CourtID) ans Tablet – nur,
+/// wenn es sich gegenüber dem zuletzt gemeldeten Stand geändert hat.
+/// `court_label` ist der Feldname (Anzeige für den Court-Monitor).
 fn push_court(
     ctx: &ServerCtx,
-    court: &str,
+    court_id: i64,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<String, Option<i64>>,
+    last_match: &mut HashMap<i64, Option<i64>>,
 ) {
-    let current = ctx.tablet.match_for_court(court);
+    let court_label = ctx
+        .tablet
+        .courts()
+        .into_iter()
+        .find(|c| c.id == court_id)
+        .map(|c| c.name)
+        .unwrap_or_default();
+    let current = ctx.tablet.match_for_court(court_id);
     let current_id = current.as_ref().map(|m| m.id);
-    if last_match.get(court) == Some(&current_id) {
+    if last_match.get(&court_id) == Some(&current_id) {
         return;
     }
-    last_match.insert(court.to_string(), current_id);
+    last_match.insert(court_id, current_id);
     let frame = match current {
         Some(m) => {
             tracing::info!(
-                "Court '{court}': Match {} ans Tablet zugewiesen (Cloud)",
+                "Feld {court_id}: Match {} ans Tablet zugewiesen (Cloud)",
                 m.id
             );
             HostFrame::MatchAssigned {
-                court_label: court.to_string(),
+                court_id,
+                court_label,
                 match_brief: match_brief(&m),
             }
         }
         None => {
-            tracing::info!("Court '{court}': Match-Zuweisung aufgehoben (Cloud)");
+            tracing::info!("Feld {court_id}: Match-Zuweisung aufgehoben (Cloud)");
             HostFrame::MatchCleared {
-                court_label: court.to_string(),
+                court_id,
+                court_label,
             }
         }
     };
     let _ = tx.send(text(&frame));
 }
 
-/// 2-s-Ticker: prüft jeden Court auf eine geänderte Match-Zuweisung.
+/// 2-s-Ticker: prüft jedes Feld auf eine geänderte Match-Zuweisung.
 fn push_all_courts(
     ctx: &ServerCtx,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<String, Option<i64>>,
+    last_match: &mut HashMap<i64, Option<i64>>,
 ) {
-    for court in ctx.tablet.court_names() {
-        push_court(ctx, &court, tx, last_match);
+    for court in ctx.tablet.courts() {
+        push_court(ctx, court.id, tx, last_match);
     }
 }
 

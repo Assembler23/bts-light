@@ -28,7 +28,8 @@ interface Props {
  */
 export function TabletPanel({ onBack }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
-  const [zoomCourt, setZoomCourt] = useState<string | null>(null);
+  // Das groß angezeigte Feld der QR-Zoom-Ansicht (per CourtID).
+  const [zoomCourt, setZoomCourt] = useState<CourtOverview | null>(null);
   const [tab, setTab] = useState<"overview" | "qr">("overview");
 
   useEffect(() => {
@@ -52,14 +53,15 @@ export function TabletPanel({ onBack }: Props) {
   const isCloud = (info?.mode ?? "lan") === "cloud";
   const relayBase = info?.relay_base ?? "";
   const courts = info?.courts ?? [];
-  const courtUrl = (court: string) =>
+  // Die URL adressiert das Feld über seine stabile CourtID.
+  const courtUrl = (courtId: number) =>
     isCloud
-      ? `${relayBase}/court/${encodeURIComponent(court)}`
-      : `http://${host}/court/${encodeURIComponent(court)}`;
-  const qrUrl = (court: string) =>
+      ? `${relayBase}/court/${courtId}`
+      : `http://${host}/court/${courtId}`;
+  const qrUrl = (courtId: number) =>
     isCloud
-      ? `${relayBase}/qr/${encodeURIComponent(court)}`
-      : `http://${host}/qr/${encodeURIComponent(court)}`;
+      ? `${relayBase}/qr/${courtId}`
+      : `http://${host}/qr/${courtId}`;
 
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
@@ -144,7 +146,7 @@ export function TabletPanel({ onBack }: Props) {
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {courts.map((c) => (
-                  <CourtCard key={c.court} court={c} />
+                  <CourtCard key={c.court_id} court={c} />
                 ))}
               </div>
             </section>
@@ -181,16 +183,16 @@ export function TabletPanel({ onBack }: Props) {
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {courts.map((c) => (
                   <div
-                    key={c.court}
+                    key={c.court_id}
                     className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
                   >
                     <button
-                      onClick={() => setZoomCourt(c.court)}
+                      onClick={() => setZoomCourt(c)}
                       title="QR-Code groß anzeigen"
                       className="shrink-0 rounded bg-white"
                     >
                       <img
-                        src={qrUrl(c.court)}
+                        src={qrUrl(c.court_id)}
                         alt=""
                         width={64}
                         height={64}
@@ -202,10 +204,10 @@ export function TabletPanel({ onBack }: Props) {
                         {c.court}
                       </div>
                       <div className="truncate text-xs text-slate-500">
-                        {courtUrl(c.court)}
+                        {courtUrl(c.court_id)}
                       </div>
                     </div>
-                    <CopyUrlButton url={courtUrl(c.court)} />
+                    <CopyUrlButton url={courtUrl(c.court_id)} />
                   </div>
                 ))}
               </div>
@@ -221,14 +223,14 @@ export function TabletPanel({ onBack }: Props) {
         >
           <div className="flex flex-col items-center rounded-xl bg-white p-6 text-center">
             <img
-              src={qrUrl(zoomCourt)}
+              src={qrUrl(zoomCourt.court_id)}
               alt=""
               className="bg-white"
               style={{ width: "min(72vw, 72vh)", height: "min(72vw, 72vh)" }}
             />
-            <div className="mt-3 text-lg font-semibold">{zoomCourt}</div>
+            <div className="mt-3 text-lg font-semibold">{zoomCourt.court}</div>
             <div className="mt-1 max-w-[20rem] break-all text-sm text-slate-500">
-              {courtUrl(zoomCourt)}
+              {courtUrl(zoomCourt.court_id)}
             </div>
             <div className="mt-3 text-xs text-slate-400">
               Zum Schließen tippen

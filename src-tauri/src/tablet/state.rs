@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use relay_proto::{MonitorCommand, MonitorCommandKind, MonitorDeviceInfo};
 
-use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchStatus};
+use crate::btp::model::{BtpCourt, BtpMatch, BtpSnapshot, Discipline, MatchStatus};
 
 /// Aktuelle Unix-Zeit in Millisekunden.
 fn now_ms() -> u64 {
@@ -66,6 +66,10 @@ struct CourtSession {
 /// Eine Court-Zeile für die Felder-Übersicht der Turnierleitung.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct CourtOverview {
+    /// Stabile BTP-CourtID des Felds – die Identität. Feldnamen wiederholen
+    /// sich bei Mehr-Hallen-Turnieren, die CourtID nicht.
+    pub court_id: i64,
+    /// Feldname (Anzeige), z. B. „1" oder „Feld 3".
     pub court: String,
     /// BTP-Match-ID des aktuellen Spiels (0 = kein Match). Damit erkennt
     /// die Oberfläche, wenn ein Feld ein neues Spiel bekommt (Sprachansage).
@@ -133,15 +137,16 @@ pub struct WalkoverProposal {
 #[derive(Default)]
 pub struct TabletState {
     snapshot: RwLock<Option<BtpSnapshot>>,
-    courts: RwLock<HashMap<String, CourtSession>>,
-    /// Court → Token des aktuell schiedsenden Tablets (LAN-Tablet-Übernahme).
-    /// Fehlt der Eintrag, ist der Court frei.
-    active: RwLock<HashMap<String, u64>>,
+    /// CourtID → laufende Tablet-Session des Felds.
+    courts: RwLock<HashMap<i64, CourtSession>>,
+    /// CourtID → Token des aktuell schiedsenden Tablets (LAN-Tablet-
+    /// Übernahme). Fehlt der Eintrag, ist der Court frei.
+    active: RwLock<HashMap<i64, u64>>,
     /// Fortlaufender Zähler, vergibt eindeutige Court-Tokens.
     token_seq: AtomicU64,
-    /// Court → gespiegelter Spielzustand (JSON) des aktiven Tablets –
+    /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
-    court_state: RwLock<HashMap<String, String>>,
+    court_state: RwLock<HashMap<i64, String>>,
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
     /// Geräte-ID → Live-Zustand der Court-Monitore (zuletzt gesehen +
@@ -169,33 +174,61 @@ impl TabletState {
             .unwrap_or_default()
     }
 
-    /// Alle Court-Namen des Turniers (für die Tablet-Adressen/QR-Codes).
+    /// Alle Court-Namen des Turniers (BTP-Reihenfolge) – nur für Tests und
+    /// Anzeigen, die keine Identität brauchen. Adressen/QR-Codes nutzen
+    /// [`TabletState::courts`].
     pub fn court_names(&self) -> Vec<String> {
         self.snapshot
             .read()
             .unwrap()
             .as_ref()
-            .map(|s| s.courts.clone())
+            .map(|s| s.court_infos.iter().map(|c| c.name.clone()).collect())
             .unwrap_or_default()
     }
 
-    /// Das Match, das BTP gerade diesem Court zugewiesen hat.
-    pub fn match_for_court(&self, court: &str) -> Option<BtpMatch> {
+    /// Alle Felder des Turniers mit Identität (CourtID) und Anzeigenamen –
+    /// Grundlage der Tablet-Adressen, QR-Codes und Monitor-Zuordnungen.
+    pub fn courts(&self) -> Vec<BtpCourt> {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.court_infos.clone())
+            .unwrap_or_default()
+    }
+
+    /// CourtID → Feldname aller Felder (für die Monitor-Geräteliste).
+    pub fn court_name_map(&self) -> HashMap<i64, String> {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| {
+                s.court_infos
+                    .iter()
+                    .map(|c| (c.id, c.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Das Match, das BTP gerade diesem Feld (per CourtID) zugewiesen hat.
+    pub fn match_for_court(&self, court_id: i64) -> Option<BtpMatch> {
         let guard = self.snapshot.read().unwrap();
         let snap = guard.as_ref()?;
         snap.matches
             .iter()
-            .find(|m| m.status == MatchStatus::OnCourt && m.court.as_deref() == Some(court))
+            .find(|m| m.status == MatchStatus::OnCourt && m.court_id == Some(court_id))
             .cloned()
     }
 
-    /// Tablet hat sich für einen Court verbunden. `match_id` startet auf 0 –
+    /// Tablet hat sich für ein Feld verbunden. `match_id` startet auf 0 –
     /// den echten Wert setzt der erste `record_score`.
-    pub fn attach_tablet(&self, court: &str) {
+    pub fn attach_tablet(&self, court_id: i64) {
         self.courts
             .write()
             .unwrap()
-            .entry(court.to_string())
+            .entry(court_id)
             .or_insert(CourtSession {
                 match_id: 0,
                 sets: Vec::new(),
@@ -207,17 +240,17 @@ impl TabletState {
             .connected = true;
     }
 
-    /// Tablet-WebSocket für einen Court ist geschlossen.
-    pub fn detach_tablet(&self, court: &str) {
-        if let Some(session) = self.courts.write().unwrap().get_mut(court) {
+    /// Tablet-WebSocket für ein Feld ist geschlossen.
+    pub fn detach_tablet(&self, court_id: i64) {
+        if let Some(session) = self.courts.write().unwrap().get_mut(&court_id) {
             session.connected = false;
         }
     }
 
     /// Satzstand vom Tablet übernehmen.
-    pub fn record_score(&self, court: &str, match_id: i64, sets: Vec<(i64, i64)>) {
+    pub fn record_score(&self, court_id: i64, match_id: i64, sets: Vec<(i64, i64)>) {
         let mut courts = self.courts.write().unwrap();
-        let session = courts.entry(court.to_string()).or_insert(CourtSession {
+        let session = courts.entry(court_id).or_insert(CourtSession {
             match_id,
             sets: Vec::new(),
             connected: true,
@@ -229,11 +262,11 @@ impl TabletState {
         session.sets = sets;
     }
 
-    /// Akkustand des Tablets an einem Court übernehmen.
-    pub fn record_battery(&self, court: &str, percent: i64, charging: bool) {
+    /// Akkustand des Tablets an einem Feld übernehmen.
+    pub fn record_battery(&self, court_id: i64, percent: i64, charging: bool) {
         let mut courts = self.courts.write().unwrap();
         courts
-            .entry(court.to_string())
+            .entry(court_id)
             .or_insert(CourtSession {
                 match_id: 0,
                 sets: Vec::new(),
@@ -245,10 +278,10 @@ impl TabletState {
             .battery = Some(TabletBattery { percent, charging });
     }
 
-    /// Meldungs-Zustand (Verletzung / Turnierleitung gerufen) des Courts setzen.
-    pub fn record_alert(&self, court: &str, injury: bool, official: bool) {
+    /// Meldungs-Zustand (Verletzung / Turnierleitung gerufen) des Felds setzen.
+    pub fn record_alert(&self, court_id: i64, injury: bool, official: bool) {
         let mut courts = self.courts.write().unwrap();
-        let session = courts.entry(court.to_string()).or_insert(CourtSession {
+        let session = courts.entry(court_id).or_insert(CourtSession {
             match_id: 0,
             sets: Vec::new(),
             connected: true,
@@ -260,51 +293,45 @@ impl TabletState {
         session.official = official;
     }
 
-    /// Beansprucht den Court für ein Tablet und gibt dessen Token zurück.
+    /// Beansprucht das Feld für ein Tablet und gibt dessen Token zurück.
     /// Ein bereits aktives Tablet wird dadurch abgelöst (Tablet-Übernahme).
-    pub fn claim_court(&self, court: &str) -> u64 {
+    pub fn claim_court(&self, court_id: i64) -> u64 {
         let token = self.token_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        self.active
-            .write()
-            .unwrap()
-            .insert(court.to_string(), token);
+        self.active.write().unwrap().insert(court_id, token);
         token
     }
 
-    /// Ist `token` noch das aktive Tablet dieses Courts?
-    pub fn is_court_active(&self, court: &str, token: u64) -> bool {
-        self.active.read().unwrap().get(court) == Some(&token)
+    /// Ist `token` noch das aktive Tablet dieses Felds?
+    pub fn is_court_active(&self, court_id: i64, token: u64) -> bool {
+        self.active.read().unwrap().get(&court_id) == Some(&token)
     }
 
-    /// Wird der Court bereits von einem Tablet geschiedst?
-    pub fn court_occupied(&self, court: &str) -> bool {
-        self.active.read().unwrap().contains_key(court)
+    /// Wird das Feld bereits von einem Tablet geschiedst?
+    pub fn court_occupied(&self, court_id: i64) -> bool {
+        self.active.read().unwrap().contains_key(&court_id)
     }
 
-    /// Gibt den Court frei – nur, wenn `token` noch der aktive ist.
-    pub fn release_court(&self, court: &str, token: u64) {
+    /// Gibt das Feld frei – nur, wenn `token` noch der aktive ist.
+    pub fn release_court(&self, court_id: i64, token: u64) {
         let mut active = self.active.write().unwrap();
-        if active.get(court) == Some(&token) {
-            active.remove(court);
+        if active.get(&court_id) == Some(&token) {
+            active.remove(&court_id);
         }
     }
 
-    /// Spiegelt den Spielzustand des aktiven Tablets am Court.
-    pub fn set_court_state(&self, court: &str, state: String) {
-        self.court_state
-            .write()
-            .unwrap()
-            .insert(court.to_string(), state);
+    /// Spiegelt den Spielzustand des aktiven Tablets am Feld.
+    pub fn set_court_state(&self, court_id: i64, state: String) {
+        self.court_state.write().unwrap().insert(court_id, state);
     }
 
-    /// Liefert den gespiegelten Spielzustand eines Courts (für die Übernahme).
-    pub fn court_state(&self, court: &str) -> Option<String> {
-        self.court_state.read().unwrap().get(court).cloned()
+    /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
+    pub fn court_state(&self, court_id: i64) -> Option<String> {
+        self.court_state.read().unwrap().get(&court_id).cloned()
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
-    pub fn clear_court(&self, court: &str) {
-        self.courts.write().unwrap().remove(court);
+    pub fn clear_court(&self, court_id: i64) {
+        self.courts.write().unwrap().remove(&court_id);
     }
 
     /// Hinterlegt einen Walkover-Vorschlag. Je EntryID gibt es höchstens
@@ -364,14 +391,15 @@ impl TabletState {
             .collect()
     }
 
-    /// Courts mit verbundenem Tablet – diese treiben ihren Live-Score selbst.
-    pub fn active_courts(&self) -> Vec<String> {
+    /// Felder (CourtIDs) mit verbundenem Tablet – diese treiben ihren
+    /// Live-Score selbst.
+    pub fn active_courts(&self) -> Vec<i64> {
         self.courts
             .read()
             .unwrap()
             .iter()
             .filter(|(_, s)| s.connected)
-            .map(|(c, _)| c.clone())
+            .map(|(c, _)| *c)
             .collect()
     }
 
@@ -382,10 +410,10 @@ impl TabletState {
     pub fn apply_tablet_scores(&self, snapshot: &mut BtpSnapshot) {
         let courts = self.courts.read().unwrap();
         for m in &mut snapshot.matches {
-            let Some(court) = m.court.as_deref() else {
+            let Some(court_id) = m.court_id else {
                 continue;
             };
-            if let Some(session) = courts.get(court) {
+            if let Some(session) = courts.get(&court_id) {
                 if session.connected && session.match_id == m.id {
                     m.sets = session.sets.clone();
                 }
@@ -401,13 +429,14 @@ impl TabletState {
             return Vec::new();
         };
         let courts = self.courts.read().unwrap();
-        snap.courts
+        snap.court_infos
             .iter()
             .map(|court| {
-                let m = snap.matches.iter().find(|m| {
-                    m.status == MatchStatus::OnCourt && m.court.as_deref() == Some(court.as_str())
-                });
-                let session = courts.get(court);
+                let m = snap
+                    .matches
+                    .iter()
+                    .find(|m| m.status == MatchStatus::OnCourt && m.court_id == Some(court.id));
+                let session = courts.get(&court.id);
                 let tablet_connected = session.map(|s| s.connected).unwrap_or(false);
                 // Satzstand vom Tablet, falls aktiv und auf dasselbe Match.
                 let sets = match (session, m) {
@@ -421,7 +450,8 @@ impl TabletState {
                         .collect::<Vec<String>>()
                 };
                 CourtOverview {
-                    court: court.clone(),
+                    court_id: court.id,
+                    court: court.name.clone(),
                     match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m
                         .map(|mm| {
@@ -453,7 +483,7 @@ impl TabletState {
     /// effektivem Satzstand (Tablet-getrieben falls aktiv, sonst aus BTP)
     /// und der gespiegelte Tablet-Spielzustand (Aufschlag/Pause). Vom
     /// Court-Monitor-Endpunkt genutzt.
-    pub fn monitor_court(&self, court: &str) -> MonitorCourt {
+    pub fn monitor_court(&self, court_id: i64) -> MonitorCourt {
         let guard = self.snapshot.read().unwrap();
         let tournament_name = guard
             .as_ref()
@@ -462,7 +492,7 @@ impl TabletState {
         let current_match = guard.as_ref().and_then(|snap| {
             snap.matches
                 .iter()
-                .find(|m| m.status == MatchStatus::OnCourt && m.court.as_deref() == Some(court))
+                .find(|m| m.status == MatchStatus::OnCourt && m.court_id == Some(court_id))
                 .cloned()
         });
         drop(guard);
@@ -473,7 +503,7 @@ impl TabletState {
         let sets = match &current_match {
             Some(mm) => {
                 let courts = self.courts.read().unwrap();
-                match courts.get(court) {
+                match courts.get(&court_id) {
                     Some(s) if s.match_id == mm.id && !s.sets.is_empty() => s.sets.clone(),
                     _ => mm.sets.clone(),
                 }
@@ -484,7 +514,7 @@ impl TabletState {
             tournament_name,
             current_match,
             sets,
-            court_state: self.court_state(court),
+            court_state: self.court_state(court_id),
         }
     }
 
@@ -575,7 +605,9 @@ mod tests {
         }
     }
 
-    fn match_on(id: i64, court: Option<&str>, status: MatchStatus) -> BtpMatch {
+    /// Baut ein Match, das (per CourtID) einem Feld zugewiesen ist. `court`
+    /// ist die CourtID des Felds (`None` = kein Feld).
+    fn match_on(id: i64, court: Option<i64>, status: MatchStatus) -> BtpMatch {
         BtpMatch {
             id,
             draw_id: 1,
@@ -588,8 +620,10 @@ mod tests {
             team2: vec![player("Ben")],
             entry1_id: 10,
             entry2_id: 20,
-            court: court.map(String::from),
-            court_id: None,
+            // Court-Name spielt für die Identität keine Rolle – die
+            // CourtID ist maßgeblich. Wir setzen einen Platzhalter-Namen.
+            court: court.map(|cid| format!("C{cid}")),
+            court_id: court,
             sets: vec![(5, 3)],
             winner: None,
             result: MatchResult::Normal,
@@ -598,13 +632,24 @@ mod tests {
         }
     }
 
-    fn snapshot(matches: Vec<BtpMatch>, courts: Vec<&str>) -> BtpSnapshot {
+    /// Baut einen Snapshot. `courts` ist eine Liste `(CourtID, Feldname)`.
+    fn snapshot(matches: Vec<BtpMatch>, courts: Vec<(i64, &str)>) -> BtpSnapshot {
+        let court_infos: Vec<BtpCourt> = courts
+            .iter()
+            .enumerate()
+            .map(|(i, (id, name))| BtpCourt {
+                id: *id,
+                name: name.to_string(),
+                location_id: Some(1),
+                sort_order: i as i64,
+            })
+            .collect();
         BtpSnapshot {
             tournament_name: "T".to_string(),
             matches,
-            courts: courts.into_iter().map(String::from).collect(),
+            courts: courts.into_iter().map(|(_, n)| n.to_string()).collect(),
             locations: Vec::new(),
-            court_infos: Vec::new(),
+            court_infos,
         }
     }
 
@@ -613,24 +658,59 @@ mod tests {
         let st = TabletState::default();
         st.set_snapshot(snapshot(
             vec![
-                match_on(1, Some("Court 1"), MatchStatus::OnCourt),
+                match_on(1, Some(101), MatchStatus::OnCourt),
                 match_on(2, None, MatchStatus::Scheduled),
             ],
-            vec!["Court 1", "Court 2"],
+            vec![(101, "Court 1"), (102, "Court 2")],
         ));
-        assert_eq!(st.match_for_court("Court 1").unwrap().id, 1);
-        assert!(st.match_for_court("Court 2").is_none());
+        assert_eq!(st.match_for_court(101).unwrap().id, 1);
+        assert!(st.match_for_court(102).is_none());
+    }
+
+    /// Regression Mehr-Hallen-Turnier: zwei Felder heißen beide „1", haben
+    /// aber verschiedene CourtIDs. Ein Tablet auf dem einen Feld darf den
+    /// anderen Court nicht beeinflussen – ohne CourtID-Keying kollidierten
+    /// beide auf demselben Namen.
+    #[test]
+    fn courts_with_same_name_but_different_id_do_not_collide() {
+        let st = TabletState::default();
+        // Halle 1 · Feld „1" (CourtID 101) und Halle 2 · Feld „1" (CourtID 401).
+        st.set_snapshot(snapshot(
+            vec![
+                match_on(1, Some(101), MatchStatus::OnCourt),
+                match_on(2, Some(401), MatchStatus::OnCourt),
+            ],
+            vec![(101, "1"), (401, "1")],
+        ));
+        // Jedes Feld findet sein eigenes Match.
+        assert_eq!(st.match_for_court(101).unwrap().id, 1);
+        assert_eq!(st.match_for_court(401).unwrap().id, 2);
+        // Tablet bindet sich nur an Feld 101 und zählt dort.
+        st.attach_tablet(101);
+        st.record_score(101, 1, vec![(21, 5)]);
+        // Feld 401 bleibt unberührt: keine Session, kein Satzstand.
+        assert_eq!(st.active_courts(), vec![101]);
+        let ov = st.overview();
+        let c101 = ov.iter().find(|o| o.court_id == 101).unwrap();
+        let c401 = ov.iter().find(|o| o.court_id == 401).unwrap();
+        assert!(c101.tablet_connected);
+        assert_eq!(c101.sets, vec![(21, 5)]);
+        assert!(!c401.tablet_connected);
+        assert_eq!(c401.sets, vec![(5, 3)]); // BTP-Stand, kein Tablet
+                                             // Beide Felder tragen denselben Anzeigenamen.
+        assert_eq!(c101.court, "1");
+        assert_eq!(c401.court, "1");
     }
 
     #[test]
     fn apply_tablet_scores_overrides_only_active_matching_court() {
         let st = TabletState::default();
         let mut snap = snapshot(
-            vec![match_on(1, Some("Court 1"), MatchStatus::OnCourt)],
-            vec!["Court 1"],
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
         );
         st.set_snapshot(snap.clone());
-        st.record_score("Court 1", 1, vec![(21, 19), (8, 6)]);
+        st.record_score(101, 1, vec![(21, 19), (8, 6)]);
         st.apply_tablet_scores(&mut snap);
         assert_eq!(snap.matches[0].sets, vec![(21, 19), (8, 6)]);
     }
@@ -641,10 +721,10 @@ mod tests {
         // nicht aufs neue Match durchschlagen.
         let st = TabletState::default();
         let mut snap = snapshot(
-            vec![match_on(9, Some("Court 1"), MatchStatus::OnCourt)],
-            vec!["Court 1"],
+            vec![match_on(9, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
         );
-        st.record_score("Court 1", 1, vec![(21, 0)]);
+        st.record_score(101, 1, vec![(21, 0)]);
         st.apply_tablet_scores(&mut snap);
         assert_eq!(snap.matches[0].sets, vec![(5, 3)]);
     }
@@ -652,9 +732,9 @@ mod tests {
     #[test]
     fn detached_tablet_is_not_active() {
         let st = TabletState::default();
-        st.attach_tablet("Court 1");
-        assert_eq!(st.active_courts(), vec!["Court 1".to_string()]);
-        st.detach_tablet("Court 1");
+        st.attach_tablet(101);
+        assert_eq!(st.active_courts(), vec![101]);
+        st.detach_tablet(101);
         assert!(st.active_courts().is_empty());
     }
 
@@ -662,18 +742,19 @@ mod tests {
     fn overview_lists_each_court_with_its_match() {
         let st = TabletState::default();
         st.set_snapshot(snapshot(
-            vec![match_on(1, Some("Court 1"), MatchStatus::OnCourt)],
-            vec!["Court 1", "Court 2"],
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
         ));
-        st.record_score("Court 1", 1, vec![(15, 12)]);
-        st.attach_tablet("Court 1");
+        st.record_score(101, 1, vec![(15, 12)]);
+        st.attach_tablet(101);
         let ov = st.overview();
         assert_eq!(ov.len(), 2);
-        let c1 = ov.iter().find(|o| o.court == "Court 1").unwrap();
+        let c1 = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert_eq!(c1.court, "Court 1");
         assert_eq!(c1.team1, vec!["Anna".to_string()]);
         assert_eq!(c1.sets, vec![(15, 12)]);
         assert!(c1.tablet_connected);
-        let c2 = ov.iter().find(|o| o.court == "Court 2").unwrap();
+        let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
     }
@@ -682,24 +763,24 @@ mod tests {
     fn monitor_court_returns_match_with_effective_sets() {
         let st = TabletState::default();
         st.set_snapshot(snapshot(
-            vec![match_on(1, Some("Court 1"), MatchStatus::OnCourt)],
-            vec!["Court 1", "Court 2"],
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
         ));
         // Ohne Tablet: Satzstand aus BTP (match_on setzt sets = [(5,3)]).
-        let mc = st.monitor_court("Court 1");
+        let mc = st.monitor_court(101);
         assert_eq!(mc.tournament_name, "T");
         assert_eq!(mc.current_match.as_ref().unwrap().id, 1);
         assert_eq!(mc.sets, vec![(5, 3)]);
         assert!(mc.court_state.is_none());
         // Mit Tablet-Score: der Satzstand kommt vom Tablet.
-        st.record_score("Court 1", 1, vec![(21, 19), (8, 4)]);
-        assert_eq!(st.monitor_court("Court 1").sets, vec![(21, 19), (8, 4)]);
+        st.record_score(101, 1, vec![(21, 19), (8, 4)]);
+        assert_eq!(st.monitor_court(101).sets, vec![(21, 19), (8, 4)]);
         // Tablet getrennt (Browser zu): der zuletzt bekannte Stand bleibt
         // stehen – der Monitor fällt NICHT auf den BTP-Stand zurück.
-        st.detach_tablet("Court 1");
-        assert_eq!(st.monitor_court("Court 1").sets, vec![(21, 19), (8, 4)]);
+        st.detach_tablet(101);
+        assert_eq!(st.monitor_court(101).sets, vec![(21, 19), (8, 4)]);
         // Leeres Feld: kein Match.
-        assert!(st.monitor_court("Court 2").current_match.is_none());
+        assert!(st.monitor_court(102).current_match.is_none());
     }
 
     #[test]
@@ -708,11 +789,11 @@ mod tests {
         // match_on setzt entry1_id = 10, entry2_id = 20.
         st.set_snapshot(snapshot(
             vec![
-                match_on(1, Some("Court 1"), MatchStatus::OnCourt), // läuft – kein Kandidat
+                match_on(1, Some(101), MatchStatus::OnCourt), // läuft – kein Kandidat
                 match_on(2, None, MatchStatus::Scheduled),
                 match_on(3, None, MatchStatus::Scheduled),
             ],
-            vec!["Court 1"],
+            vec![(101, "Court 1")],
         ));
         let cands = st.walkover_candidates(10);
         let ids: Vec<i64> = cands.iter().map(|c| c.match_id).collect();

@@ -51,8 +51,9 @@ interface Props {
  * nachträglich angesagt.
  */
 export function MatchAnnouncer({ announce }: Props) {
-  // Court → zuletzt gesehene Match-ID.
-  const seenRef = useRef<Map<string, number>>(new Map());
+  // CourtID → zuletzt gesehene Match-ID. Per CourtID, damit gleichnamige
+  // Felder eines Mehr-Hallen-Turniers nicht denselben Eintrag teilen.
+  const seenRef = useRef<Map<number, number>>(new Map());
   const baselineRef = useRef(false);
   const prevEnabledRef = useRef(announce.enabled);
   // Serialisiert die Ansagen, damit aufeinanderfolgende Gongs nicht überlappen.
@@ -86,8 +87,8 @@ export function MatchAnnouncer({ announce }: Props) {
           const cfg = cfgRef.current;
           const newMatches: CourtOverview[] = [];
           for (const court of info.courts) {
-            const prev = seenRef.current.get(court.court) ?? 0;
-            seenRef.current.set(court.court, court.match_id);
+            const prev = seenRef.current.get(court.court_id) ?? 0;
+            seenRef.current.set(court.court_id, court.match_id);
             if (
               baselineRef.current &&
               court.match_id !== 0 &&

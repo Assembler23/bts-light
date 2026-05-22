@@ -64,7 +64,9 @@ export interface MonitorDeviceInfo {
   id: string;
   /** Kurz-Code, wie ihn der TV anzeigt. */
   code: string;
-  /** Zugewiesenes Feld, oder null. */
+  /** CourtID des zugewiesenen Felds (Identität), oder null. */
+  courtId: number | null;
+  /** Feldname (Anzeige) des zugewiesenen Felds, oder null. */
   court: string | null;
   /** Hat sich das Gerät zuletzt gemeldet? */
   online: boolean;
@@ -104,6 +106,10 @@ export type Discipline =
 
 /** Eine Court-Zeile der Felder-Übersicht (Rust: tablet::state::CourtOverview). */
 export interface CourtOverview {
+  /** Stabile BTP-CourtID des Felds – die Identität (Feldnamen wiederholen
+   *  sich bei Mehr-Hallen-Turnieren, die CourtID nicht). */
+  court_id: number;
+  /** Feldname (Anzeige), z. B. „1" oder „Feld 3". */
   court: string;
   /** BTP-Match-ID des aktuellen Spiels (0 = kein Match). */
   match_id: number;

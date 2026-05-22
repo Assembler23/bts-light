@@ -25,8 +25,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use relay_proto::{
-    device_code, html_escape, path_encode, MatchBrief, PlayerBrief, ResultBody, ResultResponse,
-    ServerMsg, SetAb, TabletMsg,
+    device_code, html_escape, MatchBrief, PlayerBrief, ResultBody, ResultResponse, ServerMsg,
+    SetAb, TabletMsg,
 };
 
 use crate::badhub::diff::Update;
@@ -57,7 +57,7 @@ pub struct ServerCtx {
     /// Pfad zur `config.json` – der Court-Monitor lädt seine Konfiguration
     /// frisch von dort, damit Änderungen im Tool ohne Neustart greifen.
     config_path: PathBuf,
-    /// Pfad zur `monitor-assignments.json` (Gerät → Feld). Wird frisch
+    /// Pfad zur Monitor-Zuweisungsdatei (Gerät → CourtID). Wird frisch
     /// gelesen, damit Zuweisungen aus dem Tool sofort greifen.
     pub assignments_path: PathBuf,
 }
@@ -94,8 +94,9 @@ impl ServerCtx {
             .unwrap_or_default()
     }
 
-    /// Lädt die Geräte→Feld-Zuweisungen frisch von der Platte.
-    pub fn monitor_assignments(&self) -> HashMap<String, String> {
+    /// Lädt die Geräte→Feld-Zuweisungen (Geräte-ID → CourtID) frisch von
+    /// der Platte.
+    pub fn monitor_assignments(&self) -> HashMap<String, i64> {
         monitor::read_assignments(&self.assignments_path)
     }
 }
@@ -105,12 +106,12 @@ impl ServerCtx {
 pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
     let app = Router::new()
         .route("/", get(index))
-        .route("/court/{label}", get(court_page))
-        .route("/court/{label}/display", get(monitor_page))
-        .route("/court/{label}/state", get(monitor_state))
+        .route("/court/{id}", get(court_page))
+        .route("/court/{id}/display", get(monitor_page))
+        .route("/court/{id}/state", get(monitor_state))
         .route("/monitor", get(monitor_device_page))
         .route("/monitor/state", get(monitor_device_state))
-        .route("/qr/{label}", get(qr_svg))
+        .route("/qr/{id}", get(qr_svg))
         .route("/flags/{file}", get(flag_route))
         .route("/ads/{file}", get(ad_image))
         .route("/health", get(health))
@@ -133,18 +134,18 @@ pub fn lan_host() -> String {
 
 // ─────────────────────────────── HTTP-Routen ──────────────────────────────
 
-/// Landing-Page: zeigt die Tablet-Adressen je Court.
+/// Landing-Page: zeigt die Tablet-Adressen je Court. Die URL trägt die
+/// stabile CourtID, der angezeigte Text den Feldnamen.
 async fn index(State(ctx): State<Arc<ServerCtx>>) -> Html<String> {
     let host = lan_host();
-    let courts = ctx.tablet.court_names();
+    let courts = ctx.tablet.courts();
     let mut rows = String::new();
     for c in &courts {
         rows.push_str(&format!(
-            "<li><b>{}</b> &mdash; <a href=\"/court/{enc}\">/court/{}</a> \
-             &middot; <a href=\"/qr/{enc}\">QR</a></li>",
-            html_escape(c),
-            html_escape(c),
-            enc = path_encode(c),
+            "<li><b>{}</b> &mdash; <a href=\"/court/{id}\">/court/{id}</a> \
+             &middot; <a href=\"/qr/{id}\">QR</a></li>",
+            html_escape(&c.name),
+            id = c.id,
         ));
     }
     if courts.is_empty() {
@@ -164,16 +165,35 @@ async fn index(State(ctx): State<Arc<ServerCtx>>) -> Html<String> {
     ))
 }
 
-/// Liefert die Tablet-UI für einen Court (kein Caching – immer frisch).
-async fn court_page(Path(label): Path<String>) -> impl IntoResponse {
-    tracing::info!("Tablet-Seite ausgeliefert für Court '{label}'");
-    let body = TABLET_HTML.replace("__COURT_LABEL__", &html_escape(&label));
+/// Liefert die Tablet-UI für ein Feld (per CourtID; kein Caching – immer
+/// frisch). Der Platzhalter `__COURT_ID__` trägt die Identität,
+/// `__COURT_LABEL__` den Feldnamen für die Anzeige.
+async fn court_page(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(court_id): Path<i64>,
+) -> impl IntoResponse {
+    let label = court_label_for(&ctx, court_id);
+    tracing::info!("Tablet-Seite ausgeliefert für Feld {court_id} ('{label}')");
+    let body = TABLET_HTML
+        .replace("__COURT_ID__", &court_id.to_string())
+        .replace("__COURT_LABEL__", &html_escape(&label));
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
-/// QR-Code (SVG), der auf die Tablet-URL des Courts zeigt.
-async fn qr_svg(Path(label): Path<String>) -> impl IntoResponse {
-    let url = format!("http://{}/court/{}", lan_host(), path_encode(&label));
+/// Löst die CourtID auf ihren Feldnamen auf (leer, wenn die ID kein
+/// bekanntes Feld ist – z. B. nach einem Turnierwechsel).
+fn court_label_for(ctx: &ServerCtx, court_id: i64) -> String {
+    ctx.tablet
+        .courts()
+        .into_iter()
+        .find(|c| c.id == court_id)
+        .map(|c| c.name)
+        .unwrap_or_default()
+}
+
+/// QR-Code (SVG), der auf die Tablet-URL des Felds (per CourtID) zeigt.
+async fn qr_svg(Path(court_id): Path<i64>) -> impl IntoResponse {
+    let url = format!("http://{}/court/{}", lan_host(), court_id);
     match qrcode::QrCode::new(url.as_bytes()) {
         Ok(code) => {
             let svg = code
@@ -213,9 +233,14 @@ fn render_monitor_html(mode: &str, base: &str, court_label: &str) -> String {
         .replace("__COURT_LABEL__", &html_escape(court_label))
 }
 
-/// Liefert die Court-Monitor-Anzeige fest für ein Feld (`/court/X/display`).
-async fn monitor_page(Path(label): Path<String>) -> impl IntoResponse {
-    tracing::info!("Court-Monitor-Seite (fest) ausgeliefert für Court '{label}'");
+/// Liefert die Court-Monitor-Anzeige fest für ein Feld
+/// (`/court/{id}/display`, per CourtID).
+async fn monitor_page(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(court_id): Path<i64>,
+) -> impl IntoResponse {
+    let label = court_label_for(&ctx, court_id);
+    tracing::info!("Court-Monitor-Seite (fest) ausgeliefert für Feld {court_id} ('{label}')");
     let body = render_monitor_html("fixed", "/", &label);
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
@@ -227,15 +252,17 @@ async fn monitor_device_page() -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
-/// Anzeige-Zustand eines fest verdrahteten Feldes, im Sekundentakt gepollt.
+/// Anzeige-Zustand eines fest verdrahteten Feldes (per CourtID), im
+/// Sekundentakt gepollt.
 async fn monitor_state(
     State(ctx): State<Arc<ServerCtx>>,
-    Path(label): Path<String>,
+    Path(court_id): Path<i64>,
 ) -> impl IntoResponse {
-    let court = ctx.tablet.monitor_court(&label);
+    let label = court_label_for(&ctx, court_id);
+    let court = ctx.tablet.monitor_court(court_id);
     let config = ctx.monitor_config();
     let ads = monitor::list_ads(&ctx.monitor_dir);
-    let state = monitor::build_monitor_state(label, court, &config, ads);
+    let state = monitor::build_monitor_state(court_id, label, court, &config, ads);
     ([(header::CACHE_CONTROL, "no-store")], Json(state))
 }
 
@@ -256,12 +283,13 @@ async fn monitor_device_state(
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
     }
     let command = ctx.tablet.record_monitor_poll(&device);
-    let mut state = match ctx.monitor_assignments().get(&device) {
-        Some(court) => {
-            let court_data = ctx.tablet.monitor_court(court);
+    let mut state = match ctx.monitor_assignments().get(&device).copied() {
+        Some(court_id) => {
+            let label = court_label_for(&ctx, court_id);
+            let court_data = ctx.tablet.monitor_court(court_id);
             let config = ctx.monitor_config();
             let ads = monitor::list_ads(&ctx.monitor_dir);
-            monitor::build_monitor_state(court.clone(), court_data, &config, ads)
+            monitor::build_monitor_state(court_id, label, court_data, &config, ads)
         }
         None => monitor::unassigned_monitor_state(&device),
     };
@@ -322,7 +350,7 @@ async fn result(
 /// Mitigation des Cloud-Modus (Match-ID muss zum Court-Match passen,
 /// Satzstand plausibel).
 pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
-    let Some(m) = ctx.tablet.match_for_court(&body.court_label) else {
+    let Some(m) = ctx.tablet.match_for_court(body.court_id) else {
         return ResultResponse::err("Kein Match auf diesem Court.");
     };
     if m.id != body.match_id {
@@ -369,14 +397,15 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     };
 
     tracing::info!(
-        "Ergebnis vom Tablet: Court '{}', Match {}, Sätze {:?} – schreibe nach BTP",
+        "Ergebnis vom Tablet: Feld {} ('{}'), Match {}, Sätze {:?} – schreibe nach BTP",
+        body.court_id,
         body.court_label,
         m.id,
         update.sets
     );
     match write_result_to_btp(&ctx.config, &update).await {
         Ok(()) => {
-            ctx.tablet.clear_court(&body.court_label);
+            ctx.tablet.clear_court(body.court_id);
             tracing::info!("BTP-Schreiben OK: Match {}", m.id);
             // Nach einer Aufgabe: prüfen, ob die aufgebende Mannschaft in
             // derselben Disziplin noch Spiele hat, und der Turnierleitung
@@ -507,7 +536,9 @@ async fn send_msg(socket: &mut WebSocket, msg: &ServerMsg) {
 /// 2 s das aktuell von BTP zugewiesene Match. Pro Court schiedst genau ein
 /// Tablet aktiv – ein zweites Gerät kann den Court übernehmen.
 async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
-    let mut court: Option<String> = None;
+    // Feld-Identität dieser Verbindung: die CourtID, sobald sich das Tablet
+    // per `identify` gebunden hat.
+    let mut court: Option<i64> = None;
     let mut last_match: Option<i64> = None;
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
@@ -522,48 +553,48 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 match msg {
                     Message::Text(text) => {
                         match serde_json::from_str::<TabletMsg>(text.as_str()) {
-                            Ok(TabletMsg::Identify { court_label }) => {
-                                court = Some(court_label.clone());
+                            Ok(TabletMsg::Identify { court_id, .. }) => {
+                                court = Some(court_id);
                                 last_match = None;
-                                if ctx.tablet.court_occupied(&court_label) {
-                                    tracing::info!("Court '{court_label}' belegt – Tablet wartet auf Übernahme");
+                                if ctx.tablet.court_occupied(court_id) {
+                                    tracing::info!("Feld {court_id} belegt – Tablet wartet auf Übernahme");
                                     send_msg(&mut socket, &ServerMsg::CourtOccupied).await;
                                 } else {
-                                    my_token = Some(ctx.tablet.claim_court(&court_label));
-                                    ctx.tablet.attach_tablet(&court_label);
-                                    tracing::info!("Tablet verbunden für Court '{court_label}'");
-                                    push_match(&court_label, &ctx, &mut socket, &mut last_match).await;
+                                    my_token = Some(ctx.tablet.claim_court(court_id));
+                                    ctx.tablet.attach_tablet(court_id);
+                                    tracing::info!("Tablet verbunden für Feld {court_id}");
+                                    push_match(court_id, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }
                             Ok(TabletMsg::TakeOver) => {
-                                if let (Some(c), None, false) = (court.clone(), my_token, superseded) {
-                                    my_token = Some(ctx.tablet.claim_court(&c));
-                                    ctx.tablet.attach_tablet(&c);
+                                if let (Some(c), None, false) = (court, my_token, superseded) {
+                                    my_token = Some(ctx.tablet.claim_court(c));
+                                    ctx.tablet.attach_tablet(c);
                                     last_match = None;
-                                    tracing::info!("Tablet übernimmt Court '{c}'");
-                                    if let Some(state) = ctx.tablet.court_state(&c) {
+                                    tracing::info!("Tablet übernimmt Feld {c}");
+                                    if let Some(state) = ctx.tablet.court_state(c) {
                                         send_msg(&mut socket, &ServerMsg::StateRestore { state }).await;
                                     }
-                                    push_match(&c, &ctx, &mut socket, &mut last_match).await;
+                                    push_match(c, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }
                             Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
-                                if let (Some(c), Some(_)) = (&court, my_token) {
+                                if let (Some(c), Some(_)) = (court, my_token) {
                                     handle_score(c, score_a, score_b, &sets_history, &ctx).await;
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
-                                if let Some(c) = &court {
+                                if let Some(c) = court {
                                     ctx.tablet.record_battery(c, percent, charging);
                                 }
                             }
                             Ok(TabletMsg::Alert { injury, official }) => {
-                                if let (Some(c), Some(_)) = (&court, my_token) {
+                                if let (Some(c), Some(_)) = (court, my_token) {
                                     ctx.tablet.record_alert(c, injury, official);
                                 }
                             }
                             Ok(TabletMsg::StateSync { state }) => {
-                                if let (Some(c), Some(_)) = (&court, my_token) {
+                                if let (Some(c), Some(_)) = (court, my_token) {
                                     ctx.tablet.set_court_state(c, state);
                                 }
                             }
@@ -575,13 +606,13 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 }
             }
             _ = ticker.tick() => {
-                if let (Some(c), Some(token)) = (court.clone(), my_token) {
-                    if ctx.tablet.is_court_active(&c, token) {
-                        push_match(&c, &ctx, &mut socket, &mut last_match).await;
+                if let (Some(c), Some(token)) = (court, my_token) {
+                    if ctx.tablet.is_court_active(c, token) {
+                        push_match(c, &ctx, &mut socket, &mut last_match).await;
                     } else {
                         my_token = None;
                         superseded = true;
-                        tracing::info!("Tablet für Court '{c}' wurde abgelöst");
+                        tracing::info!("Tablet für Feld {c} wurde abgelöst");
                         send_msg(&mut socket, &ServerMsg::SessionSuperseded).await;
                     }
                 }
@@ -589,20 +620,25 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
         }
     }
 
-    // Aufräumen: nur das noch aktive Tablet gibt den Court frei.
-    if let (Some(c), Some(token)) = (&court, my_token) {
+    // Aufräumen: nur das noch aktive Tablet gibt das Feld frei.
+    if let (Some(c), Some(token)) = (court, my_token) {
         if ctx.tablet.is_court_active(c, token) {
             ctx.tablet.detach_tablet(c);
             ctx.tablet.release_court(c, token);
-            tracing::info!("Tablet getrennt für Court '{c}'");
+            tracing::info!("Tablet getrennt für Feld {c}");
         }
     }
 }
 
 /// Sendet `match_assigned`/`match_cleared`, sobald sich das Match des
-/// Courts gegenüber dem zuletzt gemeldeten Stand geändert hat.
-async fn push_match(court: &str, ctx: &ServerCtx, socket: &mut WebSocket, last: &mut Option<i64>) {
-    let current = ctx.tablet.match_for_court(court);
+/// Felds (per CourtID) gegenüber dem zuletzt gemeldeten Stand geändert hat.
+async fn push_match(
+    court_id: i64,
+    ctx: &ServerCtx,
+    socket: &mut WebSocket,
+    last: &mut Option<i64>,
+) {
+    let current = ctx.tablet.match_for_court(court_id);
     let current_id = current.as_ref().map(|m| m.id);
     if current_id == *last {
         return;
@@ -610,13 +646,13 @@ async fn push_match(court: &str, ctx: &ServerCtx, socket: &mut WebSocket, last: 
     *last = current_id;
     let msg = match &current {
         Some(m) => {
-            tracing::info!("Court '{court}': Match {} ans Tablet zugewiesen", m.id);
+            tracing::info!("Feld {court_id}: Match {} ans Tablet zugewiesen", m.id);
             ServerMsg::MatchAssigned {
                 match_brief: match_brief(m),
             }
         }
         None => {
-            tracing::info!("Court '{court}': Match-Zuweisung aufgehoben");
+            tracing::info!("Feld {court_id}: Match-Zuweisung aufgehoben");
             ServerMsg::MatchCleared
         }
     };
@@ -628,13 +664,13 @@ async fn push_match(court: &str, ctx: &ServerCtx, socket: &mut WebSocket, last: 
 /// Verarbeitet einen Live-Punktestand vom Tablet: merken + an den
 /// Liveticker pushen. Von LAN-Server und Cloud-Relay-Client genutzt.
 pub(crate) async fn handle_score(
-    court: &str,
+    court_id: i64,
     score_a: i64,
     score_b: i64,
     history: &[SetAb],
     ctx: &ServerCtx,
 ) {
-    let Some(m) = ctx.tablet.match_for_court(court) else {
+    let Some(m) = ctx.tablet.match_for_court(court_id) else {
         return;
     };
     if history.len() > 9 {
@@ -643,7 +679,7 @@ pub(crate) async fn handle_score(
     // Vollständige Satzliste: abgeschlossene Sätze + laufender Satz.
     let mut sets: Vec<(i64, i64)> = history.iter().map(|s| (s.a, s.b)).collect();
     sets.push((score_a, score_b));
-    ctx.tablet.record_score(court, m.id, sets.clone());
+    ctx.tablet.record_score(court_id, m.id, sets.clone());
 
     let mut live = m;
     live.sets = sets;
