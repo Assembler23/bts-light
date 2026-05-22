@@ -251,7 +251,9 @@ async fn handle_frame(
         RelayFrame::TabletDisconnected { court_label } => {
             ctx.tablet.detach_tablet(&court_label);
             tracing::info!("Tablet getrennt für Court '{court_label}' (Cloud)");
-            last_match.remove(&court_label);
+            // `last_match` bewusst NICHT entfernen – sonst pusht der nächste
+            // Ticker ein unnötiges `MatchAssigned`. Ein Reconnect setzt es
+            // ohnehin zurück und schiebt das Match dann frisch nach.
         }
         RelayFrame::ScoreUpdate {
             court_label,

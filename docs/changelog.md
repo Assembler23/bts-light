@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.8.2
+
+- **Court-Monitor: Satzstand bleibt bei kurzem Tablet-Aussetzer stehen.**
+  Schloss man am zählenden Tablet kurz den Browser, sprang der Monitor
+  auf 0:0 und zeigte den Stand erst beim Wiederverbinden erneut. Ursache:
+  ein erneutes Zuweisen desselben Matches (Tablet-Reconnect) setzte den
+  gemerkten Satzstand zurück. Relay und LAN-Server halten jetzt den
+  zuletzt bekannten Stand – zurückgesetzt wird nur bei echtem
+  Match-Wechsel.
+- Cloud-Monitor-Adresse korrigiert (`/bts-relay`-Pfad fehlte), Werbe-
+  Upload-Limit am Server angehoben – beides bereits am Relay/Server
+  ausgerollt.
+
 ## v0.8.1
 
 - **Court-Monitor: stabile Geräte-ID per Pi-Seriennummer.** Der Pi-Kiosk

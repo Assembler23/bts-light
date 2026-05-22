@@ -466,11 +466,15 @@ impl TabletState {
                 .cloned()
         });
         drop(guard);
+        // Satzstand vom Tablet, sobald dessen Session zum selben Match
+        // gehört – bewusst OHNE `connected`-Prüfung: ein kurzer Tablet-
+        // Aussetzer (Browser zu, Display gesperrt) soll den Monitor nicht
+        // auf 0:0 zurückwerfen; der zuletzt bekannte Stand bleibt stehen.
         let sets = match &current_match {
             Some(mm) => {
                 let courts = self.courts.read().unwrap();
                 match courts.get(court) {
-                    Some(s) if s.connected && s.match_id == mm.id => s.sets.clone(),
+                    Some(s) if s.match_id == mm.id && !s.sets.is_empty() => s.sets.clone(),
                     _ => mm.sets.clone(),
                 }
             }
@@ -686,6 +690,10 @@ mod tests {
         assert!(mc.court_state.is_none());
         // Mit Tablet-Score: der Satzstand kommt vom Tablet.
         st.record_score("Court 1", 1, vec![(21, 19), (8, 4)]);
+        assert_eq!(st.monitor_court("Court 1").sets, vec![(21, 19), (8, 4)]);
+        // Tablet getrennt (Browser zu): der zuletzt bekannte Stand bleibt
+        // stehen – der Monitor fällt NICHT auf den BTP-Stand zurück.
+        st.detach_tablet("Court 1");
         assert_eq!(st.monitor_court("Court 1").sets, vec![(21, 19), (8, 4)]);
         // Leeres Feld: kein Match.
         assert!(st.monitor_court("Court 2").current_match.is_none());

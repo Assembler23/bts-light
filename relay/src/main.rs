@@ -1054,14 +1054,22 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             court_label,
             match_brief,
         } => {
-            // Für die Court-Monitor-Anzeige merken. Ein Match-Wechsel setzt
-            // den alten Satzstand/Spielzustand zurück (der Host pusht
-            // `MatchAssigned` nur bei echtem Wechsel).
+            // Satzstand/Spielzustand nur bei einem ECHTEN Match-Wechsel
+            // zurücksetzen. Ein erneutes `MatchAssigned` fürs selbe Match
+            // (z. B. nach einem kurzen Tablet-Reconnect) darf den Monitor
+            // nicht auf 0:0 zurückwerfen.
+            let same_match = namespace
+                .court_matches
+                .get(&court_label)
+                .map(|m| m.match_id == match_brief.match_id)
+                .unwrap_or(false);
+            if !same_match {
+                namespace.court_scores.remove(&court_label);
+                namespace.court_state.remove(&court_label);
+            }
             namespace
                 .court_matches
                 .insert(court_label.clone(), match_brief.clone());
-            namespace.court_scores.remove(&court_label);
-            namespace.court_state.remove(&court_label);
             if let Some(t) = namespace.tablets.get(&court_label) {
                 let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
             }
@@ -1184,6 +1192,48 @@ mod tests {
         )
         .await;
         assert!(rx.try_recv().is_err(), "fremder Court bekommt nichts");
+    }
+
+    #[tokio::test]
+    async fn reassign_same_match_keeps_the_score() {
+        let broker = Broker::new("x".into());
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert("Feld 1".into(), brief(7));
+            ns.court_scores
+                .insert("Feld 1".into(), vec![SetAb { a: 21, b: 15 }]);
+        }
+        // Erneutes MatchAssigned fürs SELBE Match (Tablet-Reconnect) →
+        // der gemerkte Satzstand bleibt erhalten.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_label: "Feld 1".into(),
+                match_brief: brief(7),
+            },
+        )
+        .await;
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"]
+                .court_scores
+                .get("Feld 1"),
+            Some(&vec![SetAb { a: 21, b: 15 }])
+        );
+        // Echter Match-Wechsel → Satzstand wird zurückgesetzt.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_label: "Feld 1".into(),
+                match_brief: brief(9),
+            },
+        )
+        .await;
+        assert!(!broker.namespaces.lock().await["ns1"]
+            .court_scores
+            .contains_key("Feld 1"));
     }
 
     #[tokio::test]
