@@ -96,11 +96,27 @@
                   0 .6vmin 1.6vmin rgba(0, 0, 0, .45);
     }
     .flag.hidden { visibility: hidden; }
+    /* Name im Broadcast-Stil: Vorname klein darüber, Nachname groß. So
+       bleiben auch lange (Doppel-)Namen aus der Distanz gut lesbar.
+       `overflow: hidden` setzt die Flex-Mindestbreite auf 0 → der Name
+       schrumpft zuverlässig, statt die Zeile zu sprengen (dann greift die
+       Ellipsis von .given/.family). */
     .name {
-      font-size: 6.4vmin; font-weight: 800; line-height: 1.05;
+      display: flex; flex-direction: column; min-width: 0;
+      overflow: hidden; line-height: 1.03;
+    }
+    .name .given {
+      font-size: 2.9vmin; font-weight: 600; letter-spacing: .07em;
+      text-transform: uppercase; color: #94a3b8;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .players.doubles .name { font-size: 4.8vmin; }
+    .name .given:empty { display: none; }
+    .name .family {
+      font-size: 7vmin; font-weight: 800;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .players.doubles .name .given { font-size: 2.4vmin; }
+    .players.doubles .name .family { font-size: 5.4vmin; }
     .serve-dot {
       flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;
@@ -382,17 +398,17 @@
     try { return JSON.parse(json); } catch (e) { return null; }
   }
 
-  // Kürzt Vornamen zu Initialen: „Ajay Kumar Mandapati" → „A. K. Mandapati".
-  // Der letzte Namensteil (Nachname) bleibt immer voll ausgeschrieben.
-  // Genutzt nur als Fallback, wenn ein Name über seine Spalte läuft.
-  function abbreviateName(full) {
-    var parts = (full || "").trim().split(/\s+/);
-    if (parts.length < 2) return full;
-    var surname = parts[parts.length - 1];
-    var initials = parts.slice(0, -1).map(function (w) {
-      return w.charAt(0).toUpperCase() + ".";
-    }).join(" ");
-    return initials + " " + surname;
+  // Zerlegt einen Namen in Vorname(n) + Nachname. Der letzte Namensteil
+  // ist der Nachname, alles davor der Vorname. Ein einteiliger Name hat
+  // keinen Vornamen (given = ""), ein leerer Name fällt auf „—" zurück.
+  function splitName(full) {
+    var parts = (full || "").trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return { given: "", family: "—" };
+    if (parts.length === 1) return { given: "", family: parts[0] };
+    return {
+      given: parts.slice(0, -1).join(" "),
+      family: parts[parts.length - 1],
+    };
   }
 
   function flagEl(nat) {
@@ -416,16 +432,25 @@
     host.classList.toggle("serving", !!serving);
     var pBox = document.createElement("div");
     pBox.className = "players" + (players.length > 1 ? " doubles" : "");
-    var nameSpans = [];
     players.forEach(function (p) {
       var row = document.createElement("div");
       row.className = "player";
       row.appendChild(flagEl(p.nationality));
+
+      // Name im Broadcast-Stil: Vorname klein, Nachname groß.
+      var parts = splitName(p.name);
       var name = document.createElement("span");
       name.className = "name";
-      name.textContent = p.name || "—";
+      var given = document.createElement("span");
+      given.className = "given";
+      given.textContent = parts.given;
+      var family = document.createElement("span");
+      family.className = "family";
+      family.textContent = parts.family;
+      name.appendChild(given);
+      name.appendChild(family);
       row.appendChild(name);
-      nameSpans.push({ span: name, full: p.name || "—" });
+
       var dot = document.createElement("span");
       dot.className = "serve-dot" + (serving ? " on" : "");
       dot.textContent = "●";
@@ -450,16 +475,6 @@
     cur.textContent = String(current);
     scores.appendChild(cur);
     host.appendChild(scores);
-
-    // Lange Namen, die ueber ihre Spalte hinauslaufen wuerden, auf
-    // Initialen kuerzen – tritt vor allem bei Doppeln mit langen
-    // internationalen Namen auf. Messung erst nachdem die ganze Haelfte
-    // im Dokument haengt (sonst sind die Breiten noch nicht bekannt).
-    nameSpans.forEach(function (e) {
-      if (e.span.scrollWidth > e.span.clientWidth + 1) {
-        e.span.textContent = abbreviateName(e.full);
-      }
-    });
   }
 
   // ─── Match-Ansicht ───────────────────────────────────────────────────

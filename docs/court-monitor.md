@@ -156,13 +156,14 @@ Zählt ein Tablet das Feld, kennt der Monitor den Spielbeginn
 laufende Spieldauer in Minuten (Stoppuhr-Symbol). Im Tool ein-/abschaltbar.
 Ohne zählendes Tablet bleibt die Anzeige leer.
 
-## Lange Namen
+## Spielernamen (Broadcast-Stil)
 
-Läuft ein Spielername über seine Spalte hinaus (häufig bei Doppeln mit
-langen internationalen Namen), kürzt der Monitor automatisch die Vornamen
-auf Initialen — „Ajay Kumar Mandapati" → „A. K. Mandapati". Der letzte
-Namensteil (Nachname) bleibt immer voll. Passt ein Name auch gekürzt
-nicht, schneidet die Anzeige ihn mit „…" ab.
+Namen werden zweizeilig dargestellt: Vorname(n) klein darüber, Nachname
+groß darunter — wie in Sport-Übertragungen. Der letzte Namensteil gilt
+als Nachname. So bleibt der Nachname auch bei langen Doppel-Namen aus der
+Distanz gut lesbar, der Vorname geht nicht verloren, und das Bild ist für
+alle Spieler:innen einheitlich. Ein einteiliger Name steht ohne Vornamen-
+Zeile; ein sehr langer Einzelteil wird mit „…" abgeschnitten.
 
 ## Layout
 

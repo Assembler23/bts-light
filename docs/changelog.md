@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.3
+
+- **Court-Monitor: Spielernamen im Broadcast-Stil.** Namen erscheinen
+  jetzt zweizeilig — Vorname klein darüber, Nachname groß darunter, wie in
+  Sport-Übertragungen. Lange Doppel-Namen bleiben dadurch aus der Distanz
+  gut lesbar; die frühere Initialen-Kürzung entfällt. Details:
+  [court-monitor.md](court-monitor.md).
+
 ## v0.9.2
 
 - **Spielzettel: Zurück-Schritt im Match-Setup.** Der Aufstellungs-

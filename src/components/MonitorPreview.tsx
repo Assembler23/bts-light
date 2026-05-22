@@ -53,8 +53,13 @@ export function MonitorPreview({
         {/* Mannschaft 1 – schlägt auf (Amber-Akzent) */}
         <div className="flex items-center gap-2 border-l-2 border-amber-400 bg-amber-400/[.06] px-2.5 py-2.5">
           <span className="text-base leading-none">🇩🇪</span>
-          <span className="flex-1 truncate text-xs font-bold text-slate-100">
-            Anna Müller
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block text-[7px] font-semibold uppercase tracking-wide text-slate-400">
+              Anna
+            </span>
+            <span className="block truncate text-xs font-bold text-slate-100">
+              Müller
+            </span>
           </span>
           <span className="text-[9px] text-amber-400">●</span>
           <span className="text-[10px] font-bold text-slate-500">21</span>
@@ -66,8 +71,13 @@ export function MonitorPreview({
         {/* Mannschaft 2 */}
         <div className="flex items-center gap-2 border-l-2 border-transparent px-2.5 py-2.5">
           <span className="text-base leading-none">🇵🇱</span>
-          <span className="flex-1 truncate text-xs font-bold text-slate-100">
-            Hilde Kowalski
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block text-[7px] font-semibold uppercase tracking-wide text-slate-400">
+              Hilde
+            </span>
+            <span className="block truncate text-xs font-bold text-slate-100">
+              Kowalski
+            </span>
           </span>
           <span className="text-[10px] font-bold text-slate-500">18</span>
           <span className="rounded border border-slate-600 bg-slate-900 px-1.5 py-0.5 text-xs font-extrabold text-slate-100">
