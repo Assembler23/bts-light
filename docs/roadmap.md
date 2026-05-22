@@ -85,15 +85,21 @@ Der Court-Monitor ist umgesetzt (v0.7.0–v0.9.0, [court-monitor.md](court-monit
 Offen für das **Verleih-Set**-Konzept (Technik wird an Turnierleitungen
 verliehen):
 
-- **mDNS funktioniert auf Windows (noch) nicht.** Am echten Aufbau
-  getestet (2026-05-22): `bts-light.local` löst nicht auf
-  (`ERR_NAME_NOT_RESOLVED`), auch nicht nach Freigabe von UDP 5353 in der
-  Windows-Firewall. Vermutete Ursachen: mehrere Netzwerk-Adapter am PC
-  (`mdns-sd` meldet sich evtl. auf dem falschen), Windows-eigener
-  mDNS-Dienst. Braucht dediziertes Debugging direkt an der Hardware. Die
-  **IP-Adresse funktioniert** als Rückfall (`http://<ip>:8088/…`).
-  *Alternative für das Verleih-Set:* DHCP-Reservierung am vorkonfigurierten
-  Verleih-Router → stabile IP ohne Laptop-Einstellung.
+- **mDNS noch ungeklärt — entscheidender Test offen.** Stand 2026-05-22:
+  `bts-light.local` ließ sich von einem **Windows-PC** nicht auflösen
+  (`ERR_NAME_NOT_RESOLVED`, auch nach Freigabe von UDP 5353 in der
+  Windows-Firewall). Das ist **nicht aussagekräftig** — Windows ist als
+  mDNS-*Client* selbst unzuverlässig; der Fehlschlag dort beweist nicht,
+  dass bts-lights Bekanntgabe defekt ist. Der **entscheidende Test ist die
+  Auflösung von einem Raspberry Pi** (avahi, das echte Court-Monitor-
+  Gerät). Dieser Test ist **noch nicht möglich: die Court-Monitor-Pis sind
+  noch nicht einsatzfähig** (kein Master-Image, kein eingerichteter Pi).
+  Erst der Pi-Test entscheidet, ob an `mdns-sd` (Netzwerk-Adapter-Auswahl
+  auf Windows) etwas zu fixen ist — oder ob mDNS für den echten Einsatzfall
+  längst funktioniert. Bis dahin ist die **IP-Adresse der verlässliche
+  Weg** (`http://<ip>:8088/…`, eingebauter Rückfall). *Alternative fürs
+  Verleih-Set:* DHCP-Reservierung am vorkonfigurierten Verleih-Router →
+  stabile IP ohne Laptop-Einstellung.
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
