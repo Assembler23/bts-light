@@ -3,8 +3,8 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-21, nach Release v0.6.0 (Sprachansagen, im Turnierbetrieb
-> bestätigt).
+> Stand: 2026-05-22, nach Release v0.9.0 (Court-Monitor inkl. TV-Verwaltung
+> und mDNS).
 
 ## Als Nächstes
 
@@ -49,12 +49,25 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   Tablets ein „Host offline"-Signal schicken, damit das Tablet ehrlich
   „Warte auf Turnier-PC" anzeigt.
 
-## Geplant (später)
+## Court-Monitor — offene Punkte
 
-- **Court-Monitor: 2-Felder-pro-TV-Modus.** Der Court-Monitor ist mit
-  v0.7.0 für ein Feld pro TV umgesetzt ([court-monitor.md](court-monitor.md)).
-  Offen bleibt die Option, zwei benachbarte Felder auf einem großen TV
-  darzustellen (`…/display?courts=3,4`).
+Der Court-Monitor ist umgesetzt (v0.7.0–v0.9.0, [court-monitor.md](court-monitor.md),
+[pi-setup.md](pi-setup.md), [pi-master-image.md](pi-master-image.md)).
+Offen für das **Verleih-Set**-Konzept (Technik wird an Turnierleitungen
+verliehen):
+
+- **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
+  echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
+  den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
+- **mDNS auf echter Hardware prüfen.** `bts-light.local` ist gebaut, aber
+  noch nicht auf einem echten Pi + Windows-Laptop getestet (Windows-
+  Firewall für mDNS/UDP 5353; Pi löst `.local` via avahi auf). IP-Rückfall
+  ist eingebaut.
+- **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
+  echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
+  (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
+- **2-Felder-pro-TV-Modus.** Zwei benachbarte Felder auf einem großen TV
+  (`…/display?courts=3,4`).
 
 ## Bekannte Einschränkungen / technische Schuld
 

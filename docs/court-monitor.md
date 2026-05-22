@@ -139,7 +139,9 @@ Läuft kein Spiel, zeigt der Monitor Werbung:
 - **Cloud-Modus:** bts-light lädt die Bilder nach dem Verbinden per
   `POST /{ns}/monitor` zum Relay hoch (Base64-JSON) und prüft alle 30 s
   per Fingerabdruck auf Änderungen. Ad-Änderungen erreichen Cloud-Monitore
-  daher binnen ~30 s.
+  daher binnen ~30 s. **Ops-Hinweis:** nginx muss für `/bts-relay/`
+  `client_max_body_size` ≥ 25 MB setzen, sonst scheitert der Upload mit
+  HTTP 413 (Standardwert 1 MB ist zu klein).
 - Wechsel-Intervall einstellbar (Default 10 s).
 - **Fallback** ohne konfigurierte Werbung: neutrale Seite mit Turniername
   und „Kein Spiel auf diesem Feld".

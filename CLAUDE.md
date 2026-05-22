@@ -82,7 +82,7 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | Walkover (`tablet/state.rs`, `server.rs`, `commands.rs` `walkover_*`) | `docs/walkover.md` |
 | Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`) | `docs/announcements.md` |
 | Court-Monitor (`tablet/monitor.rs`, `tablet/mdns.rs`, `assets/monitor.html`, `assets/flags/`, Court-/Monitor-Routen in `server.rs` + `relay/`, `pages/CourtMonitorPanel.tsx`, `monitor_*`-Commands) | `docs/court-monitor.md` |
-| `pi/` (Raspberry-Pi-Kiosk-Einrichtung) | `docs/pi-setup.md` |
+| `pi/` (Raspberry-Pi-Kiosk-Einrichtung) | `docs/pi-setup.md`, `docs/pi-master-image.md` |
 | `src-tauri/src/log_upload.rs` | `docs/logging.md` |
 | `.github/workflows/*`, Release-Ablauf | `docs/release.md` |
 | jede veröffentlichte Version | `docs/changelog.md` |
