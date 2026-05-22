@@ -77,6 +77,13 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   erfährt nicht, dass der Host (bts-light) weg ist. Der Relay sollte den
   Tablets ein „Host offline"-Signal schicken, damit das Tablet ehrlich
   „Warte auf Turnier-PC" anzeigt.
+- **Verbindungsweg je Gerät anzeigen (Parallelbetrieb).** Im
+  LAN+Cloud-Modus pro verbundenem Gerät (Tablet, Court-Monitor) kenntlich
+  machen, ob es bts-light über LAN oder über das Cloud-Relay erreicht —
+  als Badge in der Felder-/Geräte-Übersicht. So sieht die Turnierleitung
+  auf einen Blick, welchen Weg ein Gerät nutzt; hilft bei der Fehlersuche,
+  wenn eine Halle hängt. (Der Relay/Server kennt den Weg ohnehin — er muss
+  ihn nur je Gerät bis in die Übersicht durchreichen.)
 - **Pausen-Buttons auf dem Tablet vereinheitlichen.** Die Buttons für
   Verletzungs-/Behandlungspause und der „Weiterspielen"-Button, mit dem
   eine laufende Pause beendet wird, sind uneinheitlich in Beschriftung,
