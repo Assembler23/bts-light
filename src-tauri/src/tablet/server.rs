@@ -141,10 +141,12 @@ async fn index(State(ctx): State<Arc<ServerCtx>>) -> Html<String> {
     let courts = ctx.tablet.courts();
     let mut rows = String::new();
     for c in &courts {
+        // Anzeigename inkl. Halle bei Mehr-Hallen-Turnieren ("Halle 2 · 6").
+        let label = ctx.tablet.court_display_label(c.id);
         rows.push_str(&format!(
             "<li><b>{}</b> &mdash; <a href=\"/court/{id}\">/court/{id}</a> \
              &middot; <a href=\"/qr/{id}\">QR</a></li>",
-            html_escape(&c.name),
+            html_escape(&label),
             id = c.id,
         ));
     }
@@ -180,15 +182,12 @@ async fn court_page(
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
-/// Löst die CourtID auf ihren Feldnamen auf (leer, wenn die ID kein
-/// bekanntes Feld ist – z. B. nach einem Turnierwechsel).
+/// Löst die CourtID auf ihre Anzeige-Bezeichnung auf. Bei Mehr-Hallen-
+/// Turnieren `"{Halle} · {Feld}"` (z. B. „Halle 2 · 6"), sonst nur der
+/// Feldname. Leer, wenn die ID kein bekanntes Feld ist (z. B. nach einem
+/// Turnierwechsel).
 fn court_label_for(ctx: &ServerCtx, court_id: i64) -> String {
-    ctx.tablet
-        .courts()
-        .into_iter()
-        .find(|c| c.id == court_id)
-        .map(|c| c.name)
-        .unwrap_or_default()
+    ctx.tablet.court_display_label(court_id)
 }
 
 /// QR-Code (SVG), der auf die Tablet-URL des Felds (per CourtID) zeigt.

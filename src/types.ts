@@ -111,6 +111,9 @@ export interface CourtOverview {
   court_id: number;
   /** Feldname (Anzeige), z. B. „1" oder „Feld 3". */
   court: string;
+  /** Hallenname (BTP-Location) des Felds – Grundlage der hallenweisen
+   *  Gruppierung. Leer bei Ein-Hallen-Turnieren. */
+  location: string;
   /** BTP-Match-ID des aktuellen Spiels (0 = kein Match). */
   match_id: number;
   /** Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match. */

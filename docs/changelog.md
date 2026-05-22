@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.7
+
+- **Mehr-Hallen-Unterstützung: Hallen sichtbar (Schritt 4–5/7).** Bei
+  Turnieren in mehreren Hallen zeigt der Court-Monitor jetzt „Halle 2 ·
+  Feld 6" statt nur des Feldnamens, das Tablet trägt dieselbe Bezeichnung.
+  Die Felder-Übersicht, die QR-Code-Liste und die Geräte-Zuweisung im
+  Dashboard sind nach Halle gruppiert. Ein-Hallen-Turniere bleiben
+  unverändert — kein Hallen-Präfix, keine Gruppierung.
+
 ## v0.9.6
 
 - **Mehr-Hallen-Unterstützung: Felder eindeutig per BTP-ID (Schritt 2–3/7).**

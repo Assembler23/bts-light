@@ -181,10 +181,12 @@ function DeviceRow({
   // Optionen des <select>: value = CourtID (Identität), Text = Feldname.
   // Falls einem Gerät ein Feld zugewiesen ist, das nicht (mehr) in der
   // Court-Liste steht, trotzdem als Option führen.
-  const options: { id: number; label: string }[] = courts.map((c) => ({
-    id: c.court_id,
-    label: c.court,
-  }));
+  const options: { id: number; label: string; location: string }[] =
+    courts.map((c) => ({
+      id: c.court_id,
+      label: c.court,
+      location: c.location,
+    }));
   if (
     device.courtId !== null &&
     !options.some((o) => o.id === device.courtId)
@@ -192,8 +194,15 @@ function DeviceRow({
     options.unshift({
       id: device.courtId,
       label: device.court ?? `Feld ${device.courtId}`,
+      location: "",
     });
   }
+  // Mehr-Hallen-Turnier (≥2 distinkte, nicht-leere Hallennamen): die
+  // <option>s pro Halle in <optgroup> bündeln. Sonst flache Liste.
+  const hallNames = [
+    ...new Set(options.map((o) => o.location).filter((l) => l !== "")),
+  ];
+  const grouped = hallNames.length >= 2;
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -220,11 +229,37 @@ function DeviceRow({
                    focus:border-slate-500 focus:outline-none"
       >
         <option value="">— kein Feld —</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
+        {grouped ? (
+          <>
+            {hallNames.map((hall) => (
+              <optgroup key={hall} label={hall}>
+                {options
+                  .filter((o) => o.location === hall)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+            {/* Felder ohne auflösbare Halle (z. B. nach Turnierwechsel)
+                bleiben ohne <optgroup> erhalten, damit keine Zuweisung
+                aus der Liste verschwindet. */}
+            {options
+              .filter((o) => o.location === "")
+              .map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+          </>
+        ) : (
+          options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))
+        )}
       </select>
 
       <button

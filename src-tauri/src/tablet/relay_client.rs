@@ -309,20 +309,15 @@ async fn handle_frame(
 
 /// Schiebt das aktuelle Match eines Felds (per CourtID) ans Tablet – nur,
 /// wenn es sich gegenüber dem zuletzt gemeldeten Stand geändert hat.
-/// `court_label` ist der Feldname (Anzeige für den Court-Monitor).
+/// `court_label` ist die Anzeige-Bezeichnung des Felds (bei Mehr-Hallen-
+/// Turnieren mit Hallen-Präfix, z. B. „Halle 2 · 6").
 fn push_court(
     ctx: &ServerCtx,
     court_id: i64,
     tx: &mpsc::UnboundedSender<WsMessage>,
     last_match: &mut HashMap<i64, Option<i64>>,
 ) {
-    let court_label = ctx
-        .tablet
-        .courts()
-        .into_iter()
-        .find(|c| c.id == court_id)
-        .map(|c| c.name)
-        .unwrap_or_default();
+    let court_label = ctx.tablet.court_display_label(court_id);
     let current = ctx.tablet.match_for_court(court_id);
     let current_id = current.as_ref().map(|m| m.id);
     if last_match.get(&court_id) == Some(&current_id) {

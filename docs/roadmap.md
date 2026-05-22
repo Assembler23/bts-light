@@ -23,7 +23,9 @@ BTP-`CourtID` umgestellt. Umsetzung in 7 Schritten:
    doppelter Feldnamen. ✅ erledigt
 3. **Relay & Cloud-Pfad** — Wire-Typen + Relay auf CourtID. ✅ erledigt
 4. **Tablet- & Monitor-Anzeige** — Court-Monitor zeigt „Halle 2 · Feld 6".
+   ✅ erledigt
 5. **Dashboard nach Hallen gruppiert** — Felder, Adressen, Geräte-Zuweisung.
+   ✅ erledigt
 6. **Hallen-Übersichts-Bildschirm** — ein TV pro Halle mit allen Feldern.
 7. **Aufräumen** — Übergangs-Code (Namen-Fallback) entfernen.
 

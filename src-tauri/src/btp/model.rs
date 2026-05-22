@@ -194,6 +194,53 @@ pub struct BtpSnapshot {
     pub court_infos: Vec<BtpCourt>,
 }
 
+impl BtpSnapshot {
+    /// Ist das ein Mehr-Hallen-Turnier? Ab zwei `Locations` liegen mehrere
+    /// Hallen vor – erst dann zeigt bts-light Hallen-Bezeichnungen an.
+    pub fn is_multi_hall(&self) -> bool {
+        self.locations.len() >= 2
+    }
+
+    /// Hallenname (BTP-`Location`-Name) eines Felds. Leer bei Ein-Hallen-
+    /// Turnieren oder wenn das Feld keiner auflösbaren Halle zugeordnet ist.
+    pub fn court_location_name(&self, court_id: i64) -> String {
+        if !self.is_multi_hall() {
+            return String::new();
+        }
+        let Some(location_id) = self
+            .court_infos
+            .iter()
+            .find(|c| c.id == court_id)
+            .and_then(|c| c.location_id)
+        else {
+            return String::new();
+        };
+        self.locations
+            .iter()
+            .find(|l| l.id == location_id)
+            .map(|l| l.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// Anzeige-Bezeichnung eines Felds für Monitore und Tablets. Bei einem
+    /// Mehr-Hallen-Turnier mit auflösbarer Halle `"{Halle} · {Feld}"`
+    /// (z. B. „Halle 2 · 6"), sonst nur der Feldname.
+    pub fn court_display_label(&self, court_id: i64) -> String {
+        let court_name = self
+            .court_infos
+            .iter()
+            .find(|c| c.id == court_id)
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+        let location = self.court_location_name(court_id);
+        if location.is_empty() {
+            court_name
+        } else {
+            format!("{location} · {court_name}")
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
     #[error("Antwort enthält keine <Tournament>-Daten")]
@@ -833,6 +880,58 @@ mod tests {
         )];
         let snapshot = parse_snapshot(&tree).unwrap();
         assert_eq!(snapshot.matches[0].discipline, Discipline::Mixed);
+    }
+
+    /// Baut einen minimalen Snapshot mit gegebenen Hallen und Feldern –
+    /// nur für die Tests der Anzeige-Helfer.
+    fn label_snapshot(
+        locations: Vec<(i64, &str)>,
+        courts: Vec<(i64, &str, Option<i64>)>,
+    ) -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "T".to_string(),
+            matches: Vec::new(),
+            courts: courts.iter().map(|(_, n, _)| n.to_string()).collect(),
+            locations: locations
+                .into_iter()
+                .map(|(id, name)| BtpLocation {
+                    id,
+                    name: name.to_string(),
+                })
+                .collect(),
+            court_infos: courts
+                .into_iter()
+                .map(|(id, name, loc)| BtpCourt {
+                    id,
+                    name: name.to_string(),
+                    location_id: loc,
+                    sort_order: 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn display_label_prefixes_hall_only_for_multi_hall_tournaments() {
+        // Mehr-Hallen-Turnier: Feld 6 liegt in „Halle 2" → Komposit-Label.
+        let multi = label_snapshot(
+            vec![(1, "Halle 1"), (2, "Halle 2")],
+            vec![(101, "6", Some(2)), (102, "1", Some(1))],
+        );
+        assert!(multi.is_multi_hall());
+        assert_eq!(multi.court_display_label(101), "Halle 2 · 6");
+        assert_eq!(multi.court_location_name(101), "Halle 2");
+        // Ein-Hallen-Turnier: kein Präfix, leerer Hallenname.
+        let single = label_snapshot(vec![(1, "Main Location")], vec![(101, "6", Some(1))]);
+        assert!(!single.is_multi_hall());
+        assert_eq!(single.court_display_label(101), "6");
+        assert_eq!(single.court_location_name(101), "");
+        // Mehr-Hallen, aber Feld ohne auflösbare Halle → nur der Feldname.
+        let orphan = label_snapshot(vec![(1, "Halle 1"), (2, "Halle 2")], vec![(101, "6", None)]);
+        assert_eq!(orphan.court_display_label(101), "6");
+        assert_eq!(orphan.court_location_name(101), "");
+        // Unbekannte CourtID → leeres Label, kein Panik.
+        assert_eq!(multi.court_display_label(999), "");
     }
 
     #[test]

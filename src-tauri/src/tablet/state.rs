@@ -71,6 +71,10 @@ pub struct CourtOverview {
     pub court_id: i64,
     /// Feldname (Anzeige), z. B. „1" oder „Feld 3".
     pub court: String,
+    /// Hallenname (BTP-`Location`) des Felds – Grundlage der hallenweisen
+    /// Gruppierung im Frontend. Leerer String bei Ein-Hallen-Turnieren
+    /// oder wenn das Feld keiner auflösbaren Halle zugeordnet ist.
+    pub location: String,
     /// BTP-Match-ID des aktuellen Spiels (0 = kein Match). Damit erkennt
     /// die Oberfläche, wenn ein Feld ein neues Spiel bekommt (Sprachansage).
     pub match_id: i64,
@@ -209,6 +213,18 @@ impl TabletState {
                     .map(|c| (c.id, c.name.clone()))
                     .collect()
             })
+            .unwrap_or_default()
+    }
+
+    /// Anzeige-Bezeichnung eines Felds für Monitore und Tablets. Bei einem
+    /// Mehr-Hallen-Turnier `"{Halle} · {Feld}"`, sonst nur der Feldname.
+    /// Leer, wenn die CourtID kein bekanntes Feld ist.
+    pub fn court_display_label(&self, court_id: i64) -> String {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.court_display_label(court_id))
             .unwrap_or_default()
     }
 
@@ -452,6 +468,8 @@ impl TabletState {
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
+                    // Hallenname nur bei Mehr-Hallen-Turnieren; sonst leer.
+                    location: snap.court_location_name(court.id),
                     match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m
                         .map(|mm| {
@@ -757,6 +775,53 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    #[test]
+    fn overview_fills_location_only_for_multi_hall_tournaments() {
+        use crate::btp::model::BtpLocation;
+        // Ein-Hallen-Turnier (snapshot()-Helfer setzt locations leer):
+        // location bleibt überall leer.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
+        ));
+        for c in st.overview() {
+            assert_eq!(c.location, "");
+        }
+        // Mehr-Hallen-Turnier: Feld 101 in „Halle 1", Feld 401 in „Halle 2".
+        let mut snap = snapshot(
+            vec![
+                match_on(1, Some(101), MatchStatus::OnCourt),
+                match_on(2, Some(401), MatchStatus::OnCourt),
+            ],
+            vec![(101, "1"), (401, "1")],
+        );
+        snap.locations = vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle 1".to_string(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle 2".to_string(),
+            },
+        ];
+        // court_infos[1] ist Feld 401 → der Halle 2 zuordnen.
+        snap.court_infos[1].location_id = Some(2);
+        st.set_snapshot(snap);
+        let ov = st.overview();
+        assert_eq!(
+            ov.iter().find(|o| o.court_id == 101).unwrap().location,
+            "Halle 1"
+        );
+        assert_eq!(
+            ov.iter().find(|o| o.court_id == 401).unwrap().location,
+            "Halle 2"
+        );
+        // Das Komposit-Label kombiniert Halle und Feldname.
+        assert_eq!(st.court_display_label(401), "Halle 2 · 1");
     }
 
     #[test]

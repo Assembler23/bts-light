@@ -63,6 +63,12 @@ export function TabletPanel({ onBack }: Props) {
       ? `${relayBase}/qr/${courtId}`
       : `http://${host}/qr/${courtId}`;
 
+  // Hallenweise Gruppierung: je Halle eine Gruppe mit Überschrift. Felder
+  // ohne Halle – Ein-Hallen-Turnier oder (im Mehr-Hallen-Fall) nicht
+  // zugeordnete Felder – landen in einer Gruppe ohne Überschrift. Ein-
+  // Hallen-Turniere sehen damit aus wie ein flaches Raster, unverändert.
+  const courtGroups = groupByHall(courts);
+
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
       <header className="flex items-center gap-3">
@@ -144,11 +150,16 @@ export function TabletPanel({ onBack }: Props) {
               <p className="text-xs text-slate-500">
                 Live-Stand aller Felder mit Tablet-Verbindung und Akkustand.
               </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {courts.map((c) => (
-                  <CourtCard key={c.court_id} court={c} />
-                ))}
-              </div>
+              {courtGroups.map((g) => (
+                <div key={g.location} className="flex flex-col gap-2">
+                  <HallHeading name={g.location} />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {g.courts.map((c) => (
+                      <CourtCard key={c.court_id} court={c} />
+                    ))}
+                  </div>
+                </div>
+              ))}
             </section>
           )}
 
@@ -180,37 +191,22 @@ export function TabletPanel({ onBack }: Props) {
                   ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
                   : "Tablet und dieser PC müssen im selben WLAN sein."}
               </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {courts.map((c) => (
-                  <div
-                    key={c.court_id}
-                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
-                  >
-                    <button
-                      onClick={() => setZoomCourt(c)}
-                      title="QR-Code groß anzeigen"
-                      className="shrink-0 rounded bg-white"
-                    >
-                      <img
-                        src={qrUrl(c.court_id)}
-                        alt=""
-                        width={64}
-                        height={64}
-                        className="block"
+              {courtGroups.map((g) => (
+                <div key={g.location} className="flex flex-col gap-2">
+                  <HallHeading name={g.location} />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {g.courts.map((c) => (
+                      <QrCard
+                        key={c.court_id}
+                        court={c}
+                        qrUrl={qrUrl(c.court_id)}
+                        courtUrl={courtUrl(c.court_id)}
+                        onZoom={() => setZoomCourt(c)}
                       />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">
-                        {c.court}
-                      </div>
-                      <div className="truncate text-xs text-slate-500">
-                        {courtUrl(c.court_id)}
-                      </div>
-                    </div>
-                    <CopyUrlButton url={courtUrl(c.court_id)} />
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </section>
           )}
         </>
@@ -239,6 +235,70 @@ export function TabletPanel({ onBack }: Props) {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * Gruppiert die Felder hallenweise: eine Gruppe je distinktem `location`-Wert
+ * (in Erst-Vorkommens-Reihenfolge). Felder ohne Halle landen in einer Gruppe
+ * mit leerem Namen, die ans Ende sortiert wird – so geht kein Feld verloren.
+ * Bei einem Ein-Hallen-Turnier entsteht genau diese eine namenlose Gruppe,
+ * der Aufrufer rendert sie ohne Überschrift wie ein flaches Raster.
+ */
+function groupByHall(
+  courts: CourtOverview[],
+): { location: string; courts: CourtOverview[] }[] {
+  const groups: { location: string; courts: CourtOverview[] }[] = [];
+  for (const c of courts) {
+    const loc = c.location || "";
+    let g = groups.find((x) => x.location === loc);
+    if (!g) {
+      g = { location: loc, courts: [] };
+      groups.push(g);
+    }
+    g.courts.push(c);
+  }
+  // Gruppe ohne Halle ans Ende (stabile Sortierung lässt die Hallen-
+  // Reihenfolge sonst unangetastet).
+  groups.sort((a, b) => Number(a.location === "") - Number(b.location === ""));
+  return groups;
+}
+
+/** Hallen-Überschrift über einer Feld-Gruppe; ohne Hallenname (leer) nichts. */
+function HallHeading({ name }: { name: string }) {
+  if (!name) return null;
+  return (
+    <h3 className="mt-1 text-sm font-semibold text-slate-600">{name}</h3>
+  );
+}
+
+/** Eine QR-Code-Karte mit Feldname, Adresse und Kopier-Button. */
+function QrCard({
+  court,
+  qrUrl,
+  courtUrl,
+  onZoom,
+}: {
+  court: CourtOverview;
+  qrUrl: string;
+  courtUrl: string;
+  onZoom: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+      <button
+        onClick={onZoom}
+        title="QR-Code groß anzeigen"
+        className="shrink-0 rounded bg-white"
+      >
+        <img src={qrUrl} alt="" width={64} height={64} className="block" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{court.court}</div>
+        <div className="truncate text-xs text-slate-500">{courtUrl}</div>
+      </div>
+      <CopyUrlButton url={courtUrl} />
+    </div>
   );
 }
 
