@@ -42,6 +42,10 @@ pub struct TsetEvent {
 pub struct TsetCourt {
     /// Court-Bezeichnung wie in BTP (z. B. "1" oder "Feld 9").
     pub num: String,
+    /// Halle/Standort des Felds (BTP-`Location`-Name). Leer bei
+    /// Ein-Hallen-Turnieren – der Liveticker-Monitor gruppiert erst, wenn
+    /// die Halle gesetzt ist.
+    pub hall: String,
     /// Verweist auf `TsetMatch._id`.
     pub match_id: String,
 }
@@ -173,6 +177,12 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64) -> TsetMessage {
         .filter_map(|m| {
             m.court.as_ref().map(|c| TsetCourt {
                 num: c.clone(),
+                // Halle des Felds für den Liveticker-Hallen-Monitor; bei
+                // Ein-Hallen-Turnieren leer.
+                hall: m
+                    .court_id
+                    .map(|id| snapshot.court_location_name(id))
+                    .unwrap_or_default(),
                 match_id: match_id(m.id),
             })
         })
@@ -224,7 +234,7 @@ pub fn build_tupdate(m: &BtpMatch, rid: u64) -> TupdateMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::{BtpPlayer, Discipline};
+    use crate::btp::model::{BtpCourt, BtpLocation, BtpPlayer, Discipline};
 
     /// Fester Bezugszeitpunkt für die Tests.
     const NOW: u64 = 1_700_000_000_000;
@@ -409,5 +419,53 @@ mod tests {
         let by_id = |id: &str| finished.iter().find(|m| m.id == id).unwrap();
         assert_eq!(by_id("btp_1").outcome, Some("walkover"));
         assert_eq!(by_id("btp_2").outcome, None);
+    }
+
+    #[test]
+    fn tset_court_carries_the_hall_for_multi_hall_tournaments() {
+        // Mehr-Hallen-Turnier: der TsetCourt trägt die Halle des Felds,
+        // aufgelöst über court_id → court_infos → locations.
+        let mut m = sample_match(1, MatchStatus::OnCourt, Some("1"));
+        m.court_id = Some(101);
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            courts: Vec::new(),
+            locations: vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle 1".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle 2".to_string(),
+                },
+            ],
+            court_infos: vec![BtpCourt {
+                id: 101,
+                name: "1".to_string(),
+                location_id: Some(2),
+                sort_order: 1,
+            }],
+            matches: vec![m],
+        };
+        let tset = build_tset(&snapshot, 1);
+        assert_eq!(tset.event.courts.len(), 1);
+        assert_eq!(tset.event.courts[0].num, "1");
+        assert_eq!(tset.event.courts[0].hall, "Halle 2");
+    }
+
+    #[test]
+    fn tset_court_hall_is_empty_for_single_hall_tournaments() {
+        // Ein-Hallen-Turnier (keine Locations): die Halle bleibt leer, der
+        // Liveticker-Monitor zeigt dann wie bisher ein flaches Raster.
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
+        };
+        let tset = build_tset(&snapshot, 1);
+        assert_eq!(tset.event.courts[0].hall, "");
     }
 }

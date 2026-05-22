@@ -26,7 +26,10 @@ BTP-`CourtID` umgestellt. Umsetzung in 7 Schritten:
    ✅ erledigt
 5. **Dashboard nach Hallen gruppiert** — Felder, Adressen, Geräte-Zuweisung.
    ✅ erledigt
-6. **Hallen-Übersichts-Bildschirm** — ein TV pro Halle mit allen Feldern.
+6. **Hallen-Übersichts-Bildschirm** — entfällt als bts-light-eigene Seite:
+   der badhub-Liveticker-Monitor (`/live?display=monitor`) übernimmt das,
+   nach Hallen getrennt. bts-light sendet die Halle dafür im `tset`-Push
+   mit (v0.9.8); die badhub-Seite (DB, `live.php`/`live.js`) folgt separat.
 7. **Aufräumen** — Übergangs-Code (Namen-Fallback) entfernen.
 
 Geräte-Hinweis: Bei Schritt 2 müssen Tablet-/Monitor-Kopplungen einmalig

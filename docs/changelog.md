@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.8
+
+- **Liveticker: Halle pro Feld im Push.** Der Liveticker-Push (`tset`)
+  überträgt jetzt zu jedem Feld seine Halle — Grundlage für den nach
+  Hallen getrennten Liveticker-Monitor auf badhub.de
+  (`/live?display=monitor`). Noch keine sichtbare Änderung; die
+  badhub-Seite folgt.
+
 ## v0.9.7
 
 - **Mehr-Hallen-Unterstützung: Hallen sichtbar (Schritt 4–5/7).** Bei
