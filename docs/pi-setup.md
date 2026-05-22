@@ -80,9 +80,10 @@ Anzeige. Dafür gibt es ein fertiges Skript.
    ```
    bash setup-monitor.sh
    ```
-4. Es fragt nach der **Monitor-Adresse**. Die findest du in bts-light
-   unter **Dashboard → Court-Monitore** ganz oben — z. B.
-   `http://192.168.1.50:8088/monitor`. Eintippen, Enter.
+4. Es fragt nach der **Monitor-Adresse**. Einfach **Enter** drücken —
+   dann gilt die Standardadresse `http://bts-light.local:8088/monitor`.
+   Die funktioniert in **jedem** Turnier-WLAN (der Turnier-PC meldet
+   sich unter diesem festen Namen), ganz ohne IP-Adresse.
 
 Das Skript installiert die nötigen Kleinigkeiten, schaltet die
 Bildschirm-Abschaltung aus und richtet den automatischen Start ein.
@@ -125,11 +126,13 @@ Da alle Monitore dieselbe Adresse nutzen, ist jeder weitere Pi schnell:
 
 ## Tipps & Problemlösung
 
-- **Die Adresse darf sich nicht ändern.** Die LAN-Adresse enthält die
-  IP des bts-light-PCs. Vergib dem Turnier-PC im Router eine feste IP
-  (DHCP-Reservierung) — sonst zeigt der Monitor nach einem Router-
-  Neustart ins Leere. Alternativ den **Cloud-Modus** nutzen: dessen
-  Adresse (`https://badhub.de/bts-relay/…/monitor`) ist immer stabil.
+- **Keine feste IP nötig.** Der Turnier-PC meldet sich im Netz unter dem
+  festen Namen `bts-light.local` (Technik: mDNS). Der Monitor findet ihn
+  darüber — egal welche (DHCP-)Adresse der Laptop gerade hat. Du musst
+  also weder im Router noch am Laptop eine feste IP einstellen.
+  *Falls* der Name in einem Netz ausnahmsweise nicht auflöst, zeigt
+  bts-light unter „Court-Monitore" zusätzlich die IP-Adresse als
+  Rückfall an.
 - **TV bleibt schwarz / „kein Signal":** anderen HDMI-Eingang am TV
   wählen; bei Pi 4/5 prüfen, ob das Kabel im **linken** micro-HDMI-Port
   (näher am USB-C-Strom) steckt.

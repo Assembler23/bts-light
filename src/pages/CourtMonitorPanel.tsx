@@ -49,9 +49,14 @@ export function CourtMonitorPanel({ onBack }: Props) {
   }, []);
 
   const isCloud = (info?.mode ?? "lan") === "cloud";
+  // Im LAN-Modus der feste mDNS-Name (muss zu MDNS_HOST + TABLET_PORT im
+  // Rust-Kern passen) – so braucht es keine feste IP. Die IP-Adresse dient
+  // nur als Rückfall, falls der Name im Netz nicht aufgelöst wird.
   const monitorUrl = isCloud
     ? `${info?.relay_base ?? ""}/monitor`
-    : `http://${info?.server_host ?? ""}/monitor`;
+    : "http://bts-light.local:8088/monitor";
+  const fallbackUrl =
+    !isCloud && info?.server_host ? `http://${info.server_host}/monitor` : "";
   const courts = (info?.courts ?? []).map((c) => c.court);
 
   async function refresh() {
@@ -119,6 +124,13 @@ export function CourtMonitorPanel({ onBack }: Props) {
           <code className="min-w-0 flex-1 truncate text-sm">{monitorUrl}</code>
           <CopyButton url={monitorUrl} />
         </div>
+        {fallbackUrl && (
+          <p className="text-xs text-slate-400">
+            Falls der Name <code>bts-light.local</code> im Netz nicht
+            gefunden wird, alternativ:{" "}
+            <code className="text-slate-500">{fallbackUrl}</code>
+          </p>
+        )}
       </section>
 
       {/* Geräteliste */}

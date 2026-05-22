@@ -23,19 +23,19 @@ BOOT_DIR="/boot/firmware"
 URL_FILE="$BOOT_DIR/bts-monitor-url.txt"
 
 # 1) Monitor-Adresse ──────────────────────────────────────────────────────
-# Optional: Enter überspringt. Für ein Master-Image leer lassen – der
-# Betreiber trägt die Adresse später in bts-monitor-url.txt ein.
+# Enter = Standardadresse über den festen Namen `bts-light.local`. Die
+# funktioniert dank mDNS in JEDEM Turnier-WLAN, ohne feste IP – ideal
+# fürs Master-Image. Eine eigene Adresse lässt sich später jederzeit in
+# bts-monitor-url.txt eintragen.
+DEFAULT_URL="http://bts-light.local:8088/monitor"
 echo
 echo 'Monitor-Adresse (steht in bts-light unter „Court-Monitore").'
-echo "Für ein Master-Image einfach Enter drücken – leer lassen."
+echo "Enter = Standard  $DEFAULT_URL"
+echo "(passt für jedes Turnier – ideal fürs Master-Image)."
 read -rp "Adresse: " URL || true
-if [ -n "${URL:-}" ]; then
-  echo "$URL" | sudo tee "$URL_FILE" >/dev/null
-  echo "→ gespeichert in $URL_FILE"
-else
-  [ -f "$URL_FILE" ] || echo "" | sudo tee "$URL_FILE" >/dev/null
-  echo "→ keine Adresse gesetzt – $URL_FILE bleibt leer (Master-Image)."
-fi
+[ -z "${URL:-}" ] && URL="$DEFAULT_URL"
+echo "$URL" | sudo tee "$URL_FILE" >/dev/null
+echo "→ gespeichert in $URL_FILE: $URL"
 
 # 2) Chromium sicherstellen ───────────────────────────────────────────────
 BROWSER="$(command -v chromium-browser || command -v chromium || true)"

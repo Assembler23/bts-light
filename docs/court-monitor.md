@@ -172,15 +172,28 @@ Ausführliche, einsteigertaugliche Schritt-für-Schritt-Anleitung:
 **[pi-setup.md](pi-setup.md)**. Kurzfassung:
 
 1. Raspberry Pi OS (Desktop) mit dem Raspberry Pi Imager bespielen –
-   dort gleich WLAN + Hostname voreinstellen.
+   dort gleich WLAN voreinstellen.
 2. Auf dem Pi das Skript [`pi/setup-monitor.sh`](../pi/setup-monitor.sh)
-   ausführen (es fragt nach der Monitor-Adresse) → Kiosk-Autostart steht.
+   ausführen → Kiosk-Autostart steht.
 3. Neu starten → der TV zeigt einen Kopplungs-Code; in bts-light unter
    „Court-Monitore" dem Code ein Feld zuweisen.
 
-Der Pi steht üblicherweise im selben Hallen-LAN wie der bts-light-PC →
-LAN-Adresse genügt. Ist der PC-Port gesperrt, die Cloud-Adresse
+**Feste Adresse ohne feste IP:** Im LAN-Modus meldet sich der Turnier-PC
+per mDNS unter `bts-light.local` (siehe [mDNS](#mdns-bts-lightlocal)). Die
+Standard-Monitor-Adresse `http://bts-light.local:8088/monitor` passt
+dadurch in **jedem** Turnier-WLAN – ein Master-Image braucht keine
+Anpassung. Ist der PC-Port gesperrt, die Cloud-Adresse
 (`https://badhub.de/bts-relay/<install_id>/monitor`) verwenden.
+
+## mDNS: `bts-light.local`
+
+Im LAN-Modus gibt bts-light per mDNS (`tablet/mdns.rs`) den festen Namen
+`bts-light.local` bekannt, der auf die aktuelle LAN-IP des Turnier-PCs
+zeigt. Tablets und Monitore erreichen den PC darüber, **ohne seine
+IP-Adresse zu kennen** – es ist keine feste IP nötig, weder im Router
+noch am Laptop. Der Raspberry Pi löst `.local`-Namen über das
+vorinstallierte avahi auf. Schlägt mDNS fehl (z. B. blockierende
+Firewall), funktioniert die direkte IP-Adresse weiterhin.
 
 ## Flaggen
 
