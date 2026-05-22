@@ -140,6 +140,7 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 - `Players` → `Player`
 - `Entries` → `Entry`
 - `Courts` → `Court`
+- `Locations` → `Location` – Standorte/Hallen, von `Court.LocationID` referenziert
 - `Officials` → `Official` (Schiedsrichter)
 - `Teams` → `Team` (Liga-Modus)
 
@@ -153,7 +154,12 @@ zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
 `NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w).
 
-**Court:** `ID`, `Name`, `MatchID`, `SubMatchID`.
+**Court:** `ID`, `Name`, `LocationID` (→ `Location`, ordnet das Feld einer
+Halle/einem Standort zu), `MatchID`, `SortOrder` (BTP-Sortierreihenfolge).
+
+**Location:** `ID`, `Name`. Bei Ein-Hallen-Turnieren genau eine („Main
+Location"); bei mehreren Hallen je ein Eintrag, `Court.LocationID` zeigt
+auf den jeweiligen.
 
 **Official:** `ID`, `Name`, `FirstName` (Schreibweise weicht von Player ab),
 `Country`.
