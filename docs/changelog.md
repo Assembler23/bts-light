@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.5
+
+- **Tablet-Spielzettel: zwei Tabs.** Die Seite ist jetzt in „Übersicht"
+  (Live-Stand aller Felder mit Tablet-Verbindung und Akku) und „QR-Codes"
+  (Adressen zum Einrichten der Tablets) getrennt — übersichtlicher,
+  gerade bei vielen Feldern.
+
 ## v0.9.4
 
 - **Vorbereitung Mehr-Hallen-Unterstützung (Schritt 1/7).** bts-light liest

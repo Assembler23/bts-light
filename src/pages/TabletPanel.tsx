@@ -8,6 +8,8 @@ import {
   Cloud,
   Copy,
   Info,
+  LayoutGrid,
+  QrCode,
   Wifi,
 } from "lucide-react";
 import { tabletOverview } from "../api";
@@ -18,14 +20,16 @@ interface Props {
 }
 
 /**
- * Tablet-Spielzettel-Seite: oben die Adressen/QR-Codes zum Einrichten der
- * Tablets, darunter die Live-Felder-Übersicht für die Turnierleitung.
- * Beide Bereiche sind Raster – sie skalieren bis zu 20–30 Spielfeldern.
- * Pollt den Tablet-Server alle 2 s.
+ * Tablet-Spielzettel-Seite mit zwei Tabs: „Übersicht" zeigt den Live-Stand
+ * aller Felder (Tablet-Verbindung, Akku) für die Turnierleitung;
+ * „QR-Codes" die Adressen/QR-Codes zum Einrichten der Tablets. Beide
+ * Bereiche sind Raster – sie skalieren bis zu 20–30 Spielfeldern. Pollt
+ * den Tablet-Server alle 2 s.
  */
 export function TabletPanel({ onBack }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
   const [zoomCourt, setZoomCourt] = useState<string | null>(null);
+  const [tab, setTab] = useState<"overview" | "qr">("overview");
 
   useEffect(() => {
     let active = true;
@@ -97,23 +101,6 @@ export function TabletPanel({ onBack }: Props) {
         </span>
       </header>
 
-      {/* Firewall-Hinweis – nur im LAN-Modus relevant. */}
-      {!isCloud && (
-        <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900">
-          <Info size={18} className="mt-0.5 shrink-0 text-amber-500" />
-          <p>
-            <span className="font-medium">
-              Bekommen die Tablets keine Verbindung?
-            </span>{" "}
-            Auf IT-verwalteten Turnier-PCs blockiert die Firewall oft den
-            Zugriff im lokalen Netz. Dann in den Einstellungen die
-            Tablet-Verbindung auf{" "}
-            <span className="font-medium">„Über badhub.de (Cloud)"</span>{" "}
-            umstellen – das funktioniert auch hinter gesperrten Firewalls.
-          </p>
-        </div>
-      )}
-
       {courts.length === 0 ? (
         <p className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">
           Noch keine Spielfelder geladen. Starte den Liveticker (BTP muss
@@ -122,60 +109,108 @@ export function TabletPanel({ onBack }: Props) {
         </p>
       ) : (
         <>
-          <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-slate-700">
-              Tablet-Adressen
-            </h2>
-            <p className="text-xs text-slate-500">
-              Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
-              scannen (auf den QR tippen zeigt ihn groß).{" "}
-              {isCloud
-                ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
-                : "Tablet und dieser PC müssen im selben WLAN sein."}
-            </p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {courts.map((c) => (
-                <div
-                  key={c.court}
-                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
-                >
-                  <button
-                    onClick={() => setZoomCourt(c.court)}
-                    title="QR-Code groß anzeigen"
-                    className="shrink-0 rounded bg-white"
-                  >
-                    <img
-                      src={qrUrl(c.court)}
-                      alt=""
-                      width={64}
-                      height={64}
-                      className="block"
-                    />
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">
-                      {c.court}
-                    </div>
-                    <div className="truncate text-xs text-slate-500">
-                      {courtUrl(c.court)}
-                    </div>
-                  </div>
-                  <CopyUrlButton url={courtUrl(c.court)} />
-                </div>
-              ))}
-            </div>
-          </section>
+          {/* Tab-Leiste: Übersicht (Live-Stand) und QR-Codes (Einrichtung). */}
+          <div className="flex gap-1 border-b border-slate-200">
+            <button
+              onClick={() => setTab("overview")}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3.5
+                          py-2 text-sm font-medium transition-colors ${
+                            tab === "overview"
+                              ? "border-slate-800 text-slate-800"
+                              : "border-transparent text-slate-500 hover:text-slate-700"
+                          }`}
+            >
+              <LayoutGrid size={15} />
+              Übersicht
+            </button>
+            <button
+              onClick={() => setTab("qr")}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3.5
+                          py-2 text-sm font-medium transition-colors ${
+                            tab === "qr"
+                              ? "border-slate-800 text-slate-800"
+                              : "border-transparent text-slate-500 hover:text-slate-700"
+                          }`}
+            >
+              <QrCode size={15} />
+              QR-Codes
+            </button>
+          </div>
 
-          <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-slate-700">
-              Felder-Übersicht
-            </h2>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {courts.map((c) => (
-                <CourtCard key={c.court} court={c} />
-              ))}
-            </div>
-          </section>
+          {tab === "overview" && (
+            <section className="flex flex-col gap-2">
+              <p className="text-xs text-slate-500">
+                Live-Stand aller Felder mit Tablet-Verbindung und Akkustand.
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {courts.map((c) => (
+                  <CourtCard key={c.court} court={c} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {tab === "qr" && (
+            <section className="flex flex-col gap-3">
+              {/* Firewall-Hinweis – nur im LAN-Modus relevant. */}
+              {!isCloud && (
+                <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900">
+                  <Info size={18} className="mt-0.5 shrink-0 text-amber-500" />
+                  <p>
+                    <span className="font-medium">
+                      Bekommen die Tablets keine Verbindung?
+                    </span>{" "}
+                    Auf IT-verwalteten Turnier-PCs blockiert die Firewall oft
+                    den Zugriff im lokalen Netz. Dann in den Einstellungen die
+                    Tablet-Verbindung auf{" "}
+                    <span className="font-medium">
+                      „Über badhub.de (Cloud)"
+                    </span>{" "}
+                    umstellen – das funktioniert auch hinter gesperrten
+                    Firewalls.
+                  </p>
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
+                scannen (auf den QR tippen zeigt ihn groß).{" "}
+                {isCloud
+                  ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
+                  : "Tablet und dieser PC müssen im selben WLAN sein."}
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {courts.map((c) => (
+                  <div
+                    key={c.court}
+                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
+                  >
+                    <button
+                      onClick={() => setZoomCourt(c.court)}
+                      title="QR-Code groß anzeigen"
+                      className="shrink-0 rounded bg-white"
+                    >
+                      <img
+                        src={qrUrl(c.court)}
+                        alt=""
+                        width={64}
+                        height={64}
+                        className="block"
+                      />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {c.court}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {courtUrl(c.court)}
+                      </div>
+                    </div>
+                    <CopyUrlButton url={courtUrl(c.court)} />
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
 
