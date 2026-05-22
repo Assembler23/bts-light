@@ -80,7 +80,17 @@ pub struct MatchBrief {
 /// Ein Spieler in der Monitor-Anzeige: Name + Nationalität (für die Flagge).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorPlayer {
+    /// Kombinierter Anzeigename ("Vorname Nachname").
     pub name: String,
+    /// Vorname(n) – getrennt geführt, damit der Court-Monitor Vor- und
+    /// Nachnamen exakt im Broadcast-Stil darstellen kann. `#[serde(default)]`
+    /// hält ältere Relays/Clients ohne dieses Feld lesbar; der Monitor fällt
+    /// dann auf eine Aufteilung von `name` zurück.
+    #[serde(default)]
+    pub given: String,
+    /// Nachname – getrennt geführt, siehe `given`.
+    #[serde(default)]
+    pub family: String,
     #[serde(default)]
     pub nationality: Option<String>,
 }
@@ -701,11 +711,15 @@ mod tests {
                 event_label: "HE G2".into(),
                 match_number: Some(14),
                 team1: vec![MonitorPlayer {
-                    name: "Anna".into(),
+                    name: "Anna Berg".into(),
+                    given: "Anna".into(),
+                    family: "Berg".into(),
                     nationality: Some("GER".into()),
                 }],
                 team2: vec![MonitorPlayer {
                     name: "Hilde".into(),
+                    given: String::new(),
+                    family: "Hilde".into(),
                     nationality: None,
                 }],
                 sets: vec![SetAb { a: 21, b: 18 }, SetAb { a: 11, b: 7 }],

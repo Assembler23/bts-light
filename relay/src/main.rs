@@ -555,6 +555,10 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
 fn monitor_player(p: &PlayerBrief) -> MonitorPlayer {
     MonitorPlayer {
         name: p.name.clone(),
+        // `PlayerBrief` führt nur den kombinierten Namen – Vor-/Nachname
+        // bleiben leer, der Court-Monitor zerlegt dann `name` selbst.
+        given: String::new(),
+        family: String::new(),
         nationality: p.nationality.clone(),
     }
 }

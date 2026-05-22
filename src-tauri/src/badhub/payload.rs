@@ -242,6 +242,8 @@ mod tests {
     fn player(name: &str, member: Option<&str>, nat: Option<&str>) -> BtpPlayer {
         BtpPlayer {
             name: name.to_string(),
+            first: String::new(),
+            last: name.to_string(),
             member_id: member.map(String::from),
             nationality: nat.map(String::from),
         }

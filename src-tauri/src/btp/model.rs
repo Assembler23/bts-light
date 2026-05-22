@@ -102,6 +102,12 @@ impl Discipline {
 pub struct BtpPlayer {
     /// Anzeigename ("Vorname Nachname" bzw. nur Nachname).
     pub name: String,
+    /// Vorname(n) (BTP `Firstname`) – getrennt geführt, damit der
+    /// Court-Monitor Vor- und Nachnamen exakt darstellen kann (statt zu
+    /// raten). Leer, wenn BTP keinen Vornamen liefert.
+    pub first: String,
+    /// Nachname (BTP `Lastname`) – getrennt geführt, siehe `first`.
+    pub last: String,
     /// Lizenznummer (BTP `MemberID`, z. B. "08-010493"), falls vorhanden.
     pub member_id: Option<String>,
     /// Nationalität als ISO-Code (BTP `Country`, z. B. "GER"), falls vorhanden.
@@ -298,6 +304,8 @@ fn player_map(t: &[Node]) -> HashMap<i64, BtpPlayer> {
             id,
             BtpPlayer {
                 name,
+                first: first.to_string(),
+                last: last.to_string(),
                 member_id: child_str(p, "MemberID").map(String::from),
                 nationality: child_str(p, "Country").map(String::from),
             },
@@ -958,5 +966,41 @@ mod tests {
         )];
         let snapshot = parse_snapshot(&tree).unwrap();
         assert_eq!(snapshot.matches[0].discipline, Discipline::Unknown);
+    }
+
+    /// `player_map` muss Vor- und Nachnamen getrennt am `BtpPlayer` ablegen
+    /// (BTP `Firstname`/`Lastname`) – die Grundlage für die Broadcast-
+    /// Darstellung auf dem Court-Monitor.
+    #[test]
+    fn player_map_fills_first_and_last_separately() {
+        let tree = vec![Node::group(
+            "Players",
+            vec![
+                // Mehrteiliger Nachname: zeigt, dass nichts geraten wird.
+                Node::group(
+                    "Player",
+                    vec![
+                        Node::integer("ID", 1),
+                        Node::string("Lastname", "van der Berg"),
+                        Node::string("Firstname", "Jan"),
+                    ],
+                ),
+                // Spieler nur mit Nachname: Vorname bleibt leer.
+                Node::group(
+                    "Player",
+                    vec![Node::integer("ID", 2), Node::string("Lastname", "Müller")],
+                ),
+            ],
+        )];
+        let map = player_map(&tree);
+        let p1 = &map[&1];
+        assert_eq!(p1.first, "Jan");
+        assert_eq!(p1.last, "van der Berg");
+        // `name` bleibt unverändert die kombinierte Form.
+        assert_eq!(p1.name, "Jan van der Berg");
+        let p2 = &map[&2];
+        assert_eq!(p2.first, "");
+        assert_eq!(p2.last, "Müller");
+        assert_eq!(p2.name, "Müller");
     }
 }

@@ -215,11 +215,15 @@ mod tests {
                 match_num: Some(1),
                 team1: vec![BtpPlayer {
                     name: "A".to_string(),
+                    first: String::new(),
+                    last: "A".to_string(),
                     member_id: None,
                     nationality: None,
                 }],
                 team2: vec![BtpPlayer {
                     name: "B".to_string(),
+                    first: String::new(),
+                    last: "B".to_string(),
                     member_id: None,
                     nationality: None,
                 }],

@@ -618,6 +618,8 @@ mod tests {
     fn player(name: &str) -> BtpPlayer {
         BtpPlayer {
             name: name.to_string(),
+            first: String::new(),
+            last: name.to_string(),
             member_id: None,
             nationality: None,
         }

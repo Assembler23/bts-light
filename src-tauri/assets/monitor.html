@@ -437,8 +437,14 @@
       row.className = "player";
       row.appendChild(flagEl(p.nationality));
 
-      // Name im Broadcast-Stil: Vorname klein, Nachname groß.
-      var parts = splitName(p.name);
+      // Name im Broadcast-Stil: Vorname klein, Nachname groß. Trägt der
+      // Spieler die getrennten BTP-Felder (family nicht leer), werden sie
+      // direkt verwendet – das ist 100 % korrekt auch bei mehrteiligen
+      // Nachnamen wie „van der Berg". Ältere Wire-Daten ohne die Felder
+      // fallen auf das Zerlegen von `name` zurück.
+      var parts = (p.family && p.family.length > 0)
+        ? { given: p.given || "", family: p.family }
+        : splitName(p.name);
       var name = document.createElement("span");
       name.className = "name";
       var given = document.createElement("span");

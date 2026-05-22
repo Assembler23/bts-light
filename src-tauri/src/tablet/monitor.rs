@@ -126,6 +126,11 @@ pub fn build_monitor_state(
 fn player(p: &BtpPlayer) -> MonitorPlayer {
     MonitorPlayer {
         name: p.name.clone(),
+        // Vor- und Nachname getrennt aus den BTP-Daten – damit der
+        // Court-Monitor sie exakt im Broadcast-Stil anzeigt, statt `name`
+        // zu zerlegen.
+        given: p.first.clone(),
+        family: p.last.clone(),
         nationality: p.nationality.clone(),
     }
 }
