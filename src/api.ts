@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  MonitorDeviceInfo,
   SyncStatus,
   TabletInfo,
   WalkoverProposal,
@@ -70,3 +71,19 @@ export const removeCourtAd = (file: string): Promise<void> =>
 
 /** Listet die hinterlegten Court-Monitor-Werbebilder. */
 export const listCourtAds = (): Promise<string[]> => invoke("list_court_ads");
+
+/** Liefert die Court-Monitor-Geräte für die Verwaltungsseite. */
+export const monitorDevices = (): Promise<MonitorDeviceInfo[]> =>
+  invoke("monitor_devices");
+
+/** Weist ein Monitor-Gerät einem Feld zu (null = Zuweisung aufheben). */
+export const assignMonitor = (
+  deviceId: string,
+  court: string | null,
+): Promise<void> => invoke("assign_monitor", { deviceId, court });
+
+/** Schickt einem Monitor-Gerät einen Fernbefehl. */
+export const monitorCommand = (
+  deviceId: string,
+  kind: "reload" | "identify",
+): Promise<void> => invoke("monitor_command", { deviceId, kind });

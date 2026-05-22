@@ -10,7 +10,27 @@ use std::sync::RwLock;
 
 use serde::Serialize;
 
+use relay_proto::{MonitorCommand, MonitorCommandKind, MonitorDeviceInfo};
+
 use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchStatus};
+
+/// Aktuelle Unix-Zeit in Millisekunden.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Flüchtiger Live-Zustand eines Court-Monitor-Geräts (nicht persistiert –
+/// die Feld-Zuweisungen liegen in `monitor-assignments.json`).
+#[derive(Debug, Clone, Default)]
+struct MonitorLive {
+    /// Zeitpunkt des letzten Polls (Unix-ms) – für den Online-Status.
+    last_seen_ms: u64,
+    /// Offener Fernbefehl (Neu laden / Identifizieren).
+    command: Option<MonitorCommand>,
+}
 
 /// Akkustand eines Tablets. Liefern nur Android-/Chrome-Tablets – iPads
 /// (Safari) geben den Akkustand grundsätzlich nicht her.
@@ -120,6 +140,12 @@ pub struct TabletState {
     court_state: RwLock<HashMap<String, String>>,
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
+    /// Geräte-ID → Live-Zustand der Court-Monitore (zuletzt gesehen +
+    /// offener Fernbefehl). Im LAN-Modus vom Server gepflegt.
+    monitor_live: RwLock<HashMap<String, MonitorLive>>,
+    /// Im Cloud-Modus die vom Relay gemeldete Monitor-Geräteliste – der
+    /// Relay-Client hält sie aktuell, die „Court-Monitore"-Seite liest sie.
+    relay_monitor_devices: RwLock<Vec<MonitorDeviceInfo>>,
 }
 
 impl TabletState {
@@ -452,6 +478,56 @@ impl TabletState {
             sets,
             court_state: self.court_state(court),
         }
+    }
+
+    // ─────────────────────────── Court-Monitor-Geräte ─────────────────────
+
+    /// Registriert einen Monitor-Poll (setzt „zuletzt gesehen") und liefert
+    /// den offenen Fernbefehl des Geräts zurück.
+    pub fn record_monitor_poll(&self, device_id: &str) -> Option<MonitorCommand> {
+        let mut live = self.monitor_live.write().unwrap();
+        let entry = live.entry(device_id.to_string()).or_default();
+        entry.last_seen_ms = now_ms();
+        entry.command
+    }
+
+    /// Hinterlegt einen Fernbefehl für ein Gerät. Die `id` zählt je Gerät
+    /// hoch, damit der Monitor jeden Befehl genau einmal ausführt.
+    pub fn set_monitor_command(&self, device_id: &str, kind: MonitorCommandKind) {
+        let mut live = self.monitor_live.write().unwrap();
+        let entry = live.entry(device_id.to_string()).or_default();
+        let next_id = entry.command.map(|c| c.id + 1).unwrap_or(1);
+        entry.command = Some(MonitorCommand { id: next_id, kind });
+    }
+
+    /// Geräte-ID → letzter Poll (ms) aller bekannten Monitor-Geräte.
+    pub fn monitor_live_seen(&self) -> HashMap<String, u64> {
+        self.monitor_live
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(id, l)| (id.clone(), l.last_seen_ms))
+            .collect()
+    }
+
+    /// Geräte-ID → offener Fernbefehl (für den Cloud-Push zum Relay).
+    pub fn monitor_commands(&self) -> HashMap<String, MonitorCommand> {
+        self.monitor_live
+            .read()
+            .unwrap()
+            .iter()
+            .filter_map(|(id, l)| l.command.map(|c| (id.clone(), c)))
+            .collect()
+    }
+
+    /// Übernimmt die vom Relay gemeldete Geräteliste (Cloud-Modus).
+    pub fn set_relay_monitor_devices(&self, devices: Vec<MonitorDeviceInfo>) {
+        *self.relay_monitor_devices.write().unwrap() = devices;
+    }
+
+    /// Vom Relay gemeldete Monitor-Geräteliste (Cloud-Modus).
+    pub fn relay_monitor_devices(&self) -> Vec<MonitorDeviceInfo> {
+        self.relay_monitor_devices.read().unwrap().clone()
     }
 }
 

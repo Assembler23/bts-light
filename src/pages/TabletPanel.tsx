@@ -56,8 +56,6 @@ export function TabletPanel({ onBack }: Props) {
     isCloud
       ? `${relayBase}/qr/${encodeURIComponent(court)}`
       : `http://${host}/qr/${encodeURIComponent(court)}`;
-  const monitorUrl = (court: string) =>
-    `${courtUrl(court)}/display`;
 
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
@@ -126,20 +124,20 @@ export function TabletPanel({ onBack }: Props) {
         <>
           <section className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold text-slate-700">
-              Tablet- &amp; Monitor-Adressen
+              Tablet-Adressen
             </h2>
             <p className="text-xs text-slate-500">
-              <span className="font-medium">Tablet:</span> am Spielfeld im
-              Browser öffnen oder den QR-Code scannen (antippen zeigt ihn
-              groß).{" "}
-              <span className="font-medium">Monitor:</span> die
-              Display-Adresse am Raspberry Pi des Court-Monitors eintragen.
+              Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
+              scannen (auf den QR tippen zeigt ihn groß).{" "}
+              {isCloud
+                ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
+                : "Tablet und dieser PC müssen im selben WLAN sein."}
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {courts.map((c) => (
                 <div
                   key={c.court}
-                  className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
+                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
                 >
                   <button
                     onClick={() => setZoomCourt(c.court)}
@@ -154,13 +152,15 @@ export function TabletPanel({ onBack }: Props) {
                       className="block"
                     />
                   </button>
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">
                       {c.court}
                     </div>
-                    <UrlRow label="Tablet" url={courtUrl(c.court)} />
-                    <UrlRow label="Monitor" url={monitorUrl(c.court)} />
+                    <div className="truncate text-xs text-slate-500">
+                      {courtUrl(c.court)}
+                    </div>
                   </div>
+                  <CopyUrlButton url={courtUrl(c.court)} />
                 </div>
               ))}
             </div>
@@ -264,21 +264,6 @@ function CourtCard({ court }: { court: CourtOverview }) {
       ) : (
         <div className="mt-1 text-sm text-slate-400">frei</div>
       )}
-    </div>
-  );
-}
-
-/** Eine beschriftete Adress-Zeile (Tablet bzw. Monitor) mit Kopier-Knopf. */
-function UrlRow({ label, url }: { label: string; url: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-14 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        {label}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-        {url}
-      </span>
-      <CopyUrlButton url={url} />
     </div>
   );
 }

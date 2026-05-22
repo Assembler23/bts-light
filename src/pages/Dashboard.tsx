@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   Square,
   Tablet,
+  Tv,
 } from "lucide-react";
 import { getStatus, openLiveView, openLogDir, startSync, stopSync } from "../api";
 import { useUpdate } from "../components/UpdateBanner";
@@ -19,6 +20,7 @@ interface Props {
   config: AppConfig;
   onReconfigure: () => void;
   onOpenTablets: () => void;
+  onOpenMonitors: () => void;
 }
 
 function dotColor(status: SyncStatus): string {
@@ -65,7 +67,12 @@ function ActionButton(props: {
   );
 }
 
-export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
+export function Dashboard({
+  config,
+  onReconfigure,
+  onOpenTablets,
+  onOpenMonitors,
+}: Props) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const { phase: updatePhase, checkNow } = useUpdate();
@@ -219,6 +226,12 @@ export function Dashboard({ config, onReconfigure, onOpenTablets }: Props) {
                   "im Hallen-WLAN keine Verbindung (z. B. Firewall)? Dann in " +
                   "den Einstellungen auf den Cloud-Modus umstellen."
             }
+          />
+          <ActionButton
+            icon={Tv}
+            label="Court-Monitore"
+            onClick={onOpenMonitors}
+            title="TV-Anzeigen am Spielfeld einrichten, zuweisen und steuern"
           />
           <ActionButton
             icon={RefreshCw}

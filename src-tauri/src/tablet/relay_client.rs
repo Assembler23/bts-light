@@ -19,7 +19,9 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-use relay_proto::{AdUpload, HostFrame, MonitorUpload, RelayFrame, ResultBody};
+use relay_proto::{
+    AdUpload, HostFrame, MonitorControl, MonitorDeviceInfo, MonitorUpload, RelayFrame, ResultBody,
+};
 
 use crate::tablet::monitor;
 use crate::tablet::server::{handle_score, match_brief, process_result, ServerCtx};
@@ -35,6 +37,10 @@ const TICK: Duration = Duration::from_secs(2);
 
 /// Abstand der Court-Monitor-Upload-Prüfung (Werbung/Konfiguration).
 const MONITOR_TICK: Duration = Duration::from_secs(30);
+
+/// Abstand des Geräte-Steuerungs-Abgleichs (Feld-Zuweisungen, Fernbefehle,
+/// Geräteliste) – kurz, damit Befehle zügig am Monitor ankommen.
+const CONTROL_TICK: Duration = Duration::from_secs(3);
 
 /// Obergrenze der Werbebilder bzw. ihrer Gesamtgröße beim Upload zum Relay.
 const MAX_UPLOAD_ADS: usize = 24;
@@ -81,6 +87,10 @@ async fn serve(
     let mut monitor_ticker = tokio::time::interval(MONITOR_TICK);
     monitor_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut monitor_fp: Option<String> = None;
+    // Geräte-Steuerung: Feld-Zuweisungen/Befehle pushen, Geräteliste holen.
+    let mut control_ticker = tokio::time::interval(CONTROL_TICK);
+    control_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut control_fp = String::new();
 
     loop {
         tokio::select! {
@@ -109,6 +119,9 @@ async fn serve(
             }
             _ = monitor_ticker.tick() => {
                 maybe_upload_monitor(ctx, install_id, &mut monitor_fp).await;
+            }
+            _ = control_ticker.tick() => {
+                sync_monitor_control(ctx, install_id, &mut control_fp).await;
             }
         }
     }
@@ -192,6 +205,32 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
         return Err(format!("HTTP {}", resp.status()));
     }
     Ok(())
+}
+
+/// Gleicht die Monitor-Geräte-Steuerung mit dem Relay ab: pusht die
+/// Feld-Zuweisungen + Fernbefehle (nur bei Änderung) und holt die
+/// aktuelle Geräteliste für die „Court-Monitore"-Seite.
+async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut String) {
+    let control = MonitorControl {
+        assignments: monitor::read_assignments(&ctx.assignments_path),
+        commands: ctx.tablet.monitor_commands(),
+    };
+    let fp = serde_json::to_string(&control).unwrap_or_default();
+    if fp != *last_fp {
+        let url = format!("{RELAY_HTTP}/{install_id}/monitor/control");
+        match ctx.http.post(&url).json(&control).send().await {
+            Ok(r) if r.status().is_success() => *last_fp = fp,
+            Ok(r) => tracing::warn!("Monitor-Steuerung: HTTP {}", r.status()),
+            Err(e) => tracing::warn!("Monitor-Steuerung fehlgeschlagen: {e}"),
+        }
+    }
+    // Geräteliste vom Relay holen und im geteilten Zustand ablegen.
+    let url = format!("{RELAY_HTTP}/{install_id}/monitor-devices");
+    if let Ok(resp) = ctx.http.get(&url).send().await {
+        if let Ok(devices) = resp.json::<Vec<MonitorDeviceInfo>>().await {
+            ctx.tablet.set_relay_monitor_devices(devices);
+        }
+    }
 }
 
 /// Verarbeitet ein Frame vom Relay.

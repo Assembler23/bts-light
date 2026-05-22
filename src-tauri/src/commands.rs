@@ -9,6 +9,8 @@ use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
+use relay_proto::{MonitorCommandKind, MonitorDeviceInfo};
+
 use crate::badhub::push;
 use crate::btp::client;
 use crate::config::{AppConfig, ConnectionMode};
@@ -102,6 +104,14 @@ fn monitor_ad_dir(app: &AppHandle) -> std::path::PathBuf {
         .join(crate::tablet::monitor::AD_DIR_NAME)
 }
 
+/// Pfad zur Datei mit den Monitor-Feld-Zuweisungen (Gerät → Feld).
+fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_config_dir()
+        .expect("App-Config-Verzeichnis ist verfügbar")
+        .join(crate::tablet::monitor::MONITOR_ASSIGN_FILE)
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -187,12 +197,14 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let monitor_dir = monitor_ad_dir(&app);
     let _ = std::fs::create_dir_all(&monitor_dir);
     let cfg_path = config_path(&app);
+    let assignments_path = monitor_assignments_path(&app);
     let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
         tablet,
         config,
         push::build_client(),
         monitor_dir,
         cfg_path,
+        assignments_path,
     ));
     match mode {
         ConnectionMode::Lan => {
@@ -536,4 +548,68 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
 #[tauri::command]
 pub fn list_court_ads(app: AppHandle) -> Vec<String> {
     crate::tablet::monitor::list_ads(&monitor_ad_dir(&app))
+}
+
+// ───────────────────────────── Court-Monitor-Geräte ───────────────────────
+
+/// Liefert die Court-Monitor-Geräte für die Verwaltungsseite. Im LAN-Modus
+/// lokal aus Zuweisungen + Live-Pollzeiten gebaut, im Cloud-Modus die vom
+/// Relay gemeldete Liste.
+#[tauri::command]
+pub fn monitor_devices(app: AppHandle, state: State<'_, AppState>) -> Vec<MonitorDeviceInfo> {
+    let mode = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .connection_mode;
+    match mode {
+        ConnectionMode::Cloud => state.tablet.relay_monitor_devices(),
+        ConnectionMode::Lan => {
+            let assignments =
+                crate::tablet::monitor::read_assignments(&monitor_assignments_path(&app));
+            let seen = state.tablet.monitor_live_seen();
+            relay_proto::build_device_list(&assignments, &seen, now_ms())
+        }
+    }
+}
+
+/// Weist ein Monitor-Gerät einem Feld zu. Ein leeres `court` hebt die
+/// Zuweisung auf (das Gerät zeigt dann wieder die Kopplungs-Seite).
+#[tauri::command]
+pub fn assign_monitor(
+    app: AppHandle,
+    device_id: String,
+    court: Option<String>,
+) -> Result<(), String> {
+    if device_id.is_empty() || device_id.len() > 64 {
+        return Err("Ungültige Geräte-ID.".to_string());
+    }
+    let path = monitor_assignments_path(&app);
+    let mut map = crate::tablet::monitor::read_assignments(&path);
+    match court {
+        Some(c) if !c.trim().is_empty() => {
+            map.insert(device_id, c);
+        }
+        _ => {
+            map.remove(&device_id);
+        }
+    }
+    crate::tablet::monitor::write_assignments(&path, &map).map_err(|e| e.to_string())
+}
+
+/// Schickt einem Monitor-Gerät einen Fernbefehl: `kind` ist `"reload"`
+/// (Seite neu laden) oder `"identify"` (Feldnummer groß einblenden).
+#[tauri::command]
+pub fn monitor_command(
+    state: State<'_, AppState>,
+    device_id: String,
+    kind: String,
+) -> Result<(), String> {
+    let cmd = match kind.as_str() {
+        "reload" => MonitorCommandKind::Reload,
+        "identify" => MonitorCommandKind::Identify,
+        _ => return Err("Unbekannter Befehl.".to_string()),
+    };
+    state.tablet.set_monitor_command(&device_id, cmd);
+    Ok(())
 }

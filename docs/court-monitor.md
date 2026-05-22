@@ -1,6 +1,7 @@
 # Court-Monitor — TV-Anzeige am Spielfeld
 
-> **Status: umgesetzt in v0.7.0.** Read-only TV-Anzeige pro Feld. Offen
+> **Status: umgesetzt.** v0.7.0 brachte die Anzeige, v0.8.0 die
+> Geräte-Verwaltung (Zuweisung + Fernsteuerung aus dem Tool). Offen
 > bleibt der 2-Felder-pro-TV-Modus → [roadmap.md](roadmap.md).
 
 ## Ziel
@@ -43,6 +44,35 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
 Die Anzeige-Seite ist `src-tauri/assets/monitor.html` — eine
 eigenständige HTML/CSS/JS-Datei, read-only Geschwister von `tablet.html`.
 
+## Geräte-Modus & TV-Verwaltung
+
+Monitore sind **generische Geräte**: Jeder Raspberry Pi öffnet *dieselbe*
+Adresse (`…/monitor`) und vergibt sich beim ersten Start eine eigene,
+dauerhafte Geräte-ID (im `localStorage`). Solange ihm kein Feld
+zugewiesen ist, zeigt der TV groß einen **Kopplungs-Code** (die ersten
+vier Zeichen der ID).
+
+Im Tool führt die Seite **„Court-Monitore"** (Dashboard → Court-Monitore)
+alle Geräte auf, die sich gemeldet haben:
+
+- **Online-Status** je Gerät (grün, wenn der letzte Poll < 6 s her ist).
+- **Feld-Zuweisung** per Dropdown — jederzeit umstellbar; der Monitor
+  übernimmt das neue Feld beim nächsten Poll (~1 s im LAN, ≤ 3 s Cloud).
+- **Identifizieren** — der Monitor blendet Code + Feld groß ein, damit
+  man Gerät und TV zuordnen kann.
+- **Neu laden** — der Monitor lädt seine Seite neu (falls er hängt).
+
+Die Zuweisungen liegen in `monitor-assignments.json` im
+App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
+Fernbefehle reiten auf dem normalen `…/state`-Poll mit — es gibt keinen
+zusätzlichen Verbindungsweg zum Pi, daher funktioniert die Steuerung in
+LAN **und** Cloud. Jeder Befehl trägt eine je Gerät hochzählende `id`;
+der Monitor führt ihn genau einmal aus (auch nach „Neu laden" kein
+Endlos-Reload).
+
+**Direkt-Variante:** Wer einen Monitor fest auf ein Feld nageln will,
+nutzt weiterhin `…/court/<Feld>/display` — ohne Zuweisungs-Schritt.
+
 ## Datenfluss
 
 Der Monitor braucht **keinen neuen Datenweg** — alle Daten liegen schon
@@ -70,18 +100,26 @@ roher `court_state` + Konfiguration + Werbebild-Liste.
 
 ## Endpunkte
 
-Alle Routen gibt es doppelt — vom LAN-Server **und** vom Relay,
-damit der Monitor in beiden Modi dieselbe Seite ist. `monitor.html`
-nutzt durchweg **relative URLs**, daher funktioniert sie unter beiden
-Pfaden ohne Anpassung.
+Alle Routen gibt es doppelt — vom LAN-Server **und** vom Relay, damit der
+Monitor in beiden Modi dieselbe Seite ist. Der Server setzt beim
+Ausliefern den Basis-Pfad (`__BASE__`) ein; `monitor.html` baut daraus
+absolute URLs, unabhängig von der Verschachtelungstiefe.
 
-| Zweck            | LAN                          | Cloud                                |
-|------------------|------------------------------|--------------------------------------|
-| Anzeige-Seite    | `/court/{label}/display`     | `/{ns}/court/{label}/display`        |
-| Status (Poll)    | `/court/{label}/state`       | `/{ns}/court/{label}/state`          |
-| Flaggen          | `/flags/{code}.svg`          | `/{ns}/flags/{code}.svg`             |
-| Werbebild        | `/ads/{datei}`               | `/{ns}/ads/{index}`                  |
-| Werbe-Upload     | —                            | `POST /{ns}/monitor` (Host → Relay)  |
+| Zweck             | LAN                          | Cloud                          |
+|-------------------|------------------------------|--------------------------------|
+| Anzeige (Gerät)   | `/monitor`                   | `/{ns}/monitor`                |
+| Status (Gerät)    | `/monitor/state?device=`     | `/{ns}/monitor/state?device=`  |
+| Anzeige (fest)    | `/court/{label}/display`     | `/{ns}/court/{label}/display`  |
+| Status (fest)     | `/court/{label}/state`       | `/{ns}/court/{label}/state`    |
+| Flaggen           | `/flags/{code}.svg`          | `/{ns}/flags/{code}.svg`       |
+| Werbebild         | `/ads/{datei}`               | `/{ns}/ads/{index}`            |
+| Werbe-Upload      | —                            | `POST /{ns}/monitor`           |
+| Geräte-Steuerung  | —                            | `POST /{ns}/monitor/control`   |
+| Geräteliste       | —                            | `GET /{ns}/monitor-devices`    |
+
+Im Cloud-Modus pusht der bts-light-Host die Feld-Zuweisungen + Fernbefehle
+alle ~3 s (nur bei Änderung) an `…/monitor/control` und holt von
+`…/monitor-devices` die Geräteliste für die „Court-Monitore"-Seite.
 
 ## Werbung (Leerlauf)
 
@@ -118,24 +156,25 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
   je einzeln ein-/ausblenden. Eine Live-Vorschau im Setup zeigt die
   Wirkung jeder Option sofort.
 
-Die Monitor-Adressen je Feld stehen auf der Tablet-Spielzettel-Seite
-(Zeile „Monitor") — dort zum Eintragen am Pi kopieren.
+Die Einrichtungs-Adresse und die Feld-Zuweisung der Geräte stehen auf der
+Seite **„Court-Monitore"** (Dashboard → Court-Monitore).
 
 ## Raspberry Pi — Kiosk-Einrichtung
 
 1. Raspberry Pi OS installieren, Chromium ist vorhanden.
 2. Mauszeiger ausblenden: `sudo apt install unclutter`.
-3. Autostart auf die feldspezifische Display-URL, z. B.:
+3. Autostart auf die **eine** Monitor-Adresse (für alle Pis gleich):
    ```
    chromium-browser --kiosk --noerrdialogs --disable-infobars \
-     http://<bts-light-ip>:8088/court/Feld%203/display
+     http://<bts-light-ip>:8088/monitor
    ```
 4. Bildschirmschoner / DPMS deaktivieren (`xset s off -dpms`).
+5. Der TV zeigt einen Kopplungs-Code → in bts-light unter
+   „Court-Monitore" dem Gerät ein Feld zuweisen.
 
 Der Pi steht üblicherweise im selben Hallen-LAN wie der bts-light-PC →
 LAN-Adresse genügt. Ist der PC-Port gesperrt, die Cloud-Adresse
-(`https://badhub.de/bts-relay/<install_id>/court/<label>/display`)
-verwenden.
+(`https://badhub.de/bts-relay/<install_id>/monitor`) verwenden.
 
 ## Flaggen
 

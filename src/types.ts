@@ -52,6 +52,18 @@ export interface CourtMonitorConfig {
   show_timer: boolean;
 }
 
+/** Ein Court-Monitor-Gerät (Rust: relay_proto::MonitorDeviceInfo). */
+export interface MonitorDeviceInfo {
+  /** Stabile Geräte-ID (UUID, vom Monitor selbst erzeugt). */
+  id: string;
+  /** Kurz-Code, wie ihn der TV anzeigt. */
+  code: string;
+  /** Zugewiesenes Feld, oder null. */
+  court: string | null;
+  /** Hat sich das Gerät zuletzt gemeldet? */
+  online: boolean;
+}
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;

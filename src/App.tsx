@@ -5,12 +5,13 @@ import { Footer } from "./components/Footer";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { WalkoverPanel } from "./components/WalkoverPanel";
+import { CourtMonitorPanel } from "./pages/CourtMonitorPanel";
 import { Dashboard } from "./pages/Dashboard";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
 import type { AppConfig } from "./types";
 
-type View = "loading" | "wizard" | "dashboard" | "tablets";
+type View = "loading" | "wizard" | "dashboard" | "tablets" | "monitors";
 
 function defaultConfig(): AppConfig {
   return {
@@ -85,11 +86,15 @@ function App() {
     if (view === "tablets") {
       return <TabletPanel onBack={() => setView("dashboard")} />;
     }
+    if (view === "monitors") {
+      return <CourtMonitorPanel onBack={() => setView("dashboard")} />;
+    }
     return (
       <Dashboard
         config={config}
         onReconfigure={() => setView("wizard")}
         onOpenTablets={() => setView("tablets")}
+        onOpenMonitors={() => setView("monitors")}
       />
     );
   }

@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.8.0
+
+- **TV-Verwaltung für die Court-Monitore.** Monitore sind jetzt generische
+  Geräte: Alle Raspberry Pis bekommen *dieselbe* Adresse (`…/monitor`) und
+  zeigen beim Start einen Kopplungs-Code. Auf der neuen Seite
+  **„Court-Monitore"** im Tool weist die Turnierleitung jedem Gerät ein
+  Feld zu (jederzeit umstellbar), sieht den Online-Status und löst per
+  Fernbefehl **„Identifizieren"** (Code groß einblenden) und **„Neu laden"**
+  aus – in LAN und Cloud. Die feste Adresse `…/court/<Feld>/display`
+  bleibt als Direkt-Variante erhalten. Details:
+  [court-monitor.md](court-monitor.md).
+- **Live-Vorschau der Anzeige-Optionen** im Court-Monitor-Setup –
+  Disziplin/Runde/Spielnummer/Pausen-Timer wirken sofort sichtbar.
+- Über-Dialog: Mitwirkende korrigiert (Tim Lehr; Philipp Hagemeister als
+  „Visionär einer digitalen Turnierausrichtung").
+
 ## v0.7.0
 
 - **Court-Monitor – TV-Anzeige am Spielfeld**: Pro Feld eine read-only

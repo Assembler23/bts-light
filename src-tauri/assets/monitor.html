@@ -175,6 +175,39 @@
       font-size: 2.2vmin; color: #ef4444; opacity: 0; transition: opacity .3s;
     }
     #offline.show { opacity: .8; }
+
+    /* ─── Kopplungs-Seite (Gerät noch keinem Feld zugewiesen) ─────────── */
+    #pairing-view {
+      position: absolute; inset: 0; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 3vh; text-align: center; padding: 6vmin;
+    }
+    #pairing-view.show { display: flex; }
+    #pairing-view .p-title {
+      font-size: 5vmin; font-weight: 800; letter-spacing: .04em; color: #cbd5e1;
+    }
+    #pairing-view .p-code {
+      font-size: 22vmin; font-weight: 900; line-height: 1; letter-spacing: .12em;
+      color: #fbbf24; font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 6vmin rgba(251, 191, 36, .35);
+    }
+    #pairing-view .p-hint {
+      font-size: 3vmin; color: #64748b; max-width: 76vw; line-height: 1.4;
+    }
+
+    /* ─── Identifizieren-Overlay (Fernbefehl) ────────────────────────── */
+    #identify-overlay {
+      position: absolute; inset: 0; display: none; z-index: 10;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 2vh; background: #fbbf24; color: #1a1206;
+      animation: identify-flash 1s ease-in-out infinite;
+    }
+    #identify-overlay.show { display: flex; }
+    @keyframes identify-flash { 0%, 100% { opacity: 1; } 50% { opacity: .65; } }
+    #identify-overlay .i-code {
+      font-size: 26vmin; font-weight: 900; line-height: 1; letter-spacing: .08em;
+    }
+    #identify-overlay .i-court { font-size: 7vmin; font-weight: 800; }
   </style>
 </head>
 <body>
@@ -204,16 +237,56 @@
       <div class="flaps" id="timer-flaps"></div>
     </div>
 
+    <div id="pairing-view">
+      <div class="p-title">Monitor bereit</div>
+      <div class="p-code" id="pairing-code">····</div>
+      <div class="p-hint">
+        In bts-light unter „Court-Monitore" diesem Code ein Feld zuweisen.
+      </div>
+    </div>
+
+    <div id="identify-overlay">
+      <div class="i-code" id="identify-code">····</div>
+      <div class="i-court" id="identify-court"></div>
+    </div>
+
     <div id="offline">Verbindung unterbrochen</div>
   </div>
 
   <script>
   "use strict";
+  // Betriebsmodus + Basis-Pfad – vom Server eingesetzt. `device` = Gerät,
+  // das sein Feld erst über die Zuweisung im Tool bekommt; `fixed` = fest
+  // auf ein Feld verdrahtet. BASE ist der URL-Präfix (z. B. "/" oder
+  // "/<namespace>/") für Flaggen, Werbung und die State-Abfrage.
+  var MODE = "__MODE__";
+  var BASE = "__BASE__";
   // Feldname – wird vom ersten /state-Poll gesetzt. Bewusst NICHT als
   // Platzhalter in dieses JS-Literal gebacken (nur in den HTML-Span oben,
   // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
   // aufbrechen kann.
   var COURT_LABEL = "";
+
+  // Stabile Geräte-ID (nur Geräte-Modus): einmal erzeugt, in localStorage.
+  function ensureDeviceId() {
+    var k = "bts-monitor-device-id";
+    var id = "";
+    try { id = localStorage.getItem(k) || ""; } catch (e) {}
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now().toString(16) + Math.random().toString(16).slice(2));
+      try { localStorage.setItem(k, id); } catch (e) {}
+    }
+    return id;
+  }
+  var DEVICE_ID = MODE === "device" ? ensureDeviceId() : "";
+
+  // Adresse der State-Abfrage: Geräte-Modus fragt mit der Geräte-ID,
+  // der feste Modus leitet sie aus dem eigenen Pfad ab (…/display → …/state).
+  var STATE_URL = MODE === "device"
+    ? BASE + "monitor/state?device=" + encodeURIComponent(DEVICE_ID)
+    : window.location.pathname.replace(/\/display\/?$/, "/state");
 
   var DISCIPLINE_DE = {
     mens_singles: "Herreneinzel",
@@ -237,18 +310,20 @@
     timerOverlay: document.getElementById("timer-overlay"),
     timerLabel: document.getElementById("timer-label"),
     timerFlaps: document.getElementById("timer-flaps"),
+    pairingView: document.getElementById("pairing-view"),
+    pairingCode: document.getElementById("pairing-code"),
+    identifyOverlay: document.getElementById("identify-overlay"),
+    identifyCode: document.getElementById("identify-code"),
+    identifyCourt: document.getElementById("identify-court"),
     offline: document.getElementById("offline")
   };
 
   // ─── Werbe-Rotation ──────────────────────────────────────────────────
   var adState = { urls: [], idx: 0, intervalS: 10, timer: null, key: "" };
 
-  // Asset-URLs sind bewusst relativ mit fester Tiefe `../../`: Die Seite
-  // wird unter `/court/{label}/display` (LAN) bzw.
-  // `/{ns}/court/{label}/display` (Cloud) ausgeliefert – zwei Ebenen hoch
-  // trifft in beiden Fällen die `ads/`- und `flags/`-Routen. `state` wird
-  // als direktes Geschwister (`./state`) gepollt.
-  function adUrl(id) { return "../../ads/" + encodeURIComponent(id); }
+  // Asset-URLs werden absolut aus BASE gebaut – unabhängig von der
+  // Verschachtelungstiefe der Seite (LAN vs. Cloud-Namespace).
+  function adUrl(id) { return BASE + "ads/" + encodeURIComponent(id); }
 
   function applyAds(adIds, intervalS) {
     var key = adIds.join("|") + "@" + intervalS;
@@ -288,7 +363,7 @@
     img.className = "flag";
     var code = (nat || "").trim().toUpperCase();
     if (code) {
-      img.src = "../../flags/" + encodeURIComponent(code) + ".svg";
+      img.src = BASE + "flags/" + encodeURIComponent(code) + ".svg";
       img.onerror = function () { img.classList.add("hidden"); };
     } else {
       img.classList.add("hidden");
@@ -450,8 +525,60 @@
     lastFlapText = text;
   }
 
+  // ─── Fernbefehle (Geräte-Modus) ──────────────────────────────────────
+  var lastCmdId = 0;
+  try { lastCmdId = parseInt(localStorage.getItem("bts-monitor-cmd-id") || "0", 10) || 0; }
+  catch (e) {}
+  var cmdBaselineSet = false;
+  var identifyTimer = null;
+
+  function saveCmdId() {
+    try { localStorage.setItem("bts-monitor-cmd-id", String(lastCmdId)); } catch (e) {}
+  }
+
+  // Führt einen Fernbefehl genau einmal aus. Der erste Poll setzt nur die
+  // Basis – ein beim Laden bereits offener Befehl wird nicht nachgeholt
+  // (auch nach einem „Neu laden" kein Endlos-Reload).
+  function handleCommand(cmd) {
+    var id = (cmd && typeof cmd.id === "number") ? cmd.id : 0;
+    if (!cmdBaselineSet) {
+      cmdBaselineSet = true;
+      if (id > lastCmdId) { lastCmdId = id; saveCmdId(); }
+      return;
+    }
+    if (!cmd || id <= lastCmdId) return;
+    lastCmdId = id;
+    saveCmdId();
+    if (cmd.kind === "reload") {
+      location.reload();
+    } else if (cmd.kind === "identify") {
+      showIdentify();
+    }
+  }
+
+  // Blendet Code + Feld groß ein, damit man Gerät und TV zuordnen kann.
+  function showIdentify() {
+    els.identifyCode.textContent =
+      (lastState && lastState.deviceCode) || DEVICE_ID.slice(0, 4).toUpperCase();
+    els.identifyCourt.textContent = (lastState && lastState.courtLabel) || "";
+    els.identifyOverlay.classList.add("show");
+    if (identifyTimer) clearTimeout(identifyTimer);
+    identifyTimer = setTimeout(function () {
+      els.identifyOverlay.classList.remove("show");
+    }, 6000);
+  }
+
   // ─── Poll-Schleife ───────────────────────────────────────────────────
   var lastState = null;
+
+  // Kopplungs-Seite: Gerät ist noch keinem Feld zugewiesen.
+  function showPairing(state) {
+    els.pairingView.classList.add("show");
+    els.matchView.classList.remove("show");
+    els.adView.classList.remove("show");
+    hideTimer();
+    els.pairingCode.textContent = state.deviceCode || "····";
+  }
 
   function applyState(state) {
     lastState = state;
@@ -461,6 +588,14 @@
     }
     var cfg = state.config || {};
     els.fallbackTn.textContent = state.tournamentName || "bts-light";
+
+    if (MODE === "device") handleCommand(state.command);
+
+    if (state.unassigned) {
+      showPairing(state);
+      return;
+    }
+    els.pairingView.classList.remove("show");
 
     if (state.match) {
       // Spiel auf dem Feld → Match-Ansicht.
@@ -480,7 +615,7 @@
   }
 
   function poll() {
-    fetch("state", { cache: "no-store" })
+    fetch(STATE_URL, { cache: "no-store" })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
