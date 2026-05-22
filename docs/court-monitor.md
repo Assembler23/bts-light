@@ -145,6 +145,31 @@ Läuft kein Spiel, zeigt der Monitor Werbung:
 - Wechsel-Intervall einstellbar (Default 10 s).
 - **Fallback** ohne konfigurierte Werbung: neutrale Seite mit Turniername
   und „Kein Spiel auf diesem Feld".
+- **Abschaltbar:** Die Option „Werbung im Leerlauf anzeigen" steuert, ob
+  ein freies Feld überhaupt Werbung zeigt. Aus → das Feld zeigt immer die
+  neutrale Leerlauf-Seite, auch wenn Werbebilder hinterlegt sind.
+
+## Spieldauer-Anzeige
+
+Zählt ein Tablet das Feld, kennt der Monitor den Spielbeginn
+(`court_state.startedAt`) und zeigt optional neben der Feldnummer die
+laufende Spieldauer in Minuten (Stoppuhr-Symbol). Im Tool ein-/abschaltbar.
+Ohne zählendes Tablet bleibt die Anzeige leer.
+
+## Lange Namen
+
+Läuft ein Spielername über seine Spalte hinaus (häufig bei Doppeln mit
+langen internationalen Namen), kürzt der Monitor automatisch die Vornamen
+auf Initialen — „Ajay Kumar Mandapati" → „A. K. Mandapati". Der letzte
+Namensteil (Nachname) bleibt immer voll. Passt ein Name auch gekürzt
+nicht, schneidet die Anzeige ihn mit „…" ab.
+
+## Layout
+
+Das Anzeige-Layout ist im Setup wählbar. Aktuell gibt es **„A — Geteilt"**
+(Team 1 oben, Team 2 unten); die Auswahl ist die Grundlage für weitere
+Layouts. Der Monitor setzt das gewählte Layout als `data-layout` am
+Wurzelelement.
 
 ## Pausen-Timer (Retro-Klappanzeige)
 
@@ -158,12 +183,15 @@ Behandlungspausen (ohne Countdown). Im Tool ein-/abschaltbar.
 Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tauri/src/config.rs)):
 
 - **Aktivieren** — blendet die Monitor-Adressen in der Oberfläche ein.
+- **Werbung im Leerlauf anzeigen** — steuert, ob ein freies Feld Werbung
+  zeigt oder die neutrale Leerlauf-Seite.
 - **Werbebilder** — hinzufügen/entfernen (JPG, PNG, WEBP, GIF; ≤ 8 MB je
   Bild).
 - **Wechsel-Intervall** — 3–30 s.
-- **Anzeige-Optionen** — Disziplin / Runde / Spielnummer / Pausen-Timer
-  je einzeln ein-/ausblenden. Eine Live-Vorschau im Setup zeigt die
-  Wirkung jeder Option sofort.
+- **Layout** — Anzeige-Layout des Monitors (aktuell „A — Geteilt").
+- **Anzeige-Optionen** — Disziplin / Runde / Spielnummer / Spieldauer /
+  Pausen-Timer je einzeln ein-/ausblenden. Eine Live-Vorschau im Setup
+  zeigt die Wirkung jeder Option sofort.
 
 Die Einrichtungs-Adresse und die Feld-Zuweisung der Geräte stehen auf der
 Seite **„Court-Monitore"** (Dashboard → Court-Monitore).

@@ -82,6 +82,9 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
         show_round: c.show_round,
         show_match_number: c.show_match_number,
         show_timer: c.show_timer,
+        show_match_clock: c.show_match_clock,
+        show_ads: c.show_ads,
+        layout: c.layout.clone(),
     }
 }
 

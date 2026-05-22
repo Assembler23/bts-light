@@ -59,6 +59,12 @@
       font-size: 4vmin; font-weight: 900; letter-spacing: .1em;
       text-transform: uppercase; color: #fbbf24;
     }
+    /* Spieldauer neben der Feldnummer (Stoppuhr-Symbol + Minuten). */
+    header.bar .match-clock {
+      flex: 0 0 auto; font-size: 3vmin; font-weight: 700;
+      color: #94a3b8; font-variant-numeric: tabular-nums;
+    }
+    header.bar .match-clock:empty { display: none; }
     header.bar .discipline {
       margin-left: auto; font-size: 3.4vmin; font-weight: 700;
       letter-spacing: .03em; color: #cbd5e1;
@@ -103,9 +109,9 @@
 
     /* Satzstand rechts: abgeschlossene Sätze klein, laufender Satz groß. */
     .scores { flex: 0 0 auto; display: flex; align-items: center; gap: 2.4vw; }
-    .sets-done { display: flex; gap: 1.2vw; }
+    .sets-done { display: flex; gap: 1.6vw; }
     .set-done {
-      font-size: 5vmin; font-weight: 800; color: #64748b;
+      font-size: 7vmin; font-weight: 800; color: #64748b;
       font-variant-numeric: tabular-nums;
     }
     .set-current {
@@ -224,6 +230,7 @@
       <header class="bar">
         <span class="live-dot" aria-hidden="true"></span>
         <span class="court" id="court-label">__COURT_LABEL__</span>
+        <span class="match-clock" id="match-clock"></span>
         <span class="discipline" id="discipline"></span>
       </header>
       <section class="half" id="half1"></section>
@@ -305,6 +312,7 @@
   };
 
   var els = {
+    root: document.getElementById("root"),
     adView: document.getElementById("ad-view"),
     adImg: document.getElementById("ad-img"),
     adFallback: document.getElementById("ad-fallback"),
@@ -312,6 +320,7 @@
     matchView: document.getElementById("match-view"),
     courtLabel: document.getElementById("court-label"),
     discipline: document.getElementById("discipline"),
+    matchClock: document.getElementById("match-clock"),
     half1: document.getElementById("half1"),
     half2: document.getElementById("half2"),
     footer: document.getElementById("footer"),
@@ -366,6 +375,26 @@
   }
 
   // ─── Helfer ──────────────────────────────────────────────────────────
+  // Parst den vom Tablet gespiegelten courtState (JSON-String) zu einem
+  // Objekt – oder null, wenn keiner vorliegt oder er beschädigt ist.
+  function parseCourtState(json) {
+    if (!json) return null;
+    try { return JSON.parse(json); } catch (e) { return null; }
+  }
+
+  // Kürzt Vornamen zu Initialen: „Ajay Kumar Mandapati" → „A. K. Mandapati".
+  // Der letzte Namensteil (Nachname) bleibt immer voll ausgeschrieben.
+  // Genutzt nur als Fallback, wenn ein Name über seine Spalte läuft.
+  function abbreviateName(full) {
+    var parts = (full || "").trim().split(/\s+/);
+    if (parts.length < 2) return full;
+    var surname = parts[parts.length - 1];
+    var initials = parts.slice(0, -1).map(function (w) {
+      return w.charAt(0).toUpperCase() + ".";
+    }).join(" ");
+    return initials + " " + surname;
+  }
+
   function flagEl(nat) {
     var img = document.createElement("img");
     img.className = "flag";
@@ -387,6 +416,7 @@
     host.classList.toggle("serving", !!serving);
     var pBox = document.createElement("div");
     pBox.className = "players" + (players.length > 1 ? " doubles" : "");
+    var nameSpans = [];
     players.forEach(function (p) {
       var row = document.createElement("div");
       row.className = "player";
@@ -395,6 +425,7 @@
       name.className = "name";
       name.textContent = p.name || "—";
       row.appendChild(name);
+      nameSpans.push({ span: name, full: p.name || "—" });
       var dot = document.createElement("span");
       dot.className = "serve-dot" + (serving ? " on" : "");
       dot.textContent = "●";
@@ -419,14 +450,36 @@
     cur.textContent = String(current);
     scores.appendChild(cur);
     host.appendChild(scores);
+
+    // Lange Namen, die ueber ihre Spalte hinauslaufen wuerden, auf
+    // Initialen kuerzen – tritt vor allem bei Doppeln mit langen
+    // internationalen Namen auf. Messung erst nachdem die ganze Haelfte
+    // im Dokument haengt (sonst sind die Breiten noch nicht bekannt).
+    nameSpans.forEach(function (e) {
+      if (e.span.scrollWidth > e.span.clientWidth + 1) {
+        e.span.textContent = abbreviateName(e.full);
+      }
+    });
   }
 
   // ─── Match-Ansicht ───────────────────────────────────────────────────
   function renderMatch(state) {
     var m = state.match;
     var cfg = state.config || {};
+    var cs = parseCourtState(state.courtState);
 
     els.courtLabel.textContent = state.courtLabel || COURT_LABEL;
+
+    // Spieldauer in der Kopfzeile (Stoppuhr + Minuten), wenn aktiviert und
+    // der Tablet-Zustand einen Spielbeginn kennt. Ohne zaehlendes Tablet
+    // bleibt das Element leer und wird per CSS ausgeblendet.
+    els.matchClock.textContent = "";
+    if (cfg.showMatchClock !== false && cs &&
+        typeof cs.startedAt === "number" && cs.startedAt > 0) {
+      var mins = Math.max(0, Math.floor((Date.now() - cs.startedAt) / 60000));
+      els.matchClock.textContent = "⏱ " + mins + " min";
+    }
+
     var discKey = m.discipline || "";
     els.discipline.textContent =
       cfg.showDiscipline !== false ? (DISCIPLINE_DE[discKey] || "") : "";
@@ -439,7 +492,7 @@
     var done2 = doneSets.map(function (s) { return s.b; });
 
     // Aufschlag aus dem gespiegelten Tablet-Zustand bestimmen.
-    var serving = servingTeam(state.courtState);
+    var serving = servingTeam(cs);
 
     renderHalf(els.half1, m.team1 || [], done1, current.a, serving === 1);
     renderHalf(els.half2, m.team2 || [], done2, current.b, serving === 2);
@@ -464,11 +517,8 @@
     });
   }
 
-  // Liefert 1 (Team 1), 2 (Team 2) oder null aus dem Tablet-courtState.
-  function servingTeam(courtStateJson) {
-    if (!courtStateJson) return null;
-    var cs;
-    try { cs = JSON.parse(courtStateJson); } catch (e) { return null; }
+  // Liefert 1 (Team 1), 2 (Team 2) oder null aus dem geparsten courtState.
+  function servingTeam(cs) {
     if (!cs || !cs.servingSide || !cs.teamOnSide) return null;
     return cs.teamOnSide.a === cs.servingSide ? 1 : 2;
   }
@@ -480,9 +530,7 @@
   function renderTimer(state) {
     var cfg = state.config || {};
     if (cfg.showTimer === false) { hideTimer(); return; }
-    var cs = null;
-    try { cs = state.courtState ? JSON.parse(state.courtState) : null; }
-    catch (e) { cs = null; }
+    var cs = parseCourtState(state.courtState);
     var pause = cs && cs.pause;
     if (!pause) { hideTimer(); return; }
 
@@ -597,6 +645,9 @@
     var cfg = state.config || {};
     els.fallbackTn.textContent = state.tournamentName || "bts-light";
 
+    // Layout am Wurzelelement markieren – Vorbereitung fuer weitere Layouts.
+    els.root.dataset.layout = cfg.layout || "split";
+
     if (MODE === "device") handleCommand(state.command);
 
     if (state.unassigned) {
@@ -614,11 +665,14 @@
       renderMatch(state);
       renderTimer(state);
     } else {
-      // Leeres Feld → Werbung.
+      // Leeres Feld → Werbung. Ist die Werbung abgeschaltet (showAds),
+      // bleibt die Liste leer → neutrale Leerlauf-Seite.
       els.adView.classList.add("show");
       els.matchView.classList.remove("show");
       hideTimer();
-      applyAds(Array.isArray(state.ads) ? state.ads : [], cfg.adIntervalS || 10);
+      var ads = (cfg.showAds !== false && Array.isArray(state.ads))
+        ? state.ads : [];
+      applyAds(ads, cfg.adIntervalS || 10);
     }
   }
 

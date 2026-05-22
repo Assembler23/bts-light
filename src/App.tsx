@@ -39,6 +39,9 @@ function defaultConfig(): AppConfig {
       show_round: true,
       show_match_number: true,
       show_timer: true,
+      show_match_clock: true,
+      show_ads: true,
+      layout: "split",
     },
   };
 }

@@ -3,19 +3,21 @@ interface MonitorPreviewProps {
   showRound: boolean;
   showMatchNumber: boolean;
   showTimer: boolean;
+  showMatchClock: boolean;
 }
 
 /**
  * Verkleinerte Live-Vorschau der Court-Monitor-Anzeige („Arena"-Design).
- * Spiegelt die vier Anzeige-Optionen wider, damit man beim Setzen der
- * Häkchen direkt sieht, wie der TV später aussieht. Beispieldaten sind
- * fest – es geht nur um die Wirkung der Optionen.
+ * Spiegelt die Anzeige-Optionen wider, damit man beim Setzen der Häkchen
+ * direkt sieht, wie der TV später aussieht. Beispieldaten sind fest – es
+ * geht nur um die Wirkung der Optionen.
  */
 export function MonitorPreview({
   showDiscipline,
   showRound,
   showMatchNumber,
   showTimer,
+  showMatchClock,
 }: MonitorPreviewProps) {
   const footer = [
     showRound ? "Gruppe 2" : null,
@@ -35,6 +37,11 @@ export function MonitorPreview({
         <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-400">
           Feld 3
         </span>
+        {showMatchClock && (
+          <span className="text-[10px] font-bold tabular-nums text-slate-400">
+            ⏱ 12 min
+          </span>
+        )}
         {showDiscipline && (
           <span className="ml-auto text-[10px] font-semibold text-slate-300">
             Herreneinzel

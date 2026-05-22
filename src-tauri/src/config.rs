@@ -121,6 +121,14 @@ pub struct CourtMonitorConfig {
     pub show_match_number: bool,
     /// Pausen-Countdown (Retro-Klappanzeige) anzeigen?
     pub show_timer: bool,
+    /// Spieldauer (Minuten, mit Stoppuhr-Symbol) in der Kopfzeile anzeigen?
+    pub show_match_clock: bool,
+    /// Werbung im Leerlauf anzeigen? Aus → leeres Feld zeigt die neutrale
+    /// Leerlauf-Seite statt der Werbebilder.
+    pub show_ads: bool,
+    /// Anzeige-Layout des Monitors (`split` = „A — Geteilt"). Vorbereitet
+    /// für weitere Layouts.
+    pub layout: String,
 }
 
 impl Default for CourtMonitorConfig {
@@ -132,6 +140,9 @@ impl Default for CourtMonitorConfig {
             show_round: true,
             show_match_number: true,
             show_timer: true,
+            show_match_clock: true,
+            show_ads: true,
+            layout: "split".to_string(),
         }
     }
 }
@@ -241,6 +252,9 @@ mod tests {
                 show_round: true,
                 show_match_number: false,
                 show_timer: true,
+                show_match_clock: false,
+                show_ads: false,
+                layout: "split".to_string(),
             },
         };
         config.save_to(&path).unwrap();

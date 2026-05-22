@@ -97,7 +97,7 @@ pub struct MonitorMatch {
 }
 
 /// Anzeige-Optionen des Court-Monitors (vom Tool gesetzt).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorConfig {
     #[serde(rename = "adIntervalS")]
     pub ad_interval_s: i64,
@@ -109,6 +109,24 @@ pub struct MonitorConfig {
     pub show_match_number: bool,
     #[serde(rename = "showTimer")]
     pub show_timer: bool,
+    /// Spieldauer (Minuten) in der Kopfzeile anzeigen?
+    #[serde(rename = "showMatchClock", default = "default_true")]
+    pub show_match_clock: bool,
+    /// Werbung im Leerlauf anzeigen? Aus → leeres Feld zeigt die neutrale
+    /// Leerlauf-Seite statt der Werbebilder.
+    #[serde(rename = "showAds", default = "default_true")]
+    pub show_ads: bool,
+    /// Anzeige-Layout (`split` = „A — Geteilt").
+    #[serde(default = "default_layout")]
+    pub layout: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_layout() -> String {
+    "split".to_string()
 }
 
 impl Default for MonitorConfig {
@@ -119,6 +137,9 @@ impl Default for MonitorConfig {
             show_round: true,
             show_match_number: true,
             show_timer: true,
+            show_match_clock: true,
+            show_ads: true,
+            layout: default_layout(),
         }
     }
 }

@@ -507,7 +507,7 @@ fn build_monitor_state(namespace: &Namespace, court: &str) -> MonitorState {
             .unwrap_or_default(),
         match_info,
         court_state: namespace.court_state.get(court).cloned(),
-        config: monitor.map(|m| m.config).unwrap_or_default(),
+        config: monitor.map(|m| m.config.clone()).unwrap_or_default(),
         ads: monitor
             .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
             .unwrap_or_default(),

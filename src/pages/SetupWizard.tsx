@@ -150,6 +150,9 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [cmRound, setCmRound] = useState(cm.show_round);
   const [cmMatchNumber, setCmMatchNumber] = useState(cm.show_match_number);
   const [cmTimer, setCmTimer] = useState(cm.show_timer);
+  const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
+  const [cmAds, setCmAds] = useState(cm.show_ads);
+  const [cmLayout, setCmLayout] = useState(cm.layout || "split");
   const [ads, setAds] = useState<string[]>([]);
   const [adError, setAdError] = useState("");
   const voices = useAvailableVoices();
@@ -201,6 +204,9 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         show_round: cmRound,
         show_match_number: cmMatchNumber,
         show_timer: cmTimer,
+        show_match_clock: cmMatchClock,
+        show_ads: cmAds,
+        layout: cmLayout,
       },
     };
   }
@@ -548,9 +554,18 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
               <span className="text-sm font-medium text-slate-600">
                 Werbebilder
               </span>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmAds}
+                  onChange={(e) => setCmAds(e.currentTarget.checked)}
+                />
+                Werbung im Leerlauf anzeigen
+              </label>
               <p className="text-xs text-slate-500">
-                Werden im Leerlauf nacheinander gezeigt – ein gemeinsamer Satz
-                für alle Felder.
+                {cmAds
+                  ? "Werden im Leerlauf nacheinander gezeigt – ein gemeinsamer Satz für alle Felder."
+                  : "Aus: Ein freies Feld zeigt eine neutrale Leerlauf-Seite statt der Werbung."}
               </p>
               {ads.length > 0 && (
                 <ul className="flex flex-col gap-1">
@@ -603,12 +618,26 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
             {/* Anzeige-Optionen */}
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-slate-600">Anzeige</span>
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-500">
+                  Layout
+                </span>
+                <select
+                  value={cmLayout}
+                  onChange={(e) => setCmLayout(e.currentTarget.value)}
+                  className="w-full rounded-lg border border-slate-300 bg-white
+                             px-2.5 py-1.5 text-sm text-slate-700"
+                >
+                  <option value="split">A — Geteilt (oben/unten)</option>
+                </select>
+              </label>
               {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
               <MonitorPreview
                 showDiscipline={cmDiscipline}
                 showRound={cmRound}
                 showMatchNumber={cmMatchNumber}
                 showTimer={cmTimer}
+                showMatchClock={cmMatchClock}
               />
               <p className="mb-1 text-xs text-slate-500">
                 Vorschau – ändert sich mit den Häkchen. Der Pausen-Countdown
@@ -637,6 +666,14 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
                   onChange={(e) => setCmMatchNumber(e.currentTarget.checked)}
                 />
                 Spielnummer in der Fußzeile
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmMatchClock}
+                  onChange={(e) => setCmMatchClock(e.currentTarget.checked)}
+                />
+                Spieldauer in der Kopfzeile (Stoppuhr)
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input

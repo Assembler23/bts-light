@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.1
+
+- **Court-Monitor: Spieldauer in der Kopfzeile.** Neben der Feldnummer
+  zeigt der Monitor optional die laufende Spieldauer (Minuten, mit
+  Stoppuhr-Symbol). Im Setup ein-/abschaltbar; sichtbar, sobald ein
+  Tablet das Feld zählt.
+- **Court-Monitor: Werbung im Leerlauf abschaltbar.** Neue Option
+  „Werbung im Leerlauf anzeigen". Aus → ein freies Feld zeigt eine
+  neutrale Leerlauf-Seite statt der Werbebilder.
+- **Court-Monitor: lange Namen werden automatisch gekürzt.** Läuft ein
+  Name über seine Spalte (häufig bei Doppeln mit langen internationalen
+  Namen), kürzt der Monitor die Vornamen auf Initialen
+  („Ajay Kumar Mandapati" → „A. K. Mandapati"); der Nachname bleibt voll.
+- **Court-Monitor: Layout-Auswahl vorbereitet.** Das Anzeige-Layout ist
+  jetzt im Setup wählbar (aktuell „A — Geteilt"); Grundlage für weitere
+  Layouts. Abgeschlossene Sätze werden etwas größer dargestellt.
+- Details: [court-monitor.md](court-monitor.md).
+
 ## v0.9.0
 
 - **Court-Monitor: fester Name `bts-light.local` (mDNS).** Der Turnier-PC

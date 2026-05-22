@@ -50,6 +50,12 @@ export interface CourtMonitorConfig {
   show_match_number: boolean;
   /** Pausen-Countdown (Retro-Klappanzeige) anzeigen? */
   show_timer: boolean;
+  /** Spieldauer (Minuten, mit Stoppuhr-Symbol) in der Kopfzeile anzeigen? */
+  show_match_clock: boolean;
+  /** Werbung im Leerlauf anzeigen? Aus → neutrale Leerlauf-Seite. */
+  show_ads: boolean;
+  /** Anzeige-Layout des Monitors (`split` = „A — Geteilt"). */
+  layout: string;
 }
 
 /** Ein Court-Monitor-Gerät (Rust: relay_proto::MonitorDeviceInfo). */
