@@ -85,13 +85,22 @@ Der Court-Monitor ist umgesetzt (v0.7.0–v0.9.0, [court-monitor.md](court-monit
 Offen für das **Verleih-Set**-Konzept (Technik wird an Turnierleitungen
 verliehen):
 
+- **mDNS funktioniert auf Windows (noch) nicht.** Am echten Aufbau
+  getestet (2026-05-22): `bts-light.local` löst nicht auf
+  (`ERR_NAME_NOT_RESOLVED`), auch nicht nach Freigabe von UDP 5353 in der
+  Windows-Firewall. Vermutete Ursachen: mehrere Netzwerk-Adapter am PC
+  (`mdns-sd` meldet sich evtl. auf dem falschen), Windows-eigener
+  mDNS-Dienst. Braucht dediziertes Debugging direkt an der Hardware. Die
+  **IP-Adresse funktioniert** als Rückfall (`http://<ip>:8088/…`).
+  *Alternative für das Verleih-Set:* DHCP-Reservierung am vorkonfigurierten
+  Verleih-Router → stabile IP ohne Laptop-Einstellung.
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
-- **mDNS auf echter Hardware prüfen.** `bts-light.local` ist gebaut, aber
-  noch nicht auf einem echten Pi + Windows-Laptop getestet (Windows-
-  Firewall für mDNS/UDP 5353; Pi löst `.local` via avahi auf). IP-Rückfall
-  ist eingebaut.
+  **Abhängigkeit:** Welche Monitor-Adresse das Image fest einbäckt
+  (`bts-light.local` vs. fixe Router-IP) hängt an der mDNS-Klärung oben —
+  beim Festlegen müssen [pi-setup.md](pi-setup.md) **und**
+  [pi-master-image.md](pi-master-image.md) mitgezogen werden.
 - **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
   echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
   (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
