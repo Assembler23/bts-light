@@ -297,32 +297,50 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Rendert `monitor.html` mit den Platzhaltern. `__BASE__` ist der
-/// Namespace-Präfix – so lösen sich Flaggen, Werbung und State-Abfrage
-/// relativ korrekt auf. `ns` ist hier bereits durch `valid_namespace`
-/// geprüft (nur Hex + Bindestriche) → unbedenklich im JS-String-Literal.
-fn render_monitor_html(mode: &str, ns: &str, court_label: &str) -> String {
+/// Baut den URL-Basis-Pfad für `monitor.html`: der **Pfad-Teil** der
+/// öffentlichen Relay-Basis plus der Namespace, z. B. `/bts-relay/<ns>/`.
+/// Wichtig: der Relay läuft hinter nginx unter `/bts-relay/` – ohne
+/// diesen Präfix zeigen die absoluten Asset-/State-URLs ins Leere.
+fn monitor_base(public_base: &str, ns: &str) -> String {
+    let after = public_base
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(public_base);
+    let path = after.find('/').map(|i| &after[i..]).unwrap_or("");
+    format!("{}/{}/", path.trim_end_matches('/'), ns)
+}
+
+/// Rendert `monitor.html` mit den Platzhaltern. `base` ist der
+/// absolute URL-Basis-Pfad ([`monitor_base`]) – so lösen sich Flaggen,
+/// Werbung und State-Abfrage korrekt auf.
+fn render_monitor_html(mode: &str, base: &str, court_label: &str) -> String {
     MONITOR_HTML
         .replace("__MODE__", mode)
-        .replace("__BASE__", &format!("/{ns}/"))
+        .replace("__BASE__", base)
         .replace("__COURT_LABEL__", &html_escape(court_label))
 }
 
 /// Liefert die Court-Monitor-Anzeige fest für ein Feld (`/court/X/display`).
-async fn monitor_page(Path((ns, label)): Path<(String, String)>) -> impl IntoResponse {
+async fn monitor_page(
+    State(broker): State<Broker>,
+    Path((ns, label)): Path<(String, String)>,
+) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let body = render_monitor_html("fixed", &ns, &label);
+    let body = render_monitor_html("fixed", &monitor_base(&broker.public_base, &ns), &label);
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
 /// Liefert die Court-Monitor-Anzeige im Geräte-Modus (`/{ns}/monitor`).
-async fn monitor_device_page(Path(ns): Path<String>) -> impl IntoResponse {
+async fn monitor_device_page(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let body = render_monitor_html("device", &ns, "");
+    let body = render_monitor_html("device", &monitor_base(&broker.public_base, &ns), "");
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
@@ -1077,6 +1095,23 @@ mod tests {
         // 32 Hex ohne Bindestriche – falsche Form.
         assert!(!valid_namespace("a1b2c3d4e5f67890abcdef1234567890abcd"));
         assert!(!valid_namespace("../../../etc/passwd"));
+    }
+
+    #[test]
+    fn monitor_base_keeps_the_mount_path() {
+        // Der Relay läuft hinter nginx unter /bts-relay/ – der Präfix muss
+        // im Basis-Pfad erhalten bleiben, sonst zeigen die State-/Asset-
+        // URLs des Monitors ins Leere.
+        assert_eq!(
+            monitor_base("https://badhub.de/bts-relay", "ns1"),
+            "/bts-relay/ns1/"
+        );
+        assert_eq!(
+            monitor_base("https://badhub.de/bts-relay/", "ns1"),
+            "/bts-relay/ns1/"
+        );
+        // Relay direkt auf der Domain-Wurzel.
+        assert_eq!(monitor_base("https://relay.example.com", "ns1"), "/ns1/");
     }
 
     fn brief(id: i64) -> MatchBrief {
