@@ -9,6 +9,7 @@ pub mod tablet;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[tauri::command]
 fn app_version() -> String {
@@ -121,11 +122,42 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Das Schließen-Kreuz beendet die App nicht, sondern minimiert
-            // sie ins Tray – der Liveticker läuft im Hintergrund weiter.
+            // Das Schließen-Kreuz beendet bts-light wirklich. Läuft gerade
+            // ein Liveticker, wird vorher rückgefragt, damit nicht
+            // versehentlich der Live-Feed eines Turniers abreißt. Für
+            // Hintergrundbetrieb das Fenster minimieren statt schließen.
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
+                // Schließen selbst übernehmen und dann gezielt beenden –
+                // unabhängig vom Tauri-Standardverhalten.
                 api.prevent_close();
+                let app = window.app_handle().clone();
+                let sync_running = app
+                    .state::<commands::AppState>()
+                    .status
+                    .lock()
+                    .map(|s| s.running)
+                    .unwrap_or(false);
+                if sync_running {
+                    let app_for_dialog = app.clone();
+                    app.dialog()
+                        .message(
+                            "Der Liveticker läuft noch – beim Beenden hört \
+                             bts-light auf, Ergebnisse zu senden. Trotzdem \
+                             beenden?",
+                        )
+                        .title("bts-light beenden?")
+                        .buttons(MessageDialogButtons::OkCancelCustom(
+                            "Beenden".to_string(),
+                            "Abbrechen".to_string(),
+                        ))
+                        .show(move |confirmed| {
+                            if confirmed {
+                                app_for_dialog.exit(0);
+                            }
+                        });
+                } else {
+                    app.exit(0);
+                }
             }
         })
         .run(tauri::generate_context!())

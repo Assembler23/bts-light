@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.9
+
+- **Schließen beendet bts-light wirklich.** Das Fenster-Schließen-Kreuz
+  beendet die App jetzt sauber, statt sie unsichtbar im Hintergrund
+  weiterlaufen zu lassen — kein hängender Prozess mehr im Task-Manager.
+  Läuft gerade ein Liveticker, fragt bts-light vorher zur Sicherheit
+  nach. Für Hintergrundbetrieb das Fenster wie gewohnt minimieren.
+
 ## v0.9.8
 
 - **Liveticker: Halle pro Feld im Push.** Der Liveticker-Push (`tset`)

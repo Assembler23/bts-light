@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "axum",
  "base64 0.22.1",
