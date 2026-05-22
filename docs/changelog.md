@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.10
+
+- **Installer legt die Firewall-Regel automatisch an.** Bei einer
+  Neuinstallation richtet das Setup die eingehende Windows-Firewall-Regel
+  für den Tablet-Server (Port 8088) selbst ein — die „Zugriff zulassen?"-
+  Abfrage beim ersten Start entfällt. Es kommt einmalig eine
+  Windows-Sicherheitsabfrage während der Installation. Greift nur bei der
+  **interaktiven Installation**, nicht beim stillen Auto-Update — eine
+  bestehende Installation bekommt die Regel also erst, wenn der Installer
+  einmal von Hand ausgeführt wird.
+
 ## v0.9.9
 
 - **Schließen beendet bts-light wirklich.** Das Fenster-Schließen-Kreuz
