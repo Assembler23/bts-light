@@ -168,16 +168,15 @@ Seite **„Court-Monitore"** (Dashboard → Court-Monitore).
 
 ## Raspberry Pi — Kiosk-Einrichtung
 
-1. Raspberry Pi OS installieren, Chromium ist vorhanden.
-2. Mauszeiger ausblenden: `sudo apt install unclutter`.
-3. Autostart auf die **eine** Monitor-Adresse (für alle Pis gleich):
-   ```
-   chromium-browser --kiosk --noerrdialogs --disable-infobars \
-     http://<bts-light-ip>:8088/monitor
-   ```
-4. Bildschirmschoner / DPMS deaktivieren (`xset s off -dpms`).
-5. Der TV zeigt einen Kopplungs-Code → in bts-light unter
-   „Court-Monitore" dem Gerät ein Feld zuweisen.
+Ausführliche, einsteigertaugliche Schritt-für-Schritt-Anleitung:
+**[pi-setup.md](pi-setup.md)**. Kurzfassung:
+
+1. Raspberry Pi OS (Desktop) mit dem Raspberry Pi Imager bespielen –
+   dort gleich WLAN + Hostname voreinstellen.
+2. Auf dem Pi das Skript [`pi/setup-monitor.sh`](../pi/setup-monitor.sh)
+   ausführen (es fragt nach der Monitor-Adresse) → Kiosk-Autostart steht.
+3. Neu starten → der TV zeigt einen Kopplungs-Code; in bts-light unter
+   „Court-Monitore" dem Code ein Feld zuweisen.
 
 Der Pi steht üblicherweise im selben Hallen-LAN wie der bts-light-PC →
 LAN-Adresse genügt. Ist der PC-Port gesperrt, die Cloud-Adresse
