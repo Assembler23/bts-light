@@ -14,6 +14,8 @@
 //! Beim Verändern der Renames aufpassen: `tablet.html` und der
 //! verifizierte LAN-Pfad hängen exakt an dieser Wire-Form.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 // ─────────────────────────── Gemeinsame Bausteine ─────────────────────────
@@ -163,6 +165,107 @@ pub struct MonitorState {
     pub config: MonitorConfig,
     /// Kennungen der Werbebilder; der Monitor lädt sie über `../../ads/<id>`.
     pub ads: Vec<String>,
+    /// Auszuführender Fernbefehl (Neu laden / Identifizieren) – nur im
+    /// Geräte-Modus gesetzt. `#[serde(default)]` hält ältere Frames lesbar.
+    #[serde(rename = "command", skip_serializing_if = "Option::is_none", default)]
+    pub command: Option<MonitorCommand>,
+    /// Kurz-Code des Geräts (für die Kopplungs-Anzeige). Nur Geräte-Modus.
+    #[serde(rename = "deviceCode", default)]
+    pub device_code: String,
+    /// `true`, wenn das Gerät noch keinem Feld zugewiesen ist → der Monitor
+    /// zeigt die Kopplungs-Seite statt einer Match-/Werbe-Ansicht.
+    #[serde(default)]
+    pub unassigned: bool,
+}
+
+/// Art eines Fernbefehls an einen Court-Monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorCommandKind {
+    /// Seite neu laden.
+    Reload,
+    /// Feldnummer + Code groß einblenden (zum Zuordnen Gerät ↔ TV).
+    Identify,
+}
+
+/// Ein Fernbefehl an einen Monitor. `id` zählt je Gerät hoch; der Monitor
+/// führt einen Befehl genau einmal aus (er merkt sich die zuletzt
+/// ausgeführte `id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorCommand {
+    pub id: u64,
+    pub kind: MonitorCommandKind,
+}
+
+/// Ein Monitor-Gerät, wie es die „Court-Monitore"-Seite im Tool zeigt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorDeviceInfo {
+    /// Stabile Geräte-ID (UUID, vom Monitor selbst erzeugt).
+    pub id: String,
+    /// Kurz-Code (erste Zeichen der ID), wie ihn der TV anzeigt.
+    pub code: String,
+    /// Zugewiesenes Feld, falls eines gesetzt ist.
+    #[serde(default)]
+    pub court: Option<String>,
+    /// Hat sich das Gerät zuletzt gemeldet (kürzlich gepollt)?
+    pub online: bool,
+}
+
+/// Steuerdaten, die der bts-light-Host zum Relay schickt: Feld-Zuweisungen
+/// und offene Fernbefehle. Klein und ohne Bilddaten – darf häufig gepusht
+/// werden (anders als [`MonitorUpload`] mit den Werbebildern).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorControl {
+    /// Geräte-ID → zugewiesenes Feld.
+    pub assignments: HashMap<String, String>,
+    /// Geräte-ID → offener Fernbefehl.
+    pub commands: HashMap<String, MonitorCommand>,
+}
+
+/// Ein Gerät gilt als „online", wenn sein letzter Poll höchstens so lange
+/// her ist (der Monitor pollt im Sekundentakt).
+pub const MONITOR_ONLINE_WINDOW_MS: u64 = 6_000;
+
+/// Kurz-Code eines Geräts: die ersten vier alphanumerischen Zeichen der
+/// ID, groß – so wie der Monitor ihn auf dem TV anzeigt.
+pub fn device_code(device_id: &str) -> String {
+    device_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(4)
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
+/// Baut die Monitor-Geräteliste für die „Court-Monitore"-Seite aus den
+/// Feld-Zuweisungen und dem Live-Zustand (`seen`: Geräte-ID → Zeitpunkt
+/// des letzten Polls in ms). Zugewiesene Geräte zuerst (nach Feld).
+pub fn build_device_list(
+    assignments: &HashMap<String, String>,
+    seen: &HashMap<String, u64>,
+    now_ms: u64,
+) -> Vec<MonitorDeviceInfo> {
+    let mut ids: Vec<&String> = assignments.keys().collect();
+    for id in seen.keys() {
+        if !assignments.contains_key(id) {
+            ids.push(id);
+        }
+    }
+    let mut out: Vec<MonitorDeviceInfo> = ids
+        .into_iter()
+        .map(|id| {
+            let last_seen = seen.get(id).copied().unwrap_or(0);
+            MonitorDeviceInfo {
+                id: id.clone(),
+                code: device_code(id),
+                court: assignments.get(id).cloned(),
+                online: last_seen > 0
+                    && now_ms.saturating_sub(last_seen) <= MONITOR_ONLINE_WINDOW_MS,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.court.cmp(&b.court).then(a.code.cmp(&b.code)));
+    out
 }
 
 // ─────────────────────────── Tablet ↔ Server ──────────────────────────────
@@ -509,6 +612,12 @@ mod tests {
             court_state: Some(r#"{"servingSide":"left"}"#.into()),
             config: MonitorConfig::default(),
             ads: vec!["0".into(), "1".into()],
+            command: Some(MonitorCommand {
+                id: 3,
+                kind: MonitorCommandKind::Identify,
+            }),
+            device_code: "4F2A".into(),
+            unassigned: false,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));
@@ -529,6 +638,33 @@ mod tests {
                 data: "AAAA".into(),
             }],
         });
+    }
+
+    #[test]
+    fn device_code_takes_first_four_uppercase() {
+        assert_eq!(device_code("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), "A1B2");
+        assert_eq!(device_code("xy"), "XY");
+    }
+
+    #[test]
+    fn build_device_list_merges_assignments_and_seen() {
+        let mut assign = HashMap::new();
+        assign.insert("dev-online".to_string(), "Feld 1".to_string());
+        assign.insert("dev-offline".to_string(), "Feld 2".to_string());
+        let mut seen = HashMap::new();
+        seen.insert("dev-online".to_string(), 10_000u64);
+        // Gesehen, aber noch keinem Feld zugewiesen.
+        seen.insert("dev-new".to_string(), 9_500u64);
+        let list = build_device_list(&assign, &seen, 12_000);
+        assert_eq!(list.len(), 3);
+        let online = list.iter().find(|d| d.id == "dev-online").unwrap();
+        assert!(online.online);
+        assert_eq!(online.court.as_deref(), Some("Feld 1"));
+        // Zugewiesen, aber nie gepollt → offline.
+        assert!(!list.iter().find(|d| d.id == "dev-offline").unwrap().online);
+        let fresh = list.iter().find(|d| d.id == "dev-new").unwrap();
+        assert!(fresh.online);
+        assert_eq!(fresh.court, None);
     }
 
     #[test]

@@ -109,6 +109,9 @@ pub fn run() {
             commands::add_court_ad,
             commands::remove_court_ad,
             commands::list_court_ads,
+            commands::monitor_devices,
+            commands::assign_monitor,
+            commands::monitor_command,
             open_log_dir,
         ])
         .setup(|app| {

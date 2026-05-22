@@ -11,21 +11,22 @@
 //! ([`ServerCtx`], [`process_result`], [`handle_score`], [`match_brief`])
 //! ist `pub(crate)` und wird von beiden Modi geteilt.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use relay_proto::{
-    html_escape, path_encode, MatchBrief, PlayerBrief, ResultBody, ResultResponse, ServerMsg,
-    SetAb, TabletMsg,
+    device_code, html_escape, path_encode, MatchBrief, PlayerBrief, ResultBody, ResultResponse,
+    ServerMsg, SetAb, TabletMsg,
 };
 
 use crate::badhub::diff::Update;
@@ -56,6 +57,9 @@ pub struct ServerCtx {
     /// Pfad zur `config.json` – der Court-Monitor lädt seine Konfiguration
     /// frisch von dort, damit Änderungen im Tool ohne Neustart greifen.
     config_path: PathBuf,
+    /// Pfad zur `monitor-assignments.json` (Gerät → Feld). Wird frisch
+    /// gelesen, damit Zuweisungen aus dem Tool sofort greifen.
+    pub assignments_path: PathBuf,
 }
 
 impl ServerCtx {
@@ -65,6 +69,7 @@ impl ServerCtx {
         http: reqwest::Client,
         monitor_dir: PathBuf,
         config_path: PathBuf,
+        assignments_path: PathBuf,
     ) -> Self {
         Self {
             tablet,
@@ -73,6 +78,7 @@ impl ServerCtx {
             rid: AtomicU64::new(1),
             monitor_dir,
             config_path,
+            assignments_path,
         }
     }
 
@@ -87,6 +93,11 @@ impl ServerCtx {
             .map(|c| c.court_monitor)
             .unwrap_or_default()
     }
+
+    /// Lädt die Geräte→Feld-Zuweisungen frisch von der Platte.
+    pub fn monitor_assignments(&self) -> HashMap<String, String> {
+        monitor::read_assignments(&self.assignments_path)
+    }
 }
 
 /// Startet den Server auf `0.0.0.0:8088` und bedient ihn, bis der Task
@@ -97,6 +108,8 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/court/{label}", get(court_page))
         .route("/court/{label}/display", get(monitor_page))
         .route("/court/{label}/state", get(monitor_state))
+        .route("/monitor", get(monitor_device_page))
+        .route("/monitor/state", get(monitor_device_state))
         .route("/qr/{label}", get(qr_svg))
         .route("/flags/{file}", get(flag_route))
         .route("/ads/{file}", get(ad_image))
@@ -191,14 +204,30 @@ async fn health(State(ctx): State<Arc<ServerCtx>>) -> Json<serde_json::Value> {
 
 // ─────────────────────────────── Court-Monitor ────────────────────────────
 
-/// Liefert die Court-Monitor-Anzeige (read-only TV) für ein Feld.
+/// Rendert `monitor.html` mit den Platzhaltern. `base` ist der URL-Präfix
+/// für Unter-Ressourcen (`/` im LAN), `mode` ist `fixed` oder `device`.
+fn render_monitor_html(mode: &str, base: &str, court_label: &str) -> String {
+    assets::MONITOR_HTML
+        .replace("__MODE__", mode)
+        .replace("__BASE__", base)
+        .replace("__COURT_LABEL__", &html_escape(court_label))
+}
+
+/// Liefert die Court-Monitor-Anzeige fest für ein Feld (`/court/X/display`).
 async fn monitor_page(Path(label): Path<String>) -> impl IntoResponse {
-    tracing::info!("Court-Monitor-Seite ausgeliefert für Court '{label}'");
-    let body = assets::MONITOR_HTML.replace("__COURT_LABEL__", &html_escape(&label));
+    tracing::info!("Court-Monitor-Seite (fest) ausgeliefert für Court '{label}'");
+    let body = render_monitor_html("fixed", "/", &label);
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
-/// Anzeige-Zustand eines Feldes, vom Monitor im Sekundentakt gepollt.
+/// Liefert die Court-Monitor-Anzeige im Geräte-Modus (`/monitor`) – das
+/// Gerät bekommt sein Feld erst über die Zuweisung im Tool.
+async fn monitor_device_page() -> impl IntoResponse {
+    let body = render_monitor_html("device", "/", "");
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
+}
+
+/// Anzeige-Zustand eines fest verdrahteten Feldes, im Sekundentakt gepollt.
 async fn monitor_state(
     State(ctx): State<Arc<ServerCtx>>,
     Path(label): Path<String>,
@@ -208,6 +237,37 @@ async fn monitor_state(
     let ads = monitor::list_ads(&ctx.monitor_dir);
     let state = monitor::build_monitor_state(label, court, &config, ads);
     ([(header::CACHE_CONTROL, "no-store")], Json(state))
+}
+
+/// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
+#[derive(serde::Deserialize)]
+struct DeviceQuery {
+    device: String,
+}
+
+/// Anzeige-Zustand für ein Monitor-Gerät: löst die Feld-Zuweisung auf,
+/// registriert den Poll und hängt einen offenen Fernbefehl an.
+async fn monitor_device_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<DeviceQuery>,
+) -> impl IntoResponse {
+    let device = q.device;
+    if device.is_empty() || device.len() > 64 {
+        return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
+    }
+    let command = ctx.tablet.record_monitor_poll(&device);
+    let mut state = match ctx.monitor_assignments().get(&device) {
+        Some(court) => {
+            let court_data = ctx.tablet.monitor_court(court);
+            let config = ctx.monitor_config();
+            let ads = monitor::list_ads(&ctx.monitor_dir);
+            monitor::build_monitor_state(court.clone(), court_data, &config, ads)
+        }
+        None => monitor::unassigned_monitor_state(&device),
+    };
+    state.command = command;
+    state.device_code = device_code(&device);
+    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
 }
 
 /// Liefert eine gebündelte SVG-Länderflagge (`/flags/GER.svg`).

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
@@ -30,9 +30,9 @@ use serde::Serialize;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use relay_proto::{
-    html_escape, path_encode, HostFrame, MatchBrief, MonitorConfig, MonitorMatch, MonitorPlayer,
-    MonitorState, MonitorUpload, PlayerBrief, RelayFrame, ResultBody, ResultResponse, ServerMsg,
-    SetAb, TabletMsg,
+    device_code, html_escape, path_encode, HostFrame, MatchBrief, MonitorConfig, MonitorControl,
+    MonitorDeviceInfo, MonitorMatch, MonitorPlayer, MonitorState, MonitorUpload, PlayerBrief,
+    RelayFrame, ResultBody, ResultResponse, ServerMsg, SetAb, TabletMsg,
 };
 
 /// Die Tablet-Spielzettel-UI – dieselbe Datei wie in der bts-light-App.
@@ -108,6 +108,11 @@ struct Namespace {
     court_scores: HashMap<String, Vec<SetAb>>,
     /// Court-Monitor-Konfiguration + Werbebilder, falls hochgeladen.
     monitor: Option<MonitorBundle>,
+    /// Geräte-Steuerung (Feld-Zuweisungen + Fernbefehle), vom Host gepusht.
+    monitor_control: MonitorControl,
+    /// Geräte-ID → Zeitpunkt des letzten Monitor-Polls (Unix-ms) – für den
+    /// Online-Status in der „Court-Monitore"-Seite des Tools.
+    monitor_seen: HashMap<String, u64>,
     /// Offene Ergebnis-Übermittlungen: `req_id` → wartender HTTP-Handler.
     pending: HashMap<u64, oneshot::Sender<ResultResponse>>,
     /// Fortlaufende Request-ID für Ergebnis-Übermittlungen.
@@ -123,6 +128,8 @@ impl Namespace {
             court_matches: HashMap::new(),
             court_scores: HashMap::new(),
             monitor: None,
+            monitor_control: MonitorControl::default(),
+            monitor_seen: HashMap::new(),
             pending: HashMap::new(),
             next_req: 1,
         }
@@ -196,6 +203,10 @@ async fn main() {
         .route("/{ns}/court/{label}", get(court_page))
         .route("/{ns}/court/{label}/display", get(monitor_page))
         .route("/{ns}/court/{label}/state", get(monitor_state))
+        .route("/{ns}/monitor", get(monitor_device_page))
+        .route("/{ns}/monitor/state", get(monitor_device_state))
+        .route("/{ns}/monitor/control", post(monitor_control_upload))
+        .route("/{ns}/monitor-devices", get(monitor_devices_list))
         .route("/{ns}/qr/{label}", get(qr_svg))
         .route("/{ns}/flags/{file}", get(flag_route))
         .route("/{ns}/ads/{idx}", get(ad_image))
@@ -275,17 +286,47 @@ async fn qr_svg(
 
 // ─────────────────────────────── Court-Monitor ────────────────────────────
 
-/// Liefert die Court-Monitor-Anzeige (read-only TV) für ein Feld.
+/// Obergrenze gepollter Monitor-Geräte je Namespace (Missbrauchs-Schutz).
+const MAX_MONITOR_DEVICES: usize = 128;
+
+/// Aktuelle Unix-Zeit in Millisekunden.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Rendert `monitor.html` mit den Platzhaltern. `__BASE__` ist der
+/// Namespace-Präfix – so lösen sich Flaggen, Werbung und State-Abfrage
+/// relativ korrekt auf. `ns` ist hier bereits durch `valid_namespace`
+/// geprüft (nur Hex + Bindestriche) → unbedenklich im JS-String-Literal.
+fn render_monitor_html(mode: &str, ns: &str, court_label: &str) -> String {
+    MONITOR_HTML
+        .replace("__MODE__", mode)
+        .replace("__BASE__", &format!("/{ns}/"))
+        .replace("__COURT_LABEL__", &html_escape(court_label))
+}
+
+/// Liefert die Court-Monitor-Anzeige fest für ein Feld (`/court/X/display`).
 async fn monitor_page(Path((ns, label)): Path<(String, String)>) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    tracing::info!("Court-Monitor-Seite ausgeliefert für Court '{label}'");
-    let body = MONITOR_HTML.replace("__COURT_LABEL__", &html_escape(&label));
+    let body = render_monitor_html("fixed", &ns, &label);
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
-/// Anzeige-Zustand eines Feldes, vom Monitor im Sekundentakt gepollt.
+/// Liefert die Court-Monitor-Anzeige im Geräte-Modus (`/{ns}/monitor`).
+async fn monitor_device_page(Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = render_monitor_html("device", &ns, "");
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// Anzeige-Zustand eines fest verdrahteten Feldes, im Sekundentakt gepollt.
 async fn monitor_state(
     State(broker): State<Broker>,
     Path((ns, label)): Path<(String, String)>,
@@ -296,18 +337,133 @@ async fn monitor_state(
     let map = broker.namespaces.lock().await;
     let state = match map.get(&ns) {
         Some(namespace) => build_monitor_state(namespace, &label),
-        // Kein Host verbunden: leerer Zustand → der Monitor zeigt die
-        // neutrale Leerlauf-Seite.
-        None => MonitorState {
-            court_label: label,
-            tournament_name: String::new(),
-            match_info: None,
-            court_state: None,
-            config: MonitorConfig::default(),
-            ads: Vec::new(),
-        },
+        // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
+        None => empty_monitor_state(label),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+}
+
+/// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
+#[derive(serde::Deserialize)]
+struct DeviceQuery {
+    device: String,
+}
+
+/// Anzeige-Zustand für ein Monitor-Gerät: löst die Feld-Zuweisung auf,
+/// registriert den Poll und hängt einen offenen Fernbefehl an.
+async fn monitor_device_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Query(q): Query<DeviceQuery>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    if q.device.is_empty() || q.device.len() > 64 {
+        return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
+    }
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(&ns) else {
+        // Host nicht verbunden – das Gerät zeigt die Leerlauf-Seite.
+        let state = empty_monitor_state(String::new());
+        return ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response();
+    };
+    // Poll registrieren. Bei erreichter Obergrenze das am längsten nicht
+    // gesehene Gerät verdrängen – so sperrt der Missbrauchs-Schutz keine
+    // echten Geräte nach Geräte-Wechseln dauerhaft aus.
+    if !namespace.monitor_seen.contains_key(&q.device)
+        && namespace.monitor_seen.len() >= MAX_MONITOR_DEVICES
+    {
+        if let Some(oldest) = namespace
+            .monitor_seen
+            .iter()
+            .min_by_key(|(_, &ts)| ts)
+            .map(|(id, _)| id.clone())
+        {
+            namespace.monitor_seen.remove(&oldest);
+        }
+    }
+    namespace.monitor_seen.insert(q.device.clone(), now_ms());
+    let command = namespace.monitor_control.commands.get(&q.device).copied();
+    let assigned = namespace
+        .monitor_control
+        .assignments
+        .get(&q.device)
+        .cloned();
+    let mut state = match assigned {
+        Some(court) => build_monitor_state(namespace, &court),
+        None => unassigned_state(&q.device),
+    };
+    state.command = command;
+    state.device_code = device_code(&q.device);
+    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+}
+
+/// Nimmt die Geräte-Steuerdaten (Feld-Zuweisungen + Fernbefehle) vom
+/// bts-light-Host entgegen. Nur erlaubt, solange der Host verbunden ist.
+///
+/// Wie alle Namespace-Routen bewusst ohne eigenes Auth-Token: der
+/// 128-Bit-UUID-Namespace ist das Zugangsmerkmal. Worst Case ist ein
+/// erzwungenes „Neu laden"/„Identifizieren" eines bekannten Turniers –
+/// die Befehle sind ein geschlossenes Enum, kein Code.
+async fn monitor_control_upload(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Json(control): Json<MonitorControl>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace");
+    }
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(&ns) else {
+        return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
+    };
+    namespace.monitor_control = control;
+    (StatusCode::OK, "ok")
+}
+
+/// Liefert dem bts-light-Host die Liste der gemeldeten Monitor-Geräte.
+async fn monitor_devices_list(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let map = broker.namespaces.lock().await;
+    let devices: Vec<MonitorDeviceInfo> = match map.get(&ns) {
+        Some(n) => relay_proto::build_device_list(
+            &n.monitor_control.assignments,
+            &n.monitor_seen,
+            now_ms(),
+        ),
+        None => Vec::new(),
+    };
+    ([(header::CACHE_CONTROL, "no-store")], Json(devices)).into_response()
+}
+
+/// Leerer Monitor-Zustand (kein Match, keine Werbung) – Leerlauf-Anzeige.
+fn empty_monitor_state(court_label: String) -> MonitorState {
+    MonitorState {
+        court_label,
+        tournament_name: String::new(),
+        match_info: None,
+        court_state: None,
+        config: MonitorConfig::default(),
+        ads: Vec::new(),
+        command: None,
+        device_code: String::new(),
+        unassigned: false,
+    }
+}
+
+/// Zustand für ein noch keinem Feld zugewiesenes Gerät (Kopplungs-Seite).
+fn unassigned_state(device_id: &str) -> MonitorState {
+    MonitorState {
+        unassigned: true,
+        device_code: device_code(device_id),
+        ..empty_monitor_state(String::new())
+    }
 }
 
 /// Baut den Monitor-Anzeige-Zustand aus dem gespeicherten Namespace-Stand.
@@ -337,6 +493,9 @@ fn build_monitor_state(namespace: &Namespace, court: &str) -> MonitorState {
         ads: monitor
             .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
             .unwrap_or_default(),
+        command: None,
+        device_code: String::new(),
+        unassigned: false,
     }
 }
 

@@ -6,9 +6,10 @@
 //! Werbebild-Verwaltung teilen: Werbebild-Verzeichnis, Dateinamen-
 //! Validierung und der Bau des [`MonitorState`].
 
+use std::collections::HashMap;
 use std::path::Path;
 
-use relay_proto::{MonitorConfig, MonitorMatch, MonitorPlayer, MonitorState, SetAb};
+use relay_proto::{device_code, MonitorConfig, MonitorMatch, MonitorPlayer, MonitorState, SetAb};
 
 use crate::btp::model::BtpPlayer;
 use crate::config::CourtMonitorConfig;
@@ -110,6 +111,9 @@ pub fn build_monitor_state(
         court_state: court.court_state,
         config: to_monitor_config(config),
         ads,
+        command: None,
+        device_code: String::new(),
+        unassigned: false,
     }
 }
 
@@ -117,6 +121,45 @@ fn player(p: &BtpPlayer) -> MonitorPlayer {
     MonitorPlayer {
         name: p.name.clone(),
         nationality: p.nationality.clone(),
+    }
+}
+
+// ─────────────────────────── Geräte-Verwaltung ────────────────────────────
+
+/// Dateiname der Monitor-Feld-Zuweisungen (im App-Config-Verzeichnis).
+pub const MONITOR_ASSIGN_FILE: &str = "monitor-assignments.json";
+
+/// Liest die Geräte→Feld-Zuweisungen aus der JSON-Datei. Fehlt oder
+/// klemmt die Datei, ist die Zuweisung leer (kein Fehler).
+pub fn read_assignments(path: &Path) -> HashMap<String, String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default()
+}
+
+/// Schreibt die Geräte→Feld-Zuweisungen als JSON.
+pub fn write_assignments(path: &Path, map: &HashMap<String, String>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_string_pretty(map).unwrap_or_else(|_| "{}".to_string());
+    std::fs::write(path, json)
+}
+
+/// Anzeige-Zustand für ein noch keinem Feld zugewiesenes Gerät – der
+/// Monitor zeigt damit die Kopplungs-Seite mit seinem Code.
+pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
+    MonitorState {
+        court_label: String::new(),
+        tournament_name: String::new(),
+        match_info: None,
+        court_state: None,
+        config: MonitorConfig::default(),
+        ads: Vec::new(),
+        command: None,
+        device_code: device_code(device_id),
+        unassigned: true,
     }
 }
 
@@ -140,5 +183,16 @@ mod tests {
         assert_eq!(image_mime("x.png"), "image/png");
         assert_eq!(image_mime("x.JPG"), "image/jpeg");
         assert_eq!(image_mime("x.webp"), "image/webp");
+    }
+
+    #[test]
+    fn read_write_assignments_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_ASSIGN_FILE);
+        assert!(read_assignments(&path).is_empty()); // fehlende Datei → leer
+        let mut map = HashMap::new();
+        map.insert("dev-1".to_string(), "Feld 3".to_string());
+        write_assignments(&path, &map).unwrap();
+        assert_eq!(read_assignments(&path), map);
     }
 }
