@@ -247,6 +247,17 @@
     .modal .opt.team-b { border-color: #ec4899; }
     .modal .opt .partner { font-size: .8rem; opacity: .65; margin-top: .3rem; font-weight: 400; }
     .modal .opt .club { font-size: .75rem; opacity: .55; margin-top: .25rem; font-weight: 400; }
+    /* Englische Übersetzung unter dem deutschen Text (zweisprachige Anzeige). */
+    .modal .title .t-en {
+      display: block; font-size: .95rem; font-weight: 600;
+      color: #94a3b8; margin-top: .2rem;
+    }
+    .modal .subtitle .s-en { display: block; font-style: italic; }
+    /* Zurück-Schritt im Setup-Assistenten. */
+    .modal .setup-back {
+      margin-top: .25rem; padding: .7rem 1.8rem;
+      font-size: 1rem; font-weight: 600;
+    }
 
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
@@ -427,11 +438,13 @@
   </footer>
 </div>
 
-<!-- Setup-Modal: Aufschläger + (bei Doppel) Annehmer -->
+<!-- Setup-Modal: Seitenwahl, Aufschläger + (bei Doppel) Annehmer.
+     Zweisprachig (DE/EN) wegen internationaler Spieler:innen. -->
 <div class="modal" id="setup-modal">
   <div class="title" id="setup-title">Wer schlägt zuerst auf?</div>
   <div class="subtitle" id="setup-subtitle"></div>
   <div class="options" id="setup-options"></div>
+  <button type="button" class="setup-back" id="setup-back">← Zurück · Back</button>
 </div>
 
 <!-- Mid-Game-Seitenwechsel-Banner (Entscheidungssatz bei 11) -->
@@ -661,6 +674,7 @@ const els = {
   setupTitle: document.getElementById('setup-title'),
   setupSubtitle: document.getElementById('setup-subtitle'),
   setupOptions: document.getElementById('setup-options'),
+  setupBack: document.getElementById('setup-back'),
   finishedOverlay: document.getElementById('finished-overlay'),
   winnerBanner: document.getElementById('winner-banner'),
   setSummary: document.getElementById('set-summary'),
@@ -1161,6 +1175,23 @@ function chooseReceiver(receiver, fromTeamKey) {
   finalizeSetup(STATE.pendingServer.player, STATE.pendingServer.fromTeamKey, receiver, fromTeamKey);
 }
 
+// Setup-Assistent: einen Schritt zurück (choose-receiver → choose-server
+// → choose-side). Der erste Schritt (choose-side) hat keinen Rückschritt;
+// die jeweils getroffene Wahl wird verworfen, damit sie neu gesetzt wird.
+function setupBack() {
+  if (STATE.setup === 'choose-receiver') {
+    STATE.pendingServer = null;
+    STATE.setup = 'choose-server';
+  } else if (STATE.setup === 'choose-server') {
+    STATE.teamOnSide = null;
+    STATE.setup = 'choose-side';
+  } else {
+    return;
+  }
+  persistState();
+  render();
+}
+
 function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
   if (!STATE.teamOnSide) return; // sollte nicht passieren — Seitenwahl ist Schritt 1
   const serverSide = STATE.teamOnSide[serverTeamKey];
@@ -1415,15 +1446,37 @@ function playerById(id) {
   return STATE.match.teamA.find(p => p.id === id) ?? STATE.match.teamB.find(p => p.id === id);
 }
 
+// Schreibt deutschen Text + englische Übersetzung (im <span>) per
+// textContent in ein Element – DOM-Aufbau statt innerHTML, damit keine
+// HTML-Injektion möglich ist.
+function fillBilingual(host, de, en, enClass) {
+  host.textContent = de;
+  const span = document.createElement('span');
+  span.className = enClass;
+  span.textContent = en;
+  host.appendChild(span);
+}
+
+// Setzt Titel + Untertitel des Setup-Modals zweisprachig (Deutsch oben,
+// Englisch darunter).
+function setSetupText(titleDe, titleEn, subDe, subEn) {
+  fillBilingual(els.setupTitle, titleDe, titleEn, 't-en');
+  fillBilingual(els.setupSubtitle, subDe, subEn, 's-en');
+}
+
 function renderSetupModal() {
   if (!STATE.match || STATE.setup === 'playing' || STATE.setup === 'pending') {
     els.setupModal.classList.remove('visible');
     return;
   }
   els.setupModal.classList.add('visible');
+  // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten.
+  els.setupBack.style.display = STATE.setup === 'choose-side' ? 'none' : '';
   if (STATE.setup === 'choose-side') {
-    els.setupTitle.textContent = 'Welches Team steht links?';
-    els.setupSubtitle.textContent = 'Tippe das Team an, das auf der linken Court-Hälfte spielt.';
+    setSetupText(
+      'Welches Team steht links?', 'Which team is on the left?',
+      'Tippe das Team an, das auf der linken Court-Hälfte spielt.',
+      'Tap the team playing on the left half of the court.');
     const teamAName = STATE.match.teamA.map(p => p.name).join(' / ');
     const teamBName = STATE.match.teamB.map(p => p.name).join(' / ');
     els.setupOptions.innerHTML =
@@ -1433,8 +1486,10 @@ function renderSetupModal() {
       node.addEventListener('click', () => chooseSide(node.dataset.team));
     });
   } else if (STATE.setup === 'choose-server') {
-    els.setupTitle.textContent = 'Wer schlägt zuerst auf?';
-    els.setupSubtitle.textContent = 'Tippe auf den Spieler, der das Match eröffnet.';
+    setSetupText(
+      'Wer schlägt zuerst auf?', 'Who serves first?',
+      'Tippe auf den Spieler, der das Match eröffnet.',
+      'Tap the player who starts the match.');
     const opts = [
       ...STATE.match.teamA.map(p => ({ player: p, teamKey: 'a' })),
       ...STATE.match.teamB.map(p => ({ player: p, teamKey: 'b' })),
@@ -1448,8 +1503,12 @@ function renderSetupModal() {
       node.addEventListener('click', () => chooseServer(opts[i].player, opts[i].teamKey));
     });
   } else if (STATE.setup === 'choose-receiver') {
-    els.setupTitle.textContent = 'Wer nimmt den Aufschlag an?';
-    els.setupSubtitle.textContent = 'Tippe auf den Annehmer im gegnerischen Team.';
+    setSetupText(
+      'Wer nimmt den Aufschlag an?', 'Who receives the serve?',
+      'Tippe auf den Annehmer im gegnerischen Team.',
+      'Tap the receiver in the opposing team.');
+    // Absicherung: pendingServer wird nicht persistiert – nach einem Reload
+    // steht setup ohnehin wieder auf 'choose-server'. Greift praktisch nie.
     if (!STATE.pendingServer) return;
     const otherTeamKey = STATE.pendingServer.fromTeamKey === 'a' ? 'b' : 'a';
     const otherTeam = STATE.match[otherTeamKey === 'a' ? 'teamA' : 'teamB'];
@@ -1467,7 +1526,7 @@ function renderPartnerHint(teamKey, playerId) {
   if (team.length < 2) return '';
   const partner = team.find(p => p.id !== playerId);
   if (!partner) return '';
-  return `<div class="partner">mit ${escapeHtml(partner.name)}</div>`;
+  return `<div class="partner">mit / with ${escapeHtml(partner.name)}</div>`;
 }
 
 function renderCourt() {
@@ -1638,6 +1697,7 @@ els.finishBtn.addEventListener('click', finishManually);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
+els.setupBack.addEventListener('click', setupBack);
 els.injuryBtn.addEventListener('click', startInjury);
 els.megaphoneBtn.addEventListener('click', openMegaphoneModal);
 els.megaphoneConfirm.addEventListener('click', confirmMegaphone);

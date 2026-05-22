@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.2
+
+- **Spielzettel: Zurück-Schritt im Match-Setup.** Der Aufstellungs-
+  Assistent (Seitenwahl → Aufschlag → Annahme) hat ab Schritt 2 einen
+  „← Zurück · Back"-Button. Eine falsch getippte Wahl lässt sich so
+  korrigieren, ohne das Match neu zuweisen zu müssen.
+- **Spielzettel: zweisprachige Beschriftung (DE/EN).** Titel und Hinweise
+  des Setup-Assistenten erscheinen jetzt Deutsch und Englisch – für die
+  wachsende Zahl internationaler Spieler:innen.
+- Details: [tablet.md](tablet.md).
+
 ## v0.9.1
 
 - **Court-Monitor: Spieldauer in der Kopfzeile.** Neben der Feldnummer

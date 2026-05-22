@@ -60,6 +60,23 @@ den Relay statt direkt.
    meldet sich per LOGIN an und schreibt das Match mit `SENDUPDATE` zurück
    nach BTP (siehe [btp_protocol.md](btp_protocol.md)).
 
+## Match-Setup (Seiten- und Aufschlagwahl)
+
+Sobald ein Match aufs Feld kommt, führt ein kurzer Assistent durch die
+Aufstellung:
+
+1. **Seitenwahl** – welches Team steht links?
+2. **Aufschlag** – wer schlägt zuerst auf?
+3. **Annahme** (nur Doppel) – wer nimmt den Aufschlag an?
+
+- **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück · Back"**-
+  Button. Er verwirft die zuletzt getroffene Wahl und springt einen
+  Schritt zurück – so lassen sich Fehleingaben korrigieren, ohne das
+  Match neu zuweisen zu müssen.
+- **Zweisprachig:** Titel und Hinweise des Assistenten erscheinen
+  Deutsch **und** Englisch (internationale Spieler:innen). Das gilt auch
+  für das Megafon-Popup.
+
 ## Am Tablet: Pausen, Court-Grafik, Akkustand
 
 - **Offizielle Pausen** (BWF): Bei 11 Punkten im Satz blendet das Tablet
