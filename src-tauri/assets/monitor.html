@@ -146,6 +146,18 @@
       box-shadow: 0 0 6vmin rgba(251, 191, 36, .45);
     }
 
+    /* Steht das Ergebnis fest: kein laufender Satz mehr, dafür das
+       Endergebnis groß; der Gewinner jedes Satzes hell hervorgehoben,
+       der Verlierer bleibt gedämpft. */
+    .scores.decided .set-done { font-size: 11vmin; }
+    .set-done.won { color: #f8fafc; }
+    /* Sieger-Hälfte: dezenter grüner Akzent (analog zur Aufschlag-Hälfte). */
+    .half.winner {
+      border-left-color: #34d399;
+      background: linear-gradient(90deg, rgba(52, 211, 153, .10), transparent 35%);
+    }
+    .winner-mark { flex: 0 0 auto; font-size: 9vmin; line-height: 1; }
+
     footer.bar {
       flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 1.5vw;
       padding: 1.1vh 3vw;
@@ -425,11 +437,13 @@
   }
 
   // Baut eine Bildschirmhälfte für ein Team. `players` = [{name,nationality}],
-  // `done` = abgeschlossene Satzwerte dieses Teams, `current` = laufender
-  // Satzwert, `serving` = schlägt dieses Team auf?
-  function renderHalf(host, players, done, current, serving) {
+  // `done` = abgeschlossene Sätze als [{v,won}], `current` = laufender
+  // Satzwert (oder null, wenn das Match feststeht), `serving` = schlägt
+  // dieses Team auf?, `isWinner` = dieses Team hat das Match gewonnen.
+  function renderHalf(host, players, done, current, serving, isWinner) {
     host.textContent = "";
     host.classList.toggle("serving", !!serving);
+    host.classList.toggle("winner", !!isWinner);
     var pBox = document.createElement("div");
     pBox.className = "players" + (players.length > 1 ? " doubles" : "");
     players.forEach(function (p) {
@@ -466,20 +480,31 @@
     host.appendChild(pBox);
 
     var scores = document.createElement("div");
-    scores.className = "scores";
+    // `current === null` → Match steht fest: Endergebnis größer setzen.
+    scores.className = "scores" + (current === null ? " decided" : "");
     var doneBox = document.createElement("div");
     doneBox.className = "sets-done";
-    done.forEach(function (v) {
+    done.forEach(function (s) {
       var d = document.createElement("div");
-      d.className = "set-done";
-      d.textContent = String(v);
+      d.className = "set-done" + (s.won ? " won" : "");
+      d.textContent = String(s.v);
       doneBox.appendChild(d);
     });
     scores.appendChild(doneBox);
-    var cur = document.createElement("div");
-    cur.className = "set-current" + (serving ? " serving" : "");
-    cur.textContent = String(current);
-    scores.appendChild(cur);
+    // Laufender Satz nur, solange das Match nicht entschieden ist.
+    if (current !== null) {
+      var cur = document.createElement("div");
+      cur.className = "set-current" + (serving ? " serving" : "");
+      cur.textContent = String(current);
+      scores.appendChild(cur);
+    }
+    // Steht der Sieger fest, eine klare Markierung an der Gewinner-Hälfte.
+    if (isWinner) {
+      var mark = document.createElement("div");
+      mark.className = "winner-mark";
+      mark.textContent = "🏆";
+      scores.appendChild(mark);
+    }
     host.appendChild(scores);
   }
 
@@ -505,18 +530,47 @@
     els.discipline.textContent =
       cfg.showDiscipline !== false ? (DISCIPLINE_DE[discKey] || "") : "";
 
-    // Satzstand aufteilen: letzter Eintrag = laufender Satz, Rest = fertig.
-    var sets = Array.isArray(m.sets) ? m.sets : [];
-    var current = sets.length > 0 ? sets[sets.length - 1] : { a: 0, b: 0 };
-    var doneSets = sets.slice(0, Math.max(0, sets.length - 1));
-    var done1 = doneSets.map(function (s) { return s.a; });
-    var done2 = doneSets.map(function (s) { return s.b; });
+    // Satzstand aufteilen. Steht das Match fest (das Tablet meldet
+    // `finished`), gibt es keinen laufenden Satz mehr: alle gespielten
+    // Sätze sind „fertig", ein etwaiger leerer 0:0-Geistersatz am Ende
+    // fällt weg, und der Sieger wird hervorgehoben.
+    var rawSets = Array.isArray(m.sets) ? m.sets : [];
+    var decided = !!(cs && cs.finished);
+    var winnerTeam = null;
+    var current, doneSets;
+    if (decided) {
+      var played = rawSets.slice();
+      while (played.length > 0) {
+        var ls = played[played.length - 1];
+        if ((ls.a || 0) === 0 && (ls.b || 0) === 0) { played.pop(); }
+        else { break; }
+      }
+      doneSets = played;
+      current = null;
+      winnerTeam = matchWinner(cs, played);
+    } else {
+      current = rawSets.length > 0 ? rawSets[rawSets.length - 1] : { a: 0, b: 0 };
+      doneSets = rawSets.slice(0, Math.max(0, rawSets.length - 1));
+    }
+    // Pro Satz das Gewinner-Team hervorheben – nur bei regulär (nicht per
+    // Aufgabe) feststehendem Match: bei einer Aufgabe ist der letzte Satz
+    // unvollständig, eine Hervorhebung nach Punktzahl wäre dort irreführend.
+    // Der Match-Sieger selbst (🏆 + Hälfte) bleibt auch bei Aufgabe korrekt.
+    var highlightSets = decided && !(cs && cs.retired);
+    var done1 = doneSets.map(function (s) {
+      return { v: s.a, won: highlightSets && (s.a || 0) > (s.b || 0) };
+    });
+    var done2 = doneSets.map(function (s) {
+      return { v: s.b, won: highlightSets && (s.b || 0) > (s.a || 0) };
+    });
 
-    // Aufschlag aus dem gespiegelten Tablet-Zustand bestimmen.
-    var serving = servingTeam(cs);
+    // Aufschlag aus dem gespiegelten Tablet-Zustand – nur im laufenden Spiel.
+    var serving = decided ? null : servingTeam(cs);
 
-    renderHalf(els.half1, m.team1 || [], done1, current.a, serving === 1);
-    renderHalf(els.half2, m.team2 || [], done2, current.b, serving === 2);
+    renderHalf(els.half1, m.team1 || [], done1,
+               current ? current.a : null, serving === 1, winnerTeam === 1);
+    renderHalf(els.half2, m.team2 || [], done2,
+               current ? current.b : null, serving === 2, winnerTeam === 2);
 
     // Fußzeile: Runde + Spielnummer (je nach Konfiguration).
     els.footer.textContent = "";
@@ -542,6 +596,24 @@
   function servingTeam(cs) {
     if (!cs || !cs.servingSide || !cs.teamOnSide) return null;
     return cs.teamOnSide.a === cs.servingSide ? 1 : 2;
+  }
+
+  // Sieger-Team (1 oder 2) eines feststehenden Matches, sonst null. Bei
+  // Aufgabe steht der Sieger im gespiegelten Tablet-Zustand; sonst zählt,
+  // wer mehr Sätze gewonnen hat.
+  function matchWinner(cs, sets) {
+    if (cs && cs.retired) {
+      return cs.retiredWinner === "a" ? 1
+           : cs.retiredWinner === "b" ? 2 : null;
+    }
+    var w1 = 0, w2 = 0;
+    sets.forEach(function (s) {
+      if ((s.a || 0) > (s.b || 0)) w1++;
+      else if ((s.b || 0) > (s.a || 0)) w2++;
+    });
+    if (w1 > w2) return 1;
+    if (w2 > w1) return 2;
+    return null;
   }
 
   // ─── Retro-Pausen-Timer ──────────────────────────────────────────────

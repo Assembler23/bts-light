@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.15
+
+- **Court-Monitor: entschiedenes Match klar anzeigen — kein Geister-Satz.**
+  Bei einem in zwei Sätzen entschiedenen Best-of-3 zeigte der Monitor noch
+  eine leere dritte Satz-Spalte (0:0) als „laufenden Satz", als käme noch
+  ein Satz. Jetzt: sobald das Tablet die Entscheidung meldet, rendert der
+  Monitor nur die wirklich gespielten Sätze (etwaiger 0:0-Geister-Satz am
+  Ende fällt weg), hebt je Satz das Gewinner-Team hell hervor und markiert
+  die Sieger-Hälfte mit grünem Akzent und einer 🏆. Bei Aufgabe stammt der
+  Sieger aus dem gespiegelten Tablet-Zustand (`retiredWinner`).
+- **„In Vorbereitung" als Überschrift im Tablet-Panel.** Die Liste der
+  gerufenen Spiele heißt jetzt „In Vorbereitung" statt „Aufgerufen" —
+  konsistent zum Tab- und Liveticker-Namen.
+
 ## v0.9.14
 
 - **Spiele „in Vorbereitung" aufrufen.** Neuer Tab „In Vorbereitung" im

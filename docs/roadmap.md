@@ -89,6 +89,16 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   eine laufende Pause beendet wird, sind uneinheitlich in Beschriftung,
   Größe und Anordnung. Über alle Pausen-Typen hinweg angleichen, damit
   die Bedienung im Spielbetrieb eindeutig ist.
+- **Ansage für Spiele in Vorbereitung.** Aus dem „In Vorbereitung"-Tab
+  eine gesprochene Ansage je gerufenem Spiel auslösen können (Knopf),
+  analog zur Feld-Ansage beim Court-Aufruf. Braucht eine eigene
+  Ansage-Variante ohne Feld, dafür mit Halle („Spiele in Vorbereitung —
+  [Disziplin], [Paarung], bitte in Halle [X]"). Voraussetzung:
+  `PreparationCandidate` muss Disziplin und Einzel-Spielernamen mittragen
+  (für die Auto-Sprachwahl auch Nationalitäten) — der `announcer`
+  (`buildAnnouncementSegments`) ist heute rein feld-zentriert. Umfang:
+  Backend (`commands.rs`, `types.ts`) + Ansage-Builder + Trigger-Knopf
+  im `PreparationPanel`.
 
 ## Court-Monitor — offene Punkte
 

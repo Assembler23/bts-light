@@ -212,7 +212,7 @@ export function PreparationPanel() {
       {called.length > 0 && (
         <div className="flex flex-col gap-2">
           <h3 className="mt-1 text-sm font-semibold text-slate-600">
-            Aufgerufen
+            In Vorbereitung
           </h3>
           <ul className="flex flex-col gap-1.5">
             {called.map((c) => (
