@@ -77,6 +77,12 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   eine laufende Pause beendet wird, sind uneinheitlich in Beschriftung,
   Größe und Anordnung. Über alle Pausen-Typen hinweg angleichen, damit
   die Bedienung im Spielbetrieb eindeutig ist.
+- **Akkustand farblich kodieren (Tablet-Übersicht).** In der Felder-
+  Übersicht soll der Tablet-Akkustand auf einen Blick zeigen, ob ein
+  Tablet getauscht oder nachgeladen werden muss: **> 50 % grün**, **< 20 %
+  rot**, dazwischen gelb. Schwellen am `TabletBattery.percent` in
+  [`pages/TabletPanel.tsx`](../src/pages/TabletPanel.tsx); Ladezustand
+  (`charging`) bleibt das bestehende Symbol.
 
 ## Court-Monitor — offene Punkte
 
