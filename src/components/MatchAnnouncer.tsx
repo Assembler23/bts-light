@@ -10,6 +10,7 @@ import {
   type AnnounceMatchInput,
   cancelAnnouncements,
   playAnnouncement,
+  resolveAnnouncementLanguage,
   unlockAudio,
 } from "../io/announcer";
 
@@ -28,14 +29,10 @@ function resolveLanguage(
   court: CourtOverview,
   mode: AnnounceLanguageMode,
 ): AnnounceLang {
-  if (mode === "de" || mode === "en") return mode;
-  const nats = [...court.team1_nationalities, ...court.team2_nationalities];
-  if (nats.length === 0) return "de";
-  const international = nats.filter((n) => {
-    const code = n.trim().toUpperCase();
-    return code !== "" && code !== "GER";
-  }).length;
-  return international * 2 >= nats.length ? "en" : "de";
+  return resolveAnnouncementLanguage(
+    [...court.team1_nationalities, ...court.team2_nationalities],
+    mode,
+  );
 }
 
 interface Props {

@@ -14,11 +14,14 @@ import {
   Wifi,
 } from "lucide-react";
 import { tabletOverview } from "../api";
-import type { CourtOverview, TabletInfo } from "../types";
+import type { AnnounceConfig, CourtOverview, TabletInfo } from "../types";
 import { PreparationPanel } from "./PreparationPanel";
 
 interface Props {
   onBack: () => void;
+  /** Ansage-Einstellungen — werden an den „In Vorbereitung"-Tab
+   *  durchgereicht, der je gerufenem Spiel eine Hallen-Ansage anbietet. */
+  announce: AnnounceConfig;
 }
 
 /** Eine adressierbare Verbindung eines Felds: ein Verbindungsweg mit
@@ -39,7 +42,7 @@ interface CourtAddress {
  * „QR-Codes" die Adressen/QR-Codes zum Einrichten der Tablets. Pollt
  * den Tablet-Server alle 2 s.
  */
-export function TabletPanel({ onBack }: Props) {
+export function TabletPanel({ onBack, announce }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
   // Die groß angezeigte QR-Zoom-Ansicht: Feld + die angetippte Adresse
   // (im Doppelmodus hat ein Feld LAN und Cloud).
@@ -198,7 +201,7 @@ export function TabletPanel({ onBack }: Props) {
             </section>
           )}
 
-          {tab === "preparation" && <PreparationPanel />}
+          {tab === "preparation" && <PreparationPanel announce={announce} />}
 
           {tab === "qr" && (
             <section className="flex flex-col gap-3">

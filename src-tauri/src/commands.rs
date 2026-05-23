@@ -565,10 +565,18 @@ pub struct PreparationCandidate {
     pub match_id: i64,
     /// Anzeigename, z. B. "HE G1".
     pub label: String,
-    /// Team 1 (Spielernamen mit " / " verbunden).
-    pub team1: String,
-    /// Team 2 (Spielernamen mit " / " verbunden).
-    pub team2: String,
+    /// Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed`, …;
+    /// leer = unbekannt) – das Frontend lokalisiert für die Ansage selbst.
+    pub discipline: String,
+    /// Spieler-Namen Team 1 (1 bei Einzel, 2 bei Doppel).
+    pub team1: Vec<String>,
+    /// Spieler-Namen Team 2.
+    pub team2: Vec<String>,
+    /// Nationalitäten Team 1, parallel zu `team1` (leerer String, wenn
+    /// unbekannt) – Grundlage der automatischen DE/EN-Sprachwahl.
+    pub team1_nationalities: Vec<String>,
+    /// Nationalitäten Team 2, parallel zu `team2`.
+    pub team2_nationalities: Vec<String>,
     /// Spielnummer (BTP `MatchNr`), falls vergeben.
     pub match_num: Option<i64>,
     /// Aufruf-Daten, falls das Match bereits gerufen wurde; sonst `null`.
@@ -636,18 +644,19 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                 label: format!("{} {}", m.draw_name, m.round_name)
                     .trim()
                     .to_string(),
-                team1: m
+                discipline: m.discipline.as_str().to_string(),
+                team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+                team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+                team1_nationalities: m
                     .team1
                     .iter()
-                    .map(|p| p.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(" / "),
-                team2: m
+                    .map(|p| p.nationality.clone().unwrap_or_default())
+                    .collect(),
+                team2_nationalities: m
                     .team2
                     .iter()
-                    .map(|p| p.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(" / "),
+                    .map(|p| p.nationality.clone().unwrap_or_default())
+                    .collect(),
                 match_num: m.match_num,
                 call,
             }

@@ -3,37 +3,25 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-22, nach Release v0.9.13. Mehr-Hallen-Unterstützung
-> (Schritte 1–6) ausgeliefert; offen ist nur noch Schritt 7 (Aufräumen).
+> Stand: 2026-05-23, nach Release v0.9.16. Mehr-Hallen-Unterstützung
+> ist als Architektur etabliert (siehe [multi-hall.md](multi-hall.md));
+> offen ist nur noch der Namens-Fallback-Cleanup.
 
-## In Arbeit: Mehr-Hallen-Unterstützung (Standorte/Locations)
+## Mehr-Hallen-Unterstützung — Restposten
 
-Turniere in mehreren Hallen sollen automatisch erkannt und in allen
-Ansichten nach Halle getrennt werden. BTP liefert die Hallen (`Locations`)
-und je Feld eine `LocationID` mit — bts-light liest das künftig aus
-(siehe [btp_protocol.md](btp_protocol.md)). **Wichtig:** Feldnamen
-wiederholen sich über Hallen hinweg (Halle 1 Feld 1 und Halle 2 Feld 1) —
-die Feld-Identität wird daher von der Namens- auf die stabile
-BTP-`CourtID` umgestellt. Umsetzung in 7 Schritten:
+Die Mehr-Hallen-Architektur ist umgesetzt — CourtID-Identität, Hallen-
+Gruppierung im UI, Liveticker-Hallen-Monitor (badhub), LAN+Cloud-
+Parallelbetrieb (v0.9.4 – v0.9.13, Erzählung in
+[multi-hall.md](multi-hall.md)). Geblieben ist ein technischer
+Restposten:
 
-1. **BTP-Modell liest Locations** — `BtpLocation`/`BtpCourt`-Typen,
-   `LocationID` + `SortOrder` je Feld, `BtpMatch.court_id`. Rein intern,
-   gegen echten Zwei-Hallen-Mitschnitt getestet. ✅ erledigt
-2. **Feld-Identität intern auf CourtID** — behebt die Verwechslung
-   doppelter Feldnamen. ✅ erledigt
-3. **Relay & Cloud-Pfad** — Wire-Typen + Relay auf CourtID. ✅ erledigt
-4. **Tablet- & Monitor-Anzeige** — Court-Monitor zeigt „Halle 2 · Feld 6".
-   ✅ erledigt
-5. **Dashboard nach Hallen gruppiert** — Felder, Adressen, Geräte-Zuweisung.
-   ✅ erledigt
-6. **Hallen-Übersichts-Bildschirm** — entfällt als bts-light-eigene Seite:
-   der badhub-Liveticker-Monitor (`/live?display=monitor`) übernimmt das,
-   nach Hallen getrennt. bts-light sendet die Halle dafür im `tset`-Push
-   mit (v0.9.8); die badhub-Seite (DB, `live.php`/`live.js`) folgt separat.
-7. **Aufräumen** — Übergangs-Code (Namen-Fallback) entfernen.
+- **Namens-Fallback entfernen.** Übergangs-Code, der Routing notfalls noch
+  über den Feldnamen statt der CourtID erlaubt, kann nach mehreren stabilen
+  Releases entfernt werden.
 
-Geräte-Hinweis: Bei Schritt 2 müssen Tablet-/Monitor-Kopplungen einmalig
-neu zugewiesen werden (die alte Zuordnung hing am Feldnamen).
+Geräte-Hinweis aus dem CourtID-Refactor: Tablet-/Monitor-Kopplungen mussten
+einmalig neu zugewiesen werden (die alte Zuordnung hing am Feldnamen) —
+gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
@@ -89,16 +77,6 @@ Von der Turnierleitung gewünscht, noch nicht eingeplant:
   eine laufende Pause beendet wird, sind uneinheitlich in Beschriftung,
   Größe und Anordnung. Über alle Pausen-Typen hinweg angleichen, damit
   die Bedienung im Spielbetrieb eindeutig ist.
-- **Ansage für Spiele in Vorbereitung.** Aus dem „In Vorbereitung"-Tab
-  eine gesprochene Ansage je gerufenem Spiel auslösen können (Knopf),
-  analog zur Feld-Ansage beim Court-Aufruf. Braucht eine eigene
-  Ansage-Variante ohne Feld, dafür mit Halle („Spiele in Vorbereitung —
-  [Disziplin], [Paarung], bitte in Halle [X]"). Voraussetzung:
-  `PreparationCandidate` muss Disziplin und Einzel-Spielernamen mittragen
-  (für die Auto-Sprachwahl auch Nationalitäten) — der `announcer`
-  (`buildAnnouncementSegments`) ist heute rein feld-zentriert. Umfang:
-  Backend (`commands.rs`, `types.ts`) + Ansage-Builder + Trigger-Knopf
-  im `PreparationPanel`.
 
 ## Court-Monitor — offene Punkte
 
@@ -134,12 +112,6 @@ verliehen):
   (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
 - **2-Felder-pro-TV-Modus.** Zwei benachbarte Felder auf einem großen TV
   (`…/display?courts=3,4`).
-- **Entschiedenes Match klar anzeigen — kein Geister-Satz.** Steht der
-  Sieger fest (z. B. 2:0 im Best-of-3), rendert der Court-Monitor weiterhin
-  eine leere dritte Satz-Spalte (0:0), als käme noch ein Satz. Sobald das
-  Ergebnis feststeht: keine weitere Satz-Spalte mehr zeigen, die gespielten
-  Sätze hervorheben und unmissverständlich kenntlich machen, wer gewonnen
-  hat (Sieger-Markierung).
 
 ## Bekannte Einschränkungen / technische Schuld
 

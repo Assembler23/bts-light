@@ -68,6 +68,39 @@ dem Turnier einmal die Test-Ansage drücken.
 | `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8) |
 | `gong` | Gong vor der Ansage (Default an) |
 
+## Vorbereitungs-Ansage (Spiele in Vorbereitung)
+
+Neben der Feld-Ansage gibt es eine zweite Variante: aus dem
+„In Vorbereitung"-Tab kann die Turnierleitung je gerufenem Spiel eine
+**Hallen-Ansage** auslösen — Knopf „Ansage" neben dem Aufruf
+([preparation.md](preparation.md)). Format:
+
+> Gong → **„In Vorbereitung."** → Disziplin → Paarung („… gegen …") →
+> **„Bitte in *Halle X*."** (entfällt bei Ein-Hallen-Turnieren)
+
+Englisch entsprechend: „Preparation call." → Discipline → „… versus …" →
+„Please report to *hall*."
+
+Unterschiede zur Feld-Ansage:
+
+- **Kein Feld** — die Ansage trägt keinen Court (das Spiel ist noch nicht
+  auf einem Feld); statt des wiederholten Court-Worts steht am Ende die
+  Halle, in die gerufen wurde.
+- **Manueller Auslöser, kein Auto-Detektor.** Eine eigene `MatchAnnouncer`-
+  Schwester gibt es nicht — der Knopf-Klick im Panel ist gleichzeitig die
+  User-Geste, die WebView2 zum Entsperren der Tonausgabe braucht.
+- **Sprach-Auflösung geteilt** mit der Feld-Ansage:
+  `resolveAnnouncementLanguage(nationalities, mode)` in `announcer.ts` —
+  Auto-Modus nutzt dieselbe Regel (≥ Hälfte international ⇒ Englisch).
+- **`AnnounceConfig.enabled` gilt für beide.** Ist die Ansage global
+  abgeschaltet, ist auch der „Ansage"-Knopf im Vorbereitungs-Tab
+  ausgeblendet.
+
+Engine: `playPreparationAnnouncement` / `buildPreparationSegments` in
+[`src/io/announcer.ts`](../src/io/announcer.ts).
+
+Eingeführt in v0.9.16.
+
 ## Bekannte Grenzen
 
 - Der 2-s-Poll kann ein extrem kurz belegtes und sofort wieder geräumtes

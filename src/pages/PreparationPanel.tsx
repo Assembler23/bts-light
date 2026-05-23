@@ -1,17 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
-import { Megaphone, X } from "lucide-react";
+import { Megaphone, Volume2, X } from "lucide-react";
 import { callPreparation, preparationCandidates, retractPreparation } from "../api";
-import type { PreparationCandidate, PreparationLocation } from "../types";
+import {
+  playPreparationAnnouncement,
+  resolveAnnouncementLanguage,
+} from "../io/announcer";
+import type {
+  AnnounceConfig,
+  Discipline,
+  PreparationCandidate,
+  PreparationLocation,
+} from "../types";
+
+interface Props {
+  /** Ansage-Einstellungen aus der App-Konfiguration. Bei `enabled=false`
+   *  wird kein „Ansage"-Knopf gezeigt. */
+  announce: AnnounceConfig;
+}
 
 /**
  * Tab „In Vorbereitung" der Tablet-Seite. Die Turnierleitung wählt
  * eingeplante Spiele aus und „ruft sie in die Vorbereitung" – optional je
  * Halle. Der Aufruf bekommt einen Zeitstempel, der im Liveticker-Payload
  * mitgeht; der `display=next`-Monitor hebt gerufene Spiele dann hervor
- * („vor X Min aufgerufen"). BTP kennt keinen Vorbereitungs-Zustand –
- * bts-light verwaltet ihn selbst. Pollt die Kandidaten alle 4 s.
+ * („In Vorbereitung · seit X Min"). BTP kennt keinen Vorbereitungs-Zustand
+ * – bts-light verwaltet ihn selbst. Pollt die Kandidaten alle 4 s.
+ *
+ * Je gerufenem Spiel gibt es einen „Ansage"-Knopf, der eine gesprochene
+ * Hallen-Ansage auslöst (sofern Ansagen aktiviert sind) – analog zur
+ * Feld-Ansage beim Court-Aufruf, aber ohne Feld, dafür mit Halle.
  */
-export function PreparationPanel() {
+export function PreparationPanel({ announce }: Props) {
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
   const [locations, setLocations] = useState<PreparationLocation[]>([]);
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -120,6 +139,31 @@ export function PreparationPanel() {
     }
   };
 
+  // Spielt die Vorbereitungs-Ansage für ein gerufenes Spiel: Halle aus dem
+  // Aufruf, Sprache automatisch oder per Konfiguration. Der Knopf-Klick
+  // selbst ist die User-Geste, mit der WebView2 den AudioContext entsperrt
+  // — ein separater unlockAudio()-Aufruf ist hier nicht nötig.
+  const announceCandidate = (c: PreparationCandidate) => {
+    const lang = resolveAnnouncementLanguage(
+      [...c.team1_nationalities, ...c.team2_nationalities],
+      announce.language_mode,
+    );
+    void playPreparationAnnouncement(
+      {
+        discipline: (c.discipline || "unknown") as Discipline,
+        teamANames: c.team1,
+        teamBNames: c.team2,
+        hall: c.call?.hall || undefined,
+      },
+      lang,
+      {
+        rate: announce.rate,
+        voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+        gong: announce.gong,
+      },
+    );
+  };
+
   const hallName = multiHall
     ? locations.find((l) => l.id === hallId)?.name ?? ""
     : "";
@@ -168,9 +212,9 @@ export function PreparationPanel() {
                       )}
                     </span>
                     <span className="truncate text-xs text-slate-500">
-                      {c.team1 || "—"}{" "}
+                      {c.team1.length > 0 ? c.team1.join(" / ") : "—"}{" "}
                       <span className="text-slate-400">gegen</span>{" "}
-                      {c.team2 || "—"}
+                      {c.team2.length > 0 ? c.team2.join(" / ") : "—"}
                     </span>
                   </span>
                 </label>
@@ -233,15 +277,28 @@ export function PreparationPanel() {
                     )}
                   </span>
                   <span className="truncate text-xs text-slate-500">
-                    {c.team1 || "—"}{" "}
+                    {c.team1.length > 0 ? c.team1.join(" / ") : "—"}{" "}
                     <span className="text-slate-400">gegen</span>{" "}
-                    {c.team2 || "—"}
+                    {c.team2.length > 0 ? c.team2.join(" / ") : "—"}
                   </span>
                 </span>
                 {c.call && (
                   <span className="shrink-0 text-xs text-sky-700">
                     {sinceLabel(c.call.called_at_ms)}
                   </span>
+                )}
+                {announce.enabled && (
+                  <button
+                    onClick={() => announceCandidate(c)}
+                    disabled={busy}
+                    title="Hallen-Ansage abspielen"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5
+                               py-1 text-xs font-medium text-sky-700 transition-colors
+                               hover:bg-sky-100 disabled:opacity-50"
+                  >
+                    <Volume2 size={14} />
+                    Ansage
+                  </button>
                 )}
                 <button
                   onClick={() => retract(c.match_id)}

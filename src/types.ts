@@ -200,10 +200,18 @@ export interface PreparationCandidate {
   match_id: number;
   /** Anzeigename, z. B. "HE G1". */
   label: string;
-  /** Team 1 (Spielernamen mit " / " verbunden). */
-  team1: string;
-  /** Team 2 (Spielernamen mit " / " verbunden). */
-  team2: string;
+  /** Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed`, …;
+   *  leer = unbekannt) — für die Ansage lokalisiert das Frontend selbst. */
+  discipline: string;
+  /** Spieler-Namen Team 1 (1 bei Einzel, 2 bei Doppel). */
+  team1: string[];
+  /** Spieler-Namen Team 2. */
+  team2: string[];
+  /** Nationalitäten Team 1, parallel zu `team1` (leerer String, wenn
+   *  unbekannt) — Grundlage der automatischen DE/EN-Sprachwahl. */
+  team1_nationalities: string[];
+  /** Nationalitäten Team 2, parallel zu `team2`. */
+  team2_nationalities: string[];
   /** Spielnummer (BTP MatchNr), falls vergeben. */
   match_num: number | null;
   /** Aufruf-Daten, falls das Spiel bereits gerufen wurde; sonst null. */

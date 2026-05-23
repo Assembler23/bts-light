@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.16
+
+- **Hallen-Ansage für Spiele in Vorbereitung.** Im „In Vorbereitung"-Tab
+  gibt es je gerufenem Spiel einen „Ansage"-Knopf: bts-light spielt dann
+  eine gesprochene Ansage ab — Gong → „In Vorbereitung." → Disziplin →
+  Paarung → „Bitte in *Halle X*." Nutzt die bestehende
+  Ansage-Pipeline (Gong + Web Speech), Sprache aus den Ansage-
+  Einstellungen oder automatisch (≥ Hälfte international ⇒ Englisch).
+  `PreparationCandidate` trägt jetzt Disziplin und Einzel-Spielernamen
+  inkl. Nationalitäten — Voraussetzung für die Ansage und Grundlage für
+  die Auto-Sprachwahl. Der Knopf ist nur sichtbar, wenn die Ansagen
+  aktiviert sind. Details: [docs/preparation.md](preparation.md),
+  [docs/announcements.md](announcements.md).
+- **Doku-Reorganisation.** Eigene Feature-Dokus für Spiele in Vorbereitung
+  (`docs/preparation.md`) und für die Mehr-Hallen-Architektur als
+  Gesamterzählung (`docs/multi-hall.md`); Querverweise in der
+  `CLAUDE.md`-Datei-Map.
+
 ## v0.9.15
 
 - **Court-Monitor: entschiedenes Match klar anzeigen — kein Geister-Satz.**

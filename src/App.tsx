@@ -87,7 +87,12 @@ function App() {
       );
     }
     if (view === "tablets") {
-      return <TabletPanel onBack={() => setView("dashboard")} />;
+      return (
+        <TabletPanel
+          onBack={() => setView("dashboard")}
+          announce={config.announce}
+        />
+      );
     }
     if (view === "monitors") {
       return <CourtMonitorPanel onBack={() => setView("dashboard")} />;

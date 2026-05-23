@@ -9,7 +9,7 @@
 // Nutzergeste — der Test-Knopf in den Einstellungen und ein einmaliger
 // globaler Klick-Listener schalten das Audio für die Session frei.
 
-import type { Discipline } from "../types";
+import type { AnnounceLanguageMode, Discipline } from "../types";
 
 export type AnnounceLang = "de" | "en";
 
@@ -259,4 +259,101 @@ export function cancelAnnouncements(): void {
   if (typeof window.speechSynthesis !== "undefined") {
     window.speechSynthesis.cancel();
   }
+}
+
+// ─── Vorbereitungs-Ansage ────────────────────────────────────────────────
+//
+// Eigene Variante für „Spiele in Vorbereitung". Anders als die Feld-Ansage
+// trägt sie keinen Court — der Aufruf gilt einem Hallen-Display, nicht
+// einem Spielfeld. Stattdessen optional die Halle, in die gerufen wurde.
+
+export interface AnnouncePreparationInput {
+  /** Disziplin des Matches. */
+  discipline: Discipline;
+  /** Spieler-Namen Team A (1 bei Einzel, 2 bei Doppel/Mixed). */
+  teamANames: string[];
+  /** Spieler-Namen Team B. */
+  teamBNames: string[];
+  /** Halle, in die gerufen wurde (BTP-`Location`-Name). Leer/undefined =
+   *  hallenunabhängiger Aufruf (Ein-Hallen-Turnier). */
+  hall?: string;
+}
+
+// Baut die Vorbereitungs-Ansage als Liste kurzer Segmente: „In
+// Vorbereitung" → Disziplin → Paarung → (Halle). Jedes Segment ist eine
+// eigene Utterance, das macht natürliche Pausen wie bei der Feld-Ansage.
+export function buildPreparationSegments(
+  input: AnnouncePreparationInput,
+  lang: AnnounceLang,
+): string[] {
+  const teamA = joinNames(input.teamANames, lang);
+  const teamB = joinNames(input.teamBNames, lang);
+  const versus = lang === "de" ? "gegen" : "versus";
+  const disc = disciplineWord(input.discipline, lang);
+  const hall = (input.hall || "").trim();
+
+  const segments: string[] = [
+    lang === "de" ? "In Vorbereitung." : "Preparation call.",
+  ];
+  if (disc) segments.push(`${disc}.`);
+  // Beide Teams oder nur Team A — ein Solo-„gegen TeamB" ohne Subjekt
+  // wäre grammatikalisch kaputt; in dem Fall lieber gar keine Paarung.
+  if (teamA && teamB) {
+    segments.push(`${teamA}.`);
+    segments.push(`${versus} ${teamB}.`);
+  } else if (teamA) {
+    segments.push(`${teamA}.`);
+  }
+  if (hall) {
+    segments.push(
+      lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
+    );
+  }
+  return segments;
+}
+
+// Spielt Gong + spricht die Vorbereitungs-Ansage. Wirft NICHT bei
+// fehlendem SpeechSynthesis-Support, läuft dann nur als Gong durch.
+export async function playPreparationAnnouncement(
+  input: AnnouncePreparationInput,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): Promise<void> {
+  if (opts.gong !== false) {
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+        } catch {
+          // ignore
+        }
+      }
+      await playGong(ctx);
+    } catch {
+      // Gong fehlgeschlagen → trotzdem versuchen zu sprechen.
+    }
+  }
+
+  if (typeof window.speechSynthesis === "undefined") return;
+  const rate = clampRate(opts.rate);
+  for (const segment of buildPreparationSegments(input, lang)) {
+    queueUtterance(segment, lang, rate, opts.voiceURI);
+  }
+}
+
+// Auto-Sprachwahl anhand der Nationalitäten: Englisch, sobald mindestens
+// die Hälfte der Spieler international ist (Nationalität gesetzt und
+// ≠ GER). Wird von Feld-Ansage und Vorbereitungs-Ansage geteilt.
+export function resolveAnnouncementLanguage(
+  nationalities: string[],
+  mode: AnnounceLanguageMode,
+): AnnounceLang {
+  if (mode === "de" || mode === "en") return mode;
+  if (nationalities.length === 0) return "de";
+  const international = nationalities.filter((n) => {
+    const code = n.trim().toUpperCase();
+    return code !== "" && code !== "GER";
+  }).length;
+  return international * 2 >= nationalities.length ? "en" : "de";
 }

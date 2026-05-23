@@ -156,6 +156,39 @@ Zählt ein Tablet das Feld, kennt der Monitor den Spielbeginn
 laufende Spieldauer in Minuten (Stoppuhr-Symbol). Im Tool ein-/abschaltbar.
 Ohne zählendes Tablet bleibt die Anzeige leer.
 
+## Entschiedenes Match (kein Geister-Satz)
+
+Endet ein Best-of-3 in zwei Sätzen, schickt das Tablet die Sätze plus
+einen leeren dritten 0:0-Eintrag — frühere Monitor-Versionen zeigten den
+als „laufenden Satz" als ob ein dritter Satz käme. Sobald das Tablet im
+gespiegelten `courtState` `finished: true` meldet, schaltet der Monitor
+auf die **Endergebnis-Ansicht** um:
+
+- Ein etwaiger 0:0-Geistersatz am Ende fällt weg.
+- Alle wirklich gespielten Sätze werden als „fertig" gerendert; der
+  große laufende-Satz-Box entfällt komplett. Die Done-Sätze werden in
+  dieser Ansicht etwas größer gesetzt (`.scores.decided .set-done`),
+  damit das Endergebnis aus der Distanz lesbar ist.
+- Pro Satz wird das Gewinner-Team hell hervorgehoben (`.set-done.won`,
+  Verlierer bleibt gedämpft).
+- Die Sieger-Hälfte bekommt einen grünen Akzentbalken (`.half.winner`)
+  und eine 🏆-Markierung.
+- Der Aufschlag-Indikator (`serving`) ist in dieser Ansicht unterdrückt.
+
+Sieger-Bestimmung in [monitor.html](../src-tauri/assets/monitor.html)
+(`matchWinner`):
+
+- Bei Aufgabe (`courtState.retired === true`) → `retiredWinner`
+  (`'a'`/`'b'`).
+- Sonst → Team mit den meisten Satzgewinnen (`a > b` zählt für Team 1).
+
+Per-Satz-Hervorhebung wird bei einer Aufgabe absichtlich **nicht**
+angewendet — der letzte Satz ist dort unvollständig, die Punkte-Mehrheit
+ist daher kein zuverlässiger Satzgewinner. Der Match-Sieger (🏆 + grüne
+Hälfte) bleibt korrekt.
+
+Eingeführt in v0.9.15.
+
 ## Spielernamen (Broadcast-Stil)
 
 Namen werden zweizeilig dargestellt: Vorname(n) klein darüber, Nachname

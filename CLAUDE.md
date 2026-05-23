@@ -80,8 +80,10 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | `src-tauri/src/tablet/server.rs`, `assets/tablet.html` | `docs/tablet.md` |
 | `src-tauri/src/tablet/relay_client.rs`, `relay/`, `relay-proto/` | `docs/cloud-relay.md` |
 | Walkover (`tablet/state.rs`, `server.rs`, `commands.rs` `walkover_*`) | `docs/walkover.md` |
-| Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`) | `docs/announcements.md` |
+| **Spiele in Vorbereitung** (`tablet/state.rs` `PreparationCall`, `commands.rs` `preparation_*`, `badhub/payload.rs` `preparation_call_ts`/`hall`, `badhub/diff.rs` Fingerabdruck, `pages/PreparationPanel.tsx`) | `docs/preparation.md` |
+| Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`, Ansage-Knopf in `PreparationPanel`) | `docs/announcements.md` |
 | Court-Monitor (`tablet/monitor.rs`, `tablet/mdns.rs`, `assets/monitor.html`, `assets/flags/`, Court-/Monitor-Routen in `server.rs` + `relay/`, `pages/CourtMonitorPanel.tsx`, `monitor_*`-Commands) | `docs/court-monitor.md` |
+| **Mehr-Hallen-Architektur** (CourtID-Identität in `btp/model.rs` + `tablet/state.rs`, Hallen-Gruppierung in den UIs, `ConnectionMode::LanAndCloud` in `config.rs`, `merge_device_lists` in `relay-proto`) | `docs/multi-hall.md` |
 | `pi/` (Raspberry-Pi-Kiosk-Einrichtung) | `docs/pi-setup.md`, `docs/pi-master-image.md` |
 | `src-tauri/src/log_upload.rs` | `docs/logging.md` |
 | `.github/workflows/*`, Release-Ablauf | `docs/release.md` |
@@ -90,6 +92,11 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 Offene Punkte / geplante Arbeit → [docs/roadmap.md](docs/roadmap.md).
 Große Features bekommen eine **eigene** `docs/*.md` statt einer Sektion in
 einer fremden Datei.
+
+**Übergreifend (vor Detail-Dokus lesen, wenn die Aufgabe mehrere
+Bausteine berührt):** [`docs/multi-hall.md`](docs/multi-hall.md) — bindet
+CourtID-Refactor, Hallen-Gruppierung und LAN+Cloud-Parallelbetrieb zu
+einer Architektur-Erzählung.
 
 ## Subagents
 
