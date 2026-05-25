@@ -10,14 +10,20 @@ Das Feature selbst ist in [court-monitor.md](court-monitor.md) beschrieben.
 
 ## Was du brauchst
 
-- **Raspberry Pi** (Modell 3, Zero 2 W, 4 oder 5 — Pi 4/5 sind die
-  bequemste Wahl, Pi Zero 2 W ein guter Kompromiss aus Preis und Größe).
-  ⚠️ **Achtung Modell-Verwechslung:** Pi Zero W (1. Gen) und Pi Zero 2 W
-  sehen physisch identisch aus, sind aber komplett verschiedene Chips.
-  Pi Zero W (1. Gen) ist armv6 und **kann kein 64-bit Pi OS** booten —
-  Symptom 7×-Blink-„Kernel nicht gefunden" trotz vorhandenem
-  `kernel8.img`. Für 64-bit Pi OS Lite immer Pi Zero **2** W oder höher;
-  mit Pi Zero W (1. Gen) nur Pi OS Lite **32-bit** verwenden.
+- **Raspberry Pi** — **Pi Zero 2 W**, Pi 3, Pi 4 oder Pi 5 (Pi 4/5 sind
+  die bequemste Wahl, Pi Zero 2 W ein guter Kompromiss aus Preis und
+  Größe). ⚠️ **Pi Zero W (1. Gen) ist NICHT geeignet** — er hat keine
+  NEON-SIMD-Erweiterung, und modernes Chromium ist auf Debian Trixie /
+  Pi OS Bookworm mit NEON als Pflicht kompiliert. Symptom: Chromium-
+  Start schlägt mit einem Hardware-Dialog fehl, der TV bleibt mit dem
+  Hinweis hängen. **Achtung Verwechslungsgefahr** Pi Zero W (1. Gen) vs.
+  Pi Zero 2 W: physisch identisches Aussehen, komplett verschiedene
+  Chips. Schnellster Test, wenn unsicher: `cat /proc/device-tree/model`
+  auf einem laufenden Pi — Pi Zero **2** W steht da als „Raspberry Pi
+  Zero 2 W", die 1. Gen als „Raspberry Pi Zero W". Pi Zero W (1. Gen)
+  kann zwar **booten** (Pi OS Lite 32-bit, armv6-Kernel `kernel.img`),
+  aber **nicht** den Chromium-Kiosk ausführen — daher als Court-Monitor
+  unbrauchbar.
 - **microSD-Karte**, mind. 16 GB (für das Master-Image-Konzept empfohlen
   32 GB+ einer Marken-Karte wie SanDisk Ultra A1/A2 — Class-10 / A1 / A2
   ist auf Random-IO optimiert und für Pi-Betrieb deutlich angenehmer).
