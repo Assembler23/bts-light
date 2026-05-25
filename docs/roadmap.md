@@ -110,14 +110,50 @@ verliehen):
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
   Monitor-Adresse: **`http://bts-light.local:8088/monitor`** (durch den
   mDNS-Test oben bestätigt).
-- **Hardware-Hinweis Pi Zero W vs. Pi Zero 2 W.** Beide Modelle sehen
-  physisch identisch aus, sind aber komplett verschiedene Hardware:
-  Pi Zero W ist armv6/Single-Core und **kann kein 64-bit Pi OS** booten
-  (Symptom: 7-Blink „kernel image not found" trotz vorhandenem
-  `kernel8.img`). Für Court-Monitor-Performance **Pi Zero 2 W oder Pi 4
-  empfohlen**, Pi Zero W ist für den Chromium-Kiosk grenzwertig — aber
-  prinzipiell funktionsfähig (Test 2026-05-25 mit Pi OS Lite 32-bit
-  durchlaufen).
+- **Hardware-Anforderung Pi Zero 2 W oder höher** (Hinweis 2026-05-25
+  konkretisiert): Pi Zero W (1. Gen) und Pi Zero 2 W sehen physisch
+  identisch aus, sind aber komplett verschiedene Chips. Pi Zero W (1. Gen,
+  armv6 ARM1176JZF-S) hat **keine NEON-SIMD-Einheit**; modernes Chromium
+  ist auf Debian Trixie / Pi OS Bookworm mit NEON als **Pflicht**
+  kompiliert → Pi Zero W zeigt beim Start einen Hardware-Fehler-Dialog,
+  ist als Court-Monitor **unbrauchbar**. Pi Zero 2 W (Cortex-A53), Pi 3,
+  Pi 4 und Pi 5 haben alle NEON, dort läuft alles. 64-bit-Boot
+  funktioniert nur ab Pi Zero 2 W (Symptom auf Pi Zero W: 7-Blink
+  „kernel image not found"). Empfehlung für Verleih-Set-Hardware:
+  Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
+  (deutlich kraftvoller).
+- **Info-Monitor-Typen im Pi-Zuweisungs-UI.** Aktuell weist man einem
+  Pi nur ein **Feld** zu. Ergänzen: einen Pi als **Info-Monitor** für die
+  badhub-Liveticker-Sichten konfigurieren können — ohne dass die TVs
+  Internet brauchen, bts-light würde die Daten direkt auf 8088 ausliefern.
+  Mock-Up des Dropdowns auf der „Court-Monitore"-Seite:
+  ```
+  Halle 1
+    Feld 1
+    Feld 2
+  Halle 2
+    Feld 1
+    Feld 2
+  Informationen
+    Courtübersicht       (~ badhub /live?display=monitor)
+    In Vorbereitung      (~ badhub /live?display=next)
+  ```
+  Praktisch: Eingangs-TV in der Halle zeigt „in Vorbereitung", zentraler
+  TV zeigt die Court-Übersicht. Implementation: zusätzliche Routen unter
+  dem Tablet-Server (`/info/overview`, `/info/preparation`), die direkt
+  aus dem `BtpSnapshot` rendern. Beim Pi je nach Zuweisung wird die
+  passende URL geöffnet. Datenfluss bleibt offline-fähig (kein badhub.de
+  nötig).
+- **Display-Rotation für Pivot-Monitore.** Manche TVs hängen im
+  Hochformat (Pivot). Die Court-Monitor-Ansicht soll auf dem Pi
+  rotierbar sein (0° / 90° / 180° / 270°), idealerweise **zentral aus
+  bts-light je Gerät steuerbar**, ohne den Pi anzufassen. Umsetzung:
+  Rotation als Geräte-Eigenschaft in bts-light + im
+  `bts-monitor.sh`-Startskript ein `xrandr --rotate <left|right|inverted|normal>`
+  (X-Stack, Lite) bzw. `display_hdmi_rotate=` in `config.txt` (frühere
+  Stufe). Voraussetzung: das CSS des Court-Monitors muss sowohl
+  Landscape als auch Portrait sauber rendern — bestehende Layouts
+  prüfen.
 - **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
   echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
   (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
