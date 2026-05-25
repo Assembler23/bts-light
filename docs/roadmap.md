@@ -91,28 +91,33 @@ Der Court-Monitor ist umgesetzt (v0.7.0–v0.9.0, [court-monitor.md](court-monit
 Offen für das **Verleih-Set**-Konzept (Technik wird an Turnierleitungen
 verliehen):
 
-- **mDNS noch ungeklärt — entscheidender Test offen.** Stand 2026-05-22:
-  `bts-light.local` ließ sich von einem **Windows-PC** nicht auflösen
-  (`ERR_NAME_NOT_RESOLVED`, auch nach Freigabe von UDP 5353 in der
-  Windows-Firewall). Das ist **nicht aussagekräftig** — Windows ist als
-  mDNS-*Client* selbst unzuverlässig; der Fehlschlag dort beweist nicht,
-  dass bts-lights Bekanntgabe defekt ist. Der **entscheidende Test ist die
-  Auflösung von einem Raspberry Pi** (avahi, das echte Court-Monitor-
-  Gerät). Dieser Test ist **noch nicht möglich: die Court-Monitor-Pis sind
-  noch nicht einsatzfähig** (kein Master-Image, kein eingerichteter Pi).
-  Erst der Pi-Test entscheidet, ob an `mdns-sd` (Netzwerk-Adapter-Auswahl
-  auf Windows) etwas zu fixen ist — oder ob mDNS für den echten Einsatzfall
-  längst funktioniert. Bis dahin ist die **IP-Adresse der verlässliche
-  Weg** (`http://<ip>:8088/…`, eingebauter Rückfall). *Alternative fürs
-  Verleih-Set:* DHCP-Reservierung am vorkonfigurierten Verleih-Router →
-  stabile IP ohne Laptop-Einstellung.
+- **mDNS funktioniert auf Pi/avahi (verifiziert 2026-05-25).** Der seit
+  Mai 2026 offene Entscheidungstest ist durchgeführt: ein Raspberry Pi mit
+  Pi OS Lite (avahi-daemon) löst `bts-light.local` zuverlässig zu der IP
+  des sendenden Geräts auf. Test-Setup: bts-light-Bekanntmachung
+  (`_bts-light._tcp.local.` mit Hostname `bts-light.local.`, Port 8088)
+  vom Mac aus per `dns-sd -P` simuliert → vom Pi aus mit
+  `avahi-resolve -n bts-light.local` aufgelöst → IP korrekt empfangen,
+  auch über die WLAN↔Ethernet-Bridge der FRITZ!Box hinweg. Damit ist die
+  damalige Windows-PC-Fehlschlag-Beobachtung als reines
+  Windows-mDNS-Client-Problem identifiziert; **bts-lights mDNS-Bekannt­
+  machung in `tablet/mdns.rs` ist korrekt**. Konsequenz: das Master-Image
+  bäckt `http://bts-light.local:8088/monitor` als Kiosk-Adresse ein, eine
+  DHCP-Reservierung am Verleih-Router ist nicht notwendig (kann als
+  Worst-Case-Rückfall jederzeit nachgezogen werden).
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
-  **Abhängigkeit:** Welche Monitor-Adresse das Image fest einbäckt
-  (`bts-light.local` vs. fixe Router-IP) hängt an der mDNS-Klärung oben —
-  beim Festlegen müssen [pi-setup.md](pi-setup.md) **und**
-  [pi-master-image.md](pi-master-image.md) mitgezogen werden.
+  Monitor-Adresse: **`http://bts-light.local:8088/monitor`** (durch den
+  mDNS-Test oben bestätigt).
+- **Hardware-Hinweis Pi Zero W vs. Pi Zero 2 W.** Beide Modelle sehen
+  physisch identisch aus, sind aber komplett verschiedene Hardware:
+  Pi Zero W ist armv6/Single-Core und **kann kein 64-bit Pi OS** booten
+  (Symptom: 7-Blink „kernel image not found" trotz vorhandenem
+  `kernel8.img`). Für Court-Monitor-Performance **Pi Zero 2 W oder Pi 4
+  empfohlen**, Pi Zero W ist für den Chromium-Kiosk grenzwertig — aber
+  prinzipiell funktionsfähig (Test 2026-05-25 mit Pi OS Lite 32-bit
+  durchlaufen).
 - **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
   echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
   (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).

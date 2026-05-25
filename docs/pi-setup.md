@@ -10,13 +10,26 @@ Das Feature selbst ist in [court-monitor.md](court-monitor.md) beschrieben.
 
 ## Was du brauchst
 
-- **Raspberry Pi** (Modell 3, 4 oder 5 — ein Pi 4 ist eine gute Wahl).
-- **microSD-Karte**, mind. 16 GB.
+- **Raspberry Pi** (Modell 3, Zero 2 W, 4 oder 5 — Pi 4/5 sind die
+  bequemste Wahl, Pi Zero 2 W ein guter Kompromiss aus Preis und Größe).
+  ⚠️ **Achtung Modell-Verwechslung:** Pi Zero W (1. Gen) und Pi Zero 2 W
+  sehen physisch identisch aus, sind aber komplett verschiedene Chips.
+  Pi Zero W (1. Gen) ist armv6 und **kann kein 64-bit Pi OS** booten —
+  Symptom 7×-Blink-„Kernel nicht gefunden" trotz vorhandenem
+  `kernel8.img`. Für 64-bit Pi OS Lite immer Pi Zero **2** W oder höher;
+  mit Pi Zero W (1. Gen) nur Pi OS Lite **32-bit** verwenden.
+- **microSD-Karte**, mind. 16 GB (für das Master-Image-Konzept empfohlen
+  32 GB+ einer Marken-Karte wie SanDisk Ultra A1/A2 — Class-10 / A1 / A2
+  ist auf Random-IO optimiert und für Pi-Betrieb deutlich angenehmer).
 - **Netzteil** für den Pi.
-- **HDMI-Kabel** zum TV. ⚠️ Pi 4 und Pi 5 haben **micro-HDMI**-Buchsen —
-  dann brauchst du ein micro-HDMI-→-HDMI-Kabel oder einen Adapter.
+- **HDMI-Kabel** zum TV. ⚠️ Pi 4 und Pi 5 haben **micro-HDMI**-Buchsen,
+  Pi Zero / Pi Zero 2 W haben **mini-HDMI** (anderer Stecker!) — dann
+  brauchst du ein passendes Adapter-Kabel.
 - Einen Computer mit SD-Kartenleser für die Einrichtung.
-- Das **Hallen-WLAN** (Name + Passwort).
+- Das **Hallen-WLAN** (Name + Passwort) — **2,4-GHz-Band aktiv**.
+  Pi Zero 2 W und Pi Zero W können kein 5 GHz; falls das WLAN über
+  Band-Steering nur 5 GHz anbietet (FRITZ!Box & Co.), klappt der
+  Verbindungsaufbau nicht.
 
 ## So funktioniert es im Überblick
 

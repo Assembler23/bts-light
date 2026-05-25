@@ -259,6 +259,15 @@ noch am Laptop. Der Raspberry Pi löst `.local`-Namen über das
 vorinstallierte avahi auf. Schlägt mDNS fehl (z. B. blockierende
 Firewall), funktioniert die direkte IP-Adresse weiterhin.
 
+**Verifikation 2026-05-25:** Test mit Raspberry Pi (Pi OS Lite 32-bit,
+avahi-daemon) im FRITZ!Box-WLAN; bts-light-Bekanntmachung am Mac per
+`dns-sd -P bts-light _bts-light._tcp local 8088 bts-light.local. <ip>`
+simuliert → vom Pi mit `avahi-resolve -n bts-light.local` aufgelöst →
+korrekte IP zurück, auch über die WLAN↔Ethernet-Bridge der FRITZ!Box
+hinweg. Der frühere Fehlversuch von einem Windows-PC war ein
+Windows-Client-Problem (Windows ist als mDNS-Client unzuverlässig), nicht
+ein bts-light-Problem.
+
 ## Flaggen
 
 Nationalität ist ein IOC-Code (`GER`, `POL`, …). bts-light bündelt einen
