@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Spiele in Vorbereitung</title>
+<style>
+/* Stil wie overview.html — gleiche dunkle Marine-Palette, gelbe Akzente. */
+html, body {
+  margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: none; overflow: hidden;
+}
+
+body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body.rotate-180 { transform: rotate(180deg); }
+body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+
+header.bar {
+  display: flex; align-items: baseline; gap: 2vw;
+  padding: 1.2vh 3vw;
+  background: linear-gradient(180deg, #141f33, #1c2942);
+  border-bottom: .3vh solid #334155;
+}
+header.bar .live-dot {
+  width: 1.4vmin; height: 1.4vmin; border-radius: 50%;
+  background: #f43f5e; box-shadow: 0 0 1.5vmin #f43f5e;
+  animation: live-pulse 1.6s ease-in-out infinite;
+  align-self: center;
+}
+@keyframes live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+header.bar .title {
+  flex: 0 0 auto; font-size: 3.6vmin; font-weight: 800;
+  letter-spacing: .02em; color: #fbbf24; text-transform: uppercase;
+}
+header.bar .hall-name {
+  flex: 1 1 auto; font-size: 3vmin; font-weight: 600; color: #cbd5e1;
+}
+
+main {
+  height: calc(100% - 7vh); overflow: hidden;
+  padding: 2vh 3vw; display: flex; flex-direction: column; gap: 1.2vh;
+}
+
+/* Eine Zeile = ein Spiel. Aufgerufene Spiele sind hervorgehoben
+   (gold-Rahmen + Status-Pille), nicht aufgerufene blassen ab. */
+.row {
+  display: grid;
+  grid-template-columns: 5vw 1fr auto;
+  gap: 1.6vw;
+  padding: 1.4vh 1.6vw;
+  background: linear-gradient(180deg, #1a2842, #0f1a30);
+  border: .25vmin solid #334155; border-radius: 1.4vmin;
+  align-items: center;
+}
+.row.called {
+  border-color: #fbbf24;
+  background: linear-gradient(180deg, #2a2410, #1a1408);
+  box-shadow: 0 0 2vmin rgba(251, 191, 36, .25);
+}
+.row.dim { opacity: .55; }
+
+.row__num {
+  font-size: 4vmin; font-weight: 900; color: #fbbf24;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.row__num.placeholder { color: #475569; }
+
+.row__main { min-width: 0; }
+.row__discipline {
+  font-size: 2.6vmin; font-weight: 700; color: #94a3b8;
+  text-transform: uppercase; letter-spacing: .04em;
+  margin-bottom: .3vh;
+}
+.row__players {
+  font-size: 3.4vmin; font-weight: 700; color: #f1f5f9;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.row__vs { color: #64748b; font-weight: 500; padding: 0 .8vw; }
+
+.row__status {
+  display: flex; flex-direction: column; align-items: flex-end; gap: .3vh;
+}
+.pill {
+  display: inline-block;
+  background: rgba(251, 191, 36, .25); color: #fbbf24;
+  border: .2vmin solid #fbbf24; border-radius: 999px;
+  padding: .3vh 1.4vw; font-size: 2.6vmin; font-weight: 800;
+  letter-spacing: .04em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.row__hall {
+  font-size: 2.4vmin; font-weight: 700; color: #cbd5e1;
+}
+.row__since {
+  font-size: 2vmin; color: #94a3b8;
+}
+
+.idle {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3vh;
+  color: #94a3b8; text-align: center; padding: 6vmin;
+}
+.idle h1 { font-size: 6vmin; color: #fbbf24; margin: 0; }
+.idle p { font-size: 3vmin; max-width: 70vw; line-height: 1.4; }
+
+#offline {
+  position: fixed; top: 1vh; right: 2vw;
+  background: rgba(244,63,94,.18); color: #fda4af;
+  border: .2vmin solid #b91c1c; border-radius: 1vmin;
+  padding: .5vh 1.4vw; font-size: 2.4vmin; font-weight: 700;
+  display: none;
+}
+#offline.show { display: block; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="live-dot" aria-hidden="true"></span>
+  <span class="title">In Vorbereitung</span>
+  <span class="hall-name" id="hall-name"></span>
+</header>
+<main id="board"></main>
+<div id="offline">Keine Verbindung zum Turnier-PC</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+
+  // Pivot-Rotation per URL-Parameter.
+  var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+
+  // Hallen-Filter: ?halle=<Name> — bei Meeting-Point-TVs setzen. Wenn
+  // gesetzt, zeigen wir die Halle in der Überschrift und filtern auf
+  // diese Halle ein.
+  var hallFilter = (params.get('halle') || '').trim();
+  function hallKey(name) {
+    return (name == null ? '' : String(name)).trim().toLowerCase();
+  }
+  if (hallFilter) {
+    document.getElementById('hall-name').textContent = '· ' + hallFilter;
+  }
+
+  // Frontend-Cap, damit der Bildschirm nicht überfüllt.
+  var MAX_ROWS = 10;
+
+  function h(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  function sinceLabel(calledAtMs) {
+    var mins = Math.max(0, Math.floor((Date.now() - calledAtMs) / 60000));
+    if (mins === 0) return 'gerade eben';
+    return 'vor ' + mins + ' Min.';
+  }
+
+  function renderRow(c) {
+    var called = !!c.call;
+    var row = h('div', 'row' + (called ? ' called' : ' dim'));
+
+    if (c.match_num != null) {
+      row.appendChild(h('div', 'row__num', '#' + c.match_num));
+    } else {
+      row.appendChild(h('div', 'row__num placeholder', '–'));
+    }
+
+    var main = h('div', 'row__main');
+    main.appendChild(h('div', 'row__discipline', c.label || ''));
+    var players = h('div', 'row__players');
+    var t1 = (c.team1 && c.team1.length) ? c.team1.join(' / ') : '—';
+    var t2 = (c.team2 && c.team2.length) ? c.team2.join(' / ') : '—';
+    players.appendChild(document.createTextNode(t1));
+    var vs = h('span', 'row__vs', 'gegen'); players.appendChild(vs);
+    players.appendChild(document.createTextNode(t2));
+    main.appendChild(players);
+    row.appendChild(main);
+
+    var status = h('div', 'row__status');
+    if (called) {
+      status.appendChild(h('span', 'pill', 'In Vorbereitung'));
+      if (c.call.hall) status.appendChild(h('span', 'row__hall', c.call.hall));
+      if (c.call.called_at_ms) status.appendChild(h('span', 'row__since', sinceLabel(c.call.called_at_ms)));
+    } else {
+      status.appendChild(h('span', 'row__since', 'eingeplant'));
+    }
+    row.appendChild(status);
+
+    return row;
+  }
+
+  function renderIdle(msg) {
+    var idle = h('div', 'idle');
+    idle.appendChild(h('h1', null, 'In Vorbereitung'));
+    idle.appendChild(h('p', null, msg || 'Aktuell keine Spiele aufgerufen.'));
+    return idle;
+  }
+
+  function render(data) {
+    var board = document.getElementById('board');
+    board.textContent = '';
+
+    var candidates = (data && Array.isArray(data.candidates)) ? data.candidates.slice() : [];
+
+    // ?halle=-Filter: zeige nur aufgerufene Spiele dieser Halle.
+    // Nicht aufgerufene Spiele tragen keine Halle → fallen automatisch weg.
+    if (hallFilter) {
+      var wanted = hallKey(hallFilter);
+      candidates = candidates.filter(function (c) {
+        return c.call && hallKey(c.call.hall) === wanted;
+      });
+    }
+
+    candidates = candidates.slice(0, MAX_ROWS);
+
+    if (candidates.length === 0) {
+      var msg = hallFilter
+        ? 'Aktuell keine Spiele für ' + hallFilter + ' in Vorbereitung.'
+        : 'Aktuell keine Spiele in Vorbereitung.';
+      board.appendChild(renderIdle(msg));
+      return;
+    }
+
+    candidates.forEach(function (c) { board.appendChild(renderRow(c)); });
+  }
+
+  // ── Poll-Schleife ───────────────────────────────────────────────────
+  var POLL_OK_MS = 4000;
+  var POLL_FAIL_MS = 8000;
+  var errorCount = 0;
+
+  function showOffline(show) {
+    var el = document.getElementById('offline');
+    if (el) el.classList.toggle('show', !!show);
+  }
+
+  function tick() {
+    fetch('/info/preparation/state', { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        errorCount = 0; showOffline(false);
+        render(data);
+        setTimeout(tick, POLL_OK_MS);
+      })
+      .catch(function () {
+        errorCount++;
+        if (errorCount >= 2) showOffline(true);
+        setTimeout(tick, POLL_FAIL_MS);
+      });
+  }
+  tick();
+
+  // „vor X Min."-Anzeige sekündlich aktualisieren, ohne Poll zu warten.
+  setInterval(function () {
+    // Voller Re-render bei Bedarf — sparsam: prüfen ob "since"-Strings existieren.
+    var nodes = document.querySelectorAll('.row__since');
+    // Datenquelle für since haben wir nicht im DOM; vereinfacht: alle 60s ein
+    // expliziter Re-render würde reichen, hier verlassen wir uns auf den
+    // 4-Sek-Poll, der ohnehin alles neu rendert.
+  }, 30000);
+})();
+</script>
+</body>
+</html>

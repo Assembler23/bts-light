@@ -122,11 +122,16 @@ verliehen):
   „kernel image not found"). Empfehlung für Verleih-Set-Hardware:
   Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
   (deutlich kraftvoller).
-- **Info-Monitor-Typen im Pi-Zuweisungs-UI.** Aktuell weist man einem
-  Pi nur ein **Feld** zu. Ergänzen: einen Pi als **Info-Monitor** für die
-  badhub-Liveticker-Sichten konfigurieren können — ohne dass die TVs
-  Internet brauchen, bts-light würde die Daten direkt auf 8088 ausliefern.
-  Mock-Up des Dropdowns auf der „Court-Monitore"-Seite:
+- **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
+  Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays
+  unter dedizierten URLs: `/info/overview` (Court-Übersicht, Hallen ×
+  Felder × aktuelles Spiel) und `/info/preparation` (gerufene und
+  eingeplante Spiele). Beide offline-fähig — Daten direkt aus
+  `BtpSnapshot`, kein badhub.de nötig. URL-Parameter `?halle=<Name>` und
+  `?rotate=90|180|270` unterstützt. Details
+  [court-monitor.md → Info-Monitor](court-monitor.md). **Offen:**
+  Zuweisung über die „Court-Monitore"-Seite (statt manuell die
+  `bts-monitor-url.txt` zu bearbeiten) — Mock-Up des Dropdowns:
   ```
   Halle 1
     Feld 1
@@ -135,25 +140,21 @@ verliehen):
     Feld 1
     Feld 2
   Informationen
-    Courtübersicht       (~ badhub /live?display=monitor)
-    In Vorbereitung      (~ badhub /live?display=next)
+    Courtübersicht
+    In Vorbereitung
   ```
-  Praktisch: Eingangs-TV in der Halle zeigt „in Vorbereitung", zentraler
-  TV zeigt die Court-Übersicht. Implementation: zusätzliche Routen unter
-  dem Tablet-Server (`/info/overview`, `/info/preparation`), die direkt
-  aus dem `BtpSnapshot` rendern. Beim Pi je nach Zuweisung wird die
-  passende URL geöffnet. Datenfluss bleibt offline-fähig (kein badhub.de
-  nötig).
-- **Display-Rotation für Pivot-Monitore.** Manche TVs hängen im
-  Hochformat (Pivot). Die Court-Monitor-Ansicht soll auf dem Pi
-  rotierbar sein (0° / 90° / 180° / 270°), idealerweise **zentral aus
-  bts-light je Gerät steuerbar**, ohne den Pi anzufassen. Umsetzung:
-  Rotation als Geräte-Eigenschaft in bts-light + im
-  `bts-monitor.sh`-Startskript ein `xrandr --rotate <left|right|inverted|normal>`
-  (X-Stack, Lite) bzw. `display_hdmi_rotate=` in `config.txt` (frühere
-  Stufe). Voraussetzung: das CSS des Court-Monitors muss sowohl
-  Landscape als auch Portrait sauber rendern — bestehende Layouts
-  prüfen.
+  Setzt eine Erweiterung des `monitor_assignments`-Datenmodells voraus
+  (Target = Court(i64) | InfoOverview | InfoPreparation) und ein
+  zusätzliches Dropdown-Element im Frontend; der `/monitor`-Endpoint
+  würde dann je Target-Typ die passende HTML zurückgeben.
+- **Display-Rotation für Pivot-Monitore: URL-Parameter umgesetzt**
+  (v0.9.17, 2026-05-25), **zentrale Steuerung offen.** `?rotate=90|180|270`
+  am URL der Monitor-Seiten dreht die Anzeige per CSS-Transform — Pi-
+  OS-seitig keine Änderung nötig. Das CSS rendert auch in Portrait
+  sauber. **Offen:** Rotation als Geräte-Eigenschaft zentral aus bts-light
+  pro Pi steuerbar (ohne `bts-monitor-url.txt` editieren zu müssen).
+  Implementation: zusätzliches Feld `rotation: Option<u16>` in der
+  Geräte-Zuweisung; bts-monitor.sh hängt `?rotate=…` an die URL an.
 - **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
   echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
   (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).

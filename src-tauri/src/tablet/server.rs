@@ -32,7 +32,7 @@ use relay_proto::{
 use crate::badhub::diff::Update;
 use crate::badhub::payload::build_tupdate;
 use crate::badhub::push;
-use crate::btp::model::BtpMatch;
+use crate::btp::model::{BtpMatch, MatchStatus};
 use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
 use crate::tablet::assets::{self, TABLET_HTML};
@@ -115,6 +115,9 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/flags/{file}", get(flag_route))
         .route("/ads/{file}", get(ad_image))
         .route("/health", get(health))
+        .route("/info/overview", get(info_overview_page))
+        .route("/info/preparation", get(info_preparation_page))
+        .route("/info/preparation/state", get(info_preparation_state))
         .route("/result", post(result))
         .route("/ws", get(ws_upgrade))
         .with_state(ctx);
@@ -295,6 +298,102 @@ async fn monitor_device_state(
     state.command = command;
     state.device_code = device_code(&device);
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+}
+
+// ─────────────────────────────── Info-Monitore ────────────────────────────
+//
+// Read-only Hallen-Displays, kein Bezug zu einem bestimmten Feld. Werden
+// per Master-Image oder URL auf einem Pi geöffnet:
+//   /info/overview      → Court-Übersicht (Hallen × Felder × aktuelles Spiel)
+//   /info/preparation   → Spiele in Vorbereitung (Liste, gerufene zuerst)
+// Beide unterstützen URL-Parameter:
+//   ?halle=<Name>       → filtert auf eine Halle
+//   ?rotate=90|180|270  → Pivot-Monitor um N° drehen (CSS-Transform).
+
+/// Liefert die HTML der Court-Übersicht. Pollt selbst `/health`.
+async fn info_overview_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::OVERVIEW_HTML),
+    )
+}
+
+/// Liefert die HTML des Vorbereitungs-Monitors. Pollt
+/// `/info/preparation/state`.
+async fn info_preparation_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::PREPARATION_HTML),
+    )
+}
+
+/// JSON-Zustand für den Vorbereitungs-Monitor: alle eingeplanten,
+/// ruf-baren Spiele (beide Teams stehen fest), gerufene zuerst sortiert.
+/// Aufgerufene Spiele tragen `call.hall` + `call.called_at_ms` —
+/// derselbe Datenstand, der auch `commands::preparation_candidates`
+/// liefert, nur als reines HTTP-JSON statt Tauri-Command.
+async fn info_preparation_state(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let snapshot = match ctx.tablet.snapshot_clone() {
+        Some(s) => s,
+        None => {
+            return (
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(serde_json::json!({ "candidates": [] })),
+            )
+                .into_response();
+        }
+    };
+    let calls = ctx.tablet.preparation_calls();
+
+    let mut candidates: Vec<serde_json::Value> = snapshot
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+        })
+        .map(|m| {
+            let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
+                let hall = c
+                    .location_id
+                    .and_then(|lid| {
+                        snapshot
+                            .locations
+                            .iter()
+                            .find(|l| l.id == lid)
+                            .map(|l| l.name.clone())
+                    })
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "hall": hall,
+                    "called_at_ms": c.called_at_ms,
+                })
+            });
+            serde_json::json!({
+                "match_id": m.id,
+                "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
+                "team1": m.team1.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                "match_num": m.match_num,
+                "call": call,
+            })
+        })
+        .collect();
+
+    // Gerufene Spiele zuerst, dann nach Spielnummer (ohne Nummer hinten).
+    candidates.sort_by_key(|c| {
+        let has_call = c.get("call").map(|v| !v.is_null()).unwrap_or(false);
+        let num = c
+            .get("match_num")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(i64::MAX);
+        (!has_call, num)
+    });
+
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({ "candidates": candidates })),
+    )
+        .into_response()
 }
 
 /// Liefert eine gebündelte SVG-Länderflagge (`/flags/GER.svg`).

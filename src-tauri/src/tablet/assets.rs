@@ -11,6 +11,16 @@ pub const TABLET_HTML: &str = include_str!("../../assets/tablet.html");
 /// Ausliefern durch den Court-Namen ersetzt.
 pub const MONITOR_HTML: &str = include_str!("../../assets/monitor.html");
 
+/// Court-Übersichts-Monitor (Info-Display): zeigt alle Felder mit Status
+/// und aktuellem Spiel, nach Hallen gruppiert. Optional `?halle=`-Filter,
+/// `?rotate=90|180|270` für Pivot-TVs. Pollt `/health` für Daten.
+pub const OVERVIEW_HTML: &str = include_str!("../../assets/overview.html");
+
+/// Vorbereitungs-Monitor (Info-Display): listet aufgerufene und
+/// eingeplante Spiele. Optional `?halle=`-Filter, `?rotate=`. Pollt
+/// `/info/preparation/state` für Daten.
+pub const PREPARATION_HTML: &str = include_str!("../../assets/preparation.html");
+
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.

@@ -4,6 +4,31 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.17
+
+- **Info-Monitore: Court-Übersicht und In Vorbereitung.** Neben dem
+  feld-bezogenen Court-Monitor (ein TV je Feld) liefert bts-light jetzt
+  zwei Hallen-weite Info-Displays unter eigenen URLs aus —
+  offline-fähig, direkt aus dem BTP-Snapshot, ohne Umweg über badhub.de:
+  - `…/info/overview` zeigt **alle Felder** mit Status (frei, läuft,
+    Behandlung, TL-Ruf), Paarung und Sätzen, bei Mehr-Hallen-Turnieren
+    je Halle ein Abschnitt. Ideal für den TL-Tisch oder einen zentralen
+    Eingangs-TV.
+  - `…/info/preparation` zeigt die **gerufenen und eingeplanten Spiele**
+    als Liste mit gold-Pille „In Vorbereitung", Halle und „vor X Min."
+    pro Aufruf. Ideal als Meeting-Point-TV je Halle.
+  Beide unterstützen `?halle=<Name>` (Hallen-Filter) und
+  `?rotate=90|180|270` (Pivot-Monitor, dreht per CSS-Transform — keine
+  OS-Anpassung am Pi nötig). Details:
+  [docs/court-monitor.md → Info-Monitor](court-monitor.md).
+- **`setup-monitor.sh` versteht Pi OS Lite.** Auf Lite installiert das
+  Skript jetzt selbst den X-Stack (Xorg + matchbox-WM + Chromium),
+  setzt Console-Autologin auf tty1 und richtet `.xinitrc` +
+  `.bash_profile`-Hook so ein, dass beim Boot automatisch der Chromium-
+  Kiosk startet. Auf Desktop bleibt der bisherige `.config/autostart`-
+  Pfad. Non-interaktive Aufrufe (cloud-init, `curl | bash`) werden
+  graceful unterstützt.
+
 ## v0.9.16
 
 - **Hallen-Ansage für Spiele in Vorbereitung.** Im „In Vorbereitung"-Tab

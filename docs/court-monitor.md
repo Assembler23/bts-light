@@ -105,17 +105,20 @@ Monitor in beiden Modi dieselbe Seite ist. Der Server setzt beim
 Ausliefern den Basis-Pfad (`__BASE__`) ein; `monitor.html` baut daraus
 absolute URLs, unabhängig von der Verschachtelungstiefe.
 
-| Zweck             | LAN                          | Cloud                          |
-|-------------------|------------------------------|--------------------------------|
-| Anzeige (Gerät)   | `/monitor`                   | `/{ns}/monitor`                |
-| Status (Gerät)    | `/monitor/state?device=`     | `/{ns}/monitor/state?device=`  |
-| Anzeige (fest)    | `/court/{label}/display`     | `/{ns}/court/{label}/display`  |
-| Status (fest)     | `/court/{label}/state`       | `/{ns}/court/{label}/state`    |
-| Flaggen           | `/flags/{code}.svg`          | `/{ns}/flags/{code}.svg`       |
-| Werbebild         | `/ads/{datei}`               | `/{ns}/ads/{index}`            |
-| Werbe-Upload      | —                            | `POST /{ns}/monitor`           |
-| Geräte-Steuerung  | —                            | `POST /{ns}/monitor/control`   |
-| Geräteliste       | —                            | `GET /{ns}/monitor-devices`    |
+| Zweck                  | LAN                            | Cloud                          |
+|------------------------|--------------------------------|--------------------------------|
+| Anzeige (Gerät)        | `/monitor`                     | `/{ns}/monitor`                |
+| Status (Gerät)         | `/monitor/state?device=`       | `/{ns}/monitor/state?device=`  |
+| Anzeige (fest)         | `/court/{label}/display`       | `/{ns}/court/{label}/display`  |
+| Status (fest)          | `/court/{label}/state`         | `/{ns}/court/{label}/state`    |
+| **Court-Übersicht**    | `/info/overview`               | (LAN-only erstmal)             |
+| **In Vorbereitung**    | `/info/preparation`            | (LAN-only erstmal)             |
+| Vorbereitungs-Daten    | `/info/preparation/state`      | (LAN-only erstmal)             |
+| Flaggen                | `/flags/{code}.svg`            | `/{ns}/flags/{code}.svg`       |
+| Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |
+| Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
+| Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
+| Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |
 
 Im Cloud-Modus pusht der bts-light-Host die Feld-Zuweisungen + Fernbefehle
 alle ~3 s (nur bei Änderung) an `…/monitor/control` und holt von
@@ -248,6 +251,43 @@ Standard-Monitor-Adresse `http://bts-light.local:8088/monitor` passt
 dadurch in **jedem** Turnier-WLAN – ein Master-Image braucht keine
 Anpassung. Ist der PC-Port gesperrt, die Cloud-Adresse
 (`https://badhub.de/bts-relay/<install_id>/monitor`) verwenden.
+
+## Info-Monitor (Hallen-Display)
+
+Neben dem feld-bezogenen Court-Monitor (ein TV pro Feld) liefert bts-light
+zwei **Hallen-weite Info-Anzeigen** unter dedizierten URLs aus — ideal für
+ein Display am Halleneingang oder am Schiedsrichter-Tisch der TL. Beide
+nutzen denselben Tablet-Server, brauchen also weder Internet noch
+badhub.de.
+
+| URL | Was es zeigt |
+|---|---|
+| `http://bts-light.local:8088/info/overview` | **Court-Übersicht** — alle Felder mit Status („frei" / „läuft" / „Behandlung" / „TL"), aktuellem Spiel, Paarung und Sätzen. Bei Mehr-Hallen-Turnieren je Halle ein Abschnitt mit Überschrift. |
+| `http://bts-light.local:8088/info/preparation` | **In Vorbereitung** — Liste der gerufenen und eingeplanten Spiele; aufgerufene mit gold-Pille „In Vorbereitung", Halle und „vor X Min." hervorgehoben. |
+
+Beide Seiten verstehen zwei URL-Parameter:
+
+- **`?halle=<Name>`** — filtert auf eine Halle. Court-Übersicht zeigt nur
+  die Felder dieser Halle; Vorbereitungs-Monitor nur die Aufrufe für diese
+  Halle. Vergleich getrimmt + case-insensitiv. Beim Court-Grid: kein
+  Treffer → alle Felder (Tippfehler-Schutz). Beim Vorbereitungs-Monitor:
+  kein Rückfall, der Operator soll explizit sehen, wenn nichts für die
+  Halle gerufen ist.
+- **`?rotate=90|180|270`** — Pivot-/Hochformat-Monitore: rotiert die
+  gesamte Anzeige per CSS-Transform im Browser. Pi-OS-seitig keine
+  Änderung nötig (kein `xrandr`, kein `display_rotate=` in config.txt).
+  `0` oder weggelassen = normal.
+
+Beispiele:
+
+- Eingangs-TV Halle 1 im Pivot: `…/info/preparation?halle=Halle%201&rotate=90`
+- TL-Tisch-Monitor mit Gesamtübersicht: `…/info/overview`
+- Bestimmte Halle als reines Court-Display: `…/info/overview?halle=Halle%202`
+
+Eingerichtet wird das nach dem Pi-Standardablauf
+([pi-setup.md](pi-setup.md)) — nur die `bts-monitor-url.txt` auf der
+Boot-Partition zeigt nicht auf `/monitor`, sondern auf die passende
+`/info/…`-Variante.
 
 ## mDNS: `bts-light.local`
 

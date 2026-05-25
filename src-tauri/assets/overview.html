@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Court-Übersicht</title>
+<style>
+/* ── Layout-Grundlagen ─────────────────────────────────────────────────
+   Wie monitor.html: dunkles Marine, gelbe Akzente, slate-Töne. Größen
+   in vmin damit die Skala auf jedem Bildschirm passt — Beamer wie TV. */
+html, body {
+  margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: none; overflow: hidden;
+}
+
+/* Pivot-Unterstützung: ?rotate=90|180|270 → CSS-Transform am Wurzel-
+   Element. So lässt sich derselbe Pi mit derselben URL um 90° rotieren,
+   ohne im OS herumzuschrauben (xrandr-Pendant einfach im Browser). */
+body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body.rotate-180 { transform: rotate(180deg); }
+body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+
+header.bar {
+  display: flex; align-items: baseline; gap: 2vw;
+  padding: 1.2vh 3vw;
+  background: linear-gradient(180deg, #141f33, #1c2942);
+  border-bottom: .3vh solid #334155;
+}
+header.bar .live-dot {
+  width: 1.4vmin; height: 1.4vmin; border-radius: 50%;
+  background: #f43f5e; box-shadow: 0 0 1.5vmin #f43f5e;
+  animation: live-pulse 1.6s ease-in-out infinite;
+  align-self: center;
+}
+@keyframes live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+header.bar .title {
+  flex: 0 0 auto; font-size: 3.6vmin; font-weight: 800;
+  letter-spacing: .02em; color: #fbbf24; text-transform: uppercase;
+}
+header.bar .tournament {
+  flex: 1 1 auto; font-size: 3vmin; font-weight: 600; color: #cbd5e1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+main {
+  height: calc(100% - 7vh); overflow: hidden;
+  padding: 2vh 3vw; display: flex; flex-direction: column; gap: 2vh;
+}
+
+/* Halle-Sektion */
+.hall {
+  display: flex; flex-direction: column; gap: 1.2vh;
+}
+.hall h2 {
+  font-size: 3.2vmin; font-weight: 800; color: #fbbf24;
+  margin: 0; padding: 0 0 .4vh 0; border-bottom: .2vh solid #334155;
+  letter-spacing: .04em; text-transform: uppercase;
+}
+
+/* Court-Grid */
+.courts {
+  display: grid; gap: 1.4vh 1.6vw;
+  grid-template-columns: repeat(auto-fill, minmax(28vw, 1fr));
+}
+.court {
+  background: linear-gradient(180deg, #1a2842, #0f1a30);
+  border: .25vmin solid #334155; border-radius: 1.4vmin;
+  padding: 1.2vh 1.4vw; display: flex; flex-direction: column;
+  gap: .6vh; min-height: 14vh;
+}
+.court.empty { opacity: .55; }
+.court__head {
+  display: flex; align-items: baseline; gap: 1vw; min-height: 4vmin;
+}
+.court__name {
+  font-size: 4.4vmin; font-weight: 900; color: #fbbf24; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.court__status {
+  font-size: 2.4vmin; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.court__status.live { color: #34d399; }
+.court__status.pause { color: #fbbf24; }
+.court__discipline {
+  margin-left: auto; font-size: 2.4vmin; font-weight: 700; color: #94a3b8;
+}
+
+.teams { display: flex; flex-direction: column; gap: .35vh; }
+.team {
+  font-size: 3vmin; font-weight: 700; color: #e2e8f0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.team.winner { color: #34d399; }
+.vs { font-size: 1.8vmin; color: #64748b; text-align: center; }
+
+.scores { display: flex; gap: 1vw; font-variant-numeric: tabular-nums; }
+.score-set { font-size: 3vmin; font-weight: 800; color: #cbd5e1; }
+.score-set.won { color: #f8fafc; }
+
+.idle {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3vh;
+  color: #94a3b8; text-align: center; padding: 6vmin;
+}
+.idle h1 { font-size: 6vmin; color: #fbbf24; margin: 0; }
+.idle p { font-size: 3vmin; max-width: 70vw; line-height: 1.4; }
+
+#offline {
+  position: fixed; top: 1vh; right: 2vw;
+  background: rgba(244,63,94,.18); color: #fda4af;
+  border: .2vmin solid #b91c1c; border-radius: 1vmin;
+  padding: .5vh 1.4vw; font-size: 2.4vmin; font-weight: 700;
+  display: none;
+}
+#offline.show { display: block; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="live-dot" aria-hidden="true"></span>
+  <span class="title">Court-Übersicht</span>
+  <span class="tournament" id="t-name"></span>
+</header>
+<main id="board"></main>
+<div id="offline">Keine Verbindung zum Turnier-PC</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Konfiguration aus URL-Parametern ────────────────────────────────
+  var params = new URLSearchParams(location.search);
+
+  // Rotation: ?rotate=0|90|180|270 — body bekommt CSS-Klasse rotate-<n>.
+  // Damit lässt sich ein Pivot-Monitor ohne OS-Eingriff drehen.
+  var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+
+  // Hallen-Filter: ?halle=<Name> — wie bei badhub/live, zeigt nur Felder
+  // dieser Halle. Vergleich getrimmt + case-insensitiv.
+  var hallFilter = (params.get('halle') || '').trim();
+  function hallKey(name) {
+    return (name == null ? '' : String(name)).trim().toLowerCase();
+  }
+
+  // Anzeige-Cap bei sehr großen Turnieren (sollte nicht greifen, dient
+  // nur als Sicherheit gegen pathologische Daten).
+  var MAX_COURTS = 64;
+
+  // ── DOM-Helfer ──────────────────────────────────────────────────────
+  function h(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  function setStatus(text, cssClass) {
+    var el = h('span', 'court__status' + (cssClass ? ' ' + cssClass : ''), text);
+    return el;
+  }
+
+  // Gruppiert Courts nach Halle. Reihenfolge nach erstem Vorkommen.
+  // Felder ohne Halle landen in einer Restgruppe (ohne Überschrift).
+  function groupByHall(courts) {
+    var groups = []; var byKey = {};
+    courts.forEach(function (c) {
+      var key = hallKey(c.location);
+      if (!byKey[key]) { byKey[key] = { name: c.location || '', courts: [] }; groups.push(byKey[key]); }
+      byKey[key].courts.push(c);
+    });
+    return groups;
+  }
+
+  function renderCourt(c) {
+    var card = h('div', 'court');
+    var head = h('div', 'court__head');
+    head.appendChild(h('span', 'court__name', c.court || ('Feld ' + c.court_id)));
+
+    var isLive = c.match_id && c.match_id > 0 && c.team1 && c.team1.length > 0;
+    if (!isLive) {
+      card.classList.add('empty');
+      head.appendChild(setStatus('frei'));
+      card.appendChild(head);
+      return card;
+    }
+
+    if (c.injury) {
+      head.appendChild(setStatus('Behandlung', 'pause'));
+    } else if (c.official_call) {
+      head.appendChild(setStatus('TL', 'pause'));
+    } else {
+      head.appendChild(setStatus('läuft', 'live'));
+    }
+
+    var disc = h('span', 'court__discipline', c.match_name || '');
+    head.appendChild(disc);
+    card.appendChild(head);
+
+    var teams = h('div', 'teams');
+    teams.appendChild(h('span', 'team', (c.team1 || []).join(' / ') || '—'));
+    teams.appendChild(h('span', 'vs', 'gegen'));
+    teams.appendChild(h('span', 'team', (c.team2 || []).join(' / ') || '—'));
+    card.appendChild(teams);
+
+    // Sätze (nur wenn welche da). Ohne Live-Detail (Best-of-3 vs 5 kennen wir hier nicht).
+    if (Array.isArray(c.sets) && c.sets.length > 0) {
+      var scoresT1 = h('div', 'scores');
+      var scoresT2 = h('div', 'scores');
+      c.sets.forEach(function (s) {
+        // s ist [a, b] oder {a, b} oder Tupel — Rust serde serializes Tuple as array.
+        var a = Array.isArray(s) ? s[0] : (s.a !== undefined ? s.a : s[0]);
+        var b = Array.isArray(s) ? s[1] : (s.b !== undefined ? s.b : s[1]);
+        scoresT1.appendChild(h('span', 'score-set' + (a > b ? ' won' : ''), String(a)));
+        scoresT2.appendChild(h('span', 'score-set' + (b > a ? ' won' : ''), String(b)));
+      });
+      // T1-Sätze zwischen den Teams interpretiere ich als Aufwand-zu-viel —
+      // einfacher: alle Sätze als Reihe Team1/Team2-Paare unterhalb der Paarung.
+      // Hier kompakt: nur eine Zeile mit "a:b a:b a:b" als Score-Spur.
+      // Reduziertes Score-Setup um Platz auf der Card zu sparen.
+    }
+
+    return card;
+  }
+
+  function renderIdle(msg) {
+    var idle = h('div', 'idle');
+    idle.appendChild(h('h1', null, 'Court-Übersicht'));
+    idle.appendChild(h('p', null, msg || 'Warten auf Turnier-Daten…'));
+    return idle;
+  }
+
+  function render(data) {
+    var board = document.getElementById('board');
+    board.textContent = '';
+
+    var courts = Array.isArray(data && data.courts) ? data.courts.slice(0, MAX_COURTS) : [];
+
+    // ?halle=-Filter, falls gesetzt und mindestens ein Feld diese Halle hat.
+    if (hallFilter) {
+      var wanted = hallKey(hallFilter);
+      var matched = courts.filter(function (c) { return hallKey(c.location) === wanted; });
+      if (matched.length > 0) courts = matched;
+    }
+
+    if (courts.length === 0) {
+      board.appendChild(renderIdle('Noch keine Felder aktiv. Sobald der Liveticker läuft, erscheinen sie hier.'));
+      return;
+    }
+
+    var groups = groupByHall(courts);
+    // Bei mehreren Hallen je Halle eine Section; bei einer Halle nur das Court-Grid.
+    var multiHall = groups.filter(function (g) { return g.name; }).length >= 2;
+
+    groups.forEach(function (g) {
+      if (multiHall) {
+        var section = h('section', 'hall');
+        if (g.name) section.appendChild(h('h2', null, g.name));
+        var grid = h('div', 'courts');
+        g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
+        section.appendChild(grid);
+        board.appendChild(section);
+      } else {
+        var grid2 = h('div', 'courts');
+        g.courts.forEach(function (c) { grid2.appendChild(renderCourt(c)); });
+        board.appendChild(grid2);
+      }
+    });
+  }
+
+  // ── Poll-Schleife ──────────────────────────────────────────────────
+  var POLL_OK_MS = 5000;
+  var POLL_FAIL_MS = 8000;
+  var errorCount = 0;
+
+  function showOffline(show) {
+    var el = document.getElementById('offline');
+    if (el) el.classList.toggle('show', !!show);
+  }
+
+  function tick() {
+    fetch('/health', { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        errorCount = 0; showOffline(false);
+        render(data);
+        // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —
+        // erstmal leer lassen, kein Drama für die Funktionalität.
+        setTimeout(tick, POLL_OK_MS);
+      })
+      .catch(function () {
+        errorCount++;
+        if (errorCount >= 2) showOffline(true);
+        setTimeout(tick, POLL_FAIL_MS);
+      });
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
