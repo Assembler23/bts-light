@@ -210,23 +210,32 @@
     }
     #offline.show { opacity: .8; }
 
-    /* ─── Kopplungs-Seite (Gerät noch keinem Feld zugewiesen) ─────────── */
+    /* ─── Default-Seite: Badhub-Logo (Gerät noch keinem Target zugewiesen) ─
+       Klar/aufgeraeumt: nur das Logo zentriert, gross. Subtiler
+       Atem-Glow im Hintergrund, damit der TV nicht statisch wirkt.
+       Den Device-Code blendet das "Identifizieren"-Overlay ein. */
     #pairing-view {
       position: absolute; inset: 0; display: none;
-      flex-direction: column; align-items: center; justify-content: center;
-      gap: 3vh; text-align: center; padding: 6vmin;
+      flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; gap: 4vmin;
+      background: radial-gradient(ellipse at center, #1a2238 0%, #0b1120 70%);
     }
     #pairing-view.show { display: flex; }
-    #pairing-view .p-title {
-      font-size: 5vmin; font-weight: 800; letter-spacing: .04em; color: #cbd5e1;
+    #pairing-view .logo {
+      width: 36vmin; height: 36vmin;
+      object-fit: contain;
+      filter: drop-shadow(0 0 6vmin rgba(251, 191, 36, .15));
+      animation: badhub-breathe 4s ease-in-out infinite;
     }
-    #pairing-view .p-code {
-      font-size: 22vmin; font-weight: 900; line-height: 1; letter-spacing: .12em;
-      color: #fbbf24; font-variant-numeric: tabular-nums;
-      text-shadow: 0 0 6vmin rgba(251, 191, 36, .35);
+    @keyframes badhub-breathe {
+      0%, 100% { transform: scale(1);    filter: drop-shadow(0 0 4vmin rgba(251, 191, 36, .12)); }
+      50%      { transform: scale(1.03); filter: drop-shadow(0 0 7vmin rgba(251, 191, 36, .22)); }
     }
-    #pairing-view .p-hint {
-      font-size: 3vmin; color: #64748b; max-width: 76vw; line-height: 1.4;
+    /* Wordmark direkt unter dem Logo. */
+    #pairing-view .wordmark {
+      font-size: 5vmin; letter-spacing: .15em;
+      color: #cbd5e1; font-weight: 700;
     }
 
     /* ─── Identifizieren-Overlay (Fernbefehl) ────────────────────────── */
@@ -273,11 +282,8 @@
     </div>
 
     <div id="pairing-view">
-      <div class="p-title">Monitor bereit</div>
-      <div class="p-code" id="pairing-code">····</div>
-      <div class="p-hint">
-        In bts-light unter „Court-Monitore" diesem Code ein Feld zuweisen.
-      </div>
+      <img class="logo" src="/assets/badhub-logo.png" alt="badhub.de" />
+      <div class="wordmark">badhub.de</div>
     </div>
 
     <div id="identify-overlay">
@@ -356,7 +362,6 @@
     timerLabel: document.getElementById("timer-label"),
     timerFlaps: document.getElementById("timer-flaps"),
     pairingView: document.getElementById("pairing-view"),
-    pairingCode: document.getElementById("pairing-code"),
     identifyOverlay: document.getElementById("identify-overlay"),
     identifyCode: document.getElementById("identify-code"),
     identifyCourt: document.getElementById("identify-court"),
@@ -714,19 +719,19 @@
     if (identifyTimer) clearTimeout(identifyTimer);
     identifyTimer = setTimeout(function () {
       els.identifyOverlay.classList.remove("show");
-    }, 6000);
+    }, 10000);
   }
 
   // ─── Poll-Schleife ───────────────────────────────────────────────────
   var lastState = null;
 
-  // Kopplungs-Seite: Gerät ist noch keinem Feld zugewiesen.
-  function showPairing(state) {
+  // Default-Anzeige fuer unzugewiesene Pis: Badhub-Logo Vollbild.
+  // Den Device-Code blendet das Identifizieren-Overlay on-demand ein.
+  function showPairing(_state) {
     els.pairingView.classList.add("show");
     els.matchView.classList.remove("show");
     els.adView.classList.remove("show");
     hideTimer();
-    els.pairingCode.textContent = state.deviceCode || "····";
   }
 
   function applyState(state) {

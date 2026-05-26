@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.23
+
+- **Default-Anzeige für unzugewiesene Pis: Badhub-Logo Vollbild.**
+  Statt der bisherigen Kopplungs-Karte mit großem Code zeigt ein Pi,
+  der noch keinem Feld/Info-Target zugewiesen ist, jetzt das
+  Badhub-Logo zentriert mit „badhub.de"-Wordmark darunter und einer
+  sanften Atem-Animation. Sieht im Verleih-Set wie „läuft" aus, nicht
+  wie „eingerichtet aber nichts darauf". Logo (PNG, 4 kB) ist in die
+  bts-light-Binary eingebettet, neue Route `/assets/badhub-logo.png`.
+- **„Identifizieren" zeigt jetzt den Device-Code Vollbild.** Der bisherige
+  Identify-Overlay-Code (gelb, blinkend) bleibt — aber jetzt die einzige
+  Stelle, an der der Code groß sichtbar wird. Operator klickt „Identifi-
+  zieren" im Tool, der entsprechende Pi blendet seinen Code für 10 s
+  (vorher 6 s) ein. Damit ist die Pi→Code-Zuordnung sauber bedienbar
+  ohne den Code immer am TV anzuzeigen.
+
 ## v0.9.22
 
 - **Online-Status auf Info-Pages korrigiert.** Der Pi auf einer
