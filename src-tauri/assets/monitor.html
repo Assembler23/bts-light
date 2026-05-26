@@ -741,17 +741,21 @@
     // Layout am Wurzelelement markieren – Vorbereitung fuer weitere Layouts.
     els.root.dataset.layout = cfg.layout || "split";
 
-    if (MODE === "device") handleCommand(state.command);
-
     // Info-Monitor-Zuweisung: bts-light schickt redirectTo, wir wechseln
     // sofort auf die zugehoerige Info-HTML. Geraete-Code als Query
     // weiterreichen, damit die Info-Seite die Identitaet kennt.
+    //
+    // Vor handleCommand pruefen (Code-Review v0.9.19 HIGH): ein anstehender
+    // reload-/identify-Command darf nicht auf einer Seite zuenden, die im
+    // gleichen Tick wegnavigiert — sonst zerstoert der reload den Wechsel.
     if (state.redirectTo && typeof state.redirectTo === "string"
         && location.pathname !== state.redirectTo) {
       var sep = state.redirectTo.indexOf("?") >= 0 ? "&" : "?";
       location.href = state.redirectTo + sep + "device=" + encodeURIComponent(DEVICE_ID);
       return;
     }
+
+    if (MODE === "device") handleCommand(state.command);
 
     if (state.unassigned) {
       showPairing(state);

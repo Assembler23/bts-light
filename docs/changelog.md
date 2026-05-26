@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.19
+
+- **Code-Review-Fixes zur Info-Monitor-Zuweisung (v0.9.18).** Zwei
+  Edge-Cases aus dem Review nachgezogen:
+  - `read_assignments` migriert die alte v2-Datei jetzt **persistierend**
+    nach v3 und schreibt das Ergebnis sofort auf Platte – Folge-Lesungen
+    finden direkt v3 statt v2 erneut zu migrieren. Eine vorhandene aber
+    **kaputte** v3-Datei (z.B. abgebrochener Schreibvorgang) ergibt
+    bewusst eine leere Map statt auf v2 zurückzufallen; sonst hätte
+    eine ältere v2 die jüngeren Info-Monitor-Zuweisungen überschrieben.
+    Regressionstest in `monitor.rs`.
+  - `monitor.html` prüft `redirectTo` **vor** `handleCommand`. Andersrum
+    konnte ein anstehender `reload`-/`identify`-Command auf einer Seite
+    feuern, die im selben Tick auf eine Info-HTML wegnavigiert –
+    daraus resultierte ein Reload statt der Navigation.
+- **Pi Zero 2 W: Chromium-Low-RAM-Warnung dauerhaft aus.** `setup-monitor.sh`
+  setzt jetzt das `--no-memcheck`-Flag des Pi-OS-Chromium-Wrappers im
+  Kiosk-Aufruf. Damit erscheint die "Less than 1 GB of RAM"-Splash auf
+  Pi Zero 2 W nicht mehr; auf Geräten ≥ 1 GB ist das Flag ein No-Op.
+  Heute live mit zwei Pi-Zero-2-W-Monitoren parallel verifiziert.
+
 ## v0.9.18
 
 - **Info-Monitor-Zuweisung direkt aus dem Tool.** Die „Court-Monitore"-

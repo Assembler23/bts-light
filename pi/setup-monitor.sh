@@ -138,7 +138,7 @@ PREF="\$HOME/.config/chromium/Default/Preferences"
 
 command -v unclutter >/dev/null && unclutter -idle 0.5 -root &
 
-exec "$BROWSER" \\
+exec "$BROWSER" --no-memcheck \\
   --kiosk --incognito --noerrdialogs --disable-infobars \\
   --disable-session-crashed-bubble --no-first-run \\
   --check-for-update-interval=31536000 \\

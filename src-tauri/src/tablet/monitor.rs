@@ -155,27 +155,50 @@ const MONITOR_ASSIGN_FILE_V2: &str = "monitor-assignments-v2.json";
 
 /// Liest die Geräte→Target-Zuweisungen aus der JSON-Datei.
 /// Fehlt oder klemmt die Datei, ist die Zuweisung leer (kein Fehler).
-/// **Migration:** Existiert noch keine v3-Datei, wird eine vorhandene
-/// v2-Datei (nur CourtIDs) eingelesen und jeder Eintrag in
-/// `Target::Court` übersetzt – einmalig, transparent.
+///
+/// **Reihenfolge:**
+/// 1. v3-Datei lesen, wenn vorhanden — Erfolg → Map zurückgeben; **Fehler**
+///    (Datei da, JSON kaputt) → leere Map. Eine vorhandene aber defekte
+///    v3-Datei darf **nicht** auf v2 zurückfallen, sonst überschriebe
+///    eine ältere v2 die jüngeren Info-Monitor-Zuweisungen (Code-Review
+///    HIGH-Finding v0.9.19).
+/// 2. Nur wenn v3-Datei **fehlt**: v2 als Migrationsquelle nutzen. Die
+///    migrierte Map wird **sofort als v3 geschrieben**, damit die
+///    Migration persistiert und Folge-Lesezugriffe direkt v3 finden.
 pub fn read_assignments(path: &Path) -> HashMap<String, MonitorTarget> {
-    // Schritt 1: v3 versuchen.
-    if let Ok(j) = std::fs::read_to_string(path) {
-        if let Ok(map) = serde_json::from_str::<HashMap<String, MonitorTarget>>(&j) {
-            return map;
+    // Schritt 1: v3 — Datei existiert?
+    match std::fs::read_to_string(path) {
+        Ok(j) => {
+            // v3 da. JSON-Erfolg → fertig; JSON-Fehler → leere Map
+            // (keinerlei v2-Fallback bei vorhandener, aber kaputter v3).
+            return serde_json::from_str::<HashMap<String, MonitorTarget>>(&j).unwrap_or_default();
+        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            // Lese-Fehler ungleich NotFound (Berechtigungen etc.):
+            // konservativ leer, nicht implizit auf v2 wechseln.
+            return HashMap::new();
+        }
+        Err(_) => {
+            // NotFound → fällt durch zu Schritt 2.
         }
     }
-    // Schritt 2: v2 als Migrationsquelle.
+    // Schritt 2: v3 fehlt → v2 als einmalige Migrationsquelle.
     let v2_path = path.with_file_name(MONITOR_ASSIGN_FILE_V2);
-    if let Ok(j) = std::fs::read_to_string(&v2_path) {
-        if let Ok(v2_map) = serde_json::from_str::<HashMap<String, i64>>(&j) {
-            return v2_map
-                .into_iter()
-                .map(|(dev, court_id)| (dev, MonitorTarget::court(court_id)))
-                .collect();
-        }
-    }
-    HashMap::new()
+    let Ok(j) = std::fs::read_to_string(&v2_path) else {
+        return HashMap::new();
+    };
+    let Ok(v2_map) = serde_json::from_str::<HashMap<String, i64>>(&j) else {
+        return HashMap::new();
+    };
+    let migrated: HashMap<String, MonitorTarget> = v2_map
+        .into_iter()
+        .map(|(dev, court_id)| (dev, MonitorTarget::court(court_id)))
+        .collect();
+    // Persistenz: v3 sofort schreiben, damit die Migration einmalig bleibt.
+    // Best-effort; Fehler werden bewusst ignoriert (Aufrufer sieht trotzdem
+    // die migrierte Map; nächster Aufruf migriert eben nochmal).
+    let _ = write_assignments(path, &migrated);
+    migrated
 }
 
 /// Schreibt die Geräte→Target-Zuweisungen als JSON (v3-Format).
@@ -253,6 +276,27 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert_eq!(map.get("dev-1"), Some(&MonitorTarget::court(103)));
         assert_eq!(map.get("dev-2"), Some(&MonitorTarget::court(205)));
+        // v0.9.19: Migration muss persistieren – beim ersten read_assignments
+        // wurde v3 sofort geschrieben, ein zweiter Aufruf ohne v2-Datei
+        // muss die gleiche Map zurückgeben.
+        assert!(v3_path.exists(), "v3-Datei muss nach Migration existieren");
+        std::fs::remove_file(&v2_path).unwrap();
+        assert_eq!(read_assignments(&v3_path), map);
+    }
+
+    #[test]
+    fn read_assignments_corrupt_v3_returns_empty_without_v2_fallback() {
+        // v0.9.19 (Code-Review HIGH): Wenn die v3-Datei existiert aber
+        // beschädigt ist (z.B. abgebrochener Schreibvorgang), darf
+        // read_assignments NICHT auf v2 zurückfallen — sonst überschriebe
+        // eine ältere v2 die jüngeren Info-Monitor-Zuweisungen. Erwartet:
+        // leere Map.
+        let dir = tempfile::tempdir().unwrap();
+        let v3_path = dir.path().join(MONITOR_ASSIGN_FILE);
+        let v2_path = dir.path().join("monitor-assignments-v2.json");
+        std::fs::write(&v3_path, "{ not valid json").unwrap();
+        std::fs::write(&v2_path, r#"{"dev-1":999}"#).unwrap();
+        assert!(read_assignments(&v3_path).is_empty());
     }
 
     #[test]
