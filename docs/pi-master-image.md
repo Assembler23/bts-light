@@ -177,33 +177,58 @@ Erst dann wirken Pi-Imager-Custom-Options im Klon **wie bei einem
 frischen Pi-OS-Image** und der Verleih-Operator füllt nur den Imager-
 Dialog aus.
 
-### Aktueller Übergangsweg (bis das Builder-Skript fertig ist)
+### Empfohlener Master-Image-Workflow (`pi/build-master-image.sh`)
 
-Pro neuer Pi-SD-Karte:
+Stolpersteine 2 + 3 sind durch `pi/build-master-image.sh` automatisch
+gelöst. Das Skript läuft auf dem fertig eingerichteten Master-Pi
+**vor** dem Klon. Es richtet einen persistierenden SSH-Hostkey-
+Regenerator-Service ein, entfernt gerätespezifische Identität
+(`/etc/hostname` → `bts-monitor`, `authorized_keys` leer, SSH-Hostkeys
++ `machine-id` gelöscht), behält das WLAN (für echtes Plug-and-Play)
+und leert Caches/Logs.
+
+**Master-Image herstellen (einmal):**
+
+1. Einen Pi normal aufsetzen ([pi-setup.md](pi-setup.md)) → `setup-monitor.sh`
+   ausführen → Reboot → Kiosk läuft am TV.
+2. Skript ziehen + ausführen:
+   ```
+   ssh badhub@<master-ip> 'curl -fsSL https://raw.githubusercontent.com/Assembler23/bts-light/main/pi/build-master-image.sh | sudo bash'
+   ```
+   Oder lokal kopieren und `sudo bash build-master-image.sh`.
+3. `sudo shutdown -h now` → grüne LED dauerhaft aus.
+4. SD-Karte in einen Host (Mac/Linux), Image ziehen:
+   ```
+   sudo dd if=/dev/<karte> of=$HOME/bts-monitor-master.img bs=4M
+   ```
+5. Optional: mit *PiShrink* (Linux) auf die belegte Größe schrumpfen,
+   dann `.xz`-komprimieren → final ~1-2 GB.
+6. `.img.xz` hochladen (badhub.de oder GitHub Release).
+
+**Verteilen (pro neuer Pi-Karte, ~5 Min):**
+
+1. Pi Imager öffnen, „Choose OS → Use Custom" → das `bts-monitor.img.xz`.
+2. „Choose Storage" → neue SD-Karte.
+3. Schreiben (Pi-Imager-Custom-Options sind optional — beim
+   Verleih-Set passen die fest hineingebrannten Werte fürs „Turnier"-
+   WLAN ja schon).
+4. SD ins Pi, anstöpseln. Bootet direkt ins Kiosk, meldet sich mit
+   eigener Hardware-Seriennummer in bts-light.
+
+### Aktueller Übergangsweg (ohne Master-Image, pro Pi ~20 Min)
+
+Wenn noch kein Master-Image vorliegt oder ein Pi schnell als
+Einzelgerät aufgesetzt wird:
 
 1. **Pi Imager** öffnen, OS = Pi OS Lite 64-bit, Storage = die Karte.
 2. **Customize:** Hostname (`monitor-2`, `monitor-3`, …), Username
    `badhub`, Passwort `badhub`, WLAN + Land DE, SSH-Pubkey aktivieren.
 3. Karte ins Pi, booten, in der Fritzbox die IP suchen.
-4. Im Mac-Terminal: `ssh-copy-id badhub@<ip>` — Pi Imager überträgt
-   den Pubkey unzuverlässig, das hat sich in zwei unabhängigen Tests
-   bestätigt; deshalb manuell nachholen.
+4. Im Host-Terminal: `ssh-copy-id badhub@<ip>` — Pi Imager überträgt
+   den Pubkey unzuverlässig, deshalb manuell nachholen.
 5. `scp pi/setup-monitor.sh badhub@<ip>:~/` und dann per SSH:
    `echo "badhub" | sudo -S -v && BTS_MONITOR_URL=http://bts-light.local:8088/monitor bash setup-monitor.sh`.
 6. `sudo reboot` → der Pi steht als Kiosk.
 
 Realistischer Zeitaufwand pro Pi: **~20 Minuten**, davon ~10 Minuten
 Wartezeit (apt-get install).
-
-### Roadmap: `pi/build-master-image.sh`
-
-Geplant — Skript auf dem Master-Pi vor dem `dd`-Klon ausgeführt, das die
-Stolpersteine 2 + 3 automatisiert behebt (Service enablen, Identität
-entfernen, Caches leeren, Hostname auf Default). Ziel: ein Verleih-
-Operator legt eine leere SD-Karte ein, öffnet Pi Imager, wählt das
-**bts-light-Master-Image** (z. B. von badhub.de zentral gehostet),
-füllt die Custom-Options aus und schreibt — **5 Minuten** pro Karte,
-kein SSH, kein zweites Tool.
-
-Memory-Notiz im internen Wissen-System:
-`project_pi_imager_friendly_image.md`.
