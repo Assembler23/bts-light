@@ -4,6 +4,26 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.21
+
+- **Code-Review-Fixes zum Werbe-Target (v0.9.20).**
+  - `read_assignments` parsed v3 jetzt **pro Eintrag** mit
+    `serde_json::Value`-Zwischenstufe statt das ganze Map auf einmal.
+    Schutz vor Datenverlust bei Downgrade: bisher hätte ein User, der
+    eine Werbe-Zuweisung gesetzt hat und dann auf v0.9.18/v0.9.19
+    zurückrollt, **alle** Court-Zuweisungen verloren (ein einziger
+    unbekannter Eintrag → Map-Parse failed → leere Map). Jetzt: nur die
+    unbekannten Einträge fallen weg, bekannte bleiben. Regressionstest
+    in `monitor.rs`.
+  - `ad.html`: `applyState` hat ein Dirty-Tracking — der 60-s-Pool-Poll
+    triggert nicht mehr unnötig Cross-Fade auf das gleiche Bild und
+    resettet auch nicht das Rotations-Intervall. Im `single`-Modus
+    wird `showImage` nur bei tatsächlichem File-Wechsel gerufen.
+  - `ad.html`, `overview.html`, `preparation.html`: bei
+    Re-Assignment-Navigation (z. B. Pi wechselt von einem Info-Target
+    zu einem anderen) wird der `?rotate=…`-Pivot-Param mitgenommen.
+    Bisher ging die Rotations-Einstellung jedesmal verloren.
+
 ## v0.9.20
 
 - **Werbe-Target im Court-Monitor-Dropdown.** Pis lassen sich jetzt

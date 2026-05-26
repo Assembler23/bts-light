@@ -169,9 +169,20 @@ pub fn read_assignments(path: &Path) -> HashMap<String, MonitorTarget> {
     // Schritt 1: v3 — Datei existiert?
     match std::fs::read_to_string(path) {
         Ok(j) => {
-            // v3 da. JSON-Erfolg → fertig; JSON-Fehler → leere Map
-            // (keinerlei v2-Fallback bei vorhandener, aber kaputter v3).
-            return serde_json::from_str::<HashMap<String, MonitorTarget>>(&j).unwrap_or_default();
+            // v3 da. JSON pro-Eintrag entserialisieren statt das ganze
+            // Map auf einmal: bei einem **Downgrade** (z. B. zurück auf
+            // v0.9.18/v0.9.19, die `ad_*`-Tags nicht kennen) würde sonst
+            // ein einziger unbekannter Eintrag das gesamte File-Parse
+            // zerstören → alle anderen Zuweisungen wären weg.
+            // Mit `Value`-Zwischenstufe ignorieren wir nur die Einträge,
+            // die wir nicht kennen, und bewahren die bekannten.
+            // (Code-Review HIGH-Finding v0.9.21.)
+            let raw: HashMap<String, serde_json::Value> =
+                serde_json::from_str(&j).unwrap_or_default();
+            return raw
+                .into_iter()
+                .filter_map(|(k, v)| serde_json::from_value(v).ok().map(|t| (k, t)))
+                .collect();
         }
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
             // Lese-Fehler ungleich NotFound (Berechtigungen etc.):
@@ -282,6 +293,35 @@ mod tests {
         assert!(v3_path.exists(), "v3-Datei muss nach Migration existieren");
         std::fs::remove_file(&v2_path).unwrap();
         assert_eq!(read_assignments(&v3_path), map);
+    }
+
+    #[test]
+    fn read_assignments_skips_unknown_variants_but_keeps_known() {
+        // v0.9.21 (Code-Review HIGH): Eine v3-Datei mit einer unbekannten
+        // Variante (z.B. nach Downgrade von v0.9.20 zurück auf v0.9.19)
+        // darf NICHT die ganze Map verwerfen. Bekannte Einträge bleiben,
+        // unbekannte werden still ignoriert.
+        let dir = tempfile::tempdir().unwrap();
+        let v3_path = dir.path().join(MONITOR_ASSIGN_FILE);
+        // Mix: 2 bekannte + 1 unbekannte Variante.
+        std::fs::write(
+            &v3_path,
+            r#"{
+                "dev-1": {"kind":"court","court_id":42},
+                "dev-2": {"kind":"future_thing","payload":"ignored"},
+                "dev-3": {"kind":"info_overview"}
+            }"#,
+        )
+        .unwrap();
+        let map = read_assignments(&v3_path);
+        assert_eq!(
+            map.len(),
+            2,
+            "unbekannte Variante muss still ignoriert werden, bekannte bleiben"
+        );
+        assert_eq!(map.get("dev-1"), Some(&MonitorTarget::court(42)));
+        assert_eq!(map.get("dev-3"), Some(&MonitorTarget::InfoOverview));
+        assert!(!map.contains_key("dev-2"));
     }
 
     #[test]

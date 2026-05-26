@@ -97,18 +97,35 @@
   var idx = 0;
   var intervalS = 10;
   var rotateTimer = null;
+  // Dirty-Tracking, damit der 60-s-Pool-Poll bei unveraendertem State
+  // nicht jedes Mal die Anzeige neu anstoesst (sonst Cross-Fade auf
+  // sich selbst + Intervall-Reset). v0.9.21 Code-Review MEDIUM.
+  var lastPoolSignature = '';
+  var lastSingleFile = '';
 
   function applyState(state) {
-    ads = Array.isArray(state.ads) ? state.ads.slice() : [];
-    intervalS = typeof state.intervalS === 'number' && state.intervalS > 0
+    var newAds = Array.isArray(state.ads) ? state.ads.slice() : [];
+    var newInterval = typeof state.intervalS === 'number' && state.intervalS > 0
       ? state.intervalS : 10;
+    var signature = JSON.stringify(newAds) + '|' + newInterval;
+    var poolChanged = signature !== lastPoolSignature;
+    ads = newAds;
+    intervalS = newInterval;
+    lastPoolSignature = signature;
 
     if (mode === 'single') {
-      if (fileParam && ads.indexOf(fileParam) >= 0) {
+      var available = fileParam && ads.indexOf(fileParam) >= 0;
+      // Nur dann showImage rufen, wenn sich der konkret angezeigte File
+      // aendert (oder erstmals da/wegfaellt).
+      if (available && fileParam !== lastSingleFile) {
         showEmpty(false);
         showImage('/ads/' + encodeURIComponent(fileParam));
-      } else {
-        // Auswahl wurde aus dem Pool entfernt → Hinweis.
+        lastSingleFile = fileParam;
+      } else if (!available && lastSingleFile !== '') {
+        showEmpty(true);
+        lastSingleFile = '';
+      } else if (!available) {
+        // Erst-Render ohne verfuegbares File: leeren Zustand sicherstellen.
         showEmpty(true);
       }
       return;
@@ -119,8 +136,13 @@
       stopRotation();
       return;
     }
+    if (!poolChanged) {
+      // Selber Pool, selbes Intervall → laufender Rotations-Timer ist OK,
+      // nichts erneut anstossen.
+      return;
+    }
     showEmpty(false);
-    // Wenn idx aus dem Array gerutscht ist, reset.
+    // Wenn idx aus dem Array gerutscht ist (Pool geschrumpft), reset.
     if (idx >= ads.length) idx = 0;
     showImage('/ads/' + encodeURIComponent(ads[idx]));
     startRotation();
@@ -163,6 +185,18 @@
              here.searchParams.toString() === there.searchParams.toString();
     } catch (e) { return false; }
   }
+  function navigateWithRotate(href) {
+    // Den aktuellen ?rotate=…-Wert mitnehmen — sonst verlieren wir die
+    // Pivot-Konfiguration bei jeder Re-Assignment-Navigation (Code-Review
+    // MEDIUM v0.9.21).
+    var hereRotate = new URLSearchParams(location.search).get('rotate');
+    if (hereRotate && href.indexOf('rotate=') < 0) {
+      var sep = href.indexOf('?') >= 0 ? '&' : '?';
+      href += sep + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    location.href = href;
+  }
+
   function checkReassignment() {
     if (!deviceId) return;
     fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
@@ -172,11 +206,11 @@
         if (s.redirectTo) {
           if (!currentUrlMatches(s.redirectTo)) {
             var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
-            location.href = s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId);
+            navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
           }
         } else {
           // Kein Info/Ad-Target mehr → zurück zur Feld-/Pairing-Seite.
-          location.href = '/monitor?device=' + encodeURIComponent(deviceId);
+          navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
         }
       })
       .catch(function () {});

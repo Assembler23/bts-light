@@ -292,6 +292,15 @@ main {
   // Geraet inzwischen einem anderen Target zugewiesen ist. Wenn ja:
   // selbst umleiten (zurueck auf /monitor fuer ein Feld, oder weiter zu
   // /info/preparation etc.).
+  function navigateWithRotate(href) {
+    // ?rotate=…-Wert ueber den Wechsel mitnehmen (Code-Review v0.9.21 MEDIUM).
+    var hereRotate = new URLSearchParams(location.search).get('rotate');
+    if (hereRotate && href.indexOf('rotate=') < 0) {
+      var sep = href.indexOf('?') >= 0 ? '&' : '?';
+      href += sep + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    location.href = href;
+  }
   function checkReassignment() {
     if (!deviceId) return;
     fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
@@ -300,10 +309,10 @@ main {
         if (!s) return;
         if (s.redirectTo && s.redirectTo !== location.pathname) {
           var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
-          location.href = s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId);
+          navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
         } else if (!s.redirectTo) {
           // Kein Info-Target mehr → zurueck zur Feld-/Pairing-Seite.
-          location.href = '/monitor?device=' + encodeURIComponent(deviceId);
+          navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
         }
       })
       .catch(function () {});
