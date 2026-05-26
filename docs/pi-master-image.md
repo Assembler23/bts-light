@@ -101,3 +101,109 @@ sondern frisch vom Turnier-PC. Verbesserungen an der Monitor-Anzeige
 erreichen die Pis also über das normale **bts-light-Auto-Update** — ein
 neues Master-Image ist dafür **nicht** nötig. Ein neues Image braucht es
 nur, wenn sich an der Pi-Grundeinrichtung selbst etwas ändert.
+
+---
+
+## Lessons Learned aus dem ersten Live-Test (2026-05-26)
+
+Erste End-to-End-Validierung mit zwei Pi-Zero-2-W-Geräten parallel an
+einer bts-light-Instanz (macOS-Host). Ergebnis: das Konzept funktioniert,
+v0.9.18-Info-Monitor-Redirect schaltet zwei Pis live um — aber das
+naive `dd`-Klonen aus Teil B oben hat **drei** harte Stolpersteine, die
+das Builder-Skript zwingend lösen muss, bevor das Verleih-Set wirklich
+plug-and-play ist.
+
+### Was sofort lief
+
+- Pi-Imager-Setup pro Pi: WLAN, SSH-User, Hostname über die Custom-
+  Options → Pi bootet ins Netz, ist per SSH erreichbar.
+- `setup-monitor.sh` auf der frischen Karte installiert X11 + Chromium +
+  Kiosk-Autostart auf Pi-OS-Lite-Trixie sauber durch.
+- mDNS: `bts-light.local` vom Mac wird von beiden Pis im selben Subnetz
+  in <1 s aufgelöst, HTTP-Request liefert die Monitor-Seite in ~130 ms.
+- v0.9.18-Redirect-Mechanik: ein Pi wechselt innerhalb von 1-2 s vom
+  Court- zum Info-Display, sobald die Zuweisung in bts-light geändert
+  wird.
+
+### Stolperstein 1 — Chromium-„Less-than-1-GB-RAM"-Splash auf Pi Zero 2 W
+
+Pi Zero 2 W hat 512 MB RAM. Der Pi-OS-Chromium-Wrapper zeigt **vor**
+Anzeige der Seite eine modale Warnung („It is not recommended..."), die
+sich mit `--noerrdialogs --disable-infobars` **nicht** unterdrücken
+lässt. Der Pi-OS-Wrapper hat dafür eine eigene Option `--no-memcheck`,
+die genau diese Splash überspringt.
+
+**Fix in v0.9.19:** `--no-memcheck` ist jetzt dauerhaft im
+Chromium-Aufruf in `pi/setup-monitor.sh`. Auf Pis ≥ 1 GB ist die Option
+ein No-Op.
+
+### Stolperstein 2 — SSH-Hostkeys nach `dd`-Klon
+
+Pi-OS hat einen Service `regenerate_ssh_host_keys.service`, der beim
+**ersten** Boot fehlende SSH-Hostkeys generiert und sich danach selbst
+disabled (`systemctl disable`). Beim `dd`-Klon vom bereits gebooteten
+Master wird dieser disabled-Zustand mitkopiert → der Klon hat keine
+Hostkeys → SSH-Daemon startet nicht → der geklonte Pi ist nur per Ping
+erreichbar, aber nicht per SSH administrierbar.
+
+**Konsequenz:** ein naives `dd`-Klonen reicht nicht. Das Builder-Skript
+muss vor dem Image-Pull `regenerate_ssh_host_keys.service` wieder
+**enablen**, oder eine eigene Variante davon einrichten, die bei jedem
+Boot prüft, ob Hostkeys existieren und sie sonst regeneriert.
+
+### Stolperstein 3 — Hostname / WLAN / SSH-Key aus Pi-Imager-Custom-Options überlappen das Klon-Image
+
+Pi Imager schreibt vor dem ersten Boot in `bootfs` ein `firstrun.sh`,
+das die im Imager-Dialog gewählten Hostname/WLAN/User/SSH-Key auf das
+System anwendet. Wenn das Master-Image diese Werte aber schon
+**hartkodiert** drin hat, kommt es zu Überlappung: das `firstrun.sh`
+läuft, aber der Hostname springt nach Reboot teilweise wieder auf den
+ursprünglichen Master-Hostname (`/etc/hostname` wird zwar zur Laufzeit
+gesetzt, aber durch einen Hook beim nächsten Reboot überschrieben).
+
+**Konsequenz:** Das Builder-Skript muss vor dem `dd` aus dem Master-Pi
+folgendes **rausnehmen**:
+
+- `/etc/hostname` → generischer Default (z. B. `bts-monitor`).
+- `/etc/wpa_supplicant/wpa_supplicant.conf` → leer / Vorlage.
+- `/home/badhub/.ssh/authorized_keys` → leer.
+- `/etc/sudoers.d/010_pi-nopasswd` (falls Pi-Imager-spezifisch) →
+  generisch.
+- `/etc/machine-id` und `/var/lib/dbus/machine-id` → leer (systemd
+  generiert sie beim ersten Boot neu).
+- Bash-History, `journalctl --rotate`, `apt-get clean`.
+
+Erst dann wirken Pi-Imager-Custom-Options im Klon **wie bei einem
+frischen Pi-OS-Image** und der Verleih-Operator füllt nur den Imager-
+Dialog aus.
+
+### Aktueller Übergangsweg (bis das Builder-Skript fertig ist)
+
+Pro neuer Pi-SD-Karte:
+
+1. **Pi Imager** öffnen, OS = Pi OS Lite 64-bit, Storage = die Karte.
+2. **Customize:** Hostname (`monitor-2`, `monitor-3`, …), Username
+   `badhub`, Passwort `badhub`, WLAN + Land DE, SSH-Pubkey aktivieren.
+3. Karte ins Pi, booten, in der Fritzbox die IP suchen.
+4. Im Mac-Terminal: `ssh-copy-id badhub@<ip>` — Pi Imager überträgt
+   den Pubkey unzuverlässig, das hat sich in zwei unabhängigen Tests
+   bestätigt; deshalb manuell nachholen.
+5. `scp pi/setup-monitor.sh badhub@<ip>:~/` und dann per SSH:
+   `echo "badhub" | sudo -S -v && BTS_MONITOR_URL=http://bts-light.local:8088/monitor bash setup-monitor.sh`.
+6. `sudo reboot` → der Pi steht als Kiosk.
+
+Realistischer Zeitaufwand pro Pi: **~20 Minuten**, davon ~10 Minuten
+Wartezeit (apt-get install).
+
+### Roadmap: `pi/build-master-image.sh`
+
+Geplant — Skript auf dem Master-Pi vor dem `dd`-Klon ausgeführt, das die
+Stolpersteine 2 + 3 automatisiert behebt (Service enablen, Identität
+entfernen, Caches leeren, Hostname auf Default). Ziel: ein Verleih-
+Operator legt eine leere SD-Karte ein, öffnet Pi Imager, wählt das
+**bts-light-Master-Image** (z. B. von badhub.de zentral gehostet),
+füllt die Custom-Options aus und schreibt — **5 Minuten** pro Karte,
+kein SSH, kein zweites Tool.
+
+Memory-Notiz im internen Wissen-System:
+`project_pi_imager_friendly_image.md`.
