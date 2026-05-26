@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Werbung</title>
+<style>
+  /* Vollbild-Werbe-Anzeige. Dunkler Hintergrund, damit Bilder mit
+     Transparenz sauber aussehen; Cover-Fit auf den ganzen Bildschirm.
+     Optional Pivot wie overview.html (?rotate=90|180|270). */
+  html, body {
+    margin: 0; height: 100%; width: 100%;
+    background: #000; color: #f8fafc;
+    font-family: system-ui, -apple-system, sans-serif;
+    cursor: none; overflow: hidden;
+  }
+  body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+  body.rotate-180 { transform: rotate(180deg); }
+  body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+
+  .stage {
+    position: relative; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* Zwei Layer fuer das Cross-Fade beim Bild-Wechsel. */
+  .stage img {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; opacity: 0;
+    transition: opacity .6s ease;
+  }
+  .stage img.show { opacity: 1; }
+
+  /* Hinweis-Box wenn keine Bilder hinterlegt sind. */
+  .empty {
+    position: absolute; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    text-align: center; padding: 6vmin; gap: 2vh;
+    flex-direction: column;
+  }
+  .empty.show { display: flex; }
+  .empty h1 { font-size: 5vmin; color: #fbbf24; margin: 0; }
+  .empty p { font-size: 2.8vmin; color: #94a3b8; margin: 0; max-width: 70vw; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <img id="img-a" alt="" />
+    <img id="img-b" alt="" />
+  </div>
+  <div class="empty" id="empty">
+    <h1>Werbe-Anzeige – noch keine Bilder hinterlegt</h1>
+    <p>In bts-light unter „Einstellungen → Werbebilder" hochladen.
+    Wenn dort Bilder erscheinen, zeigt der Monitor sie automatisch.</p>
+  </div>
+
+<script>
+(function () {
+  // ── Query-Parameter ────────────────────────────────────────────────────
+  var params = new URLSearchParams(location.search);
+  var rotate = (params.get('rotate') || '').trim();
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+  var mode = (params.get('mode') || 'rotation').trim();   // single | rotation
+  var fileParam = (params.get('file') || '').trim();
+  var deviceId = (params.get('device') || '').trim();
+
+  var imgA = document.getElementById('img-a');
+  var imgB = document.getElementById('img-b');
+  var emptyEl = document.getElementById('empty');
+
+  // ── Bild-Wechsel mit Cross-Fade ────────────────────────────────────────
+  var current = 0;   // 0 = imgA sichtbar, 1 = imgB sichtbar
+  var imgs = [imgA, imgB];
+
+  function showImage(src) {
+    var visible = imgs[current];
+    var hidden = imgs[1 - current];
+    hidden.onload = function () {
+      hidden.classList.add('show');
+      visible.classList.remove('show');
+      current = 1 - current;
+    };
+    hidden.src = src;
+  }
+
+  function showEmpty(show) {
+    emptyEl.classList.toggle('show', !!show);
+    if (show) {
+      imgA.classList.remove('show');
+      imgB.classList.remove('show');
+    }
+  }
+
+  // ── Rotations-Logik ────────────────────────────────────────────────────
+  var ads = [];
+  var idx = 0;
+  var intervalS = 10;
+  var rotateTimer = null;
+
+  function applyState(state) {
+    ads = Array.isArray(state.ads) ? state.ads.slice() : [];
+    intervalS = typeof state.intervalS === 'number' && state.intervalS > 0
+      ? state.intervalS : 10;
+
+    if (mode === 'single') {
+      if (fileParam && ads.indexOf(fileParam) >= 0) {
+        showEmpty(false);
+        showImage('/ads/' + encodeURIComponent(fileParam));
+      } else {
+        // Auswahl wurde aus dem Pool entfernt → Hinweis.
+        showEmpty(true);
+      }
+      return;
+    }
+    // mode === 'rotation'
+    if (ads.length === 0) {
+      showEmpty(true);
+      stopRotation();
+      return;
+    }
+    showEmpty(false);
+    // Wenn idx aus dem Array gerutscht ist, reset.
+    if (idx >= ads.length) idx = 0;
+    showImage('/ads/' + encodeURIComponent(ads[idx]));
+    startRotation();
+  }
+
+  function startRotation() {
+    stopRotation();
+    if (ads.length <= 1) return;   // nichts zu rotieren
+    rotateTimer = setInterval(function () {
+      idx = (idx + 1) % ads.length;
+      showImage('/ads/' + encodeURIComponent(ads[idx]));
+    }, intervalS * 1000);
+  }
+  function stopRotation() {
+    if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; }
+  }
+
+  // ── State-Poll (Bilder-Liste vom Server) ───────────────────────────────
+  function poll() {
+    fetch('/info/ad/state', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) { if (s) applyState(s); })
+      .catch(function () {});
+  }
+  poll();
+  // Pool neu laden alle 60 s — wenn der Operator ein neues Bild hochlädt,
+  // soll der Werbe-Monitor das ohne Reboot übernehmen.
+  setInterval(poll, 60000);
+
+  // ── Reassignment-Check ─────────────────────────────────────────────────
+  // Wenn der Operator den Pi auf ein anderes Target umstellt
+  // (Werbe-Rotation → Werbe-Einzelbild → Court → …), erkennen wir das
+  // über /monitor/state und navigieren selbst.
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname &&
+             here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
+  function checkReassignment() {
+    if (!deviceId) return;
+    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s) return;
+        if (s.redirectTo) {
+          if (!currentUrlMatches(s.redirectTo)) {
+            var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
+            location.href = s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId);
+          }
+        } else {
+          // Kein Info/Ad-Target mehr → zurück zur Feld-/Pairing-Seite.
+          location.href = '/monitor?device=' + encodeURIComponent(deviceId);
+        }
+      })
+      .catch(function () {});
+  }
+  // Erste Pruefung schon nach 5 s, dann alle 30 s — schneller als
+  // overview/preparation, weil Werbe-Wechsel haeufiger gewollt sind.
+  setTimeout(checkReassignment, 5000);
+  setInterval(checkReassignment, 30000);
+})();
+</script>
+</body>
+</html>

@@ -119,6 +119,8 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/overview", get(info_overview_page))
         .route("/info/preparation", get(info_preparation_page))
         .route("/info/preparation/state", get(info_preparation_state))
+        .route("/info/ad", get(info_ad_page))
+        .route("/info/ad/state", get(info_ad_state))
         .route("/result", post(result))
         .route("/ws", get(ws_upgrade))
         .with_state(ctx);
@@ -286,7 +288,7 @@ async fn monitor_device_state(
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
     }
     let command = ctx.tablet.record_monitor_poll(&device);
-    let assignment = ctx.monitor_assignments().get(&device).copied();
+    let assignment = ctx.monitor_assignments().get(&device).cloned();
     let mut state = match assignment {
         Some(relay_proto::MonitorTarget::Court { court_id }) => {
             let label = court_label_for(&ctx, court_id);
@@ -295,13 +297,13 @@ async fn monitor_device_state(
             let ads = monitor::list_ads(&ctx.monitor_dir);
             monitor::build_monitor_state(court_id, label, court_data, &config, ads)
         }
-        // Info-Targets: der Pi soll auf die passende Info-HTML
-        // umleiten. Wir liefern einen minimalen MonitorState mit
-        // `redirect_to`; die monitor.html springt darauf.
-        Some(target) if target.redirect_path().is_some() => {
+        // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
+        // Anzeige-HTML umleiten. Wir liefern einen minimalen MonitorState
+        // mit `redirect_to`; die monitor.html springt darauf.
+        Some(ref target) if target.redirect_path().is_some() => {
             let mut s = monitor::unassigned_monitor_state(&device);
             s.unassigned = false;
-            s.redirect_to = target.redirect_path().map(String::from);
+            s.redirect_to = target.redirect_path();
             s
         }
         // Sollte unerreichbar sein (redirect_path() ist Some für alle
@@ -338,6 +340,26 @@ async fn info_preparation_page() -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store")],
         Html(assets::PREPARATION_HTML),
     )
+}
+
+/// Liefert die HTML der Werbe-Anzeige. Pollt `/info/ad/state` für die
+/// Bilder-Liste; mode/file/device kommen über den Query-String.
+async fn info_ad_page() -> impl IntoResponse {
+    ([(header::CACHE_CONTROL, "no-store")], Html(assets::AD_HTML))
+}
+
+/// JSON-Zustand für die Werbe-Anzeige: aktuelle Bilder-Liste +
+/// Rotations-Intervall. Liest die Bilder aus dem Court-Ad-Verzeichnis
+/// (gleicher Pool wie der Court-Monitor) und nutzt
+/// `MonitorConfig.ad_interval_s` als Intervall.
+async fn info_ad_state(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let ads = monitor::list_ads(&ctx.monitor_dir);
+    let config = ctx.monitor_config();
+    let payload = serde_json::json!({
+        "ads": ads,
+        "intervalS": config.ad_interval_s.max(1),
+    });
+    ([(header::CACHE_CONTROL, "no-store")], Json(payload))
 }
 
 /// JSON-Zustand für den Vorbereitungs-Monitor: alle eingeplanten,

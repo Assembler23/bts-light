@@ -323,5 +323,35 @@ mod tests {
         assert_eq!(info, r#"{"kind":"info_overview"}"#);
         let prep = serde_json::to_string(&MonitorTarget::InfoPreparation).unwrap();
         assert_eq!(prep, r#"{"kind":"info_preparation"}"#);
+        // v0.9.20: Ad-Targets.
+        let rot = serde_json::to_string(&MonitorTarget::AdRotation).unwrap();
+        assert_eq!(rot, r#"{"kind":"ad_rotation"}"#);
+        let sng = serde_json::to_string(&MonitorTarget::ad_single("foo.png")).unwrap();
+        assert_eq!(sng, r#"{"kind":"ad_single","file":"foo.png"}"#);
+    }
+
+    #[test]
+    fn monitor_target_ad_redirect_paths() {
+        // Ad-Targets liefern Pfad+Query fuer ad.html.
+        assert_eq!(
+            MonitorTarget::AdRotation.redirect_path().as_deref(),
+            Some("/info/ad?mode=rotation"),
+        );
+        assert_eq!(
+            MonitorTarget::ad_single("sommerfest.png")
+                .redirect_path()
+                .as_deref(),
+            Some("/info/ad?mode=single&file=sommerfest.png"),
+        );
+        // Sonderzeichen muessten URL-escaped werden — unsere Werbebild-
+        // Namen sind aber per is_safe_image_name auf [A-Za-z0-9.-_]
+        // beschraenkt, daher real eigentlich nie noetig. Sanity-Check
+        // trotzdem:
+        assert_eq!(
+            MonitorTarget::ad_single("hat space.png")
+                .redirect_path()
+                .as_deref(),
+            Some("/info/ad?mode=single&file=hat%20space.png"),
+        );
     }
 }

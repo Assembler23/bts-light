@@ -10,7 +10,13 @@ import {
   Tv,
   Wifi,
 } from "lucide-react";
-import { assignMonitor, monitorCommand, monitorDevices, tabletOverview } from "../api";
+import {
+  assignMonitor,
+  listCourtAds,
+  monitorCommand,
+  monitorDevices,
+  tabletOverview,
+} from "../api";
 import type {
   CourtOverview,
   MonitorDeviceInfo,
@@ -20,14 +26,17 @@ import type {
 
 // ─── String ↔ MonitorTarget-Konvertierung fürs <select> ──────────────────
 // <option value="…"> muss ein String sein. Schlüssel:
-//   ""                   → keine Zuweisung
-//   "court:<id>"         → MonitorTarget::Court { court_id }
-//   "info_overview"      → MonitorTarget::InfoOverview
-//   "info_preparation"   → MonitorTarget::InfoPreparation
+//   ""                       → keine Zuweisung
+//   "court:<id>"             → MonitorTarget::Court { court_id }
+//   "info_overview"          → MonitorTarget::InfoOverview
+//   "info_preparation"       → MonitorTarget::InfoPreparation
+//   "ad_rotation"            → MonitorTarget::AdRotation
+//   "ad_single:<dateiname>"  → MonitorTarget::AdSingle { file }
 
 function targetToValue(t: MonitorTarget | null): string {
   if (!t) return "";
   if (t.kind === "court") return `court:${t.court_id}`;
+  if (t.kind === "ad_single") return `ad_single:${t.file}`;
   return t.kind;
 }
 
@@ -35,9 +44,14 @@ function valueToTarget(v: string): MonitorTarget | null {
   if (v === "") return null;
   if (v === "info_overview") return { kind: "info_overview" };
   if (v === "info_preparation") return { kind: "info_preparation" };
+  if (v === "ad_rotation") return { kind: "ad_rotation" };
   if (v.startsWith("court:")) {
     const id = Number(v.slice("court:".length));
     if (Number.isFinite(id)) return { kind: "court", court_id: id };
+  }
+  if (v.startsWith("ad_single:")) {
+    const file = v.slice("ad_single:".length);
+    if (file.length > 0) return { kind: "ad_single", file };
   }
   return null;
 }
@@ -54,6 +68,11 @@ interface Props {
 export function CourtMonitorPanel({ onBack }: Props) {
   const [devices, setDevices] = useState<MonitorDeviceInfo[]>([]);
   const [info, setInfo] = useState<TabletInfo | null>(null);
+  // Werbebild-Liste fuer das "Werbung"-optgroup. Polling im selben Takt
+  // wie die Geraeteliste, damit das Dropdown sich live aktualisiert,
+  // wenn der Operator parallel in den Einstellungen ein Bild
+  // hinzufuegt oder entfernt.
+  const [ads, setAds] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -66,6 +85,11 @@ export function CourtMonitorPanel({ onBack }: Props) {
       tabletOverview()
         .then((i) => {
           if (active) setInfo(i);
+        })
+        .catch(() => {});
+      listCourtAds()
+        .then((a) => {
+          if (active) setAds(a);
         })
         .catch(() => {});
     };
@@ -203,6 +227,7 @@ export function CourtMonitorPanel({ onBack }: Props) {
                 key={d.id}
                 device={d}
                 courts={courts}
+                ads={ads}
                 onAssign={(target) => void assign(d.id, target)}
                 onIdentify={() => void monitorCommand(d.id, "identify")}
                 onReload={() => void monitorCommand(d.id, "reload")}
@@ -218,12 +243,14 @@ export function CourtMonitorPanel({ onBack }: Props) {
 function DeviceRow({
   device,
   courts,
+  ads,
   onAssign,
   onIdentify,
   onReload,
 }: {
   device: MonitorDeviceInfo;
   courts: CourtOverview[];
+  ads: string[];
   onAssign: (target: MonitorTarget | null) => void;
   onIdentify: () => void;
   onReload: () => void;
@@ -319,6 +346,40 @@ function DeviceRow({
         <optgroup label="Informationen">
           <option value="info_overview">Court-Übersicht</option>
           <option value="info_preparation">In Vorbereitung</option>
+        </optgroup>
+        {/* Werbe-Anzeige: rotierend oder Einzelbild. Wenn keine Werbe-
+            bilder hinterlegt sind, ist die Gruppe deaktiviert (das HTML
+            erlaubt `disabled` auf optgroup). Eine bereits zugewiesene
+            ad_single-Datei taucht zusätzlich oben mit auf, damit die
+            Auswahl sichtbar bleibt, selbst wenn die Datei zwischenzeitlich
+            aus dem Pool entfernt wurde. */}
+        <optgroup label="Werbung" disabled={ads.length === 0}>
+          {ads.length === 0 ? (
+            <option value="" disabled>
+              — keine Werbebilder hinterlegt —
+            </option>
+          ) : (
+            <>
+              <option value="ad_rotation">
+                Rotierend ({ads.length}{" "}
+                {ads.length === 1 ? "Bild" : "Bilder"})
+              </option>
+              {ads.map((file) => (
+                <option key={file} value={`ad_single:${file}`}>
+                  {file}
+                </option>
+              ))}
+              {/* Falls die gerade zugewiesene Datei nicht (mehr) im Pool
+                  steckt, dennoch als Option aufnehmen — sonst rutschte die
+                  Auswahl unsichtbar aus dem Dropdown. */}
+              {device.target?.kind === "ad_single" &&
+                !ads.includes(device.target.file) && (
+                  <option
+                    value={`ad_single:${device.target.file}`}
+                  >{`${device.target.file} (nicht mehr im Pool)`}</option>
+                )}
+            </>
+          )}
         </optgroup>
       </select>
 

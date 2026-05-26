@@ -21,6 +21,13 @@ pub const OVERVIEW_HTML: &str = include_str!("../../assets/overview.html");
 /// `/info/preparation/state` für Daten.
 pub const PREPARATION_HTML: &str = include_str!("../../assets/preparation.html");
 
+/// Werbe-Anzeige (Info-Display ohne Spielbezug): Vollbild-Werbebild
+/// oder rotierende Bildschleife aus den `/ads/{file}` ausgelieferten
+/// Werbebildern. Steuerung via Query: `?mode=single&file=…` oder
+/// `?mode=rotation`. Pollt `/monitor/state` zum Erkennen einer
+/// Re-Zuweisung (analog overview/preparation).
+pub const AD_HTML: &str = include_str!("../../assets/ad.html");
+
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.

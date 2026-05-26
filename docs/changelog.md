@@ -4,6 +4,32 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.20
+
+- **Werbe-Target im Court-Monitor-Dropdown.** Pis lassen sich jetzt
+  nicht nur Feldern oder Info-Displays zuweisen, sondern auch direkt
+  einer Werbe-Anzeige. Im „Court-Monitore"-Dropdown gibt es eine
+  dritte Sektion „Werbung" mit zwei Modi:
+  - **Rotierend:** alle hinterlegten Werbebilder im Wechsel, Intervall
+    aus den Court-Monitor-Einstellungen (`ad_interval_s`).
+  - **Einzelbild:** ein bestimmtes Werbebild Vollbild, dauerhaft.
+  Wenn keine Werbebilder hinterlegt sind, ist die ganze Sektion
+  ausgegraut. Neue Anzeige-Seite `assets/ad.html` mit Cross-Fade-
+  Animation; Bilderpool wird alle 60 s frisch geholt, sodass das
+  Hochladen neuer Bilder ohne Neustart wirkt.
+- **`MonitorTarget` erweitert** um die Varianten `AdRotation` und
+  `AdSingle { file }` (Wire-Form
+  `{"kind":"ad_rotation"}` und `{"kind":"ad_single","file":"…"}`). Damit
+  ist der Enum nicht mehr `Copy` — wo bisher `.copied()` reichte, ist es
+  jetzt `.cloned()` (zwei Stellen angepasst, sonst transparent).
+  `redirect_path()` liefert für Ad-Targets Pfad+Query
+  (z. B. `/info/ad?mode=single&file=…`).
+- **Reassignment-robust für Ad-Single.** Wechselt der Operator das
+  Einzelbild eines Pis von `a.png` auf `b.png`, vergleicht `ad.html`
+  beim 30-s-Poll den vollen Pfad+Query (nicht nur `pathname`) und
+  navigiert auf das neue Bild. Kein Reload-Loop, kein Hängenbleiben
+  auf dem alten Bild.
+
 ## v0.9.19
 
 - **Code-Review-Fixes zur Info-Monitor-Zuweisung (v0.9.18).** Zwei

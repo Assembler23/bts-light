@@ -182,14 +182,21 @@ pub struct MonitorUpload {
 }
 
 /// Was ein Court-Monitor-Gerät anzeigen soll – per Gerät zugewiesen.
-/// Entweder ein bestimmtes Feld (Court-Monitor) oder ein Hallen-weites
-/// Info-Display (Übersicht oder „in Vorbereitung").
+/// Zuweisungs-Ziel eines Court-Monitor-Geräts. Drei große Familien:
+/// 1. **Court** – klassisch ein bestimmtes Feld
+/// 2. **Info** – Hallen-weites Info-Display (Übersicht / In Vorbereitung)
+/// 3. **Ad** – dedizierte Werbe-Anzeige (rotierend oder Einzelbild)
 ///
 /// JSON-Form (`#[serde(tag = "kind")]`):
 /// - `{"kind":"court","court_id":5}`
 /// - `{"kind":"info_overview"}`
 /// - `{"kind":"info_preparation"}`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// - `{"kind":"ad_rotation"}`
+/// - `{"kind":"ad_single","file":"sommerfest.jpg"}`
+///
+/// `Copy` ist seit dem Ad-Single-Variant (String) nicht mehr ableitbar;
+/// wo bisher `.copied()` reichte, ist es jetzt `.cloned()`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MonitorTarget {
     /// Klassischer Court-Monitor für ein bestimmtes Feld.
@@ -201,12 +208,21 @@ pub enum MonitorTarget {
     InfoOverview,
     /// Spiele-in-Vorbereitung-Liste (`/info/preparation`).
     InfoPreparation,
+    /// Werbung: alle hinterlegten Werbebilder rotierend.
+    AdRotation,
+    /// Werbung: ein bestimmtes Werbebild, dauerhaft.
+    AdSingle { file: String },
 }
 
 impl MonitorTarget {
     /// Court-Konstruktor zur Bequemlichkeit.
     pub fn court(court_id: i64) -> Self {
         Self::Court { court_id }
+    }
+
+    /// Ad-Single-Konstruktor zur Bequemlichkeit.
+    pub fn ad_single(file: impl Into<String>) -> Self {
+        Self::AdSingle { file: file.into() }
     }
 
     /// CourtID, falls dieses Target ein Feld ist; sonst `None`.
@@ -217,25 +233,49 @@ impl MonitorTarget {
         }
     }
 
-    /// Pfad, zu dem ein Info-Target umleitet (für `MonitorState.redirect_to`).
-    /// Bei `Court` `None` (keine Umleitung, normale Monitor-Seite).
-    pub fn redirect_path(&self) -> Option<&'static str> {
+    /// Pfad+Query, zu dem ein Nicht-Court-Target umleitet (für
+    /// `MonitorState.redirect_to`). Bei `Court` `None` (keine Umleitung,
+    /// normale Monitor-Seite). Ad-Targets kommen mit Query, damit die
+    /// Anzeige-Seite weiß, welches Bild bzw. Rotation gemeint ist.
+    pub fn redirect_path(&self) -> Option<String> {
         match self {
             Self::Court { .. } => None,
-            Self::InfoOverview => Some("/info/overview"),
-            Self::InfoPreparation => Some("/info/preparation"),
+            Self::InfoOverview => Some("/info/overview".to_string()),
+            Self::InfoPreparation => Some("/info/preparation".to_string()),
+            Self::AdRotation => Some("/info/ad?mode=rotation".to_string()),
+            Self::AdSingle { file } => {
+                // Dateiname URL-escapen (Punkte/Bindestriche/Unterstriche
+                // bleiben unverändert, alles andere ist eh nicht erlaubt
+                // dank `is_safe_image_name`).
+                Some(format!("/info/ad?mode=single&file={}", url_encode(file)))
+            }
         }
     }
 
-    /// Kurz-Schlüssel (`court` / `info_overview` / `info_preparation`) –
-    /// gleich dem serde-Tag. Für UI-Logik und Debug.
+    /// Kurz-Schlüssel – gleich dem serde-Tag. Für UI-Logik und Debug.
     pub fn kind_str(&self) -> &'static str {
         match self {
             Self::Court { .. } => "court",
             Self::InfoOverview => "info_overview",
             Self::InfoPreparation => "info_preparation",
+            Self::AdRotation => "ad_rotation",
+            Self::AdSingle { .. } => "ad_single",
         }
     }
+}
+
+/// Minimaler URL-Encoder fürs Werbebild-Query. Akzeptiert ASCII-
+/// alphanumerisch + `.`, `-`, `_` 1:1 (das deckt alle nach
+/// `is_safe_image_name` erlaubten Zeichen ab); alles andere als `%HH`.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.bytes() {
+        match c {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => out.push(c as char),
+            _ => out.push_str(&format!("%{c:02X}")),
+        }
+    }
+    out
 }
 
 /// Vollständiger Anzeige-Zustand eines Feldes, den `monitor.html` pollt.
@@ -386,8 +426,8 @@ pub fn build_device_list(
         .into_iter()
         .map(|id| {
             let last_seen = seen.get(id).copied().unwrap_or(0);
-            let target = assignments.get(id).copied();
-            let court_id = target.and_then(|t| t.court_id());
+            let target = assignments.get(id).cloned();
+            let court_id = target.as_ref().and_then(|t| t.court_id());
             MonitorDeviceInfo {
                 id: id.clone(),
                 code: device_code(id),

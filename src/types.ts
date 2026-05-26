@@ -59,12 +59,14 @@ export interface CourtMonitorConfig {
   layout: string;
 }
 
-/** Was ein Court-Monitor-Gerät anzeigen soll – entweder ein Feld oder
- *  eine Hallen-weite Info-Anzeige (Rust: relay_proto::MonitorTarget). */
+/** Was ein Court-Monitor-Gerät anzeigen soll – Feld, Info-Anzeige oder
+ *  Werbung (Rust: relay_proto::MonitorTarget). */
 export type MonitorTarget =
   | { kind: "court"; court_id: number }
   | { kind: "info_overview" }
-  | { kind: "info_preparation" };
+  | { kind: "info_preparation" }
+  | { kind: "ad_rotation" }
+  | { kind: "ad_single"; file: string };
 
 /** Ein Court-Monitor-Gerät (Rust: relay_proto::MonitorDeviceInfo). */
 export interface MonitorDeviceInfo {
