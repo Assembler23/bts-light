@@ -219,8 +219,37 @@ async fn qr_svg(Path(court_id): Path<i64>) -> impl IntoResponse {
     }
 }
 
-/// Status-Schnappschuss für die bts-light-Oberfläche.
-async fn health(State(ctx): State<Arc<ServerCtx>>) -> Json<serde_json::Value> {
+/// Optionaler `device`-Query-Param. Wird von den Info-Pages
+/// (`overview.html`, `preparation.html`, `ad.html`) mitgegeben, damit
+/// der State-Poll als „Lebenszeichen" gezaehlt wird – sonst gilt der
+/// Pi auf einer Info-Page als offline, weil `record_monitor_poll`
+/// nur in `/monitor/state` aufgerufen wird (Code-Review v0.9.22).
+#[derive(serde::Deserialize, Default)]
+struct DeviceHeartbeat {
+    #[serde(default)]
+    device: Option<String>,
+}
+
+/// Markiert das Geraet als „gesehen", falls eine Device-ID im Query
+/// kam. Geteilte Hilfsfunktion fuer alle Info-State-Endpoints und
+/// `/health`.
+fn note_heartbeat(ctx: &ServerCtx, q: &DeviceHeartbeat) {
+    if let Some(d) = q.device.as_deref() {
+        if !d.is_empty() && d.len() <= 64 {
+            // Rueckgabewert (Fernbefehl) ignorieren — Info-Pages
+            // verarbeiten Commands ueber den separaten /monitor/state-Poll.
+            let _ = ctx.tablet.record_monitor_poll(d);
+        }
+    }
+}
+
+/// Status-Schnappschuss für die bts-light-Oberfläche. Optional
+/// `?device=<id>` als Lebenszeichen-Markierung von der Info-Page.
+async fn health(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<DeviceHeartbeat>,
+) -> Json<serde_json::Value> {
+    note_heartbeat(&ctx, &q);
     Json(serde_json::json!({
         "ok": true,
         "courts": ctx.tablet.overview(),
@@ -352,7 +381,11 @@ async fn info_ad_page() -> impl IntoResponse {
 /// Rotations-Intervall. Liest die Bilder aus dem Court-Ad-Verzeichnis
 /// (gleicher Pool wie der Court-Monitor) und nutzt
 /// `MonitorConfig.ad_interval_s` als Intervall.
-async fn info_ad_state(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+async fn info_ad_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<DeviceHeartbeat>,
+) -> impl IntoResponse {
+    note_heartbeat(&ctx, &q);
     let ads = monitor::list_ads(&ctx.monitor_dir);
     let config = ctx.monitor_config();
     let payload = serde_json::json!({
@@ -367,7 +400,11 @@ async fn info_ad_state(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
 /// Aufgerufene Spiele tragen `call.hall` + `call.called_at_ms` —
 /// derselbe Datenstand, der auch `commands::preparation_candidates`
 /// liefert, nur als reines HTTP-JSON statt Tauri-Command.
-async fn info_preparation_state(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+async fn info_preparation_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<DeviceHeartbeat>,
+) -> impl IntoResponse {
+    note_heartbeat(&ctx, &q);
     let snapshot = match ctx.tablet.snapshot_clone() {
         Some(s) => s,
         None => {

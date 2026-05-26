@@ -161,16 +161,26 @@
   }
 
   // ── State-Poll (Bilder-Liste vom Server) ───────────────────────────────
+  // Geraete-ID als Query mitgeben (sofern vorhanden), damit der Server
+  // den Poll als Online-Lebenszeichen zaehlt — sonst gilt der Pi auf
+  // einer Info-Page als offline (record_monitor_poll laeuft nur in
+  // /monitor/state). v0.9.22.
+  function adStateUrl() {
+    return deviceId
+      ? '/info/ad/state?device=' + encodeURIComponent(deviceId)
+      : '/info/ad/state';
+  }
   function poll() {
-    fetch('/info/ad/state', { cache: 'no-store' })
+    fetch(adStateUrl(), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) { if (s) applyState(s); })
       .catch(function () {});
   }
   poll();
-  // Pool neu laden alle 60 s — wenn der Operator ein neues Bild hochlädt,
-  // soll der Werbe-Monitor das ohne Reboot übernehmen.
-  setInterval(poll, 60000);
+  // Pool-Refresh alle 5 s — schnell genug, dass der Server den Pi durch
+  // diese Polls dauerhaft als online sieht (Online-Fenster 6 s). Operator
+  // sieht auch neue Werbebilder zeitnah, nicht erst nach 60 s.
+  setInterval(poll, 5000);
 
   // ── Reassignment-Check ─────────────────────────────────────────────────
   // Wenn der Operator den Pi auf ein anderes Target umstellt

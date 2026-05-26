@@ -275,8 +275,14 @@ main {
   }
   setInterval(checkReassignment, 30000);
 
+  function stateUrl() {
+    // Geraete-ID als Heartbeat-Markierung (v0.9.22).
+    return deviceId
+      ? '/info/preparation/state?device=' + encodeURIComponent(deviceId)
+      : '/info/preparation/state';
+  }
   function tick() {
-    fetch('/info/preparation/state', { cache: 'no-store' })
+    fetch(stateUrl(), { cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();

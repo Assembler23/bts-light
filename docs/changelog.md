@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.22
+
+- **Online-Status auf Info-Pages korrigiert.** Der Pi auf einer
+  Info-Page (Court-Übersicht, In Vorbereitung, Werbung) wurde in der
+  „Court-Monitore"-Liste bisher als **offline** angezeigt, obwohl er
+  problemlos läuft. Grund: `record_monitor_poll` lief nur in
+  `/monitor/state`, das von Info-Pages aber nur alle 30 s gepollt wurde
+  (Reassignment-Check) — der Server hat den Pi 24 von 30 s nicht
+  gesehen, das Online-Fenster ist aber nur 6 s. Beim Entfernen oder
+  Wechseln der Zuweisung dauerte es entsprechend lang, bis der Pi
+  wieder als online angezeigt wurde.
+- **Fix:** Die Info-State-Endpoints (`/info/ad/state`,
+  `/info/preparation/state`, `/health`) akzeptieren jetzt einen
+  optionalen `?device=<id>`-Query-Param. Wenn der gesetzt ist, zählt
+  jeder dieser Polls als Lebenszeichen — der Pi gilt durchgehend als
+  online. `ad.html`, `overview.html`, `preparation.html` schicken die
+  Geräte-ID jetzt mit.
+- **`ad.html` pollt schneller (5 s statt 60 s).** Neue Werbebilder
+  erscheinen damit auch ohne Reboot/Reassignment auf dem Pi — und der
+  schnellere Poll trägt direkt zum Online-Heartbeat bei.
+
 ## v0.9.21
 
 - **Code-Review-Fixes zum Werbe-Target (v0.9.20).**
