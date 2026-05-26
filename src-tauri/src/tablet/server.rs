@@ -94,9 +94,10 @@ impl ServerCtx {
             .unwrap_or_default()
     }
 
-    /// Lädt die Geräte→Feld-Zuweisungen (Geräte-ID → CourtID) frisch von
-    /// der Platte.
-    pub fn monitor_assignments(&self) -> HashMap<String, i64> {
+    /// Lädt die Geräte→Target-Zuweisungen frisch von der Platte. Ein
+    /// Target ist entweder eine CourtID (klassischer Court-Monitor) oder
+    /// ein Info-Display (`InfoOverview` / `InfoPreparation`).
+    pub fn monitor_assignments(&self) -> HashMap<String, relay_proto::MonitorTarget> {
         monitor::read_assignments(&self.assignments_path)
     }
 }
@@ -285,15 +286,27 @@ async fn monitor_device_state(
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
     }
     let command = ctx.tablet.record_monitor_poll(&device);
-    let mut state = match ctx.monitor_assignments().get(&device).copied() {
-        Some(court_id) => {
+    let assignment = ctx.monitor_assignments().get(&device).copied();
+    let mut state = match assignment {
+        Some(relay_proto::MonitorTarget::Court { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
             let config = ctx.monitor_config();
             let ads = monitor::list_ads(&ctx.monitor_dir);
             monitor::build_monitor_state(court_id, label, court_data, &config, ads)
         }
-        None => monitor::unassigned_monitor_state(&device),
+        // Info-Targets: der Pi soll auf die passende Info-HTML
+        // umleiten. Wir liefern einen minimalen MonitorState mit
+        // `redirect_to`; die monitor.html springt darauf.
+        Some(target) if target.redirect_path().is_some() => {
+            let mut s = monitor::unassigned_monitor_state(&device);
+            s.unassigned = false;
+            s.redirect_to = target.redirect_path().map(String::from);
+            s
+        }
+        // Sollte unerreichbar sein (redirect_path() ist Some für alle
+        // Nicht-Court-Varianten), aber strukturiert exhaustiv:
+        Some(_) | None => monitor::unassigned_monitor_state(&device),
     };
     state.command = command;
     state.device_code = device_code(&device);

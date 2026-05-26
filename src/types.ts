@@ -59,16 +59,27 @@ export interface CourtMonitorConfig {
   layout: string;
 }
 
+/** Was ein Court-Monitor-Gerät anzeigen soll – entweder ein Feld oder
+ *  eine Hallen-weite Info-Anzeige (Rust: relay_proto::MonitorTarget). */
+export type MonitorTarget =
+  | { kind: "court"; court_id: number }
+  | { kind: "info_overview" }
+  | { kind: "info_preparation" };
+
 /** Ein Court-Monitor-Gerät (Rust: relay_proto::MonitorDeviceInfo). */
 export interface MonitorDeviceInfo {
   /** Stabile Geräte-ID (UUID, vom Monitor selbst erzeugt). */
   id: string;
   /** Kurz-Code, wie ihn der TV anzeigt. */
   code: string;
-  /** CourtID des zugewiesenen Felds (Identität), oder null. */
+  /** CourtID des zugewiesenen Felds (Identität), oder null bei
+   *  unzugewiesen ODER Info-Target (dann steht der Typ in `target`). */
   courtId: number | null;
   /** Feldname (Anzeige) des zugewiesenen Felds, oder null. */
   court: string | null;
+  /** Vollständige Zuweisung (Feld oder Info-Display) – null wenn das
+   *  Gerät noch keinem Target zugewiesen ist. */
+  target: MonitorTarget | null;
   /** Hat sich das Gerät zuletzt gemeldet? */
   online: boolean;
 }

@@ -11,7 +11,36 @@ import {
   Wifi,
 } from "lucide-react";
 import { assignMonitor, monitorCommand, monitorDevices, tabletOverview } from "../api";
-import type { CourtOverview, MonitorDeviceInfo, TabletInfo } from "../types";
+import type {
+  CourtOverview,
+  MonitorDeviceInfo,
+  MonitorTarget,
+  TabletInfo,
+} from "../types";
+
+// ─── String ↔ MonitorTarget-Konvertierung fürs <select> ──────────────────
+// <option value="…"> muss ein String sein. Schlüssel:
+//   ""                   → keine Zuweisung
+//   "court:<id>"         → MonitorTarget::Court { court_id }
+//   "info_overview"      → MonitorTarget::InfoOverview
+//   "info_preparation"   → MonitorTarget::InfoPreparation
+
+function targetToValue(t: MonitorTarget | null): string {
+  if (!t) return "";
+  if (t.kind === "court") return `court:${t.court_id}`;
+  return t.kind;
+}
+
+function valueToTarget(v: string): MonitorTarget | null {
+  if (v === "") return null;
+  if (v === "info_overview") return { kind: "info_overview" };
+  if (v === "info_preparation") return { kind: "info_preparation" };
+  if (v.startsWith("court:")) {
+    const id = Number(v.slice("court:".length));
+    if (Number.isFinite(id)) return { kind: "court", court_id: id };
+  }
+  return null;
+}
 
 interface Props {
   onBack: () => void;
@@ -72,9 +101,9 @@ export function CourtMonitorPanel({ onBack }: Props) {
     }
   }
 
-  async function assign(deviceId: string, courtId: number | null) {
+  async function assign(deviceId: string, target: MonitorTarget | null) {
     try {
-      await assignMonitor(deviceId, courtId);
+      await assignMonitor(deviceId, target);
       await refresh();
     } catch {
       /* ignorieren */
@@ -174,7 +203,7 @@ export function CourtMonitorPanel({ onBack }: Props) {
                 key={d.id}
                 device={d}
                 courts={courts}
-                onAssign={(courtId) => void assign(d.id, courtId)}
+                onAssign={(target) => void assign(d.id, target)}
                 onIdentify={() => void monitorCommand(d.id, "identify")}
                 onReload={() => void monitorCommand(d.id, "reload")}
               />
@@ -195,14 +224,15 @@ function DeviceRow({
 }: {
   device: MonitorDeviceInfo;
   courts: CourtOverview[];
-  onAssign: (courtId: number | null) => void;
+  onAssign: (target: MonitorTarget | null) => void;
   onIdentify: () => void;
   onReload: () => void;
 }) {
-  // Optionen des <select>: value = CourtID (Identität), Text = Feldname.
+  // Optionen des <select>: value = String-Schlüssel ("" = keine,
+  // "court:<id>", "info_overview", "info_preparation"), Text = Anzeige.
   // Falls einem Gerät ein Feld zugewiesen ist, das nicht (mehr) in der
   // Court-Liste steht, trotzdem als Option führen.
-  const options: { id: number; label: string; location: string }[] =
+  const fieldOptions: { id: number; label: string; location: string }[] =
     courts.map((c) => ({
       id: c.court_id,
       label: c.court,
@@ -210,9 +240,9 @@ function DeviceRow({
     }));
   if (
     device.courtId !== null &&
-    !options.some((o) => o.id === device.courtId)
+    !fieldOptions.some((o) => o.id === device.courtId)
   ) {
-    options.unshift({
+    fieldOptions.unshift({
       id: device.courtId,
       label: device.court ?? `Feld ${device.courtId}`,
       location: "",
@@ -221,9 +251,16 @@ function DeviceRow({
   // Mehr-Hallen-Turnier (≥2 distinkte, nicht-leere Hallennamen): die
   // <option>s pro Halle in <optgroup> bündeln. Sonst flache Liste.
   const hallNames = [
-    ...new Set(options.map((o) => o.location).filter((l) => l !== "")),
+    ...new Set(fieldOptions.map((o) => o.location).filter((l) => l !== "")),
   ];
   const grouped = hallNames.length >= 2;
+
+  // Aktueller String-Wert für das <select> (eindeutiger Schlüssel).
+  const currentValue = targetToValue(device.target);
+
+  function onChange(value: string) {
+    onAssign(valueToTarget(value));
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -241,23 +278,20 @@ function DeviceRow({
       </span>
 
       <select
-        value={device.courtId ?? ""}
-        onChange={(e) => {
-          const v = e.currentTarget.value;
-          onAssign(v === "" ? null : Number(v));
-        }}
+        value={currentValue}
+        onChange={(e) => onChange(e.currentTarget.value)}
         className="ml-auto rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
                    focus:border-slate-500 focus:outline-none"
       >
-        <option value="">— kein Feld —</option>
+        <option value="">— keine Zuweisung —</option>
         {grouped ? (
           <>
             {hallNames.map((hall) => (
               <optgroup key={hall} label={hall}>
-                {options
+                {fieldOptions
                   .filter((o) => o.location === hall)
                   .map((o) => (
-                    <option key={o.id} value={o.id}>
+                    <option key={o.id} value={`court:${o.id}`}>
                       {o.label}
                     </option>
                   ))}
@@ -266,21 +300,26 @@ function DeviceRow({
             {/* Felder ohne auflösbare Halle (z. B. nach Turnierwechsel)
                 bleiben ohne <optgroup> erhalten, damit keine Zuweisung
                 aus der Liste verschwindet. */}
-            {options
+            {fieldOptions
               .filter((o) => o.location === "")
               .map((o) => (
-                <option key={o.id} value={o.id}>
+                <option key={o.id} value={`court:${o.id}`}>
                   {o.label}
                 </option>
               ))}
           </>
         ) : (
-          options.map((o) => (
-            <option key={o.id} value={o.id}>
+          fieldOptions.map((o) => (
+            <option key={o.id} value={`court:${o.id}`}>
               {o.label}
             </option>
           ))
         )}
+        {/* Info-Monitore: Hallen-weite Read-Only-Anzeigen ohne Feld-Bezug. */}
+        <optgroup label="Informationen">
+          <option value="info_overview">Court-Übersicht</option>
+          <option value="info_preparation">In Vorbereitung</option>
+        </optgroup>
       </select>
 
       <button

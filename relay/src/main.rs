@@ -474,12 +474,19 @@ async fn monitor_devices_list(
     }
     let map = broker.namespaces.lock().await;
     let devices: Vec<MonitorDeviceInfo> = match map.get(&ns) {
-        Some(n) => relay_proto::build_device_list(
-            &n.monitor_control.assignments,
-            &n.court_labels,
-            &n.monitor_seen,
-            now_ms(),
-        ),
+        Some(n) => {
+            // Cloud-Pfad transportiert die Zuweisungen weiterhin als
+            // `HashMap<String, i64>` (CourtID-only). Info-Monitor-Zuweisungen
+            // sind heute nur LAN-seitig – `MonitorTarget::Court`-Wrap ist
+            // damit korrekt für alles, was über den Relay läuft.
+            let assignments: std::collections::HashMap<String, relay_proto::MonitorTarget> = n
+                .monitor_control
+                .assignments
+                .iter()
+                .map(|(k, &v)| (k.clone(), relay_proto::MonitorTarget::court(v)))
+                .collect();
+            relay_proto::build_device_list(&assignments, &n.court_labels, &n.monitor_seen, now_ms())
+        }
         None => Vec::new(),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(devices)).into_response()
@@ -498,6 +505,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         command: None,
         device_code: String::new(),
         unassigned: false,
+        redirect_to: None,
     }
 }
 
@@ -549,6 +557,7 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         command: None,
         device_code: String::new(),
         unassigned: false,
+        redirect_to: None,
     }
 }
 

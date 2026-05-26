@@ -135,6 +135,11 @@ main {
     document.body.classList.add('rotate-' + rotate);
   }
 
+  // Geräte-Code aus dem URL-Parameter (bts-monitor.sh haengt ihn an):
+  // ?device=<8 chars>. Wenn gesetzt, pollen wir periodisch
+  // /monitor/state, um Reassignment zu erkennen und uns umzuleiten.
+  var deviceId = (params.get('device') || '').trim();
+
   // Hallen-Filter: ?halle=<Name> — bei Meeting-Point-TVs setzen. Wenn
   // gesetzt, zeigen wir die Halle in der Überschrift und filtern auf
   // diese Halle ein.
@@ -240,6 +245,26 @@ main {
     var el = document.getElementById('offline');
     if (el) el.classList.toggle('show', !!show);
   }
+
+  // Reassignment-Check (alle 30 s gegen /monitor/state). Wenn das Geraet
+  // inzwischen einem Feld zugewiesen ist (kein redirectTo mehr), oder
+  // einem anderen Info-Target → selbst umleiten.
+  function checkReassignment() {
+    if (!deviceId) return;
+    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s) return;
+        if (s.redirectTo && s.redirectTo !== location.pathname) {
+          var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
+          location.href = s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId);
+        } else if (!s.redirectTo) {
+          location.href = '/monitor?device=' + encodeURIComponent(deviceId);
+        }
+      })
+      .catch(function () {});
+  }
+  setInterval(checkReassignment, 30000);
 
   function tick() {
     fetch('/info/preparation/state', { cache: 'no-store' })

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
   MonitorDeviceInfo,
+  MonitorTarget,
   PreparationView,
   SyncStatus,
   TabletInfo,
@@ -92,12 +93,12 @@ export const listCourtAds = (): Promise<string[]> => invoke("list_court_ads");
 export const monitorDevices = (): Promise<MonitorDeviceInfo[]> =>
   invoke("monitor_devices");
 
-/** Weist ein Monitor-Gerät einem Feld (per CourtID) zu (null = Zuweisung
- *  aufheben). */
+/** Weist ein Monitor-Gerät einem Target zu — entweder einem Feld oder
+ *  einer Hallen-weiten Info-Anzeige. `null` = Zuweisung aufheben. */
 export const assignMonitor = (
   deviceId: string,
-  courtId: number | null,
-): Promise<void> => invoke("assign_monitor", { deviceId, courtId });
+  target: MonitorTarget | null,
+): Promise<void> => invoke("assign_monitor", { deviceId, target });
 
 /** Schickt einem Monitor-Gerät einen Fernbefehl. */
 export const monitorCommand = (

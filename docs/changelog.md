@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.18
+
+- **Info-Monitor-Zuweisung direkt aus dem Tool.** Die „Court-Monitore"-
+  Seite hat ein erweitertes Dropdown: neben den Feldern (in den
+  Mehr-Hallen-`optgroup`s) steht jetzt eine Sektion „Informationen" mit
+  „Courtübersicht" und „In Vorbereitung". Wechseln zwischen Feld- und
+  Info-Zuweisung passiert ohne SD-Karten-Editieren — der Pi merkt den
+  Wechsel beim nächsten `/monitor/state`-Poll und navigiert sich selbst
+  auf die richtige Seite. Auch der Rückweg (Info → Feld) klappt
+  automatisch: die Info-Pages prüfen alle 30 s gegen `/monitor/state`,
+  ob ihre Zuweisung sich geändert hat.
+- **Datenmodell `MonitorTarget`** (Court | InfoOverview | InfoPreparation)
+  ersetzt die reine CourtID-Zuweisung. Die Datei
+  `monitor-assignments-v2.json` wird beim ersten Start nach
+  `monitor-assignments-v3.json` migriert (jede CourtID → `Court`-Target);
+  manuelles Eingreifen ist nicht nötig.
+
 ## v0.9.17
 
 - **Info-Monitore: Court-Übersicht und In Vorbereitung.** Neben dem

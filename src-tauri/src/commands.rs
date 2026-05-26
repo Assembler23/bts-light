@@ -789,23 +789,29 @@ pub fn monitor_devices(app: AppHandle, state: State<'_, AppState>) -> Vec<Monito
     }
 }
 
-/// Weist ein Monitor-Gerät einem Feld (per CourtID) zu. `court_id` =
-/// `None` hebt die Zuweisung auf (das Gerät zeigt dann wieder die
-/// Kopplungs-Seite).
+/// Weist ein Monitor-Gerät einem Target zu (Feld oder Info-Anzeige).
+/// `target = None` hebt die Zuweisung auf (das Gerät zeigt dann wieder
+/// die Kopplungs-Seite).
+///
+/// Frontend ruft so auf:
+/// - Feld: `{ kind: "court", court_id: 5 }`
+/// - Info-Übersicht: `{ kind: "info_overview" }`
+/// - Info-Vorbereitung: `{ kind: "info_preparation" }`
+/// - Aufheben: `null`
 #[tauri::command]
 pub fn assign_monitor(
     app: AppHandle,
     device_id: String,
-    court_id: Option<i64>,
+    target: Option<relay_proto::MonitorTarget>,
 ) -> Result<(), String> {
     if device_id.is_empty() || device_id.len() > 64 {
         return Err("Ungültige Geräte-ID.".to_string());
     }
     let path = monitor_assignments_path(&app);
     let mut map = crate::tablet::monitor::read_assignments(&path);
-    match court_id {
-        Some(cid) => {
-            map.insert(device_id, cid);
+    match target {
+        Some(t) => {
+            map.insert(device_id, t);
         }
         None => {
             map.remove(&device_id);

@@ -181,6 +181,63 @@ pub struct MonitorUpload {
     pub ads: Vec<AdUpload>,
 }
 
+/// Was ein Court-Monitor-Gerät anzeigen soll – per Gerät zugewiesen.
+/// Entweder ein bestimmtes Feld (Court-Monitor) oder ein Hallen-weites
+/// Info-Display (Übersicht oder „in Vorbereitung").
+///
+/// JSON-Form (`#[serde(tag = "kind")]`):
+/// - `{"kind":"court","court_id":5}`
+/// - `{"kind":"info_overview"}`
+/// - `{"kind":"info_preparation"}`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MonitorTarget {
+    /// Klassischer Court-Monitor für ein bestimmtes Feld.
+    Court {
+        #[serde(rename = "court_id")]
+        court_id: i64,
+    },
+    /// Hallen-Übersicht aller Felder (`/info/overview`).
+    InfoOverview,
+    /// Spiele-in-Vorbereitung-Liste (`/info/preparation`).
+    InfoPreparation,
+}
+
+impl MonitorTarget {
+    /// Court-Konstruktor zur Bequemlichkeit.
+    pub fn court(court_id: i64) -> Self {
+        Self::Court { court_id }
+    }
+
+    /// CourtID, falls dieses Target ein Feld ist; sonst `None`.
+    pub fn court_id(&self) -> Option<i64> {
+        match self {
+            Self::Court { court_id } => Some(*court_id),
+            _ => None,
+        }
+    }
+
+    /// Pfad, zu dem ein Info-Target umleitet (für `MonitorState.redirect_to`).
+    /// Bei `Court` `None` (keine Umleitung, normale Monitor-Seite).
+    pub fn redirect_path(&self) -> Option<&'static str> {
+        match self {
+            Self::Court { .. } => None,
+            Self::InfoOverview => Some("/info/overview"),
+            Self::InfoPreparation => Some("/info/preparation"),
+        }
+    }
+
+    /// Kurz-Schlüssel (`court` / `info_overview` / `info_preparation`) –
+    /// gleich dem serde-Tag. Für UI-Logik und Debug.
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            Self::Court { .. } => "court",
+            Self::InfoOverview => "info_overview",
+            Self::InfoPreparation => "info_preparation",
+        }
+    }
+}
+
 /// Vollständiger Anzeige-Zustand eines Feldes, den `monitor.html` pollt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonitorState {
@@ -218,6 +275,19 @@ pub struct MonitorState {
     /// zeigt die Kopplungs-Seite statt einer Match-/Werbe-Ansicht.
     #[serde(default)]
     pub unassigned: bool,
+    /// Pfad, zu dem die Monitor-Seite navigieren soll. Wird gesetzt, wenn
+    /// das Gerät neuerdings als Info-Monitor (`/info/overview` oder
+    /// `/info/preparation`) zugewiesen wurde, der TV aber noch die
+    /// Feld-Seite (`monitor.html`) zeigt. `monitor.html` macht dann ein
+    /// `location.href = redirect_to` und lädt die richtige Info-HTML.
+    /// Bei Feld-Zuweisung leer/none. `#[serde(default)]` hält ältere
+    /// Frames lesbar.
+    #[serde(
+        rename = "redirectTo",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub redirect_to: Option<String>,
 }
 
 /// Art eines Fernbefehls an einen Court-Monitor.
@@ -247,11 +317,20 @@ pub struct MonitorDeviceInfo {
     /// Kurz-Code (erste Zeichen der ID), wie ihn der TV anzeigt.
     pub code: String,
     /// CourtID des zugewiesenen Felds (Identität), falls eines gesetzt ist.
+    /// `None` bei nicht zugewiesenen Geräten **oder** wenn das Gerät einem
+    /// Info-Display zugewiesen ist (dann steht der Typ in `target`).
     #[serde(rename = "courtId", default)]
     pub court_id: Option<i64>,
     /// Feldname (Anzeige) des zugewiesenen Felds, falls eines gesetzt ist.
     #[serde(default)]
     pub court: Option<String>,
+    /// Vollständige Geräte-Zuweisung (Feld ODER Info-Display). `None` =
+    /// nicht zugewiesen. `#[serde(default)]` hält ältere Frames lesbar
+    /// (Cloud-Relay-Versionen ohne Info-Monitor-Konzept liefern hier
+    /// nichts → das Frontend behandelt sie als reine Feld-Zuweisungen
+    /// auf Basis von `court_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<MonitorTarget>,
     /// Hat sich das Gerät zuletzt gemeldet (kürzlich gepollt)?
     pub online: bool,
 }
@@ -284,14 +363,15 @@ pub fn device_code(device_id: &str) -> String {
 }
 
 /// Baut die Monitor-Geräteliste für die „Court-Monitore"-Seite aus den
-/// Feld-Zuweisungen (Geräte-ID → CourtID) und dem Live-Zustand (`seen`:
-/// Geräte-ID → Zeitpunkt des letzten Polls in ms). `court_names` löst die
-/// CourtID auf einen Anzeigenamen auf – fehlt eine ID darin, bleibt der
-/// Anzeigename leer (das Gerät bleibt trotzdem in der Liste). Sortiert nach
-/// Feldname, dann Code – noch nicht zugewiesene Geräte (`court = None`)
-/// stehen damit zuerst, weil `None` vor `Some(_)` sortiert.
+/// Geräte-Zuweisungen (Geräte-ID → [`MonitorTarget`]) und dem Live-Zustand
+/// (`seen`: Geräte-ID → Zeitpunkt des letzten Polls in ms). `court_names`
+/// löst die CourtID einer Feld-Zuweisung auf einen Anzeigenamen auf –
+/// fehlt eine ID darin, bleibt der Anzeigename leer (das Gerät bleibt
+/// trotzdem in der Liste). Sortiert nach Feldname, dann Code – noch nicht
+/// zugewiesene Geräte (`court = None`) stehen damit zuerst, weil `None`
+/// vor `Some(_)` sortiert.
 pub fn build_device_list(
-    assignments: &HashMap<String, i64>,
+    assignments: &HashMap<String, MonitorTarget>,
     court_names: &HashMap<i64, String>,
     seen: &HashMap<String, u64>,
     now_ms: u64,
@@ -306,12 +386,14 @@ pub fn build_device_list(
         .into_iter()
         .map(|id| {
             let last_seen = seen.get(id).copied().unwrap_or(0);
-            let court_id = assignments.get(id).copied();
+            let target = assignments.get(id).copied();
+            let court_id = target.and_then(|t| t.court_id());
             MonitorDeviceInfo {
                 id: id.clone(),
                 code: device_code(id),
                 court_id,
                 court: court_id.and_then(|cid| court_names.get(&cid).cloned()),
+                target,
                 online: last_seen > 0
                     && now_ms.saturating_sub(last_seen) <= MONITOR_ONLINE_WINDOW_MS,
             }
@@ -760,6 +842,7 @@ mod tests {
             }),
             device_code: "4F2A".into(),
             unassigned: false,
+            redirect_to: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));
@@ -790,10 +873,11 @@ mod tests {
 
     #[test]
     fn build_device_list_merges_assignments_and_seen() {
-        // Zuweisungen sind nun CourtID-basiert; court_names löst sie auf.
+        // Zuweisungen sind jetzt MonitorTarget; court_names löst die
+        // CourtID-Variante auf.
         let mut assign = HashMap::new();
-        assign.insert("dev-online".to_string(), 101i64);
-        assign.insert("dev-offline".to_string(), 102i64);
+        assign.insert("dev-online".to_string(), MonitorTarget::court(101));
+        assign.insert("dev-offline".to_string(), MonitorTarget::court(102));
         let mut court_names = HashMap::new();
         court_names.insert(101i64, "Feld 1".to_string());
         court_names.insert(102i64, "Feld 2".to_string());
@@ -823,6 +907,7 @@ mod tests {
             code: device_code(id),
             court_id: court.map(|_| 1),
             court: court.map(|c| c.to_string()),
+            target: court.map(|_| MonitorTarget::court(1)),
             online,
         };
         // LAN: Feld-1-Gerät online, gemeinsames Gerät offline.
@@ -867,6 +952,7 @@ mod tests {
             code: device_code(id),
             court_id: court.map(|_| 1),
             court: court.map(|c| c.to_string()),
+            target: court.map(|_| MonitorTarget::court(1)),
             online: false,
         };
         let lan = vec![dev("dev-assigned", Some("Feld 1"))];
@@ -887,6 +973,7 @@ mod tests {
             code: device_code("dev-x"),
             court_id: None,
             court: None,
+            target: None,
             online: true,
         }];
         assert_eq!(merge_device_lists(&lan, &[]), lan);
