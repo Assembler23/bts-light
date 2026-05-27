@@ -28,11 +28,6 @@ pub const PREPARATION_HTML: &str = include_str!("../../assets/preparation.html")
 /// Re-Zuweisung (analog overview/preparation).
 pub const AD_HTML: &str = include_str!("../../assets/ad.html");
 
-/// Badhub-Logo (512x512 PNG) – zeigt der Court-Monitor an, solange das
-/// Gerät noch keinem Feld/Info-Target zugewiesen ist. Im "Identifizieren"-
-/// Modus blendet der Monitor stattdessen den Device-Code groß ein.
-pub const BADHUB_LOGO_PNG: &[u8] = include_bytes!("../../assets/badhub-logo.png");
-
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.

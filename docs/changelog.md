@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.24
+
+- **Default-Anzeige (Logo) übernimmt das App-Header-Design.** Statt des
+  Badhub-Federball-PNGs zeigt der Pi jetzt das **gleiche Icon wie die
+  bts-light-App selbst** (Dashboard-Header): Federball-Emoji 🏸 in einem
+  dunklen Rounded-Square mit Schatten. Darunter Wordmark „badhub.de",
+  darunter klein „BTS light". Dieselbe Atem-Animation wie vorher.
+- **`fonts-noto-color-emoji` in `setup-monitor.sh`.** Pi OS Lite hat
+  standardmäßig nur Mono-Schriften — ohne diese Font würde das Emoji
+  als leeres Kästchen rendern. Wird beim ersten Setup-Lauf
+  automatisch mit installiert. Auf Pis, die schon laufen, einmalig
+  manuell nachziehen: `sudo apt-get install -y fonts-noto-color-emoji`
+  und Chromium reloaden.
+- **Unbenutztes Logo-PNG + Route entfernt** (`/assets/badhub-logo.png`,
+  `BADHUB_LOGO_PNG`, `src-tauri/assets/badhub-logo.png`) — wurde nur in
+  v0.9.23 kurz gebraucht und ist jetzt durch das Emoji-Design abgelöst.
+
 ## v0.9.23
 
 - **Default-Anzeige für unzugewiesene Pis: Badhub-Logo Vollbild.**

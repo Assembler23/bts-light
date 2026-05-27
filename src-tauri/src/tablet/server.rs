@@ -121,7 +121,6 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/preparation/state", get(info_preparation_state))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
-        .route("/assets/badhub-logo.png", get(badhub_logo))
         .route("/result", post(result))
         .route("/ws", get(ws_upgrade))
         .with_state(ctx);
@@ -376,20 +375,6 @@ async fn info_preparation_page() -> impl IntoResponse {
 /// Bilder-Liste; mode/file/device kommen über den Query-String.
 async fn info_ad_page() -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "no-store")], Html(assets::AD_HTML))
-}
-
-/// Liefert das eingebettete Badhub-Logo (PNG, 512×512). Wird vom
-/// Court-Monitor als Default-Anzeige fuer unzugewiesene Pis genutzt.
-async fn badhub_logo() -> impl IntoResponse {
-    (
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            // Lange Cache-Dauer ok – das Logo aendert sich praktisch nie
-            // und ist in die Binary eingebettet.
-            (header::CACHE_CONTROL, "public, max-age=86400"),
-        ],
-        assets::BADHUB_LOGO_PNG,
-    )
 }
 
 /// JSON-Zustand für die Werbe-Anzeige: aktuelle Bilder-Liste +

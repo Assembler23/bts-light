@@ -62,7 +62,7 @@ echo "→ gespeichert in $URL_FILE: $URL"
 echo
 echo "→ Pakete installieren (auf Lite dauert das ein paar Minuten)…"
 sudo apt-get update -qq
-COMMON_PKGS="unclutter"
+COMMON_PKGS="unclutter fonts-noto-color-emoji"
 LITE_PKGS="xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils matchbox-window-manager chromium avahi-utils xdotool"
 
 if [ "$VARIANT" = "lite" ]; then
