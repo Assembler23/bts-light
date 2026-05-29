@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.38
+
+- **Aufschlag-Indikator spieler-genau im Doppel/Mixed.** Der gelbe Punkt
+  steht jetzt beim **konkret aufschlagenden Spieler** (nicht mehr nur beim
+  Team) und wechselt regelkonform: Bei geradem Punktestand des
+  aufschlagenden Teams serviert der Spieler im rechten Aufschlagfeld, bei
+  ungeradem der im linken; bei Side-out wechselt das Team. Das Tablet
+  berechnet den Aufschläger (es kennt Positionen + Spieler-IDs) und legt
+  `serving: {team, index}` in den `court_state`; `CourtOverview` trägt
+  `serving_team` + `serving_player`, `combo.html` setzt den Punkt bei der
+  richtigen Namens-Zeile. Einzel: Punkt beim einzigen Spieler. Alte
+  Tablet-Stände ohne die Info → Team-Level-Fallback.
+
 ## v0.9.37
 
 - **Fix: kein „Geistersatz" mehr nach Spielende.** Nach dem Match-Ende

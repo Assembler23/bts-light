@@ -205,17 +205,19 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     var lastIdx = sets.length - 1;
     var running = !isPause; // bei Pause kein "laufender" Satz markieren
 
-    function teamRow(names, nats, selfIdx, otherIdx, isServing) {
+    function teamRow(names, nats, selfIdx, otherIdx, isServing, servePlayerIdx) {
       var row = h('div', 'row');
-      // Aufschlag-Punkt vor dem Team (gelb), wenn dieses Team aufschlägt.
-      // hidden statt weglassen → beide Zeilen bleiben gleich eingerückt.
-      row.appendChild(h('span', 'serve-dot' + (isServing ? '' : ' hidden')));
       // Namen: im Doppel jeder Spieler in einer eigenen Zeile untereinander,
-      // jeweils mit Flagge (Nationalität parallel zum Namen).
+      // jeweils mit Flagge + Aufschlag-Punkt beim konkret aufschlagenden
+      // Spieler (BWF-Doppelregel). servePlayerIdx = Index im Team, der
+      // aufschlägt; null → Team-Level-Fallback (Punkt beim ersten Namen).
       var nameBox = h('div', 'row__name');
       var list = (names && names.length) ? names : ['—'];
       list.forEach(function (n, i) {
         var line = h('div', 'pname');
+        var dotHere = isServing &&
+          (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
+        line.appendChild(h('span', 'serve-dot' + (dotHere ? '' : ' hidden')));
         line.appendChild(flagEl(nats && nats[i]));
         line.appendChild(h('span', 'pname-text', n));
         nameBox.appendChild(line);
@@ -234,8 +236,9 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
       return row;
     }
 
-    band.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1, c.serving_team === 1));
-    band.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0, c.serving_team === 2));
+    var sp = (typeof c.serving_player === 'number') ? c.serving_player : null;
+    band.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1, c.serving_team === 1, sp));
+    band.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0, c.serving_team === 2, sp));
     return band;
   }
 

@@ -98,9 +98,12 @@ pub struct CourtOverview {
     /// Die Turnierleitung wurde an diesen Court gerufen.
     pub official_call: bool,
     /// Welches Team schlägt gerade auf? 1 = team1, 2 = team2, None =
-    /// unbekannt. Abgeleitet aus dem Tablet-`court_state`
-    /// (servingSide + teamOnSide).
+    /// unbekannt. Abgeleitet aus dem Tablet-`court_state`.
     pub serving_team: Option<u8>,
+    /// Index (0/1) des konkret aufschlagenden Spielers innerhalb seines
+    /// Teams (BWF-Doppelregel; vom Tablet berechnet). None bei Einzel oder
+    /// altem Tablet-Stand ohne diese Info.
+    pub serving_player: Option<u8>,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -552,6 +555,30 @@ impl TabletState {
                         .map(|p| p.nationality.clone().unwrap_or_default())
                         .collect::<Vec<String>>()
                 };
+                // Aufschlag-Info aus dem Tablet-court_state: (team 1/2,
+                // optional Spieler-Index 0/1). Bevorzugt das Tablet-berechnete
+                // `serving:{team,index}`; Fallback auf servingSide/teamOnSide.
+                let serving_info: Option<(u8, Option<u8>)> = self
+                    .court_state
+                    .read()
+                    .unwrap()
+                    .get(&court.id)
+                    .and_then(|cs| {
+                        let v: serde_json::Value = serde_json::from_str(cs).ok()?;
+                        if let Some(s) = v.get("serving").filter(|s| !s.is_null()) {
+                            let team = if s.get("team")?.as_str()? == "a" {
+                                1u8
+                            } else {
+                                2u8
+                            };
+                            let idx = s.get("index").and_then(|i| i.as_u64()).map(|i| i as u8);
+                            return Some((team, idx));
+                        }
+                        // Fallback (altes Tablet ohne `serving`): nur Team.
+                        let serving = v.get("servingSide")?.as_str()?;
+                        let team_a = v.get("teamOnSide")?.get("a")?.as_str()?;
+                        Some((if serving == team_a { 1u8 } else { 2u8 }, None))
+                    });
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
@@ -579,19 +606,13 @@ impl TabletState {
                     battery: session.and_then(|s| s.battery),
                     injury: session.map(|s| s.injury).unwrap_or(false),
                     official_call: session.map(|s| s.official).unwrap_or(false),
-                    // Aufschlagendes Team aus dem rohen Tablet-court_state
-                    // ableiten: servingSide vs. teamOnSide.a → 1 oder 2.
-                    serving_team: self
-                        .court_state
-                        .read()
-                        .unwrap()
-                        .get(&court.id)
-                        .and_then(|cs| {
-                            let v: serde_json::Value = serde_json::from_str(cs).ok()?;
-                            let serving = v.get("servingSide")?.as_str()?;
-                            let team_a = v.get("teamOnSide")?.get("a")?.as_str()?;
-                            Some(if serving == team_a { 1u8 } else { 2u8 })
-                        }),
+                    // Aufschlagendes Team + konkreter Spieler aus dem
+                    // Tablet-court_state. Bevorzugt das vom Tablet berechnete
+                    // `serving: {team, index}` (BWF-Doppelregel, Spieler-genau);
+                    // fällt sonst auf die servingSide/teamOnSide-Ableitung
+                    // zurück (nur Team, für alte Tablet-Stände).
+                    serving_team: serving_info.map(|(t, _)| t),
+                    serving_player: serving_info.and_then(|(_, p)| p),
                 }
             })
             .collect()

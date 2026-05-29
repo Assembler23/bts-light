@@ -1058,6 +1058,29 @@ function renderClock() {
 // der User-Tap auf den Setup-Modal eh interaktiv läuft.
 const PERSIST_KEY = `badhub.tablet.state.${COURT_ID}`;
 
+// Welcher Spieler schlägt gerade auf? BWF-Doppelregel: Beim geraden
+// Punktestand des aufschlagenden Teams schlägt der Spieler im rechten
+// Aufschlagfeld auf, bei ungeradem der im linken. `positions` hält pro
+// Seite { rightSC, leftSC } (Spieler-IDs), die addPointOnSide regelkonform
+// tauscht. Ergebnis { team:'a'|'b', index:0|1 } für die Monitor-Anzeige;
+// null, solange kein laufendes Spiel.
+function computeServing() {
+  if (STATE.setup !== 'playing' || STATE.finished) return null;
+  if (!STATE.positions || !STATE.servingSide || !STATE.teamOnSide || !STATE.match) return null;
+  const side = STATE.servingSide;
+  const serverScore = side === 'left' ? STATE.currentSet.left : STATE.currentSet.right;
+  const field = (serverScore % 2 === 0) ? 'rightSC' : 'leftSC';
+  const pos = STATE.positions[side];
+  if (!pos) return null;
+  const playerId = pos[field];
+  if (playerId == null) return null;
+  const teamKey = (STATE.teamOnSide.a === side) ? 'a' : 'b';
+  const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
+  let idx = arr.findIndex(p => p.id === playerId);
+  if (idx < 0) idx = 0;
+  return { team: teamKey, index: idx };
+}
+
 function persistState() {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
   // Übermittlung, das muss einen Reload überleben.
@@ -1069,6 +1092,10 @@ function persistState() {
     teamOnSide: STATE.teamOnSide,
     positions: STATE.positions,
     servingSide: STATE.servingSide,
+    // Konkret aufschlagender Spieler (BWF-Doppelregel) für die Monitor-
+    // Anzeige: { team:'a'|'b', index:0|1 }. Das Tablet kennt die Spieler-
+    // IDs + Positionen, der Server nicht — daher hier berechnet.
+    serving: computeServing(),
     setup: STATE.setup,
     finished: STATE.finished,
     midGameSwitchDone: STATE.midGameSwitchDone,
