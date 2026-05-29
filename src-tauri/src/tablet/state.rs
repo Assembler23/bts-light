@@ -1216,6 +1216,57 @@ mod tests {
         assert!(st.walkover_candidates(0).is_empty());
     }
 
+    /// Regression: Eine Aufgabe gilt NUR für die Disziplin, in der aufgegeben
+    /// wurde (die EntryID ist pro Draw/Disziplin eindeutig). Annas Einzel und
+    /// das andere Doppel ihrer Partnerin dürfen NICHT als Walkover-Kandidaten
+    /// auftauchen, wenn das gemeinsame Herrendoppel aufgibt.
+    #[test]
+    fn walkover_candidates_stay_within_the_retiring_entrys_discipline() {
+        // Übriges HD-Spiel des Paares "Anna / Cara" (EntryID 100) → Kandidat.
+        let mut hd_next = match_on(1, None, MatchStatus::Scheduled);
+        hd_next.draw_name = "HD".into();
+        hd_next.discipline = Discipline::MensDoubles;
+        hd_next.team1 = vec![player("Anna"), player("Cara")];
+        hd_next.entry1_id = 100;
+        hd_next.team2 = vec![player("Eva"), player("Fia")];
+        hd_next.entry2_id = 110;
+
+        // Annas Einzel (EntryID 200) → KEIN Kandidat (andere Disziplin/Entry).
+        let mut he_anna = match_on(2, None, MatchStatus::Scheduled);
+        he_anna.draw_name = "HE".into();
+        he_anna.team1 = vec![player("Anna")];
+        he_anna.entry1_id = 200;
+        he_anna.team2 = vec![player("Gustav")];
+        he_anna.entry2_id = 300;
+
+        // Caras anderes Doppel (EntryID 400) → KEIN Kandidat.
+        let mut cara_other = match_on(3, None, MatchStatus::Scheduled);
+        cara_other.draw_name = "DD".into();
+        cara_other.discipline = Discipline::WomensDoubles;
+        cara_other.team1 = vec![player("Cara"), player("Hanna")];
+        cara_other.entry1_id = 400;
+        cara_other.team2 = vec![player("Ida"), player("Jana")];
+        cara_other.entry2_id = 410;
+
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(vec![hd_next, he_anna, cara_other], vec![]));
+
+        // Aufgabe des HD-Paares (EntryID 100): nur dessen übriges HD-Spiel.
+        let cands = st.walkover_candidates(100);
+        let ids: Vec<i64> = cands.iter().map(|c| c.match_id).collect();
+        assert_eq!(ids, vec![1]); // NICHT 2 (HE) und NICHT 3 (DD)
+        assert!(cands[0].retired_is_team1);
+        assert_eq!(cands[0].opponent, "Eva / Fia");
+
+        // Gegenprobe: Annas Einzel-Entry ist davon unabhängig (nur ihr HE).
+        let he_ids: Vec<i64> = st
+            .walkover_candidates(200)
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
+        assert_eq!(he_ids, vec![2]);
+    }
+
     #[test]
     fn preparation_call_is_unique_per_match_and_removable() {
         let st = TabletState::default();
