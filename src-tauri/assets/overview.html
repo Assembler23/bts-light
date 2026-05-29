@@ -45,59 +45,81 @@ header.bar .tournament {
 
 main {
   height: calc(100% - 7vh); overflow: hidden;
-  padding: 2vh 3vw; display: flex; flex-direction: column; gap: 2vh;
+  padding: 2vh 2vw; display: flex; flex-direction: column; gap: 1.5vh;
 }
 
-/* Halle-Sektion */
+/* Halle-Sektion: füllt die verfügbare Höhe, damit die Kacheln den
+   Bildschirm ausnutzen (mehrere Hallen teilen sich die Höhe). */
 .hall {
-  display: flex; flex-direction: column; gap: 1.2vh;
+  display: flex; flex-direction: column; gap: 1vh;
+  flex: 1 1 auto; min-height: 0;
 }
 .hall h2 {
   font-size: 3.2vmin; font-weight: 800; color: #fbbf24;
   margin: 0; padding: 0 0 .4vh 0; border-bottom: .2vh solid #334155;
-  letter-spacing: .04em; text-transform: uppercase;
+  letter-spacing: .04em; text-transform: uppercase; flex: 0 0 auto;
 }
 
-/* Court-Grid */
+/* Court-Grid: Spaltenzahl wird per JS gesetzt (dynamisch nach Feldzahl),
+   die Zeilen teilen sich die Höhe gleichmäßig (grid-auto-rows: 1fr) →
+   wenige Felder = große Kacheln, die den Schirm füllen. */
 .courts {
   display: grid; gap: 1.4vh 1.6vw;
-  grid-template-columns: repeat(auto-fill, minmax(28vw, 1fr));
+  grid-auto-rows: 1fr; flex: 1 1 auto; min-height: 0;
 }
 .court {
   background: linear-gradient(180deg, #1a2842, #0f1a30);
   border: .25vmin solid #334155; border-radius: 1.4vmin;
-  padding: 1.2vh 1.4vw; display: flex; flex-direction: column;
-  gap: .6vh; min-height: 14vh;
+  padding: 1.6vh 1.8vw; display: flex; flex-direction: column;
+  gap: 1vh; min-height: 0; overflow: hidden;
 }
 .court.empty { opacity: .55; }
+.court.live  { border-color: #1f6f4a; }
+.court.pause { border-color: #b08400; }
 .court__head {
-  display: flex; align-items: baseline; gap: 1vw; min-height: 4vmin;
+  display: flex; align-items: center; gap: 1.2vw; flex: 0 0 auto;
 }
 .court__name {
-  font-size: 4.4vmin; font-weight: 900; color: #fbbf24; line-height: 1;
+  font-size: 5vmin; font-weight: 900; color: #fbbf24; line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .court__status {
-  font-size: 2.4vmin; font-weight: 700; color: #64748b;
+  font-size: 2.6vmin; font-weight: 700; color: #64748b;
   text-transform: uppercase; letter-spacing: .04em;
 }
 .court__status.live { color: #34d399; }
 .court__status.pause { color: #fbbf24; }
 .court__discipline {
-  margin-left: auto; font-size: 2.4vmin; font-weight: 700; color: #94a3b8;
-}
-
-.teams { display: flex; flex-direction: column; gap: .35vh; }
-.team {
-  font-size: 3vmin; font-weight: 700; color: #e2e8f0;
+  margin-left: auto; font-size: 2.6vmin; font-weight: 700; color: #94a3b8;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.team.winner { color: #34d399; }
-.vs { font-size: 1.8vmin; color: #64748b; text-align: center; }
 
-.scores { display: flex; gap: 1vw; font-variant-numeric: tabular-nums; }
-.score-set { font-size: 3vmin; font-weight: 800; color: #cbd5e1; }
-.score-set.won { color: #f8fafc; }
+/* Teams + Sätze: Name(n) links, Satzstand rechts gross. */
+.teams {
+  display: flex; flex-direction: column; gap: .8vh;
+  flex: 1 1 auto; justify-content: center; min-height: 0;
+}
+.trow { display: flex; align-items: center; gap: 1.2vw; }
+.trow__name {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: .8vw;
+  font-size: 3.2vmin; font-weight: 700; color: #e2e8f0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.trow.winner .trow__name { color: #34d399; }
+.trow__name .flag {
+  flex: 0 0 auto; height: 3vmin; width: auto; border-radius: .3vh;
+  box-shadow: 0 0 .4vh rgba(0,0,0,.5);
+}
+.trow__name .flag.hidden { display: none; }
+.trow__name .nm { overflow: hidden; text-overflow: ellipsis; }
+.trow__sets { flex: 0 0 auto; display: flex; gap: 1vw; font-variant-numeric: tabular-nums; }
+.sset {
+  min-width: 1.6ch; text-align: center;
+  font-size: 4.4vmin; font-weight: 900; color: #64748b; line-height: 1;
+}
+.sset.won { color: #f8fafc; }
+.sset.current { color: #fbbf24; }
 
 .idle {
   height: 100%; display: flex; flex-direction: column;
@@ -182,6 +204,27 @@ main {
     return groups;
   }
 
+  // Flaggen-IMG aus IOC-3-Nationalität; unbekannt/leer → versteckt.
+  function flagEl(nat) {
+    var img = document.createElement('img');
+    img.className = 'flag';
+    var code = (nat || '').trim().toUpperCase();
+    if (code) {
+      img.src = '/flags/' + encodeURIComponent(code) + '.svg';
+      img.onerror = function () { img.classList.add('hidden'); };
+    } else {
+      img.classList.add('hidden');
+    }
+    return img;
+  }
+
+  function setVal(s, idx) {
+    if (Array.isArray(s)) return s[idx] != null ? s[idx] : 0;
+    return idx === 0
+      ? (s.a != null ? s.a : (s[0] != null ? s[0] : 0))
+      : (s.b != null ? s.b : (s[1] != null ? s[1] : 0));
+  }
+
   function renderCourt(c) {
     var card = h('div', 'court');
     var head = h('div', 'court__head');
@@ -195,40 +238,51 @@ main {
       return card;
     }
 
+    var isPause = !!(c.injury || c.official_call);
     if (c.injury) {
+      card.classList.add('pause');
       head.appendChild(setStatus('Behandlung', 'pause'));
     } else if (c.official_call) {
+      card.classList.add('pause');
       head.appendChild(setStatus('TL', 'pause'));
     } else {
+      card.classList.add('live');
       head.appendChild(setStatus('läuft', 'live'));
     }
 
-    var disc = h('span', 'court__discipline', c.match_name || '');
-    head.appendChild(disc);
+    head.appendChild(h('span', 'court__discipline', c.match_name || ''));
     card.appendChild(head);
 
-    var teams = h('div', 'teams');
-    teams.appendChild(h('span', 'team', (c.team1 || []).join(' / ') || '—'));
-    teams.appendChild(h('span', 'vs', 'gegen'));
-    teams.appendChild(h('span', 'team', (c.team2 || []).join(' / ') || '—'));
-    card.appendChild(teams);
+    var sets = Array.isArray(c.sets) ? c.sets : [];
+    var lastIdx = sets.length - 1;
+    var running = !isPause;
 
-    // Sätze (nur wenn welche da). Ohne Live-Detail (Best-of-3 vs 5 kennen wir hier nicht).
-    if (Array.isArray(c.sets) && c.sets.length > 0) {
-      var scoresT1 = h('div', 'scores');
-      var scoresT2 = h('div', 'scores');
-      c.sets.forEach(function (s) {
-        // s ist [a, b] oder {a, b} oder Tupel — Rust serde serializes Tuple as array.
-        var a = Array.isArray(s) ? s[0] : (s.a !== undefined ? s.a : s[0]);
-        var b = Array.isArray(s) ? s[1] : (s.b !== undefined ? s.b : s[1]);
-        scoresT1.appendChild(h('span', 'score-set' + (a > b ? ' won' : ''), String(a)));
-        scoresT2.appendChild(h('span', 'score-set' + (b > a ? ' won' : ''), String(b)));
+    // Eine Team-Zeile: Flagge(n) + Name(n) links, Satzstand rechts.
+    function teamRow(names, nats, selfIdx, otherIdx) {
+      var row = h('div', 'trow');
+      var nameBox = h('div', 'trow__name');
+      var list = (names && names.length) ? names : ['—'];
+      list.forEach(function (n, i) {
+        nameBox.appendChild(flagEl(nats && nats[i]));
+        nameBox.appendChild(h('span', 'nm', n));
       });
-      // T1-Sätze zwischen den Teams interpretiere ich als Aufwand-zu-viel —
-      // einfacher: alle Sätze als Reihe Team1/Team2-Paare unterhalb der Paarung.
-      // Hier kompakt: nur eine Zeile mit "a:b a:b a:b" als Score-Spur.
-      // Reduziertes Score-Setup um Platz auf der Card zu sparen.
+      row.appendChild(nameBox);
+      var setsEl = h('div', 'trow__sets');
+      sets.forEach(function (s, i) {
+        var mine = setVal(s, selfIdx), theirs = setVal(s, otherIdx);
+        var cls = 'sset';
+        if (i === lastIdx && running) cls += ' current';
+        else if (mine > theirs) cls += ' won';
+        setsEl.appendChild(h('span', cls, String(mine)));
+      });
+      row.appendChild(setsEl);
+      return row;
     }
+
+    var teams = h('div', 'teams');
+    teams.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1));
+    teams.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0));
+    card.appendChild(teams);
 
     return card;
   }
@@ -263,19 +317,27 @@ main {
     var multiHall = groups.filter(function (g) { return g.name; }).length >= 2;
 
     groups.forEach(function (g) {
+      var grid = h('div', 'courts');
+      // Dynamische Spaltenzahl: wenige Felder → wenige Spalten → grosse
+      // Kacheln, die (zusammen mit grid-auto-rows:1fr) den Schirm füllen.
+      grid.style.gridTemplateColumns = 'repeat(' + gridColsFor(g.courts.length) + ', 1fr)';
+      g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
       if (multiHall) {
         var section = h('section', 'hall');
         if (g.name) section.appendChild(h('h2', null, g.name));
-        var grid = h('div', 'courts');
-        g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
         section.appendChild(grid);
         board.appendChild(section);
       } else {
-        var grid2 = h('div', 'courts');
-        g.courts.forEach(function (c) { grid2.appendChild(renderCourt(c)); });
-        board.appendChild(grid2);
+        board.appendChild(grid);
       }
     });
+  }
+
+  // Spaltenzahl je Feldanzahl: 1→1, 2→2, 3-4→2, 5-6→3, 7-9→3, mehr→4.
+  // ceil(sqrt(n)) ergibt ein ausgewogenes, möglichst quadratisches Raster.
+  function gridColsFor(n) {
+    if (n <= 1) return 1;
+    return Math.min(4, Math.ceil(Math.sqrt(n)));
   }
 
   // ── Poll-Schleife ──────────────────────────────────────────────────

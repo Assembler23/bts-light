@@ -877,9 +877,30 @@ function showSwitchToast() {
 const BREAK_SECONDS = { eleven: 60, game: 120 };
 let breakTimer = null;
 
+// ── Uhr-Synchronisation mit dem Server ────────────────────────────────
+// Pausen-`endsAt` wird in SERVER-Zeit gesetzt, nicht in Tablet-Zeit. Sonst
+// driften Tablet- und TV-Countdown um die Differenz der Geraeteuhren
+// auseinander (5-6 s beobachtet). Der TV rechnet (seit v0.9.29) ohnehin
+// gegen die Server-Zeit (serverNowMs) — mit demselben Bezug auf dem
+// Tablet zeigen beide denselben Wert. Offset wird per /health gemessen.
+let serverClockOffset = 0;
+function serverNow() { return Date.now() + serverClockOffset; }
+function syncServerClock() {
+  fetch('/health', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (d && typeof d.serverNowMs === 'number' && d.serverNowMs > 0) {
+        serverClockOffset = d.serverNowMs - Date.now();
+      }
+    })
+    .catch(function () { /* offline -> Offset bleibt, Fallback Date.now() */ });
+}
+syncServerClock();
+setInterval(syncServerClock, 30000);
+
 function startBreak(kind) {
   const secs = BREAK_SECONDS[kind]; // undefined bei 'injury' – kein Countdown
-  STATE.pause = { kind, endsAt: secs ? Date.now() + secs * 1000 : null };
+  STATE.pause = { kind, endsAt: secs ? serverNow() + secs * 1000 : null };
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   if (STATE.pause.endsAt) breakTimer = setInterval(tickBreak, 250);
   tlog('info', 'break_start', { kind });
@@ -908,7 +929,7 @@ function tickBreak() {
     if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
     return;
   }
-  if (Date.now() >= STATE.pause.endsAt) {
+  if (serverNow() >= STATE.pause.endsAt) {
     endBreak();
     return;
   }
@@ -924,7 +945,7 @@ function renderBreak() {
     els.breakTitle.textContent = 'Behandlungspause';
     els.breakCountdown.textContent = '✚';
   } else {
-    const secs = Math.max(0, Math.round((STATE.pause.endsAt - Date.now()) / 1000));
+    const secs = Math.max(0, Math.round((STATE.pause.endsAt - serverNow()) / 1000));
     els.breakCountdown.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     els.breakTitle.textContent = STATE.pause.kind === 'eleven'
       ? 'Pause bei 11 Punkten'
@@ -1087,7 +1108,7 @@ function applyPersistedState(p) {
   // nur, wenn ihre Zeit noch nicht abgelaufen ist.
   if (p.pause && p.pause.kind === 'injury') {
     STATE.pause = p.pause;
-  } else if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > Date.now()) {
+  } else if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > serverNow()) {
     STATE.pause = p.pause;
     if (breakTimer) clearInterval(breakTimer);
     breakTimer = setInterval(tickBreak, 250);

@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.32
+
+- **Pausen-Countdown auf Tablet und TV synchron.** Das Tablet setzte
+  `endsAt` mit seiner eigenen Uhr; der TV rechnet (seit v0.9.29) gegen
+  die Server-Uhr → bei abweichenden Geräteuhren liefen die Countdowns
+  5–6 s auseinander. Das Tablet holt jetzt per `/health` (neues Feld
+  `serverNowMs`) seinen Uhr-Offset zum Server und setzt/zählt die Pause
+  in **Server-Zeit** (`serverNow()`). Damit zeigen Tablet und TV
+  denselben Wert. Offset wird beim Start und alle 30 s aktualisiert;
+  ohne Verbindung Fallback auf die lokale Uhr.
+- **Kombi-Anzeige lesbarer.** Die Satz-Zahlen sind deutlich größer
+  (7vh, fett) und der laufende Satz stärker hervorgehoben (Glow). Im
+  Doppel stehen die beiden Spieler eines Teams jetzt **untereinander**
+  (A1 / A2) statt nebeneinander, **mit Flagge** je Spieler.
+- **Court-Übersicht (`/info/overview`) zeigt jetzt Spielstände.** Je Feld
+  beide Teams mit **Flagge**, Name(n) und **Satzstand** (gewonnene Sätze
+  hervorgehoben, laufender Satz gelb) — vorher nur Teams + Status.
+- **Court-Übersicht: dynamische Kachelgröße.** Das Feld-Raster passt die
+  Spaltenzahl an die Feldanzahl an (1→1, 2→2, 3-4→2, 5-6→3 … bis 4) und
+  füllt die Bildschirmhöhe (gleich hohe Zeilen). Bei wenigen Feldern
+  (z. B. 4) große, bildschirmfüllende Kacheln statt kleiner Boxen oben.
+
 ## v0.9.31
 
 - **Fix: TV übernimmt den Stand nach „Match wieder öffnen".** `reopen()`

@@ -255,6 +255,11 @@ async fn health(
     Json(serde_json::json!({
         "ok": true,
         "courts": ctx.tablet.overview(),
+        // Server-Zeit, damit das Tablet seinen Uhr-Offset zum Server
+        // bestimmen kann und Pausen-`endsAt` in Server-Zeit setzt — so
+        // zeigen Tablet und TV denselben Countdown (sonst Drift durch
+        // abweichende Geraeteuhren). v0.9.32.
+        "serverNowMs": monitor::now_ms(),
     }))
 }
 

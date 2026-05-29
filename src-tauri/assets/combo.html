@@ -74,23 +74,37 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 }
 .row__name {
   flex: 1 1 auto; min-width: 0;
-  font-size: 3.4vh; font-weight: 700; color: #e2e8f0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; flex-direction: column; justify-content: center; gap: .2vh;
 }
-.row.winner .row__name { color: #34d399; }
+.row__name .pname {
+  font-size: 3.2vh; font-weight: 700; color: #e2e8f0; line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 1vw;
+}
+.row__name .pname .flag {
+  flex: 0 0 auto; height: 2.6vh; width: auto;
+  border-radius: .3vh; box-shadow: 0 0 .4vh rgba(0,0,0,.5);
+}
+.row__name .pname .flag.hidden { display: none; }
+.row__name .pname .pname-text {
+  overflow: hidden; text-overflow: ellipsis;
+}
+.row.winner .row__name .pname { color: #34d399; }
 .row__sets {
-  flex: 0 0 auto; display: flex; gap: 1.2vw;
+  flex: 0 0 auto; display: flex; align-items: center; gap: 1.6vw;
   font-variant-numeric: tabular-nums;
 }
+/* Ergebnis-Zahlen gross + klar lesbar (Hauptinformation auf Distanz). */
 .set {
-  min-width: 2.4ch; text-align: center;
-  font-size: 3.4vh; font-weight: 800; color: #64748b;
+  min-width: 1.8ch; text-align: center;
+  font-size: 7vh; font-weight: 900; color: #64748b; line-height: 1;
 }
 .set.won { color: #f8fafc; }
 /* Laufender Satz (letzter, solange das Spiel live ist) hervorgehoben. */
 .set.current {
   color: #fbbf24;
-  border-bottom: .4vh solid #fbbf24;
+  border-bottom: .6vh solid #fbbf24;
+  text-shadow: 0 0 2vh rgba(251, 191, 36, .4);
 }
 
 .idle {
@@ -184,10 +198,19 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     var lastIdx = sets.length - 1;
     var running = !isPause; // bei Pause kein "laufender" Satz markieren
 
-    function teamRow(names, selfIdx, otherIdx) {
-      var won = false;
+    function teamRow(names, nats, selfIdx, otherIdx) {
       var row = h('div', 'row');
-      row.appendChild(h('span', 'row__name', (names || []).join(' / ') || '—'));
+      // Namen: im Doppel jeder Spieler in einer eigenen Zeile untereinander,
+      // jeweils mit Flagge (Nationalität parallel zum Namen).
+      var nameBox = h('div', 'row__name');
+      var list = (names && names.length) ? names : ['—'];
+      list.forEach(function (n, i) {
+        var line = h('div', 'pname');
+        line.appendChild(flagEl(nats && nats[i]));
+        line.appendChild(h('span', 'pname-text', n));
+        nameBox.appendChild(line);
+      });
+      row.appendChild(nameBox);
       var setsEl = h('div', 'row__sets');
       sets.forEach(function (s, i) {
         var mine = setVal(s, selfIdx);
@@ -201,9 +224,23 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
       return row;
     }
 
-    band.appendChild(teamRow(c.team1, 0, 1));
-    band.appendChild(teamRow(c.team2, 1, 0));
+    band.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1));
+    band.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0));
     return band;
+  }
+
+  // Flaggen-IMG aus der IOC-3-Nationalität; unbekannt/leer → versteckt.
+  function flagEl(nat) {
+    var img = document.createElement('img');
+    img.className = 'flag';
+    var code = (nat || '').trim().toUpperCase();
+    if (code) {
+      img.src = '/flags/' + encodeURIComponent(code) + '.svg';
+      img.onerror = function () { img.classList.add('hidden'); };
+    } else {
+      img.classList.add('hidden');
+    }
+    return img;
   }
 
   function render(data) {
