@@ -28,6 +28,11 @@ pub const PREPARATION_HTML: &str = include_str!("../../assets/preparation.html")
 /// Re-Zuweisung (analog overview/preparation).
 pub const AD_HTML: &str = include_str!("../../assets/ad.html");
 
+/// Kombi-Anzeige (mehrere Felder als horizontale Bänder auf einem
+/// Bildschirm). CourtIDs via `?courts=1,2,3`, optional `?device=` +
+/// `?rotate=`. Pollt `/combo/state` für die Live-Stände.
+pub const COMBO_HTML: &str = include_str!("../../assets/combo.html");
+
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.

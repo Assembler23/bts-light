@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.27
+
+- **Kombi-Court-Monitor: bis zu 3 Felder auf einem Bildschirm.** Ein
+  großer TV kann jetzt die Live-Spielstände von 2–3 Feldern gleichzeitig
+  zeigen — als horizontale Bänder untereinander, je Feld Feldname,
+  Disziplin, Status (läuft/Pause/TL/frei), beide Teams (Doppel-tauglich)
+  und Satzstand mit hervorgehobenem laufendem Satz. So deckt man mit
+  wenigen großen Bildschirmen viele Felder ab statt ein TV pro Feld.
+  - Neue `MonitorTarget`-Variante `CourtCombo { court_ids }`
+    (Wire-Form `{"kind":"court_combo","court_ids":[1,2,3]}`).
+  - Neue Anzeige-Seite `combo.html` + Routen `/combo` und
+    `/combo/state?courts=1,2,3` (filtert die Felder-Übersicht auf die
+    gewählten CourtIDs, Reihenfolge = Band-Reihenfolge). 1-s-Poll,
+    Pivot (`?rotate=`), Heartbeat wie die anderen Info-Seiten.
+  - Zuweisung über einen **Kombi-Dialog** im „Court-Monitore"-Bereich:
+    Dropdown-Eintrag „Felder wählen…" → Modal mit Feld-Checkboxen
+    (2–3, Auswahl-Reihenfolge nummeriert). Aktive Kombi wird im
+    Dropdown angezeigt.
+  - Cloud-Modus: wie Info/Ad LAN-only (CourtCombo hat keine einzelne
+    `court_id`, wird im Relay-Filter ausgeschlossen).
+
 ## v0.9.26
 
 - **Schnellere Umstellung weg von Info-/Werbe-Anzeigen.** Ein Pi auf

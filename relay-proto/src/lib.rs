@@ -212,6 +212,12 @@ pub enum MonitorTarget {
     AdRotation,
     /// Werbung: ein bestimmtes Werbebild, dauerhaft.
     AdSingle { file: String },
+    /// Kombi-Anzeige: Spielstände mehrerer Felder (1-3) gleichzeitig auf
+    /// einem Bildschirm, als horizontale Bänder.
+    CourtCombo {
+        #[serde(rename = "court_ids")]
+        court_ids: Vec<i64>,
+    },
 }
 
 impl MonitorTarget {
@@ -223,6 +229,11 @@ impl MonitorTarget {
     /// Ad-Single-Konstruktor zur Bequemlichkeit.
     pub fn ad_single(file: impl Into<String>) -> Self {
         Self::AdSingle { file: file.into() }
+    }
+
+    /// Kombi-Konstruktor zur Bequemlichkeit.
+    pub fn court_combo(court_ids: Vec<i64>) -> Self {
+        Self::CourtCombo { court_ids }
     }
 
     /// CourtID, falls dieses Target ein Feld ist; sonst `None`.
@@ -249,6 +260,15 @@ impl MonitorTarget {
                 // dank `is_safe_image_name`).
                 Some(format!("/info/ad?mode=single&file={}", url_encode(file)))
             }
+            Self::CourtCombo { court_ids } => {
+                // CourtIDs als kommaseparierte Query (?courts=1,2,3).
+                let csv = court_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                Some(format!("/combo?courts={csv}"))
+            }
         }
     }
 
@@ -260,6 +280,7 @@ impl MonitorTarget {
             Self::InfoPreparation => "info_preparation",
             Self::AdRotation => "ad_rotation",
             Self::AdSingle { .. } => "ad_single",
+            Self::CourtCombo { .. } => "court_combo",
         }
     }
 }

@@ -394,6 +394,12 @@ mod tests {
         assert_eq!(rot, r#"{"kind":"ad_rotation"}"#);
         let sng = serde_json::to_string(&MonitorTarget::ad_single("foo.png")).unwrap();
         assert_eq!(sng, r#"{"kind":"ad_single","file":"foo.png"}"#);
+        // v0.9.27: Kombi-Target.
+        let combo = serde_json::to_string(&MonitorTarget::court_combo(vec![1, 2, 3])).unwrap();
+        assert_eq!(combo, r#"{"kind":"court_combo","court_ids":[1,2,3]}"#);
+        // Roundtrip (auch fuer die read_assignments-Persistenz wichtig).
+        let back: MonitorTarget = serde_json::from_str(&combo).unwrap();
+        assert_eq!(back, MonitorTarget::court_combo(vec![1, 2, 3]));
     }
 
     #[test]
@@ -419,5 +425,25 @@ mod tests {
                 .as_deref(),
             Some("/info/ad?mode=single&file=hat%20space.png"),
         );
+    }
+
+    #[test]
+    fn monitor_target_combo_redirect_path() {
+        // Kombi-Target leitet auf /combo?courts=1,2,3 um (v0.9.27).
+        assert_eq!(
+            MonitorTarget::court_combo(vec![1, 2, 3])
+                .redirect_path()
+                .as_deref(),
+            Some("/combo?courts=1,2,3"),
+        );
+        assert_eq!(
+            MonitorTarget::court_combo(vec![7])
+                .redirect_path()
+                .as_deref(),
+            Some("/combo?courts=7"),
+        );
+        // court_id() ist None fuer Kombi → wird im Cloud-Filter (nur
+        // Court-Targets) korrekt ausgeschlossen, LAN-only wie Info/Ad.
+        assert_eq!(MonitorTarget::court_combo(vec![1, 2]).court_id(), None);
     }
 }

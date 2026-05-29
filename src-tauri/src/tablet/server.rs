@@ -121,6 +121,8 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/preparation/state", get(info_preparation_state))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
+        .route("/combo", get(combo_page))
+        .route("/combo/state", get(combo_state))
         .route("/result", post(result))
         .route("/ws", get(ws_upgrade))
         .with_state(ctx);
@@ -392,6 +394,57 @@ async fn info_ad_state(
         "ads": ads,
         "intervalS": config.ad_interval_s.max(1),
     });
+    ([(header::CACHE_CONTROL, "no-store")], Json(payload))
+}
+
+/// Liefert die HTML der Kombi-Anzeige (mehrere Felder als Bänder). Die
+/// gewünschten CourtIDs + optionale `device`/`rotate` kommen über den
+/// Query-String, die Live-Daten holt die Seite über `/combo/state`.
+async fn combo_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::COMBO_HTML),
+    )
+}
+
+/// Query der Kombi-Anzeige: `courts=1,2,3` (kommasepariert) plus
+/// optionaler `device`-Heartbeat.
+#[derive(serde::Deserialize, Default)]
+struct ComboQuery {
+    #[serde(default)]
+    courts: String,
+    #[serde(default)]
+    device: Option<String>,
+}
+
+/// JSON-Zustand für die Kombi-Anzeige: filtert die Felder-Übersicht auf
+/// die in `?courts=` genannten CourtIDs und behält deren Reihenfolge.
+/// Greift auf denselben `overview()`-Datenstand zurück wie `/health`.
+async fn combo_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<ComboQuery>,
+) -> impl IntoResponse {
+    // Heartbeat (analog Info-Pages, v0.9.22): Poll als Lebenszeichen.
+    if let Some(d) = q.device.as_deref() {
+        if !d.is_empty() && d.len() <= 64 {
+            let _ = ctx.tablet.record_monitor_poll(d);
+        }
+    }
+    // Gewünschte CourtIDs in der angegebenen Reihenfolge parsen.
+    let wanted: Vec<i64> = q
+        .courts
+        .split(',')
+        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .collect();
+    let overview = ctx.tablet.overview();
+    // Je gewünschter ID das passende Feld heraussuchen, Reihenfolge
+    // beibehalten (nicht die overview-Reihenfolge). Unbekannte IDs
+    // werden übersprungen.
+    let courts: Vec<&crate::tablet::state::CourtOverview> = wanted
+        .iter()
+        .filter_map(|id| overview.iter().find(|c| c.court_id == *id))
+        .collect();
+    let payload = serde_json::json!({ "courts": courts });
     ([(header::CACHE_CONTROL, "no-store")], Json(payload))
 }
 

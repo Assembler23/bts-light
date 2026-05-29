@@ -33,11 +33,14 @@ import type {
 //   "info_preparation"       → MonitorTarget::InfoPreparation
 //   "ad_rotation"            → MonitorTarget::AdRotation
 //   "ad_single:<dateiname>"  → MonitorTarget::AdSingle { file }
+//   "combo:1,2,3"            → MonitorTarget::CourtCombo { court_ids }
+//   "__combo_edit__"         → öffnet den Kombi-Dialog (kein echtes Target)
 
 function targetToValue(t: MonitorTarget | null): string {
   if (!t) return "";
   if (t.kind === "court") return `court:${t.court_id}`;
   if (t.kind === "ad_single") return `ad_single:${t.file}`;
+  if (t.kind === "court_combo") return `combo:${t.court_ids.join(",")}`;
   return t.kind;
 }
 
@@ -53,6 +56,14 @@ function valueToTarget(v: string): MonitorTarget | null {
   if (v.startsWith("ad_single:")) {
     const file = v.slice("ad_single:".length);
     if (file.length > 0) return { kind: "ad_single", file };
+  }
+  if (v.startsWith("combo:")) {
+    const ids = v
+      .slice("combo:".length)
+      .split(",")
+      .map((s) => Number(s))
+      .filter((n) => Number.isFinite(n));
+    if (ids.length > 0) return { kind: "court_combo", court_ids: ids };
   }
   return null;
 }
@@ -286,9 +297,26 @@ function DeviceRow({
   // Aktueller String-Wert für das <select> (eindeutiger Schlüssel).
   const currentValue = targetToValue(device.target);
 
+  // Kombi-Dialog (mehrere Felder auf einem TV).
+  const [comboOpen, setComboOpen] = useState(false);
+
   function onChange(value: string) {
+    if (value === "__combo_edit__") {
+      setComboOpen(true);
+      return; // kein echtes Target — Dialog übernimmt
+    }
     onAssign(valueToTarget(value));
   }
+
+  // Label der aktuellen Kombi-Zuweisung (für die Dropdown-Option).
+  const comboCourtIds =
+    device.target?.kind === "court_combo" ? device.target.court_ids : null;
+  const comboLabel = comboCourtIds
+    ? "Kombi: " +
+      comboCourtIds
+        .map((id) => fieldOptions.find((o) => o.id === id)?.label ?? id)
+        .join(" + ")
+    : null;
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -390,6 +418,17 @@ function DeviceRow({
             </>
           )}
         </optgroup>
+        {/* Kombi-Anzeige: mehrere Felder auf einem TV. Die aktuelle
+            Kombi-Auswahl wird als eigene (selektierte) Option gezeigt;
+            „Felder wählen…" öffnet den Dialog. Mind. 2 Felder nötig. */}
+        <optgroup label="Kombi-Anzeige" disabled={fieldOptions.length < 2}>
+          {comboLabel && (
+            <option value={currentValue}>{comboLabel}</option>
+          )}
+          <option value="__combo_edit__">
+            {comboLabel ? "Felder ändern…" : "Felder wählen…"}
+          </option>
+        </optgroup>
       </select>
 
       <button
@@ -410,6 +449,128 @@ function DeviceRow({
         <RefreshCw size={15} />
         Neu laden
       </button>
+
+      {comboOpen && (
+        <ComboDialog
+          fields={fieldOptions}
+          initial={comboCourtIds ?? []}
+          onCancel={() => setComboOpen(false)}
+          onConfirm={(ids) => {
+            setComboOpen(false);
+            onAssign({ kind: "court_combo", court_ids: ids });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Modaler Dialog zur Auswahl von 2-3 Feldern für die Kombi-Anzeige.
+ * `fields` sind die wählbaren Felder, `initial` die aktuell gewählten
+ * CourtIDs. Die Auswahl-Reihenfolge bestimmt die Band-Reihenfolge auf
+ * dem TV; max. 3 Felder (mehr wird auf 16:9 unleserlich).
+ */
+function ComboDialog({
+  fields,
+  initial,
+  onCancel,
+  onConfirm,
+}: {
+  fields: { id: number; label: string; location: string }[];
+  initial: number[];
+  onCancel: () => void;
+  onConfirm: (ids: number[]) => void;
+}) {
+  const MAX = 3;
+  // Auswahl als geordnete Liste (Reihenfolge = Band-Reihenfolge).
+  const [selected, setSelected] = useState<number[]>(initial);
+
+  function toggle(id: number) {
+    setSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= MAX) return prev; // Cap: nicht mehr als 3
+      return [...prev, id];
+    });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold text-slate-800">
+          Kombi-Anzeige — Felder wählen
+        </h3>
+        <p className="mt-1 text-sm text-slate-500">
+          Wähle 2–3 Felder. Sie werden als Bänder untereinander auf einem
+          Bildschirm angezeigt (Reihenfolge = Auswahl-Reihenfolge).
+        </p>
+
+        <div className="mt-3 flex max-h-72 flex-col gap-1 overflow-y-auto">
+          {fields.map((f) => {
+            const pos = selected.indexOf(f.id);
+            const checked = pos >= 0;
+            const atCap = !checked && selected.length >= MAX;
+            return (
+              <label
+                key={f.id}
+                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm ${
+                  checked
+                    ? "border-slate-400 bg-slate-50"
+                    : "border-slate-200"
+                } ${atCap ? "opacity-40" : "cursor-pointer"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={atCap}
+                  onChange={() => toggle(f.id)}
+                />
+                <span className="flex-1 text-slate-700">
+                  {f.label}
+                  {f.location ? (
+                    <span className="text-slate-400"> · {f.location}</span>
+                  ) : null}
+                </span>
+                {checked && (
+                  <span className="rounded bg-slate-700 px-1.5 text-xs font-bold text-white">
+                    {pos + 1}
+                  </span>
+                )}
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <span className="text-xs text-slate-400">
+            {selected.length} / {MAX} gewählt
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                         text-slate-700 transition-colors hover:bg-slate-200"
+            >
+              Abbrechen
+            </button>
+            <button
+              onClick={() => onConfirm(selected)}
+              disabled={selected.length < 2}
+              className="rounded-lg bg-slate-800 px-3.5 py-1.5 text-sm font-medium
+                         text-white transition-colors hover:bg-slate-900
+                         disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Übernehmen
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -74,7 +74,8 @@ export type MonitorTarget =
   | { kind: "info_overview" }
   | { kind: "info_preparation" }
   | { kind: "ad_rotation" }
-  | { kind: "ad_single"; file: string };
+  | { kind: "ad_single"; file: string }
+  | { kind: "court_combo"; court_ids: number[] };
 
 /** Ein Court-Monitor-Gerät (Rust: relay_proto::MonitorDeviceInfo). */
 export interface MonitorDeviceInfo {

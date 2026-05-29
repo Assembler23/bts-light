@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Kombi-Anzeige</title>
+<style>
+/* Gleiche Palette wie monitor.html / overview.html: dunkles Marine,
+   gelbe Akzente. Mehrere Felder als horizontale Bänder übereinander —
+   jedes Band flex:1, teilt sich die Höhe gleichmäßig (1 Feld = voll,
+   3 Felder = je ein Drittel). */
+html, body {
+  margin: 0; height: 100%; width: 100%;
+  background: #0b1120; color: #f8fafc;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: none; overflow: hidden;
+}
+body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body.rotate-180 { transform: rotate(180deg); }
+body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+
+#board {
+  height: 100%; display: flex; flex-direction: column;
+  gap: .6vh; padding: .6vh; box-sizing: border-box;
+}
+
+/* Ein Band = ein Feld. */
+.band {
+  flex: 1 1 0; min-height: 0;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 1vh;
+  padding: 1.6vh 2.4vw;
+  background: linear-gradient(180deg, #1a2842, #0f1a30);
+  border: .25vmin solid #334155; border-radius: 1.6vmin;
+  overflow: hidden;
+}
+.band.live   { border-color: #1f6f4a; }
+.band.pause  { border-color: #b08400; }
+.band.empty  { opacity: .5; }
+
+/* Kopfzeile: Feldnummer + Disziplin links, Status rechts. */
+.band__head {
+  display: flex; align-items: baseline; gap: 1.6vw;
+}
+.band__field {
+  font-size: 4vh; font-weight: 900; color: #fbbf24;
+  line-height: 1; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.band__disc {
+  font-size: 2.6vh; font-weight: 700; color: #94a3b8;
+  text-transform: uppercase; letter-spacing: .04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.band__status {
+  margin-left: auto; font-size: 2.6vh; font-weight: 800;
+  letter-spacing: .05em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .8vw;
+  white-space: nowrap;
+}
+.band__status.live  { color: #34d399; }
+.band__status.pause { color: #fbbf24; }
+.band__status.free  { color: #64748b; }
+.dot {
+  width: 1.4vh; height: 1.4vh; border-radius: 50%;
+  background: currentColor; box-shadow: 0 0 1.4vh currentColor;
+}
+.band__status.live .dot { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+/* Spieler-Zeilen: Name links (flex), Sätze rechts (tabellarisch). */
+.row {
+  display: flex; align-items: center; gap: 2vw;
+}
+.row__name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 3.4vh; font-weight: 700; color: #e2e8f0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.row.winner .row__name { color: #34d399; }
+.row__sets {
+  flex: 0 0 auto; display: flex; gap: 1.2vw;
+  font-variant-numeric: tabular-nums;
+}
+.set {
+  min-width: 2.4ch; text-align: center;
+  font-size: 3.4vh; font-weight: 800; color: #64748b;
+}
+.set.won { color: #f8fafc; }
+/* Laufender Satz (letzter, solange das Spiel live ist) hervorgehoben. */
+.set.current {
+  color: #fbbf24;
+  border-bottom: .4vh solid #fbbf24;
+}
+
+.idle {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2vh;
+  color: #94a3b8; text-align: center; padding: 6vmin;
+}
+.idle h1 { font-size: 5vmin; color: #fbbf24; margin: 0; }
+
+#offline {
+  position: fixed; top: 1vh; right: 2vw;
+  background: rgba(244,63,94,.18); color: #fda4af;
+  border: .2vmin solid #b91c1c; border-radius: 1vmin;
+  padding: .5vh 1.4vw; font-size: 2.2vh; font-weight: 700;
+  display: none;
+}
+#offline.show { display: block; }
+</style>
+</head>
+<body>
+<main id="board"></main>
+<div id="offline">Keine Verbindung zum Turnier-PC</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+
+  // Pivot-Rotation per URL-Parameter.
+  var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+
+  // Gewünschte CourtIDs (Reihenfolge wird beibehalten) + Geräte-Code.
+  var courtsParam = (params.get('courts') || '').trim();
+  var deviceId = (params.get('device') || '').trim();
+
+  var POLL_OK_MS = 1000;
+  var POLL_FAIL_MS = 2000;
+  var errorCount = 0;
+
+  function h(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  function setVal(s, key, idx) {
+    // sets-Eintrag ist [a,b] (serde-Tuple) oder {a,b}.
+    if (Array.isArray(s)) return s[idx];
+    return idx === 0 ? (s.a !== undefined ? s.a : s[0]) : (s.b !== undefined ? s.b : s[1]);
+  }
+
+  function renderBand(c) {
+    var isLive = c.match_id && c.match_id > 0 && c.team1 && c.team1.length > 0;
+    var isPause = isLive && (c.injury || c.official_call);
+
+    var band = h('div', 'band' + (!isLive ? ' empty' : isPause ? ' pause' : ' live'));
+
+    // Kopfzeile
+    var head = h('div', 'band__head');
+    head.appendChild(h('span', 'band__field', c.court || ('Feld ' + c.court_id)));
+    if (isLive) head.appendChild(h('span', 'band__disc', c.match_name || ''));
+    var status;
+    if (!isLive) {
+      status = h('span', 'band__status free');
+      status.appendChild(h('span', null, 'frei'));
+    } else if (c.injury) {
+      status = h('span', 'band__status pause');
+      status.appendChild(h('span', 'dot')); status.appendChild(h('span', null, 'Behandlung'));
+    } else if (c.official_call) {
+      status = h('span', 'band__status pause');
+      status.appendChild(h('span', 'dot')); status.appendChild(h('span', null, 'TL'));
+    } else {
+      status = h('span', 'band__status live');
+      status.appendChild(h('span', 'dot')); status.appendChild(h('span', null, 'läuft'));
+    }
+    head.appendChild(status);
+    band.appendChild(head);
+
+    if (!isLive) return band;
+
+    // Sätze-Anzahl + Index des laufenden Satzes (letzter, solange live).
+    var sets = Array.isArray(c.sets) ? c.sets : [];
+    var lastIdx = sets.length - 1;
+    var running = !isPause; // bei Pause kein "laufender" Satz markieren
+
+    function teamRow(names, selfIdx, otherIdx) {
+      var won = false;
+      var row = h('div', 'row');
+      row.appendChild(h('span', 'row__name', (names || []).join(' / ') || '—'));
+      var setsEl = h('div', 'row__sets');
+      sets.forEach(function (s, i) {
+        var mine = setVal(s, selfIdx);
+        var theirs = setVal(s, otherIdx);
+        var cls = 'set';
+        if (i === lastIdx && running) cls += ' current';
+        else if (mine > theirs) cls += ' won';
+        setsEl.appendChild(h('span', cls, String(mine)));
+      });
+      row.appendChild(setsEl);
+      return row;
+    }
+
+    band.appendChild(teamRow(c.team1, 0, 1));
+    band.appendChild(teamRow(c.team2, 1, 0));
+    return band;
+  }
+
+  function render(data) {
+    var board = document.getElementById('board');
+    board.textContent = '';
+    var courts = (data && Array.isArray(data.courts)) ? data.courts : [];
+    if (courts.length === 0) {
+      var idle = h('div', 'idle');
+      idle.appendChild(h('h1', null, 'Kombi-Anzeige'));
+      idle.appendChild(h('p', null, 'Keine Felder zugewiesen oder Felder nicht gefunden.'));
+      board.appendChild(idle);
+      return;
+    }
+    courts.forEach(function (c) { board.appendChild(renderBand(c)); });
+  }
+
+  function showOffline(show) {
+    var el = document.getElementById('offline');
+    if (el) el.classList.toggle('show', !!show);
+  }
+
+  // ── Live-Poll ───────────────────────────────────────────────────────
+  function stateUrl() {
+    var u = '/combo/state?courts=' + encodeURIComponent(courtsParam);
+    if (deviceId) u += '&device=' + encodeURIComponent(deviceId);
+    return u;
+  }
+  function tick() {
+    fetch(stateUrl(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (data) {
+        errorCount = 0; showOffline(false);
+        render(data);
+        setTimeout(tick, POLL_OK_MS);
+      })
+      .catch(function () {
+        errorCount++;
+        if (errorCount >= 2) showOffline(true);
+        setTimeout(tick, POLL_FAIL_MS);
+      });
+  }
+  tick();
+
+  // ── Reassignment-Check (1 s, wie die anderen Info-Seiten, v0.9.26) ──
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname &&
+             here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
+  function navigateWithRotate(href) {
+    var hereRotate = new URLSearchParams(location.search).get('rotate');
+    if (hereRotate && href.indexOf('rotate=') < 0) {
+      var sep = href.indexOf('?') >= 0 ? '&' : '?';
+      href += sep + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    location.href = href;
+  }
+  function checkReassignment() {
+    if (!deviceId) return;
+    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s) return;
+        if (s.redirectTo) {
+          if (!currentUrlMatches(s.redirectTo)) {
+            var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
+            navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
+          }
+        } else {
+          // Kein Redirect-Target mehr (z. B. Einzelfeld zugewiesen) →
+          // zurück zur normalen Monitor-Seite.
+          navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
+        }
+      })
+      .catch(function () {});
+  }
+  setInterval(checkReassignment, 1000);
+})();
+</script>
+</body>
+</html>
