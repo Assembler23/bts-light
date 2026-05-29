@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.34
+
+- **Offline-Geräte aus der Liste entfernen (X).** Offline-Monitore haben
+  jetzt ein **X** zum Entfernen aus der „Court-Monitore"-Liste (vergisst
+  den Live-Eintrag + löscht eine eventuelle Zuweisung). **Online-Geräte
+  haben kein X** und werden auch server-seitig abgelehnt — sie kämen eh
+  beim nächsten Poll zurück und sollen ihre Zuweisung nicht verlieren.
+  Neuer Command `forget_monitor_device` (prüft `is_monitor_online`).
+
 ## v0.9.33
 
 - **Fix: TV zeigt nach manuellem „Match beenden" den Endstand.**

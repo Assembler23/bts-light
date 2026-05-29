@@ -9,9 +9,11 @@ import {
   Search,
   Tv,
   Wifi,
+  X,
 } from "lucide-react";
 import {
   assignMonitor,
+  forgetMonitorDevice,
   listCourtAds,
   monitorCommand,
   monitorDevices,
@@ -244,6 +246,15 @@ export function CourtMonitorPanel({ onBack }: Props) {
     }
   }
 
+  async function forget(deviceId: string) {
+    try {
+      await forgetMonitorDevice(deviceId);
+      await refresh();
+    } catch {
+      /* Online-Geräte werden vom Backend abgelehnt — still ignorieren */
+    }
+  }
+
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
       <header className="flex items-center gap-3">
@@ -380,6 +391,7 @@ export function CourtMonitorPanel({ onBack }: Props) {
                     onAssign={(target) => void assign(d.id, target)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
+                    onForget={() => void forget(d.id)}
                   />
                 ))}
               </div>
@@ -398,6 +410,7 @@ function DeviceRow({
   onAssign,
   onIdentify,
   onReload,
+  onForget,
 }: {
   device: MonitorDeviceInfo;
   courts: CourtOverview[];
@@ -405,6 +418,8 @@ function DeviceRow({
   onAssign: (target: MonitorTarget | null) => void;
   onIdentify: () => void;
   onReload: () => void;
+  /** Nur für offline Geräte gesetzt — entfernt das Gerät aus der Liste. */
+  onForget?: () => void;
 }) {
   // Optionen des <select>: value = String-Schlüssel ("" = keine,
   // "court:<id>", "info_overview", "info_preparation"), Text = Anzeige.
@@ -588,6 +603,17 @@ function DeviceRow({
         <RefreshCw size={15} />
         Neu laden
       </button>
+      {/* X nur bei offline Geräten — entfernt sie aus der Liste. */}
+      {onForget && (
+        <button
+          onClick={onForget}
+          title="Offline-Gerät aus der Liste entfernen"
+          className="inline-flex items-center justify-center rounded-lg bg-slate-100 p-1.5
+                     text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+        >
+          <X size={15} />
+        </button>
+      )}
 
       {comboOpen && (
         <ComboDialog

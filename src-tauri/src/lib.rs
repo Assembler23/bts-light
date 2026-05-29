@@ -117,6 +117,7 @@ pub fn run() {
             commands::monitor_devices,
             commands::assign_monitor,
             commands::monitor_command,
+            commands::forget_monitor_device,
             open_log_dir,
         ])
         .setup(|app| {

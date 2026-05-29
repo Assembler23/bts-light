@@ -649,6 +649,24 @@ impl TabletState {
         entry.command = Some(MonitorCommand { id: next_id, kind });
     }
 
+    /// Ist das Gerät aktuell online (letzter Poll innerhalb des
+    /// Online-Fensters)? Unbekannte Geräte gelten als offline.
+    pub fn is_monitor_online(&self, device_id: &str, now_ms: u64) -> bool {
+        self.monitor_live
+            .read()
+            .unwrap()
+            .get(device_id)
+            .map(|l| now_ms.saturating_sub(l.last_seen_ms) <= relay_proto::MONITOR_ONLINE_WINDOW_MS)
+            .unwrap_or(false)
+    }
+
+    /// Entfernt ein Gerät aus dem Live-State (vergisst es). Damit
+    /// verschwindet es aus der Geräteliste, sofern es auch keine
+    /// Zuweisung mehr hat (die räumt der Aufrufer separat ab).
+    pub fn forget_monitor(&self, device_id: &str) {
+        self.monitor_live.write().unwrap().remove(device_id);
+    }
+
     /// Geräte-ID → letzter Poll (ms) aller bekannten Monitor-Geräte.
     pub fn monitor_live_seen(&self) -> HashMap<String, u64> {
         self.monitor_live

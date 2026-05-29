@@ -111,3 +111,8 @@ export const monitorCommand = (
   deviceId: string,
   kind: "reload" | "identify",
 ): Promise<void> => invoke("monitor_command", { deviceId, kind });
+
+/** Entfernt ein offline Monitor-Gerät aus der Liste (Online wird vom
+ *  Backend abgelehnt). */
+export const forgetMonitorDevice = (deviceId: string): Promise<void> =>
+  invoke("forget_monitor_device", { deviceId });

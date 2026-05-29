@@ -878,6 +878,36 @@ pub fn assign_monitor(
     crate::tablet::monitor::write_assignments(&path, &map).map_err(|e| e.to_string())
 }
 
+/// Entfernt ein **offline** Monitor-Gerät aus der Liste: vergisst den
+/// Live-Eintrag und löscht eine eventuelle Zuweisung. Online-Geräte
+/// werden abgelehnt (sie würden ohnehin beim nächsten Poll
+/// zurückkommen, und ein versehentliches Entfernen soll ihre Zuweisung
+/// nicht verlieren).
+#[tauri::command]
+pub fn forget_monitor_device(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+) -> Result<(), String> {
+    if device_id.is_empty() || device_id.len() > 64 {
+        return Err("Ungültige Geräte-ID.".to_string());
+    }
+    let now = crate::tablet::monitor::now_ms();
+    if state.tablet.is_monitor_online(&device_id, now) {
+        return Err("Online-Geräte können nicht entfernt werden.".to_string());
+    }
+    // Live-Eintrag vergessen.
+    state.tablet.forget_monitor(&device_id);
+    // Zuweisung (falls vorhanden) aus der v3-Datei entfernen.
+    let path = monitor_assignments_path(&app);
+    let mut map = crate::tablet::monitor::read_assignments(&path);
+    if map.remove(&device_id).is_some() {
+        crate::tablet::monitor::write_assignments(&path, &map).map_err(|e| e.to_string())?;
+    }
+    tracing::info!("Court-Monitor: Gerät '{device_id}' aus der Liste entfernt");
+    Ok(())
+}
+
 /// Schickt einem Monitor-Gerät einen Fernbefehl: `kind` ist `"reload"`
 /// (Seite neu laden) oder `"identify"` (Feldnummer groß einblenden).
 #[tauri::command]
