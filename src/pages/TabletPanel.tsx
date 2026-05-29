@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   Megaphone,
   QrCode,
+  Tablet,
   Wifi,
 } from "lucide-react";
 import { tabletOverview } from "../api";
@@ -475,6 +476,15 @@ function CourtCard({ court }: { court: CourtOverview }) {
               {court.sets.map((s) => s[1]).join("  ")}
             </span>
           </div>
+          {court.scorekeeper.length > 0 && (
+            <div
+              className="mt-1 flex items-center gap-1 truncate text-xs text-slate-400"
+              title="Zähltafelbediener (Verlierer des Vorspiels)"
+            >
+              <Tablet size={12} className="shrink-0" />
+              <span className="truncate">{court.scorekeeper.join(" / ")}</span>
+            </div>
+          )}
         </>
       ) : (
         <div className="mt-1 text-sm text-slate-400">frei</div>

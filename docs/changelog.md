@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.39
+
+- **Zähltafelbediener (Teil 1: bts-light-Übersicht).** bts-light merkt
+  sich jetzt je Feld den **Verlierer des zuletzt dort beendeten Spiels**
+  — das ist der voraussichtliche Zähltafelbediener fürs nächste Spiel.
+  In der „Tablet-Spielzettel"-Übersicht steht er beim Feld mit
+  Tablet-Symbol. Da BTP beendete Spiele nicht zuverlässig dem Feld
+  zugeordnet behält, **trackt der Sync-Loop den Übergang OnCourt→Finished
+  selbst** (kein Verlass auf BTP, keine externe DB — In-Memory pro Feld).
+  - `TabletState.scorekeeper_by_court` + `SyncEngine.track_scorekeepers`
+    (vergleicht zyklisch, welches Spiel ein Feld verlassen hat).
+  - `CourtOverview.scorekeeper` (Verlierer-Namen), in TabletPanel angezeigt.
+  - Teil 2 (Hinweis direkt auf dem Tablet-Spielzettel bei der Seitenwahl)
+    folgt separat.
+
 ## v0.9.38
 
 - **Aufschlag-Indikator spieler-genau im Doppel/Mixed.** Der gelbe Punkt

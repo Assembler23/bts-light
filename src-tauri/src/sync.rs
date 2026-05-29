@@ -63,6 +63,10 @@ pub struct SyncEngine {
     /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
     /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
     last_topology: Option<(usize, usize, usize)>,
+    /// CourtID → Match-ID des im letzten Zyklus dort OnCourt gewesenen
+    /// Spiels. Wechselt das (Spiel verlässt das Feld) und ist es beendet,
+    /// merkt sich der State den Verlierer als Zähltafelbediener fürs Feld.
+    oncourt_prev: HashMap<i64, i64>,
 }
 
 impl Default for SyncEngine {
@@ -79,6 +83,7 @@ impl SyncEngine {
             finished_at: HashMap::new(),
             last_push_at: None,
             last_topology: None,
+            oncourt_prev: HashMap::new(),
         }
     }
 
@@ -99,6 +104,40 @@ impl SyncEngine {
                 m.finished_at = Some(*self.finished_at.entry(m.id).or_insert(now));
             }
         }
+    }
+
+    /// Verfolgt den Zähltafelbediener je Feld: Verlässt das im letzten
+    /// Zyklus auf einem Feld OnCourt gewesene Spiel das Feld und ist es
+    /// beendet, merkt sich der TabletState den Verlierer als
+    /// Zähltafelbediener fürs nächste Spiel auf diesem Feld. BTP behält die
+    /// Feld-Zuordnung beendeter Spiele nicht zuverlässig — daher tracken
+    /// wir den Übergang selbst über die Zyklen.
+    fn track_scorekeepers(&mut self, snapshot: &BtpSnapshot, tablet: &TabletState) {
+        let oncourt_now: HashMap<i64, i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|c| (c, m.id)))
+            .collect();
+        for (&court_id, &prev_match_id) in &self.oncourt_prev {
+            // Steht auf dem Feld jetzt ein anderes (oder kein) Spiel?
+            if oncourt_now.get(&court_id) == Some(&prev_match_id) {
+                continue;
+            }
+            // Das vorige Spiel hat das Feld verlassen — beendet + mit Sieger?
+            if let Some(fm) = snapshot.matches.iter().find(|m| m.id == prev_match_id) {
+                if fm.status == MatchStatus::Finished {
+                    if let Some(w) = fm.winner {
+                        let loser = if w == 1 { &fm.team2 } else { &fm.team1 };
+                        let names: Vec<String> = loser.iter().map(|p| p.name.clone()).collect();
+                        if !names.is_empty() {
+                            tablet.set_scorekeeper(court_id, names);
+                        }
+                    }
+                }
+            }
+        }
+        self.oncourt_prev = oncourt_now;
     }
 
     /// Führt einen vollständigen Poll-Push-Zyklus aus.
@@ -142,6 +181,7 @@ impl SyncEngine {
         }
 
         self.stamp_finished(&mut snapshot);
+        self.track_scorekeepers(&snapshot, tablet);
         // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());

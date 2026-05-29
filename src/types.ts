@@ -157,6 +157,12 @@ export interface CourtOverview {
   injury: boolean;
   /** Die Turnierleitung wurde an diesen Court gerufen. */
   official_call: boolean;
+  /** Aufschlagendes Team (1/2) bzw. Spieler-Index (0/1) – Monitor-Anzeige. */
+  serving_team: number | null;
+  serving_player: number | null;
+  /** Voraussichtlicher Zähltafelbediener (Verlierer-Team des Vorspiels auf
+   *  diesem Feld). Leer, wenn es kein Vorspiel gab. */
+  scorekeeper: string[];
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

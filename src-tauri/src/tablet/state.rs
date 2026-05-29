@@ -104,6 +104,10 @@ pub struct CourtOverview {
     /// Teams (BWF-Doppelregel; vom Tablet berechnet). None bei Einzel oder
     /// altem Tablet-Stand ohne diese Info.
     pub serving_player: Option<u8>,
+    /// Voraussichtlicher Zähltafelbediener für das aktuelle Spiel: die
+    /// Namen des Verlierer-Teams des zuletzt auf diesem Feld beendeten
+    /// Spiels. Leer, wenn es kein Vorspiel auf dem Feld gab.
+    pub scorekeeper: Vec<String>,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -182,12 +186,36 @@ pub struct TabletState {
     /// Im Cloud-Modus die vom Relay gemeldete Monitor-Geräteliste – der
     /// Relay-Client hält sie aktuell, die „Court-Monitore"-Seite liest sie.
     relay_monitor_devices: RwLock<Vec<MonitorDeviceInfo>>,
+    /// CourtID → Namen des Verlierer-Teams des zuletzt auf diesem Feld
+    /// beendeten Spiels (= voraussichtlicher Zähltafelbediener fürs nächste
+    /// Spiel). Vom Sync-Loop beim Übergang OnCourt→Finished gepflegt, weil
+    /// BTP beendete Spiele nicht zuverlässig dem Feld zugeordnet behält.
+    scorekeeper_by_court: RwLock<HashMap<i64, Vec<String>>>,
 }
 
 impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
         *self.snapshot.write().unwrap() = Some(snapshot);
+    }
+
+    /// Merkt den Zähltafelbediener (Verlierer-Team-Namen) für ein Feld.
+    /// Vom Sync-Loop beim Spielende auf dem Feld gesetzt.
+    pub fn set_scorekeeper(&self, court_id: i64, loser_names: Vec<String>) {
+        self.scorekeeper_by_court
+            .write()
+            .unwrap()
+            .insert(court_id, loser_names);
+    }
+
+    /// Voraussichtlicher Zähltafelbediener eines Felds (leer, wenn keiner).
+    pub fn scorekeeper(&self, court_id: i64) -> Vec<String> {
+        self.scorekeeper_by_court
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Kopie des aktuellen BTP-Snapshots (oder `None`, falls noch keiner
@@ -613,6 +641,20 @@ impl TabletState {
                     // zurück (nur Team, für alte Tablet-Stände).
                     serving_team: serving_info.map(|(t, _)| t),
                     serving_player: serving_info.and_then(|(_, p)| p),
+                    // Zähltafelbediener = Verlierer des zuletzt auf diesem
+                    // Feld beendeten Spiels. Wird vom Sync-Loop getrackt
+                    // (BTP behält die Feld-Zuordnung beendeter Spiele nicht
+                    // zuverlässig). Nur zeigen, wenn gerade ein Spiel läuft.
+                    scorekeeper: if m.is_some() {
+                        self.scorekeeper_by_court
+                            .read()
+                            .unwrap()
+                            .get(&court.id)
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    },
                 }
             })
             .collect()
