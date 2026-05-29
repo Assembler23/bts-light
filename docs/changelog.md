@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.37
+
+- **Fix: kein „Geistersatz" mehr nach Spielende.** Nach dem Match-Ende
+  setzt das Tablet den laufenden Satz auf 0:0 zurück; `handle_score`
+  hängte diesen leeren Satz an die Satzliste → in Kombi-/Übersicht-/
+  Liveticker-Anzeige erschien ein zusätzlicher leerer Satz. Ein 0:0-Satz
+  wird jetzt nicht mehr angehängt, wenn bereits Sätze gespielt sind
+  (der allererste 0:0-Satz bleibt).
+- **Fix: Monitor synct nach Netzwerk-Unterbrechung wieder.** Fiel der
+  bts-light-Rechner kurz offline (Router/WLAN) und die Tablets zählten
+  weiter, blieb der Kombi-Monitor nach dem Reconnect auf dem alten
+  Stand. Das Tablet pusht jetzt beim Wiederverbinden (`ws.onopen`)
+  sofort seinen aktuellen Satzstand + Spielzustand (Aufschlag/Pause) an
+  den Server — Monitore + Liveticker holen damit den weitergezählten
+  Stand vom Tablet zurück.
+- **Kombi-Anzeige: Aufschlag-Indikator.** Vor dem aufschlagenden Team
+  steht jetzt ein gelber Punkt (abgeleitet aus dem Tablet-Spielzustand:
+  servingSide + teamOnSide). Zeigt auf einen Blick, welches Team
+  aufschlägt; wechselt beim Aufschlagwechsel. `CourtOverview` trägt dazu
+  ein `serving_team`-Feld (1/2/none).
+
 ## v0.9.36
 
 - **Kombi-Anzeige: Ergebnis-Zahlen viel größer + ruhiger.** Die Satz-

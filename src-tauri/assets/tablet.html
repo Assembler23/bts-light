@@ -743,6 +743,14 @@ function connect() {
     if (sendBattery) sendBattery();
     // Aktive Meldungen nach einem Reconnect erneut melden.
     if (STATE.alertInjury || STATE.alertOfficial) sendAlert();
+    // WICHTIG: nach einem Reconnect den aktuellen Stand re-pushen. Wurde
+    // während der Offline-Zeit weitergezählt, hat der Server (und damit
+    // Monitore + Liveticker) sonst nur den veralteten Stand und
+    // aktualisiert sich erst beim nächsten Punkt. sendScoreUpdate schickt
+    // den Satzstand, persistState den court_state (Aufschlag/Pause).
+    // Greift nur, wenn ein Match läuft (sonst No-Op).
+    sendScoreUpdate();
+    persistState();
     render();
   };
   ws.onmessage = (ev) => {

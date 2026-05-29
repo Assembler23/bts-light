@@ -97,6 +97,10 @@ pub struct CourtOverview {
     pub injury: bool,
     /// Die Turnierleitung wurde an diesen Court gerufen.
     pub official_call: bool,
+    /// Welches Team schlägt gerade auf? 1 = team1, 2 = team2, None =
+    /// unbekannt. Abgeleitet aus dem Tablet-`court_state`
+    /// (servingSide + teamOnSide).
+    pub serving_team: Option<u8>,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -575,6 +579,19 @@ impl TabletState {
                     battery: session.and_then(|s| s.battery),
                     injury: session.map(|s| s.injury).unwrap_or(false),
                     official_call: session.map(|s| s.official).unwrap_or(false),
+                    // Aufschlagendes Team aus dem rohen Tablet-court_state
+                    // ableiten: servingSide vs. teamOnSide.a → 1 oder 2.
+                    serving_team: self
+                        .court_state
+                        .read()
+                        .unwrap()
+                        .get(&court.id)
+                        .and_then(|cs| {
+                            let v: serde_json::Value = serde_json::from_str(cs).ok()?;
+                            let serving = v.get("servingSide")?.as_str()?;
+                            let team_a = v.get("teamOnSide")?.get("a")?.as_str()?;
+                            Some(if serving == team_a { 1u8 } else { 2u8 })
+                        }),
                 }
             })
             .collect()

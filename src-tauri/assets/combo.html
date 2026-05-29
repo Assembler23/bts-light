@@ -70,8 +70,14 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 
 /* Spieler-Zeilen: Name links (flex), Sätze rechts (tabellarisch). */
 .row {
-  display: flex; align-items: center; gap: 2vw;
+  display: flex; align-items: center; gap: 1.4vw;
 }
+/* Aufschlag-Indikator: gelber Punkt vor dem aufschlagenden Team. */
+.serve-dot {
+  flex: 0 0 auto; width: 1.8vh; height: 1.8vh; border-radius: 50%;
+  background: #fbbf24; box-shadow: 0 0 1.4vh rgba(251,191,36,.7);
+}
+.serve-dot.hidden { visibility: hidden; }
 .row__name {
   flex: 1 1 auto; min-width: 0;
   display: flex; flex-direction: column; justify-content: center; gap: .2vh;
@@ -199,8 +205,11 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     var lastIdx = sets.length - 1;
     var running = !isPause; // bei Pause kein "laufender" Satz markieren
 
-    function teamRow(names, nats, selfIdx, otherIdx) {
+    function teamRow(names, nats, selfIdx, otherIdx, isServing) {
       var row = h('div', 'row');
+      // Aufschlag-Punkt vor dem Team (gelb), wenn dieses Team aufschlägt.
+      // hidden statt weglassen → beide Zeilen bleiben gleich eingerückt.
+      row.appendChild(h('span', 'serve-dot' + (isServing ? '' : ' hidden')));
       // Namen: im Doppel jeder Spieler in einer eigenen Zeile untereinander,
       // jeweils mit Flagge (Nationalität parallel zum Namen).
       var nameBox = h('div', 'row__name');
@@ -225,8 +234,8 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
       return row;
     }
 
-    band.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1));
-    band.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0));
+    band.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1, c.serving_team === 1));
+    band.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0, c.serving_team === 2));
     return band;
   }
 

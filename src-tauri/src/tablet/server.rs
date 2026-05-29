@@ -917,8 +917,14 @@ pub(crate) async fn handle_score(
         return; // unplausibel viele Sätze – Nachricht verwerfen
     }
     // Vollständige Satzliste: abgeschlossene Sätze + laufender Satz.
+    // Einen laufenden Satz von 0:0 NICHT anhängen, wenn schon Sätze
+    // gespielt sind — sonst erscheint nach Spielende (currentSet wurde
+    // auf 0:0 zurückgesetzt) ein leerer „Geistersatz" in der Anzeige.
+    // Beim allerersten Satz (history leer) bleibt 0:0 erhalten.
     let mut sets: Vec<(i64, i64)> = history.iter().map(|s| (s.a, s.b)).collect();
-    sets.push((score_a, score_b));
+    if !(score_a == 0 && score_b == 0 && !sets.is_empty()) {
+        sets.push((score_a, score_b));
+    }
     ctx.tablet.record_score(court_id, m.id, sets.clone());
 
     let mut live = m;
