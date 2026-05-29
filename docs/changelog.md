@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.35
+
+- **Fix: Auto-Update-Versionssprung repariert.** Ab v0.9.32 hatte der
+  Versions-Bump (`package.json`/`tauri.conf.json`/`Cargo.toml`) nicht
+  gegriffen — alle Builds v0.9.32–v0.9.34 trugen intern noch **0.9.31**.
+  Folge: `latest.json` meldete eine neue Versionsnummer (aus dem Tag),
+  der Installer war aber intern 0.9.31 → der Windows-Updater installierte
+  faktisch wieder 0.9.31 und blieb in einer Update-Schleife. Mit v0.9.35
+  stimmen Tag und interne Version wieder überein; das Update greift und
+  bringt **alle** Fixes/Features aus v0.9.27–v0.9.35 auf einmal.
+- **CI: Releases werden serialisiert** (`concurrency`-Group), damit nie
+  zwei Publish-Jobs parallel ins Auto-Update-Verzeichnis schreiben und
+  eine inkonsistente `latest.json` hinterlassen.
+
+(Inhaltlich enthält 0.9.35 alle Änderungen seit 0.9.31: finishManually-
+Push, Geräteliste sortiert/gruppiert, offline-Geräte entfernen.)
+
 ## v0.9.34
 
 - **Offline-Geräte aus der Liste entfernen (X).** Offline-Monitore haben
