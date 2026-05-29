@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.40
+
+- **Tablet-Auto-Reconnect (Heartbeat).** Das Tablet verbindet sich jetzt
+  selbstständig neu, wenn der Server/Router kurz weg war — kein manuelles
+  Seite-neu-Laden mehr nötig. Ein Watchdog (alle 5 s) sendet ein Ping und
+  erkennt **tote Verbindungen auch dann, wenn der Browser kein `onclose`
+  liefert** (Router weg → nur Stille): kam >15 s nichts vom Server, gilt
+  die Verbindung als tot und wird neu aufgebaut. Backoff auf max. 5 s
+  verkürzt (vorher 30 s). Der Watchdog ist der **einzige** Reconnect-
+  Treiber (keine doppelten Sockets mehr).
+  - `TabletMsg::Ping` / `ServerMsg::Pong` (relay-proto); LAN-Server
+    *(server.rs)* und Cloud-Relay *(relay/main.rs)* antworten je sofort
+    mit Pong.
+- **Kombi-Anzeige: Feldnummer hervorgehoben.** Die Feldnummer am
+  Bandanfang steht jetzt größer und als gelbes Badge (dunkler Text auf
+  gelbem Block) — aus der Ferne sofort erkennbar.
+
 ## v0.9.39
 
 - **Zähltafelbediener (Teil 1: bts-light-Übersicht).** bts-light merkt

@@ -43,9 +43,13 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
   display: flex; align-items: baseline; gap: 1.6vw;
 }
 .band__field {
-  font-size: 4vh; font-weight: 900; color: #fbbf24;
+  /* Feldnummer als hervorgehobenes Badge — aus der Ferne sofort erkennbar:
+     großer Schrift, dunkler Text auf gelbem Block. */
+  font-size: 6vh; font-weight: 900; color: #0b1220;
   line-height: 1; font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  background: #fbbf24; border-radius: 1vh;
+  padding: .3vh 1.4vw;
 }
 .band__disc {
   font-size: 2.6vh; font-weight: 700; color: #94a3b8;

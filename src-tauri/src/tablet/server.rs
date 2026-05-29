@@ -838,6 +838,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     ctx.tablet.set_court_state(c, state);
                                 }
                             }
+                            Ok(TabletMsg::Ping) => {
+                                // Lebenszeichen → sofort Pong zurück, damit das
+                                // Tablet eine tote Verbindung erkennen kann.
+                                send_msg(&mut socket, &ServerMsg::Pong).await;
+                            }
                             Err(_) => {}
                         }
                     }

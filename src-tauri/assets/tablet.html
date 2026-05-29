@@ -722,7 +722,9 @@ const els = {
 // ─────────────────────────────── WebSocket ────────────────────────────
 
 let ws = null;
-let reconnectAttempt = 0;
+// Zeitpunkt des letzten Server-Lebenszeichens (jede WS-Nachricht, inkl.
+// Pong). Der Watchdog erkennt darüber eine tote (stale) Verbindung.
+let lastServerContact = 0;
 
 function connect() {
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + BASE_PATH + '/ws';
@@ -731,7 +733,7 @@ function connect() {
   els.connText.textContent = 'verbinde…';
 
   ws.onopen = () => {
-    reconnectAttempt = 0;
+    lastServerContact = Date.now();
     els.connDot.classList.add('ok');
     els.connText.textContent = 'verbunden';
     tlog('info', 'ws_open');
@@ -754,8 +756,11 @@ function connect() {
     render();
   };
   ws.onmessage = (ev) => {
+    // Jede empfangene Nachricht ist ein Lebenszeichen des Servers.
+    lastServerContact = Date.now();
     let msg;
     try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
+    if (msg.type === 'pong') { return; } // reines Lebenszeichen
     if (msg.type === 'match_assigned') { tlog('info', 'match_assigned', { matchId: msg.match?.matchId }); loadMatch(msg.match); }
     else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearMatch(); }
     else if (msg.type === 'court_occupied') { tlog('info', 'court_occupied'); STATE.occupied = true; render(); }
@@ -773,15 +778,33 @@ function connect() {
     els.connDot.classList.add('bad');
     els.connText.textContent = 'getrennt — neuer Versuch…';
     tlog('warn', 'ws_close', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
-    scheduleReconnect();
+    // KEIN eigener Reconnect-Timer hier — der Watchdog ist der einzige
+    // Reconnect-Treiber (verhindert doppelte Verbindungen).
   };
   ws.onerror = () => { tlog('error', 'ws_error'); };
 }
 
-function scheduleReconnect() {
-  reconnectAttempt++;
-  const delayMs = Math.min(30_000, 1000 * Math.pow(2, Math.min(5, reconnectAttempt - 1)));
-  setTimeout(connect, delayMs);
+// Watchdog: einziger Reconnect-Treiber. Erkennt auch tote (stale)
+// Verbindungen, bei denen der Browser kein `onclose` liefert (Router
+// weg → nur Stille). Alle 5 s:
+//  - Verbindung offen: Ping senden; kam >15 s nichts vom Server zurück,
+//    gilt sie als tot → schließen (readyState wird CLOSED).
+//  - Verbindung zu/fehlt: neu verbinden (CONNECTING/OPEN nicht anfassen,
+//    sonst doppelte Sockets).
+function startConnectionWatchdog() {
+  setInterval(() => {
+    if (!ws || ws.readyState === WebSocket.CLOSED) {
+      connect();
+      return;
+    }
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* tot */ }
+      if (lastServerContact && Date.now() - lastServerContact > 15_000) {
+        tlog('warn', 'ws_stale_close');
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    }
+  }, 5_000);
 }
 
 function sendScoreUpdate() {
@@ -1943,6 +1966,7 @@ document.getElementById('diag-clear').addEventListener('click', () => {
 restorePersistedState();
 render();
 connect();
+startConnectionWatchdog();
 setupBattery();
 // Hing beim letzten Mal noch ein Ergebnis in der Übermittlung? Weiter damit.
 if (STATE.pendingResult) trySubmitPending();

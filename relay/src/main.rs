@@ -821,6 +821,11 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     store_court_state(&broker, &ns, c, state).await;
                                 }
                             }
+                            Ok(TabletMsg::Ping) => {
+                                // Lebenszeichen des Tablets über die Cloud →
+                                // sofort Pong zurück, ohne bts-light zu behelligen.
+                                let _ = tx.send(text(&ServerMsg::Pong));
+                            }
                             Err(_) => {}
                         }
                     }

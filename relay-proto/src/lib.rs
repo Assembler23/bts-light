@@ -542,6 +542,11 @@ pub enum TabletMsg {
     /// ihn vor, damit ein übernehmendes Gerät das laufende Spiel bekommt.
     #[serde(rename = "state_sync")]
     StateSync { state: String },
+    /// Lebenszeichen des Tablets. Der Server antwortet mit [`ServerMsg::Pong`].
+    /// So erkennt das Tablet eine tote (stale) Verbindung, auch wenn der
+    /// Browser kein `onclose` liefert (Router weg → nur Stille).
+    #[serde(rename = "ping")]
+    Ping,
 }
 
 /// Nachrichten vom Server an das Tablet.
@@ -569,6 +574,10 @@ pub enum ServerMsg {
     /// das laufende Spiel fortsetzt statt bei 0:0 zu beginnen.
     #[serde(rename = "state_restore")]
     StateRestore { state: String },
+    /// Antwort auf [`TabletMsg::Ping`] – bestätigt dem Tablet die lebende
+    /// Verbindung.
+    #[serde(rename = "pong")]
+    Pong,
 }
 
 /// Endergebnis-Body, den das Tablet per `POST …/result` schickt.
