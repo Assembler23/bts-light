@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.29
+
+- **KRITISCHER Fix: Punkte landen nach „Match wieder öffnen" nicht mehr
+  beim falschen Gegner.** `snapshot()`/`restoreSnapshot()` im Tablet-
+  Spielzettel speicherten `teamOnSide` (welches Team auf welcher Seite
+  steht) nicht. `swapSides()` (Satzende + Mid-Game-Switch bei 11 im
+  Decider) flippt diese Zuordnung aber. Beim Undo/Wiederöffnen über eine
+  solche Grenze blieb `teamOnSide` auf dem geflippten Stand, während
+  `positions`/`currentSet`/`setsCompleted` zurückgesetzt wurden → die
+  Team↔Seite-Zuordnung war gespiegelt und getippte Punkte gingen an den
+  **falschen Gegner**. Jetzt wird `teamOnSide` (und `intervalDoneThisGame`)
+  mit im Snapshot gesichert und korrekt wiederhergestellt. Alte, in
+  localStorage liegende Snapshots ohne das Feld bleiben lesbar.
+- **Fix: Pausen-Countdown + Match-Uhr auf dem TV stimmen wieder.** Der
+  Court-Monitor (Pi) rechnete Pausen-Restzeit und Spieldauer mit seiner
+  **eigenen** Uhr (`Date.now()`) gegen ein absolutes `endsAt`/`startedAt`
+  vom Tablet. Pi Zero hat keine RTC und oft keine NTP-Synchronisation im
+  Turnier-WLAN → die Uhr driftet, der Countdown war z. B. **+1 Minute**
+  zu hoch (Tablet 1 min → TV 2 min). `MonitorState` trägt jetzt
+  `serverNowMs` (Server-Zeit beim Poll); `monitor.html` rechnet relativ
+  dazu statt zur Pi-Uhr. Fallback auf `Date.now()` bei alten Frames.
+
 ## v0.9.28
 
 - **Kombi-Monitor Code-Review-Fixes (v0.9.27).**

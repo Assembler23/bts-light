@@ -506,6 +506,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         device_code: String::new(),
         unassigned: false,
         redirect_to: None,
+        server_now_ms: now_ms(),
     }
 }
 
@@ -558,6 +559,7 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         device_code: String::new(),
         unassigned: false,
         redirect_to: None,
+        server_now_ms: now_ms(),
     }
 }
 

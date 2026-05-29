@@ -349,6 +349,16 @@ pub struct MonitorState {
         default
     )]
     pub redirect_to: Option<String>,
+    /// Server-Zeit (ms seit Epoch) zum Zeitpunkt des Polls. Der Pausen-
+    /// Countdown im `courtState` trägt ein absolutes `endsAt` (mit der
+    /// Uhr des zählenden Tablets gesetzt). Der TV (Pi) hat aber oft keine
+    /// synchrone Uhr (kein RTC, evtl. kein NTP im Turnier-WLAN) → `endsAt
+    /// - Date.now()` weicht um den Uhren-Drift ab (z. B. +1 min). Mit
+    /// `server_now_ms` rechnet `monitor.html` die Restzeit relativ zur
+    /// Server-Uhr statt zur eigenen → Pi-Drift eliminiert. `default` (0)
+    /// = altes Frame, dann fällt der TV auf `Date.now()` zurück.
+    #[serde(rename = "serverNowMs", default)]
+    pub server_now_ms: u64,
 }
 
 /// Art eines Fernbefehls an einen Court-Monitor.
@@ -904,6 +914,7 @@ mod tests {
             device_code: "4F2A".into(),
             unassigned: false,
             redirect_to: None,
+            server_now_ms: 0,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));

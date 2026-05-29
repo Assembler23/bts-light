@@ -538,7 +538,12 @@
     els.matchClock.textContent = "";
     if (cfg.showMatchClock !== false && cs &&
         typeof cs.startedAt === "number" && cs.startedAt > 0) {
-      var mins = Math.max(0, Math.floor((Date.now() - cs.startedAt) / 60000));
+      // Wie beim Pausen-Countdown: relativ zur Server-Zeit rechnen, damit
+      // die Pi-Uhr (oft nicht synchron) die Spieldauer nicht verfaelscht.
+      var nowClock = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
+        ? state.serverNowMs
+        : Date.now();
+      var mins = Math.max(0, Math.floor((nowClock - cs.startedAt) / 60000));
       els.matchClock.textContent = "⏱ " + mins + " min";
     }
 
@@ -647,7 +652,15 @@
     els.timerLabel.textContent = PAUSE_LABEL[pause.kind] || "Pause";
     var text;
     if (typeof pause.endsAt === "number") {
-      var secs = Math.max(0, Math.round((pause.endsAt - Date.now()) / 1000));
+      // `endsAt` ist mit der Uhr des zaehlenden Tablets gesetzt. Der Pi
+      // (TV) hat oft keine synchrone Uhr → `Date.now()` weicht ab und der
+      // Countdown ist um den Drift verschoben (z.B. +1 min). Wir rechnen
+      // daher relativ zur Server-Zeit aus dem Poll (state.serverNowMs),
+      // sofern vorhanden — sonst Fallback auf die lokale Uhr.
+      var nowMs = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
+        ? state.serverNowMs
+        : Date.now();
+      var secs = Math.max(0, Math.round((pause.endsAt - nowMs) / 1000));
       var mm = Math.floor(secs / 60);
       var ss = secs % 60;
       text = mm + ":" + (ss < 10 ? "0" + ss : ss);

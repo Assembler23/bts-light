@@ -1239,9 +1239,18 @@ function snapshot() {
       left: { ...STATE.positions.left },
       right: { ...STATE.positions.right },
     } : null,
+    // teamOnSide MUSS in den Snapshot: swapSides() (Satzende +
+    // Mid-Game-Switch) flippt es. Fehlt es hier, bleibt nach undo/reopen
+    // über eine Seitenwechsel-Grenze die Team↔Seite-Zuordnung gespiegelt
+    // zu positions/currentSet → Punkte landen beim FALSCHEN Gegner
+    // (kritischer Bugfix). Deep-Copy, damit der Snapshot stabil ist.
+    teamOnSide: STATE.teamOnSide ? { ...STATE.teamOnSide } : null,
     servingSide: STATE.servingSide,
     finished: STATE.finished,
     midGameSwitchDone: STATE.midGameSwitchDone,
+    // Damit das 11-Punkte-Intervall nach undo nicht doppelt/gar nicht
+    // triggert, das Flag ebenfalls sichern.
+    intervalDoneThisGame: STATE.intervalDoneThisGame,
   };
 }
 
@@ -1252,10 +1261,19 @@ function restoreSnapshot(snap) {
     left: { ...snap.positions.left },
     right: { ...snap.positions.right },
   } : null;
+  // teamOnSide wiederherstellen — Gegenstück zum Snapshot oben. Nur
+  // überschreiben, wenn der Snapshot es trägt (Abwärtskompatibilität mit
+  // alten, in localStorage liegenden Snapshots ohne dieses Feld).
+  if (snap.teamOnSide !== undefined) {
+    STATE.teamOnSide = snap.teamOnSide ? { ...snap.teamOnSide } : null;
+  }
   STATE.servingSide = snap.servingSide;
   STATE.finished = snap.finished;
   if (typeof snap.midGameSwitchDone === 'boolean') {
     STATE.midGameSwitchDone = snap.midGameSwitchDone;
+  }
+  if (typeof snap.intervalDoneThisGame === 'boolean') {
+    STATE.intervalDoneThisGame = snap.intervalDoneThisGame;
   }
 }
 

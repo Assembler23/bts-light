@@ -17,6 +17,16 @@ use crate::btp::model::BtpPlayer;
 use crate::config::CourtMonitorConfig;
 use crate::tablet::state::MonitorCourt;
 
+/// Server-Zeit in Millisekunden seit Epoch. Wird in den `MonitorState`
+/// gelegt (`server_now_ms`), damit der TV den Pausen-Countdown relativ
+/// zur Server-Uhr rechnet statt zur eigenen (oft driftenden) Pi-Uhr.
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Unterverzeichnis im App-Datenverzeichnis für die Werbebilder.
 pub const AD_DIR_NAME: &str = "court-ads";
 
@@ -149,6 +159,7 @@ pub fn build_monitor_state(
         device_code: String::new(),
         unassigned: false,
         redirect_to: None,
+        server_now_ms: now_ms(),
     }
 }
 
@@ -262,6 +273,7 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         device_code: device_code(device_id),
         unassigned: true,
         redirect_to: None,
+        server_now_ms: now_ms(),
     }
 }
 
