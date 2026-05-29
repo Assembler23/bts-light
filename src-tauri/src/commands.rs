@@ -106,6 +106,14 @@ fn monitor_ad_dir(app: &AppHandle) -> std::path::PathBuf {
         .join(crate::tablet::monitor::AD_DIR_NAME)
 }
 
+/// Pfad zur Datei mit den Werbebild-Labels (Dateiname → Anzeigename).
+fn monitor_ad_labels_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join(crate::tablet::monitor::AD_LABELS_FILE)
+}
+
 /// Pfad zur Datei mit den Monitor-Feld-Zuweisungen (Gerät → Feld).
 fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
@@ -319,6 +327,15 @@ pub fn stop_sync(state: State<'_, AppState>) {
         let _ = daemon.shutdown();
     }
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
+}
+
+/// Ein Werbebild mit optionalem Anzeige-Label. `label` ist leer, wenn
+/// der Operator dem Bild noch keinen Namen gegeben hat – die UI
+/// rendert dann den Dateinamen als Fallback.
+#[derive(Serialize)]
+pub struct CourtAd {
+    pub file: String,
+    pub label: String,
 }
 
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
@@ -741,7 +758,9 @@ pub fn add_court_ad(app: AppHandle, path: String) -> Result<String, String> {
     Ok(name)
 }
 
-/// Entfernt ein Werbebild aus dem `court-ads`-Verzeichnis.
+/// Entfernt ein Werbebild aus dem `court-ads`-Verzeichnis. Räumt ein
+/// eventuell hinterlegtes Label automatisch mit auf, damit die
+/// Labels-Datei nicht über die Zeit mit Karteileichen wächst.
 #[tauri::command]
 pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
     if !crate::tablet::monitor::is_safe_image_name(&file) {
@@ -749,14 +768,53 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
     }
     std::fs::remove_file(monitor_ad_dir(&app).join(&file))
         .map_err(|e| format!("Löschen fehlgeschlagen: {e}"))?;
+    let labels_path = monitor_ad_labels_path(&app);
+    let mut labels = crate::tablet::monitor::read_ad_labels(&labels_path);
+    if labels.remove(&file).is_some() {
+        let _ = crate::tablet::monitor::write_ad_labels(&labels_path, &labels);
+    }
     tracing::info!("Court-Monitor: Werbebild '{file}' entfernt");
     Ok(())
 }
 
-/// Listet die aktuell hinterlegten Werbebild-Dateinamen.
+/// Listet die aktuell hinterlegten Werbebilder mit ihrem optionalen
+/// Anzeigenamen. Eintraege ohne hinterlegtes Label tragen ein leeres
+/// `label` – die UI faellt dann auf den Dateinamen zurueck.
 #[tauri::command]
-pub fn list_court_ads(app: AppHandle) -> Vec<String> {
-    crate::tablet::monitor::list_ads(&monitor_ad_dir(&app))
+pub fn list_court_ads(app: AppHandle) -> Vec<CourtAd> {
+    let files = crate::tablet::monitor::list_ads(&monitor_ad_dir(&app));
+    let labels = crate::tablet::monitor::read_ad_labels(&monitor_ad_labels_path(&app));
+    files
+        .into_iter()
+        .map(|file| CourtAd {
+            label: labels.get(&file).cloned().unwrap_or_default(),
+            file,
+        })
+        .collect()
+}
+
+/// Setzt oder löscht das Anzeige-Label eines Werbebilds. Ein leerer
+/// `label`-String entfernt den Eintrag aus der Labels-Datei.
+#[tauri::command]
+pub fn set_court_ad_label(app: AppHandle, file: String, label: String) -> Result<(), String> {
+    if !crate::tablet::monitor::is_safe_image_name(&file) {
+        return Err("Ungültiger Dateiname.".to_string());
+    }
+    // Label-Länge begrenzen — die UI rendert das in einem Dropdown,
+    // ueberlanger Text wuerde nur stoeren. 80 Zeichen sind reichlich.
+    let label = label.trim();
+    if label.chars().count() > 80 {
+        return Err("Anzeigename ist zu lang (max. 80 Zeichen).".to_string());
+    }
+    let labels_path = monitor_ad_labels_path(&app);
+    let mut labels = crate::tablet::monitor::read_ad_labels(&labels_path);
+    if label.is_empty() {
+        labels.remove(&file);
+    } else {
+        labels.insert(file.clone(), label.to_string());
+    }
+    crate::tablet::monitor::write_ad_labels(&labels_path, &labels)
+        .map_err(|e| format!("Labels speichern fehlgeschlagen: {e}"))
 }
 
 // ───────────────────────────── Court-Monitor-Geräte ───────────────────────

@@ -18,6 +18,7 @@ import {
   addCourtAd,
   listCourtAds,
   removeCourtAd,
+  setCourtAdLabel,
   saveConfig,
   startSync,
   stopSync,
@@ -27,7 +28,12 @@ import { MonitorPreview } from "../components/MonitorPreview";
 import { playTestAnnouncement } from "../io/announcer";
 import { PRESETS, findPreset } from "../presets";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
-import type { AnnounceLanguageMode, AppConfig, ConnectionMode } from "../types";
+import type {
+  AnnounceLanguageMode,
+  AppConfig,
+  ConnectionMode,
+  CourtAd,
+} from "../types";
 
 interface Props {
   initialConfig: AppConfig;
@@ -216,7 +222,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
   const [cmAds, setCmAds] = useState(cm.show_ads);
   const [cmLayout, setCmLayout] = useState(cm.layout || "split");
-  const [ads, setAds] = useState<string[]>([]);
+  const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
   const voices = useAvailableVoices();
   const [test, setTest] = useState<TestState>({ kind: "idle" });
@@ -646,16 +652,35 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
               </p>
               {ads.length > 0 && (
                 <ul className="flex flex-col gap-1">
-                  {ads.map((file, i) => (
+                  {ads.map((ad, i) => (
                     <li
-                      key={file}
+                      key={ad.file}
                       className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                     >
-                      <span className="flex-1 truncate text-slate-600">
-                        Werbebild {i + 1}
-                      </span>
+                      <input
+                        type="text"
+                        value={ad.label}
+                        placeholder={`Werbebild ${i + 1}`}
+                        maxLength={80}
+                        onChange={(e) => {
+                          // Optimistisch lokal anwenden, damit der Operator
+                          // beim Tippen direkt sieht; auf Blur persistieren.
+                          const v = e.currentTarget.value;
+                          setAds((prev) =>
+                            prev.map((a) =>
+                              a.file === ad.file ? { ...a, label: v } : a,
+                            ),
+                          );
+                        }}
+                        onBlur={(e) => {
+                          void setCourtAdLabel(ad.file, e.currentTarget.value.trim());
+                        }}
+                        className="flex-1 min-w-0 rounded border border-transparent bg-transparent
+                                   px-1.5 py-0.5 text-sm text-slate-700 placeholder:text-slate-400
+                                   focus:border-slate-300 focus:bg-white focus:outline-none"
+                      />
                       <button
-                        onClick={() => void deleteAd(file)}
+                        onClick={() => void deleteAd(ad.file)}
                         title="Werbebild entfernen"
                         className="rounded p-1 text-slate-400 transition-colors
                                    hover:bg-rose-50 hover:text-rose-600"

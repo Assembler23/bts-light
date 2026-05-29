@@ -18,6 +18,7 @@ import {
   tabletOverview,
 } from "../api";
 import type {
+  CourtAd,
   CourtOverview,
   MonitorDeviceInfo,
   MonitorTarget,
@@ -72,7 +73,7 @@ export function CourtMonitorPanel({ onBack }: Props) {
   // wie die Geraeteliste, damit das Dropdown sich live aktualisiert,
   // wenn der Operator parallel in den Einstellungen ein Bild
   // hinzufuegt oder entfernt.
-  const [ads, setAds] = useState<string[]>([]);
+  const [ads, setAds] = useState<CourtAd[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -250,7 +251,7 @@ function DeviceRow({
 }: {
   device: MonitorDeviceInfo;
   courts: CourtOverview[];
-  ads: string[];
+  ads: CourtAd[];
   onAssign: (target: MonitorTarget | null) => void;
   onIdentify: () => void;
   onReload: () => void;
@@ -364,20 +365,28 @@ function DeviceRow({
                 Rotierend ({ads.length}{" "}
                 {ads.length === 1 ? "Bild" : "Bilder"})
               </option>
-              {ads.map((file) => (
-                <option key={file} value={`ad_single:${file}`}>
-                  {file}
+              {ads.map((ad) => (
+                <option key={ad.file} value={`ad_single:${ad.file}`}>
+                  {ad.label || ad.file}
                 </option>
               ))}
               {/* Falls die gerade zugewiesene Datei nicht (mehr) im Pool
                   steckt, dennoch als Option aufnehmen — sonst rutschte die
                   Auswahl unsichtbar aus dem Dropdown. */}
-              {device.target?.kind === "ad_single" &&
-                !ads.includes(device.target.file) && (
-                  <option
-                    value={`ad_single:${device.target.file}`}
-                  >{`${device.target.file} (nicht mehr im Pool)`}</option>
-                )}
+              {(() => {
+                const t = device.target;
+                if (
+                  t?.kind === "ad_single" &&
+                  !ads.some((a) => a.file === t.file)
+                ) {
+                  return (
+                    <option
+                      value={`ad_single:${t.file}`}
+                    >{`${t.file} (nicht mehr im Pool)`}</option>
+                  );
+                }
+                return null;
+              })()}
             </>
           )}
         </optgroup>

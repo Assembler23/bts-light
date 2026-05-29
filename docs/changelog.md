@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.25
+
+- **Werbebilder mit Anzeigenamen.** In den Einstellungen → Werbebilder
+  hat jedes Bild jetzt ein freies Textfeld für seinen Anzeigenamen
+  (z. B. „Sommerfest 2026", „Sponsor Hauptbruecke"). Der Name wird in
+  einer separaten JSON-Datei (`court-ad-labels.json`) persistiert und
+  taucht in der „Werbung"-Sektion des Court-Monitor-Dropdowns statt
+  des kryptischen `ad-1234567890.jpg` auf. Bilder ohne Label fallen
+  auf den Dateinamen zurück. Beim Löschen eines Bilds wird der
+  zugehörige Label-Eintrag mit aufgeräumt.
+- **Tauri-Command `list_court_ads` ändert Rückgabetyp** von `Vec<String>`
+  auf `Vec<CourtAd>` (`{file, label}`). Frontend nutzt jetzt `CourtAd[]`
+  überall. Neuer Command `set_court_ad_label` zum Speichern.
+- **MonitorTarget bleibt referenziert über `file`** (nicht Label) — eine
+  Umbenennung in der UI bricht keine bestehenden Pi-Zuweisungen.
+
 ## v0.9.24
 
 - **Default-Anzeige (Logo) übernimmt das App-Header-Design.** Statt des

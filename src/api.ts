@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  CourtAd,
   MonitorDeviceInfo,
   MonitorTarget,
   PreparationView,
@@ -86,8 +87,13 @@ export const addCourtAd = (path: string): Promise<string> =>
 export const removeCourtAd = (file: string): Promise<void> =>
   invoke("remove_court_ad", { file });
 
-/** Listet die hinterlegten Court-Monitor-Werbebilder. */
-export const listCourtAds = (): Promise<string[]> => invoke("list_court_ads");
+/** Listet die hinterlegten Court-Monitor-Werbebilder samt optionalem
+ *  Anzeige-Label. Ein leeres Label bedeutet "noch kein Name vergeben". */
+export const listCourtAds = (): Promise<CourtAd[]> => invoke("list_court_ads");
+
+/** Setzt (oder löscht bei leerem Label) den Anzeigenamen eines Werbebilds. */
+export const setCourtAdLabel = (file: string, label: string): Promise<void> =>
+  invoke("set_court_ad_label", { file, label });
 
 /** Liefert die Court-Monitor-Geräte für die Verwaltungsseite. */
 export const monitorDevices = (): Promise<MonitorDeviceInfo[]> =>

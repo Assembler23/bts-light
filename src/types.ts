@@ -59,6 +59,14 @@ export interface CourtMonitorConfig {
   layout: string;
 }
 
+/** Ein Werbebild mit optionalem Anzeige-Label (Rust: commands::CourtAd).
+ *  `label === ""` bedeutet "noch kein Anzeigename gesetzt" – die UI
+ *  rendert dann den Dateinamen als Fallback. */
+export interface CourtAd {
+  file: string;
+  label: string;
+}
+
 /** Was ein Court-Monitor-Gerät anzeigen soll – Feld, Info-Anzeige oder
  *  Werbung (Rust: relay_proto::MonitorTarget). */
 export type MonitorTarget =

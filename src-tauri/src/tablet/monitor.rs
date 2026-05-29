@@ -76,6 +76,32 @@ pub fn list_ads(dir: &Path) -> Vec<String> {
     names
 }
 
+/// Dateiname der Werbebild-Label-Persistenz (im selben App-Config-
+/// Verzeichnis wie [`MONITOR_ASSIGN_FILE`]). Mapping: Dateiname →
+/// Anzeigename. Fehlende Eintraege bedeuten "kein Label gesetzt" und
+/// werden in der UI als Dateiname dargestellt.
+pub const AD_LABELS_FILE: &str = "court-ad-labels.json";
+
+/// Liest die Werbebild-Labels aus der JSON-Datei. Fehlende oder
+/// kaputte Datei → leere Map (kein Fehler – Labels sind rein optional).
+pub fn read_ad_labels(path: &Path) -> HashMap<String, String> {
+    let Ok(j) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    serde_json::from_str(&j).unwrap_or_default()
+}
+
+/// Schreibt die Werbebild-Labels in die JSON-Datei. Leere Werte werden
+/// nicht persistiert (kein Punkt, "" zu speichern).
+pub fn write_ad_labels(path: &Path, labels: &HashMap<String, String>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let cleaned: HashMap<&String, &String> = labels.iter().filter(|(_, v)| !v.is_empty()).collect();
+    let json = serde_json::to_string_pretty(&cleaned).unwrap_or_else(|_| "{}".to_string());
+    std::fs::write(path, json)
+}
+
 /// Übersetzt die persistierte [`CourtMonitorConfig`] in die Wire-Form.
 pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
     MonitorConfig {
