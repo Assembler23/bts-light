@@ -735,7 +735,7 @@ pub(crate) async fn write_result_to_btp(
 
 /// Baut die Match-Kurzinfo fürs Tablet. BTP liefert das Spielsystem nicht
 /// zuverlässig – Standard ist Best-of-3 bis 21 (Badminton-Normalfall).
-pub(crate) fn match_brief(m: &BtpMatch) -> MatchBrief {
+pub(crate) fn match_brief(m: &BtpMatch, scorekeeper: Vec<String>) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
             .iter()
@@ -758,6 +758,7 @@ pub(crate) fn match_brief(m: &BtpMatch) -> MatchBrief {
         target_score: 21,
         discipline: m.discipline.as_str().to_string(),
         match_number: m.match_num,
+        scorekeeper,
     }
 }
 
@@ -924,7 +925,7 @@ async fn push_match(
         Some(m) => {
             tracing::info!("Feld {court_id}: Match {} ans Tablet zugewiesen", m.id);
             ServerMsg::MatchAssigned {
-                match_brief: match_brief(m),
+                match_brief: match_brief(m, ctx.tablet.scorekeeper(court_id)),
             }
         }
         None => {

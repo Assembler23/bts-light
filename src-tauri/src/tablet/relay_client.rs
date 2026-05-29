@@ -342,7 +342,7 @@ fn push_court(
             HostFrame::MatchAssigned {
                 court_id,
                 court_label,
-                match_brief: match_brief(&m),
+                match_brief: match_brief(&m, ctx.tablet.scorekeeper(court_id)),
             }
         }
         None => {

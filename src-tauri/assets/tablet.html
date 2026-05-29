@@ -261,6 +261,17 @@
       margin-top: .25rem; padding: .7rem 1.8rem;
       font-size: 1rem; font-weight: 600;
     }
+    /* Hinweis Zähltafelbediener (Verlierer Vorspiel) im Setup-Modal. */
+    .modal .sk-hint {
+      flex: 0 0 auto; align-self: center; max-width: 90%;
+      margin: .1rem 0 .4rem; padding: .6rem 1rem;
+      background: rgba(251, 191, 36, .12);
+      border: 1px solid rgba(251, 191, 36, .45); border-radius: .6rem;
+      font-size: 1rem; line-height: 1.35; text-align: center; color: #fde68a;
+    }
+    .modal .sk-hint[hidden] { display: none; }
+    .modal .sk-hint .sk-names { font-weight: 700; color: #fff; }
+    .modal .sk-hint .sk-label { opacity: .85; }
 
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
@@ -446,6 +457,8 @@
 <div class="modal" id="setup-modal">
   <div class="title" id="setup-title">Wer schlägt zuerst auf?</div>
   <div class="subtitle" id="setup-subtitle"></div>
+  <!-- Hinweis Zähltafelbediener: Verlierer des Vorspiels auf diesem Feld. -->
+  <div class="sk-hint" id="setup-scorekeeper" hidden></div>
   <div class="options" id="setup-options"></div>
   <button type="button" class="setup-back" id="setup-back">← Zurück · Back</button>
 </div>
@@ -689,6 +702,7 @@ const els = {
   setupTitle: document.getElementById('setup-title'),
   setupSubtitle: document.getElementById('setup-subtitle'),
   setupOptions: document.getElementById('setup-options'),
+  setupScorekeeper: document.getElementById('setup-scorekeeper'),
   setupBack: document.getElementById('setup-back'),
   finishedOverlay: document.getElementById('finished-overlay'),
   winnerBanner: document.getElementById('winner-banner'),
@@ -1683,6 +1697,9 @@ function renderSetupModal() {
   els.setupModal.classList.add('visible');
   // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten.
   els.setupBack.style.display = STATE.setup === 'choose-side' ? 'none' : '';
+  // Hinweis Zähltafelbediener nur im ersten Schritt (Seitenwahl), wenn ein
+  // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
+  renderScorekeeperHint(STATE.setup === 'choose-side');
   if (STATE.setup === 'choose-side') {
     setSetupText(
       'Welches Team steht links?', 'Which team is on the left?',
@@ -1730,6 +1747,24 @@ function renderSetupModal() {
       node.addEventListener('click', () => chooseReceiver(otherTeam[i], otherTeamKey));
     });
   }
+}
+
+// Zeigt im Setup-Modal an, wer voraussichtlich die Zähltafel bedient: das
+// Verlierer-Team des zuletzt auf diesem Feld beendeten Spiels (kommt als
+// `scorekeeper` im MatchBrief vom Server). `show=false` oder keine Namen →
+// ausgeblendet. Zweisprachig wie das übrige Modal.
+function renderScorekeeperHint(show) {
+  const names = (STATE.match && Array.isArray(STATE.match.scorekeeper))
+    ? STATE.match.scorekeeper : [];
+  if (!show || names.length === 0) {
+    els.setupScorekeeper.hidden = true;
+    return;
+  }
+  const joined = names.map(escapeHtml).join(' / ');
+  els.setupScorekeeper.innerHTML =
+    `🧮 <span class="sk-label">Zähltafel / Scoreboard:</span> ` +
+    `<span class="sk-names">${joined}</span>`;
+  els.setupScorekeeper.hidden = false;
 }
 
 function renderPartnerHint(teamKey, playerId) {

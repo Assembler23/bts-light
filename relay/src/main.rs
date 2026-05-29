@@ -1235,6 +1235,7 @@ mod tests {
             target_score: 21,
             discipline: "mens_singles".into(),
             match_number: Some(14),
+            scorekeeper: Vec::new(),
         }
     }
 

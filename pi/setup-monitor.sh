@@ -142,7 +142,8 @@ exec "$BROWSER" --no-memcheck \\
   --kiosk --incognito --noerrdialogs --disable-infobars \\
   --disable-session-crashed-bubble --no-first-run \\
   --check-for-update-interval=31536000 \\
-  --disable-features=Translate --disable-translate \\
+  --disable-features=Translate,TranslateUI --disable-translate \\
+  --lang=de-DE --accept-lang=de-DE,de \\
   "\$TARGET"
 EOF
 chmod +x "$HOME/.local/bin/bts-monitor.sh"

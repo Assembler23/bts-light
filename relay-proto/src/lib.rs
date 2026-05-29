@@ -69,6 +69,12 @@ pub struct MatchBrief {
     /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Monitor-Fußzeile.
     #[serde(rename = "matchNumber", default)]
     pub match_number: Option<i64>,
+    /// Voraussichtlicher Zähltafelbediener fürs nächste Spiel: die Namen des
+    /// Verlierer-Teams des zuletzt auf diesem Feld beendeten Spiels. Wird dem
+    /// Tablet bei der Seitenwahl als Hinweis angezeigt. Leer, wenn es kein
+    /// Vorspiel auf dem Feld gab. `#[serde(default)]` hält ältere Frames lesbar.
+    #[serde(default)]
+    pub scorekeeper: Vec<String>,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -831,6 +837,7 @@ mod tests {
                 target_score: 21,
                 discipline: "mens_singles".into(),
                 match_number: Some(14),
+                scorekeeper: vec!["Cara / Dora".into()],
             },
         };
         let json = serde_json::to_string(&msg).unwrap();

@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.44
+
+- **Zähltafelbediener-Hinweis auf dem Tablet-Spielzettel (Teil 2).** Bei der
+  Seitenwahl zeigt das Tablet jetzt direkt, wer voraussichtlich die Zähltafel
+  bedient: das Verlierer-Team des zuletzt auf diesem Feld beendeten Spiels
+  („🧮 Zähltafel / Scoreboard: …"). `MatchBrief` trägt dafür ein neues Feld
+  `scorekeeper` (vom Server aus `TabletState::scorekeeper`, LAN + Cloud),
+  `#[serde(default)]` für Abwärtskompatibilität. Ergänzt Teil 1 (Übersicht in
+  bts-light, v0.9.39). Kein Vorspiel auf dem Feld → kein Hinweis.
+- **Pi-Court-Monitore: „German / English"-Übersetzungs-Pille unterdrückt.**
+  Der Chromium-Kiosk läuft jetzt mit `--lang=de-DE`/`--accept-lang` und
+  `--disable-features=Translate,TranslateUI` – Seite (deutsch) und UI-Sprache
+  stimmen überein, sodass Chromium keinen Übersetzen-Hinweis mehr oben rechts
+  einblendet. Wirkt nach erneutem `setup-monitor.sh` + Pi-Neustart.
+
 ## v0.9.43
 
 - **TV-Anzeige verliert nach einem Netzausfall nicht mehr den Spielstand.**
