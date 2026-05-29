@@ -122,6 +122,16 @@ fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
         .join(crate::tablet::monitor::MONITOR_ASSIGN_FILE)
 }
 
+/// Pfad zur Datei mit dem laufenden Live-Satzstand je Feld. Übersteht einen
+/// App-Neustart, damit der TV nach einem Absturz/Neustart nicht auf BTPs
+/// 0:0 zurückfällt, bis das Tablet wieder verbunden ist.
+fn tablet_scores_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("live-scores.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -179,6 +189,16 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let mode = config.connection_mode;
 
     let tablet = state.tablet.clone();
+
+    // Live-Stände vom letzten Lauf wiederherstellen, BEVOR der erste Sync
+    // läuft – sonst pusht run_once kurzzeitig BTPs 0:0. Danach jede
+    // Score-Änderung dauerhaft sichern.
+    let scores_path = tablet_scores_path(&app);
+    if let Some(parent) = scores_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    tablet.load_scores(&scores_path);
+    tablet.set_scores_path(scores_path);
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();

@@ -785,11 +785,27 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     let mut superseded = false;
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Zeitpunkt der letzten empfangenen Nachricht (jede Art, inkl. App-Ping
+    // und Protokoll-Pong). Bricht der Router weg, liefert der Browser oft
+    // KEIN Close – die TCP-Verbindung bleibt serverseitig minutenlang als
+    // „offen" hängen und hält das Feld belegt, sodass das zurückkehrende
+    // Tablet beim Reconnect „belegt" zu hören bekommt. Erkennt der Server
+    // nach STALE_AFTER kein Lebenszeichen mehr, schließt er die Verbindung
+    // selbst → das Feld wird frei und kann sofort neu belegt werden.
+    let mut last_seen = std::time::Instant::now();
+    // Bewusst großzügiger als der Tablet-Watchdog (15 s): Das Tablet schließt
+    // sich bei Stille selbst und meldet sich neu an. Der Server soll NICHT
+    // gleichzeitig schließen (sonst beidseitiger Doppel-Close unter Last) –
+    // er räumt nur die wirklich toten Leichen weg, die kein Close geschickt
+    // haben (Router weg). 30 s gibt genug Luft, hält das Feld aber nicht
+    // minutenlang belegt.
+    const STALE_AFTER: Duration = Duration::from_secs(30);
 
     loop {
         tokio::select! {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
+                last_seen = std::time::Instant::now();
                 match msg {
                     Message::Text(text) => {
                         match serde_json::from_str::<TabletMsg>(text.as_str()) {
@@ -851,6 +867,21 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 }
             }
             _ = ticker.tick() => {
+                // Tote Verbindung (Router weg, kein Close vom Browser) erkennen
+                // und schließen, damit das Feld nicht dauerhaft belegt bleibt.
+                if last_seen.elapsed() > STALE_AFTER {
+                    tracing::info!(
+                        "Tablet-Verbindung still seit >{}s – schließe (Feld {court:?})",
+                        STALE_AFTER.as_secs()
+                    );
+                    break;
+                }
+                // Protokoll-Ping: hält die Leitung wach und lässt auch ältere
+                // Tablets (ohne App-Ping) durch ihr Pong als „lebend" gelten;
+                // schlägt das Senden fehl, ist die Verbindung tot → Schluss.
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
                 if let (Some(c), Some(token)) = (court, my_token) {
                     if ctx.tablet.is_court_active(c, token) {
                         push_match(c, &ctx, &mut socket, &mut last_match).await;

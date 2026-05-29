@@ -5,10 +5,11 @@
 //! sich ein `Arc<TabletState>`.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use relay_proto::{MonitorCommand, MonitorCommandKind, MonitorDeviceInfo};
 
@@ -191,6 +192,22 @@ pub struct TabletState {
     /// Spiel). Vom Sync-Loop beim Übergang OnCourt→Finished gepflegt, weil
     /// BTP beendete Spiele nicht zuverlässig dem Feld zugeordnet behält.
     scorekeeper_by_court: RwLock<HashMap<i64, Vec<String>>>,
+    /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
+    /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
+    /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
+    /// fiele der TV auf BTPs 0:0 zurück). `None` = Persistenz aus.
+    scores_path: RwLock<Option<PathBuf>>,
+    /// Serialisiert die Schreibvorgänge auf `live-scores.json` – mehrere
+    /// Felder können (LAN, mehrere WS-Handler) gleichzeitig zählen; ohne das
+    /// Lock könnten sich die Schreiber gegenseitig die Datei abschneiden.
+    scores_persist_lock: Mutex<()>,
+}
+
+/// Auf Platte gesicherter Live-Stand eines Felds (für den App-Neustart).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedScore {
+    match_id: i64,
+    sets: Vec<(i64, i64)>,
 }
 
 impl TabletState {
@@ -322,17 +339,88 @@ impl TabletState {
 
     /// Satzstand vom Tablet übernehmen.
     pub fn record_score(&self, court_id: i64, match_id: i64, sets: Vec<(i64, i64)>) {
+        {
+            let mut courts = self.courts.write().unwrap();
+            let session = courts.entry(court_id).or_insert(CourtSession {
+                match_id,
+                sets: Vec::new(),
+                connected: true,
+                battery: None,
+                injury: false,
+                official: false,
+            });
+            session.match_id = match_id;
+            session.sets = sets;
+        }
+        // Stand auf Platte sichern, damit ein App-Neustart ihn behält.
+        self.persist_scores();
+    }
+
+    /// Pfad der Live-Score-Datei setzen (beim Start). Aktiviert die Persistenz.
+    pub fn set_scores_path(&self, path: PathBuf) {
+        *self.scores_path.write().unwrap() = Some(path);
+    }
+
+    /// Live-Stände beim Start aus der Datei laden. Die wiederhergestellten
+    /// Sessions sind `connected: false` (kein Tablet-WebSocket offen) – der
+    /// Stand wird trotzdem angezeigt/gepusht (siehe `apply_tablet_scores`),
+    /// bis das Tablet zurückkehrt oder das Match wechselt.
+    pub fn load_scores(&self, path: &Path) {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return; // keine Datei (erster Start) → nichts zu tun
+        };
+        let Ok(data) = serde_json::from_str::<HashMap<i64, PersistedScore>>(&text) else {
+            tracing::warn!("live-scores.json unlesbar – ignoriere");
+            return;
+        };
         let mut courts = self.courts.write().unwrap();
-        let session = courts.entry(court_id).or_insert(CourtSession {
-            match_id,
-            sets: Vec::new(),
-            connected: true,
-            battery: None,
-            injury: false,
-            official: false,
-        });
-        session.match_id = match_id;
-        session.sets = sets;
+        for (court_id, ps) in data {
+            courts.entry(court_id).or_insert(CourtSession {
+                match_id: ps.match_id,
+                sets: ps.sets,
+                connected: false,
+                battery: None,
+                injury: false,
+                official: false,
+            });
+        }
+    }
+
+    /// Aktuellen Live-Stand aller Felder in die Datei schreiben (best effort:
+    /// Schreibfehler dürfen das Zählen nie stören). No-op, wenn kein Pfad
+    /// gesetzt ist (z. B. in Tests).
+    fn persist_scores(&self) {
+        let Some(path) = self.scores_path.read().unwrap().clone() else {
+            return;
+        };
+        // Schreiber serialisieren: verhindert, dass zwei gleichzeitige
+        // record_score den Temp-Pfad oder die Zieldatei gegenseitig zerlegen.
+        let _guard = self.scores_persist_lock.lock().unwrap();
+        let data: HashMap<i64, PersistedScore> = {
+            let courts = self.courts.read().unwrap();
+            courts
+                .iter()
+                .filter(|(_, s)| !s.sets.is_empty())
+                .map(|(c, s)| {
+                    (
+                        *c,
+                        PersistedScore {
+                            match_id: s.match_id,
+                            sets: s.sets.clone(),
+                        },
+                    )
+                })
+                .collect()
+        };
+        if let Ok(json) = serde_json::to_string(&data) {
+            // Atomar schreiben: erst in eine Temp-Datei, dann umbenennen –
+            // so liegt nie eine halb geschriebene live-scores.json vor (ein
+            // Absturz mitten im Schreiben würde sie sonst korrumpieren).
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
     }
 
     /// Akkustand des Tablets an einem Feld übernehmen.
@@ -405,6 +493,8 @@ impl TabletState {
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
     pub fn clear_court(&self, court_id: i64) {
         self.courts.write().unwrap().remove(&court_id);
+        // Entfernten Stand auch aus der Datei nehmen.
+        self.persist_scores();
     }
 
     /// Hinterlegt einen Walkover-Vorschlag. Je EntryID gibt es höchstens
@@ -539,8 +629,13 @@ impl TabletState {
 
     /// Überschreibt im Snapshot die Sätze jedes tablet-getriebenen Matches
     /// mit dem Tablet-Stand. So pusht die Liveticker-Pipeline den
-    /// Tablet-Score statt BTPs veraltetem Poll-Wert. Greift nur, wenn die
-    /// Session zum selben Match gehört (Schutz gegen Match-Wechsel).
+    /// Tablet-Score statt BTPs veraltetem Poll-Wert. Greift, sobald eine
+    /// Session zum selben Match einen Stand hat – BEWUSST OHNE
+    /// `connected`-Prüfung: Ein kurzer WebSocket-Aussetzer (Router weg,
+    /// Display gesperrt) oder ein App-Neustart (Stand aus `live-scores.json`
+    /// wiederhergestellt, Tablet noch nicht zurück) darf den Liveticker
+    /// nicht auf BTPs 0:0 zurückwerfen. `match_id == m.id` schützt gegen
+    /// Match-Wechsel, `!is_empty()` gegen das Überschreiben mit Leerstand.
     pub fn apply_tablet_scores(&self, snapshot: &mut BtpSnapshot) {
         let courts = self.courts.read().unwrap();
         for m in &mut snapshot.matches {
@@ -548,7 +643,7 @@ impl TabletState {
                 continue;
             };
             if let Some(session) = courts.get(&court_id) {
-                if session.connected && session.match_id == m.id {
+                if session.match_id == m.id && !session.sets.is_empty() {
                     m.sets = session.sets.clone();
                 }
             }
@@ -572,9 +667,15 @@ impl TabletState {
                     .find(|m| m.status == MatchStatus::OnCourt && m.court_id == Some(court.id));
                 let session = courts.get(&court.id);
                 let tablet_connected = session.map(|s| s.connected).unwrap_or(false);
-                // Satzstand vom Tablet, falls aktiv und auf dasselbe Match.
+                // Satzstand vom Tablet, sobald dessen Session zum selben Match
+                // einen Stand hat – BEWUSST OHNE `connected`-Prüfung (wie
+                // `monitor_court`/`apply_tablet_scores`): ein kurzer Aussetzer
+                // oder ein App-Neustart darf die Übersicht nicht auf BTPs 0:0
+                // zurückwerfen. `tablet_connected` bleibt rein der Online-Indikator.
                 let sets = match (session, m) {
-                    (Some(s), Some(mm)) if s.connected && s.match_id == mm.id => s.sets.clone(),
+                    (Some(s), Some(mm)) if s.match_id == mm.id && !s.sets.is_empty() => {
+                        s.sets.clone()
+                    }
                     (_, Some(mm)) => mm.sets.clone(),
                     _ => Vec::new(),
                 };
@@ -1031,6 +1132,66 @@ mod tests {
         assert_eq!(st.monitor_court(101).sets, vec![(21, 19), (8, 4)]);
         // Leeres Feld: kein Match.
         assert!(st.monitor_court(102).current_match.is_none());
+    }
+
+    #[test]
+    fn tablet_score_is_trusted_even_when_disconnected() {
+        // Regression: Ein kurzer WS-Aussetzer (connected=false) darf weder
+        // den Liveticker-Push (apply_tablet_scores) noch die Übersicht
+        // (overview) auf BTPs 0:0/Poll-Stand zurückwerfen.
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        );
+        st.set_snapshot(snap.clone());
+        st.record_score(101, 1, vec![(21, 19), (8, 4)]);
+        st.detach_tablet(101); // Browser zu / Netz weg → connected=false
+                               // apply_tablet_scores überschreibt den BTP-Stand trotzdem.
+        st.apply_tablet_scores(&mut snap);
+        assert_eq!(snap.matches[0].sets, vec![(21, 19), (8, 4)]);
+        // overview zeigt den Tablet-Stand, markiert das Tablet aber als offline.
+        let ov = st.overview();
+        let c = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert_eq!(c.sets, vec![(21, 19), (8, 4)]);
+        assert!(!c.tablet_connected);
+    }
+
+    #[test]
+    fn live_scores_persist_and_reload_across_restart() {
+        // Simuliert einen App-Neustart: Stand sichern, neue Instanz lädt ihn
+        // und zeigt ihn (auch ohne verbundenes Tablet) statt BTPs 0:0.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("live-scores.json");
+
+        let st = TabletState::default();
+        st.set_scores_path(path.clone());
+        st.record_score(101, 7, vec![(21, 5), (2, 9)]);
+        assert!(path.exists());
+
+        // „Neustart": frische Instanz, gleiches Match noch OnCourt.
+        let st2 = TabletState::default();
+        st2.load_scores(&path);
+        let mut snap = snapshot(
+            vec![match_on(7, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        );
+        st2.set_snapshot(snap.clone());
+        // monitor_court + apply_tablet_scores liefern den wiederhergestellten Stand.
+        assert_eq!(st2.monitor_court(101).sets, vec![(21, 5), (2, 9)]);
+        st2.apply_tablet_scores(&mut snap);
+        assert_eq!(snap.matches[0].sets, vec![(21, 5), (2, 9)]);
+
+        // clear_court entfernt den Stand auch aus der Datei.
+        st2.set_scores_path(path.clone());
+        st2.clear_court(101);
+        let st3 = TabletState::default();
+        st3.load_scores(&path);
+        st3.set_snapshot(snapshot(
+            vec![match_on(7, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert_eq!(st3.monitor_court(101).sets, vec![(5, 3)]); // wieder BTP-Stand
     }
 
     #[test]

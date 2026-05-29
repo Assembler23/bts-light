@@ -4,6 +4,32 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.43
+
+- **TV-Anzeige verliert nach einem Netzausfall nicht mehr den Spielstand.**
+  Sprang der TV nach einem kurzen Router-/Netzausfall auf 0:0 zurück (obwohl
+  das Tablet weiterzählte) und kam nicht wieder, lag das an gleich mehreren
+  Schwachstellen im Live-Score-Pfad. Behoben:
+  - **Sticky Score:** Liveticker-Push und Felder-Übersicht vertrauten dem
+    Tablet-Stand nur bei *offener* WebSocket-Verbindung – ein kurzer
+    Aussetzer warf sie auf BTPs 0:0 zurück. Jetzt zählt der zuletzt
+    gemeldete Stand für dasselbe Match unabhängig vom Verbindungsstatus
+    (wie schon beim Feldmonitor); `verbunden` ist nur noch der Online-Indikator.
+  - **Persistenz:** Der laufende Satzstand wird je Feld in `live-scores.json`
+    gesichert und beim Start wieder geladen. Ein App-Neustart (Absturz,
+    Standby) wirft den TV damit nicht mehr auf 0:0, bis das Tablet zurück ist.
+    Atomar geschrieben (Temp-Datei + Rename), Schreiber serialisiert.
+  - **Tote Verbindungen freigeben:** Bricht der Router weg, schickt der
+    Browser oft kein „Close" – die Verbindung hing serverseitig und hielt das
+    Feld „belegt", sodass das zurückkehrende Tablet ausgesperrt blieb. Der
+    Server erkennt jetzt stille Verbindungen (Protokoll-Ping; >30 s ohne
+    Lebenszeichen) und gibt das Feld frei.
+  - **Selbstheilender Reconnect:** Hört das Tablet beim Wiederanmelden „Feld
+    belegt", versucht es sich (wenn es das laufende Match hält) automatisch
+    alle 4 s neu anzumelden und re-pusht nach erfolgreicher Übernahme sofort
+    seinen Stand – ohne manuelles „Übernehmen". Ein echt fremdes Tablet
+    behält das Feld; dann entscheidet weiter der Mensch.
+
 ## v0.9.42
 
 - **Einzel- und Kombi-Anzeige einheitlich.** Drei Angleichungen:

@@ -741,7 +741,7 @@ function connect() {
     STATE.locked = false;
     STATE.occupied = false;
     // Identität ist die CourtID; der Feldname geht nur informativ mit.
-    ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtId: COURT_ID, courtLabel: COURT_LABEL }));
+    sendIdentify();
     if (sendBattery) sendBattery();
     // Aktive Meldungen nach einem Reconnect erneut melden.
     if (STATE.alertInjury || STATE.alertOfficial) sendAlert();
@@ -761,10 +761,30 @@ function connect() {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
     if (msg.type === 'pong') { return; } // reines Lebenszeichen
-    if (msg.type === 'match_assigned') { tlog('info', 'match_assigned', { matchId: msg.match?.matchId }); loadMatch(msg.match); }
-    else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearMatch(); }
-    else if (msg.type === 'court_occupied') { tlog('info', 'court_occupied'); STATE.occupied = true; render(); }
-    else if (msg.type === 'session_superseded') { tlog('warn', 'session_superseded'); STATE.locked = true; STATE.occupied = false; render(); }
+    if (msg.type === 'match_assigned') {
+      tlog('info', 'match_assigned', { matchId: msg.match?.matchId });
+      // Feld erfolgreich (zurück-)belegt → etwaigen Retry stoppen.
+      clearReidentify();
+      STATE.occupied = false;
+      loadMatch(msg.match);
+      // Nach einer Wieder-Anmeldung den lokalen Stand re-pushen: Bei
+      // demselben Match ist loadMatch ein No-Op (Stand bleibt), der Server
+      // hat nach einem Reconnect aber evtl. nur 0:0 – sendScoreUpdate bringt
+      // ihn (und damit TV + Liveticker) sofort auf den Tablet-Stand.
+      sendScoreUpdate();
+      persistState();
+    }
+    else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearReidentify(); clearMatch(); }
+    else if (msg.type === 'court_occupied') {
+      tlog('info', 'court_occupied');
+      STATE.occupied = true;
+      render();
+      // Haben wir ein laufendes Match geladen, sind wir der rechtmäßige
+      // Zähler, der nach einem Netzausfall zurückkommt – automatisch weiter
+      // anmelden, bis das (evtl. noch hängende) alte Socket das Feld freigibt.
+      if (STATE.match) startReidentifyRetry();
+    }
+    else if (msg.type === 'session_superseded') { tlog('warn', 'session_superseded'); clearReidentify(); STATE.locked = true; STATE.occupied = false; render(); }
     else if (msg.type === 'state_restore') {
       tlog('info', 'state_restore');
       try {
@@ -777,6 +797,8 @@ function connect() {
     els.connDot.classList.remove('ok');
     els.connDot.classList.add('bad');
     els.connText.textContent = 'getrennt — neuer Versuch…';
+    // Retry läuft über den frischen Socket weiter (onopen meldet sich neu an).
+    clearReidentify();
     tlog('warn', 'ws_close', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
     // KEIN eigener Reconnect-Timer hier — der Watchdog ist der einzige
     // Reconnect-Treiber (verhindert doppelte Verbindungen).
@@ -805,6 +827,31 @@ function startConnectionWatchdog() {
       }
     }
   }, 5_000);
+}
+
+// Meldet die Feld-Identität beim Server an. Wird bei jedem Reconnect und –
+// solange das Feld „belegt" gemeldet wird – per Retry erneut gesendet.
+function sendIdentify() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtId: COURT_ID, courtLabel: COURT_LABEL }));
+}
+
+// Reconnect-Selbstheilung: Meldet sich das Tablet nach einem Netzausfall neu
+// an, hängt der vorige (tote) Socket serverseitig evtl. noch und hält das Feld
+// „belegt" – der Server gibt es erst nach seinem Stale-Timeout frei. Statt den
+// Nutzer dann manuell „übernehmen" zu lassen, versuchen wir es automatisch
+// weiter: alle 4 s erneut identify. Sobald das Feld frei ist, greift die
+// Anmeldung und das Match wird wieder zugewiesen (→ clearReidentify). Hält ein
+// ECHT anderes Tablet das Feld, bleibt es belegt – dann übernimmt der Mensch.
+let reidentifyTimer = null;
+function startReidentifyRetry() {
+  if (reidentifyTimer) return; // läuft schon
+  reidentifyTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) sendIdentify();
+  }, 4000);
+}
+function clearReidentify() {
+  if (reidentifyTimer) { clearInterval(reidentifyTimer); reidentifyTimer = null; }
 }
 
 function sendScoreUpdate() {
@@ -1885,6 +1932,7 @@ els.breakAbort.addEventListener('click', abortMatchRetired);
 els.retireWinnerA.addEventListener('click', () => { STATE.retiredWinner = 'a'; persistState(); render(); });
 els.retireWinnerB.addEventListener('click', () => { STATE.retiredWinner = 'b'; persistState(); render(); });
 els.takeoverBtn.addEventListener('click', () => {
+  clearReidentify(); // manuelle Übernahme ersetzt den Auto-Retry
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'take_over' }));
   tlog('info', 'take_over');
   STATE.occupied = false;
