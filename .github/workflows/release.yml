@@ -8,6 +8,17 @@ on:
   push:
     tags: ["v*"]
 
+# Releases strikt serialisieren: nie zwei Builds/Publishes gleichzeitig.
+# Sonst rsyncen mehrere publish-Jobs parallel ins selbe Verzeichnis auf
+# badhub.de und hinterlassen eine inkonsistente latest.json (Version aus
+# Build A, URL/Signatur aus Build B → Updater lädt die falsche Datei und
+# bleibt in einer Update-Schleife auf der alten Version hängen).
+# cancel-in-progress: false → laufende Releases NICHT abbrechen, sauber
+# nacheinander abarbeiten.
+concurrency:
+  group: bts-light-release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
