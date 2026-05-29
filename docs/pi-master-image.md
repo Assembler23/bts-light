@@ -40,6 +40,36 @@ Turnier mitbringst.
 > Wenn alle Sets bzw. Vereine dieselbe SSID `Turnier` + dasselbe Passwort
 > verwenden, passt **ein** Master-Image für alle.
 
+### ⚠️ Doppel-DHCP-Falle beim Testen am Heim-Router
+
+**Symptom:** Manche Court-Monitore laufen (zeigen Logo / Spiel), andere
+zeigen hartnäckig „This site can't be reached ·
+`ERR_ADDRESS_UNREACHABLE`" für `bts-light.local:8088` — obwohl sie
+sauber mit dem Turnier-WLAN verbunden sind. Wirkt wie ein sporadischer
+„mal geht's, mal nicht"-Fehler, und ein Pi-Neustart hilft mal, mal nicht.
+
+**Ursache:** Hängt der Turnier-Router (z. B. TP-Link MR6400) zum Testen
+**mit einem LAN-Kabel an einem bestehenden Router** (Fritzbox o. ä.),
+laufen **zwei DHCP-Server** im selben Netz:
+- der bestehende Router (z. B. `192.168.178.*`)
+- der Turnier-Router (z. B. `192.168.16.*`)
+
+Clients ziehen zufällig die eine oder andere IP — wer im falschen
+Subnetz landet, erreicht den bts-light-Rechner nicht (`ERR_ADDRESS_
+UNREACHABLE`, weil `bts-light.local` zwar auflöst, die IP aber in einem
+fremden Subnetz liegt).
+
+**Lösung beim Test:** Den Turnier-Router in den **Access-Point-Modus**
+schalten (MR6400: „Operation Mode" → „Access Point") oder dessen
+**DHCP-Server deaktivieren** (DHCP → Disable). Dann vergibt nur noch der
+bestehende Router IPs, alle Geräte landen im selben Subnetz. Betroffene
+Geräte danach einmal neu starten.
+
+**Im echten Verleih-Einsatz** (Turnier-Router **allein**, mit LTE-SIM,
+ohne zweiten Router) tritt das Problem **nicht** auf — dann ist der
+Turnier-Router der einzige DHCP. Punkt 4 oben gilt also nur für den
+Stand-alone-Betrieb.
+
 ## Teil B — Master-Image erstellen (einmal)
 
 Ein Pi wird einmal sauber eingerichtet; seine SD-Karte wird zum „Golden
