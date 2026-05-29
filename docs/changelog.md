@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.31
+
+- **Fix: TV übernimmt den Stand nach „Match wieder öffnen".** `reopen()`
+  pushte den wiederhergestellten Stand nicht an den Server → der
+  Court-Monitor hing auf dem alten beendeten Stand (zeigte z. B. 0:0 im
+  laufenden Satz statt 20:17, und die alten Satz-Zahlen). `reopen()` ruft
+  jetzt `sendScoreUpdate()` (wie `undo()`), der Server ersetzt die
+  Satzliste, der TV zeigt beim nächsten 1-s-Poll den korrigierten Stand.
+- **Neu: Korrektur direkt aus der Pause.** Im Pausen-Overlay (11er-/
+  Satzpause) gibt es jetzt einen Button „↩ Korrektur — letzter Punkt
+  zurück": bricht die Pause ab und nimmt den auslösenden Punkt zurück
+  (z. B. wenn der Ball wiederholt werden muss und die Pause zu früh kam).
+  Erscheint nur, wenn ein Punkt zum Zurücknehmen vorhanden ist.
+
 ## v0.9.30
 
 - **Fix: „Match wieder öffnen" stellt den echten Stand auch nach einem

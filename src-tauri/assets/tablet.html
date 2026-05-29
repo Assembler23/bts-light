@@ -507,12 +507,16 @@
   <div class="break-title" id="break-title"></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
   <button class="primary" id="break-skip">Weiterspielen</button>
+  <button id="break-correct" style="display:none">
+    ↩ Korrektur — letzter Punkt zurück
+  </button>
   <button class="danger" id="break-abort" style="display:none">
     Spiel abbrechen · Aufgabe
   </button>
   <div class="break-hint">
     Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — sonst geht
-    es nach Ablauf der Zeit automatisch weiter.
+    es nach Ablauf der Zeit automatisch weiter. „Korrektur" bricht die Pause
+    ab und nimmt den letzten Punkt zurück (z. B. Ball wiederholen).
   </div>
 </div>
 
@@ -695,6 +699,7 @@ const els = {
   breakTitle: document.getElementById('break-title'),
   breakCountdown: document.getElementById('break-countdown'),
   breakSkip: document.getElementById('break-skip'),
+  breakCorrect: document.getElementById('break-correct'),
   matchClock: document.getElementById('match-clock'),
   injuryBtn: document.getElementById('injury-btn'),
   megaphoneBtn: document.getElementById('megaphone-btn'),
@@ -927,6 +932,11 @@ function renderBreak() {
   }
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
   els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
+  // „Korrektur — letzter Punkt zurück" bei den BWF-Intervallen (11er-/
+  // Satzpause), wenn ein Punkt zum Zurücknehmen da ist. Bricht die Pause
+  // ab und nimmt den auslösenden Punkt zurück (z. B. Ball wiederholen).
+  els.breakCorrect.style.display =
+    (STATE.pause.kind !== 'injury' && STATE.history.length > 0) ? '' : 'none';
   els.breakOverlay.classList.add('visible');
 }
 
@@ -1413,6 +1423,10 @@ function reopen() {
   if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
   persistState();
   render();
+  // WICHTIG: den wiederhergestellten Stand sofort an den Server/TV pushen
+  // (wie undo() es tut). Ohne das hängt der Court-Monitor auf dem alten
+  // beendeten Stand — er zeigt z.B. 0:0 im laufenden Satz statt 20:17.
+  sendScoreUpdate();
 }
 
 // ─────────────────────────── Ergebnis-Übermittlung ────────────────────
@@ -1735,6 +1749,13 @@ els.finishBtn.addEventListener('click', finishManually);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
+// Korrektur aus der Pause: Pause abbrechen + letzten Punkt zurücknehmen.
+// undo() stellt den Snapshot vor dem auslösenden Punkt wieder her und
+// pusht den Stand an Server/TV (sendScoreUpdate steckt in undo()).
+els.breakCorrect.addEventListener('click', () => {
+  endBreak();
+  undo();
+});
 els.setupBack.addEventListener('click', setupBack);
 els.injuryBtn.addEventListener('click', startInjury);
 els.megaphoneBtn.addEventListener('click', openMegaphoneModal);
