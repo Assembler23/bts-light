@@ -225,10 +225,11 @@
       })
       .catch(function () {});
   }
-  // Erste Pruefung schon nach 5 s, dann alle 30 s — schneller als
-  // overview/preparation, weil Werbe-Wechsel haeufiger gewollt sind.
-  setTimeout(checkReassignment, 5000);
-  setInterval(checkReassignment, 30000);
+  // Reassignment im LAN sofort: jede Sekunde gegen /monitor/state pruefen,
+  // gleich schnell wie monitor.html. Ein winziger GET, im LAN unkritisch
+  // (v0.9.26).
+  setTimeout(checkReassignment, 1000);
+  setInterval(checkReassignment, 1000);
 })();
 </script>
 </body>

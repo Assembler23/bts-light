@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.26
+
+- **Schnellere Umstellung weg von Info-/Werbe-Anzeigen.** Ein Pi auf
+  einer Info- oder Werbe-Seite (Courtübersicht, In Vorbereitung,
+  Werbung) prüfte bisher nur **alle 30 s**, ob seine Zuweisung sich
+  geändert hat — beim Umschalten zurück auf ein Feld (oder ein anderes
+  Target) dauerte es entsprechend lang. Im LAN ist dieser Check ein
+  winziger HTTP-GET; das Intervall ist jetzt auf **1 s** gesenkt
+  (`overview.html`, `preparation.html`, `ad.html`) — gleich schnell wie
+  `monitor.html`. Damit wirkt **jede** Umstellung im LAN binnen ~1 s,
+  egal aus welcher Anzeige heraus.
+
 ## v0.9.25
 
 - **Werbebilder mit Anzeigenamen.** In den Einstellungen → Werbebilder
