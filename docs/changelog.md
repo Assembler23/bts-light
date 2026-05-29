@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.28
+
+- **Kombi-Monitor Code-Review-Fixes (v0.9.27).**
+  - `/combo/state` cappt die Felderzahl jetzt serverseitig auf **3** und
+    entfernt **Duplikate** — eine manuell gebaute URL `?courts=1,1,1,…`
+    kann das Band-Layout nicht mehr unleserlich machen.
+  - `combo.html::setVal` vereinfacht (toter Parameter entfernt) +
+    Fallback `0` statt `"undefined"` in der Satz-Zelle bei
+    abweichendem Schema.
+- **Chromium-Übersetzungsleiste auf den Pi-Monitoren aus.** Der
+  Kiosk-Aufruf in `pi/setup-monitor.sh` bekommt
+  `--disable-features=Translate --disable-translate` — damit erscheint
+  die „German / English / Diese Seite übersetzen?"-Leiste oben rechts
+  nicht mehr.
+
 ## v0.9.27
 
 - **Kombi-Court-Monitor: bis zu 3 Felder auf einem Bildschirm.** Ein

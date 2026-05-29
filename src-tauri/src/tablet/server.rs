@@ -431,11 +431,23 @@ async fn combo_state(
         }
     }
     // Gewünschte CourtIDs in der angegebenen Reihenfolge parsen.
-    let wanted: Vec<i64> = q
+    // Max. 3 Felder (UI-Cap auch serverseitig spiegeln) und Duplikate
+    // entfernen — sonst rendert combo.html bei einer manuell gebauten
+    // URL (?courts=1,1,1,…) unleserlich viele/doppelte Bänder
+    // (Code-Review v0.9.28 MEDIUM/LOW).
+    let mut wanted: Vec<i64> = Vec::new();
+    for id in q
         .courts
         .split(',')
         .filter_map(|s| s.trim().parse::<i64>().ok())
-        .collect();
+    {
+        if !wanted.contains(&id) {
+            wanted.push(id);
+        }
+        if wanted.len() >= 3 {
+            break;
+        }
+    }
     let overview = ctx.tablet.overview();
     // Je gewünschter ID das passende Feld heraussuchen, Reihenfolge
     // beibehalten (nicht die overview-Reihenfolge). Unbekannte IDs

@@ -141,10 +141,13 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     return el;
   }
 
-  function setVal(s, key, idx) {
-    // sets-Eintrag ist [a,b] (serde-Tuple) oder {a,b}.
-    if (Array.isArray(s)) return s[idx];
-    return idx === 0 ? (s.a !== undefined ? s.a : s[0]) : (s.b !== undefined ? s.b : s[1]);
+  function setVal(s, idx) {
+    // sets-Eintrag ist [a,b] (serde-Tuple) oder {a,b}. Fallback 0 statt
+    // "undefined" in der Zelle, falls das Schema je abweicht.
+    if (Array.isArray(s)) return s[idx] != null ? s[idx] : 0;
+    return idx === 0
+      ? (s.a != null ? s.a : (s[0] != null ? s[0] : 0))
+      : (s.b != null ? s.b : (s[1] != null ? s[1] : 0));
   }
 
   function renderBand(c) {
