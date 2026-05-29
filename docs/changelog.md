@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.41
+
+- **Einzel-Court-Ansicht: Aufschlag-Punkt spieler-genau im Doppel.** Auf
+  dem Einzel-Feldmonitor (`monitor.html`) saß der gelbe Aufschlag-Punkt im
+  Doppel/Mixed noch auf Team-Ebene (bei beiden Spielern). Jetzt steht er
+  beim **konkret aufschlagenden Spieler** — dieselbe BWF-Logik wie auf der
+  Kombi-Anzeige. Nutzt das vom Tablet berechnete `serving:{team,index}`;
+  altes Tablet ohne die Info → Punkt beim ersten Spieler des Teams. Einzel
+  unverändert.
+
 ## v0.9.40
 
 - **Tablet-Auto-Reconnect (Heartbeat).** Das Tablet verbindet sich jetzt

@@ -456,13 +456,15 @@
   // `done` = abgeschlossene Sätze als [{v,won}], `current` = laufender
   // Satzwert (oder null, wenn das Match feststeht), `serving` = schlägt
   // dieses Team auf?, `isWinner` = dieses Team hat das Match gewonnen.
-  function renderHalf(host, players, done, current, serving, isWinner) {
+  // `servePlayerIdx` = Index des konkret aufschlagenden Spielers im Team
+  // (BWF-Doppelregel); null → Team-Level-Fallback (Punkt beim ersten Namen).
+  function renderHalf(host, players, done, current, serving, isWinner, servePlayerIdx) {
     host.textContent = "";
     host.classList.toggle("serving", !!serving);
     host.classList.toggle("winner", !!isWinner);
     var pBox = document.createElement("div");
     pBox.className = "players" + (players.length > 1 ? " doubles" : "");
-    players.forEach(function (p) {
+    players.forEach(function (p, i) {
       var row = document.createElement("div");
       row.className = "player";
       row.appendChild(flagEl(p.nationality));
@@ -487,8 +489,13 @@
       name.appendChild(family);
       row.appendChild(name);
 
+      // Aufschlag-Punkt nur beim konkret aufschlagenden Spieler. Im Doppel
+      // mit Spieler-Info beim richtigen Namen, sonst (Einzel oder altes
+      // Tablet ohne Info) beim ersten Spieler des aufschlagenden Teams.
+      var dotHere = serving &&
+        (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
       var dot = document.createElement("span");
-      dot.className = "serve-dot" + (serving ? " on" : "");
+      dot.className = "serve-dot" + (dotHere ? " on" : "");
       dot.textContent = "●";
       row.appendChild(dot);
       pBox.appendChild(row);
@@ -586,12 +593,17 @@
     });
 
     // Aufschlag aus dem gespiegelten Tablet-Zustand – nur im laufenden Spiel.
-    var serving = decided ? null : servingTeam(cs);
+    // Spieler-genau (BWF-Doppelregel), wenn das Tablet die Info liefert.
+    var serveInfo = decided ? null : servingInfo(cs);
+    var serving = serveInfo ? serveInfo.team : null;
+    var servePlayerIdx = serveInfo ? serveInfo.playerIdx : null;
 
     renderHalf(els.half1, m.team1 || [], done1,
-               current ? current.a : null, serving === 1, winnerTeam === 1);
+               current ? current.a : null, serving === 1, winnerTeam === 1,
+               serving === 1 ? servePlayerIdx : null);
     renderHalf(els.half2, m.team2 || [], done2,
-               current ? current.b : null, serving === 2, winnerTeam === 2);
+               current ? current.b : null, serving === 2, winnerTeam === 2,
+               serving === 2 ? servePlayerIdx : null);
 
     // Fußzeile: Runde + Spielnummer (je nach Konfiguration).
     els.footer.textContent = "";
@@ -617,6 +629,22 @@
   function servingTeam(cs) {
     if (!cs || !cs.servingSide || !cs.teamOnSide) return null;
     return cs.teamOnSide.a === cs.servingSide ? 1 : 2;
+  }
+
+  // Spieler-genauer Aufschlag: { team:1|2, playerIdx:0|1|null } oder null.
+  // Bevorzugt das vom Tablet berechnete `serving:{team,index}` (BWF-
+  // Doppelregel, kennt Positionen + Spieler-IDs); fällt sonst auf die
+  // Team-Ableitung zurück (Punkt beim ersten Spieler). Spiegelt die
+  // Server-Logik in state.rs (overview()).
+  function servingInfo(cs) {
+    if (!cs) return null;
+    if (cs.serving && cs.serving.team) {
+      var team = cs.serving.team === "a" ? 1 : 2;
+      var idx = (typeof cs.serving.index === "number") ? cs.serving.index : null;
+      return { team: team, playerIdx: idx };
+    }
+    var t = servingTeam(cs);
+    return t == null ? null : { team: t, playerIdx: null };
   }
 
   // Sieger-Team (1 oder 2) eines feststehenden Matches, sonst null. Bei
