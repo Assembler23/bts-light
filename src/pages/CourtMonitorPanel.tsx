@@ -68,6 +68,97 @@ function valueToTarget(v: string): MonitorTarget | null {
   return null;
 }
 
+// ─── Sortier-/Gruppier-Logik der Geräteliste ────────────────────────────
+// Eine fertig sortierte Anzeige-Struktur: Online-Block (ggf. nach Hallen
+// unterteilt) + Offline-Block unter einer Trennlinie. Innerhalb jeder
+// Sektion ist nach Typ + Feldnummer sortiert.
+
+interface DeviceGroup {
+  /** Hallenname; leer wenn keine/Einzelhalle bzw. Info-/unzugewiesene Geräte. */
+  hall: string;
+  devices: MonitorDeviceInfo[];
+}
+interface GroupedDevices {
+  online: DeviceGroup[];
+  offline: DeviceGroup[];
+  /** Hallennamen anzeigen? Nur bei ≥2 distinkten, nicht-leeren Hallen. */
+  showHalls: boolean;
+}
+
+/** Typ-Rang fürs Sortieren: Feld < Kombi < Info/Werbung < unzugewiesen. */
+function targetRank(t: MonitorTarget | null): number {
+  if (!t) return 3;
+  if (t.kind === "court") return 0;
+  if (t.kind === "court_combo") return 1;
+  return 2; // info_overview / info_preparation / ad_*
+}
+
+/** Feld-Sortierschlüssel: numerischer Anteil des Feldnamens (Feld 1 zuerst);
+ *  ohne Zahl ans Ende. */
+function fieldSortKey(name: string | null): number {
+  if (!name) return Number.MAX_SAFE_INTEGER;
+  const m = name.match(/\d+/);
+  return m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+function groupDevicesForDisplay(
+  devices: MonitorDeviceInfo[],
+  courts: CourtOverview[],
+): GroupedDevices {
+  const courtById = new Map(courts.map((c) => [c.court_id, c]));
+  // Halle eines Geräts: aus seinem (ersten) zugewiesenen Feld. Info-/
+  // Werbe-/Kombi-/unzugewiesene Geräte haben keine eindeutige Halle.
+  const hallOf = (d: MonitorDeviceInfo): string => {
+    const cid =
+      d.target?.kind === "court"
+        ? d.target.court_id
+        : d.courtId !== null
+          ? d.courtId
+          : null;
+    if (cid === null) return "";
+    return courtById.get(cid)?.location ?? "";
+  };
+
+  const distinctHalls = new Set(
+    devices.map(hallOf).filter((h) => h !== ""),
+  );
+  const showHalls = distinctHalls.size >= 2;
+
+  const sortWithin = (a: MonitorDeviceInfo, b: MonitorDeviceInfo): number => {
+    const r = targetRank(a.target) - targetRank(b.target);
+    if (r !== 0) return r;
+    const f = fieldSortKey(a.court) - fieldSortKey(b.court);
+    if (f !== 0) return f;
+    return a.code.localeCompare(b.code);
+  };
+
+  const buildGroups = (list: MonitorDeviceInfo[]): DeviceGroup[] => {
+    if (!showHalls) {
+      return list.length ? [{ hall: "", devices: [...list].sort(sortWithin) }] : [];
+    }
+    // Nach Halle bündeln; Geräte ohne Halle (Info/Kombi/unzugewiesen)
+    // landen in einer Rest-Gruppe am Ende.
+    const byHall = new Map<string, MonitorDeviceInfo[]>();
+    for (const d of list) {
+      const h = hallOf(d);
+      if (!byHall.has(h)) byHall.set(h, []);
+      byHall.get(h)!.push(d);
+    }
+    const halls = [...byHall.keys()].sort((a, b) => {
+      if (a === "") return 1; // Rest-Gruppe ans Ende
+      if (b === "") return -1;
+      return a.localeCompare(b, "de");
+    });
+    return halls.map((h) => ({ hall: h, devices: byHall.get(h)!.sort(sortWithin) }));
+  };
+
+  return {
+    online: buildGroups(devices.filter((d) => d.online)),
+    offline: buildGroups(devices.filter((d) => !d.online)),
+    showHalls,
+  };
+}
+
 interface Props {
   onBack: () => void;
 }
@@ -128,6 +219,13 @@ export function CourtMonitorPanel({ onBack }: Props) {
   // Felder mit Identität (CourtID) und Anzeigename – die Zuweisung nutzt
   // die CourtID, das <select> zeigt den Namen.
   const courts: CourtOverview[] = info?.courts ?? [];
+
+  // Geräte für die Anzeige sortieren + gruppieren:
+  //  - online zuerst, offline darunter (Trennlinie)
+  //  - je Block nach Halle gruppiert (nur wenn ≥2 Hallen)
+  //  - innerhalb: Felder (nach Feld-Nr.) → Kombi-Felder → Info/Werbung →
+  //    unzugewiesen
+  const grouped = groupDevicesForDisplay(devices, courts);
 
   async function refresh() {
     try {
@@ -234,16 +332,57 @@ export function CourtMonitorPanel({ onBack }: Props) {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {devices.map((d) => (
-              <DeviceRow
-                key={d.id}
-                device={d}
-                courts={courts}
-                ads={ads}
-                onAssign={(target) => void assign(d.id, target)}
-                onIdentify={() => void monitorCommand(d.id, "identify")}
-                onReload={() => void monitorCommand(d.id, "reload")}
-              />
+            {/* Online-Geräte, nach Halle gruppiert + nach Feld sortiert. */}
+            {grouped.online.map((g) => (
+              <div key={`on-${g.hall || "_"}`} className="flex flex-col gap-2">
+                {grouped.showHalls && g.hall && (
+                  <h3 className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+                    {g.hall}
+                  </h3>
+                )}
+                {g.devices.map((d) => (
+                  <DeviceRow
+                    key={d.id}
+                    device={d}
+                    courts={courts}
+                    ads={ads}
+                    onAssign={(target) => void assign(d.id, target)}
+                    onIdentify={() => void monitorCommand(d.id, "identify")}
+                    onReload={() => void monitorCommand(d.id, "reload")}
+                  />
+                ))}
+              </div>
+            ))}
+
+            {/* Offline-Geräte: unter einer Trennlinie, gleiche Sortierung. */}
+            {grouped.offline.some((g) => g.devices.length > 0) && (
+              <div className="mt-2 flex items-center gap-2">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span className="text-xs font-medium text-slate-400">
+                  offline
+                </span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+            )}
+            {grouped.offline.map((g) => (
+              <div key={`off-${g.hall || "_"}`} className="flex flex-col gap-2 opacity-60">
+                {grouped.showHalls && g.hall && (
+                  <h3 className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-400">
+                    {g.hall}
+                  </h3>
+                )}
+                {g.devices.map((d) => (
+                  <DeviceRow
+                    key={d.id}
+                    device={d}
+                    courts={courts}
+                    ads={ads}
+                    onAssign={(target) => void assign(d.id, target)}
+                    onIdentify={() => void monitorCommand(d.id, "identify")}
+                    onReload={() => void monitorCommand(d.id, "reload")}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         )}

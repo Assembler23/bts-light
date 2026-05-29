@@ -1429,6 +1429,10 @@ function finishManually() {
   }
   persistState();
   render();
+  // Den finalen Stand an Server/TV pushen (analog reopen()). Sonst zeigt
+  // der Court-Monitor nach manuellem Match-Ende noch den letzten
+  // Live-Stand statt des Endstands (Code-Review v0.9.33 HIGH).
+  sendScoreUpdate();
 }
 
 function reopen() {

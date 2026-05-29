@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.33
+
+- **Fix: TV zeigt nach manuellem „Match beenden" den Endstand.**
+  `finishManually()` pushte den finalen Stand nicht an Server/TV (wie
+  zuvor schon `reopen()` nicht) → der Court-Monitor hing auf dem letzten
+  Live-Stand. Ruft jetzt `sendScoreUpdate()` (Code-Review-Finding).
+- **Court-Monitore-Übersicht: sortiert, gruppiert, offline unten.** Die
+  Geräteliste in „Court-Monitore" ist jetzt aufgeräumt:
+  - **Online-Geräte oben, offline darunter** unter einer „offline"-
+    Trennlinie (ausgegraut) — keine Bereinigung nötig, störende
+    Altgeräte rutschen nach unten.
+  - Bei **mehreren Hallen** nach Halle gruppiert (Zwischenüberschrift).
+  - Sortierung: **Felder zuerst (Feld 1 oben, dann 2, 3 …), dann
+    Kombi-Felder, dann Info-/Werbe-TVs, dann unzugewiesene.**
+
 ## v0.9.32
 
 - **Pausen-Countdown auf Tablet und TV synchron.** Das Tablet setzte
