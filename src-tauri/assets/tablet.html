@@ -1020,8 +1020,7 @@ const PERSIST_KEY = `badhub.tablet.state.${COURT_ID}`;
 
 function persistState() {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
-  // Übermittlung, das muss einen Reload überleben. history wird bewusst
-  // NICHT gesichert (Undo nach Reload nicht unterstützt).
+  // Übermittlung, das muss einen Reload überleben.
   if (!STATE.match && !STATE.pendingResult) return;
   const snap = {
     match: STATE.match,
@@ -1042,6 +1041,11 @@ function persistState() {
     alertOfficial: STATE.alertOfficial,
     retired: STATE.retired,
     retiredWinner: STATE.retiredWinner,
+    // history MIT sichern: nur so kann „Match wieder öffnen" nach einem
+    // Tablet-Reload/Reconnect den echten Stand (und korrekte Seiten)
+    // wiederherstellen, statt einen leeren currentSet (0:0) zu zeigen.
+    // Auf 50 Snapshots gecappt (siehe addPointOnSide) → unkritisch klein.
+    history: STATE.history,
   };
   const json = JSON.stringify(snap);
   try { localStorage.setItem(PERSIST_KEY, json); } catch { /* QuotaExceeded o.ä. */ }
@@ -1087,6 +1091,9 @@ function applyPersistedState(p) {
   STATE.alertOfficial = !!p.alertOfficial;
   STATE.retired = !!p.retired;
   STATE.retiredWinner = p.retiredWinner ?? null;
+  // Undo-/Reopen-History wiederherstellen (seit Persistenz mitgesichert).
+  // Fehlt sie in alten gespeicherten Ständen, bleibt sie leer.
+  STATE.history = Array.isArray(p.history) ? p.history : [];
 }
 
 function restorePersistedState() {

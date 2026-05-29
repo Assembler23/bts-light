@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.30
+
+- **Fix: „Match wieder öffnen" stellt den echten Stand auch nach einem
+  Tablet-Reload her.** Die Undo-/Reopen-History wurde bewusst nicht
+  persistiert. Endete ein Match automatisch (gewinnender Punkt) und das
+  Tablet wurde danach neu geladen / reconnectete, war die History weg —
+  `reopen()` konnte den letzten Stand (z. B. 20:1) nicht zurückholen und
+  zeigte einen leeren `currentSet` (0:0) als zusätzlichen Satz. Die
+  History wird jetzt mit in `localStorage` gesichert (auf 50 Snapshots
+  gecappt) und beim Laden wiederhergestellt. „Match wieder öffnen" bringt
+  damit den korrekten Stand + die korrekten Seiten zurück, und Korrektur
+  per Undo funktioniert auch nach Pause/Reload (vorher war Undo bei
+  leerer History gesperrt).
+
 ## v0.9.29
 
 - **KRITISCHER Fix: Punkte landen nach „Match wieder öffnen" nicht mehr
