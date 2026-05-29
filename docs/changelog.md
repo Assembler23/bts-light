@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.42
+
+- **Einzel- und Kombi-Anzeige einheitlich.** Drei Angleichungen:
+  - Aufschlag-Punkt steht jetzt auf beiden Ansichten **vor der Flagge**
+    (Punkt → Flagge → Name); vorher saß er auf der Einzel-Ansicht hinter
+    dem Namen.
+  - Flaggen einheitlich groß: feste Box + `object-fit:cover` auch auf der
+    Kombi-Anzeige (vorher variable Breite je Seitenverhältnis).
+  - Einzel-Ansicht hebt abgeschlossene Sätze jetzt auch **während des
+    laufenden Spiels** den Satzsieger hell (weiß) hervor — wie die
+    Kombi-Anzeige; vorher erst nach Spielende. Bei Aufgabe weiterhin keine
+    Satz-Hervorhebung (letzter Satz unvollständig).
+
 ## v0.9.41
 
 - **Einzel-Court-Ansicht: Aufschlag-Punkt spieler-genau im Doppel.** Auf

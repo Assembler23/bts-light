@@ -92,7 +92,9 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
   display: flex; align-items: center; gap: 1vw;
 }
 .row__name .pname .flag {
-  flex: 0 0 auto; height: 2.6vh; width: auto;
+  /* Einheitliche Größe für alle Flaggen (manche Seitenverhältnisse sind
+     breiter): feste Box + object-fit:cover, wie auf der Einzel-Ansicht. */
+  flex: 0 0 auto; width: 4vh; height: 2.6vh; object-fit: cover;
   border-radius: .3vh; box-shadow: 0 0 .4vh rgba(0,0,0,.5);
 }
 .row__name .pname .flag.hidden { display: none; }

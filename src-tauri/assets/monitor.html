@@ -467,6 +467,17 @@
     players.forEach(function (p, i) {
       var row = document.createElement("div");
       row.className = "player";
+
+      // Reihenfolge wie auf der Kombi-Anzeige: Aufschlag-Punkt → Flagge →
+      // Name. Der Punkt sitzt nur beim konkret aufschlagenden Spieler. Im
+      // Doppel mit Spieler-Info beim richtigen Namen, sonst (Einzel oder
+      // altes Tablet ohne Info) beim ersten Spieler des aufschlagenden Teams.
+      var dotHere = serving &&
+        (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
+      var dot = document.createElement("span");
+      dot.className = "serve-dot" + (dotHere ? " on" : "");
+      dot.textContent = "●";
+      row.appendChild(dot);
       row.appendChild(flagEl(p.nationality));
 
       // Name im Broadcast-Stil: Vorname klein, Nachname groß. Trägt der
@@ -488,16 +499,6 @@
       name.appendChild(given);
       name.appendChild(family);
       row.appendChild(name);
-
-      // Aufschlag-Punkt nur beim konkret aufschlagenden Spieler. Im Doppel
-      // mit Spieler-Info beim richtigen Namen, sonst (Einzel oder altes
-      // Tablet ohne Info) beim ersten Spieler des aufschlagenden Teams.
-      var dotHere = serving &&
-        (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
-      var dot = document.createElement("span");
-      dot.className = "serve-dot" + (dotHere ? " on" : "");
-      dot.textContent = "●";
-      row.appendChild(dot);
       pBox.appendChild(row);
     });
     host.appendChild(pBox);
@@ -580,11 +581,13 @@
       current = rawSets.length > 0 ? rawSets[rawSets.length - 1] : { a: 0, b: 0 };
       doneSets = rawSets.slice(0, Math.max(0, rawSets.length - 1));
     }
-    // Pro Satz das Gewinner-Team hervorheben – nur bei regulär (nicht per
-    // Aufgabe) feststehendem Match: bei einer Aufgabe ist der letzte Satz
+    // Pro abgeschlossenem Satz den Sieger hell (weiß) hervorheben – wie auf
+    // der Kombi-Anzeige, auch während des laufenden Spiels (die `doneSets`
+    // sind dann bereits beendete Sätze; der laufende Satz ist `current` und
+    // nicht dabei). Ausnahme: bei einer Aufgabe ist der letzte Satz
     // unvollständig, eine Hervorhebung nach Punktzahl wäre dort irreführend.
     // Der Match-Sieger selbst (🏆 + Hälfte) bleibt auch bei Aufgabe korrekt.
-    var highlightSets = decided && !(cs && cs.retired);
+    var highlightSets = !(cs && cs.retired);
     var done1 = doneSets.map(function (s) {
       return { v: s.a, won: highlightSets && (s.a || 0) > (s.b || 0) };
     });
