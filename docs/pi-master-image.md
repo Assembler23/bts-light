@@ -70,6 +70,23 @@ ohne zweiten Router) tritt das Problem **nicht** auf — dann ist der
 Turnier-Router der einzige DHCP. Punkt 4 oben gilt also nur für den
 Stand-alone-Betrieb.
 
+### Die zwei sauberen Betriebsarten (DHCP-Schalter beachten)
+
+| Modus | TP-Link DHCP | Subnetz | Internet |
+|---|---|---|---|
+| **Test** — TP-Link per LAN an bestehendem Router (Fritzbox) | **AUS** (Access-Point-Modus) | bestehender Router (z. B. `192.168.178.*`) | über bestehenden Router |
+| **Verleih** — TP-Link allein, mit LTE-SIM | **AN** | TP-Link `192.168.16.*` | über LTE-SIM (sonst nur lokal) |
+
+**Beim Umschalten zwischen den Modi den DHCP-Schalter nicht vergessen:**
+- Vom Test → Verleih (Fritzbox abstecken): **DHCP am TP-Link wieder
+  einschalten** — sonst gibt es gar keinen DHCP mehr und kein Gerät
+  bekommt eine IP.
+- Vom Verleih → Test (an Fritzbox stecken): **DHCP am TP-Link
+  ausschalten** — sonst der oben beschriebene Doppel-DHCP-Konflikt.
+
+Der bts-light-Rechner (Laptop/Mac) muss im Verleih-Modus zwingend ins
+Turnier-WLAN, weil das bestehende Heim-Netz dann nicht mehr da ist.
+
 ## Teil B — Master-Image erstellen (einmal)
 
 Ein Pi wird einmal sauber eingerichtet; seine SD-Karte wird zum „Golden
