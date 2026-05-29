@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.36
+
+- **Kombi-Anzeige: Ergebnis-Zahlen viel größer + ruhiger.** Die Satz-
+  Zahlen skalieren jetzt mit der Feldzahl und nutzen die Bandhöhe aus
+  (1 Feld ~30vh, 2 ~19vh, 3 ~13vh) — auf Distanz klar lesbar. Der
+  „läuft"-Status (Punkt + Text) ist entfernt (redundant, kostete Platz);
+  der laufende Satz wird nur noch farblich (gelb) markiert, **ohne
+  Unterstrich**. Frei/Pause/TL/Behandlung bleiben als Status sichtbar.
+- **Tablet: Zurück zur Aufstellung bei 0:0.** Wenn nach der Seiten-/
+  Aufschlagwahl versehentlich zu schnell getippt wurde, führt der
+  ↩-Button bei 0:0 (noch kein Punkt) zurück zur Aufstellung statt ins
+  Leere. Das Button-Label wechselt dann zu „↩ Aufstellung ändern".
+
 ## v0.9.35
 
 - **Fix: Auto-Update-Versionssprung repariert.** Ab v0.9.32 hatte der

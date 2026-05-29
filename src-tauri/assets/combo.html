@@ -94,17 +94,17 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
   flex: 0 0 auto; display: flex; align-items: center; gap: 1.6vw;
   font-variant-numeric: tabular-nums;
 }
-/* Ergebnis-Zahlen gross + klar lesbar (Hauptinformation auf Distanz). */
+/* Ergebnis-Zahlen so gross wie moeglich — Hauptinformation auf Distanz.
+   --set-size wird per JS nach Feldzahl gesetzt (nutzt die Bandhoehe):
+   1 Feld riesig, 3 Felder kleiner aber weiterhin gross lesbar. */
 .set {
-  min-width: 1.8ch; text-align: center;
-  font-size: 7vh; font-weight: 900; color: #64748b; line-height: 1;
+  min-width: 1.6ch; text-align: center;
+  font-size: var(--set-size, 12vh); font-weight: 900; color: #64748b; line-height: 1;
 }
 .set.won { color: #f8fafc; }
-/* Laufender Satz (letzter, solange das Spiel live ist) hervorgehoben. */
+/* Laufender Satz: nur farblich hervorgehoben (gelb), kein Unterstrich. */
 .set.current {
   color: #fbbf24;
-  border-bottom: .6vh solid #fbbf24;
-  text-shadow: 0 0 2vh rgba(251, 191, 36, .4);
 }
 
 .idle {
@@ -174,21 +174,22 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     var head = h('div', 'band__head');
     head.appendChild(h('span', 'band__field', c.court || ('Feld ' + c.court_id)));
     if (isLive) head.appendChild(h('span', 'band__disc', c.match_name || ''));
-    var status;
+    // Status nur bei AbweichungEN vom Normalfall zeigen — „läuft" ist
+    // redundant (sieht man am Spielstand) und kostet Platz. Frei/Pause/
+    // TL/Behandlung bleiben sichtbar.
     if (!isLive) {
-      status = h('span', 'band__status free');
-      status.appendChild(h('span', null, 'frei'));
+      var sFree = h('span', 'band__status free');
+      sFree.appendChild(h('span', null, 'frei'));
+      head.appendChild(sFree);
     } else if (c.injury) {
-      status = h('span', 'band__status pause');
-      status.appendChild(h('span', 'dot')); status.appendChild(h('span', null, 'Behandlung'));
+      var sInj = h('span', 'band__status pause');
+      sInj.appendChild(h('span', null, 'Behandlung'));
+      head.appendChild(sInj);
     } else if (c.official_call) {
-      status = h('span', 'band__status pause');
-      status.appendChild(h('span', 'dot')); status.appendChild(h('span', null, 'TL'));
-    } else {
-      status = h('span', 'band__status live');
-      status.appendChild(h('span', 'dot')); status.appendChild(h('span', null, 'läuft'));
+      var sTl = h('span', 'band__status pause');
+      sTl.appendChild(h('span', null, 'TL'));
+      head.appendChild(sTl);
     }
-    head.appendChild(status);
     band.appendChild(head);
 
     if (!isLive) return band;
@@ -254,6 +255,13 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
       board.appendChild(idle);
       return;
     }
+    // Satz-Zahlen-Größe an die Bandzahl koppeln: je weniger Felder, desto
+    // mehr Höhe pro Band → desto größer die Zahlen. Werte empirisch so
+    // gewählt, dass die Zahlen die Bandhöhe gut ausfüllen, ohne über-
+    // zulaufen (1 Feld ~ 30vh, 2 ~ 19vh, 3 ~ 13vh).
+    var sizeByCount = { 1: "30vh", 2: "19vh", 3: "13vh" };
+    var n = Math.min(3, courts.length);
+    board.style.setProperty("--set-size", sizeByCount[n] || "13vh");
     courts.forEach(function (c) { board.appendChild(renderBand(c)); });
   }
 

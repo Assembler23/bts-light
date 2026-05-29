@@ -683,6 +683,7 @@ const els = {
     document.getElementById('undo-btn-top'),
     document.getElementById('undo-btn-bottom'),
   ].filter(Boolean)),
+  undoBtnBottom: document.getElementById('undo-btn-bottom'),
   finishBtn: document.getElementById('finish-btn'),
   setupModal: document.getElementById('setup-modal'),
   setupTitle: document.getElementById('setup-title'),
@@ -1412,8 +1413,36 @@ function swapSides() {
 
 function flip(side) { return side === 'left' ? 'right' : 'left'; }
 
+// Frisch nach dem Setup, noch kein Punkt gefallen? Dann ist „zurück"
+// nicht „Punkt zurücknehmen", sondern „Aufstellung korrigieren".
+function isFreshAfterSetup() {
+  return STATE.setup === 'playing'
+    && STATE.history.length === 0
+    && STATE.setsCompleted.length === 0
+    && STATE.currentSet.left === 0 && STATE.currentSet.right === 0;
+}
+
+// Zurück zur Seiten-/Aufschlagwahl, falls jemand zu schnell getippt hat.
+// Nur sinnvoll bei 0:0 ohne gespielten Punkt (sonst greift undo).
+function backToSetup() {
+  STATE.setup = 'choose-side';
+  STATE.positions = null;
+  STATE.servingSide = null;
+  STATE.teamOnSide = null;
+  STATE.pendingServer = null;
+  STATE.startedAt = null; // Spieldauer war ein Fehlstart → zurücksetzen
+  persistState();
+  render();
+}
+
 function undo() {
-  if (!STATE.match || STATE.history.length === 0 || STATE.finished) return;
+  if (!STATE.match || STATE.finished || STATE.setup !== 'playing') return;
+  // Kein Punkt zum Zurücknehmen, aber Setup gerade abgeschlossen →
+  // zurück zur Aufstellung (versehentlich zu schnell entschieden).
+  if (STATE.history.length === 0) {
+    if (isFreshAfterSetup()) backToSetup();
+    return;
+  }
   restoreSnapshot(STATE.history.pop());
   persistState();
   render();
@@ -1721,8 +1750,16 @@ function render() {
 
   renderCourt();
 
-  const undoDisabled = STATE.history.length === 0 || STATE.finished || STATE.setup !== 'playing';
+  // Der ↩-Button ist aktiv, wenn es einen Punkt zum Zurücknehmen gibt
+  // ODER das Setup gerade frisch abgeschlossen wurde (dann führt er zur
+  // Aufstellung zurück). Das Label des unteren Buttons passt sich an.
+  const fresh = isFreshAfterSetup();
+  const undoDisabled = STATE.finished || STATE.setup !== 'playing'
+    || (STATE.history.length === 0 && !fresh);
   els.undoBtns.forEach(b => b.disabled = undoDisabled);
+  if (els.undoBtnBottom) {
+    els.undoBtnBottom.textContent = fresh ? '↩ Aufstellung ändern' : '↩ Letzten Punkt zurück';
+  }
   els.finishBtn.disabled = STATE.finished || STATE.setsCompleted.length === 0 || STATE.setup !== 'playing';
 
   if (STATE.finished) {
