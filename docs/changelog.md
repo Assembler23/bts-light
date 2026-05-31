@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.45
+
+- **Schnellere Selbstheilung nach Netzausfall.** Der Server-Timeout für tote
+  Tablet-Verbindungen von 30 s auf **10 s** verkürzt. Da das jetzt kürzer ist
+  als der Tablet-Watchdog (15 s), ist das Feld nach einem Router-/WLAN-Ausfall
+  serverseitig schon frei, **bevor** sich das Tablet neu meldet – das „Feld
+  wird bereits geschiedst"-Overlay erscheint dann gar nicht mehr und das
+  Tablet belegt das Feld direkt selbst neu (kein manuelles „Übernehmen"). Auf
+  gesunder Verbindung unkritisch: der Protokoll-Ping hält `last_seen` alle
+  ~2 s frisch.
+
 ## v0.9.44
 
 - **Zähltafelbediener-Hinweis auf dem Tablet-Spielzettel (Teil 2).** Bei der

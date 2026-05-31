@@ -794,13 +794,16 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // nach STALE_AFTER kein Lebenszeichen mehr, schließt er die Verbindung
     // selbst → das Feld wird frei und kann sofort neu belegt werden.
     let mut last_seen = std::time::Instant::now();
-    // Bewusst großzügiger als der Tablet-Watchdog (15 s): Das Tablet schließt
-    // sich bei Stille selbst und meldet sich neu an. Der Server soll NICHT
-    // gleichzeitig schließen (sonst beidseitiger Doppel-Close unter Last) –
-    // er räumt nur die wirklich toten Leichen weg, die kein Close geschickt
-    // haben (Router weg). 30 s gibt genug Luft, hält das Feld aber nicht
-    // minutenlang belegt.
-    const STALE_AFTER: Duration = Duration::from_secs(30);
+    // 10 s, BEWUSST KÜRZER als der Tablet-Watchdog (15 s): Bricht der Router
+    // weg, gibt der Server das Feld schon nach 10 s frei – also bevor das
+    // Tablet (frühestens nach 15 s Stille) sich neu meldet. So ist das Feld
+    // beim Reconnect bereits frei, das „Feld belegt"-Overlay erscheint gar
+    // nicht erst und das Tablet belegt direkt selbst neu. Auf einer gesunden
+    // Verbindung trifft der Browser den Protokoll-Ping alle ~2 s mit Pong →
+    // last_seen bleibt frisch, 10 s lösen also keinen Fehlschluss aus. Ein
+    // seltener Fehlschluss unter Last wäre harmlos: das Tablet verbindet sich
+    // sofort neu (Stand ist persistiert und wird re-gepusht).
+    const STALE_AFTER: Duration = Duration::from_secs(10);
 
     loop {
         tokio::select! {
