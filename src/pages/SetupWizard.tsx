@@ -78,7 +78,7 @@ function ChoiceCard(props: {
   return (
     <button
       onClick={props.onClick}
-      className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-left
+      className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left
                   transition-colors ${
                     props.active
                       ? "border-slate-800 bg-white shadow-sm"

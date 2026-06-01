@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.48
+
+- **Einbettcode nur noch an einer Stelle.** Die „Website-Einbettung"-Karte vom
+  Dashboard entfernt — der Einbettcode wird jetzt ausschließlich über die
+  „Code"-Buttons je Verband im Setup-Wizard gepflegt (eine Quelle, kein
+  Doppel-Pflegen). `EmbedCodeCard` entfällt; Snippet lebt zentral in
+  `embedSnippet.ts`.
+- **Einheitliche Kartenbreite** im Liveticker-Ziel: alle Preset-Karten füllen
+  jetzt die volle Breite (`ChoiceCard` w-full), statt sich an die Textlänge
+  anzupassen.
+
 ## v0.9.47
 
 - **Einbettcode = kompakte „Jetzt live"-Box (WordPress-sicher).** Der
