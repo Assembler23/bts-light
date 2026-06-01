@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.47
+
+- **Einbettcode = kompakte „Jetzt live"-Box (WordPress-sicher).** Der
+  Copy-Button liefert jetzt den Einzeiler
+  `<script src="https://badhub.de/embed/badge.php" data-key="…"></script>`
+  (statt des vollen iFrames) — die kompakte Box erscheint nur bei laufendem
+  Turnier und verlinkt zum Liveticker.
+- **Einbettcode je Verband im Setup-Wizard.** Hinter jeder LV-Preset-Karte ein
+  „Code"-Button, der den fertigen Einbettcode des jeweiligen Verbands kopiert
+  (kein Umweg übers Dashboard). Gemeinsamer Helper `embedSnippet.ts`,
+  Dashboard-Karte nutzt denselben Snippet.
+
 ## v0.9.46
 
 - **5 weitere Landesverbände als Preset.** Der Setup-Wizard bietet neben BVBB

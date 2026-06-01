@@ -25,6 +25,7 @@ import {
   stopSync,
   testBtp,
 } from "../api";
+import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import { playTestAnnouncement } from "../io/announcer";
 import { PRESETS, findPreset } from "../presets";
@@ -373,14 +374,18 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       <section className="flex flex-col gap-2">
         <SectionHeader icon={Target}>1 · Liveticker-Ziel</SectionHeader>
         {PRESETS.map((preset) => (
-          <ChoiceCard
-            key={preset.id}
-            icon={Target}
-            title={preset.label}
-            description={preset.badhub.live_url}
-            active={presetId === preset.id}
-            onClick={() => setPresetId(preset.id)}
-          />
+          <div key={preset.id} className="flex items-stretch gap-2">
+            <div className="min-w-0 flex-1">
+              <ChoiceCard
+                icon={Target}
+                title={preset.label}
+                description={preset.badhub.live_url}
+                active={presetId === preset.id}
+                onClick={() => setPresetId(preset.id)}
+              />
+            </div>
+            <CopyBadgeButton liveUrl={preset.badhub.live_url} />
+          </div>
         ))}
         <ChoiceCard
           icon={KeyRound}
