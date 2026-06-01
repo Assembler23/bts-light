@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import {
   Check,
   Cloud,
+  Info,
   KeyRound,
   type LucideIcon,
   Monitor,
@@ -425,6 +426,22 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       {isManual && (
         <section className="flex flex-col gap-3">
           <SectionHeader icon={KeyRound}>3 · Badhub-Zugang</SectionHeader>
+          <div className="flex gap-2.5 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-sm text-sky-900">
+            <Info size={18} strokeWidth={2} className="mt-0.5 shrink-0 text-sky-600" />
+            <p>
+              Für ein <strong>eigenes Turnier</strong> brauchst du einen eigenen
+              Zugang. Wende dich vorab an{" "}
+              <a
+                href="mailto:info@badhub.de"
+                className="font-medium underline underline-offset-2"
+              >
+                info@badhub.de
+              </a>{" "}
+              — dann bekommst du eine individuelle Liveticker-Adresse und die
+              passenden Zugangsdaten (URL&nbsp;+&nbsp;Passwort), die du hier
+              einträgst.
+            </p>
+          </div>
           <Field label="Badhub-URL" value={badhubUrl} onChange={setBadhubUrl} />
           <Field
             label="Badhub-Passwort"

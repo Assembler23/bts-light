@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.46
+
+- **5 weitere Landesverbände als Preset.** Der Setup-Wizard bietet neben BVBB
+  jetzt auch **BVRP, HBV, BBV, BWBV, NBV** als Ein-Klick-Ziel (eigene
+  Liveticker-Adresse + Push-Token je Verband, einheitlicher Karten-Look).
+- **Website-Einbettung mit Copy-Button.** Neue Dashboard-Karte
+  „Website-Einbettung": zeigt den fertigen iFrame-Code für die Verbands-Website
+  (WordPress) passend zum konfigurierten Turnier (`badhub.de/embed/live.php?t=…`,
+  mit Auto-Höhe per postMessage) und kopiert ihn per Klick.
+- **Hinweis für eigene Turniere.** Im manuellen Setup („Anderes Turnier") eine
+  Infobox: für eine eigene Liveticker-Adresse vorab an info@badhub.de wenden.
+
 ## v0.9.45
 
 - **Schnellere Selbstheilung nach Netzausfall.** Der Server-Timeout für tote

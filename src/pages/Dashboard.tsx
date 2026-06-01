@@ -13,6 +13,7 @@ import {
   Tv,
 } from "lucide-react";
 import { getStatus, openLiveView, openLogDir, startSync, stopSync } from "../api";
+import { EmbedCodeCard } from "../components/EmbedCodeCard";
 import { useUpdate } from "../components/UpdateBanner";
 import type { AppConfig, SyncStatus } from "../types";
 
@@ -202,6 +203,10 @@ export function Dashboard({
             />
           </div>
         </section>
+      )}
+
+      {config.badhub.live_url !== "" && (
+        <EmbedCodeCard liveUrl={config.badhub.live_url} />
       )}
 
       <section className="flex flex-col gap-2">
