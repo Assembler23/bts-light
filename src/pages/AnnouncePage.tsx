@@ -6,11 +6,8 @@ import { useEffect, useState } from "react";
 import { Megaphone, Volume2 } from "lucide-react";
 import { tabletOverview } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
-import {
-  playAnnouncement,
-  playTestAnnouncement,
-  resolveAnnouncementLanguage,
-} from "../io/announcer";
+import { announceCourt } from "../io/announceCourt";
+import { playTestAnnouncement } from "../io/announcer";
 import { useNow } from "../state/callTimer";
 import type { AnnounceConfig, CallTimerConfig, CourtOverview } from "../types";
 
@@ -46,29 +43,6 @@ export function AnnouncePage({
       clearInterval(id);
     };
   }, []);
-
-  // Feld-Ansage für ein laufendes Spiel – Sprache automatisch/konfiguriert.
-  // Der Klick ist die User-Geste, die WebView2-Audio entsperrt.
-  function announceCourt(c: CourtOverview) {
-    const lang = resolveAnnouncementLanguage(
-      [...c.team1_nationalities, ...c.team2_nationalities],
-      announce.language_mode,
-    );
-    void playAnnouncement(
-      {
-        courtLabel: c.court,
-        discipline: c.discipline,
-        teamANames: c.team1,
-        teamBNames: c.team2,
-      },
-      lang,
-      {
-        rate: announce.rate,
-        voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
-        gong: announce.gong,
-      },
-    );
-  }
 
   const onField = courts.filter((c) => c.match_id > 0);
 
@@ -136,7 +110,7 @@ export function AnnouncePage({
                 </div>
               </div>
               <button
-                onClick={() => announceCourt(c)}
+                onClick={() => announceCourt(c, announce)}
                 title="Dieses Feld ansagen"
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5
                            text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"

@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.60
+
+- **„Nochmal aufrufen" je Feld.** In der Spielübersicht hat jedes belegte Feld
+  jetzt einen Megafon-Button „Aufrufen", der die Feld-Ansage (Gong + Feld +
+  Disziplin + Paarung) erneut abspielt – praktisch, wenn die Spieler nicht kommen.
+  Sichtbar, wenn Ansagen aktiviert sind. (Ansage-Logik mit der Ansagen-Seite
+  geteilt, eine Quelle.)
+
 ## v0.9.59
 
 - **Spielübersicht als Board.** Statt links/rechts jetzt: oben der Pool der

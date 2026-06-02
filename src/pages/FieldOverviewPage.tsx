@@ -5,7 +5,7 @@
 // freigeben (mit Sicherheitsabfrage). Sperren-Umschalter je Feld. Bei ≥2 Hallen
 // nach Halle gruppiert + Hallen-Filter.
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Ban, Lock, Unlock } from "lucide-react";
+import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
 import {
   assignCourt,
   freeCourt,
@@ -15,8 +15,14 @@ import {
 } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
+import { announceCourt } from "../io/announceCourt";
 import { useNow } from "../state/callTimer";
-import type { CallTimerConfig, CourtOverview, PreparationCandidate } from "../types";
+import type {
+  AnnounceConfig,
+  CallTimerConfig,
+  CourtOverview,
+  PreparationCandidate,
+} from "../types";
 
 const POLL_MS = 2500;
 
@@ -26,7 +32,13 @@ function teamsLabel(t1: string[], t2: string[]): string {
   return `${a} – ${b}`;
 }
 
-export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig }) {
+export function FieldOverviewPage({
+  callTimer,
+  announce,
+}: {
+  callTimer: CallTimerConfig;
+  announce: AnnounceConfig;
+}) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
@@ -285,17 +297,36 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
                               cfg={callTimer}
                             />
                           )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmFree(c);
-                            }}
-                            disabled={busy}
-                            className="mt-auto self-start rounded-md bg-amber-200/70 px-2.5 py-1 text-xs
-                                       font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
-                          >
-                            Freigeben
-                          </button>
+                          <div className="mt-auto flex items-center gap-1.5">
+                            {/* „Nochmal aufrufen" nur, wenn Ansagen aktiviert
+                                sind – sonst gibt es keine Sprachausgabe. */}
+                            {announce.enabled && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  announceCourt(c, announce);
+                                }}
+                                disabled={busy}
+                                aria-label={`Feld ${c.court} nochmal aufrufen`}
+                                title="Dieses Feld nochmal aufrufen (Ansage)"
+                                className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1
+                                           text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+                              >
+                                <Megaphone size={13} /> Aufrufen
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmFree(c);
+                              }}
+                              disabled={busy}
+                              className="rounded-md bg-amber-200/70 px-2.5 py-1 text-xs font-medium
+                                         text-amber-900 hover:bg-amber-200 disabled:opacity-50"
+                            >
+                              Freigeben
+                            </button>
+                          </div>
                         </>
                       ) : (
                         <div className="flex flex-1 items-center justify-center text-center text-xs text-emerald-700">

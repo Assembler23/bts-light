@@ -169,7 +169,12 @@ function App() {
       case "dashboard":
         return <Dashboard config={config} status={status} />;
       case "fields":
-        return <FieldOverviewPage callTimer={config.call_timer} />;
+        return (
+          <FieldOverviewPage
+            callTimer={config.call_timer}
+            announce={config.announce}
+          />
+        );
       case "tablets":
         return <TabletPanel announce={config.announce} />;
       case "announce":
