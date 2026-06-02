@@ -122,6 +122,14 @@ fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
         .join(crate::tablet::monitor::MONITOR_ASSIGN_FILE)
 }
 
+/// Pfad der expliziten Hallen-Zuordnung je Monitor-Gerät.
+fn monitor_halls_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_config_dir()
+        .expect("App-Config-Verzeichnis ist verfügbar")
+        .join(crate::tablet::monitor::MONITOR_HALLS_FILE)
+}
+
 /// Pfad zur Datei mit dem laufenden Live-Satzstand je Feld. Übersteht einen
 /// App-Neustart, damit der TV nach einem Absturz/Neustart nicht auf BTPs
 /// 0:0 zurückfällt, bis das Tablet wieder verbunden ist.
@@ -952,7 +960,7 @@ pub fn monitor_devices(app: AppHandle, state: State<'_, AppState>) -> Vec<Monito
         let seen = state.tablet.monitor_live_seen();
         relay_proto::build_device_list(&assignments, &court_names, &seen, now_ms())
     };
-    match mode {
+    let mut devices = match mode {
         ConnectionMode::Cloud => state.tablet.relay_monitor_devices(),
         ConnectionMode::Lan => lan_devices(),
         // Doppelmodus: LAN- und Cloud-Liste vereinen (Dedup über die
@@ -960,7 +968,45 @@ pub fn monitor_devices(app: AppHandle, state: State<'_, AppState>) -> Vec<Monito
         ConnectionMode::LanAndCloud => {
             relay_proto::merge_device_lists(&lan_devices(), &state.tablet.relay_monitor_devices())
         }
+    };
+    // Explizite Halle je Gerät anhängen (host-seitig persistiert) – greift in
+    // ALLEN Modi, auch Cloud (der Relay kennt die Hallen-Zuordnung nicht).
+    let halls = crate::tablet::monitor::read_halls(&monitor_halls_path(&app));
+    if !halls.is_empty() {
+        for d in &mut devices {
+            d.hall = halls.get(&d.id).cloned();
+        }
     }
+    devices
+}
+
+/// Legt für ein Monitor-Gerät explizit eine Halle (Hallenname) fest oder hebt
+/// die Zuordnung auf (`None`). Damit lassen sich auch Geräte ohne Feld
+/// (unzugewiesen, Info/Werbung/Kombi) bei Mehr-Hallen-Turnieren einer Halle
+/// zuordnen und gruppieren.
+#[tauri::command]
+pub fn set_monitor_hall(
+    app: AppHandle,
+    device_id: String,
+    hall: Option<String>,
+) -> Result<(), String> {
+    if device_id.is_empty() || device_id.len() > 64 {
+        return Err("Ungültige Geräte-ID.".to_string());
+    }
+    if hall.as_deref().is_some_and(|h| h.len() > 128) {
+        return Err("Hallenname zu lang.".to_string());
+    }
+    let path = monitor_halls_path(&app);
+    let mut map = crate::tablet::monitor::read_halls(&path);
+    match hall.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()) {
+        Some(h) => {
+            map.insert(device_id, h);
+        }
+        None => {
+            map.remove(&device_id);
+        }
+    }
+    crate::tablet::monitor::write_halls(&path, &map).map_err(|e| e.to_string())
 }
 
 /// Weist ein Monitor-Gerät einem Target zu (Feld oder Info-Anzeige).
@@ -1019,6 +1065,13 @@ pub fn forget_monitor_device(
     let mut map = crate::tablet::monitor::read_assignments(&path);
     if map.remove(&device_id).is_some() {
         crate::tablet::monitor::write_assignments(&path, &map).map_err(|e| e.to_string())?;
+    }
+    // Ebenso eine explizite Hallen-Zuordnung entfernen, sonst sammeln sich
+    // über viele Turniere verwaiste Einträge in der Hallen-Datei an.
+    let halls_path = monitor_halls_path(&app);
+    let mut halls = crate::tablet::monitor::read_halls(&halls_path);
+    if halls.remove(&device_id).is_some() {
+        crate::tablet::monitor::write_halls(&halls_path, &halls).map_err(|e| e.to_string())?;
     }
     tracing::info!("Court-Monitor: Gerät '{device_id}' aus der Liste entfernt");
     Ok(())

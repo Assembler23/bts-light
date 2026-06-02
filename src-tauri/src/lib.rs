@@ -119,6 +119,7 @@ pub fn run() {
             commands::set_court_ad_label,
             commands::monitor_devices,
             commands::assign_monitor,
+            commands::set_monitor_hall,
             commands::monitor_command,
             commands::forget_monitor_device,
             open_log_dir,

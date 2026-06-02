@@ -111,6 +111,9 @@ export interface MonitorDeviceInfo {
   target: MonitorTarget | null;
   /** Hat sich das Gerät zuletzt gemeldet? */
   online: boolean;
+  /** Vom Operator explizit gewählte Halle (Hallenname); überschreibt die aus
+   *  dem Feld abgeleitete Halle. null = keine explizite Wahl. */
+  hall: string | null;
 }
 
 export interface AppConfig {

@@ -118,6 +118,13 @@ export const assignMonitor = (
   target: MonitorTarget | null,
 ): Promise<void> => invoke("assign_monitor", { deviceId, target });
 
+/** Legt für ein Monitor-Gerät explizit eine Halle fest (Hallenname) oder hebt
+ *  sie auf (`null`). Für Geräte ohne Feld (Info/Werbung/Kombi/unzugewiesen). */
+export const setMonitorHall = (
+  deviceId: string,
+  hall: string | null,
+): Promise<void> => invoke("set_monitor_hall", { deviceId, hall });
+
 /** Schickt einem Monitor-Gerät einen Fernbefehl. */
 export const monitorCommand = (
   deviceId: string,

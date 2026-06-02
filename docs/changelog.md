@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.58
+
+- **Mehr-Hallen-Komfort.** Bei Turnieren mit ≥2 Hallen:
+  - **Hallen-Filter** („Alle | Halle 1 | Halle 2 …") auf der Tablet- und der
+    Court-Monitore-Seite – zeigt nur die gewählte Halle.
+  - **Halle je Court-Monitor wählbar** (Dropdown „Halle: automatisch / Halle …"):
+    überschreibt die aus dem Feld abgeleitete Halle. So lassen sich auch Geräte
+    ohne Feld (Info-/Werbe-/Kombi-Monitore, noch unzugewiesene Pis) einer Halle
+    zuordnen. Persistiert in `monitor-halls.json`.
+  - **Tablet-Übersicht je Halle** mit Kurz-Zusammenfassung „X/Y Tablets
+    verbunden" in der Hallen-Überschrift.
+  - Geräte ohne Feld-Halle erscheinen weiterhin sauber gruppiert; ein leerer
+    Hallen-Filter zeigt einen Hinweis statt einer leeren Liste.
+
 ## v0.9.57
 
 - **Sicherheitsabfrage beim Feld-Freigeben.** „Freigeben" fragt jetzt erst nach

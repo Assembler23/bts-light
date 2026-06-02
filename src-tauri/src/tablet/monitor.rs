@@ -265,6 +265,28 @@ pub fn write_assignments(path: &Path, map: &HashMap<String, MonitorTarget>) -> s
     std::fs::write(path, json)
 }
 
+/// Dateiname der expliziten Hallen-Zuordnung je Monitor-Gerät (Geräte-ID →
+/// Hallenname). Getrennt von den Feld-Zuweisungen, damit eine Halle auch für
+/// nicht-feldgebundene Geräte (Info/Werbung/Kombi/unzugewiesen) gilt.
+pub const MONITOR_HALLS_FILE: &str = "monitor-halls.json";
+
+/// Liest die Geräte→Hallenname-Zuordnung. Fehlt/klemmt die Datei: leere Map.
+pub fn read_halls(path: &Path) -> HashMap<String, String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Schreibt die Geräte→Hallenname-Zuordnung.
+pub fn write_halls(path: &Path, map: &HashMap<String, String>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_string_pretty(map).unwrap_or_else(|_| "{}".to_string());
+    std::fs::write(path, json)
+}
+
 /// Anzeige-Zustand für ein noch keinem Feld zugewiesenes Gerät – der
 /// Monitor zeigt damit die Kopplungs-Seite mit seinem Code.
 pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
@@ -306,6 +328,27 @@ mod tests {
         assert_eq!(image_mime("x.png"), "image/png");
         assert_eq!(image_mime("x.JPG"), "image/jpeg");
         assert_eq!(image_mime("x.webp"), "image/webp");
+    }
+
+    #[test]
+    fn read_halls_missing_file_is_empty_then_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join(MONITOR_HALLS_FILE);
+        // Fehlt die Datei → leere Map (kein Fehler).
+        assert!(read_halls(&path).is_empty());
+        // Schreiben + Lesen erhält die Zuordnung.
+        let mut map = HashMap::new();
+        map.insert("dev-1".to_string(), "Halle 2".to_string());
+        write_halls(&path, &map).unwrap();
+        assert_eq!(read_halls(&path).get("dev-1").map(String::as_str), Some("Halle 2"));
+    }
+
+    #[test]
+    fn read_halls_corrupt_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_HALLS_FILE);
+        std::fs::write(&path, "{ kaputt").unwrap();
+        assert!(read_halls(&path).is_empty());
     }
 
     #[test]

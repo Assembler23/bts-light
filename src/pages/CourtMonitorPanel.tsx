@@ -16,8 +16,10 @@ import {
   listCourtAds,
   monitorCommand,
   monitorDevices,
+  setMonitorHall,
   tabletOverview,
 } from "../api";
+import { HallFilter } from "../components/HallFilter";
 import type {
   CourtAd,
   CourtOverview,
@@ -107,9 +109,11 @@ function groupDevicesForDisplay(
   courts: CourtOverview[],
 ): GroupedDevices {
   const courtById = new Map(courts.map((c) => [c.court_id, c]));
-  // Halle eines Geräts: aus seinem (ersten) zugewiesenen Feld. Info-/
-  // Werbe-/Kombi-/unzugewiesene Geräte haben keine eindeutige Halle.
+  // Halle eines Geräts: explizit gewählte Halle hat Vorrang; sonst aus dem
+  // zugewiesenen Feld abgeleitet. Info-/Werbe-/Kombi-/unzugewiesene Geräte
+  // ohne explizite Wahl haben keine eindeutige Halle.
   const hallOf = (d: MonitorDeviceInfo): string => {
+    if (d.hall) return d.hall;
     const cid =
       d.target?.kind === "court"
         ? d.target.court_id
@@ -173,6 +177,8 @@ export function CourtMonitorPanel() {
   // wenn der Operator parallel in den Einstellungen ein Bild
   // hinzufuegt oder entfernt.
   const [ads, setAds] = useState<CourtAd[]>([]);
+  // Hallen-Filter: null = alle Hallen.
+  const [hallFilter, setHallFilter] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -223,12 +229,31 @@ export function CourtMonitorPanel() {
   //  - innerhalb: Felder (nach Feld-Nr.) → Kombi-Felder → Info/Werbung →
   //    unzugewiesen
   const grouped = groupDevicesForDisplay(devices, courts);
+  // Alle Hallen des Turniers (für Filter + Zuweisungs-Dropdown), aus den
+  // Feld-Standorten. Erst ab 2 Hallen relevant.
+  const allHalls = [
+    ...new Set(courts.map((c) => c.location).filter((l) => l !== "")),
+  ].sort((a, b) => a.localeCompare(b, "de"));
+  // Bei aktivem Hallen-Filter nur die passende Hallen-Gruppe zeigen.
+  const byFilter = (groups: typeof grouped.online) =>
+    hallFilter === null ? groups : groups.filter((g) => g.hall === hallFilter);
+  const showOnline = byFilter(grouped.online);
+  const showOffline = byFilter(grouped.offline);
 
   async function refresh() {
     try {
       setDevices(await monitorDevices());
     } catch {
       /* ignorieren – nächster Poll versucht es erneut */
+    }
+  }
+
+  async function setHall(deviceId: string, hall: string | null) {
+    try {
+      await setMonitorHall(deviceId, hall);
+      await refresh();
+    } catch {
+      /* ignorieren */
     }
   }
 
@@ -318,7 +343,14 @@ export function CourtMonitorPanel() {
 
       {/* Geräteliste */}
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">Geräte</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">Geräte</h2>
+          <HallFilter
+            halls={allHalls}
+            value={hallFilter}
+            onChange={setHallFilter}
+          />
+        </div>
         {devices.length === 0 ? (
           <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
             <Info size={18} className="mt-0.5 shrink-0 text-slate-400" />
@@ -330,7 +362,7 @@ export function CourtMonitorPanel() {
         ) : (
           <div className="flex flex-col gap-2">
             {/* Online-Geräte, nach Halle gruppiert + nach Feld sortiert. */}
-            {grouped.online.map((g) => (
+            {showOnline.map((g) => (
               <div key={`on-${g.hall || "_"}`} className="flex flex-col gap-2">
                 {grouped.showHalls && g.hall && (
                   <h3 className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -343,7 +375,9 @@ export function CourtMonitorPanel() {
                     device={d}
                     courts={courts}
                     ads={ads}
+                    allHalls={allHalls}
                     onAssign={(target) => void assign(d.id, target)}
+                    onSetHall={(hall) => void setHall(d.id, hall)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
                   />
@@ -352,7 +386,7 @@ export function CourtMonitorPanel() {
             ))}
 
             {/* Offline-Geräte: unter einer Trennlinie, gleiche Sortierung. */}
-            {grouped.offline.some((g) => g.devices.length > 0) && (
+            {showOffline.some((g) => g.devices.length > 0) && (
               <div className="mt-2 flex items-center gap-2">
                 <div className="h-px flex-1 bg-slate-200" />
                 <span className="text-xs font-medium text-slate-400">
@@ -361,7 +395,7 @@ export function CourtMonitorPanel() {
                 <div className="h-px flex-1 bg-slate-200" />
               </div>
             )}
-            {grouped.offline.map((g) => (
+            {showOffline.map((g) => (
               <div key={`off-${g.hall || "_"}`} className="flex flex-col gap-2 opacity-60">
                 {grouped.showHalls && g.hall && (
                   <h3 className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -374,7 +408,9 @@ export function CourtMonitorPanel() {
                     device={d}
                     courts={courts}
                     ads={ads}
+                    allHalls={allHalls}
                     onAssign={(target) => void assign(d.id, target)}
+                    onSetHall={(hall) => void setHall(d.id, hall)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
                     onForget={() => void forget(d.id)}
@@ -382,6 +418,17 @@ export function CourtMonitorPanel() {
                 ))}
               </div>
             ))}
+
+            {/* Hallen-Filter aktiv, aber (noch) kein Gerät in dieser Halle –
+                z. B. zu Turnierbeginn, bevor Geräte zugeordnet sind. */}
+            {hallFilter !== null &&
+              showOnline.length === 0 &&
+              showOffline.length === 0 && (
+                <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400">
+                  Keine Geräte in „{hallFilter}". Über „Alle" siehst du alle
+                  Geräte; die Halle lässt sich je Gerät rechts einstellen.
+                </p>
+              )}
           </div>
         )}
       </section>
@@ -393,7 +440,9 @@ function DeviceRow({
   device,
   courts,
   ads,
+  allHalls,
   onAssign,
+  onSetHall,
   onIdentify,
   onReload,
   onForget,
@@ -401,7 +450,11 @@ function DeviceRow({
   device: MonitorDeviceInfo;
   courts: CourtOverview[];
   ads: CourtAd[];
+  /** Alle Hallen des Turniers – für das Hallen-Dropdown (ab 2 Hallen). */
+  allHalls: string[];
   onAssign: (target: MonitorTarget | null) => void;
+  /** Explizite Halle setzen (Name) oder aufheben (null). */
+  onSetHall: (hall: string | null) => void;
   onIdentify: () => void;
   onReload: () => void;
   /** Nur für offline Geräte gesetzt — entfernt das Gerät aus der Liste. */
@@ -570,6 +623,26 @@ function DeviceRow({
           </option>
         </optgroup>
       </select>
+
+      {/* Explizite Halle (nur Mehr-Hallen-Turnier): überschreibt die aus dem
+          Feld abgeleitete Halle – für Geräte ohne Feld (Info/Werbung/Kombi/
+          unzugewiesen) die einzige Möglichkeit, sie einer Halle zuzuordnen. */}
+      {allHalls.length >= 2 && (
+        <select
+          value={device.hall ?? ""}
+          onChange={(e) => onSetHall(e.currentTarget.value || null)}
+          title="Halle dieses Monitors (überschreibt die Halle des Felds)"
+          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
+                     text-slate-700 focus:border-slate-500 focus:outline-none"
+        >
+          <option value="">Halle: automatisch</option>
+          {allHalls.map((h) => (
+            <option key={h} value={h}>
+              {h}
+            </option>
+          ))}
+        </select>
+      )}
 
       <button
         onClick={onIdentify}

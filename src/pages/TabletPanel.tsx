@@ -14,6 +14,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { tabletOverview } from "../api";
+import { HallFilter } from "../components/HallFilter";
 import type { AnnounceConfig, CourtOverview, TabletInfo } from "../types";
 import { PreparationPanel } from "./PreparationPanel";
 
@@ -52,6 +53,8 @@ export function TabletPanel({ announce }: Props) {
   const [tab, setTab] = useState<"overview" | "preparation" | "qr">(
     "overview",
   );
+  // Hallen-Filter (null = alle) für Übersicht + QR-Codes.
+  const [hallFilter, setHallFilter] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -108,6 +111,14 @@ export function TabletPanel({ announce }: Props) {
   // zugeordnete Felder – landen in einer Gruppe ohne Überschrift. Ein-
   // Hallen-Turniere sehen damit aus wie ein flaches Raster, unverändert.
   const courtGroups = groupByHall(courts);
+  // Hallen des Turniers (für den Filter) + bei aktivem Filter nur die gewählte.
+  const allHalls = [
+    ...new Set(courts.map((c) => c.location).filter((l) => l !== "")),
+  ].sort((a, b) => a.localeCompare(b, "de"));
+  const visibleGroups =
+    hallFilter === null
+      ? courtGroups
+      : courtGroups.filter((g) => g.location === hallFilter);
 
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
@@ -173,21 +184,36 @@ export function TabletPanel({ announce }: Props) {
             </button>
           </div>
 
+          {/* Hallen-Filter – gilt für Übersicht und QR-Codes (nicht Vorbereitung). */}
+          {tab !== "preparation" && (
+            <HallFilter
+              halls={allHalls}
+              value={hallFilter}
+              onChange={setHallFilter}
+            />
+          )}
+
           {tab === "overview" && (
             <section className="flex flex-col gap-2">
               <p className="text-xs text-slate-500">
                 Live-Stand aller Felder mit Tablet-Verbindung und Akkustand.
               </p>
-              {courtGroups.map((g) => (
-                <div key={g.location} className="flex flex-col gap-2">
-                  <HallHeading name={g.location} />
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {g.courts.map((c) => (
-                      <CourtCard key={c.court_id} court={c} />
-                    ))}
+              {visibleGroups.map((g) => {
+                const online = g.courts.filter((c) => c.tablet_connected).length;
+                return (
+                  <div key={g.location} className="flex flex-col gap-2">
+                    <HallHeading
+                      name={g.location}
+                      summary={`${online}/${g.courts.length} Tablets verbunden`}
+                    />
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {g.courts.map((c) => (
+                        <CourtCard key={c.court_id} court={c} />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </section>
           )}
 
@@ -224,7 +250,7 @@ export function TabletPanel({ announce }: Props) {
                     ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
                     : "Tablet und dieser PC müssen im selben WLAN sein."}
               </p>
-              {courtGroups.map((g) => (
+              {visibleGroups.map((g) => (
                 <div key={g.location} className="flex flex-col gap-2">
                   <HallHeading name={g.location} />
                   <div
@@ -303,11 +329,15 @@ function groupByHall(
   return groups;
 }
 
-/** Hallen-Überschrift über einer Feld-Gruppe; ohne Hallenname (leer) nichts. */
-function HallHeading({ name }: { name: string }) {
+/** Hallen-Überschrift über einer Feld-Gruppe; ohne Hallenname (leer) nichts.
+ *  `summary` zeigt optional eine Kurz-Zusammenfassung (z. B. Tablets online). */
+function HallHeading({ name, summary }: { name: string; summary?: string }) {
   if (!name) return null;
   return (
-    <h3 className="mt-1 text-sm font-semibold text-slate-600">{name}</h3>
+    <div className="mt-1 flex items-baseline justify-between gap-2">
+      <h3 className="text-sm font-semibold text-slate-600">{name}</h3>
+      {summary && <span className="text-xs text-slate-400">{summary}</span>}
+    </div>
   );
 }
 

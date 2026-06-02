@@ -452,6 +452,14 @@ pub struct MonitorDeviceInfo {
     pub target: Option<MonitorTarget>,
     /// Hat sich das Gerät zuletzt gemeldet (kürzlich gepollt)?
     pub online: bool,
+    /// Vom Operator explizit gewählte Halle (Hallenname) für dieses Gerät –
+    /// überschreibt die aus dem zugewiesenen Feld abgeleitete Halle. Nötig für
+    /// Geräte ohne Feld (unzugewiesen, Info-/Werbe-/Kombi-Monitore), damit sie
+    /// bei Mehr-Hallen-Turnieren einer Halle zugeordnet werden können. Wird
+    /// host-seitig angehängt (`monitor-halls.json`); `None` = keine explizite
+    /// Wahl → Halle folgt dem Feld. `#[serde(default)]` hält ältere Frames lesbar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hall: Option<String>,
 }
 
 /// Steuerdaten, die der bts-light-Host zum Relay schickt: Feld-Zuweisungen
@@ -515,6 +523,8 @@ pub fn build_device_list(
                 target,
                 online: last_seen > 0
                     && now_ms.saturating_sub(last_seen) <= MONITOR_ONLINE_WINDOW_MS,
+                // Explizite Halle hängt der Host nachträglich an (monitor_devices).
+                hall: None,
             }
         })
         .collect();
@@ -538,8 +548,10 @@ pub fn merge_device_lists(
     let mut out: Vec<MonitorDeviceInfo> = Vec::new();
     for dev in lan.iter().chain(cloud.iter()) {
         if let Some(existing) = out.iter_mut().find(|d| d.id == dev.id) {
-            // Gerät schon bekannt → Online-Status der Quellen vereinen.
+            // Gerät schon bekannt → Online-Status der Quellen vereinen,
+            // explizite Halle übernehmen, falls eine Quelle sie kennt.
             existing.online = existing.online || dev.online;
+            existing.hall = existing.hall.clone().or_else(|| dev.hall.clone());
         } else {
             out.push(dev.clone());
         }
@@ -1058,6 +1070,7 @@ mod tests {
             court: court.map(|c| c.to_string()),
             target: court.map(|_| MonitorTarget::court(1)),
             online,
+            hall: None,
         };
         // LAN: Feld-1-Gerät online, gemeinsames Gerät offline.
         let lan = vec![
@@ -1092,6 +1105,26 @@ mod tests {
     }
 
     #[test]
+    fn merge_device_lists_preserves_hall_from_either_source() {
+        // Vertrag: kennt eine Quelle die explizite Halle, bleibt sie im Merge
+        // erhalten (auch wenn der Host sie i. d. R. nachträglich überschreibt).
+        let mk = |id: &str, hall: Option<&str>| MonitorDeviceInfo {
+            id: id.to_string(),
+            code: device_code(id),
+            court_id: None,
+            court: None,
+            target: None,
+            online: true,
+            hall: hall.map(|h| h.to_string()),
+        };
+        let lan = vec![mk("dev-1", None)];
+        let cloud = vec![mk("dev-1", Some("Halle 2"))];
+        let merged = merge_device_lists(&lan, &cloud);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].hall.as_deref(), Some("Halle 2"));
+    }
+
+    #[test]
     fn merge_device_lists_sorts_unassigned_devices_first() {
         // Vertrag: ein noch nicht zugewiesenes Gerät (court = None) sortiert
         // VOR zugewiesenen, weil `None` vor `Some(_)` ordnet. Pinnt die im
@@ -1103,6 +1136,7 @@ mod tests {
             court: court.map(|c| c.to_string()),
             target: court.map(|_| MonitorTarget::court(1)),
             online: false,
+            hall: None,
         };
         let lan = vec![dev("dev-assigned", Some("Feld 1"))];
         let cloud = vec![dev("dev-free", None)];
@@ -1124,6 +1158,7 @@ mod tests {
             court: None,
             target: None,
             online: true,
+            hall: None,
         }];
         assert_eq!(merge_device_lists(&lan, &[]), lan);
         assert_eq!(merge_device_lists(&[], &lan), lan);
