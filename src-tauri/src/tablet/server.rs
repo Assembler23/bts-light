@@ -94,6 +94,12 @@ impl ServerCtx {
             .unwrap_or_default()
     }
 
+    /// Gesamte App-Config frisch von der Platte (Default bei Fehler) – für
+    /// Aufrufer, die mehrere Felder daraus brauchen, ohne doppelt zu lesen.
+    pub fn app_config(&self) -> AppConfig {
+        AppConfig::load_from(&self.config_path).unwrap_or_default()
+    }
+
     /// Lädt die Geräte→Target-Zuweisungen frisch von der Platte. Ein
     /// Target ist entweder eine CourtID (klassischer Court-Monitor) oder
     /// ein Info-Display (`InfoOverview` / `InfoPreparation`).
@@ -301,9 +307,16 @@ async fn monitor_state(
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
     let court = ctx.tablet.monitor_court(court_id);
-    let config = ctx.monitor_config();
+    let cfg = ctx.app_config();
     let ads = monitor::list_ads(&ctx.monitor_dir);
-    let state = monitor::build_monitor_state(court_id, label, court, &config, ads);
+    let state = monitor::build_monitor_state(
+        court_id,
+        label,
+        court,
+        &cfg.court_monitor,
+        &cfg.call_timer,
+        ads,
+    );
     ([(header::CACHE_CONTROL, "no-store")], Json(state))
 }
 
@@ -329,9 +342,16 @@ async fn monitor_device_state(
         Some(relay_proto::MonitorTarget::Court { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
-            let config = ctx.monitor_config();
+            let cfg = ctx.app_config();
             let ads = monitor::list_ads(&ctx.monitor_dir);
-            monitor::build_monitor_state(court_id, label, court_data, &config, ads)
+            monitor::build_monitor_state(
+                court_id,
+                label,
+                court_data,
+                &cfg.court_monitor,
+                &cfg.call_timer,
+                ads,
+            )
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
         // Anzeige-HTML umleiten. Wir liefern einen minimalen MonitorState

@@ -133,6 +133,7 @@ pub fn build_monitor_state(
     court_label: String,
     court: MonitorCourt,
     config: &CourtMonitorConfig,
+    call_timer: &crate::config::CallTimerConfig,
     ads: Vec<String>,
 ) -> MonitorState {
     let sets: Vec<SetAb> = court.sets.iter().map(|&(a, b)| SetAb { a, b }).collect();
@@ -160,6 +161,12 @@ pub fn build_monitor_state(
         unassigned: false,
         redirect_to: None,
         server_now_ms: now_ms(),
+        on_court_since_ms: court.on_court_since_ms,
+        call_timer: relay_proto::CallTimerView {
+            enabled: call_timer.enabled,
+            second_call_minutes: call_timer.second_call_minutes,
+            third_call_minutes: call_timer.third_call_minutes,
+        },
     }
 }
 
@@ -274,6 +281,8 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         unassigned: true,
         redirect_to: None,
         server_now_ms: now_ms(),
+        on_court_since_ms: None,
+        call_timer: relay_proto::CallTimerView::default(),
     }
 }
 

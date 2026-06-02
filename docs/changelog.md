@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.54
+
+- **Aufruf-Timer jetzt auch auf dem Court-Monitor.** Steht ein Spiel auf dem
+  Feld, zeigt der TV in der Kopfzeile eine hochzählende Uhr + Aufruf-Chip
+  („📢 m:ss · 1. Aufruf → 2. Aufruf → Letzter Aufruf", grün→gelb→rot, pulsierend).
+  Rechnet relativ zur Server-Zeit (Pi-Uhr oft nicht synchron). Schwellen wie
+  bei der Spielübersicht aus **Einstellungen → Aufruf-Timer**.
+- *Gilt zunächst für den LAN-Pfad* (Pi am Hallen-WLAN / `bts-light.local`); im
+  Cloud-Modus folgt der Timer separat.
+
 ## v0.9.53
 
 - **Zählweise aus BTP übernommen.** bts-light liest jetzt das in BTP eingestellte

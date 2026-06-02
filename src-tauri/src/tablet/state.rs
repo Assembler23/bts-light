@@ -874,11 +874,15 @@ impl TabletState {
             }
             None => Vec::new(),
         };
+        let on_court_since_ms = current_match
+            .as_ref()
+            .and_then(|mm| self.on_court_since_ms(court_id, mm.id));
         MonitorCourt {
             tournament_name,
             current_match,
             sets,
             court_state: self.court_state(court_id),
+            on_court_since_ms,
         }
     }
 
@@ -972,6 +976,9 @@ pub struct MonitorCourt {
     pub sets: Vec<(i64, i64)>,
     /// Gespiegelter Tablet-Spielzustand (JSON-String), falls vorhanden.
     pub court_state: Option<String>,
+    /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
+    /// steht; `None` = kein Spiel. Grundlage der Aufruf-Uhr am Monitor.
+    pub on_court_since_ms: Option<u64>,
 }
 
 #[cfg(test)]

@@ -375,6 +375,32 @@ pub struct MonitorState {
     /// = altes Frame, dann fällt der TV auf `Date.now()` zurück.
     #[serde(rename = "serverNowMs", default)]
     pub server_now_ms: u64,
+    /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
+    /// steht; `None` = kein Spiel. Grundlage der Aufruf-Uhr am Monitor.
+    /// `#[serde(default)]` hält ältere Frames lesbar.
+    #[serde(
+        rename = "onCourtSinceMs",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub on_court_since_ms: Option<u64>,
+    /// Aufruf-Timer (1./2./3. Aufruf) – Schwellen für die Monitor-Anzeige.
+    /// `#[serde(default)]` (= aus) hält ältere Frames lesbar.
+    #[serde(rename = "callTimer", default)]
+    pub call_timer: CallTimerView,
+}
+
+/// Aufruf-Timer-Einstellungen für die Monitor-Anzeige (gespiegelt aus der
+/// App-Config). Der Monitor rechnet die hochzählende Uhr und den fälligen
+/// Aufruf selbst aus `on_court_since_ms` + `server_now_ms`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CallTimerView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(rename = "secondCallMinutes", default)]
+    pub second_call_minutes: f64,
+    #[serde(rename = "thirdCallMinutes", default)]
+    pub third_call_minutes: f64,
 }
 
 /// Art eines Fernbefehls an einen Court-Monitor.
@@ -943,6 +969,12 @@ mod tests {
             unassigned: false,
             redirect_to: None,
             server_now_ms: 0,
+            on_court_since_ms: Some(1_700_000_000_000),
+            call_timer: CallTimerView {
+                enabled: true,
+                second_call_minutes: 2.0,
+                third_call_minutes: 4.0,
+            },
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));

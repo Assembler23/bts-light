@@ -507,6 +507,10 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         unassigned: false,
         redirect_to: None,
         server_now_ms: now_ms(),
+        // Aufruf-Timer am Monitor: im Cloud-Pfad noch nicht durchgereicht
+        // (Host→Relay-Push fehlt) → Default (aus). LAN-Pfad zeigt ihn bereits.
+        on_court_since_ms: None,
+        call_timer: relay_proto::CallTimerView::default(),
     }
 }
 
@@ -560,6 +564,8 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         unassigned: false,
         redirect_to: None,
         server_now_ms: now_ms(),
+        on_court_since_ms: None,
+        call_timer: relay_proto::CallTimerView::default(),
     }
 }
 
