@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.57
+
+- **Sicherheitsabfrage beim Feld-Freigeben.** „Freigeben" fragt jetzt erst nach
+  („Feld wird in BTP zurückgezogen, Halle+Feld am Spiel entfernt; läuft ein
+  Spiel, wird der laufende Spielstand verworfen") und muss mit „Freigeben"
+  bestätigt werden. Verhindert versehentliches Zurückziehen eines laufenden
+  Spiels. Die angezeigten Spiel-Infos kommen aus dem Live-Stand des Felds.
+
 ## v0.9.56
 
 - **Automatische Feldvergabe.** Optional (Einstellungen → „Automatische

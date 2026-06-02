@@ -30,6 +30,8 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
+  // Feld, dessen Freigabe gerade bestätigt werden soll (Sicherheitsabfrage).
+  const [confirmFree, setConfirmFree] = useState<CourtOverview | null>(null);
   const timer = useRef<number | null>(null);
   const now = useNow();
 
@@ -99,6 +101,11 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
   const onCourtMatchIds = new Set(courts.map((c) => c.match_id).filter((id) => id > 0));
   const assignable = candidates.filter((m) => !onCourtMatchIds.has(m.match_id));
   const onField = courts.filter((c) => c.match_id > 0);
+  // Anzeige im Bestätigungs-Dialog stets aus dem Live-Stand des Felds ziehen
+  // (über die stabile court_id), damit sie bei einem Poll-Wechsel nicht veraltet.
+  const liveConfirm = confirmFree
+    ? courts.find((c) => c.court_id === confirmFree.court_id) ?? confirmFree
+    : null;
 
   return (
     <main className="mx-auto flex min-h-full max-w-5xl flex-col gap-5 p-6 text-slate-800">
@@ -274,7 +281,7 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          void run(() => freeCourt(c.court_id));
+                          setConfirmFree(c);
                         }}
                         disabled={busy}
                         className="mt-2 rounded-md bg-amber-200/70 px-2.5 py-1 text-xs font-medium
@@ -299,6 +306,60 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
           )}
         </section>
       </div>
+
+      {/* Sicherheitsabfrage vor dem Freigeben eines belegten Felds. */}
+      {confirmFree && liveConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="free-confirm-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-xl">
+            <div className="border-b border-slate-200 px-5 py-3">
+              <h2 id="free-confirm-title" className="font-semibold text-slate-800">
+                Feld {liveConfirm.court} freigeben?
+              </h2>
+            </div>
+            <div className="px-5 py-4 text-sm text-slate-700">
+              <p>
+                Das Feld wird in BTP zurückgezogen — Halle und Feld werden am
+                Spiel entfernt.
+              </p>
+              <p className="mt-2 font-medium text-rose-700">
+                Achtung: Läuft auf dem Feld ein Spiel, wird der laufende
+                Spielstand verworfen.
+              </p>
+              <p className="mt-2 text-slate-600">
+                {liveConfirm.match_name || "Spiel"} —{" "}
+                {teamsLabel(liveConfirm.team1, liveConfirm.team2)}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                onClick={() => setConfirmFree(null)}
+                disabled={busy}
+                className="rounded-lg bg-slate-100 px-3.5 py-2 text-sm font-medium
+                           text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={() => {
+                  const court_id = confirmFree.court_id;
+                  setConfirmFree(null);
+                  void run(() => freeCourt(court_id));
+                }}
+                disabled={busy}
+                className="rounded-lg bg-rose-600 px-3.5 py-2 text-sm font-medium text-white
+                           transition-colors hover:bg-rose-700 disabled:opacity-50"
+              >
+                Freigeben
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
