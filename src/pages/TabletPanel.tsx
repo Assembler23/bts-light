@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   Battery,
   BatteryCharging,
   BatteryWarning,
@@ -19,7 +18,6 @@ import type { AnnounceConfig, CourtOverview, TabletInfo } from "../types";
 import { PreparationPanel } from "./PreparationPanel";
 
 interface Props {
-  onBack: () => void;
   /** Ansage-Einstellungen — werden an den „In Vorbereitung"-Tab
    *  durchgereicht, der je gerufenem Spiel eine Hallen-Ansage anbietet. */
   announce: AnnounceConfig;
@@ -43,7 +41,7 @@ interface CourtAddress {
  * „QR-Codes" die Adressen/QR-Codes zum Einrichten der Tablets. Pollt
  * den Tablet-Server alle 2 s.
  */
-export function TabletPanel({ onBack, announce }: Props) {
+export function TabletPanel({ announce }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
   // Die groß angezeigte QR-Zoom-Ansicht: Feld + die angetippte Adresse
   // (im Doppelmodus hat ein Feld LAN und Cloud).
@@ -114,15 +112,6 @@ export function TabletPanel({ onBack, announce }: Props) {
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
       <header className="flex items-center gap-3">
-        <button
-          onClick={onBack}
-          title="Zurück zum Dashboard"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5
-                     text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
-        >
-          <ArrowLeft size={16} />
-          Zurück
-        </button>
         <div className="flex-1">
           <h1 className="text-2xl font-semibold leading-tight">
             Tablet-Spielzettel

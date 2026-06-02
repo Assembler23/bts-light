@@ -40,6 +40,12 @@ import type {
 interface Props {
   initialConfig: AppConfig;
   onDone: (config: AppConfig) => void;
+  /** "wizard" = Erst-Einrichtung (Vollbild, „Speichern & starten").
+   *  "settings" = jederzeit erreichbare Einstellungen-Seite. */
+  mode?: "wizard" | "settings";
+  /** Abschnitt, zu dem beim Öffnen gescrollt wird (Sprung aus einem
+   *  ausgegrauten Menüpunkt der Seitenleiste). */
+  focus?: "ansagen" | "court-monitor";
 }
 
 type TestState =
@@ -189,8 +195,25 @@ function Field(props: {
   );
 }
 
-export function SetupWizard({ initialConfig, onDone }: Props) {
-  const [presetId, setPresetId] = useState("bvbb");
+export function SetupWizard({
+  initialConfig,
+  onDone,
+  mode = "wizard",
+  focus,
+}: Props) {
+  const isSettings = mode === "settings";
+  // Vorauswahl des Verbands aus der gespeicherten Config ableiten – damit die
+  // Einstellungen-Seite das tatsächlich aktive Ziel zeigt (nicht stur BVBB).
+  const initialPreset = PRESETS.find(
+    (p) =>
+      (initialConfig.badhub.live_url &&
+        p.badhub.live_url === initialConfig.badhub.live_url) ||
+      (initialConfig.badhub.password &&
+        p.badhub.password === initialConfig.badhub.password),
+  );
+  const [presetId, setPresetId] = useState(
+    initialPreset?.id ?? (initialConfig.badhub.password ? MANUAL : "bvbb"),
+  );
   const [host, setHost] = useState(initialConfig.btp.host);
   const [port, setPort] = useState(String(initialConfig.btp.port));
   const [btpPassword, setBtpPassword] = useState(initialConfig.btp.password ?? "");
@@ -230,6 +253,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [saved, setSaved] = useState(false);
 
   // Hinterlegte Werbebilder beim Öffnen laden.
   useEffect(() => {
@@ -237,6 +261,13 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       .then(setAds)
       .catch(() => {});
   }, []);
+
+  // Sprung aus einem ausgegrauten Menüpunkt: zum passenden Abschnitt scrollen.
+  useEffect(() => {
+    if (!focus) return;
+    const el = document.getElementById(`section-${focus}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focus]);
 
   const isManual = presetId === MANUAL;
 
@@ -339,6 +370,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
   async function saveAndStart() {
     setSaving(true);
     setSaveError("");
+    setSaved(false);
     try {
       const config = buildConfig();
       await saveConfig(config);
@@ -350,6 +382,15 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       await new Promise((r) => setTimeout(r, 400));
       await startSync();
       onDone(config);
+      // In den Einstellungen bleibt die Seite stehen (Navigation via
+      // Seitenleiste) – kurze Bestätigung statt Wechsel ins Dashboard.
+      // Die Bestätigung nach 3 s ausblenden, damit ein später dazukommender
+      // Helfer keinen veralteten „Gespeichert"-Hinweis fehldeutet.
+      if (isSettings) {
+        setSaved(true);
+        setSaving(false);
+        window.setTimeout(() => setSaved(false), 3000);
+      }
     } catch (e) {
       setSaveError(String(e));
       setSaving(false);
@@ -364,10 +405,12 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         </div>
         <div>
           <h1 className="text-2xl font-semibold leading-tight">
-            BTS Light einrichten
+            {isSettings ? "Einstellungen" : "BTS Light einrichten"}
           </h1>
           <p className="text-sm text-slate-500">
-            Verbinde dein Turnier (BTP) mit dem Badhub-Liveticker.
+            {isSettings
+              ? "Verband, BTP-Verbindung, Tablets, Ansagen und Monitore anpassen."
+              : "Verbinde dein Turnier (BTP) mit dem Badhub-Liveticker."}
           </p>
         </div>
       </header>
@@ -497,7 +540,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       </section>
 
       {/* Sprachansagen */}
-      <section className="flex flex-col gap-2">
+      <section id="section-ansagen" className="flex flex-col gap-2 scroll-mt-4">
         <SectionHeader icon={Volume2}>Sprachansagen</SectionHeader>
         <p className="text-xs text-slate-500">
           Sagt jedes Spiel an, das in BTP auf ein Feld gezogen wird – mit
@@ -638,7 +681,7 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       </section>
 
       {/* Court-Monitor */}
-      <section className="flex flex-col gap-2">
+      <section id="section-court-monitor" className="flex flex-col gap-2 scroll-mt-4">
         <SectionHeader icon={Monitor}>Court-Monitor</SectionHeader>
         <p className="text-xs text-slate-500">
           TV-Anzeige am Spielfeld (Raspberry Pi): Werbung im Leerlauf, die
@@ -833,6 +876,11 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
       </section>
 
       {saveError && <p className="text-sm text-rose-700">{saveError}</p>}
+      {saved && isSettings && (
+        <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+          <Check size={16} /> Gespeichert – Liveticker neu gestartet.
+        </p>
+      )}
 
       <button
         onClick={saveAndStart}
@@ -840,7 +888,13 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-medium text-white
                    transition-colors hover:bg-slate-900 disabled:opacity-50"
       >
-        {saving ? "Wird gestartet …" : "Speichern & Liveticker starten"}
+        {saving
+          ? isSettings
+            ? "Wird gespeichert …"
+            : "Wird gestartet …"
+          : isSettings
+            ? "Speichern"
+            : "Speichern & Liveticker starten"}
       </button>
     </main>
   );

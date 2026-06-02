@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.51
+
+- **Neue, durchgängige Navigation.** Statt Dashboard-„Hub" mit Zurück-Button gibt
+  es jetzt eine **immer sichtbare Seitenleiste** (Status · Spielübersicht · Tablets ·
+  Ansagen · Monitore · Einstellungen) — von jedem Bereich direkt in jeden anderen,
+  ohne Zurück. Oben eine **feste Kopfzeile** mit Verband, Live-Status-Punkt und
+  Start/Stoppen (von überall erreichbar).
+- **Feature-abhängige Menüpunkte.** „Ansagen" und „Monitore" sind immer sichtbar,
+  aber **ausgegraut**, solange sie nicht aktiviert sind; ein Klick führt direkt in
+  den passenden **Einstellungen**-Abschnitt. Nach dem Aktivieren wird der Punkt
+  sofort nutzbar (kein Neustart).
+- **Einstellungen als Dauer-Seite.** Der Einrichtungs-Assistent ist jetzt auch
+  jederzeit über die Seitenleiste erreichbar (mit kurzer „Gespeichert"-Bestätigung);
+  der geführte Assistent erscheint nur noch bei der Erst-Einrichtung.
+- **Neu: Ansagen-Seite.** Manuelle Feld-Ansage je laufendem Spiel + Test-Ansage
+  (Grundlage für den künftigen Aufruf-Timer / 2.+3. Aufruf).
+
 ## v0.9.50
 
 - **Spiele per Drag-and-Drop aufs Feld ziehen.** In der Spielübersicht lassen

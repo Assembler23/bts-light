@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   Check,
   Cloud,
   Copy,
@@ -161,16 +160,12 @@ function groupDevicesForDisplay(
   };
 }
 
-interface Props {
-  onBack: () => void;
-}
-
 /**
  * Court-Monitore-Seite: oben die eine Einrichtungs-Adresse für alle
  * Raspberry Pis, darunter die Geräteliste mit Online-Status, Feld-
  * Zuweisung und Fernbefehlen. Pollt im 2-s-Takt.
  */
-export function CourtMonitorPanel({ onBack }: Props) {
+export function CourtMonitorPanel() {
   const [devices, setDevices] = useState<MonitorDeviceInfo[]>([]);
   const [info, setInfo] = useState<TabletInfo | null>(null);
   // Werbebild-Liste fuer das "Werbung"-optgroup. Polling im selben Takt
@@ -258,15 +253,6 @@ export function CourtMonitorPanel({ onBack }: Props) {
   return (
     <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
       <header className="flex items-center gap-3">
-        <button
-          onClick={onBack}
-          title="Zurück zum Dashboard"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5
-                     text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
-        >
-          <ArrowLeft size={16} />
-          Zurück
-        </button>
         <div className="flex-1">
           <h1 className="text-2xl font-semibold leading-tight">Court-Monitore</h1>
           <p className="text-sm text-slate-500">

@@ -75,3 +75,19 @@ export const PRESETS: Preset[] = [
 export function findPreset(id: string): Preset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
+
+/**
+ * Kurzname des aktiven Ziels für die Kopfzeile – das Verbands-Kürzel (z. B.
+ * „BVBB"), wenn die Config zu einem Preset passt, sonst „Eigenes Turnier".
+ * Erkennung über die Live-URL bzw. das Passwort.
+ */
+export function tenantShortLabel(badhub: BadhubConfig): string {
+  const preset = PRESETS.find(
+    (p) =>
+      (badhub.live_url && p.badhub.live_url === badhub.live_url) ||
+      (badhub.password && p.badhub.password === badhub.password),
+  );
+  // Kürzel = Teil vor dem ersten „–" im Preset-Label.
+  if (preset) return preset.label.split("–")[0].trim();
+  return "Eigenes Turnier";
+}

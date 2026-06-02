@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
-import { loadConfig, saveConfig } from "./api";
+import { getStatus, loadConfig, saveConfig, startSync, stopSync } from "./api";
 import { AlertBanner } from "./components/AlertBanner";
+import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
+import type { NavView, SettingsFocus } from "./components/SideNav";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { WalkoverPanel } from "./components/WalkoverPanel";
+import { AnnouncePage } from "./pages/AnnouncePage";
 import { CourtMonitorPanel } from "./pages/CourtMonitorPanel";
 import { Dashboard } from "./pages/Dashboard";
 import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
-import type { AppConfig } from "./types";
+import type { AppConfig, SyncStatus } from "./types";
 
-type View = "loading" | "wizard" | "dashboard" | "tablets" | "monitors" | "fields";
+// "loading"/"wizard" sind Sonderzustände ohne Shell; alles andere sind die
+// über die Seitenleiste erreichbaren Bereiche (NavView).
+type View = "loading" | "wizard" | NavView;
 
 function defaultConfig(): AppConfig {
   return {
@@ -51,6 +56,12 @@ function defaultConfig(): AppConfig {
 function App() {
   const [view, setView] = useState<View>("loading");
   const [config, setConfig] = useState<AppConfig>(defaultConfig());
+  // Einstellungen-Abschnitt, zu dem beim Öffnen gesprungen wird (Klick auf
+  // einen ausgegrauten Menüpunkt).
+  const [settingsFocus, setSettingsFocus] = useState<SettingsFocus | undefined>();
+  // Live-Status zentral – geteilt von Kopfzeile (Start/Stopp) und Status-Seite.
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     loadConfig()
@@ -69,58 +80,113 @@ function App() {
       .catch(() => setView("wizard"));
   }, []);
 
-  // Vor dem Öffnen des Wizards die Config frisch von der Platte laden – sonst
-  // überschreibt buildConfig() Änderungen, die seit App-Start passiert sind
-  // (z. B. in der Spielübersicht gesperrte Felder), mit dem veralteten Stand.
-  function openWizard() {
-    loadConfig()
-      .then((c) => setConfig(c))
-      .catch(() => {})
-      .finally(() => setView("wizard"));
+  // Status zentral pollen, sobald die App eingerichtet ist (nicht im
+  // Wizard/Loading – dort läuft noch kein Sync).
+  useEffect(() => {
+    if (view === "loading" || view === "wizard") return;
+    let active = true;
+    const tick = () => {
+      getStatus()
+        .then((s) => {
+          if (active) setStatus(s);
+        })
+        .catch(() => {});
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [view]);
+
+  async function toggleRun() {
+    if (!status) return;
+    setBusy(true);
+    try {
+      if (status.running) {
+        await stopSync();
+      } else {
+        await startSync();
+      }
+      setStatus(await getStatus());
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function renderView() {
-    if (view === "loading") {
-      return (
-        <main className="flex h-full items-center justify-center text-slate-400">
+  // Navigation aus der Seitenleiste; bei einem ausgegrauten Punkt steht der
+  // Ziel-Abschnitt der Einstellungen in `focus`.
+  function navigate(next: NavView, focus?: SettingsFocus) {
+    setSettingsFocus(next === "settings" ? focus : undefined);
+    setView(next);
+  }
+
+  if (view === "loading") {
+    return (
+      <div className="flex h-full flex-col bg-slate-50">
+        <main className="flex flex-1 items-center justify-center text-slate-400">
           Lädt …
         </main>
-      );
-    }
-    if (view === "wizard") {
-      return (
-        <SetupWizard
-          initialConfig={config}
-          onDone={(c) => {
-            setConfig(c);
-            setView("dashboard");
-          }}
-        />
-      );
-    }
-    if (view === "tablets") {
-      return (
-        <TabletPanel
-          onBack={() => setView("dashboard")}
-          announce={config.announce}
-        />
-      );
-    }
-    if (view === "monitors") {
-      return <CourtMonitorPanel onBack={() => setView("dashboard")} />;
-    }
-    if (view === "fields") {
-      return <FieldOverviewPage onBack={() => setView("dashboard")} />;
-    }
-    return (
-      <Dashboard
-        config={config}
-        onReconfigure={openWizard}
-        onOpenTablets={() => setView("tablets")}
-        onOpenMonitors={() => setView("monitors")}
-        onOpenFields={() => setView("fields")}
-      />
+      </div>
     );
+  }
+
+  // Erst-Einrichtung: Wizard im Vollbild, ohne Shell.
+  if (view === "wizard") {
+    return (
+      <UpdateProvider>
+        <div className="flex h-full flex-col bg-slate-50">
+          <UpdateBanner />
+          <AlertBanner />
+          <div className="min-h-0 flex-1 overflow-auto">
+            <SetupWizard
+              initialConfig={config}
+              onDone={(c) => {
+                setConfig(c);
+                setView("dashboard");
+              }}
+            />
+          </div>
+          <Footer />
+          <MatchAnnouncer announce={config.announce} />
+        </div>
+      </UpdateProvider>
+    );
+  }
+
+  function activePage(v: NavView) {
+    switch (v) {
+      case "dashboard":
+        return <Dashboard config={config} status={status} />;
+      case "fields":
+        return <FieldOverviewPage />;
+      case "tablets":
+        return <TabletPanel announce={config.announce} />;
+      case "announce":
+        return <AnnouncePage announce={config.announce} />;
+      case "monitors":
+        return <CourtMonitorPanel />;
+      case "settings":
+        // Hinweis: SetupWizard liest seine Felder einmalig aus initialConfig.
+        // Das ist sicher, weil `config` nur beim Speichern (onDone) wechselt –
+        // dann zeigt die Seite ohnehin den gespeicherten Stand. Würde `config`
+        // künftig während offener Einstellungen von außen geändert, müsste die
+        // Seite per key remountet werden.
+        return (
+          <SetupWizard
+            mode="settings"
+            focus={settingsFocus}
+            initialConfig={config}
+            onDone={(c) => setConfig(c)}
+          />
+        );
+      default: {
+        // Erzwingt zur Compile-Zeit, dass jeder NavView-Fall behandelt ist.
+        const _exhaustive: never = v;
+        return _exhaustive;
+      }
+    }
   }
 
   return (
@@ -128,7 +194,16 @@ function App() {
       <div className="flex h-full flex-col bg-slate-50">
         <UpdateBanner />
         <AlertBanner />
-        <div className="min-h-0 flex-1 overflow-auto">{renderView()}</div>
+        <AppShell
+          current={view}
+          config={config}
+          status={status}
+          busy={busy}
+          onToggleRun={toggleRun}
+          onNavigate={navigate}
+        >
+          {activePage(view)}
+        </AppShell>
         <Footer />
         <WalkoverPanel />
         <MatchAnnouncer announce={config.announce} />
