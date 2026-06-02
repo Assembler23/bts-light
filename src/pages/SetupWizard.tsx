@@ -4,6 +4,7 @@ import {
   Cloud,
   Info,
   KeyRound,
+  LayoutGrid,
   type LucideIcon,
   Monitor,
   Server,
@@ -243,6 +244,10 @@ export function SetupWizard({
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
   const [ctSecond, setCtSecond] = useState(String(ct?.second_call_minutes ?? 2));
   const [ctThird, setCtThird] = useState(String(ct?.third_call_minutes ?? 4));
+  // Automatische Feldvergabe.
+  const aa = initialConfig.auto_assign;
+  const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
+  const [aaWait, setAaWait] = useState(String(aa?.wait_minutes ?? 1));
   const cm = initialConfig.court_monitor;
   const [cmEnabled, setCmEnabled] = useState(cm.enabled);
   const [cmInterval, setCmInterval] = useState(cm.ad_interval_s);
@@ -332,6 +337,11 @@ export function SetupWizard({
           third_call_minutes: thirdRaw > second ? thirdRaw : second + 1,
         };
       })(),
+      auto_assign: {
+        enabled: aaEnabled,
+        // Negative/leere Eingabe abfangen; 0 ist erlaubt (sofort belegen).
+        wait_minutes: Number(aaWait) >= 0 ? Number(aaWait) : 1,
+      },
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
     };
@@ -741,6 +751,47 @@ export function SetupWizard({
                 sonst automatisch angehoben.
               </p>
             )}
+          </div>
+        )}
+      </section>
+
+      {/* Automatische Feldvergabe */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={LayoutGrid}>Automatische Feldvergabe</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Belegt freie Felder automatisch mit dem nächsten spielbereiten Spiel –
+          schreibt die Zuweisung nach BTP (wie das Ziehen in der Spielübersicht).
+          Gesperrte Felder bleiben frei.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={aaEnabled}
+            onChange={(e) => setAaEnabled(e.currentTarget.checked)}
+          />
+          Automatische Feldvergabe aktivieren
+        </label>
+
+        {aaEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <Field
+              label="Wartezeit, bis ein freies Feld belegt wird (Minuten)"
+              value={aaWait}
+              onChange={setAaWait}
+              type="number"
+            />
+            <p className="text-xs text-slate-500">
+              Verhindert, dass ein Feld sofort in der kurzen Lücke zwischen zwei
+              Spielen belegt wird. 0 = sofort.{" "}
+              {initialConfig.locked_courts.length > 0 && (
+                <>Aktuell gesperrte Felder werden nicht automatisch belegt.</>
+              )}
+            </p>
+            <p className="flex items-start gap-1.5 text-xs text-amber-700">
+              <Info size={14} className="mt-0.5 shrink-0" />
+              In Mehr-Hallen-Turnieren werden nur Spiele automatisch verteilt,
+              die du für die jeweilige Halle „in Vorbereitung" gerufen hast.
+            </p>
           </div>
         )}
       </section>

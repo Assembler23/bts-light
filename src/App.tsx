@@ -54,6 +54,10 @@ function defaultConfig(): AppConfig {
       second_call_minutes: 2,
       third_call_minutes: 4,
     },
+    auto_assign: {
+      enabled: false,
+      wait_minutes: 1,
+    },
     locked_courts: [],
   };
 }

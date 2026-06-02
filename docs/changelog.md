@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.56
+
+- **Automatische Feldvergabe.** Optional (Einstellungen → „Automatische
+  Feldvergabe"): bts-light belegt freie, nicht gesperrte Felder automatisch mit
+  dem nächsten spielbereiten Spiel und schreibt das nach BTP — sobald ein Feld
+  **lange genug frei** ist (einstellbare Wartezeit, verhindert Belegen in der
+  kurzen Lücke zwischen Spielen; 0 = sofort).
+  - Reihenfolge wie in der Vorbereitung (gerufen zuerst, dann Spielnummer).
+  - **Mehr-Hallen-sicher:** Im Mehr-Hallen-Turnier werden nur Spiele verteilt,
+    die für die jeweilige Halle „in Vorbereitung" gerufen wurden — kein Risiko,
+    ein Spiel in die falsche Halle zu legen.
+  - **Keine Doppelvergabe:** ein bereits (auch zyklusübergreifend) vergebenes
+    Spiel/Feld wird erst nach BTP-Bestätigung wieder berücksichtigt.
+
 ## v0.9.55
 
 - **Aufruf-Timer jetzt auch im Cloud-Modus auf dem Court-Monitor.** Der Aufruf-

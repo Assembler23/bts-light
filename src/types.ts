@@ -46,6 +46,14 @@ export interface CallTimerConfig {
   third_call_minutes: number;
 }
 
+/** Einstellungen der automatischen Feldvergabe (Rust: config::AutoAssignConfig). */
+export interface AutoAssignConfig {
+  /** Automatische Feldvergabe aktiv? */
+  enabled: boolean;
+  /** Wartezeit in Minuten, die ein Feld frei sein muss, bevor automatisch belegt wird. */
+  wait_minutes: number;
+}
+
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
 export interface CourtMonitorConfig {
   /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der
@@ -120,6 +128,8 @@ export interface AppConfig {
   court_monitor: CourtMonitorConfig;
   /** Einstellungen des Aufruf-Timers (1./2./3. Aufruf). */
   call_timer: CallTimerConfig;
+  /** Einstellungen der automatischen Feldvergabe. */
+  auto_assign: AutoAssignConfig;
   /** Vom Operator gesperrte Felder (CourtIDs) – keine Auto-Vergabe. */
   locked_courts: number[];
 }

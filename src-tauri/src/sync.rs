@@ -67,7 +67,21 @@ pub struct SyncEngine {
     /// Spiels. Wechselt das (Spiel verlässt das Feld) und ist es beendet,
     /// merkt sich der State den Verlierer als Zähltafelbediener fürs Feld.
     oncourt_prev: HashMap<i64, i64>,
+    /// CourtID → Zeitpunkt (Unix-ms), seit dem ein Feld frei ist (kein Match
+    /// referenziert es). Grundlage der Wartezeit der automatischen Feldvergabe.
+    court_free_since: HashMap<i64, u64>,
+    /// Schon automatisch vergebene, aber von BTP noch nicht bestätigte
+    /// Zuweisungen: CourtID → (Match-ID, Versand-Zeitpunkt). Verhindert, dass
+    /// dasselbe Match/Feld erneut vergeben wird, bevor der BTP-Write im
+    /// nächsten Poll sichtbar ist (sonst Doppelvergabe bei langsamem BTP).
+    /// Einträge fallen weg, sobald das Feld belegt erscheint oder nach
+    /// [`PENDING_AUTO_TTL`] (fehlgeschlagener Write → erneuter Versuch).
+    pending_auto: HashMap<i64, (i64, u64)>,
 }
+
+/// Wie lange eine offene Auto-Zuweisung als „unterwegs" gilt, bevor sie als
+/// fehlgeschlagen verworfen und neu versucht wird (BTP-Write nicht sichtbar).
+const PENDING_AUTO_TTL: Duration = Duration::from_secs(30);
 
 impl Default for SyncEngine {
     fn default() -> Self {
@@ -84,6 +98,8 @@ impl SyncEngine {
             last_push_at: None,
             last_topology: None,
             oncourt_prev: HashMap::new(),
+            court_free_since: HashMap::new(),
+            pending_auto: HashMap::new(),
         }
     }
 
@@ -138,6 +154,133 @@ impl SyncEngine {
             }
         }
         self.oncourt_prev = oncourt_now;
+    }
+
+    /// Bestimmt die automatischen Feldvergaben dieses Zyklus und pflegt dabei
+    /// `court_free_since`. Liefert die nach BTP zu schreibenden (Court-,
+    /// Match-)Updates; leer, wenn die Funktion aus ist oder nichts ansteht.
+    ///
+    /// Regeln (bewusst konservativ – schreibt live nach BTP):
+    /// - Nur Felder, die im Snapshot frei (kein Match referenziert sie) und
+    ///   nicht gesperrt sind und seit ≥ `wait_minutes` frei stehen.
+    /// - Nächstes spielbereites Match (Scheduled, beide Teams bekannt);
+    ///   Reihenfolge gerufen-zuerst → Spielnummer → ID (wie die Vorbereitung).
+    /// - Mehr-Hallen-Turnier: nur Matches, die für DIESE Halle in die
+    ///   Vorbereitung gerufen wurden (kein Risiko, ein Spiel in die falsche
+    ///   Halle zu legen). Ein-Hallen: das nächste bereite Match.
+    /// - Kein Match doppelt in einem Zyklus.
+    fn auto_assign(
+        &mut self,
+        config: &AppConfig,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) -> (
+        Vec<crate::btp::proto::CourtAssignment>,
+        Vec<crate::btp::proto::MatchCourt>,
+    ) {
+        use std::collections::HashSet;
+        let now = now_ms();
+        // Belegt = irgendein Match referenziert das Feld (OnCourt ODER noch
+        // nicht abgeräumtes beendetes Spiel) → solche Felder sind nicht frei.
+        let busy: HashSet<i64> = snapshot.matches.iter().filter_map(|m| m.court_id).collect();
+        // Frei-seit pflegen: belegte vergessen, freie stempeln, unbekannte raus.
+        let known: HashSet<i64> = snapshot.court_infos.iter().map(|c| c.id).collect();
+        self.court_free_since.retain(|id, _| known.contains(id));
+        for court in &snapshot.court_infos {
+            if busy.contains(&court.id) {
+                self.court_free_since.remove(&court.id);
+            } else {
+                self.court_free_since.entry(court.id).or_insert(now);
+            }
+        }
+
+        // Offene (von BTP noch nicht bestätigte) Auto-Zuweisungen abgleichen:
+        // belegt sichtbar gewordene Felder bzw. abgelaufene Einträge fallen
+        // weg (Letzteres = Write vermutlich fehlgeschlagen → erneut versuchen).
+        self.pending_auto
+            .retain(|court_id, (_, ts)| {
+                !busy.contains(court_id)
+                    && now.saturating_sub(*ts) < PENDING_AUTO_TTL.as_millis() as u64
+            });
+
+        if !config.auto_assign.enabled {
+            return (Vec::new(), Vec::new());
+        }
+        // Wartezeit robust: NaN/Inf/negativ → 0 (sofort).
+        let wm = config.auto_assign.wait_minutes;
+        let wait_ms = if wm.is_finite() && wm > 0.0 {
+            (wm * 60_000.0) as u64
+        } else {
+            0
+        };
+        let locked: HashSet<i64> = tablet.locked_courts().into_iter().collect();
+        // Felder/Matches mit offener (unbestätigter) Auto-Zuweisung sperren.
+        let pending_courts: HashSet<i64> = self.pending_auto.keys().copied().collect();
+        let pending_matches: HashSet<i64> =
+            self.pending_auto.values().map(|(m, _)| *m).collect();
+        let multi_hall = snapshot.is_multi_hall();
+        let calls = tablet.preparation_calls();
+        let call_for = |mid: i64| calls.iter().find(|c| c.match_id == mid);
+
+        // Spielbereite Matches in Vorbereitungs-Reihenfolge.
+        let mut ready: Vec<&crate::btp::model::BtpMatch> = snapshot
+            .matches
+            .iter()
+            .filter(|m| {
+                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+            })
+            .collect();
+        ready.sort_by_key(|m| (call_for(m.id).is_none(), m.match_num.unwrap_or(i64::MAX), m.id));
+
+        let mut courts = Vec::new();
+        let mut match_courts = Vec::new();
+        let mut used: HashSet<i64> = HashSet::new();
+
+        for court in &snapshot.court_infos {
+            if busy.contains(&court.id)
+                || locked.contains(&court.id)
+                || pending_courts.contains(&court.id)
+            {
+                continue;
+            }
+            let free_since = self.court_free_since.get(&court.id).copied().unwrap_or(now);
+            if now.saturating_sub(free_since) < wait_ms {
+                continue;
+            }
+            let pick = ready.iter().find(|m| {
+                if used.contains(&m.id) || pending_matches.contains(&m.id) {
+                    return false;
+                }
+                if multi_hall {
+                    // Nur für diese Halle gerufene Matches.
+                    call_for(m.id)
+                        .and_then(|c| c.location_id)
+                        .zip(court.location_id)
+                        .map(|(a, b)| a == b)
+                        .unwrap_or(false)
+                } else {
+                    true
+                }
+            });
+            let Some(m) = pick else { continue };
+            used.insert(m.id);
+            courts.push(crate::btp::proto::CourtAssignment {
+                court_id: court.id,
+                match_id: Some(m.id),
+            });
+            match_courts.push(crate::btp::proto::MatchCourt {
+                match_id: m.id,
+                draw_id: m.draw_id,
+                planning_id: m.planning_id,
+                court_id: court.id,
+            });
+            // Feld gilt jetzt als belegt – Wartezeit zurücksetzen und die
+            // Zuweisung als „unterwegs" merken, damit weder Feld noch Match bis
+            // zur BTP-Rückmeldung erneut vergeben werden (keine Doppelvergabe).
+            self.court_free_since.remove(&court.id);
+            self.pending_auto.insert(court.id, (m.id, now));
+        }
+        (courts, match_courts)
     }
 
     /// Führt einen vollständigen Poll-Push-Zyklus aus.
@@ -212,6 +355,22 @@ impl SyncEngine {
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
         tablet.reconcile_on_court(&oncourt_now, now_ms());
+        // Automatische Feldvergabe: freie, lange genug freie, nicht gesperrte
+        // Felder mit dem nächsten spielbereiten Match belegen (schreibt nach
+        // BTP). Aus dem aktuellen Snapshot bestimmt – kollidiert so nicht mit
+        // einer BTP-seitigen Zuweisung; der nächste Poll liest beides gleich.
+        let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
+        if !auto_courts.is_empty() {
+            match crate::tablet::server::write_courts_to_btp(config, &auto_courts, &auto_matches)
+                .await
+            {
+                Ok(()) => tracing::info!(
+                    "Auto-Feldvergabe: {} Feld(er) belegt",
+                    auto_courts.len()
+                ),
+                Err(e) => tracing::warn!("Auto-Feldvergabe fehlgeschlagen: {e}"),
+            }
+        }
         // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());
@@ -348,5 +507,188 @@ mod tests {
         // Direkt nach einem Push → noch kein Heartbeat fällig.
         engine.last_push_at = Some(Instant::now());
         assert!(!engine.heartbeat_due());
+    }
+
+    // ───────────────────────── Auto-Feldvergabe ─────────────────────────
+
+    use crate::btp::model::{BtpCourt, BtpLocation};
+    use crate::config::AutoAssignConfig;
+    use crate::tablet::state::{PreparationCall, TabletState};
+
+    fn player(n: &str) -> BtpPlayer {
+        BtpPlayer {
+            name: n.to_string(),
+            first: String::new(),
+            last: n.to_string(),
+            member_id: None,
+            nationality: None,
+        }
+    }
+
+    /// Match mit Status/Feld/Halle-unabhängig; Scheduled = spielbereit.
+    fn ready_match(id: i64, num: i64) -> BtpMatch {
+        BtpMatch {
+            id,
+            draw_id: 1,
+            planning_id: 1000 + id,
+            draw_name: "HE".to_string(),
+            discipline: Discipline::MensSingles,
+            round_name: "G1".to_string(),
+            match_num: Some(num),
+            team1: vec![player("A")],
+            team2: vec![player("B")],
+            entry1_id: 0,
+            entry2_id: 0,
+            court: None,
+            court_id: None,
+            sets: Vec::new(),
+            winner: None,
+            result: MatchResult::Normal,
+            status: MatchStatus::Scheduled,
+            finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
+            scoring: crate::btp::model::ScoringFormat::default(),
+        }
+    }
+
+    fn court(id: i64, location_id: Option<i64>) -> BtpCourt {
+        BtpCourt {
+            id,
+            name: id.to_string(),
+            location_id,
+            sort_order: id,
+        }
+    }
+
+    fn snap_with(courts: Vec<BtpCourt>, matches: Vec<BtpMatch>, locs: Vec<BtpLocation>) -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "T".to_string(),
+            courts: Vec::new(),
+            locations: locs,
+            court_infos: courts,
+            matches,
+        }
+    }
+
+    fn cfg_auto(enabled: bool, wait_minutes: f64) -> AppConfig {
+        AppConfig {
+            auto_assign: AutoAssignConfig {
+                enabled,
+                wait_minutes,
+            },
+            ..AppConfig::default()
+        }
+    }
+
+    #[test]
+    fn auto_assign_fills_free_court_with_ready_match() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        // wait=0 → sofort belegen.
+        let (courts, matches) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].court_id, 1);
+        assert_eq!(courts[0].match_id, Some(7));
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].match_id, 7);
+        assert_eq!(matches[0].court_id, 1);
+    }
+
+    #[test]
+    fn auto_assign_disabled_assigns_nothing_but_tracks_free() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        let (courts, _) = engine.auto_assign(&cfg_auto(false, 0.0), &snap, &tablet);
+        assert!(courts.is_empty());
+        // Frei-seit wird trotzdem gepflegt (für den Wartezeit-Start).
+        assert!(engine.court_free_since.contains_key(&1));
+    }
+
+    #[test]
+    fn auto_assign_skips_locked_court() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.set_court_locked(1, true);
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(courts.is_empty());
+    }
+
+    #[test]
+    fn auto_assign_waits_until_court_free_long_enough() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        // Erste Runde mit Wartezeit 5 min: gerade erst frei → noch nichts.
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 5.0), &snap, &tablet);
+        assert!(courts.is_empty());
+        // Frei-seit künstlich 6 min in die Vergangenheit → jetzt belegen.
+        let old = now_ms().saturating_sub(6 * 60_000);
+        engine.court_free_since.insert(1, old);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 5.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn auto_assign_no_double_assign_one_match_two_courts() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![ready_match(7, 1)],
+            Vec::new(),
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        // Nur ein Feld belegt – das eine Match nicht doppelt.
+        assert_eq!(courts.len(), 1);
+    }
+
+    #[test]
+    fn auto_assign_does_not_rebook_match_until_btp_confirms() {
+        // Regression (HIGH): schreibt der BTP-Write langsam, zeigt der nächste
+        // Poll das Match noch als Scheduled und das Feld noch frei. Die
+        // Zuweisung darf NICHT ein zweites Mal (auf ein anderes Feld) erfolgen.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![ready_match(7, 1)],
+            Vec::new(),
+        );
+        let cfg = cfg_auto(true, 0.0);
+        let (first, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(first.len(), 1, "erste Runde: ein Feld belegt");
+        // Zweite Runde mit UNVERÄNDERTEM Snapshot (BTP noch nicht bestätigt):
+        // Match 7 ist „unterwegs" → keine erneute Vergabe.
+        let (second, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert!(second.is_empty(), "kein erneutes Buchen vor BTP-Bestätigung");
+    }
+
+    #[test]
+    fn auto_assign_multi_hall_only_matches_called_for_that_hall() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Match 7 wurde für Halle 2 in die Vorbereitung gerufen.
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: Some(2),
+            called_at_ms: 0,
+        });
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![ready_match(7, 1)],
+            vec![
+                BtpLocation { id: 1, name: "Halle 1".into() },
+                BtpLocation { id: 2, name: "Halle 2".into() },
+            ],
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        // Nur das Feld in Halle 2 (location_id=2) bekommt das Match.
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].court_id, 2);
     }
 }

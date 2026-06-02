@@ -192,6 +192,29 @@ impl Default for CallTimerConfig {
     }
 }
 
+/// Einstellungen der automatischen Feldvergabe. Ist sie aktiv, weist bts-light
+/// ein spielbereites Match automatisch einem freien, nicht gesperrten Feld zu,
+/// sobald dieses lange genug frei ist – schreibt das wie die manuelle Vergabe
+/// nach BTP.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AutoAssignConfig {
+    /// Automatische Feldvergabe aktiv?
+    pub enabled: bool,
+    /// Wartezeit in Minuten, die ein Feld frei sein muss, bevor automatisch
+    /// belegt wird (verhindert Zuweisung in der kurzen Lücke zwischen Spielen).
+    pub wait_minutes: f64,
+}
+
+impl Default for AutoAssignConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            wait_minutes: 1.0,
+        }
+    }
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -222,6 +245,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub call_timer: CallTimerConfig,
+    /// Einstellungen der automatischen Feldvergabe. `#[serde(default)]` hält
+    /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub auto_assign: AutoAssignConfig,
     /// Vom Operator gesperrte Felder (CourtIDs) – werden nicht automatisch
     /// belegt. bts-light-seitig, persistiert über Neustarts. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -315,6 +342,10 @@ mod tests {
                 second_call_minutes: 1.5,
                 third_call_minutes: 3.0,
             },
+            auto_assign: AutoAssignConfig {
+                enabled: true,
+                wait_minutes: 0.5,
+            },
             locked_courts: vec![3, 7],
         };
         config.save_to(&path).unwrap();
@@ -350,6 +381,10 @@ mod tests {
         assert!(!loaded.call_timer.enabled);
         assert_eq!(loaded.call_timer.second_call_minutes, 2.0);
         assert_eq!(loaded.call_timer.third_call_minutes, 4.0);
+        // Ebenso die Auto-Feldvergabe (vor v0.9.56 unbekannt) → Defaults.
+        assert_eq!(loaded.auto_assign, AutoAssignConfig::default());
+        assert!(!loaded.auto_assign.enabled);
+        assert_eq!(loaded.auto_assign.wait_minutes, 1.0);
     }
 
     #[test]
