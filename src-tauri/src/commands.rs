@@ -580,6 +580,51 @@ pub async fn confirm_walkover(
     Ok(WalkoverResult { written, errors })
 }
 
+// ───────────────────────────── Feldvergabe (BTP-Write) ────────────────────
+
+/// Weist ein Match einem Feld zu – schreibt die Zuweisung nach BTP
+/// (`SENDUPDATE`-Courts-Block). Bidirektional: beim nächsten Poll liest
+/// bts-light das Match als OnCourt auf diesem Feld zurück, und BTP zeigt es
+/// ebenfalls. Wird auch genutzt, um das Feld umzubelegen.
+#[tauri::command]
+pub async fn assign_court(
+    state: State<'_, AppState>,
+    match_id: i64,
+    court_id: i64,
+) -> Result<(), String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    crate::tablet::server::write_courts_to_btp(
+        &config,
+        &[crate::btp::proto::CourtAssignment {
+            court_id,
+            match_id: Some(match_id),
+        }],
+    )
+    .await
+}
+
+/// Gibt ein Feld frei – schreibt einen `Court` ohne `MatchID` nach BTP.
+#[tauri::command]
+pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(), String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    crate::tablet::server::write_courts_to_btp(
+        &config,
+        &[crate::btp::proto::CourtAssignment {
+            court_id,
+            match_id: None,
+        }],
+    )
+    .await
+}
+
 // ───────────────────────────── Spiele in Vorbereitung ─────────────────────
 
 /// Daten zu einem bereits ausgesprochenen „in Vorbereitung"-Aufruf.

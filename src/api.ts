@@ -39,6 +39,14 @@ export const openLiveView = (display: string | null): Promise<void> =>
 export const tabletOverview = (): Promise<TabletInfo> =>
   invoke("tablet_overview");
 
+/** Weist ein Match einem Feld zu (schreibt nach BTP). */
+export const assignCourt = (matchId: number, courtId: number): Promise<void> =>
+  invoke("assign_court", { matchId, courtId });
+
+/** Gibt ein Feld frei (schreibt nach BTP). */
+export const freeCourt = (courtId: number): Promise<void> =>
+  invoke("free_court", { courtId });
+
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
 

@@ -731,6 +731,40 @@ pub(crate) async fn write_result_to_btp(
         .map_err(|e| e.to_string())
 }
 
+/// LOGIN → Session-Schlüssel → `SENDUPDATE` mit Courts-Block. Schreibt
+/// **Feld-Zuweisungen** nach BTP (Match auf Feld setzen / Feld freigeben) –
+/// nach dem Vorbild des Original-BTS. Bidirektional: das, was hier geschrieben
+/// wird, liest bts-light beim nächsten Poll als OnCourt zurück.
+pub(crate) async fn write_courts_to_btp(
+    config: &AppConfig,
+    assignments: &[proto::CourtAssignment],
+) -> Result<(), String> {
+    if assignments.is_empty() {
+        return Ok(());
+    }
+    let host = &config.btp.host;
+    let port = config.btp.port;
+    let pw = config.btp.password.as_deref();
+
+    let login_raw = client::send_request(host, port, &proto::login_request(pw))
+        .await
+        .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    let session = proto::parse_login_response(
+        &proto::decode_response(&login_raw).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let upd_raw = client::send_request(
+        host,
+        port,
+        &proto::courts_update_request(assignments, &session, pw),
+    )
+    .await
+    .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
 // ─────────────────────────────── WebSocket ────────────────────────────────
 
 /// Baut die Match-Kurzinfo fürs Tablet. BTP liefert das Spielsystem nicht

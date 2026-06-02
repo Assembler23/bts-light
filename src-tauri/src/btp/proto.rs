@@ -127,6 +127,49 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
     wire::encode_message(&xml::encode(&nodes))
 }
 
+/// Eine Feld-Zuweisung für BTP. `match_id = Some(id)` weist das Match dem
+/// Feld zu, `None` gibt das Feld frei (BTS-Vorbild: ein `Court` ohne `MatchID`
+/// im Courts-Block bedeutet „frei").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CourtAssignment {
+    /// BTP-interne Court-ID (`Court.ID`).
+    pub court_id: i64,
+    /// Zugewiesenes Match (`Court.MatchID`); `None` = Feld freigeben.
+    pub match_id: Option<i64>,
+}
+
+/// Fertige Wire-Bytes für einen `SENDUPDATE`-Request, der **Feld-Zuweisungen**
+/// nach BTP schreibt (`Update.Tournament.Courts.Court{ID,[MatchID]}`). Nach dem
+/// Vorbild des Original-BTS (`btp_proto.js update_courts_request`). Die Antwort
+/// wird wie beim Ergebnis-Write per [`parse_update_response`] geprüft.
+pub fn courts_update_request(
+    assignments: &[CourtAssignment],
+    session_key: &str,
+    password: Option<&str>,
+) -> Vec<u8> {
+    let court_nodes: Vec<Node> = assignments
+        .iter()
+        .map(|a| {
+            let mut children = vec![Node::integer("ID", a.court_id)];
+            // MatchID nur setzen, wenn zugewiesen wird; weglassen = freigeben.
+            if let Some(mid) = a.match_id {
+                children.push(Node::integer("MatchID", mid));
+            }
+            Node::group("Court", children)
+        })
+        .collect();
+
+    let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
+    nodes.push(Node::group(
+        "Update",
+        vec![Node::group(
+            "Tournament",
+            vec![Node::group("Courts", court_nodes)],
+        )],
+    ));
+    wire::encode_message(&xml::encode(&nodes))
+}
+
 /// Dekodiert eine Wire-Antwort zu VISUALXML-Knoten.
 pub fn decode_response(wire_bytes: &[u8]) -> Result<Vec<Node>, ProtoError> {
     let xml = wire::decode_message(wire_bytes)?;
@@ -384,5 +427,70 @@ mod tests {
             parse_update_response(&update_reply("ERROR", 1)),
             Err(ProtoError::UnexpectedReply(id)) if id == "ERROR"
         ));
+    }
+
+    // --- SENDUPDATE Courts (Feldvergabe) ----------------------------------
+
+    /// Kinder des `Courts`-Knotens aus einer SENDUPDATE-Wire-Nachricht.
+    fn courts_block(wire_bytes: &[u8]) -> Vec<Node> {
+        let nodes = decode_response(wire_bytes).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        xml::find(tournament.children(), "Courts")
+            .unwrap()
+            .children()
+            .to_vec()
+    }
+
+    #[test]
+    fn courts_update_uses_sendupdate_action_with_session_key() {
+        let req = courts_update_request(
+            &[CourtAssignment {
+                court_id: 5,
+                match_id: Some(42),
+            }],
+            "SESSION-7",
+            None,
+        );
+        let action = action_of(&req);
+        assert_eq!(child_str(&action, "ID"), Some("SENDUPDATE"));
+        assert_eq!(child_str(&action, "Unicode"), Some("SESSION-7"));
+    }
+
+    #[test]
+    fn courts_update_assign_includes_matchid() {
+        let req = courts_update_request(
+            &[CourtAssignment {
+                court_id: 5,
+                match_id: Some(42),
+            }],
+            "S",
+            None,
+        );
+        let court = xml::find(&courts_block(&req), "Court")
+            .unwrap()
+            .children()
+            .to_vec();
+        assert_eq!(child_int(&court, "ID"), Some(5));
+        assert_eq!(child_int(&court, "MatchID"), Some(42));
+    }
+
+    #[test]
+    fn courts_update_free_omits_matchid() {
+        // Freigeben: Court ohne MatchID (BTS-Vorbild).
+        let req = courts_update_request(
+            &[CourtAssignment {
+                court_id: 7,
+                match_id: None,
+            }],
+            "S",
+            None,
+        );
+        let court = xml::find(&courts_block(&req), "Court")
+            .unwrap()
+            .children()
+            .to_vec();
+        assert_eq!(child_int(&court, "ID"), Some(7));
+        assert!(xml::find(&court, "MatchID").is_none());
     }
 }
