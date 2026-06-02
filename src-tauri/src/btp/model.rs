@@ -139,6 +139,70 @@ pub struct BtpCourt {
 }
 
 /// Eine anzeigbare Paarung.
+/// Aufgelöste Zählweise eines Matches (aus dem BTP-`ScoringFormat`). BTP führt
+/// die Formate zentral (`ScoringFormats`) und ordnet sie je `Stage` zu; der
+/// Draw hängt über `StageID` an der Stage. Aus dem `SetType` ergeben sich
+/// Spielende, Cap und die Intervall-Pausenschwelle (offizielle BWF-Werte,
+/// Tabelle wie im Original-BTS).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoringFormat {
+    /// Anzahl Sätze (BTP `NumSets`), z. B. 3 → Best-of-3.
+    pub best_of: i64,
+    /// Punktzahl zum Satzgewinn (z. B. 21 oder 15).
+    pub target_score: i64,
+    /// Maximalpunktzahl/Cap: bei Gleichstand wird bis dahin gespielt, dann
+    /// gewinnt der Führende (z. B. 30 bei 21, 21 bei 15).
+    pub cap_score: i64,
+    /// Punktestand, bei dem die Intervall-Pause (60 s) ausgelöst wird; `None`,
+    /// wenn das Format keine reguläre Intervall-Pause je Satz kennt.
+    pub interval_at: Option<i64>,
+}
+
+impl Default for ScoringFormat {
+    /// Klassisch 3×21 (Cap 30, Intervall bei 11) – BTP-Standard und Fallback.
+    fn default() -> Self {
+        Self {
+            best_of: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: Some(11),
+        }
+    }
+}
+
+impl ScoringFormat {
+    /// Leitet Spielende/Cap/Intervall aus BTP `NumSets`/`SetType`/`Score` ab.
+    /// SetType-Tabelle (BWF, identisch zum Original-BTS):
+    /// `0` = 3×21 (Ende 21, Cap 30, Intervall 11); `306` = 15 (21), Intervall 8;
+    /// `301/304/305` = 11er-Sätze (Cap 11/15/13, keine reguläre Intervall-Pause
+    /// in Mehrsatz-Formaten); `999` = Score-getrieben; sonst → klassisch 21.
+    fn from_btp(num_sets: i64, set_type: i64, score: i64) -> Self {
+        let best_of = if num_sets > 0 { num_sets } else { 3 };
+        let (target_score, cap_score, interval_at) = match set_type {
+            0 => (21, 30, Some(11)),
+            301 => (11, 11, None),
+            304 => (11, 15, None),
+            305 => (11, 13, None),
+            306 => (15, 21, Some(8)),
+            999 if score > 0 => (score, score, None),
+            // Unbekannter SetType: sicher auf klassisch 21 zurückfallen,
+            // aber die echte Satzzahl behalten.
+            _ => {
+                return ScoringFormat {
+                    best_of,
+                    ..ScoringFormat::default()
+                }
+            }
+        };
+        ScoringFormat {
+            best_of,
+            target_score,
+            cap_score,
+            interval_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BtpMatch {
     pub id: i64,
@@ -190,6 +254,10 @@ pub struct BtpMatch {
     /// hallenweise gerufen wurde. Transientes Feld wie `preparation_call_ts`:
     /// der Parser schreibt immer `None`.
     pub preparation_hall: Option<String>,
+    /// Zählweise des Matches (Sätze, Spielende, Cap, Intervall-Schwelle) –
+    /// aus dem BTP-`ScoringFormat` der Stage des Draws aufgelöst. Steuert auf
+    /// dem Tablet Satzgewinn und Pausen. Default = 3×21.
+    pub scoring: ScoringFormat,
 }
 
 /// Aufbereiteter Turnier-Stand aus einer `SENDTOURNAMENTINFO`-Antwort.
@@ -275,6 +343,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     let courts = court_map(t);
     let draws = draw_map(t);
     let disciplines = draw_discipline_map(t);
+    let scoring = scoring_by_draw(t);
 
     // Court-Namen nach CourtID sortiert – das ergibt die BTP-Anlegereihenfolge.
     let mut court_pairs: Vec<(&i64, &String)> = courts.iter().collect();
@@ -283,7 +352,9 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
 
     Ok(BtpSnapshot {
         tournament_name: setting_str(t, 1001).unwrap_or_default(),
-        matches: parse_matches(t, &players, &entries, &slots, &courts, &draws, &disciplines),
+        matches: parse_matches(
+            t, &players, &entries, &slots, &courts, &draws, &disciplines, &scoring,
+        ),
         courts: court_names,
         locations: location_list(t),
         court_infos: court_list(t),
@@ -450,6 +521,61 @@ fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
     map
 }
 
+/// DrawID → aufgelöste Zählweise. BTP ordnet die Formate je `Stage` zu
+/// (`Stage.ScoringFormat` = Format-ID), der Draw verweist per `StageID` auf
+/// seine Stage. Ohne auflösbare Zuordnung gilt das als Standard markierte
+/// Format (`IsDefault`), sonst 3×21. (BTP erlaubt theoretisch auch eine
+/// Zählweise pro Spiel; wie das Original-BTS lösen wir auf Stage-Ebene auf.)
+fn scoring_by_draw(t: &[Node]) -> HashMap<i64, ScoringFormat> {
+    // FormatID → ScoringFormat; zugleich das Default-Format merken.
+    let mut formats: HashMap<i64, ScoringFormat> = HashMap::new();
+    let mut default_format = ScoringFormat::default();
+    if let Some(group) = xml::find(t, "ScoringFormats") {
+        for f in group.children() {
+            let Some(id) = child_int(f, "ID") else {
+                continue;
+            };
+            let sf = ScoringFormat::from_btp(
+                child_int(f, "NumSets").unwrap_or(3),
+                child_int(f, "SetType").unwrap_or(0),
+                child_int(f, "Score").unwrap_or(0),
+            );
+            // BTP kann `IsDefault` als Bool ODER Integer (1) liefern – beides
+            // als „Standard" werten, sonst fiele die Default-Auflösung still
+            // auf 3×21 zurück.
+            if child_bool(f, "IsDefault") == Some(true) || child_int(f, "IsDefault") == Some(1) {
+                default_format = sf.clone();
+            }
+            formats.insert(id, sf);
+        }
+    }
+    // StageID → FormatID.
+    let mut stage_format: HashMap<i64, i64> = HashMap::new();
+    if let Some(group) = xml::find(t, "Stages") {
+        for s in group.children() {
+            if let (Some(id), Some(fmt)) = (child_int(s, "ID"), child_int(s, "ScoringFormat")) {
+                stage_format.insert(id, fmt);
+            }
+        }
+    }
+    // DrawID → Format über die StageID des Draws.
+    let mut map = HashMap::new();
+    if let Some(group) = xml::find(t, "Draws") {
+        for d in group.children() {
+            let Some(draw_id) = child_int(d, "ID") else {
+                continue;
+            };
+            let sf = child_int(d, "StageID")
+                .and_then(|sid| stage_format.get(&sid))
+                .and_then(|fid| formats.get(fid))
+                .cloned()
+                .unwrap_or_else(|| default_format.clone());
+            map.insert(draw_id, sf);
+        }
+    }
+    map
+}
+
 /// Generische ID→Name-Tabelle für Container mit gleichförmigen Einträgen.
 fn id_name_map(t: &[Node], container: &str) -> HashMap<i64, String> {
     let mut map = HashMap::new();
@@ -475,6 +601,7 @@ fn parse_matches(
     courts: &HashMap<i64, String>,
     draws: &HashMap<i64, String>,
     disciplines: &HashMap<i64, Discipline>,
+    scoring: &HashMap<i64, ScoringFormat>,
 ) -> Vec<BtpMatch> {
     let mut out = Vec::new();
     let Some(matches) = xml::find(t, "Matches") else {
@@ -533,6 +660,10 @@ fn parse_matches(
             // apply_preparation_calls, nicht der Parser.
             preparation_call_ts: None,
             preparation_hall: None,
+            // Zählweise über die Stage des Draws; ohne Zuordnung 3×21.
+            scoring: draw_id
+                .and_then(|id| scoring.get(&id).cloned())
+                .unwrap_or_default(),
         });
     }
     out
@@ -901,6 +1032,120 @@ mod tests {
         )];
         let snapshot = parse_snapshot(&tree).unwrap();
         assert_eq!(snapshot.matches[0].discipline, Discipline::Mixed);
+    }
+
+    #[test]
+    fn scoring_format_from_btp_maps_set_types() {
+        let f = |s: ScoringFormat| (s.best_of, s.target_score, s.cap_score, s.interval_at);
+        // 0 = klassisch 3×21 (Cap 30, Intervall 11).
+        assert_eq!(f(ScoringFormat::from_btp(3, 0, 21)), (3, 21, 30, Some(11)));
+        // 306 = „3×15 (21)" → Ende 15, Cap 21, Intervall bei 8 (Fall des Nutzers).
+        assert_eq!(f(ScoringFormat::from_btp(3, 306, 15)), (3, 15, 21, Some(8)));
+        // 11er-Sätze (301/304/305): Cap 11/15/13, kein reguläres Intervall.
+        assert_eq!(f(ScoringFormat::from_btp(5, 301, 11)), (5, 11, 11, None));
+        assert_eq!(f(ScoringFormat::from_btp(5, 304, 11)), (5, 11, 15, None));
+        assert_eq!(f(ScoringFormat::from_btp(5, 305, 11)), (5, 11, 13, None));
+        // Unbekannter SetType → klassisch 21, Satzzahl bleibt erhalten.
+        assert_eq!(f(ScoringFormat::from_btp(1, 4242, 0)), (1, 21, 30, Some(11)));
+    }
+
+    #[test]
+    fn scoring_resolves_via_stage_else_default() {
+        // Format 1 = Default 3×21; Format 2 = 3×15 (21). Stage 10 → Format 2.
+        // Draw 1 hängt an Stage 10, Draw 2 hat keine Stage → Default.
+        let bool_item = |id: &str, v: bool| Node::Item {
+            id: id.to_string(),
+            value: Value::Bool(v),
+        };
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![
+                    Node::group(
+                        "ScoringFormats",
+                        vec![
+                            Node::group(
+                                "ScoringFormat",
+                                vec![
+                                    Node::integer("ID", 1),
+                                    Node::integer("NumSets", 3),
+                                    Node::integer("SetType", 0),
+                                    Node::integer("Score", 21),
+                                    bool_item("IsDefault", true),
+                                ],
+                            ),
+                            Node::group(
+                                "ScoringFormat",
+                                vec![
+                                    Node::integer("ID", 2),
+                                    Node::integer("NumSets", 3),
+                                    Node::integer("SetType", 306),
+                                    Node::integer("Score", 15),
+                                ],
+                            ),
+                        ],
+                    ),
+                    Node::group(
+                        "Stages",
+                        vec![Node::group(
+                            "Stage",
+                            vec![Node::integer("ID", 10), Node::integer("ScoringFormat", 2)],
+                        )],
+                    ),
+                    Node::group(
+                        "Draws",
+                        vec![
+                            Node::group(
+                                "Draw",
+                                vec![
+                                    Node::integer("ID", 1),
+                                    Node::integer("StageID", 10),
+                                    Node::string("Name", "HE"),
+                                ],
+                            ),
+                            Node::group(
+                                "Draw",
+                                vec![Node::integer("ID", 2), Node::string("Name", "DE")],
+                            ),
+                        ],
+                    ),
+                    Node::group(
+                        "Matches",
+                        vec![
+                            Node::group(
+                                "Match",
+                                vec![
+                                    Node::integer("ID", 5),
+                                    Node::integer("DrawID", 1),
+                                    bool_item("IsMatch", true),
+                                ],
+                            ),
+                            Node::group(
+                                "Match",
+                                vec![
+                                    Node::integer("ID", 6),
+                                    Node::integer("DrawID", 2),
+                                    bool_item("IsMatch", true),
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            )],
+        )];
+        let snap = parse_snapshot(&tree).unwrap();
+        let m1 = snap.matches.iter().find(|m| m.id == 5).unwrap();
+        assert_eq!(
+            (m1.scoring.target_score, m1.scoring.cap_score, m1.scoring.interval_at),
+            (15, 21, Some(8))
+        );
+        // Draw 2 ohne Stage → als Standard markiertes Format (3×21).
+        let m2 = snap.matches.iter().find(|m| m.id == 6).unwrap();
+        assert_eq!(
+            (m2.scoring.target_score, m2.scoring.cap_score, m2.scoring.interval_at),
+            (21, 30, Some(11))
+        );
     }
 
     /// Baut einen minimalen Snapshot mit gegebenen Hallen und Feldern –

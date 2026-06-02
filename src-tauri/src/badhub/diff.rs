@@ -125,6 +125,7 @@ mod tests {
             finished_at: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            scoring: crate::btp::model::ScoringFormat::default(),
         }
     }
 

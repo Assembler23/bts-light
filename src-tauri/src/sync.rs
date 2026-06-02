@@ -177,6 +177,24 @@ impl SyncEngine {
                 topology.1,
                 topology.2
             );
+            // Diagnose: welche Zählweisen liefert BTP? Distinkte Formate
+            // (Sätze/Ende/Cap/Intervall) ohne Spielernamen – zur Kontrolle,
+            // ob z. B. „3×15 (21)" korrekt als 15/21/Intervall-8 ankommt.
+            let mut formats: Vec<(i64, i64, i64, Option<i64>)> = snapshot
+                .matches
+                .iter()
+                .map(|m| {
+                    (
+                        m.scoring.best_of,
+                        m.scoring.target_score,
+                        m.scoring.cap_score,
+                        m.scoring.interval_at,
+                    )
+                })
+                .collect();
+            formats.sort_unstable();
+            formats.dedup();
+            tracing::info!("BTP-Zählweisen (best_of, Ende, Cap, Intervall): {formats:?}");
             self.last_topology = Some(topology);
         }
 
@@ -293,6 +311,7 @@ mod tests {
                 finished_at: None,
                 preparation_call_ts: None,
                 preparation_hall: None,
+                scoring: crate::btp::model::ScoringFormat::default(),
             }],
         }
     }

@@ -922,14 +922,18 @@ function setupBattery() {
 
 function capForTarget(target) {
   if (target === 21) return 30;
-  if (target === 15) return 20;
+  if (target === 15) return 21; // BWF „15 (21)": Cap 21, nicht 20
   if (target === 11) return 15;
   return target + 5;
 }
 
 function setWinnerSide(setScore, target) {
   if (target >= 99) return null;
-  const cap = capForTarget(target);
+  // Cap aus der BTP-Zählweise (z. B. 21 bei 15er-Sätzen, 30 bei 21er).
+  // Fallback auf die klassische Ableitung, falls der Server keinen (oder 0)
+  // Cap mitschickt – hält ältere Frames lesbar.
+  const sent = STATE.match && STATE.match.capScore;
+  const cap = (sent && sent >= target) ? sent : capForTarget(target);
   const { left, right } = setScore;
   if (left >= cap) return 'left';
   if (right >= cap) return 'right';
@@ -1468,9 +1472,18 @@ function addPointOnSide(side) {
   const setsRight = STATE.setsCompleted.filter(s => s.right > s.left).length;
   const isDecider = STATE.match.bestOfSets > 1
     && setsLeft === need - 1 && setsRight === need - 1;
-  const reached11 = STATE.currentSet.left === 11 || STATE.currentSet.right === 11;
+  // Intervall-/Seitenwechsel-Schwelle aus der BTP-Zählweise: 11 bei 21er-,
+  // 8 bei 15er-Sätzen. `null` = Format ohne reguläre Intervall-Pause (dann
+  // weder 60-s-Pause noch Decider-Seitenwechsel an dieser Schwelle).
+  // Fehlt intervalAt (alter Frame/Relay), gilt für klassische 21er-Sätze
+  // die BWF-Schwelle 11 – so verschwindet die Intervall-Pause nie unbemerkt.
+  const intervalAt = (STATE.match.intervalAt != null && STATE.match.intervalAt > 0)
+    ? STATE.match.intervalAt
+    : (STATE.match.targetScore === 21 ? 11 : null);
+  const reachedInterval = intervalAt != null
+    && (STATE.currentSet.left === intervalAt || STATE.currentSet.right === intervalAt);
   let triggeredMidGameSwitch = false;
-  if (isDecider && reached11 && !STATE.midGameSwitchDone) {
+  if (isDecider && reachedInterval && !STATE.midGameSwitchDone) {
     swapSides();
     STATE.midGameSwitchDone = true;
     triggeredMidGameSwitch = true;
@@ -1478,8 +1491,8 @@ function addPointOnSide(side) {
 
   // Offizielle Pause merken – erst nach Render/Score-Push starten.
   let triggeredBreak = null;
-  // 60-s-Intervall, sobald ein Team in diesem Satz erstmals 11 erreicht.
-  if (reached11 && !STATE.intervalDoneThisGame) {
+  // 60-s-Intervall, sobald ein Team in diesem Satz erstmals die Schwelle erreicht.
+  if (reachedInterval && !STATE.intervalDoneThisGame) {
     STATE.intervalDoneThisGame = true;
     triggeredBreak = 'eleven';
   }

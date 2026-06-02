@@ -789,8 +789,10 @@ pub(crate) fn match_brief(m: &BtpMatch, scorekeeper: Vec<String>) -> MatchBrief 
         event_label: format!("{} {}", m.draw_name, m.round_name)
             .trim()
             .to_string(),
-        best_of_sets: 3,
-        target_score: 21,
+        best_of_sets: m.scoring.best_of,
+        target_score: m.scoring.target_score,
+        cap_score: m.scoring.cap_score,
+        interval_at: m.scoring.interval_at,
         discipline: m.discipline.as_str().to_string(),
         match_number: m.match_num,
         scorekeeper,

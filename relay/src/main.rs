@@ -1233,6 +1233,8 @@ mod tests {
             event_label: "HE G1".into(),
             best_of_sets: 3,
             target_score: 21,
+            cap_score: 30,
+            interval_at: Some(11),
             discipline: "mens_singles".into(),
             match_number: Some(14),
             scorekeeper: Vec::new(),

@@ -61,6 +61,16 @@ pub struct MatchBrief {
     pub best_of_sets: i64,
     #[serde(rename = "targetScore")]
     pub target_score: i64,
+    /// Maximalpunktzahl/Cap des Satzes (z. B. 30 bei 21, 21 bei 15). Bei
+    /// Gleichstand wird bis dahin gespielt, dann gewinnt der Führende.
+    /// `#[serde(default)]` hält ältere Frames lesbar (0 → Tablet-Fallback).
+    #[serde(rename = "capScore", default)]
+    pub cap_score: i64,
+    /// Punktestand, bei dem die Intervall-Pause (60 s) ausgelöst wird; `None`
+    /// = keine reguläre Intervall-Pause je Satz. `#[serde(default)]` hält
+    /// ältere Frames lesbar.
+    #[serde(rename = "intervalAt", default)]
+    pub interval_at: Option<i64>,
     /// Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed`, …;
     /// leer = unbekannt) – der Court-Monitor lokalisiert ihn selbst.
     /// `#[serde(default)]` hält ältere Frames lesbar.
@@ -835,6 +845,8 @@ mod tests {
                 event_label: "HE G1".into(),
                 best_of_sets: 3,
                 target_score: 21,
+                cap_score: 30,
+                interval_at: Some(11),
                 discipline: "mens_singles".into(),
                 match_number: Some(14),
                 scorekeeper: vec!["Cara / Dora".into()],

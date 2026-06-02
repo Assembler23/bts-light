@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.53
+
+- **Zählweise aus BTP übernommen.** bts-light liest jetzt das in BTP eingestellte
+  Spielsystem (`ScoringFormats`, je `Stage` zugeordnet, Draw → `StageID` → Stage)
+  und gibt es ans Zähltablett weiter — statt fest „3×21". Daraus ergeben sich
+  **Satzgewinn, Cap und die Intervall-Pause** korrekt je Format:
+  - `3×21` → Satz bis 21, Cap 30, Intervall-Pause bei 11.
+  - `3×15 (21)` → Satz bis 15, **Cap 21**, **Intervall-Pause bei 8** (auch der
+    Seitenwechsel im Entscheidungssatz).
+  - 11er-Sätze (Cap 11/15/13) entsprechend; unbekannte Formate fallen sicher
+    auf 3×21 zurück.
+- **Diagnose-Log:** die erkannten Zählweisen werden bei Turnier-Wechsel ins Log
+  geschrieben (ohne Spielernamen), zur Kontrolle gegen BTP.
+- *Bekannte Grenze:* ein abweichender **Entscheidungssatz** (`LastSetType`, z. B.
+  Decider zu 11 statt 21) wird noch nicht gesondert ausgewertet — alle Sätze nutzen
+  das reguläre Format. Folgt bei Bedarf.
+
 ## v0.9.52
 
 - **Aufruf-Timer (1./2./3. Aufruf).** Der Aufruf aufs Feld ist der 1. Aufruf;
