@@ -108,6 +108,8 @@ export interface AppConfig {
   announce: AnnounceConfig;
   /** Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld). */
   court_monitor: CourtMonitorConfig;
+  /** Vom Operator gesperrte Felder (CourtIDs) – keine Auto-Vergabe. */
+  locked_courts: number[];
 }
 
 export interface SyncStatus {
@@ -163,6 +165,8 @@ export interface CourtOverview {
   /** Voraussichtlicher Zähltafelbediener (Verlierer-Team des Vorspiels auf
    *  diesem Feld). Leer, wenn es kein Vorspiel gab. */
   scorekeeper: string[];
+  /** Feld vom Operator gesperrt (bts-light-seitig) → rot, keine Auto-Vergabe. */
+  locked: boolean;
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

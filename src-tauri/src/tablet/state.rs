@@ -4,7 +4,7 @@
 //! Tablet-Server pflegt die laufenden Court-Sessions. Beide Seiten teilen
 //! sich ein `Arc<TabletState>`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
@@ -109,6 +109,9 @@ pub struct CourtOverview {
     /// Namen des Verlierer-Teams des zuletzt auf diesem Feld beendeten
     /// Spiels. Leer, wenn es kein Vorspiel auf dem Feld gab.
     pub scorekeeper: Vec<String>,
+    /// Feld vom Operator gesperrt (bts-light-seitig): wird nicht automatisch
+    /// belegt und im UI rot markiert. BTP kennt keinen Sperr-Zustand.
+    pub locked: bool,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -201,6 +204,10 @@ pub struct TabletState {
     /// Felder können (LAN, mehrere WS-Handler) gleichzeitig zählen; ohne das
     /// Lock könnten sich die Schreiber gegenseitig die Datei abschneiden.
     scores_persist_lock: Mutex<()>,
+    /// Vom Operator gesperrte Felder (CourtID). bts-light-seitig (BTP kennt das
+    /// nicht): gesperrte Felder werden nicht automatisch belegt und rot
+    /// markiert. Beim Start aus der Config geseedet, bei Änderung persistiert.
+    locked_courts: RwLock<HashSet<i64>>,
 }
 
 /// Auf Platte gesicherter Live-Stand eines Felds (für den App-Neustart).
@@ -223,6 +230,33 @@ impl TabletState {
             .write()
             .unwrap()
             .insert(court_id, loser_names);
+    }
+
+    /// Gesperrte Felder beim Start aus der Config übernehmen.
+    pub fn set_locked_courts(&self, ids: impl IntoIterator<Item = i64>) {
+        *self.locked_courts.write().unwrap() = ids.into_iter().collect();
+    }
+
+    /// Feld sperren (`true`) oder entsperren (`false`).
+    pub fn set_court_locked(&self, court_id: i64, locked: bool) {
+        let mut set = self.locked_courts.write().unwrap();
+        if locked {
+            set.insert(court_id);
+        } else {
+            set.remove(&court_id);
+        }
+    }
+
+    /// Aktuelle Sperrliste (für Persistenz + Auto-Vergabe).
+    pub fn locked_courts(&self) -> Vec<i64> {
+        let mut v: Vec<i64> = self.locked_courts.read().unwrap().iter().copied().collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// Ist das Feld gesperrt?
+    pub fn is_court_locked(&self, court_id: i64) -> bool {
+        self.locked_courts.read().unwrap().contains(&court_id)
     }
 
     /// Voraussichtlicher Zähltafelbediener eines Felds (leer, wenn keiner).
@@ -756,6 +790,7 @@ impl TabletState {
                     } else {
                         Vec::new()
                     },
+                    locked: self.locked_courts.read().unwrap().contains(&court.id),
                 }
             })
             .collect()

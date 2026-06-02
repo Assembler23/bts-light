@@ -7,11 +7,12 @@ import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
 import { WalkoverPanel } from "./components/WalkoverPanel";
 import { CourtMonitorPanel } from "./pages/CourtMonitorPanel";
 import { Dashboard } from "./pages/Dashboard";
+import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
 import type { AppConfig } from "./types";
 
-type View = "loading" | "wizard" | "dashboard" | "tablets" | "monitors";
+type View = "loading" | "wizard" | "dashboard" | "tablets" | "monitors" | "fields";
 
 function defaultConfig(): AppConfig {
   return {
@@ -43,6 +44,7 @@ function defaultConfig(): AppConfig {
       show_ads: true,
       layout: "split",
     },
+    locked_courts: [],
   };
 }
 
@@ -66,6 +68,16 @@ function App() {
       })
       .catch(() => setView("wizard"));
   }, []);
+
+  // Vor dem Öffnen des Wizards die Config frisch von der Platte laden – sonst
+  // überschreibt buildConfig() Änderungen, die seit App-Start passiert sind
+  // (z. B. in der Spielübersicht gesperrte Felder), mit dem veralteten Stand.
+  function openWizard() {
+    loadConfig()
+      .then((c) => setConfig(c))
+      .catch(() => {})
+      .finally(() => setView("wizard"));
+  }
 
   function renderView() {
     if (view === "loading") {
@@ -97,12 +109,16 @@ function App() {
     if (view === "monitors") {
       return <CourtMonitorPanel onBack={() => setView("dashboard")} />;
     }
+    if (view === "fields") {
+      return <FieldOverviewPage onBack={() => setView("dashboard")} />;
+    }
     return (
       <Dashboard
         config={config}
-        onReconfigure={() => setView("wizard")}
+        onReconfigure={openWizard}
         onOpenTablets={() => setView("tablets")}
         onOpenMonitors={() => setView("monitors")}
+        onOpenFields={() => setView("fields")}
       />
     );
   }

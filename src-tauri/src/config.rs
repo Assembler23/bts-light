@@ -192,6 +192,11 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub court_monitor: CourtMonitorConfig,
+    /// Vom Operator gesperrte Felder (CourtIDs) – werden nicht automatisch
+    /// belegt. bts-light-seitig, persistiert über Neustarts. `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub locked_courts: Vec<i64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -275,6 +280,7 @@ mod tests {
                 show_ads: false,
                 layout: "split".to_string(),
             },
+            locked_courts: vec![3, 7],
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

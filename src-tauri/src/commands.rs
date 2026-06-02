@@ -199,6 +199,8 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     }
     tablet.load_scores(&scores_path);
     tablet.set_scores_path(scores_path);
+    // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
+    tablet.set_locked_courts(config.locked_courts.iter().copied());
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
@@ -623,6 +625,30 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
         }],
     )
     .await
+}
+
+/// Feld sperren/entsperren (bts-light-seitig). Persistiert die Sperrliste in
+/// die Config, damit sie einen Neustart übersteht. BTP wird NICHT geschrieben –
+/// gesperrte Felder werden nur nicht (auto-)belegt und im UI rot markiert.
+#[tauri::command]
+pub fn set_court_locked(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    court_id: i64,
+    locked: bool,
+) -> Result<(), String> {
+    state.tablet.set_court_locked(court_id, locked);
+    // Config-Wert bauen, Mutex VOR der Datei-I/O wieder freigeben (sonst
+    // blockiert ein langsamer Schreibvorgang andere config-Zugriffe).
+    let config_to_save = {
+        let mut cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.locked_courts = state.tablet.locked_courts();
+        cfg.clone()
+    };
+    config_to_save
+        .save_to(&config_path(&app))
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ───────────────────────────── Spiele in Vorbereitung ─────────────────────

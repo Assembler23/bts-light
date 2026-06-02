@@ -47,6 +47,10 @@ export const assignCourt = (matchId: number, courtId: number): Promise<void> =>
 export const freeCourt = (courtId: number): Promise<void> =>
   invoke("free_court", { courtId });
 
+/** Feld sperren/entsperren (bts-light-seitig, persistiert in Config). */
+export const setCourtLocked = (courtId: number, locked: boolean): Promise<void> =>
+  invoke("set_court_locked", { courtId, locked });
+
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   FolderOpen,
+  LayoutGrid,
   ListOrdered,
   type LucideIcon,
   Monitor,
@@ -21,6 +22,7 @@ interface Props {
   onReconfigure: () => void;
   onOpenTablets: () => void;
   onOpenMonitors: () => void;
+  onOpenFields: () => void;
 }
 
 function dotColor(status: SyncStatus): string {
@@ -72,6 +74,7 @@ export function Dashboard({
   onReconfigure,
   onOpenTablets,
   onOpenMonitors,
+  onOpenFields,
 }: Props) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -224,6 +227,12 @@ export function Dashboard({
             label="Einstellungen"
             onClick={onReconfigure}
             title="BTP-Verbindung, Verband und Tablet-Verbindungsart ändern"
+          />
+          <ActionButton
+            icon={LayoutGrid}
+            label="Spielübersicht"
+            onClick={onOpenFields}
+            title="Felder-Übersicht: Spiele zuweisen, freigeben, sperren (schreibt nach BTP)"
           />
           <ActionButton
             icon={Tablet}

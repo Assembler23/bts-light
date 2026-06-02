@@ -109,6 +109,7 @@ pub fn run() {
             commands::confirm_walkover,
             commands::assign_court,
             commands::free_court,
+            commands::set_court_locked,
             commands::preparation_candidates,
             commands::call_preparation,
             commands::retract_preparation,

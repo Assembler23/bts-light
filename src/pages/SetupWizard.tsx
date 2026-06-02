@@ -283,6 +283,8 @@ export function SetupWizard({ initialConfig, onDone }: Props) {
         show_ads: cmAds,
         layout: cmLayout,
       },
+      // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
+      locked_courts: initialConfig.locked_courts ?? [],
     };
   }
 

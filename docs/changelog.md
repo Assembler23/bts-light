@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.49
+
+- **Feldsteuerung: Spielübersicht + Feldvergabe (schreibt nach BTP).** Neue Seite
+  „Spielübersicht" (Dashboard → Button): links die spielbereiten Spiele, rechts
+  die Felder als **Ampel** — grün=frei, gelb=belegt, rot=gesperrt. Spiel wählen +
+  freies Feld anklicken → **Match auf Feld zuweisen**; belegtes Feld → **freigeben**;
+  je Feld ein **Sperren**-Umschalter (gesperrte Felder werden nicht belegt;
+  bts-light-seitig, in der Config persistiert).
+- **Bidirektional:** Zuweisen schreibt via `SENDUPDATE`-Courts-Block nach BTP
+  (Vorbild: Original-BTS); umgekehrt wird eine in BTP gesetzte Zuweisung weiter
+  gelesen. Die aktuelle Belegung kommt immer aus dem BTP-Snapshot (eine Wahrheit).
+  Voraussetzung: in BTP müssen Netzwerk-Edits aktiv sein.
+- Technik: `proto.rs courts_update_request` + `write_courts_to_btp`, Commands
+  `assign_court`/`free_court`/`set_court_locked`; `locked_courts` in Config + State.
+
 ## v0.9.48
 
 - **Einbettcode nur noch an einer Stelle.** Die „Website-Einbettung"-Karte vom
