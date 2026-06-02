@@ -138,34 +138,73 @@ pub struct CourtAssignment {
     pub match_id: Option<i64>,
 }
 
-/// Fertige Wire-Bytes für einen `SENDUPDATE`-Request, der **Feld-Zuweisungen**
-/// nach BTP schreibt (`Update.Tournament.Courts.Court{ID,[MatchID]}`). Nach dem
-/// Vorbild des Original-BTS (`btp_proto.js update_courts_request`). Die Antwort
-/// wird wie beim Ergebnis-Write per [`parse_update_response`] geprüft.
-pub fn courts_update_request(
-    assignments: &[CourtAssignment],
+/// Setzt/löscht die Feldzuordnung AM MATCH selbst (`Match.CourtID`). `court_id`
+/// = 0 löscht die Zuordnung (Halle + Feld verschwinden aus den BTP-Match-
+/// Eigenschaften). Bewusst OHNE `Winner`/`Sets`/`ScoreStatus` – das ist ein
+/// reines Feld-Update, kein Ergebnis (Vorbild BTS: Result-Felder nur wenn ein
+/// Ergebnis vorliegt).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MatchCourt {
+    pub match_id: i64,
+    pub draw_id: i64,
+    pub planning_id: i64,
+    /// Neue Court-ID am Match; `0` = Zuordnung löschen.
+    pub court_id: i64,
+}
+
+/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **Feld-Zuweisungen** nach BTP
+/// schreibt: einen `Courts`-Block (`Court{ID,[MatchID]}`, MatchID weglassen =
+/// frei) UND optional einen `Matches`-Block, der `Match.CourtID` setzt/löscht.
+/// Beides in einem Request (BTP akzeptiert `Courts` + `Matches` parallel). So
+/// wird beim Freigeben nicht nur die Court-Verknüpfung gelöst, sondern auch
+/// Halle+Feld am Match entfernt (`court_id = 0`). Nach Vorbild Original-BTS.
+pub fn court_assign_request(
+    courts: &[CourtAssignment],
+    match_courts: &[MatchCourt],
     session_key: &str,
     password: Option<&str>,
 ) -> Vec<u8> {
-    let court_nodes: Vec<Node> = assignments
-        .iter()
-        .map(|a| {
-            let mut children = vec![Node::integer("ID", a.court_id)];
-            // MatchID nur setzen, wenn zugewiesen wird; weglassen = freigeben.
-            if let Some(mid) = a.match_id {
-                children.push(Node::integer("MatchID", mid));
-            }
-            Node::group("Court", children)
-        })
-        .collect();
+    let mut tournament_children = Vec::new();
+
+    if !courts.is_empty() {
+        let court_nodes: Vec<Node> = courts
+            .iter()
+            .map(|a| {
+                let mut children = vec![Node::integer("ID", a.court_id)];
+                // MatchID nur setzen, wenn zugewiesen wird; weglassen = frei.
+                if let Some(mid) = a.match_id {
+                    children.push(Node::integer("MatchID", mid));
+                }
+                Node::group("Court", children)
+            })
+            .collect();
+        tournament_children.push(Node::group("Courts", court_nodes));
+    }
+
+    if !match_courts.is_empty() {
+        let match_nodes: Vec<Node> = match_courts
+            .iter()
+            .map(|mc| {
+                Node::group(
+                    "Match",
+                    vec![
+                        Node::integer("ID", mc.match_id),
+                        Node::integer("Status", 0),
+                        // 0 = Feldzuordnung am Match löschen.
+                        Node::integer("CourtID", mc.court_id),
+                        Node::integer("DrawID", mc.draw_id),
+                        Node::integer("PlanningID", mc.planning_id),
+                    ],
+                )
+            })
+            .collect();
+        tournament_children.push(Node::group("Matches", match_nodes));
+    }
 
     let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
     nodes.push(Node::group(
         "Update",
-        vec![Node::group(
-            "Tournament",
-            vec![Node::group("Courts", court_nodes)],
-        )],
+        vec![Node::group("Tournament", tournament_children)],
     ));
     wire::encode_message(&xml::encode(&nodes))
 }
@@ -444,11 +483,12 @@ mod tests {
 
     #[test]
     fn courts_update_uses_sendupdate_action_with_session_key() {
-        let req = courts_update_request(
+        let req = court_assign_request(
             &[CourtAssignment {
                 court_id: 5,
                 match_id: Some(42),
             }],
+            &[],
             "SESSION-7",
             None,
         );
@@ -459,11 +499,12 @@ mod tests {
 
     #[test]
     fn courts_update_assign_includes_matchid() {
-        let req = courts_update_request(
+        let req = court_assign_request(
             &[CourtAssignment {
                 court_id: 5,
                 match_id: Some(42),
             }],
+            &[],
             "S",
             None,
         );
@@ -478,11 +519,12 @@ mod tests {
     #[test]
     fn courts_update_free_omits_matchid() {
         // Freigeben: Court ohne MatchID (BTS-Vorbild).
-        let req = courts_update_request(
+        let req = court_assign_request(
             &[CourtAssignment {
                 court_id: 7,
                 match_id: None,
             }],
+            &[],
             "S",
             None,
         );
@@ -492,5 +534,33 @@ mod tests {
             .to_vec();
         assert_eq!(child_int(&court, "ID"), Some(7));
         assert!(xml::find(&court, "MatchID").is_none());
+    }
+
+    #[test]
+    fn court_assign_clears_match_courtid_without_result() {
+        // Freigeben mit Match-Block: Court ohne MatchID + Match.CourtID=0,
+        // OHNE Winner/Sets (kein Ergebnis schreiben!).
+        let req = court_assign_request(
+            &[CourtAssignment {
+                court_id: 7,
+                match_id: None,
+            }],
+            &[MatchCourt {
+                match_id: 42,
+                draw_id: 3,
+                planning_id: 1002,
+                court_id: 0,
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "ID"), Some(42));
+        assert_eq!(child_int(&m, "CourtID"), Some(0));
+        assert_eq!(child_int(&m, "DrawID"), Some(3));
+        assert_eq!(child_int(&m, "PlanningID"), Some(1002));
+        // Kein Ergebnis: weder Winner noch Sets dürfen mitgehen.
+        assert!(xml::find(&m, "Winner").is_none());
+        assert!(xml::find(&m, "Sets").is_none());
     }
 }

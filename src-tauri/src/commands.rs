@@ -599,17 +599,31 @@ pub async fn assign_court(
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
+    // Court→Match verknüpfen UND die Feldzuordnung am Match selbst setzen
+    // (Halle+Feld erscheinen so konsistent in den BTP-Match-Eigenschaften).
+    let match_courts = match state.tablet.match_planning(match_id) {
+        Some((draw_id, planning_id)) => vec![crate::btp::proto::MatchCourt {
+            match_id,
+            draw_id,
+            planning_id,
+            court_id,
+        }],
+        None => Vec::new(),
+    };
     crate::tablet::server::write_courts_to_btp(
         &config,
         &[crate::btp::proto::CourtAssignment {
             court_id,
             match_id: Some(match_id),
         }],
+        &match_courts,
     )
     .await
 }
 
-/// Gibt ein Feld frei – schreibt einen `Court` ohne `MatchID` nach BTP.
+/// Gibt ein Feld frei – löst die Court-Verknüpfung (`Court` ohne `MatchID`)
+/// UND löscht die Feldzuordnung am Match selbst (`Match.CourtID = 0`), damit
+/// Halle + Feld auch aus den BTP-Match-Eigenschaften verschwinden.
 #[tauri::command]
 pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(), String> {
     let config = state
@@ -617,12 +631,23 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
+    // Das aktuell auf dem Feld stehende Match auflösen, um dessen CourtID zu löschen.
+    let match_courts = match state.tablet.match_for_court(court_id) {
+        Some(m) => vec![crate::btp::proto::MatchCourt {
+            match_id: m.id,
+            draw_id: m.draw_id,
+            planning_id: m.planning_id,
+            court_id: 0, // 0 = Feldzuordnung am Match löschen
+        }],
+        None => Vec::new(),
+    };
     crate::tablet::server::write_courts_to_btp(
         &config,
         &[crate::btp::proto::CourtAssignment {
             court_id,
             match_id: None,
         }],
+        &match_courts,
     )
     .await
 }

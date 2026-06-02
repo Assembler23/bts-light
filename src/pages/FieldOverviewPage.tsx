@@ -3,7 +3,7 @@
 // wählen und auf ein freies Feld klicken → Zuweisung wird nach BTP geschrieben
 // (bidirektional: beim nächsten Poll zeigen bts-light UND BTP dasselbe).
 // Belegtes Feld → freigeben. Sperren-Umschalter je Feld.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Ban, Lock, Unlock } from "lucide-react";
 import {
   assignCourt,
@@ -65,25 +65,37 @@ export function FieldOverviewPage({ onBack }: { onBack: () => void }) {
     }
   }
 
-  function onCourtClick(c: CourtOverview) {
-    if (busy || c.locked) return;
-    if (c.match_id > 0) return; // belegt → nur über „Freigeben"
-    if (selected == null) {
-      setError("Erst links ein Spiel wählen, dann auf ein freies Feld klicken.");
-      return;
-    }
-    const matchId = selected;
+  // Ein Match (per Klick-Auswahl oder Drag&Drop) einem freien Feld zuweisen.
+  function assignTo(matchId: number, c: CourtOverview) {
+    if (busy || c.locked || c.match_id > 0) return;
     // Auswahl erst nach erfolgreicher Zuweisung leeren – schlägt der BTP-Write
-    // fehl, bleibt das Spiel gewählt und der Klick lässt sich wiederholen.
+    // fehl, bleibt das Spiel gewählt und der Klick/Drop lässt sich wiederholen.
     void run(async () => {
       await assignCourt(matchId, c.court_id);
       setSelected(null);
     });
   }
 
-  // Bereits auf einem Feld stehende Matches nicht in der Auswahl zeigen.
+  function onCourtClick(c: CourtOverview) {
+    if (busy || c.locked || c.match_id > 0) return;
+    if (selected == null) {
+      setError("Erst links ein Spiel wählen (oder es auf ein Feld ziehen).");
+      return;
+    }
+    assignTo(selected, c);
+  }
+
+  function onCourtDrop(e: DragEvent, c: CourtOverview) {
+    e.preventDefault();
+    const matchId = Number(e.dataTransfer.getData("text/plain"));
+    if (matchId) assignTo(matchId, c);
+  }
+
+  // Bereits auf einem Feld stehende Matches nicht in der Auswahl-Liste, aber
+  // separat „Auf Feld" farblich markiert anzeigen (gewünschter Überblick).
   const onCourtMatchIds = new Set(courts.map((c) => c.match_id).filter((id) => id > 0));
   const assignable = candidates.filter((m) => !onCourtMatchIds.has(m.match_id));
+  const onField = courts.filter((c) => c.match_id > 0);
 
   return (
     <main className="mx-auto flex min-h-full max-w-5xl flex-col gap-5 p-6 text-slate-800">
@@ -116,7 +128,8 @@ export function FieldOverviewPage({ onBack }: { onBack: () => void }) {
             Spielbereit <span className="text-slate-400">({assignable.length})</span>
           </h2>
           <p className="text-xs text-slate-500">
-            Spiel wählen, dann rechts auf ein freies (grünes) Feld klicken.
+            Spiel auf ein freies (grünes) Feld <strong>ziehen</strong> — oder
+            anklicken und dann aufs Feld klicken.
           </p>
           <div className="flex flex-col gap-1.5">
             {assignable.length === 0 && (
@@ -129,8 +142,13 @@ export function FieldOverviewPage({ onBack }: { onBack: () => void }) {
               return (
                 <button
                   key={m.match_id}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", String(m.match_id));
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
                   onClick={() => setSelected(active ? null : m.match_id)}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                  className={`cursor-grab rounded-lg border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing ${
                     active
                       ? "border-slate-800 bg-slate-800 text-white"
                       : "border-slate-200 bg-white hover:border-slate-400"
@@ -151,6 +169,35 @@ export function FieldOverviewPage({ onBack }: { onBack: () => void }) {
               );
             })}
           </div>
+
+          {/* Auf Feld stehende Spiele – farblich markiert (gelb wie belegt). */}
+          {onField.length > 0 && (
+            <>
+              <h2 className="mt-3 text-sm font-semibold text-slate-700">
+                Auf Feld <span className="text-slate-400">({onField.length})</span>
+              </h2>
+              <div className="flex flex-col gap-1.5">
+                {onField.map((c) => (
+                  <div
+                    key={c.court_id}
+                    className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-amber-900">
+                        {c.match_name || "Spiel"}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                        Feld {c.court}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      {teamsLabel(c.team1, c.team2)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </section>
 
         {/* Spalte rechts: Felder als Ampel */}
@@ -169,6 +216,11 @@ export function FieldOverviewPage({ onBack }: { onBack: () => void }) {
                 <div
                   key={c.court_id}
                   onClick={() => onCourtClick(c)}
+                  // Freies, nicht gesperrtes Feld = Drop-Ziel für ein gezogenes Spiel.
+                  onDragOver={(e) => {
+                    if (clickable) e.preventDefault();
+                  }}
+                  onDrop={(e) => clickable && onCourtDrop(e, c)}
                   className={`relative rounded-xl border p-3 ${cls} ${
                     clickable ? "cursor-pointer hover:shadow-sm" : ""
                   }`}

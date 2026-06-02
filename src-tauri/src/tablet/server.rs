@@ -737,9 +737,10 @@ pub(crate) async fn write_result_to_btp(
 /// wird, liest bts-light beim nächsten Poll als OnCourt zurück.
 pub(crate) async fn write_courts_to_btp(
     config: &AppConfig,
-    assignments: &[proto::CourtAssignment],
+    courts: &[proto::CourtAssignment],
+    match_courts: &[proto::MatchCourt],
 ) -> Result<(), String> {
-    if assignments.is_empty() {
+    if courts.is_empty() && match_courts.is_empty() {
         return Ok(());
     }
     let host = &config.btp.host;
@@ -757,7 +758,7 @@ pub(crate) async fn write_courts_to_btp(
     let upd_raw = client::send_request(
         host,
         port,
-        &proto::courts_update_request(assignments, &session, pw),
+        &proto::court_assign_request(courts, match_courts, &session, pw),
     )
     .await
     .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;

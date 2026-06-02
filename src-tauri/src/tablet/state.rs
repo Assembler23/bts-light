@@ -346,6 +346,18 @@ impl TabletState {
             .cloned()
     }
 
+    /// (DrawID, PlanningID) eines Matches per Match-ID – zum Adressieren eines
+    /// `SENDUPDATE` (BTP braucht ID + DrawID + PlanningID). `None`, wenn das
+    /// Match nicht im aktuellen Snapshot ist.
+    pub fn match_planning(&self, match_id: i64) -> Option<(i64, i64)> {
+        let guard = self.snapshot.read().unwrap();
+        let snap = guard.as_ref()?;
+        snap.matches
+            .iter()
+            .find(|m| m.id == match_id)
+            .map(|m| (m.draw_id, m.planning_id))
+    }
+
     /// Tablet hat sich für ein Feld verbunden. `match_id` startet auf 0 –
     /// den echten Wert setzt der erste `record_score`.
     pub fn attach_tablet(&self, court_id: i64) {

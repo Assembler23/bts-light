@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.50
+
+- **Spiele per Drag-and-Drop aufs Feld ziehen.** In der Spielübersicht lassen
+  sich Spiele jetzt direkt auf ein freies (grünes) Feld ziehen (Klick-Auswahl
+  bleibt als Alternative).
+- **„Auf Feld"-Liste.** Bereits zugewiesene Spiele verschwinden nicht mehr aus
+  der linken Liste, sondern erscheinen farblich markiert (gelb) mit Feldnummer.
+- **Freigeben entfernt Halle+Feld am Match in BTP.** Beim Freigeben wird jetzt
+  nicht nur die Court-Verknüpfung gelöst, sondern auch `Match.CourtID` gelöscht
+  (`court_id=0`) — Halle und Feld verschwinden so aus den BTP-Match-Eigenschaften.
+  Zuweisen setzt `Match.CourtID` zusätzlich konsistent mit (Vorbild Original-BTS).
+  Technik: `proto.rs court_assign_request` (Courts- + Matches-Block in einem
+  SENDUPDATE, ohne Ergebnis), `match_planning()`-Lookup.
+
 ## v0.9.49
 
 - **Feldsteuerung: Spielübersicht + Feldvergabe (schreibt nach BTP).** Neue Seite
