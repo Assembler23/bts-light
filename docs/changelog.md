@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.59
+
+- **Spielübersicht als Board.** Statt links/rechts jetzt: oben der Pool der
+  spielbereiten Spiele (ziehbar), darunter die **Felder als Spalten** mit
+  Ampel-Kopf (grün frei / gelb belegt / rot gesperrt), Aufruf-Uhr und
+  Freigeben/Sperren je Spalte. Übersichtlicher bei vielen Feldern; bei ≥2 Hallen
+  nach Halle gruppiert + Hallen-Filter. Drag&Drop und Klick-Auswahl bleiben.
+  Beim Zuweisen wird geprüft, dass das Spiel noch spielbereit ist.
+
 ## v0.9.58
 
 - **Mehr-Hallen-Komfort.** Bei Turnieren mit ≥2 Hallen:

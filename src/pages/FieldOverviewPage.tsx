@@ -1,8 +1,9 @@
-// Spielübersicht + Feldvergabe. Zeigt links die spielbereiten Matches und
-// rechts die Felder als Ampel (grün=frei, gelb=belegt, rot=gesperrt). Ein Match
-// wählen und auf ein freies Feld klicken → Zuweisung wird nach BTP geschrieben
-// (bidirektional: beim nächsten Poll zeigen bts-light UND BTP dasselbe).
-// Belegtes Feld → freigeben. Sperren-Umschalter je Feld.
+// Spielübersicht + Feldvergabe als Board: oben der Pool spielbereiter Spiele,
+// darunter die Felder als Spalten (Ampel: grün=frei, gelb=belegt, rot=gesperrt)
+// mit Aufruf-Uhr. Spiel auf eine freie Spalte ziehen (oder anklicken + Spalte)
+// → Zuweisung wird nach BTP geschrieben (bidirektional). Belegtes Feld →
+// freigeben (mit Sicherheitsabfrage). Sperren-Umschalter je Feld. Bei ≥2 Hallen
+// nach Halle gruppiert + Hallen-Filter.
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Ban, Lock, Unlock } from "lucide-react";
 import {
@@ -13,6 +14,7 @@ import {
   tabletOverview,
 } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
+import { HallFilter } from "../components/HallFilter";
 import { useNow } from "../state/callTimer";
 import type { CallTimerConfig, CourtOverview, PreparationCandidate } from "../types";
 
@@ -32,6 +34,8 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
   const [error, setError] = useState<string>("");
   // Feld, dessen Freigabe gerade bestätigt werden soll (Sicherheitsabfrage).
   const [confirmFree, setConfirmFree] = useState<CourtOverview | null>(null);
+  // Hallen-Filter (null = alle Hallen).
+  const [hallFilter, setHallFilter] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
   const now = useNow();
 
@@ -73,6 +77,13 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
   // Ein Match (per Klick-Auswahl oder Drag&Drop) einem freien Feld zuweisen.
   function assignTo(matchId: number, c: CourtOverview) {
     if (busy || c.locked || c.match_id > 0) return;
+    // Spiel könnte seit dem Auswählen/Ziehen aus den spielbereiten gefallen
+    // sein (anderer Operator, BTP-Wechsel) → dann nicht blind nach BTP schreiben.
+    if (!candidates.some((m) => m.match_id === matchId)) {
+      setSelected(null);
+      setError("Das Spiel ist nicht mehr spielbereit — bitte neu wählen.");
+      return;
+    }
     // Auswahl erst nach erfolgreicher Zuweisung leeren – schlägt der BTP-Write
     // fehl, bleibt das Spiel gewählt und der Klick/Drop lässt sich wiederholen.
     void run(async () => {
@@ -84,7 +95,7 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
   function onCourtClick(c: CourtOverview) {
     if (busy || c.locked || c.match_id > 0) return;
     if (selected == null) {
-      setError("Erst links ein Spiel wählen (oder es auf ein Feld ziehen).");
+      setError("Erst oben ein Spiel wählen (oder es auf eine Feld-Spalte ziehen).");
       return;
     }
     assignTo(selected, c);
@@ -100,19 +111,39 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
   // separat „Auf Feld" farblich markiert anzeigen (gewünschter Überblick).
   const onCourtMatchIds = new Set(courts.map((c) => c.match_id).filter((id) => id > 0));
   const assignable = candidates.filter((m) => !onCourtMatchIds.has(m.match_id));
-  const onField = courts.filter((c) => c.match_id > 0);
   // Anzeige im Bestätigungs-Dialog stets aus dem Live-Stand des Felds ziehen
   // (über die stabile court_id), damit sie bei einem Poll-Wechsel nicht veraltet.
   const liveConfirm = confirmFree
     ? courts.find((c) => c.court_id === confirmFree.court_id) ?? confirmFree
     : null;
 
+  // Felder als Board-Spalten, bei ≥2 Hallen nach Halle gruppiert.
+  const allHalls = [
+    ...new Set(courts.map((c) => c.location).filter((l) => l !== "")),
+  ].sort((a, b) => a.localeCompare(b, "de"));
+  const multiHall = allHalls.length >= 2;
+  const hallGroups: { hall: string; courts: CourtOverview[] }[] = multiHall
+    ? [
+        ...allHalls.map((h) => ({
+          hall: h,
+          courts: courts.filter((c) => c.location === h),
+        })),
+        // Felder ohne Halle ans Ende.
+        { hall: "", courts: courts.filter((c) => c.location === "") },
+      ].filter((g) => g.courts.length > 0)
+    : [{ hall: "", courts }];
+  const visibleGroups =
+    hallFilter === null
+      ? hallGroups
+      : hallGroups.filter((g) => g.hall === hallFilter);
+
   return (
-    <main className="mx-auto flex min-h-full max-w-5xl flex-col gap-5 p-6 text-slate-800">
+    <main className="mx-auto flex min-h-full max-w-6xl flex-col gap-4 p-6 text-slate-800">
       <header>
         <h1 className="text-2xl font-semibold leading-tight">Spielübersicht</h1>
         <p className="text-sm text-slate-500">
-          Spiele auf Felder zuweisen, freigeben, sperren — schreibt nach BTP.
+          Spielbereite Spiele oben auf eine freie (grüne) Feld-Spalte ziehen —
+          oder anklicken und dann auf die Spalte tippen. Schreibt nach BTP.
         </p>
       </header>
 
@@ -122,190 +153,169 @@ export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig })
         </div>
       )}
 
-      <div className="grid gap-5 md:grid-cols-[20rem_1fr]">
-        {/* Spalte links: spielbereite Matches */}
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-slate-700">
-            Spielbereit <span className="text-slate-400">({assignable.length})</span>
-          </h2>
-          <p className="text-xs text-slate-500">
-            Spiel auf ein freies (grünes) Feld <strong>ziehen</strong> — oder
-            anklicken und dann aufs Feld klicken.
-          </p>
-          <div className="flex flex-col gap-1.5">
-            {assignable.length === 0 && (
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400">
-                Keine spielbereiten Spiele.
-              </div>
-            )}
-            {assignable.map((m) => {
-              const active = selected === m.match_id;
-              return (
-                <button
-                  key={m.match_id}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", String(m.match_id));
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
-                  onClick={() => setSelected(active ? null : m.match_id)}
-                  className={`cursor-grab rounded-lg border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing ${
-                    active
-                      ? "border-slate-800 bg-slate-800 text-white"
-                      : "border-slate-200 bg-white hover:border-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{m.label || "Spiel"}</span>
-                    {m.match_num != null && (
-                      <span className={active ? "text-slate-300" : "text-slate-400"}>
-                        #{m.match_num}
-                      </span>
-                    )}
-                  </div>
-                  <div className={`text-xs ${active ? "text-slate-200" : "text-slate-500"}`}>
-                    {teamsLabel(m.team1, m.team2)}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Auf Feld stehende Spiele – farblich markiert (gelb wie belegt). */}
-          {onField.length > 0 && (
-            <>
-              <h2 className="mt-3 text-sm font-semibold text-slate-700">
-                Auf Feld <span className="text-slate-400">({onField.length})</span>
-              </h2>
-              <div className="flex flex-col gap-1.5">
-                {onField.map((c) => (
-                  <div
-                    key={c.court_id}
-                    className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium text-amber-900">
-                        {c.match_name || "Spiel"}
-                      </span>
-                      <span className="shrink-0 rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
-                        Feld {c.court}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-600">
-                      {teamsLabel(c.team1, c.team2)}
-                    </div>
-                    {callTimer.enabled && c.on_court_since_ms != null && (
-                      <div className="mt-1.5">
-                        <CallTimerBadge
-                          sinceMs={c.on_court_since_ms}
-                          now={now}
-                          cfg={callTimer}
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
+      {/* Pool: spielbereite Spiele (ziehbar) */}
+      <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Spielbereit <span className="text-slate-400">({assignable.length})</span>
+        </h2>
+        <div className="flex flex-wrap gap-2">
+          {assignable.length === 0 && (
+            <span className="text-sm text-slate-400">Keine spielbereiten Spiele.</span>
           )}
-        </section>
-
-        {/* Spalte rechts: Felder als Ampel */}
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-slate-700">Felder</h2>
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-            {courts.map((c) => {
-              const occupied = c.match_id > 0;
-              const cls = c.locked
-                ? "border-rose-300 bg-rose-50"
-                : occupied
-                  ? "border-amber-300 bg-amber-50"
-                  : "border-emerald-300 bg-emerald-50";
-              const clickable = !c.locked && !occupied && !busy;
-              return (
-                <div
-                  key={c.court_id}
-                  onClick={() => onCourtClick(c)}
-                  // Freies, nicht gesperrtes Feld = Drop-Ziel für ein gezogenes Spiel.
-                  onDragOver={(e) => {
-                    if (clickable) e.preventDefault();
-                  }}
-                  onDrop={(e) => clickable && onCourtDrop(e, c)}
-                  className={`relative rounded-xl border p-3 ${cls} ${
-                    clickable ? "cursor-pointer hover:shadow-sm" : ""
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="font-semibold">
-                      {c.court}
-                      {c.location && (
-                        <span className="ml-1 text-xs font-normal text-slate-400">
-                          {c.location}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void run(() => setCourtLocked(c.court_id, !c.locked));
-                      }}
-                      title={c.locked ? "Feld entsperren" : "Feld sperren"}
-                      className="rounded p-1 text-slate-500 hover:bg-white/60 disabled:opacity-50"
-                    >
-                      {c.locked ? <Lock size={15} /> : <Unlock size={15} />}
-                    </button>
-                  </div>
-
-                  {c.locked ? (
-                    <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-rose-700">
-                      <Ban size={13} /> Gesperrt
-                    </div>
-                  ) : occupied ? (
-                    <div className="mt-1">
-                      <div className="text-xs font-medium text-amber-800">
-                        {c.match_name}
-                      </div>
-                      <div className="truncate text-xs text-slate-600" title={teamsLabel(c.team1, c.team2)}>
-                        {teamsLabel(c.team1, c.team2)}
-                      </div>
-                      {callTimer.enabled && c.on_court_since_ms != null && (
-                        <div className="mt-1.5">
-                          <CallTimerBadge
-                            sinceMs={c.on_court_since_ms}
-                            now={now}
-                            cfg={callTimer}
-                          />
-                        </div>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmFree(c);
-                        }}
-                        disabled={busy}
-                        className="mt-2 rounded-md bg-amber-200/70 px-2.5 py-1 text-xs font-medium
-                                   text-amber-900 hover:bg-amber-200 disabled:opacity-50"
-                      >
-                        Freigeben
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-xs text-emerald-700">
-                      frei{selected != null ? " · klicken zum Zuweisen" : ""}
-                    </div>
+          {assignable.map((m) => {
+            const active = selected === m.match_id;
+            return (
+              <button
+                key={m.match_id}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/plain", String(m.match_id));
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onClick={() => setSelected(active ? null : m.match_id)}
+                aria-pressed={active}
+                title={teamsLabel(m.team1, m.team2)}
+                className={`max-w-[16rem] cursor-grab rounded-lg border px-3 py-1.5 text-left text-sm
+                            transition-colors active:cursor-grabbing ${
+                              active
+                                ? "border-slate-800 bg-slate-800 text-white"
+                                : "border-slate-200 bg-white hover:border-slate-400"
+                            }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{m.label || "Spiel"}</span>
+                  {m.match_num != null && (
+                    <span className={active ? "text-slate-300" : "text-slate-400"}>
+                      #{m.match_num}
+                    </span>
                   )}
                 </div>
-              );
-            })}
-          </div>
-          {courts.length === 0 && (
-            <p className="text-sm text-slate-400">
-              Keine Felder — läuft der Sync und ist ein Turnier in BTP geladen?
-            </p>
-          )}
-        </section>
-      </div>
+                <div
+                  className={`truncate text-xs ${active ? "text-slate-200" : "text-slate-500"}`}
+                >
+                  {teamsLabel(m.team1, m.team2)}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <HallFilter halls={allHalls} value={hallFilter} onChange={setHallFilter} />
+
+      {/* Board: Felder als Spalten, je Halle eine Gruppe. */}
+      {courts.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          Keine Felder — läuft der Sync und ist ein Turnier in BTP geladen?
+        </p>
+      ) : (
+        visibleGroups.map((g) => (
+          <section key={g.hall || "_"} className="flex flex-col gap-2">
+            {multiHall && (
+              <h2 className="text-sm font-semibold text-slate-600">
+                {g.hall || "Ohne Halle"}
+              </h2>
+            )}
+            <div className="flex flex-wrap gap-2.5">
+              {g.courts.map((c) => {
+                const occupied = c.match_id > 0;
+                const clickable = !c.locked && !occupied && !busy;
+                // Ampel: Kopfzeile farbig je Status.
+                const head = c.locked
+                  ? "bg-rose-100 text-rose-800"
+                  : occupied
+                    ? "bg-amber-100 text-amber-900"
+                    : "bg-emerald-100 text-emerald-800";
+                return (
+                  <div
+                    key={c.court_id}
+                    onClick={() => onCourtClick(c)}
+                    onDragOver={(e) => {
+                      if (clickable) e.preventDefault();
+                    }}
+                    onDrop={(e) => clickable && onCourtDrop(e, c)}
+                    className={`flex w-44 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${
+                      clickable ? "cursor-pointer hover:border-slate-400 hover:shadow-sm" : ""
+                    }`}
+                  >
+                    {/* Spaltenkopf: Feldname + Ampelpunkt + Sperren-Schalter. */}
+                    <div className={`flex items-center justify-between gap-1 px-2.5 py-1.5 ${head}`}>
+                      <span className="flex items-center gap-1.5 font-semibold">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            c.locked ? "bg-rose-500" : occupied ? "bg-amber-500" : "bg-emerald-500"
+                          }`}
+                        />
+                        Feld {c.court}
+                      </span>
+                      <button
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void run(() => setCourtLocked(c.court_id, !c.locked));
+                        }}
+                        title={c.locked ? "Feld entsperren" : "Feld sperren"}
+                        className="rounded p-0.5 hover:bg-white/50 disabled:opacity-50"
+                      >
+                        {c.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                      </button>
+                    </div>
+
+                    {/* Spalteninhalt je Status. */}
+                    <div className="flex min-h-[5.5rem] flex-col gap-1 p-2.5">
+                      {c.locked ? (
+                        <div className="inline-flex items-center gap-1 text-xs font-medium text-rose-700">
+                          <Ban size={13} /> Gesperrt
+                        </div>
+                      ) : occupied ? (
+                        <>
+                          <div className="text-xs font-medium text-amber-800">
+                            {c.match_name}
+                          </div>
+                          <div
+                            className="text-xs text-slate-600"
+                            title={teamsLabel(c.team1, c.team2)}
+                          >
+                            {teamsLabel(c.team1, c.team2)}
+                          </div>
+                          {callTimer.enabled && c.on_court_since_ms != null && (
+                            <CallTimerBadge
+                              sinceMs={c.on_court_since_ms}
+                              now={now}
+                              cfg={callTimer}
+                            />
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmFree(c);
+                            }}
+                            disabled={busy}
+                            className="mt-auto self-start rounded-md bg-amber-200/70 px-2.5 py-1 text-xs
+                                       font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
+                          >
+                            Freigeben
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex flex-1 items-center justify-center text-center text-xs text-emerald-700">
+                          {selected != null ? "klicken/ziehen zum Zuweisen" : "frei"}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
+      {/* Hallen-Filter aktiv, aber keine Felder in dieser Halle. */}
+      {courts.length > 0 && visibleGroups.length === 0 && (
+        <p className="text-sm text-slate-400">
+          Keine Felder in „{hallFilter}". Über „Alle" siehst du alle Felder.
+        </p>
+      )}
 
       {/* Sicherheitsabfrage vor dem Freigeben eines belegten Felds. */}
       {confirmFree && liveConfirm && (
