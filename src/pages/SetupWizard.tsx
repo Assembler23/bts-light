@@ -9,6 +9,7 @@ import {
   Server,
   Stethoscope,
   Target,
+  Timer,
   Trash2,
   Volume2,
   Wifi,
@@ -237,6 +238,11 @@ export function SetupWizard({
   const [annVoiceEn, setAnnVoiceEn] = useState(initialConfig.announce.voice_en);
   const [annRate, setAnnRate] = useState(initialConfig.announce.rate);
   const [annGong, setAnnGong] = useState(initialConfig.announce.gong);
+  // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
+  const ct = initialConfig.call_timer;
+  const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
+  const [ctSecond, setCtSecond] = useState(String(ct?.second_call_minutes ?? 2));
+  const [ctThird, setCtThird] = useState(String(ct?.third_call_minutes ?? 4));
   const cm = initialConfig.court_monitor;
   const [cmEnabled, setCmEnabled] = useState(cm.enabled);
   const [cmInterval, setCmInterval] = useState(cm.ad_interval_s);
@@ -314,6 +320,18 @@ export function SetupWizard({
         show_ads: cmAds,
         layout: cmLayout,
       },
+      // Schwellen robust auflösen: ungültige/leere Eingabe → Standard; und der
+      // 3. Aufruf muss nach dem 2. liegen (sonst übersprünge die Anzeige den
+      // 2. Aufruf). Bei Fehlkonfig wird der 3. auf 2. + 1 Min angehoben.
+      call_timer: (() => {
+        const second = Number(ctSecond) > 0 ? Number(ctSecond) : 2;
+        const thirdRaw = Number(ctThird) > 0 ? Number(ctThird) : 4;
+        return {
+          enabled: ctEnabled,
+          second_call_minutes: second,
+          third_call_minutes: thirdRaw > second ? thirdRaw : second + 1,
+        };
+      })(),
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
     };
@@ -676,6 +694,53 @@ export function SetupWizard({
                 am Rechner frei.
               </p>
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Aufruf-Timer (1./2./3. Aufruf) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Timer}>Aufruf-Timer</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Der Aufruf aufs Feld ist der <strong>1. Aufruf</strong>. bts-light
+          zeigt dann je belegtem Feld eine hochzählende Uhr und meldet ab den
+          eingestellten Minuten den <strong>2.</strong> und{" "}
+          <strong>3./letzten</strong> Aufruf als fällig.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={ctEnabled}
+            onChange={(e) => setCtEnabled(e.currentTarget.checked)}
+          />
+          Aufruf-Timer aktivieren
+        </label>
+
+        {ctEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <Field
+              label="2. Aufruf nach (Minuten)"
+              value={ctSecond}
+              onChange={setCtSecond}
+              type="number"
+            />
+            <Field
+              label="3./letzter Aufruf nach (Minuten)"
+              value={ctThird}
+              onChange={setCtThird}
+              type="number"
+            />
+            <p className="text-xs text-slate-500">
+              Minuten ab dem 1. Aufruf. Beispiel: 2 und 4 → der 2. Aufruf wird
+              nach 2 Minuten fällig, der letzte nach 4.
+            </p>
+            {Number(ctThird) <= Number(ctSecond) && (
+              <p className="flex items-start gap-1.5 text-xs text-amber-700">
+                <X size={14} className="mt-0.5 shrink-0" />
+                Der 3. Aufruf sollte nach dem 2. liegen — beim Speichern wird er
+                sonst automatisch angehoben.
+              </p>
+            )}
           </div>
         )}
       </section>

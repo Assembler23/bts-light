@@ -5,12 +5,14 @@
 import { useEffect, useState } from "react";
 import { Megaphone, Volume2 } from "lucide-react";
 import { tabletOverview } from "../api";
+import { CallTimerBadge } from "../components/CallTimerBadge";
 import {
   playAnnouncement,
   playTestAnnouncement,
   resolveAnnouncementLanguage,
 } from "../io/announcer";
-import type { AnnounceConfig, CourtOverview } from "../types";
+import { useNow } from "../state/callTimer";
+import type { AnnounceConfig, CallTimerConfig, CourtOverview } from "../types";
 
 const POLL_MS = 2500;
 
@@ -18,8 +20,15 @@ function teamsLabel(t1: string[], t2: string[]): string {
   return `${t1.join(" / ") || "—"} – ${t2.join(" / ") || "—"}`;
 }
 
-export function AnnouncePage({ announce }: { announce: AnnounceConfig }) {
+export function AnnouncePage({
+  announce,
+  callTimer,
+}: {
+  announce: AnnounceConfig;
+  callTimer: CallTimerConfig;
+}) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
+  const now = useNow();
 
   useEffect(() => {
     let active = true;
@@ -110,8 +119,17 @@ export function AnnouncePage({ announce }: { announce: AnnounceConfig }) {
                 {c.court}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">
-                  {c.match_name || "Spiel"}
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium">
+                    {c.match_name || "Spiel"}
+                  </span>
+                  {callTimer.enabled && c.on_court_since_ms != null && (
+                    <CallTimerBadge
+                      sinceMs={c.on_court_since_ms}
+                      now={now}
+                      cfg={callTimer}
+                    />
+                  )}
                 </div>
                 <div className="truncate text-xs text-slate-500">
                   {teamsLabel(c.team1, c.team2)}

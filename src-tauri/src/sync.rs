@@ -182,6 +182,18 @@ impl SyncEngine {
 
         self.stamp_finished(&mut snapshot);
         self.track_scorekeepers(&snapshot, tablet);
+        // Aufruf-Timer: je Feld festhalten, seit wann das aktuelle Spiel dort
+        // steht (1. Aufruf). Aus demselben OnCourt-Stand wie die Scorekeeper.
+        // Bewusst VOR set_snapshot: so ist der Zeitstempel spätestens da, wenn
+        // overview() das neue OnCourt-Match sieht (sonst fehlte der Chip einen
+        // Poll lang). Reihenfolge nicht umdrehen.
+        let oncourt_now: HashMap<i64, i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|c| (c, m.id)))
+            .collect();
+        tablet.reconcile_on_court(&oncourt_now, now_ms());
         // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());

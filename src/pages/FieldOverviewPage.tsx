@@ -12,7 +12,9 @@ import {
   setCourtLocked,
   tabletOverview,
 } from "../api";
-import type { CourtOverview, PreparationCandidate } from "../types";
+import { CallTimerBadge } from "../components/CallTimerBadge";
+import { useNow } from "../state/callTimer";
+import type { CallTimerConfig, CourtOverview, PreparationCandidate } from "../types";
 
 const POLL_MS = 2500;
 
@@ -22,13 +24,14 @@ function teamsLabel(t1: string[], t2: string[]): string {
   return `${a} – ${b}`;
 }
 
-export function FieldOverviewPage() {
+export function FieldOverviewPage({ callTimer }: { callTimer: CallTimerConfig }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const timer = useRef<number | null>(null);
+  const now = useNow();
 
   const refresh = useCallback(async () => {
     try {
@@ -184,6 +187,15 @@ export function FieldOverviewPage() {
                     <div className="text-xs text-slate-600">
                       {teamsLabel(c.team1, c.team2)}
                     </div>
+                    {callTimer.enabled && c.on_court_since_ms != null && (
+                      <div className="mt-1.5">
+                        <CallTimerBadge
+                          sinceMs={c.on_court_since_ms}
+                          now={now}
+                          cfg={callTimer}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -250,6 +262,15 @@ export function FieldOverviewPage() {
                       <div className="truncate text-xs text-slate-600" title={teamsLabel(c.team1, c.team2)}>
                         {teamsLabel(c.team1, c.team2)}
                       </div>
+                      {callTimer.enabled && c.on_court_since_ms != null && (
+                        <div className="mt-1.5">
+                          <CallTimerBadge
+                            sinceMs={c.on_court_since_ms}
+                            now={now}
+                            cfg={callTimer}
+                          />
+                        </div>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

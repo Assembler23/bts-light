@@ -166,6 +166,32 @@ impl Default for CourtMonitorConfig {
     }
 }
 
+/// Einstellungen des Aufruf-Timers (1./2./3. Aufruf). Der 1. Aufruf ist das
+/// Aufrufen aufs Feld; danach zeigt bts-light je belegtem Feld eine
+/// hochzählende Uhr und ab den Schwellen den 2. bzw. 3./letzten Aufruf als
+/// fällig an. Die Anzeige/Logik läuft im Frontend; hier stehen nur die
+/// Schwellen, damit sie über die Geräte hinweg einheitlich sind.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CallTimerConfig {
+    /// Aufruf-Timer aktiv?
+    pub enabled: bool,
+    /// Minuten nach dem 1. Aufruf, ab denen der 2. Aufruf fällig ist.
+    pub second_call_minutes: f64,
+    /// Minuten nach dem 1. Aufruf, ab denen der 3./letzte Aufruf fällig ist.
+    pub third_call_minutes: f64,
+}
+
+impl Default for CallTimerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            second_call_minutes: 2.0,
+            third_call_minutes: 4.0,
+        }
+    }
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -192,6 +218,10 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub court_monitor: CourtMonitorConfig,
+    /// Einstellungen des Aufruf-Timers (1./2./3. Aufruf). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub call_timer: CallTimerConfig,
     /// Vom Operator gesperrte Felder (CourtIDs) – werden nicht automatisch
     /// belegt. bts-light-seitig, persistiert über Neustarts. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -280,6 +310,11 @@ mod tests {
                 show_ads: false,
                 layout: "split".to_string(),
             },
+            call_timer: CallTimerConfig {
+                enabled: true,
+                second_call_minutes: 1.5,
+                third_call_minutes: 3.0,
+            },
             locked_courts: vec![3, 7],
         };
         config.save_to(&path).unwrap();
@@ -309,6 +344,12 @@ mod tests {
         assert!(!loaded.court_monitor.enabled);
         assert_eq!(loaded.court_monitor.ad_interval_s, 10);
         assert!(loaded.court_monitor.show_timer);
+        // Ebenso der call_timer-Block – ältere config.json (vor v0.9.52) kennt
+        // ihn nicht; er muss mit den Defaults laden (Auto-Update-Pfad).
+        assert_eq!(loaded.call_timer, CallTimerConfig::default());
+        assert!(!loaded.call_timer.enabled);
+        assert_eq!(loaded.call_timer.second_call_minutes, 2.0);
+        assert_eq!(loaded.call_timer.third_call_minutes, 4.0);
     }
 
     #[test]

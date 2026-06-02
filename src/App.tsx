@@ -49,6 +49,11 @@ function defaultConfig(): AppConfig {
       show_ads: true,
       layout: "split",
     },
+    call_timer: {
+      enabled: false,
+      second_call_minutes: 2,
+      third_call_minutes: 4,
+    },
     locked_courts: [],
   };
 }
@@ -160,11 +165,16 @@ function App() {
       case "dashboard":
         return <Dashboard config={config} status={status} />;
       case "fields":
-        return <FieldOverviewPage />;
+        return <FieldOverviewPage callTimer={config.call_timer} />;
       case "tablets":
         return <TabletPanel announce={config.announce} />;
       case "announce":
-        return <AnnouncePage announce={config.announce} />;
+        return (
+          <AnnouncePage
+            announce={config.announce}
+            callTimer={config.call_timer}
+          />
+        );
       case "monitors":
         return <CourtMonitorPanel />;
       case "settings":

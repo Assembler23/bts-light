@@ -36,6 +36,16 @@ export interface AnnounceConfig {
   gong: boolean;
 }
 
+/** Einstellungen des Aufruf-Timers (Rust: config::CallTimerConfig). */
+export interface CallTimerConfig {
+  /** Aufruf-Timer aktiv? */
+  enabled: boolean;
+  /** Minuten nach dem 1. Aufruf, ab denen der 2. Aufruf fällig ist. */
+  second_call_minutes: number;
+  /** Minuten nach dem 1. Aufruf, ab denen der 3./letzte Aufruf fällig ist. */
+  third_call_minutes: number;
+}
+
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
 export interface CourtMonitorConfig {
   /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der
@@ -108,6 +118,8 @@ export interface AppConfig {
   announce: AnnounceConfig;
   /** Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld). */
   court_monitor: CourtMonitorConfig;
+  /** Einstellungen des Aufruf-Timers (1./2./3. Aufruf). */
+  call_timer: CallTimerConfig;
   /** Vom Operator gesperrte Felder (CourtIDs) – keine Auto-Vergabe. */
   locked_courts: number[];
 }
@@ -167,6 +179,9 @@ export interface CourtOverview {
   scorekeeper: string[];
   /** Feld vom Operator gesperrt (bts-light-seitig) → rot, keine Auto-Vergabe. */
   locked: boolean;
+  /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
+   *  steht; null = kein Spiel. Grundlage des Aufruf-Timers. */
+  on_court_since_ms: number | null;
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

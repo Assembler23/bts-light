@@ -112,6 +112,10 @@ pub struct CourtOverview {
     /// Feld vom Operator gesperrt (bts-light-seitig): wird nicht automatisch
     /// belegt und im UI rot markiert. BTP kennt keinen Sperr-Zustand.
     pub locked: bool,
+    /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
+    /// steht. `None`, wenn kein Spiel auf dem Feld ist. Grundlage des
+    /// Aufruf-Timers (hochzählende Uhr + 2./3. Aufruf).
+    pub on_court_since_ms: Option<u64>,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -208,6 +212,10 @@ pub struct TabletState {
     /// nicht): gesperrte Felder werden nicht automatisch belegt und rot
     /// markiert. Beim Start aus der Config geseedet, bei Änderung persistiert.
     locked_courts: RwLock<HashSet<i64>>,
+    /// CourtID → (Match-ID, Zeitpunkt des 1. Aufrufs in Unix-ms), seit wann
+    /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
+    /// Sync-Loop je Poll abgeglichen.
+    on_court_since: RwLock<HashMap<i64, (i64, u64)>>,
 }
 
 /// Auf Platte gesicherter Live-Stand eines Felds (für den App-Neustart).
@@ -257,6 +265,32 @@ impl TabletState {
     /// Ist das Feld gesperrt?
     pub fn is_court_locked(&self, court_id: i64) -> bool {
         self.locked_courts.read().unwrap().contains(&court_id)
+    }
+
+    /// Gleicht je Poll ab, seit wann das aktuelle Spiel auf dem Feld steht
+    /// (= 1. Aufruf). `oncourt` bildet CourtID → aktuelle Match-ID. Ein neues
+    /// oder gewechseltes Spiel wird mit `now` gestempelt; verlässt ein Spiel
+    /// das Feld, fällt sein Eintrag weg. Idempotent – mehrfacher Aufruf mit
+    /// gleichem Stand ändert die Zeitstempel nicht.
+    pub fn reconcile_on_court(&self, oncourt: &HashMap<i64, i64>, now: u64) {
+        let mut map = self.on_court_since.write().unwrap();
+        // Felder vergessen, auf denen jetzt kein bzw. ein anderes Spiel steht.
+        map.retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
+        // Neu hinzugekommene Spiele stempeln (gewechselte sind oben rausgeflogen).
+        for (&court_id, &mid) in oncourt {
+            map.entry(court_id).or_insert((mid, now));
+        }
+    }
+
+    /// Zeitpunkt (Unix-ms) des 1. Aufrufs für ein Feld, sofern dort das
+    /// angegebene Match steht.
+    fn on_court_since_ms(&self, court_id: i64, match_id: i64) -> Option<u64> {
+        self.on_court_since
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .filter(|(mid, _)| *mid == match_id)
+            .map(|(_, ts)| *ts)
     }
 
     /// Voraussichtlicher Zähltafelbediener eines Felds (leer, wenn keiner).
@@ -803,6 +837,7 @@ impl TabletState {
                         Vec::new()
                     },
                     locked: self.locked_courts.read().unwrap().contains(&court.id),
+                    on_court_since_ms: m.and_then(|mm| self.on_court_since_ms(court.id, mm.id)),
                 }
             })
             .collect()
@@ -1409,5 +1444,26 @@ mod tests {
         let rest = st.walkover_proposals();
         assert_eq!(rest.len(), 1);
         assert_eq!(rest[0].entry_id, 20);
+    }
+
+    #[test]
+    fn on_court_since_stamps_holds_restamps_and_clears() {
+        let st = TabletState::default();
+        // 1. Aufruf: Match 100 kommt auf Feld 1 um t=1000.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 1000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000));
+
+        // Gleicher Stand später: Zeitstempel bleibt (idempotent).
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 5000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000));
+
+        // Anderes Match auf demselben Feld: neu stempeln.
+        st.reconcile_on_court(&HashMap::from([(1, 200)]), 8000);
+        assert_eq!(st.on_court_since_ms(1, 100), None);
+        assert_eq!(st.on_court_since_ms(1, 200), Some(8000));
+
+        // Feld wird frei: Eintrag verschwindet.
+        st.reconcile_on_court(&HashMap::new(), 9000);
+        assert_eq!(st.on_court_since_ms(1, 200), None);
     }
 }

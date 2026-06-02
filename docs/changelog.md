@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.52
+
+- **Aufruf-Timer (1./2./3. Aufruf).** Der Aufruf aufs Feld ist der 1. Aufruf;
+  bts-light zeigt je belegtem Feld eine **hochzählende Uhr** und meldet ab den
+  eingestellten Minuten den **2.** und **3./letzten** Aufruf als fällig
+  (grün → gelb → rot). Schwellen einstellbar in den **Einstellungen → Aufruf-Timer**
+  (unter den Ansagen). Anzeige in **Spielübersicht** und **Ansagen**-Seite.
+  Der Zeitpunkt wird serverseitig je Feld festgehalten (überlebt
+  Seitenwechsel/Neuladen); wechselt das Spiel auf dem Feld, läuft die Uhr neu.
+  *Court-Monitor-Anzeige folgt separat (eigener Datenpfad).*
+
 ## v0.9.51
 
 - **Neue, durchgängige Navigation.** Statt Dashboard-„Hub" mit Zurück-Button gibt
