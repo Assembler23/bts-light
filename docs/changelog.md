@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.55
+
+- **Aufruf-Timer jetzt auch im Cloud-Modus auf dem Court-Monitor.** Der Aufruf-
+  Timer (hochzählende Uhr + 1./2./3.-Aufruf-Chip) erscheint nun auch auf Pis, die
+  über den Relay (LTE/Verleih-Set) angebunden sind — gleiche Anzeige wie im LAN.
+  Der **1.-Aufruf-Zeitpunkt wird autoritativ vom Host** mitgeschickt (gleiche
+  Quelle wie die Spielübersicht), bleibt also über Reconnects stabil und ist je
+  Turnier frisch; die Schwellen kommen über die Monitor-Konfiguration mit.
+
 ## v0.9.54
 
 - **Aufruf-Timer jetzt auch auf dem Court-Monitor.** Steht ein Spiel auf dem

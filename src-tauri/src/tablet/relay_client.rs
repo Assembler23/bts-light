@@ -149,7 +149,10 @@ async fn maybe_upload_monitor(ctx: &ServerCtx, install_id: &str, last_fp: &mut O
 /// Fingerabdruck der Court-Monitor-Daten – ändert sich, sobald die
 /// Konfiguration oder ein Werbebild (Name, Größe, Änderungszeit) wechselt.
 fn monitor_fingerprint(ctx: &ServerCtx) -> String {
-    let mut s = format!("{:?}", ctx.monitor_config());
+    // Monitor- UND Aufruf-Timer-Config: ändert der Operator die Schwellen,
+    // muss der Upload neu feuern, damit der Relay sie kennt.
+    let app = ctx.app_config();
+    let mut s = format!("{:?}|{:?}", app.court_monitor, app.call_timer);
     for name in monitor::list_ads(&ctx.monitor_dir) {
         let (len, mtime) = std::fs::metadata(ctx.monitor_dir.join(&name))
             .map(|m| {
@@ -188,10 +191,16 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
             data: base64::engine::general_purpose::STANDARD.encode(&bytes),
         });
     }
+    let ct = ctx.app_config().call_timer;
     let upload = MonitorUpload {
         config: monitor::to_monitor_config(&cfg),
         tournament_name: ctx.tablet.tournament_name(),
         ads,
+        call_timer: relay_proto::CallTimerView {
+            enabled: ct.enabled,
+            second_call_minutes: ct.second_call_minutes,
+            third_call_minutes: ct.third_call_minutes,
+        },
     };
     let url = format!("{RELAY_HTTP}/{install_id}/monitor");
     let resp = ctx
@@ -343,6 +352,9 @@ fn push_court(
                 court_id,
                 court_label,
                 match_brief: match_brief(&m, ctx.tablet.scorekeeper(court_id)),
+                // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
+                // wie die Spielübersicht) – auch bei Reconnect identisch.
+                on_court_since_ms: ctx.tablet.on_court_since_ms(court_id, m.id),
             }
         }
         None => {

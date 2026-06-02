@@ -284,7 +284,7 @@ impl TabletState {
 
     /// Zeitpunkt (Unix-ms) des 1. Aufrufs für ein Feld, sofern dort das
     /// angegebene Match steht.
-    fn on_court_since_ms(&self, court_id: i64, match_id: i64) -> Option<u64> {
+    pub(crate) fn on_court_since_ms(&self, court_id: i64, match_id: i64) -> Option<u64> {
         self.on_court_since
             .read()
             .unwrap()

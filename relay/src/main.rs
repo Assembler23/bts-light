@@ -88,6 +88,8 @@ struct MonitorBundle {
     config: MonitorConfig,
     tournament_name: String,
     ads: Vec<AdImage>,
+    /// Aufruf-Timer-Schwellen (vom Host hochgeladen) für die Monitor-Anzeige.
+    call_timer: relay_proto::CallTimerView,
 }
 
 /// Ein Namespace: ein bts-light-Host und seine Tablets.
@@ -103,6 +105,10 @@ struct Namespace {
     court_matches: HashMap<i64, MatchBrief>,
     /// CourtID → Satzstand in Team-Koordinaten (für die Monitor-Anzeige).
     court_scores: HashMap<i64, Vec<SetAb>>,
+    /// CourtID → Zeitpunkt (Unix-ms), seit dem das aktuelle Spiel auf dem Feld
+    /// steht (1. Aufruf). Wird beim ersten `MatchAssigned` eines neuen Matches
+    /// gestempelt – Grundlage der Aufruf-Uhr am Cloud-Monitor.
+    court_on_court_since: HashMap<i64, u64>,
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
@@ -127,6 +133,7 @@ impl Namespace {
             court_state: HashMap::new(),
             court_matches: HashMap::new(),
             court_scores: HashMap::new(),
+            court_on_court_since: HashMap::new(),
             court_labels: HashMap::new(),
             monitor: None,
             monitor_control: MonitorControl::default(),
@@ -564,8 +571,12 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         unassigned: false,
         redirect_to: None,
         server_now_ms: now_ms(),
-        on_court_since_ms: None,
-        call_timer: relay_proto::CallTimerView::default(),
+        // 1.-Aufruf-Zeitpunkt (relay-seitig gestempelt) + Aufruf-Timer-Schwellen
+        // aus dem Host-Upload → der Cloud-Monitor zeigt dieselbe Aufruf-Uhr.
+        on_court_since_ms: namespace.court_on_court_since.get(&court_id).copied(),
+        call_timer: monitor
+            .map(|m| m.call_timer.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -673,6 +684,7 @@ async fn monitor_upload(
         config: upload.config,
         tournament_name: upload.tournament_name,
         ads,
+        call_timer: upload.call_timer,
     });
     tracing::info!("Namespace '{ns}': Court-Monitor-Datensatz aktualisiert");
     (StatusCode::OK, "ok")
@@ -1144,6 +1156,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             court_id,
             court_label,
             match_brief,
+            on_court_since_ms,
         } => {
             // Feldname (Anzeige) merken – der Monitor liest ihn.
             if !court_label.is_empty() {
@@ -1162,6 +1175,17 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
                 namespace.court_scores.remove(&court_id);
                 namespace.court_state.remove(&court_id);
             }
+            // 1.-Aufruf-Zeitpunkt: den autoritativen Host-Stempel übernehmen
+            // (gleicher Wert auch bei Reconnect, frisch je Turnier → kein
+            // veralteter Stand). Fehlt er (älterer Host), Eintrag entfernen.
+            match on_court_since_ms {
+                Some(ts) => {
+                    namespace.court_on_court_since.insert(court_id, ts);
+                }
+                None => {
+                    namespace.court_on_court_since.remove(&court_id);
+                }
+            }
             namespace
                 .court_matches
                 .insert(court_id, match_brief.clone());
@@ -1179,6 +1203,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             namespace.court_matches.remove(&court_id);
             namespace.court_scores.remove(&court_id);
             namespace.court_state.remove(&court_id);
+            namespace.court_on_court_since.remove(&court_id);
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchCleared));
             }
@@ -1269,6 +1294,7 @@ mod tests {
                 court_id: 101,
                 court_label: "Feld 1".into(),
                 match_brief: brief(7),
+                on_court_since_ms: None,
             },
         )
         .await;
@@ -1321,6 +1347,7 @@ mod tests {
                 court_id: 401,
                 court_label: "1".into(),
                 match_brief: brief(7),
+                on_court_since_ms: None,
             },
         )
         .await;
@@ -1347,6 +1374,7 @@ mod tests {
                 court_id: 101,
                 court_label: "Feld 1".into(),
                 match_brief: brief(7),
+                on_court_since_ms: Some(1000),
             },
         )
         .await;
@@ -1354,7 +1382,14 @@ mod tests {
             broker.namespaces.lock().await["ns1"].court_scores.get(&101),
             Some(&vec![SetAb { a: 21, b: 15 }])
         );
-        // Echter Match-Wechsel → Satzstand wird zurückgesetzt.
+        // Aufruf-Timer: der Host-Stempel wird übernommen (auch bei Reconnect).
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"]
+                .court_on_court_since
+                .get(&101),
+            Some(&1000)
+        );
+        // Echter Match-Wechsel → Satzstand zurückgesetzt, neuer Aufruf-Stempel.
         handle_host_frame(
             &broker,
             "ns1",
@@ -1362,12 +1397,13 @@ mod tests {
                 court_id: 101,
                 court_label: "Feld 1".into(),
                 match_brief: brief(9),
+                on_court_since_ms: Some(2000),
             },
         )
         .await;
-        assert!(!broker.namespaces.lock().await["ns1"]
-            .court_scores
-            .contains_key(&101));
+        let ns = broker.namespaces.lock().await;
+        assert!(!ns["ns1"].court_scores.contains_key(&101));
+        assert_eq!(ns["ns1"].court_on_court_since.get(&101), Some(&2000));
     }
 
     #[tokio::test]

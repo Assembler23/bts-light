@@ -189,12 +189,18 @@ pub struct AdUpload {
 
 /// Court-Monitor-Datensatz, den der bts-light-Host zum Relay hochlädt –
 /// damit Cloud-Monitore Werbung und Anzeige-Konfiguration bekommen.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Kein `Eq`: enthält über `call_timer` f64-Felder (CallTimerView).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonitorUpload {
     pub config: MonitorConfig,
     #[serde(rename = "tournamentName", default)]
     pub tournament_name: String,
     pub ads: Vec<AdUpload>,
+    /// Aufruf-Timer-Schwellen (1./2./3. Aufruf) – damit der Relay sie beim
+    /// Bauen des MonitorState mitschickt. `#[serde(default)]` (= aus) hält
+    /// ältere Host-Uploads lesbar.
+    #[serde(rename = "callTimer", default)]
+    pub call_timer: CallTimerView,
 }
 
 /// Was ein Court-Monitor-Gerät anzeigen soll – per Gerät zugewiesen.
@@ -683,6 +689,12 @@ pub enum HostFrame {
         court_label: String,
         #[serde(rename = "match")]
         match_brief: MatchBrief,
+        /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem
+        /// Feld steht. Vom Host autoritativ gestempelt (überlebt Reconnects,
+        /// frisch je Turnier) → der Relay übernimmt ihn 1:1 für die
+        /// Aufruf-Uhr am Cloud-Monitor. `#[serde(default)]` = ältere Hosts.
+        #[serde(rename = "onCourtSinceMs", skip_serializing_if = "Option::is_none", default)]
+        on_court_since_ms: Option<u64>,
     },
     /// Court-Match aufgehoben.
     MatchCleared {
@@ -994,6 +1006,11 @@ mod tests {
                 content_type: "image/png".into(),
                 data: "AAAA".into(),
             }],
+            call_timer: CallTimerView {
+                enabled: true,
+                second_call_minutes: 2.0,
+                third_call_minutes: 4.0,
+            },
         });
     }
 
