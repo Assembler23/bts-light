@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.61
+
+- **„Offline ausblenden" in der Court-Monitore-Verwaltung.** Ein Umschalter
+  blendet offline gemeldete Monitore aus der Liste aus — übrig bleiben nur die
+  aktuell laufenden. Reiner Ansichtsfilter: Zuweisungen bleiben erhalten, ein
+  wieder pollender Pi taucht automatisch erneut auf. Hilft, wenn sich über den
+  Turniertag alte/neu-geflashte Geräte ansammeln.
+
 ## v0.9.60
 
 - **„Nochmal aufrufen" je Feld.** In der Spielübersicht hat jedes belegte Feld

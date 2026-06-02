@@ -3,6 +3,8 @@ import {
   Check,
   Cloud,
   Copy,
+  Eye,
+  EyeOff,
   Info,
   RefreshCw,
   Search,
@@ -179,6 +181,8 @@ export function CourtMonitorPanel() {
   const [ads, setAds] = useState<CourtAd[]>([]);
   // Hallen-Filter: null = alle Hallen.
   const [hallFilter, setHallFilter] = useState<string | null>(null);
+  // Offline-Geräte ausblenden (nur aus der Ansicht – Zuweisungen bleiben).
+  const [hideOffline, setHideOffline] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -345,11 +349,29 @@ export function CourtMonitorPanel() {
       <section className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-slate-700">Geräte</h2>
-          <HallFilter
-            halls={allHalls}
-            value={hallFilter}
-            onChange={setHallFilter}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <HallFilter
+              halls={allHalls}
+              value={hallFilter}
+              onChange={setHallFilter}
+            />
+            {/* Offline-TVs aus der Ansicht nehmen – Zuweisungen bleiben, ein
+                wieder pollendes Gerät taucht automatisch erneut auf. */}
+            <button
+              onClick={() => setHideOffline((v) => !v)}
+              aria-pressed={hideOffline}
+              title="Offline-Monitore aus der Liste ausblenden (Zuweisung bleibt erhalten)"
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium
+                          transition-colors ${
+                            hideOffline
+                              ? "bg-slate-800 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+            >
+              {hideOffline ? <EyeOff size={14} /> : <Eye size={14} />}
+              Offline ausblenden
+            </button>
+          </div>
         </div>
         {devices.length === 0 ? (
           <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
@@ -385,8 +407,9 @@ export function CourtMonitorPanel() {
               </div>
             ))}
 
-            {/* Offline-Geräte: unter einer Trennlinie, gleiche Sortierung. */}
-            {showOffline.some((g) => g.devices.length > 0) && (
+            {/* Offline-Geräte: unter einer Trennlinie, gleiche Sortierung.
+                Mit „Offline ausblenden" komplett ausgeblendet. */}
+            {!hideOffline && showOffline.some((g) => g.devices.length > 0) && (
               <div className="mt-2 flex items-center gap-2">
                 <div className="h-px flex-1 bg-slate-200" />
                 <span className="text-xs font-medium text-slate-400">
@@ -395,7 +418,8 @@ export function CourtMonitorPanel() {
                 <div className="h-px flex-1 bg-slate-200" />
               </div>
             )}
-            {showOffline.map((g) => (
+            {!hideOffline &&
+              showOffline.map((g) => (
               <div key={`off-${g.hall || "_"}`} className="flex flex-col gap-2 opacity-60">
                 {grouped.showHalls && g.hall && (
                   <h3 className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -429,6 +453,14 @@ export function CourtMonitorPanel() {
                   Geräte; die Halle lässt sich je Gerät rechts einstellen.
                 </p>
               )}
+
+            {/* „Offline ausblenden" aktiv, aber kein Online-Gerät sichtbar. */}
+            {hideOffline && showOnline.every((g) => g.devices.length === 0) && (
+              <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400">
+                Keine Online-Monitore. „Offline ausblenden" deaktivieren, um die
+                offline gemeldeten Geräte (mit Zuweisung) zu sehen.
+              </p>
+            )}
           </div>
         )}
       </section>
