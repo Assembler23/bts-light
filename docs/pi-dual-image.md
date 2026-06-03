@@ -36,6 +36,14 @@ daher MUSS die bts-light-Adresse in die SERVERS-Liste, aber nur in unserer Kopie
 
 Datei: [`pi/shared-startbrowser.sh`](../pi/shared-startbrowser.sh)
 (Drop-in-Ersatz für `/home/pi/startbrowser.sh` **auf der Verleih-Set-Kopie**).
+
+**Verhalten (Dauerschleife, Auto-Reconnect):** Der Launcher gibt nicht mehr nach
+einmaligem Suchen auf, sondern sucht laufend: kein Server → wartet (Desktop
+sichtbar) und sucht weiter; Server gefunden → Kiosk startet automatisch; Server
+wechselt (BTS↔bts-light) → schaltet auf den höherprioren um; Chromium abgestürzt
+→ Neustart. Damit ist „erst Pi, dann Server" egal und ein System-Wechsel braucht
+keinen Pi-Neustart (Prüfung alle 15 s).
+
 Änderungen ggü. Tilos Original:
 
 1. **bts-light in `SERVERS`:** `http://bts-light.local:8088/monitor` (mDNS).
