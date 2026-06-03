@@ -239,10 +239,10 @@
     /* Logo wie im bts-light-App-Header: dunkles Rounded-Square mit
        Federball-Emoji. Genau dieselbe Optik wie in Dashboard.tsx. */
     #pairing-view .logo {
-      width: 32vmin; height: 32vmin;
+      width: 22vmin; height: 22vmin;
       display: flex; align-items: center; justify-content: center;
-      background: #1e293b; border-radius: 6vmin;
-      font-size: 22vmin; line-height: 1;
+      background: #1e293b; border-radius: 4vmin;
+      font-size: 15vmin; line-height: 1;
       /* Emoji-Schriften erzwingen (Pi OS Lite nutzt sonst eine Mono-Fallback). */
       font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
       box-shadow: 0 .8vmin 4vmin rgba(0, 0, 0, .35), inset 0 0 0 .3vmin #334155;
@@ -253,13 +253,17 @@
       50%      { transform: scale(1.03); box-shadow: 0 1.2vmin 6vmin rgba(251, 191, 36, .15), inset 0 0 0 .3vmin #475569; }
     }
     /* Wordmark (gross) + Untertitel (klein) unter dem Logo. */
+    /* badhub.de = Held der Leerlauf-Anzeige (Werbung): fast über die ganze
+       TV-Breite, gut lesbar. Größe an der VIEWPORT-BREITE (vw), damit es
+       quer wirklich breit wird. "BTS light" deutlich kleiner darunter. */
     #pairing-view .wordmark {
-      font-size: 5vmin; letter-spacing: .15em;
-      color: #cbd5e1; font-weight: 700;
+      font-size: 15vw; letter-spacing: .005em; line-height: 1;
+      color: #f1f5f9; font-weight: 800;
+      text-shadow: 0 .4vmin 2vmin rgba(0, 0, 0, .4);
     }
     #pairing-view .subtitle {
-      font-size: 2.6vmin; letter-spacing: .3em; text-transform: uppercase;
-      color: #64748b; font-weight: 600;
+      font-size: 4.5vw; letter-spacing: .25em; text-transform: uppercase;
+      color: #94a3b8; font-weight: 600; margin-top: 1vmin;
     }
 
     /* ─── Identifizieren-Overlay (Fernbefehl) ────────────────────────── */

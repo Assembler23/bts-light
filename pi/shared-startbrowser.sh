@@ -68,7 +68,8 @@ btslight_ip() {
     echo "$ip"; return 0
   fi
   # 2) Sonst Namen geduldig auflösen (getent/avahi) und in der Datei merken.
-  rm -f "$BTSLIGHT_CACHE"
+  #    Cache NICHT löschen – bei einem kurzen Aussetzer wollen wir die IP
+  #    beim nächsten Versuch sofort wiederverwenden, sobald der Server zurück ist.
   for try in 1 2 3; do
     ip=$(getent hosts "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $1; exit}')
     if [ -z "$ip" ] && command -v avahi-resolve-host-name >/dev/null 2>&1; then
@@ -123,18 +124,26 @@ launch() {
 }
 
 # 3) Dauerschleife: immer den besten erreichbaren Server anzeigen.
+#    WICHTIG (Lehre aus dem Feld): einen EINZELNEN Aussetzer NICHT sofort als
+#    "Server weg" werten – sonst flackert der Kiosk zum Desktop und wieder zurück.
+#    Erst nach MISS_LIMIT erfolglosen Runden (≈30 s) beenden. So bleibt ein
+#    laufender Kiosk bei kurzem WLAN-Wackler einfach stehen.
 CUR=""
+MISS=0
+MISS_LIMIT=3
 while true; do
   BEST="$(discover || true)"
   if [ -n "$BEST" ]; then
+    MISS=0
     if [ "$BEST" != "$CUR" ] || ! pgrep -f chromium-browser >/dev/null 2>&1; then
       echo "$(date) - Anzeige: $BEST" >> "$LOG"
       launch "$BEST"
       CUR="$BEST"
     fi
   else
-    if [ -n "$CUR" ]; then
-      echo "$(date) - Kein Server erreichbar – Kiosk beendet, suche weiter" >> "$LOG"
+    MISS=$((MISS + 1))
+    if [ -n "$CUR" ] && [ "$MISS" -ge "$MISS_LIMIT" ]; then
+      echo "$(date) - Server seit $MISS Versuchen weg – Kiosk beendet, suche weiter" >> "$LOG"
       pkill -f chromium-browser 2>/dev/null
       CUR=""
     fi

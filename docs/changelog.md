@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.63
+
+- **Court-Monitor-Leerlauf: „badhub.de" groß als Werbung.** Die Wortmarke füllt
+  jetzt fast die ganze TV-Breite (an der Viewport-Breite skaliert), gut lesbar in
+  hellem Weiß; „BTS light" deutlich kleiner darunter, das Federball-Logo etwas
+  zurückgenommen. Greift im Cloud-Modus über den Relay-Redeploy.
+- **Pi-Kiosk-Launcher stabiler (kein Flackern mehr).** Der gemeinsame
+  `pi/shared-startbrowser.sh` beendete bei einem *einzelnen* WLAN-Aussetzer sofort
+  den Kiosk (Desktop taucht auf, dann Neustart). Jetzt **Hysterese**: erst nach
+  mehreren erfolglosen Runden (≈30 s) beenden, und die gemerkte bts-light-IP wird
+  bei kurzen Blips nicht mehr verworfen. Der Kiosk läuft bei Wacklern einfach durch.
+
 ## v0.9.62
 
 - **Court-Monitor: Logo & Symbole schrift-unabhängig.** Die Leerlauf-Anzeige
