@@ -36,7 +36,11 @@ SERVERS=(
 )
 BTSLIGHT_NAME="bts-light.local"
 BTSLIGHT_PORT="8088"
-BTSLIGHT_IP=""   # gemerkte, aufgelöste IP von bts-light
+# Gemerkte IP in einer DATEI (nicht als Shell-Variable!): discover()/btslight_ip()
+# laufen über $(…) in einer Subshell – eine Variable würde dort verloren gehen,
+# sodass JEDER Durchlauf neu (langsam, flaky) aufgelöst hätte. Die Datei übersteht
+# die Subshell → genau EINE Auflösung, danach immer die schnelle IP.
+BTSLIGHT_CACHE="/tmp/btslight_ip"
 
 # Erreichbar? curl (echte HTTP-Antwort, großzügiges Timeout), sonst /dev/tcp.
 # KEIN ping-Fallback: Windows beantwortet ICMP standardmäßig nicht.
@@ -57,18 +61,21 @@ reachable() {
 # bts-light-IP ermitteln: gemerkte IP wiederverwenden, solange erreichbar;
 # sonst Namen geduldig auflösen (getent/avahi, mehrere Versuche) und merken.
 btslight_ip() {
-  if [ -n "$BTSLIGHT_IP" ] && reachable "http://$BTSLIGHT_IP:$BTSLIGHT_PORT/health"; then
-    echo "$BTSLIGHT_IP"; return 0
+  local ip try
+  # 1) Gemerkte IP wiederverwenden, solange erreichbar (keine Neuauflösung!).
+  ip=$(cat "$BTSLIGHT_CACHE" 2>/dev/null)
+  if [ -n "$ip" ] && reachable "http://$ip:$BTSLIGHT_PORT/health"; then
+    echo "$ip"; return 0
   fi
-  BTSLIGHT_IP=""
-  local ip="" try
+  # 2) Sonst Namen geduldig auflösen (getent/avahi) und in der Datei merken.
+  rm -f "$BTSLIGHT_CACHE"
   for try in 1 2 3; do
     ip=$(getent hosts "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $1; exit}')
     if [ -z "$ip" ] && command -v avahi-resolve-host-name >/dev/null 2>&1; then
       ip=$(avahi-resolve-host-name -4 "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $2; exit}')
     fi
     if [ -n "$ip" ] && reachable "http://$ip:$BTSLIGHT_PORT/health"; then
-      BTSLIGHT_IP="$ip"
+      echo "$ip" > "$BTSLIGHT_CACHE"
       echo "$(date) - bts-light aufgelöst: $BTSLIGHT_NAME → $ip" >> "$LOG"
       echo "$ip"; return 0
     fi
