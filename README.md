@@ -42,6 +42,14 @@ Badhub-Passwort eintragen – fertig.
 - **Single-Instance** – bts-light läuft pro Rechner nur einmal; ein
   zweiter Start holt das bestehende Fenster nach vorn (sonst kollidierte
   der Tablet-Server-Port).
+- **Court-Monitor (Raspberry Pi)** – ein Pi im Hallen-WLAN zeigt
+  Live-Score bzw. Feldnummer als Kiosk auf einem TV. Ein **gemeinsames
+  Image** bedient sowohl Tilos BTS als auch bts-light (Auto-Discovery per
+  Subnetz-Scan, kein Karten-/Image-Tausch). Fertiges Image zum Schreiben
+  mit Raspberry Pi Imager + Anleitung:
+  [docs/pi-dual-image.md](docs/pi-dual-image.md) · Download:
+  <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz>
+  (32-GB-Karten).
 
 Noch nicht signiert: Der Windows-Installer hat kein Code-Signing-
 Zertifikat, daher zeigt Windows beim ersten Start eine SmartScreen-Warnung
@@ -75,6 +83,7 @@ bts-light/          # Cargo-Workspace
 ├── src-tauri/      # Rust-Kern + Tauri-Konfiguration (die App)
 ├── relay/          # Cloud-Relay-Dienst (Binary bts-relay)
 ├── relay-proto/    # geteilte JSON-Wire-Typen App ↔ Relay
+├── pi/             # Kiosk-Launcher für den Court-Monitor-Pi (shared BTS/bts-light)
 ├── ops/            # systemd-/nginx-Vorlagen für den Relay
 ├── tools/          # Entwicklungs-Werkzeuge (BTP-Capture-Skript)
 ├── docs/           # Protokoll- & Feature-Doku

@@ -120,10 +120,38 @@ Der Pi + Shared-Launcher funktionieren; die Hürden lagen beim **Server-Laptop**
 Schnelltest ohne Pi-Tastatur: Handy ins `btsaccess`-WLAN, `http://bts-light.local:8088/monitor`
 öffnen — erscheint die Kopplungsseite, findet der Pi sie genauso.
 
+## Fertiges Image (Download) & Schreiben mit Raspberry Pi Imager
+
+Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + v3-Launcher +
+`btsaccess`-WLAN, genau wie im 40-min-Test verifiziert) liegt zum Download bereit:
+
+- **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz>
+- **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz.sha256>
+- ~1,2 GB komprimiert (entpackt 15 GB). **Nur für 32-GB-Karten** (so im Einsatz);
+  bewusst **nicht** geschrumpft/auto-expandiert → 1:1 der getestete Stand, sofort
+  einsatzfähig.
+
+**Schreiben mit Raspberry Pi Imager:**
+1. Imager öffnen → **„Eigenes Image verwenden" / „Use custom"** → die `.img.xz`
+   wählen (Imager entpackt beim Schreiben selbst, `.xz` muss nicht ausgepackt werden).
+2. Ziel-SD-Karte (32 GB) wählen → schreiben.
+3. **Keine** Imager-Anpassungen (Hostname/WLAN/SSH) nötig — WLAN `btsaccess` und der
+   Launcher sind bereits im Image. (Diese Custom-Optionen würden hier ohnehin nicht
+   greifen und könnten das gebackene `btsaccess`-WLAN überschreiben → weglassen.)
+4. Karte in den Pi, einschalten. Nach Pi-OS-Boot startet der Kiosk automatisch und
+   sucht den laufenden Server (BTS *oder* bts-light, siehe oben).
+
+> Build-Quelle: Das Image ist eine Kopie von Tilos `piZero2_image_autostart_16GB`
+> mit ersetztem `/home/pi/startbrowser.sh` (= `pi/shared-startbrowser.sh`).
+> Launcher aktualisieren → `pi/shared-startbrowser.sh` ins Image schreiben
+> (macOS: `e2fsck` → `debugfs -w write` auf `/dev/diskNs2`, uid/gid 1000, 0755),
+> neu komprimieren (`xz -T0 -6`) und hochladen.
+
 ## Test (mit echter Hardware)
 
-1. Tilos Image flashen, `/home/pi/startbrowser.sh` durch
-   `pi/shared-startbrowser.sh` ersetzen, Pi neu starten.
+1. **Fertiges Image (Download oder lokal) mit Pi Imager auf eine neue Karte schreiben**
+   (siehe Abschnitt oben) — oder manuell: Tilos Image flashen,
+   `/home/pi/startbrowser.sh` durch `pi/shared-startbrowser.sh` ersetzen.
 2. **BTS-Fall:** BTS-Server unter `192.168.16.2:4433` läuft → Pi zeigt BTS.
 3. **bts-light-Fall:** kein BTS im Netz, bts-light-Laptop im selben WLAN →
    Pi fällt auf `bts-light.local:8088/monitor` zurück, zeigt den Kopplungscode.
