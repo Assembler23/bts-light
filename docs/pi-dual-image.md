@@ -24,11 +24,19 @@ Der Pi lädt also **nur** einen Kiosk-Browser; der gesamte Anzeige-Inhalt kommt
 vom Server. Dual-Image ist damit **reine Boot-Discovery** — kein doppeltes OS,
 kein App-Code auf dem Pi.
 
-## Lösung: Tilos Launcher um bts-light erweitern
+## Lösung: eine KOPIE von Tilos Image fürs Verleih-Set (Tilo ändert nichts)
 
-Empfohlene Variante: **Tilos Desktop-Image als Basis**, sein `startbrowser.sh`
-um bts-light ergänzen. Datei: [`pi/shared-startbrowser.sh`](../pi/shared-startbrowser.sh)
-(Drop-in-Ersatz für `/home/pi/startbrowser.sh`). Änderungen ggü. Tilos Original:
+Ein Image kann nur dann zwischen beiden Systemen wechseln, wenn seine
+`SERVERS`-Liste **beide** Adressen kennt (BTS *und* bts-light). Tilos
+**Original-Image bleibt unverändert** — wir nehmen eine **Kopie** fürs
+Verleih-Set und ergänzen dort die eine bts-light-Zeile. Tilo muss nichts tun;
+seine Pis/Server laufen wie gehabt. (Sein unverändertes Image pingt nur seine
+BTS-Adressen `192.168.16.2:4433/d1` … und findet bts-light auf `:8088` nie —
+daher MUSS die bts-light-Adresse in die SERVERS-Liste, aber nur in unserer Kopie.)
+
+Datei: [`pi/shared-startbrowser.sh`](../pi/shared-startbrowser.sh)
+(Drop-in-Ersatz für `/home/pi/startbrowser.sh` **auf der Verleih-Set-Kopie**).
+Änderungen ggü. Tilos Original:
 
 1. **bts-light in `SERVERS`:** `http://bts-light.local:8088/monitor` (mDNS).
    Greift, wenn kein BTS-/CourtSpot-Server im Netz ist.
@@ -42,15 +50,24 @@ um bts-light ergänzen. Datei: [`pi/shared-startbrowser.sh`](../pi/shared-startb
 
 bts-light braucht avahi für `bts-light.local` — im Desktop-Image vorhanden.
 
-## Offene Abstimmung mit Tilo (Koordination, nicht Technik)
+## Netz-Konvention (von Tilo vorgegeben, übernommen)
 
-- **Gemeinsame SSID:** beide Systeme im selben WLAN. Am einfachsten Tilos
-  `btsaccess` für beide nutzen (dann muss der bts-light-Laptop ins `btsaccess`).
-- **Owner des gemeinsamen Images:** Tilos Image bleibt Basis; die eine geänderte
-  Datei (`startbrowser.sh`) pflegen wir/Tilo gemeinsam.
-- **Ports/URLs bestätigen:** Image zeigt BTS auf `4433/d1` und CourtSpot auf
-  `192.168.16.3`. Falls sich das ändert, `SERVERS` anpassen.
-- **DHCP-Stolperstein** beim Heim-Test beachten (siehe Memory
+Tilo (Chat 2026-05-26): das Verleih-WLAN soll **`btsaccess` / `tmt2024!`**
+heißen, Subnetz **192.168.16.\***. Damit joinen **dieselben Pis** automatisch
+sowohl Tilos BTS-Netz als auch das bts-light-Verleih-Netz, und die Boot-
+Discovery wählt den jeweils laufenden Server. bts-light bleibt bei mDNS
+`bts-light.local` (kein fester IP-Zwang) — funktioniert im 192.168.16.*-Netz.
+→ Im Verleih-Router (TP-Link) SSID/PSK/Subnetz entsprechend setzen.
+
+**Tilo muss nichts ändern.** Nur falls er WILL, dass auch *seine* Pis bts-light
+finden, würde er die bts-light-Zeile zusätzlich in *sein* SERVERS aufnehmen —
+optional, nicht nötig fürs Verleih-Set.
+
+Rest-Punkte:
+- **Ports/URLs:** Image zeigt BTS auf `4433/d1` und CourtSpot auf `192.168.16.3`
+  — in `shared-startbrowser.sh` verbatim übernommen. Ändert sich das, `SERVERS`
+  anpassen.
+- **DHCP-Stolperstein** beim Heim-Test beachten (Memory
   `project_verleihset_dhcp_conflict`): TP-Link am bestehenden Netz → Doppel-DHCP;
   im echten LTE-Verleih-Einsatz kein Problem.
 
