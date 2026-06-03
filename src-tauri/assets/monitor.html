@@ -35,7 +35,11 @@
       text-align: center; padding: 6vmin;
     }
     #ad-fallback.show { display: flex; }
-    #ad-fallback .tn { font-size: 5vmin; font-weight: 800; opacity: .9; }
+    #ad-fallback .tn { font-size: 4vmin; font-weight: 700; opacity: .7; }
+    /* Feldnummer ist hier der Held: groß, damit klar ist, welches Feld der
+       Monitor zeigt – auch wenn gerade kein Spiel läuft und keine Werbung kommt. */
+    #ad-fallback .court { font-size: 17vmin; font-weight: 800; line-height: 1; margin: 1.5vmin 0; color: #f1f5f9; }
+    #ad-fallback .court:empty { display: none; }
     #ad-fallback .sub { font-size: 3.4vmin; opacity: .45; letter-spacing: .04em; }
 
     /* ─── Match-Ansicht ───────────────────────────────────────────────── */
@@ -287,6 +291,7 @@
       <img id="ad-img" alt="" />
       <div id="ad-fallback">
         <div class="tn" id="fallback-tn">bts-light</div>
+        <div class="court" id="fallback-court"></div>
         <div class="sub">Kein Spiel auf diesem Feld</div>
       </div>
     </div>
@@ -397,6 +402,7 @@
     adImg: document.getElementById("ad-img"),
     adFallback: document.getElementById("ad-fallback"),
     fallbackTn: document.getElementById("fallback-tn"),
+    fallbackCourt: document.getElementById("fallback-court"),
     matchView: document.getElementById("match-view"),
     courtLabel: document.getElementById("court-label"),
     discipline: document.getElementById("discipline"),
@@ -865,6 +871,9 @@
     }
     var cfg = state.config || {};
     els.fallbackTn.textContent = state.tournamentName || "bts-light";
+    // Feldnummer groß auf der Leerlauf-Seite, damit erkennbar bleibt, welches
+    // Feld dieser Monitor zeigt (auch ohne Spiel/Werbung).
+    els.fallbackCourt.textContent = state.courtLabel || COURT_LABEL || "";
 
     // Layout am Wurzelelement markieren – Vorbereitung fuer weitere Layouts.
     els.root.dataset.layout = cfg.layout || "split";

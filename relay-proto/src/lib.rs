@@ -475,8 +475,11 @@ pub struct MonitorControl {
 }
 
 /// Ein Gerät gilt als „online", wenn sein letzter Poll höchstens so lange
-/// her ist (der Monitor pollt im Sekundentakt).
-pub const MONITOR_ONLINE_WINDOW_MS: u64 = 6_000;
+/// her ist (der Monitor pollt im Sekundentakt). Großzügig (20 s), damit ein
+/// kurzer WLAN-Zucker den Online-Status NICHT flackern lässt – im flakigen
+/// Hallen-/Verleih-WLAN sind einzelne >6-s-Aussetzer normal. Ein wirklich
+/// totes Gerät fällt weiterhin nach 20 s raus.
+pub const MONITOR_ONLINE_WINDOW_MS: u64 = 20_000;
 
 /// Kurz-Code eines Geräts: die ersten vier alphanumerischen Zeichen der
 /// ID, groß – so wie der Monitor ihn auf dem TV anzeigt.

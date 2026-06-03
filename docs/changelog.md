@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.64
+
+- **Monitor-Online-Status flackert nicht mehr.** Der Server stufte einen Monitor
+  schon nach 6 s ohne Poll als offline ein – ein kurzer WLAN-Zucker (im Hallen-/
+  Verleih-WLAN normal) ließ den Online-Punkt damit hin- und herspringen
+  (`MONITOR_ONLINE_WINDOW_MS` 6 s → **20 s**). Ein wirklich totes Gerät fällt
+  weiterhin nach 20 s raus.
+- **Feldnummer groß auf der Leerlauf-Seite.** Wenn kein Spiel läuft und keine
+  Werbung kommt, zeigte der Monitor nur Turniername + „Kein Spiel auf diesem
+  Feld". Jetzt steht die **Feldnummer groß** dazwischen – man erkennt sofort,
+  welches Feld der Bildschirm zeigt.
+
 ## v0.9.63
 
 - **Court-Monitor-Leerlauf: „badhub.de" groß als Werbung.** Die Wortmarke füllt
