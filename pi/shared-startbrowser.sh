@@ -1,81 +1,101 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-# Gemeinsamer Kiosk-Launcher für ein Pi-Image, das SOWOHL Tilos BTS-Server
-# ALS AUCH bts-light bedient (Verleih-Set, gemischte Turniere).
+# Gemeinsamer Kiosk-Launcher: bedient SOWOHL Tilos BTS-Server ALS AUCH
+# bts-light (Verleih-Set, gemischte Turniere). Drop-in für /home/pi/startbrowser.sh
+# auf Tilos Pi-Image (Autologin pi → LXDE-Autostart ruft dieses Skript).
 #
-# Drop-in-Ersatz für /home/pi/startbrowser.sh auf Tilos Pi-Image
-# (Raspberry Pi OS Desktop, Autologin pi → LXDE-Autostart ruft dieses Skript).
+# Dauerschleife: sucht laufend den ersten erreichbaren Server und zeigt ihn:
+#   kein Server → wartet (Desktop) und sucht weiter; gefunden → Kiosk;
+#   Server-Wechsel BTS↔bts-light → umschalten; Chromium-Absturz → Neustart.
 #
-# Prinzip: Der Pi lädt NUR einen Chromium-Kiosk; der Inhalt kommt vom Server.
-# Eine Dauerschleife sucht laufend den ersten erreichbaren Server aus SERVERS
-# und zeigt ihn an:
-#   • kein Server → wartet (Desktop sichtbar), sucht weiter (gibt NICHT auf);
-#   • Server gefunden → Chromium-Kiosk startet automatisch;
-#   • Server wechselt (z. B. BTS geht an, während bts-light lief) → es wird
-#     auf den höherprioren Server umgeschaltet (Chromium neu gestartet);
-#   • Chromium abgestürzt → wird automatisch neu gestartet.
-# So ist die Reihenfolge „erst Pi, dann Server" egal und ein System-Wechsel
-# braucht keinen Neustart.
+# Wichtig (Lehre aus dem Feld): die mDNS-Auflösung von `bts-light.local` ist über
+# WLAN oft LANGSAM/flaky. Darum lösen wir den Namen EINMAL geduldig zur IP auf,
+# MERKEN sie und prüfen/laden danach über die zuverlässige IP (Re-Resolve nur,
+# wenn die gemerkte IP nicht mehr antwortet). curl --max-time darf nicht zu kurz
+# sein, sonst schlägt die Auflösung im curl selbst fehl.
 # ─────────────────────────────────────────────────────────────────────────
 export DISPLAY=:0
 export XAUTHORITY=/home/pi/.Xauthority
 LOG=/home/pi/startbrowser.log
 
-echo "$(date) - Startbrowser (shared, auto-reconnect) gestartet" >> "$LOG"
+echo "$(date) - Startbrowser (shared, auto-reconnect v2) gestartet" >> "$LOG"
 
-# 1) Auf eigene IP warten — NICHT auf Internet (reines bts-light-LAN hat ggf.
-#    kein Internet). Timeout ~120 s, danach trotzdem in die Suchschleife.
+# 1) Auf eigene IP warten (kein Internet-Zwang).
 for _ in $(seq 1 60); do
     if hostname -I 2>/dev/null | grep -qE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'; then break; fi
     sleep 2
 done
 echo "$(date) - Netz: $(hostname -I 2>/dev/null)" >> "$LOG"
 
-# 2) Serverliste in Prüf-Reihenfolge: kiosk_url|probe_url
-#    BTS/CourtSpot zuerst (feste IPs), bts-light als Fallback (mDNS).
+# Feste Server (BTS/CourtSpot): kiosk_url|probe_url – per IP, schnell.
 SERVERS=(
   "https://192.168.16.2:4433/d1|https://192.168.16.2:4433/d1"
   "https://192.168.26.2:4433/d1|https://192.168.26.2:4433/d1"
   "https://192.168.36.2:4433/d1|https://192.168.36.2:4433/d1"
   "http://192.168.16.3/regio/Update-Verzeichnis/bup/#courtspot&display|http://192.168.16.3/"
-  "http://bts-light.local:8088/monitor|http://bts-light.local:8088/health"
 )
+BTSLIGHT_NAME="bts-light.local"
+BTSLIGHT_PORT="8088"
+BTSLIGHT_IP=""   # gemerkte, aufgelöste IP von bts-light
 
-# Erreichbarkeit eines Dienstes: bevorzugt curl (echte HTTP-Antwort), sonst
-# ping als Fallback. 0 = erreichbar.
+# Erreichbar? curl (echte HTTP-Antwort, großzügiges Timeout), sonst /dev/tcp.
+# KEIN ping-Fallback: Windows beantwortet ICMP standardmäßig nicht.
 reachable() {
-  local probe="$1" host code
+  local probe="$1" code host port
   if command -v curl >/dev/null 2>&1; then
-    code=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$probe" 2>/dev/null)
+    code=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 5 "$probe" 2>/dev/null)
     [ -n "$code" ] && [ "$code" != "000" ]
   else
     host=$(echo "$probe" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')
-    ping -c1 -W1 "$host" &>/dev/null
+    port=$(echo "$probe" | sed -nE 's#^[a-z]+://[^/:]+:([0-9]+).*#\1#p'); [ -z "$port" ] && port=80
+    timeout 3 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null
   fi
 }
 
-# Erste erreichbare KIOSK-URL ausgeben (oder leer + Rückgabe 1).
-discover() {
-  local S KIOSK PROBE
-  for S in "${SERVERS[@]}"; do
-    KIOSK="${S%%|*}"; PROBE="${S##*|}"
-    if reachable "$PROBE"; then echo "$KIOSK"; return 0; fi
+# bts-light-IP ermitteln: gemerkte IP wiederverwenden, solange erreichbar;
+# sonst Namen geduldig auflösen (getent/avahi, mehrere Versuche) und merken.
+btslight_ip() {
+  if [ -n "$BTSLIGHT_IP" ] && reachable "http://$BTSLIGHT_IP:$BTSLIGHT_PORT/health"; then
+    echo "$BTSLIGHT_IP"; return 0
+  fi
+  BTSLIGHT_IP=""
+  local ip="" try
+  for try in 1 2 3; do
+    ip=$(getent hosts "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $1; exit}')
+    if [ -z "$ip" ] && command -v avahi-resolve-host-name >/dev/null 2>&1; then
+      ip=$(avahi-resolve-host-name -4 "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $2; exit}')
+    fi
+    if [ -n "$ip" ] && reachable "http://$ip:$BTSLIGHT_PORT/health"; then
+      BTSLIGHT_IP="$ip"
+      echo "$(date) - bts-light aufgelöst: $BTSLIGHT_NAME → $ip" >> "$LOG"
+      echo "$ip"; return 0
+    fi
+    sleep 2
   done
   return 1
 }
 
-# bts-light: stabile Geräte-Kennung (Pi-Seriennummer) anhängen. BTS unverändert.
-append_device() {
-  local url="$1" serial sep
-  case "$url" in
-    *bts-light.local*)
-      if ! echo "$url" | grep -q "device="; then
-        serial=$(awk -F': ' '/Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')
-        sep="?"; case "$url" in *\?*) sep="&";; esac
-        [ -n "$serial" ] && url="${url}${sep}device=pi-${serial}"
-      fi ;;
-  esac
-  echo "$url"
+# Erste erreichbare KIOSK-URL (oder leer + Rückgabe 1).
+discover() {
+  local S KIOSK PROBE ip serial sep
+  # 1) feste BTS/CourtSpot-Server zuerst
+  for S in "${SERVERS[@]}"; do
+    KIOSK="${S%%|*}"; PROBE="${S##*|}"
+    if reachable "$PROBE"; then echo "$KIOSK"; return 0; fi
+  done
+  # 2) bts-light per aufgelöster IP (stabil), inkl. eindeutiger Geräte-Kennung
+  ip="$(btslight_ip)"
+  if [ -n "$ip" ]; then
+    serial=$(awk -F': ' '/Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')
+    sep="?"
+    if [ -n "$serial" ]; then
+      echo "http://$ip:$BTSLIGHT_PORT/monitor${sep}device=pi-${serial}"
+    else
+      echo "http://$ip:$BTSLIGHT_PORT/monitor"
+    fi
+    return 0
+  fi
+  return 1
 }
 
 # Chromium-Kiosk auf eine URL (neu) starten.
@@ -94,26 +114,21 @@ launch() {
 }
 
 # 3) Dauerschleife: immer den besten erreichbaren Server anzeigen.
-CUR=""   # aktuell geladene KIOSK-URL
+CUR=""
 while true; do
   BEST="$(discover || true)"
   if [ -n "$BEST" ]; then
-    BEST="$(append_device "$BEST")"
-    # Neu starten, wenn sich der Server geändert hat ODER Chromium fehlt
-    # (Wechsel BTS↔bts-light bzw. Absturz-Selbstheilung).
     if [ "$BEST" != "$CUR" ] || ! pgrep -f chromium-browser >/dev/null 2>&1; then
       echo "$(date) - Anzeige: $BEST" >> "$LOG"
       launch "$BEST"
       CUR="$BEST"
     fi
   else
-    # Kein Server erreichbar → laufenden Kiosk beenden (Desktop sichtbar),
-    # weiter suchen.
     if [ -n "$CUR" ]; then
       echo "$(date) - Kein Server erreichbar – Kiosk beendet, suche weiter" >> "$LOG"
       pkill -f chromium-browser 2>/dev/null
       CUR=""
     fi
   fi
-  sleep 15
+  sleep 10
 done
