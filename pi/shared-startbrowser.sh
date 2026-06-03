@@ -43,7 +43,9 @@ BTSLIGHT_IP=""   # gemerkte, aufgelöste IP von bts-light
 reachable() {
   local probe="$1" code host port
   if command -v curl >/dev/null 2>&1; then
-    code=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 5 "$probe" 2>/dev/null)
+    # Kurz: curl prüft nur IPs (bts-light wird vorab per getent aufgelöst),
+    # daher genügen knappe Timeouts → schnelle Discovery-Runden.
+    code=$(curl -k -s -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$probe" 2>/dev/null)
     [ -n "$code" ] && [ "$code" != "000" ]
   else
     host=$(echo "$probe" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')
