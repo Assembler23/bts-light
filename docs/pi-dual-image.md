@@ -38,16 +38,30 @@ Datei: [`pi/shared-startbrowser.sh`](../pi/shared-startbrowser.sh)
 (Drop-in-Ersatz für `/home/pi/startbrowser.sh` **auf der Verleih-Set-Kopie**).
 
 **Verhalten (Dauerschleife, Auto-Reconnect):** Der Launcher gibt nicht mehr nach
-einmaligem Suchen auf, sondern sucht laufend: kein Server → wartet (Desktop
-sichtbar) und sucht weiter; Server gefunden → Kiosk startet automatisch; Server
-wechselt (BTS↔bts-light) → schaltet auf den höherprioren um; Chromium abgestürzt
-→ Neustart. Damit ist „erst Pi, dann Server" egal und ein System-Wechsel braucht
-keinen Pi-Neustart (Prüfung alle 15 s).
+einmaligem Suchen auf, sondern sucht laufend (Prüfung alle 10 s): kein Server →
+sucht weiter; Server gefunden → Kiosk startet automatisch; Server wechselt
+(BTS↔bts-light) → schaltet um; Chromium abgestürzt → Neustart. „Erst Pi, dann
+Server" ist egal, ein System-Wechsel braucht keinen Pi-Neustart.
+
+**Hysterese (v3):** Ein *einzelner* Aussetzer beendet den Kiosk NICHT — erst nach
+`MISS_LIMIT` (3) erfolglosen Runden (~30 s). So flackert der Bildschirm bei einem
+kurzen WLAN-Wackler nicht zum Desktop. Verifiziert: 40-min-Lauf am 2026-06-03 ohne
+einen einzigen Kiosk-Abbruch trotz ~3 Mikro-Blips.
+
+**Discovery von bts-light — Reihenfolge nach Zuverlässigkeit (v3):**
+1. **gemerkte IP** (Datei `/tmp/btslight_ip`) — sofort, solange `:8088/health` antwortet.
+2. **Subnetz-Scan** des eigenen /24 auf `:8088/health` — findet bts-light direkt am
+   offenen Port, **unabhängig von mDNS**. mDNS (`bts-light.local`) war über WLAN das
+   schwächste Glied: `getent hosts` blockierte im Feld **minutenlang** ohne Timeout.
+3. **mDNS nur als Fallback**, immer mit `timeout 3` (kann nie wieder hängen).
+
+Die IP wird in einer **Datei** gemerkt, nicht in einer Shell-Variablen — `discover()`
+läuft über `$(…)` in einer Subshell, eine Variable wäre dort verloren.
 
 Änderungen ggü. Tilos Original:
 
-1. **bts-light in `SERVERS`:** `http://bts-light.local:8088/monitor` (mDNS).
-   Greift, wenn kein BTS-/CourtSpot-Server im Netz ist.
+1. **bts-light-Discovery:** Subnetz-Scan auf `:8088/health` (primär) + mDNS-Fallback,
+   siehe oben. Greift, wenn kein BTS-/CourtSpot-Server im Netz ist.
 2. **Netz-Warten ohne Internet-Zwang:** Original wartet auf `ping 8.8.8.8`
    (Internet). Ein reines bts-light-LAN (Laptop+Router, kein Internet) hinge
    ewig → jetzt warten auf eine eigene IP (`hostname -I`).
@@ -87,9 +101,16 @@ Der Pi + Shared-Launcher funktionieren; die Hürden lagen beim **Server-Laptop**
    geht auf dem Windows-Rechner SELBST nicht — lokal mit `http://localhost:8088/monitor`
    testen. **Pi (avahi) und Handy (iOS/Android) lösen `.local` dagegen auf** — bts-light
    announced den Namen über die Rust-Crate `mdns-sd`, unabhängig von Windows.
-2. **Windows-Firewall** muss bts-light durchlassen: **TCP 8088** (Tablet-/Monitor-Server,
-   bindet auf `0.0.0.0`) **und UDP 5353** (mDNS). Beim ersten Start „privates Netz
-   zulassen". Das war der Hauptgrund, warum Pi/Handy zunächst nichts fanden.
+2. **Windows-Firewall** muss **TCP 8088** durchlassen (Tablet-/Monitor-Server, bindet
+   auf `0.0.0.0`). Beim ersten Start „privates Netz zulassen" — der Installer legt die
+   Regel via `installer/firewall-hooks.nsh` an (einmalige UAC bei *manueller* Installation,
+   `IfSilent`-Guard → Auto-Updates fragen NICHT). UDP 5353 (mDNS) ist seit v3 **nicht mehr
+   nötig**, weil der Pi per Subnetz-Scan am Port 8088 findet, nicht über `bts-light.local`.
+
+> **Online-Punkt flackerte** (≤ v0.9.63): Der Server stufte einen Monitor schon nach 6 s
+> ohne Poll als offline ein → ein WLAN-Mikro-Blip ließ den Punkt springen. Seit **v0.9.64**
+> ist das Fenster `MONITOR_ONLINE_WINDOW_MS` = 20 s (relay-proto). Der Pi-Kiosk selbst war
+> davon nie betroffen (eigene Hysterese), nur die Admin-Anzeige.
 3. **Server-Laptop muss im `btsaccess`-WLAN** sein (nicht im Heimnetz 192.168.178.*).
    Sonst sind Pi (192.168.16.*) und Laptop in verschiedenen Subnetzen.
 4. bts-light muss **gestartet** sein (grüner Punkt „Liveticker aktiv") und im
