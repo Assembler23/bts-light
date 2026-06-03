@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.62
+
+- **Court-Monitor: Logo & Symbole schrift-unabhängig.** Die Leerlauf-Anzeige
+  nutzte das 🏸-Emoji als Logo; auf Raspberry Pi OS (keine Emoji-Schrift) blieb
+  das Kästchen leer. Jetzt **Inline-SVG-Federball** → rendert auf Pi, Handy und
+  Windows gleich. Ebenso die Emojis 📢 (Aufruf-Chip) und ⏱ (Spieldauer) im
+  Monitor entfernt (Klartext genügt). Greift im Cloud-Modus über den Relay-
+  Redeploy (monitor.html jetzt in dessen Deploy-Triggern).
+
 ## v0.9.61
 
 - **„Offline ausblenden" in der Court-Monitore-Verwaltung.** Ein Umschalter

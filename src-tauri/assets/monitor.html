@@ -307,7 +307,23 @@
     </div>
 
     <div id="pairing-view">
-      <div class="logo" aria-label="Federball">🏸</div>
+      <div class="logo" aria-label="Federball">
+        <!-- Inline-SVG-Federball statt 🏸-Emoji: rendert auch ohne Emoji-Schrift
+             (Raspberry Pi OS hat standardmäßig keine) – auf Pi, Handy, Windows gleich. -->
+        <svg viewBox="0 0 100 100" width="62%" height="62%" aria-hidden="true">
+          <g fill="none" stroke="#e2e8f0" stroke-width="4"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M50 67 L22 30" />
+            <path d="M50 67 L36 24" />
+            <path d="M50 67 L50 20" />
+            <path d="M50 67 L64 24" />
+            <path d="M50 67 L78 30" />
+            <path d="M22 30 Q50 14 78 30" />
+          </g>
+          <path d="M41 65 Q50 92 59 65 Z" fill="#fbbf24"
+                stroke="#fbbf24" stroke-width="3" stroke-linejoin="round" />
+        </svg>
+      </div>
       <div class="wordmark">badhub.de</div>
       <div class="subtitle">BTS light</div>
     </div>
@@ -574,7 +590,8 @@
     } else if (typeof second === "number" && second > 0 && min >= second) {
       label = "2. Aufruf"; tone = "warn";
     }
-    el.textContent = "📢 " + clock + " · " + label;
+    // Kein Emoji (Pi OS hat keine Emoji-Schrift) – Uhr + Klartext genügen.
+    el.textContent = clock + " · " + label;
     el.className = "call-timer " + tone;
   }
 
@@ -597,7 +614,7 @@
         ? state.serverNowMs
         : Date.now();
       var mins = Math.max(0, Math.floor((nowClock - cs.startedAt) / 60000));
-      els.matchClock.textContent = "⏱ " + mins + " min";
+      els.matchClock.textContent = mins + " min";
     }
 
     renderCallTimer(state);
