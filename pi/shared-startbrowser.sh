@@ -18,7 +18,7 @@ export DISPLAY=:0
 export XAUTHORITY=/home/pi/.Xauthority
 LOG=/home/pi/startbrowser.log
 
-echo "$(date) - Startbrowser (shared, auto-reconnect v2) gestartet" >> "$LOG"
+echo "$(date) - Startbrowser (shared, auto-reconnect v3: Subnetz-Scan) gestartet" >> "$LOG"
 
 # 1) Auf eigene IP warten (kein Internet-Zwang).
 for _ in $(seq 1 60); do
@@ -58,30 +58,52 @@ reachable() {
   fi
 }
 
-# bts-light-IP ermitteln: gemerkte IP wiederverwenden, solange erreichbar;
-# sonst Namen geduldig auflösen (getent/avahi, mehrere Versuche) und merken.
+# Subnetz nach bts-light absuchen: jede IP im eigenen /24 auf :8088/health.
+# UNABHÄNGIG von mDNS – das ist über WLAN das schwächste Glied (getent hing im
+# Feld minutenlang). Der Scan findet den Server am offenen Port direkt.
+# Parallel in Blöcken zu 30, Abbruch beim ersten Treffer.
+scan_subnet() {
+  local prefix n hit="/tmp/btslight_scan_hit"
+  prefix=$(hostname -I 2>/dev/null | tr ' ' '\n' \
+           | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | sed -E 's/\.[0-9]+$/./')
+  [ -z "$prefix" ] && return 1
+  rm -f "$hit"
+  for n in $(seq 1 254); do
+    ( reachable "http://${prefix}${n}:$BTSLIGHT_PORT/health" && echo "${prefix}${n}" > "$hit" ) &
+    if [ $((n % 30)) -eq 0 ]; then wait; [ -s "$hit" ] && break; fi
+  done
+  wait
+  [ -s "$hit" ] && { head -1 "$hit"; return 0; }
+  return 1
+}
+
+# bts-light-IP ermitteln. Reihenfolge nach Zuverlässigkeit:
+#   1) gemerkte IP (sofort), 2) Subnetz-Scan (zuverlässig), 3) mDNS NUR mit timeout.
 btslight_ip() {
-  local ip try
+  local ip
   # 1) Gemerkte IP wiederverwenden, solange erreichbar (keine Neuauflösung!).
+  #    Cache NICHT löschen bei kurzem Aussetzer – sofort wiederverwenden, sobald zurück.
   ip=$(cat "$BTSLIGHT_CACHE" 2>/dev/null)
   if [ -n "$ip" ] && reachable "http://$ip:$BTSLIGHT_PORT/health"; then
     echo "$ip"; return 0
   fi
-  # 2) Sonst Namen geduldig auflösen (getent/avahi) und in der Datei merken.
-  #    Cache NICHT löschen – bei einem kurzen Aussetzer wollen wir die IP
-  #    beim nächsten Versuch sofort wiederverwenden, sobald der Server zurück ist.
-  for try in 1 2 3; do
-    ip=$(getent hosts "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $1; exit}')
-    if [ -z "$ip" ] && command -v avahi-resolve-host-name >/dev/null 2>&1; then
-      ip=$(avahi-resolve-host-name -4 "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $2; exit}')
-    fi
-    if [ -n "$ip" ] && reachable "http://$ip:$BTSLIGHT_PORT/health"; then
-      echo "$ip" > "$BTSLIGHT_CACHE"
-      echo "$(date) - bts-light aufgelöst: $BTSLIGHT_NAME → $ip" >> "$LOG"
-      echo "$ip"; return 0
-    fi
-    sleep 2
-  done
+  # 2) Subnetz-Scan nach dem offenen Port (zuverlässig, ohne mDNS).
+  ip=$(scan_subnet)
+  if [ -n "$ip" ]; then
+    echo "$ip" > "$BTSLIGHT_CACHE"
+    echo "$(date) - bts-light per Scan gefunden → $ip" >> "$LOG"
+    echo "$ip"; return 0
+  fi
+  # 3) mDNS als Fallback – IMMER mit timeout, darf NIE hängen.
+  ip=$(timeout 3 getent hosts "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $1; exit}')
+  if [ -z "$ip" ] && command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    ip=$(timeout 3 avahi-resolve-host-name -4 "$BTSLIGHT_NAME" 2>/dev/null | awk '{print $2; exit}')
+  fi
+  if [ -n "$ip" ] && reachable "http://$ip:$BTSLIGHT_PORT/health"; then
+    echo "$ip" > "$BTSLIGHT_CACHE"
+    echo "$(date) - bts-light aufgelöst (mDNS): $BTSLIGHT_NAME → $ip" >> "$LOG"
+    echo "$ip"; return 0
+  fi
   return 1
 }
 
@@ -142,6 +164,10 @@ while true; do
     fi
   else
     MISS=$((MISS + 1))
+    # Heartbeat: alle ~60 s eine Zeile, damit das Log bei Suche nicht stumm bleibt.
+    if [ $((MISS % 6)) -eq 1 ]; then
+      echo "$(date) - noch kein Server – suche weiter (Versuch $MISS)" >> "$LOG"
+    fi
     if [ -n "$CUR" ] && [ "$MISS" -ge "$MISS_LIMIT" ]; then
       echo "$(date) - Server seit $MISS Versuchen weg – Kiosk beendet, suche weiter" >> "$LOG"
       pkill -f chromium-browser 2>/dev/null
