@@ -79,6 +79,26 @@ Rest-Punkte:
   `project_verleihset_dhcp_conflict`): TP-Link am bestehenden Netz → Doppel-DHCP;
   im echten LTE-Verleih-Einsatz kein Problem.
 
+## Inbetriebnahme & Stolpersteine (am 2026-06-03 live verifiziert)
+
+Der Pi + Shared-Launcher funktionieren; die Hürden lagen beim **Server-Laptop**:
+
+1. **Windows hat keine `.local`-Auflösung** (kein Bonjour). `http://bts-light.local:8088`
+   geht auf dem Windows-Rechner SELBST nicht — lokal mit `http://localhost:8088/monitor`
+   testen. **Pi (avahi) und Handy (iOS/Android) lösen `.local` dagegen auf** — bts-light
+   announced den Namen über die Rust-Crate `mdns-sd`, unabhängig von Windows.
+2. **Windows-Firewall** muss bts-light durchlassen: **TCP 8088** (Tablet-/Monitor-Server,
+   bindet auf `0.0.0.0`) **und UDP 5353** (mDNS). Beim ersten Start „privates Netz
+   zulassen". Das war der Hauptgrund, warum Pi/Handy zunächst nichts fanden.
+3. **Server-Laptop muss im `btsaccess`-WLAN** sein (nicht im Heimnetz 192.168.178.*).
+   Sonst sind Pi (192.168.16.*) und Laptop in verschiedenen Subnetzen.
+4. bts-light muss **gestartet** sein (grüner Punkt „Liveticker aktiv") und im
+   **LAN-Modus** (Einstellungen → Tablet-Verbindung → LAN) — sonst läuft weder der
+   `:8088`-Server noch die mDNS-Bekanntgabe.
+
+Schnelltest ohne Pi-Tastatur: Handy ins `btsaccess`-WLAN, `http://bts-light.local:8088/monitor`
+öffnen — erscheint die Kopplungsseite, findet der Pi sie genauso.
+
 ## Test (mit echter Hardware)
 
 1. Tilos Image flashen, `/home/pi/startbrowser.sh` durch
