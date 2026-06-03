@@ -38,25 +38,41 @@ for _ in $(seq 1 60); do
 done
 echo "$(date) - Netz bereit: $(hostname -I 2>/dev/null)" >> "$LOG"
 
-# 2) Serverliste in Prüf-Reihenfolge: schema://host:port/pfad
+# 2) Serverliste in Prüf-Reihenfolge: kiosk_url|probe_url
 #    Echte BTS-/CourtSpot-Server zuerst (feste IPs), bts-light als Fallback
-#    (mDNS — greift, wenn kein BTS-Server im Netz ist).
+#    (mDNS — greift, wenn kein BTS-Server im Netz ist). Die probe_url wird
+#    per HTTP geprüft: antwortet ein ECHTER Dienst (beliebiger HTTP-Code),
+#    gewinnt der Eintrag. So genügt nicht, dass irgendwer auf die IP „pingt".
 SERVERS=(
-  "https://192.168.16.2:4433/d1"
-  "https://192.168.26.2:4433/d1"
-  "https://192.168.36.2:4433/d1"
-  "http://192.168.16.3/regio/Update-Verzeichnis/bup/#courtspot&display"
-  "http://bts-light.local:8088/monitor"
+  "https://192.168.16.2:4433/d1|https://192.168.16.2:4433/d1"
+  "https://192.168.26.2:4433/d1|https://192.168.26.2:4433/d1"
+  "https://192.168.36.2:4433/d1|https://192.168.36.2:4433/d1"
+  "http://192.168.16.3/regio/Update-Verzeichnis/bup/#courtspot&display|http://192.168.16.3/"
+  "http://bts-light.local:8088/monitor|http://bts-light.local:8088/health"
 )
 
+# Erreichbarkeit eines Dienstes prüfen: bevorzugt curl (echte HTTP-Antwort),
+# Fallback ping (falls curl fehlt). Liefert 0 = erreichbar.
+reachable() {
+  local probe="$1" host
+  if command -v curl >/dev/null 2>&1; then
+    local code
+    code=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$probe" 2>/dev/null)
+    [ -n "$code" ] && [ "$code" != "000" ]
+  else
+    host=$(echo "$probe" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')
+    ping -c1 -W1 "$host" &>/dev/null
+  fi
+}
+
 URL=""
-# Bis zu 3 Discovery-Runden (Geräte/mDNS brauchen nach dem WLAN-Join kurz).
-for _round in 1 2 3; do
+# Bis zu 5 Discovery-Runden (Geräte/mDNS/Server brauchen nach dem WLAN-Join kurz).
+for _round in 1 2 3 4 5; do
   for S in "${SERVERS[@]}"; do
-    HOST=$(echo "$S" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')
-    if ping -c1 -W1 "$HOST" &>/dev/null; then
-      URL="$S"
-      echo "$(date) - Gefunden: $URL" >> "$LOG"
+    KIOSK="${S%%|*}"; PROBE="${S##*|}"
+    if reachable "$PROBE"; then
+      URL="$KIOSK"
+      echo "$(date) - Gefunden: $URL (Probe $PROBE)" >> "$LOG"
       break 2
     fi
   done
