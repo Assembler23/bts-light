@@ -998,6 +998,24 @@ async fn push_match(
     }
 }
 
+/// Entscheiden die bereits abgeschlossenen Sätze das Match schon? (Ein Team hat
+/// die Mehrheit der Best-of-N-Sätze gewonnen.) Damit unterscheiden wir einen
+/// 0:0-„Geistersatz" NACH Spielende von einem echten neuen Satz zwischen zwei
+/// Sätzen – ohne dafür ein separates `finished`-Signal zu brauchen (das im
+/// Cloud-Pfad nicht vorliegt). Funktioniert in LAN- und Cloud-Modus identisch.
+fn match_decided(best_of: i64, completed: &[(i64, i64)]) -> bool {
+    let need = best_of / 2 + 1;
+    let (mut a, mut b) = (0, 0);
+    for &(sa, sb) in completed {
+        if sa > sb {
+            a += 1;
+        } else if sb > sa {
+            b += 1;
+        }
+    }
+    a >= need || b >= need
+}
+
 /// Verarbeitet einen Live-Punktestand vom Tablet: merken + an den
 /// Liveticker pushen. Von LAN-Server und Cloud-Relay-Client genutzt.
 pub(crate) async fn handle_score(
@@ -1014,12 +1032,16 @@ pub(crate) async fn handle_score(
         return; // unplausibel viele Sätze – Nachricht verwerfen
     }
     // Vollständige Satzliste: abgeschlossene Sätze + laufender Satz.
-    // Einen laufenden Satz von 0:0 NICHT anhängen, wenn schon Sätze
-    // gespielt sind — sonst erscheint nach Spielende (currentSet wurde
-    // auf 0:0 zurückgesetzt) ein leerer „Geistersatz" in der Anzeige.
-    // Beim allerersten Satz (history leer) bleibt 0:0 erhalten.
+    // Den laufenden 0:0-Satz NUR dann weglassen, wenn er ein „Geistersatz"
+    // NACH Spielende ist – d. h. die abgeschlossenen Sätze entscheiden das
+    // Match bereits (das Tablet setzt currentSet beim Match-Ende auf 0:0).
+    // ZWISCHEN den Sätzen (Match noch offen) MUSS der 0:0-Satz erhalten
+    // bleiben, sonst klebt der Court-Monitor nach der Satzpause am alten
+    // Satzstand, bis der erste Punkt fällt. Erster Satz (history leer): bleibt.
     let mut sets: Vec<(i64, i64)> = history.iter().map(|s| (s.a, s.b)).collect();
-    if !(score_a == 0 && score_b == 0 && !sets.is_empty()) {
+    let ghost_after_finish =
+        score_a == 0 && score_b == 0 && match_decided(m.scoring.best_of, &sets);
+    if !ghost_after_finish {
         sets.push((score_a, score_b));
     }
     ctx.tablet.record_score(court_id, m.id, sets.clone());
@@ -1036,5 +1058,31 @@ pub(crate) async fn handle_score(
     .await
     {
         tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::match_decided;
+
+    // Die Logik hinter dem 0:0-Geistersatz-Fix: Zwischen den Sätzen ist das
+    // Match NICHT entschieden → der laufende 0:0-Satz bleibt erhalten (Monitor
+    // zeigt sofort 0:0). Erst wenn die Mehrheit der Sätze gewonnen ist, gilt
+    // ein 0:0 als Geistersatz nach Spielende und wird weggelassen.
+    #[test]
+    fn match_decided_best_of_3() {
+        assert!(!match_decided(3, &[])); // erster Satz – offen
+        assert!(!match_decided(3, &[(21, 7)])); // 1:0 – Satzpause, neuer Satz
+        assert!(!match_decided(3, &[(21, 7), (15, 21)])); // 1:1 – Entscheidungssatz
+        assert!(match_decided(3, &[(21, 7), (21, 15)])); // 2:0 – entschieden
+        assert!(match_decided(3, &[(21, 7), (15, 21), (21, 18)])); // 2:1 – entschieden
+    }
+
+    #[test]
+    fn match_decided_best_of_1_and_5() {
+        assert!(!match_decided(1, &[])); // einziger Satz läuft
+        assert!(match_decided(1, &[(21, 15)])); // 1:0 in Bo1 → entschieden
+        assert!(!match_decided(5, &[(21, 1), (21, 2)])); // 2:0 in Bo5 – noch offen
+        assert!(match_decided(5, &[(21, 1), (21, 2), (21, 3)])); // 3:0 – entschieden
     }
 }

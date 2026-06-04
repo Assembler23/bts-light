@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.65
+
+- **Court-Monitor zeigt nach der Satzpause sofort 0:0.** Nach dem ersten Satz
+  klebte der TV am alten Satzstand (z. B. 21:7) und sprang erst beim ersten
+  Punkt des neuen Satzes auf 0:0. Ursache: Der LAN-Server ließ den laufenden
+  0:0-Satz weg, sobald schon ein Satz gespielt war (gedacht gegen einen
+  0:0-„Geistersatz" nach Spielende). Jetzt wird 0:0 nur noch weggelassen, wenn
+  die abgeschlossenen Sätze das Match **bereits entscheiden** (echtes Spielende),
+  nicht **zwischen** den Sätzen. Gilt für Monitor, Kombi-Anzeige, Übersicht und
+  Liveticker; LAN- und Cloud-Pfad identisch. (Der Cloud-Monitor über den Relay
+  war nicht betroffen.)
+
 ## v0.9.64
 
 - **Monitor-Online-Status flackert nicht mehr.** Der Server stufte einen Monitor
