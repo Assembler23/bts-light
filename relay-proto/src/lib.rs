@@ -692,6 +692,16 @@ impl ResultResponse {
 
 // ─────────────────────────── Host ↔ Relay ─────────────────────────────────
 
+/// Ein Feld (CourtID + Anzeige-Label) für die Cloud-Feldliste. Der Host pusht
+/// die vollständige Liste, der Relay liefert sie unter `/{ns}/courts` an das
+/// Feldwechsel-Menü des Tablets (PIN). Im LAN-Modus baut der Server `/courts`
+/// direkt aus seinen BTP-Daten.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CourtBrief {
+    pub id: i64,
+    pub label: String,
+}
+
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -729,6 +739,12 @@ pub enum HostFrame {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+    },
+    /// Vollständige Feld-Liste des Turniers – Grundlage des Feldwechsels im
+    /// PIN-Menü des Tablets im Cloud-Modus. Periodisch vom Host gepusht.
+    Courts {
+        #[serde(default)]
+        courts: Vec<CourtBrief>,
     },
 }
 

@@ -20,7 +20,8 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use relay_proto::{
-    AdUpload, HostFrame, MonitorControl, MonitorDeviceInfo, MonitorUpload, RelayFrame, ResultBody,
+    AdUpload, CourtBrief, HostFrame, MonitorControl, MonitorDeviceInfo, MonitorUpload, RelayFrame,
+    ResultBody,
 };
 
 use crate::tablet::monitor;
@@ -119,6 +120,9 @@ async fn serve(
             }
             _ = monitor_ticker.tick() => {
                 maybe_upload_monitor(ctx, install_id, &mut monitor_fp).await;
+                // Feld-Liste fürs Cloud-Feldwechsel-Menü mitschicken (selten
+                // veränderlich; erster Tick feuert sofort nach dem Verbinden).
+                push_courts(ctx, &tx);
             }
             _ = control_ticker.tick() => {
                 sync_monitor_control(ctx, install_id, &mut control_fp).await;
@@ -376,6 +380,24 @@ fn push_all_courts(
 ) {
     for court in ctx.tablet.courts() {
         push_court(ctx, court.id, tx, last_match);
+    }
+}
+
+/// Sendet die vollständige Feld-Liste an den Relay – Grundlage des Feldwechsels
+/// im PIN-Menü des Tablets im Cloud-Modus (LAN baut `/courts` direkt). Selten
+/// veränderlich; periodisch (alle 30 s) genügt.
+fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
+    let courts: Vec<CourtBrief> = ctx
+        .tablet
+        .courts()
+        .into_iter()
+        .map(|c| CourtBrief {
+            id: c.id,
+            label: ctx.tablet.court_display_label(c.id),
+        })
+        .collect();
+    if !courts.is_empty() {
+        let _ = tx.send(text(&HostFrame::Courts { courts }));
     }
 }
 

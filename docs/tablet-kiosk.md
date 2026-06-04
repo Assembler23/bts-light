@@ -93,8 +93,8 @@ ausreichend – Fully Kiosk mit Allowlist ist die robuste Wahl.
 
 ---
 
-## Offen (Cloud-Modus)
-Im Cloud-Modus (Relay) gibt es die `/courts`-Feldliste noch nicht – das
-Einstellungs-Menü meldet dort „Feldliste nicht erreichbar"; PIN-Gate und
-Vollbild funktionieren. Für vollständigen Cloud-Feldwechsel müsste der Host die
-komplette Feld-Liste an den Relay pushen (Folge-Arbeit).
+## Cloud-Modus
+Der Feldwechsel funktioniert **auch im Cloud-Modus** (ab v0.9.67): Der Host
+pusht die Feld-Liste an den Relay (`HostFrame::Courts`), der sie unter
+`/{ns}/courts` ausliefert. Der Cloud-PIN ist dort technisch bedingt `0000`
+(der Relay kennt den Host-PIN nicht) – im LAN-Modus gilt der konfigurierte PIN.
