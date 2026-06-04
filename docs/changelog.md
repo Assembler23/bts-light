@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.70
+
+- **Fix: Tablet zeigte nach Reconnect ein bereits entferntes Spiel.** Wurde ein
+  Spiel vom Feld genommen, während die Tablet-WebSocket nach langer Inaktivität
+  „still" tot war, behielt das Tablet das alte Spiel auch nach dem automatischen
+  Reconnect – der Server unterdrückte das `match_cleared`, weil der „noch nichts
+  gesendet"-Zustand und „kein Match" beide als `None` galten (Dedup `None==None`).
+  Jetzt feuert der erste Push pro Verbindung immer (Sentinel) → leeres Feld
+  meldet sofort `match_cleared`. (Nur LAN; Cloud war korrekt.)
+
 ## v0.9.69
 
 - **Schiri-Modus am Zähltablett (Deutsch).** Hinter dem PIN aktivierbar

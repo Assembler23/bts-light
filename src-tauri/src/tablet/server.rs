@@ -877,7 +877,12 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // Feld-Identität dieser Verbindung: die CourtID, sobald sich das Tablet
     // per `identify` gebunden hat.
     let mut court: Option<i64> = None;
-    let mut last_match: Option<i64> = None;
+    // Zuletzt ans Tablet gemeldete Match-ID. Sentinel `Some(i64::MIN)` =
+    // „in dieser Verbindung noch nichts gesendet", damit der ERSTE push_match
+    // immer feuert – auch ein `MatchCleared`, wenn das Feld leer ist. Sonst
+    // behielte ein nach Inaktivität neu verbundenes Tablet sein altes (längst
+    // entferntes) Match, weil `None == None` (kein Match) den Dedup auslöste.
+    let mut last_match: Option<i64> = Some(i64::MIN);
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
     let mut superseded = false;
