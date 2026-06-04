@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.69
+
+- **Schiri-Modus am Zähltablett (Deutsch).** Hinter dem PIN aktivierbar
+  (⚙ → „Schiri-Modus: an"): eine **immer sichtbare Ansage-Leiste** zeigt den
+  vorzulesenden Text (Eröffnung, Stand mit Aufschlägerstand zuerst, „N beide",
+  „Aufschlagwechsel …", 11-Pause, Satzende+Seitenwechsel, Satzbeginn, Spielende;
+  Satz-/Matchball-Badge). Dazu **Karten/Verwarnungen** je Spieler: Gelb
+  (Verwarnung), Rot (Fehler → Gegner bekommt +1), Schwarz (Disqualifikation) –
+  mit Ansagetext, **nur lokal** protokolliert (Chips). Reine Anzeige, kein
+  Eingriff in die Zähl-Logik. Doku: `docs/umpire-mode.md`. (Für Vereins-/
+  Verleih-Turniere; Bundesliga läuft über das Original-BTS.)
+
 ## v0.9.68
 
 - **Tablet-Einstellungs-PIN in der Oberfläche setzbar.** Der PIN fürs ⚙-Menü
