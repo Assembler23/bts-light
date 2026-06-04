@@ -353,7 +353,14 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     Ok(BtpSnapshot {
         tournament_name: setting_str(t, 1001).unwrap_or_default(),
         matches: parse_matches(
-            t, &players, &entries, &slots, &courts, &draws, &disciplines, &scoring,
+            t,
+            &players,
+            &entries,
+            &slots,
+            &courts,
+            &draws,
+            &disciplines,
+            &scoring,
         ),
         courts: court_names,
         locations: location_list(t),
@@ -1046,7 +1053,10 @@ mod tests {
         assert_eq!(f(ScoringFormat::from_btp(5, 304, 11)), (5, 11, 15, None));
         assert_eq!(f(ScoringFormat::from_btp(5, 305, 11)), (5, 11, 13, None));
         // Unbekannter SetType → klassisch 21, Satzzahl bleibt erhalten.
-        assert_eq!(f(ScoringFormat::from_btp(1, 4242, 0)), (1, 21, 30, Some(11)));
+        assert_eq!(
+            f(ScoringFormat::from_btp(1, 4242, 0)),
+            (1, 21, 30, Some(11))
+        );
     }
 
     #[test]
@@ -1137,13 +1147,21 @@ mod tests {
         let snap = parse_snapshot(&tree).unwrap();
         let m1 = snap.matches.iter().find(|m| m.id == 5).unwrap();
         assert_eq!(
-            (m1.scoring.target_score, m1.scoring.cap_score, m1.scoring.interval_at),
+            (
+                m1.scoring.target_score,
+                m1.scoring.cap_score,
+                m1.scoring.interval_at
+            ),
             (15, 21, Some(8))
         );
         // Draw 2 ohne Stage → als Standard markiertes Format (3×21).
         let m2 = snap.matches.iter().find(|m| m.id == 6).unwrap();
         assert_eq!(
-            (m2.scoring.target_score, m2.scoring.cap_score, m2.scoring.interval_at),
+            (
+                m2.scoring.target_score,
+                m2.scoring.cap_score,
+                m2.scoring.interval_at
+            ),
             (21, 30, Some(11))
         );
     }

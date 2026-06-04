@@ -340,7 +340,10 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("dev-1".to_string(), "Halle 2".to_string());
         write_halls(&path, &map).unwrap();
-        assert_eq!(read_halls(&path).get("dev-1").map(String::as_str), Some("Halle 2"));
+        assert_eq!(
+            read_halls(&path).get("dev-1").map(String::as_str),
+            Some("Halle 2")
+        );
     }
 
     #[test]
