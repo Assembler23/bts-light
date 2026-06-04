@@ -30,9 +30,9 @@ use serde::Serialize;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use relay_proto::{
-    device_code, html_escape, path_encode, HostFrame, MatchBrief, MonitorConfig, MonitorControl,
-    MonitorDeviceInfo, MonitorMatch, MonitorPlayer, MonitorState, MonitorUpload, PlayerBrief,
-    RelayFrame, ResultBody, ResultResponse, ServerMsg, SetAb, TabletMsg,
+    device_code, html_escape, path_encode, CourtBrief, HostFrame, MatchBrief, MonitorConfig,
+    MonitorControl, MonitorDeviceInfo, MonitorMatch, MonitorPlayer, MonitorState, MonitorUpload,
+    PlayerBrief, RelayFrame, ResultBody, ResultResponse, ServerMsg, SetAb, TabletMsg,
 };
 
 /// Die Tablet-Spielzettel-UI – dieselbe Datei wie in der bts-light-App.
@@ -112,6 +112,9 @@ struct Namespace {
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
+    /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
+    /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
+    courts: Vec<CourtBrief>,
     /// Court-Monitor-Konfiguration + Werbebilder, falls hochgeladen.
     monitor: Option<MonitorBundle>,
     /// Geräte-Steuerung (Feld-Zuweisungen + Fernbefehle), vom Host gepusht.
@@ -135,6 +138,7 @@ impl Namespace {
             court_scores: HashMap::new(),
             court_on_court_since: HashMap::new(),
             court_labels: HashMap::new(),
+            courts: Vec::new(),
             monitor: None,
             monitor_control: MonitorControl::default(),
             monitor_seen: HashMap::new(),
@@ -209,6 +213,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/{ns}/court/{id}", get(court_page))
+        .route("/{ns}/courts", get(courts_list))
         .route("/{ns}/court/{id}/display", get(monitor_page))
         .route("/{ns}/court/{id}/state", get(monitor_state))
         .route("/{ns}/monitor", get(monitor_device_page))
@@ -270,10 +275,31 @@ async fn court_page(
         .replace("__COURT_ID__", &court_id.to_string())
         .replace("__COURT_LABEL__", &html_escape(&label))
         // Der Relay kennt den Host-PIN nicht → leer lassen; tablet.html fällt
-        // dann defensiv auf „0000" zurück. (Die Feldwechsel-Liste /courts gibt
-        // es im Cloud-Pfad noch nicht – das Menü meldet dort „nicht erreichbar".)
+        // dann defensiv auf „0000" zurück. Die Feldwechsel-Liste liefert
+        // `/{ns}/courts` (vom Host gepusht).
         .replace("__TABLET_PIN__", "");
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// Feld-Liste fürs Feldwechsel-PIN-Menü des Tablets (Cloud-Modus). Liefert die
+/// vom Host via `HostFrame::Courts` gepushte Liste; leer, solange kein Push kam.
+async fn courts_list(State(broker): State<Broker>, Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let courts = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns).map(|n| n.courts.clone()).unwrap_or_default()
+    };
+    let items: Vec<serde_json::Value> = courts
+        .into_iter()
+        .map(|c| serde_json::json!({ "id": c.id, "label": c.label }))
+        .collect();
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::Value::Array(items)),
+    )
+        .into_response()
 }
 
 /// QR-Code (SVG), der auf die öffentliche Tablet-URL des Felds (per
@@ -1214,6 +1240,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             if let Some(pending) = namespace.pending.remove(&req_id) {
                 let _ = pending.send(ResultResponse { ok, error });
             }
+        }
+        HostFrame::Courts { courts } => {
+            // Vollständige Feld-Liste für das Cloud-Feldwechsel-Menü merken.
+            namespace.courts = courts;
         }
     }
 }
