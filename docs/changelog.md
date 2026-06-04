@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.67
+
+- **Feldwechsel ohne QR jetzt auch im Cloud-Modus.** Das PIN-Menü am Tablet
+  (v0.9.66) konnte die Feld-Liste bisher nur im LAN laden. Jetzt pusht der Host
+  die vollständige Feld-Liste an den Relay (`HostFrame::Courts`), der sie unter
+  `/{ns}/courts` ausliefert – der Feldwechsel funktioniert damit in LAN **und**
+  Cloud identisch. (Greift im Cloud-Modus über den Relay-Redeploy.)
+
 ## v0.9.66
 
 - **PIN-Einstellungsmenü am Zähltablett – Feldwechsel ohne QR.** Ein Zahnrad ⚙
