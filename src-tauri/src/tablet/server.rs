@@ -190,9 +190,18 @@ async fn court_page(
     Path(court_id): Path<i64>,
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
-    // PIN fürs Einstellungs-Menü (Feldwechsel) – Live-Config, leer → Default „0000".
-    let pin = ctx.app_config().tablet_settings_pin;
-    let pin = if pin.trim().is_empty() {
+    // PIN fürs Einstellungs-Menü (Feldwechsel) – Live-Config. NUR Ziffern
+    // (Bedien-PIN; leer → Default „0000"). Ziffern sind in einem JS-String-
+    // Literal unkritisch → kein Escape nötig (Code-Review-Hinweis: html_escape
+    // wäre für einen JS-Kontext der falsche Escaper).
+    let pin: String = ctx
+        .app_config()
+        .tablet_settings_pin
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(8)
+        .collect();
+    let pin = if pin.is_empty() {
         "0000".to_string()
     } else {
         pin
@@ -201,12 +210,14 @@ async fn court_page(
     let body = TABLET_HTML
         .replace("__COURT_ID__", &court_id.to_string())
         .replace("__COURT_LABEL__", &html_escape(&label))
-        .replace("__TABLET_PIN__", &html_escape(&pin));
+        .replace("__TABLET_PIN__", &pin);
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
 /// Feldliste (CourtID + Anzeige-Label) für den Feldwechsel im PIN-Menü des
 /// Tablets – so kann das Tablet ohne QR-Scan auf ein anderes Feld umschalten.
+/// Bewusst ohne Auth (wie die anderen Anzeige-Routen): nur Feld-IDs + Labels,
+/// im Hallen-LAN; keine personenbezogenen Daten.
 async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
     let items: Vec<serde_json::Value> = ctx
         .tablet

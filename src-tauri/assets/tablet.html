@@ -292,6 +292,9 @@
     .pin-pad button.pin-aux { font-size: 1.2rem; opacity: .8; }
     .modal .opt.settings-wide { flex: 0 0 auto; min-width: 16rem; }
     .modal .opt.court-current { border-color: #22c55e; opacity: .55; }
+    /* Über den Lock-/Belegt-Overlays (z-index 25), damit das PIN-Menü auch
+       dann oben liegt und bedienbar bleibt (Feldwechsel als Recovery). */
+    #settings-modal { z-index: 28; }
 
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
@@ -596,6 +599,7 @@
   <!-- 2) Einstellungen (nach korrekter PIN) -->
   <div class="settings-view" id="settings-main-view" hidden>
     <div class="title">Einstellungen</div>
+    <!-- __COURT_LABEL__ wird serverseitig ersetzt (str::replace, alle Vorkommen). -->
     <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
     <div class="settings-section">Feld wechseln</div>
     <div class="options" id="settings-court-list"></div>
@@ -2071,7 +2075,7 @@ function showSettingsMain() {
 function pinKey(k) {
   if (k === 'cancel') { closeSettings(); return; }
   if (k === 'del') { settingsPinEntry = settingsPinEntry.slice(0, -1); renderPinDisplay(); return; }
-  if (settingsPinEntry.length >= 8) return;
+  if (settingsPinEntry.length >= Math.max(SETTINGS_PIN.length, 8)) return;
   settingsPinEntry += k;
   renderPinDisplay();
   if (settingsPinEntry.length >= SETTINGS_PIN.length) {
