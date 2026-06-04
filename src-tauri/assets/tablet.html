@@ -296,6 +296,36 @@
        dann oben liegt und bedienbar bleibt (Feldwechsel als Recovery). */
     #settings-modal { z-index: 28; }
 
+    /* Schiri-Modus: Ansage-Leiste (immer sichtbar, zum Vorlesen). */
+    .umpire-bar {
+      margin: .5rem auto 0; max-width: 52rem; width: 100%;
+      background: #0f172a; border: 2px solid #1e3a8a; border-radius: .75rem;
+      padding: .55rem .9rem; text-align: center;
+    }
+    .umpire-bar[hidden] { display: none; }
+    .umpire-badge {
+      display: inline-block; margin-bottom: .3rem; padding: .12rem .7rem;
+      border-radius: 999px; font-size: .8rem; font-weight: 800;
+      letter-spacing: .04em; text-transform: uppercase;
+      background: #f59e0b; color: #1a1206;
+    }
+    .umpire-badge[hidden] { display: none; }
+    .umpire-say { font-size: 1.45rem; font-weight: 700; line-height: 1.25; color: #e2e8f0; }
+    .umpire-cards { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; margin-top: .4rem; }
+    .umpire-cards:empty { display: none; }
+    .umpire-cards .card-chip {
+      font-size: .8rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px;
+      background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+    }
+    .umpire-card-btn {
+      margin-top: .5rem; padding: .45rem 1rem; font-size: .95rem; font-weight: 700;
+      background: #1e293b; border: 2px solid #334155; border-radius: .6rem; color: #fff; cursor: pointer;
+    }
+    .umpire-card-btn:active { background: #334155; }
+    .modal .opt.card-yellow { border-color: #f59e0b; }
+    .modal .opt.card-red { border-color: #ef4444; }
+    .modal .opt.card-black { border-color: #64748b; }
+
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,.85);
@@ -438,6 +468,14 @@
             </div>
             <div class="set-history" id="set-history"></div>
           </div>
+        </div>
+
+        <!-- Schiri-Modus: immer sichtbare Ansage zum Vorlesen (hidden, bis aktiviert). -->
+        <div id="umpire-bar" class="umpire-bar" hidden>
+          <div class="umpire-badge" id="umpire-badge" hidden></div>
+          <div class="umpire-say" id="umpire-say"></div>
+          <div class="umpire-cards" id="umpire-cards"></div>
+          <button type="button" id="umpire-card-btn" class="umpire-card-btn">Karte / Verwarnung</button>
         </div>
 
         <div class="court-wrapper">
@@ -603,8 +641,29 @@
     <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
     <div class="settings-section">Feld wechseln</div>
     <div class="options" id="settings-court-list"></div>
+    <div class="settings-section">Schiedsrichter</div>
+    <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
     <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
     <div class="opt settings-wide" id="settings-close">Schließen</div>
+  </div>
+</div>
+
+<!-- Schiri-Modus: Karte/Verwarnung vergeben (Spieler → Farbe). -->
+<div class="modal" id="card-modal">
+  <div class="settings-view" id="card-player-view">
+    <div class="title">Karte / Verwarnung</div>
+    <div class="subtitle">Spieler wählen</div>
+    <div class="options" id="card-player-list"></div>
+    <div class="opt settings-wide" id="card-cancel">Abbrechen</div>
+  </div>
+  <div class="settings-view" id="card-color-view" hidden>
+    <div class="title">Karte für <span id="card-player-name"></span></div>
+    <div class="options">
+      <div class="opt card-yellow" id="card-yellow">🟨 Gelb – Verwarnung</div>
+      <div class="opt card-red" id="card-red">🟥 Rot – Fehler (Gegner +1)</div>
+      <div class="opt card-black" id="card-black">⬛ Schwarz – Disqualifikation</div>
+    </div>
+    <div class="opt settings-wide" id="card-back">Zurück</div>
   </div>
 </div>
 
@@ -715,6 +774,14 @@ const STATE = {
   retired: /** @type {boolean} */ (false),
   retiredWinner: /** @type {'a'|'b'|null} */ (null),
 
+  // Schiri-Modus: immer sichtbare Ansage zum Vorlesen. Opt-in pro Tablet
+  // (lokal gespeichert). `lastEvent` beschreibt, was zuletzt passierte, damit
+  // die Ansage-Leiste den passenden Text zeigt (Stand/Aufschlagwechsel/Satz …).
+  umpireMode: /** @type {boolean} */ (false),
+  lastEvent: /** @type {null | {type:string, [k:string]:any}} */ (null),
+  // Karten/Verwarnungen (Phase 2), lokal: {team,index,name,color,ts,score}.
+  cards: /** @type {object[]} */ ([]),
+
   // Welches der ursprünglichen Teams ('a' / 'b') steht auf welcher Seite ('left' / 'right')
   teamOnSide: /** @type {{a:'left'|'right', b:'left'|'right'} | null} */ (null),
   // Spielerpositionen pro Side
@@ -744,6 +811,14 @@ const STATE = {
   locked: /** @type {boolean} */ (false),
   occupied: /** @type {boolean} */ (false),
 };
+
+// Schiri-Modus ist eine Tablet-Operator-Einstellung – pro Feld lokal gespeichert.
+const UMPIRE_KEY = `badhub.tablet.umpire.${COURT_ID}`;
+try { STATE.umpireMode = localStorage.getItem(UMPIRE_KEY) === '1'; } catch { /* ignore */ }
+// Karten/Verwarnungen werden NUR lokal protokolliert (pro Feld, an die matchId
+// gebunden → bei neuem Match leer). Kein Versand an Server/badhub.
+const CARDS_KEY = `badhub.tablet.cards.${COURT_ID}`;
+let cardsMatchId = null;
 
 const els = {
   eventLabel: document.getElementById('event-label'),
@@ -806,6 +881,22 @@ const els = {
   settingsCourtList: document.getElementById('settings-court-list'),
   settingsFullscreen: document.getElementById('settings-fullscreen'),
   settingsClose: document.getElementById('settings-close'),
+  settingsUmpire: document.getElementById('settings-umpire'),
+  umpireBar: document.getElementById('umpire-bar'),
+  umpireBadge: document.getElementById('umpire-badge'),
+  umpireSay: document.getElementById('umpire-say'),
+  umpireCards: document.getElementById('umpire-cards'),
+  umpireCardBtn: document.getElementById('umpire-card-btn'),
+  cardModal: document.getElementById('card-modal'),
+  cardPlayerView: document.getElementById('card-player-view'),
+  cardColorView: document.getElementById('card-color-view'),
+  cardPlayerList: document.getElementById('card-player-list'),
+  cardPlayerName: document.getElementById('card-player-name'),
+  cardCancel: document.getElementById('card-cancel'),
+  cardBack: document.getElementById('card-back'),
+  cardYellow: document.getElementById('card-yellow'),
+  cardRed: document.getElementById('card-red'),
+  cardBlack: document.getElementById('card-black'),
   occupiedOverlay: document.getElementById('occupied-overlay'),
   takeoverBtn: document.getElementById('takeover-btn'),
   lockedOverlay: document.getElementById('locked-overlay'),
@@ -1407,6 +1498,9 @@ function clearMatch() {
   STATE.alertOfficial = false;
   STATE.retired = false;
   STATE.retiredWinner = null;
+  STATE.lastEvent = null;
+  STATE.cards = [];
+  cardsMatchId = null;
   sendAlert();
   clearPersistedState();
   render();
@@ -1525,6 +1619,9 @@ function addPointOnSide(side) {
   if (STATE.pause) return; // während einer offiziellen Pause keine Punkte
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing' || !STATE.positions) return;
 
+  // Aufschlagseite VOR der Mutation merken (für die „Aufschlagwechsel"-Ansage).
+  const prevServing = STATE.servingSide;
+
   // Snapshot vor Mutation für Undo
   STATE.history.push(snapshot());
   if (STATE.history.length > 50) STATE.history.shift();
@@ -1594,6 +1691,8 @@ function addPointOnSide(side) {
   // 120-s-Satzpause, wenn ein Satz endete und das Match weiterläuft.
   if (winnerOfSet && !STATE.finished) triggeredBreak = 'game';
 
+  // Für die Schiri-Ansage: war das ein Aufschlagwechsel?
+  STATE.lastEvent = { type: 'point', serveChanged: side !== prevServing };
   persistState();
   render();
   sendScoreUpdate();
@@ -1658,6 +1757,7 @@ function undo() {
     return;
   }
   restoreSnapshot(STATE.history.pop());
+  STATE.lastEvent = null; // nach Undo neutralen Stand ansagen (kein „Aufschlagwechsel")
   persistState();
   render();
   sendScoreUpdate();
@@ -1948,6 +2048,7 @@ function render() {
   renderSetupModal();
   renderBreak();
   renderClock();
+  renderUmpireBar();
 
   // Tablet-Übernahme-Overlays (auch ohne Match relevant: passives Tablet).
   els.occupiedOverlay.classList.toggle('visible', STATE.occupied && !STATE.locked);
@@ -2124,6 +2225,265 @@ function toggleFullscreen() {
   }
 }
 
+// ─────────────────────────── Schiri-Modus (Ansagen) ───────────────────
+// Erzeugt aus dem aktuellen Spielstand die immer sichtbare Ansage zum
+// Vorlesen (Deutsch/DBV). Aufschlägerstand zuerst; Gleichstand „N beide";
+// Aufschlagwechsel als Präfix; Satz-/Matchball als Badge.
+
+function umpTeamNames(teamKey) {
+  if (!STATE.match) return '';
+  const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
+  return arr.map(p => p.name).join(' / ');
+}
+// Welches Team ('a'/'b') steht auf der physischen Seite 'left'/'right'?
+function umpSideTeam(side) {
+  return (STATE.teamOnSide && STATE.teamOnSide.a === side) ? 'a' : 'b';
+}
+function umpOrdinal(n) {
+  return ['nullter', 'erster', 'zweiter', 'dritter', 'vierter', 'fünfter'][n] || (n + '.');
+}
+function umpOrdinalAkk(n) {
+  return ['nullten', 'ersten', 'zweiten', 'dritten', 'vierten', 'fünften'][n] || (n + '.');
+}
+
+// Aufschläger als Anzeigename (spieler-genau im Doppel via computeServing).
+function umpServerName() {
+  const s = computeServing();
+  if (!s || !STATE.match) return '';
+  const arr = s.team === 'a' ? STATE.match.teamA : STATE.match.teamB;
+  const p = arr[s.index] || arr[0];
+  return p ? p.name : umpTeamNames(s.team);
+}
+// Rückschläger (diagonal, gleiches Service-Feld auf der Gegenseite) – Eröffnung.
+function umpReceiverName() {
+  if (!STATE.positions || !STATE.servingSide || !STATE.teamOnSide || !STATE.match) return '';
+  const recvSide = STATE.servingSide === 'left' ? 'right' : 'left';
+  const serverScore = STATE.servingSide === 'left' ? STATE.currentSet.left : STATE.currentSet.right;
+  const field = (serverScore % 2 === 0) ? 'rightSC' : 'leftSC';
+  const recvTeam = umpSideTeam(recvSide);
+  const arr = recvTeam === 'a' ? STATE.match.teamA : STATE.match.teamB;
+  const pos = STATE.positions[recvSide];
+  let idx = pos ? arr.findIndex(p => p.id === pos[field]) : -1;
+  if (idx < 0) idx = 0;
+  const p = arr[idx];
+  return p ? p.name : umpTeamNames(recvTeam);
+}
+
+// Stand mit Aufschlägerstand zuerst, als Text: „5:3" bzw. „4 beide".
+function umpScoreSpoken() {
+  if (!STATE.servingSide) {
+    const l = STATE.currentSet.left, r = STATE.currentSet.right;
+    return l === r ? `${l} beide` : `${l}:${r}`;
+  }
+  const sv = STATE.servingSide === 'left' ? STATE.currentSet.left : STATE.currentSet.right;
+  const rv = STATE.servingSide === 'left' ? STATE.currentSet.right : STATE.currentSet.left;
+  return sv === rv ? `${sv} beide` : `${sv}:${rv}`;
+}
+
+function umpOpeningSpoken() {
+  const right = umpTeamNames(umpSideTeam('right'));
+  const left = umpTeamNames(umpSideTeam('left'));
+  const server = umpServerName();
+  const recv = umpReceiverName();
+  let s = `Meine Damen und Herren: zu meiner Rechten ${right}, zu meiner Linken ${left}. `;
+  if (server && recv) s += `${server} schlägt auf ${recv}. `;
+  else if (server) s += `${server} schlägt auf. `;
+  return s + 'Null beide – bitte spielen.';
+}
+
+function umpSetEndSpoken() {
+  const last = STATE.setsCompleted[STATE.setsCompleted.length - 1];
+  if (!last) return 'Satz.';
+  const winSide = last.left > last.right ? 'left' : 'right';
+  const winner = umpTeamNames(umpSideTeam(winSide));
+  const hi = Math.max(last.left, last.right), lo = Math.min(last.left, last.right);
+  return `Satz. Den ${umpOrdinalAkk(STATE.setsCompleted.length)} Satz gewinnt ${winner} mit ${hi}:${lo}.`;
+}
+
+function umpMatchEndSpoken() {
+  const winsLeft = STATE.setsCompleted.filter(s => s.left > s.right).length;
+  const winsRight = STATE.setsCompleted.filter(s => s.right > s.left).length;
+  if (STATE.retired) {
+    const w = STATE.retiredWinner;
+    const name = w ? umpTeamNames(w) : '';
+    return name ? `Spiel durch Aufgabe. Das Spiel gewinnt ${name}.` : 'Spiel durch Aufgabe.';
+  }
+  const winSide = winsLeft >= winsRight ? 'left' : 'right';
+  const winner = umpTeamNames(umpSideTeam(winSide));
+  const x = Math.max(winsLeft, winsRight), y = Math.min(winsLeft, winsRight);
+  // Satzstände aus Sicht des Siegers (gewonnene Sätze zuerst je Satz).
+  const sets = STATE.setsCompleted
+    .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`)
+    .join(', ');
+  return `Spiel. Das Spiel gewinnt ${winner}, ${x} ${x === 1 ? 'Satz' : 'Sätze'} zu ${y}: ${sets}.`;
+}
+
+// Satzball/Matchball-Badge (Näherung: Führender 1 Punkt vom Satzgewinn entfernt).
+function umpPointBadge() {
+  if (!STATE.match) return '';
+  const target = STATE.match.targetScore;
+  if (!target || target >= 99) return '';
+  const l = STATE.currentSet.left, r = STATE.currentSet.right;
+  const lead = Math.max(l, r), trail = Math.min(l, r);
+  const gamePoint = (lead - trail >= 1) && (lead >= target - 1);
+  if (!gamePoint) return '';
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const leaderSide = l >= r ? 'left' : 'right';
+  const wins = STATE.setsCompleted.filter(s =>
+    leaderSide === 'left' ? s.left > s.right : s.right > s.left).length;
+  return wins === need - 1 ? 'Matchball' : 'Satzball';
+}
+
+// Die aktuelle Ansage: { say, badge }.
+function umpAnnouncement() {
+  if (!STATE.match) return { say: '', badge: '' };
+  if (STATE.finished) return { say: umpMatchEndSpoken(), badge: '' };
+  if (STATE.setup !== 'playing') return { say: 'Aufstellung wählen …', badge: '' };
+  if (STATE.pause) {
+    if (STATE.pause.kind === 'injury') return { say: 'Spielunterbrechung.', badge: 'Pause' };
+    if (STATE.pause.kind === 'eleven') return { say: `${umpScoreSpoken()} – Pause.`, badge: 'Pause' };
+    if (STATE.pause.kind === 'game') {
+      return { say: umpSetEndSpoken() + ' Bitte die Seiten wechseln.', badge: 'Satzpause' };
+    }
+  }
+  const noPoint = STATE.currentSet.left === 0 && STATE.currentSet.right === 0;
+  if (noPoint && STATE.setsCompleted.length === 0 && STATE.history.length === 0) {
+    return { say: umpOpeningSpoken(), badge: '' };
+  }
+  if (noPoint && STATE.setsCompleted.length > 0) {
+    const n = STATE.setsCompleted.length + 1;
+    return { say: `${umpCap(umpOrdinal(n))} Satz. Null beide – bitte spielen.`, badge: '' };
+  }
+  const ev = STATE.lastEvent;
+  if (ev && ev.type === 'card') {
+    const badge = ev.color === 'yellow' ? 'Verwarnung'
+      : ev.color === 'red' ? 'Rote Karte' : 'Disqualifikation';
+    return { say: ev.say, badge };
+  }
+  let say = umpScoreSpoken();
+  if (ev && ev.type === 'point' && ev.serveChanged) say = 'Aufschlagwechsel ' + say;
+  return { say, badge: umpPointBadge() };
+}
+function umpCap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+function renderUmpireBar() {
+  if (els.settingsUmpire) {
+    els.settingsUmpire.textContent = 'Schiri-Modus: ' + (STATE.umpireMode ? 'an' : 'aus');
+  }
+  const show = STATE.umpireMode && !!STATE.match;
+  els.umpireBar.hidden = !show;
+  if (!show) return;
+  const a = umpAnnouncement();
+  els.umpireSay.textContent = a.say || '';
+  els.umpireBadge.textContent = a.badge || '';
+  els.umpireBadge.hidden = !a.badge;
+  renderCards();
+  els.umpireCardBtn.hidden = !(STATE.setup === 'playing' && !STATE.finished && !STATE.pause);
+}
+
+// ─── Karten / Verwarnungen (Phase 2, nur lokal protokolliert) ──────────
+let cardPending = null;
+function cardSymbol(color) { return color === 'yellow' ? '🟨' : color === 'red' ? '🟥' : '⬛'; }
+function ensureCardsLoaded() {
+  if (!STATE.match) { cardsMatchId = null; return; }
+  if (cardsMatchId === STATE.match.matchId) return;
+  cardsMatchId = STATE.match.matchId;
+  try {
+    const obj = JSON.parse(localStorage.getItem(CARDS_KEY) || 'null');
+    STATE.cards = (obj && obj.matchId === STATE.match.matchId && Array.isArray(obj.cards)) ? obj.cards : [];
+  } catch { STATE.cards = []; }
+}
+function saveCards() {
+  try {
+    localStorage.setItem(CARDS_KEY, JSON.stringify({
+      matchId: STATE.match ? STATE.match.matchId : null, cards: STATE.cards,
+    }));
+  } catch { /* quota */ }
+}
+function renderCards() {
+  ensureCardsLoaded();
+  els.umpireCards.textContent = '';
+  STATE.cards.forEach(c => {
+    const chip = document.createElement('span');
+    chip.className = 'card-chip';
+    chip.textContent = `${cardSymbol(c.color)} ${c.name}`;
+    els.umpireCards.appendChild(chip);
+  });
+}
+function openCardModal() {
+  if (!STATE.match || STATE.setup !== 'playing' || STATE.finished || STATE.pause) return;
+  els.cardPlayerList.textContent = '';
+  const sideLabel = (teamKey) =>
+    !STATE.teamOnSide ? '' : (STATE.teamOnSide[teamKey] === 'left' ? 'links' : 'rechts');
+  ['a', 'b'].forEach(teamKey => {
+    const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
+    arr.forEach((p, index) => {
+      const b = document.createElement('div');
+      b.className = 'opt';
+      b.textContent = `${p.name} (${sideLabel(teamKey)})`;
+      b.addEventListener('click', () => {
+        cardPending = { teamKey, index, name: p.name };
+        els.cardPlayerName.textContent = p.name;
+        els.cardPlayerView.hidden = true;
+        els.cardColorView.hidden = false;
+      });
+      els.cardPlayerList.appendChild(b);
+    });
+  });
+  els.cardPlayerView.hidden = false;
+  els.cardColorView.hidden = true;
+  els.cardModal.classList.add('visible');
+}
+function closeCardModal() {
+  els.cardModal.classList.remove('visible');
+  cardPending = null;
+}
+function applyCard(color) {
+  if (!cardPending || !STATE.match || STATE.setup !== 'playing' || STATE.finished || STATE.pause) {
+    closeCardModal();
+    return;
+  }
+  const { teamKey, index, name } = cardPending;
+  closeCardModal();
+  // Rote Karte: der Gegner bekommt einen Punkt (zählt als regulärer Punkt,
+  // inkl. Aufschlag-Update / ggf. Satz-/Matchende über addPointOnSide).
+  if (color === 'red') {
+    const oppTeam = teamKey === 'a' ? 'b' : 'a';
+    const oppSide = STATE.teamOnSide ? STATE.teamOnSide[oppTeam] : null;
+    if (oppSide) addPointOnSide(oppSide);
+  }
+  const stand = umpScoreSpoken();
+  const txt = color === 'yellow'
+    ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
+    : color === 'red'
+      ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
+      : `${name}, disqualifiziert.`;
+  STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });
+  saveCards();
+  STATE.lastEvent = { type: 'card', color, say: txt };
+  tlog('info', 'umpire_card', { name, color });
+  render();
+}
+
+els.umpireCardBtn.addEventListener('click', openCardModal);
+els.cardCancel.addEventListener('click', closeCardModal);
+els.cardBack.addEventListener('click', () => {
+  els.cardColorView.hidden = true;
+  els.cardPlayerView.hidden = false;
+});
+els.cardYellow.addEventListener('click', () => applyCard('yellow'));
+els.cardRed.addEventListener('click', () => applyCard('red'));
+els.cardBlack.addEventListener('click', () => applyCard('black'));
+
+function toggleUmpireMode() {
+  STATE.umpireMode = !STATE.umpireMode;
+  try { localStorage.setItem(UMPIRE_KEY, STATE.umpireMode ? '1' : '0'); } catch { /* ignore */ }
+  tlog('info', 'umpire_mode', { on: STATE.umpireMode });
+  closeSettings();
+  render();
+}
+
+els.settingsUmpire.addEventListener('click', toggleUmpireMode);
 els.settingsBtn.addEventListener('click', openSettings);
 els.settingsClose.addEventListener('click', closeSettings);
 els.settingsFullscreen.addEventListener('click', toggleFullscreen);
