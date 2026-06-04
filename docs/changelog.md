@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.66
+
+- **PIN-Einstellungsmenü am Zähltablett – Feldwechsel ohne QR.** Ein Zahnrad ⚙
+  im Tablet-Header öffnet (nach PIN) ein Menü: **Feld wechseln** zeigt die
+  Feld-Liste (BTP-Feldname inkl. Halle) und schaltet das Tablet auf ein anderes
+  Feld um, **ohne einen QR-Code zu scannen**; dazu **Vollbild ein/aus**. PIN in
+  `config.json` (`tablet_settings_pin`, Default „0000", nur Ziffern, ohne
+  Neustart wirksam) – reiner Bedien-Schutz. Neuer Server-Endpoint `GET /courts`.
+  Die echte Kiosk-Sperre (kein Internet, Android-Buttons aus, Exit-PIN) macht ein
+  Kiosk-Browser – Anleitung in `docs/tablet-kiosk.md` (Allowlist deckt bts-light
+  und Tilos BTS ab). Cloud-Modus: Feldwechsel-Liste noch offen.
+
 ## v0.9.65
 
 - **Court-Monitor zeigt nach der Satzpause sofort 0:0.** Nach dem ersten Satz
