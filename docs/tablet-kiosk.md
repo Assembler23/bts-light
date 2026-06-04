@@ -33,41 +33,46 @@ Reiner Bedien-Schutz gegen versehentliche Änderungen – **keine Sicherheitsgre
 
 ---
 
-## 2) Kiosk-Sperre mit Fully Kiosk Browser (empfohlen)
+## 2) Kiosk-Sperre mit Fully Kiosk Browser
 
-[Fully Kiosk Browser](https://www.fully-kiosk.com/) (Android, Gratis-Version
-reicht) lädt unsere Seite im Vollbild, blendet Navigations-/Statusleiste aus und
-lässt sich nur per PIN verlassen. **Funktioniert für bts-light UND Tilos BTS** –
-dank URL-Freigabeliste.
+[Fully Kiosk Browser](https://www.fully-kiosk.com/) lädt unsere Seite im Vollbild.
+Läuft auch auf **Amazon Fire-Tablets** (Installation über den Amazon Appstore
+oder als APK von fully-kiosk.com — kein Google Play nötig).
+
+**Gratis vs. PLUS — wichtig (am 2026-06-04 auf Fire-Tablet verifiziert):**
+
+| Funktion | Gratis | PLUS (einmalig/Gerät) |
+|---|---|---|
+| Vollbild | ✅ | |
+| Bildschirm an lassen (Keep Screen On) | ✅ | |
+| Start beim Booten | ✅ | |
+| Web Auto Reload (Reconnect/Error) | ✅ | |
+| **Kiosk Mode** (App-Verlassen sperren, Buttons sperren, **Exit-PIN**, Single-App) | ❌ | ✅ |
+| **Web-Filter / URL-Allowlist** (kein Internet) | ❌ | ✅ |
+
+→ **Die eigentliche Sperre (kein Internet + Buttons gesperrt + Exit-PIN) braucht PLUS.**
+Gratis bekommt man eine saubere, dauerhafte Anzeige, aber die Android-Buttons
+bleiben aktiv (Helfer *könnten* die App verlassen). Für ein echtes Verleih-Set
+daher **PLUS pro Gerät** (Volumen-Rabatt für ~10 Tablets) einplanen.
 
 ### Einrichtung pro Tablet (einmalig, Teil des Master-Setups)
 
-1. **Fully Kiosk** installieren, als **Standard-Browser/Launcher** zulassen.
-2. **Web-Content → Start URL:** je Einsatz das laufende System, z. B.
+1. **Fully Kiosk** installieren (Fire: Amazon Appstore / APK), öffnen.
+2. **Start URL** (Quick-Start oder Web Content Settings) je Einsatz, z. B.
    - bts-light: `http://192.168.16.101:8088/court/<CourtID>`
    - Tilos BTS (Umpire-Panel): `http://192.168.16.2:4433/u`
-   (Bei einem Turnier läuft ohnehin nur **ein** System. Alternativ zwei
-   Lesezeichen „BTS"/„bts-light" anlegen.)
-3. **Web-Content → URL-Freigabeliste (Allowlist)** auf **beide LAN-Server**
-   begrenzen → alles außerhalb wird blockiert, **kein Internet**:
-   ```
-   192.168.16.101    (bts-light)
-   192.168.16.2      (Tilos BTS)
-   ```
-   („Allowed Domains/URLs" einschalten und nur diese eintragen.)
-4. **Device Management:**
-   - **Kiosk-Modus aktivieren** (Vollbild, „Disable Status Bar", „Disable Nav Bar").
-   - **„Kiosk Exit PIN"** setzen → Verlassen nur per PIN (= dein „raus nur per PIN").
-   - **„Start on Boot"** + **„Auto Reload on Idle"/„Relaunch on Screen On"** für
-     Robustheit über den Turniertag.
-5. **WLAN `btsaccess`** (wie der Pi-Court-Monitor). Damit hängen Tablet, Pi und
-   Server im selben Subnetz `192.168.16.*`.
+   (Bei einem Turnier läuft ohnehin nur **ein** System. Feld innerhalb bts-light
+   wechselt man danach über das ⚙-PIN-Menü — kein QR.)
+3. **Gratis-Robustheit:** *Device Management* → **Keep Screen On** + **Start on
+   Boot**; *Web Auto Reload* → **Reload on Network Reconnect** + **on Error** (NICHT
+   „on Idle" — würde mitten im Spiel neu laden).
+4. **Nur mit PLUS:** *Advanced Web Settings → Web Filter* → nur `192.168.16.101`
+   und `192.168.16.2` erlauben (kein Internet); *Kiosk Mode* → **Exit-PIN** setzen,
+   „Disable Nav/Status Bar", Single-App.
+5. **WLAN `btsaccess`** (wie der Pi-Court-Monitor) → selbes Subnetz `192.168.16.*`.
 
-> **Hinweis Nav-Bar:** Das vollständige Ausblenden der Android-Navigationsleiste
-> gelingt am zuverlässigsten, wenn Fully Kiosk per ADB als *Device Owner*
-> eingerichtet ist (einmalig pro Tablet). Ohne das werden Status-/Overlay-Leisten
-> ausgeblendet und der Exit ist PIN-geschützt – für den Verleih in der Praxis
-> ausreichend.
+> **Hinweis Fire-Tablet:** Die Android-Navigationsleiste vollständig auszublenden
+> gelingt zuverlässig nur mit PLUS (Kiosk Mode) bzw. *Device Owner* per ADB.
 
 ### Tilo muss nichts ändern
 Tilos BTS-Server liefert die Umpire-Seite wie gehabt; sie wird nur in einem
