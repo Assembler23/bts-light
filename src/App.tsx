@@ -59,6 +59,7 @@ function defaultConfig(): AppConfig {
       wait_minutes: 1,
     },
     locked_courts: [],
+    tablet_settings_pin: "0000",
   };
 }
 

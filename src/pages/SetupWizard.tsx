@@ -223,6 +223,9 @@ export function SetupWizard({
   const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
   const [uploadLogs, setUploadLogs] = useState(initialConfig.upload_logs);
+  const [tabletPin, setTabletPin] = useState(
+    initialConfig.tablet_settings_pin ?? "0000",
+  );
   // LAN und Cloud sind unabhängig schaltbar – aus dem gespeicherten
   // connection_mode abgeleitet ("lan+cloud" → beide an).
   const [lanEnabled, setLanEnabled] = useState(
@@ -344,6 +347,8 @@ export function SetupWizard({
       },
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
+      // Tablet-Einstellungs-PIN: nur Ziffern, leer → Default „0000".
+      tablet_settings_pin: tabletPin.replace(/\D/g, "").slice(0, 8) || "0000",
     };
   }
 
@@ -565,6 +570,20 @@ export function SetupWizard({
             Mindestens einen Verbindungsweg aktivieren.
           </p>
         )}
+        <div className="mt-1">
+          <Field
+            label="Tablet-Einstellungs-PIN"
+            value={tabletPin}
+            onChange={(v) => setTabletPin(v.replace(/\D/g, "").slice(0, 8))}
+            placeholder="0000"
+            type="tel"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Schützt das Zahnrad-Menü am Zähltablett (Feld wechseln ohne QR).
+            Nur Ziffern. Reiner Bedien-Schutz – die echte Kiosk-Sperre macht
+            der Kiosk-Browser (eigener Exit-PIN).
+          </p>
+        </div>
       </section>
 
       {/* Sprachansagen */}

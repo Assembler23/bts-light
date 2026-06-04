@@ -135,6 +135,9 @@ export interface AppConfig {
   auto_assign: AutoAssignConfig;
   /** Vom Operator gesperrte Felder (CourtIDs) – keine Auto-Vergabe. */
   locked_courts: number[];
+  /** PIN fürs Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
+   *  Nur Ziffern, Default „0000". Reiner Bedien-Schutz, keine Sicherheitsgrenze. */
+  tablet_settings_pin: string;
 }
 
 export interface SyncStatus {

@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.68
+
+- **Tablet-Einstellungs-PIN in der Oberfläche setzbar.** Der PIN fürs ⚙-Menü
+  am Zähltablett (Feldwechsel ohne QR) lässt sich jetzt direkt in den
+  Einstellungen unter **„Tablet-Verbindung"** eingeben (nur Ziffern, Default
+  „0000") – kein Bearbeiten der `config.json` mehr nötig.
+
 ## v0.9.67
 
 - **Feldwechsel ohne QR jetzt auch im Cloud-Modus.** Das PIN-Menü am Tablet
