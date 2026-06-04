@@ -47,9 +47,9 @@ Badhub-Passwort eintragen – fertig.
   Image** bedient sowohl Tilos BTS als auch bts-light (Auto-Discovery per
   Subnetz-Scan, kein Karten-/Image-Tausch). Fertiges Image zum Schreiben
   mit Raspberry Pi Imager + Anleitung:
-  [docs/pi-dual-image.md](docs/pi-dual-image.md) · Download:
-  <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz>
-  (32-GB-Karten).
+  [docs/pi-dual-image.md](docs/pi-dual-image.md) · Download (empfohlen, klein &
+  auto-wachsend):
+  <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz>.
 
 Noch nicht signiert: Der Windows-Installer hat kein Code-Signing-
 Zertifikat, daher zeigt Windows beim ersten Start eine SmartScreen-Warnung

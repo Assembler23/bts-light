@@ -123,13 +123,21 @@ Schnelltest ohne Pi-Tastatur: Handy ins `btsaccess`-WLAN, `http://bts-light.loca
 ## Fertiges Image (Download) & Schreiben mit Raspberry Pi Imager
 
 Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + v3-Launcher +
-`btsaccess`-WLAN, genau wie im 40-min-Test verifiziert) liegt zum Download bereit:
+`btsaccess`-WLAN, wie im 40-min-Test verifiziert) liegt in **zwei Varianten** bereit:
 
+**① Empfohlen — klein & auto-wachsend** (schnell zu schreiben):
+- **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz>
+- **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz.sha256>
+- ~1,0 GB komprimiert, **entpackt nur 3,85 GB** → schreibt + verifiziert **~4× schneller**.
+  **Wächst beim ersten Boot automatisch** auf die volle Kartengröße (PiShrink, via
+  `/etc/rc.local`). Passt auf jede Karte ≥ 4 GB. Inhaltlich identisch zum getesteten Stand.
+
+**② Alternativ — 1:1 wie getestet, groß** (langsam zu schreiben):
 - **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz>
 - **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz.sha256>
-- ~1,2 GB komprimiert (entpackt 15 GB). **Nur für 32-GB-Karten** (so im Einsatz);
-  bewusst **nicht** geschrumpft/auto-expandiert → 1:1 der getestete Stand, sofort
-  einsatzfähig.
+- ~1,2 GB komprimiert, **entpackt 15 GB**. **Nur für 32-GB-Karten**, nicht geschrumpft —
+  exakt der dd-getestete Stand. (Tipp: Pi-Imager-Verifizierung ist hier der Zeitfresser —
+  bei Bedarf nach dem Schreiben abbrechen.)
 
 **Schreiben mit Raspberry Pi Imager:**
 1. Imager öffnen → **„Eigenes Image verwenden" / „Use custom"** → die `.img.xz`
@@ -143,9 +151,17 @@ Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + v3-Launcher +
 
 > Build-Quelle: Das Image ist eine Kopie von Tilos `piZero2_image_autostart_16GB`
 > mit ersetztem `/home/pi/startbrowser.sh` (= `pi/shared-startbrowser.sh`).
-> Launcher aktualisieren → `pi/shared-startbrowser.sh` ins Image schreiben
-> (macOS: `e2fsck` → `debugfs -w write` auf `/dev/diskNs2`, uid/gid 1000, 0755),
-> neu komprimieren (`xz -T0 -6`) und hochladen.
+> Launcher aktualisieren → `pi/shared-startbrowser.sh` ins große Image schreiben
+> (macOS: `e2fsck` → `debugfs -w write` auf `/dev/diskNs2`, uid/gid 1000, 0755).
+> **Große Variante** (②): `xz -T0 -6 -c gross.img > bts-light-pi-shared-32gb.img.xz`.
+> **Kleine Variante** (①) aus demselben großen Image via PiShrink (braucht Linux-Loop,
+> daher Docker): `docker run --rm --privileged -v "$HOME/Downloads:/work" -w /work
+> debian:bookworm-slim bash -c 'apt-get update && apt-get install -y parted e2fsprogs
+> xz-utils util-linux udev wget ca-certificates && wget -qO /usr/local/bin/pishrink
+> https://raw.githubusercontent.com/Drewsif/PiShrink/master/pishrink.sh && chmod +x
+> /usr/local/bin/pishrink && pishrink -Z -a gross.img bts-light-pi.img'`. Beide
+> hochladen nach `badhub@…:/var/www/badhub/public/download/bts-light/pi-image/` +
+> jeweils `shasum -a 256 … > ….sha256`.
 
 ## Test (mit echter Hardware)
 
