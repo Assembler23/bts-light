@@ -254,6 +254,18 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub locked_courts: Vec<i64>,
+    /// PIN für das Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
+    /// Reiner Bedien-Schutz gegen versehentliche Änderungen durch Helfer –
+    /// KEINE Sicherheitsgrenze (der echte Kiosk-Lock liegt im Kiosk-Browser).
+    /// Default „0000"; pro Verleih-Set änderbar. `#[serde(default = …)]` hält
+    /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default = "default_tablet_settings_pin")]
+    pub tablet_settings_pin: String,
+}
+
+/// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
+fn default_tablet_settings_pin() -> String {
+    "0000".to_string()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -347,6 +359,7 @@ mod tests {
                 wait_minutes: 0.5,
             },
             locked_courts: vec![3, 7],
+            tablet_settings_pin: "1234".to_string(),
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
@@ -385,6 +398,8 @@ mod tests {
         assert_eq!(loaded.auto_assign, AutoAssignConfig::default());
         assert!(!loaded.auto_assign.enabled);
         assert_eq!(loaded.auto_assign.wait_minutes, 1.0);
+        // Tablet-Einstellungs-PIN (vor diesem Feature unbekannt) → Default „0000".
+        assert_eq!(loaded.tablet_settings_pin, "0000");
     }
 
     #[test]

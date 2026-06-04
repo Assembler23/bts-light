@@ -272,6 +272,26 @@
     .modal .sk-hint[hidden] { display: none; }
     .modal .sk-hint .sk-names { font-weight: 700; color: #fff; }
     .modal .sk-hint .sk-label { opacity: .85; }
+    /* Einstellungen (PIN + Feldwechsel). */
+    .modal .settings-view {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 1.25rem; width: 100%;
+    }
+    .modal .settings-view[hidden] { display: none; }
+    .modal .settings-section { font-size: 1rem; font-weight: 700; opacity: .8; }
+    .pin-display {
+      font-size: 2rem; letter-spacing: .6rem; min-height: 2.4rem; font-weight: 700;
+    }
+    .pin-pad { display: grid; grid-template-columns: repeat(3, 5rem); gap: .75rem; }
+    .pin-pad button {
+      width: 5rem; height: 4rem; font-size: 1.5rem; font-weight: 700;
+      background: #1e293b; border: 2px solid #334155; border-radius: .75rem;
+      color: #fff; cursor: pointer;
+    }
+    .pin-pad button:active { background: #334155; }
+    .pin-pad button.pin-aux { font-size: 1.2rem; opacity: .8; }
+    .modal .opt.settings-wide { flex: 0 0 auto; min-width: 16rem; }
+    .modal .opt.court-current { border-color: #22c55e; opacity: .55; }
 
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
@@ -373,6 +393,13 @@
       aria-label="Turnierleitung rufen"
       title="Turnierleitung ans Feld rufen"
     >📣</button>
+    <button
+      type="button"
+      id="settings-btn"
+      class="header-btn"
+      aria-label="Einstellungen"
+      title="Einstellungen (PIN)"
+    >⚙</button>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
   </header>
 
@@ -544,6 +571,39 @@
   </div>
 </div>
 
+<!-- Einstellungen: PIN-geschützt. Erst PIN, dann Feldwechsel (ohne QR). -->
+<div class="modal" id="settings-modal">
+  <!-- 1) PIN-Eingabe -->
+  <div class="settings-view" id="settings-pin-view">
+    <div class="title">Einstellungen</div>
+    <div class="subtitle">PIN eingeben</div>
+    <div class="pin-display" id="settings-pin-display"></div>
+    <div class="pin-pad" id="settings-pin-pad">
+      <button type="button" data-k="1">1</button>
+      <button type="button" data-k="2">2</button>
+      <button type="button" data-k="3">3</button>
+      <button type="button" data-k="4">4</button>
+      <button type="button" data-k="5">5</button>
+      <button type="button" data-k="6">6</button>
+      <button type="button" data-k="7">7</button>
+      <button type="button" data-k="8">8</button>
+      <button type="button" data-k="9">9</button>
+      <button type="button" data-k="del" class="pin-aux">⌫</button>
+      <button type="button" data-k="0">0</button>
+      <button type="button" data-k="cancel" class="pin-aux">✕</button>
+    </div>
+  </div>
+  <!-- 2) Einstellungen (nach korrekter PIN) -->
+  <div class="settings-view" id="settings-main-view" hidden>
+    <div class="title">Einstellungen</div>
+    <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
+    <div class="settings-section">Feld wechseln</div>
+    <div class="options" id="settings-court-list"></div>
+    <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
+    <div class="opt settings-wide" id="settings-close">Schließen</div>
+  </div>
+</div>
+
 <!-- Belegt-Overlay: Court wird bereits von einem anderen Gerät geschiedst -->
 <div class="lock-overlay" id="occupied-overlay">
   <div class="lock-icon">🔒</div>
@@ -593,6 +653,15 @@
 // Mehr-Hallen-Turnieren, die CourtID nicht.
 const COURT_ID = Number('__COURT_ID__') || 0;
 const COURT_LABEL = '__COURT_LABEL__';
+// PIN fürs Einstellungs-Menü (Feldwechsel ohne QR). Vom Server getemplatet
+// (Live-Config, Default „0000"). Reiner Bedien-Schutz, KEINE Sicherheitsgrenze.
+// Defensiv: wird der Platzhalter mal nicht ersetzt (z. B. älterer Relay) oder
+// ist leer → Fallback „0000", damit das Menü nicht unbedienbar wird. Der
+// Vergleichswert ist gestückelt, damit der Server ihn NICHT mitersetzt.
+const SETTINGS_PIN = (function () {
+  const p = '__TABLET_PIN__';
+  return (!p || p === '__TABLET' + '_PIN__') ? '0000' : p;
+})();
 
 // Basis-Pfad der Server-Endpunkte: alles vor "/court/<id>".
 //   LAN   → ""  (Endpunkte /ws, /result direkt am eingebetteten Server)
@@ -724,6 +793,15 @@ const els = {
   megaphoneText: document.getElementById('megaphone-text'),
   megaphoneConfirm: document.getElementById('megaphone-confirm'),
   megaphoneCancel: document.getElementById('megaphone-cancel'),
+  settingsBtn: document.getElementById('settings-btn'),
+  settingsModal: document.getElementById('settings-modal'),
+  settingsPinView: document.getElementById('settings-pin-view'),
+  settingsMainView: document.getElementById('settings-main-view'),
+  settingsPinDisplay: document.getElementById('settings-pin-display'),
+  settingsPinPad: document.getElementById('settings-pin-pad'),
+  settingsCourtList: document.getElementById('settings-court-list'),
+  settingsFullscreen: document.getElementById('settings-fullscreen'),
+  settingsClose: document.getElementById('settings-close'),
   occupiedOverlay: document.getElementById('occupied-overlay'),
   takeoverBtn: document.getElementById('takeover-btn'),
   lockedOverlay: document.getElementById('locked-overlay'),
@@ -1956,6 +2034,99 @@ function render() {
 }
 
 // ─────────────────────────────── Wiring ───────────────────────────────
+
+// ───────────────────────── Einstellungen (PIN + Feldwechsel) ───────────
+// PIN-geschütztes Menü, um das Tablet OHNE QR-Scan auf ein anderes Feld
+// umzuschalten (lädt einfach die Seite des Zielfelds). Reiner Bedien-Schutz
+// gegen versehentliche Änderungen durch Helfer – die echte Kiosk-Sperre
+// (kein Internet, Android-Buttons aus) liegt im Kiosk-Browser, separater PIN.
+let settingsPinEntry = '';
+
+function renderPinDisplay() {
+  const len = settingsPinEntry.length;
+  const total = Math.max(SETTINGS_PIN.length, len, 4);
+  els.settingsPinDisplay.textContent =
+    '•'.repeat(len) + '–'.repeat(Math.max(0, total - len));
+}
+
+function openSettings() {
+  settingsPinEntry = '';
+  renderPinDisplay();
+  els.settingsPinView.hidden = false;
+  els.settingsMainView.hidden = true;
+  els.settingsModal.classList.add('visible');
+}
+
+function closeSettings() {
+  els.settingsModal.classList.remove('visible');
+  settingsPinEntry = '';
+}
+
+function showSettingsMain() {
+  els.settingsPinView.hidden = true;
+  els.settingsMainView.hidden = false;
+  loadCourtList();
+}
+
+function pinKey(k) {
+  if (k === 'cancel') { closeSettings(); return; }
+  if (k === 'del') { settingsPinEntry = settingsPinEntry.slice(0, -1); renderPinDisplay(); return; }
+  if (settingsPinEntry.length >= 8) return;
+  settingsPinEntry += k;
+  renderPinDisplay();
+  if (settingsPinEntry.length >= SETTINGS_PIN.length) {
+    if (settingsPinEntry === SETTINGS_PIN) {
+      showSettingsMain();
+    } else {
+      els.settingsPinDisplay.textContent = 'PIN falsch';
+      settingsPinEntry = '';
+      setTimeout(renderPinDisplay, 800);
+    }
+  }
+}
+
+function loadCourtList() {
+  els.settingsCourtList.textContent = 'Lade Felder…';
+  fetch(BASE_PATH + '/courts', { cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : Promise.reject()))
+    .then(list => {
+      els.settingsCourtList.textContent = '';
+      if (!Array.isArray(list) || list.length === 0) {
+        els.settingsCourtList.textContent = 'Keine Felder gefunden.';
+        return;
+      }
+      list.forEach(c => {
+        const name = c.label || ('Feld ' + c.id);
+        const b = document.createElement('div');
+        const current = Number(c.id) === COURT_ID;
+        b.className = 'opt' + (current ? ' court-current' : '');
+        b.textContent = current ? name + ' (aktuell)' : name;
+        if (!current) {
+          b.addEventListener('click', () => {
+            location.href = BASE_PATH + '/court/' + encodeURIComponent(c.id);
+          });
+        }
+        els.settingsCourtList.appendChild(b);
+      });
+    })
+    .catch(() => { els.settingsCourtList.textContent = 'Feldliste nicht erreichbar.'; });
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    if (document.exitFullscreen) document.exitFullscreen();
+  } else if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+els.settingsBtn.addEventListener('click', openSettings);
+els.settingsClose.addEventListener('click', closeSettings);
+els.settingsFullscreen.addEventListener('click', toggleFullscreen);
+els.settingsPinPad.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-k]');
+  if (btn) pinKey(btn.dataset.k);
+});
 
 els.plusLeft.addEventListener('click', () => addPointOnSide('left'));
 els.plusRight.addEventListener('click', () => addPointOnSide('right'));

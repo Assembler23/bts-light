@@ -114,6 +114,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/court/{id}", get(court_page))
+        .route("/courts", get(courts_list))
         .route("/court/{id}/display", get(monitor_page))
         .route("/court/{id}/state", get(monitor_state))
         .route("/monitor", get(monitor_device_page))
@@ -189,11 +190,39 @@ async fn court_page(
     Path(court_id): Path<i64>,
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
+    // PIN fürs Einstellungs-Menü (Feldwechsel) – Live-Config, leer → Default „0000".
+    let pin = ctx.app_config().tablet_settings_pin;
+    let pin = if pin.trim().is_empty() {
+        "0000".to_string()
+    } else {
+        pin
+    };
     tracing::info!("Tablet-Seite ausgeliefert für Feld {court_id} ('{label}')");
     let body = TABLET_HTML
         .replace("__COURT_ID__", &court_id.to_string())
-        .replace("__COURT_LABEL__", &html_escape(&label));
+        .replace("__COURT_LABEL__", &html_escape(&label))
+        .replace("__TABLET_PIN__", &html_escape(&pin));
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
+}
+
+/// Feldliste (CourtID + Anzeige-Label) für den Feldwechsel im PIN-Menü des
+/// Tablets – so kann das Tablet ohne QR-Scan auf ein anderes Feld umschalten.
+async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let items: Vec<serde_json::Value> = ctx
+        .tablet
+        .courts()
+        .into_iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "label": ctx.tablet.court_display_label(c.id),
+            })
+        })
+        .collect();
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::Value::Array(items)),
+    )
 }
 
 /// Löst die CourtID auf ihre Anzeige-Bezeichnung auf. Bei Mehr-Hallen-
