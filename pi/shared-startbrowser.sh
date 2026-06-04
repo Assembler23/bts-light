@@ -18,7 +18,7 @@ export DISPLAY=:0
 export XAUTHORITY=/home/pi/.Xauthority
 LOG=/home/pi/startbrowser.log
 
-echo "$(date) - Startbrowser (shared, auto-reconnect v3: Subnetz-Scan) gestartet" >> "$LOG"
+echo "$(date) - Startbrowser (shared, auto-reconnect v4: Subnetz-Scan + Cloud-Log) gestartet" >> "$LOG"
 
 # 1) Auf eigene IP warten (kein Internet-Zwang).
 for _ in $(seq 1 60); do
@@ -41,6 +41,27 @@ BTSLIGHT_PORT="8088"
 # sodass JEDER Durchlauf neu (langsam, flaky) aufgelöst hätte. Die Datei übersteht
 # die Subshell → genau EINE Auflösung, danach immer die schnelle IP.
 BTSLIGHT_CACHE="/tmp/btslight_ip"
+
+# Cloud-Log: das Verbindungslog periodisch an badhub.de schicken, damit ein
+# Monitor-Pi im Turnierbetrieb AUS DER FERNE diagnostizierbar ist (ohne die
+# SD-Karte zu ziehen). Geräte-ID = Pi-Seriennummer. Selber verbandsweiter
+# Bearer-Token wie bts-light. Scheitert STILL, wenn kein Internet da ist
+# (z. B. Heim-Test ohne Uplink) – dann steht das Log eben nur lokal.
+SERIAL=$(awk -F': ' '/Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')
+DEVICE_ID="pi-${SERIAL}"
+PILOG_URL="https://badhub.de/api/pi_log.php"
+PILOG_TOKEN="d896d5c45f1dfe72d324be2da0dcc8031e447809f9a3c1ce"
+
+# Letzte ~800 Logzeilen in die Cloud schieben; kurzer Timeout, Fehler ignorieren.
+upload_log() {
+  command -v curl >/dev/null 2>&1 || return 0
+  [ -n "$SERIAL" ] || return 0
+  tail -n 800 "$LOG" 2>/dev/null | curl -s --max-time 8 -X POST \
+    -H "Authorization: Bearer ${PILOG_TOKEN}" \
+    -H "X-Device-Id: ${DEVICE_ID}" \
+    -H "Content-Type: text/plain" \
+    --data-binary @- "$PILOG_URL" >/dev/null 2>&1 || true
+}
 
 # Erreichbar? curl (echte HTTP-Antwort, großzügiges Timeout), sonst /dev/tcp.
 # KEIN ping-Fallback: Windows beantwortet ICMP standardmäßig nicht.
@@ -109,7 +130,7 @@ btslight_ip() {
 
 # Erste erreichbare KIOSK-URL (oder leer + Rückgabe 1).
 discover() {
-  local S KIOSK PROBE ip serial sep
+  local S KIOSK PROBE ip
   # 1) feste BTS/CourtSpot-Server zuerst
   for S in "${SERVERS[@]}"; do
     KIOSK="${S%%|*}"; PROBE="${S##*|}"
@@ -118,10 +139,8 @@ discover() {
   # 2) bts-light per aufgelöster IP (stabil), inkl. eindeutiger Geräte-Kennung
   ip="$(btslight_ip)"
   if [ -n "$ip" ]; then
-    serial=$(awk -F': ' '/Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')
-    sep="?"
-    if [ -n "$serial" ]; then
-      echo "http://$ip:$BTSLIGHT_PORT/monitor${sep}device=pi-${serial}"
+    if [ -n "$SERIAL" ]; then
+      echo "http://$ip:$BTSLIGHT_PORT/monitor?device=${DEVICE_ID}"
     else
       echo "http://$ip:$BTSLIGHT_PORT/monitor"
     fi
@@ -153,7 +172,9 @@ launch() {
 CUR=""
 MISS=0
 MISS_LIMIT=3
+TICK=0
 while true; do
+  TICK=$((TICK + 1))
   BEST="$(discover || true)"
   if [ -n "$BEST" ]; then
     MISS=0
@@ -174,5 +195,8 @@ while true; do
       CUR=""
     fi
   fi
+  # Verbindungslog in die Cloud: gleich beim ersten Durchlauf (Boot-Info schnell
+  # sichtbar) und danach alle ~5 min. Im Hintergrund → blockiert die Schleife nicht.
+  if [ $(( (TICK - 1) % 30 )) -eq 0 ]; then upload_log & fi
   sleep 10
 done
