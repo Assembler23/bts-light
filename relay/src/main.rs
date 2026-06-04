@@ -574,9 +574,7 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         // 1.-Aufruf-Zeitpunkt (relay-seitig gestempelt) + Aufruf-Timer-Schwellen
         // aus dem Host-Upload → der Cloud-Monitor zeigt dieselbe Aufruf-Uhr.
         on_court_since_ms: namespace.court_on_court_since.get(&court_id).copied(),
-        call_timer: monitor
-            .map(|m| m.call_timer.clone())
-            .unwrap_or_default(),
+        call_timer: monitor.map(|m| m.call_timer.clone()).unwrap_or_default(),
     }
 }
 

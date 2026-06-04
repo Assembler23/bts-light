@@ -708,7 +708,11 @@ pub enum HostFrame {
         /// Feld steht. Vom Host autoritativ gestempelt (überlebt Reconnects,
         /// frisch je Turnier) → der Relay übernimmt ihn 1:1 für die
         /// Aufruf-Uhr am Cloud-Monitor. `#[serde(default)]` = ältere Hosts.
-        #[serde(rename = "onCourtSinceMs", skip_serializing_if = "Option::is_none", default)]
+        #[serde(
+            rename = "onCourtSinceMs",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
         on_court_since_ms: Option<u64>,
     },
     /// Court-Match aufgehoben.
