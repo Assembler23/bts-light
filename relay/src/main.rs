@@ -268,7 +268,11 @@ async fn court_page(
     };
     let body = TABLET_HTML
         .replace("__COURT_ID__", &court_id.to_string())
-        .replace("__COURT_LABEL__", &html_escape(&label));
+        .replace("__COURT_LABEL__", &html_escape(&label))
+        // Der Relay kennt den Host-PIN nicht → leer lassen; tablet.html fällt
+        // dann defensiv auf „0000" zurück. (Die Feldwechsel-Liste /courts gibt
+        // es im Cloud-Pfad noch nicht – das Menü meldet dort „nicht erreichbar".)
+        .replace("__TABLET_PIN__", "");
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 

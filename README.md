@@ -30,7 +30,8 @@ Badhub-Passwort eintragen – fertig.
 - **Tablet-Spielzettel** – eingebetteter Server, an dem Schiedsrichter-
   Tablets im Hallen-WLAN hängen: Punkte zählen, Live-Score an den
   Liveticker, Endergebnis zurück nach BTP. Details:
-  [docs/tablet.md](docs/tablet.md).
+  [docs/tablet.md](docs/tablet.md). PIN-Einstellungsmenü (Feldwechsel ohne
+  QR) + Kiosk-Sperre fürs Verleih-Set: [docs/tablet-kiosk.md](docs/tablet-kiosk.md).
 - **Cloud-Relay** – die Tablets erreichen bts-light wahlweise direkt im
   LAN oder über einen Relay auf badhub.de. Der Cloud-Weg funktioniert
   auch hinter gesperrten Firmen-Firewalls (nur ausgehende Verbindungen) –
