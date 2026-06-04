@@ -72,6 +72,19 @@ läuft über `$(…)` in einer Subshell, eine Variable wäre dort verloren.
 
 bts-light braucht avahi für `bts-light.local` — im Desktop-Image vorhanden.
 
+### Ferndiagnose: Verbindungslog in die Cloud (ab v4)
+
+Der Launcher lädt sein `/home/pi/startbrowser.log` periodisch (~5 min + sofort
+beim Boot, im Hintergrund) an **`https://badhub.de/api/pi_log.php`** hoch
+(Bearer-Token wie bts-light, Header `X-Device-Id: pi-<seriennummer>`). So lässt
+sich **im laufenden Turnierbetrieb aus der Ferne** prüfen, ob ein Monitor-Pi
+sauber verbunden ist — **ohne die SD-Karte zu ziehen**. Scheitert still, wenn
+kein Internet da ist (Heim-Test ohne Uplink); im Verleih-Set mit LTE läuft's.
+
+Auslesen (Server): `ssh badhub@… 'ls -lt /var/www/badhub/storage/pi-logs/;
+cat /var/www/badhub/storage/pi-logs/pi-<serial>.log'`. Endpoint-Details:
+badhub-Repo `docs/features/liveticker_bts.md`.
+
 ## Netz-Konvention (von Tilo vorgegeben, übernommen)
 
 Tilo (Chat 2026-05-26): das Verleih-WLAN soll **`btsaccess` / `tmt2024!`**
