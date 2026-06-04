@@ -311,6 +311,20 @@
     }
     .umpire-badge[hidden] { display: none; }
     .umpire-say { font-size: 1.45rem; font-weight: 700; line-height: 1.25; color: #e2e8f0; }
+    .umpire-cards { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; margin-top: .4rem; }
+    .umpire-cards:empty { display: none; }
+    .umpire-cards .card-chip {
+      font-size: .8rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px;
+      background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+    }
+    .umpire-card-btn {
+      margin-top: .5rem; padding: .45rem 1rem; font-size: .95rem; font-weight: 700;
+      background: #1e293b; border: 2px solid #334155; border-radius: .6rem; color: #fff; cursor: pointer;
+    }
+    .umpire-card-btn:active { background: #334155; }
+    .modal .opt.card-yellow { border-color: #f59e0b; }
+    .modal .opt.card-red { border-color: #ef4444; }
+    .modal .opt.card-black { border-color: #64748b; }
 
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
@@ -460,6 +474,8 @@
         <div id="umpire-bar" class="umpire-bar" hidden>
           <div class="umpire-badge" id="umpire-badge" hidden></div>
           <div class="umpire-say" id="umpire-say"></div>
+          <div class="umpire-cards" id="umpire-cards"></div>
+          <button type="button" id="umpire-card-btn" class="umpire-card-btn">Karte / Verwarnung</button>
         </div>
 
         <div class="court-wrapper">
@@ -632,6 +648,25 @@
   </div>
 </div>
 
+<!-- Schiri-Modus: Karte/Verwarnung vergeben (Spieler → Farbe). -->
+<div class="modal" id="card-modal">
+  <div class="settings-view" id="card-player-view">
+    <div class="title">Karte / Verwarnung</div>
+    <div class="subtitle">Spieler wählen</div>
+    <div class="options" id="card-player-list"></div>
+    <div class="opt settings-wide" id="card-cancel">Abbrechen</div>
+  </div>
+  <div class="settings-view" id="card-color-view" hidden>
+    <div class="title">Karte für <span id="card-player-name"></span></div>
+    <div class="options">
+      <div class="opt card-yellow" id="card-yellow">🟨 Gelb – Verwarnung</div>
+      <div class="opt card-red" id="card-red">🟥 Rot – Fehler (Gegner +1)</div>
+      <div class="opt card-black" id="card-black">⬛ Schwarz – Disqualifikation</div>
+    </div>
+    <div class="opt settings-wide" id="card-back">Zurück</div>
+  </div>
+</div>
+
 <!-- Belegt-Overlay: Court wird bereits von einem anderen Gerät geschiedst -->
 <div class="lock-overlay" id="occupied-overlay">
   <div class="lock-icon">🔒</div>
@@ -780,6 +815,10 @@ const STATE = {
 // Schiri-Modus ist eine Tablet-Operator-Einstellung – pro Feld lokal gespeichert.
 const UMPIRE_KEY = `badhub.tablet.umpire.${COURT_ID}`;
 try { STATE.umpireMode = localStorage.getItem(UMPIRE_KEY) === '1'; } catch { /* ignore */ }
+// Karten/Verwarnungen werden NUR lokal protokolliert (pro Feld, an die matchId
+// gebunden → bei neuem Match leer). Kein Versand an Server/badhub.
+const CARDS_KEY = `badhub.tablet.cards.${COURT_ID}`;
+let cardsMatchId = null;
 
 const els = {
   eventLabel: document.getElementById('event-label'),
@@ -846,6 +885,18 @@ const els = {
   umpireBar: document.getElementById('umpire-bar'),
   umpireBadge: document.getElementById('umpire-badge'),
   umpireSay: document.getElementById('umpire-say'),
+  umpireCards: document.getElementById('umpire-cards'),
+  umpireCardBtn: document.getElementById('umpire-card-btn'),
+  cardModal: document.getElementById('card-modal'),
+  cardPlayerView: document.getElementById('card-player-view'),
+  cardColorView: document.getElementById('card-color-view'),
+  cardPlayerList: document.getElementById('card-player-list'),
+  cardPlayerName: document.getElementById('card-player-name'),
+  cardCancel: document.getElementById('card-cancel'),
+  cardBack: document.getElementById('card-back'),
+  cardYellow: document.getElementById('card-yellow'),
+  cardRed: document.getElementById('card-red'),
+  cardBlack: document.getElementById('card-black'),
   occupiedOverlay: document.getElementById('occupied-overlay'),
   takeoverBtn: document.getElementById('takeover-btn'),
   lockedOverlay: document.getElementById('locked-overlay'),
@@ -1447,6 +1498,9 @@ function clearMatch() {
   STATE.alertOfficial = false;
   STATE.retired = false;
   STATE.retiredWinner = null;
+  STATE.lastEvent = null;
+  STATE.cards = [];
+  cardsMatchId = null;
   sendAlert();
   clearPersistedState();
   render();
@@ -2323,7 +2377,103 @@ function renderUmpireBar() {
   els.umpireSay.textContent = a.say || '';
   els.umpireBadge.textContent = a.badge || '';
   els.umpireBadge.hidden = !a.badge;
+  renderCards();
+  els.umpireCardBtn.hidden = !(STATE.setup === 'playing' && !STATE.finished && !STATE.pause);
 }
+
+// ─── Karten / Verwarnungen (Phase 2, nur lokal protokolliert) ──────────
+let cardPending = null;
+function cardSymbol(color) { return color === 'yellow' ? '🟨' : color === 'red' ? '🟥' : '⬛'; }
+function ensureCardsLoaded() {
+  if (!STATE.match) { cardsMatchId = null; return; }
+  if (cardsMatchId === STATE.match.matchId) return;
+  cardsMatchId = STATE.match.matchId;
+  try {
+    const obj = JSON.parse(localStorage.getItem(CARDS_KEY) || 'null');
+    STATE.cards = (obj && obj.matchId === STATE.match.matchId && Array.isArray(obj.cards)) ? obj.cards : [];
+  } catch { STATE.cards = []; }
+}
+function saveCards() {
+  try {
+    localStorage.setItem(CARDS_KEY, JSON.stringify({
+      matchId: STATE.match ? STATE.match.matchId : null, cards: STATE.cards,
+    }));
+  } catch { /* quota */ }
+}
+function renderCards() {
+  ensureCardsLoaded();
+  els.umpireCards.textContent = '';
+  STATE.cards.forEach(c => {
+    const chip = document.createElement('span');
+    chip.className = 'card-chip';
+    chip.textContent = `${cardSymbol(c.color)} ${c.name}`;
+    els.umpireCards.appendChild(chip);
+  });
+}
+function openCardModal() {
+  if (!STATE.match || STATE.setup !== 'playing' || STATE.finished || STATE.pause) return;
+  els.cardPlayerList.textContent = '';
+  const sideLabel = (teamKey) =>
+    !STATE.teamOnSide ? '' : (STATE.teamOnSide[teamKey] === 'left' ? 'links' : 'rechts');
+  ['a', 'b'].forEach(teamKey => {
+    const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
+    arr.forEach((p, index) => {
+      const b = document.createElement('div');
+      b.className = 'opt';
+      b.textContent = `${p.name} (${sideLabel(teamKey)})`;
+      b.addEventListener('click', () => {
+        cardPending = { teamKey, index, name: p.name };
+        els.cardPlayerName.textContent = p.name;
+        els.cardPlayerView.hidden = true;
+        els.cardColorView.hidden = false;
+      });
+      els.cardPlayerList.appendChild(b);
+    });
+  });
+  els.cardPlayerView.hidden = false;
+  els.cardColorView.hidden = true;
+  els.cardModal.classList.add('visible');
+}
+function closeCardModal() {
+  els.cardModal.classList.remove('visible');
+  cardPending = null;
+}
+function applyCard(color) {
+  if (!cardPending || !STATE.match || STATE.setup !== 'playing' || STATE.finished || STATE.pause) {
+    closeCardModal();
+    return;
+  }
+  const { teamKey, index, name } = cardPending;
+  closeCardModal();
+  // Rote Karte: der Gegner bekommt einen Punkt (zählt als regulärer Punkt,
+  // inkl. Aufschlag-Update / ggf. Satz-/Matchende über addPointOnSide).
+  if (color === 'red') {
+    const oppTeam = teamKey === 'a' ? 'b' : 'a';
+    const oppSide = STATE.teamOnSide ? STATE.teamOnSide[oppTeam] : null;
+    if (oppSide) addPointOnSide(oppSide);
+  }
+  const stand = umpScoreSpoken();
+  const txt = color === 'yellow'
+    ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
+    : color === 'red'
+      ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
+      : `${name}, disqualifiziert.`;
+  STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });
+  saveCards();
+  STATE.lastEvent = { type: 'card', color, say: txt };
+  tlog('info', 'umpire_card', { name, color });
+  render();
+}
+
+els.umpireCardBtn.addEventListener('click', openCardModal);
+els.cardCancel.addEventListener('click', closeCardModal);
+els.cardBack.addEventListener('click', () => {
+  els.cardColorView.hidden = true;
+  els.cardPlayerView.hidden = false;
+});
+els.cardYellow.addEventListener('click', () => applyCard('yellow'));
+els.cardRed.addEventListener('click', () => applyCard('red'));
+els.cardBlack.addEventListener('click', () => applyCard('black'));
 
 function toggleUmpireMode() {
   STATE.umpireMode = !STATE.umpireMode;
