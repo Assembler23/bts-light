@@ -372,6 +372,13 @@
       font-variant-numeric: tabular-nums; color: #f8fafc;
     }
     .break-hint { font-size: .85rem; opacity: .55; max-width: 22rem; }
+    /* Schiri-Ansage in der Pausen-Überlagerung (Satzende/„Bitte spielen" …). */
+    .break-umpire {
+      max-width: 42rem; font-size: 1.4rem; font-weight: 700; line-height: 1.3;
+      color: #e2e8f0; background: #0f172a; border: 2px solid #1e3a8a;
+      border-radius: .75rem; padding: .7rem 1.1rem;
+    }
+    .break-umpire[hidden] { display: none; }
 
     /* ─── Belegt-/Gesperrt-Overlay (Tablet-Übernahme) ────────────────── */
     .lock-overlay {
@@ -586,6 +593,8 @@
 <!-- Pausen-Overlay: offizielle BWF-Intervalle mit Countdown -->
 <div class="break-overlay" id="break-overlay">
   <div class="break-title" id="break-title"></div>
+  <!-- Schiri-Modus: Ansage zum Vorlesen, auch während der Pause sichtbar. -->
+  <div class="break-umpire" id="break-umpire" hidden></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
   <button class="primary" id="break-skip">Weiterspielen</button>
   <button id="break-correct" style="display:none">
@@ -860,6 +869,7 @@ const els = {
   reopenBtn: document.getElementById('reopen-btn'),
   breakOverlay: document.getElementById('break-overlay'),
   breakTitle: document.getElementById('break-title'),
+  breakUmpire: document.getElementById('break-umpire'),
   breakCountdown: document.getElementById('break-countdown'),
   breakSkip: document.getElementById('break-skip'),
   breakCorrect: document.getElementById('break-correct'),
@@ -1228,6 +1238,15 @@ function renderBreak() {
   // ab und nimmt den auslösenden Punkt zurück (z. B. Ball wiederholen).
   els.breakCorrect.style.display =
     (STATE.pause.kind !== 'injury' && STATE.history.length > 0) ? '' : 'none';
+  // Schiri-Modus: den Ansagetext (z. B. „Satz. Den ersten Satz gewinnt … Bitte
+  // die Seiten wechseln.") auch in der Pausen-Überlagerung zeigen – sonst
+  // verdecken Countdown/Buttons die Ansage-Leiste darunter.
+  if (STATE.umpireMode) {
+    els.breakUmpire.textContent = umpAnnouncement().say || '';
+    els.breakUmpire.hidden = !els.breakUmpire.textContent;
+  } else {
+    els.breakUmpire.hidden = true;
+  }
   els.breakOverlay.classList.add('visible');
 }
 

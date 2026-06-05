@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.71
+
+- **Schiri-Modus: Ansage in der Pause lesbar.** Beim Satzende verdeckten
+  Countdown + „Weiterspielen/Korrektur"-Buttons der Pausen-Überlagerung die
+  Ansage-Leiste. Im Schiri-Modus steht der Ansagetext (z. B. „Satz. Den ersten
+  Satz gewinnt … Bitte die Seiten wechseln.") jetzt **direkt auf der Pausen-
+  Überlagerung** – gut lesbar zum Vorlesen.
+
 ## v0.9.70
 
 - **Fix: Tablet zeigte nach Reconnect ein bereits entferntes Spiel.** Wurde ein
