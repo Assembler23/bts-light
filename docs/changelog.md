@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.72
+
+- **Schiri-Modus: Spielende-Ansage lesbar.** Wie bei der Satzpause (v0.9.71)
+  verdeckte am Match-Ende die „beendet"-Überlagerung (Sieger + Übermitteln/
+  Wieder-öffnen) die Ansage-Leiste. Im Schiri-Modus steht die Spielende-Ansage
+  („Spiel. Das Spiel gewinnt … {Satzstände}.") jetzt **direkt auf der beendet-
+  Überlagerung**.
+
 ## v0.9.71
 
 - **Schiri-Modus: Ansage in der Pause lesbar.** Beim Satzende verdeckten

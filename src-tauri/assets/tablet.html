@@ -578,6 +578,8 @@
 <div class="match-finished-overlay" id="finished-overlay">
   <div class="winner-banner" id="winner-banner"></div>
   <div class="set-summary" id="set-summary"></div>
+  <!-- Schiri-Modus: Spielende-Ansage zum Vorlesen, auch hier lesbar. -->
+  <div class="break-umpire" id="finished-umpire" hidden></div>
   <div class="retire-pick" id="retire-pick" style="display:none">
     <div class="retire-pick-label">Aufgabe — wer gewinnt das Match?</div>
     <div class="retire-options">
@@ -862,6 +864,7 @@ const els = {
   setupScorekeeper: document.getElementById('setup-scorekeeper'),
   setupBack: document.getElementById('setup-back'),
   finishedOverlay: document.getElementById('finished-overlay'),
+  finishedUmpire: document.getElementById('finished-umpire'),
   winnerBanner: document.getElementById('winner-banner'),
   setSummary: document.getElementById('set-summary'),
   submitStatus: document.getElementById('submit-status'),
@@ -2139,6 +2142,14 @@ function render() {
       els.retirePick.style.display = 'none';
     }
     els.setSummary.textContent = STATE.setsCompleted.map(s => `${s.left}:${s.right}`).join(' · ');
+    // Schiri-Modus: Spielende-Ansage auch auf der beendet-Überlagerung zeigen
+    // (sonst verdeckt sie die Ansage-Leiste darunter).
+    if (STATE.umpireMode) {
+      els.finishedUmpire.textContent = umpMatchEndSpoken();
+      els.finishedUmpire.hidden = !els.finishedUmpire.textContent;
+    } else {
+      els.finishedUmpire.hidden = true;
+    }
     els.finishedOverlay.classList.add('visible');
     const needWinner = STATE.retired && !STATE.retiredWinner;
     if (STATE.submittedOk) {
