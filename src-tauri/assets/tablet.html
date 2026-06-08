@@ -2570,10 +2570,14 @@ const diagLog = document.getElementById('diag-log');
 const diagMeta = document.getElementById('diag-meta');
 let diagTapCount = 0;
 let diagTapTimer = null;
-els.connDot.addEventListener('click', () => {
+// Tippfläche = der GANZE Verbindungs-Bereich (Punkt + „verbunden"-Text), nicht
+// nur der winzige Punkt – auf dem Touchscreen sonst kaum zu treffen.
+const diagTapTarget = els.connDot.closest('.conn') || els.connDot;
+diagTapTarget.style.cursor = 'pointer';
+diagTapTarget.addEventListener('click', () => {
   diagTapCount += 1;
   if (diagTapTimer) clearTimeout(diagTapTimer);
-  diagTapTimer = setTimeout(() => { diagTapCount = 0; }, 1500);
+  diagTapTimer = setTimeout(() => { diagTapCount = 0; }, 2000);
   if (diagTapCount >= 5) {
     diagTapCount = 0;
     openDiagModal();
@@ -2590,6 +2594,27 @@ function openDiagModal() {
   diagLog.textContent = formatLog();
   diagModal.style.display = 'flex';
 }
+
+// Tablet-Log an den bts-light-Server schicken (LAN), der es lokal ablegt und –
+// wenn online – an die badhub-Cloud weiterleitet. Scheitert still (z. B. ohne
+// Server-Route im Cloud-Modus). Alle 5 min + beim Schließen/Schlafen des Tabs.
+function uploadTabletLog() {
+  try {
+    const body = `Tablet ${COURT_LABEL}\nUA: ${navigator.userAgent}\nGeneriert: ${new Date().toISOString()}\n\n${formatLog()}\n`;
+    fetch(BASE_PATH + '/tablet-log?court=' + encodeURIComponent(COURT_ID), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body,
+      keepalive: true,
+    }).catch(() => { /* offline/keine Route → egal */ });
+  } catch { /* ignore */ }
+}
+setInterval(uploadTabletLog, 5 * 60 * 1000);
+setTimeout(uploadTabletLog, 30 * 1000); // einmal kurz nach dem Start
+window.addEventListener('pagehide', uploadTabletLog);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') uploadTabletLog();
+});
 document.getElementById('diag-close').addEventListener('click', () => {
   diagModal.style.display = 'none';
 });
