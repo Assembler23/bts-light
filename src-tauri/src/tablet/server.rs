@@ -60,6 +60,9 @@ pub struct ServerCtx {
     /// Pfad zur Monitor-Zuweisungsdatei (Gerät → CourtID). Wird frisch
     /// gelesen, damit Zuweisungen aus dem Tool sofort greifen.
     pub assignments_path: PathBuf,
+    /// App-Log-Verzeichnis (wie „Logs öffnen"). Hierhin schreibt der Server die
+    /// von den Tablets hochgeladenen Diagnoselogs (Unterordner `tablet-logs`).
+    pub log_dir: PathBuf,
 }
 
 impl ServerCtx {
@@ -70,6 +73,7 @@ impl ServerCtx {
         monitor_dir: PathBuf,
         config_path: PathBuf,
         assignments_path: PathBuf,
+        log_dir: PathBuf,
     ) -> Self {
         Self {
             tablet,
@@ -79,6 +83,7 @@ impl ServerCtx {
             monitor_dir,
             config_path,
             assignments_path,
+            log_dir,
         }
     }
 
@@ -131,6 +136,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/combo", get(combo_page))
         .route("/combo/state", get(combo_state))
         .route("/result", post(result))
+        .route("/tablet-log", post(tablet_log))
         .route("/ws", get(ws_upgrade))
         .with_state(ctx);
 
@@ -234,6 +240,56 @@ async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::Value::Array(items)),
     )
+}
+
+/// Fester (verbandsweiter) Token zum Weiterleiten der Tablet-Logs an badhub –
+/// derselbe wie Diagnose-/Pi-Log. Nicht geheim (Bedien-Token, nicht-PII-Daten).
+const TABLET_LOG_TOKEN: &str = "d896d5c45f1dfe72d324be2da0dcc8031e447809f9a3c1ce";
+
+#[derive(serde::Deserialize)]
+struct TabletLogQuery {
+    #[serde(default)]
+    court: i64,
+}
+
+/// Nimmt das Diagnoselog eines Zähltablets entgegen (LAN, ohne Auth wie die
+/// anderen Hallen-Routen): legt es lokal unter `<log_dir>/tablet-logs/court-<id>.log`
+/// ab (über „Logs öffnen" greifbar) UND leitet es – sofern Internet da ist – an
+/// die badhub-Cloud weiter (fire-and-forget, scheitert still ohne Uplink).
+async fn tablet_log(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<TabletLogQuery>,
+    body: String,
+) -> impl IntoResponse {
+    if body.len() > 2 * 1024 * 1024 {
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    }
+    let court_id = q.court;
+    // 1) Lokal beim Turnier-PC ablegen (auch offline verfügbar).
+    let dir = ctx.log_dir.join("tablet-logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join(format!("court-{court_id}.log")), &body);
+    // 2) An die Cloud weiterleiten – Geräte-ID inkl. install_id, damit sich
+    //    verschiedene PCs/Turniere nicht gegenseitig überschreiben.
+    let install = ctx.app_config().install_id;
+    let device_id = if install.is_empty() {
+        format!("court-{court_id}")
+    } else {
+        format!("{install}-court-{court_id}")
+    };
+    let http = ctx.http.clone();
+    tokio::spawn(async move {
+        let _ = http
+            .post("https://badhub.de/api/tablet_log.php")
+            .bearer_auth(TABLET_LOG_TOKEN)
+            .header("X-Device-Id", device_id)
+            .header(header::CONTENT_TYPE, "text/plain")
+            .timeout(std::time::Duration::from_secs(8))
+            .body(body)
+            .send()
+            .await;
+    });
+    StatusCode::OK
 }
 
 /// Löst die CourtID auf ihre Anzeige-Bezeichnung auf. Bei Mehr-Hallen-

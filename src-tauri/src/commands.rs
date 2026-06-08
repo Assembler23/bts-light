@@ -238,6 +238,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let _ = std::fs::create_dir_all(&monitor_dir);
     let cfg_path = config_path(&app);
     let assignments_path = monitor_assignments_path(&app);
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
         tablet,
         config,
@@ -245,6 +249,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         monitor_dir,
         cfg_path,
         assignments_path,
+        log_dir,
     ));
     // LAN und Cloud sind unabhängig voneinander schaltbar – im
     // Doppelmodus (`LanAndCloud`) laufen beide Wege für dieselbe
