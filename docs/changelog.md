@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.73
+
+- **Tablet-Diagnoselog wird gesammelt (PC + Cloud).** Tablets schicken ihr Log
+  (Verbindung, Match, Punkte, Karten, Reconnects) alle ~5 min an den bts-light-
+  Server → liegt beim Turnier-PC unter „Logs öffnen" als
+  `tablet-logs/court-N.log` (auch **offline**). Hat der PC Internet, wird es
+  zusätzlich an die badhub-Cloud weitergeleitet (`api/tablet_log.php`) → fern
+  auswertbar. **5×-Tap-Diagnose** triggert zuverlässiger (ganzer Verbindungs-
+  Bereich tippbar statt nur der winzige Punkt). (Cloud-Modus-Tablet: Server-Empfang
+  über den Relay folgt noch.)
+
 ## v0.9.72
 
 - **Schiri-Modus: Spielende-Ansage lesbar.** Wie bei der Satzpause (v0.9.71)
