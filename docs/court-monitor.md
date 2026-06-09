@@ -290,6 +290,12 @@ Beide Seiten verstehen zwei URL-Parameter:
 > öffentlichen Online-Liveticker, die lokale Gesamt-Übersicht und (ab 2 Hallen)
 > je Halle einen `?halle=`-Link zum Kopieren auf den Hallen-TV. „Öffnen" zeigt
 > die Vorschau am PC.
+>
+> **Pi direkt einer Halle zuweisen:** Im Zuweisungs-Dropdown eines Geräts
+> stehen ab 2 Hallen unter „Informationen" automatisch „Court-Übersicht – alle
+> Hallen" **und** je Halle „Court-Übersicht – Halle X". Wählt man eine Halle,
+> wird der Pi fest auf `…/info/overview?halle=<Halle>` umgeleitet — kein
+> manuelles URL-Eintippen am Pi nötig.
 
 **Mehr-Hallen-Verhalten der Court-Übersicht (ein TV pro Halle ODER ein TV für
 alle):**

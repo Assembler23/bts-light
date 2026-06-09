@@ -226,8 +226,15 @@ pub enum MonitorTarget {
         #[serde(rename = "court_id")]
         court_id: i64,
     },
-    /// Hallen-Übersicht aller Felder (`/info/overview`).
-    InfoOverview,
+    /// Hallen-Übersicht (`/info/overview`). `hall = Some(name)` bindet den
+    /// Monitor fest an eine Halle (`?halle=…`, ein Pi je Halle); `None` =
+    /// alle Hallen (rotiert bei mehreren). `skip_serializing_if` hält die
+    /// JSON-Form bei `None` exakt wie früher (`{"kind":"info_overview"}`) →
+    /// alte gespeicherte Zuweisungen bleiben lesbar.
+    InfoOverview {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hall: Option<String>,
+    },
     /// Spiele-in-Vorbereitung-Liste (`/info/preparation`).
     InfoPreparation,
     /// Werbung: alle hinterlegten Werbebilder rotierend.
@@ -273,7 +280,10 @@ impl MonitorTarget {
     pub fn redirect_path(&self) -> Option<String> {
         match self {
             Self::Court { .. } => None,
-            Self::InfoOverview => Some("/info/overview".to_string()),
+            Self::InfoOverview { hall } => Some(match hall {
+                Some(h) => format!("/info/overview?halle={}", url_encode(h)),
+                None => "/info/overview".to_string(),
+            }),
             Self::InfoPreparation => Some("/info/preparation".to_string()),
             Self::AdRotation => Some("/info/ad?mode=rotation".to_string()),
             Self::AdSingle { file } => {
@@ -298,7 +308,7 @@ impl MonitorTarget {
     pub fn kind_str(&self) -> &'static str {
         match self {
             Self::Court { .. } => "court",
-            Self::InfoOverview => "info_overview",
+            Self::InfoOverview { .. } => "info_overview",
             Self::InfoPreparation => "info_preparation",
             Self::AdRotation => "ad_rotation",
             Self::AdSingle { .. } => "ad_single",
@@ -1077,6 +1087,34 @@ mod tests {
                 third_call_minutes: 4.0,
             },
         });
+    }
+
+    #[test]
+    fn info_overview_redirect_carries_hall_filter() {
+        // Ohne Halle: alte Form, unveränderter Pfad.
+        assert_eq!(
+            MonitorTarget::InfoOverview { hall: None }.redirect_path(),
+            Some("/info/overview".to_string())
+        );
+        // Mit Halle: ?halle= mit URL-kodiertem Namen (Leerzeichen → %20).
+        assert_eq!(
+            MonitorTarget::InfoOverview {
+                hall: Some("Halle 1".to_string())
+            }
+            .redirect_path(),
+            Some("/info/overview?halle=Halle%201".to_string())
+        );
+    }
+
+    #[test]
+    fn info_overview_without_hall_serializes_like_before() {
+        // Abwärtskompatibilität: hall=None darf KEIN hall-Feld schreiben, damit
+        // alte gespeicherte Zuweisungen ({"kind":"info_overview"}) gleich bleiben.
+        let json = serde_json::to_string(&MonitorTarget::InfoOverview { hall: None }).unwrap();
+        assert_eq!(json, r#"{"kind":"info_overview"}"#);
+        // Und eine alte gespeicherte Zuweisung lädt weiterhin (hall = None).
+        let back: MonitorTarget = serde_json::from_str(r#"{"kind":"info_overview"}"#).unwrap();
+        assert_eq!(back, MonitorTarget::InfoOverview { hall: None });
     }
 
     #[test]
