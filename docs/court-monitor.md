@@ -266,7 +266,7 @@ badhub.de.
 
 | URL | Was es zeigt |
 |---|---|
-| `http://bts-light.local:8088/info/overview` | **Court-Übersicht** — alle Felder mit Status („frei" / „läuft" / „Behandlung" / „TL"), aktuellem Spiel, Paarung und Sätzen. Bei Mehr-Hallen-Turnieren je Halle ein Abschnitt mit Überschrift. |
+| `http://bts-light.local:8088/info/overview` | **Court-Übersicht** — alle Felder mit Status („frei" / „läuft" / „Behandlung" / „TL"), aktuellem Spiel, Paarung und Sätzen. Bei Doppeln stehen die zwei Partner untereinander (wie der badhub-Hallen-Monitor). Bei Mehr-Hallen-Turnieren ohne `?halle=` **rotiert** die Anzeige automatisch durch die Hallen (jede einzeln im Vollbild). |
 | `http://bts-light.local:8088/info/preparation` | **In Vorbereitung** — Liste der gerufenen und eingeplanten Spiele; aufgerufene mit gold-Pille „In Vorbereitung", Halle und „vor X Min." hervorgehoben. |
 
 Beide Seiten verstehen zwei URL-Parameter:
@@ -281,12 +281,25 @@ Beide Seiten verstehen zwei URL-Parameter:
   gesamte Anzeige per CSS-Transform im Browser. Pi-OS-seitig keine
   Änderung nötig (kein `xrandr`, kein `display_rotate=` in config.txt).
   `0` oder weggelassen = normal.
+- **`?hallSeconds=<n>`** — nur Court-Übersicht: Intervall der **Hallen-
+  Auto-Rotation** in Sekunden (Default 12, min 3). Greift nur, wenn mehrere
+  Hallen erkannt werden und **kein** `?halle=` gesetzt ist.
+
+**Mehr-Hallen-Verhalten der Court-Übersicht (ein TV pro Halle ODER ein TV für
+alle):**
+
+- **Fester TV pro Halle:** `…/info/overview?halle=Halle%201` → zeigt dauerhaft
+  nur diese Halle im Vollbild (bei 12 Feldern ein 4×3-Raster). Empfohlen, wenn
+  pro Halle ein Display vorhanden ist.
+- **Ein TV für mehrere Hallen:** `…/info/overview` (ohne `?halle=`) → erkennt
+  mehrere Hallen und **wechselt automatisch** durch sie (Halle 1 Vollbild →
+  nach `hallSeconds` Halle 2 → …). Der Kopf zeigt den Hallennamen + „1 / N".
 
 Beispiele:
 
 - Eingangs-TV Halle 1 im Pivot: `…/info/preparation?halle=Halle%201&rotate=90`
-- TL-Tisch-Monitor mit Gesamtübersicht: `…/info/overview`
-- Bestimmte Halle als reines Court-Display: `…/info/overview?halle=Halle%202`
+- Fester Court-TV Halle 2: `…/info/overview?halle=Halle%202`
+- Ein TV, alle Hallen im 20-Sek-Wechsel: `…/info/overview?hallSeconds=20`
 
 Eingerichtet wird das nach dem Pi-Standardablauf
 ([pi-setup.md](pi-setup.md)) — nur die `bts-monitor-url.txt` auf der

@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.80
+
+- **Court-Übersicht: Auto-Rotation bei mehreren Hallen.** Erkennt der Monitor
+  mehrere Hallen und ist **kein** `?halle=` gesetzt, zeigt er jede Halle
+  nacheinander **im Vollbild** (statt alle gestapelt zu quetschen) — Kopf mit
+  Hallenname + „1 / N", Intervall via `?hallSeconds=<n>` (Default 12). Mit
+  `?halle=<Name>` bleibt ein Monitor fest bei einer Halle (empfohlen bei 12
+  Feldern/Halle → ein TV pro Halle, 4×3-Raster). Doku: court-monitor.md.
+
 ## v0.9.79
 
 - **Court-Übersicht: Doppel-Darstellung wie der Hallen-Monitor.** Bei Doppeln
