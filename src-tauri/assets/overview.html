@@ -54,10 +54,18 @@ main {
   display: flex; flex-direction: column; gap: 1vh;
   flex: 1 1 auto; min-height: 0;
 }
+.hall__head {
+  display: flex; align-items: baseline; gap: 1.5vw;
+  padding: 0 0 .4vh 0; border-bottom: .2vh solid #334155; flex: 0 0 auto;
+}
 .hall h2 {
   font-size: 3.2vmin; font-weight: 800; color: #fbbf24;
-  margin: 0; padding: 0 0 .4vh 0; border-bottom: .2vh solid #334155;
-  letter-spacing: .04em; text-transform: uppercase; flex: 0 0 auto;
+  margin: 0; letter-spacing: .04em; text-transform: uppercase;
+}
+/* Zyklus-Anzeige „1 / 3" bei der Hallen-Rotation. */
+.hall__idx {
+  margin-left: auto; font-size: 2.6vmin; font-weight: 700; color: #94a3b8;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Court-Grid: Spaltenzahl wird per JS gesetzt (dynamisch nach Feldzahl),
@@ -184,11 +192,22 @@ main {
   var deviceId = (params.get('device') || '').trim();
 
   // Hallen-Filter: ?halle=<Name> — wie bei badhub/live, zeigt nur Felder
-  // dieser Halle. Vergleich getrimmt + case-insensitiv.
+  // dieser Halle. Vergleich getrimmt + case-insensitiv. Ist er gesetzt, zeigt
+  // dieser Monitor fest genau diese Halle (keine Rotation).
   var hallFilter = (params.get('halle') || '').trim();
   function hallKey(name) {
     return (name == null ? '' : String(name)).trim().toLowerCase();
   }
+
+  // Auto-Rotation: erkennt der Monitor MEHRERE Hallen und ist KEIN ?halle=
+  // gesetzt, zeigt er jede Halle nacheinander im Vollbild (statt alle
+  // gestapelt zu quetschen). Intervall via ?hallSeconds=<n> (Default 12,
+  // min 3). Eigener Param – nicht der Pivot-`rotate` oben.
+  var hallSeconds = parseInt(params.get('hallSeconds'), 10);
+  if (!hallSeconds || hallSeconds < 3) hallSeconds = 12;
+  var lastData = null; // letzte Daten, damit der Rotations-Timer neu rendern kann
+  var hallIdx = 0; // aktuell gezeigte Halle (Index in der Hallen-Liste)
+  var hallTimer = null;
 
   // Anzeige-Cap bei sehr großen Turnieren (sollte nicht greifen, dient
   // nur als Sicherheit gegen pathologische Daten).
@@ -312,7 +331,41 @@ main {
     return idle;
   }
 
+  // Court-Grid einer Halle (dynamische Spaltenzahl).
+  function buildGrid(g) {
+    var grid = h('div', 'courts');
+    // Dynamische Spaltenzahl: wenige Felder → wenige Spalten → grosse Kacheln,
+    // die (zusammen mit grid-auto-rows:minmax(0,1fr)) den Schirm füllen.
+    grid.style.gridTemplateColumns = 'repeat(' + gridColsFor(g.courts.length) + ', 1fr)';
+    g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
+    return grid;
+  }
+
+  // Eine Halle als Vollbild-Section: Kopf (Name [+ Zyklus „1 / N"]) + Grid.
+  function renderHallSection(g, idx, total) {
+    var section = h('section', 'hall');
+    var head = h('div', 'hall__head');
+    head.appendChild(h('h2', null, g.name || 'Halle'));
+    if (total > 1) head.appendChild(h('span', 'hall__idx', (idx + 1) + ' / ' + total));
+    section.appendChild(head);
+    section.appendChild(buildGrid(g));
+    return section;
+  }
+
+  function stopHallRotation() {
+    if (hallTimer) { clearInterval(hallTimer); hallTimer = null; }
+    hallIdx = 0;
+  }
+  function startHallRotation() {
+    if (hallTimer) return; // läuft bereits
+    hallTimer = setInterval(function () {
+      hallIdx += 1; // render() nimmt modulo der aktuellen Hallenzahl
+      render(lastData);
+    }, hallSeconds * 1000);
+  }
+
   function render(data) {
+    lastData = data;
     var board = document.getElementById('board');
     board.textContent = '';
 
@@ -326,28 +379,28 @@ main {
     }
 
     if (courts.length === 0) {
+      stopHallRotation();
       board.appendChild(renderIdle('Noch keine Felder aktiv. Sobald der Liveticker läuft, erscheinen sie hier.'));
       return;
     }
 
     var groups = groupByHall(courts);
-    // Bei mehreren Hallen je Halle eine Section; bei einer Halle nur das Court-Grid.
-    var multiHall = groups.filter(function (g) { return g.name; }).length >= 2;
+    // Mehrere benannte Hallen UND kein fester ?halle=-Filter → Auto-Rotation:
+    // immer nur EINE Halle im Vollbild, zyklisch durchgewechselt.
+    var rotating = !hallFilter && groups.filter(function (g) { return g.name; }).length >= 2;
 
+    if (rotating) {
+      var idx = hallIdx % groups.length;
+      board.appendChild(renderHallSection(groups[idx], idx, groups.length));
+      startHallRotation();
+      return;
+    }
+
+    // Eine (ggf. gefilterte) Halle im Vollbild. Hat sie einen Namen, zeigt der
+    // Kopf ihn an (bestätigt bei ?halle= die richtige Halle); sonst nur Grid.
+    stopHallRotation();
     groups.forEach(function (g) {
-      var grid = h('div', 'courts');
-      // Dynamische Spaltenzahl: wenige Felder → wenige Spalten → grosse
-      // Kacheln, die (zusammen mit grid-auto-rows:1fr) den Schirm füllen.
-      grid.style.gridTemplateColumns = 'repeat(' + gridColsFor(g.courts.length) + ', 1fr)';
-      g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
-      if (multiHall) {
-        var section = h('section', 'hall');
-        if (g.name) section.appendChild(h('h2', null, g.name));
-        section.appendChild(grid);
-        board.appendChild(section);
-      } else {
-        board.appendChild(grid);
-      }
+      board.appendChild(g.name ? renderHallSection(g, 0, 1) : buildGrid(g));
     });
   }
 
