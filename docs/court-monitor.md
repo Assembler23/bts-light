@@ -47,10 +47,14 @@ eigenständige HTML/CSS/JS-Datei, read-only Geschwister von `tablet.html`.
 ## Geräte-Modus & TV-Verwaltung
 
 Monitore sind **generische Geräte**: Jeder Raspberry Pi öffnet *dieselbe*
-Adresse (`…/monitor`) und vergibt sich beim ersten Start eine eigene,
-dauerhafte Geräte-ID (im `localStorage`). Solange ihm kein Feld
-zugewiesen ist, zeigt der TV groß einen **Kopplungs-Code** (die ersten
-vier Zeichen der ID).
+Adresse (`…/monitor`). Pi-Monitore melden sich mit ihrer CPU-Seriennummer
+(`device=pi-<serial>`); ohne `?device` vergibt sich die Seite beim ersten
+Start eine eigene, dauerhafte Geräte-ID (im `localStorage`). Solange dem
+Gerät kein Feld zugewiesen ist, zeigt der TV groß einen **Kopplungs-Code**
+(die **letzten** vier alphanumerischen Zeichen der ID). Bewusst das Ende:
+alle Pi-Serials beginnen mit demselben Präfix (`00000000…`), die ersten
+vier Zeichen wären sonst für jeden Pi gleich („PI00") und nicht
+unterscheidbar.
 
 Im Tool führt die Seite **„Court-Monitore"** (Dashboard → Court-Monitore)
 alle Geräte auf, die sich gemeldet haben:
