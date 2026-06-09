@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   FolderOpen,
   ListOrdered,
@@ -7,7 +7,7 @@ import {
   Radio,
   RefreshCw,
 } from "lucide-react";
-import { openLiveView, openLogDir } from "../api";
+import { openExternal, openLiveView, openLogDir, tabletOverview } from "../api";
 import { useUpdate } from "../components/UpdateBanner";
 import type { AppConfig, SyncStatus } from "../types";
 
@@ -58,6 +58,40 @@ function ActionButton(props: {
 export function Dashboard({ config, status }: Props) {
   const { phase: updatePhase, checkNow } = useUpdate();
   const [updateChecked, setUpdateChecked] = useState(false);
+  // Hallen erst NACH dem Start bekannt (dann steht die BTP-Verbindung und
+  // die Felder/Hallen aus der Turnierdatei). Bei ≥2 Hallen blenden wir je
+  // Halle einen lokalen Hallen-Monitor-Button ein.
+  const running = status?.running ?? false;
+  const [halls, setHalls] = useState<string[]>([]);
+  useEffect(() => {
+    if (!running) {
+      setHalls([]);
+      return;
+    }
+    let active = true;
+    const load = () => {
+      tabletOverview()
+        .then((info) => {
+          if (!active) return;
+          setHalls(
+            [
+              ...new Set(
+                (info.courts ?? [])
+                  .map((c) => c.location)
+                  .filter((l) => l !== ""),
+              ),
+            ].sort((a, b) => a.localeCompare(b, "de")),
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 20000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [running]);
 
   async function handleCheckUpdate() {
     setUpdateChecked(true);
@@ -119,21 +153,66 @@ export function Dashboard({ config, status }: Props) {
               icon={Radio}
               label="Liveticker"
               onClick={() => openLiveView(null)}
-              title="Öffentliche Liveticker-Seite im Browser öffnen"
+              disabled={!running}
+              title={
+                running
+                  ? "Öffentliche Liveticker-Seite im Browser öffnen"
+                  : "Erst nach Start des Livetickers verfügbar"
+              }
             />
             <ActionButton
               icon={Monitor}
               label="Hallen-Monitor"
               onClick={() => openLiveView("monitor")}
-              title="Großbild-Ansicht für einen Hallen-Monitor"
+              disabled={!running}
+              title={
+                running
+                  ? "Großbild-Ansicht für einen Hallen-Monitor (online)"
+                  : "Erst nach Start des Livetickers verfügbar"
+              }
             />
             <ActionButton
               icon={ListOrdered}
               label="Nächste Spiele"
               onClick={() => openLiveView("next")}
-              title="Aufruf-Anzeige der als Nächstes anstehenden Spiele"
+              disabled={!running}
+              title={
+                running
+                  ? "Aufruf-Anzeige der als Nächstes anstehenden Spiele"
+                  : "Erst nach Start des Livetickers verfügbar"
+              }
             />
           </div>
+          {!running && (
+            <p className="text-xs text-slate-400">
+              Verfügbar, sobald der Liveticker gestartet ist (dann steht die
+              Verbindung zu BTP).
+            </p>
+          )}
+          {/* Ab 2 Hallen je Halle ein lokaler Hallen-Monitor (Court-Übersicht
+              dieser Halle) – am PC im Browser geöffnet. */}
+          {running && halls.length >= 2 && (
+            <div className="mt-1 flex flex-col gap-1.5">
+              <span className="text-xs text-slate-500">
+                Hallen-Monitor je Halle (lokal):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {halls.map((hall) => (
+                  <ActionButton
+                    key={hall}
+                    icon={Monitor}
+                    label={hall}
+                    onClick={() =>
+                      void openExternal(
+                        `http://localhost:8088/info/overview?halle=${encodeURIComponent(hall)}`,
+                      )
+                    }
+                    title={`Lokale Court-Übersicht für ${hall} im Browser öffnen`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
