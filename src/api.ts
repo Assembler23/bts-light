@@ -11,6 +11,7 @@ import type {
   TabletInfo,
   WalkoverProposal,
   WalkoverResult,
+  WifiStatus,
 } from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
@@ -30,6 +31,9 @@ export const startSync = (): Promise<void> => invoke("start_sync");
 export const stopSync = (): Promise<void> => invoke("stop_sync");
 
 export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
+
+/** Aktuelles WLAN (SSID) des Turnier-PCs für die Kopfzeile. */
+export const wifiStatus = (): Promise<WifiStatus> => invoke("wifi_status");
 
 /** Öffnet die Live-Seite im Browser. display: null | "monitor" | "next". */
 export const openLiveView = (display: string | null): Promise<void> =>

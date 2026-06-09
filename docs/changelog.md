@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.76
+
+- **WLAN-Anzeige in der Kopfzeile.** Neben dem Liveticker-Status zeigt bts-light
+  jetzt, mit welchem **WLAN** der Turnier-PC verbunden ist — **grün**, wenn es
+  das erwartete Netz `btsaccess` ist, sonst neutral mit Klarname (bzw. „Kein
+  WLAN" am LAN-Kabel). So sieht man auf einen Blick, ob der PC im richtigen Netz
+  hängt. SSID wird plattformabhängig ausgelesen (Windows: `netsh`), alle 15 s,
+  mit Deadline gegen hängende WLAN-Dienste.
+
 ## v0.9.75
 
 - **Court-Monitor-Code eindeutig (Pi-„PI00"-Kollision behoben).** Mehrere
