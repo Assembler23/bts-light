@@ -608,16 +608,22 @@ pub fn open_live_view(
         .map_err(|e| e.to_string())
 }
 
-/// Öffnet eine externe `https`-URL im Standardbrowser – für die
-/// Mitwirkenden-Links im Über-Dialog. Erlaubt nur saubere `https`-URLs
-/// (Schema-Prefix, keine Steuerzeichen/Leerzeichen), damit kein
-/// präparierter String an die OS-Shell durchgereicht wird.
+/// Öffnet eine URL im Standardbrowser – für die Mitwirkenden-Links im
+/// Über-Dialog und die Court-Übersicht-Vorschau. Erlaubt nur:
+/// - saubere `https://`-URLs (externe Links, z. B. badhub-Liveticker), oder
+/// - die eigene **lokale** Übersicht per `http://` auf Loopback bzw. den
+///   mDNS-Namen `bts-light.local` (Vorschau am Turnier-PC).
+/// Kein anderes Schema und keine Steuerzeichen/Leerzeichen → es wird kein
+/// präparierter String an die OS-Shell durchgereicht.
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    let is_clean_https =
-        url.starts_with("https://") && !url.contains(|c: char| c.is_control() || c == ' ');
-    if !is_clean_https {
-        return Err("Nur reguläre https-Links sind erlaubt.".to_string());
+    let has_bad_chars = url.contains(|c: char| c.is_control() || c == ' ');
+    let is_https = url.starts_with("https://");
+    let is_local_http = url.starts_with("http://localhost:")
+        || url.starts_with("http://127.0.0.1:")
+        || url.starts_with("http://bts-light.local:");
+    if has_bad_chars || !(is_https || is_local_http) {
+        return Err("Nur https- oder lokale bts-light-Links sind erlaubt.".to_string());
     }
     app.opener()
         .open_url(url, None::<String>)

@@ -3,9 +3,12 @@ import {
   Check,
   Cloud,
   Copy,
+  ExternalLink,
   Eye,
   EyeOff,
+  Globe,
   Info,
+  LayoutGrid,
   RefreshCw,
   Search,
   Tv,
@@ -18,11 +21,13 @@ import {
   listCourtAds,
   monitorCommand,
   monitorDevices,
+  openExternal,
   setMonitorHall,
   tabletOverview,
 } from "../api";
 import { HallFilter } from "../components/HallFilter";
 import type {
+  AppConfig,
   CourtAd,
   CourtOverview,
   MonitorDeviceInfo,
@@ -171,7 +176,7 @@ function groupDevicesForDisplay(
  * Raspberry Pis, darunter die Geräteliste mit Online-Status, Feld-
  * Zuweisung und Fernbefehlen. Pollt im 2-s-Takt.
  */
-export function CourtMonitorPanel() {
+export function CourtMonitorPanel({ config }: { config: AppConfig }) {
   const [devices, setDevices] = useState<MonitorDeviceInfo[]>([]);
   const [info, setInfo] = useState<TabletInfo | null>(null);
   // Werbebild-Liste fuer das "Werbung"-optgroup. Polling im selben Takt
@@ -238,6 +243,21 @@ export function CourtMonitorPanel() {
   const allHalls = [
     ...new Set(courts.map((c) => c.location).filter((l) => l !== "")),
   ].sort((a, b) => a.localeCompare(b, "de"));
+
+  // ── Court-Übersicht (Hallen-Display) ────────────────────────────────────
+  // Online-Ansicht = öffentlicher badhub-Liveticker (übers Internet teilbar),
+  // aus dem konfigurierten Verband (live_url) + display=monitor. Pro-Halle =
+  // lokale bts-light-Übersicht je Halle (?halle=…), für einen TV je Halle.
+  const liveUrl = (config.badhub.live_url || "").trim();
+  const onlineOverviewUrl = liveUrl
+    ? liveUrl + (liveUrl.includes("?") ? "&" : "?") + "display=monitor"
+    : "";
+  const overviewLan = "http://bts-light.local:8088/info/overview";
+  const overviewPreview = "http://localhost:8088/info/overview";
+  const hallOverviewUrl = (hall: string) =>
+    `${overviewLan}?halle=${encodeURIComponent(hall)}`;
+  const hallPreviewUrl = (hall: string) =>
+    `${overviewPreview}?halle=${encodeURIComponent(hall)}`;
   // Bei aktivem Hallen-Filter nur die passende Hallen-Gruppe zeigen.
   const byFilter = (groups: typeof grouped.online) =>
     hallFilter === null ? groups : groups.filter((g) => g.hall === hallFilter);
@@ -343,6 +363,50 @@ export function CourtMonitorPanel() {
             <code className="text-slate-500">{fallbackUrl}</code>
           </p>
         )}
+      </section>
+
+      {/* Court-Übersicht (Hallen-Display): Online-Liveticker + lokale Links,
+          bei mehreren Hallen automatisch je Halle einer. */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Court-Übersicht (Hallen-Display)
+        </h2>
+        <p className="text-xs text-slate-500">
+          {allHalls.length >= 2
+            ? "Pro Halle ein eigener Übersichts-Monitor (lokal). Ohne Hallen-Auswahl wechselt die lokale Übersicht automatisch durch die Hallen. Die Online-Ansicht ist der öffentliche Liveticker."
+            : "Übersicht aller Felder. Die Online-Ansicht ist der öffentliche Liveticker, die lokale Adresse für einen Hallen-TV."}
+        </p>
+        {onlineOverviewUrl && (
+          <OverviewLinkRow
+            label="Online-Ansicht (öffentlich)"
+            kind="online"
+            url={onlineOverviewUrl}
+            openUrl={onlineOverviewUrl}
+          />
+        )}
+        {/* Lokale Gesamt-Übersicht (alle Hallen / rotiert bei mehreren). */}
+        <OverviewLinkRow
+          label={allHalls.length >= 2 ? "Lokal – alle Hallen (rotiert)" : "Lokal – Übersicht"}
+          kind="local"
+          url={overviewLan}
+          openUrl={overviewPreview}
+        />
+        {/* Bei mehreren Hallen automatisch je Halle ein fester Link. */}
+        {allHalls.length >= 2 &&
+          allHalls.map((hall) => (
+            <OverviewLinkRow
+              key={hall}
+              label={`Lokal – ${hall}`}
+              kind="hall"
+              url={hallOverviewUrl(hall)}
+              openUrl={hallPreviewUrl(hall)}
+            />
+          ))}
+        <p className="text-xs text-slate-400">
+          Die angezeigte <code>bts-light.local</code>-Adresse ist für die
+          Hallen-TVs zum Kopieren. „Öffnen" zeigt die Vorschau hier am
+          Turnier-PC (über <code>localhost</code>).
+        </p>
       </section>
 
       {/* Geräteliste */}
@@ -863,6 +927,45 @@ function MonitorAddressRow({
         </span>
       )}
       <code className="min-w-0 flex-1 truncate text-sm">{url}</code>
+      <CopyButton url={url} />
+    </div>
+  );
+}
+
+/**
+ * Eine Zeile der Court-Übersicht-Links: Icon je Art (Online/Lokal/Halle),
+ * Label, die kopierbare Adresse und ein „Öffnen"-Button (Vorschau am PC bzw.
+ * der öffentliche Liveticker im Browser).
+ */
+function OverviewLinkRow({
+  label,
+  kind,
+  url,
+  openUrl,
+}: {
+  label: string;
+  kind: "online" | "local" | "hall";
+  url: string;
+  openUrl: string;
+}) {
+  const Icon = kind === "online" ? Globe : kind === "hall" ? LayoutGrid : Tv;
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+      <Icon size={18} className="shrink-0 text-slate-400" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-xs font-medium text-slate-600">
+          {label}
+        </span>
+        <code className="truncate text-sm text-slate-800">{url}</code>
+      </div>
+      <button
+        onClick={() => void openExternal(openUrl)}
+        title="Im Browser öffnen"
+        className="shrink-0 rounded-md p-1.5 text-slate-400 transition-colors
+                   hover:bg-slate-100 hover:text-slate-700"
+      >
+        <ExternalLink size={16} />
+      </button>
       <CopyButton url={url} />
     </div>
   );

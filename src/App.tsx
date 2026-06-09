@@ -223,7 +223,7 @@ function App() {
           />
         );
       case "monitors":
-        return <CourtMonitorPanel />;
+        return <CourtMonitorPanel config={config} />;
       case "settings":
         // Hinweis: SetupWizard liest seine Felder einmalig aus initialConfig.
         // Das ist sicher, weil `config` nur beim Speichern (onDone) wechselt –
