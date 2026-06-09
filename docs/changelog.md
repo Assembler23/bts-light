@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.79
+
+- **Court-Übersicht: Doppel-Darstellung wie der Hallen-Monitor.** Bei Doppeln
+  stehen die zwei Partner jetzt **untereinander** (je eigene Flaggen-Spalte,
+  volle Namen statt abgeschnitten), Satzstand mittig rechts — vorher quetschten
+  sich beide Namen in eine Zeile und wurden abgeschnitten. Zudem **kein
+  Unten-Überlauf** mehr: das Kachel-Grid teilt die Höhe strikt (`minmax(0,1fr)`)
+  und clippt im Notfall, statt aus dem Bild zu laufen.
+
 ## v0.9.78
 
 - **Kopfzeile zeigt „BTS-Netzwerk" statt nur WLAN.** Die Anzeige sagt jetzt, ob
