@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { getStatus, loadConfig, saveConfig, startSync, stopSync } from "./api";
+import {
+  getStatus,
+  loadConfig,
+  saveConfig,
+  startSync,
+  stopSync,
+  wifiStatus,
+} from "./api";
 import { AlertBanner } from "./components/AlertBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
@@ -13,7 +20,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
-import type { AppConfig, SyncStatus } from "./types";
+import type { AppConfig, SyncStatus, WifiStatus } from "./types";
 
 // "loading"/"wizard" sind Sonderzustände ohne Shell; alles andere sind die
 // über die Seitenleiste erreichbaren Bereiche (NavView).
@@ -71,6 +78,8 @@ function App() {
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocus | undefined>();
   // Live-Status zentral – geteilt von Kopfzeile (Start/Stopp) und Status-Seite.
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  // WLAN des PCs für die Kopfzeile (zeigt, ob er im btsaccess-Netz hängt).
+  const [wifi, setWifi] = useState<WifiStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -104,6 +113,34 @@ function App() {
     };
     tick();
     const id = setInterval(tick, 2000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [view]);
+
+  // WLAN seltener pollen (15 s) – die SSID wechselt selten, und jeder Aufruf
+  // startet auf dem PC einen kurzen netsh-Prozess.
+  useEffect(() => {
+    if (view === "loading" || view === "wizard") return;
+    let active = true;
+    // Überlappende Aufrufe vermeiden: hängt das WLAN-Tool ausnahmsweise, darf
+    // der 15-s-Tick keine weiteren Aufrufe nachschieben.
+    let inflight = false;
+    const tick = () => {
+      if (inflight) return;
+      inflight = true;
+      wifiStatus()
+        .then((w) => {
+          if (active) setWifi(w);
+        })
+        .catch(() => {})
+        .finally(() => {
+          inflight = false;
+        });
+    };
+    tick();
+    const id = setInterval(tick, 15000);
     return () => {
       active = false;
       clearInterval(id);
@@ -218,6 +255,7 @@ function App() {
           current={view}
           config={config}
           status={status}
+          wifi={wifi}
           busy={busy}
           onToggleRun={toggleRun}
           onNavigate={navigate}

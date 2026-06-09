@@ -442,6 +442,110 @@ pub fn get_status(state: State<'_, AppState>) -> SyncStatus {
         .clone()
 }
 
+/// WLAN-Status des Turnier-PCs für die Kopfzeile.
+#[derive(Clone, Serialize)]
+pub struct WifiStatus {
+    /// Mit einem WLAN verbunden?
+    pub connected: bool,
+    /// SSID des verbundenen Netzes (`None` = kein WLAN / nicht ermittelbar,
+    /// z. B. LAN-Kabel oder fehlendes WLAN-Tool).
+    pub ssid: Option<String>,
+}
+
+/// Liefert das aktuell verbundene WLAN (SSID), damit man in der Kopfzeile auf
+/// einen Blick sieht, ob der PC im richtigen Hallen-/Verleih-Netz
+/// (`btsaccess`) hängt. Plattform-spezifisch ausgelesen; schlägt das Auslesen
+/// fehl (kein WLAN-Adapter, LAN-Kabel), ist `ssid = None`.
+#[tauri::command]
+pub fn wifi_status() -> WifiStatus {
+    // current_ssid() startet ein externes Tool (netsh/networksetup/iwgetid).
+    // Hängt der WLAN-Dienst (gestörter Adapter), könnte output() unbegrenzt
+    // blockieren. Deadline drum herum, damit weder ein Tauri-Worker dauerhaft
+    // hängt noch die Kopfzeile auf eine Antwort wartet.
+    let ssid = ssid_with_timeout(Duration::from_secs(3));
+    WifiStatus {
+        connected: ssid.is_some(),
+        ssid,
+    }
+}
+
+/// Ruft `current_ssid()` in einem eigenen Thread auf und gibt nach `timeout`
+/// auf (dann `None`). Ein wirklich hängendes Tool blockiert so höchstens den
+/// abgekoppelten Hilfsthread, nicht den Command.
+fn ssid_with_timeout(timeout: Duration) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(current_ssid());
+    });
+    rx.recv_timeout(timeout).ok().flatten()
+}
+
+/// Parst die SSID aus der Ausgabe von `netsh wlan show interfaces`. Robust
+/// gegen Lokalisierung (das Feld „SSID" bleibt in jeder Sprache so) und gegen
+/// die `BSSID`-Zeile: der Schlüssel muss exakt „SSID" sein. Eigene Funktion,
+/// damit das Parsing unit-testbar ist.
+#[cfg(any(target_os = "windows", test))]
+fn parse_netsh_ssid(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("SSID") {
+            let v = value.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn current_ssid() -> Option<String> {
+    let out = std::process::Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .output()
+        .ok()?;
+    parse_netsh_ssid(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// macOS (nur für die Entwicklung): SSID über `networksetup`.
+#[cfg(target_os = "macos")]
+fn current_ssid() -> Option<String> {
+    let out = std::process::Command::new("networksetup")
+        .args(["-getairportnetwork", "en0"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Erfolg: "Current Wi-Fi Network: <ssid>"; sonst "… not associated …".
+    // strip_prefix statt split_once(':'), damit SSIDs mit ':' nicht abgeschnitten
+    // werden (der feste Präfix selbst enthält keinen Doppelpunkt).
+    let v = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Current Wi-Fi Network:"))?
+        .trim();
+    if v.is_empty() {
+        None
+    } else {
+        Some(v.to_string())
+    }
+}
+
+/// Linux (nur für die Entwicklung): SSID über `iwgetid`.
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn current_ssid() -> Option<String> {
+    let out = std::process::Command::new("iwgetid")
+        .arg("-r")
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
 /// Öffnet die öffentliche Live-Seite im Standard-Browser.
 ///
 /// `display` wählt die Ansicht: `None` = Liveticker, `Some("monitor")` =
@@ -1097,4 +1201,39 @@ pub fn monitor_command(
     };
     state.tablet.set_monitor_command(&device_id, cmd);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_netsh_ssid_reads_ssid_not_bssid() {
+        // Gekürzte, typische netsh-Ausgabe (englisches Windows).
+        let text = "\
+    Name                   : WLAN
+    State                  : connected
+    SSID                   : btsaccess
+    BSSID                  : 00:11:22:33:44:55
+    Signal                 : 92%";
+        assert_eq!(parse_netsh_ssid(text), Some("btsaccess".to_string()));
+    }
+
+    #[test]
+    fn parse_netsh_ssid_handles_german_locale_and_spaces() {
+        // Deutsches Windows: „Status" statt „State"; das Feld „SSID" bleibt.
+        let text = "\
+    Name                   : WLAN
+    Status                 : Verbunden
+    SSID                   : BTS Access 5G
+    BSSID                  : aa:bb:cc:dd:ee:ff";
+        assert_eq!(parse_netsh_ssid(text), Some("BTS Access 5G".to_string()));
+    }
+
+    #[test]
+    fn parse_netsh_ssid_none_when_disconnected() {
+        // Kein verbundenes Interface → keine (nicht-leere) SSID-Zeile.
+        let text = "    Name                   : WLAN\n    State                  : disconnected";
+        assert_eq!(parse_netsh_ssid(text), None);
+    }
 }

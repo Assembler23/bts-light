@@ -2,9 +2,9 @@
 // die Seitenleiste. Der gewählte Bereich wird als `children` im Inhaltsbereich
 // gerendert – ohne Zurück-Button, denn die Navigation ist immer sichtbar.
 import { type ReactNode } from "react";
-import { Play, Square } from "lucide-react";
+import { Play, Square, Wifi, WifiOff } from "lucide-react";
 import { tenantShortLabel } from "../presets";
-import type { AppConfig, SyncStatus } from "../types";
+import type { AppConfig, SyncStatus, WifiStatus } from "../types";
 import { type NavView, type SettingsFocus, SideNav } from "./SideNav";
 
 function dotColor(status: SyncStatus | null): string {
@@ -14,10 +14,50 @@ function dotColor(status: SyncStatus | null): string {
   return "bg-rose-500";
 }
 
+// Erwartetes Hallen-/Verleih-Netz – die SSID wird hervorgehoben, wenn der PC
+// genau dort hängt.
+const EXPECTED_SSID = "btsaccess";
+
+// WLAN-Anzeige für die Kopfzeile: zeigt die SSID; grün, wenn es das erwartete
+// btsaccess-Netz ist, sonst neutral; grau, wenn kein WLAN ermittelt wurde
+// (z. B. LAN-Kabel).
+function WifiIndicator({ wifi }: { wifi: WifiStatus | null }) {
+  if (!wifi || !wifi.connected || !wifi.ssid) {
+    return (
+      <div
+        className="flex items-center gap-1.5 text-slate-400"
+        title="Kein WLAN erkannt (z. B. LAN-Kabel oder kein WLAN-Adapter)"
+      >
+        <WifiOff size={15} />
+        <span className="text-xs">Kein WLAN</span>
+      </div>
+    );
+  }
+  const onExpected = wifi.ssid.toLowerCase() === EXPECTED_SSID;
+  return (
+    <div
+      className={`flex items-center gap-1.5 ${
+        onExpected ? "text-emerald-600" : "text-slate-500"
+      }`}
+      title={
+        onExpected
+          ? `Mit dem Turnier-Netz „${wifi.ssid}" verbunden`
+          : `WLAN: ${wifi.ssid} (erwartet: ${EXPECTED_SSID})`
+      }
+    >
+      <Wifi size={15} />
+      <span className="max-w-[10rem] truncate text-xs font-medium">
+        {wifi.ssid}
+      </span>
+    </div>
+  );
+}
+
 export function AppShell({
   current,
   config,
   status,
+  wifi,
   busy,
   onToggleRun,
   onNavigate,
@@ -26,6 +66,7 @@ export function AppShell({
   current: NavView;
   config: AppConfig;
   status: SyncStatus | null;
+  wifi: WifiStatus | null;
   busy: boolean;
   onToggleRun: () => void;
   onNavigate: (view: NavView, focus?: SettingsFocus) => void;
@@ -58,6 +99,11 @@ export function AppShell({
           <span className="text-sm text-slate-600">
             {running ? "Liveticker aktiv" : "Gestoppt"}
           </span>
+        </div>
+
+        {/* WLAN-Anzeige: hängt der PC im richtigen Netz (btsaccess)? */}
+        <div className="ml-3 border-l border-slate-200 pl-3">
+          <WifiIndicator wifi={wifi} />
         </div>
 
         {/* Start/Stopp – von überall erreichbar. */}

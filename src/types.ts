@@ -148,6 +148,13 @@ export interface SyncStatus {
   updated_at_ms: number;
 }
 
+/** WLAN-Status des Turnier-PCs (Rust: commands::WifiStatus). */
+export interface WifiStatus {
+  connected: boolean;
+  /** SSID des verbundenen Netzes; null = kein WLAN / nicht ermittelbar. */
+  ssid: string | null;
+}
+
 /** Disziplin eines Matches (Rust: btp::model::Discipline). */
 export type Discipline =
   | "mens_singles"

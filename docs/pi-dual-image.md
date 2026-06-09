@@ -125,7 +125,10 @@ Der Pi + Shared-Launcher funktionieren; die Hürden lagen beim **Server-Laptop**
 > ist das Fenster `MONITOR_ONLINE_WINDOW_MS` = 20 s (relay-proto). Der Pi-Kiosk selbst war
 > davon nie betroffen (eigene Hysterese), nur die Admin-Anzeige.
 3. **Server-Laptop muss im `btsaccess`-WLAN** sein (nicht im Heimnetz 192.168.178.*).
-   Sonst sind Pi (192.168.16.*) und Laptop in verschiedenen Subnetzen.
+   Sonst sind Pi (192.168.16.*) und Laptop in verschiedenen Subnetzen. Die
+   bts-light-Kopfzeile zeigt rechts die **aktuelle WLAN-SSID** — grün, wenn es
+   `btsaccess` ist, sonst grau/neutral (bzw. „Kein WLAN" am LAN-Kabel). So sieht
+   man auf einen Blick, ob der Laptop im richtigen Netz hängt.
 4. bts-light muss **gestartet** sein (grüner Punkt „Liveticker aktiv") und im
    **LAN-Modus** (Einstellungen → Tablet-Verbindung → LAN) — sonst läuft weder der
    `:8088`-Server noch die mDNS-Bekanntgabe.
