@@ -39,7 +39,8 @@ import type {
 // <option value="…"> muss ein String sein. Schlüssel:
 //   ""                       → keine Zuweisung
 //   "court:<id>"             → MonitorTarget::Court { court_id }
-//   "info_overview"          → MonitorTarget::InfoOverview
+//   "info_overview"          → MonitorTarget::InfoOverview (alle Hallen)
+//   "info_overview:<halle>"  → InfoOverview, fest auf eine Halle
 //   "info_preparation"       → MonitorTarget::InfoPreparation
 //   "ad_rotation"            → MonitorTarget::AdRotation
 //   "ad_single:<dateiname>"  → MonitorTarget::AdSingle { file }
@@ -49,6 +50,7 @@ import type {
 function targetToValue(t: MonitorTarget | null): string {
   if (!t) return "";
   if (t.kind === "court") return `court:${t.court_id}`;
+  if (t.kind === "info_overview" && t.hall) return `info_overview:${t.hall}`;
   if (t.kind === "ad_single") return `ad_single:${t.file}`;
   if (t.kind === "court_combo") return `combo:${t.court_ids.join(",")}`;
   return t.kind;
@@ -57,6 +59,10 @@ function targetToValue(t: MonitorTarget | null): string {
 function valueToTarget(v: string): MonitorTarget | null {
   if (v === "") return null;
   if (v === "info_overview") return { kind: "info_overview" };
+  if (v.startsWith("info_overview:")) {
+    const hall = v.slice("info_overview:".length);
+    if (hall.length > 0) return { kind: "info_overview", hall };
+  }
   if (v === "info_preparation") return { kind: "info_preparation" };
   if (v === "ad_rotation") return { kind: "ad_rotation" };
   if (v.startsWith("court:")) {
@@ -660,9 +666,23 @@ function DeviceRow({
             </option>
           ))
         )}
-        {/* Info-Monitore: Hallen-weite Read-Only-Anzeigen ohne Feld-Bezug. */}
+        {/* Info-Monitore: Hallen-weite Read-Only-Anzeigen ohne Feld-Bezug.
+            Bei ≥2 Hallen automatisch je Halle eine Court-Übersicht-Option,
+            damit man einen Pi fest an eine Halle binden kann. */}
         <optgroup label="Informationen">
-          <option value="info_overview">Court-Übersicht</option>
+          <option value="info_overview">
+            {grouped ? "Court-Übersicht – alle Hallen" : "Court-Übersicht"}
+          </option>
+          {/* Fällt die Hallenzahl später unter 2 (Turnierwechsel), fehlt die
+              passende Option und das <select> zeigt leer — die Zuweisung
+              bleibt aber im Backend erhalten (wie bei entfernten ad_single-
+              Dateien); der Pi zeigt dann wieder alle Hallen. */}
+          {grouped &&
+            hallNames.map((hall) => (
+              <option key={`ov:${hall}`} value={`info_overview:${hall}`}>
+                Court-Übersicht – {hall}
+              </option>
+            ))}
           <option value="info_preparation">In Vorbereitung</option>
         </optgroup>
         {/* Werbe-Anzeige: rotierend oder Einzelbild. Wenn keine Werbe-

@@ -361,7 +361,10 @@ mod tests {
         assert!(read_assignments(&path).is_empty()); // fehlende Datei → leer
         let mut map = HashMap::new();
         map.insert("dev-1".to_string(), MonitorTarget::court(103));
-        map.insert("dev-2".to_string(), MonitorTarget::InfoOverview);
+        map.insert(
+            "dev-2".to_string(),
+            MonitorTarget::InfoOverview { hall: None },
+        );
         map.insert("dev-3".to_string(), MonitorTarget::InfoPreparation);
         write_assignments(&path, &map).unwrap();
         assert_eq!(read_assignments(&path), map);
@@ -413,7 +416,10 @@ mod tests {
             "unbekannte Variante muss still ignoriert werden, bekannte bleiben"
         );
         assert_eq!(map.get("dev-1"), Some(&MonitorTarget::court(42)));
-        assert_eq!(map.get("dev-3"), Some(&MonitorTarget::InfoOverview));
+        assert_eq!(
+            map.get("dev-3"),
+            Some(&MonitorTarget::InfoOverview { hall: None })
+        );
         assert!(!map.contains_key("dev-2"));
     }
 
@@ -441,7 +447,10 @@ mod tests {
         let v2_path = dir.path().join("monitor-assignments-v2.json");
         std::fs::write(&v2_path, r#"{"dev-1":999}"#).unwrap();
         let mut v3 = HashMap::new();
-        v3.insert("dev-1".to_string(), MonitorTarget::InfoOverview);
+        v3.insert(
+            "dev-1".to_string(),
+            MonitorTarget::InfoOverview { hall: None },
+        );
         write_assignments(&v3_path, &v3).unwrap();
         assert_eq!(read_assignments(&v3_path), v3);
     }
@@ -452,7 +461,7 @@ mod tests {
         // Seite (api.ts) verlässlich Bescheid weiß.
         let court = serde_json::to_string(&MonitorTarget::court(5)).unwrap();
         assert_eq!(court, r#"{"kind":"court","court_id":5}"#);
-        let info = serde_json::to_string(&MonitorTarget::InfoOverview).unwrap();
+        let info = serde_json::to_string(&MonitorTarget::InfoOverview { hall: None }).unwrap();
         assert_eq!(info, r#"{"kind":"info_overview"}"#);
         let prep = serde_json::to_string(&MonitorTarget::InfoPreparation).unwrap();
         assert_eq!(prep, r#"{"kind":"info_preparation"}"#);

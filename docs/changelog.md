@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.82
+
+- **Pi je Halle zuweisen (Court-Übersicht).** Im Zuweisungs-Dropdown eines
+  Court-Monitors erscheinen ab 2 Hallen unter „Informationen" automatisch
+  „Court-Übersicht – alle Hallen" **und** je Halle „Court-Übersicht – Halle X".
+  Der Pi wird dann fest auf `…/info/overview?halle=<Halle>` umgeleitet — kein
+  URL-Tippen am Pi. Technisch: `MonitorTarget::InfoOverview` trägt jetzt eine
+  optionale Halle (abwärtskompatibel, alte Zuweisungen bleiben gültig).
+
 ## v0.9.81
 
 - **Court-Übersicht-Links automatisch in der Court-Monitore-Seite.** Neue
