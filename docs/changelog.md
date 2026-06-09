@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.74
+
+- **„Match beenden" ab 0:0 — mit Dialog für Aufgabe oder Kampflos.** Der
+  Beenden-Button am Tablet ist jetzt **ab Spielbeginn (0:0)** verfügbar (vorher
+  erst ab dem 2. Satz) und bewusst **dezent** gestaltet. Ein Tippen öffnet eine
+  zweisprachige Rückfrage („Spiel beenden? · End the match?") mit **Aufgabe
+  (Verletzung) · Retirement** und **Kampflos · Walkover**; „Regulär beenden"
+  erscheint nur, wenn schon Sätze gespielt wurden. Der Status geht nach BTP
+  (`ScoreStatus` 2 = Aufgabe, **1 = Kampflos**, Kampflos ohne Sätze). Sieger wird
+  danach im Match-Ende-Overlay gewählt. Aufgabe und Kampflos schließen sich aus.
+
 ## v0.9.73
 
 - **Tablet-Diagnoselog wird gesammelt (PC + Cloud).** Tablets schicken ihr Log

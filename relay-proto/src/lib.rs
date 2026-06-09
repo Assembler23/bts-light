@@ -659,7 +659,12 @@ pub struct ResultBody {
     /// nicht aus den Sätzen ableitbar, sondern steht in `winner`.
     #[serde(default)]
     pub retired: bool,
-    /// Sieger-Team (1 oder 2) bei Aufgabe; sonst aus den Sätzen bestimmt.
+    /// Kampflos (Walkover): das Match wurde nicht ausgespielt. `sets` ist leer,
+    /// der Sieger steht in `winner` (BTP-ScoreStatus 1). `#[serde(default)]`
+    /// hält ältere Tablets kompatibel (Feld fehlt → false).
+    #[serde(default)]
+    pub walkover: bool,
+    /// Sieger-Team (1 oder 2) bei Aufgabe/Kampflos; sonst aus den Sätzen bestimmt.
     #[serde(default)]
     pub winner: Option<i64>,
 }
@@ -792,6 +797,9 @@ pub enum RelayFrame {
         sets: Vec<SetAb>,
         #[serde(default)]
         retired: bool,
+        /// Kampflos (Walkover) – siehe [`ResultBody::walkover`].
+        #[serde(default)]
+        walkover: bool,
         #[serde(default)]
         winner: Option<i64>,
     },
@@ -953,6 +961,7 @@ mod tests {
             match_id: 18,
             sets: vec![SetAb { a: 21, b: 0 }, SetAb { a: 0, b: 21 }],
             retired: false,
+            walkover: false,
             winner: None,
         });
         roundtrip(&RelayFrame::Result {
@@ -962,7 +971,18 @@ mod tests {
             match_id: 19,
             sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 5, b: 5 }],
             retired: true,
+            walkover: false,
             winner: Some(1),
+        });
+        roundtrip(&RelayFrame::Result {
+            req_id: 11,
+            court_id: 3,
+            court_label: "Feld 3".into(),
+            match_id: 20,
+            sets: vec![],
+            retired: false,
+            walkover: true,
+            winner: Some(2),
         });
     }
 
