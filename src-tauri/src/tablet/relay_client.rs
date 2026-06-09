@@ -309,6 +309,7 @@ async fn handle_frame(
             match_id,
             sets,
             retired,
+            walkover,
             winner,
         } => {
             let body = ResultBody {
@@ -317,6 +318,7 @@ async fn handle_frame(
                 court_label,
                 sets,
                 retired,
+                walkover,
                 winner,
             };
             let resp = process_result(ctx, &body).await;

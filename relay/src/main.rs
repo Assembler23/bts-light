@@ -769,6 +769,7 @@ async fn result(
             match_id: body.match_id,
             sets: body.sets.clone(),
             retired: body.retired,
+            walkover: body.walkover,
             winner: body.winner,
         };
         if host.send(text(&frame)).is_err() {

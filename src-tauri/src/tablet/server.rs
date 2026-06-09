@@ -713,7 +713,14 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.");
     }
 
-    let sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
+    // Aufgabe und Kampflos schließen sich aus – beide gesetzt ist ein
+    // Client-Fehler (das Status-Mapping unten würde sonst stillschweigend
+    // walkover bevorzugen).
+    if body.walkover && body.retired {
+        return ResultResponse::err("Aufgabe und Kampflos zugleich – ungültig.");
+    }
+
+    let mut sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
     if sets.len() > 9 {
         return ResultResponse::err("Ungültige Satzanzahl.");
     }
@@ -723,9 +730,18 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     {
         return ResultResponse::err("Ungültiger Satzstand.");
     }
-    // Sieger + ScoreStatus: bei Aufgabe (retired) ist der Sieger explizit
-    // angegeben, sonst wird er aus den Sätzen abgeleitet.
-    let (team1_won, score_status) = if body.retired {
+    // Sieger + BTP-ScoreStatus (0=normal, 1=Walkover, 2=Aufgabe/Retired):
+    // Bei Kampflos (walkover) und Aufgabe (retired) ist der Sieger explizit
+    // angegeben; sonst wird er aus den Sätzen abgeleitet. Kampflos wird ohne
+    // gespielte Sätze gewertet → die Satzliste wird verworfen.
+    let (team1_won, score_status) = if body.walkover {
+        sets.clear();
+        match body.winner {
+            Some(1) => (true, 1),
+            Some(2) => (false, 1),
+            _ => return ResultResponse::err("Kampflos ohne gültigen Sieger."),
+        }
+    } else if body.retired {
         match body.winner {
             Some(1) => (true, 2),
             Some(2) => (false, 2),
@@ -765,7 +781,9 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             tracing::info!("BTP-Schreiben OK: Match {}", m.id);
             // Nach einer Aufgabe: prüfen, ob die aufgebende Mannschaft in
             // derselben Disziplin noch Spiele hat, und der Turnierleitung
-            // einen Walkover-Vorschlag hinterlegen.
+            // einen Walkover-Vorschlag hinterlegen. Bei einem echten Kampflos
+            // (score_status=1) bewusst NICHT: das ist bereits die finale
+            // Kampflos-Wertung dieses Spiels – kein abgeleiteter Vorschlag.
             if body.retired {
                 register_walkover_proposal(ctx, &m, team1_won);
             }

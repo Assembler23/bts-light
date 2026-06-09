@@ -120,6 +120,27 @@ in der Behandlungspause das Match. Der laufende Satz wird als Teilstand
 Match-Ende-Overlay manuell den Sieger. Das Ergebnis geht mit dem Status
 **Aufgabe** (`ScoreStatus = 2`, „retired") nach BTP.
 
+## „Match beenden" (Dialog: Aufgabe oder Kampflos)
+
+Der dezente Button **„Match beenden …"** in der Fußzeile ist **ab 0:0**
+verfügbar (vorher erst ab dem 2. Satz). Ein Tippen öffnet eine zweisprachige
+Rückfrage (**„Spiel beenden? · End the match?"**) mit den Optionen:
+
+- **Aufgabe (Verletzung) · Retirement** → Status **Aufgabe** (`ScoreStatus = 2`).
+  Der laufende Teilstand wird als Satz übernommen (wie „Spiel abbrechen").
+- **Kampflos · Walkover** → Status **Kampflos** (`ScoreStatus = 1`). Das Spiel
+  wird **ohne Sätze** gewertet (z. B. Nichtantritt), die Satzliste wird verworfen.
+- **Regulär beenden · Finish normally** → nur sichtbar, wenn schon Sätze
+  gespielt wurden; beendet wie der frühere Button manuell anhand der Sätze.
+- **Abbrechen · Cancel**.
+
+Bei Aufgabe **und** Kampflos wählt der Schiedsrichter danach im Match-Ende-
+Overlay den Sieger; erst dann lässt sich das Ergebnis übermitteln. Der Status
+wird über `POST …/result` (Feld `retired` bzw. `walkover` + `winner`) an
+bts-light gemeldet und per `SENDUPDATE` (`ScoreStatus`) nach BTP geschrieben
+(LAN- und Cloud-Modus). Aufgabe und Kampflos schließen sich aus — der Server
+weist beide gesetzten Flags ab.
+
 ## Kampflose Wertung nach Aufgabe
 
 Nach einer Aufgabe schlägt bts-light vor, die restlichen Spiele der
