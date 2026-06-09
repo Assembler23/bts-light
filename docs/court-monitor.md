@@ -285,6 +285,12 @@ Beide Seiten verstehen zwei URL-Parameter:
   Auto-Rotation** in Sekunden (Default 12, min 3). Greift nur, wenn mehrere
   Hallen erkannt werden und **kein** `?halle=` gesetzt ist.
 
+> **Links nicht von Hand bauen:** Die bts-light-Seite **Court-Monitore** zeigt
+> unter „Court-Übersicht (Hallen-Display)" die fertigen Links automatisch — den
+> öffentlichen Online-Liveticker, die lokale Gesamt-Übersicht und (ab 2 Hallen)
+> je Halle einen `?halle=`-Link zum Kopieren auf den Hallen-TV. „Öffnen" zeigt
+> die Vorschau am PC.
+
 **Mehr-Hallen-Verhalten der Court-Übersicht (ein TV pro Halle ODER ein TV für
 alle):**
 

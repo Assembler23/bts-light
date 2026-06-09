@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.81
+
+- **Court-Übersicht-Links automatisch in der Court-Monitore-Seite.** Neue
+  Sektion „Court-Übersicht (Hallen-Display)": zeigt den **Online-Liveticker**
+  (öffentlich, aus dem konfigurierten Verband) und die **lokale Übersicht**.
+  Sind **mehrere Hallen** im Turnier, erscheint **automatisch je Halle** ein
+  fertiger Link (`…/info/overview?halle=<Halle>`) zum Kopieren auf den jeweiligen
+  Hallen-TV. „Öffnen" zeigt die Vorschau am PC (localhost). `open_external`
+  erlaubt dafür jetzt zusätzlich lokale `http://`-Links (Loopback/`bts-light.local`).
+
 ## v0.9.80
 
 - **Court-Übersicht: Auto-Rotation bei mehreren Hallen.** Erkennt der Monitor
