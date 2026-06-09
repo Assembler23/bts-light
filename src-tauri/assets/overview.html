@@ -65,7 +65,11 @@ main {
    wenige Felder = große Kacheln, die den Schirm füllen. */
 .courts {
   display: grid; gap: 1.4vh 1.6vw;
-  grid-auto-rows: 1fr; flex: 1 1 auto; min-height: 0;
+  /* minmax(0,1fr) statt 1fr: ein nacktes 1fr ist implizit minmax(auto,1fr) →
+     hohe Kacheln (gestapelte Doppel) wachsen über ihren Anteil und das Grid
+     läuft unten aus dem Bild. minmax(0,…) zwingt gleiche Höhenteilung; der
+     Kachel-`overflow:hidden` clippt im Notfall statt nach unten zu schieben. */
+  grid-auto-rows: minmax(0, 1fr); flex: 1 1 auto; min-height: 0;
 }
 .court {
   background: linear-gradient(180deg, #1a2842, #0f1a30);
@@ -96,23 +100,34 @@ main {
 
 /* Teams + Sätze: Name(n) links, Satzstand rechts gross. */
 .teams {
-  display: flex; flex-direction: column; gap: .8vh;
-  flex: 1 1 auto; justify-content: center; min-height: 0;
+  display: flex; flex-direction: column; gap: .6vh;
+  flex: 1 1 auto; justify-content: center; min-height: 0; overflow: hidden;
 }
-.trow { display: flex; align-items: center; gap: 1.2vw; }
-.trow__name {
+.trow { display: flex; align-items: center; gap: 1.2vw; min-width: 0; }
+/* Bei Doppel stehen die beiden Partner UNTEREINANDER (je eigene Zeile mit
+   Flagge + Name) – sonst teilen sie sich eine Zeile und werden abgeschnitten.
+   Bei Einzel ist es einfach eine einzelne Zeile. */
+.trow__names {
   flex: 1 1 auto; min-width: 0;
-  display: flex; align-items: center; gap: .8vw;
-  font-size: 3.2vmin; font-weight: 700; color: #e2e8f0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; flex-direction: column; gap: .3vh;
+  font-size: 2.9vmin; font-weight: 700; color: #e2e8f0;
 }
-.trow.winner .trow__name { color: #34d399; }
-.trow__name .flag {
-  flex: 0 0 auto; height: 3vmin; width: auto; border-radius: .3vh;
-  box-shadow: 0 0 .4vh rgba(0,0,0,.5);
+.trow.winner .trow__names { color: #34d399; }
+.trow__names .pl {
+  display: flex; align-items: center; gap: .8vw; min-width: 0;
+  line-height: 1.15;
 }
-.trow__name .flag.hidden { display: none; }
-.trow__name .nm { overflow: hidden; text-overflow: ellipsis; }
+/* Feste Flaggen-Box, damit die Namen der Partner bündig untereinander stehen –
+   auch wenn ein Spieler keine Nationalität/Flagge hat (dann unsichtbar, aber
+   Platz bleibt reserviert). */
+.trow__names .flag {
+  flex: 0 0 auto; width: 3.6vmin; height: 2.7vmin; object-fit: contain;
+  border-radius: .3vh; box-shadow: 0 0 .4vh rgba(0,0,0,.5);
+}
+.trow__names .flag.hidden { visibility: hidden; box-shadow: none; }
+.trow__names .nm {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .trow__sets { flex: 0 0 auto; display: flex; gap: 1vw; font-variant-numeric: tabular-nums; }
 .sset {
   min-width: 1.6ch; text-align: center;
@@ -257,14 +272,17 @@ main {
     var lastIdx = sets.length - 1;
     var running = !isPause;
 
-    // Eine Team-Zeile: Flagge(n) + Name(n) links, Satzstand rechts.
+    // Eine Team-Zeile: bei Doppel die zwei Partner UNTEREINANDER (je Flagge +
+    // Name), bei Einzel eine einzelne Zeile; Satzstand rechts.
     function teamRow(names, nats, selfIdx, otherIdx) {
       var row = h('div', 'trow');
-      var nameBox = h('div', 'trow__name');
+      var nameBox = h('div', 'trow__names');
       var list = (names && names.length) ? names : ['—'];
       list.forEach(function (n, i) {
-        nameBox.appendChild(flagEl(nats && nats[i]));
-        nameBox.appendChild(h('span', 'nm', n));
+        var pl = h('div', 'pl');
+        pl.appendChild(flagEl(nats && nats[i]));
+        pl.appendChild(h('span', 'nm', n));
+        nameBox.appendChild(pl);
       });
       row.appendChild(nameBox);
       var setsEl = h('div', 'trow__sets');
