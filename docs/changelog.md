@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.77
+
+- **Fix: kein aufblitzendes cmd-Fenster mehr.** Die WLAN-Anzeige (v0.9.76)
+  startete alle 15 s `netsh` ohne `CREATE_NO_WINDOW` → unter Windows blitzte bei
+  jedem Poll kurz ein Konsolenfenster auf, besonders auffällig **ohne** WLAN
+  (langsameres `netsh`). Der Aufruf läuft jetzt fensterlos im Hintergrund.
+
 ## v0.9.76
 
 - **WLAN-Anzeige in der Kopfzeile.** Neben dem Liveticker-Status zeigt bts-light

@@ -502,8 +502,14 @@ fn parse_netsh_ssid(text: &str) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn current_ssid() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    // CREATE_NO_WINDOW: sonst blitzt bei JEDEM 15-s-Poll kurz ein cmd-Fenster
+    // auf (eine aus der GUI-App gestartete Konsolenanwendung bekommt sonst ein
+    // eigenes Konsolenfenster). 0x0800_0000 = CREATE_NO_WINDOW.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let out = std::process::Command::new("netsh")
         .args(["wlan", "show", "interfaces"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     parse_netsh_ssid(&String::from_utf8_lossy(&out.stdout))
