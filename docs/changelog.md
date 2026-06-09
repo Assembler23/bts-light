@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.78
+
+- **Kopfzeile zeigt „BTS-Netzwerk" statt nur WLAN.** Die Anzeige sagt jetzt, ob
+  der PC im **lokalen BTS-Netz** hängt — erkannt am `btsaccess`-WLAN **oder** an
+  einer IP im BTS-Subnetz `192.168.16.x` (also **auch am LAN-Kabel**, nicht nur
+  WLAN). Grün „BTS-Netzwerk", wenn verbunden; sonst grau „Kein BTS-Netz
+  (\<WLAN-Name>)". Hintergrund: das WLAN kann auch ein anderes sein, und Tablets
+  laufen ggf. über die Cloud — entscheidend ist das lokale Netz, über das
+  LAN-Tablets/Pi-Monitore den PC erreichen.
+
 ## v0.9.77
 
 - **Fix: kein aufblitzendes cmd-Fenster mehr.** Die WLAN-Anzeige (v0.9.76)

@@ -442,20 +442,28 @@ pub fn get_status(state: State<'_, AppState>) -> SyncStatus {
         .clone()
 }
 
-/// WLAN-Status des Turnier-PCs für die Kopfzeile.
+/// Erwartetes lokales BTS-Netz (Verleih-Set): WLAN `btsaccess` bzw. Subnetz
+/// `192.168.16.0/24`. Über dieses Netz erreichen LAN-Tablets und Pi-Monitore
+/// den PC – Tablets im Cloud-Modus sind davon unabhängig.
+const EXPECTED_SSID: &str = "btsaccess";
+const BTS_SUBNET: [u8; 3] = [192, 168, 16];
+
+/// Lokaler Netzwerk-Status des Turnier-PCs für die Kopfzeile.
 #[derive(Clone, Serialize)]
 pub struct WifiStatus {
-    /// Mit einem WLAN verbunden?
-    pub connected: bool,
-    /// SSID des verbundenen Netzes (`None` = kein WLAN / nicht ermittelbar,
-    /// z. B. LAN-Kabel oder fehlendes WLAN-Tool).
+    /// Hängt der PC im lokalen BTS-Netz? Wahr, wenn er im `btsaccess`-WLAN ist
+    /// ODER eine lokale IPv4 im BTS-Subnetz hat (deckt das LAN-Kabel ab, wo es
+    /// keine SSID gibt).
+    pub bts_network: bool,
+    /// Verbundenes WLAN (zur Anzeige); `None` = kein WLAN (z. B. LAN-Kabel oder
+    /// fehlendes WLAN-Tool).
     pub ssid: Option<String>,
 }
 
-/// Liefert das aktuell verbundene WLAN (SSID), damit man in der Kopfzeile auf
-/// einen Blick sieht, ob der PC im richtigen Hallen-/Verleih-Netz
-/// (`btsaccess`) hängt. Plattform-spezifisch ausgelesen; schlägt das Auslesen
-/// fehl (kein WLAN-Adapter, LAN-Kabel), ist `ssid = None`.
+/// Liefert den lokalen Netzwerk-Status, damit man in der Kopfzeile auf einen
+/// Blick sieht, ob der PC im **BTS-Netzwerk** hängt (über das LAN-Tablets/Pis
+/// ihn erreichen). Erkennt sowohl das `btsaccess`-WLAN als auch das BTS-Subnetz
+/// am LAN-Kabel.
 #[tauri::command]
 pub fn wifi_status() -> WifiStatus {
     // current_ssid() startet ein externes Tool (netsh/networksetup/iwgetid).
@@ -463,10 +471,29 @@ pub fn wifi_status() -> WifiStatus {
     // blockieren. Deadline drum herum, damit weder ein Tauri-Worker dauerhaft
     // hängt noch die Kopfzeile auf eine Antwort wartet.
     let ssid = ssid_with_timeout(Duration::from_secs(3));
+    let on_bts_ssid = ssid
+        .as_deref()
+        .map(|s| s.eq_ignore_ascii_case(EXPECTED_SSID))
+        .unwrap_or(false);
     WifiStatus {
-        connected: ssid.is_some(),
+        bts_network: on_bts_ssid || on_bts_subnet(),
         ssid,
     }
+}
+
+/// Hat der PC eine lokale IPv4 im BTS-Subnetz (`192.168.16.0/24`)? Prüft alle
+/// Schnittstellen, also auch das LAN-Kabel – kein Prozess-Start, schnell.
+fn on_bts_subnet() -> bool {
+    let Ok(ifaces) = local_ip_address::list_afinet_netifas() else {
+        return false;
+    };
+    ifaces.iter().any(|(_, ip)| match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            o[0] == BTS_SUBNET[0] && o[1] == BTS_SUBNET[1] && o[2] == BTS_SUBNET[2]
+        }
+        _ => false,
+    })
 }
 
 /// Ruft `current_ssid()` in einem eigenen Thread auf und gibt nach `timeout`
