@@ -481,13 +481,23 @@ pub struct MonitorControl {
 /// totes Gerät fällt weiterhin nach 20 s raus.
 pub const MONITOR_ONLINE_WINDOW_MS: u64 = 20_000;
 
-/// Kurz-Code eines Geräts: die ersten vier alphanumerischen Zeichen der
+/// Kurz-Code eines Geräts: die **letzten** vier alphanumerischen Zeichen der
 /// ID, groß – so wie der Monitor ihn auf dem TV anzeigt.
+///
+/// Bewusst das Ende, nicht der Anfang: Pi-Monitore melden sich als
+/// `pi-<CPU-Serial>`, und alle Raspberry-Pi-Serials beginnen mit demselben
+/// Präfix (`00000000…`/`10000000…`). Die ersten vier Zeichen wären deshalb für
+/// jeden Pi identisch („PI00") – die unterscheidende Entropie der Serial steht
+/// am Ende. Der Code ist reine Anzeige + Sortier-Tiebreak (kein Identitäts-
+/// Schlüssel – der ist die volle `device_id`).
 pub fn device_code(device_id: &str) -> String {
-    device_id
+    let alnum: Vec<char> = device_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
-        .take(4)
+        .collect();
+    let start = alnum.len().saturating_sub(4);
+    alnum[start..]
+        .iter()
         .collect::<String>()
         .to_ascii_uppercase()
 }
@@ -1070,9 +1080,22 @@ mod tests {
     }
 
     #[test]
-    fn device_code_takes_first_four_uppercase() {
-        assert_eq!(device_code("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), "A1B2");
+    fn device_code_takes_last_four_uppercase() {
+        assert_eq!(device_code("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), "7890");
         assert_eq!(device_code("xy"), "XY");
+    }
+
+    #[test]
+    fn device_code_distinguishes_pi_serials_with_shared_prefix() {
+        // Pi-Monitore melden sich als pi-<CPU-Serial>; alle Serials beginnen
+        // mit demselben Präfix (00000000…). Der Code muss sie am ENDE
+        // unterscheiden – sonst zeigen alle Pis denselben Code ("PI00").
+        assert_eq!(device_code("pi-00000000a3a5a3f8"), "A3F8");
+        assert_eq!(device_code("pi-00000000a3a5b1c2"), "B1C2");
+        assert_ne!(
+            device_code("pi-00000000a3a5a3f8"),
+            device_code("pi-00000000a3a5b1c2")
+        );
     }
 
     #[test]

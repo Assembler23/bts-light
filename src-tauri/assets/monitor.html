@@ -841,8 +841,12 @@
 
   // Blendet Code + Feld groß ein, damit man Gerät und TV zuordnen kann.
   function showIdentify() {
+    // Fallback (noch kein Server-State): die LETZTEN vier alphanumerischen
+    // Zeichen der ID – konsistent mit device_code() im Server. (Pi-Serials
+    // teilen sich das Präfix, die ersten vier wären für alle Pis "PI00".)
     els.identifyCode.textContent =
-      (lastState && lastState.deviceCode) || DEVICE_ID.slice(0, 4).toUpperCase();
+      (lastState && lastState.deviceCode) ||
+      DEVICE_ID.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase();
     els.identifyCourt.textContent = (lastState && lastState.courtLabel) || "";
     els.identifyOverlay.classList.add("show");
     if (identifyTimer) clearTimeout(identifyTimer);

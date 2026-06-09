@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.75
+
+- **Court-Monitor-Code eindeutig (Pi-„PI00"-Kollision behoben).** Mehrere
+  Raspberry-Pi-Monitore zeigten beim „Identifizieren" denselben Kopplungs-Code
+  „PI00", weil alle Pi-Seriennummern mit demselben Präfix (`00000000…`)
+  beginnen und der Code aus den **ersten** vier Zeichen gebildet wurde. Der Code
+  nutzt jetzt die **letzten** vier alphanumerischen Zeichen der Geräte-ID →
+  jeder Pi ist eindeutig unterscheidbar. **Kein Re-Flash nötig** — der Code wird
+  am PC/Relay berechnet; Update + Relay-Redeploy genügen. (Die Geräte-IDs waren
+  schon vorher eindeutig, nur die Anzeige nicht.)
+
 ## v0.9.74
 
 - **„Match beenden" ab 0:0 — mit Dialog für Aufgabe oder Kampflos.** Der
