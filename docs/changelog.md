@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.83
+
+- **Status-Seite: „Anzeigen im Browser" erst nach Start + Hallen-Buttons.** Die
+  Buttons (Liveticker, Hallen-Monitor, Nächste Spiele) sind jetzt **deaktiviert,
+  bis der Liveticker gestartet ist** (vorher konnte man ins Leere klicken, ohne
+  BTP-Verbindung). Nach dem Start kennt bts-light die Hallen aus der Turnierdatei
+  und blendet bei **mehreren Hallen je Halle einen lokalen Hallen-Monitor-Button**
+  ein (öffnet die Court-Übersicht dieser Halle).
+
 ## v0.9.82
 
 - **Pi je Halle zuweisen (Court-Übersicht).** Im Zuweisungs-Dropdown eines
