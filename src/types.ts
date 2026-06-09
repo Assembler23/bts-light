@@ -148,10 +148,11 @@ export interface SyncStatus {
   updated_at_ms: number;
 }
 
-/** WLAN-Status des Turnier-PCs (Rust: commands::WifiStatus). */
+/** Lokaler Netzwerk-Status des Turnier-PCs (Rust: commands::WifiStatus). */
 export interface WifiStatus {
-  connected: boolean;
-  /** SSID des verbundenen Netzes; null = kein WLAN / nicht ermittelbar. */
+  /** Im lokalen BTS-Netz (btsaccess-WLAN oder 192.168.16.x am LAN)? */
+  bts_network: boolean;
+  /** SSID des verbundenen WLAN; null = kein WLAN (z. B. LAN-Kabel). */
   ssid: string | null;
 }
 

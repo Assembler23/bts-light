@@ -14,40 +14,40 @@ function dotColor(status: SyncStatus | null): string {
   return "bg-rose-500";
 }
 
-// Erwartetes Hallen-/Verleih-Netz – die SSID wird hervorgehoben, wenn der PC
-// genau dort hängt.
-const EXPECTED_SSID = "btsaccess";
-
-// WLAN-Anzeige für die Kopfzeile: zeigt die SSID; grün, wenn es das erwartete
-// btsaccess-Netz ist, sonst neutral; grau, wenn kein WLAN ermittelt wurde
-// (z. B. LAN-Kabel).
-function WifiIndicator({ wifi }: { wifi: WifiStatus | null }) {
-  if (!wifi || !wifi.connected || !wifi.ssid) {
+// Netzwerk-Anzeige für die Kopfzeile: zeigt, ob der PC im lokalen BTS-Netzwerk
+// hängt (btsaccess-WLAN oder 192.168.16.x am LAN) – darüber erreichen ihn die
+// LAN-Tablets/Pi-Monitore. Tablets im Cloud-Modus sind davon unabhängig.
+// Grün = im BTS-Netz; sonst neutral mit dem aktuell verbundenen WLAN-Namen.
+function NetworkIndicator({ wifi }: { wifi: WifiStatus | null }) {
+  if (!wifi) return null; // noch kein Status (erster Poll läuft)
+  if (wifi.bts_network) {
     return (
       <div
-        className="flex items-center gap-1.5 text-slate-400"
-        title="Kein WLAN erkannt (z. B. LAN-Kabel oder kein WLAN-Adapter)"
+        className="flex items-center gap-1.5 text-emerald-600"
+        title={
+          wifi.ssid
+            ? `Im BTS-Netzwerk (WLAN „${wifi.ssid}")`
+            : "Im BTS-Netzwerk (LAN-Kabel, 192.168.16.x)"
+        }
       >
-        <WifiOff size={15} />
-        <span className="text-xs">Kein WLAN</span>
+        <Wifi size={15} />
+        <span className="text-xs font-medium">BTS-Netzwerk</span>
       </div>
     );
   }
-  const onExpected = wifi.ssid.toLowerCase() === EXPECTED_SSID;
+  // Nicht im BTS-Netz – kein Fehler (z. B. reiner Cloud-Betrieb), aber sichtbar.
   return (
     <div
-      className={`flex items-center gap-1.5 ${
-        onExpected ? "text-emerald-600" : "text-slate-500"
-      }`}
+      className="flex items-center gap-1.5 text-slate-400"
       title={
-        onExpected
-          ? `Mit dem Turnier-Netz „${wifi.ssid}" verbunden`
-          : `WLAN: ${wifi.ssid} (erwartet: ${EXPECTED_SSID})`
+        wifi.ssid
+          ? `Nicht im BTS-Netzwerk – aktuell WLAN „${wifi.ssid}" (erwartet btsaccess bzw. 192.168.16.x)`
+          : "Nicht im BTS-Netzwerk (kein WLAN, kein BTS-LAN)"
       }
     >
-      <Wifi size={15} />
-      <span className="max-w-[10rem] truncate text-xs font-medium">
-        {wifi.ssid}
+      <WifiOff size={15} />
+      <span className="max-w-[10rem] truncate text-xs">
+        {wifi.ssid ? `Kein BTS-Netz (${wifi.ssid})` : "Kein BTS-Netz"}
       </span>
     </div>
   );
@@ -101,9 +101,9 @@ export function AppShell({
           </span>
         </div>
 
-        {/* WLAN-Anzeige: hängt der PC im richtigen Netz (btsaccess)? */}
+        {/* Netzwerk-Anzeige: hängt der PC im lokalen BTS-Netzwerk? */}
         <div className="ml-3 border-l border-slate-200 pl-3">
-          <WifiIndicator wifi={wifi} />
+          <NetworkIndicator wifi={wifi} />
         </div>
 
         {/* Start/Stopp – von überall erreichbar. */}

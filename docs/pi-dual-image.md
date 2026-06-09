@@ -126,9 +126,12 @@ Der Pi + Shared-Launcher funktionieren; die Hürden lagen beim **Server-Laptop**
 > davon nie betroffen (eigene Hysterese), nur die Admin-Anzeige.
 3. **Server-Laptop muss im `btsaccess`-WLAN** sein (nicht im Heimnetz 192.168.178.*).
    Sonst sind Pi (192.168.16.*) und Laptop in verschiedenen Subnetzen. Die
-   bts-light-Kopfzeile zeigt rechts die **aktuelle WLAN-SSID** — grün, wenn es
-   `btsaccess` ist, sonst grau/neutral (bzw. „Kein WLAN" am LAN-Kabel). So sieht
-   man auf einen Blick, ob der Laptop im richtigen Netz hängt.
+   bts-light-Kopfzeile zeigt rechts **„BTS-Netzwerk"** in Grün, wenn der Laptop
+   im lokalen BTS-Netz hängt — erkannt am `btsaccess`-**WLAN** _oder_ an einer
+   IP im **BTS-Subnetz 192.168.16.x** (also auch am LAN-Kabel). Hängt er in
+   einem anderen Netz, steht dort grau „Kein BTS-Netz (\<WLAN-Name>)". So sieht
+   man auf einen Blick, ob der Laptop im richtigen lokalen Netz ist (für den
+   Cloud-Modus der Tablets ist das egal).
 4. bts-light muss **gestartet** sein (grüner Punkt „Liveticker aktiv") und im
    **LAN-Modus** (Einstellungen → Tablet-Verbindung → LAN) — sonst läuft weder der
    `:8088`-Server noch die mDNS-Bekanntgabe.
