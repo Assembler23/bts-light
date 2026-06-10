@@ -85,6 +85,9 @@
     .plus-left:active { background: #1e40af; }
     .plus-right { background: #831843; }
     .plus-right:active { background: #9d174d; }
+    /* Doppel-Eingabe-Schutz: kurz nach einem Punkt gesperrt (gedimmt, keine
+       Taps) – verhindert versehentliche zweite Punkte. */
+    .plus-btn.cooling { opacity: .4; pointer-events: none; transition: opacity .15s; }
 
     /* Court + Score Block in der Mitte */
     .center { display: flex; flex-direction: column; min-height: 0; gap: .35rem; }
@@ -1701,9 +1704,32 @@ function restoreSnapshot(snap) {
   }
 }
 
+// Doppel-Eingabe-Schutz: nach einem Punkt sind die +1-Flächen kurz gesperrt
+// (gedimmt) – Punkte fallen nicht im Sekundentakt, das verhindert versehentliche
+// Doppel-Taps. Undo hebt die Sperre sofort auf (Korrektur soll nicht warten).
+var SCORE_COOLDOWN_MS = 3000;
+var scoreCooldownUntil = 0;
+var scoreCooldownTimer = null;
+function clearScoreCooldown() {
+  scoreCooldownUntil = 0;
+  if (scoreCooldownTimer) { clearTimeout(scoreCooldownTimer); scoreCooldownTimer = null; }
+  if (els.plusLeft) els.plusLeft.classList.remove('cooling');
+  if (els.plusRight) els.plusRight.classList.remove('cooling');
+}
+function startScoreCooldown() {
+  scoreCooldownUntil = Date.now() + SCORE_COOLDOWN_MS;
+  if (els.plusLeft) els.plusLeft.classList.add('cooling');
+  if (els.plusRight) els.plusRight.classList.add('cooling');
+  if (scoreCooldownTimer) clearTimeout(scoreCooldownTimer);
+  scoreCooldownTimer = setTimeout(clearScoreCooldown, SCORE_COOLDOWN_MS);
+}
+
 function addPointOnSide(side) {
   if (STATE.pause) return; // während einer offiziellen Pause keine Punkte
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing' || !STATE.positions) return;
+  // Doppel-Eingabe-Schutz: kurz nach einem Punkt keine weitere Eingabe.
+  if (Date.now() < scoreCooldownUntil) return;
+  startScoreCooldown();
 
   // Aufschlagseite VOR der Mutation merken (für die „Aufschlagwechsel"-Ansage).
   const prevServing = STATE.servingSide;
@@ -1836,6 +1862,8 @@ function backToSetup() {
 
 function undo() {
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing') return;
+  // Korrektur soll nicht auf den Punkt-Cooldown warten → Sperre sofort lösen.
+  clearScoreCooldown();
   // Kein Punkt zum Zurücknehmen, aber Setup gerade abgeschlossen →
   // zurück zur Aufstellung (versehentlich zu schnell entschieden).
   if (STATE.history.length === 0) {
