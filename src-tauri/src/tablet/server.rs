@@ -20,13 +20,13 @@ use std::time::Duration;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse};
+use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use relay_proto::{
-    device_code, html_escape, MatchBrief, PlayerBrief, ResultBody, ResultResponse, ServerMsg,
-    SetAb, TabletMsg,
+    device_code, html_escape, path_encode, MatchBrief, PlayerBrief, ResultBody, ResultResponse,
+    ServerMsg, SetAb, TabletMsg,
 };
 
 use crate::badhub::diff::Update;
@@ -117,7 +117,14 @@ impl ServerCtx {
 /// abgebrochen wird.
 pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
     let app = Router::new()
-        .route("/", get(index))
+        // TV-Launcher: kurze Root-Adresse landet auf einem Auswahl-Menü
+        // (Fernbedienung statt langer ?halle=-URLs). Kurz-Pfade leiten direkt.
+        .route("/", get(tv_page))
+        .route("/tv", get(tv_page))
+        .route("/status", get(index))
+        .route("/alle", get(|| async { Redirect::to("/info/overview") }))
+        .route("/next", get(|| async { Redirect::to("/info/preparation") }))
+        .route("/h/{n}", get(hall_short))
         .route("/court/{id}", get(court_page))
         .route("/courts", get(courts_list))
         .route("/court/{id}/display", get(monitor_page))
@@ -155,8 +162,34 @@ pub fn lan_host() -> String {
 
 // ─────────────────────────────── HTTP-Routen ──────────────────────────────
 
-/// Landing-Page: zeigt die Tablet-Adressen je Court. Die URL trägt die
-/// stabile CourtID, der angezeigte Text den Feldnamen.
+/// TV-Launcher (`/` und `/tv`): Vollbild-Auswahlmenü, per Fernbedienung
+/// bedienbar — so muss am Smart-TV nur einmal die kurze Adresse getippt werden
+/// statt langer `?halle=`-URLs.
+async fn tv_page() -> impl IntoResponse {
+    ([(header::CACHE_CONTROL, "no-store")], Html(assets::TV_HTML))
+}
+
+/// Kurz-Pfad `/h/{n}` → leitet auf die Court-Übersicht der n-ten Halle
+/// (1-basiert, Hallen alphabetisch sortiert). Unbekannte Nummer → alle Hallen.
+/// Spart das Tippen langer `?halle=`-URLs an der TV-Fernbedienung.
+async fn hall_short(State(ctx): State<Arc<ServerCtx>>, Path(n): Path<usize>) -> Redirect {
+    let mut halls: Vec<String> = ctx
+        .tablet
+        .overview()
+        .into_iter()
+        .map(|c| c.location)
+        .filter(|l| !l.is_empty())
+        .collect();
+    halls.sort();
+    halls.dedup();
+    match n.checked_sub(1).and_then(|i| halls.get(i)) {
+        Some(h) => Redirect::to(&format!("/info/overview?halle={}", path_encode(h))),
+        None => Redirect::to("/info/overview"),
+    }
+}
+
+/// Landing-Page (Debug, `/status`): zeigt die Tablet-Adressen je Court. Die URL
+/// trägt die stabile CourtID, der angezeigte Text den Feldnamen.
 async fn index(State(ctx): State<Arc<ServerCtx>>) -> Html<String> {
     let host = lan_host();
     let courts = ctx.tablet.courts();

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>BTS Light – Anzeige wählen</title>
+<style>
+  /* TV-Launcher: einmal die kurze Adresse tippen, dann mit der Fernbedienung
+     (Pfeiltasten + OK) eine Anzeige wählen — kein Query-String/Hallenname
+     tippen. Dunkles Marine wie die Monitore, große fokussierbare Buttons. */
+  html, body {
+    margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { display: flex; flex-direction: column; }
+  header {
+    display: flex; align-items: baseline; gap: 2vw; padding: 2.2vh 4vw;
+    border-bottom: .3vh solid #334155;
+    background: linear-gradient(180deg, #141f33, #1c2942);
+  }
+  header .logo { font-size: 4vmin; font-weight: 800; color: #fbbf24; text-transform: uppercase; letter-spacing: .02em; }
+  header .sub { font-size: 2.6vmin; color: #94a3b8; }
+  main {
+    flex: 1 1 auto; min-height: 0; overflow: auto;
+    padding: 4vh 4vw;
+    display: grid; gap: 2.5vh 2.5vw;
+    grid-template-columns: repeat(auto-fill, minmax(28vw, 1fr));
+    align-content: start;
+  }
+  a.tile {
+    display: flex; flex-direction: column; justify-content: center;
+    min-height: 16vh; padding: 3vh 3vw; border-radius: 1.6vmin;
+    background: linear-gradient(180deg, #1a2842, #0f1a30);
+    border: .35vmin solid #334155; color: #f8fafc;
+    text-decoration: none; cursor: pointer;
+    font-size: 4.2vmin; font-weight: 800; letter-spacing: .01em;
+    transition: border-color .1s, background .1s, transform .1s;
+  }
+  a.tile .hint { font-size: 2.2vmin; font-weight: 600; color: #94a3b8; margin-top: 1vh; }
+  a.tile.all { border-color: #1f6f4a; }
+  a.tile.next { border-color: #1f4f8a; }
+  /* Fokus (Fernbedienung) deutlich hervorheben. */
+  a.tile:focus { outline: none; border-color: #fbbf24; background: #243352; transform: scale(1.02); }
+  a.tile:focus .hint { color: #cbd5e1; }
+  .empty { grid-column: 1 / -1; color: #94a3b8; font-size: 3vmin; text-align: center; padding: 6vh 0; }
+  footer { padding: 1.5vh 4vw; color: #475569; font-size: 2vmin; border-top: 1px solid #1e293b; }
+  footer code { background: #1e293b; color: #cbd5e1; padding: .1em .5em; border-radius: .3em; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">🏸 BTS Light</span>
+  <span class="sub">Anzeige wählen — mit Pfeiltasten + OK</span>
+</header>
+<main id="menu"><div class="empty">Lädt …</div></main>
+<footer>Direkt-Adressen: <code>…/alle</code> · <code>…/h/1</code>, <code>…/h/2</code> · <code>…/next</code></footer>
+
+<script>
+(function () {
+  'use strict';
+  var menu = document.getElementById('menu');
+
+  function tile(href, label, hint, cls) {
+    var a = document.createElement('a');
+    a.className = 'tile' + (cls ? ' ' + cls : '');
+    a.href = href;
+    a.tabIndex = 0;
+    var t = document.createElement('div');
+    t.textContent = label;
+    a.appendChild(t);
+    if (hint) {
+      var h = document.createElement('div');
+      h.className = 'hint';
+      h.textContent = hint;
+      a.appendChild(h);
+    }
+    return a;
+  }
+
+  function render(halls) {
+    menu.textContent = '';
+    var tiles = [];
+    tiles.push(tile('/info/overview', 'Alle Hallen', 'Court-Übersicht (rotiert bei mehreren Hallen)', 'all'));
+    halls.forEach(function (name) {
+      tiles.push(tile('/info/overview?halle=' + encodeURIComponent(name), name, 'Court-Übersicht dieser Halle'));
+    });
+    tiles.push(tile('/info/preparation', 'Nächste Spiele', 'Aufruf-/Vorbereitungs-Anzeige', 'next'));
+    tiles.forEach(function (t) { menu.appendChild(t); });
+    // Erstes Element fokussieren, damit die Fernbedienung sofort navigiert.
+    if (tiles[0]) tiles[0].focus();
+  }
+
+  var lastKey = null; // zuletzt gerenderte Hallenliste – Re-Render nur bei Änderung
+
+  function load() {
+    fetch('/health', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        var courts = (data && data.courts) || [];
+        var halls = [];
+        courts.forEach(function (c) {
+          var l = (c.location || '').trim();
+          if (l && halls.indexOf(l) < 0) halls.push(l);
+        });
+        // Byte-/Code-Point-Sortierung wie der Server (`/h/{n}`), damit die
+        // Reihenfolge im Menü und die Kurz-Pfade übereinstimmen.
+        halls.sort();
+        // Nur neu zeichnen, wenn sich die Hallen geändert haben — sonst würde
+        // der periodische Refresh den Fernbedienungs-Fokus zurücksetzen.
+        var key = halls.join('|');
+        if (key === lastKey) return;
+        lastKey = key;
+        render(halls);
+      })
+      .catch(function () { if (lastKey !== '') { lastKey = ''; render([]); } });
+  }
+
+  // Fernbedienungs-Navigation: Pfeiltasten bewegen den Fokus über die Kacheln,
+  // OK/Enter folgt dem Link. (Viele TV-Browser mappen die Pfeiltasten ohnehin
+  // auf Fokus-Navigation; dies stellt es überall sicher.)
+  document.addEventListener('keydown', function (e) {
+    var tiles = Array.prototype.slice.call(document.querySelectorAll('a.tile'));
+    if (!tiles.length) return;
+    var i = tiles.indexOf(document.activeElement);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      tiles[(i + 1 + tiles.length) % tiles.length].focus();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      tiles[(i - 1 + tiles.length) % tiles.length].focus();
+    } else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) {
+      e.preventDefault();
+      tiles[i].click();
+    }
+  });
+
+  load();
+  // Falls BTP beim Öffnen noch nicht verbunden war, die Hallen nachladen.
+  setInterval(load, 15000);
+})();
+</script>
+</body>
+</html>

@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.86
+
+- **TV-Launcher — kurze URLs statt langer `?halle=`-Eingabe.** An einem Smart-TV
+  reicht jetzt die **kurze** Adresse `bts-light.local:8088` (= Auswahl-Menü, auch
+  unter `/tv`): per **Fernbedienung (Pfeiltasten + OK)** „Alle Hallen", je Halle
+  ein Button oder „Nächste Spiele" wählen — kein `?halle=` mehr tippen.
+  Direkt-Kurzpfade: `…/alle`, `…/h/1`, `…/h/2` (n-te Halle), `…/next`. Die
+  bisherige Debug-Landing liegt jetzt unter `/status`.
+
 ## v0.9.85
 
 - **Aufgabe: Disziplin-Kaskade jetzt optional (Verletzung abgefragt).** Bisher

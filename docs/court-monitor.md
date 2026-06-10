@@ -264,6 +264,14 @@ ein Display am Halleneingang oder am Schiedsrichter-Tisch der TL. Beide
 nutzen denselben Tablet-Server, brauchen also weder Internet noch
 badhub.de.
 
+> **TV-Launcher (Tippen sparen):** An einem Smart-TV ohne feste Zuweisung muss
+> man nur die **kurze** Adresse `http://bts-light.local:8088` (oder `/tv`) tippen
+> — es erscheint ein **Auswahl-Menü**, das man mit der **Fernbedienung
+> (Pfeiltasten + OK)** bedient: „Alle Hallen", je Halle ein Button, „Nächste
+> Spiele". Kein `?halle=` tippen. Direkt-Kurzpfade ohne Menü: `…/alle`,
+> `…/h/1`, `…/h/2` (n-te Halle, alphabetisch), `…/next`. (Pi-Monitore brauchen
+> gar nichts zu tippen — die werden im Tool zugewiesen.)
+
 | URL | Was es zeigt |
 |---|---|
 | `http://bts-light.local:8088/info/overview` | **Court-Übersicht** — alle Felder mit Status („frei" / „läuft" / „Behandlung" / „TL"), aktuellem Spiel, Paarung und Sätzen. Bei Doppeln stehen die zwei Partner untereinander (wie der badhub-Hallen-Monitor). Bei Mehr-Hallen-Turnieren ohne `?halle=` **rotiert** die Anzeige automatisch durch die Hallen (jede einzeln im Vollbild). |

@@ -11,6 +11,11 @@ pub const TABLET_HTML: &str = include_str!("../../assets/tablet.html");
 /// Ausliefern durch den Court-Namen ersetzt.
 pub const MONITOR_HTML: &str = include_str!("../../assets/monitor.html");
 
+/// TV-Launcher (`/` und `/tv`): Vollbild-Menü zum Auswählen einer Anzeige per
+/// Fernbedienung (Pfeiltasten + OK) — man muss nur einmal die kurze Adresse
+/// tippen, statt lange `?halle=`-URLs. Holt die Hallen aus `/health`.
+pub const TV_HTML: &str = include_str!("../../assets/tv.html");
+
 /// Court-Übersichts-Monitor (Info-Display): zeigt alle Felder mit Status
 /// und aktuellem Spiel, nach Hallen gruppiert. Optional `?halle=`-Filter,
 /// `?rotate=90|180|270` für Pivot-TVs. Pollt `/health` für Daten.
