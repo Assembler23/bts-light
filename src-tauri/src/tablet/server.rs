@@ -144,6 +144,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/combo/state", get(combo_state))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
+        .route("/pi-log", post(pi_log))
         .route("/ws", get(ws_upgrade))
         .with_state(ctx);
 
@@ -327,6 +328,62 @@ async fn tablet_log(
             .post("https://badhub.de/api/tablet_log.php")
             .bearer_auth(TABLET_LOG_TOKEN)
             .header("X-Device-Id", device_id)
+            .header(header::CONTENT_TYPE, "text/plain")
+            .timeout(std::time::Duration::from_secs(8))
+            .body(body)
+            .send()
+            .await;
+    });
+    StatusCode::OK
+}
+
+#[derive(serde::Deserialize)]
+struct PiLogQuery {
+    /// Geräte-ID des Pi-Monitors (= `pi-<CPU-Serial>`), vom Pi-Startskript
+    /// mitgeschickt. Bestimmt den Dateinamen + die Cloud-Geräte-ID.
+    #[serde(default)]
+    device: String,
+}
+
+/// Nimmt das Verbindungslog eines Pi-Court-Monitors entgegen (LAN, ohne Auth
+/// wie die anderen Hallen-Routen). Einheitlich mit den Tablets: der Pi postet
+/// im LAN an den PC (plain HTTP – kein TLS/keine Pi-Uhr nötig), der PC legt es
+/// lokal unter `<log_dir>/pi-logs/<device>.log` ab UND leitet es – sofern
+/// Internet da ist – an die badhub-Cloud weiter (fire-and-forget).
+async fn pi_log(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<PiLogQuery>,
+    body: String,
+) -> impl IntoResponse {
+    if body.len() > 2 * 1024 * 1024 {
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    }
+    // Geräte-ID auf dateinamen-/header-sichere Zeichen reduzieren.
+    let id: String = q
+        .device
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
+    let id = if id.is_empty() {
+        "pi-unbekannt".to_string()
+    } else {
+        id
+    };
+    // 1) Lokal beim Turnier-PC ablegen (auch offline verfügbar, „Logs öffnen").
+    let dir = ctx.log_dir.join("pi-logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join(format!("{id}.log")), &body);
+    // 2) An die Cloud weiterleiten (gleicher Token + Endpoint wie der frühere
+    //    Direkt-Upload der Pis). Bewusst OHNE install_id-Präfix (anders als bei
+    //    Tablets): die Pi-Serial ist global eindeutig → ein Cloud-Log je
+    //    physischem Pi über alle Turniere (gut für Ferndiagnose desselben Geräts).
+    let http = ctx.http.clone();
+    tokio::spawn(async move {
+        let _ = http
+            .post("https://badhub.de/api/pi_log.php")
+            .bearer_auth(TABLET_LOG_TOKEN)
+            .header("X-Device-Id", id)
             .header(header::CONTENT_TYPE, "text/plain")
             .timeout(std::time::Duration::from_secs(8))
             .body(body)

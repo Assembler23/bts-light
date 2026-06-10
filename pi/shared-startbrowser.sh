@@ -42,25 +42,27 @@ BTSLIGHT_PORT="8088"
 # die Subshell → genau EINE Auflösung, danach immer die schnelle IP.
 BTSLIGHT_CACHE="/tmp/btslight_ip"
 
-# Cloud-Log: das Verbindungslog periodisch an badhub.de schicken, damit ein
-# Monitor-Pi im Turnierbetrieb AUS DER FERNE diagnostizierbar ist (ohne die
-# SD-Karte zu ziehen). Geräte-ID = Pi-Seriennummer. Selber verbandsweiter
-# Bearer-Token wie bts-light. Scheitert STILL, wenn kein Internet da ist
-# (z. B. Heim-Test ohne Uplink) – dann steht das Log eben nur lokal.
+# Verbindungslog einheitlich wie die Tablets an den Turnier-PC (bts-light) im
+# LAN schicken – der PC legt es ab und leitet es an die Cloud weiter. Vorteil
+# ggü. Direkt-Upload: plain HTTP im LAN → kein TLS und keine korrekte Pi-Uhr
+# nötig (Pis haben keine RTC; bei falscher Uhr scheiterte HTTPS sonst still).
+# Geräte-ID = Pi-Seriennummer. Scheitert still, wenn der PC (noch) nicht
+# gefunden ist – dann steht das Log lokal und geht beim nächsten Versuch raus.
 SERIAL=$(awk -F': ' '/Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')
 DEVICE_ID="pi-${SERIAL}"
-PILOG_URL="https://badhub.de/api/pi_log.php"
-PILOG_TOKEN="d896d5c45f1dfe72d324be2da0dcc8031e447809f9a3c1ce"
 
-# Letzte ~800 Logzeilen in die Cloud schieben; kurzer Timeout, Fehler ignorieren.
+# Letzte ~800 Logzeilen an den PC (gecachte bts-light-IP) posten; kurzer
+# Timeout, Fehler ignorieren.
 upload_log() {
   command -v curl >/dev/null 2>&1 || return 0
   [ -n "$SERIAL" ] || return 0
+  local ip
+  ip=$(cat "$BTSLIGHT_CACHE" 2>/dev/null)
+  [ -n "$ip" ] || return 0   # PC noch nicht gefunden → nichts zu senden
   tail -n 800 "$LOG" 2>/dev/null | curl -s --max-time 8 -X POST \
-    -H "Authorization: Bearer ${PILOG_TOKEN}" \
-    -H "X-Device-Id: ${DEVICE_ID}" \
     -H "Content-Type: text/plain" \
-    --data-binary @- "$PILOG_URL" >/dev/null 2>&1 || true
+    --data-binary @- \
+    "http://${ip}:${BTSLIGHT_PORT}/pi-log?device=${DEVICE_ID}" >/dev/null 2>&1 || true
 }
 
 # Erreichbar? curl (echte HTTP-Antwort, großzügiges Timeout), sonst /dev/tcp.
