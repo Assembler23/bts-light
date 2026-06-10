@@ -687,6 +687,13 @@ pub struct ResultBody {
     /// Sieger-Team (1 oder 2) bei Aufgabe/Kampflos; sonst aus den Sätzen bestimmt.
     #[serde(default)]
     pub winner: Option<i64>,
+    /// Nur bei Aufgabe relevant: soll die aufgebende Mannschaft auch in den
+    /// **restlichen** Spielen dieser Disziplin kampflos gewertet werden (echte
+    /// Verletzung → Walkover-Vorschlag für die Folgespiele)? `false` (Default)
+    /// = nur dieses Spiel zählt als Aufgabe. `#[serde(default)]` hält ältere
+    /// Tablets kompatibel.
+    #[serde(rename = "cascadeWalkover", default)]
+    pub cascade_walkover: bool,
 }
 
 /// Antwort auf eine Ergebnis-Übermittlung.
@@ -822,6 +829,10 @@ pub enum RelayFrame {
         walkover: bool,
         #[serde(default)]
         winner: Option<i64>,
+        /// Verletzung → Folgespiele der Disziplin kampflos – siehe
+        /// [`ResultBody::cascade_walkover`].
+        #[serde(rename = "cascadeWalkover", default)]
+        cascade_walkover: bool,
     },
     /// Akkustand eines Tablets.
     Battery {
@@ -983,6 +994,7 @@ mod tests {
             retired: false,
             walkover: false,
             winner: None,
+            cascade_walkover: false,
         });
         roundtrip(&RelayFrame::Result {
             req_id: 10,
@@ -993,6 +1005,7 @@ mod tests {
             retired: true,
             walkover: false,
             winner: Some(1),
+            cascade_walkover: true,
         });
         roundtrip(&RelayFrame::Result {
             req_id: 11,
@@ -1003,6 +1016,7 @@ mod tests {
             retired: false,
             walkover: true,
             winner: Some(2),
+            cascade_walkover: false,
         });
     }
 
