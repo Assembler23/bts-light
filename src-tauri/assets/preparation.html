@@ -249,6 +249,18 @@ main {
   // Reassignment-Check (alle 30 s gegen /monitor/state). Wenn das Geraet
   // inzwischen einem Feld zugewiesen ist (kein redirectTo mehr), oder
   // einem anderen Info-Target → selbst umleiten.
+  // Siehe overview.html: Vergleich über Pfad + Query ohne device/rotate, damit
+  // ein ?…-Ziel keinen Endlos-Redirect auslöst.
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device');
+      here.searchParams.delete('rotate');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname &&
+             here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
   function navigateWithRotate(href) {
     // ?rotate=…-Wert ueber den Wechsel mitnehmen (Code-Review v0.9.21 MEDIUM).
     var hereRotate = new URLSearchParams(location.search).get('rotate');
@@ -264,7 +276,7 @@ main {
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
-        if (s.redirectTo && s.redirectTo !== location.pathname) {
+        if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
           var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
           navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
         } else if (!s.redirectTo) {
