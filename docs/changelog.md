@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.91
+
+- **Punkt-Cooldown am Zähltablett (Doppel-Eingabe-Schutz).** Nach einem Punkt
+  sind die +1-Flächen **3 s gesperrt** (sichtbar gedimmt) — verhindert
+  versehentliche Doppel-Taps/Doppelpunkte (Punkte fallen ohnehin nicht im
+  Sekundentakt). **Undo** hebt die Sperre sofort auf (Korrektur ohne Warten).
+  Dauer als Konstante `SCORE_COOLDOWN_MS` leicht anpassbar.
+
 ## v0.9.90
 
 - **Fix: Court-Übersicht je Halle flackerte / ging „offline" (Redirect-Loop).**
