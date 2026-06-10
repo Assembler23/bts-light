@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.84
+
+- **Court-Übersicht: Hallenname in der Kopfzeile + Unten-Abschnitt behoben.**
+  Der Hallenname (bei Rotation mit „1 / N") steht jetzt **hinter „Court-Übersicht"
+  in der Kopfzeile** statt in einer eigenen Zeile — spart Platz. Außerdem wurden
+  unten Kacheln abgeschnitten: Ursache war eine hartcodierte Kopfzeilenhöhe
+  (`calc(100% - 7vh)`); jetzt füllt der Inhalt per Flex exakt den Rest → nichts
+  läuft mehr aus dem Bild.
+- **Court-Monitore: Online-Link je Halle.** Bei mehreren Hallen gibt es unter
+  „Court-Übersicht (Hallen-Display)" jetzt auch je Halle einen **öffentlichen
+  Online-Link** (`…/live?…&display=monitor&halle=<Halle>`), zusätzlich zur
+  Gesamt-Online-Ansicht und den lokalen Links.
+
 ## v0.9.83
 
 - **Status-Seite: „Anzeigen im Browser" erst nach Start + Hallen-Buttons.** Die

@@ -13,6 +13,11 @@ html, body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   cursor: none; overflow: hidden;
 }
+/* Body als Flex-Spalte: die Kopfzeile nimmt ihre echte Höhe, `main` füllt
+   exakt den Rest. (Vorher: main = calc(100% - 7vh) mit hartcodierter
+   Kopfzeilen-Höhe → war die Kopfzeile real höher, lief das Grid unten aus
+   dem Bild.) */
+body { display: flex; flex-direction: column; }
 
 /* Pivot-Unterstützung: ?rotate=90|180|270 → CSS-Transform am Wurzel-
    Element. So lässt sich derselbe Pi mit derselben URL um 90° rotieren,
@@ -23,7 +28,7 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 
 header.bar {
   display: flex; align-items: baseline; gap: 2vw;
-  padding: 1.2vh 3vw;
+  padding: 1.2vh 3vw; flex: 0 0 auto;
   background: linear-gradient(180deg, #141f33, #1c2942);
   border-bottom: .3vh solid #334155;
 }
@@ -38,34 +43,24 @@ header.bar .title {
   flex: 0 0 auto; font-size: 3.6vmin; font-weight: 800;
   letter-spacing: .02em; color: #fbbf24; text-transform: uppercase;
 }
+/* Hallenname direkt hinter dem Titel (spart die separate Zeile im Body). */
+header.bar .bar-hall {
+  flex: 0 0 auto; font-size: 3vmin; font-weight: 700; color: #e2e8f0;
+  letter-spacing: .02em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+header.bar .bar-hall:empty { display: none; }
+header.bar .bar-hall:not(:empty)::before {
+  content: "·"; margin-right: 1.6vw; color: #64748b; font-weight: 800;
+}
 header.bar .tournament {
   flex: 1 1 auto; font-size: 3vmin; font-weight: 600; color: #cbd5e1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 main {
-  height: calc(100% - 7vh); overflow: hidden;
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
   padding: 2vh 2vw; display: flex; flex-direction: column; gap: 1.5vh;
-}
-
-/* Halle-Sektion: füllt die verfügbare Höhe, damit die Kacheln den
-   Bildschirm ausnutzen (mehrere Hallen teilen sich die Höhe). */
-.hall {
-  display: flex; flex-direction: column; gap: 1vh;
-  flex: 1 1 auto; min-height: 0;
-}
-.hall__head {
-  display: flex; align-items: baseline; gap: 1.5vw;
-  padding: 0 0 .4vh 0; border-bottom: .2vh solid #334155; flex: 0 0 auto;
-}
-.hall h2 {
-  font-size: 3.2vmin; font-weight: 800; color: #fbbf24;
-  margin: 0; letter-spacing: .04em; text-transform: uppercase;
-}
-/* Zyklus-Anzeige „1 / 3" bei der Hallen-Rotation. */
-.hall__idx {
-  margin-left: auto; font-size: 2.6vmin; font-weight: 700; color: #94a3b8;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Court-Grid: Spaltenzahl wird per JS gesetzt (dynamisch nach Feldzahl),
@@ -166,6 +161,7 @@ main {
 <header class="bar">
   <span class="live-dot" aria-hidden="true"></span>
   <span class="title">Court-Übersicht</span>
+  <span class="bar-hall" id="bar-hall"></span>
   <span class="tournament" id="t-name"></span>
 </header>
 <main id="board"></main>
@@ -342,14 +338,13 @@ main {
   }
 
   // Eine Halle als Vollbild-Section: Kopf (Name [+ Zyklus „1 / N"]) + Grid.
-  function renderHallSection(g, idx, total) {
-    var section = h('section', 'hall');
-    var head = h('div', 'hall__head');
-    head.appendChild(h('h2', null, g.name || 'Halle'));
-    if (total > 1) head.appendChild(h('span', 'hall__idx', (idx + 1) + ' / ' + total));
-    section.appendChild(head);
-    section.appendChild(buildGrid(g));
-    return section;
+  // Hallenname (+ Zyklus „1 / N" bei Rotation) in die Kopfzeile schreiben –
+  // statt einer eigenen Zeile im Body (spart vertikalen Platz).
+  function setBarHall(name, idx, total) {
+    var el = document.getElementById('bar-hall');
+    if (!el) return;
+    if (!name) { el.textContent = ''; return; }
+    el.textContent = total > 1 ? (name + '  ' + (idx + 1) + ' / ' + total) : name;
   }
 
   function stopHallRotation() {
@@ -380,6 +375,7 @@ main {
 
     if (courts.length === 0) {
       stopHallRotation();
+      setBarHall('');
       board.appendChild(renderIdle('Noch keine Felder aktiv. Sobald der Liveticker läuft, erscheinen sie hier.'));
       return;
     }
@@ -391,17 +387,24 @@ main {
 
     if (rotating) {
       var idx = hallIdx % groups.length;
-      board.appendChild(renderHallSection(groups[idx], idx, groups.length));
+      var g = groups[idx];
+      setBarHall(g.name, idx, groups.length); // Name + „1 / N" in die Kopfzeile
+      board.appendChild(buildGrid(g));
       startHallRotation();
       return;
     }
 
-    // Eine (ggf. gefilterte) Halle im Vollbild. Hat sie einen Namen, zeigt der
-    // Kopf ihn an (bestätigt bei ?halle= die richtige Halle); sonst nur Grid.
+    // Eine (ggf. gefilterte) Halle im Vollbild: Name in die Kopfzeile, nur das
+    // Grid in den Body. Bei genau einer Halle der Normalfall; ein gemischter
+    // Mehr-Gruppen-Fall (benannt + unbenannt) fällt auf gestapelte Grids zurück.
     stopHallRotation();
-    groups.forEach(function (g) {
-      board.appendChild(g.name ? renderHallSection(g, 0, 1) : buildGrid(g));
-    });
+    if (groups.length === 1) {
+      setBarHall(groups[0].name || '');
+      board.appendChild(buildGrid(groups[0]));
+    } else {
+      setBarHall('');
+      groups.forEach(function (g) { board.appendChild(buildGrid(g)); });
+    }
   }
 
   // Spaltenzahl je Feldanzahl: 1→1, 2→2, 3-4→2, 5-6→3, 7-9→3, mehr→4.

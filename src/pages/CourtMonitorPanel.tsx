@@ -252,12 +252,15 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
 
   // ── Court-Übersicht (Hallen-Display) ────────────────────────────────────
   // Online-Ansicht = öffentlicher badhub-Liveticker (übers Internet teilbar),
-  // aus dem konfigurierten Verband (live_url) + display=monitor. Pro-Halle =
-  // lokale bts-light-Übersicht je Halle (?halle=…), für einen TV je Halle.
+  // aus dem konfigurierten Verband (live_url) + display=monitor. badhub/live
+  // unterstützt denselben ?halle=-Filter wie die lokale Übersicht → je Halle
+  // ein eigener Online-Link. Pro-Halle lokal = bts-light-Übersicht je Halle.
   const liveUrl = (config.badhub.live_url || "").trim();
   const onlineOverviewUrl = liveUrl
     ? liveUrl + (liveUrl.includes("?") ? "&" : "?") + "display=monitor"
     : "";
+  const onlineHallUrl = (hall: string) =>
+    `${onlineOverviewUrl}&halle=${encodeURIComponent(hall)}`;
   const overviewLan = "http://bts-light.local:8088/info/overview";
   const overviewPreview = "http://localhost:8088/info/overview";
   const hallOverviewUrl = (hall: string) =>
@@ -384,12 +387,29 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
         </p>
         {onlineOverviewUrl && (
           <OverviewLinkRow
-            label="Online-Ansicht (öffentlich)"
+            label={
+              allHalls.length >= 2
+                ? "Online – alle Hallen"
+                : "Online-Ansicht (öffentlich)"
+            }
             kind="online"
             url={onlineOverviewUrl}
             openUrl={onlineOverviewUrl}
           />
         )}
+        {/* Bei mehreren Hallen je Halle ein eigener Online-Link (badhub/live
+            unterstützt ?halle=). */}
+        {onlineOverviewUrl &&
+          allHalls.length >= 2 &&
+          allHalls.map((hall) => (
+            <OverviewLinkRow
+              key={`on:${hall}`}
+              label={`Online – ${hall}`}
+              kind="online"
+              url={onlineHallUrl(hall)}
+              openUrl={onlineHallUrl(hall)}
+            />
+          ))}
         {/* Lokale Gesamt-Übersicht (alle Hallen / rotiert bei mehreren). */}
         <OverviewLinkRow
           label={allHalls.length >= 2 ? "Lokal – alle Hallen (rotiert)" : "Lokal – Übersicht"}
