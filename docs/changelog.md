@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.89
+
+- **Pi-Logs einheitlich über den PC (statt direkt in die Cloud).** Pi-Court-
+  Monitore posten ihr Log jetzt – wie die Tablets – an den Turnier-PC
+  (`/pi-log` im LAN, plain HTTP); der PC legt es lokal ab und leitet es an die
+  Cloud weiter. Vorteil: **nur der PC braucht Internet**, weniger LTE-Daten, und
+  **kein TLS/keine Pi-Uhr** nötig — der bisherige Direkt-HTTPS-Upload scheiterte
+  bei fehlender Pi-RTC (falsche Uhr) still. Pi-Seite: `pi/shared-startbrowser.sh`
+  (wirkt erst nach Neu-Flashen der Karten). Doku: `docs/logging.md`.
+
 ## v0.9.88
 
 - **Internet-/Uplink-Status in der Kopfzeile.** Neben „BTS-Netzwerk" zeigt

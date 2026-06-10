@@ -38,3 +38,25 @@ bts-light seine Logdatei alle ~10 Minuten an badhub.de hoch, damit Fehler
 Ohne den Schalter bleibt das Log rein lokal. Empfänger-Seite:
 [badhub `docs/features/liveticker_bts.md`](https://badhub.de) →
 Abschnitt „Diagnose-Log-Upload".
+
+## Geräte-Logs (Tablets + Pi-Monitore) — einheitlich über den PC
+
+Tablets **und** Pi-Court-Monitore schicken ihr Verbindungslog **an den
+Turnier-PC (bts-light) im LAN**; der PC legt es lokal ab und leitet es – sofern
+Internet da ist – an die Cloud weiter. Vorteil: **nur der PC braucht
+Internet**, minimale LTE-Daten, und der Upload läuft über **plain HTTP im LAN**
+(kein TLS / keine korrekte Geräte-Uhr nötig — Pis haben keine RTC).
+
+- **Tablet → PC:** `POST …/tablet-log?court=<id>` → lokal
+  `<log_dir>/tablet-logs/court-<id>.log` → Cloud `api/tablet_log.php`
+  (Geräte-ID inkl. `install_id`).
+- **Pi → PC:** `POST …/pi-log?device=pi-<serial>` (an die gecachte
+  bts-light-IP) → lokal `<log_dir>/pi-logs/pi-<serial>.log` → Cloud
+  `api/pi_log.php`. Geräte-ID = **Pi-Seriennummer** (global eindeutig → ein
+  Cloud-Log je physischem Pi). Frequenz: beim Boot + alle ~5 min.
+- Beides ist über **„Logs öffnen"** am PC sofort einsehbar (auch offline);
+  die Cloud-Kopie liegt unter `storage/{tablet,pi}-logs/` auf badhub.de.
+
+> Früher luden die Pis **direkt** per HTTPS in die Cloud — das scheiterte bei
+> falscher Pi-Uhr (keine RTC) still an der TLS-Prüfung. Der Weg über den PC
+> behebt das. (Pi-Seite: `pi/shared-startbrowser.sh` → `upload_log`.)
