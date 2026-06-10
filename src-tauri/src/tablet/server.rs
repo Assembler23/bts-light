@@ -779,12 +779,13 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
             tracing::info!("BTP-Schreiben OK: Match {}", m.id);
-            // Nach einer Aufgabe: prüfen, ob die aufgebende Mannschaft in
-            // derselben Disziplin noch Spiele hat, und der Turnierleitung
-            // einen Walkover-Vorschlag hinterlegen. Bei einem echten Kampflos
-            // (score_status=1) bewusst NICHT: das ist bereits die finale
-            // Kampflos-Wertung dieses Spiels – kein abgeleiteter Vorschlag.
-            if body.retired {
+            // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
+            // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
+            // ausdrücklich gewählt hat (echte Verletzung → `cascade_walkover`).
+            // Ohne das Flag zählt nur dieses eine Spiel als Aufgabe. Bei einem
+            // echten Kampflos (score_status=1) ebenfalls nicht – das ist bereits
+            // die finale Wertung dieses Spiels.
+            if body.retired && body.cascade_walkover {
                 register_walkover_proposal(ctx, &m, team1_won);
             }
             ResultResponse::ok()

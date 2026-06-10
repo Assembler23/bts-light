@@ -771,6 +771,7 @@ async fn result(
             retired: body.retired,
             walkover: body.walkover,
             winner: body.winner,
+            cascade_walkover: body.cascade_walkover,
         };
         if host.send(text(&frame)).is_err() {
             namespace.pending.remove(&req_id);

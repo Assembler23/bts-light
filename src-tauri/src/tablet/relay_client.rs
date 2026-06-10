@@ -311,6 +311,7 @@ async fn handle_frame(
             retired,
             walkover,
             winner,
+            cascade_walkover,
         } => {
             let body = ResultBody {
                 match_id,
@@ -320,6 +321,7 @@ async fn handle_frame(
                 retired,
                 walkover,
                 winner,
+                cascade_walkover,
             };
             let resp = process_result(ctx, &body).await;
             let _ = tx.send(text(&HostFrame::ResultAck {

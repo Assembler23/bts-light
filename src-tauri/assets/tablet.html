@@ -622,12 +622,14 @@
 </div>
 
 <!-- Match-beenden-Dialog: Rückfrage (DE/EN), dann Aufgabe (Retired) oder
-     Kampflos (Walkover). „Regulär beenden" nur, wenn schon Sätze gespielt
-     wurden (sonst gibt es nichts regulär zu werten). -->
+     Kampflos (Walkover). Bei Aufgabe wird gefragt, ob nur dieses Spiel zählt
+     oder (echte Verletzung) auch die Folgespiele der Disziplin kampflos
+     gewertet werden. „Regulär beenden" nur, wenn schon Sätze gespielt wurden. -->
 <div class="modal" id="finish-modal">
   <div class="title" id="finish-title"></div>
   <div class="options">
-    <div class="opt" id="finish-retire"></div>
+    <div class="opt" id="finish-retire-one"></div>
+    <div class="opt" id="finish-retire-injury"></div>
     <div class="opt" id="finish-walkover"></div>
     <div class="opt" id="finish-regular" hidden></div>
     <div class="opt" id="finish-cancel">Abbrechen · Cancel</div>
@@ -808,6 +810,10 @@ const STATE = {
   // Kampflos (Walkover): Match wurde nicht ausgespielt (z. B. Nichtantritt).
   // Sätze bleiben leer, Sieger wird manuell gewählt (in `retiredWinner`).
   walkover: /** @type {boolean} */ (false),
+  // Nur bei Aufgabe: echte Verletzung → Folgespiele der Disziplin kampflos
+  // werten (Server hinterlegt dann den Walkover-Vorschlag). false = nur dieses
+  // Spiel.
+  cascadeWalkover: /** @type {boolean} */ (false),
   retiredWinner: /** @type {'a'|'b'|null} */ (null),
 
   // Schiri-Modus: immer sichtbare Ansage zum Vorlesen. Opt-in pro Tablet
@@ -945,7 +951,8 @@ const els = {
   retireWinnerB: document.getElementById('retire-winner-b'),
   finishModal: document.getElementById('finish-modal'),
   finishTitle: document.getElementById('finish-title'),
-  finishRetire: document.getElementById('finish-retire'),
+  finishRetireOne: document.getElementById('finish-retire-one'),
+  finishRetireInjury: document.getElementById('finish-retire-injury'),
   finishWalkover: document.getElementById('finish-walkover'),
   finishRegular: document.getElementById('finish-regular'),
   finishCancel: document.getElementById('finish-cancel'),
@@ -1298,8 +1305,11 @@ function abortMatchRetired() {
   STATE.finished = true;
   STATE.retired = true;
   STATE.walkover = false;
+  // Behandlungspause-Abbruch = nur dieses Spiel; keine automatische
+  // Disziplin-Kaskade (die ist Opt-in über den Match-beenden-Dialog).
+  STATE.cascadeWalkover = false;
   STATE.retiredWinner = null;
-  tlog('info', 'match_retired');
+  tlog('info', 'match_retired', { cascade: false });
   persistState();
   render();
 }
@@ -1424,6 +1434,7 @@ function persistState() {
     alertOfficial: STATE.alertOfficial,
     retired: STATE.retired,
     walkover: STATE.walkover,
+    cascadeWalkover: STATE.cascadeWalkover,
     retiredWinner: STATE.retiredWinner,
     // history MIT sichern: nur so kann „Match wieder öffnen" nach einem
     // Tablet-Reload/Reconnect den echten Stand (und korrekte Seiten)
@@ -1475,6 +1486,7 @@ function applyPersistedState(p) {
   STATE.alertOfficial = !!p.alertOfficial;
   STATE.retired = !!p.retired;
   STATE.walkover = !!p.walkover;
+  STATE.cascadeWalkover = !!p.cascadeWalkover;
   STATE.retiredWinner = p.retiredWinner ?? null;
   // Undo-/Reopen-History wiederherstellen (seit Persistenz mitgesichert).
   // Fehlt sie in alten gespeicherten Ständen, bleibt sie leer.
@@ -1518,6 +1530,7 @@ function loadMatch(match) {
   STATE.alertOfficial = false;
   STATE.retired = false;
   STATE.walkover = false;
+  STATE.cascadeWalkover = false;
   STATE.retiredWinner = null;
   sendAlert();
   persistState();
@@ -1556,6 +1569,7 @@ function clearMatch() {
   STATE.alertOfficial = false;
   STATE.retired = false;
   STATE.walkover = false;
+  STATE.cascadeWalkover = false;
   STATE.retiredWinner = null;
   STATE.lastEvent = null;
   STATE.cards = [];
@@ -1649,6 +1663,7 @@ function snapshot() {
     // sein (sonst bliebe nach einem Walkover STATE.walkover hängen).
     retired: STATE.retired,
     walkover: STATE.walkover,
+    cascadeWalkover: STATE.cascadeWalkover,
     retiredWinner: STATE.retiredWinner,
     midGameSwitchDone: STATE.midGameSwitchDone,
     // Damit das 11-Punkte-Intervall nach undo nicht doppelt/gar nicht
@@ -1676,6 +1691,7 @@ function restoreSnapshot(snap) {
   // (alte localStorage-Snapshots ohne diese Felder bleiben kompatibel).
   if (typeof snap.retired === 'boolean') STATE.retired = snap.retired;
   if (typeof snap.walkover === 'boolean') STATE.walkover = snap.walkover;
+  if (typeof snap.cascadeWalkover === 'boolean') STATE.cascadeWalkover = snap.cascadeWalkover;
   if (snap.retiredWinner !== undefined) STATE.retiredWinner = snap.retiredWinner;
   if (typeof snap.midGameSwitchDone === 'boolean') {
     STATE.midGameSwitchDone = snap.midGameSwitchDone;
@@ -1854,7 +1870,11 @@ function openFinishModal() {
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing'
       || STATE.locked || STATE.occupied) return;
   fillBilingual(els.finishTitle, 'Spiel beenden?', 'End the match?', 't-en');
-  els.finishRetire.textContent = 'Aufgabe (Verletzung) · Retirement (injury)';
+  // Zwei Aufgabe-Varianten: nur dieses Spiel ODER (Verletzung) auch die
+  // Folgespiele der Disziplin kampflos werten.
+  els.finishRetireOne.textContent = 'Aufgabe – nur dieses Spiel · Retire (this match)';
+  els.finishRetireInjury.textContent =
+    'Verletzung – auch Folgespiele der Disziplin · Injury (rest of discipline)';
   els.finishWalkover.textContent = 'Kampflos · Walkover';
   const hasSets = STATE.setsCompleted.length > 0
     || STATE.currentSet.left > 0 || STATE.currentSet.right > 0;
@@ -1869,7 +1889,10 @@ function closeFinishModal() {
 
 // Beendet das Match per Aufgabe (retired) oder Kampflos (walkover). Der
 // Sieger wird danach im Match-Ende-Overlay gewählt.
-function finishAs(status) {
+// `status`: 'walkover' (Kampflos) | 'retired' (Aufgabe). `cascade` nur bei
+// Aufgabe relevant: true = echte Verletzung → Folgespiele der Disziplin
+// kampflos werten; false = nur dieses Spiel.
+function finishAs(status, cascade) {
   closeFinishModal();
   // Gleiche Bedingungen wie openFinishModal: falls sich der Zustand bei
   // offenem Dialog geändert hat (Server-Push: gesperrt/belegt/schon beendet),
@@ -1883,6 +1906,7 @@ function finishAs(status) {
     STATE.currentSet = { left: 0, right: 0 };
     STATE.walkover = true;
     STATE.retired = false;
+    STATE.cascadeWalkover = false;
   } else {
     // Aufgabe: laufenden Teilstand als Satz übernehmen (wie abortMatchRetired).
     if (STATE.currentSet.left > 0 || STATE.currentSet.right > 0) {
@@ -1891,10 +1915,12 @@ function finishAs(status) {
     }
     STATE.retired = true;
     STATE.walkover = false;
+    STATE.cascadeWalkover = !!cascade;
   }
   STATE.finished = true;
   STATE.retiredWinner = null;
-  tlog('info', status === 'walkover' ? 'match_walkover' : 'match_retired');
+  tlog('info', status === 'walkover' ? 'match_walkover' : 'match_retired',
+    { cascade: STATE.cascadeWalkover });
   persistState();
   render();
   sendScoreUpdate();
@@ -1910,6 +1936,7 @@ function reopen() {
   STATE.pendingResult = null;
   STATE.retired = false;
   STATE.walkover = false;
+  STATE.cascadeWalkover = false;
   STATE.retiredWinner = null;
   if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
   persistState();
@@ -1940,13 +1967,17 @@ function submit() {
     : { a: s.right, b: s.left });
   const body = { matchId: STATE.match.matchId, courtId: COURT_ID, courtLabel: COURT_LABEL, sets };
   if (STATE.retired || STATE.walkover) {
-    if (STATE.retired) body.retired = true;
+    if (STATE.retired) {
+      body.retired = true;
+      // Nur bei Aufgabe: Folgespiele der Disziplin kampflos werten (Verletzung)?
+      if (STATE.cascadeWalkover) body.cascadeWalkover = true;
+    }
     if (STATE.walkover) body.walkover = true;
     body.winner = STATE.retiredWinner === 'a' ? 1 : 2;
   }
   STATE.pendingResult = body;
   STATE.submittedOk = false;
-  tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired, walkover: STATE.walkover });
+  tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired, walkover: STATE.walkover, cascade: STATE.cascadeWalkover });
   persistState();
   render();
   trySubmitPending();
@@ -2231,7 +2262,9 @@ function render() {
       ? STATE.match[key === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ')
       : '';
     if (STATE.retired || STATE.walkover) {
-      const statusDe = STATE.walkover ? 'Kampflos' : 'Aufgabe';
+      const statusDe = STATE.walkover
+        ? 'Kampflos'
+        : (STATE.cascadeWalkover ? 'Aufgabe · Verletzung' : 'Aufgabe');
       els.winnerBanner.textContent = STATE.retiredWinner
         ? `🏆 ${teamName(STATE.retiredWinner)} · ${statusDe}`
         : (STATE.walkover ? 'Kampflos — Sieger wählen' : 'Spiel abgebrochen — Aufgabe');
@@ -2637,8 +2670,9 @@ els.plusLeft.addEventListener('click', () => addPointOnSide('left'));
 els.plusRight.addEventListener('click', () => addPointOnSide('right'));
 els.undoBtns.forEach(b => b.addEventListener('click', undo));
 els.finishBtn.addEventListener('click', openFinishModal);
-els.finishRetire.addEventListener('click', () => finishAs('retired'));
-els.finishWalkover.addEventListener('click', () => finishAs('walkover'));
+els.finishRetireOne.addEventListener('click', () => finishAs('retired', false));
+els.finishRetireInjury.addEventListener('click', () => finishAs('retired', true));
+els.finishWalkover.addEventListener('click', () => finishAs('walkover', false));
 els.finishRegular.addEventListener('click', () => { closeFinishModal(); finishManually(); });
 els.finishCancel.addEventListener('click', closeFinishModal);
 els.submitBtn.addEventListener('click', submit);

@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.85
+
+- **Aufgabe: Disziplin-Kaskade jetzt optional (Verletzung abgefragt).** Bisher
+  löste **jede** Aufgabe automatisch einen Walkover-Vorschlag für die restlichen
+  Spiele der Disziplin aus. Der Match-beenden-Dialog fragt jetzt: **„Aufgabe –
+  nur dieses Spiel"** (nur dieses Spiel zählt) oder **„Verletzung – auch
+  Folgespiele der Disziplin"** (dann erst der Walkover-Vorschlag für die
+  Folgespiele). Durchgeschleift bis BTP (`cascadeWalkover`-Flag,
+  abwärtskompatibel). „Spiel abbrechen" in der Behandlungspause beendet nur
+  dieses Spiel.
+
 ## v0.9.84
 
 - **Court-Übersicht: Hallenname in der Kopfzeile + Unten-Abschnitt behoben.**

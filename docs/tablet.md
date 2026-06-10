@@ -126,8 +126,13 @@ Der dezente Button **„Match beenden …"** in der Fußzeile ist **ab 0:0**
 verfügbar (vorher erst ab dem 2. Satz). Ein Tippen öffnet eine zweisprachige
 Rückfrage (**„Spiel beenden? · End the match?"**) mit den Optionen:
 
-- **Aufgabe (Verletzung) · Retirement** → Status **Aufgabe** (`ScoreStatus = 2`).
-  Der laufende Teilstand wird als Satz übernommen (wie „Spiel abbrechen").
+- **Aufgabe – nur dieses Spiel · Retire (this match)** → Status **Aufgabe**
+  (`ScoreStatus = 2`). Der laufende Teilstand wird als Satz übernommen. Es
+  zählt **nur dieses Spiel**, keine Folgespiele.
+- **Verletzung – auch Folgespiele der Disziplin · Injury** → wie Aufgabe, aber
+  zusätzlich wird für die **restlichen Spiele der Disziplin** ein Walkover-
+  Vorschlag hinterlegt (echte Verletzung, Spieler fällt aus). Siehe
+  [walkover.md](walkover.md).
 - **Kampflos · Walkover** → Status **Kampflos** (`ScoreStatus = 1`). Das Spiel
   wird **ohne Sätze** gewertet (z. B. Nichtantritt), die Satzliste wird verworfen.
 - **Regulär beenden · Finish normally** → nur sichtbar, wenn schon Sätze
@@ -143,9 +148,11 @@ weist beide gesetzten Flags ab.
 
 ## Kampflose Wertung nach Aufgabe
 
-Nach einer Aufgabe schlägt bts-light vor, die restlichen Spiele der
-aufgebenden Mannschaft in derselben Disziplin kampflos (Walkover) für den
-jeweiligen Gegner zu werten. Eigenes Feature-Dokument:
+**Nur auf ausdrückliche Wahl** (Dialog-Option „Verletzung – auch Folgespiele
+der Disziplin") schlägt bts-light vor, die restlichen Spiele der aufgebenden
+Mannschaft in derselben Disziplin kampflos (Walkover) für den jeweiligen Gegner
+zu werten. Bei „Aufgabe – nur dieses Spiel" passiert das **nicht**. (Früher
+kaskadierte jede Aufgabe automatisch.) Eigenes Feature-Dokument:
 [walkover.md](walkover.md).
 
 ## Spiele in Vorbereitung aufrufen
