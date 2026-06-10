@@ -141,22 +141,21 @@ Schnelltest ohne Pi-Tastatur: Handy ins `btsaccess`-WLAN, `http://bts-light.loca
 
 ## Fertiges Image (Download) & Schreiben mit Raspberry Pi Imager
 
-Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + v3-Launcher +
-`btsaccess`-WLAN, wie im 40-min-Test verifiziert) liegt in **zwei Varianten** bereit:
+Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + aktueller Launcher
++ `btsaccess`-WLAN) steht bereit:
 
-**① Empfohlen — klein & auto-wachsend** (schnell zu schreiben):
 - **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz>
 - **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz.sha256>
-- ~1,0 GB komprimiert, **entpackt nur 3,85 GB** → schreibt + verifiziert **~4× schneller**.
+- ~1,0 GB komprimiert, **entpackt nur 3,85 GB** → schreibt + verifiziert schnell.
   **Wächst beim ersten Boot automatisch** auf die volle Kartengröße (PiShrink, via
-  `/etc/rc.local`). Passt auf jede Karte ≥ 4 GB. Inhaltlich identisch zum getesteten Stand.
+  `/etc/rc.local`). Passt auf jede Karte ≥ 4 GB.
+- **Launcher-Stand (2026-06-10):** Pi-Verbindungslogs gehen **an den PC**
+  (`…:8088/pi-log`), nicht mehr direkt in die Cloud (kein TLS/keine Pi-Uhr nötig).
+  Bei Launcher-Änderungen Image neu bauen (siehe Build-Quelle unten).
 
-**② Alternativ — 1:1 wie getestet, groß** (langsam zu schreiben):
-- **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz>
-- **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-shared-32gb.img.xz.sha256>
-- ~1,2 GB komprimiert, **entpackt 15 GB**. **Nur für 32-GB-Karten**, nicht geschrumpft —
-  exakt der dd-getestete Stand. (Tipp: Pi-Imager-Verifizierung ist hier der Zeitfresser —
-  bei Bedarf nach dem Schreiben abbrechen.)
+> Frühere große 1:1-Variante (`bts-light-pi-shared-32gb.img.xz`, 15 GB, nur 32-GB-
+> Karten) wird **nicht mehr** angeboten — die kleine Variante ist inhaltsgleich
+> und auto-wachsend.
 
 **Schreiben mit Raspberry Pi Imager:**
 1. Imager öffnen → **„Eigenes Image verwenden" / „Use custom"** → die `.img.xz`
@@ -170,17 +169,29 @@ Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + v3-Launcher +
 
 > Build-Quelle: Das Image ist eine Kopie von Tilos `piZero2_image_autostart_16GB`
 > mit ersetztem `/home/pi/startbrowser.sh` (= `pi/shared-startbrowser.sh`).
-> Launcher aktualisieren → `pi/shared-startbrowser.sh` ins große Image schreiben
-> (macOS: `e2fsck` → `debugfs -w write` auf `/dev/diskNs2`, uid/gid 1000, 0755).
-> **Große Variante** (②): `xz -T0 -6 -c gross.img > bts-light-pi-shared-32gb.img.xz`.
-> **Kleine Variante** (①) aus demselben großen Image via PiShrink (braucht Linux-Loop,
-> daher Docker): `docker run --rm --privileged -v "$HOME/Downloads:/work" -w /work
-> debian:bookworm-slim bash -c 'apt-get update && apt-get install -y parted e2fsprogs
-> xz-utils util-linux udev wget ca-certificates && wget -qO /usr/local/bin/pishrink
-> https://raw.githubusercontent.com/Drewsif/PiShrink/master/pishrink.sh && chmod +x
-> /usr/local/bin/pishrink && pishrink -Z -a gross.img bts-light-pi.img'`. Beide
-> hochladen nach `badhub@…:/var/www/badhub/public/download/bts-light/pi-image/` +
-> jeweils `shasum -a 256 … > ….sha256`.
+>
+> **Nur den Launcher aktualisieren** (schnellster Weg, nur diese eine Datei
+> ändert sich) — direkt in der kleinen `bts-light-pi.img.xz`, per Docker
+> Offset-Loop (macOS hat kein ext4/Loop; `losetup -P` legt im Container keine
+> `p2`-Node an → Offset-Loop auf Partition 2):
+> ```
+> docker run --rm --privileged -v "$HOME/Downloads:/work" -w /work \
+>   -v "$REPO/pi/shared-startbrowser.sh:/new.sh:ro" debian:bookworm-slim bash -c '
+>   apt-get update -qq && apt-get install -y -qq util-linux e2fsprogs xz-utils parted
+>   xz -dk -f bts-light-pi.img.xz
+>   OFF=$(parted -m bts-light-pi.img unit B print | awk -F: "\$1==2{gsub(/B/,\"\",\$2);print \$2}")
+>   LOOP=$(losetup -f --show -o "$OFF" bts-light-pi.img); e2fsck -p -f "$LOOP" || true
+>   mkdir -p /mnt/r && mount "$LOOP" /mnt/r
+>   cp --remove-destination /new.sh /mnt/r/home/pi/startbrowser.sh
+>   chown 1000:1000 /mnt/r/home/pi/startbrowser.sh; chmod 0755 /mnt/r/home/pi/startbrowser.sh
+>   sync; umount /mnt/r; losetup -d "$LOOP"
+>   xz -T0 -6 -f -c bts-light-pi.img > bts-light-pi.NEW.img.xz; rm -f bts-light-pi.img'
+> ```
+> Dann `mv …NEW.img.xz bts-light-pi.img.xz`, `shasum -a 256 … > ….sha256`, beide
+> nach `badhub@…:/var/www/badhub/public/download/bts-light/pi-image/` rsyncen.
+>
+> Komplett-Neubau (neues Pi-OS/Base): kleine Variante aus dem großen Image via
+> PiShrink (`docker run --privileged … pishrink -Z -a gross.img bts-light-pi.img`).
 
 ## Test (mit echter Hardware)
 
