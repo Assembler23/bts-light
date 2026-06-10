@@ -267,8 +267,10 @@ badhub.de.
 > **TV-Launcher (Tippen sparen):** An einem Smart-TV ohne feste Zuweisung muss
 > man nur die **kurze** Adresse `http://bts-light.local:8088` (oder `/tv`) tippen
 > — es erscheint ein **Auswahl-Menü**, das man mit der **Fernbedienung
-> (Pfeiltasten + OK)** bedient: „Alle Hallen", je Halle ein Button, „Nächste
-> Spiele". Kein `?halle=` tippen. Direkt-Kurzpfade ohne Menü: `…/alle`,
+> (Pfeiltasten + OK)** bedient. Es bietet **Lokal** (bts-light: „Alle Hallen",
+> je Halle ein Button, „Nächste Spiele") **und Online** (öffentlicher
+> badhub-Liveticker je Halle, etwas andere Darstellung — aus dem konfigurierten
+> Verband). Kein `?halle=` tippen. Direkt-Kurzpfade ohne Menü: `…/alle`,
 > `…/h/1`, `…/h/2` (n-te Halle, alphabetisch), `…/next`. (Pi-Monitore brauchen
 > gar nichts zu tippen — die werden im Tool zugewiesen.)
 
