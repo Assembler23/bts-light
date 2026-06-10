@@ -68,6 +68,7 @@ function defaultConfig(): AppConfig {
     },
     locked_courts: [],
     tablet_settings_pin: "0000",
+    tournament_logo: { data: "", mime: "", background_color: "" },
   };
 }
 

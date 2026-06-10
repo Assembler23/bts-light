@@ -215,6 +215,22 @@ impl Default for AutoAssignConfig {
     }
 }
 
+/// Turnierlogo für den badhub-Liveticker. BTP liefert kein Logo (verifiziert),
+/// deshalb lädt es der Operator in den Einstellungen hoch; bts-light schickt es
+/// im `tset`-Event mit, wo badhubs `#live-logo`-Element es anzeigt — genau wie
+/// das Original-BTS. Leere `data` ⇒ kein Logo (Felder werden dann nicht gesendet).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LogoConfig {
+    /// Base64-kodierte Bilddaten OHNE `data:`-Präfix.
+    pub data: String,
+    /// MIME-Typ, z. B. `image/png`.
+    pub mime: String,
+    /// CSS-Hintergrundfarbe hinter dem Logo (viele Logos sind transparent).
+    /// Leer ⇒ badhub fällt auf sein Standard-Weiß zurück.
+    pub background_color: String,
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -249,6 +265,10 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub auto_assign: AutoAssignConfig,
+    /// Turnierlogo für den badhub-Liveticker (Upload in den Einstellungen).
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub tournament_logo: LogoConfig,
     /// Vom Operator gesperrte Felder (CourtIDs) – werden nicht automatisch
     /// belegt. bts-light-seitig, persistiert über Neustarts. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -360,6 +380,11 @@ mod tests {
             },
             locked_courts: vec![3, 7],
             tablet_settings_pin: "1234".to_string(),
+            tournament_logo: LogoConfig {
+                data: "aGVsbG8=".to_string(),
+                mime: "image/png".to_string(),
+                background_color: "#112233".to_string(),
+            },
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

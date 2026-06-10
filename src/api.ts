@@ -116,6 +116,13 @@ export const listCourtAds = (): Promise<CourtAd[]> => invoke("list_court_ads");
 export const setCourtAdLabel = (file: string, label: string): Promise<void> =>
   invoke("set_court_ad_label", { file, label });
 
+/** Liest eine gewählte Logo-Datei und liefert sie Base64-kodiert + MIME zurück
+ *  (zum Ablegen in config.tournament_logo). */
+export const readTournamentLogo = (
+  path: string,
+): Promise<{ data: string; mime: string }> =>
+  invoke("read_tournament_logo", { path });
+
 /** Liefert die Court-Monitor-Geräte für die Verwaltungsseite. */
 export const monitorDevices = (): Promise<MonitorDeviceInfo[]> =>
   invoke("monitor_devices");

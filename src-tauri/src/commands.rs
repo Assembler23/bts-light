@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
 use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager, State};
@@ -1052,6 +1053,56 @@ pub fn add_court_ad(app: AppHandle, path: String) -> Result<String, String> {
     std::fs::copy(&src, dir.join(&name)).map_err(|e| format!("Kopieren fehlgeschlagen: {e}"))?;
     tracing::info!("Court-Monitor: Werbebild '{name}' hinzugefügt");
     Ok(name)
+}
+
+/// Maximale Logo-Größe. Ein Logo ist klein; 2 MB sind großzügig und halten
+/// den Liveticker-Payload (Base64 wandert in JEDEN vollen `tset`) schlank.
+const MAX_LOGO_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Base64-Bilddaten + MIME einer gewählten Logo-Datei.
+#[derive(Serialize)]
+pub struct LogoData {
+    pub data: String,
+    pub mime: String,
+}
+
+/// Liest eine vom Operator gewählte Bilddatei und liefert sie Base64-kodiert
+/// samt MIME zurück. Das Frontend legt das Ergebnis in `config.tournament_logo`
+/// ab (per `save_config`); von dort schickt es der Sync im `tset`-Event an
+/// badhub, wo `#live-logo` es anzeigt. BTP liefert kein Logo – daher Upload.
+#[tauri::command]
+pub fn read_tournament_logo(path: String) -> Result<LogoData, String> {
+    let src = std::path::PathBuf::from(&path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| ["jpg", "jpeg", "png", "webp", "gif", "svg"].contains(&e.as_str()))
+        .ok_or("Nur Bilddateien (PNG, JPG, WEBP, GIF, SVG) sind erlaubt.")?;
+    let meta = std::fs::metadata(&src).map_err(|e| format!("Datei nicht lesbar: {e}"))?;
+    if !meta.is_file() {
+        return Err("Die Auswahl ist keine Datei.".to_string());
+    }
+    // Erst lesen, dann die tatsächlich gelesene Größe prüfen (kein TOCTOU-
+    // Fenster zwischen metadata() und read()).
+    let bytes = std::fs::read(&src).map_err(|e| format!("Datei nicht lesbar: {e}"))?;
+    if bytes.len() as u64 > MAX_LOGO_BYTES {
+        return Err("Das Logo ist größer als 2 MB.".to_string());
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    };
+    tracing::info!("Turnierlogo geladen ({} B, {mime})", bytes.len());
+    Ok(LogoData {
+        data,
+        mime: mime.to_string(),
+    })
 }
 
 /// Entfernt ein Werbebild aus dem `court-ads`-Verzeichnis. Räumt ein

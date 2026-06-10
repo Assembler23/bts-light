@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import {
   Check,
   Cloud,
+  Image,
   Info,
   KeyRound,
   LayoutGrid,
@@ -20,6 +21,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addCourtAd,
   listCourtAds,
+  readTournamentLogo,
   removeCourtAd,
   setCourtAdLabel,
   saveConfig,
@@ -222,6 +224,13 @@ export function SetupWizard({
   const [badhubUrl, setBadhubUrl] = useState(initialConfig.badhub.url);
   const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
+  // Turnierlogo (badhub-Liveticker). BTP liefert keins → Upload.
+  const [logoData, setLogoData] = useState(initialConfig.tournament_logo?.data ?? "");
+  const [logoMime, setLogoMime] = useState(initialConfig.tournament_logo?.mime ?? "");
+  const [logoBg, setLogoBg] = useState(
+    initialConfig.tournament_logo?.background_color ?? "",
+  );
+  const [logoError, setLogoError] = useState("");
   const [uploadLogs, setUploadLogs] = useState(initialConfig.upload_logs);
   const [tabletPin, setTabletPin] = useState(
     initialConfig.tablet_settings_pin ?? "0000",
@@ -349,7 +358,39 @@ export function SetupWizard({
       locked_courts: initialConfig.locked_courts ?? [],
       // Tablet-Einstellungs-PIN: nur Ziffern, leer → Default „0000".
       tablet_settings_pin: tabletPin.replace(/\D/g, "").slice(0, 8) || "0000",
+      tournament_logo: {
+        data: logoData,
+        mime: logoMime,
+        background_color: logoBg.trim(),
+      },
     };
+  }
+
+  /** Lässt den Nutzer ein Turnierlogo wählen und übernimmt es (Base64) sofort. */
+  async function pickLogo() {
+    setLogoError("");
+    try {
+      const sel = await open({
+        multiple: false,
+        filters: [
+          { name: "Bilder", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"] },
+        ],
+      });
+      if (!sel) return;
+      const path = Array.isArray(sel) ? sel[0] : sel;
+      const { data, mime } = await readTournamentLogo(path);
+      setLogoData(data);
+      setLogoMime(mime);
+    } catch (e) {
+      setLogoError(String(e));
+    }
+  }
+
+  /** Entfernt das hinterlegte Turnierlogo. */
+  function clearLogo() {
+    setLogoData("");
+    setLogoMime("");
+    setLogoError("");
   }
 
   /** Lässt den Nutzer Werbebilder wählen und übernimmt sie sofort. */
@@ -472,6 +513,65 @@ export function SetupWizard({
           active={isManual}
           onClick={() => setPresetId(MANUAL)}
         />
+      </section>
+
+      {/* Turnierlogo (badhub-Liveticker) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Image}>Turnierlogo (optional)</SectionHeader>
+        <p className="text-sm text-slate-600">
+          Erscheint oben auf der Live-Seite (badhub.de/live). BTP liefert kein
+          Logo – lade es hier hoch (PNG, JPG, WEBP, GIF, SVG; max. 2 MB).
+        </p>
+        <div className="flex items-center gap-3">
+          {logoData ? (
+            <img
+              src={`data:${logoMime};base64,${logoData}`}
+              alt="Turnierlogo-Vorschau"
+              className="h-16 w-16 rounded-lg border border-slate-200 object-contain"
+              style={{ background: logoBg || "#ffffff" }}
+            />
+          ) : (
+            <div
+              className="flex h-16 w-16 items-center justify-center rounded-lg
+                         border border-dashed border-slate-300 text-slate-400"
+            >
+              <Image size={22} />
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={() => void pickLogo()}
+              className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm
+                         font-medium text-slate-700 transition-colors hover:bg-slate-200"
+            >
+              {logoData ? "Logo ersetzen" : "Logo wählen"}
+            </button>
+            {logoData && (
+              <button
+                onClick={clearLogo}
+                className="inline-flex items-center gap-1 self-start text-xs
+                           text-rose-700 hover:underline"
+              >
+                <Trash2 size={13} /> Entfernen
+              </button>
+            )}
+          </div>
+        </div>
+        {logoData && (
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            Hintergrundfarbe
+            <input
+              type="color"
+              value={logoBg || "#ffffff"}
+              onChange={(e) => setLogoBg(e.target.value)}
+              className="h-7 w-10 cursor-pointer rounded border border-slate-200"
+            />
+            <span className="text-xs text-slate-500">
+              für transparente Logos (sonst Standard-Weiß)
+            </span>
+          </label>
+        )}
+        {logoError && <p className="text-xs text-rose-700">{logoError}</p>}
       </section>
 
       {/* Schritt 2: BTP-Verbindung */}

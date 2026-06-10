@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.92
+
+- **Turnierlogo für den badhub-Liveticker.** In den Einstellungen
+  (Abschnitt „Liveticker-Ziel") lässt sich ein **Turnierlogo hochladen**
+  (PNG/JPG/WEBP/GIF/SVG, max. 2 MB) inkl. optionaler Hintergrundfarbe für
+  transparente Logos. bts-light schickt es als Base64 im vollen `tset`-Event
+  mit (`tournament_logo`/`_mime`/`_background_color`) — badhubs vorhandenes
+  `#live-logo`-Element zeigt es dann oben auf **badhub.de/live** an, genau wie
+  beim Original-BTS. **Hintergrund:** BTP liefert kein Logo (verifiziert in
+  BTS- und bts-light-Code), deshalb der Upload. Ohne Logo wird nichts gesendet
+  (Felder mit `skip_serializing_if`), badhub blendet das Element dann aus.
+
 ## v0.9.91
 
 - **Punkt-Cooldown am Zähltablett (Doppel-Eingabe-Schutz).** Nach einem Punkt

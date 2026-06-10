@@ -138,6 +138,19 @@ export interface AppConfig {
   /** PIN fürs Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
    *  Nur Ziffern, Default „0000". Reiner Bedien-Schutz, keine Sicherheitsgrenze. */
   tablet_settings_pin: string;
+  /** Turnierlogo für den badhub-Liveticker (#live-logo). Upload, da BTP keins
+   *  liefert. Leere `data` = kein Logo. */
+  tournament_logo: LogoConfig;
+}
+
+/** Turnierlogo (Base64) für badhubs #live-logo. */
+export interface LogoConfig {
+  /** Base64-Bilddaten ohne `data:`-Präfix. Leer = kein Logo. */
+  data: string;
+  /** MIME-Typ, z. B. "image/png". */
+  mime: string;
+  /** CSS-Hintergrundfarbe hinter dem Logo (leer = badhub-Standard). */
+  background_color: string;
 }
 
 export interface SyncStatus {
