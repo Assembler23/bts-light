@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   getStatus,
+  internetStatus,
   loadConfig,
   saveConfig,
   startSync,
@@ -20,7 +21,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
-import type { AppConfig, SyncStatus, WifiStatus } from "./types";
+import type { AppConfig, InternetStatus, SyncStatus, WifiStatus } from "./types";
 
 // "loading"/"wizard" sind Sonderzustände ohne Shell; alles andere sind die
 // über die Seitenleiste erreichbaren Bereiche (NavView).
@@ -80,6 +81,8 @@ function App() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   // WLAN des PCs für die Kopfzeile (zeigt, ob er im btsaccess-Netz hängt).
   const [wifi, setWifi] = useState<WifiStatus | null>(null);
+  // Internet-/Uplink-Status (LTE/Cloud erreichbar?) für die Kopfzeile.
+  const [internet, setInternet] = useState<InternetStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -141,6 +144,32 @@ function App() {
     };
     tick();
     const id = setInterval(tick, 15000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [view]);
+
+  // Internet/Uplink alle 30 s prüfen (HEAD auf badhub.de) – seltener, weil es
+  // einen echten Netz-Roundtrip macht und über LTE Daten kostet.
+  useEffect(() => {
+    if (view === "loading" || view === "wizard") return;
+    let active = true;
+    let inflight = false;
+    const tick = () => {
+      if (inflight) return;
+      inflight = true;
+      internetStatus()
+        .then((s) => {
+          if (active) setInternet(s);
+        })
+        .catch(() => {})
+        .finally(() => {
+          inflight = false;
+        });
+    };
+    tick();
+    const id = setInterval(tick, 30000);
     return () => {
       active = false;
       clearInterval(id);
@@ -256,6 +285,7 @@ function App() {
           config={config}
           status={status}
           wifi={wifi}
+          internet={internet}
           busy={busy}
           onToggleRun={toggleRun}
           onNavigate={navigate}

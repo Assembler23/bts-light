@@ -148,6 +148,12 @@ export interface SyncStatus {
   updated_at_ms: number;
 }
 
+/** Internet-/Uplink-Status des Turnier-PCs (Rust: commands::InternetStatus). */
+export interface InternetStatus {
+  /** Ist die badhub-Cloud erreichbar (Internet/LTE aktiv)? */
+  online: boolean;
+}
+
 /** Lokaler Netzwerk-Status des Turnier-PCs (Rust: commands::WifiStatus). */
 export interface WifiStatus {
   /** Im lokalen BTS-Netz (btsaccess-WLAN oder 192.168.16.x am LAN)? */

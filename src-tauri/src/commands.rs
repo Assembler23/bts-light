@@ -496,6 +496,30 @@ fn on_bts_subnet() -> bool {
     })
 }
 
+/// Internet-/Uplink-Status für die Kopfzeile.
+#[derive(Clone, Serialize)]
+pub struct InternetStatus {
+    /// Ist die badhub-Cloud erreichbar? = Internet/LTE-Uplink aktiv und zugleich
+    /// Voraussetzung für Cloud-Logs + Liveticker-Push.
+    pub online: bool,
+}
+
+/// Kurzer HEAD auf badhub.de: hat der PC Internet (LTE-Uplink aktiv)? Jede
+/// HTTP-Antwort – auch 4xx/Cloudflare-Challenge – zählt als „online"; nur ein
+/// Verbindungs-/Timeout-Fehler ist „offline". 5-s-Deadline, damit die Kopfzeile
+/// nicht hängt. Carrier-Name (z. B. Vodafone) ist vom PC aus nicht ermittelbar.
+#[tauri::command]
+pub async fn internet_status() -> InternetStatus {
+    let online = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c.head("https://badhub.de/").send().await.is_ok(),
+        Err(_) => false,
+    };
+    InternetStatus { online }
+}
+
 /// Ruft `current_ssid()` in einem eigenen Thread auf und gibt nach `timeout`
 /// auf (dann `None`). Ein wirklich hängendes Tool blockiert so höchstens den
 /// abgekoppelten Hilfsthread, nicht den Command.

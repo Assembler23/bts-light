@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.88
+
+- **Internet-/Uplink-Status in der Kopfzeile.** Neben „BTS-Netzwerk" zeigt
+  bts-light jetzt „Internet" (grün) bzw. „Kein Internet" (rot) — ein kurzer
+  HEAD auf badhub.de alle 30 s. So sieht man, ob der LTE-/Uplink aktiv ist (=
+  Voraussetzung für Cloud-Logs + Liveticker-Push). Der Carriername (z. B.
+  Vodafone) ist vom PC aus nicht ermittelbar.
+
 ## v0.9.87
 
 - **TV-Launcher bietet auch die Online-Anzeige (badhub.de).** Das Auswahl-Menü
