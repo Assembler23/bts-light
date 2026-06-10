@@ -7,6 +7,7 @@ import type {
   MonitorDeviceInfo,
   MonitorTarget,
   PreparationView,
+  InternetStatus,
   SyncStatus,
   TabletInfo,
   WalkoverProposal,
@@ -34,6 +35,10 @@ export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 
 /** Aktuelles WLAN (SSID) des Turnier-PCs für die Kopfzeile. */
 export const wifiStatus = (): Promise<WifiStatus> => invoke("wifi_status");
+
+/** Internet-/Uplink-Status (badhub-Cloud erreichbar?) für die Kopfzeile. */
+export const internetStatus = (): Promise<InternetStatus> =>
+  invoke("internet_status");
 
 /** Öffnet die Live-Seite im Browser. display: null | "monitor" | "next". */
 export const openLiveView = (display: string | null): Promise<void> =>

@@ -102,6 +102,7 @@ pub fn run() {
             commands::stop_sync,
             commands::get_status,
             commands::wifi_status,
+            commands::internet_status,
             commands::open_live_view,
             commands::open_external,
             commands::tablet_overview,
