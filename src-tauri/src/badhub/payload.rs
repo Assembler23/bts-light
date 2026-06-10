@@ -36,6 +36,15 @@ pub struct TsetEvent {
     pub recent_finished_matches: Vec<TsetMatch>,
     /// Anstehende Matches (in Vorbereitung).
     pub upcoming_matches: Vec<TsetMatch>,
+    /// Turnierlogo (Base64, ohne `data:`-Präfix) für badhubs `#live-logo`.
+    /// Wird in `sync` aus der Config injiziert; bei leerem Logo NICHT gesendet
+    /// (badhub blendet das Element dann aus). Gleiche Feldnamen wie Original-BTS.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tournament_logo: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tournament_logo_mime: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tournament_logo_background_color: String,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -220,6 +229,11 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64) -> TsetMessage {
             matches: on_court.iter().map(|m| to_tset_match(m)).collect(),
             recent_finished_matches: recent_finished(snapshot),
             upcoming_matches: upcoming(snapshot),
+            // Logo wird erst im Sync-Loop aus der Config gefüllt (build_tset
+            // kennt die Config nicht) – hier leer lassen.
+            tournament_logo: String::new(),
+            tournament_logo_mime: String::new(),
+            tournament_logo_background_color: String::new(),
         },
         rid,
     }

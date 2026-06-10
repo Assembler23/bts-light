@@ -383,10 +383,25 @@ impl SyncEngine {
         // Push >60 s vergangen, wird ein voller `tset` als Lebenszeichen
         // erzwungen (Diff gegen `None`). badhub frischt damit `updated_at`
         // auf und erkennt das Turnier als aktiv.
-        let update = match self.plan(&snapshot) {
+        let mut update = match self.plan(&snapshot) {
             Update::None if self.heartbeat_due() => diff(None, &snapshot, self.rid),
             other => other,
         };
+        // Turnierlogo aus der Config in den vollen `tset`-Event injizieren –
+        // badhubs `#live-logo` zeigt es dann an (gleiche Felder wie Original-BTS).
+        // Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht es nicht,
+        // da badhub den Logo-Stand aus dem zuletzt gemergten Snapshot behält.
+        // Bei leerem Logo bleiben die Felder leer und werden nicht serialisiert.
+        if let Update::Full(msg) = &mut update {
+            let logo = &config.tournament_logo;
+            if !logo.data.is_empty() {
+                msg.event.tournament_logo = logo.data.clone();
+                msg.event.tournament_logo_mime = logo.mime.clone();
+                msg.event
+                    .tournament_logo_background_color
+                    .clone_from(&logo.background_color);
+            }
+        }
         let sent_something = !matches!(update, Update::None);
         match push::push_update(http, &config.badhub.url, &config.badhub.password, &update).await {
             Ok(()) => {
