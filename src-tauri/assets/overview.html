@@ -428,6 +428,22 @@ main {
   // Geraet inzwischen einem anderen Target zugewiesen ist. Wenn ja:
   // selbst umleiten (zurueck auf /monitor fuer ein Feld, oder weiter zu
   // /info/preparation etc.).
+  // Zeigt diese Seite bereits das vom Server gewünschte Ziel? Vergleich über
+  // Pfad + Query (z. B. ?halle=…), aber OHNE die laufzeit-eigenen Parameter
+  // `device`/`rotate`/`hallSeconds`. WICHTIG: ein naiver Vergleich gegen
+  // location.pathname (ohne Query) würde bei einem ?halle=-Ziel IMMER abweichen
+  // → Endlos-Redirect/Flackern (Bug bis v0.9.89).
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device');
+      here.searchParams.delete('rotate');
+      here.searchParams.delete('hallSeconds');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname &&
+             here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
   function navigateWithRotate(href) {
     // ?rotate=…-Wert ueber den Wechsel mitnehmen (Code-Review v0.9.21 MEDIUM).
     var hereRotate = new URLSearchParams(location.search).get('rotate');
@@ -443,7 +459,7 @@ main {
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
-        if (s.redirectTo && s.redirectTo !== location.pathname) {
+        if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
           var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
           navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
         } else if (!s.redirectTo) {

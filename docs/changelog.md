@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.90
+
+- **Fix: Court-Übersicht je Halle flackerte / ging „offline" (Redirect-Loop).**
+  Seit der Per-Halle-Zuweisung (v0.9.82) hat das Monitor-Ziel ein `?halle=…`;
+  `overview.html`/`preparation.html` verglichen das Server-Ziel aber naiv gegen
+  `location.pathname` (ohne Query) → der Vergleich schlug **immer** an → die
+  Seite navigierte im Sekundentakt neu (Flackern), aktualisierte keine
+  Ergebnisse und fiel durch das Dauer-Neuladen auf **„offline"**. Jetzt
+  Vergleich über Pfad **+ Query** (ohne `device`/`rotate`/`hallSeconds`), wie in
+  `ad.html`/`combo.html`. Greift, sobald der PC aktualisiert ist (die Pis laden
+  `overview.html` vom PC).
+
 ## v0.9.89
 
 - **Pi-Logs einheitlich über den PC (statt direkt in die Cloud).** Pi-Court-
