@@ -39,6 +39,8 @@
   a.tile .hint { font-size: 2.2vmin; font-weight: 600; color: #94a3b8; margin-top: 1vh; }
   a.tile.all { border-color: #1f6f4a; }
   a.tile.next { border-color: #1f4f8a; }
+  a.tile.online { border-color: #7c5cff; }
+  .section-label { grid-column: 1 / -1; color: #94a3b8; font-size: 2.4vmin; font-weight: 700; margin: 1.5vh 0 -.5vh; text-transform: uppercase; letter-spacing: .04em; }
   /* Fokus (Fernbedienung) deutlich hervorheben. */
   a.tile:focus { outline: none; border-color: #fbbf24; background: #243352; transform: scale(1.02); }
   a.tile:focus .hint { color: #cbd5e1; }
@@ -59,6 +61,23 @@
 (function () {
   'use strict';
   var menu = document.getElementById('menu');
+  // Öffentlicher badhub-Liveticker (vom Server eingesetzt, z. B.
+  // https://badhub.de/live?t=bvbb). Leer = kein Verband konfiguriert →
+  // keine Online-Kacheln. Die badhub-Anzeige sieht etwas anders aus als die
+  // lokale Übersicht; beide stehen im Menü zur Wahl.
+  var LIVE = '__LIVE_URL__';
+  var hasOnline = /^https?:\/\//.test(LIVE);
+  function onlineUrl(hall) {
+    var u = LIVE + (LIVE.indexOf('?') >= 0 ? '&' : '?') + 'display=monitor';
+    return hall ? u + '&halle=' + encodeURIComponent(hall) : u;
+  }
+
+  function label(text) {
+    var d = document.createElement('div');
+    d.className = 'section-label';
+    d.textContent = text;
+    return d;
+  }
 
   function tile(href, label, hint, cls) {
     var a = document.createElement('a');
@@ -79,15 +98,28 @@
 
   function render(halls) {
     menu.textContent = '';
-    var tiles = [];
-    tiles.push(tile('/info/overview', 'Alle Hallen', 'Court-Übersicht (rotiert bei mehreren Hallen)', 'all'));
+    var first = null;
+    function add(node, focusable) {
+      menu.appendChild(node);
+      if (focusable && !first) first = node;
+    }
+    // Lokal (am Turnier-PC / im Hallen-WLAN).
+    if (hasOnline) add(label('Lokal (bts-light)'), false);
+    add(tile('/info/overview', 'Alle Hallen', 'Court-Übersicht (rotiert bei mehreren Hallen)', 'all'), true);
     halls.forEach(function (name) {
-      tiles.push(tile('/info/overview?halle=' + encodeURIComponent(name), name, 'Court-Übersicht dieser Halle'));
+      add(tile('/info/overview?halle=' + encodeURIComponent(name), name, 'Court-Übersicht dieser Halle'), true);
     });
-    tiles.push(tile('/info/preparation', 'Nächste Spiele', 'Aufruf-/Vorbereitungs-Anzeige', 'next'));
-    tiles.forEach(function (t) { menu.appendChild(t); });
+    add(tile('/info/preparation', 'Nächste Spiele', 'Aufruf-/Vorbereitungs-Anzeige', 'next'), true);
+    // Online (öffentlicher badhub-Liveticker – etwas andere Darstellung).
+    if (hasOnline) {
+      add(label('Online (badhub.de)'), false);
+      add(tile(onlineUrl(''), 'Online – Alle Hallen', 'badhub.de · öffentlicher Liveticker', 'online'), true);
+      halls.forEach(function (name) {
+        add(tile(onlineUrl(name), 'Online – ' + name, 'badhub.de · diese Halle', 'online'), true);
+      });
+    }
     // Erstes Element fokussieren, damit die Fernbedienung sofort navigiert.
-    if (tiles[0]) tiles[0].focus();
+    if (first) first.focus();
   }
 
   var lastKey = null; // zuletzt gerenderte Hallenliste – Re-Render nur bei Änderung

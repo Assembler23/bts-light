@@ -165,8 +165,19 @@ pub fn lan_host() -> String {
 /// TV-Launcher (`/` und `/tv`): Vollbild-Auswahlmenü, per Fernbedienung
 /// bedienbar — so muss am Smart-TV nur einmal die kurze Adresse getippt werden
 /// statt langer `?halle=`-URLs.
-async fn tv_page() -> impl IntoResponse {
-    ([(header::CACHE_CONTROL, "no-store")], Html(assets::TV_HTML))
+async fn tv_page(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    // Konfigurierten badhub-Liveticker einsetzen, damit der Launcher auch die
+    // öffentlichen Online-Anzeigen je Halle anbieten kann. Defensiv: nur eine
+    // saubere http(s)-URL ohne Zeichen, die das JS-String-Literal aufbrechen
+    // könnten (Anführungszeichen/Backslash/Spitzklammern/Whitespace) – sonst
+    // leer (keine Online-Kacheln).
+    let live = ctx.app_config().badhub.live_url;
+    let safe = (live.starts_with("https://") || live.starts_with("http://"))
+        && !live
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '\'' | '"' | '\\' | '<' | '>' | '`'));
+    let body = assets::TV_HTML.replace("__LIVE_URL__", if safe { &live } else { "" });
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
 /// Kurz-Pfad `/h/{n}` → leitet auf die Court-Übersicht der n-ten Halle

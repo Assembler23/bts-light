@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.87
+
+- **TV-Launcher bietet auch die Online-Anzeige (badhub.de).** Das Auswahl-Menü
+  zeigt jetzt zwei Gruppen: **Lokal** (bts-light) **und Online** (öffentlicher
+  badhub-Liveticker je Halle, `…/live?t=…&display=monitor&halle=<Halle>`, etwas
+  andere Darstellung). So lässt sich am TV per Fernbedienung auch die
+  Online-Ansicht je Halle wählen. Der Link kommt aus dem konfigurierten Verband.
+
 ## v0.9.86
 
 - **TV-Launcher — kurze URLs statt langer `?halle=`-Eingabe.** An einem Smart-TV
