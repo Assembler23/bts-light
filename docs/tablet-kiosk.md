@@ -59,10 +59,16 @@ daher **PLUS pro Gerät** (Volumen-Rabatt für ~10 Tablets) einplanen.
 
 1. **Fully Kiosk** installieren (Fire: Amazon Appstore / APK), öffnen.
 2. **Start URL** (Quick-Start oder Web Content Settings) je Einsatz, z. B.
-   - bts-light: `http://192.168.16.101:8088/court/<CourtID>`
+   - bts-light (empfohlen, ab v0.9.94): **`http://<PC-IP>:8088/felder`** — die
+     **Felder-Lobby**: zeigt alle Felder, ein Tipp startet das Zählen, belegte
+     Felder sind als „belegt" markiert (Doppelbelegung bleibt ausgeschlossen).
+     Kein QR, kein Feld pro Tablet vorkonfigurieren.
+   - bts-light (fest auf ein Feld): `http://<PC-IP>:8088/court/<CourtID>`
    - Tilos BTS (Umpire-Panel): `http://192.168.16.2:4433/u`
-   (Bei einem Turnier läuft ohnehin nur **ein** System. Feld innerhalb bts-light
-   wechselt man danach über das ⚙-PIN-Menü — kein QR.)
+   ⚠️ `<PC-IP>` = die **aktuelle** LAN-IP des Turnier-PCs (nicht fest 192.168.16.101);
+   am einfachsten den QR aus dem „QR-Codes"-Tab nutzen. Bei einem Turnier läuft
+   ohnehin nur **ein** System. Feld später wechseln: über die Lobby bzw. das
+   ⚙-PIN-Menü — kein QR.
 3. **Gratis-Robustheit:** *Device Management* → **Keep Screen On** + **Start on
    Boot**; *Web Auto Reload* → **Reload on Network Reconnect** + **on Error** (NICHT
    „on Idle" — würde mitten im Spiel neu laden).

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Feld wählen – bts-light</title>
+<!--
+  Felder-Lobby (/felder): Start-Seite fürs Zähltablett. Listet alle Felder,
+  Tippen führt auf /court/<id> (zählen). Belegte Felder (ein Tablet zählt sie
+  schon) sind als „belegt" markiert und führen auf die bestehende Übernahme-
+  Abfrage — Doppelbelegung bleibt serverseitig ausgeschlossen. Pollt /courts.
+-->
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body { display: flex; flex-direction: column; }
+  header.bar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: .6rem;
+    padding: .8rem 1rem; border-bottom: 1px solid #1e293b;
+  }
+  header.bar h1 { font-size: 1.15rem; margin: 0; font-weight: 800; letter-spacing: .02em; }
+  header.bar .hint { margin-left: auto; font-size: .8rem; color: #94a3b8; }
+  main { flex: 1 1 auto; overflow: auto; padding: 1rem; }
+  #grid {
+    display: grid; gap: .8rem;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .tile {
+    position: relative; border: 2px solid #334155; border-radius: 1rem;
+    background: #111c33; padding: 1rem; min-height: 120px; display: flex;
+    flex-direction: column; gap: .35rem; cursor: pointer; text-align: left;
+    color: inherit; font: inherit; appearance: none; -webkit-appearance: none;
+    transition: transform .08s, border-color .15s, background .15s;
+  }
+  .tile:active { transform: scale(.97); }
+  .tile.free { border-color: #22c55e; }
+  .tile.free:active { background: #15331f; }
+  .tile.busy { border-color: #f59e0b; background: #1c1606; }
+  .tile .court { font-size: 1.6rem; font-weight: 900; line-height: 1; }
+  .tile .pairing { font-size: .9rem; color: #e2e8f0; line-height: 1.2; }
+  .tile .sub { font-size: .72rem; color: #94a3b8; }
+  .tile .state {
+    margin-top: auto; font-size: .75rem; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .tile.free .state { color: #4ade80; }
+  .tile.busy .state { color: #fbbf24; }
+  #empty, #offline { text-align: center; color: #94a3b8; padding: 2rem; }
+  #offline { color: #fda4af; display: none; }
+  #offline.show { display: block; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Feld wählen</h1>
+  <span class="hint">Tippen zum Zählen</span>
+</header>
+<main>
+  <div id="offline">Keine Verbindung zum Turnier-PC …</div>
+  <div id="grid"></div>
+  <div id="empty" style="display:none">Noch keine Felder vorhanden.</div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var grid = document.getElementById('grid');
+  var offline = document.getElementById('offline');
+  var empty = document.getElementById('empty');
+  var POLL_OK = 3000, POLL_FAIL = 4000;
+
+  function go(id) { location.href = '/court/' + encodeURIComponent(id); }
+
+  function render(courts) {
+    offline.classList.remove('show');
+    if (!courts.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+    // Liste ist klein → komplett neu aufbauen (kein Diff nötig).
+    grid.innerHTML = '';
+    courts.forEach(function (c) {
+      var busy = !!c.occupied;
+      var t = document.createElement('button');
+      t.className = 'tile ' + (busy ? 'busy' : 'free');
+      t.onclick = function () { go(c.id); };
+
+      var court = document.createElement('div');
+      court.className = 'court';
+      court.textContent = c.label || ('Feld ' + c.id);
+      t.appendChild(court);
+
+      if (c.pairing) {
+        var p = document.createElement('div');
+        p.className = 'pairing';
+        p.textContent = c.pairing;
+        t.appendChild(p);
+      }
+      if (c.sub) {
+        var s = document.createElement('div');
+        s.className = 'sub';
+        s.textContent = c.sub;
+        t.appendChild(s);
+      }
+
+      var st = document.createElement('div');
+      st.className = 'state';
+      st.textContent = busy ? 'belegt — übernehmen' : 'frei — antippen';
+      t.appendChild(st);
+
+      grid.appendChild(t);
+    });
+  }
+
+  function tick() {
+    fetch('/courts', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (list) {
+        if (!Array.isArray(list)) throw new Error('bad');
+        render(list);
+        setTimeout(tick, POLL_OK);
+      })
+      .catch(function () {
+        offline.classList.add('show');
+        setTimeout(tick, POLL_FAIL);
+      });
+  }
+  tick();
+})();
+</script>
+</body>
+</html>

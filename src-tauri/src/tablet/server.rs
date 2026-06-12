@@ -127,6 +127,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/h/{n}", get(hall_short))
         .route("/court/{id}", get(court_page))
         .route("/courts", get(courts_list))
+        .route("/felder", get(lobby_page))
         .route("/court/{id}/display", get(monitor_page))
         .route("/court/{id}/state", get(monitor_state))
         .route("/monitor", get(monitor_device_page))
@@ -266,18 +267,51 @@ async fn court_page(
 }
 
 /// Feldliste (CourtID + Anzeige-Label) für den Feldwechsel im PIN-Menü des
-/// Tablets – so kann das Tablet ohne QR-Scan auf ein anderes Feld umschalten.
-/// Bewusst ohne Auth (wie die anderen Anzeige-Routen): nur Feld-IDs + Labels,
-/// im Hallen-LAN; keine personenbezogenen Daten.
+/// Tablets – so kann das Tablet ohne QR-Scan auf ein anderes Feld umschalten,
+/// und die Felder-Lobby (`/felder`) baut daraus ihre Kacheln.
+/// Bewusst ohne Auth (wie die anderen Anzeige-Routen): Nutzung nur im Hallen-LAN.
+/// Enthält die Spielernamen der laufenden Partie (`pairing`) – dieselbe Exposition
+/// wie Zähltablett und Court-Monitor, die die Namen im LAN ohnehin anzeigen.
 async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    // Spielernamen eines Teams kompakt verbinden ("Müller / Schmidt").
+    let names = |players: &[crate::btp::model::BtpPlayer]| {
+        players
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
     let items: Vec<serde_json::Value> = ctx
         .tablet
         .courts()
         .into_iter()
         .map(|c| {
+            // Belegt = ein Tablet zählt das Feld bereits (Doppelbelegung-Schutz).
+            // Paarung/Untertitel für die Felder-Lobby, damit man sieht, was auf
+            // dem Feld läuft, bevor man es antippt.
+            let m = ctx.tablet.match_for_court(c.id);
+            let (pairing, sub) = match &m {
+                Some(m) => {
+                    let a = names(&m.team1);
+                    let b = names(&m.team2);
+                    let pairing = if a.is_empty() && b.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{a} — {b}")
+                    };
+                    let sub = format!("{} {}", m.draw_name, m.round_name)
+                        .trim()
+                        .to_string();
+                    (pairing, sub)
+                }
+                None => (String::new(), String::new()),
+            };
             serde_json::json!({
                 "id": c.id,
                 "label": ctx.tablet.court_display_label(c.id),
+                "occupied": ctx.tablet.court_occupied(c.id),
+                "pairing": pairing,
+                "sub": sub,
             })
         })
         .collect();
@@ -285,6 +319,13 @@ async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::Value::Array(items)),
     )
+}
+
+/// Felder-Lobby (`/felder`): Start-Seite fürs Zähltablett. Listet alle Felder
+/// (Live-Belegung via `/courts`-Poll), Tippen auf ein Feld führt auf
+/// `/court/{id}` (zählen bzw. – bei Belegung – die bestehende Übernahme-Abfrage).
+async fn lobby_page() -> impl IntoResponse {
+    ([(header::CACHE_CONTROL, "no-store")], Html(assets::LOBBY_HTML))
 }
 
 /// Fester (verbandsweiter) Token zum Weiterleiten der Tablet-Logs an badhub –
