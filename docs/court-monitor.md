@@ -63,7 +63,9 @@ alle Geräte auf, die sich gemeldet haben:
 - **Feld-Zuweisung** per Dropdown — jederzeit umstellbar; der Monitor
   übernimmt das neue Feld beim nächsten Poll (~1 s im LAN, ≤ 3 s Cloud).
 - **Identifizieren** — der Monitor blendet Code + Feld groß ein, damit
-  man Gerät und TV zuordnen kann.
+  man Gerät und TV zuordnen kann. Wirkt in **allen** Anzeigen — Einzelfeld
+  (`monitor.html`), Court-Übersicht (`overview.html`) und Kombi
+  (`combo.html`) (seit v0.9.93; davor nur Einzelfeld).
 - **Neu laden** — der Monitor lädt seine Seite neu (falls er hängt).
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
