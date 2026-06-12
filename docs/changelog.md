@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.93
+
+- **Fix: „Identifizieren" wirkt jetzt auch in Court-Übersicht und Kombi-
+  Anzeige.** Bisher zeigte der gelbe Code-Overlay nur in der Einzelfeld-
+  Ansicht (`monitor.html`); in `overview.html`/`combo.html` passierte beim
+  Klick auf „Identifizieren" nichts. Ursache: beide pollten zwar bereits
+  `/monitor/state` (für den Reassignment-Check), werteten den darin
+  enthaltenen `command` aber nicht aus. Jetzt behandeln sie den Fernbefehl
+  mit derselben id-basierten Logik wie `monitor.html` (Identifizieren + Neu
+  laden) und blenden den Geräte-Code groß auf gelbem Grund ein. Greift,
+  sobald der PC aktualisiert ist und die Pis die Seite neu laden.
+
 ## v0.9.92
 
 - **Turnierlogo für den badhub-Liveticker.** In den Einstellungen
