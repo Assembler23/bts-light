@@ -325,7 +325,10 @@ async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
 /// (Live-Belegung via `/courts`-Poll), Tippen auf ein Feld führt auf
 /// `/court/{id}` (zählen bzw. – bei Belegung – die bestehende Übernahme-Abfrage).
 async fn lobby_page() -> impl IntoResponse {
-    ([(header::CACHE_CONTROL, "no-store")], Html(assets::LOBBY_HTML))
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::LOBBY_HTML),
+    )
 }
 
 /// Fester (verbandsweiter) Token zum Weiterleiten der Tablet-Logs an badhub –
