@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.94
+
+- **Felder-Lobby als Tablet-Startseite (`/felder`).** Statt das Tablet fest auf
+  `…/court/<id>` zu starten, gibt es jetzt eine Start-Übersicht aller Felder:
+  ein Tipp auf ein Feld beginnt das Zählen. Belegte Felder (ein Tablet zählt
+  sie schon) sind als „belegt" + Paarung markiert; ein Tipp führt auf die
+  bestehende „Feld belegt – übernehmen?"-Abfrage. **Doppelbelegung bleibt
+  ausgeschlossen** (serverseitige `CourtOccupied`-Sperre unverändert). Die Lobby
+  pollt `/courts` (jetzt inkl. `occupied` + Paarung) alle ~3 s. Empfohlene
+  Tablet-Start-URL daher `http://<PC-IP>:8088/felder`.
+- **Fix: Identifizieren/Neu-laden funktionierten nach einem bts-light-Neustart
+  erst nach mehreren Klicks.** Die Fernbefehl-`id` zählte im RAM hoch und
+  startete nach jedem Neustart wieder bei 1, während die Monitore die zuletzt
+  gesehene `id` im `localStorage` über den Neustart hinweg behielten → kleinere
+  `id` = „schon erledigt". Die `id` ist jetzt **zeitstempel-basiert** (`now_ms`)
+  und damit über Neustarts hinweg monoton steigend.
+- **Diagnose Akkustand:** Das Tablet loggt jetzt beim Start `battery_env`
+  (`getBattery` vorhanden? `secureContext`?). Hintergrund: `navigator.getBattery()`
+  braucht in modernem Chromium HTTPS — über HTTP-LAN ist die Akku-Anzeige daher
+  oft nicht verfügbar (kein Code-Fehler, Plattform-Einschränkung).
+
 ## v0.9.93
 
 - **Fix: „Identifizieren" wirkt jetzt auch in Court-Übersicht und Kombi-

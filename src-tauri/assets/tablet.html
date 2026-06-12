@@ -1128,6 +1128,13 @@ function sendScoreUpdate() {
 // navigator.getBattery nicht vorhanden; dann bleibt das Feature stumm.
 let sendBattery = null;
 function setupBattery() {
+  // Diagnose: festhalten, WARUM der Akku evtl. fehlt. getBattery() braucht in
+  // modernem Chromium einen secure context (HTTPS) — über HTTP-LAN ist die API
+  // dann nicht vorhanden (und in Android-WebView ohnehin unzuverlässig).
+  tlog('info', 'battery_env', {
+    hasGetBattery: !!navigator.getBattery,
+    secureContext: window.isSecureContext === true,
+  });
   if (!navigator.getBattery) return;
   navigator.getBattery().then((bat) => {
     sendBattery = () => {

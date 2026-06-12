@@ -912,7 +912,16 @@ impl TabletState {
     pub fn set_monitor_command(&self, device_id: &str, kind: MonitorCommandKind) {
         let mut live = self.monitor_live.write().unwrap();
         let entry = live.entry(device_id.to_string()).or_default();
-        let next_id = entry.command.map(|c| c.id + 1).unwrap_or(1);
+        // ID zeitstempel-basiert (ms seit Epoch) statt reiner +1-Zähler: der
+        // Zähler lebt nur im RAM und startet nach jedem bts-light-Neustart
+        // wieder bei 1, während die Monitore die zuletzt gesehene ID im
+        // localStorage ÜBER den Neustart hinweg behalten. Eine kleinere ID
+        // würde als „schon erledigt" verworfen → Identify/Neu-laden feuerten
+        // erst nach mehrfachem Klicken. now_ms() ist über Neustarts hinweg
+        // monoton; max(+1) sichert Eindeutigkeit bei zwei Befehlen je ms.
+        // (Einziger Restfall: wird die Systemuhr zurückgestellt, kann genau ein
+        // Befehl verworfen werden – für ein LAN-Tool akzeptabel.)
+        let next_id = now_ms().max(entry.command.map(|c| c.id + 1).unwrap_or(0));
         entry.command = Some(MonitorCommand { id: next_id, kind });
     }
 

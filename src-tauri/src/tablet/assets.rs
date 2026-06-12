@@ -38,6 +38,10 @@ pub const AD_HTML: &str = include_str!("../../assets/ad.html");
 /// `?rotate=`. Pollt `/combo/state` für die Live-Stände.
 pub const COMBO_HTML: &str = include_str!("../../assets/combo.html");
 
+/// Felder-Lobby (`/felder`): Start-Seite fürs Zähltablett. Kacheln aller
+/// Felder mit Live-Belegung (Poll `/courts`), Tippen führt auf `/court/{id}`.
+pub const LOBBY_HTML: &str = include_str!("../../assets/lobby.html");
+
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.
