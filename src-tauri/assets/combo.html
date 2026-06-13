@@ -173,13 +173,16 @@ body.vertical .vnames .pname .flag {
 }
 body.vertical .vnames .pname .flag.hidden { display: none; }
 body.vertical .vnames .pname .pname-text { overflow: hidden; text-overflow: ellipsis; }
-body.vertical .vscore {
-  display: flex; flex-direction: column; align-items: center; gap: .6vh;
-  font-variant-numeric: tabular-nums;
+/* Spielstand: je Team eine Zeile mit den Satzzahlen (groß), Team 1 oben,
+   Team 2 darunter — zwischen den Namen. Mehrere Sätze = mehrere Zahlen
+   nebeneinander je Zeile. */
+body.vertical .vsetrow {
+  display: flex; justify-content: center; gap: 3vw;
+  font-variant-numeric: tabular-nums; line-height: 1;
 }
-body.vertical .vpair { font-size: 8.5vh; font-weight: 900; color: #64748b; line-height: 1; }
-body.vertical .vpair.done { color: #f8fafc; }
-body.vertical .vpair.current { color: #fbbf24; }
+body.vertical .vset { font-size: 15vh; font-weight: 900; color: #64748b; }
+body.vertical .vset.won { color: #f8fafc; }
+body.vertical .vset.current { color: #fbbf24; }
 </style>
 </head>
 <body>
@@ -282,14 +285,24 @@ body.vertical .vpair.current { color: #fbbf24; }
         });
         return box;
       };
+      // Satzzahlen-Zeile eines Teams (selfIdx 0/1), gleiche Gewinn-/Laufend-
+      // Färbung wie der horizontale Modus.
+      var vsetRow = function (selfIdx, otherIdx) {
+        var row = h('div', 'vsetrow');
+        sets.forEach(function (s, i) {
+          var mine = setVal(s, selfIdx);
+          var theirs = setVal(s, otherIdx);
+          var cls = 'vset';
+          if (i === lastIdx && running) cls += ' current';
+          else if (mine > theirs) cls += ' won';
+          row.appendChild(h('span', cls, String(mine)));
+        });
+        return row;
+      };
       var spv = (typeof c.serving_player === 'number') ? c.serving_player : null;
       band.appendChild(vname(c.team1, c.team1_nationalities, c.serving_team === 1, spv));
-      var vscore = h('div', 'vscore');
-      sets.forEach(function (s, i) {
-        var cls = 'vpair' + (i === lastIdx && running ? ' current' : ' done');
-        vscore.appendChild(h('div', cls, setVal(s, 0) + ' : ' + setVal(s, 1)));
-      });
-      band.appendChild(vscore);
+      band.appendChild(vsetRow(0, 1)); // Team 1 Punkte (oben)
+      band.appendChild(vsetRow(1, 0)); // Team 2 Punkte (darunter)
       band.appendChild(vname(c.team2, c.team2_nationalities, c.serving_team === 2, spv));
       return band;
     }

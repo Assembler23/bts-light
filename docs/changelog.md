@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.98
+
+- **Vertikale Kombi: Spielstand als große Zahlen-Spalte.** Statt „21 : 19"
+  nebeneinander stehen die Satzzahlen jetzt **untereinander** zwischen den
+  Namen — Team 1 oben, Team 2 darunter — und **deutlich größer** (15vh):
+  Name/Name · 21 · 18 · Name/Name. Gewinn-/Laufend-Färbung wie gehabt.
+
 ## v0.9.97
 
 - **Kombi-Anzeige: Option „Felder nebeneinander" (vertikal).** Neuer Schalter in
