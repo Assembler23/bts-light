@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.99
+
+- **Vertikale Kombi: größere Namen + sichtbarer Aufschlag-Punkt.** Namen jetzt
+  5.6vh (war 4.8), Flaggen entsprechend größer. Der gelbe Aufschlag-Punkt beim
+  aufschlagenden Spieler ist im Vertikal-Modus deutlich größer (3vh) — er war
+  schon verdrahtet (gleiche Logik wie Einzelmonitor/horizontale Kombi), nur
+  neben den großen Zahlen kaum sichtbar; erscheint, sobald das Tablet die
+  Aufschlag-Info meldet.
+
 ## v0.9.98
 
 - **Vertikale Kombi: Spielstand als große Zahlen-Spalte.** Statt „21 : 19"

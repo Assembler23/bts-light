@@ -163,15 +163,19 @@ body.vertical .vnames {
   display: flex; flex-direction: column; align-items: center; gap: .5vh;
 }
 body.vertical .vnames .pname {
-  justify-content: center; font-size: 4.8vh; font-weight: 700; color: #e2e8f0;
-  line-height: 1.15; max-width: 100%;
+  justify-content: center; font-size: 5.6vh; font-weight: 700; color: #e2e8f0;
+  line-height: 1.15; max-width: 100%; gap: 1.4vw;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 body.vertical .vnames .pname .flag {
-  flex: 0 0 auto; width: 5vh; height: 3.2vh; object-fit: cover;
+  flex: 0 0 auto; width: 5.8vh; height: 3.8vh; object-fit: cover;
   border-radius: .3vh; box-shadow: 0 0 .4vh rgba(0,0,0,.5);
 }
 body.vertical .vnames .pname .flag.hidden { display: none; }
+/* Aufschlag-Punkt im Vertikal-Modus deutlich größer (neben den großen
+   Namen/Zahlen sonst kaum sichtbar). Erscheint beim aufschlagenden Spieler,
+   sobald das Tablet die Aufschlag-Info meldet. */
+body.vertical .vnames .serve-dot { width: 3vh; height: 3vh; }
 body.vertical .vnames .pname .pname-text { overflow: hidden; text-overflow: ellipsis; }
 /* Spielstand: je Team eine Zeile mit den Satzzahlen (groß), Team 1 oben,
    Team 2 darunter — zwischen den Namen. Mehrere Sätze = mehrere Zahlen
