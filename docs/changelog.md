@@ -4,6 +4,11 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.96
+
+- **Kombi-Anzeige: Namen noch größer** (Feld-Test 2026-06-13): `--name-size`
+  jetzt 1 Feld 10vh · 2 Felder 6.5vh · 3 Felder 4.3vh (war 8/5.5/3.8).
+
 ## v0.9.95
 
 - **Kombi-Anzeige: Spielernamen größer/lesbar.** Die Namen standen fix auf
