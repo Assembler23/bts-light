@@ -149,6 +149,37 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
   font-size: 26vmin; font-weight: 900; line-height: 1; letter-spacing: .08em;
 }
 #identify-overlay .i-court { font-size: 7vmin; font-weight: 800; }
+
+/* ─── Vertikale Kombi (?dir=v): Felder NEBENEINANDER, je Feld Hochformat —
+   Team 1 oben, Spielstand (Satz-Paare) mittig, Team 2 unten. So mappt ein
+   TV zwischen zwei Feldern räumlich auf links/rechts. ─────────────────── */
+body.vertical #board { flex-direction: row; }
+body.vertical .band {
+  justify-content: space-evenly; align-items: stretch; text-align: center;
+  padding: 2vh 1.2vw; gap: 1.4vh;
+}
+body.vertical .band__head { justify-content: center; }
+body.vertical .vnames {
+  display: flex; flex-direction: column; align-items: center; gap: .5vh;
+}
+body.vertical .vnames .pname {
+  justify-content: center; font-size: 4.8vh; font-weight: 700; color: #e2e8f0;
+  line-height: 1.15; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.vertical .vnames .pname .flag {
+  flex: 0 0 auto; width: 5vh; height: 3.2vh; object-fit: cover;
+  border-radius: .3vh; box-shadow: 0 0 .4vh rgba(0,0,0,.5);
+}
+body.vertical .vnames .pname .flag.hidden { display: none; }
+body.vertical .vnames .pname .pname-text { overflow: hidden; text-overflow: ellipsis; }
+body.vertical .vscore {
+  display: flex; flex-direction: column; align-items: center; gap: .6vh;
+  font-variant-numeric: tabular-nums;
+}
+body.vertical .vpair { font-size: 8.5vh; font-weight: 900; color: #64748b; line-height: 1; }
+body.vertical .vpair.done { color: #f8fafc; }
+body.vertical .vpair.current { color: #fbbf24; }
 </style>
 </head>
 <body>
@@ -174,6 +205,11 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
   // Gewünschte CourtIDs (Reihenfolge wird beibehalten) + Geräte-Code.
   var courtsParam = (params.get('courts') || '').trim();
   var deviceId = (params.get('device') || '').trim();
+
+  // ?dir=v → Felder NEBENEINANDER (Hochformat je Feld) statt übereinander.
+  if (/^(v|vertical)$/i.test(params.get('dir') || '')) {
+    document.body.classList.add('vertical');
+  }
 
   var POLL_OK_MS = 1000;
   var POLL_FAIL_MS = 2000;
@@ -229,6 +265,34 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     var sets = Array.isArray(c.sets) ? c.sets : [];
     var lastIdx = sets.length - 1;
     var running = !isPause; // bei Pause kein "laufender" Satz markieren
+
+    // Vertikaler Modus (?dir=v): Team 1 oben, Spielstand (Satz-Paare) mittig,
+    // Team 2 unten — je Feld ein Hochformat-Scoreboard, Felder nebeneinander.
+    if (document.body.classList.contains('vertical')) {
+      var vname = function (names, nats, isServing, servePlayerIdx) {
+        var box = h('div', 'vnames');
+        var list = (names && names.length) ? names : ['—'];
+        list.forEach(function (n, i) {
+          var line = h('div', 'pname');
+          var dotHere = isServing && (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
+          line.appendChild(h('span', 'serve-dot' + (dotHere ? '' : ' hidden')));
+          line.appendChild(flagEl(nats && nats[i]));
+          line.appendChild(h('span', 'pname-text', n));
+          box.appendChild(line);
+        });
+        return box;
+      };
+      var spv = (typeof c.serving_player === 'number') ? c.serving_player : null;
+      band.appendChild(vname(c.team1, c.team1_nationalities, c.serving_team === 1, spv));
+      var vscore = h('div', 'vscore');
+      sets.forEach(function (s, i) {
+        var cls = 'vpair' + (i === lastIdx && running ? ' current' : ' done');
+        vscore.appendChild(h('div', cls, setVal(s, 0) + ' : ' + setVal(s, 1)));
+      });
+      band.appendChild(vscore);
+      band.appendChild(vname(c.team2, c.team2_nationalities, c.serving_team === 2, spv));
+      return band;
+    }
 
     function teamRow(names, nats, selfIdx, otherIdx, isServing, servePlayerIdx) {
       var row = h('div', 'row');

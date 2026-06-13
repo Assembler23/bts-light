@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.97
+
+- **Kombi-Anzeige: Option „Felder nebeneinander" (vertikal).** Neuer Schalter in
+  den Court-Monitor-Einstellungen: statt zwei Felder über­einander (horizontale
+  Trennung) werden sie **nebeneinander** gezeigt — je Feld ein Hochformat-
+  Scoreboard (Team 1 oben, Spielstand als Satz-Paare mittig, Team 2 unten). So
+  mappt ein TV zwischen zwei Feldern räumlich auf links/rechts. Technisch hängt
+  der Schalter `&dir=v` an die Kombi-URL (`combo.html` rendert das Layout).
+  Globaler Schalter (gilt für alle Kombi-Anzeigen).
+
 ## v0.9.96
 
 - **Kombi-Anzeige: Namen noch größer** (Feld-Test 2026-06-13): `--name-size`

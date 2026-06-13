@@ -75,6 +75,8 @@ export interface CourtMonitorConfig {
   show_ads: boolean;
   /** Anzeige-Layout des Monitors (`split` = „A — Geteilt"). */
   layout: string;
+  /** Kombi-Anzeige: Felder nebeneinander (Hochformat) statt übereinander. */
+  combo_vertical: boolean;
 }
 
 /** Ein Werbebild mit optionalem Anzeige-Label (Rust: commands::CourtAd).

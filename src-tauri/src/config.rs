@@ -148,6 +148,10 @@ pub struct CourtMonitorConfig {
     /// Anzeige-Layout des Monitors (`split` = „A — Geteilt"). Vorbereitet
     /// für weitere Layouts.
     pub layout: String,
+    /// Kombi-Anzeige: Felder NEBENEINANDER (Hochformat je Feld) statt
+    /// übereinander. Sinnvoll, wenn ein TV zwischen zwei Feldern steht.
+    /// Hängt `&dir=v` an die Kombi-URL.
+    pub combo_vertical: bool,
 }
 
 impl Default for CourtMonitorConfig {
@@ -162,6 +166,7 @@ impl Default for CourtMonitorConfig {
             show_match_clock: true,
             show_ads: true,
             layout: "split".to_string(),
+            combo_vertical: false,
         }
     }
 }
@@ -368,6 +373,7 @@ mod tests {
                 show_match_clock: false,
                 show_ads: false,
                 layout: "split".to_string(),
+                combo_vertical: true,
             },
             call_timer: CallTimerConfig {
                 enabled: true,
