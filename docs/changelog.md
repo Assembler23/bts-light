@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.95
+
+- **Kombi-Anzeige: Spielernamen größer/lesbar.** Die Namen standen fix auf
+  3.2vh und wirkten neben den großen Satz-Zahlen winzig. Sie skalieren jetzt –
+  wie die Zahlen – nach Feldzahl (`--name-size`: 1 Feld 8vh · 2 Felder 5.5vh ·
+  3 Felder 3.8vh), ohne bei Doppeln/3 Feldern überzulaufen. Zahlen unverändert.
+
 ## v0.9.94
 
 - **Felder-Lobby als Tablet-Startseite (`/felder`).** Statt das Tablet fest auf

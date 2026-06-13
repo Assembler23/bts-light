@@ -87,7 +87,9 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
   display: flex; flex-direction: column; justify-content: center; gap: .2vh;
 }
 .row__name .pname {
-  font-size: 3.2vh; font-weight: 700; color: #e2e8f0; line-height: 1.15;
+  /* --name-size wird per JS nach Feldzahl gesetzt (analog --set-size), damit
+     die Namen die Bandhöhe nutzen statt winzig zu wirken. */
+  font-size: var(--name-size, 4vh); font-weight: 700; color: #e2e8f0; line-height: 1.15;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   display: flex; align-items: center; gap: 1vw;
 }
@@ -295,8 +297,13 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
     // gewählt, dass die Zahlen die Bandhöhe gut ausfüllen, ohne über-
     // zulaufen (1 Feld ~ 30vh, 2 ~ 19vh, 3 ~ 13vh).
     var sizeByCount = { 1: "30vh", 2: "19vh", 3: "13vh" };
+    // Namen analog zur Bandhöhe skalieren — sonst wirken sie neben den großen
+    // Zahlen winzig (Feld-Test 2026-06-13). Werte so, dass auch Doppel (zwei
+    // gestapelte Namen je Team) bei 3 Feldern nicht überlaufen.
+    var nameByCount = { 1: "8vh", 2: "5.5vh", 3: "3.8vh" };
     var n = Math.min(3, courts.length);
     board.style.setProperty("--set-size", sizeByCount[n] || "13vh");
+    board.style.setProperty("--name-size", nameByCount[n] || "3.8vh");
     courts.forEach(function (c) { board.appendChild(renderBand(c)); });
   }
 
