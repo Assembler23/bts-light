@@ -270,6 +270,7 @@ export function SetupWizard({
   const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
   const [cmAds, setCmAds] = useState(cm.show_ads);
   const [cmLayout, setCmLayout] = useState(cm.layout || "split");
+  const [cmComboVertical, setCmComboVertical] = useState(cm.combo_vertical ?? false);
   const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
   const voices = useAvailableVoices();
@@ -336,6 +337,7 @@ export function SetupWizard({
         show_match_clock: cmMatchClock,
         show_ads: cmAds,
         layout: cmLayout,
+        combo_vertical: cmComboVertical,
       },
       // Schwellen robust auflösen: ungültige/leere Eingabe → Standard; und der
       // 3. Aufruf muss nach dem 2. liegen (sonst übersprünge die Anzeige den
@@ -1034,6 +1036,15 @@ export function SetupWizard({
                 >
                   <option value="split">A — Geteilt (oben/unten)</option>
                 </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmComboVertical}
+                  onChange={(e) => setCmComboVertical(e.currentTarget.checked)}
+                />
+                Kombi-Anzeige: Felder <strong>nebeneinander</strong> (Hochformat
+                je Feld – für einen TV zwischen zwei Feldern)
               </label>
               {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
               <MonitorPreview

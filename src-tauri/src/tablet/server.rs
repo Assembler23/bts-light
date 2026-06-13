@@ -600,7 +600,17 @@ async fn monitor_device_state(
         Some(ref target) if target.redirect_path().is_some() => {
             let mut s = monitor::unassigned_monitor_state(&device);
             s.unassigned = false;
-            s.redirect_to = target.redirect_path();
+            let mut path = target.redirect_path();
+            // Kombi nebeneinander (Hochformat je Feld): globaler Schalter aus
+            // den Court-Monitor-Einstellungen hängt `&dir=v` an die Kombi-URL.
+            if matches!(target, relay_proto::MonitorTarget::CourtCombo { .. })
+                && ctx.app_config().court_monitor.combo_vertical
+            {
+                if let Some(p) = path.as_mut() {
+                    p.push_str("&dir=v");
+                }
+            }
+            s.redirect_to = path;
             s
         }
         // Sollte unerreichbar sein (redirect_path() ist Some für alle

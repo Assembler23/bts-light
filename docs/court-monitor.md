@@ -232,6 +232,12 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
   Bild).
 - **Wechsel-Intervall** — 3–30 s.
 - **Layout** — Anzeige-Layout des Monitors (aktuell „A — Geteilt").
+- **Kombi-Anzeige: Felder nebeneinander** (`combo_vertical`, seit v0.9.97) —
+  zeigt bei der Kombi-Anzeige zwei Felder **nebeneinander** (Hochformat je Feld:
+  Team 1 oben, Spielstand als Satz-Paare mittig, Team 2 unten) statt
+  über­einander. Sinnvoll, wenn ein TV zwischen zwei Feldern steht. Der Server
+  hängt dann `&dir=v` an die Kombi-URL (`/combo?courts=…&dir=v`). Globaler
+  Schalter (gilt für alle Kombi-Anzeigen).
 - **Anzeige-Optionen** — Disziplin / Runde / Spielnummer / Spieldauer /
   Pausen-Timer je einzeln ein-/ausblenden. Eine Live-Vorschau im Setup
   zeigt die Wirkung jeder Option sofort.
