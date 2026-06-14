@@ -66,6 +66,7 @@ function defaultConfig(): AppConfig {
     auto_assign: {
       enabled: false,
       wait_minutes: 1,
+      pause_minutes: 0,
     },
     locked_courts: [],
     tablet_settings_pin: "0000",

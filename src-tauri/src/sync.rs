@@ -31,6 +31,25 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Stabiler Schlüssel zur Spieler-Identität für die Verfügbarkeitsprüfung der
+/// Auto-Feldvergabe: bevorzugt die Lizenznummer (`member_id`), sonst der
+/// normalisierte Name. So greift die Prüfung auch über Disziplinen hinweg
+/// (dieselbe Person hat je Disziplin eine andere EntryID, aber dieselbe Lizenz).
+/// Achtung: Ohne `member_id` (Turniere ohne Lizenzen) können zwei verschiedene
+/// Spieler mit identischem Namen verschmelzen – in lizenzierten Turnieren ist
+/// die `member_id` praktisch immer gesetzt, daher hier akzeptiert.
+fn player_key(p: &crate::btp::model::BtpPlayer) -> String {
+    match p
+        .member_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(id) => id.to_ascii_lowercase(),
+        None => p.name.trim().to_ascii_lowercase(),
+    }
+}
+
 /// Ergebnis eines Sync-Zyklus.
 #[derive(Debug)]
 pub enum SyncOutcome {
@@ -228,17 +247,70 @@ impl SyncEngine {
                 m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
             })
             .collect();
+        // Reihenfolge: manuell „in Vorbereitung" gerufene zuerst (Override),
+        // sonst den BTP-Zeitplan von oben nach unten (PlannedTime), dann
+        // Spielnummer/ID als Tiebreaker. Ohne Ansetzung → ans Ende der Zeit-
+        // gruppe, danach greift die Spielnummer (Verhalten wie bisher).
         ready.sort_by_key(|m| {
             (
                 call_for(m.id).is_none(),
+                m.planned_time.unwrap_or(i64::MAX),
                 m.match_num.unwrap_or(i64::MAX),
                 m.id,
             )
         });
 
+        // ── Spieler-Verfügbarkeit ────────────────────────────────────────
+        // Spieler, die GERADE spielen (nur OnCourt). Bewusst NICHT „jedes Match
+        // mit court_id": ein beendetes Spiel kann seine Feld-Zuweisung in BTP
+        // noch tragen, hat den Spieler aber freigegeben – der unterliegt dann
+        // der Pausen-Logik, nicht dem harten Belegt-Block.
+        let busy_players: HashSet<String> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.court_id.is_some() && m.status == MatchStatus::OnCourt)
+            .flat_map(|m| m.team1.iter().chain(m.team2.iter()))
+            .map(player_key)
+            .collect();
+        // Pausen-Fenster: Override aus der Config (>0) sonst BTP-Setting 1303.
+        let pause_ms: u64 = {
+            let mins = if config.auto_assign.pause_minutes > 0.0 {
+                config.auto_assign.pause_minutes
+            } else {
+                snapshot.rest_minutes.unwrap_or(0) as f64
+            };
+            if mins.is_finite() && mins > 0.0 {
+                (mins * 60_000.0) as u64
+            } else {
+                0
+            }
+        };
+        // Letztes Spielende je Spieler (max finished_at) – nur nötig bei Pause.
+        let last_finish: HashMap<String, u64> = if pause_ms == 0 {
+            HashMap::new()
+        } else {
+            let mut lf: HashMap<String, u64> = HashMap::new();
+            for m in snapshot
+                .matches
+                .iter()
+                .filter(|m| m.status == MatchStatus::Finished)
+            {
+                if let Some(end) = m.finished_at {
+                    for p in m.team1.iter().chain(m.team2.iter()) {
+                        let e = lf.entry(player_key(p)).or_insert(0);
+                        *e = (*e).max(end);
+                    }
+                }
+            }
+            lf
+        };
+
         let mut courts = Vec::new();
         let mut match_courts = Vec::new();
         let mut used: HashSet<i64> = HashSet::new();
+        // Spieler, die in DIESEM Zyklus schon ein Feld bekommen haben – kein
+        // Spieler darf auf zwei gleichzeitig frei werdende Felder kommen.
+        let mut used_players: HashSet<String> = HashSet::new();
 
         for court in &snapshot.court_infos {
             if busy.contains(&court.id)
@@ -255,6 +327,25 @@ impl SyncEngine {
                 if used.contains(&m.id) || pending_matches.contains(&m.id) {
                     return false;
                 }
+                // Verfügbarkeit: kein Spieler darf gerade spielen, in diesem
+                // Zyklus schon vergeben sein oder noch in seiner Pause stecken.
+                let player_free = m.team1.iter().chain(m.team2.iter()).all(|p| {
+                    let k = player_key(p);
+                    if busy_players.contains(&k) || used_players.contains(&k) {
+                        return false;
+                    }
+                    if pause_ms > 0 {
+                        if let Some(&end) = last_finish.get(&k) {
+                            if now.saturating_sub(end) < pause_ms {
+                                return false;
+                            }
+                        }
+                    }
+                    true
+                });
+                if !player_free {
+                    return false;
+                }
                 if multi_hall {
                     // Nur für diese Halle gerufene Matches.
                     call_for(m.id)
@@ -268,6 +359,10 @@ impl SyncEngine {
             });
             let Some(m) = pick else { continue };
             used.insert(m.id);
+            // Spieler dieses Matches für den Rest des Zyklus als belegt merken.
+            for p in m.team1.iter().chain(m.team2.iter()) {
+                used_players.insert(player_key(p));
+            }
             courts.push(crate::btp::proto::CourtAssignment {
                 court_id: court.id,
                 match_id: Some(m.id),
@@ -450,6 +545,7 @@ mod tests {
     fn snapshot() -> BtpSnapshot {
         BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -461,6 +557,7 @@ mod tests {
                 discipline: Discipline::MensSingles,
                 round_name: "G1".to_string(),
                 match_num: Some(1),
+                planned_time: None,
                 team1: vec![BtpPlayer {
                     name: "A".to_string(),
                     first: String::new(),
@@ -551,6 +648,7 @@ mod tests {
             discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(num),
+            planned_time: None,
             team1: vec![player("A")],
             team2: vec![player("B")],
             entry1_id: 0,
@@ -584,6 +682,7 @@ mod tests {
     ) -> BtpSnapshot {
         BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: locs,
             court_infos: courts,
@@ -596,6 +695,7 @@ mod tests {
             auto_assign: AutoAssignConfig {
                 enabled,
                 wait_minutes,
+                pause_minutes: 0.0,
             },
             ..AppConfig::default()
         }
@@ -719,5 +819,134 @@ mod tests {
         // Nur das Feld in Halle 2 (location_id=2) bekommt das Match.
         assert_eq!(courts.len(), 1);
         assert_eq!(courts[0].court_id, 2);
+    }
+
+    // ── Zeit-Reihenfolge + Spieler-Verfügbarkeit ─────────────────────────
+    fn ready_named(id: i64, planned: Option<i64>, p1: &str, p2: &str) -> BtpMatch {
+        let mut m = ready_match(id, id);
+        m.planned_time = planned;
+        m.team1 = vec![player(p1)];
+        m.team2 = vec![player(p2)];
+        m
+    }
+    fn oncourt_named(id: i64, court_id: i64, p1: &str, p2: &str) -> BtpMatch {
+        let mut m = ready_named(id, None, p1, p2);
+        m.status = MatchStatus::OnCourt;
+        m.court = Some(court_id.to_string());
+        m.court_id = Some(court_id);
+        m
+    }
+    fn finished_named(id: i64, end_ms: u64, p1: &str, p2: &str) -> BtpMatch {
+        let mut m = ready_named(id, None, p1, p2);
+        m.status = MatchStatus::Finished;
+        m.winner = Some(1);
+        m.finished_at = Some(end_ms);
+        m
+    }
+    fn cfg_auto_pause(wait: f64, pause: f64) -> AppConfig {
+        let mut c = cfg_auto(true, wait);
+        c.auto_assign.pause_minutes = pause;
+        c
+    }
+
+    #[test]
+    fn player_key_prefers_member_id_then_name() {
+        let mut p = player("Müller");
+        assert_eq!(player_key(&p), "müller");
+        p.member_id = Some("  08-001234 ".to_string());
+        assert_eq!(player_key(&p), "08-001234");
+    }
+
+    #[test]
+    fn auto_assign_orders_by_planned_time() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Ein freies Feld, zwei spielbereite Spiele – das früher angesetzte gewinnt.
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, Some(202506141400), "A", "B"),
+                ready_named(8, Some(202506141000), "C", "D"),
+            ],
+            Vec::new(),
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(8));
+    }
+
+    #[test]
+    fn auto_assign_skips_player_on_other_court() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(9, None)],
+            vec![
+                oncourt_named(1, 5, "A", "B"),     // A spielt gerade
+                ready_named(7, Some(1), "A", "X"), // teilt A → überspringen
+                ready_named(8, Some(2), "C", "D"), // frei → bekommt das Feld
+            ],
+            Vec::new(),
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(8));
+    }
+
+    #[test]
+    fn auto_assign_same_player_not_on_two_courts() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(9, None), court(10, None)],
+            vec![
+                ready_named(7, Some(1), "A", "B"),
+                ready_named(8, Some(2), "A", "C"), // teilt A mit 7
+            ],
+            Vec::new(),
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        // Nur ein Spiel vergeben – A kann nicht auf zwei Felder gleichzeitig.
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn auto_assign_respects_pause_after_finish() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let now = now_ms();
+        let snap = snap_with(
+            vec![court(9, None)],
+            vec![
+                finished_named(1, now - 120_000, "A", "B"), // A vor 2 Min fertig
+                ready_named(7, Some(1), "A", "X"),          // A noch in Pause
+                ready_named(8, Some(2), "C", "D"),          // C frei
+            ],
+            Vec::new(),
+        );
+        // 5-Min-Pause → A (vor 2 Min fertig) übersprungen, C kommt dran.
+        let (courts, _) = engine.auto_assign(&cfg_auto_pause(0.0, 5.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(8));
+    }
+
+    #[test]
+    fn auto_assign_pause_falls_back_to_btp_setting() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let now = now_ms();
+        let mut snap = snap_with(
+            vec![court(9, None)],
+            vec![
+                finished_named(1, now - 120_000, "A", "B"),
+                ready_named(7, Some(1), "A", "X"),
+            ],
+            Vec::new(),
+        );
+        snap.rest_minutes = Some(5); // BTP-Setting 1303 = 5 Min
+                                     // pause_minutes=0 → BTP-Wert greift → A noch in Pause → nichts vergeben.
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(courts.is_empty());
     }
 }

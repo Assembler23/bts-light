@@ -52,6 +52,9 @@ export interface AutoAssignConfig {
   enabled: boolean;
   /** Wartezeit in Minuten, die ein Feld frei sein muss, bevor automatisch belegt wird. */
   wait_minutes: number;
+  /** Mindest-Pause eines Spielers nach seinem letzten Spiel (Minuten), bevor er
+   *  wieder aufgerufen wird. 0 = Wert aus BTP (Setting 1303) übernehmen. */
+  pause_minutes: number;
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */

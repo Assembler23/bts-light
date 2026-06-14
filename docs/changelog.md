@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.100
+
+- **Auto-Feldvergabe spielt den Zeitplan ab + prüft Spieler-Verfügbarkeit.**
+  Die automatische Feldvergabe belegt freie Felder jetzt in der Reihenfolge der
+  **BTP-Ansetzung** (`PlannedTime`, von oben nach unten) statt nur nach
+  Spielnummer; manuell „in Vorbereitung" gerufene Spiele bleiben Vorrang, ohne
+  Ansetzung gilt wie bisher die Spielnummer. Ein Spiel wird **übersprungen**,
+  wenn einer seiner Spieler **gerade auf einem anderen Feld spielt** oder noch
+  in seiner **Pause** ist – dann rückt das nächste Spiel nach. Spieler-Identität
+  über Lizenznummer (Name als Fallback), wirkt auch über Disziplinen hinweg; ein
+  Spieler kann nie auf zwei gleichzeitig frei werdende Felder kommen.
+- **Pausenzeit aus BTP.** Die Mindest-Pause wird aus **BTP-Setting 1303**
+  gelesen (wie der Turniername aus 1001). In den Einstellungen → „Automatische
+  Feldvergabe" lässt sich „Pause nach Spielende (Min.)" als **Override** setzen
+  (0 = BTP-Wert übernehmen). Die Vorbereitungs-/Kandidatenliste ist konsistent
+  ebenfalls nach Ansetzung sortiert.
+
 ## v0.9.99
 
 - **Vertikale Kombi: größere Namen + sichtbarer Aufschlag-Punkt.** Namen jetzt

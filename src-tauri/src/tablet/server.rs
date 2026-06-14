@@ -787,19 +787,25 @@ async fn info_preparation_state(
                 "team1": m.team1.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "match_num": m.match_num,
+                "planned_time": m.planned_time,
                 "call": call,
             })
         })
         .collect();
 
-    // Gerufene Spiele zuerst, dann nach Spielnummer (ohne Nummer hinten).
+    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), danach nach
+    // Spielnummer (ohne Zeit/Nummer hinten) – konsistent zur Auto-Feldvergabe.
     candidates.sort_by_key(|c| {
         let has_call = c.get("call").map(|v| !v.is_null()).unwrap_or(false);
+        let planned = c
+            .get("planned_time")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(i64::MAX);
         let num = c
             .get("match_num")
             .and_then(|v| v.as_i64())
             .unwrap_or(i64::MAX);
-        (!has_call, num)
+        (!has_call, planned, num)
     });
 
     (

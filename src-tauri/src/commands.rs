@@ -976,10 +976,17 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
             }
         })
         .collect();
-    // Gerufene zuerst, danach nach Spielnummer (ohne Nummer zuletzt).
+    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), danach nach
+    // Spielnummer (ohne Nummer/Zeit zuletzt) – konsistent zur Auto-Feldvergabe.
+    let planned: std::collections::HashMap<i64, i64> = snapshot
+        .matches
+        .iter()
+        .filter_map(|m| m.planned_time.map(|t| (m.id, t)))
+        .collect();
     candidates.sort_by_key(|c| {
         (
             c.call.is_none(),
+            planned.get(&c.match_id).copied().unwrap_or(i64::MAX),
             c.match_num.unwrap_or(i64::MAX),
             c.match_id,
         )
