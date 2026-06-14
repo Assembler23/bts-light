@@ -209,6 +209,11 @@ pub struct AutoAssignConfig {
     /// Wartezeit in Minuten, die ein Feld frei sein muss, bevor automatisch
     /// belegt wird (verhindert Zuweisung in der kurzen Lücke zwischen Spielen).
     pub wait_minutes: f64,
+    /// Mindest-Pause eines Spielers nach seinem letzten Spiel, bevor er
+    /// automatisch wieder aufgerufen wird (Minuten). `0.0` = Wert aus BTP
+    /// (Setting 1303) übernehmen; >0 überschreibt den BTP-Wert. Unabhängig
+    /// davon wird ein Spieler nie aufgerufen, solange er gerade spielt.
+    pub pause_minutes: f64,
 }
 
 impl Default for AutoAssignConfig {
@@ -216,6 +221,7 @@ impl Default for AutoAssignConfig {
         Self {
             enabled: false,
             wait_minutes: 1.0,
+            pause_minutes: 0.0,
         }
     }
 }
@@ -383,6 +389,7 @@ mod tests {
             auto_assign: AutoAssignConfig {
                 enabled: true,
                 wait_minutes: 0.5,
+                pause_minutes: 2.0,
             },
             locked_courts: vec![3, 7],
             tablet_settings_pin: "1234".to_string(),

@@ -260,6 +260,7 @@ export function SetupWizard({
   const aa = initialConfig.auto_assign;
   const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
   const [aaWait, setAaWait] = useState(String(aa?.wait_minutes ?? 1));
+  const [aaPause, setAaPause] = useState(String(aa?.pause_minutes ?? 0));
   const cm = initialConfig.court_monitor;
   const [cmEnabled, setCmEnabled] = useState(cm.enabled);
   const [cmInterval, setCmInterval] = useState(cm.ad_interval_s);
@@ -355,6 +356,8 @@ export function SetupWizard({
         enabled: aaEnabled,
         // Negative/leere Eingabe abfangen; 0 ist erlaubt (sofort belegen).
         wait_minutes: Number(aaWait) >= 0 ? Number(aaWait) : 1,
+        // Spieler-Pause nach Spielende; 0 = aus BTP (Setting 1303).
+        pause_minutes: Number(aaPause) >= 0 ? Number(aaPause) : 0,
       },
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
@@ -881,8 +884,10 @@ export function SetupWizard({
         <SectionHeader icon={LayoutGrid}>Automatische Feldvergabe</SectionHeader>
         <p className="text-xs text-slate-500">
           Belegt freie Felder automatisch mit dem nächsten spielbereiten Spiel –
-          schreibt die Zuweisung nach BTP (wie das Ziehen in der Spielübersicht).
-          Gesperrte Felder bleiben frei.
+          in der Reihenfolge der BTP-Ansetzung (Zeitplan von oben nach unten),
+          und überspringt Spiele, deren Spieler gerade spielen oder noch Pause
+          haben. Schreibt die Zuweisung nach BTP (wie das Ziehen in der
+          Spielübersicht). Gesperrte Felder bleiben frei.
         </p>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input
@@ -907,6 +912,18 @@ export function SetupWizard({
               {initialConfig.locked_courts.length > 0 && (
                 <>Aktuell gesperrte Felder werden nicht automatisch belegt.</>
               )}
+            </p>
+            <Field
+              label="Pause nach Spielende je Spieler (Minuten)"
+              value={aaPause}
+              onChange={setAaPause}
+              type="number"
+            />
+            <p className="text-xs text-slate-500">
+              Ein Spieler wird erst nach dieser Pause wieder automatisch
+              aufgerufen. <strong>0 = Wert aus BTP übernehmen</strong> (BTP-
+              Einstellung „Pause", Setting 1303). Unabhängig davon wird niemand
+              aufgerufen, der gerade auf einem anderen Feld spielt.
             </p>
             <p className="flex items-start gap-1.5 text-xs text-amber-700">
               <Info size={14} className="mt-0.5 shrink-0" />

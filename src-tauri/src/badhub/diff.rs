@@ -100,6 +100,7 @@ mod tests {
             discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(id),
+            planned_time: None,
             team1: vec![BtpPlayer {
                 name: "A".to_string(),
                 first: String::new(),
@@ -132,6 +133,7 @@ mod tests {
     fn snapshot(matches: Vec<BtpMatch>) -> BtpSnapshot {
         BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             matches,
             courts: Vec::new(),
             locations: Vec::new(),

@@ -296,6 +296,7 @@ mod tests {
             discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(id),
+            planned_time: None,
             team1: vec![player("Anna Müller", Some("08-001234"), Some("GER"))],
             team2: vec![player("Ben Schmidt", None, None)],
             entry1_id: 0,
@@ -317,6 +318,7 @@ mod tests {
     fn tset_matches_and_courts_cover_on_court_matches() {
         let snapshot = BtpSnapshot {
             tournament_name: "Test-Turnier".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -338,6 +340,7 @@ mod tests {
     fn tset_match_maps_players_and_score() {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -370,6 +373,7 @@ mod tests {
 
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -395,6 +399,7 @@ mod tests {
 
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -409,6 +414,7 @@ mod tests {
     fn upcoming_contains_scheduled_matches_with_num() {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -436,6 +442,7 @@ mod tests {
 
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -459,6 +466,7 @@ mod tests {
         // Reihenfolge – das alte Verhalten bleibt unverändert.
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -477,6 +485,7 @@ mod tests {
     fn serializes_to_expected_json_keys() {
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -503,6 +512,7 @@ mod tests {
 
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
@@ -522,6 +532,7 @@ mod tests {
         m.court_id = Some(101);
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: vec![
                 BtpLocation {
@@ -553,6 +564,7 @@ mod tests {
         // Liveticker-Monitor zeigt dann wie bisher ein flaches Raster.
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),

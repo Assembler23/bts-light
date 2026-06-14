@@ -1016,6 +1016,7 @@ mod tests {
             discipline: Discipline::MensSingles,
             round_name: "G1".to_string(),
             match_num: Some(id),
+            planned_time: None,
             team1: vec![player("Anna")],
             team2: vec![player("Ben")],
             entry1_id: 10,
@@ -1049,6 +1050,7 @@ mod tests {
             .collect();
         BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             matches,
             courts: courts.into_iter().map(|(_, n)| n.to_string()).collect(),
             locations: Vec::new(),

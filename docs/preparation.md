@@ -47,6 +47,22 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 8. **Zurücknehmen** — die Turnierleitung kann einen Aufruf jederzeit per
    `retract_preparation` manuell zurücknehmen.
 
+## Auto-Feldvergabe: Reihenfolge + Spieler-Verfügbarkeit
+
+`auto_assign` (`src-tauri/src/sync.rs`) belegt freie Felder automatisch:
+
+- **Reihenfolge:** `(call.is_none(), planned_time, match_num, id)` — manuell
+  gerufene Spiele zuerst, sonst den **BTP-Zeitplan** (`PlannedTime`, geparst zu
+  `BtpMatch.planned_time` als `YYYYMMDDHHMM`), dann Spielnummer/ID. Die
+  Kandidatenliste (`preparation_candidates`, `info_preparation_state`) sortiert
+  identisch.
+- **Spieler-Verfügbarkeit:** Ein spielbereites Match wird übersprungen, wenn ein
+  Spieler gerade OnCourt ist, in diesem Zyklus schon ein Feld bekam, oder noch in
+  seiner **Pause** ist. Identität via `player_key` (Lizenznr., sonst Name).
+- **Pause:** `pause_ms` aus `config.auto_assign.pause_minutes` (>0 = Override) bzw.
+  `BtpSnapshot.rest_minutes` aus **BTP-Setting 1303**; je Spieler gegen das
+  zuletzt beendete Spiel (`finished_at`) geprüft.
+
 ## Was ist „ruf-bar"?
 
 Kandidaten der Liste (`commands::preparation_candidates`) sind alle

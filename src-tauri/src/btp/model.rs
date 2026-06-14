@@ -219,6 +219,11 @@ pub struct BtpMatch {
     pub round_name: String,
     /// Spielnummer (BTP `MatchNr`), falls vergeben.
     pub match_num: Option<i64>,
+    /// Angesetzte Spielzeit (BTP `PlannedTime`) als sortierbarer Schlüssel
+    /// `YYYYMMDDHHMM` (z. B. 202606141330), falls BTP eine Ansetzung liefert.
+    /// Steuert die Reihenfolge der Auto-Feldvergabe („Zeitplan abspielen").
+    /// `None`, wenn keine/ungültige Ansetzung.
+    pub planned_time: Option<i64>,
     /// Team 1 (ein Spieler bei Einzel, zwei bei Doppel).
     pub team1: Vec<BtpPlayer>,
     pub team2: Vec<BtpPlayer>,
@@ -264,6 +269,10 @@ pub struct BtpMatch {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BtpSnapshot {
     pub tournament_name: String,
+    /// Mindest-Pause zwischen zwei Spielen eines Spielers in Minuten
+    /// (BTP-Setting 1303). `None`, wenn BTP keine Pause gesetzt hat. Die
+    /// Auto-Feldvergabe ruft einen Spieler erst nach dieser Pause wieder auf.
+    pub rest_minutes: Option<i64>,
     pub matches: Vec<BtpMatch>,
     /// Alle Court-Namen des Turniers (BTP-Reihenfolge), auch leere Courts –
     /// damit der Tablet-Server jedem Court eine Adresse zuordnen kann.
@@ -352,6 +361,8 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
 
     Ok(BtpSnapshot {
         tournament_name: setting_str(t, 1001).unwrap_or_default(),
+        // BTP-Setting 1303 = Mindest-Pause zwischen Spielen (Minuten).
+        rest_minutes: setting_int(t, 1303).filter(|&m| m > 0),
         matches: parse_matches(
             t,
             &players,
@@ -651,6 +662,7 @@ fn parse_matches(
                 .unwrap_or(Discipline::Unknown),
             round_name: child_str(m, "RoundName").unwrap_or_default().to_string(),
             match_num: child_int(m, "MatchNr").filter(|&n| n > 0),
+            planned_time: parse_planned_time(m),
             team1,
             team2,
             entry1_id,
@@ -714,6 +726,24 @@ fn parse_sets(m: &Node) -> Vec<(i64, i64)> {
         .collect()
 }
 
+/// Parst den `PlannedTime`-Knoten eines Matches zu einem sortierbaren
+/// `YYYYMMDDHHMM`-Schlüssel. BTP liefert die Ansetzung als verschachtelten
+/// Knoten (Year/Month/Day/Hour/Minute), nicht als Text. Die Feldnamen werden
+/// gross- UND kleingeschrieben akzeptiert (defensiv gegen XML-Casing).
+/// `None`, wenn kein PlannedTime-Knoten existiert oder das Jahr fehlt/0 ist.
+fn parse_planned_time(m: &Node) -> Option<i64> {
+    let pt = xml::find(m.children(), "PlannedTime")?;
+    let part = |a: &str, b: &str| child_int(pt, a).or_else(|| child_int(pt, b));
+    // Jahr begrenzen – schützt den YYYYMMDDHHMM-Schlüssel vor i64-Overflow bei
+    // korruptem XML (reale BTP-Jahre liegen weit innerhalb 1..9999).
+    let year = part("Year", "year").filter(|&y| (1..10_000).contains(&y))?;
+    let month = part("Month", "month").unwrap_or(0).clamp(0, 12);
+    let day = part("Day", "day").unwrap_or(0).clamp(0, 31);
+    let hour = part("Hour", "hour").unwrap_or(0).clamp(0, 23);
+    let minute = part("Minute", "minute").unwrap_or(0).clamp(0, 59);
+    Some(year * 100_000_000 + month * 1_000_000 + day * 10_000 + hour * 100 + minute)
+}
+
 // --- Kleine Knoten-Zugriffshelfer -----------------------------------------
 
 fn child_int(node: &Node, id: &str) -> Option<i64> {
@@ -734,6 +764,21 @@ fn setting_str(t: &[Node], setting_id: i64) -> Option<String> {
     settings.children().iter().find_map(|s| {
         if child_int(s, "ID") == Some(setting_id) {
             child_str(s, "Value").map(String::from)
+        } else {
+            None
+        }
+    })
+}
+
+/// Wert eines `Setting` als Ganzzahl – akzeptiert sowohl einen Integer- als
+/// auch einen String-`Value` (BTP typisiert Settings unterschiedlich).
+fn setting_int(t: &[Node], setting_id: i64) -> Option<i64> {
+    let settings = xml::find(t, "Settings")?;
+    settings.children().iter().find_map(|s| {
+        if child_int(s, "ID") == Some(setting_id) {
+            let v = xml::find(s.children(), "Value")?.value()?;
+            v.as_int()
+                .or_else(|| v.as_str()?.trim().parse::<i64>().ok())
         } else {
             None
         }
@@ -1174,6 +1219,7 @@ mod tests {
     ) -> BtpSnapshot {
         BtpSnapshot {
             tournament_name: "T".to_string(),
+            rest_minutes: None,
             matches: Vec::new(),
             courts: courts.iter().map(|(_, n, _)| n.to_string()).collect(),
             locations: locations
@@ -1278,5 +1324,54 @@ mod tests {
         assert_eq!(p2.first, "");
         assert_eq!(p2.last, "Müller");
         assert_eq!(p2.name, "Müller");
+    }
+
+    #[test]
+    fn parse_planned_time_builds_sortable_key() {
+        let m = Node::group(
+            "Match",
+            vec![Node::group(
+                "PlannedTime",
+                vec![
+                    Node::integer("Year", 2025),
+                    Node::integer("Month", 6),
+                    Node::integer("Day", 14),
+                    Node::integer("Hour", 13),
+                    Node::integer("Minute", 30),
+                ],
+            )],
+        );
+        assert_eq!(parse_planned_time(&m), Some(202_506_141_330));
+    }
+
+    #[test]
+    fn parse_planned_time_is_none_without_node() {
+        let m = Node::group("Match", vec![Node::integer("ID", 1)]);
+        assert_eq!(parse_planned_time(&m), None);
+    }
+
+    #[test]
+    fn parse_snapshot_reads_rest_minutes_from_setting_1303() {
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![Node::group(
+                    "Settings",
+                    vec![
+                        Node::group(
+                            "Setting",
+                            vec![Node::integer("ID", 1001), Node::string("Value", "T")],
+                        ),
+                        Node::group(
+                            "Setting",
+                            vec![Node::integer("ID", 1303), Node::string("Value", "20")],
+                        ),
+                    ],
+                )],
+            )],
+        )];
+        let snap = parse_snapshot(&tree).unwrap();
+        assert_eq!(snap.rest_minutes, Some(20));
     }
 }
