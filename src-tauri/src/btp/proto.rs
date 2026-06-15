@@ -110,7 +110,10 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
             // ScoreStatus: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
             Node::integer("ScoreStatus", update.score_status),
             Node::integer("Duration", update.duration_mins),
-            Node::integer("Status", 0),
+            // KEIN `Status` schreiben: das ist in BTP ein Bitfeld mit den
+            // Check-in-Bits der Spieler. Hart auf 0 zu setzen würde sie als
+            // „nicht eingecheckt" markieren (rot→gelb in BTP). Wir lassen das
+            // Feld weg, dann behält BTP seinen Stand (so macht es auch BTS).
             Node::integer("DrawID", update.draw_id),
             Node::integer("PlanningID", update.planning_id),
         ],
@@ -189,8 +192,10 @@ pub fn court_assign_request(
                     "Match",
                     vec![
                         Node::integer("ID", mc.match_id),
-                        Node::integer("Status", 0),
-                        // 0 = Feldzuordnung am Match löschen.
+                        // KEIN `Status` schreiben (Check-in-Bitfeld in BTP) —
+                        // sonst würden die Spieler bei jeder Feldzuweisung als
+                        // nicht eingecheckt markiert (rot→gelb). BTP behält den
+                        // Stand, wenn wir das Feld weglassen.
                         Node::integer("CourtID", mc.court_id),
                         Node::integer("DrawID", mc.draw_id),
                         Node::integer("PlanningID", mc.planning_id),
@@ -416,7 +421,8 @@ mod tests {
         assert_eq!(child_int(&m, "Winner"), Some(1));
         assert_eq!(child_int(&m, "Duration"), Some(28));
         assert_eq!(child_int(&m, "ScoreStatus"), Some(0));
-        assert_eq!(child_int(&m, "Status"), Some(0));
+        // `Status` wird bewusst NICHT mehr geschrieben (Check-in-Bitfeld in BTP).
+        assert_eq!(child_int(&m, "Status"), None);
     }
 
     #[test]
