@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.106
+
+- **Relay-Log persistent + ohne Sonderrechte lesbar.** Der Cloud-Relay schreibt sein Log jetzt
+  zusätzlich in eine **täglich rotierende Datei** unter `storage/relay-logs/bts-relay.log.YYYY-MM-DD`
+  (Pfad per `RELAY_LOG_DIR` in der systemd-Unit). Der `badhub`-User liest sie direkt per SFTP/SSH —
+  kein journalctl-Recht nötig. Loglevel auf INFO begrenzt (kein Verbindungs-Spam).
+- **Relay: StateRestore-Diagnose.** Beim (Neu-)Verbinden/Übernehmen eines Tablets protokolliert der
+  Relay explizit, ob ein gespeicherter Spielstand wiederhergestellt wurde oder das Feld bei 0:0 startet —
+  genau die offene Frage vom 14.06. (Ersatz-Tablet sprang auf 0:0).
+- **Tablet crash-fest geloggt.** Unbehandelte JS-Fehler (`window.onerror`) und Promise-Rejections landen
+  jetzt im Tablet-Log und werden sofort + beim nächsten Boot hochgeladen (Buffer von 300 auf 500 erhöht).
+- **Court-Monitore loggen.** combo/overview/monitor erfassen JS-Fehler + Schlüsselereignisse
+  („keine Daten", Deassign, Offline-Wechsel) und schicken sie best-effort an den Turnier-PC
+  (`/pi-log` → lokal + Cloud, Datei `mon-<device>.log`). Deckt u. a. die Kombi-„keine Daten"-Klasse ab.
+
+> **Server-Schritt einmalig** (wegen neuer Unit-Env): `sudo cp ops/bts-relay.service /etc/systemd/system/`
+> dann `sudo systemctl daemon-reload && sudo systemctl restart bts-relay`.
+
 ## v0.9.105
 
 - **Kombi-Anzeige: Satz-Sieger deutlich hinterlegt.** Der gewonnene Satz steht jetzt

@@ -234,6 +234,46 @@ body.vertical .vset.current { color: #fbbf24; }
     document.body.classList.add('vertical');
   }
 
+  // ── Diagnose-Mini-Logger ──────────────────────────────────────────────
+  // Fängt JS-Fehler + Schlüsselereignisse (z. B. „keine Daten", Deassign) und
+  // schickt sie best-effort an den Turnier-PC: POST /pi-log → lokal ablegen +
+  // (online) an die Cloud weiterleiten (Datei mon-<device>.log). Nur LAN; im
+  // reinen Cloud-Modus (Relay ohne /pi-log) scheitert der Post still. Kein
+  // Dauer-Upload — nur bei Fehler, „keine Daten" und beim Schließen der Seite.
+  var MLOG = [], MLOG_MAX = 200;
+  var wasEmpty = false; // „keine Daten" nur beim Übergang loggen (nicht je Poll)
+  function mlog(level, event, detail) {
+    var e = { t: Date.now(), level: level, event: event };
+    if (detail !== undefined) e.d = detail;
+    MLOG.push(e); while (MLOG.length > MLOG_MAX) MLOG.shift();
+    try { console.log('[' + new Date(e.t).toISOString() + '] ' + level + ' ' + event, detail || ''); } catch (x) {}
+  }
+  function mlogDevice() {
+    var id = (deviceId || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 56);
+    return 'mon-' + (id || 'unbekannt');
+  }
+  function uploadMonitorLog() {
+    try {
+      var body = 'Monitor combo · device=' + mlogDevice() + '\nUA: ' + navigator.userAgent
+        + '\nGeneriert: ' + new Date().toISOString() + '\n\n'
+        + MLOG.map(function (e) {
+            return '[' + new Date(e.t).toISOString() + '] ' + e.level + ' ' + e.event
+              + (e.d !== undefined ? ' ' + JSON.stringify(e.d) : '');
+          }).join('\n') + '\n';
+      fetch('/pi-log?device=' + encodeURIComponent(mlogDevice()), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: body, keepalive: true,
+      }).catch(function () {});
+    } catch (x) {}
+  }
+  window.addEventListener('error', function (ev) {
+    try { mlog('error', 'js_error', { msg: String((ev && ev.message) || ev), src: (ev && ev.filename) || '', line: (ev && ev.lineno) || 0 }); uploadMonitorLog(); } catch (x) {}
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    try { var r = ev && ev.reason; mlog('error', 'unhandled_rejection', { msg: r != null ? (r.message || String(r)) : 'unknown' }); uploadMonitorLog(); } catch (x) {}
+  });
+  window.addEventListener('pagehide', uploadMonitorLog);
+  mlog('info', 'monitor_boot', { courts: courtsParam, dir: document.body.classList.contains('vertical') ? 'v' : 'h' });
+
   var POLL_OK_MS = 1000;
   var POLL_FAIL_MS = 2000;
   var errorCount = 0;
@@ -425,12 +465,21 @@ body.vertical .vset.current { color: #fbbf24; }
     SERVER_NOW_WALL = performance.now();
     var courts = (data && Array.isArray(data.courts)) ? data.courts : [];
     if (courts.length === 0) {
+      // „keine Daten" diagnostisch festhalten — aber nur beim ÜBERGANG (nicht
+      // jede Sekunde), und einmal hochladen, damit der Aussetzer fern sichtbar
+      // wird (der bekannte Kombi-„keine Daten"-Fall).
+      if (!wasEmpty) {
+        wasEmpty = true;
+        mlog('warn', 'no_data', { courts: courtsParam });
+        uploadMonitorLog();
+      }
       var idle = h('div', 'idle');
       idle.appendChild(h('h1', null, 'Kombi-Anzeige'));
       idle.appendChild(h('p', null, 'Keine Felder zugewiesen oder Felder nicht gefunden.'));
       board.appendChild(idle);
       return;
     }
+    if (wasEmpty) { wasEmpty = false; mlog('info', 'data_back', { n: courts.length }); }
     // Satz-Zahlen-Größe an die Bandzahl koppeln: je weniger Felder, desto
     // mehr Höhe pro Band → desto größer die Zahlen. Werte empirisch so
     // gewählt, dass die Zahlen die Bandhöhe gut ausfüllen, ohne über-
@@ -518,6 +567,8 @@ body.vertical .vset.current { color: #fbbf24; }
           // normalen Monitor-Seite. Entprellt: erst nach mehreren Polls, damit
           // ein einzelnes transientes Leer-Lesen die Kombi nicht strandet.
           if (++noRedirectPolls < DEASSIGN_AFTER) return;
+          mlog('info', 'deassign_to_monitor', { polls: noRedirectPolls });
+          uploadMonitorLog();
           navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
           return;
         }

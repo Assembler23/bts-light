@@ -140,8 +140,14 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
 
 - `https://badhub.de/bts-relay/health` antwortet mit `{"ok":true,…}` →
   Relay läuft und ist über nginx erreichbar.
-- `journalctl -u bts-relay -f` zeigt Host-/Tablet-Verbindungen und
-  Namespace-Aktivität.
+- **Relay-Log als Datei** (empfohlen, ohne journal-Recht): bei gesetzter
+  `RELAY_LOG_DIR` (systemd-Unit → `storage/relay-logs/`) schreibt der Relay
+  täglich rotierend nach `bts-relay.log.YYYY-MM-DD`; der `badhub`-User liest
+  sie direkt per SFTP/SSH. Zeigt Verbindungen, Übernahmen und ob beim
+  (Neu-)Verbinden ein Spielstand wiederhergestellt wurde (StateRestore) oder
+  das Feld bei 0:0 startet. Details: [logging.md](logging.md) → „Relay-Log".
+  **Nach Unit-Änderung einmalig:** `sudo systemctl daemon-reload && sudo systemctl restart bts-relay`.
+- `journalctl -u bts-relay -f` zeigt dasselbe live (benötigt `systemd-journal`-Recht).
 - Tablet erreicht die Seite, aber „verbinde…" bleibt → bts-light ist im
   Cloud-Modus nicht verbunden (App-Log prüfen: „Mit Cloud-Relay
   verbunden") oder ein zweiter Host belegt den Namespace.

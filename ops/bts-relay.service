@@ -21,6 +21,11 @@ User=badhub
 Environment=PORT=8090
 # Oeffentliche Basis-URL fuer die QR-Codes.
 Environment=PUBLIC_BASE=https://badhub.de/bts-relay
+# Verzeichnis fuer die taeglich rotierende Relay-Logdatei (bts-relay.log.YYYY-MM-DD).
+# Liegt unter storage/, das der badhub-User direkt lesen darf (kein journalctl-
+# Recht noetig). Wird beim Start automatisch angelegt. Ohne diese Var: nur stdout
+# (journald). Nach Aenderung dieser Unit einmalig: sudo systemctl daemon-reload.
+Environment=RELAY_LOG_DIR=/var/www/badhub/storage/relay-logs
 ExecStart=/opt/bts-relay/bts-relay
 Restart=always
 RestartSec=3

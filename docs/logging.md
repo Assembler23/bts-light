@@ -49,13 +49,51 @@ Internet**, minimale LTE-Daten, und der Upload läuft über **plain HTTP im LAN*
 
 - **Tablet → PC:** `POST …/tablet-log?court=<id>` → lokal
   `<log_dir>/tablet-logs/court-<id>.log` → Cloud `api/tablet_log.php`
-  (Geräte-ID inkl. `install_id`).
+  (Geräte-ID inkl. `install_id`). Frequenz: ~30 s nach Boot, alle 5 min,
+  beim Schließen/Schlafen (`pagehide`), **und sofort bei einem JS-Fehler**.
+- **Court-Monitore (combo/overview/monitor) → PC:** `POST …/pi-log?device=mon-<id>`
+  → lokal `<log_dir>/pi-logs/mon-<id>.log` → Cloud `api/pi_log.php`. Die
+  Monitor-Seiten fangen JS-Fehler + Schlüsselereignisse („keine Daten",
+  Deassign, Offline-Wechsel) und laden best-effort beim Ereignis + `pagehide`
+  hoch. Nur LAN (im reinen Cloud-Modus hat der Relay keine `/pi-log`-Route →
+  Post scheitert still; die Kombi-Anzeige ist ohnehin LAN-only).
 - **Pi → PC:** `POST …/pi-log?device=pi-<serial>` (an die gecachte
   bts-light-IP) → lokal `<log_dir>/pi-logs/pi-<serial>.log` → Cloud
   `api/pi_log.php`. Geräte-ID = **Pi-Seriennummer** (global eindeutig → ein
   Cloud-Log je physischem Pi). Frequenz: beim Boot + alle ~5 min.
-- Beides ist über **„Logs öffnen"** am PC sofort einsehbar (auch offline);
+- Alles ist über **„Logs öffnen"** am PC sofort einsehbar (auch offline);
   die Cloud-Kopie liegt unter `storage/{tablet,pi}-logs/` auf badhub.de.
+
+### Crash-Sicherheit (Tablet)
+
+Das Tablet-Log liegt in `localStorage` (Schlüssel `badhub.tablet.log.<court>`,
+bis zu 500 Einträge) und **überlebt einen Reload/WebView-Neustart**: beim
+nächsten Boot wird der Puffer wieder geladen und mit hochgeladen. Zusätzlich
+fängt das Tablet `window.onerror` + `unhandledrejection` als `js_error`/
+`unhandled_rejection` und stößt sofort einen Upload an. *Grenze:* Wird ein
+abgestürztes Tablet durch ein **anderes Gerät** ersetzt (statt neugestartet),
+bleibt sein Log auf dem alten Gerät — die cloud-seitige Sicht liefert dann das
+**Relay-Log** (siehe unten).
+
+## Relay-Log (Cloud-Seite)
+
+Im lan+cloud-Betrieb laufen Tablet-Verbindung/Übernahme/State über den
+`bts-relay`-Dienst auf badhub.de. Er schreibt sein Log (neben journald)
+**täglich rotierend** nach `storage/relay-logs/bts-relay.log.YYYY-MM-DD`
+(Pfad aus `RELAY_LOG_DIR` in der systemd-Unit). Der `badhub`-User liest die
+Datei direkt per SFTP/SSH — **ohne** `systemd-journal`-Recht. Loglevel INFO.
+
+Protokolliert u. a.: Tablet verbunden/getrennt, Feld belegt, Übernahme **und
+ob beim Verbinden ein gespeicherter Spielstand wiederhergestellt wurde** (oder
+das Feld bei 0:0 startet — die Diagnose-Zeile für den 14.06.-Vorfall).
+
+> **Einmaliger Server-Schritt** nach dem Unit-Update (neue Env-Var):
+> ```
+> ssh badhub@178.104.221.177
+> sudo cp /opt/bts-relay/ops/bts-relay.service /etc/systemd/system/  # bzw. aus dem Repo kopieren
+> sudo systemctl daemon-reload && sudo systemctl restart bts-relay
+> ```
+> Das Verzeichnis `storage/relay-logs/` legt der Relay beim Start selbst an.
 
 > Früher luden die Pis **direkt** per HTTPS in die Cloud — das scheiterte bei
 > falscher Pi-Uhr (keine RTC) still an der TLS-Prüfung. Der Weg über den PC
