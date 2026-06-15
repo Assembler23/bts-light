@@ -36,6 +36,8 @@ export interface AnnounceConfig {
   gong: boolean;
   /** Phonetische Aussprache-Korrekturen (Name/Namensteil → gesprochene Form). */
   name_overrides: NameOverride[];
+  /** Aussprache-Korrekturen anwenden (Basis-Wörterbuch + Einträge)? Default an. */
+  name_overrides_enabled: boolean;
 }
 
 /** Aussprache-Korrektur für die Ansage (Rust: config::NameOverride). */

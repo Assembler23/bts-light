@@ -10,6 +10,7 @@
 // globaler Klick-Listener schalten das Audio für die Session frei.
 
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
+import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 
 export type AnnounceLang = "de" | "en";
 
@@ -31,8 +32,10 @@ export interface AnnounceOptions {
   voiceURI?: string;
   /** Gong vor der Ansage abspielen? Default true. */
   gong?: boolean;
-  /** Phonetische Aussprache-Korrekturen (Name/Namensteil → gesprochene Form). */
+  /** Phonetische Aussprache-Korrekturen des Nutzers (Vorrang vor der Basis). */
   nameOverrides?: NameOverride[];
+  /** Aussprache-Korrekturen anwenden? Default true (Basis + Nutzer-Einträge). */
+  nameOverridesEnabled?: boolean;
 }
 
 // Synthesizer-Gong über Web Audio. Zwei kurze Sinus-Töne (hoch → tiefer) mit
@@ -247,15 +250,34 @@ function disciplineWord(d: Discipline, lang: AnnounceLang): string {
   return words[lang][d] ?? "";
 }
 
+// Schlüssel-Normalisierung fürs Matching: Diakritika UND fremde Sonderbuchstaben
+// falten, damit z. B. „Nguyên"/„Nguyen", „Yıldız"/„Yildiz", „García"/„Garcia"
+// alle denselben Wörterbuch-Eintrag treffen. NFD + Entfernen kombinierender
+// Marken deckt ê,é,ä,ñ,ş,ç,ğ … ab; eigenständige Buchstaben (ı,ø,ł,đ) explizit.
 function normalizeName(s: string): string {
-  return s.trim().toLowerCase();
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[ıİ]/g, "i")
+    .replace(/[øØ]/g, "o")
+    .replace(/[łŁ]/g, "l")
+    .replace(/[đĐ]/g, "d")
+    .trim()
+    .toLowerCase();
 }
 
-// Baut aus der Override-Liste eine Lookup-Map (normalisierter Schlüssel →
-// gesprochene Form). Leere Einträge werden ignoriert.
-function buildOverrideMap(overrides?: NameOverride[]): Map<string, string> {
+// Baut die Lookup-Map (normalisierter Schlüssel → gesprochene Form): zuerst das
+// mitgelieferte Basis-Wörterbuch, dann die Nutzer-Einträge — Letztere
+// ÜBERSCHREIBEN die Basis bei gleichem Schlüssel (Nutzer hat Vorrang). Ist die
+// Korrektur ausgeschaltet (`enabled === false`), bleibt die Map leer → Namen
+// werden 1:1 vorgelesen.
+function buildOverrideMap(
+  userOverrides: NameOverride[] | undefined,
+  enabled: boolean,
+): Map<string, string> {
   const map = new Map<string, string>();
-  for (const o of overrides ?? []) {
+  if (!enabled) return map;
+  for (const o of [...BASE_NAME_OVERRIDES, ...(userOverrides ?? [])]) {
     const key = normalizeName(o.name);
     const say = (o.say ?? "").trim();
     if (key && say) map.set(key, say);
@@ -303,8 +325,9 @@ export function buildAnnouncementSegments(
   input: AnnounceMatchInput,
   lang: AnnounceLang,
   nameOverrides?: NameOverride[],
+  nameOverridesEnabled = true,
 ): string[] {
-  const overrides = buildOverrideMap(nameOverrides);
+  const overrides = buildOverrideMap(nameOverrides, nameOverridesEnabled);
   const court = resolveCourtPhrase(input.courtLabel, lang);
   const teamA = joinNames(input.teamANames, lang, overrides);
   const teamB = joinNames(input.teamBNames, lang, overrides);
@@ -329,7 +352,12 @@ export function playAnnouncement(
   return enqueueAnnouncement(async () => {
     await maybeGong(opts.gong);
     await speakSegments(
-      buildAnnouncementSegments(input, lang, opts.nameOverrides),
+      buildAnnouncementSegments(
+        input,
+        lang,
+        opts.nameOverrides,
+        opts.nameOverridesEnabled ?? true,
+      ),
       lang,
       clampRate(opts.rate),
       opts.voiceURI,
@@ -404,8 +432,9 @@ export function buildPreparationSegments(
   input: AnnouncePreparationInput,
   lang: AnnounceLang,
   nameOverrides?: NameOverride[],
+  nameOverridesEnabled = true,
 ): string[] {
-  const overrides = buildOverrideMap(nameOverrides);
+  const overrides = buildOverrideMap(nameOverrides, nameOverridesEnabled);
   const teamA = joinNames(input.teamANames, lang, overrides);
   const teamB = joinNames(input.teamBNames, lang, overrides);
   const versus = lang === "de" ? "gegen" : "versus";
@@ -442,7 +471,12 @@ export function playPreparationAnnouncement(
   return enqueueAnnouncement(async () => {
     await maybeGong(opts.gong);
     await speakSegments(
-      buildPreparationSegments(input, lang, opts.nameOverrides),
+      buildPreparationSegments(
+        input,
+        lang,
+        opts.nameOverrides,
+        opts.nameOverridesEnabled ?? true,
+      ),
       lang,
       clampRate(opts.rate),
       opts.voiceURI,

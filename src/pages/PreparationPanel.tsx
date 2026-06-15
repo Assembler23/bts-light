@@ -161,6 +161,7 @@ export function PreparationPanel({ announce }: Props) {
         voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
         gong: announce.gong,
         nameOverrides: announce.name_overrides,
+        nameOverridesEnabled: announce.name_overrides_enabled,
       },
     );
   };

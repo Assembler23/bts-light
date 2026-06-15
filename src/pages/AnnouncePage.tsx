@@ -65,6 +65,8 @@ export function AnnouncePage({
                 ? announce.voice_en
                 : announce.voice_de) || undefined,
             gong: announce.gong,
+            nameOverrides: announce.name_overrides,
+            nameOverridesEnabled: announce.name_overrides_enabled,
           })
         }
         className="inline-flex w-fit items-center gap-2 rounded-lg bg-slate-100 px-3.5 py-2

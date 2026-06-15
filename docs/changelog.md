@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.108
+
+- **Aussprache: mitgeliefertes Basis-Wörterbuch + An/Aus-Schalter.** Häufige internationale Nachnamen
+  (abgeleitet aus den häufigsten Namen der Badhub-Spieler-DB; VN/CN/IN/FR/ES/TR/PL) werden jetzt
+  **automatisch** korrekt(er) ausgesprochen — ohne Pflege. Eigene Einträge in der Tabelle haben
+  **Vorrang**. Neuer Schalter „Aussprache-Korrekturen anwenden" (Default an) schaltet alles ab/an.
+- **Robusteres Matching (diakritik-/sonderzeichen-unabhängig).** „Nguyên"/„Nguyen", „Yıldız"/„Yildiz",
+  „García"/„Garcia" treffen denselben Eintrag (NFD-Faltung + ı/ø/ł/đ). Der „Häufige Namen laden"-Knopf
+  entfällt (das Basis-Wörterbuch wirkt automatisch).
+- Ehrlich: Die Lautschrift sind **Näherungen** (keine verifizierte Aussprache-DB) — gut für häufige
+  Namen, per ▶-Test und eigener Tabelle nachjustierbar.
+
 ## v0.9.107
 
 - **Aussprache-Korrekturen für die Ansage.** Spricht die Stimme einen Namen falsch, lässt sich pro

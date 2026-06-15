@@ -46,6 +46,7 @@ function defaultConfig(): AppConfig {
       rate: 0.8,
       gong: true,
       name_overrides: [],
+      name_overrides_enabled: true,
     },
     court_monitor: {
       enabled: false,

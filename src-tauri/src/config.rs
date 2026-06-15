@@ -111,6 +111,9 @@ pub struct AnnounceConfig {
     /// Schreibweise. Behebt z. B. asiatische Namen, die die deutsche/englische
     /// TTS-Stimme falsch ausspricht. Offline, kein externer Dienst.
     pub name_overrides: Vec<NameOverride>,
+    /// Aussprache-Korrekturen (Basis-Wörterbuch + obige Nutzer-Einträge)
+    /// überhaupt anwenden? Default an; aus = Namen werden 1:1 vorgelesen.
+    pub name_overrides_enabled: bool,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -132,6 +135,7 @@ impl Default for AnnounceConfig {
             rate: 0.8,
             gong: true,
             name_overrides: Vec::new(),
+            name_overrides_enabled: true,
         }
     }
 }
@@ -393,6 +397,7 @@ mod tests {
                     name: "Nguyen".to_string(),
                     say: "Nujen".to_string(),
                 }],
+                name_overrides_enabled: false,
             },
             court_monitor: CourtMonitorConfig {
                 enabled: true,
@@ -427,6 +432,28 @@ mod tests {
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn announce_block_without_name_overrides_enabled_defaults_to_true() {
+        // Upgrade-Pfad v0.9.107 → v0.9.108: announce-Block vorhanden, aber das
+        // neue Feld name_overrides_enabled fehlt. #[serde(default)] am Struct
+        // muss den Default aus AnnounceConfig::default() (= true) ziehen, NICHT
+        // bool::default() (= false) — sonst verlören Bestandsnutzer das Feature.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "announce":{"enabled":true,"rate":0.9,"gong":true,"name_overrides":[]}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert!(
+            loaded.announce.name_overrides_enabled,
+            "fehlendes name_overrides_enabled muss true sein (Default-Impl)"
+        );
     }
 
     #[test]
