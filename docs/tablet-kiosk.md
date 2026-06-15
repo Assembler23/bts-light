@@ -76,6 +76,10 @@ daher **PLUS pro Gerät** (Volumen-Rabatt für ~10 Tablets) einplanen.
    und `192.168.16.2` erlauben (kein Internet); *Kiosk Mode* → **Exit-PIN** setzen,
    „Disable Nav/Status Bar", Single-App.
 5. **WLAN `btsaccess`** (wie der Pi-Court-Monitor) → selbes Subnetz `192.168.16.*`.
+6. **Für die Akku-Anzeige:** *Web Content Settings* → **„Enable JavaScript Interface"**
+   aktivieren. Dann liest das Tablet den Akku über das Fully-`fully`-Objekt
+   (`getBatteryLevel()`/`isPlugged()`) — die Web-Battery-API funktioniert über HTTP
+   nicht. Ohne diese Option bleibt der Akku-Badge in der bts-light-Übersicht leer.
 
 > **Hinweis Fire-Tablet:** Die Android-Navigationsleiste vollständig auszublenden
 > gelingt zuverlässig nur mit PLUS (Kiosk Mode) bzw. *Device Owner* per ADB.

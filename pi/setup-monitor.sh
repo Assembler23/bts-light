@@ -81,6 +81,17 @@ echo "→ Browser: $BROWSER"
 # ─── 3) Bildschirm-Abschaltung deaktivieren ──────────────────────────────
 sudo raspi-config nonint do_blanking 1 || true
 
+# ─── 3b) HDMI immer aktiv erzwingen ──────────────────────────────────────
+# Ohne das wird der Pi am TV-HDMI nicht erkannt, wenn Pi und TV GLEICHZEITIG
+# Strom bekommen (Pi liest beim Boot „kein Display", gibt kein Signal aus →
+# kein Bild bis Pi-Neustart; Feld-Beobachtung 2026-06-14). hdmi_force_hotplug=1
+# → der Pi gibt IMMER ein HDMI-Signal aus, unabhängig vom TV-Zustand beim Boot.
+CONFIG_TXT="$BOOT_DIR/config.txt"
+if [ -f "$CONFIG_TXT" ] && ! grep -qE "^\s*hdmi_force_hotplug=1" "$CONFIG_TXT"; then
+  echo "hdmi_force_hotplug=1" | sudo tee -a "$CONFIG_TXT" >/dev/null
+  echo "→ hdmi_force_hotplug=1 in $CONFIG_TXT gesetzt (Bild auch ohne TV beim Boot)"
+fi
+
 # ─── 4) Hinweisseite „noch keine Adresse" ────────────────────────────────
 ASSET_DIR="$HOME/.local/share/bts-monitor"
 mkdir -p "$ASSET_DIR"
