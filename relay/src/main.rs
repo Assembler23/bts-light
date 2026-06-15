@@ -220,8 +220,9 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 eprintln!("WARN: RELAY_LOG_DIR '{dir}' nicht anlegbar: {e} — nur stdout");
             }
-            let (non_blocking, guard) =
-                tracing_appender::non_blocking(tracing_appender::rolling::daily(&dir, "bts-relay.log"));
+            let (non_blocking, guard) = tracing_appender::non_blocking(
+                tracing_appender::rolling::daily(&dir, "bts-relay.log"),
+            );
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_writer(non_blocking);
@@ -1031,9 +1032,7 @@ async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
             "Feld {court_id} (Namespace '{ns}'): Übernahme – StateRestore gesendet ({len} Bytes)"
         );
     } else {
-        tracing::info!(
-            "Feld {court_id} (Namespace '{ns}'): Übernahme ohne gespeicherten Stand"
-        );
+        tracing::info!("Feld {court_id} (Namespace '{ns}'): Übernahme ohne gespeicherten Stand");
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
