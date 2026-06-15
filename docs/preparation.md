@@ -62,6 +62,11 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 - **Pause:** `pause_ms` aus `config.auto_assign.pause_minutes` (>0 = Override) bzw.
   `BtpSnapshot.rest_minutes` aus **BTP-Setting 1303**; je Spieler gegen das
   zuletzt beendete Spiel (`finished_at`) geprüft.
+- **Aktive Halle:** `config.auto_assign.active_hall` (BTP-Location-Name). Gesetzt
+  und Mehr-Hallen-Turnier → `active_loc` aufgelöst; es werden nur Felder dieser
+  Halle bespielt und die Aufruf-Pflicht entfällt (`require_call = multi_hall &&
+  active_loc.is_none()`). Ein-Hallen-Turnier ignoriert den Wert; unbekannter Name
+  → `warn!` + sicherer Rückfall auf Aufruf-Pflicht.
 
 ## Was ist „ruf-bar"?
 
