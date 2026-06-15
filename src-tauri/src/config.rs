@@ -214,6 +214,12 @@ pub struct AutoAssignConfig {
     /// (Setting 1303) übernehmen; >0 überschreibt den BTP-Wert. Unabhängig
     /// davon wird ein Spieler nie aufgerufen, solange er gerade spielt.
     pub pause_minutes: f64,
+    /// Aktive Halle (BTP-`Location`-Name) für Mehr-Hallen-Turniere, bei denen
+    /// an einem Tag nur in EINER Halle gespielt wird (z. B. 2-Tage-1-Datei).
+    /// Ist sie gesetzt, vergibt die Auto-Feldvergabe nur auf die Felder DIESER
+    /// Halle und braucht KEINEN manuellen „in Vorbereitung"-Aufruf je Halle.
+    /// Leer = alle Hallen (bei Mehr-Hallen dann wie bisher: Aufruf nötig).
+    pub active_hall: String,
 }
 
 impl Default for AutoAssignConfig {
@@ -222,6 +228,7 @@ impl Default for AutoAssignConfig {
             enabled: false,
             wait_minutes: 1.0,
             pause_minutes: 0.0,
+            active_hall: String::new(),
         }
     }
 }
@@ -390,6 +397,7 @@ mod tests {
                 enabled: true,
                 wait_minutes: 0.5,
                 pause_minutes: 2.0,
+                active_hall: "Halle A".to_string(),
             },
             locked_courts: vec![3, 7],
             tablet_settings_pin: "1234".to_string(),

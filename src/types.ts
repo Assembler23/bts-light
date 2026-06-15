@@ -55,6 +55,10 @@ export interface AutoAssignConfig {
   /** Mindest-Pause eines Spielers nach seinem letzten Spiel (Minuten), bevor er
    *  wieder aufgerufen wird. 0 = Wert aus BTP (Setting 1303) übernehmen. */
   pause_minutes: number;
+  /** Aktive Halle (BTP-Location-Name) für Mehr-Hallen-Turniere mit nur einer
+   *  bespielten Halle pro Tag. Gesetzt = Auto-Vergabe nur dort, ohne manuellen
+   *  „in Vorbereitung"-Aufruf. Leer = alle Hallen. */
+  active_hall: string;
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */

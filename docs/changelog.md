@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.104
+
+- **Aktive Halle (Tages-Halle) für Mehr-Hallen-Turniere.** Bei Turnieren, bei denen
+  an einem Tag nur in EINER Halle gespielt wird (z. B. eine BTP-Datei für zwei Tage),
+  musste man bisher jedes Spiel manuell „in Vorbereitung" rufen, damit die Auto-
+  Feldvergabe greift. Neu: in den Einstellungen → „Automatische Feldvergabe" trägt man
+  die **aktive Halle** ein (BTP-Hallenname) — dann vergibt bts-light automatisch nur auf
+  die Felder dieser Halle, **ohne** Aufruf-Pflicht (die Ansage folgt dann automatisch).
+  Leer = alle Hallen (Mehr-Hallen wie bisher mit Aufruf). Im Ein-Hallen-Turnier wird der
+  Wert ignoriert; ein unbekannter Hallenname wird geloggt und fällt sicher zurück.
+
 ## v0.9.103
 
 - **Fix: bts-light setzte BTP-Spieler fälschlich auf „nicht spielbereit" (rot→gelb).**

@@ -261,6 +261,7 @@ export function SetupWizard({
   const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
   const [aaWait, setAaWait] = useState(String(aa?.wait_minutes ?? 1));
   const [aaPause, setAaPause] = useState(String(aa?.pause_minutes ?? 0));
+  const [aaActiveHall, setAaActiveHall] = useState(aa?.active_hall ?? "");
   const cm = initialConfig.court_monitor;
   const [cmEnabled, setCmEnabled] = useState(cm.enabled);
   const [cmInterval, setCmInterval] = useState(cm.ad_interval_s);
@@ -358,6 +359,8 @@ export function SetupWizard({
         wait_minutes: Number(aaWait) >= 0 ? Number(aaWait) : 1,
         // Spieler-Pause nach Spielende; 0 = aus BTP (Setting 1303).
         pause_minutes: Number(aaPause) >= 0 ? Number(aaPause) : 0,
+        // Aktive Halle (Tages-Halle) für Mehr-Hallen-Turniere; leer = alle.
+        active_hall: aaActiveHall.trim(),
       },
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
@@ -925,9 +928,23 @@ export function SetupWizard({
               Einstellung „Pause", Setting 1303). Unabhängig davon wird niemand
               aufgerufen, der gerade auf einem anderen Feld spielt.
             </p>
+            <Field
+              label="Aktive Halle (Tages-Halle, leer = alle)"
+              value={aaActiveHall}
+              onChange={setAaActiveHall}
+              placeholder="z. B. Halle A"
+            />
+            <p className="text-xs text-slate-500">
+              Nur für <strong>Mehr-Hallen-Turniere</strong>, bei denen an einem Tag
+              nur in <strong>einer</strong> Halle gespielt wird (z. B. eine Datei für
+              zwei Tage). Trägst du hier den Hallennamen ein (wie in BTP), verteilt
+              die Auto-Vergabe nur auf diese Halle — <strong>ohne</strong> dass du
+              Spiele erst „in Vorbereitung" rufen musst. Leer lassen bei
+              Ein-Hallen-Turnieren.
+            </p>
             <p className="flex items-start gap-1.5 text-xs text-amber-700">
               <Info size={14} className="mt-0.5 shrink-0" />
-              In Mehr-Hallen-Turnieren werden nur Spiele automatisch verteilt,
+              Mehr-Hallen OHNE gesetzte aktive Halle: es werden nur Spiele verteilt,
               die du für die jeweilige Halle „in Vorbereitung" gerufen hast.
             </p>
           </div>

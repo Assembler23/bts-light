@@ -236,6 +236,42 @@ impl SyncEngine {
         let pending_courts: HashSet<i64> = self.pending_auto.keys().copied().collect();
         let pending_matches: HashSet<i64> = self.pending_auto.values().map(|(m, _)| *m).collect();
         let multi_hall = snapshot.is_multi_hall();
+        // Aktive Halle (Tages-Halle) aus der Config → LocationID auflösen.
+        // Ist sie gesetzt, vergeben wir NUR auf Felder dieser Halle und brauchen
+        // KEINEN manuellen „in Vorbereitung"-Aufruf (Mehr-Hallen-Turnier, an dem
+        // Tag wird nur eine Halle bespielt). Unbekannter Name → wie nicht gesetzt.
+        // Nur im Mehr-Hallen-Fall relevant: bei Ein-Hallen-Turnieren (auch wenn
+        // versehentlich gesetzt) wird die aktive Halle ignoriert — sonst würden
+        // Felder ohne `location_id` (häufig bei Ein-Hallen-BTP) alle gefiltert
+        // und es würde nichts vergeben.
+        let active_loc: Option<i64> = if !multi_hall {
+            None
+        } else {
+            let name = config.auto_assign.active_hall.trim();
+            if name.is_empty() {
+                None
+            } else {
+                let found = snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.name.trim().eq_ignore_ascii_case(name))
+                    .map(|l| l.id);
+                if found.is_none() {
+                    tracing::warn!(
+                        "Aktive Halle '{name}' nicht gefunden – Auto-Vergabe fällt auf \
+                         Aufruf-Pflicht zurück. Verfügbar: {:?}",
+                        snapshot
+                            .locations
+                            .iter()
+                            .map(|l| &l.name)
+                            .collect::<Vec<_>>()
+                    );
+                }
+                found
+            }
+        };
+        // Aufruf-Pflicht nur im Mehr-Hallen-Fall OHNE gesetzte aktive Halle.
+        let require_call = multi_hall && active_loc.is_none();
         let calls = tablet.preparation_calls();
         let call_for = |mid: i64| calls.iter().find(|c| c.match_id == mid);
 
@@ -319,6 +355,12 @@ impl SyncEngine {
             {
                 continue;
             }
+            // Aktive Halle gesetzt → nur deren Felder bespielen.
+            if let Some(loc) = active_loc {
+                if court.location_id != Some(loc) {
+                    continue;
+                }
+            }
             let free_since = self.court_free_since.get(&court.id).copied().unwrap_or(now);
             if now.saturating_sub(free_since) < wait_ms {
                 continue;
@@ -346,14 +388,17 @@ impl SyncEngine {
                 if !player_free {
                     return false;
                 }
-                if multi_hall {
-                    // Nur für diese Halle gerufene Matches.
+                if require_call {
+                    // Mehr-Hallen ohne aktive Halle: nur für diese Halle
+                    // gerufene Matches.
                     call_for(m.id)
                         .and_then(|c| c.location_id)
                         .zip(court.location_id)
                         .map(|(a, b)| a == b)
                         .unwrap_or(false)
                 } else {
+                    // Ein-Hallen oder aktive Halle gesetzt: jedes spielbereite
+                    // Match (Reihenfolge regelt die Zeit-Sortierung).
                     true
                 }
             });
@@ -696,6 +741,7 @@ mod tests {
                 enabled,
                 wait_minutes,
                 pause_minutes: 0.0,
+                active_hall: String::new(),
             },
             ..AppConfig::default()
         }
@@ -948,5 +994,51 @@ mod tests {
                                      // pause_minutes=0 → BTP-Wert greift → A noch in Pause → nichts vergeben.
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert!(courts.is_empty());
+    }
+
+    #[test]
+    fn auto_assign_active_hall_assigns_without_call() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let locs = vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle A".into(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle B".into(),
+            },
+        ];
+        // Feld 10 in Halle A, Feld 20 in Halle B; ein spielbereites Match, NICHT
+        // „in Vorbereitung" gerufen.
+        let snap = snap_with(
+            vec![court(10, Some(1)), court(20, Some(2))],
+            vec![ready_match(7, 1)],
+            locs,
+        );
+        let mut cfg = cfg_auto(true, 0.0);
+        cfg.auto_assign.active_hall = "Halle A".to_string();
+        let (courts, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        // Aktive Halle A → Match landet ohne Aufruf auf Feld 10 (Halle A),
+        // nicht auf Feld 20 (Halle B). (Ohne aktive Halle bräuchte es im
+        // Mehr-Hallen-Fall einen Aufruf → nichts.)
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].court_id, 10);
+    }
+
+    #[test]
+    fn auto_assign_active_hall_ignored_in_single_hall() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Ein-Hallen-Turnier (keine Locations), Feld ohne location_id, aber
+        // active_hall gesetzt → muss ignoriert werden, sonst würde der Hall-
+        // Filter das Feld überspringen und nichts vergeben.
+        let snap = snap_with(vec![court(9, None)], vec![ready_match(7, 1)], Vec::new());
+        let mut cfg = cfg_auto(true, 0.0);
+        cfg.auto_assign.active_hall = "Halle A".to_string();
+        let (courts, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].court_id, 9);
     }
 }
