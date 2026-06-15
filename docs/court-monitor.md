@@ -245,6 +245,27 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
 Die Einrichtungs-Adresse und die Feld-Zuweisung der Geräte stehen auf der
 Seite **„Court-Monitore"** (Dashboard → Court-Monitore).
 
+## Kombi-Anzeige (`combo.html`)
+
+Mehrere Felder auf einem TV (bis zu 3), als Bänder über- oder (mit
+`combo_vertical`) nebeneinander. Datenquelle ist `/combo/state` —
+derselbe `overview()`-Stand wie die Einzelanzeige. **Nur LAN:** der Relay
+transportiert nur Einzelfeld-Zuweisungen, Kombi-Monitore laufen daher über
+den Turnier-PC.
+
+- **Satz-Sieger deutlich hinterlegt** (seit v0.9.105): Der gewonnene Satz
+  steht nicht nur weiß/grau, sondern als **grüner Block** (`.set.won` /
+  `body.vertical .vset.won`) — aus der Ferne sofort als Sieger erkennbar
+  (Feld-Wunsch 2026-06-15). Laufender Satz bleibt gelb (`.current`).
+- **Pausen-Countdown am betroffenen Feld** (seit v0.9.105): Läuft an einem
+  Feld eine Pause (`court_state.pause`), zeigt das Band dieses Felds die
+  Restzeit (`Pause`/`Satzpause` + `m:ss`, `Behandlung` ohne Countdown) —
+  „an der Seite, wo die Pause ist". `combo.html` rechnet den Countdown
+  relativ zur Server-Zeit (`serverNowMs` im `/combo/state`-Payload), weil
+  die Pi keine synchrone Uhr haben muss; das Tablet setzt `endsAt` in
+  Server-Zeit. Das Feld `CourtOverview.pause` wird in `overview()` 1:1 aus
+  dem Tablet-`court_state` übernommen (wie `serving`).
+
 ## Raspberry Pi — Kiosk-Einrichtung
 
 Ausführliche, einsteigertaugliche Schritt-für-Schritt-Anleitung:

@@ -732,7 +732,9 @@ async fn combo_state(
         .iter()
         .filter_map(|id| overview.iter().find(|c| c.court_id == *id))
         .collect();
-    let payload = serde_json::json!({ "courts": courts });
+    // serverNowMs reicht combo.html die Server-Zeit für den Pausen-Countdown
+    // durch (Pi hat evtl. keine synchrone Uhr; endsAt steht in Server-Zeit).
+    let payload = serde_json::json!({ "courts": courts, "serverNowMs": monitor::now_ms() });
     ([(header::CACHE_CONTROL, "no-store")], Json(payload))
 }
 

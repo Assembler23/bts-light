@@ -837,6 +837,11 @@ const STATE = {
   setup: /** @type {'pending'|'choose-side'|'choose-server'|'choose-receiver'|'playing'} */ ('pending'),
   // Während Setup-Schritt 2: gewählter Aufschläger-Spieler + sein Team
   pendingServer: /** @type {null | { player:any, fromTeamKey:'a'|'b' }} */ (null),
+  // Nach jedem Satz (Doppel/Mixed): das Gewinnerteam des letzten Satzes, das
+  // im neuen Satz zuerst aufschlägt (BWF). Gesetzt → der Setup-Schritt
+  // 'choose-server' zeigt NUR dieses Team, danach Annehmer-Wahl. null beim
+  // Einzel und während des normalen Spiels.
+  serveSetupTeam: /** @type {null | 'a'|'b'} */ (null),
   // BWF-Regel: Im Entscheidungssatz tauschen die Spieler bei 11 Punkten
   // einmalig die Court-Seiten (egal welches Team führt). Wir merken uns,
   // ob das in diesem Match schon erfolgt ist.
@@ -1272,8 +1277,27 @@ function endBreak() {
     }
   }
   STATE.pause = null;
+  // Doppel/Mixed: Steht nach einem Satz die Aufschläger-/Annehmer-Neuwahl an
+  // (serveSetupTeam beim Satz-Ende gesetzt), öffnet sie JETZT — nach der
+  // Satzpause. So bleibt `setup` während der Pause auf 'playing' (undo/
+  // Korrektur funktioniert), und die Abfrage erscheint erst, wenn die Spieler
+  // zurückkommen. undo() räumt serveSetupTeam vorher weg → kein Re-Prompt.
+  maybeOpenServeReprompt();
   persistState();
   render();
+}
+
+// Öffnet die Per-Satz-Aufschlagwahl (Doppel/Mixed), falls sie nach einem Satz
+// fällig ist: serveSetupTeam gesetzt, Spiel läuft (setup 'playing'), keine
+// Pause mehr. Idempotent. Aufrufer: endBreak (Normalfall nach Satzpause) und
+// applyPersistedState (Reload/Übernahme, wenn die Pause inzwischen ablief).
+function maybeOpenServeReprompt() {
+  if (STATE.serveSetupTeam && STATE.setup === 'playing' && !STATE.pause && isDoubles()) {
+    STATE.pendingServer = null;
+    STATE.setup = 'choose-server';
+    return true;
+  }
+  return false;
 }
 
 // 4×/s: aktualisiert den Countdown; bei 0 endet die Pause automatisch.
@@ -1454,6 +1478,10 @@ function persistState() {
     // IDs + Positionen, der Server nicht — daher hier berechnet.
     serving: computeServing(),
     setup: STATE.setup,
+    // Per-Satz-Aufschlagwahl überlebt einen Reload (anders als pendingServer):
+    // sonst stünde nach einem Reload während der Abfrage wieder die volle
+    // Aufschläger-Liste statt nur des Gewinnerteams.
+    serveSetupTeam: STATE.serveSetupTeam,
     finished: STATE.finished,
     midGameSwitchDone: STATE.midGameSwitchDone,
     pause: STATE.pause,
@@ -1496,6 +1524,8 @@ function applyPersistedState(p) {
   STATE.positions = p.positions ?? null;
   STATE.servingSide = p.servingSide ?? null;
   STATE.setup = p.setup ?? 'playing';
+  STATE.serveSetupTeam = (p.serveSetupTeam === 'a' || p.serveSetupTeam === 'b')
+    ? p.serveSetupTeam : null;
   STATE.finished = !!p.finished;
   STATE.midGameSwitchDone = !!p.midGameSwitchDone;
   STATE.intervalDoneThisGame = !!p.intervalDoneThisGame;
@@ -1522,6 +1552,9 @@ function applyPersistedState(p) {
   // Undo-/Reopen-History wiederherstellen (seit Persistenz mitgesichert).
   // Fehlt sie in alten gespeicherten Ständen, bleibt sie leer.
   STATE.history = Array.isArray(p.history) ? p.history : [];
+  // Lief die Satzpause während eines Reloads/einer Übernahme ab, wird endBreak
+  // nie durchlaufen → die fällige Per-Satz-Aufschlagwahl hier nachholen.
+  maybeOpenServeReprompt();
 }
 
 function restorePersistedState() {
@@ -1552,6 +1585,7 @@ function loadMatch(match) {
   STATE.servingSide = null;
   STATE.setup = 'choose-side';
   STATE.pendingServer = null;
+  STATE.serveSetupTeam = null;
   STATE.midGameSwitchDone = false;
   STATE.intervalDoneThisGame = false;
   STATE.pause = null;
@@ -1591,6 +1625,7 @@ function clearMatch() {
   STATE.servingSide = null;
   STATE.setup = 'pending';
   STATE.pendingServer = null;
+  STATE.serveSetupTeam = null;
   STATE.midGameSwitchDone = false;
   STATE.intervalDoneThisGame = false;
   STATE.pause = null;
@@ -1638,6 +1673,10 @@ function setupBack() {
     STATE.pendingServer = null;
     STATE.setup = 'choose-server';
   } else if (STATE.setup === 'choose-server') {
+    // Per-Satz-Aufschlagwahl: 'choose-server' ist der erste Schritt → kein
+    // Zurück (würde sonst teamOnSide löschen und mitten im Match die
+    // Seitenwahl neu öffnen). Nur beim Match-Start zurück zur Seitenwahl.
+    if (STATE.serveSetupTeam) return;
     STATE.teamOnSide = null;
     STATE.setup = 'choose-side';
   } else {
@@ -1666,6 +1705,8 @@ function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
   STATE.servingSide = serverSide;
   STATE.setup = 'playing';
   STATE.pendingServer = null;
+  // Per-Satz-Aufschlagwahl abgeschlossen → Constraint aufheben.
+  STATE.serveSetupTeam = null;
   // Spieldauer ab jetzt zählen (nur beim ersten Setup setzen).
   if (!STATE.startedAt) STATE.startedAt = Date.now();
   persistState();
@@ -1730,6 +1771,10 @@ function restoreSnapshot(snap) {
   if (typeof snap.intervalDoneThisGame === 'boolean') {
     STATE.intervalDoneThisGame = snap.intervalDoneThisGame;
   }
+  // Undo/Korrektur führt zurück ins laufende Spiel (setup='playing') — eine
+  // ggf. anstehende Per-Satz-Aufschlagwahl ist damit hinfällig.
+  STATE.serveSetupTeam = null;
+  STATE.pendingServer = null;
 }
 
 // Doppel-Eingabe-Schutz: nach einem Punkt sind die +1-Flächen kurz gesperrt
@@ -1818,7 +1863,14 @@ function addPointOnSide(side) {
 
   // Satz-Ende?
   const winnerOfSet = setWinnerSide(STATE.currentSet, STATE.match.targetScore);
+  let setWinnerTeamKey = null;
   if (winnerOfSet) {
+    // BWF: Der Gewinner des Satzes schlägt im nächsten Satz zuerst auf —
+    // Team-Key VOR dem Seitentausch bestimmen (swapSides spiegelt teamOnSide).
+    // Ohne teamOnSide (dürfte hier nie sein) bleibt es null → kein Re-Prompt.
+    setWinnerTeamKey = STATE.teamOnSide
+      ? (STATE.teamOnSide.a === winnerOfSet ? 'a' : 'b')
+      : null;
     STATE.setsCompleted.push({ ...STATE.currentSet });
     STATE.currentSet = { left: 0, right: 0 };
     // Neuer Satz → das 11-Punkte-Intervall ist wieder möglich.
@@ -1830,6 +1882,17 @@ function addPointOnSide(side) {
   if (matchWinnerSide()) STATE.finished = true;
   // 120-s-Satzpause, wenn ein Satz endete und das Match weiterläuft.
   if (winnerOfSet && !STATE.finished) triggeredBreak = 'game';
+
+  // Doppel/Mixed: Nach jedem Satz (Match läuft weiter) neu festlegen, wer vom
+  // Gewinnerteam aufschlägt und wer annimmt — das kann je Satz wechseln. Wir
+  // MERKEN uns hier nur das Gewinnerteam; die Abfrage selbst öffnet erst beim
+  // Ende der Satzpause (endBreak), damit `setup` während der Pause auf
+  // 'playing' bleibt und „Korrektur — letzter Punkt zurück" (undo) weiter
+  // funktioniert. Einzel braucht keine Wahl und läuft automatisch weiter.
+  if (winnerOfSet && !STATE.finished && isDoubles() && setWinnerTeamKey) {
+    STATE.serveSetupTeam = setWinnerTeamKey;
+    STATE.pendingServer = null;
+  }
 
   // Für die Schiri-Ansage: war das ein Aufschlagwechsel?
   STATE.lastEvent = { type: 'point', serveChanged: side !== prevServing };
@@ -1883,6 +1946,7 @@ function backToSetup() {
   STATE.servingSide = null;
   STATE.teamOnSide = null;
   STATE.pendingServer = null;
+  STATE.serveSetupTeam = null;
   STATE.startedAt = null; // Spieldauer war ein Fehlstart → zurücksetzen
   persistState();
   render();
@@ -2103,8 +2167,12 @@ function renderSetupModal() {
     return;
   }
   els.setupModal.classList.add('visible');
-  // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten.
-  els.setupBack.style.display = STATE.setup === 'choose-side' ? 'none' : '';
+  // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten. Bei der Per-Satz-
+  // Aufschlagwahl ist 'choose-server' der erste Schritt (kein Zurück — das
+  // Gewinnerteam steht durch den Satzstand fest, nicht zur Wahl).
+  const hideBack = STATE.setup === 'choose-side'
+    || (STATE.setup === 'choose-server' && STATE.serveSetupTeam);
+  els.setupBack.style.display = hideBack ? 'none' : '';
   // Hinweis Zähltafelbediener nur im ersten Schritt (Seitenwahl), wenn ein
   // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
   renderScorekeeperHint(STATE.setup === 'choose-side');
@@ -2122,14 +2190,28 @@ function renderSetupModal() {
       node.addEventListener('click', () => chooseSide(node.dataset.team));
     });
   } else if (STATE.setup === 'choose-server') {
-    setSetupText(
-      'Wer schlägt zuerst auf?', 'Who serves first?',
-      'Tippe auf den Spieler, der das Match eröffnet.',
-      'Tap the player who starts the match.');
-    const opts = [
-      ...STATE.match.teamA.map(p => ({ player: p, teamKey: 'a' })),
-      ...STATE.match.teamB.map(p => ({ player: p, teamKey: 'b' })),
-    ];
+    // Per-Satz-Wahl: nur das Gewinnerteam des letzten Satzes zeigen (BWF —
+    // dieses Team schlägt zuerst auf). Sonst (Match-Start): beide Teams.
+    const repromptTeam = (STATE.serveSetupTeam === 'a' || STATE.serveSetupTeam === 'b')
+      ? STATE.serveSetupTeam : null;
+    if (repromptTeam) {
+      setSetupText(
+        'Neuer Satz — wer schlägt auf?', 'New set — who serves?',
+        'Tippe den Aufschläger im Gewinnerteam des letzten Satzes an.',
+        'Tap the server in the team that won the previous set.');
+    } else {
+      setSetupText(
+        'Wer schlägt zuerst auf?', 'Who serves first?',
+        'Tippe auf den Spieler, der das Match eröffnet.',
+        'Tap the player who starts the match.');
+    }
+    const opts = repromptTeam
+      ? STATE.match[repromptTeam === 'a' ? 'teamA' : 'teamB']
+          .map(p => ({ player: p, teamKey: repromptTeam }))
+      : [
+          ...STATE.match.teamA.map(p => ({ player: p, teamKey: 'a' })),
+          ...STATE.match.teamB.map(p => ({ player: p, teamKey: 'b' })),
+        ];
     els.setupOptions.innerHTML = opts.map((o, i) =>
       `<div class="opt team-${o.teamKey}" data-i="${i}">${escapeHtml(o.player.name)}${
         renderPartnerHint(o.teamKey, o.player.id)
@@ -2143,9 +2225,14 @@ function renderSetupModal() {
       'Wer nimmt den Aufschlag an?', 'Who receives the serve?',
       'Tippe auf den Annehmer im gegnerischen Team.',
       'Tap the receiver in the opposing team.');
-    // Absicherung: pendingServer wird nicht persistiert – nach einem Reload
-    // steht setup ohnehin wieder auf 'choose-server'. Greift praktisch nie.
-    if (!STATE.pendingServer) return;
+    // pendingServer wird nicht persistiert. Steht setup nach einem Reload auf
+    // 'choose-receiver', fehlt der gewählte Aufschläger → einen Schritt zurück
+    // zur Aufschläger-Wahl (sonst bliebe das Modal leer/gestrandet).
+    if (!STATE.pendingServer) {
+      STATE.setup = 'choose-server';
+      renderSetupModal();
+      return;
+    }
     const otherTeamKey = STATE.pendingServer.fromTeamKey === 'a' ? 'b' : 'a';
     const otherTeam = STATE.match[otherTeamKey === 'a' ? 'teamA' : 'teamB'];
     els.setupOptions.innerHTML = otherTeam.map((p, i) =>
@@ -2734,12 +2821,15 @@ els.finishCancel.addEventListener('click', closeFinishModal);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
-// Korrektur aus der Pause: Pause abbrechen + letzten Punkt zurücknehmen.
+// Korrektur aus der Pause: letzten Punkt zurücknehmen + Pause abbrechen.
 // undo() stellt den Snapshot vor dem auslösenden Punkt wieder her und
 // pusht den Stand an Server/TV (sendScoreUpdate steckt in undo()).
+// Reihenfolge: ERST undo() (während `setup` noch 'playing' ist — sonst
+// würde der undo-Guard nach einem Satz-Ende-Punkt greifen), DANN endBreak();
+// undo() räumt serveSetupTeam weg, sodass endBreak keine Aufschlagwahl öffnet.
 els.breakCorrect.addEventListener('click', () => {
-  endBreak();
   undo();
+  endBreak();
 });
 els.setupBack.addEventListener('click', setupBack);
 els.injuryBtn.addEventListener('click', startInjury);
