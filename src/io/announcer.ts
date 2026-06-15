@@ -23,6 +23,9 @@ export interface AnnounceMatchInput {
   teamANames: string[];
   /** Spieler-Namen Team B. */
   teamBNames: string[];
+  /** Reine BTP-Runde (z. B. "VF", "Finale"). Wird AB Viertelfinale vor der
+   *  Paarung mitangesagt; frühere Runden/Gruppen werden nicht angesagt. */
+  roundName?: string;
 }
 
 export interface AnnounceOptions {
@@ -318,9 +321,52 @@ function joinNames(
   return clean.slice(0, -1).join(", ") + connector + clean[clean.length - 1];
 }
 
+// Liefert das anzusagende Runden-Label — NUR ab Viertelfinale (Viertel-/Halb-
+// finale, Finale, Spiel um Platz 3). Frühere Runden, Gruppen, Achtelfinale →
+// `null` (nicht ansagen). `roundName` ist die rohe BTP-Runde (z. B. "VF", "HF",
+// "Finale", "Spiel um Platz 3", aber auch "G1", "Achtelfinale", "1. Runde").
+export function knockoutRoundLabel(
+  roundName: string | undefined,
+  lang: AnnounceLang,
+): string | null {
+  const r = (roundName ?? "")
+    .toLowerCase()
+    .replace(/[.\-_/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!r) return null;
+  const k = r.replace(/\s/g, "");
+  // Frühe Runden / Gruppen / Achtelfinale explizit NICHT ansagen.
+  // (1) Substring-Treffer (dürfen irgendwo in k stehen):
+  if (
+    /(achtel|sechzehntel|runde[0-9]|round[0-9]|roundof|gruppe|group|pool|quali|vorrunde)/.test(
+      k,
+    )
+  ) {
+    return null;
+  }
+  // (2) Anker-Treffer (nur am Stringanfang relevant, z. B. "G1", "Pos 5-8"):
+  if (/^(g[0-9]|pos)/.test(k)) {
+    return null;
+  }
+  if (/(umplatz3|platz3|3platz|bronze|thirdplace|3rdplace|^3rd)/.test(k)) {
+    return lang === "de" ? "Spiel um Platz 3" : "Third place match";
+  }
+  if (/(viertelfinale|quarterfinal|^vf$|^qf$)/.test(k)) {
+    return lang === "de" ? "Viertelfinale" : "Quarterfinal";
+  }
+  if (/(halbfinale|semifinale|semifinal|^hf$|^sf$)/.test(k)) {
+    return lang === "de" ? "Halbfinale" : "Semifinal";
+  }
+  if (/(^finale$|^final$|^f$|endspiel)/.test(k)) {
+    return lang === "de" ? "Finale" : "Final";
+  }
+  return null;
+}
+
 // Baut die Ansage als Liste kurzer Segmente: Gong → Feld → Disziplin →
-// Paarung → Feld. Jedes Segment ist eine eigene Utterance — Browser-TTS
-// spricht kurze Stücke deutlich klarer und macht natürliche Pausen.
+// (Runde ab Viertelfinale) → Paarung → Feld. Jedes Segment ist eine eigene
+// Utterance — Browser-TTS spricht kurze Stücke deutlich klarer.
 export function buildAnnouncementSegments(
   input: AnnounceMatchInput,
   lang: AnnounceLang,
@@ -333,9 +379,12 @@ export function buildAnnouncementSegments(
   const teamB = joinNames(input.teamBNames, lang, overrides);
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWord(input.discipline, lang);
+  const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
   if (disc) segments.push(`${disc}.`);
+  // Runde ab Viertelfinale vor der Paarung ansagen (wertet die Ansage auf).
+  if (round) segments.push(`${round}.`);
   if (teamA) segments.push(`${teamA}.`);
   if (teamB) segments.push(`${versus} ${teamB}.`);
   segments.push(`${court}.`);
@@ -423,6 +472,8 @@ export interface AnnouncePreparationInput {
   /** Halle, in die gerufen wurde (BTP-`Location`-Name). Leer/undefined =
    *  hallenunabhängiger Aufruf (Ein-Hallen-Turnier). */
   hall?: string;
+  /** Reine BTP-Runde; wird ab Viertelfinale vor der Paarung mitangesagt. */
+  roundName?: string;
 }
 
 // Baut die Vorbereitungs-Ansage als Liste kurzer Segmente: „In
@@ -439,12 +490,14 @@ export function buildPreparationSegments(
   const teamB = joinNames(input.teamBNames, lang, overrides);
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWord(input.discipline, lang);
+  const round = knockoutRoundLabel(input.roundName, lang);
   const hall = (input.hall || "").trim();
 
   const segments: string[] = [
     lang === "de" ? "In Vorbereitung." : "Preparation call.",
   ];
   if (disc) segments.push(`${disc}.`);
+  if (round) segments.push(`${round}.`);
   // Beide Teams oder nur Team A — ein Solo-„gegen TeamB" ohne Subjekt
   // wäre grammatikalisch kaputt; in dem Fall lieber gar keine Paarung.
   if (teamA && teamB) {

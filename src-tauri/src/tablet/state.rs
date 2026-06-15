@@ -81,6 +81,10 @@ pub struct CourtOverview {
     pub match_id: i64,
     /// Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match.
     pub match_name: String,
+    /// Reine Runde aus BTP (`RoundName`), z. B. "VF", "HF", "Finale",
+    /// "Spiel um Platz 3" – ohne Draw-Präfix. Grundlage der K.-o.-Runden-Ansage
+    /// (ab Viertelfinale). Leer, wenn kein Match / keine Runde.
+    pub round_name: String,
     /// Disziplin des aktuellen Matches (für die Sprachansage).
     pub discipline: Discipline,
     pub team1: Vec<String>,
@@ -821,6 +825,7 @@ impl TabletState {
                                 .to_string()
                         })
                         .unwrap_or_default(),
+                    round_name: m.map(|mm| mm.round_name.clone()).unwrap_or_default(),
                     discipline: m.map(|mm| mm.discipline).unwrap_or(Discipline::Unknown),
                     team1: m
                         .map(|mm| mm.team1.iter().map(|p| p.name.clone()).collect())
