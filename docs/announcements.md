@@ -71,11 +71,12 @@ dem Turnier einmal die Test-Ansage drücken.
 
 ## Aussprache-Korrekturen (`name_overrides`)
 
-Spricht die TTS-Stimme einen Namen falsch (häufig bei vietnamesischen,
-chinesischen, indischen Namen, weil die deutsche/englische Stimme Buchstaben
-wie `ph`, `tr`, `x`, `zh`, `q` nach ihren eigenen Regeln liest), lässt sich pro
+Spricht die TTS-Stimme einen Namen falsch (die deutsche/englische Stimme liest
+fremdsprachige Buchstaben nach ihren eigenen Regeln — betrifft viele Herkünfte:
+asiatisch/indisch `ph tr x zh q`, französisch stille Endungen/`j`, spanisch
+`j ll ñ z`, türkisch `ç ş ğ y`, polnisch `sz cz ł` …), lässt sich pro
 **Name oder Namensteil** eine **Ersatz-Schreibweise** hinterlegen, die die
-Stimme besser trifft (z. B. `Nguyen` → `Nujen`).
+Stimme besser trifft (z. B. `Nguyen` → `Nujen`, `Lefebvre` → `Löfäwr`).
 
 - **Anwendung** (`src/io/announcer.ts`, `joinNames`): pro Spielername zuerst ein
   **exakter Voll-Name-Treffer**, sonst **Wort für Wort** — ein einmal
@@ -85,10 +86,11 @@ Stimme besser trifft (z. B. `Nguyen` → `Nujen`).
   de/en, nur die Aussprache einzelner Namen wird ersetzt. Läuft offline
   (kein externer Dienst).
 - **Pflege:** Tabelle im Setup → Abschnitt *Ansagen* → *Aussprache-Korrekturen*.
-  Knopf **„Häufige Namen laden"** fügt eine Startliste gängiger VN/CN/IN-
-  Nachnamen mit deutscher Lautschrift ein (`src/io/nameOverrideSeed.ts`) — als
-  **editierbare Startwerte** (Vietnamesisch ist tonal: brauchbar, nicht
-  perfekt). ▶ je Zeile spielt die Aussprache zum Nachjustieren ab.
+  Knopf **„Häufige Namen laden"** fügt eine Startliste gängiger Nachnamen
+  vieler Herkünfte (vietnamesisch, chinesisch, indisch, französisch, spanisch,
+  türkisch, polnisch) mit deutscher Lautschrift ein (`src/io/nameOverrideSeed.ts`)
+  — als **editierbare Startwerte** (manche Sprachen nur näherungsweise). ▶ je
+  Zeile spielt die Aussprache zum Nachjustieren ab.
 - **SSML/Phoneme** sind bewusst NICHT genutzt — Browser-`SpeechSynthesis`
   (WebView2/Chrome) ignoriert `<phoneme>`; nur die Ersatz-Schreibweise wirkt.
 

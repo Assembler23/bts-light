@@ -961,11 +961,11 @@ export function SetupWizard({
                 </button>
               </div>
               <p className="text-xs text-slate-500">
-                „Häufige Namen laden“ fügt eine Startliste gängiger
-                vietnamesischer, chinesischer und indischer Nachnamen mit
-                deutscher Lautschrift ein – als Startwerte zum Nachjustieren
-                (per ▶ anhören). Vietnamesisch ist tonal: brauchbar, nicht
-                perfekt.
+                „Häufige Namen laden“ fügt eine Startliste gängiger Nachnamen
+                vieler Herkünfte (u. a. vietnamesisch, chinesisch, indisch,
+                französisch, spanisch, türkisch, polnisch) mit deutscher
+                Lautschrift ein – als Startwerte zum Nachjustieren (per ▶
+                anhören), nicht perfekt.
               </p>
             </div>
           </div>
