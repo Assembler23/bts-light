@@ -31,7 +31,8 @@ import {
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
-import { playTestAnnouncement } from "../io/announcer";
+import { playNameTest, playTestAnnouncement } from "../io/announcer";
+import { COMMON_NAME_OVERRIDES } from "../io/nameOverrideSeed";
 import { PRESETS, findPreset } from "../presets";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
 import type {
@@ -39,6 +40,7 @@ import type {
   AppConfig,
   ConnectionMode,
   CourtAd,
+  NameOverride,
 } from "../types";
 
 interface Props {
@@ -251,6 +253,11 @@ export function SetupWizard({
   const [annVoiceEn, setAnnVoiceEn] = useState(initialConfig.announce.voice_en);
   const [annRate, setAnnRate] = useState(initialConfig.announce.rate);
   const [annGong, setAnnGong] = useState(initialConfig.announce.gong);
+  // Phonetische Aussprache-Korrekturen (Name/Namensteil → gesprochene Form),
+  // z. B. für asiatische Namen, die die de/en-Stimme falsch ausspricht.
+  const [annNameOverrides, setAnnNameOverrides] = useState<NameOverride[]>(
+    initialConfig.announce.name_overrides ?? [],
+  );
   // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
   const ct = initialConfig.call_timer;
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
@@ -328,6 +335,10 @@ export function SetupWizard({
         voice_en: annVoiceEn,
         rate: annRate,
         gong: annGong,
+        name_overrides: annNameOverrides
+          // Leere Zeilen (weder Name noch Aussprache) beim Speichern verwerfen.
+          .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
+          .filter((o) => o.name && o.say),
       },
       court_monitor: {
         enabled: cmEnabled,
@@ -829,6 +840,132 @@ export function SetupWizard({
               <p className="text-xs text-slate-500">
                 Vor dem Turnier einmal drücken – das schaltet die Tonausgabe
                 am Rechner frei.
+              </p>
+            </div>
+
+            {/* Aussprache-Korrekturen (Phonetik-Tabelle) */}
+            <div className="flex flex-col gap-2 border-t border-slate-200 pt-4">
+              <span className="text-sm font-medium text-slate-700">
+                Aussprache-Korrekturen
+              </span>
+              <p className="text-xs text-slate-500">
+                Spricht die Stimme einen Namen falsch (z. B. asiatische Namen),
+                trage hier <strong>Name oder Namensteil</strong> und die
+                gewünschte <strong>Aussprache</strong> (Lautschrift) ein. Ein
+                Nachname wie „Nguyen“ reicht einmal – er wirkt für alle
+                Spieler:innen mit diesem Namen. Mit ▶ hörst du die Aussprache.
+              </p>
+
+              {annNameOverrides.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  {annNameOverrides.map((ov, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={ov.name}
+                        placeholder="Name / Namensteil"
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          setAnnNameOverrides((prev) =>
+                            prev.map((o, i) =>
+                              i === idx ? { ...o, name: v } : o,
+                            ),
+                          );
+                        }}
+                        className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                      />
+                      <span className="text-slate-400">→</span>
+                      <input
+                        type="text"
+                        value={ov.say}
+                        placeholder="Aussprache"
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          setAnnNameOverrides((prev) =>
+                            prev.map((o, i) =>
+                              i === idx ? { ...o, say: v } : o,
+                            ),
+                          );
+                        }}
+                        className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                      />
+                      <button
+                        type="button"
+                        title="Aussprache testen"
+                        onClick={() =>
+                          void playNameTest(
+                            ov.say || ov.name,
+                            annLang === "en" ? "en" : "de",
+                            {
+                              rate: annRate,
+                              voiceURI:
+                                (annLang === "en" ? annVoiceEn : annVoiceDe) ||
+                                undefined,
+                            },
+                          )
+                        }
+                        className="rounded-md bg-slate-100 px-2 py-1 text-sm text-slate-700 hover:bg-slate-200"
+                      >
+                        ▶
+                      </button>
+                      <button
+                        type="button"
+                        title="Zeile entfernen"
+                        onClick={() =>
+                          setAnnNameOverrides((prev) =>
+                            prev.filter((_, i) => i !== idx),
+                          )
+                        }
+                        className="rounded-md bg-slate-100 px-2 py-1 text-sm text-slate-500 hover:bg-rose-100 hover:text-rose-700"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAnnNameOverrides((prev) => [
+                      ...prev,
+                      { name: "", say: "" },
+                    ])
+                  }
+                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                             text-slate-700 transition-colors hover:bg-slate-200"
+                >
+                  + Name hinzufügen
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAnnNameOverrides((prev) => {
+                      // Häufige Namen anhängen, aber keine Doppelten (Name
+                      // case-insensitiv bereits vorhanden → überspringen).
+                      const have = new Set(
+                        prev.map((o) => o.name.trim().toLowerCase()),
+                      );
+                      const add = COMMON_NAME_OVERRIDES.filter(
+                        (o) => !have.has(o.name.toLowerCase()),
+                      );
+                      return [...prev, ...add];
+                    })
+                  }
+                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                             text-slate-700 transition-colors hover:bg-slate-200"
+                >
+                  Häufige Namen laden
+                </button>
+              </div>
+              <p className="text-xs text-slate-500">
+                „Häufige Namen laden“ fügt eine Startliste gängiger Nachnamen
+                vieler Herkünfte (u. a. vietnamesisch, chinesisch, indisch,
+                französisch, spanisch, türkisch, polnisch) mit deutscher
+                Lautschrift ein – als Startwerte zum Nachjustieren (per ▶
+                anhören), nicht perfekt.
               </p>
             </div>
           </div>

@@ -34,6 +34,16 @@ export interface AnnounceConfig {
   rate: number;
   /** Gong vor der Ansage abspielen? */
   gong: boolean;
+  /** Phonetische Aussprache-Korrekturen (Name/Namensteil → gesprochene Form). */
+  name_overrides: NameOverride[];
+}
+
+/** Aussprache-Korrektur für die Ansage (Rust: config::NameOverride). */
+export interface NameOverride {
+  /** Ganzer Name ODER einzelner Namensteil (z. B. Nachname). */
+  name: string;
+  /** Phonetische Ersatz-Schreibweise, z. B. „Nguyen" → „Nwujen". */
+  say: string;
 }
 
 /** Einstellungen des Aufruf-Timers (Rust: config::CallTimerConfig). */

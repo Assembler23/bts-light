@@ -9,7 +9,7 @@
 // Nutzergeste — der Test-Knopf in den Einstellungen und ein einmaliger
 // globaler Klick-Listener schalten das Audio für die Session frei.
 
-import type { AnnounceLanguageMode, Discipline } from "../types";
+import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 
 export type AnnounceLang = "de" | "en";
 
@@ -31,6 +31,8 @@ export interface AnnounceOptions {
   voiceURI?: string;
   /** Gong vor der Ansage abspielen? Default true. */
   gong?: boolean;
+  /** Phonetische Aussprache-Korrekturen (Name/Namensteil → gesprochene Form). */
+  nameOverrides?: NameOverride[];
 }
 
 // Synthesizer-Gong über Web Audio. Zwei kurze Sinus-Töne (hoch → tiefer) mit
@@ -245,8 +247,49 @@ function disciplineWord(d: Discipline, lang: AnnounceLang): string {
   return words[lang][d] ?? "";
 }
 
-function joinNames(names: string[], lang: AnnounceLang): string {
-  const clean = names.map((n) => n.trim()).filter((n) => n.length > 0);
+function normalizeName(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+// Baut aus der Override-Liste eine Lookup-Map (normalisierter Schlüssel →
+// gesprochene Form). Leere Einträge werden ignoriert.
+function buildOverrideMap(overrides?: NameOverride[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const o of overrides ?? []) {
+    const key = normalizeName(o.name);
+    const say = (o.say ?? "").trim();
+    if (key && say) map.set(key, say);
+  }
+  return map;
+}
+
+// Wendet die Aussprache-Korrekturen auf EINEN Spielernamen an: zuerst ein
+// exakter Voll-Name-Treffer, sonst Wort für Wort (so wirkt z. B. ein einmal
+// eingetragener Nachname „Nguyen" bei allen Spieler:innen mit diesem Namen).
+// Whitespace bleibt erhalten; Nicht-Treffer bleiben unverändert.
+function applyOverride(name: string, map: Map<string, string>): string {
+  if (map.size === 0) return name;
+  const full = map.get(normalizeName(name));
+  if (full) return full;
+  return name
+    .split(/(\s+)/)
+    .map((tok) => {
+      // Für den Lookup an Wort-Rändern hängende Satzzeichen ignorieren
+      // (z. B. „Nguyen,") — der unveränderte Token bleibt bei Nicht-Treffer.
+      const stripped = tok.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+      return map.get(normalizeName(stripped)) ?? tok;
+    })
+    .join("");
+}
+
+function joinNames(
+  names: string[],
+  lang: AnnounceLang,
+  overrides: Map<string, string>,
+): string {
+  const clean = names
+    .map((n) => applyOverride(n, overrides).trim())
+    .filter((n) => n.length > 0);
   if (clean.length === 0) return "";
   if (clean.length === 1) return clean[0];
   const connector = lang === "de" ? " und " : " and ";
@@ -259,10 +302,12 @@ function joinNames(names: string[], lang: AnnounceLang): string {
 export function buildAnnouncementSegments(
   input: AnnounceMatchInput,
   lang: AnnounceLang,
+  nameOverrides?: NameOverride[],
 ): string[] {
+  const overrides = buildOverrideMap(nameOverrides);
   const court = resolveCourtPhrase(input.courtLabel, lang);
-  const teamA = joinNames(input.teamANames, lang);
-  const teamB = joinNames(input.teamBNames, lang);
+  const teamA = joinNames(input.teamANames, lang, overrides);
+  const teamB = joinNames(input.teamBNames, lang, overrides);
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWord(input.discipline, lang);
 
@@ -284,7 +329,7 @@ export function playAnnouncement(
   return enqueueAnnouncement(async () => {
     await maybeGong(opts.gong);
     await speakSegments(
-      buildAnnouncementSegments(input, lang),
+      buildAnnouncementSegments(input, lang, opts.nameOverrides),
       lang,
       clampRate(opts.rate),
       opts.voiceURI,
@@ -307,6 +352,19 @@ export async function playTestAnnouncement(
     },
     lang,
     opts,
+  );
+}
+
+// Spricht NUR einen einzelnen Text (Name) – ohne Gong, ohne Feld/Disziplin.
+// Für den Test-Knopf je Aussprache-Korrektur in den Einstellungen: man hört
+// sofort, wie die eingetragene Ersatz-Schreibweise klingt, und justiert nach.
+export function playNameTest(
+  text: string,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): Promise<void> {
+  return enqueueAnnouncement(() =>
+    speakSegments([text.trim()], lang, clampRate(opts.rate), opts.voiceURI),
   );
 }
 
@@ -345,9 +403,11 @@ export interface AnnouncePreparationInput {
 export function buildPreparationSegments(
   input: AnnouncePreparationInput,
   lang: AnnounceLang,
+  nameOverrides?: NameOverride[],
 ): string[] {
-  const teamA = joinNames(input.teamANames, lang);
-  const teamB = joinNames(input.teamBNames, lang);
+  const overrides = buildOverrideMap(nameOverrides);
+  const teamA = joinNames(input.teamANames, lang, overrides);
+  const teamB = joinNames(input.teamBNames, lang, overrides);
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWord(input.discipline, lang);
   const hall = (input.hall || "").trim();
@@ -382,7 +442,7 @@ export function playPreparationAnnouncement(
   return enqueueAnnouncement(async () => {
     await maybeGong(opts.gong);
     await speakSegments(
-      buildPreparationSegments(input, lang),
+      buildPreparationSegments(input, lang, opts.nameOverrides),
       lang,
       clampRate(opts.rate),
       opts.voiceURI,

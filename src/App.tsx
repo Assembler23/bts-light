@@ -45,6 +45,7 @@ function defaultConfig(): AppConfig {
       voice_en: "",
       rate: 0.8,
       gong: true,
+      name_overrides: [],
     },
     court_monitor: {
       enabled: false,

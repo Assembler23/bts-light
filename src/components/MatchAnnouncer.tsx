@@ -119,6 +119,7 @@ export function MatchAnnouncer({ announce }: Props) {
               rate: cfg.rate,
               voiceURI: voiceURI || undefined,
               gong: cfg.gong,
+              nameOverrides: cfg.name_overrides,
             });
           }
         })

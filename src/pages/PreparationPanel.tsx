@@ -160,6 +160,7 @@ export function PreparationPanel({ announce }: Props) {
         rate: announce.rate,
         voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
         gong: announce.gong,
+        nameOverrides: announce.name_overrides,
       },
     );
   };
