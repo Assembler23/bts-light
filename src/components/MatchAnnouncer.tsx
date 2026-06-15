@@ -120,6 +120,7 @@ export function MatchAnnouncer({ announce }: Props) {
               voiceURI: voiceURI || undefined,
               gong: cfg.gong,
               nameOverrides: cfg.name_overrides,
+              nameOverridesEnabled: cfg.name_overrides_enabled,
             });
           }
         })

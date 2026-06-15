@@ -67,7 +67,8 @@ dem Turnier einmal die Test-Ansage drücken.
 | `voice_de` / `voice_en` | bevorzugte Stimme je Sprache (`voiceURI`), leer = Browser-Standard |
 | `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8) |
 | `gong` | Gong vor der Ansage (Default an) |
-| `name_overrides` | Phonetische Aussprache-Korrekturen, Liste `{ name, say }` (Default leer) |
+| `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
+| `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
 
 ## Aussprache-Korrekturen (`name_overrides`)
 
@@ -78,19 +79,23 @@ asiatisch/indisch `ph tr x zh q`, französisch stille Endungen/`j`, spanisch
 **Name oder Namensteil** eine **Ersatz-Schreibweise** hinterlegen, die die
 Stimme besser trifft (z. B. `Nguyen` → `Nujen`, `Lefebvre` → `Löfäwr`).
 
+- **Basis-Wörterbuch** (`src/io/nameOverrideBase.ts`, `BASE_NAME_OVERRIDES`):
+  mitgelieferte Liste häufiger fremdsprachiger Nachnamen (abgeleitet aus den
+  häufigsten Namen der Badhub-Spieler-DB), wird **automatisch** angewendet. Die
+  **Nutzer-Tabelle** (`name_overrides`) hat **Vorrang** (gleicher Schlüssel
+  überschreibt die Basis). Schalter `name_overrides_enabled` schaltet beides ab.
 - **Anwendung** (`src/io/announcer.ts`, `joinNames`): pro Spielername zuerst ein
   **exakter Voll-Name-Treffer**, sonst **Wort für Wort** — ein einmal
   eingetragener Nachname wirkt also für alle Spieler:innen mit diesem Namen.
-  Vergleich case-insensitiv/getrimmt; Whitespace bleibt erhalten.
+- **Matching diakritik-/sonderzeichen-unabhängig** (`normalizeName`): NFD-Faltung
+  + ı/İ/ø/ł/đ → „Nguyên"/„Nguyen", „Yıldız"/„Yildiz", „García"/„Garcia" treffen
+  denselben Eintrag. Whitespace + Wort-Satzzeichen bleiben beim Vorlesen erhalten.
 - **Reichweite:** Es ist **keine zusätzliche Sprache** — die Ansage bleibt
   de/en, nur die Aussprache einzelner Namen wird ersetzt. Läuft offline
   (kein externer Dienst).
 - **Pflege:** Tabelle im Setup → Abschnitt *Ansagen* → *Aussprache-Korrekturen*.
-  Knopf **„Häufige Namen laden"** fügt eine Startliste gängiger Nachnamen
-  vieler Herkünfte (vietnamesisch, chinesisch, indisch, französisch, spanisch,
-  türkisch, polnisch) mit deutscher Lautschrift ein (`src/io/nameOverrideSeed.ts`)
-  — als **editierbare Startwerte** (manche Sprachen nur näherungsweise). ▶ je
-  Zeile spielt die Aussprache zum Nachjustieren ab.
+  Das Basis-Wörterbuch wirkt automatisch; in der Tabelle pflegst du nur eigene
+  Korrekturen/Ergänzungen (Vorrang). ▶ je Zeile spielt die Aussprache ab.
 - **SSML/Phoneme** sind bewusst NICHT genutzt — Browser-`SpeechSynthesis`
   (WebView2/Chrome) ignoriert `<phoneme>`; nur die Ersatz-Schreibweise wirkt.
 
@@ -141,8 +146,8 @@ Eingeführt in v0.9.16.
 - `src-tauri/src/tablet/state.rs` — `CourtOverview` (`match_id`,
   `discipline`, Nationalitäten).
 - `src-tauri/src/config.rs` — `AnnounceConfig`, `NameOverride`.
-- `src/io/announcer.ts` — Gong + Sprachsynthese + Aussprache-Korrekturen (`applyOverride`, `playNameTest`).
-- `src/io/nameOverrideSeed.ts` — Startliste häufiger Nachnamen (VN/CN/IN).
+- `src/io/announcer.ts` — Gong + Sprachsynthese + Aussprache-Korrekturen (`normalizeName`-Faltung, `buildOverrideMap`, `applyOverride`, `playNameTest`).
+- `src/io/nameOverrideBase.ts` — mitgeliefertes Basis-Wörterbuch (`BASE_NAME_OVERRIDES`).
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.

@@ -32,7 +32,7 @@ import {
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import { playNameTest, playTestAnnouncement } from "../io/announcer";
-import { COMMON_NAME_OVERRIDES } from "../io/nameOverrideSeed";
+import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
 import { PRESETS, findPreset } from "../presets";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
 import type {
@@ -258,6 +258,9 @@ export function SetupWizard({
   const [annNameOverrides, setAnnNameOverrides] = useState<NameOverride[]>(
     initialConfig.announce.name_overrides ?? [],
   );
+  const [annOverridesEnabled, setAnnOverridesEnabled] = useState(
+    initialConfig.announce.name_overrides_enabled ?? true,
+  );
   // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
   const ct = initialConfig.call_timer;
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
@@ -339,6 +342,7 @@ export function SetupWizard({
           // Leere Zeilen (weder Name noch Aussprache) beim Speichern verwerfen.
           .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
           .filter((o) => o.name && o.say),
+        name_overrides_enabled: annOverridesEnabled,
       },
       court_monitor: {
         enabled: cmEnabled,
@@ -830,6 +834,8 @@ export function SetupWizard({
                     voiceURI:
                       (annLang === "en" ? annVoiceEn : annVoiceDe) || undefined,
                     gong: annGong,
+                    nameOverrides: annNameOverrides,
+                    nameOverridesEnabled: annOverridesEnabled,
                   })
                 }
                 className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
@@ -848,12 +854,25 @@ export function SetupWizard({
               <span className="text-sm font-medium text-slate-700">
                 Aussprache-Korrekturen
               </span>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={annOverridesEnabled}
+                  onChange={(e) => setAnnOverridesEnabled(e.currentTarget.checked)}
+                />
+                Aussprache-Korrekturen anwenden
+              </label>
               <p className="text-xs text-slate-500">
-                Spricht die Stimme einen Namen falsch (z. B. asiatische Namen),
-                trage hier <strong>Name oder Namensteil</strong> und die
-                gewünschte <strong>Aussprache</strong> (Lautschrift) ein. Ein
-                Nachname wie „Nguyen“ reicht einmal – er wirkt für alle
-                Spieler:innen mit diesem Namen. Mit ▶ hörst du die Aussprache.
+                Ein mitgeliefertes <strong>Basis-Wörterbuch</strong> (
+                {BASE_NAME_OVERRIDES.length} gängige internationale Nachnamen,
+                u. a. vietnamesisch, chinesisch, indisch, französisch, spanisch,
+                türkisch, polnisch) wird automatisch angewendet, damit die Stimme
+                fremdsprachige Namen besser trifft. Eigene Korrekturen unten haben
+                <strong> Vorrang</strong>: trage <strong>Name oder Namensteil</strong>
+                und die gewünschte <strong>Aussprache</strong> (Lautschrift) ein –
+                ein Nachname wie „Nguyen“ reicht einmal. Mit ▶ hörst du die
+                Aussprache. (Korrekturen sind Näherungen, kein Ersatz für eine
+                perfekte Lautschrift.)
               </p>
 
               {annNameOverrides.length > 0 && (
@@ -925,48 +944,16 @@ export function SetupWizard({
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAnnNameOverrides((prev) => [
-                      ...prev,
-                      { name: "", say: "" },
-                    ])
-                  }
-                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                             text-slate-700 transition-colors hover:bg-slate-200"
-                >
-                  + Name hinzufügen
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAnnNameOverrides((prev) => {
-                      // Häufige Namen anhängen, aber keine Doppelten (Name
-                      // case-insensitiv bereits vorhanden → überspringen).
-                      const have = new Set(
-                        prev.map((o) => o.name.trim().toLowerCase()),
-                      );
-                      const add = COMMON_NAME_OVERRIDES.filter(
-                        (o) => !have.has(o.name.toLowerCase()),
-                      );
-                      return [...prev, ...add];
-                    })
-                  }
-                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                             text-slate-700 transition-colors hover:bg-slate-200"
-                >
-                  Häufige Namen laden
-                </button>
-              </div>
-              <p className="text-xs text-slate-500">
-                „Häufige Namen laden“ fügt eine Startliste gängiger Nachnamen
-                vieler Herkünfte (u. a. vietnamesisch, chinesisch, indisch,
-                französisch, spanisch, türkisch, polnisch) mit deutscher
-                Lautschrift ein – als Startwerte zum Nachjustieren (per ▶
-                anhören), nicht perfekt.
-              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setAnnNameOverrides((prev) => [...prev, { name: "", say: "" }])
+                }
+                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                           text-slate-700 transition-colors hover:bg-slate-200"
+              >
+                + Name hinzufügen
+              </button>
             </div>
           </div>
         )}
