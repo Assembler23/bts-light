@@ -1161,6 +1161,17 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     my_token = Some(ctx.tablet.claim_court(court_id));
                                     ctx.tablet.attach_tablet(court_id);
                                     tracing::info!("Tablet verbunden für Feld {court_id}");
+                                    // Gespeicherten Spielstand auch beim normalen
+                                    // Verbinden wiederherstellen (nicht nur bei
+                                    // Übernahme): so startet ein neu verbundenes
+                                    // ODER Ersatz-Tablet nach einem Crash nicht bei
+                                    // 0:0. Das Tablet behält den Stand nur, wenn die
+                                    // matchId zum gleich gepushten Match passt
+                                    // (tablet.html), sonst überschreibt push_match.
+                                    if let Some(state) = ctx.tablet.court_state(court_id) {
+                                        send_msg(&mut socket, &ServerMsg::StateRestore { state })
+                                            .await;
+                                    }
                                     push_match(court_id, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }

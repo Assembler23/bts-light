@@ -573,6 +573,12 @@ impl TabletState {
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
     pub fn clear_court(&self, court_id: i64) {
         self.courts.write().unwrap().remove(&court_id);
+        // Gespiegelten Spielstand löschen, sonst bekäme ein nach dem Ergebnis
+        // neu/ersatzweise verbundenes Tablet via StateRestore kurz den BEENDETEN
+        // Stand (Render-Blitz, im schmalen Fenster sogar Doppel-Submit). Wird nur
+        // nach Ergebnis-Submit aufgerufen (nicht beim Disconnect), daher bleibt
+        // der Crash-Restore eines laufenden Spiels unberührt.
+        self.court_state.write().unwrap().remove(&court_id);
         // Entfernten Stand auch aus der Datei nehmen.
         self.persist_scores();
     }

@@ -938,6 +938,15 @@ async fn attach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> Att
         return AttachResult::Rejected;
     }
     namespace.tablets.insert(court_id, tx.clone());
+    // Laufenden Spielstand auch beim NORMALEN Verbinden wiederherstellen
+    // (Crash/Ersatz-Tablet) – nicht nur bei Übernahme. Das Tablet behält ihn
+    // nur, wenn die matchId zum gleich gepushten Match passt, sonst überschreibt
+    // der Host das Feld (kein Wiederaufleben eines alten Stands).
+    if let Some(state) = namespace.court_state.get(&court_id) {
+        let _ = tx.send(text(&ServerMsg::StateRestore {
+            state: state.clone(),
+        }));
+    }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::TabletConnected {
