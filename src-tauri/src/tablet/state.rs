@@ -105,6 +105,11 @@ pub struct CourtOverview {
     /// Teams (BWF-Doppelregel; vom Tablet berechnet). None bei Einzel oder
     /// altem Tablet-Stand ohne diese Info.
     pub serving_player: Option<u8>,
+    /// Laufende Pause am Feld (BWF-Intervall/Satzpause/Behandlung), 1:1 aus
+    /// dem Tablet-`court_state` übernommen: `{kind, endsAt}`. Damit zeigt die
+    /// Kombi-Anzeige den Pausen-Countdown direkt am betroffenen Feld. None =
+    /// keine Pause. `endsAt` steht in Server-Zeit (vom Tablet so gesetzt).
+    pub pause: Option<serde_json::Value>,
     /// Voraussichtlicher Zähltafelbediener für das aktuelle Spiel: die
     /// Namen des Verlierer-Teams des zuletzt auf diesem Feld beendeten
     /// Spiels. Leer, wenn es kein Vorspiel auf dem Feld gab.
@@ -770,16 +775,20 @@ impl TabletState {
                         .map(|p| p.nationality.clone().unwrap_or_default())
                         .collect::<Vec<String>>()
                 };
-                // Aufschlag-Info aus dem Tablet-court_state: (team 1/2,
-                // optional Spieler-Index 0/1). Bevorzugt das Tablet-berechnete
-                // `serving:{team,index}`; Fallback auf servingSide/teamOnSide.
-                let serving_info: Option<(u8, Option<u8>)> = self
+                // Tablet-court_state EINMAL lesen + parsen — so sind Aufschlag-
+                // und Pause-Info garantiert vom selben Stand abgeleitet (kein
+                // zweiter Lock, kein doppeltes Parsen).
+                let court_state_json: Option<serde_json::Value> = self
                     .court_state
                     .read()
                     .unwrap()
                     .get(&court.id)
-                    .and_then(|cs| {
-                        let v: serde_json::Value = serde_json::from_str(cs).ok()?;
+                    .and_then(|cs| serde_json::from_str(cs).ok());
+                // Aufschlag-Info aus dem court_state: (team 1/2, optional
+                // Spieler-Index 0/1). Bevorzugt das Tablet-berechnete
+                // `serving:{team,index}`; Fallback auf servingSide/teamOnSide.
+                let serving_info: Option<(u8, Option<u8>)> =
+                    court_state_json.as_ref().and_then(|v| {
                         if let Some(s) = v.get("serving").filter(|s| !s.is_null()) {
                             let team = if s.get("team")?.as_str()? == "a" {
                                 1u8
@@ -794,6 +803,11 @@ impl TabletState {
                         let team_a = v.get("teamOnSide")?.get("a")?.as_str()?;
                         Some((if serving == team_a { 1u8 } else { 2u8 }, None))
                     });
+                // Laufende Pause (BWF-Intervall/Satzpause/Behandlung) — 1:1 für
+                // den Kombi-Pausen-Countdown.
+                let pause_info: Option<serde_json::Value> = court_state_json
+                    .as_ref()
+                    .and_then(|v| v.get("pause").filter(|p| !p.is_null()).cloned());
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
@@ -828,6 +842,8 @@ impl TabletState {
                     // zurück (nur Team, für alte Tablet-Stände).
                     serving_team: serving_info.map(|(t, _)| t),
                     serving_player: serving_info.and_then(|(_, p)| p),
+                    // Pause am Feld (für den Kombi-Pausen-Countdown).
+                    pause: pause_info,
                     // Zähltafelbediener = Verlierer des zuletzt auf diesem
                     // Feld beendeten Spiels. Wird vom Sync-Loop getrackt
                     // (BTP behält die Feld-Zuordnung beendeter Spiele nicht
@@ -1168,6 +1184,46 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    #[test]
+    fn overview_extracts_pause_and_serving_from_court_state() {
+        // overview() übernimmt Pause + Aufschlag-Info 1:1 aus dem Tablet-
+        // court_state (Grundlage für Kombi-Pausen-Countdown + Aufschlag-Punkt).
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        st.attach_tablet(101);
+        st.set_court_state(
+            101,
+            r#"{"serving":{"team":"b","index":1},"pause":{"kind":"game","endsAt":1700000000000}}"#
+                .to_string(),
+        );
+        let ov = st.overview();
+        let c = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert_eq!(c.serving_team, Some(2));
+        assert_eq!(c.serving_player, Some(1));
+        let pause = c.pause.as_ref().expect("pause present");
+        assert_eq!(pause.get("kind").and_then(|v| v.as_str()), Some("game"));
+        assert_eq!(
+            pause.get("endsAt").and_then(|v| v.as_i64()),
+            Some(1_700_000_000_000)
+        );
+    }
+
+    #[test]
+    fn overview_has_no_pause_without_court_state() {
+        // Kein court_state (kein zählendes Tablet) → pause = None.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        let ov = st.overview();
+        let c = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert!(c.pause.is_none());
     }
 
     #[test]

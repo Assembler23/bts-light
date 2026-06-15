@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.105
+
+- **Kombi-Anzeige: Satz-Sieger deutlich hinterlegt.** Der gewonnene Satz steht jetzt
+  als **grüner Block** statt nur weiß-auf-grau — aus der Ferne sofort als Sieger
+  erkennbar (Feld-Wunsch). Gilt für die übereinander- wie die nebeneinander-Variante.
+- **Kombi-Anzeige: Pausen-Countdown am betroffenen Feld.** Läuft an einem Feld eine
+  Pause, zeigt dessen Band die Restzeit (`Pause`/`Satzpause` + `m:ss`, `Behandlung`
+  ohne Countdown) — direkt „an der Seite, wo die Pause ist". Server-zeit-relativ
+  gerechnet (die Pi braucht keine synchrone Uhr).
+- **Tablet: Aufschläger/Annehmer nach jedem Satz neu (Doppel/Mixed).** Endet ein Satz
+  und das Match läuft weiter, fragt das Tablet nach der Satzpause „**Neuer Satz — wer
+  schlägt auf?**" — beschränkt auf das Gewinnerteam des letzten Satzes, danach die
+  Annehmer-Wahl. Aufschläger/Annehmer können je Satz wechseln; bis zur Bestätigung
+  bleibt die Zähltafel gesperrt. Einzel läuft unverändert automatisch weiter.
+
 ## v0.9.104
 
 - **Aktive Halle (Tages-Halle) für Mehr-Hallen-Turniere.** Bei Turnieren, bei denen

@@ -65,6 +65,12 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 .band__status.live  { color: #34d399; }
 .band__status.pause { color: #fbbf24; }
 .band__status.free  { color: #64748b; }
+/* Pausen-Countdown im Bandstatus: große, gut lesbare Restzeit direkt an dem
+   Feld (= „der Seite"), das gerade pausiert. Server-zeit-relativ berechnet. */
+.band__status .pause-count {
+  font-variant-numeric: tabular-nums; font-weight: 900;
+  font-size: 3.4vh; margin-left: .6vw;
+}
 .dot {
   width: 1.4vh; height: 1.4vh; border-radius: 50%;
   background: currentColor; box-shadow: 0 0 1.4vh currentColor;
@@ -114,8 +120,14 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 .set {
   min-width: 1.6ch; text-align: center;
   font-size: var(--set-size, 12vh); font-weight: 900; color: #64748b; line-height: 1;
+  border-radius: .8vh; padding: 0 .25ch;
 }
-.set.won { color: #f8fafc; }
+/* Gewonnener Satz: nicht nur weiß/grau, sondern als grüner Block HINTERLEGT —
+   aus der Ferne sofort als Sieger erkennbar (Feld-Wunsch 2026-06-15). */
+.set.won {
+  color: #052e16; background: #34d399;
+  box-shadow: 0 0 1.2vh rgba(52,211,153,.45);
+}
 /* Laufender Satz: nur farblich hervorgehoben (gelb), kein Unterstrich. */
 .set.current {
   color: #fbbf24;
@@ -184,8 +196,12 @@ body.vertical .vsetrow {
   display: flex; justify-content: center; gap: 3vw;
   font-variant-numeric: tabular-nums; line-height: 1;
 }
-body.vertical .vset { font-size: 15vh; font-weight: 900; color: #64748b; }
-body.vertical .vset.won { color: #f8fafc; }
+body.vertical .vset { font-size: 15vh; font-weight: 900; color: #64748b; border-radius: .8vh; padding: 0 .25ch; }
+/* Gewonnener Satz auch im Vertikal-Modus als grüner Block hinterlegt. */
+body.vertical .vset.won {
+  color: #052e16; background: #34d399;
+  box-shadow: 0 0 1.2vh rgba(52,211,153,.45);
+}
 body.vertical .vset.current { color: #fbbf24; }
 </style>
 </head>
@@ -229,6 +245,34 @@ body.vertical .vset.current { color: #fbbf24; }
     return el;
   }
 
+  // Server-Zeit (ms) aus dem letzten Poll. Der Pausen-Countdown wird relativ
+  // dazu berechnet — die Pi hat evtl. keine synchrone Uhr (kein NTP im
+  // Turnier-WLAN), das zählende Tablet hat `endsAt` aber in SERVER-Zeit gesetzt.
+  // SERVER_NOW_WALL hält die lokale Monotonuhr (performance.now()) zum
+  // Empfangszeitpunkt, damit der Countdown auch zwischen Polls weiterläuft und
+  // nicht systematisch um die Poll-Latenz zu hoch steht.
+  var SERVER_NOW = 0;
+  var SERVER_NOW_WALL = 0;
+  // Pausen-Beschriftung wie monitor.html (Einzelmonitor): gleicher Wortlaut.
+  var PAUSE_LABEL = { eleven: 'Pause', game: 'Satzpause', injury: 'Behandlung' };
+
+  // Restzeit einer Pause als „m:ss". null, wenn kein Countdown (Behandlung
+  // ohne Ende oder kein gültiges `endsAt`).
+  function pauseCountdown(pause) {
+    if (!pause || pause.kind === 'injury' || typeof pause.endsAt !== 'number') return null;
+    var nowMs;
+    if (SERVER_NOW > 0) {
+      // Seit dem Poll vergangene lokale Zeit aufaddieren (Monotonuhr).
+      nowMs = SERVER_NOW + Math.max(0, performance.now() - SERVER_NOW_WALL);
+    } else {
+      nowMs = Date.now();
+    }
+    var secs = Math.max(0, Math.round((pause.endsAt - nowMs) / 1000));
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    return m + ':' + (s < 10 ? '0' + s : s);
+  }
+
   function setVal(s, idx) {
     // sets-Eintrag ist [a,b] (serde-Tuple) oder {a,b}. Fallback 0 statt
     // "undefined" in der Zelle, falls das Schema je abweicht.
@@ -240,7 +284,10 @@ body.vertical .vset.current { color: #fbbf24; }
 
   function renderBand(c) {
     var isLive = c.match_id && c.match_id > 0 && c.team1 && c.team1.length > 0;
-    var isPause = isLive && (c.injury || c.official_call);
+    // Offizielle Pause vom Tablet (eleven/game/injury). Hat Vorrang vor dem
+    // älteren injury-Flag, weil sie die Restzeit (endsAt) mitbringt.
+    var pause = (c.pause && c.pause.kind) ? c.pause : null;
+    var isPause = isLive && (!!pause || c.injury || c.official_call);
 
     var band = h('div', 'band' + (!isLive ? ' empty' : isPause ? ' pause' : ' live'));
 
@@ -250,11 +297,18 @@ body.vertical .vset.current { color: #fbbf24; }
     if (isLive) head.appendChild(h('span', 'band__disc', c.match_name || ''));
     // Status nur bei AbweichungEN vom Normalfall zeigen — „läuft" ist
     // redundant (sieht man am Spielstand) und kostet Platz. Frei/Pause/
-    // TL/Behandlung bleiben sichtbar.
+    // TL/Behandlung bleiben sichtbar. Bei einer laufenden Pause steht der
+    // Countdown direkt an diesem Feld (= „der Seite, wo die Pause ist").
     if (!isLive) {
       var sFree = h('span', 'band__status free');
       sFree.appendChild(h('span', null, 'frei'));
       head.appendChild(sFree);
+    } else if (pause) {
+      var sP = h('span', 'band__status pause');
+      sP.appendChild(h('span', null, PAUSE_LABEL[pause.kind] || 'Pause'));
+      var cd = pauseCountdown(pause);
+      if (cd) sP.appendChild(h('span', 'pause-count', cd));
+      head.appendChild(sP);
     } else if (c.injury) {
       var sInj = h('span', 'band__status pause');
       sInj.appendChild(h('span', null, 'Behandlung'));
@@ -365,6 +419,10 @@ body.vertical .vset.current { color: #fbbf24; }
   function render(data) {
     var board = document.getElementById('board');
     board.textContent = '';
+    // Server-Zeit aus dem Poll merken (für die Pausen-Countdowns) + lokale
+    // Monotonuhr zum Empfangszeitpunkt (Drift-Kompensation zwischen Polls).
+    SERVER_NOW = (data && typeof data.serverNowMs === 'number') ? data.serverNowMs : 0;
+    SERVER_NOW_WALL = performance.now();
     var courts = (data && Array.isArray(data.courts)) ? data.courts : [];
     if (courts.length === 0) {
       var idle = h('div', 'idle');

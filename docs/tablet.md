@@ -75,10 +75,21 @@ Aufstellung:
 2. **Aufschlag** – wer schlägt zuerst auf?
 3. **Annahme** (nur Doppel) – wer nimmt den Aufschlag an?
 
+- **Aufschlag/Annahme nach jedem Satz neu** (Doppel/Mixed, seit v0.9.105):
+  Aufschläger und Annehmer können je Satz wechseln. Endet ein Satz und das
+  Match läuft weiter, fragt das Tablet nach der **Satzpause** erneut
+  „**Neuer Satz — wer schlägt auf?**" — die Auswahl ist auf das
+  **Gewinnerteam des letzten Satzes** beschränkt (BWF: der Satzgewinner
+  schlägt zuerst auf), danach folgt die Annehmer-Wahl im Gegnerteam. Bis
+  zur Bestätigung ist die Zähltafel gesperrt. **Einzel** braucht keine Wahl
+  und läuft mit getauschter Aufstellung automatisch weiter. Die Wahl
+  übersteht einen Tablet-Reload (`serveSetupTeam` wird persistiert);
+  „Korrektur — letzter Punkt zurück" in der Satzpause hebt sie wieder auf.
 - **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück · Back"**-
   Button. Er verwirft die zuletzt getroffene Wahl und springt einen
   Schritt zurück – so lassen sich Fehleingaben korrigieren, ohne das
-  Match neu zuweisen zu müssen.
+  Match neu zuweisen zu müssen. (Bei der Per-Satz-Aufschlagwahl entfällt
+  das Zurück: das Gewinnerteam steht durch den Satzstand fest.)
 - **Zweisprachig:** Titel und Hinweise des Assistenten erscheinen
   Deutsch **und** Englisch (internationale Spieler:innen). Das gilt auch
   für das Megafon-Popup.
