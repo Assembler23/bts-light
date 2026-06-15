@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.103
+
+- **Fix: bts-light setzte BTP-Spieler fälschlich auf „nicht spielbereit" (rot→gelb).**
+  Unser `SENDUPDATE` schrieb `Status: 0` in den Match-Knoten — sowohl bei jeder
+  Feldzuweisung (Auto + manuell) als auch beim Ergebnis. `Match.Status` ist in BTP
+  aber ein **Bitfeld mit den Check-in-Bits der Spieler**; hart auf 0 zu setzen hat
+  sie als nicht eingecheckt markiert. Wir schreiben das `Status`-Feld jetzt **gar
+  nicht mehr** (BTP behält seinen Stand — wie Tilos BTS). Stabilisiert voraussichtlich
+  auch die automatische Ansage/Feldvergabe. *(Bitte am echten BTP gegenprüfen.)*
+
 ## v0.9.102
 
 - **Fix: Kombi-/Übersichts-Monitore zeigten zwischendurch „keine Daten".** Ursache
