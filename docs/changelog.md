@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.107
+
+- **Aussprache-Korrekturen für die Ansage.** Spricht die Stimme einen Namen falsch (häufig bei
+  vietnamesischen, chinesischen, indischen Namen), lässt sich pro **Name oder Namensteil** eine
+  **Ersatz-Schreibweise** hinterlegen (z. B. „Nguyen" → „Nujen"). Ein Nachname reicht einmal und wirkt
+  für alle Spieler:innen mit diesem Namen. Pflege im Setup → *Ansagen* → *Aussprache-Korrekturen*,
+  mit ▶-Test je Zeile und Knopf **„Häufige Namen laden"** (Startliste mit deutscher Lautschrift).
+  Läuft offline; keine zusätzliche Ansage-Sprache, nur korrektere Aussprache.
+
 ## v0.9.106
 
 - **Relay-Log persistent + ohne Sonderrechte lesbar.** Der Cloud-Relay schreibt sein Log jetzt

@@ -67,6 +67,30 @@ dem Turnier einmal die Test-Ansage drücken.
 | `voice_de` / `voice_en` | bevorzugte Stimme je Sprache (`voiceURI`), leer = Browser-Standard |
 | `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8) |
 | `gong` | Gong vor der Ansage (Default an) |
+| `name_overrides` | Phonetische Aussprache-Korrekturen, Liste `{ name, say }` (Default leer) |
+
+## Aussprache-Korrekturen (`name_overrides`)
+
+Spricht die TTS-Stimme einen Namen falsch (häufig bei vietnamesischen,
+chinesischen, indischen Namen, weil die deutsche/englische Stimme Buchstaben
+wie `ph`, `tr`, `x`, `zh`, `q` nach ihren eigenen Regeln liest), lässt sich pro
+**Name oder Namensteil** eine **Ersatz-Schreibweise** hinterlegen, die die
+Stimme besser trifft (z. B. `Nguyen` → `Nujen`).
+
+- **Anwendung** (`src/io/announcer.ts`, `joinNames`): pro Spielername zuerst ein
+  **exakter Voll-Name-Treffer**, sonst **Wort für Wort** — ein einmal
+  eingetragener Nachname wirkt also für alle Spieler:innen mit diesem Namen.
+  Vergleich case-insensitiv/getrimmt; Whitespace bleibt erhalten.
+- **Reichweite:** Es ist **keine zusätzliche Sprache** — die Ansage bleibt
+  de/en, nur die Aussprache einzelner Namen wird ersetzt. Läuft offline
+  (kein externer Dienst).
+- **Pflege:** Tabelle im Setup → Abschnitt *Ansagen* → *Aussprache-Korrekturen*.
+  Knopf **„Häufige Namen laden"** fügt eine Startliste gängiger VN/CN/IN-
+  Nachnamen mit deutscher Lautschrift ein (`src/io/nameOverrideSeed.ts`) — als
+  **editierbare Startwerte** (Vietnamesisch ist tonal: brauchbar, nicht
+  perfekt). ▶ je Zeile spielt die Aussprache zum Nachjustieren ab.
+- **SSML/Phoneme** sind bewusst NICHT genutzt — Browser-`SpeechSynthesis`
+  (WebView2/Chrome) ignoriert `<phoneme>`; nur die Ersatz-Schreibweise wirkt.
 
 ## Vorbereitungs-Ansage (Spiele in Vorbereitung)
 
@@ -114,8 +138,9 @@ Eingeführt in v0.9.16.
 - `src-tauri/src/btp/model.rs` — `Discipline`, Event-Parsing.
 - `src-tauri/src/tablet/state.rs` — `CourtOverview` (`match_id`,
   `discipline`, Nationalitäten).
-- `src-tauri/src/config.rs` — `AnnounceConfig`.
-- `src/io/announcer.ts` — Gong + Sprachsynthese.
+- `src-tauri/src/config.rs` — `AnnounceConfig`, `NameOverride`.
+- `src/io/announcer.ts` — Gong + Sprachsynthese + Aussprache-Korrekturen (`applyOverride`, `playNameTest`).
+- `src/io/nameOverrideSeed.ts` — Startliste häufiger Nachnamen (VN/CN/IN).
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.

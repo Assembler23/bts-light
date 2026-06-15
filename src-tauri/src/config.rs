@@ -107,6 +107,19 @@ pub struct AnnounceConfig {
     pub rate: f64,
     /// Gong vor der Ansage abspielen?
     pub gong: bool,
+    /// Phonetische Aussprache-Korrekturen: Name oder Namensteil → gesprochene
+    /// Schreibweise. Behebt z. B. asiatische Namen, die die deutsche/englische
+    /// TTS-Stimme falsch ausspricht. Offline, kein externer Dienst.
+    pub name_overrides: Vec<NameOverride>,
+}
+
+/// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
+/// einzelner Namensteil (z. B. ein Nachname), `say` die phonetische Ersatz-
+/// Schreibweise, die die TTS besser trifft (z. B. „Nguyen" → „Nwujen").
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NameOverride {
+    pub name: String,
+    pub say: String,
 }
 
 impl Default for AnnounceConfig {
@@ -118,6 +131,7 @@ impl Default for AnnounceConfig {
             voice_en: String::new(),
             rate: 0.8,
             gong: true,
+            name_overrides: Vec::new(),
         }
     }
 }
@@ -375,6 +389,10 @@ mod tests {
                 voice_en: "voice-en-1".to_string(),
                 rate: 1.1,
                 gong: false,
+                name_overrides: vec![NameOverride {
+                    name: "Nguyen".to_string(),
+                    say: "Nujen".to_string(),
+                }],
             },
             court_monitor: CourtMonitorConfig {
                 enabled: true,
