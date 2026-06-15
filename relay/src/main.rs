@@ -197,9 +197,56 @@ fn valid_namespace(ns: &str) -> bool {
         })
 }
 
+/// Richtet das Logging ein. Ist `RELAY_LOG_DIR` gesetzt, schreibt der Relay
+/// ZUSÄTZLICH zu stdout (journald) in eine **täglich rotierende Datei**
+/// `bts-relay.log.YYYY-MM-DD` in diesem Verzeichnis — auf dem Hetzner-Server
+/// nach `storage/relay-logs/`, das der `badhub`-User direkt lesen darf (kein
+/// journalctl-Recht nötig). Ohne die Env-Var bleibt es bei stdout-only (lokal/
+/// `cargo run`). Der zurückgegebene Guard muss für die Programmlaufzeit leben
+/// (sonst flusht der non-blocking Writer nicht).
+fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::prelude::*;
+    // INFO-Default: unsere Diagnose-Zeilen (info!) bleiben, der TRACE-/DEBUG-
+    // Verbindungsspam von axum/hyper wird gefiltert → lesbare, kompakte Datei.
+    let level = LevelFilter::INFO;
+    let stdout_layer = tracing_subscriber::fmt::layer().with_ansi(false);
+    match std::env::var("RELAY_LOG_DIR") {
+        Ok(dir) if !dir.is_empty() => {
+            // Relay läuft als `badhub` und darf in storage/ schreiben. Scheitert
+            // das (falsche Rechte/Quota), warnen wir nach stdout/journald — sonst
+            // bliebe die erwartete Datei stumm leer (im Ernstfall der falsche
+            // Moment, das zu merken). Der stdout-Fallback greift weiterhin.
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("WARN: RELAY_LOG_DIR '{dir}' nicht anlegbar: {e} — nur stdout");
+            }
+            let (non_blocking, guard) = tracing_appender::non_blocking(
+                tracing_appender::rolling::daily(&dir, "bts-relay.log"),
+            );
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(non_blocking);
+            tracing_subscriber::registry()
+                .with(level)
+                .with(stdout_layer)
+                .with(file_layer)
+                .init();
+            Some(guard)
+        }
+        _ => {
+            tracing_subscriber::registry()
+                .with(level)
+                .with(stdout_layer)
+                .init();
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_ansi(false).init();
+    // Guard bis Programmende halten → der Datei-Writer flusht zuverlässig.
+    let _log_guard = init_tracing();
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -942,10 +989,20 @@ async fn attach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> Att
     // (Crash/Ersatz-Tablet) – nicht nur bei Übernahme. Das Tablet behält ihn
     // nur, wenn die matchId zum gleich gepushten Match passt, sonst überschreibt
     // der Host das Feld (kein Wiederaufleben eines alten Stands).
+    //
+    // Diagnose (14.06.-Vorfall: Ersatz-Tablet sprang auf 0:0): explizit
+    // protokollieren, ob beim (Neu-)Verbinden ein gespeicherter Stand
+    // wiederhergestellt wurde oder das Feld ohne Stand startet.
     if let Some(state) = namespace.court_state.get(&court_id) {
+        let len = state.len();
         let _ = tx.send(text(&ServerMsg::StateRestore {
             state: state.clone(),
         }));
+        tracing::info!("Feld {court_id} (Namespace '{ns}'): StateRestore gesendet ({len} Bytes)");
+    } else {
+        tracing::info!(
+            "Feld {court_id} (Namespace '{ns}'): kein gespeicherter Stand – Tablet startet bei 0:0"
+        );
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
@@ -967,9 +1024,15 @@ async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
     }
     // Laufenden Spielstand an das übernehmende Tablet übergeben.
     if let Some(state) = namespace.court_state.get(&court_id) {
+        let len = state.len();
         let _ = tx.send(text(&ServerMsg::StateRestore {
             state: state.clone(),
         }));
+        tracing::info!(
+            "Feld {court_id} (Namespace '{ns}'): Übernahme – StateRestore gesendet ({len} Bytes)"
+        );
+    } else {
+        tracing::info!("Feld {court_id} (Namespace '{ns}'): Übernahme ohne gespeicherten Stand");
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {

@@ -776,7 +776,7 @@ const BASE_PATH = location.pathname.replace(/\/court\/[^/]*\/?$/, '');
 // Lebt in localStorage → überlebt Browser-Crash + ist später als .txt
 // herunterladbar (5× Tap auf den Connection-Dot oben rechts öffnet das
 // Diagnose-Modal).
-const LOG_MAX = 300;
+const LOG_MAX = 500;
 // localStorage-Schlüssel je Feld – per CourtID, damit gleichnamige Felder
 // eines Mehr-Hallen-Turniers nicht denselben Log teilen.
 const LOG_KEY = `badhub.tablet.log.${COURT_ID}`;
@@ -797,6 +797,33 @@ function tlog(level, event, detail) {
   try { console.log(`[${new Date(e.t).toISOString()}] ${level} ${event}`, detail ?? ''); } catch {}
 }
 tlog('info', 'tablet_boot', { courtId: COURT_ID, courtLabel: COURT_LABEL, ua: navigator.userAgent });
+
+// Crash-Diagnose: unbehandelte JS-Fehler + Promise-Rejections ins Log fangen.
+// So bleibt der Fehler, der einem (WebView-)Crash vorausgeht, im localStorage-
+// Buffer und wird beim nächsten Boot mit hochgeladen (Buffer-Replay oben).
+// Zusätzlich einmal SOFORT hochladen (best-effort, keepalive) — erhöht die
+// Chance, dass der Fehler die Cloud erreicht, bevor das Gerät ganz wegbricht.
+// `uploadTabletLog` ist eine (gehoistete) Funktionsdeklaration weiter unten.
+window.addEventListener('error', (ev) => {
+  try {
+    tlog('error', 'js_error', {
+      msg: String(ev && ev.message || ev),
+      src: ev && ev.filename || '',
+      line: ev && ev.lineno || 0,
+      col: ev && ev.colno || 0,
+    });
+    uploadTabletLog();
+  } catch { /* niemals die Fehlerbehandlung selbst werfen lassen */ }
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  try {
+    const r = ev && ev.reason;
+    tlog('error', 'unhandled_rejection', {
+      msg: r != null ? (r.message || String(r)) : 'unknown',
+    });
+    uploadTabletLog();
+  } catch { /* ignore */ }
+});
 
 const STATE = {
   match: /** @type {null | {matchId:number, teamA:any[], teamB:any[], eventLabel:string, roundIndex:number, bestOfSets:number, targetScore:number}} */ (null),

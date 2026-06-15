@@ -205,6 +205,42 @@ main {
   // zu erkennen und uns selbst umzuleiten.
   var deviceId = (params.get('device') || '').trim();
 
+  // ── Diagnose-Mini-Logger ──────────────────────────────────────────────
+  // Wie combo.html: JS-Fehler + Schlüsselereignisse best-effort an /pi-log
+  // (lokal + Cloud, Datei mon-<device>.log). Nur LAN; Cloud-Modus scheitert still.
+  var MLOG = [], MLOG_MAX = 200;
+  function mlog(level, event, detail) {
+    var e = { t: Date.now(), level: level, event: event };
+    if (detail !== undefined) e.d = detail;
+    MLOG.push(e); while (MLOG.length > MLOG_MAX) MLOG.shift();
+    try { console.log('[' + new Date(e.t).toISOString() + '] ' + level + ' ' + event, detail || ''); } catch (x) {}
+  }
+  function mlogDevice() {
+    var id = (deviceId || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 56);
+    return 'mon-' + (id || 'unbekannt');
+  }
+  function uploadMonitorLog() {
+    try {
+      var body = 'Monitor overview · device=' + mlogDevice() + '\nUA: ' + navigator.userAgent
+        + '\nGeneriert: ' + new Date().toISOString() + '\n\n'
+        + MLOG.map(function (e) {
+            return '[' + new Date(e.t).toISOString() + '] ' + e.level + ' ' + e.event
+              + (e.d !== undefined ? ' ' + JSON.stringify(e.d) : '');
+          }).join('\n') + '\n';
+      fetch('/pi-log?device=' + encodeURIComponent(mlogDevice()), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: body, keepalive: true,
+      }).catch(function () {});
+    } catch (x) {}
+  }
+  window.addEventListener('error', function (ev) {
+    try { mlog('error', 'js_error', { msg: String((ev && ev.message) || ev), src: (ev && ev.filename) || '', line: (ev && ev.lineno) || 0 }); uploadMonitorLog(); } catch (x) {}
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    try { var r = ev && ev.reason; mlog('error', 'unhandled_rejection', { msg: r != null ? (r.message || String(r)) : 'unknown' }); uploadMonitorLog(); } catch (x) {}
+  });
+  window.addEventListener('pagehide', uploadMonitorLog);
+  mlog('info', 'monitor_boot', {});
+
   // Hallen-Filter: ?halle=<Name> — wie bei badhub/live, zeigt nur Felder
   // dieser Halle. Vergleich getrimmt + case-insensitiv. Ist er gesetzt, zeigt
   // dieser Monitor fest genau diese Halle (keine Rotation).
@@ -496,6 +532,8 @@ main {
           // Kein Info-Target mehr → zurueck zur Feld-/Pairing-Seite. Entprellt,
           // damit ein einzelnes transientes Leer-Lesen nicht sofort wegnavigiert.
           if (++noRedirectPolls < DEASSIGN_AFTER) return;
+          mlog('info', 'deassign_to_monitor', { polls: noRedirectPolls });
+          uploadMonitorLog();
           navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
           return;
         }
