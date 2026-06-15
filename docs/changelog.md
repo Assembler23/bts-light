@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.102
+
+- **Fix: Kombi-/Übersichts-Monitore zeigten zwischendurch „keine Daten".** Ursache
+  war ein nicht-atomares Schreiben der Monitor-Zuweisungsdatei: las ein Monitor-Poll
+  sie genau während eines Schreibens (z. B. beim Zuweisen), kam unvollständiges JSON →
+  leere Zuweisung → der Monitor navigierte auf die leere Einzel-Seite, bis man „Neu
+  laden" drückte. Zuweisungen werden jetzt **atomar** geschrieben (temp + rename), und
+  die Monitore **entprellen** ein leeres Zuweisungs-Ergebnis (erst nach mehreren Polls).
+- **Akku-Anzeige der Tablets zurück (über Fully Kiosk).** Da die Web-Battery-API über
+  HTTP nicht verfügbar ist, liest das Tablet den Akku jetzt über das **Fully-Kiosk-JS-
+  Interface** (`fully.getBatteryLevel()`/`isPlugged()`), Fallback Web-API. Voraussetzung:
+  in Fully Kiosk **„JavaScript Interface aktivieren"**.
+- **Pi-HDMI: Bild auch bei gleichzeitigem Einschalten von Pi und TV.** Das Setup setzt
+  jetzt `hdmi_force_hotplug=1` — der Pi gibt immer ein HDMI-Signal aus, auch wenn der TV
+  beim Booten noch nicht bereit war (vorher half nur ein Pi-Neustart).
+
 ## v0.9.101
 
 - **Fix: Spielstand bleibt nach Tablet-Crash/-Tausch erhalten (kein 0:0 mehr).**

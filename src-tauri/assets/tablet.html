@@ -1124,32 +1124,53 @@ function sendScoreUpdate() {
 }
 
 // ─────────────────────────────── Akkustand ────────────────────────────
-// Battery Status API – nur Android/Chrome. Auf iPads/Safari ist
-// navigator.getBattery nicht vorhanden; dann bleibt das Feature stumm.
+// Zwei Quellen: 1) Fully-Kiosk-JS-Interface (funktioniert über HTTP, der
+// eigentliche Weg auf den Fire-Tablets), 2) Web Battery Status API als
+// Fallback (nur Android/Chrome + secure context/HTTPS; über HTTP-LAN meist
+// nicht vorhanden — darum braucht es Fully).
 let sendBattery = null;
+function sendBatteryMsg(percent, charging) {
+  if (ws && ws.readyState === WebSocket.OPEN && Number.isFinite(percent)) {
+    ws.send(JSON.stringify({
+      type: 'battery',
+      percent: Math.max(0, Math.min(100, Math.round(percent))),
+      charging: !!charging,
+    }));
+  }
+}
 function setupBattery() {
-  // Diagnose: festhalten, WARUM der Akku evtl. fehlt. getBattery() braucht in
-  // modernem Chromium einen secure context (HTTPS) — über HTTP-LAN ist die API
-  // dann nicht vorhanden (und in Android-WebView ohnehin unzuverlässig).
+  const hasFully = typeof window.fully !== 'undefined'
+    && typeof window.fully.getBatteryLevel === 'function';
   tlog('info', 'battery_env', {
+    hasFully,
     hasGetBattery: !!navigator.getBattery,
     secureContext: window.isSecureContext === true,
   });
+
+  // 1) Fully Kiosk: nativer Bridge, klappt auch über HTTP. Voraussetzung am
+  //    Tablet: Fully → „JavaScript Interface aktivieren".
+  if (hasFully) {
+    sendBattery = () => {
+      try {
+        const lvl = Number(window.fully.getBatteryLevel());
+        let charging = false;
+        try { charging = !!window.fully.isPlugged(); } catch (e) { /* optional */ }
+        if (Number.isFinite(lvl) && lvl >= 0) sendBatteryMsg(lvl, charging);
+      } catch (e) { tlog('warn', 'battery_fully_failed', String(e)); }
+    };
+    sendBattery();
+    setInterval(sendBattery, 60000); // alle 60 s
+    return;
+  }
+
+  // 2) Fallback: Web Battery Status API.
   if (!navigator.getBattery) return;
   navigator.getBattery().then((bat) => {
-    sendBattery = () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'battery',
-          percent: Math.round(bat.level * 100),
-          charging: bat.charging,
-        }));
-      }
-    };
+    sendBattery = () => sendBatteryMsg(bat.level * 100, bat.charging);
     bat.addEventListener('levelchange', sendBattery);
     bat.addEventListener('chargingchange', sendBattery);
     sendBattery();
-    setInterval(sendBattery, 120000); // Fallback alle 2 Min
+    setInterval(sendBattery, 120000);
   }).catch(() => { /* nicht verfügbar – Feature bleibt stumm */ });
 }
 

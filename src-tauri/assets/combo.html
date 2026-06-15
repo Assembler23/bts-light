@@ -433,6 +433,11 @@ body.vertical .vset.current { color: #fbbf24; }
     }
     location.href = href;
   }
+  // Deassign-Entprellung: zählt aufeinanderfolgende No-Redirect-Polls. Erst
+  // ab DEASSIGN_AFTER wird auf /monitor navigiert — schützt gegen ein
+  // transientes Leer-Lesen der Zuweisung (zusätzlich zum atomaren Schreiben).
+  var noRedirectPolls = 0;
+  var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
     fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
@@ -444,14 +449,17 @@ body.vertical .vset.current { color: #fbbf24; }
         // mehr ausgeführt (sonst bräche ein gleichzeitiges „Neu laden" die
         // Navigation ab). Erst Reassignment prüfen + früh raus …
         if (s.redirectTo) {
+          noRedirectPolls = 0;
           if (!currentUrlMatches(s.redirectTo)) {
             var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
             navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
             return;
           }
         } else {
-          // Kein Redirect-Target mehr (z. B. Einzelfeld zugewiesen) →
-          // zurück zur normalen Monitor-Seite.
+          // Kein Redirect-Target mehr (z. B. Einzelfeld zugewiesen) → zurück zur
+          // normalen Monitor-Seite. Entprellt: erst nach mehreren Polls, damit
+          // ein einzelnes transientes Leer-Lesen die Kombi nicht strandet.
+          if (++noRedirectPolls < DEASSIGN_AFTER) return;
           navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
           return;
         }

@@ -471,6 +471,11 @@ main {
     }
     location.href = href;
   }
+  // Deassign-Entprellung: erst nach mehreren No-Redirect-Polls weg navigieren
+  // (schützt gegen transientes Leer-Lesen der Zuweisung, zusätzlich zum
+  // atomaren Schreiben server-seitig).
+  var noRedirectPolls = 0;
+  var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
     fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
@@ -482,15 +487,19 @@ main {
         // mehr ausgeführt (sonst würde ein gleichzeitiges „Neu laden" die
         // Navigation abbrechen). Erst Reassignment prüfen + früh raus …
         if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
+          noRedirectPolls = 0;
           var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
           navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
           return;
         }
         if (!s.redirectTo) {
-          // Kein Info-Target mehr → zurueck zur Feld-/Pairing-Seite.
+          // Kein Info-Target mehr → zurueck zur Feld-/Pairing-Seite. Entprellt,
+          // damit ein einzelnes transientes Leer-Lesen nicht sofort wegnavigiert.
+          if (++noRedirectPolls < DEASSIGN_AFTER) return;
           navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
           return;
         }
+        noRedirectPolls = 0;
         // … wir bleiben auf dieser Seite → Fernbefehl behandeln. Dieser Poll
         // konsumiert den Command ohnehin; ohne das ginge „Identifizieren"
         // für die Übersicht verloren (der bisherige Bug).

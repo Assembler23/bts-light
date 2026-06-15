@@ -101,15 +101,27 @@ pub fn read_ad_labels(path: &Path) -> HashMap<String, String> {
     serde_json::from_str(&j).unwrap_or_default()
 }
 
-/// Schreibt die Werbebild-Labels in die JSON-Datei. Leere Werte werden
-/// nicht persistiert (kein Punkt, "" zu speichern).
-pub fn write_ad_labels(path: &Path, labels: &HashMap<String, String>) -> std::io::Result<()> {
+/// Schreibt eine Datei **atomar**: erst in eine temporäre Datei im selben
+/// Verzeichnis, dann per `rename` über die Zieldatei. So sieht ein gleichzeitig
+/// lesender Poll (z. B. `/monitor/state` jede Sekunde je Monitor) NIE eine halb
+/// geschriebene Datei — sonst lieferte `serde_json::from_str` einen Fehler und
+/// die Lese-Funktionen fielen auf eine leere Map zurück (Ursache für „Kombi
+/// zeigt keine Daten", Turnier 2026-06-14).
+fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Schreibt die Werbebild-Labels in die JSON-Datei. Leere Werte werden
+/// nicht persistiert (kein Punkt, "" zu speichern).
+pub fn write_ad_labels(path: &Path, labels: &HashMap<String, String>) -> std::io::Result<()> {
     let cleaned: HashMap<&String, &String> = labels.iter().filter(|(_, v)| !v.is_empty()).collect();
     let json = serde_json::to_string_pretty(&cleaned).unwrap_or_else(|_| "{}".to_string());
-    std::fs::write(path, json)
+    write_atomic(path, &json)
 }
 
 /// Übersetzt die persistierte [`CourtMonitorConfig`] in die Wire-Form.
@@ -258,11 +270,8 @@ pub fn read_assignments(path: &Path) -> HashMap<String, MonitorTarget> {
 
 /// Schreibt die Geräte→Target-Zuweisungen als JSON (v3-Format).
 pub fn write_assignments(path: &Path, map: &HashMap<String, MonitorTarget>) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let json = serde_json::to_string_pretty(map).unwrap_or_else(|_| "{}".to_string());
-    std::fs::write(path, json)
+    write_atomic(path, &json)
 }
 
 /// Dateiname der expliziten Hallen-Zuordnung je Monitor-Gerät (Geräte-ID →
@@ -280,11 +289,8 @@ pub fn read_halls(path: &Path) -> HashMap<String, String> {
 
 /// Schreibt die Geräte→Hallenname-Zuordnung.
 pub fn write_halls(path: &Path, map: &HashMap<String, String>) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let json = serde_json::to_string_pretty(map).unwrap_or_else(|_| "{}".to_string());
-    std::fs::write(path, json)
+    write_atomic(path, &json)
 }
 
 /// Anzeige-Zustand für ein noch keinem Feld zugewiesenes Gerät – der
