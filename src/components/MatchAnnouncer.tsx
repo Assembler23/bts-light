@@ -53,8 +53,6 @@ export function MatchAnnouncer({ announce }: Props) {
   const seenRef = useRef<Map<number, number>>(new Map());
   const baselineRef = useRef(false);
   const prevEnabledRef = useRef(announce.enabled);
-  // Serialisiert die Ansagen, damit aufeinanderfolgende Gongs nicht überlappen.
-  const chainRef = useRef<Promise<void>>(Promise.resolve());
   // Aktuelle Config in einer Ref, damit der Poll-Effekt stabil bleibt.
   const cfgRef = useRef(announce);
   cfgRef.current = announce;
@@ -115,13 +113,13 @@ export function MatchAnnouncer({ announce }: Props) {
               teamANames: court.team1,
               teamBNames: court.team2,
             };
-            chainRef.current = chainRef.current.then(() =>
-              playAnnouncement(input, lang, {
-                rate: cfg.rate,
-                voiceURI: voiceURI || undefined,
-                gong: cfg.gong,
-              }),
-            );
+            // Strikt sequenziell über die globale Ansage-Warteschlange in
+            // announcer.ts — kein Gong startet, während eine Ansage noch spricht.
+            void playAnnouncement(input, lang, {
+              rate: cfg.rate,
+              voiceURI: voiceURI || undefined,
+              gong: cfg.gong,
+            });
           }
         })
         .catch(() => {});

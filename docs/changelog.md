@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.101
+
+- **Fix: Spielstand bleibt nach Tablet-Crash/-Tausch erhalten (kein 0:0 mehr).**
+  Bisher bekam ein neu oder ersatzweise verbundenes Tablet den gespeicherten
+  Spielstand nur über den „Übernehmen"-Pfad — bei einem echten Crash war das Feld
+  aber sofort frei, sodass das Ersatz-Tablet ein frisches 0:0 begann (im Feld-Test
+  bestätigt: `state_restore` kam nie). Jetzt sendet der Server (LAN **und** Cloud-
+  Relay) den gespeicherten Stand auch beim **normalen Verbinden** — das Tablet
+  übernimmt ihn, sofern die Match-ID passt, sonst gilt das frisch zugewiesene
+  Match. Nach einem übermittelten Ergebnis wird der gespiegelte Stand verworfen
+  (kein Wiederaufleben eines beendeten Spiels).
+- **Fix: Feld-Ansagen laufen strikt nacheinander.** Wurden zwei Spiele kurz
+  hintereinander auf Felder gezogen, startete der Gong der zweiten Ansage, während
+  die erste noch sprach. Alle Ansagen (Feld, Vorbereitung, manuell) laufen jetzt
+  durch **eine globale Warteschlange** und warten aufs **Sprechende**, bevor die
+  nächste (mit Gong) beginnt.
+
 ## v0.9.100
 
 - **Auto-Feldvergabe spielt den Zeitplan ab + prüft Spieler-Verfügbarkeit.**

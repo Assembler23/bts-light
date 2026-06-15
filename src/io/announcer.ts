@@ -88,6 +88,43 @@ export function unlockAudio(): void {
   }
 }
 
+// ─── Globale Ansage-Warteschlange ────────────────────────────────────────
+// ALLE Ansagen (Feld-Auto-Ansage, manuelle Ansage, Vorbereitung) laufen
+// strikt nacheinander durch DIESE eine Kette — so kann nie ein Gong starten,
+// während eine vorige Ansage noch spricht (Feld-Bug 2026-06-14). Eine
+// „Generation" entwertet noch wartende Aufgaben, wenn abgebrochen wird.
+let announceQueue: Promise<void> = Promise.resolve();
+let announceGen = 0;
+
+function enqueueAnnouncement(task: () => Promise<void>): Promise<void> {
+  const gen = announceGen;
+  const run = announceQueue.then(() => (gen === announceGen ? task() : undefined));
+  // Kette auch nach einem Fehler weiterlaufen lassen.
+  announceQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+// Spielt (optional) den Gong und wartet, bis er ausgeklungen ist.
+async function maybeGong(gong: boolean | undefined): Promise<void> {
+  if (gong === false) return;
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch {
+        // ignore
+      }
+    }
+    await playGong(ctx);
+  } catch {
+    // Gong fehlgeschlagen → trotzdem sprechen.
+  }
+}
+
 // Sprech-Geschwindigkeit. Browser-Default ist 1.0 (oft zu schnell für eine
 // Hallen-Durchsage). 0.8 ist ein guter Mittelweg.
 export const DEFAULT_SPEECH_RATE = 0.8;
@@ -100,26 +137,57 @@ function clampRate(rate: number | undefined): number {
   return rate;
 }
 
-// Einzelne Utterance in die Queue stellen. Mehrere hintereinander ergeben
-// durch die Browser-Atempause natürliche Sprechpausen.
-function queueUtterance(
+// Spricht EIN Segment und löst auf, wenn es FERTIG gesprochen ist (`onend`).
+// Wichtig fürs strikt sequenzielle Abspielen: nur so kann die nächste Ansage
+// (und ihr Gong) erst nach dem Sprechende der vorigen starten. Fallback-Timeout,
+// falls `onend` in WebView2 mal nicht feuert — dann hängt die Queue nicht.
+function speakSegment(
   text: string,
   lang: AnnounceLang,
   rate: number,
   voiceURI?: string,
-): void {
-  if (typeof window.speechSynthesis === "undefined" || !text.trim()) return;
-  const u = new SpeechSynthesisUtterance(text.trim());
-  u.lang = lang === "de" ? "de-DE" : "en-US";
-  u.rate = clampRate(rate);
-  u.pitch = 1;
-  u.volume = 1;
-  if (voiceURI) {
-    const voices = window.speechSynthesis.getVoices();
-    const match = voices.find((v) => v.voiceURI === voiceURI);
-    if (match) u.voice = match;
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window.speechSynthesis === "undefined" || !text.trim()) {
+      resolve();
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(text.trim());
+    u.lang = lang === "de" ? "de-DE" : "en-US";
+    u.rate = clampRate(rate);
+    u.pitch = 1;
+    u.volume = 1;
+    if (voiceURI) {
+      const voices = window.speechSynthesis.getVoices();
+      const match = voices.find((v) => v.voiceURI === voiceURI);
+      if (match) u.voice = match;
+    }
+    let done = false;
+    let timer = 0;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    u.onend = finish;
+    u.onerror = finish;
+    // Großzügige Obergrenze; `onend` feuert im Normalfall vorher.
+    timer = window.setTimeout(finish, 2000 + text.trim().length * 140);
+    window.speechSynthesis.speak(u);
+  });
+}
+
+// Spricht mehrere Segmente nacheinander, jeweils bis zum Sprechende.
+async function speakSegments(
+  segments: string[],
+  lang: AnnounceLang,
+  rate: number,
+  voiceURI?: string,
+): Promise<void> {
+  for (const seg of segments) {
+    await speakSegment(seg, lang, rate, voiceURI);
   }
-  window.speechSynthesis.speak(u);
 }
 
 // Browser-TTS spricht "Feld 1" gern als "Feld erste" (Ordinal-Heuristik).
@@ -208,32 +276,20 @@ export function buildAnnouncementSegments(
 
 // Spielt Gong + spricht die Ansage. Wirft NICHT bei fehlendem
 // SpeechSynthesis-Support, läuft dann nur als Gong durch.
-export async function playAnnouncement(
+export function playAnnouncement(
   input: AnnounceMatchInput,
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
 ): Promise<void> {
-  if (opts.gong !== false) {
-    try {
-      const ctx = getAudioContext();
-      if (ctx.state === "suspended") {
-        try {
-          await ctx.resume();
-        } catch {
-          // ignore
-        }
-      }
-      await playGong(ctx);
-    } catch {
-      // Gong fehlgeschlagen → trotzdem versuchen zu sprechen.
-    }
-  }
-
-  if (typeof window.speechSynthesis === "undefined") return;
-  const rate = clampRate(opts.rate);
-  for (const segment of buildAnnouncementSegments(input, lang)) {
-    queueUtterance(segment, lang, rate, opts.voiceURI);
-  }
+  return enqueueAnnouncement(async () => {
+    await maybeGong(opts.gong);
+    await speakSegments(
+      buildAnnouncementSegments(input, lang),
+      lang,
+      clampRate(opts.rate),
+      opts.voiceURI,
+    );
+  });
 }
 
 // Test-Ansage für die Einstellungen — feste Beispieldaten, damit der Klang
@@ -254,8 +310,12 @@ export async function playTestAnnouncement(
   );
 }
 
-// Stoppt alle laufenden Ansagen — z. B. wenn die Ansagen abgeschaltet werden.
+// Stoppt alle laufenden Ansagen UND verwirft noch wartende — z. B. wenn die
+// Ansagen abgeschaltet werden. `announceGen` hochzählen entwertet bereits
+// eingereihte Aufgaben (sie werden übersprungen statt noch abgespielt).
 export function cancelAnnouncements(): void {
+  announceGen++;
+  announceQueue = Promise.resolve();
   if (typeof window.speechSynthesis !== "undefined") {
     window.speechSynthesis.cancel();
   }
@@ -314,32 +374,20 @@ export function buildPreparationSegments(
 
 // Spielt Gong + spricht die Vorbereitungs-Ansage. Wirft NICHT bei
 // fehlendem SpeechSynthesis-Support, läuft dann nur als Gong durch.
-export async function playPreparationAnnouncement(
+export function playPreparationAnnouncement(
   input: AnnouncePreparationInput,
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
 ): Promise<void> {
-  if (opts.gong !== false) {
-    try {
-      const ctx = getAudioContext();
-      if (ctx.state === "suspended") {
-        try {
-          await ctx.resume();
-        } catch {
-          // ignore
-        }
-      }
-      await playGong(ctx);
-    } catch {
-      // Gong fehlgeschlagen → trotzdem versuchen zu sprechen.
-    }
-  }
-
-  if (typeof window.speechSynthesis === "undefined") return;
-  const rate = clampRate(opts.rate);
-  for (const segment of buildPreparationSegments(input, lang)) {
-    queueUtterance(segment, lang, rate, opts.voiceURI);
-  }
+  return enqueueAnnouncement(async () => {
+    await maybeGong(opts.gong);
+    await speakSegments(
+      buildPreparationSegments(input, lang),
+      lang,
+      clampRate(opts.rate),
+      opts.voiceURI,
+    );
+  });
 }
 
 // Auto-Sprachwahl anhand der Nationalitäten: Englisch, sobald mindestens
