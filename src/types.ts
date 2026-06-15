@@ -219,6 +219,9 @@ export interface CourtOverview {
   match_id: number;
   /** Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match. */
   match_name: string;
+  /** Reine BTP-Runde (z. B. "VF", "HF", "Finale", "Spiel um Platz 3"); leer
+   *  wenn keine. Grundlage der K.-o.-Runden-Ansage (ab Viertelfinale). */
+  round_name: string;
   /** Disziplin des aktuellen Matches. */
   discipline: Discipline;
   team1: string[];

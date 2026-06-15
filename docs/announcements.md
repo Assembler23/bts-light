@@ -34,6 +34,23 @@ dem BTP-**Event**, nicht aus dem Draw-Namen. Auflösungskette im Parser
 Lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
 in der Ansage weggelassen.
 
+## K.-o.-Runde (ab Viertelfinale)
+
+Steht ein Spiel im **Viertelfinale, Halbfinale, Finale oder Spiel um Platz 3**,
+wird die Runde **vor der Paarung** mitangesagt (z. B. „Feld 2. Herrendoppel.
+**Halbfinale.** … gegen …"). **Frühere Runden, Gruppen und das Achtelfinale
+werden NICHT angesagt.**
+
+- Quelle: die rohe BTP-Runde `RoundName` (`btp/model.rs` `BtpMatch.round_name`),
+  durchgereicht als `CourtOverview.round_name` (Rust + `types.ts`) bis zum
+  Announcer (`AnnounceMatchInput.roundName`).
+- Erkennung: `knockoutRoundLabel()` in [`announcer.ts`](../src/io/announcer.ts) —
+  normalisiert (Punkte/Bindestriche/Leerzeichen) und matcht robust:
+  `VF`/`Viertelfinale`/`QF`/`Quarterfinal`, `HF`/`Halbfinale`/`SF`/`Semifinal`,
+  `Finale`/`Final`/`Endspiel`, `Spiel um Platz 3`/`Bronze`/`3rd`. Gruppen
+  (`G1`, `Gruppe …`), `Achtelfinale`, `Runde/Round N`, Quali/Vorrunde → kein
+  Label (→ keine Ansage). de/en gemäß Ansage-Sprache.
+
 ## Sprache: Deutsch / Englisch / Automatisch
 
 Einstellbar im Setup unter „Sprachansagen":

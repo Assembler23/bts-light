@@ -16,6 +16,7 @@ export function announceCourt(court: CourtOverview, announce: AnnounceConfig): v
       discipline: court.discipline,
       teamANames: court.team1,
       teamBNames: court.team2,
+      roundName: court.round_name,
     },
     lang,
     {

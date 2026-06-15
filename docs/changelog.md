@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.109
+
+- **K.-o.-Runde in der Feld-Ansage (ab Viertelfinale).** Vor der Paarung wird jetzt die Runde
+  mitangesagt — **Viertelfinale, Halbfinale, Finale, Spiel um Platz 3** (z. B. „Feld 2. Herrendoppel.
+  Halbfinale. … gegen …"). Frühere Runden, Gruppen und das Achtelfinale werden **nicht** angesagt.
+  Erkennung aus der BTP-Runde (`RoundName`), robust gegen Schreibweisen (VF/HF/Finale, Voll-Namen,
+  de/en). Die rohe Runde wird dafür als `CourtOverview.round_name` durchgereicht.
+
 ## v0.9.108
 
 - **Aussprache: mitgeliefertes Basis-Wörterbuch + An/Aus-Schalter.** Häufige internationale Nachnamen

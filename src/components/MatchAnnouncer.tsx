@@ -112,6 +112,7 @@ export function MatchAnnouncer({ announce }: Props) {
               discipline: court.discipline,
               teamANames: court.team1,
               teamBNames: court.team2,
+              roundName: court.round_name,
             };
             // Strikt sequenziell über die globale Ansage-Warteschlange in
             // announcer.ts — kein Gong startet, während eine Ansage noch spricht.
