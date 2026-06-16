@@ -103,6 +103,7 @@ export const BASE_NAME_OVERRIDES: NameOverride[] = [
   { name: "Ozdemir", say: "Ösdemir" },
   { name: "Simsek", say: "Schimschek" },
   { name: "Gunes", say: "Günesch" },
+  { name: "Coban", say: "Tschoban" },
 
   // ── Französisch (stille Endungen, j→sch, ch→sch, Nasale) ─────────────
   { name: "Lefebvre", say: "Löfäwr" },
@@ -139,4 +140,42 @@ export const BASE_NAME_OVERRIDES: NameOverride[] = [
   { name: "Wiśniewski", say: "Wischnjewski" },
   { name: "Kaczmarek", say: "Katschmarek" },
   { name: "Krawczyk", say: "Krawtschik" },
+
+  // ── Vornamen (international) ──────────────────────────────────────────
+  // Hinweis: Badhubs HÄUFIGE Vornamen sind überwiegend deutsch (werden korrekt
+  // gelesen). Fremdsprachige Vornamen sind ein verstreuter Long-Tail — hier die
+  // GÄNGIGEN, die eine deutsche Stimme klar falsch liest. Kollisionsträchtige
+  // kurze Token (z. B. „Van" → bräche niederländisches „van der …") bewusst
+  // weggelassen. Auch hier: Näherungen, in der Nutzer-Tabelle korrigierbar.
+  // Vietnamesisch:
+  { name: "Anh", say: "An" },
+  { name: "Minh", say: "Minj" },
+  { name: "Duc", say: "Dück" },
+  { name: "Quang", say: "Kwang" },
+  { name: "Huy", say: "Hui" },
+  { name: "Thi", say: "Ti" },
+  { name: "Thanh", say: "Tan" },
+  { name: "Linh", say: "Linj" },
+  { name: "Huong", say: "Hwong" },
+  // Chinesisch:
+  { name: "Jun", say: "Dschün" },
+  { name: "Yi", say: "I" },
+  { name: "Xin", say: "Schin" },
+  { name: "Jing", say: "Dsching" },
+  { name: "Jie", say: "Dschieh" },
+  { name: "Qiang", say: "Tschiang" },
+  // Indisch:
+  { name: "Arjun", say: "Ardschun" },
+  { name: "Priya", say: "Prija" },
+  { name: "Raj", say: "Radsch" },
+  { name: "Vijay", say: "Widschej" },
+  { name: "Sanjay", say: "Sandschej" },
+  { name: "Aditya", say: "Aditja" },
+  { name: "Youssef", say: "Jussef" },
+  // Türkisch:
+  { name: "Can", say: "Dschan" },
+  { name: "Cem", say: "Dschem" },
+  { name: "Deniz", say: "Denis" },
+  { name: "Oguz", say: "Ous" },
+  { name: "Cagri", say: "Tschari" },
 ];

@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.110
+
+- **Aussprache-Basis-Wörterbuch erweitert (Vornamen + mehr).** Zusätzlich zu den Nachnamen jetzt
+  gängige **internationale Vornamen** (vietnamesisch, chinesisch, indisch, türkisch), die eine deutsche
+  Stimme falsch liest (z. B. „Duc"→Dück, „Quang"→Kwang, „Can"→Dschan, „Arjun"→Ardschun) + Çoban→Tschoban.
+  Vornamen werden ja mitgesprochen (BTP liefert „Vorname Nachname"). Insgesamt nun 130 Einträge.
+  Hinweis: Die häufigsten Vornamen in den Ligen sind deutsch (werden korrekt gelesen); fremdsprachige
+  Vornamen sind ein Long-Tail — abgedeckt sind die gängigen, Spezialfälle über die Nutzer-Tabelle.
+
 ## v0.9.109
 
 - **K.-o.-Runde in der Feld-Ansage (ab Viertelfinale).** Vor der Paarung wird jetzt die Runde
