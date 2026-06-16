@@ -116,6 +116,26 @@ Stimme besser trifft (z. B. `Nguyen` → `Nujen`, `Lefebvre` → `Löfäwr`).
 - **SSML/Phoneme** sind bewusst NICHT genutzt — Browser-`SpeechSynthesis`
   (WebView2/Chrome) ignoriert `<phoneme>`; nur die Ersatz-Schreibweise wirkt.
 
+### Regelbasierte Umschrift (CN/VN) — `src/io/transliterate.ts`
+
+Greift, wenn Wörterbuch UND Nutzer-Tabelle keinen Treffer haben, damit auch
+NICHT gelistete chinesische/vietnamesische Namen besser klingen. Reihenfolge je
+Wort in `applyOverride`: **Wörterbuch/Tabelle → Regel-Engine → unverändert**.
+
+- **Erkennung** (`detectNameLang`): nur wenn ein Token ein **markanter** CN- bzw.
+  VN-Nachname ist (Trigger-Listen; kurze/mehrdeutige wie „Le"/„Do"/„Ma" sind KEIN
+  Trigger). Deutsche/andere Namen → keine Umschrift. Innerhalb eines erkannten
+  Namens sind aggressive Regeln (v→w, x→s) gefahrlos.
+- **Pinyin** (`pinyinToGerman`): Silben-Segmentierung (greedy Initial+Finale) →
+  zh→dsch, ch→tsch, sh/x→sch, q/j→tsch/dsch, c→ts, z→ds, w→u, y→j; apikales i
+  (zhi/chi/shi/zi/ci/si/ri)→„i"; nach j/q/x wird u→ü.
+- **Vietnamesisch** (`vietnameseToGerman`): konsonant-fokussiert — tr→tsch, th→t,
+  ph→f, ch→tsch, kh→ch, nh→nj (Anlaut)/n (Endung), ng/ngh→ng, gi→j, qu→ku, x→s,
+  v→w; Endung -c/-ch→k. **„d" bleibt „d"** (ASCII verschluckt das đ; weiche
+  d-Fälle wie „Duong"→„Juong" deckt das Wörterbuch ab).
+- **Grenze:** Konsonanten zuverlässig; Vokale/Töne/Dialekt (südvietnamesisch,
+  Wade-Giles) nur Näherung → Spezialfälle in der Nutzer-Tabelle (Vorrang).
+
 ## Vorbereitungs-Ansage (Spiele in Vorbereitung)
 
 Neben der Feld-Ansage gibt es eine zweite Variante: aus dem
@@ -165,6 +185,7 @@ Eingeführt in v0.9.16.
 - `src-tauri/src/config.rs` — `AnnounceConfig`, `NameOverride`.
 - `src/io/announcer.ts` — Gong + Sprachsynthese + Aussprache-Korrekturen (`normalizeName`-Faltung, `buildOverrideMap`, `applyOverride`, `playNameTest`).
 - `src/io/nameOverrideBase.ts` — mitgeliefertes Basis-Wörterbuch (`BASE_NAME_OVERRIDES`).
+- `src/io/transliterate.ts` — regelbasierte CN/VN-Umschrift (`detectNameLang`, `pinyinToGerman`, `vietnameseToGerman`).
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.

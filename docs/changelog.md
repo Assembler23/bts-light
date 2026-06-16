@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.111
+
+- **Aussprache: regelbasierte Umschrift für chinesische & vietnamesische Namen.** Auch NICHT im
+  Wörterbuch gelistete Namen werden jetzt besser gelesen: eine Engine (`src/io/transliterate.ts`)
+  schreibt Pinyin (zh→dsch, x→sch, q→tsch, apikales i→i, j/q/x+u→ü …) und Vietnamesisch (tr→tsch,
+  th→t, ph→f, kh→ch, nh→nj, Endung -c→k …) in deutsche Lautschrift um. Beispiele: „Zhang Zhixin"→
+  „Dschang Dschi-schin", „Xu Yinsong"→„Schü In-ssong", „Pham Thi Hong Thu"→„Fam Ti Hong Tu".
+- **Sicher:** greift NUR bei Namen, die per **markantem chinesischem/vietnamesischem Nachnamen** erkannt
+  werden (deutsche/andere Namen bleiben unverändert). Reihenfolge je Wort: Wörterbuch/Tabelle → Engine →
+  unverändert. Über denselben An/Aus-Schalter steuerbar.
+- **Ehrliche Grenze:** Konsonanten sitzen zuverlässig; Vokale/Töne/Dialekt (z. B. südvietnamesisch,
+  taiwanesisches Wade-Giles) bleiben Näherung — Feinschliff über die Nutzer-Tabelle (Vorrang).
+
 ## v0.9.110
 
 - **Aussprache-Basis-Wörterbuch erweitert (Vornamen + mehr).** Zusätzlich zu den Nachnamen jetzt
