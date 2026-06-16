@@ -11,6 +11,7 @@
 
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
+import { detectNameLang, transliterateToken } from "./transliterate";
 
 export type AnnounceLang = "de" | "en";
 
@@ -288,21 +289,34 @@ function buildOverrideMap(
   return map;
 }
 
-// Wendet die Aussprache-Korrekturen auf EINEN Spielernamen an: zuerst ein
-// exakter Voll-Name-Treffer, sonst Wort für Wort (so wirkt z. B. ein einmal
-// eingetragener Nachname „Nguyen" bei allen Spieler:innen mit diesem Namen).
-// Whitespace bleibt erhalten; Nicht-Treffer bleiben unverändert.
-function applyOverride(name: string, map: Map<string, string>): string {
-  if (map.size === 0) return name;
+// Wendet die Aussprache-Korrektur auf EINEN Spielernamen an. Reihenfolge je
+// Name/Token: 1) exakter Voll-Name-Treffer im Wörterbuch/Tabelle, sonst pro
+// Wort: 2) Wörterbuch-/Tabellen-Treffer, 3) Regel-Engine (nur wenn der Name per
+// markantem chinesischem/vietnamesischem Nachnamen erkannt wurde), 4) sonst
+// unverändert. Whitespace bleibt erhalten. `engine=false` (Korrektur aus) →
+// Name 1:1.
+function applyOverride(
+  name: string,
+  map: Map<string, string>,
+  engine: boolean,
+): string {
+  if (!engine && map.size === 0) return name;
   const full = map.get(normalizeName(name));
   if (full) return full;
+  // Sprache aus den markanten Nachnamen ableiten (nur für die Regel-Engine).
+  const lang = engine
+    ? detectNameLang(name.split(/\s+/).filter(Boolean))
+    : null;
   return name
     .split(/(\s+)/)
     .map((tok) => {
-      // Für den Lookup an Wort-Rändern hängende Satzzeichen ignorieren
-      // (z. B. „Nguyen,") — der unveränderte Token bleibt bei Nicht-Treffer.
+      if (!/\S/.test(tok)) return tok; // Whitespace unverändert
+      // Für den Lookup an Wort-Rändern hängende Satzzeichen ignorieren.
       const stripped = tok.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-      return map.get(normalizeName(stripped)) ?? tok;
+      const hit = map.get(normalizeName(stripped));
+      if (hit) return hit; // Wörterbuch/Tabelle gewinnt
+      if (lang && stripped) return transliterateToken(stripped, lang); // Regel-Engine
+      return tok;
     })
     .join("");
 }
@@ -311,9 +325,10 @@ function joinNames(
   names: string[],
   lang: AnnounceLang,
   overrides: Map<string, string>,
+  engine: boolean,
 ): string {
   const clean = names
-    .map((n) => applyOverride(n, overrides).trim())
+    .map((n) => applyOverride(n, overrides, engine).trim())
     .filter((n) => n.length > 0);
   if (clean.length === 0) return "";
   if (clean.length === 1) return clean[0];
@@ -375,8 +390,8 @@ export function buildAnnouncementSegments(
 ): string[] {
   const overrides = buildOverrideMap(nameOverrides, nameOverridesEnabled);
   const court = resolveCourtPhrase(input.courtLabel, lang);
-  const teamA = joinNames(input.teamANames, lang, overrides);
-  const teamB = joinNames(input.teamBNames, lang, overrides);
+  const teamA = joinNames(input.teamANames, lang, overrides, nameOverridesEnabled);
+  const teamB = joinNames(input.teamBNames, lang, overrides, nameOverridesEnabled);
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWord(input.discipline, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
@@ -486,8 +501,8 @@ export function buildPreparationSegments(
   nameOverridesEnabled = true,
 ): string[] {
   const overrides = buildOverrideMap(nameOverrides, nameOverridesEnabled);
-  const teamA = joinNames(input.teamANames, lang, overrides);
-  const teamB = joinNames(input.teamBNames, lang, overrides);
+  const teamA = joinNames(input.teamANames, lang, overrides, nameOverridesEnabled);
+  const teamB = joinNames(input.teamBNames, lang, overrides, nameOverridesEnabled);
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWord(input.discipline, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
