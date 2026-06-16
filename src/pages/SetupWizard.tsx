@@ -864,10 +864,10 @@ export function SetupWizard({
               </label>
               <p className="text-xs text-slate-500">
                 Ein mitgeliefertes <strong>Basis-Wörterbuch</strong> (
-                {BASE_NAME_OVERRIDES.length} gängige internationale Nachnamen,
-                u. a. vietnamesisch, chinesisch, indisch, französisch, spanisch,
-                türkisch, polnisch) wird automatisch angewendet, damit die Stimme
-                fremdsprachige Namen besser trifft. Eigene Korrekturen unten haben
+                {BASE_NAME_OVERRIDES.length} gängige internationale Nach- und
+                Vornamen, u. a. vietnamesisch, chinesisch, indisch, französisch,
+                spanisch, türkisch, polnisch) wird automatisch angewendet, damit
+                die Stimme fremdsprachige Namen besser trifft. Eigene Korrekturen unten haben
                 <strong> Vorrang</strong>: trage <strong>Name oder Namensteil</strong>
                 und die gewünschte <strong>Aussprache</strong> (Lautschrift) ein –
                 ein Nachname wie „Nguyen“ reicht einmal. Mit ▶ hörst du die
