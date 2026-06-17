@@ -942,6 +942,31 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
             tracing::info!("BTP-Schreiben OK: Match {}", m.id);
+            // Feld in BTP freigeben (Court ohne MatchID + Match.CourtID=0). Sonst
+            // bleibt das beendete Spiel dort „auf dem Feld" und die Spieler werden
+            // nicht wieder als verfügbar (rot) angezeigt — BTP räumt beendete
+            // Spiele nicht zuverlässig selbst ab. Best-effort: das Ergebnis ist
+            // bereits geschrieben, ein Fehler hier darf die Wertung nicht kippen.
+            if let Err(e) = write_courts_to_btp(
+                &ctx.config,
+                &[proto::CourtAssignment {
+                    court_id: body.court_id,
+                    match_id: None,
+                }],
+                &[proto::MatchCourt {
+                    match_id: m.id,
+                    draw_id: m.draw_id,
+                    planning_id: m.planning_id,
+                    court_id: 0,
+                }],
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Feldfreigabe nach Ergebnis fehlgeschlagen (Match {}): {e}",
+                    m.id
+                );
+            }
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
             // ausdrücklich gewählt hat (echte Verletzung → `cascade_walkover`).
