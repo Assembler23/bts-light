@@ -5,8 +5,10 @@ import {
   playPreparationAnnouncement,
   resolveAnnouncementLanguage,
 } from "../io/announcer";
+import { azureOption } from "../io/azureAnnounce";
 import type {
   AnnounceConfig,
+  AzureTtsConfig,
   Discipline,
   PreparationCandidate,
   PreparationLocation,
@@ -16,6 +18,7 @@ interface Props {
   /** Ansage-Einstellungen aus der App-Konfiguration. Bei `enabled=false`
    *  wird kein „Ansage"-Knopf gezeigt. */
   announce: AnnounceConfig;
+  azureTts?: AzureTtsConfig;
 }
 
 /**
@@ -30,7 +33,7 @@ interface Props {
  * Hallen-Ansage auslöst (sofern Ansagen aktiviert sind) – analog zur
  * Feld-Ansage beim Court-Aufruf, aber ohne Feld, dafür mit Halle.
  */
-export function PreparationPanel({ announce }: Props) {
+export function PreparationPanel({ announce, azureTts }: Props) {
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
   const [locations, setLocations] = useState<PreparationLocation[]>([]);
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -162,6 +165,7 @@ export function PreparationPanel({ announce }: Props) {
         gong: announce.gong,
         nameOverrides: announce.name_overrides,
         nameOverridesEnabled: announce.name_overrides_enabled,
+        azure: azureOption(azureTts),
       },
     );
   };

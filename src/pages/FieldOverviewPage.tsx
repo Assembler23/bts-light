@@ -19,6 +19,7 @@ import { announceCourt } from "../io/announceCourt";
 import { useNow } from "../state/callTimer";
 import type {
   AnnounceConfig,
+  AzureTtsConfig,
   CallTimerConfig,
   CourtOverview,
   PreparationCandidate,
@@ -35,9 +36,11 @@ function teamsLabel(t1: string[], t2: string[]): string {
 export function FieldOverviewPage({
   callTimer,
   announce,
+  azureTts,
 }: {
   callTimer: CallTimerConfig;
   announce: AnnounceConfig;
+  azureTts?: AzureTtsConfig;
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
@@ -304,7 +307,7 @@ export function FieldOverviewPage({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  announceCourt(c, announce);
+                                  announceCourt(c, announce, azureTts);
                                 }}
                                 disabled={busy}
                                 aria-label={`Feld ${c.court} nochmal aufrufen`}

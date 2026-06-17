@@ -186,6 +186,28 @@ Eingeführt in v0.9.16.
 - `src/io/announcer.ts` — Gong + Sprachsynthese + Aussprache-Korrekturen (`normalizeName`-Faltung, `buildOverrideMap`, `applyOverride`, `playNameTest`).
 - `src/io/nameOverrideBase.ts` — mitgeliefertes Basis-Wörterbuch (`BASE_NAME_OVERRIDES`).
 - `src/io/transliterate.ts` — regelbasierte CN/VN-Umschrift (`detectNameLang`, `pinyinToGerman`, `vietnameseToGerman`).
+- `src/io/azureAnnounce.ts` — baut die `AnnounceOptions.azure`-Option (nur wenn aktiv).
+- `src-tauri/src/azure_tts.rs` + `commands::azure_tts_speak` — Azure-Synthese (Key im Backend) + Datei-Cache.
+
+## Azure Neural TTS (hochwertige Cloud-Ansage, opt-in)
+
+Ist `azure_tts.enabled`, wird die **ganze Ansage als ein SSML** (`buildAnnouncementSsml` /
+`buildPreparationSsml` in `announcer.ts`) an Azure geschickt: deutscher/englischer Rahmen +
+**jeder Name in seinem `<lang>`-Span** (`detectNameLang` → `zh-CN`/`vi-VN`), sodass die neuronale
+Stimme die Namen **nativ** spricht. Ablauf:
+
+- Frontend baut SSML → Tauri-Command **`azure_tts_speak`** (`commands.rs`) → `azure_tts::synthesize`
+  (POST an `https://<region>.tts.speech.microsoft.com/cognitiveservices/v1`). **Key/Region bleiben im
+  Backend** (aus `AppConfig.azure_tts`). Antwort = MP3 (Base64) → Web Audio spielt es nach dem Gong.
+- **Cache:** MP3 je SSML-Hash unter `app_data_dir/tts-cache/` → Wiederholungen/„nochmal aufrufen"
+  kosten kein Netz/Geld.
+- **Fallback:** Azure aus / kein Key / Netzfehler → nahtlos die lokale Web-Speech-Ansage (mit Wörterbuch
+  + Regel-Umschrift). Nie stumm, nie blockierend.
+- **Konfig** (`AppConfig.azure_tts`): `enabled`, `region`, `key`, `voice`. Einrichtung im Setup →
+  *Ansagen*. Spielernamen werden XML-escaped in die SSML eingesetzt.
+- **Datenschutz:** Bei aktivem Azure-TTS werden die **Namen der gerufenen Paarung** zur Synthese an
+  Azure (Region wählbar, z. B. West Europe/EU) gesendet — öffentliche Wettkampfdaten, opt-in über
+  `enabled`. Ist Azure aus, verlässt nichts das Gerät.
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.

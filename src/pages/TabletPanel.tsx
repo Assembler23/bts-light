@@ -15,13 +15,19 @@ import {
 } from "lucide-react";
 import { tabletOverview } from "../api";
 import { HallFilter } from "../components/HallFilter";
-import type { AnnounceConfig, CourtOverview, TabletInfo } from "../types";
+import type {
+  AnnounceConfig,
+  AzureTtsConfig,
+  CourtOverview,
+  TabletInfo,
+} from "../types";
 import { PreparationPanel } from "./PreparationPanel";
 
 interface Props {
   /** Ansage-Einstellungen — werden an den „In Vorbereitung"-Tab
    *  durchgereicht, der je gerufenem Spiel eine Hallen-Ansage anbietet. */
   announce: AnnounceConfig;
+  azureTts?: AzureTtsConfig;
 }
 
 /** Eine adressierbare Verbindung eines Felds: ein Verbindungsweg mit
@@ -42,7 +48,7 @@ interface CourtAddress {
  * „QR-Codes" die Adressen/QR-Codes zum Einrichten der Tablets. Pollt
  * den Tablet-Server alle 2 s.
  */
-export function TabletPanel({ announce }: Props) {
+export function TabletPanel({ announce, azureTts }: Props) {
   const [info, setInfo] = useState<TabletInfo | null>(null);
   // Die groß angezeigte QR-Zoom-Ansicht: Feld + die angetippte Adresse
   // (im Doppelmodus hat ein Feld LAN und Cloud).
@@ -217,7 +223,9 @@ export function TabletPanel({ announce }: Props) {
             </section>
           )}
 
-          {tab === "preparation" && <PreparationPanel announce={announce} />}
+          {tab === "preparation" && (
+            <PreparationPanel announce={announce} azureTts={azureTts} />
+          )}
 
           {tab === "qr" && (
             <section className="flex flex-col gap-3">

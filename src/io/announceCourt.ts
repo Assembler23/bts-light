@@ -3,9 +3,14 @@
 // („nochmal aufrufen"). Sprache automatisch/konfiguriert; der auslösende Klick
 // ist die User-Geste, die WebView2-Audio entsperrt.
 import { playAnnouncement, resolveAnnouncementLanguage } from "./announcer";
-import type { AnnounceConfig, CourtOverview } from "../types";
+import { azureOption } from "./azureAnnounce";
+import type { AnnounceConfig, AzureTtsConfig, CourtOverview } from "../types";
 
-export function announceCourt(court: CourtOverview, announce: AnnounceConfig): void {
+export function announceCourt(
+  court: CourtOverview,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): void {
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],
     announce.language_mode,
@@ -25,6 +30,7 @@ export function announceCourt(court: CourtOverview, announce: AnnounceConfig): v
       gong: announce.gong,
       nameOverrides: announce.name_overrides,
       nameOverridesEnabled: announce.name_overrides_enabled,
+      azure: azureOption(azureTts),
     },
   );
 }

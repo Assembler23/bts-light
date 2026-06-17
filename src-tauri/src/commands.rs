@@ -172,6 +172,27 @@ pub async fn test_btp(host: String, port: u16, password: Option<String>) -> Resu
     Ok(snapshot.tournament_name)
 }
 
+/// Synthetisiert eine Ansage per Azure Neural TTS und liefert das MP3 als
+/// Base64. Key/Region kommen aus der gespeicherten Konfiguration (bleiben im
+/// Backend). Ergebnis wird je SSML auf Platte gecacht. Fehler → `Err`, das
+/// Frontend fällt dann auf die lokale Web-Speech-Ansage zurück.
+#[tauri::command]
+pub async fn azure_tts_speak(app: AppHandle, ssml: String) -> Result<String, String> {
+    use base64::Engine;
+    let cfg = AppConfig::load_from(&config_path(&app)).map_err(|e| e.to_string())?;
+    let az = cfg.azure_tts;
+    if !az.enabled || az.key.is_empty() || az.region.is_empty() {
+        return Err("Azure TTS nicht konfiguriert".to_string());
+    }
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("tts-cache");
+    let bytes = crate::azure_tts::synthesize(&az.region, &az.key, &ssml, &cache_dir).await?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).
 #[tauri::command]
 pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {

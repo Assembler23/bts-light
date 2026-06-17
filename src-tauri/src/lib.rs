@@ -1,3 +1,4 @@
+pub mod azure_tts;
 pub mod badhub;
 pub mod btp;
 pub mod commands;
@@ -98,6 +99,7 @@ pub fn run() {
             commands::load_config,
             commands::save_config,
             commands::test_btp,
+            commands::azure_tts_speak,
             commands::start_sync,
             commands::stop_sync,
             commands::get_status,

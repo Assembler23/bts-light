@@ -9,7 +9,13 @@ import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
 import { playTestAnnouncement } from "../io/announcer";
 import { useNow } from "../state/callTimer";
-import type { AnnounceConfig, CallTimerConfig, CourtOverview } from "../types";
+import type {
+  AnnounceConfig,
+  AzureTtsConfig,
+  CallTimerConfig,
+  CourtOverview,
+} from "../types";
+import { azureOption } from "../io/azureAnnounce";
 
 const POLL_MS = 2500;
 
@@ -20,9 +26,11 @@ function teamsLabel(t1: string[], t2: string[]): string {
 export function AnnouncePage({
   announce,
   callTimer,
+  azureTts,
 }: {
   announce: AnnounceConfig;
   callTimer: CallTimerConfig;
+  azureTts?: AzureTtsConfig;
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const now = useNow();
@@ -67,6 +75,7 @@ export function AnnouncePage({
             gong: announce.gong,
             nameOverrides: announce.name_overrides,
             nameOverridesEnabled: announce.name_overrides_enabled,
+            azure: azureOption(azureTts),
           })
         }
         className="inline-flex w-fit items-center gap-2 rounded-lg bg-slate-100 px-3.5 py-2
@@ -112,7 +121,7 @@ export function AnnouncePage({
                 </div>
               </div>
               <button
-                onClick={() => announceCourt(c, announce)}
+                onClick={() => announceCourt(c, announce, azureTts)}
                 title="Dieses Feld ansagen"
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5
                            text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"

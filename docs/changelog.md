@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.112
+
+- **Hochwertige Ansage über Azure Neural TTS (opt-in).** Statt der lokalen Stimme kann die ganze Ansage
+  von einer **neuronalen Azure-Stimme** gesprochen werden, die asiatische/internationale Namen **nativ**
+  ausspricht (SSML-Sprachtag pro Name via `detectNameLang` → zh-CN/vi-VN). Stimme wählbar
+  (Seraphina/Florian, mehrsprachig). Einrichtung in *Einstellungen → Ansagen → „Hochwertige Stimme über
+  Azure"* (Region + Key + Stimme).
+- **Robust:** Key bleibt im Backend (Rust-Command `azure_tts_speak`), Ergebnis wird je Ansage **gecacht**
+  (kein Netz/Geld bei Wiederholung), und bei Fehler/offline greift **automatisch die lokale
+  Web-Speech-Ansage** als Fallback — nie stumm. Braucht Internet in der Halle.
+
 ## v0.9.111
 
 - **Aussprache: regelbasierte Umschrift für chinesische & vietnamesische Namen.** Auch NICHT im

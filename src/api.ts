@@ -27,6 +27,11 @@ export const testBtp = (
   password: string | null,
 ): Promise<string> => invoke("test_btp", { host, port, password });
 
+/** Synthetisiert eine Ansage per Azure Neural TTS; liefert MP3 als Base64.
+ *  Wirft, wenn Azure aus/fehlerhaft ist → Aufrufer fällt auf Web Speech zurück. */
+export const azureTtsSpeak = (ssml: string): Promise<string> =>
+  invoke("azure_tts_speak", { ssml });
+
 export const startSync = (): Promise<void> => invoke("start_sync");
 
 export const stopSync = (): Promise<void> => invoke("stop_sync");

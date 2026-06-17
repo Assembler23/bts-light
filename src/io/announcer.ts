@@ -40,6 +40,10 @@ export interface AnnounceOptions {
   nameOverrides?: NameOverride[];
   /** Aussprache-Korrekturen anwenden? Default true (Basis + Nutzer-Einträge). */
   nameOverridesEnabled?: boolean;
+  /** Hochwertige Azure-Ansage: ganze Ansage als SSML synthetisieren + abspielen.
+   *  `synthesize(ssml)` liefert MP3 als Base64; wirft bei Fehler → Fallback auf
+   *  Web Speech. Fehlt das Feld, läuft alles wie bisher (Web Speech). */
+  azure?: { voice: string; synthesize: (ssml: string) => Promise<string> };
 }
 
 // Synthesizer-Gong über Web Audio. Zwei kurze Sinus-Töne (hoch → tiefer) mit
@@ -95,6 +99,38 @@ export function unlockAudio(): void {
   } catch {
     // AudioContext nicht verfügbar – ignorieren.
   }
+}
+
+// Spielt ein Base64-MP3 (von Azure TTS) über den AudioContext und löst auf,
+// wenn es fertig ist. Wirft bei ungültigem Audio (→ Aufrufer-Fallback).
+// Aktuell laufende Azure-Audioquelle — damit cancelAnnouncements() sie stoppen
+// kann (Web-Audio-Pendant zu speechSynthesis.cancel()).
+let activeAzureSrc: AudioBufferSourceNode | null = null;
+
+async function playMp3Base64(b64: string): Promise<void> {
+  const ctx = getAudioContext();
+  if (ctx.state === "suspended") {
+    try {
+      await ctx.resume();
+    } catch {
+      /* ignore */
+    }
+  }
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const buf = await ctx.decodeAudioData(bytes.buffer);
+  await new Promise<void>((resolve) => {
+    const src = ctx.createBufferSource();
+    activeAzureSrc = src;
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.onended = () => {
+      if (activeAzureSrc === src) activeAzureSrc = null;
+      resolve();
+    };
+    src.start();
+  });
 }
 
 // ─── Globale Ansage-Warteschlange ────────────────────────────────────────
@@ -406,6 +442,66 @@ export function buildAnnouncementSegments(
   return segments;
 }
 
+// ─── Azure-SSML (hochwertige Ansage am Stück) ────────────────────────────
+function xmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+// Einen Spielernamen ggf. in ein `<lang>`-Span hüllen, damit Azure ihn nativ
+// spricht (chinesisch/vietnamesisch erkannt über `detectNameLang`); sonst roh.
+function nameSsml(name: string): string {
+  const l = detectNameLang(name.split(/\s+/).filter(Boolean));
+  const tag = l === "cn" ? "zh-CN" : l === "vn" ? "vi-VN" : null;
+  return tag
+    ? `<lang xml:lang="${tag}">${xmlEscape(name)}</lang>`
+    : xmlEscape(name);
+}
+
+function joinNamesSsml(names: string[], lang: AnnounceLang): string {
+  const clean = names.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (clean.length === 0) return "";
+  if (clean.length === 1) return nameSsml(clean[0]);
+  const connector = lang === "de" ? " und " : " and ";
+  return (
+    clean.slice(0, -1).map(nameSsml).join(", ") +
+    connector +
+    nameSsml(clean[clean.length - 1])
+  );
+}
+
+// Baut die ganze Feld-Ansage als EIN SSML für Azure: deutscher/englischer
+// Rahmen (Feld/Disziplin/Runde/„gegen") + Namen je in ihrer erkannten Sprache.
+export function buildAnnouncementSsml(
+  input: AnnounceMatchInput,
+  lang: AnnounceLang,
+  voice: string,
+): string {
+  const court = xmlEscape(resolveCourtPhrase(input.courtLabel, lang));
+  const disc = xmlEscape(disciplineWord(input.discipline, lang));
+  const round = knockoutRoundLabel(input.roundName, lang);
+  const versus = lang === "de" ? "gegen" : "versus";
+  const teamA = joinNamesSsml(input.teamANames, lang);
+  const teamB = joinNamesSsml(input.teamBNames, lang);
+
+  const parts: string[] = [`${court}.`];
+  if (disc) parts.push(`${disc}.`);
+  if (round) parts.push(`${xmlEscape(round)}.`);
+  if (teamA) parts.push(`${teamA}.`);
+  if (teamB) parts.push(`${versus} ${teamB}.`);
+  parts.push(`${court}.`);
+
+  const speakLang = lang === "de" ? "de-DE" : "en-US";
+  return (
+    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
+    `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
+  );
+}
+
 // Spielt Gong + spricht die Ansage. Wirft NICHT bei fehlendem
 // SpeechSynthesis-Support, läuft dann nur als Gong durch.
 export function playAnnouncement(
@@ -415,6 +511,18 @@ export function playAnnouncement(
 ): Promise<void> {
   return enqueueAnnouncement(async () => {
     await maybeGong(opts.gong);
+    // Hochwertiger Azure-Weg (ganze Ansage am Stück); bei Fehler → Web Speech.
+    if (opts.azure) {
+      try {
+        const b64 = await opts.azure.synthesize(
+          buildAnnouncementSsml(input, lang, opts.azure.voice),
+        );
+        await playMp3Base64(b64);
+        return;
+      } catch {
+        /* Azure aus/Netzfehler → Fallback unten */
+      }
+    }
     await speakSegments(
       buildAnnouncementSegments(
         input,
@@ -466,6 +574,13 @@ export function playNameTest(
 export function cancelAnnouncements(): void {
   announceGen++;
   announceQueue = Promise.resolve();
+  // Laufendes Azure-Audio stoppen (Pendant zu speechSynthesis.cancel()).
+  try {
+    activeAzureSrc?.stop();
+  } catch {
+    /* bereits beendet */
+  }
+  activeAzureSrc = null;
   if (typeof window.speechSynthesis !== "undefined") {
     window.speechSynthesis.cancel();
   }
@@ -529,6 +644,38 @@ export function buildPreparationSegments(
   return segments;
 }
 
+// Vorbereitungs-Ansage als EIN SSML für Azure (Namen je in ihrer Sprache).
+export function buildPreparationSsml(
+  input: AnnouncePreparationInput,
+  lang: AnnounceLang,
+  voice: string,
+): string {
+  const disc = xmlEscape(disciplineWord(input.discipline, lang));
+  const round = knockoutRoundLabel(input.roundName, lang);
+  const versus = lang === "de" ? "gegen" : "versus";
+  const teamA = joinNamesSsml(input.teamANames, lang);
+  const teamB = joinNamesSsml(input.teamBNames, lang);
+  const hall = xmlEscape((input.hall || "").trim());
+
+  const parts: string[] = [lang === "de" ? "In Vorbereitung." : "Preparation call."];
+  if (disc) parts.push(`${disc}.`);
+  if (round) parts.push(`${xmlEscape(round)}.`);
+  if (teamA && teamB) {
+    parts.push(`${teamA}.`);
+    parts.push(`${versus} ${teamB}.`);
+  } else if (teamA) {
+    parts.push(`${teamA}.`);
+  }
+  if (hall) {
+    parts.push(lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`);
+  }
+  const speakLang = lang === "de" ? "de-DE" : "en-US";
+  return (
+    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
+    `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
+  );
+}
+
 // Spielt Gong + spricht die Vorbereitungs-Ansage. Wirft NICHT bei
 // fehlendem SpeechSynthesis-Support, läuft dann nur als Gong durch.
 export function playPreparationAnnouncement(
@@ -538,6 +685,17 @@ export function playPreparationAnnouncement(
 ): Promise<void> {
   return enqueueAnnouncement(async () => {
     await maybeGong(opts.gong);
+    if (opts.azure) {
+      try {
+        const b64 = await opts.azure.synthesize(
+          buildPreparationSsml(input, lang, opts.azure.voice),
+        );
+        await playMp3Base64(b64);
+        return;
+      } catch {
+        /* Fallback unten */
+      }
+    }
     await speakSegments(
       buildPreparationSegments(
         input,
