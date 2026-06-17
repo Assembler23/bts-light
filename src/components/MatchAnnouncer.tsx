@@ -3,6 +3,7 @@ import { tabletOverview } from "../api";
 import type {
   AnnounceConfig,
   AnnounceLanguageMode,
+  AzureTtsConfig,
   CourtOverview,
 } from "../types";
 import {
@@ -13,6 +14,7 @@ import {
   resolveAnnouncementLanguage,
   unlockAudio,
 } from "../io/announcer";
+import { azureOption } from "../io/azureAnnounce";
 
 const POLL_MS = 2000;
 
@@ -37,6 +39,7 @@ function resolveLanguage(
 
 interface Props {
   announce: AnnounceConfig;
+  azureTts?: AzureTtsConfig;
 }
 
 /**
@@ -47,7 +50,7 @@ interface Props {
  * Der erste Poll ist nur die Baseline: bereits laufende Spiele werden nicht
  * nachträglich angesagt.
  */
-export function MatchAnnouncer({ announce }: Props) {
+export function MatchAnnouncer({ announce, azureTts }: Props) {
   // CourtID → zuletzt gesehene Match-ID. Per CourtID, damit gleichnamige
   // Felder eines Mehr-Hallen-Turniers nicht denselben Eintrag teilen.
   const seenRef = useRef<Map<number, number>>(new Map());
@@ -56,6 +59,9 @@ export function MatchAnnouncer({ announce }: Props) {
   // Aktuelle Config in einer Ref, damit der Poll-Effekt stabil bleibt.
   const cfgRef = useRef(announce);
   cfgRef.current = announce;
+  // Azure-Config ebenfalls in einer Ref (Poll-Effekt hat leere Deps).
+  const azureRef = useRef(azureTts);
+  azureRef.current = azureTts;
 
   // Ansagen abgeschaltet → laufende Ansage sofort stoppen.
   useEffect(() => {
@@ -122,6 +128,7 @@ export function MatchAnnouncer({ announce }: Props) {
               gong: cfg.gong,
               nameOverrides: cfg.name_overrides,
               nameOverridesEnabled: cfg.name_overrides_enabled,
+              azure: azureOption(azureRef.current),
             });
           }
         })

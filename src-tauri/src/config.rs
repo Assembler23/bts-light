@@ -267,6 +267,34 @@ pub struct LogoConfig {
     pub background_color: String,
 }
 
+/// Hochwertige Cloud-Ansage über Azure Cognitive Services Speech (Neural TTS).
+/// Opt-in; ist sie aus oder schlägt der Aufruf fehl, greift die lokale
+/// Web-Speech-Ansage als Fallback. Schlüssel/Region aus dem Azure-Portal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AzureTtsConfig {
+    /// Azure-TTS für die Ansage verwenden?
+    pub enabled: bool,
+    /// Azure-Region der Speech-Ressource, z. B. „westeurope".
+    pub region: String,
+    /// Subscription-Key (KEY 1) der Speech-Ressource.
+    pub key: String,
+    /// Stimme (mehrsprachig, für `<lang>`-Spans), z. B.
+    /// „de-DE-SeraphinaMultilingualNeural".
+    pub voice: String,
+}
+
+impl Default for AzureTtsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            region: String::new(),
+            key: String::new(),
+            voice: "de-DE-SeraphinaMultilingualNeural".to_string(),
+        }
+    }
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -289,6 +317,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub announce: AnnounceConfig,
+    /// Hochwertige Cloud-Ansage über Azure Neural TTS (opt-in). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub azure_tts: AzureTtsConfig,
     /// Einstellungen der Court-Monitor-Anzeige. `#[serde(default)]` hält
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -398,6 +430,12 @@ mod tests {
                     say: "Nujen".to_string(),
                 }],
                 name_overrides_enabled: false,
+            },
+            azure_tts: AzureTtsConfig {
+                enabled: true,
+                region: "westeurope".to_string(),
+                key: "secret-key".to_string(),
+                voice: "de-DE-FlorianMultilingualNeural".to_string(),
             },
             court_monitor: CourtMonitorConfig {
                 enabled: true,

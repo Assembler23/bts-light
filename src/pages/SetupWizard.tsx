@@ -32,6 +32,7 @@ import {
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import { playNameTest, playTestAnnouncement } from "../io/announcer";
+import { azureOption } from "../io/azureAnnounce";
 import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
 import { PRESETS, findPreset } from "../presets";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
@@ -261,6 +262,14 @@ export function SetupWizard({
   const [annOverridesEnabled, setAnnOverridesEnabled] = useState(
     initialConfig.announce.name_overrides_enabled ?? true,
   );
+  // Azure Neural TTS (hochwertige Cloud-Ansage, opt-in).
+  const az = initialConfig.azure_tts;
+  const [azEnabled, setAzEnabled] = useState(az?.enabled ?? false);
+  const [azRegion, setAzRegion] = useState(az?.region ?? "");
+  const [azKey, setAzKey] = useState(az?.key ?? "");
+  const [azVoice, setAzVoice] = useState(
+    az?.voice || "de-DE-SeraphinaMultilingualNeural",
+  );
   // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
   const ct = initialConfig.call_timer;
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
@@ -343,6 +352,12 @@ export function SetupWizard({
           .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
           .filter((o) => o.name && o.say),
         name_overrides_enabled: annOverridesEnabled,
+      },
+      azure_tts: {
+        enabled: azEnabled,
+        region: azRegion.trim(),
+        key: azKey.trim(),
+        voice: azVoice,
       },
       court_monitor: {
         enabled: cmEnabled,
@@ -836,6 +851,14 @@ export function SetupWizard({
                     gong: annGong,
                     nameOverrides: annNameOverrides,
                     nameOverridesEnabled: annOverridesEnabled,
+                    // Azure nutzt den GESPEICHERTEN Key (Backend) — zum Testen
+                    // einer neuen Stimme/Konfig vorher speichern.
+                    azure: azureOption({
+                      enabled: azEnabled,
+                      region: azRegion,
+                      key: azKey,
+                      voice: azVoice,
+                    }),
                   })
                 }
                 className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
@@ -954,6 +977,64 @@ export function SetupWizard({
               >
                 + Name hinzufügen
               </button>
+            </div>
+
+            {/* Azure Neural TTS (hochwertige Cloud-Stimme) */}
+            <div className="flex flex-col gap-2 border-t border-slate-200 pt-4">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={azEnabled}
+                  onChange={(e) => setAzEnabled(e.currentTarget.checked)}
+                />
+                Hochwertige Stimme über Azure (Cloud)
+              </label>
+              <p className="text-xs text-slate-500">
+                Spricht die ganze Ansage mit einer neuronalen Azure-Stimme und gibt
+                asiatische/internationale Namen <strong>nativ</strong> wieder (per
+                Sprach-Erkennung). Braucht Internet; bei Fehler/offline greift
+                automatisch die lokale Stimme. Schlüssel + Region aus deiner
+                Azure-Speech-Ressource. Wird nach dem Speichern aktiv.
+              </p>
+              {azEnabled && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm text-slate-600">
+                    Region
+                    <input
+                      type="text"
+                      value={azRegion}
+                      placeholder="westeurope"
+                      onChange={(e) => setAzRegion(e.currentTarget.value)}
+                      className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <label className="text-sm text-slate-600">
+                    Schlüssel (KEY 1)
+                    <input
+                      type="password"
+                      value={azKey}
+                      placeholder="Azure Speech Key"
+                      onChange={(e) => setAzKey(e.currentTarget.value)}
+                      className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <label className="text-sm text-slate-600">
+                    Stimme
+                    <select
+                      value={azVoice}
+                      onChange={(e) => setAzVoice(e.currentTarget.value)}
+                      className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    >
+                      <option value="de-DE-SeraphinaMultilingualNeural">
+                        Seraphina (weiblich, mehrsprachig)
+                      </option>
+                      <option value="de-DE-FlorianMultilingualNeural">
+                        Florian (männlich, mehrsprachig)
+                      </option>
+                    </select>
+                  </label>
+                </div>
+              )}
             </div>
           </div>
         )}

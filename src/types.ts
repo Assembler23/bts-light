@@ -40,6 +40,18 @@ export interface AnnounceConfig {
   name_overrides_enabled: boolean;
 }
 
+/** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */
+export interface AzureTtsConfig {
+  /** Azure-TTS für die Ansage verwenden? */
+  enabled: boolean;
+  /** Azure-Region der Speech-Ressource, z. B. „westeurope". */
+  region: string;
+  /** Subscription-Key (KEY 1) der Speech-Ressource. */
+  key: string;
+  /** Mehrsprachige Stimme, z. B. „de-DE-SeraphinaMultilingualNeural". */
+  voice: string;
+}
+
 /** Aussprache-Korrektur für die Ansage (Rust: config::NameOverride). */
 export interface NameOverride {
   /** Ganzer Name ODER einzelner Namensteil (z. B. Nachname). */
@@ -148,6 +160,8 @@ export interface AppConfig {
   connection_mode: ConnectionMode;
   /** Einstellungen der gesprochenen Feld-Ansagen. */
   announce: AnnounceConfig;
+  /** Hochwertige Cloud-Ansage über Azure Neural TTS (opt-in). */
+  azure_tts: AzureTtsConfig;
   /** Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld). */
   court_monitor: CourtMonitorConfig;
   /** Einstellungen des Aufruf-Timers (1./2./3. Aufruf). */

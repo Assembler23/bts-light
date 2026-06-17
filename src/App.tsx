@@ -48,6 +48,12 @@ function defaultConfig(): AppConfig {
       name_overrides: [],
       name_overrides_enabled: true,
     },
+    azure_tts: {
+      enabled: false,
+      region: "",
+      key: "",
+      voice: "de-DE-SeraphinaMultilingualNeural",
+    },
     court_monitor: {
       enabled: false,
       ad_interval_s: 10,
@@ -231,7 +237,7 @@ function App() {
             />
           </div>
           <Footer />
-          <MatchAnnouncer announce={config.announce} />
+          <MatchAnnouncer announce={config.announce} azureTts={config.azure_tts} />
         </div>
       </UpdateProvider>
     );
@@ -246,15 +252,19 @@ function App() {
           <FieldOverviewPage
             callTimer={config.call_timer}
             announce={config.announce}
+            azureTts={config.azure_tts}
           />
         );
       case "tablets":
-        return <TabletPanel announce={config.announce} />;
+        return (
+          <TabletPanel announce={config.announce} azureTts={config.azure_tts} />
+        );
       case "announce":
         return (
           <AnnouncePage
             announce={config.announce}
             callTimer={config.call_timer}
+            azureTts={config.azure_tts}
           />
         );
       case "monitors":
@@ -300,7 +310,7 @@ function App() {
         </AppShell>
         <Footer />
         <WalkoverPanel />
-        <MatchAnnouncer announce={config.announce} />
+        <MatchAnnouncer announce={config.announce} azureTts={config.azure_tts} />
       </div>
     </UpdateProvider>
   );
