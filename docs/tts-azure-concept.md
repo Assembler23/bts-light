@@ -12,34 +12,31 @@ Gleichzeitig die **Offline-Tauglichkeit** der Halle erhalten (Verleih-Kit ohne I
 1. **Pro Name die Sprache markieren** und von einer **mehrsprachigen Azure-Neural-Stimme**
    sprechen lassen (SSML `<lang xml:lang="zh-CN">Zhang Zhixin</lang>`). Die Sprach-Erkennung
    pro Name existiert bereits: `detectNameLang()` in `src/io/transliterate.ts` (zh/vn; erweiterbar).
-2. **Offline durch Vorab-Generierung + Cache:** Audio wird erzeugt, **solange der PC Internet hat**
-   (beim Sync/Turnierstart), lokal als Dateien gecacht und **während des Turniers offline abgespielt**.
+2. **Annahme aktualisiert (2026-06-17): in der Halle ist verlässlich Internet da.** → **On-Demand,
+   ganze Ansage am Stück** synthetisieren (natürlichste Satzmelodie, einfachster Bau). Vorab-Generierung
+   + Offline-Cache (s. u.) wird damit **optional** (nur als Offline-Härtung später).
 
-## Architektur
+## Architektur (On-Demand, primär)
 - **Synthese im Rust-Backend** (`src-tauri`, vorhandener `reqwest`-HTTP-Client) gegen die
   **Azure Speech REST-API**:
   `POST https://<region>.tts.speech.microsoft.com/cognitiveservices/v1`,
-  Header `Ocp-Apim-Subscription-Key`, Body = SSML, Antwort = Audio (z. B. MP3/Opus).
-- **Eine** mehrsprachige Neural-Stimme für ALLES (Konsistenz), z. B.
-  `de-DE-SeraphinaMultilingualNeural` / `de-DE-FlorianMultilingualNeural` — kann innerhalb
-  einer Äußerung per `<lang>` die Sprache wechseln.
-- **Cache zweistufig** (im App-Datenverzeichnis, z. B. `audio-cache/`):
-  - **Feste Fragmente** (einmalig, bounded): „Feld 1…30"/Zahlen, Disziplinen (5), Runden
-    (Viertelfinale/Halbfinale/Finale/Spiel um Platz 3), „gegen"/„versus", „und"/„and",
-    „In Vorbereitung", „Bitte in <Halle>" (Hallennamen aus BTP).
-  - **Namens-Clips**: je Spielername ein Clip (Sprache via `detectNameLang`), erzeugt aus der
-    BTP-Spielerliste beim Sync; lazy für neu auftauchende Namen.
-- **Ansage = Audiosegmente zusammensetzen** (Web Audio API, kleine Pausen dazwischen):
-  Gong → Feld → Disziplin → (Runde) → TeamA-Namen → „gegen" → TeamB-Namen → Feld.
-  Voll offline abspielbar, sobald die Clips im Cache sind.
-- **Fallback (robust):** Fehlt ein Clip / kein Azure-Key / beim Erstlauf noch offline →
-  nahtlos zurück auf die heutige **Web-Speech-Ansage** (mit Wörterbuch + Regel-Engine). Nie stumm.
+  Header `Ocp-Apim-Subscription-Key`, Body = SSML, Antwort = Audio (MP3/Opus).
+- **Eine** mehrsprachige Neural-Stimme für die ganze Ansage (Konsistenz + natürliche Prosodie), z. B.
+  `de-DE-SeraphinaMultilingualNeural` / `de-DE-FlorianMultilingualNeural` — wechselt innerhalb der
+  Äußerung per `<lang>` die Sprache.
+- **Ganze Ansage als EIN SSML** bauen (statt Fragmente): Feld → Disziplin → (Runde) → TeamA →
+  „gegen" → TeamB; Spielernamen je in `<lang>` ihrer erkannten Sprache. Azure liefert ein Audio →
+  Web Audio spielt es nach dem Gong ab. Durchgehende Satzmelodie = menschlicher.
+- **Latenz**: Request bei Ansage-Auslösung feuern, **während der ~1,2 s Gong läuft** lädt das Audio →
+  praktisch keine spürbare Verzögerung.
+- **Cache** (im App-Datenverzeichnis): Audio je **Ansage-Text-Hash** ablegen → „nochmal aufrufen"
+  und identische Ansagen kosten nichts/kein Netz; Invalidierung bei Stimmen-/Versionswechsel.
+- **Fallback (robust):** kein Azure-Key / Netz weg / API-Fehler → nahtlos die heutige
+  **Web-Speech-Ansage** (Wörterbuch + Regel-Engine). Nie stumm, nie blockierend.
 
-## Generierungs-Timing
-- Beim **Sync** (Namen + Hallen aus BTP bekannt) im Hintergrund erzeugen, solange Internet da ist.
-- **Lazy**: ein im Spielbetrieb neu auftauchender Name wird beim ersten Mal erzeugt (falls online),
-  sonst Fallback; danach gecacht.
-- Cache überlebt App-Neustarts; Invalidierung nur bei Stimmen-/Versionswechsel.
+## Optional später: Offline-Härtung (nur falls Hallen-Internet doch wackelt)
+Vorab-Generierung beim Sync + zweistufiger Cache (feste Fragmente „Feld N"/Disziplin/Runde/„gegen" +
+Namens-Clips) → Audiosegmente zusammensetzen. Mehr Bau, aber voll offline. **Erst wenn nötig.**
 
 ## Konfiguration (`AppConfig`)
 ```
@@ -63,11 +60,13 @@ azure_tts: { enabled: bool, region: string, key: string, voice: string }
   <lang zh-CN>Zhang Zhixin</lang> gegen <lang vi-VN>Pham Thi Hong Thu</lang>.") → Qualität/Aussprache
   prüfen, BEVOR Cache/Playback gebaut werden. Braucht den Azure-Key.
 
-## Phasen
-1. **Spike** (klein): Rust-Funktion `azure_tts_say(ssml) -> audio`, ein Testaufruf, Qualität prüfen
-   (braucht Azure-Key). Stimmen vergleichen.
-2. **Cache + Playback**: feste Fragmente + Namens-Clips erzeugen/cachen; Web-Audio-Sequencer; Fallback.
-3. **Integration**: in den Ansage-Pfad (MatchAnnouncer/Vorbereitung/manuell), Config-UI, Doku.
+## Phasen (On-Demand-Variante)
+1. **Spike** (klein): Rust-Funktion `azure_tts_say(ssml) -> audio`, ein Testaufruf mit gemischter
+   Sprache, Qualität + 2–3 Stimmen gegenhören (**braucht Azure-Key**).
+2. **Integration**: ganze Ansage als SSML (Namen in `<lang>`), Request beim Auslösen, Audio nach Gong
+   abspielen (Web Audio), Cache je Text-Hash, **Fallback** auf Web Speech.
+3. **Config-UI** (`azure_tts`: enabled/region/key/voice) + Doku + Datenschutz-Hinweis.
+4. *(optional, später)* Offline-Härtung (Vorab-Generierung + Cache), nur falls Hallen-Internet wackelt.
 
 ## Bezug
 - Sprach-Erkennung: `src/io/transliterate.ts` `detectNameLang` (zh/vn — für Azure auf zh-CN/vi-VN
