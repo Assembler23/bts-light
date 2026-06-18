@@ -132,6 +132,9 @@ export type MonitorTarget =
 /** Ein platzierter Spieler im Podium (Rust: tablet::winners::WinnerPlayer). */
 export interface WinnerPlayer {
   name: string;
+  /** Vorname(n) und Nachname getrennt — fürs zweizeilige Rendern im Sieger-Monitor. */
+  first: string;
+  last: string;
   club: string | null;
 }
 

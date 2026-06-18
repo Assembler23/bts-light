@@ -58,13 +58,22 @@ main {
 
 .spot .medal { font-size: 7vmin; line-height: 1; margin-bottom: .6vh; }
 .spot .names {
-  font-weight: 800; text-align: center; line-height: 1.12;
-  margin-bottom: .3vh; color: #f8fafc;
+  text-align: center; color: #f8fafc; margin-bottom: .3vh;
+  display: flex; flex-direction: column; align-items: center; gap: .6vh;
 }
+/* Ein Spieler = zwei Zeilen: Vorname (kleiner) über Nachname (groß). */
+.spot .pl { display: flex; flex-direction: column; align-items: center; line-height: 1.04; }
+.spot .given { font-size: .55em; font-weight: 700; color: #cbd5e1; }
+.spot .fam   { font-size: 1em; font-weight: 800; }
 .spot .club { text-align: center; color: #94a3b8; line-height: 1.15; }
-.gold   .names { font-size: 7vmin; color: #fde68a; }
-.silver .names { font-size: 5.6vmin; }
-.bronze .names { font-size: 5vmin; }
+/* Schriftgröße je Stufe; `.duo` (Doppel = 2 Spieler) kompakter, damit 4 Zeilen passen. */
+.gold   .names { font-size: 8.5vmin; }
+.silver .names { font-size: 6.6vmin; }
+.bronze .names { font-size: 5.8vmin; }
+.gold   .names.duo { font-size: 6vmin; }
+.silver .names.duo { font-size: 5vmin; }
+.bronze .names.duo { font-size: 4.4vmin; }
+.gold   .fam, .gold .given { color: #fde68a; }
 .gold   .club  { font-size: 3.8vmin; }
 .silver .club, .bronze .club { font-size: 3.3vmin; }
 .wo { color: #f59e0b; font-weight: 700; }
@@ -155,6 +164,45 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
   function teamNames(p) {
     return (p.players || []).map(function (x) { return x.name; }).join(' / ') || '—';
   }
+
+  // Vorname(n) kürzen: erster Vorname voll, weitere → Initialen.
+  // „Melina Sabrina" → „Melina S."; „Manh Hung" → „Manh H."; „Mengmeng" → „Mengmeng".
+  function shortenGiven(first) {
+    var t = (first || '').trim().split(/\s+/).filter(Boolean);
+    if (t.length <= 1) return (first || '').trim();
+    return t[0] + ' ' + t.slice(1).map(function (w) {
+      return w.charAt(0).toUpperCase() + '.';
+    }).join(' ');
+  }
+
+  // EIN Spieler als zweizeiliges Element: Vorname (gekürzt) über Nachname.
+  // Nutzt getrennte first/last (BTP); Fallback: kombinierten Namen am letzten
+  // Wort trennen (nur wenn first/last fehlen).
+  function playerNameEl(x) {
+    var first = (x.first || '').trim();
+    var last = (x.last || '').trim();
+    if (!first && !last) {
+      var parts = (x.name || '').trim().split(/\s+/).filter(Boolean);
+      last = parts.length ? parts.pop() : '';
+      first = parts.join(' ');
+    }
+    var given = shortenGiven(first);
+    var pl = h('div', 'pl');
+    if (given) pl.appendChild(h('div', 'given', given));
+    pl.appendChild(h('div', 'fam', last || given || '—'));
+    return pl;
+  }
+
+  // Alle Spieler eines Platzes als gestapelte zweizeilige Namen (+ „kampflos").
+  // `.duo` bei 2 Spielern (Doppel) → kompaktere Schrift.
+  function namesEl(place) {
+    var players = place.players || [];
+    var wrap = h('div', 'names' + (players.length > 1 ? ' duo' : ''));
+    if (!players.length) { wrap.appendChild(h('div', 'fam', '—')); }
+    players.forEach(function (x) { wrap.appendChild(playerNameEl(x)); });
+    if (place.walkover) wrap.appendChild(h('span', 'wo', '(kampflos)'));
+    return wrap;
+  }
   function teamClubs(p) {
     var clubs = [];
     (p.players || []).forEach(function (x) {
@@ -169,21 +217,13 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
     var s = h('div', 'spot ' + cls);
     s.appendChild(h('div', 'medal', medal));
     if (place) {
-      var names = h('div', 'names');
-      names.appendChild(document.createTextNode(teamNames(place)));
-      if (place.walkover) {
-        names.appendChild(document.createTextNode(' '));
-        names.appendChild(h('span', 'wo', '(kampflos)'));
-      }
-      s.appendChild(names);
+      s.appendChild(namesEl(place));
       var club = teamClubs(place);
       if (club) s.appendChild(h('div', 'club', club));
     }
     if (extra) {
       var wrap = h('div', 'second-third');
-      var n2 = h('div', 'names');
-      n2.appendChild(document.createTextNode(teamNames(extra)));
-      wrap.appendChild(n2);
+      wrap.appendChild(namesEl(extra));
       var c2 = teamClubs(extra);
       if (c2) wrap.appendChild(h('div', 'club', c2));
       s.appendChild(wrap);

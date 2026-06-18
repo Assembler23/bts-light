@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.118
+
+- **Sieger-Monitor: zweizeilige Namen (Vorname / Nachname) + Mittelnamen gekürzt.** Statt eines langen,
+  krumm umbrechenden Namens steht jetzt der **Vorname** (kleiner) über dem **Nachnamen** (groß) — das
+  erlaubt eine größere, ruhigere Darstellung, gerade bei Doppeln. Mehrere Vornamen werden gekürzt
+  („Melina Sabrina" → „Melina S."). Mehrteilige Nachnamen bleiben korrekt (BTP `Firstname`/`Lastname`
+  werden dafür getrennt mitgeschickt; z. B. „Nguyen Duc" bleibt zusammen). Doppel etwas kompakter,
+  damit die vier Zeilen passen.
+
 ## v0.9.117
 
 - **Sieger-Monitor: Podest nutzt die volle Breite + noch größer.** Säulen breiter (31vw statt 26),
