@@ -181,8 +181,15 @@ pub fn discipline_results(snapshot: &BtpSnapshot) -> Vec<DisciplineResult> {
         });
     }
 
-    // Neueste Disziplinen zuerst (None ans Ende).
-    out.sort_by_key(|d| std::cmp::Reverse(d.finished_at));
+    // Neueste Disziplinen zuerst; bei gleichem/fehlendem `finished_at` (BTP
+    // liefert es derzeit gar nicht → immer None) STABIL nach draw_id, sonst
+    // leakte die zufällige HashMap-Reihenfolge und die Liste „wackelte" bei
+    // jedem Poll.
+    out.sort_by(|a, b| {
+        b.finished_at
+            .cmp(&a.finished_at)
+            .then(a.draw_id.cmp(&b.draw_id))
+    });
     out
 }
 
@@ -372,5 +379,38 @@ mod tests {
         fm.result = MatchResult::Walkover;
         let res = discipline_results(&snap(vec![fm]));
         assert!(res[0].podium[0].walkover);
+    }
+
+    #[test]
+    fn discipline_order_is_deterministic_by_draw_id() {
+        // Mehrere Finals OHNE finished_at (BTP liefert es nie) → Reihenfolge muss
+        // STABIL nach draw_id sein (nicht die zufällige HashMap-Reihenfolge), sonst
+        // wackelt die Steuerliste bei jedem Poll.
+        let build = || {
+            [5_i64, 1, 9, 3, 7]
+                .iter()
+                .map(|&id| {
+                    m(
+                        id,
+                        "Finale",
+                        Some(1),
+                        vec![p("W", None)],
+                        vec![p("L", None)],
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let ids: Vec<i64> = discipline_results(&snap(build()))
+            .iter()
+            .map(|d| d.draw_id)
+            .collect();
+        assert_eq!(ids, vec![1, 3, 5, 7, 9]);
+        for _ in 0..5 {
+            let again: Vec<i64> = discipline_results(&snap(build()))
+                .iter()
+                .map(|d| d.draw_id)
+                .collect();
+            assert_eq!(again, ids, "Reihenfolge muss über Aufrufe stabil sein");
+        }
     }
 }

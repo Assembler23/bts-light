@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.115
+
+- **Fix Sieger-Monitor: kein Flackern/„ständiger Reload" mehr.** Die Podium-Anzeige (`winners.html`) baute
+  bei jedem 2-s-Poll den ganzen Bildschirm neu auf, auch wenn sich nichts geändert hat → sichtbares
+  Flackern auf dem TV. Jetzt wird nur noch bei **tatsächlicher Änderung** neu gezeichnet (Signatur-Vergleich).
+- **Fix Sieger-Steuerliste: stabile Reihenfolge.** Die Disziplinen kamen aus einer HashMap und wurden nur
+  nach `finished_at` sortiert (das BTP nicht liefert → immer leer) → die Liste „wackelte" bei jedem Poll.
+  Jetzt deterministisch nach `draw_id` sortiert.
+
 ## v0.9.114
 
 - **Sieger-Monitor / Siegerehrung.** Neue Info-Anzeige, die das **Podium (1./2./3.) mit Verein** einer
