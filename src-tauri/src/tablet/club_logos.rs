@@ -1,9 +1,10 @@
 //! Vereinslogos vom Badhub holen und für den Sieger-Monitor bereitstellen.
 //!
-//! Badhub liefert pro Verband eine offene (key-freie) Liste über
-//! `GET {base}/api/v1/clubfinder?fed={slug}` → `{ "clubs": [{name, logo_url}, …] }`.
-//! (Der `/federations/{slug}/clubs`-Endpoint verlangt dagegen einen API-Key.)
-//! Wir matchen den BTP-Vereinsnamen (den bts-light kennt) gegen diese Liste
+//! Badhub liefert über `GET {base}/api/v1/club-logos` eine offene (key-freie),
+//! **verbandsübergreifende** Liste `{ "clubs": [{name, logo_url}, …] }` — so
+//! bekommen auch Teilnehmer aus anderen Landesverbänden ihr Logo. (Der frühere
+//! `clubfinder` war geo-/verbandsgebunden, `federations/…/clubs` braucht einen
+//! API-Key.) Wir matchen den BTP-Vereinsnamen (den bts-light kennt) gegen diese
 //! und liefern das Logo über einen lokalen Endpoint aus — so funktioniert es
 //! auch auf reinen LAN-TVs ohne eigenes Internet (der Turnier-PC holt das Bild,
 //! die Anzeige lädt es vom lokalen Server).
@@ -25,11 +26,8 @@ const MAP_TTL_EMPTY: Duration = Duration::from_secs(60);
 /// Logos sind klein; größere Antworten lehnen wir ab (Schutz vor Fehlrouten).
 const MAX_LOGO_BYTES: usize = 2 * 1024 * 1024;
 
-/// Name→Logo-URL-Zuordnung eines Verbands (zwei Schlüsselebenen, s. `lookup`).
+/// Name→Logo-URL-Zuordnung (verbandsübergreifend, zwei Schlüsselebenen, s. `lookup`).
 struct ClubMap {
-    /// Verband-Slug, für den diese Map gilt — wechselt der Verband, ist die
-    /// Map stale (sonst würden Logos des falschen Verbands gezeigt).
-    fed: String,
     fetched_at: Instant,
     /// Exakt-normalisierter Name → Logo-URL.
     exact: HashMap<String, String>,
@@ -44,9 +42,9 @@ impl ClubMap {
     }
 }
 
-/// Antwort von `clubfinder`: `{ "clubs": [ … ] }`.
+/// Antwort von `club-logos`: `{ "clubs": [ … ] }`.
 #[derive(Deserialize)]
-struct ClubfinderResp {
+struct ClubLogosResp {
     #[serde(default)]
     clubs: Vec<ApiClub>,
 }
@@ -102,7 +100,7 @@ fn norm_loose(s: &str) -> String {
 }
 
 /// Baut die Zuordnung aus der API-Antwort. Nur Vereine **mit** Logo.
-fn build_map(clubs: Vec<ApiClub>, fed: &str) -> ClubMap {
+fn build_map(clubs: Vec<ApiClub>) -> ClubMap {
     let mut exact = HashMap::new();
     let mut loose: HashMap<String, Option<String>> = HashMap::new();
     for c in clubs {
@@ -129,7 +127,6 @@ fn build_map(clubs: Vec<ApiClub>, fed: &str) -> ClubMap {
         }
     }
     ClubMap {
-        fed: fed.to_string(),
         fetched_at: Instant::now(),
         exact,
         loose,
@@ -147,34 +144,22 @@ fn lookup(map: &ClubMap, name: &str) -> Option<String> {
     }
 }
 
-/// Basis-Origin (`https://badhub.de`) aus der Push-URL + Verband-Slug aus der
-/// `live_url` (`?t=…`). `None`, wenn etwas fehlt → dann keine Logos.
-fn base_and_fed(cfg: &crate::config::BadhubConfig) -> Option<(String, String)> {
+/// Basis-Origin (`https://badhub.de`) aus der Push-URL. `None` bei Unsinn →
+/// dann keine Logos. (Verband-Slug wird nicht mehr gebraucht: `club-logos` ist
+/// verbandsübergreifend.)
+fn base_url(cfg: &crate::config::BadhubConfig) -> Option<String> {
     let base = reqwest::Url::parse(&cfg.url)
         .ok()
         .map(|u| u.origin().ascii_serialization())?;
     if base == "null" {
         return None;
     }
-    let fed = reqwest::Url::parse(&cfg.live_url)
-        .ok()?
-        .query_pairs()
-        .find(|(k, _)| k == "t")
-        .map(|(_, v)| v.into_owned())?;
-    let fed = fed.trim().to_string();
-    // Slug streng begrenzen (nur a–z0–9 und „-") — er wird in die URL-Pfad
-    // interpoliert; alles andere wäre eine unerwartete Route.
-    if fed.is_empty() || !fed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return None;
-    }
-    Some((base, fed))
+    Some(base)
 }
 
 /// Stellt sicher, dass die Vereinsliste (frisch genug) geladen ist.
-async fn ensure_map(http: &reqwest::Client, base: &str, fed: &str) {
+async fn ensure_map(http: &reqwest::Client, base: &str) {
     let stale = match &*club_map().read().unwrap() {
-        // Anderer Verband → sofort neu laden (sonst falsche Logos).
-        Some(m) if m.fed != fed => true,
         Some(m) => {
             let ttl = if m.is_empty() {
                 MAP_TTL_EMPTY
@@ -188,22 +173,19 @@ async fn ensure_map(http: &reqwest::Client, base: &str, fed: &str) {
     if !stale {
         return;
     }
-    // `limit=200` = Maximum des clubfinder-Endpoints (Default wären nur 50 →
-    // größere Verbände blieben unvollständig). 200 deckt jeden LV ab.
-    let url = format!("{base}/api/v1/clubfinder?fed={fed}&limit=200");
+    let url = format!("{base}/api/v1/club-logos");
     let fetched = async {
         let resp = http.get(&url).send().await.ok()?;
         if !resp.status().is_success() {
             return None;
         }
-        resp.json::<ClubfinderResp>().await.ok().map(|r| r.clubs)
+        resp.json::<ClubLogosResp>().await.ok().map(|r| r.clubs)
     }
     .await;
     let map = match fetched {
-        Some(list) => build_map(list, fed),
+        Some(list) => build_map(list),
         // Fehlschlag: leere Map mit aktuellem Zeitstempel → kurzer Retry-Takt.
         None => ClubMap {
-            fed: fed.to_string(),
             fetched_at: Instant::now(),
             exact: HashMap::new(),
             loose: HashMap::new(),
@@ -256,8 +238,8 @@ pub async fn resolve(
     if name.is_empty() {
         return None;
     }
-    let (base, fed) = base_and_fed(cfg)?;
-    ensure_map(http, &base, &fed).await;
+    let base = base_url(cfg)?;
+    ensure_map(http, &base).await;
 
     let url = {
         let guard = club_map().read().unwrap();
@@ -293,13 +275,10 @@ mod tests {
 
     #[test]
     fn exact_match_is_case_and_space_insensitive() {
-        let m = build_map(
-            vec![club(
-                "BC  Tempelhof (Berlin)",
-                Some("https://badhub.de/assets/logos/42.png"),
-            )],
-            "bvbb",
-        );
+        let m = build_map(vec![club(
+            "BC  Tempelhof (Berlin)",
+            Some("https://badhub.de/assets/logos/42.png"),
+        )]);
         assert_eq!(
             lookup(&m, "bc tempelhof (berlin)").as_deref(),
             Some("https://badhub.de/assets/logos/42.png")
@@ -308,13 +287,10 @@ mod tests {
 
     #[test]
     fn loose_match_ignores_parenthetical_suffix() {
-        let m = build_map(
-            vec![club(
-                "BC Tempelhof (Berlin)",
-                Some("https://badhub.de/assets/logos/42.png"),
-            )],
-            "bvbb",
-        );
+        let m = build_map(vec![club(
+            "BC Tempelhof (Berlin)",
+            Some("https://badhub.de/assets/logos/42.png"),
+        )]);
         // BTP-Name ohne Ortszusatz trifft trotzdem.
         assert_eq!(
             lookup(&m, "BC Tempelhof").as_deref(),
@@ -324,29 +300,26 @@ mod tests {
 
     #[test]
     fn clubs_without_logo_are_skipped() {
-        let m = build_map(
-            vec![club("SV Ohne Logo", None), club("SV Leer", Some("  "))],
-            "bvbb",
-        );
+        let m = build_map(vec![
+            club("SV Ohne Logo", None),
+            club("SV Leer", Some("  ")),
+        ]);
         assert!(lookup(&m, "SV Ohne Logo").is_none());
         assert!(lookup(&m, "SV Leer").is_none());
     }
 
     #[test]
     fn ambiguous_loose_key_is_not_used() {
-        let m = build_map(
-            vec![
-                club(
-                    "Post SV (Berlin)",
-                    Some("https://badhub.de/assets/logos/1.png"),
-                ),
-                club(
-                    "Post SV (Hamburg)",
-                    Some("https://badhub.de/assets/logos/2.png"),
-                ),
-            ],
-            "bvbb",
-        );
+        let m = build_map(vec![
+            club(
+                "Post SV (Berlin)",
+                Some("https://badhub.de/assets/logos/1.png"),
+            ),
+            club(
+                "Post SV (Hamburg)",
+                Some("https://badhub.de/assets/logos/2.png"),
+            ),
+        ]);
         // Exakt funktioniert weiter …
         assert_eq!(
             lookup(&m, "Post SV (Berlin)").as_deref(),
@@ -358,43 +331,31 @@ mod tests {
 
     #[test]
     fn unknown_club_has_no_logo() {
-        let m = build_map(
-            vec![club("A", Some("https://badhub.de/assets/logos/1.png"))],
-            "bvbb",
-        );
+        let m = build_map(vec![club(
+            "A",
+            Some("https://badhub.de/assets/logos/1.png"),
+        )]);
         assert!(lookup(&m, "Völlig Anderer Verein").is_none());
     }
 
     #[test]
-    fn base_and_fed_extracted_from_config() {
-        let cfg = crate::config::BadhubConfig {
-            url: "https://badhub.de/api/live_update.php".into(),
-            password: String::new(),
-            live_url: "https://badhub.de/live?t=bvbb".into(),
-        };
-        assert_eq!(
-            base_and_fed(&cfg),
-            Some(("https://badhub.de".to_string(), "bvbb".to_string()))
-        );
-    }
-
-    #[test]
-    fn base_and_fed_none_without_slug() {
+    fn base_url_is_origin_of_push_url() {
         let cfg = crate::config::BadhubConfig {
             url: "https://badhub.de/api/live_update.php".into(),
             password: String::new(),
             live_url: String::new(),
         };
-        assert_eq!(base_and_fed(&cfg), None);
+        // Verbandsunabhängig: kein Slug nötig, nur die Origin.
+        assert_eq!(base_url(&cfg).as_deref(), Some("https://badhub.de"));
     }
 
     #[test]
-    fn base_and_fed_rejects_unsafe_slug() {
+    fn base_url_none_on_garbage() {
         let cfg = crate::config::BadhubConfig {
-            url: "https://badhub.de/api/live_update.php".into(),
+            url: "not a url".into(),
             password: String::new(),
-            live_url: "https://badhub.de/live?t=../../../etc/passwd".into(),
+            live_url: String::new(),
         };
-        assert_eq!(base_and_fed(&cfg), None);
+        assert_eq!(base_url(&cfg), None);
     }
 }

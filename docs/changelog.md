@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.126
+
+- **Vereinslogos jetzt verbandsübergreifend.** Umgestellt vom verbands-/geogebundenen `clubfinder` auf den
+  neuen öffentlichen `GET /api/v1/club-logos` (alle Landesverbände in einem Aufruf). Damit bekommen auch
+  **Teilnehmer aus anderen LVs** ihr Logo — wichtig bei überregionalen Turnieren. Kein `t=`-Slug mehr
+  nötig (funktioniert, sobald die badhub-URL gesetzt ist).
+
 ## v0.9.125
 
 - **Vereinslogos: richtiger (key-freier) Badhub-Endpoint.** Der zuvor genutzte
