@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.125
+
+- **Vereinslogos: richtiger (key-freier) Badhub-Endpoint.** Der zuvor genutzte
+  `/api/v1/federations/{slug}/clubs` verlangt einen API-Key (→ 401, keine Logos). Umgestellt auf den
+  öffentlichen `GET /api/v1/clubfinder?fed={slug}&limit=200`, der Vereinsname + `logo_url` ohne Key
+  liefert. Damit erscheinen die Logos jetzt tatsächlich.
+
 ## v0.9.124
 
 - **Vereinslogos auf dem Sieger-Monitor.** Neben dem Vereinsnamen erscheint jetzt — sofern vorhanden —
