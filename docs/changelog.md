@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.123
+
+- **Sieger-Monitor: Header + Footer wirklich randlos über die volle Breite.** Header- und Footer-Leiste
+  bekommen zusätzlich `align-self: stretch` + `width: 100%` + `box-sizing: border-box` — damit spannen
+  sie sicher über die gesamte Breite (kein zentrierter Kasten mehr), unabhängig von der Flex-Ausrichtung.
+
 ## v0.9.122
 
 - **Einzel-Monitore: Namen einzeilig + Verein größer.** Im Einzel-Modus steht der ganze Name jetzt in
