@@ -1,7 +1,8 @@
-# Konzept: Native Namensaussprache via Azure Neural TTS (vorab erzeugt + offline)
+# Native Namensaussprache via Azure Neural TTS
 
-> **Status: Konzept/Spike — noch nicht gebaut.** Entscheidungsgrundlage für die
-> hochwertige Ansage. Baut auf der bestehenden Ansage ([announcements.md](announcements.md)) auf.
+> **Status: UMGESETZT in v0.9.112** (On-Demand-Variante, ganze Ansage am Stück, Cache, Fallback).
+> Implementierungsdetails: [announcements.md](announcements.md) → „Azure Neural TTS". Dieses Dokument
+> hält Konzept, Architektur-Entscheidungen und die **Modell-Evaluation** fest.
 
 ## Ziel
 Ausländische Spielernamen (v. a. chinesisch/vietnamesisch, aber auch alle anderen)
@@ -68,7 +69,33 @@ azure_tts: { enabled: bool, region: string, key: string, voice: string }
 3. **Config-UI** (`azure_tts`: enabled/region/key/voice) + Doku + Datenschutz-Hinweis.
 4. *(optional, später)* Offline-Härtung (Vorab-Generierung + Cache), nur falls Hallen-Internet wackelt.
 
+## Modell-Evaluation & Entscheidung (2026-06-18)
+
+Geprüfte Alternativen zu Azure für unseren Bedarf (deutscher Ansage-Rahmen + Namen v. a.
+chinesisch/vietnamesisch **nativ**, in der Halle, Kosten gering):
+
+| Modell | DE/VI/ZH | Pro-Name-Sprache (`<lang>`) | Betrieb | Kosten/Lizenz |
+|---|---|---|---|---|
+| **Azure** (gewählt) | alle drei | **ja** (`<lang>`) | Cloud | **F0 gratis** (0,5 Mio. Zeichen/Monat) |
+| Google **Chirp 3 HD** | alle drei | **nein** (`<lang>` nicht unterstützt; nur `<phoneme>` etc.) | Cloud | GCP + Karte, kostenpflichtig |
+| **Fish Audio S2** | inkl. Vietnamesisch (30+) | unklar / kein SSML-`<lang>` | Self-Host (starke GPU) / Cloud-API | API ~$15/1M Bytes; Weights nicht-kommerziell |
+| **ChatTTS** | **nur EN+ZH** | nein | GPU | CC-BY-NC (nur Forschung) |
+
+**Entscheidung: bei Azure bleiben.** Begründung:
+- **ChatTTS** scheidet aus — kein Deutsch, kein Vietnamesisch.
+- **Chirp 3 HD** klingt sehr natürlich, kann aber **kein `<lang>`** → ausländische Namen nicht nativ
+  mitten im deutschen Satz (nur über Umwege: Einzel-Synthese+Stückeln oder IPA via `<phoneme>`).
+- **Fish Audio** ist ausdrucksstark und kann Vietnamesisch, aber Self-Host braucht eine starke GPU
+  (auf dem Turnier-PC unrealistisch), die offenen Weights sind **nicht-kommerziell**, und die Cloud-API
+  **kostet laufend**; Pro-Name-Steuerung unklar.
+- **Azure** ist das **einzige** mit sauberer Pro-Name-Sprachsteuerung (`<lang>`) über alle drei Sprachen
+  **und** mit einem **Gratis-Tarif (F0)**, der unser Turnier-Volumen abdeckt.
+- Re-evaluieren erst, wenn ein Anbieter ein `<lang>`-Äquivalent **und** einen Gratis-Tier bietet.
+
+Für reine Höreindrücke: Web-Demos genügen (Google „Try it" ohne Account; ElevenLabs Free-Tier ohne
+Karte). Referenz-Höhrprobe unserer Azure-Lösung: lokal erzeugbar / `~/Downloads/tts_PROD_ssml.mp3`.
+
 ## Bezug
-- Sprach-Erkennung: `src/io/transliterate.ts` `detectNameLang` (zh/vn — für Azure auf zh-CN/vi-VN
-  mappen; weitere Sprachen ergänzbar).
+- Sprach-Erkennung: `src/io/transliterate.ts` `detectNameLang` (zh/vn → für Azure auf zh-CN/vi-VN
+  gemappt; weitere Sprachen ergänzbar).
 - Fallback-Ansage: `src/io/announcer.ts` (Web Speech + Wörterbuch + Regel-Engine) bleibt vollständig erhalten.
