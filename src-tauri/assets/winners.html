@@ -93,15 +93,18 @@ main {
 .bronze .block { height: 16vh; background: linear-gradient(180deg, #e0a06a, #b45309); color: #1a0f00; }
 
 /* ── Einzel-Modus (ein Rang pro Monitor) ─────────────────────────────── */
-body.solo main { align-items: center; padding: 0 5vw 3vh; }
+/* Einzel-Modus zentriert; overflow:hidden schützt den Footer (Inhalt kann nie
+   darüber/darunter laufen, auch nicht bei zwei dritten Plätzen). */
+body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
 .solo {
   display: flex; flex-direction: column; align-items: center; text-align: center;
-  gap: 1vh; animation: rise .6s cubic-bezier(.2,.8,.2,1) both; max-width: 90vw;
+  justify-content: center; gap: .8vh;
+  animation: rise .6s cubic-bezier(.2,.8,.2,1) both; max-width: 94vw;
 }
-.solo-medal { font-size: 22vmin; line-height: 1; }
+.solo-medal { font-size: 14vmin; line-height: 1; }
 .solo-rank {
-  font-size: 5vmin; font-weight: 900; text-transform: uppercase; letter-spacing: .05em;
-  margin-bottom: 1.5vh;
+  font-size: 4.6vmin; font-weight: 900; text-transform: uppercase; letter-spacing: .05em;
+  margin-bottom: 1vh;
 }
 .solo.gold   .solo-rank { color: #fbbf24; }
 .solo.silver .solo-rank { color: #cbd5e1; }
@@ -109,12 +112,20 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
 .solo-entry { margin: 1vh 0; }
 /* Einzel-TV (ein Platz): zweizeilig, sehr groß. `.duo` (Doppel) kompakter. */
 .solo-names {
-  font-size: 12vmin; color: #f8fafc; line-height: 1.04;
+  font-size: 13vmin; color: #f8fafc; line-height: 1.04;
   display: flex; flex-direction: column; align-items: center; gap: .8vh;
 }
-.solo-names.duo { font-size: 7.5vmin; }
-.solo .pl { margin: .5vh 0; }
+.solo-names.duo { font-size: 8vmin; }
+.solo .pl { margin: .4vh 0; }
 .solo-club { font-size: 4vmin; color: #94a3b8; margin-top: .6vh; }
+/* Zwei dritte Plätze auf einem TV (only=3 ohne Spiel um Platz 3) → alles
+   kompakter, damit beide Paare samt Footer sicher auf den Schirm passen. */
+.solo.multi .solo-medal { font-size: 10vmin; }
+.solo.multi .solo-rank  { margin-bottom: .4vh; }
+.solo.multi .solo-entry { margin: .4vh 0; }
+.solo.multi .solo-names      { font-size: 7vmin; }
+.solo.multi .solo-names.duo  { font-size: 5vmin; }
+.solo.multi .solo-club  { font-size: 3vmin; margin-top: .3vh; }
 
 .idle {
   height: 100%; display: flex; flex-direction: column;
@@ -182,10 +193,11 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
     }).join(' ');
   }
 
-  // EIN Spieler als zweizeiliges Element: Vorname (gekürzt) über Nachname.
+  // EIN Spieler als zweizeiliges Element: Vorname über Nachname.
   // Nutzt getrennte first/last (BTP); Fallback: kombinierten Namen am letzten
-  // Wort trennen (nur wenn first/last fehlen).
-  function playerNameEl(x) {
+  // Wort trennen (nur wenn first/last fehlen). `full=true` (Einzel-Monitor,
+  // viel Platz) → Vornamen ausschreiben; sonst Mittelnamen kürzen (Podium eng).
+  function playerNameEl(x, full) {
     var first = (x.first || '').trim();
     var last = (x.last || '').trim();
     if (!first && !last) {
@@ -193,7 +205,7 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
       last = parts.length ? parts.pop() : '';
       first = parts.join(' ');
     }
-    var given = shortenGiven(first);
+    var given = full ? first : shortenGiven(first);
     var pl = h('div', 'pl');
     if (given) pl.appendChild(h('div', 'given', given));
     pl.appendChild(h('div', 'fam', last || given || '—'));
@@ -267,11 +279,12 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
     if (places.length === 0) {
       box.appendChild(h('div', 'solo-names', '—'));
     } else {
+      if (places.length > 1) box.classList.add('multi');
       places.forEach(function (place) {
         var players = place.players || [];
         var entry = h('div', 'solo-entry');
         var names = h('div', 'solo-names' + (players.length > 1 ? ' duo' : ''));
-        players.forEach(function (x) { names.appendChild(playerNameEl(x)); });
+        players.forEach(function (x) { names.appendChild(playerNameEl(x, true)); });
         if (!players.length) names.appendChild(h('div', 'fam', '—'));
         if (place.walkover) names.appendChild(h('span', 'wo', '(kampflos)'));
         entry.appendChild(names);

@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.120
+
+- **Sieger-Einzel-TVs: bessere Darstellung + Footer-Fix.** Im Solo-Modus (`?only=1|2|3`) wird die
+  Disziplin-Leiste (Footer) nicht mehr vom Inhalt überlappt/halb abgeschnitten — der Einzel-Bereich
+  bekommt `overflow:hidden`, sodass der Footer immer voll sichtbar bleibt. Die Medaille ist kleiner
+  (14vmin statt 22) und damit weniger top-lastig; dafür sind die Namen größer (Einzel 13vmin, Doppel
+  8vmin). **Namen werden im Einzel-Modus ausgeschrieben** (kein Mittelnamen-Kürzen, da ein TV nur einen
+  Platz zeigt → viel Platz). Der Sonderfall „zwei dritte Plätze auf einem TV" (`?only=3` ohne Spiel um
+  Platz 3) skaliert automatisch kompakter (`multi`-Modus), damit beide Paare samt Footer sicher passen.
+
 ## v0.9.119
 
 - **Sieger-Einzel-TVs (ein Platz pro Monitor) auch zweizeilig + größer.** Der Solo-Modus (`?only=1|2|3`,
