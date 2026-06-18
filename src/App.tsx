@@ -21,6 +21,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
+import { WinnersPage } from "./pages/WinnersPage";
 import type { AppConfig, InternetStatus, SyncStatus, WifiStatus } from "./types";
 
 // "loading"/"wizard" sind Sonderzustände ohne Shell; alles andere sind die
@@ -269,6 +270,8 @@ function App() {
         );
       case "monitors":
         return <CourtMonitorPanel config={config} />;
+      case "winners":
+        return <WinnersPage />;
       case "settings":
         // Hinweis: SetupWizard liest seine Felder einmalig aus initialConfig.
         // Das ist sicher, weil `config` nur beim Speichern (onDone) wechselt –
