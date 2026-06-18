@@ -381,8 +381,9 @@ Anzeige (`winners.html`):
   über die **volle Breite**. Footer zweizeilig: **Turniername** (klein) über der
   **Disziplin** (groß).
 - **Vereinslogos** neben dem Vereinsnamen (sofern in Badhub vorhanden):
-  - Quelle: `GET {base}/api/v1/federations/{slug}/clubs` → `{name, logo_url}`.
-    `base` = Origin aus `badhub.url`, `slug` = `t`-Param aus `badhub.live_url`.
+  - Quelle: `GET {base}/api/v1/clubfinder?fed={slug}&limit=200` (key-frei) →
+    `{clubs:[{name, logo_url}]}`. `base` = Origin aus `badhub.url`, `slug` =
+    `t`-Param aus `badhub.live_url`. (`/federations/{slug}/clubs` braucht Key.)
   - Backend `tablet/club_logos.rs` matcht den BTP-Vereinsnamen (exakt → lose ohne
     Klammerzusatz; mehrdeutige lose Treffer werden verworfen) und cacht
     Vereinsliste (6 h / 60 s bei Fehler) + Bildbytes; Endpoint

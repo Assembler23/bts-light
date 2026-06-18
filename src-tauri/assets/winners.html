@@ -100,9 +100,11 @@ main {
 /* Verein mit optionalem Logo davor. `.club-logo` skaliert über `em` mit der
    jeweiligen Vereins-Schriftgröße (Podium `.club` / Einzel `.solo-club`).
    Fehlt das Logo, entfernt JS das <img> → nur der Name bleibt. */
-.club-item { display: inline-flex; align-items: center; gap: .35em; }
+.club-item { display: inline-flex; align-items: center; gap: .4em; }
+/* Logo bewusst größer als die Vereins-Schrift (≈1.8×), damit es gut erkennbar
+   ist. Skaliert per `em` mit der jeweiligen Vereins-Schriftgröße. */
 .club-logo {
-  height: 1.25em; width: auto; max-width: 2.4em;
+  height: 1.8em; width: auto; max-width: 3.4em;
   object-fit: contain; vertical-align: middle;
 }
 

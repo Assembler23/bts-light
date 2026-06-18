@@ -1,7 +1,8 @@
 //! Vereinslogos vom Badhub holen und für den Sieger-Monitor bereitstellen.
 //!
-//! Badhub liefert pro Verband eine offene Liste
-//! `GET {base}/api/v1/federations/{slug}/clubs` → `[{name, logo_url}, …]`.
+//! Badhub liefert pro Verband eine offene (key-freie) Liste über
+//! `GET {base}/api/v1/clubfinder?fed={slug}` → `{ "clubs": [{name, logo_url}, …] }`.
+//! (Der `/federations/{slug}/clubs`-Endpoint verlangt dagegen einen API-Key.)
 //! Wir matchen den BTP-Vereinsnamen (den bts-light kennt) gegen diese Liste
 //! und liefern das Logo über einen lokalen Endpoint aus — so funktioniert es
 //! auch auf reinen LAN-TVs ohne eigenes Internet (der Turnier-PC holt das Bild,
@@ -41,6 +42,13 @@ impl ClubMap {
     fn is_empty(&self) -> bool {
         self.exact.is_empty() && self.loose.is_empty()
     }
+}
+
+/// Antwort von `clubfinder`: `{ "clubs": [ … ] }`.
+#[derive(Deserialize)]
+struct ClubfinderResp {
+    #[serde(default)]
+    clubs: Vec<ApiClub>,
 }
 
 #[derive(Deserialize)]
@@ -180,13 +188,15 @@ async fn ensure_map(http: &reqwest::Client, base: &str, fed: &str) {
     if !stale {
         return;
     }
-    let url = format!("{base}/api/v1/federations/{fed}/clubs");
+    // `limit=200` = Maximum des clubfinder-Endpoints (Default wären nur 50 →
+    // größere Verbände blieben unvollständig). 200 deckt jeden LV ab.
+    let url = format!("{base}/api/v1/clubfinder?fed={fed}&limit=200");
     let fetched = async {
         let resp = http.get(&url).send().await.ok()?;
         if !resp.status().is_success() {
             return None;
         }
-        resp.json::<Vec<ApiClub>>().await.ok()
+        resp.json::<ClubfinderResp>().await.ok().map(|r| r.clubs)
     }
     .await;
     let map = match fetched {
