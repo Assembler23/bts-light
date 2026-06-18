@@ -307,18 +307,27 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     }
     stage.appendChild(box);
     // Nach dem Layout die Namen auf die volle Breite skalieren (s. fitSolo).
-    requestAnimationFrame(fitSolo);
+    // Double-rAF: erst nach dem Layout-Commit messen — auf dem Pi (feste
+    // Auflösung, kein späteres resize-Event) ist scrollWidth im ersten Frame
+    // sonst 0 und die Schrift bliebe falsch.
+    requestAnimationFrame(function () { requestAnimationFrame(fitSolo); });
   }
 
   // Einzel-Monitor: Namen so groß wie möglich — kurze Namen werden durch die
   // Höhe begrenzt, lange schrumpfen exakt auf ~94 % der Breite. Dadurch wird
   // (anders als bei fixen vmin-Größen) die gesamte TV-Breite genutzt.
   function fitSolo() {
-    var main = document.querySelector('main');
+    var main = document.getElementById('stage');
     var box = main && main.querySelector('.solo');
     if (!box) return;
     var blocks = box.querySelectorAll('.solo-names');
     if (!blocks.length) return;
+    // Layout noch nicht bereit (erster Frame / Pi) → später erneut messen,
+    // sonst kollabieren die Größen auf 0.
+    if (!main.clientWidth || !main.clientHeight) {
+      requestAnimationFrame(fitSolo);
+      return;
+    }
     var maxW = main.clientWidth * 0.94;
     var multi = box.classList.contains('multi');
     // Höhen-Obergrenze je Namensblock, damit ein kurzer Name nicht absurd
@@ -335,11 +344,14 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
         el.style.fontSize = Math.floor(parseFloat(el.style.fontSize) * maxW / w) + 'px';
       }
     });
-    // 2) Übersteigt die Gesamthöhe (Doppel / zwei Plätze) das main, alles
-    //    gleichmäßig herunterskalieren — Footer bleibt unangetastet.
-    var avail = main.clientHeight * 0.98;
-    if (box.scrollHeight > avail) {
-      var f = avail / box.scrollHeight;
+    // 2) Höhe: NUR die Namen werden skaliert — daher die Resthöhe (Medaille,
+    //    Rang, Vereine, Abstände) abziehen und die Namen exakt auf den dann
+    //    verbleibenden Platz herunterskalieren (Footer bleibt unangetastet).
+    var blocksH = 0;
+    blocks.forEach(function (el) { blocksH += el.offsetHeight; });
+    var avail = main.clientHeight * 0.98 - (box.scrollHeight - blocksH);
+    if (avail > 0 && blocksH > avail) {
+      var f = avail / blocksH;
       blocks.forEach(function (el) {
         el.style.fontSize = Math.floor(parseFloat(el.style.fontSize) * f) + 'px';
       });
