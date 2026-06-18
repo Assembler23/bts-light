@@ -80,9 +80,14 @@ chinesisch/vietnamesisch **nativ**, in der Halle, Kosten gering):
 | Google **Chirp 3 HD** | alle drei | **nein** (`<lang>` nicht unterstützt; nur `<phoneme>` etc.) | Cloud | GCP + Karte, kostenpflichtig |
 | **Fish Audio S2** | inkl. Vietnamesisch (30+) | unklar / kein SSML-`<lang>` | Self-Host (starke GPU) / Cloud-API | API ~$15/1M Bytes; Weights nicht-kommerziell |
 | **ChatTTS** | **nur EN+ZH** | nein | GPU | CC-BY-NC (nur Forschung) |
+| **Kokoro** (82M) | **kein DE, kein VI** (nur ZH/EN/ES/FR/HI/IT/JA/PT) | nein (lang_code je Generierung) | **CPU/Mac, offline** | **Apache, gratis, kommerziell** |
 
 **Entscheidung: bei Azure bleiben.** Begründung:
 - **ChatTTS** scheidet aus — kein Deutsch, kein Vietnamesisch.
+- **Kokoro** (82M, geprüft 2026-06-18) ist technisch top — winzig, CPU/Mac-**offline**, **Apache**
+  (gratis + kommerziell). Aber **kein Deutsch** (unser Ansage-Rahmen ist deutsch → Show-Stopper),
+  **kein Vietnamesisch**, keine Sprachmischung im Satz → **ungeeignet**. Mit DE+VI wäre es ein
+  starker Offline-Kandidat fürs Verleih-Kit gewesen.
 - **Chirp 3 HD** klingt sehr natürlich, kann aber **kein `<lang>`** → ausländische Namen nicht nativ
   mitten im deutschen Satz (nur über Umwege: Einzel-Synthese+Stückeln oder IPA via `<phoneme>`).
 - **Fish Audio** ist ausdrucksstark und kann Vietnamesisch, aber Self-Host braucht eine starke GPU
@@ -91,6 +96,13 @@ chinesisch/vietnamesisch **nativ**, in der Halle, Kosten gering):
 - **Azure** ist das **einzige** mit sauberer Pro-Name-Sprachsteuerung (`<lang>`) über alle drei Sprachen
   **und** mit einem **Gratis-Tarif (F0)**, der unser Turnier-Volumen abdeckt.
 - Re-evaluieren erst, wenn ein Anbieter ein `<lang>`-Äquivalent **und** einen Gratis-Tier bietet.
+
+**Ranking-Sichtung (Artificial Analysis, 2026-06-18):** Das Quality/Preis-Ranking misst nicht unser
+Nadelöhr (Namen nativ im dt. Satz). Sprachlich passende Spitzenreiter sind **Google Gemini 3.1 Flash TTS**
+(70+ Sprachen inkl. DE/VI) und **ElevenLabs** (VI seit kurzem) — beide aber **ohne deterministische
+Pro-Name-Sprachsteuerung** (nur Auto-Code-Switching / Prompt-Tags; ElevenLabs v2/v3 ohne SSML-Phoneme)
+und **kostenpflichtig**. Kein Wechselgrund. Optional: Gemini Flash TTS gratis in Google AI Studio
+gegenhören, falls man Natürlichkeit jagt.
 
 Für reine Höreindrücke: Web-Demos genügen (Google „Try it" ohne Account; ElevenLabs Free-Tier ohne
 Karte). Referenz-Höhrprobe unserer Azure-Lösung: lokal erzeugbar / `~/Downloads/tts_PROD_ssml.mp3`.
