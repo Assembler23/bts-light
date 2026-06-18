@@ -1404,4 +1404,175 @@ mod tests {
         assert!(!match_decided(5, &[(21, 1), (21, 2)])); // 2:0 in Bo5 – noch offen
         assert!(match_decided(5, &[(21, 1), (21, 2), (21, 3)])); // 3:0 – entschieden
     }
+
+    /// Regression (v0.9.113): Nach einem Ergebnis muss `process_result` das Feld
+    /// in BTP freigeben (Court ohne MatchID + Match.CourtID=0), sonst bleiben die
+    /// Spieler in BTP „auf dem Feld" (nicht wieder rot/verfügbar). Wir fahren
+    /// einen Mock-BTP hoch und prüfen, dass GENAU ZWEI SENDUPDATEs kommen:
+    /// das Ergebnis UND die Feldfreigabe.
+    #[tokio::test]
+    async fn process_result_frees_court_in_btp() {
+        use super::*;
+        use crate::btp::model::{BtpPlayer, BtpSnapshot, Discipline, MatchResult, ScoringFormat};
+        use crate::btp::wire;
+        use crate::btp::xml::{self, Node, Value};
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        // Antwort-Frame im BTP-Format: Action{ID=REPLY, Result=1, [extra]}.
+        fn reply(extra: Vec<Node>) -> Vec<u8> {
+            let mut c = vec![Node::string("ID", "REPLY"), Node::integer("Result", 1)];
+            c.extend(extra);
+            wire::encode_message(&xml::encode(&[Node::group("Action", c)]))
+        }
+
+        let recorded: Arc<Mutex<Vec<Vec<Node>>>> = Arc::new(Mutex::new(Vec::new()));
+        let rec = recorded.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Mock-BTP: LOGIN -> Session, SENDUPDATE -> aufzeichnen + bestätigen.
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut header = [0u8; 4];
+                if sock.read_exact(&mut header).await.is_err() {
+                    continue;
+                }
+                let len = i32::from_be_bytes(header) as usize;
+                let mut payload = vec![0u8; len];
+                if sock.read_exact(&mut payload).await.is_err() {
+                    continue;
+                }
+                let mut full = header.to_vec();
+                full.extend_from_slice(&payload);
+                let nodes = proto::decode_response(&full).unwrap();
+                let action = xml::find(&nodes, "Action").unwrap();
+                let id = xml::find(action.children(), "ID")
+                    .and_then(Node::value)
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if id == "LOGIN" {
+                    sock.write_all(&reply(vec![Node::string("Unicode", "SESSION")]))
+                        .await
+                        .unwrap();
+                } else {
+                    // SENDUPDATE: erst aufzeichnen, dann bestätigen.
+                    rec.lock().unwrap().push(nodes.clone());
+                    sock.write_all(&reply(vec![])).await.unwrap();
+                }
+            }
+        });
+
+        // TabletState mit einem Match (id 42) auf Court 101 (OnCourt).
+        let player = |n: &str| BtpPlayer {
+            name: n.to_string(),
+            first: String::new(),
+            last: n.to_string(),
+            member_id: None,
+            nationality: None,
+        };
+        let m = BtpMatch {
+            id: 42,
+            draw_id: 7,
+            planning_id: 1001,
+            draw_name: "HE".into(),
+            discipline: Discipline::MensSingles,
+            round_name: "G1".into(),
+            match_num: Some(1),
+            planned_time: None,
+            team1: vec![player("A")],
+            team2: vec![player("B")],
+            entry1_id: 0,
+            entry2_id: 0,
+            court: Some("1".into()),
+            court_id: Some(101),
+            sets: vec![],
+            winner: None,
+            result: MatchResult::Normal,
+            status: MatchStatus::OnCourt,
+            finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
+            scoring: ScoringFormat::default(),
+        };
+        let tablet = Arc::new(TabletState::default());
+        tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![m],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+        });
+
+        let mut config = AppConfig::default();
+        config.btp.host = "127.0.0.1".into();
+        config.btp.port = port;
+        config.btp.password = None;
+        let tmp = std::env::temp_dir();
+        let ctx = ServerCtx::new(
+            tablet,
+            config,
+            reqwest::Client::new(),
+            tmp.clone(),
+            tmp.join("bts_test_config.json"),
+            tmp.join("bts_test_assign.json"),
+            tmp.clone(),
+        );
+
+        let body = ResultBody {
+            match_id: 42,
+            court_id: 101,
+            court_label: "1".into(),
+            sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 21, b: 15 }],
+            retired: false,
+            walkover: false,
+            winner: None,
+            cascade_walkover: false,
+        };
+
+        let resp = process_result(&ctx, &body).await;
+        assert!(
+            resp.ok,
+            "Ergebnis sollte erfolgreich sein: {:?}",
+            resp.error
+        );
+
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(
+            reqs.len(),
+            2,
+            "Erwartet: Ergebnis + Feldfreigabe = 2 SENDUPDATE, war {}",
+            reqs.len()
+        );
+
+        // Zweiter SENDUPDATE = Feldfreigabe.
+        let upd = xml::find(&reqs[1], "Update").expect("Update");
+        let tour = xml::find(upd.children(), "Tournament").expect("Tournament");
+        // Court 101 OHNE MatchID.
+        let courts = xml::find(tour.children(), "Courts").expect("Courts-Block (Feldfreigabe)");
+        let court = xml::find(courts.children(), "Court").expect("Court");
+        assert_eq!(
+            xml::find(court.children(), "ID")
+                .and_then(Node::value)
+                .and_then(Value::as_int),
+            Some(101)
+        );
+        assert!(
+            xml::find(court.children(), "MatchID").is_none(),
+            "frei = Court ohne MatchID"
+        );
+        // Match.CourtID = 0 (Feldzuordnung am Match gelöscht).
+        let matches = xml::find(tour.children(), "Matches").expect("Matches");
+        let mnode = xml::find(matches.children(), "Match").expect("Match");
+        assert_eq!(
+            xml::find(mnode.children(), "CourtID")
+                .and_then(Node::value)
+                .and_then(Value::as_int),
+            Some(0)
+        );
+    }
 }

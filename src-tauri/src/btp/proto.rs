@@ -568,5 +568,36 @@ mod tests {
         // Kein Ergebnis: weder Winner noch Sets dürfen mitgehen.
         assert!(xml::find(&m, "Winner").is_none());
         assert!(xml::find(&m, "Sets").is_none());
+        // Regression (v0.9.103): NIEMALS das Status-Bitfeld schreiben.
+        assert!(
+            xml::find(&m, "Status").is_none(),
+            "kein Status (Check-in-Bitfeld)"
+        );
+    }
+
+    /// Regression: Ein freigegebenes Feld muss als `Court` OHNE `MatchID`
+    /// geschrieben werden (MatchID weglassen = frei). Sonst bliebe das Feld in
+    /// BTP belegt und die Spieler nicht wieder verfügbar (rot).
+    #[test]
+    fn court_assign_free_court_omits_matchid() {
+        let req = court_assign_request(
+            &[CourtAssignment {
+                court_id: 101,
+                match_id: None,
+            }],
+            &[],
+            "S",
+            None,
+        );
+        let nodes = decode_response(&req).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        let courts = xml::find(tournament.children(), "Courts").expect("Courts-Block");
+        let court = xml::find(courts.children(), "Court").expect("Court");
+        assert_eq!(child_int(court.children(), "ID"), Some(101));
+        assert!(
+            xml::find(court.children(), "MatchID").is_none(),
+            "frei = Court ohne MatchID"
+        );
     }
 }
