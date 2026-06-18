@@ -97,6 +97,15 @@ main {
 .silver .club, .bronze .club { font-size: 3.3vmin; }
 .wo { color: #f59e0b; font-weight: 700; }
 
+/* Verein mit optionalem Logo davor. `.club-logo` skaliert über `em` mit der
+   jeweiligen Vereins-Schriftgröße (Podium `.club` / Einzel `.solo-club`).
+   Fehlt das Logo, entfernt JS das <img> → nur der Name bleibt. */
+.club-item { display: inline-flex; align-items: center; gap: .35em; }
+.club-logo {
+  height: 1.25em; width: auto; max-width: 2.4em;
+  object-fit: contain; vertical-align: middle;
+}
+
 /* Zwei dritte Plätze: zweiter Name als zusätzlicher Block im selben Spot. */
 .spot .second-third { margin-top: 1.4vh; padding-top: 1.2vh; border-top: .2vmin dashed #475569; }
 
@@ -246,12 +255,43 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     if (place.walkover) wrap.appendChild(h('span', 'wo', '(kampflos)'));
     return wrap;
   }
-  function teamClubs(p) {
+  // Verschiedene Vereine eines Platzes (Doppel: bis zu 2).
+  function clubList(p) {
     var clubs = [];
     (p.players || []).forEach(function (x) {
       if (x.club && clubs.indexOf(x.club) < 0) clubs.push(x.club);
     });
-    return clubs.join(' · ');
+    return clubs;
+  }
+
+  // Vereinslogo vom lokalen Server (der holt es von Badhub). Gibt es kein Logo
+  // (kein Treffer / Verein ohne Logo / kein Internet → 404), entfernt `onerror`
+  // das Bild: dann steht NUR der Name da, kein Platzhalter.
+  function clubLogoImg(name) {
+    var img = document.createElement('img');
+    img.className = 'club-logo';
+    img.alt = '';
+    img.src = '/info/club-logo?name=' + encodeURIComponent(name);
+    img.onerror = function () { if (img.parentNode) img.parentNode.removeChild(img); };
+    // Logos laden asynchron → im Einzel-Modus nach dem Laden neu einpassen,
+    // damit die Höhenrechnung den jetzt sichtbaren Logo-Platz berücksichtigt.
+    img.onload = function () { if (onlyRank) requestAnimationFrame(fitSolo); };
+    return img;
+  }
+
+  // Vereins-Zeile: je Verein [Logo] + Name, mit „ · " getrennt. `null` ohne Verein.
+  function clubsEl(p, cls) {
+    var clubs = clubList(p);
+    if (!clubs.length) return null;
+    var wrap = h('div', cls);
+    clubs.forEach(function (name, i) {
+      if (i) wrap.appendChild(document.createTextNode(' · '));
+      var item = h('span', 'club-item');
+      item.appendChild(clubLogoImg(name));
+      item.appendChild(document.createTextNode(name));
+      wrap.appendChild(item);
+    });
+    return wrap;
   }
 
   // Einen Podest-Block (Gold/Silber/Bronze) bauen. `extra` = optionaler
@@ -261,14 +301,14 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     s.appendChild(h('div', 'medal', medal));
     if (place) {
       s.appendChild(namesEl(place));
-      var club = teamClubs(place);
-      if (club) s.appendChild(h('div', 'club', club));
+      var club = clubsEl(place, 'club');
+      if (club) s.appendChild(club);
     }
     if (extra) {
       var wrap = h('div', 'second-third');
       wrap.appendChild(namesEl(extra));
-      var c2 = teamClubs(extra);
-      if (c2) wrap.appendChild(h('div', 'club', c2));
+      var c2 = clubsEl(extra, 'club');
+      if (c2) wrap.appendChild(c2);
       s.appendChild(wrap);
     }
     s.appendChild(h('div', 'block', String(rank)));
@@ -319,8 +359,8 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
         if (!players.length) names.appendChild(h('div', 'pl-line', '—'));
         if (place.walkover) names.appendChild(h('span', 'wo', '(kampflos)'));
         entry.appendChild(names);
-        var club = teamClubs(place);
-        if (club) entry.appendChild(h('div', 'solo-club', club));
+        var club = clubsEl(place, 'solo-club');
+        if (club) entry.appendChild(club);
         box.appendChild(entry);
       });
     }

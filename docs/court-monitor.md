@@ -380,6 +380,16 @@ Anzeige (`winners.html`):
 - Layout = Flex-Spalte (wie `overview.html`): Header / `main` / Footer jeweils
   über die **volle Breite**. Footer zweizeilig: **Turniername** (klein) über der
   **Disziplin** (groß).
+- **Vereinslogos** neben dem Vereinsnamen (sofern in Badhub vorhanden):
+  - Quelle: `GET {base}/api/v1/federations/{slug}/clubs` → `{name, logo_url}`.
+    `base` = Origin aus `badhub.url`, `slug` = `t`-Param aus `badhub.live_url`.
+  - Backend `tablet/club_logos.rs` matcht den BTP-Vereinsnamen (exakt → lose ohne
+    Klammerzusatz; mehrdeutige lose Treffer werden verworfen) und cacht
+    Vereinsliste (6 h / 60 s bei Fehler) + Bildbytes; Endpoint
+    `GET /info/club-logo?name=…` liefert das Bild lokal aus (auch für LAN-TVs ohne
+    Internet). SSRF-sicher: Bild-Origin == badhub-Origin; Slug streng validiert.
+  - Kein Treffer / kein Logo / offline → `<img onerror>` entfernt sich, es bleibt
+    **nur der Name** (kein Platzhalter).
 - Sonderfall „zwei dritte Plätze" (kein Spiel um Platz 3): `?only=3` zeigt beide
   Paare kompakter (`multi`-Modus).
 

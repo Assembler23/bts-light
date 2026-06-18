@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.124
+
+- **Vereinslogos auf dem Sieger-Monitor.** Neben dem Vereinsnamen erscheint jetzt — sofern vorhanden —
+  das **Vereinslogo aus Badhub**. Der Turnier-PC holt einmalig die Vereinsliste des Verbands
+  (`/api/v1/federations/{slug}/clubs`, Slug aus der `live_url`), matcht den BTP-Vereinsnamen (exakt, mit
+  konservativer Locker-Variante ohne Ortszusatz) und liefert das Logo über einen lokalen Endpoint
+  `/info/club-logo` aus — funktioniert damit auch auf reinen LAN-TVs ohne eigenes Internet. **Gibt es
+  kein Logo** (kein Treffer, Verein ohne Logo, oder offline) → es wird **gar kein Logo** angezeigt, nur
+  der Name. Logos werden gecacht; Bild-Abruf ist auf die badhub-Origin beschränkt (SSRF-sicher).
+
 ## v0.9.123
 
 - **Sieger-Monitor: Header + Footer wirklich randlos über die volle Breite.** Header- und Footer-Leiste
