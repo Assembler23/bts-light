@@ -1378,4 +1378,26 @@ mod tests {
         let text = "    Name                   : WLAN\n    State                  : disconnected";
         assert_eq!(parse_netsh_ssid(text), None);
     }
+
+    #[test]
+    fn parse_netsh_ssid_does_not_match_bssid_alone() {
+        // Nur eine BSSID-Zeile (MAC) → das ist KEINE SSID. Guard gegen die
+        // dokumentierte BSSID/SSID-Verwechslung.
+        let text = "    BSSID                  : 00:11:22:33:44:55";
+        assert_eq!(parse_netsh_ssid(text), None);
+    }
+
+    #[test]
+    fn parse_netsh_ssid_skips_empty_value() {
+        // Leerer SSID-Wert (Übergangszustand) zählt nicht als verbunden.
+        let text = "    SSID                   : \n    BSSID                  : 00:11:22:33:44:55";
+        assert_eq!(parse_netsh_ssid(text), None);
+    }
+
+    #[test]
+    fn parse_netsh_ssid_preserves_colon_in_name() {
+        // Doppelpunkt im Netznamen bleibt erhalten (Split nur am ersten ':').
+        let text = "    SSID                   : Halle:2 5G";
+        assert_eq!(parse_netsh_ssid(text), Some("Halle:2 5G".to_string()));
+    }
 }

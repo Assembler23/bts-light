@@ -1382,7 +1382,166 @@ pub(crate) async fn handle_score(
 
 #[cfg(test)]
 mod tests {
-    use super::match_decided;
+    use super::*;
+    use crate::btp::model::{BtpPlayer, BtpSnapshot, Discipline, MatchResult, ScoringFormat};
+    use crate::btp::wire;
+    use crate::btp::xml::{self, Node, Value};
+    use crate::config::BtpConfig;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    // ───────────────────────── Test-Helfer (BTP-Ergebnis-Pfad) ──────────────
+
+    /// Antwort-Frame im BTP-Format: Action{ID=REPLY, Result=1, [extra]}.
+    fn mock_reply(extra: Vec<Node>) -> Vec<u8> {
+        let mut c = vec![Node::string("ID", "REPLY"), Node::integer("Result", 1)];
+        c.extend(extra);
+        wire::encode_message(&xml::encode(&[Node::group("Action", c)]))
+    }
+
+    /// Mock-BTP: LOGIN → Session, SENDUPDATE → aufzeichnen + bestätigen.
+    /// Liefert Port und den Aufzeichnungs-Puffer der SENDUPDATE-Requests.
+    async fn spawn_mock_btp() -> (u16, Arc<Mutex<Vec<Vec<Node>>>>) {
+        let recorded: Arc<Mutex<Vec<Vec<Node>>>> = Arc::new(Mutex::new(Vec::new()));
+        let rec = recorded.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut header = [0u8; 4];
+                if sock.read_exact(&mut header).await.is_err() {
+                    continue;
+                }
+                let len = i32::from_be_bytes(header) as usize;
+                let mut payload = vec![0u8; len];
+                if sock.read_exact(&mut payload).await.is_err() {
+                    continue;
+                }
+                let mut full = header.to_vec();
+                full.extend_from_slice(&payload);
+                let nodes = proto::decode_response(&full).unwrap();
+                let action = xml::find(&nodes, "Action").unwrap();
+                let id = xml::find(action.children(), "ID")
+                    .and_then(Node::value)
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if id == "LOGIN" {
+                    sock.write_all(&mock_reply(vec![Node::string("Unicode", "SESSION")]))
+                        .await
+                        .unwrap();
+                } else {
+                    rec.lock().unwrap().push(nodes.clone());
+                    sock.write_all(&mock_reply(vec![])).await.unwrap();
+                }
+            }
+        });
+        (port, recorded)
+    }
+
+    fn player(n: &str) -> BtpPlayer {
+        BtpPlayer {
+            name: n.to_string(),
+            first: String::new(),
+            last: n.to_string(),
+            member_id: None,
+            nationality: None,
+        }
+    }
+
+    /// Match id=42 auf Court 101 (OnCourt), zwei Einzel-Spieler.
+    fn match_on_court() -> BtpMatch {
+        BtpMatch {
+            id: 42,
+            draw_id: 7,
+            planning_id: 1001,
+            draw_name: "HE".into(),
+            discipline: Discipline::MensSingles,
+            round_name: "G1".into(),
+            match_num: Some(1),
+            planned_time: None,
+            team1: vec![player("A")],
+            team2: vec![player("B")],
+            entry1_id: 0,
+            entry2_id: 0,
+            court: Some("1".into()),
+            court_id: Some(101),
+            sets: vec![],
+            winner: None,
+            result: MatchResult::Normal,
+            status: MatchStatus::OnCourt,
+            finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
+            scoring: ScoringFormat::default(),
+        }
+    }
+
+    /// ServerCtx mit Match 42 auf Court 101; BTP zeigt auf 127.0.0.1:`port`.
+    /// Für Ablehnungs-Tests genügt ein toter Port (es kommt nie zum Schreiben).
+    fn make_ctx(port: u16) -> ServerCtx {
+        let tablet = Arc::new(TabletState::default());
+        tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+        });
+        let config = AppConfig {
+            btp: BtpConfig {
+                host: "127.0.0.1".into(),
+                port,
+                password: None,
+            },
+            ..Default::default()
+        };
+        let tmp = std::env::temp_dir();
+        ServerCtx::new(
+            tablet,
+            config,
+            reqwest::Client::new(),
+            tmp.clone(),
+            tmp.join("bts_test_config.json"),
+            tmp.join("bts_test_assign.json"),
+            tmp,
+        )
+    }
+
+    /// Standard-Ergebnis-Body (Match 42 / Court 101) mit gegebenen Sätzen.
+    fn body_with(sets: &[(i64, i64)]) -> ResultBody {
+        ResultBody {
+            match_id: 42,
+            court_id: 101,
+            court_label: "1".into(),
+            sets: sets.iter().map(|&(a, b)| SetAb { a, b }).collect(),
+            retired: false,
+            walkover: false,
+            winner: None,
+            cascade_walkover: false,
+        }
+    }
+
+    /// Kinder des Match-Knotens aus einem aufgezeichneten SENDUPDATE-Request.
+    fn match_fields(req: &[Node]) -> Vec<Node> {
+        let upd = xml::find(req, "Update").unwrap();
+        let tour = xml::find(upd.children(), "Tournament").unwrap();
+        let matches = xml::find(tour.children(), "Matches").unwrap();
+        xml::find(matches.children(), "Match")
+            .unwrap()
+            .children()
+            .to_vec()
+    }
+
+    fn int(children: &[Node], id: &str) -> Option<i64> {
+        xml::find(children, id)
+            .and_then(Node::value)
+            .and_then(Value::as_int)
+    }
 
     // Die Logik hinter dem 0:0-Geistersatz-Fix: Zwischen den Sätzen ist das
     // Match NICHT entschieden → der laufende 0:0-Satz bleibt erhalten (Monitor
@@ -1407,134 +1566,14 @@ mod tests {
 
     /// Regression (v0.9.113): Nach einem Ergebnis muss `process_result` das Feld
     /// in BTP freigeben (Court ohne MatchID + Match.CourtID=0), sonst bleiben die
-    /// Spieler in BTP „auf dem Feld" (nicht wieder rot/verfügbar). Wir fahren
-    /// einen Mock-BTP hoch und prüfen, dass GENAU ZWEI SENDUPDATEs kommen:
-    /// das Ergebnis UND die Feldfreigabe.
+    /// Spieler in BTP „auf dem Feld" (nicht wieder rot/verfügbar). GENAU ZWEI
+    /// SENDUPDATEs: das Ergebnis UND die Feldfreigabe.
     #[tokio::test]
     async fn process_result_frees_court_in_btp() {
-        use super::*;
-        use crate::btp::model::{BtpPlayer, BtpSnapshot, Discipline, MatchResult, ScoringFormat};
-        use crate::btp::wire;
-        use crate::btp::xml::{self, Node, Value};
-        use std::sync::{Arc, Mutex};
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpListener;
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
 
-        // Antwort-Frame im BTP-Format: Action{ID=REPLY, Result=1, [extra]}.
-        fn reply(extra: Vec<Node>) -> Vec<u8> {
-            let mut c = vec![Node::string("ID", "REPLY"), Node::integer("Result", 1)];
-            c.extend(extra);
-            wire::encode_message(&xml::encode(&[Node::group("Action", c)]))
-        }
-
-        let recorded: Arc<Mutex<Vec<Vec<Node>>>> = Arc::new(Mutex::new(Vec::new()));
-        let rec = recorded.clone();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        // Mock-BTP: LOGIN -> Session, SENDUPDATE -> aufzeichnen + bestätigen.
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut sock, _)) = listener.accept().await else {
-                    break;
-                };
-                let mut header = [0u8; 4];
-                if sock.read_exact(&mut header).await.is_err() {
-                    continue;
-                }
-                let len = i32::from_be_bytes(header) as usize;
-                let mut payload = vec![0u8; len];
-                if sock.read_exact(&mut payload).await.is_err() {
-                    continue;
-                }
-                let mut full = header.to_vec();
-                full.extend_from_slice(&payload);
-                let nodes = proto::decode_response(&full).unwrap();
-                let action = xml::find(&nodes, "Action").unwrap();
-                let id = xml::find(action.children(), "ID")
-                    .and_then(Node::value)
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if id == "LOGIN" {
-                    sock.write_all(&reply(vec![Node::string("Unicode", "SESSION")]))
-                        .await
-                        .unwrap();
-                } else {
-                    // SENDUPDATE: erst aufzeichnen, dann bestätigen.
-                    rec.lock().unwrap().push(nodes.clone());
-                    sock.write_all(&reply(vec![])).await.unwrap();
-                }
-            }
-        });
-
-        // TabletState mit einem Match (id 42) auf Court 101 (OnCourt).
-        let player = |n: &str| BtpPlayer {
-            name: n.to_string(),
-            first: String::new(),
-            last: n.to_string(),
-            member_id: None,
-            nationality: None,
-        };
-        let m = BtpMatch {
-            id: 42,
-            draw_id: 7,
-            planning_id: 1001,
-            draw_name: "HE".into(),
-            discipline: Discipline::MensSingles,
-            round_name: "G1".into(),
-            match_num: Some(1),
-            planned_time: None,
-            team1: vec![player("A")],
-            team2: vec![player("B")],
-            entry1_id: 0,
-            entry2_id: 0,
-            court: Some("1".into()),
-            court_id: Some(101),
-            sets: vec![],
-            winner: None,
-            result: MatchResult::Normal,
-            status: MatchStatus::OnCourt,
-            finished_at: None,
-            preparation_call_ts: None,
-            preparation_hall: None,
-            scoring: ScoringFormat::default(),
-        };
-        let tablet = Arc::new(TabletState::default());
-        tablet.set_snapshot(BtpSnapshot {
-            tournament_name: "T".into(),
-            rest_minutes: None,
-            matches: vec![m],
-            courts: vec!["1".into()],
-            locations: vec![],
-            court_infos: vec![],
-        });
-
-        let mut config = AppConfig::default();
-        config.btp.host = "127.0.0.1".into();
-        config.btp.port = port;
-        config.btp.password = None;
-        let tmp = std::env::temp_dir();
-        let ctx = ServerCtx::new(
-            tablet,
-            config,
-            reqwest::Client::new(),
-            tmp.clone(),
-            tmp.join("bts_test_config.json"),
-            tmp.join("bts_test_assign.json"),
-            tmp.clone(),
-        );
-
-        let body = ResultBody {
-            match_id: 42,
-            court_id: 101,
-            court_label: "1".into(),
-            sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 21, b: 15 }],
-            retired: false,
-            walkover: false,
-            winner: None,
-            cascade_walkover: false,
-        };
-
-        let resp = process_result(&ctx, &body).await;
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
         assert!(
             resp.ok,
             "Ergebnis sollte erfolgreich sein: {:?}",
@@ -1542,37 +1581,143 @@ mod tests {
         );
 
         let reqs = recorded.lock().unwrap();
-        assert_eq!(
-            reqs.len(),
-            2,
-            "Erwartet: Ergebnis + Feldfreigabe = 2 SENDUPDATE, war {}",
-            reqs.len()
-        );
+        assert_eq!(reqs.len(), 2, "Ergebnis + Feldfreigabe = 2 SENDUPDATE");
 
-        // Zweiter SENDUPDATE = Feldfreigabe.
+        // Zweiter SENDUPDATE = Feldfreigabe: Court 101 OHNE MatchID, Match.CourtID=0.
         let upd = xml::find(&reqs[1], "Update").expect("Update");
         let tour = xml::find(upd.children(), "Tournament").expect("Tournament");
-        // Court 101 OHNE MatchID.
         let courts = xml::find(tour.children(), "Courts").expect("Courts-Block (Feldfreigabe)");
         let court = xml::find(courts.children(), "Court").expect("Court");
-        assert_eq!(
-            xml::find(court.children(), "ID")
-                .and_then(Node::value)
-                .and_then(Value::as_int),
-            Some(101)
-        );
+        assert_eq!(int(court.children(), "ID"), Some(101));
         assert!(
             xml::find(court.children(), "MatchID").is_none(),
             "frei = Court ohne MatchID"
         );
-        // Match.CourtID = 0 (Feldzuordnung am Match gelöscht).
         let matches = xml::find(tour.children(), "Matches").expect("Matches");
         let mnode = xml::find(matches.children(), "Match").expect("Match");
-        assert_eq!(
-            xml::find(mnode.children(), "CourtID")
-                .and_then(Node::value)
-                .and_then(Value::as_int),
-            Some(0)
-        );
+        assert_eq!(int(mnode.children(), "CourtID"), Some(0));
+    }
+
+    /// Sieger wird aus den Sätzen abgeleitet (Team 2 gewinnt 0:2) und als
+    /// `Winner=2`, `ScoreStatus=0`, mit beiden Sätzen nach BTP geschrieben.
+    #[tokio::test]
+    async fn result_winner_derived_from_sets() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+
+        let resp = process_result(&ctx, &body_with(&[(10, 21), (15, 21)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+
+        let reqs = recorded.lock().unwrap();
+        let m = match_fields(&reqs[0]);
+        assert_eq!(int(&m, "Winner"), Some(2), "Team 2 gewinnt");
+        assert_eq!(int(&m, "ScoreStatus"), Some(0), "regulär ausgespielt");
+        let sets = xml::find(&m, "Sets").expect("Sets");
+        assert_eq!(sets.children().len(), 2, "beide Sätze übertragen");
+    }
+
+    /// Aufgabe (Retired): Sieger explizit, `ScoreStatus=2`.
+    #[tokio::test]
+    async fn result_retired_sets_score_status_2() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let mut body = body_with(&[(21, 10), (5, 11)]);
+        body.retired = true;
+        body.winner = Some(1);
+
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+
+        let reqs = recorded.lock().unwrap();
+        let m = match_fields(&reqs[0]);
+        assert_eq!(int(&m, "Winner"), Some(1));
+        assert_eq!(int(&m, "ScoreStatus"), Some(2), "Aufgabe");
+    }
+
+    /// Kampflos (Walkover): `ScoreStatus=1`, Satzliste wird verworfen.
+    #[tokio::test]
+    async fn result_walkover_clears_sets() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let mut body = body_with(&[(21, 10), (21, 15)]); // Sätze werden ignoriert
+        body.walkover = true;
+        body.winner = Some(2);
+
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+
+        let reqs = recorded.lock().unwrap();
+        let m = match_fields(&reqs[0]);
+        assert_eq!(int(&m, "Winner"), Some(2));
+        assert_eq!(int(&m, "ScoreStatus"), Some(1), "Kampflos");
+        let sets = xml::find(&m, "Sets").expect("Sets");
+        assert!(sets.children().is_empty(), "Kampflos verwirft Sätze");
+    }
+
+    // ── Ablehnungen: ungültige Ergebnisse werden NICHT nach BTP geschrieben ──
+    // (process_result bricht vor jedem Netzwerkzugriff ab; toter Port genügt.)
+
+    async fn rejected(body: ResultBody) -> super::ResultResponse {
+        let ctx = make_ctx(1); // Port 1 wird nie kontaktiert
+        process_result(&ctx, &body).await
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_sets_without_walkover_or_retired() {
+        assert!(!rejected(body_with(&[])).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_drawn_sets() {
+        // 1:1 → kein Sieger ableitbar.
+        assert!(!rejected(body_with(&[(21, 10), (10, 21)])).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_too_many_sets() {
+        let many: Vec<(i64, i64)> = (0..10).map(|_| (21, 0)).collect();
+        assert!(!rejected(body_with(&many)).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_set_score() {
+        assert!(!rejected(body_with(&[(100, 0)])).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_walkover_without_winner() {
+        let mut b = body_with(&[]);
+        b.walkover = true; // winner bleibt None
+        assert!(!rejected(b).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_retired_without_winner() {
+        let mut b = body_with(&[(21, 10)]);
+        b.retired = true; // winner bleibt None
+        assert!(!rejected(b).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_walkover_and_retired_together() {
+        let mut b = body_with(&[]);
+        b.walkover = true;
+        b.retired = true;
+        b.winner = Some(1);
+        assert!(!rejected(b).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_when_court_match_changed() {
+        let mut b = body_with(&[(21, 10), (21, 12)]);
+        b.match_id = 999; // anderes Match als auf dem Court (42)
+        assert!(!rejected(b).await.ok);
+    }
+
+    #[tokio::test]
+    async fn rejects_when_no_match_on_court() {
+        let mut b = body_with(&[(21, 10), (21, 12)]);
+        b.court_id = 999; // kein Match auf diesem Feld
+        assert!(!rejected(b).await.ok);
     }
 }

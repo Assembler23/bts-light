@@ -409,3 +409,120 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
 fn text<T: serde::Serialize>(value: &T) -> WsMessage {
     WsMessage::Text(serde_json::to_string(value).unwrap_or_default().into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::btp::model::{
+        BtpMatch, BtpPlayer, BtpSnapshot, Discipline, MatchResult, MatchStatus, ScoringFormat,
+    };
+    use crate::config::AppConfig;
+    use crate::tablet::state::TabletState;
+    use std::collections::HashMap;
+
+    fn player(n: &str) -> BtpPlayer {
+        BtpPlayer {
+            name: n.to_string(),
+            first: String::new(),
+            last: n.to_string(),
+            member_id: None,
+            nationality: None,
+        }
+    }
+
+    fn match_on_court(id: i64, court_id: i64) -> BtpMatch {
+        BtpMatch {
+            id,
+            draw_id: 7,
+            planning_id: 1001,
+            draw_name: "HE".into(),
+            discipline: Discipline::MensSingles,
+            round_name: "G1".into(),
+            match_num: Some(1),
+            planned_time: None,
+            team1: vec![player("A")],
+            team2: vec![player("B")],
+            entry1_id: 0,
+            entry2_id: 0,
+            court: Some("1".into()),
+            court_id: Some(court_id),
+            sets: vec![],
+            winner: None,
+            result: MatchResult::Normal,
+            status: MatchStatus::OnCourt,
+            finished_at: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
+            scoring: ScoringFormat::default(),
+        }
+    }
+
+    fn snapshot(matches: Vec<BtpMatch>) -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches,
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+        }
+    }
+
+    fn ctx_with(matches: Vec<BtpMatch>) -> ServerCtx {
+        let tablet = Arc::new(TabletState::default());
+        tablet.set_snapshot(snapshot(matches));
+        let tmp = std::env::temp_dir();
+        ServerCtx::new(
+            tablet,
+            AppConfig::default(),
+            reqwest::Client::new(),
+            tmp.clone(),
+            tmp.join("bts_rc_config.json"),
+            tmp.join("bts_rc_assign.json"),
+            tmp,
+        )
+    }
+
+    fn text_of(msg: &WsMessage) -> String {
+        match msg {
+            WsMessage::Text(t) => t.to_string(),
+            _ => String::new(),
+        }
+    }
+
+    /// Cloud-Feld-Diffing: erster Push meldet die Zuweisung, ein unveränderter
+    /// Stand wird dedupliziert (kein doppelter Push → kein Tablet-Reset), und
+    /// verlässt das Match das Feld, kommt genau eine Aufhebung.
+    #[test]
+    fn push_court_sends_once_dedups_then_clears() {
+        let ctx = ctx_with(vec![match_on_court(42, 101)]);
+        let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+        let mut last: HashMap<i64, Option<i64>> = HashMap::new();
+
+        // 1) Zuweisung → genau ein MatchAssigned.
+        push_court(&ctx, 101, &tx, &mut last);
+        let f1 = rx.try_recv().expect("ein Frame erwartet");
+        assert!(
+            text_of(&f1).contains("\"type\":\"match_assigned\""),
+            "erwartet match_assigned, war: {}",
+            text_of(&f1)
+        );
+
+        // 2) Unveränderter Stand → kein erneuter Push (Dedup).
+        push_court(&ctx, 101, &tx, &mut last);
+        assert!(
+            rx.try_recv().is_err(),
+            "kein doppelter Push bei gleichem Stand"
+        );
+
+        // 3) Match verlässt das Feld → genau ein MatchCleared.
+        ctx.tablet.set_snapshot(snapshot(vec![]));
+        push_court(&ctx, 101, &tx, &mut last);
+        let f3 = rx.try_recv().expect("Clear-Frame erwartet");
+        assert!(
+            text_of(&f3).contains("\"type\":\"match_cleared\""),
+            "erwartet match_cleared, war: {}",
+            text_of(&f3)
+        );
+    }
+}

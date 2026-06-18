@@ -1041,4 +1041,36 @@ mod tests {
         assert_eq!(courts.len(), 1);
         assert_eq!(courts[0].court_id, 9);
     }
+
+    #[test]
+    fn auto_assign_skips_match_with_unknown_opponent() {
+        // Scheduled, aber Gegner noch offen (team2 leer) → nicht spielbereit,
+        // darf NICHT auf ein Feld gelegt werden.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut m = ready_match(7, 1);
+        m.team2 = Vec::new();
+        let snap = snap_with(vec![court(1, None)], vec![m], Vec::new());
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(courts.is_empty(), "unvollständige Paarung nicht vergeben");
+    }
+
+    #[test]
+    fn auto_assign_court_with_finished_match_stays_busy() {
+        // Sicherheitsnetz (Kontext v0.9.113): Trägt ein beendetes Spiel in BTP
+        // noch seine CourtID, gilt das Feld als belegt — keine Doppelvergabe.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut fin = ready_match(5, 1);
+        fin.status = MatchStatus::Finished;
+        fin.court_id = Some(1);
+        fin.winner = Some(1);
+        let ready = ready_match(7, 2);
+        let snap = snap_with(vec![court(1, None)], vec![fin, ready], Vec::new());
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "Feld mit noch nicht abgeräumtem beendeten Spiel bleibt belegt"
+        );
+    }
 }
