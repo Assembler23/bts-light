@@ -669,9 +669,15 @@ async fn info_winners_state(
     // `selected` = vom Operator gewählte Disziplin (Draw-ID). Der Monitor zeigt
     // genau diese (keine Rotation); `null` → Begrüßungsbild.
     let selected = ctx.tablet.winners_selection();
+    // Turniername für die Footer-Zeile (über der Disziplin) mitliefern.
+    let tournament = ctx.tablet.tournament_name();
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Json(serde_json::json!({ "disciplines": results, "selected": selected })),
+        Json(serde_json::json!({
+            "disciplines": results,
+            "selected": selected,
+            "tournament": tournament,
+        })),
     )
 }
 
