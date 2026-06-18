@@ -225,6 +225,11 @@ pub struct TabletState {
     /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
     /// Sync-Loop je Poll abgeglichen.
     on_court_since: RwLock<HashMap<i64, (i64, u64)>>,
+    /// Aktuell für die Siegerehrung gewählte Disziplin (Draw-ID), die der
+    /// Sieger-Monitor zeigt. `None` = nichts gewählt (Begrüßungsbild). Vom
+    /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
+    /// bewusst gesteuert (Leute fotografieren das Podium).
+    winners_selection: RwLock<Option<i64>>,
 }
 
 /// Auf Platte gesicherter Live-Stand eines Felds (für den App-Neustart).
@@ -747,6 +752,26 @@ impl TabletState {
 
     /// Felder-Übersicht für die Turnierleitung – je Court das aktuelle
     /// Match mit Live-Satzstand und Tablet-Status.
+    /// Podien aller ausgespielten Disziplinen (Sieger-Monitor). Leitet aus dem
+    /// aktuellen Snapshot ab (siehe `tablet::winners`).
+    pub fn discipline_results(&self) -> Vec<crate::tablet::winners::DisciplineResult> {
+        let guard = self.snapshot.read().unwrap();
+        match guard.as_ref() {
+            Some(snap) => crate::tablet::winners::discipline_results(snap),
+            None => Vec::new(),
+        }
+    }
+
+    /// Setzt die für die Siegerehrung gewählte Disziplin (`None` = nichts).
+    pub fn set_winners_selection(&self, draw_id: Option<i64>) {
+        *self.winners_selection.write().unwrap() = draw_id;
+    }
+
+    /// Aktuell für die Siegerehrung gewählte Disziplin (Draw-ID), falls eine.
+    pub fn winners_selection(&self) -> Option<i64> {
+        *self.winners_selection.read().unwrap()
+    }
+
     pub fn overview(&self) -> Vec<CourtOverview> {
         let guard = self.snapshot.read().unwrap();
         let Some(snap) = guard.as_ref() else {
@@ -1029,6 +1054,7 @@ mod tests {
             last: name.to_string(),
             member_id: None,
             nationality: None,
+            club: None,
         }
     }
 

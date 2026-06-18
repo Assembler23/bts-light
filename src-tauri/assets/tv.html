@@ -40,6 +40,7 @@
   a.tile.all { border-color: #1f6f4a; }
   a.tile.next { border-color: #1f4f8a; }
   a.tile.online { border-color: #7c5cff; }
+  a.tile.win { border-color: #fbbf24; }
   .section-label { grid-column: 1 / -1; color: #94a3b8; font-size: 2.4vmin; font-weight: 700; margin: 1.5vh 0 -.5vh; text-transform: uppercase; letter-spacing: .04em; }
   /* Fokus (Fernbedienung) deutlich hervorheben. */
   a.tile:focus { outline: none; border-color: #fbbf24; background: #243352; transform: scale(1.02); }
@@ -110,6 +111,13 @@
       add(tile('/info/overview?halle=' + encodeURIComponent(name), name, 'Court-Übersicht dieser Halle'), true);
     });
     add(tile('/info/preparation', 'Nächste Spiele', 'Aufruf-/Vorbereitungs-Anzeige', 'next'), true);
+    // Siegerehrung: zeigt die in bts-light gewählte Disziplin (keine Rotation).
+    // Ganzes Podium auf einem Monitor ODER ein TV je Podest-Platz (drei
+    // Monitore vor dem Podest, je Platz 1/2/3 — Platz 3 zeigt beide Dritten).
+    add(tile('/info/winners', 'Siegerehrung', 'Podium der in bts-light gewählten Disziplin', 'win'), true);
+    add(tile('/info/winners?only=1', 'Sieger – Platz 1', 'Nur 1. Platz (ein Monitor je Podest-Stufe)', 'win'), true);
+    add(tile('/info/winners?only=2', 'Sieger – Platz 2', 'Nur 2. Platz', 'win'), true);
+    add(tile('/info/winners?only=3', 'Sieger – Platz 3', 'Nur 3. Platz (beide Dritten)', 'win'), true);
     // Online (öffentlicher badhub-Liveticker – etwas andere Darstellung).
     if (hasOnline) {
       add(label('Online (badhub.de)'), false);

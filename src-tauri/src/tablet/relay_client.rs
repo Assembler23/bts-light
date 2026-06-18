@@ -427,6 +427,7 @@ mod tests {
             last: n.to_string(),
             member_id: None,
             nationality: None,
+            club: None,
         }
     }
 

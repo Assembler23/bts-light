@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.114
+
+- **Sieger-Monitor / Siegerehrung.** Neue Info-Anzeige, die das **Podium (1./2./3.) mit Verein** einer
+  ausgespielten Disziplin zeigt — als klassisches Siegerpodest (Silber–Gold–Bronze), Disziplinname groß
+  im Footer (gut für Fotos). **Gesteuert aus bts-light** (Seite *Court-Monitore → Siegerehrung*): der
+  Operator wählt live, welche Disziplin erscheint — **keine Rotation**. Sieger = Gewinner des K.o.-Finals
+  (Gruppen sind nur Qualifikation); ist „Spiel um Platz 3" nicht ausgetragen, werden **beide
+  Halbfinal-Verlierer** als 3. Platz gezeigt.
+- **Drei-Monitor-Aufbau möglich:** je ein TV vor Platz 1/2/3 (`?only=1|2|3`), oder ganzes Podium auf einem
+  Bildschirm. Im Pi-Launcher und in der Geräte-Zuweisung wählbar. Verein wird neu aus BTP gelesen
+  (`Player.ClubID` → Vereinsname).
+- **Fix:** BTP-Matches mit `Winner=0` („noch kein Sieger") gelten nicht mehr fälschlich als beendet.
+
+## v0.9.113
+
+- **Fix Spieler-Status rot/gelb nach Spielende.** Ein gerade beendetes Spiel ließ beim Belegen eines
+  anderen Felds fälschlich freie Spieler als „aktiv" (rot) erscheinen. Behoben und mit Regressions-Tests
+  abgesichert.
+
 ## v0.9.112
 
 - **Hochwertige Ansage über Azure Neural TTS (opt-in).** Statt der lokalen Stimme kann die ganze Ansage

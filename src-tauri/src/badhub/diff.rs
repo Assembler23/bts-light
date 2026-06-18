@@ -107,6 +107,7 @@ mod tests {
                 last: "A".to_string(),
                 member_id: None,
                 nationality: None,
+                club: None,
             }],
             team2: vec![BtpPlayer {
                 name: "B".to_string(),
@@ -114,6 +115,7 @@ mod tests {
                 last: "B".to_string(),
                 member_id: None,
                 nationality: None,
+                club: None,
             }],
             entry1_id: 0,
             entry2_id: 0,

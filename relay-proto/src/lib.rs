@@ -237,6 +237,15 @@ pub enum MonitorTarget {
     },
     /// Spiele-in-Vorbereitung-Liste (`/info/preparation`).
     InfoPreparation,
+    /// Sieger-/Podium-Anzeige ausgespielter Disziplinen (`/info/winners`).
+    /// `rank = None` → ganzes Podium auf einem Monitor; `Some(1|2|3)` → nur
+    /// dieser Rang (drei TVs vor dem physischen Podest, je ein Platz).
+    /// `skip_serializing_if` hält die JSON-Form bei `None` exakt wie früher
+    /// (`{"kind":"info_winners"}`) → alte Zuweisungen bleiben lesbar.
+    InfoWinners {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rank: Option<u8>,
+    },
     /// Werbung: alle hinterlegten Werbebilder rotierend.
     AdRotation,
     /// Werbung: ein bestimmtes Werbebild, dauerhaft.
@@ -285,6 +294,10 @@ impl MonitorTarget {
                 None => "/info/overview".to_string(),
             }),
             Self::InfoPreparation => Some("/info/preparation".to_string()),
+            Self::InfoWinners { rank } => Some(match rank {
+                Some(r) => format!("/info/winners?only={r}"),
+                None => "/info/winners".to_string(),
+            }),
             Self::AdRotation => Some("/info/ad?mode=rotation".to_string()),
             Self::AdSingle { file } => {
                 // Dateiname URL-escapen (Punkte/Bindestriche/Unterstriche
@@ -310,6 +323,7 @@ impl MonitorTarget {
             Self::Court { .. } => "court",
             Self::InfoOverview { .. } => "info_overview",
             Self::InfoPreparation => "info_preparation",
+            Self::InfoWinners { .. } => "info_winners",
             Self::AdRotation => "ad_rotation",
             Self::AdSingle { .. } => "ad_single",
             Self::CourtCombo { .. } => "court_combo",
@@ -1129,6 +1143,30 @@ mod tests {
         // Und eine alte gespeicherte Zuweisung lädt weiterhin (hall = None).
         let back: MonitorTarget = serde_json::from_str(r#"{"kind":"info_overview"}"#).unwrap();
         assert_eq!(back, MonitorTarget::InfoOverview { hall: None });
+    }
+
+    #[test]
+    fn info_winners_redirect_carries_rank_filter() {
+        // Ohne Rang: ganzes Podium, unveränderter Pfad.
+        assert_eq!(
+            MonitorTarget::InfoWinners { rank: None }.redirect_path(),
+            Some("/info/winners".to_string())
+        );
+        // Mit Rang: ?only=N (ein Monitor je Podest-Platz).
+        assert_eq!(
+            MonitorTarget::InfoWinners { rank: Some(2) }.redirect_path(),
+            Some("/info/winners?only=2".to_string())
+        );
+    }
+
+    #[test]
+    fn info_winners_without_rank_serializes_like_before() {
+        // Abwärtskompatibilität: rank=None darf KEIN rank-Feld schreiben, damit
+        // alte gespeicherte Zuweisungen ({"kind":"info_winners"}) gleich bleiben.
+        let json = serde_json::to_string(&MonitorTarget::InfoWinners { rank: None }).unwrap();
+        assert_eq!(json, r#"{"kind":"info_winners"}"#);
+        let back: MonitorTarget = serde_json::from_str(r#"{"kind":"info_winners"}"#).unwrap();
+        assert_eq!(back, MonitorTarget::InfoWinners { rank: None });
     }
 
     #[test]

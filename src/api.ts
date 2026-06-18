@@ -13,6 +13,7 @@ import type {
   WalkoverProposal,
   WalkoverResult,
   WifiStatus,
+  WinnersView,
 } from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
@@ -104,6 +105,14 @@ export const callPreparation = (
 /** Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück. */
 export const retractPreparation = (matchId: number): Promise<void> =>
   invoke("retract_preparation", { matchId });
+
+/** Podien aller ausgespielten Disziplinen + aktuell gewählte Disziplin. */
+export const winnersOverview = (): Promise<WinnersView> =>
+  invoke("winners_overview");
+
+/** Wählt die auf dem Sieger-Monitor gezeigte Disziplin (null = nichts). */
+export const setWinnersSelection = (drawId: number | null): Promise<void> =>
+  invoke("set_winners_selection", { drawId });
 
 /** Übernimmt ein gewähltes Werbebild in das Court-Monitor-Verzeichnis. */
 export const addCourtAd = (path: string): Promise<string> =>

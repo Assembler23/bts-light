@@ -139,6 +139,8 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/overview", get(info_overview_page))
         .route("/info/preparation", get(info_preparation_page))
         .route("/info/preparation/state", get(info_preparation_state))
+        .route("/info/winners", get(info_winners_page))
+        .route("/info/winners/state", get(info_winners_state))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
@@ -646,6 +648,30 @@ async fn info_preparation_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
         Html(assets::PREPARATION_HTML),
+    )
+}
+
+/// Sieger-/Podium-Monitor. Pollt `/info/winners/state` für die Disziplin-Podien.
+async fn info_winners_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::WINNERS_HTML),
+    )
+}
+
+/// JSON-Zustand für den Sieger-Monitor: Podien aller ausgespielten Disziplinen.
+async fn info_winners_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<DeviceHeartbeat>,
+) -> impl IntoResponse {
+    note_heartbeat(&ctx, &q);
+    let results = ctx.tablet.discipline_results();
+    // `selected` = vom Operator gewählte Disziplin (Draw-ID). Der Monitor zeigt
+    // genau diese (keine Rotation); `null` → Begrüßungsbild.
+    let selected = ctx.tablet.winners_selection();
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({ "disciplines": results, "selected": selected })),
     )
 }
 
@@ -1449,6 +1475,7 @@ mod tests {
             last: n.to_string(),
             member_id: None,
             nationality: None,
+            club: None,
         }
     }
 

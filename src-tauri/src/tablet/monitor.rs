@@ -372,6 +372,14 @@ mod tests {
             MonitorTarget::InfoOverview { hall: None },
         );
         map.insert("dev-3".to_string(), MonitorTarget::InfoPreparation);
+        map.insert(
+            "dev-4".to_string(),
+            MonitorTarget::InfoWinners { rank: None },
+        );
+        map.insert(
+            "dev-5".to_string(),
+            MonitorTarget::InfoWinners { rank: Some(1) },
+        );
         write_assignments(&path, &map).unwrap();
         assert_eq!(read_assignments(&path), map);
     }
@@ -471,6 +479,10 @@ mod tests {
         assert_eq!(info, r#"{"kind":"info_overview"}"#);
         let prep = serde_json::to_string(&MonitorTarget::InfoPreparation).unwrap();
         assert_eq!(prep, r#"{"kind":"info_preparation"}"#);
+        let win = serde_json::to_string(&MonitorTarget::InfoWinners { rank: None }).unwrap();
+        assert_eq!(win, r#"{"kind":"info_winners"}"#);
+        let win1 = serde_json::to_string(&MonitorTarget::InfoWinners { rank: Some(3) }).unwrap();
+        assert_eq!(win1, r#"{"kind":"info_winners","rank":3}"#);
         // v0.9.20: Ad-Targets.
         let rot = serde_json::to_string(&MonitorTarget::AdRotation).unwrap();
         assert_eq!(rot, r#"{"kind":"ad_rotation"}"#);

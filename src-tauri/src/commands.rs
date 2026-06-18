@@ -1050,6 +1050,35 @@ pub fn retract_preparation(state: State<'_, AppState>, match_id: i64) {
     state.tablet.remove_preparation_call(match_id);
 }
 
+// ───────────────────────────── Siegerehrung ───────────────────────────────
+
+/// Podien der ausgespielten Disziplinen + aktuell gewählte Disziplin – für
+/// die Steuerung der Siegerehrung in der Monitor-Verwaltung.
+#[derive(Serialize)]
+pub struct WinnersView {
+    pub disciplines: Vec<crate::tablet::winners::DisciplineResult>,
+    /// Draw-ID der aktuell auf dem Sieger-Monitor gezeigten Disziplin (oder
+    /// `None`, wenn nichts gewählt ist).
+    pub selected: Option<i64>,
+}
+
+/// Liefert alle ausgespielten Disziplinen (mit Podium) und die aktuell für die
+/// Siegerehrung gewählte Disziplin.
+#[tauri::command]
+pub fn winners_overview(state: State<'_, AppState>) -> WinnersView {
+    WinnersView {
+        disciplines: state.tablet.discipline_results(),
+        selected: state.tablet.winners_selection(),
+    }
+}
+
+/// Wählt die auf dem Sieger-Monitor gezeigte Disziplin (`None` = nichts/
+/// Begrüßungsbild). Steuert die Siegerehrung — bewusst nicht rotierend.
+#[tauri::command]
+pub fn set_winners_selection(state: State<'_, AppState>, draw_id: Option<i64>) {
+    state.tablet.set_winners_selection(draw_id);
+}
+
 // ───────────────────────────── Court-Monitor-Werbung ──────────────────────
 
 /// Obergrenze für ein einzelnes Werbebild (8 MB).

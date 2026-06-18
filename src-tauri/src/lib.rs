@@ -117,6 +117,8 @@ pub fn run() {
             commands::preparation_candidates,
             commands::call_preparation,
             commands::retract_preparation,
+            commands::winners_overview,
+            commands::set_winners_selection,
             commands::add_court_ad,
             commands::remove_court_ad,
             commands::list_court_ads,

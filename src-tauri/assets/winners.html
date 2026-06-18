@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Sieger der Disziplinen</title>
+<style>
+/* Stil wie overview.html/preparation.html — dunkle Marine-Palette, gelbe Akzente. */
+html, body {
+  margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: none; overflow: hidden;
+}
+body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body.rotate-180 { transform: rotate(180deg); }
+body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+
+header.bar {
+  display: flex; align-items: center; gap: 2vw; padding: 1.4vh 4vw;
+  background: linear-gradient(180deg, #141f33, #1c2942);
+  border-bottom: .3vh solid #334155;
+}
+header.bar .live-dot {
+  width: 1.4vmin; height: 1.4vmin; border-radius: 50%;
+  background: #f43f5e; box-shadow: 0 0 1.5vmin #f43f5e;
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+header.bar .title {
+  font-size: 3vmin; font-weight: 800; letter-spacing: .04em;
+  color: #fbbf24; text-transform: uppercase;
+}
+/* Disziplinname groß im Footer – gut lesbar fürs Publikum / für Fotos. */
+footer#footer {
+  height: 13vh; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 0 4vw;
+  background: linear-gradient(0deg, #141f33, #1c2942);
+  border-top: .3vh solid #fbbf24;
+  font-size: 7vmin; font-weight: 900; letter-spacing: .02em; color: #fbbf24;
+  text-transform: uppercase; line-height: 1.05;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Bühne: klassisches Siegerpodest 2 – 1 – 3 ───────────────────────── */
+main {
+  height: calc(100% - 7.4vh - 13vh); display: flex; align-items: flex-end;
+  justify-content: center; gap: 2.5vw; padding: 0 5vw 3vh;
+}
+.spot {
+  display: flex; flex-direction: column; align-items: center;
+  width: 26vw; max-width: 30vw;
+  animation: rise .6s cubic-bezier(.2,.8,.2,1) both;
+}
+.spot.gold   { order: 2; }
+.spot.silver { order: 1; }
+.spot.bronze { order: 3; }
+@keyframes rise { from { opacity: 0; transform: translateY(4vh) } to { opacity: 1; transform: none } }
+
+.spot .medal { font-size: 6vmin; line-height: 1; margin-bottom: .6vh; }
+.spot .names {
+  font-weight: 800; text-align: center; line-height: 1.12;
+  margin-bottom: .3vh; color: #f8fafc;
+}
+.spot .club { text-align: center; color: #94a3b8; line-height: 1.15; }
+.gold   .names { font-size: 4.2vmin; color: #fde68a; }
+.silver .names { font-size: 3.4vmin; }
+.bronze .names { font-size: 3.2vmin; }
+.gold   .club  { font-size: 2.6vmin; }
+.silver .club, .bronze .club { font-size: 2.3vmin; }
+.wo { color: #f59e0b; font-weight: 700; }
+
+/* Zwei dritte Plätze: zweiter Name als zusätzlicher Block im selben Spot. */
+.spot .second-third { margin-top: 1.4vh; padding-top: 1.2vh; border-top: .2vmin dashed #475569; }
+
+.block {
+  margin-top: 1.6vh; width: 100%; border-radius: 1.2vmin 1.2vmin 0 0;
+  display: flex; align-items: flex-start; justify-content: center;
+  font-size: 7vmin; font-weight: 900; font-variant-numeric: tabular-nums;
+  color: #0b1120; padding-top: 1.2vh; box-shadow: 0 -.4vmin 2vmin rgba(0,0,0,.35);
+}
+.gold   .block { height: 30vh; background: linear-gradient(180deg, #fcd34d, #f59e0b); }
+.silver .block { height: 22vh; background: linear-gradient(180deg, #e2e8f0, #94a3b8); }
+.bronze .block { height: 16vh; background: linear-gradient(180deg, #e0a06a, #b45309); color: #1a0f00; }
+
+/* ── Einzel-Modus (ein Rang pro Monitor) ─────────────────────────────── */
+body.solo main { align-items: center; padding: 0 5vw 3vh; }
+.solo {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 1vh; animation: rise .6s cubic-bezier(.2,.8,.2,1) both; max-width: 90vw;
+}
+.solo-medal { font-size: 22vmin; line-height: 1; }
+.solo-rank {
+  font-size: 5vmin; font-weight: 900; text-transform: uppercase; letter-spacing: .05em;
+  margin-bottom: 1.5vh;
+}
+.solo.gold   .solo-rank { color: #fbbf24; }
+.solo.silver .solo-rank { color: #cbd5e1; }
+.solo.bronze .solo-rank { color: #d6a06a; }
+.solo-entry { margin: 1vh 0; }
+.solo-names { font-size: 7vmin; font-weight: 800; color: #f8fafc; line-height: 1.1; }
+.solo-club { font-size: 4vmin; color: #94a3b8; margin-top: .4vh; }
+
+.idle {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3vh; color: #94a3b8; text-align: center;
+}
+.idle h1 { font-size: 7vmin; color: #fbbf24; margin: 0; }
+.idle p { font-size: 3vmin; max-width: 70vw; line-height: 1.4; }
+
+#offline {
+  position: fixed; top: 1vh; right: 2vw; background: rgba(244,63,94,.18);
+  color: #fda4af; border: .2vmin solid #b91c1c; border-radius: 1vmin;
+  padding: .5vh 1.4vw; font-size: 2.4vmin; font-weight: 700; display: none;
+}
+#offline.show { display: block; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="live-dot" aria-hidden="true"></span>
+  <span class="title">Siegerehrung</span>
+</header>
+<main id="stage"></main>
+<footer id="footer"></footer>
+<div id="offline">Keine Verbindung zum Turnier-PC</div>
+
+<script>
+(function () {
+  'use strict';
+  // Parameter aus Query UND Hash lesen — beim Öffnen einer file://-URL geht
+  // der `?…`-Teil oft verloren, der `#…`-Teil bleibt erhalten (Demo-Testen).
+  var qs = location.search.slice(1);
+  var hs = location.hash.slice(1);
+  var params = new URLSearchParams(qs + (qs && hs ? '&' : '') + hs);
+
+  var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+  var deviceId = (params.get('device') || '').trim();
+  // Einzel-Modus: nur ein Rang je Monitor (1, 2 oder 3) — für drei TVs vor
+  // dem physischen Podest. Leer = ganzes Podium auf einem Monitor.
+  var only = (params.get('only') || '').replace(/[^0-9]/g, '');
+  if (only !== '1' && only !== '2' && only !== '3') only = '';
+  var onlyRank = only ? parseInt(only, 10) : 0;
+  if (only) document.body.classList.add('solo');
+
+  function h(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  function teamNames(p) {
+    return (p.players || []).map(function (x) { return x.name; }).join(' / ') || '—';
+  }
+  function teamClubs(p) {
+    var clubs = [];
+    (p.players || []).forEach(function (x) {
+      if (x.club && clubs.indexOf(x.club) < 0) clubs.push(x.club);
+    });
+    return clubs.join(' · ');
+  }
+
+  // Einen Podest-Block (Gold/Silber/Bronze) bauen. `extra` = optionaler
+  // zweiter dritter Platz (geteiltes Bronze ohne Spiel um Platz 3).
+  function spot(rank, cls, medal, place, extra) {
+    var s = h('div', 'spot ' + cls);
+    s.appendChild(h('div', 'medal', medal));
+    if (place) {
+      var names = h('div', 'names');
+      names.appendChild(document.createTextNode(teamNames(place)));
+      if (place.walkover) {
+        names.appendChild(document.createTextNode(' '));
+        names.appendChild(h('span', 'wo', '(kampflos)'));
+      }
+      s.appendChild(names);
+      var club = teamClubs(place);
+      if (club) s.appendChild(h('div', 'club', club));
+    }
+    if (extra) {
+      var wrap = h('div', 'second-third');
+      var n2 = h('div', 'names');
+      n2.appendChild(document.createTextNode(teamNames(extra)));
+      wrap.appendChild(n2);
+      var c2 = teamClubs(extra);
+      if (c2) wrap.appendChild(h('div', 'club', c2));
+      s.appendChild(wrap);
+    }
+    s.appendChild(h('div', 'block', String(rank)));
+    return s;
+  }
+
+  var MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  var RANKCLS = { 1: 'gold', 2: 'silver', 3: 'bronze' };
+
+  function renderPodium(d) {
+    var stage = document.getElementById('stage');
+    stage.textContent = '';
+    var podium = d.podium || [];
+    var first  = podium.find(function (p) { return p.rank === 1; });
+    var second = podium.find(function (p) { return p.rank === 2; });
+    var thirds = podium.filter(function (p) { return p.rank === 3; });
+    // Klassische Anordnung: Silber links, Gold Mitte (höchste Stufe), Bronze rechts.
+    stage.appendChild(spot(2, 'silver', '🥈', second || null, null));
+    stage.appendChild(spot(1, 'gold', '🥇', first || null, null));
+    stage.appendChild(spot(3, 'bronze', '🥉', thirds[0] || null, thirds[1] || null));
+  }
+
+  // Einzel-Monitor: nur Rang `onlyRank` der Disziplin, groß und zentriert.
+  // Bei Platz 3 ohne Spiel um Platz 3 werden beide dritten Plätze gezeigt.
+  function renderSolo(d) {
+    var stage = document.getElementById('stage');
+    stage.textContent = '';
+    var places = (d.podium || []).filter(function (p) { return p.rank === onlyRank; });
+    var box = h('div', 'solo ' + (RANKCLS[onlyRank] || ''));
+    box.appendChild(h('div', 'solo-medal', MEDAL[onlyRank] || ''));
+    box.appendChild(h('div', 'solo-rank', onlyRank + '. Platz'));
+    if (places.length === 0) {
+      box.appendChild(h('div', 'solo-names', '—'));
+    } else {
+      places.forEach(function (place) {
+        var entry = h('div', 'solo-entry');
+        var names = h('div', 'solo-names');
+        names.appendChild(document.createTextNode(teamNames(place)));
+        if (place.walkover) {
+          names.appendChild(document.createTextNode(' '));
+          names.appendChild(h('span', 'wo', '(kampflos)'));
+        }
+        entry.appendChild(names);
+        var club = teamClubs(place);
+        if (club) entry.appendChild(h('div', 'solo-club', club));
+        box.appendChild(entry);
+      });
+    }
+    stage.appendChild(box);
+  }
+
+  function setFooter(text) {
+    var f = document.getElementById('footer');
+    f.textContent = text || '';
+    f.style.display = text ? '' : 'none';
+  }
+
+  function renderIdle() {
+    setFooter('');
+    var stage = document.getElementById('stage');
+    stage.textContent = '';
+    var idle = h('div', 'idle');
+    idle.appendChild(h('h1', null, 'Siegerehrung'));
+    idle.appendChild(h('p', null, 'Disziplin wird in bts-light gewählt.'));
+    stage.appendChild(idle);
+  }
+
+  // ── Zustand: GENAU die in bts-light gewählte Disziplin zeigen ─────────
+  // Keine Rotation — der Operator steuert, welches Podium erscheint (zum
+  // Fotografieren). `selected` = Draw-ID; null → Begrüßungsbild.
+  function applyData(data) {
+    var list = (data && Array.isArray(data.disciplines)) ? data.disciplines : [];
+    var selected = data && data.selected;
+    if (selected == null) { renderIdle(); return; }
+    var d = list.find(function (x) { return x.draw_id === selected; });
+    if (!d) { renderIdle(); return; }
+    if (onlyRank) renderSolo(d); else renderPodium(d);
+    // Disziplinname groß im Footer (gut lesbar fürs Publikum/Fotos).
+    setFooter(d.draw_name || '');
+  }
+
+  // ── Poll + Reassignment (wie preparation.html) ──────────────────────
+  // Schneller Takt: der Operator wählt live in bts-light → der Monitor soll
+  // zügig umschalten (Ehrung in Bewegung).
+  var POLL_OK_MS = 2000, POLL_FAIL_MS = 6000, errorCount = 0;
+  function showOffline(s) { var el = document.getElementById('offline'); if (el) el.classList.toggle('show', !!s); }
+
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device'); here.searchParams.delete('rotate');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname && here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
+  function navigateWithRotate(href) {
+    var hereRotate = new URLSearchParams(location.search).get('rotate');
+    if (hereRotate && href.indexOf('rotate=') < 0) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    location.href = href;
+  }
+  function checkReassignment() {
+    if (!deviceId) return;
+    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s) return;
+        if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
+          var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
+          navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
+        } else if (!s.redirectTo) {
+          navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
+        }
+      })
+      .catch(function () {});
+  }
+  setInterval(checkReassignment, 1000);
+
+  function stateUrl() {
+    return deviceId ? '/info/winners/state?device=' + encodeURIComponent(deviceId) : '/info/winners/state';
+  }
+  function tick() {
+    fetch(stateUrl(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (data) { errorCount = 0; showOffline(false); applyData(data); setTimeout(tick, POLL_OK_MS); })
+      .catch(function () { errorCount++; if (errorCount >= 2) showOffline(true); setTimeout(tick, POLL_FAIL_MS); });
+  }
+  // Demo-Modus (`?demo=1`): rendert Beispiel-Daten ohne Server — zum Prüfen
+  // des Layouts (auch per Doppelklick auf die Datei). Niemals im Betrieb aktiv.
+  if (params.get('demo') === '1') {
+    var DEMO = {
+      selected: 100,
+      disciplines: [{
+        draw_id: 100,
+        draw_name: 'JE U17 D',
+        podium: [
+          { rank: 1, players: [{ name: 'Anne Schmidt', club: 'VfL Lichtenrade' }], walkover: false },
+          { rank: 2, players: [{ name: 'Bernd Krause', club: 'Berliner SC' }], walkover: false },
+          // Zwei dritte Plätze (kein Spiel um Platz 3):
+          { rank: 3, players: [{ name: 'Clara Vogt', club: 'TSV Spandau' }], walkover: false },
+          { rank: 3, players: [{ name: 'David Lang', club: 'SC Charlottenburg' }], walkover: false }
+        ]
+      }]
+    };
+    applyData(DEMO);
+    return;
+  }
+
+  renderIdle();
+  tick();
+})();
+</script>
+</body>
+</html>

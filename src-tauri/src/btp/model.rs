@@ -112,6 +112,8 @@ pub struct BtpPlayer {
     pub member_id: Option<String>,
     /// Nationalität als ISO-Code (BTP `Country`, z. B. "GER"), falls vorhanden.
     pub nationality: Option<String>,
+    /// Verein (BTP `Player.ClubID` → `Clubs > Club.Name`), falls zugeordnet.
+    pub club: Option<String>,
 }
 
 /// Ein Standort/eine Halle des Turniers (BTP `Location`).
@@ -346,7 +348,8 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
         .ok_or(ModelError::NoTournament)?;
     let t = tournament.children();
 
-    let players = player_map(t);
+    let clubs = id_name_map(t, "Clubs");
+    let players = player_map(t, &clubs);
     let entries = entry_map(t);
     let slots = slot_map(t);
     let courts = court_map(t);
@@ -382,7 +385,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
 // --- Lookup-Tabellen ------------------------------------------------------
 
 /// PlayerID → Spielerdaten.
-fn player_map(t: &[Node]) -> HashMap<i64, BtpPlayer> {
+fn player_map(t: &[Node], clubs: &HashMap<i64, String>) -> HashMap<i64, BtpPlayer> {
     let mut map = HashMap::new();
     let Some(players) = xml::find(t, "Players") else {
         return map;
@@ -406,6 +409,8 @@ fn player_map(t: &[Node]) -> HashMap<i64, BtpPlayer> {
                 last: last.to_string(),
                 member_id: child_str(p, "MemberID").map(String::from),
                 nationality: child_str(p, "Country").map(String::from),
+                // Verein über Player.ClubID auflösen (fehlt → kein Verein).
+                club: child_int(p, "ClubID").and_then(|cid| clubs.get(&cid).cloned()),
             },
         );
     }
@@ -637,7 +642,12 @@ fn parse_matches(
             |planning: Option<i64>| resolve_team(draw_id, planning, slots, entries, players);
         let court_id = child_int(m, "CourtID");
         let court = court_id.and_then(|id| courts.get(&id).cloned());
-        let winner = child_int(m, "Winner").and_then(|w| u8::try_from(w).ok());
+        // BTP nutzt Winner=0 als „noch kein Sieger" — nur 1/2 sind echte
+        // Sieger. Sonst gälte ein Match mit Winner=0 fälschlich als entschieden
+        // (Status=beendet) und Team 2 würde als Sieger gewertet.
+        let winner = child_int(m, "Winner")
+            .and_then(|w| u8::try_from(w).ok())
+            .filter(|&w| w == 1 || w == 2);
         // „Auf dem Feld" hängt an der CourtID, nicht am aufgelösten Namen:
         // eine CourtID, die (noch) in keinem Courts-Eintrag steht, ist
         // trotzdem eine Feld-Zuweisung.
@@ -872,6 +882,37 @@ mod tests {
                 &MatchStatus::Scheduled
             ]
         );
+    }
+
+    #[test]
+    fn winner_zero_is_not_a_decided_match() {
+        // BTP schreibt Winner=0 für „noch kein Sieger". Das darf NICHT als
+        // beendetes Match (mit Team 2 als Sieger) durchgehen — sonst entstünde
+        // ein falsches Podium in der Siegerermittlung.
+        let is_match = || Node::Item {
+            id: "IsMatch".to_string(),
+            value: Value::Bool(true),
+        };
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![Node::group(
+                    "Matches",
+                    vec![Node::group(
+                        "Match",
+                        vec![
+                            Node::integer("ID", 1),
+                            is_match(),
+                            Node::integer("Winner", 0),
+                        ],
+                    )],
+                )],
+            )],
+        )];
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.matches[0].winner, None);
+        assert_eq!(snapshot.matches[0].status, MatchStatus::Scheduled);
     }
 
     #[test]
@@ -1314,7 +1355,7 @@ mod tests {
                 ),
             ],
         )];
-        let map = player_map(&tree);
+        let map = player_map(&tree, &std::collections::HashMap::new());
         let p1 = &map[&1];
         assert_eq!(p1.first, "Jan");
         assert_eq!(p1.last, "van der Berg");
@@ -1324,6 +1365,44 @@ mod tests {
         assert_eq!(p2.first, "");
         assert_eq!(p2.last, "Müller");
         assert_eq!(p2.name, "Müller");
+    }
+
+    #[test]
+    fn player_map_resolves_club_from_clubid() {
+        let tree = vec![
+            Node::group(
+                "Clubs",
+                vec![Node::group(
+                    "Club",
+                    vec![
+                        Node::integer("ID", 7),
+                        Node::string("Name", "VfL Lichtenrade"),
+                    ],
+                )],
+            ),
+            Node::group(
+                "Players",
+                vec![
+                    Node::group(
+                        "Player",
+                        vec![
+                            Node::integer("ID", 1),
+                            Node::string("Lastname", "Anne"),
+                            Node::integer("ClubID", 7),
+                        ],
+                    ),
+                    // Spieler ohne ClubID → kein Verein.
+                    Node::group(
+                        "Player",
+                        vec![Node::integer("ID", 2), Node::string("Lastname", "Bernd")],
+                    ),
+                ],
+            ),
+        ];
+        let clubs = id_name_map(&tree, "Clubs");
+        let map = player_map(&tree, &clubs);
+        assert_eq!(map[&1].club.as_deref(), Some("VfL Lichtenrade"));
+        assert_eq!(map[&2].club, None);
     }
 
     #[test]

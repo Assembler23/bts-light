@@ -26,6 +26,10 @@ pub const OVERVIEW_HTML: &str = include_str!("../../assets/overview.html");
 /// `/info/preparation/state` für Daten.
 pub const PREPARATION_HTML: &str = include_str!("../../assets/preparation.html");
 
+/// Sieger-Monitor (Info-Display): Podien (1./2./3., zwei dritte Plätze möglich)
+/// aller ausgespielten Disziplinen mit Verein. Pollt `/info/winners/state`.
+pub const WINNERS_HTML: &str = include_str!("../../assets/winners.html");
+
 /// Werbe-Anzeige (Info-Display ohne Spielbezug): Vollbild-Werbebild
 /// oder rotierende Bildschleife aus den `/ads/{file}` ausgelieferten
 /// Werbebildern. Steuerung via Query: `?mode=single&file=…` oder

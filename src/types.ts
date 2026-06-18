@@ -124,9 +124,39 @@ export type MonitorTarget =
   | { kind: "court"; court_id: number }
   | { kind: "info_overview"; hall?: string | null }
   | { kind: "info_preparation" }
+  | { kind: "info_winners"; rank?: number | null }
   | { kind: "ad_rotation" }
   | { kind: "ad_single"; file: string }
   | { kind: "court_combo"; court_ids: number[] };
+
+/** Ein platzierter Spieler im Podium (Rust: tablet::winners::WinnerPlayer). */
+export interface WinnerPlayer {
+  name: string;
+  club: string | null;
+}
+
+/** Eine Platzierung im Podium (Rust: tablet::winners::Placement). */
+export interface Placement {
+  rank: number;
+  players: WinnerPlayer[];
+  walkover: boolean;
+}
+
+/** Podium einer ausgespielten Disziplin (Rust: tablet::winners::DisciplineResult). */
+export interface DisciplineResult {
+  draw_id: number;
+  draw_name: string;
+  discipline: string;
+  podium: Placement[];
+  finished_at: number | null;
+}
+
+/** Steuer-Ansicht der Siegerehrung (Rust: commands::WinnersView). */
+export interface WinnersView {
+  disciplines: DisciplineResult[];
+  /** Draw-ID der aktuell gezeigten Disziplin, oder null. */
+  selected: number | null;
+}
 
 /** Ein Court-Monitor-Gerät (Rust: relay_proto::MonitorDeviceInfo). */
 export interface MonitorDeviceInfo {

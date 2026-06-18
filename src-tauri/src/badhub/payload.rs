@@ -284,6 +284,7 @@ mod tests {
             last: name.to_string(),
             member_id: member.map(String::from),
             nationality: nat.map(String::from),
+            club: None,
         }
     }
 
