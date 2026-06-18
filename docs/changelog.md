@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.119
+
+- **Sieger-Einzel-TVs (ein Platz pro Monitor) auch zweizeilig + größer.** Der Solo-Modus (`?only=1|2|3`,
+  drei TVs vor dem Podest) nutzt jetzt dieselbe Vorname-/Nachname-Darstellung wie das Voll-Podest und ist
+  deutlich größer (Einzel 12vmin, Doppel 7.5vmin) — optimal lesbar, da ein TV nur einen Platz zeigt.
+
 ## v0.9.118
 
 - **Sieger-Monitor: zweizeilige Namen (Vorname / Nachname) + Mittelnamen gekürzt.** Statt eines langen,
