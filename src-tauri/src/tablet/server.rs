@@ -141,6 +141,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/preparation/state", get(info_preparation_state))
         .route("/info/winners", get(info_winners_page))
         .route("/info/winners/state", get(info_winners_state))
+        .route("/info/club-logo", get(info_club_logo))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
@@ -679,6 +680,34 @@ async fn info_winners_state(
             "tournament": tournament,
         })),
     )
+}
+
+#[derive(serde::Deserialize)]
+struct ClubLogoQuery {
+    /// BTP-Vereinsname (z. B. „BC Tempelhof (Berlin)").
+    name: String,
+}
+
+/// Vereinslogo für den Sieger-Monitor: matcht den Vereinsnamen gegen die
+/// Badhub-Vereinsliste und liefert das Bild lokal aus (auch für LAN-TVs ohne
+/// eigenes Internet). Kein Treffer / kein Logo → 404 (der Monitor blendet das
+/// `<img>` dann per `onerror` weg).
+async fn info_club_logo(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<ClubLogoQuery>,
+) -> impl IntoResponse {
+    match crate::tablet::club_logos::resolve(&ctx.config.badhub, &ctx.http, &q.name).await {
+        Some((content_type, bytes)) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                // Logos sind stabil – TVs dürfen sie lange cachen.
+                (header::CACHE_CONTROL, "public, max-age=86400".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// Liefert die HTML der Werbe-Anzeige. Pollt `/info/ad/state` für die
