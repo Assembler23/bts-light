@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.127
+
+- **Vereinslogos auf einheitlichem weißen Chip.** Logos kommen mit sehr unterschiedlichen Hintergründen
+  (oft weißes JPG, manchmal transparentes PNG) — als rohe Rechtecke auf dunklem Grund wirkte das unruhig.
+  Jetzt sitzt jedes Logo auf einem einheitlichen weißen, abgerundeten, quadratischen Chip
+  (`object-fit:contain`) → konsistentes, ruhiges Bild unabhängig von der Quelle.
+
 ## v0.9.126
 
 - **Vereinslogos jetzt verbandsübergreifend.** Umgestellt vom verbands-/geogebundenen `clubfinder` auf den
