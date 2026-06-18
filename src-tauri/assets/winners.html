@@ -256,11 +256,19 @@ body.solo main { align-items: center; padding: 0 5vw 3vh; }
   // ── Zustand: GENAU die in bts-light gewählte Disziplin zeigen ─────────
   // Keine Rotation — der Operator steuert, welches Podium erscheint (zum
   // Fotografieren). `selected` = Draw-ID; null → Begrüßungsbild.
+  var lastSig = null;
   function applyData(data) {
     var list = (data && Array.isArray(data.disciplines)) ? data.disciplines : [];
     var selected = data && data.selected;
-    if (selected == null) { renderIdle(); return; }
-    var d = list.find(function (x) { return x.draw_id === selected; });
+    var d = (selected != null)
+      ? list.find(function (x) { return x.draw_id === selected; })
+      : null;
+    // NUR bei echter Änderung neu zeichnen — sonst baute jeder 2-s-Poll das
+    // ganze Podium-DOM neu auf und der TV flackerte/„lud neu". Signatur =
+    // Modus + Disziplin + Podium-Inhalt.
+    var sig = d ? (onlyRank + '|' + d.draw_id + '|' + JSON.stringify(d.podium)) : 'idle';
+    if (sig === lastSig) return;
+    lastSig = sig;
     if (!d) { renderIdle(); return; }
     if (onlyRank) renderSolo(d); else renderPodium(d);
     // Disziplinname groß im Footer (gut lesbar fürs Publikum/Fotos).
