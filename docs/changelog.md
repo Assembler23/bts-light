@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.117
+
+- **Sieger-Monitor: Podest nutzt die volle Breite + noch größer.** Säulen breiter (31vw statt 26),
+  weniger Seitenrand (1.5vw statt 5) und größere Schrift/Medaillen/Podest-Zahlen (Namen 7/5.6/5vmin,
+  Zahlen 9vmin) — füllt den Bildschirm und ist aus der Distanz noch besser lesbar.
+
 ## v0.9.116
 
 - **Sieger-Monitor: größere Namen.** Auf dem Voll-Podest sind die Spielernamen (und Vereine) jetzt
