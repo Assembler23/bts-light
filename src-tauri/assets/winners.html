@@ -20,6 +20,9 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 
 header.bar {
   flex-shrink: 0;
+  /* Immer über die volle Breite — align-self:stretch + width:100% schlagen
+     jede Body-Ausrichtung (kein zentrierter „Kasten"). */
+  align-self: stretch; width: 100%; box-sizing: border-box;
   display: flex; align-items: center; gap: 2vw; padding: 1.4vh 4vw;
   background: linear-gradient(180deg, #141f33, #1c2942);
   border-bottom: .3vh solid #334155;
@@ -37,6 +40,7 @@ header.bar .title {
 /* Disziplinname groß im Footer – gut lesbar fürs Publikum / für Fotos. */
 footer#footer {
   flex-shrink: 0;
+  align-self: stretch; width: 100%; box-sizing: border-box;
   height: 16vh; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: .6vh;
   text-align: center; padding: 0 4vw;
