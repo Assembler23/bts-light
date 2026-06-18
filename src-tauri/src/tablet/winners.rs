@@ -17,7 +17,13 @@ use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchResult, MatchSta
 /// Ein platzierter Spieler/ein Team-Mitglied (mit Verein, falls bekannt).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WinnerPlayer {
+    /// Kombinierter Anzeigename („Vorname Nachname") — Fallback fürs Frontend.
     pub name: String,
+    /// Vorname(n) und Nachname GETRENNT (BTP `Firstname`/`Lastname`), damit der
+    /// Monitor zweizeilig (Vorname/Nachname) rendern + Mittelnamen kürzen kann.
+    /// Wichtig für mehrteilige Nachnamen (z. B. „Nguyen Duc").
+    pub first: String,
+    pub last: String,
     pub club: Option<String>,
 }
 
@@ -110,6 +116,8 @@ fn placement(rank: u8, team: &[crate::btp::model::BtpPlayer], walkover: bool) ->
             .iter()
             .map(|p| WinnerPlayer {
                 name: p.name.clone(),
+                first: p.first.clone(),
+                last: p.last.clone(),
                 club: p.club.clone(),
             })
             .collect(),
