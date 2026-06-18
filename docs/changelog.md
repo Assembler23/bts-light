@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.122
+
+- **Einzel-Monitore: Namen einzeilig + Verein größer.** Im Einzel-Modus steht der ganze Name jetzt in
+  EINER Zeile (Vorname + Nachname) und wird per `fitSolo()` über die volle Breite gezogen — nutzt den
+  Platz maximal. Der Verein ist deutlich größer (5.5vmin) und etwas heller.
+- **Footer + Header über die volle Breite.** Layout auf Flex-Spalte umgestellt (wie `overview.html`):
+  Header oben, `main` füllt den Rest, Footer unten — alle randlos über die gesamte Breite statt als
+  zentrierter Kasten.
+
 ## v0.9.121
 
 - **Siegerehrung als eigener Menüpunkt.** Die Disziplin-Steuerung der Siegerehrung ist von „Monitore"

@@ -373,12 +373,13 @@ Anzeige (`winners.html`):
 - Endpunkte `GET /info/winners` (ganzes Podium) bzw. `?only=1|2|3` (ein Platz je
   TV); Zustand über `GET /info/winners/state` (Disziplinen, `selected`,
   `tournament`).
-- Namen zweizeilig (Vorname / Nachname); im Podium werden mehrere Vornamen
-  gekürzt, im **Einzel-Modus ausgeschrieben** (mehr Platz).
-- Einzel-Modus nutzt die **volle Breite**: `fitSolo()` skaliert die Namen nach
-  dem Layout dynamisch auf ~94 % der Breite (kurze Namen durch die Höhe
-  begrenzt), statt fixer `vmin`-Größen.
-- Footer zweizeilig: **Turniername** (klein) über der **Disziplin** (groß).
+- Podium: Namen zweizeilig (Vorname / Nachname), mehrere Vornamen gekürzt.
+- Einzel-Modus: ganzer Name in **einer Zeile**, per `fitSolo()` dynamisch auf
+  ~94 % der Breite skaliert (kurze Namen durch die Höhe begrenzt) — nutzt die
+  **volle Breite** statt fixer `vmin`-Größen. Verein größer dargestellt.
+- Layout = Flex-Spalte (wie `overview.html`): Header / `main` / Footer jeweils
+  über die **volle Breite**. Footer zweizeilig: **Turniername** (klein) über der
+  **Disziplin** (groß).
 - Sonderfall „zwei dritte Plätze" (kein Spiel um Platz 3): `?only=3` zeigt beide
   Paare kompakter (`multi`-Modus).
 

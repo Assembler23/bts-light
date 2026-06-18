@@ -11,11 +11,15 @@ html, body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   cursor: none; overflow: hidden;
 }
+/* Flex-Spalte wie overview.html: Header oben, main füllt den Rest, Footer
+   unten — alle über die volle Breite (kein zentrierter „Kasten"). */
+body { display: flex; flex-direction: column; }
 body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
 body.rotate-180 { transform: rotate(180deg); }
 body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
 
 header.bar {
+  flex-shrink: 0;
   display: flex; align-items: center; gap: 2vw; padding: 1.4vh 4vw;
   background: linear-gradient(180deg, #141f33, #1c2942);
   border-bottom: .3vh solid #334155;
@@ -32,6 +36,7 @@ header.bar .title {
 }
 /* Disziplinname groß im Footer – gut lesbar fürs Publikum / für Fotos. */
 footer#footer {
+  flex-shrink: 0;
   height: 16vh; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: .6vh;
   text-align: center; padding: 0 4vw;
@@ -52,7 +57,7 @@ footer#footer .ft-discipline {
 
 /* ── Bühne: klassisches Siegerpodest 2 – 1 – 3 ───────────────────────── */
 main {
-  height: calc(100% - 7.4vh - 16vh); display: flex; align-items: flex-end;
+  flex: 1; min-height: 0; display: flex; align-items: flex-end;
   justify-content: center; gap: 2vw; padding: 0 1.5vw 3vh;
 }
 .spot {
@@ -119,17 +124,20 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
 .solo.silver .solo-rank { color: #cbd5e1; }
 .solo.bronze .solo-rank { color: #d6a06a; }
 .solo-entry { margin: 1vh 0; }
-/* Einzel-TV (ein Platz): zweizeilig, sehr groß. `.duo` (Doppel) kompakter. */
+/* Einzel-TV (ein Platz): ganzer Name in EINER Zeile, sehr groß. Die endgültige
+   Größe setzt fitSolo() inline (Breiten-Skalierung); die vmin-Werte sind nur
+   Startwert/Fallback. */
 .solo-names {
-  font-size: 13vmin; color: #f8fafc; line-height: 1.04;
-  display: flex; flex-direction: column; align-items: center; gap: .8vh;
+  font-size: 13vmin; color: #f8fafc; line-height: 1.08;
+  display: flex; flex-direction: column; align-items: center; gap: 1vh;
 }
-.solo-names.duo { font-size: 8vmin; }
+.solo-names.duo { font-size: 9vmin; }
+.solo .pl-line { font-weight: 800; }
 /* Namen im Einzel-Modus nie umbrechen — die Größe steuert fitSolo() über die
    Breite (Umbruch würde die Breitenmessung verfälschen). */
-.solo .given, .solo .fam { white-space: nowrap; }
+.solo .pl-line, .solo .given, .solo .fam { white-space: nowrap; }
 .solo .pl { margin: .4vh 0; }
-.solo-club { font-size: 4vmin; color: #94a3b8; margin-top: .6vh; }
+.solo-club { font-size: 5.5vmin; color: #cbd5e1; margin-top: .8vh; }
 /* Zwei dritte Plätze auf einem TV (only=3 ohne Spiel um Platz 3) → alles
    kompakter, damit beide Paare samt Footer sicher auf den Schirm passen. */
 .solo.multi .solo-medal { font-size: 10vmin; }
@@ -296,8 +304,15 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
         var players = place.players || [];
         var entry = h('div', 'solo-entry');
         var names = h('div', 'solo-names' + (players.length > 1 ? ' duo' : ''));
-        players.forEach(function (x) { names.appendChild(playerNameEl(x, true)); });
-        if (!players.length) names.appendChild(h('div', 'fam', '—'));
+        // Einzel-Monitor: ganzer Name in EINER Zeile (Vorname + Nachname) —
+        // dank fitSolo() wird er auf die volle Breite skaliert und damit größer
+        // als zweizeilig (vor allem bei Doppeln: 2 statt 4 Zeilen).
+        players.forEach(function (x) {
+          var full = ((x.first || '') + ' ' + (x.last || '')).trim()
+            || (x.name || '').trim() || '—';
+          names.appendChild(h('div', 'pl-line', full));
+        });
+        if (!players.length) names.appendChild(h('div', 'pl-line', '—'));
         if (place.walkover) names.appendChild(h('span', 'wo', '(kampflos)'));
         entry.appendChild(names);
         var club = teamClubs(place);
