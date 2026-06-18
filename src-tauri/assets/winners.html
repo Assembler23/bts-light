@@ -32,18 +32,27 @@ header.bar .title {
 }
 /* Disziplinname groß im Footer – gut lesbar fürs Publikum / für Fotos. */
 footer#footer {
-  height: 13vh; display: flex; align-items: center; justify-content: center;
+  height: 16vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: .6vh;
   text-align: center; padding: 0 4vw;
   background: linear-gradient(0deg, #141f33, #1c2942);
   border-top: .3vh solid #fbbf24;
+  line-height: 1.05; overflow: hidden;
+}
+footer#footer .ft-tournament {
+  font-size: 3.4vmin; font-weight: 700; letter-spacing: .03em; color: #cbd5e1;
+  text-transform: uppercase; max-width: 92vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+footer#footer .ft-discipline {
   font-size: 7vmin; font-weight: 900; letter-spacing: .02em; color: #fbbf24;
-  text-transform: uppercase; line-height: 1.05;
+  text-transform: uppercase; max-width: 92vw;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* ── Bühne: klassisches Siegerpodest 2 – 1 – 3 ───────────────────────── */
 main {
-  height: calc(100% - 7.4vh - 13vh); display: flex; align-items: flex-end;
+  height: calc(100% - 7.4vh - 16vh); display: flex; align-items: flex-end;
   justify-content: center; gap: 2vw; padding: 0 1.5vw 3vh;
 }
 .spot {
@@ -296,14 +305,20 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     stage.appendChild(box);
   }
 
-  function setFooter(text) {
+  // Footer = Turniername (klein, gedämpft) über der Disziplin (groß, gelb).
+  function setFooter(tournament, discipline) {
     var f = document.getElementById('footer');
-    f.textContent = text || '';
-    f.style.display = text ? '' : 'none';
+    f.textContent = '';
+    var t = (tournament || '').trim();
+    var dn = (discipline || '').trim();
+    if (!t && !dn) { f.style.display = 'none'; return; }
+    f.style.display = '';
+    if (t) f.appendChild(h('div', 'ft-tournament', t));
+    if (dn) f.appendChild(h('div', 'ft-discipline', dn));
   }
 
   function renderIdle() {
-    setFooter('');
+    setFooter('', '');
     var stage = document.getElementById('stage');
     stage.textContent = '';
     var idle = h('div', 'idle');
@@ -325,13 +340,17 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     // NUR bei echter Änderung neu zeichnen — sonst baute jeder 2-s-Poll das
     // ganze Podium-DOM neu auf und der TV flackerte/„lud neu". Signatur =
     // Modus + Disziplin + Podium-Inhalt.
-    var sig = d ? (onlyRank + '|' + d.draw_id + '|' + JSON.stringify(d.podium)) : 'idle';
+    var tournament = (data && data.tournament) || '';
+    var sig = d
+      ? (onlyRank + '|' + d.draw_id + '|' + tournament + '|' + JSON.stringify(d.podium))
+      : 'idle';
     if (sig === lastSig) return;
     lastSig = sig;
     if (!d) { renderIdle(); return; }
     if (onlyRank) renderSolo(d); else renderPodium(d);
-    // Disziplinname groß im Footer (gut lesbar fürs Publikum/Fotos).
-    setFooter(d.draw_name || '');
+    // Footer: Turniername klein über dem großen Disziplinnamen (gut lesbar
+    // fürs Publikum/Fotos).
+    setFooter(tournament, d.draw_name || '');
   }
 
   // ── Poll + Reassignment (wie preparation.html) ──────────────────────

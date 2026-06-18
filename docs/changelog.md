@@ -13,6 +13,10 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   8vmin). **Namen werden im Einzel-Modus ausgeschrieben** (kein Mittelnamen-Kürzen, da ein TV nur einen
   Platz zeigt → viel Platz). Der Sonderfall „zwei dritte Plätze auf einem TV" (`?only=3` ohne Spiel um
   Platz 3) skaliert automatisch kompakter (`multi`-Modus), damit beide Paare samt Footer sicher passen.
+- **Footer zeigt Turniername + Disziplin.** Die Disziplin-Leiste hat jetzt etwas mehr Platz (16vh) und
+  zwei Zeilen: oben klein/gedämpft der **Turniername**, darunter groß/gelb die **Disziplin** (z. B.
+  „MD U17 C"). Gilt für Voll-Podest und Einzel-TVs. Der Turniername kommt aus dem BTP-Snapshot
+  (`/info/winners/state` liefert ihn jetzt mit).
 
 ## v0.9.119
 
