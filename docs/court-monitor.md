@@ -357,6 +357,31 @@ Eingerichtet wird das nach dem Pi-Standardablauf
 Boot-Partition zeigt nicht auf `/monitor`, sondern auf die passende
 `/info/…`-Variante.
 
+## Siegerehrung (Sieger-Monitor)
+
+Eigener Menüpunkt **„Siegerehrung"** in der App (neben „Monitore"). Dort wählt
+der Operator live, welche ausgespielte Disziplin auf dem Sieger-Monitor
+erscheint (keine Rotation — ideal zum Fotografieren des Podiums). Die
+Disziplin-Auswahl ist global (`set_winners_selection`/`winners_overview`), wirkt
+also auf alle Sieger-Monitore gleichzeitig.
+
+Die TV-**Zuweisung** bleibt unter „Monitore": ein Gerät bekommt „Siegerehrung —
+ganzes Podium" oder „nur Platz 1/2/3" (drei Einzel-TVs vor dem Podest).
+
+Anzeige (`winners.html`):
+
+- Endpunkte `GET /info/winners` (ganzes Podium) bzw. `?only=1|2|3` (ein Platz je
+  TV); Zustand über `GET /info/winners/state` (Disziplinen, `selected`,
+  `tournament`).
+- Namen zweizeilig (Vorname / Nachname); im Podium werden mehrere Vornamen
+  gekürzt, im **Einzel-Modus ausgeschrieben** (mehr Platz).
+- Einzel-Modus nutzt die **volle Breite**: `fitSolo()` skaliert die Namen nach
+  dem Layout dynamisch auf ~94 % der Breite (kurze Namen durch die Höhe
+  begrenzt), statt fixer `vmin`-Größen.
+- Footer zweizeilig: **Turniername** (klein) über der **Disziplin** (groß).
+- Sonderfall „zwei dritte Plätze" (kein Spiel um Platz 3): `?only=3` zeigt beide
+  Paare kompakter (`multi`-Modus).
+
 ## mDNS: `bts-light.local`
 
 Im LAN-Modus gibt bts-light per mDNS (`tablet/mdns.rs`) den festen Namen

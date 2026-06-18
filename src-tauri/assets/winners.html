@@ -125,6 +125,9 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
   display: flex; flex-direction: column; align-items: center; gap: .8vh;
 }
 .solo-names.duo { font-size: 8vmin; }
+/* Namen im Einzel-Modus nie umbrechen — die Größe steuert fitSolo() über die
+   Breite (Umbruch würde die Breitenmessung verfälschen). */
+.solo .given, .solo .fam { white-space: nowrap; }
 .solo .pl { margin: .4vh 0; }
 .solo-club { font-size: 4vmin; color: #94a3b8; margin-top: .6vh; }
 /* Zwei dritte Plätze auf einem TV (only=3 ohne Spiel um Platz 3) → alles
@@ -303,6 +306,56 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
       });
     }
     stage.appendChild(box);
+    // Nach dem Layout die Namen auf die volle Breite skalieren (s. fitSolo).
+    // Double-rAF: erst nach dem Layout-Commit messen — auf dem Pi (feste
+    // Auflösung, kein späteres resize-Event) ist scrollWidth im ersten Frame
+    // sonst 0 und die Schrift bliebe falsch.
+    requestAnimationFrame(function () { requestAnimationFrame(fitSolo); });
+  }
+
+  // Einzel-Monitor: Namen so groß wie möglich — kurze Namen werden durch die
+  // Höhe begrenzt, lange schrumpfen exakt auf ~94 % der Breite. Dadurch wird
+  // (anders als bei fixen vmin-Größen) die gesamte TV-Breite genutzt.
+  function fitSolo() {
+    var main = document.getElementById('stage');
+    var box = main && main.querySelector('.solo');
+    if (!box) return;
+    var blocks = box.querySelectorAll('.solo-names');
+    if (!blocks.length) return;
+    // Layout noch nicht bereit (erster Frame / Pi) → später erneut messen,
+    // sonst kollabieren die Größen auf 0.
+    if (!main.clientWidth || !main.clientHeight) {
+      requestAnimationFrame(fitSolo);
+      return;
+    }
+    var maxW = main.clientWidth * 0.94;
+    var multi = box.classList.contains('multi');
+    // Höhen-Obergrenze je Namensblock, damit ein kurzer Name nicht absurd
+    // groß wird; im multi-Fall (zwei dritte Plätze) deutlich kleiner.
+    var capPx = main.clientHeight * (multi ? 0.16 : 0.40);
+    // 1) Breite ausreizen: jede Namenszeile auf ~94 % der Breite bringen.
+    blocks.forEach(function (el) {
+      el.style.fontSize = capPx + 'px';
+      var w = el.scrollWidth;
+      var px = w > 0 ? Math.min(capPx, capPx * maxW / w) : capPx;
+      el.style.fontSize = Math.floor(px) + 'px';
+      w = el.scrollWidth; // 2. Pass gegen Sub-Pixel-Rundung
+      if (w > maxW) {
+        el.style.fontSize = Math.floor(parseFloat(el.style.fontSize) * maxW / w) + 'px';
+      }
+    });
+    // 2) Höhe: NUR die Namen werden skaliert — daher die Resthöhe (Medaille,
+    //    Rang, Vereine, Abstände) abziehen und die Namen exakt auf den dann
+    //    verbleibenden Platz herunterskalieren (Footer bleibt unangetastet).
+    var blocksH = 0;
+    blocks.forEach(function (el) { blocksH += el.offsetHeight; });
+    var avail = main.clientHeight * 0.98 - (box.scrollHeight - blocksH);
+    if (avail > 0 && blocksH > avail) {
+      var f = avail / blocksH;
+      blocks.forEach(function (el) {
+        el.style.fontSize = Math.floor(parseFloat(el.style.fontSize) * f) + 'px';
+      });
+    }
   }
 
   // Footer = Turniername (klein, gedämpft) über der Disziplin (groß, gelb).
@@ -419,6 +472,11 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     };
     applyData(DEMO);
     return;
+  }
+
+  // Bei Größenänderung (Fenster/TV-Rotation) die Einzel-Namen neu einpassen.
+  if (onlyRank) {
+    window.addEventListener('resize', function () { requestAnimationFrame(fitSolo); });
   }
 
   renderIdle();

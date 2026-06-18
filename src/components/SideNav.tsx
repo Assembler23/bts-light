@@ -9,6 +9,7 @@ import {
   Megaphone,
   SlidersHorizontal,
   Tablet,
+  Trophy,
   Tv,
 } from "lucide-react";
 import type { AppConfig } from "../types";
@@ -20,6 +21,7 @@ export type NavView =
   | "tablets"
   | "announce"
   | "monitors"
+  | "winners"
   | "settings";
 
 /** Abschnitts-Anker in den Einstellungen (für den Sprung aus einem
@@ -52,6 +54,13 @@ function items(config: AppConfig): NavItem[] {
       view: "monitors",
       label: "Monitore",
       icon: Tv,
+      enabled: config.court_monitor.enabled,
+      focus: "court-monitor",
+    },
+    {
+      view: "winners",
+      label: "Siegerehrung",
+      icon: Trophy,
       enabled: config.court_monitor.enabled,
       focus: "court-monitor",
     },

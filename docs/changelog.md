@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.121
+
+- **Siegerehrung als eigener Menüpunkt.** Die Disziplin-Steuerung der Siegerehrung ist von „Monitore"
+  in einen eigenen Menüpunkt **„Siegerehrung"** (Pokal-Icon) gewandert — übersichtlicher getrennt. Die
+  TV-Zuweisung („ganzes Podium" / „nur Platz 1/2/3") bleibt unter „Monitore".
+- **Einzel-Monitore nutzen die volle Breite.** Statt fixer `vmin`-Schriftgrößen skaliert `fitSolo()` die
+  Namen nach dem Layout dynamisch auf ~94 % der Bildschirmbreite (kurze Namen durch die Höhe begrenzt,
+  lange schrumpfen exakt auf die Breite). Damit sind die Namen auf den Einzel-TVs deutlich größer und
+  besser lesbar; bei zwei dritten Plätzen wird automatisch passend herunterskaliert. Re-Fit bei
+  Fenster-/Bildschirmänderung.
+
 ## v0.9.120
 
 - **Sieger-Einzel-TVs: bessere Darstellung + Footer-Fix.** Im Solo-Modus (`?only=1|2|3`) wird die
