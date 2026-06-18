@@ -100,12 +100,16 @@ main {
 /* Verein mit optionalem Logo davor. `.club-logo` skaliert über `em` mit der
    jeweiligen Vereins-Schriftgröße (Podium `.club` / Einzel `.solo-club`).
    Fehlt das Logo, entfernt JS das <img> → nur der Name bleibt. */
-.club-item { display: inline-flex; align-items: center; gap: .4em; }
-/* Logo bewusst größer als die Vereins-Schrift (≈1.8×), damit es gut erkennbar
-   ist. Skaliert per `em` mit der jeweiligen Vereins-Schriftgröße. */
+.club-item { display: inline-flex; align-items: center; gap: .45em; }
+/* Vereinslogos kommen mit sehr unterschiedlichen Hintergründen (oft weißes JPG,
+   manchmal transparentes PNG). Ein einheitlicher weißer, abgerundeter „Chip"
+   normalisiert das: ruhiges, konsistentes Bild auf dunklem Grund — egal welche
+   Quelle. Quadratisch + object-fit:contain zentriert jedes Logo formatneutral.
+   Größe per `em` an der Vereins-Schrift orientiert (≈2×, gut erkennbar). */
 .club-logo {
-  height: 1.8em; width: auto; max-width: 3.4em;
+  height: 2.1em; width: 2.1em; box-sizing: border-box;
   object-fit: contain; vertical-align: middle;
+  background: #fff; border-radius: .28em; padding: .16em;
 }
 
 /* Zwei dritte Plätze: zweiter Name als zusätzlicher Block im selben Spot. */
