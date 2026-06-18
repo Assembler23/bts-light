@@ -10,6 +10,7 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   `/api/v1/federations/{slug}/clubs` verlangt einen API-Key (→ 401, keine Logos). Umgestellt auf den
   öffentlichen `GET /api/v1/clubfinder?fed={slug}&limit=200`, der Vereinsname + `logo_url` ohne Key
   liefert. Damit erscheinen die Logos jetzt tatsächlich.
+- **Vereinslogos größer** dargestellt (≈1.8× der Vereins-Schrift), damit sie gut erkennbar sind.
 
 ## v0.9.124
 
