@@ -52,6 +52,7 @@ function defaultConfig(): AppConfig {
       name_overrides: [],
       name_overrides_enabled: true,
       announce_hall: "",
+      saved_announcements: [],
     },
     azure_tts: {
       enabled: false,

@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.135
+
+- **Verlauf der letzten 10 Ansagen + erneut abspielen.** Auf der Ansagen-Seite werden die zuletzt
+  **manuell** ausgelösten Ansagen (Freitext + manuelle Feld-Ansage) protokolliert — jede lässt sich mit
+  einem Klick **erneut abspielen**. Automatische Spielaufrufe erscheinen nicht im Verlauf.
+- **Gespeicherte Ansage-Blöcke.** Wiederkehrende Ansagen (z. B. „Siegerehrung in 10 Minuten") lassen sich
+  per **„Als Block speichern"** ablegen und jederzeit per Knopfdruck ansagen (Halle wählbar, Master →
+  Slaves), ins Textfeld laden oder löschen.
+- **Azure-Stimme aktiv → Standard-Stimme ausgeblendet.** Ist die hochwertige Azure-Stimme an, ist die
+  Standard-Stimmenauswahl deaktiviert (sie hätte keinen Effekt) — der Offline-/Fehler-Fallback greift
+  weiterhin automatisch.
+
 ## v0.9.134
 
 - **Startseite ist jetzt ein Turnier-Dashboard.** Die Status-Seite zeigt oben den **Turniernamen** und
