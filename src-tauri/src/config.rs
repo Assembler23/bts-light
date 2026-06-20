@@ -335,6 +335,13 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub connection_mode: ConnectionMode,
+    /// Ansage-Slave-Modus (Mehr-Hallen): diese Instanz liest nur BTP und sagt
+    /// ihre Halle (`announce.announce_hall`) an — KEIN Liveticker-Push, KEINE
+    /// Auto-Feldvergabe, KEIN Tablet-Server/mDNS/Relay. Für einen zweiten
+    /// Rechner in der anderen Halle, der nur Ansagen macht (Master steuert).
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub slave_mode: bool,
     /// Einstellungen der gesprochenen Feld-Ansagen. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -572,6 +579,7 @@ mod tests {
             upload_logs: true,
             install_id: "inst-abc123".to_string(),
             connection_mode: ConnectionMode::Cloud,
+            slave_mode: false,
             announce: AnnounceConfig {
                 enabled: true,
                 language_mode: AnnounceLanguageMode::En,

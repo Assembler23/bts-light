@@ -210,6 +210,10 @@ export interface AppConfig {
   install_id: string;
   /** Verbindungsart für die Tablets: LAN (lokal) oder Cloud (über badhub.de). */
   connection_mode: ConnectionMode;
+  /** Ansage-Slave-Modus (Mehr-Hallen): nur BTP lesen + eigene Halle ansagen,
+   *  kein Liveticker-Push/Auto-Vergabe/Tablet-Server. Zweiter Rechner in der
+   *  anderen Halle, der nur Ansagen macht (es gibt genau einen Master). */
+  slave_mode: boolean;
   /** Einstellungen der gesprochenen Feld-Ansagen. */
   announce: AnnounceConfig;
   /** Hochwertige Cloud-Ansage über Azure Neural TTS (opt-in). */

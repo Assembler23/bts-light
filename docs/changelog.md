@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.130
+
+- **Ansage-Slave-Modus (Mehr-Hallen, Phase 2).** Neuer Schalter „Ansage-Slave-Modus": macht aus einem
+  zweiten bts-light-Rechner einen reinen **Ansage-Rechner** für die andere Halle. Er liest nur BTP und
+  sagt die unter „Sprachansagen" gewählte Halle **selbst** an (eigene Azure-Stimme, kein Audio über die
+  Leitung) — **kein** Liveticker-Push, **keine** Auto-Feldvergabe, **kein** Tablet-Server/mDNS/Relay.
+  Damit kollidiert er nicht mit dem Master. Es gibt genau **einen Master** (mit der BTP-Steuerung);
+  beliebig viele Slaves dürfen mitlaufen, jeder für seine Halle. Voraussetzung: der Slave-Rechner
+  erreicht den BTP-Rechner im selben Netz (LAN/WLAN).
+
 ## v0.9.129
 
 - **Mehr-Hallen: Disziplinen je Halle (Vergabe-Constraint, Phase 1b).** Neue Einstellung „Disziplinen je

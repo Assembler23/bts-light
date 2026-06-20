@@ -151,12 +151,31 @@ Welche Disziplin/Klasse in welcher Halle gespielt wird, ist einstellbar und
 Damit deckt **Turnier B** auch den Fall ab, dass Kategorie X fest in Halle A und
 andere in Halle B laufen (Felder gehen nur in ihre Halle).
 
+## Ansage-Slave-Modus (Phase 2, v0.9.130)
+
+Statt Audio über die Leitung zu schicken, läuft in der zweiten Halle ein
+**eigener bts-light-Rechner als Ansage-Slave**: er liest dieselbe BTP-Datei
+(über das gemeinsame Netz) und sagt **seine** Halle selbst an — mit eigener
+Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
+
+- **Config:** `AppConfig.slave_mode: bool` (`config.rs`). Aktiv →
+  `start_sync` (`commands.rs`) startet **keinen** Tablet-Server/mDNS/Relay; die
+  Sync-Engine (`sync.rs::run_once`) **liest** BTP + `set_snapshot` (damit der
+  `MatchAnnouncer` ansagt), **überspringt** aber Auto-Feldvergabe und
+  Liveticker-Push (`SyncOutcome::SlaveActive`). Schreibt nie nach BTP.
+- **Halle:** über die bestehende „Ansagen nur für Halle X"-Einstellung
+  (`announce.announce_hall`, Phase 1) — der Slave sagt nur seine Halle an.
+- **UI:** Schalter „Ansage-Slave-Modus" oben im SetupWizard.
+- **Architektur:** genau **ein Master** (mit BTP-Steuerung: Vergabe + Push);
+  beliebig viele Slaves (read-only). Voraussetzung: der Slave erreicht den
+  BTP-Rechner im selben Netz (LAN/WLAN).
+
 ## Offene Punkte
 
-- **Ansage-Slave (Phase 2/3).** Ein reines Ansage-Gerät (Browser-Seite, nur Ton)
-  je Halle, das die Ansagen seiner Halle abspielt — über LAN (lokaler Server)
-  bzw. Cloud-Relay. Cloud-Info-Displays sind heute LAN-only (Relay trägt nur
-  Court-Monitore), das ist der größere Teil von Phase 3.
+- **Ansage über die Distanz (Phase 3, Cloud).** Sind die Hallen NICHT im selben
+  Netz (km entfernt, getrennte LTE-Router), erreicht der Slave den BTP nicht.
+  Dann müsste der Master die Daten über den Cloud-Relay zum Slave bringen
+  (Relay trägt heute nur Court-Monitore). Größerer Umbau — separat.
 
 - **Verbindungsweg je Gerät anzeigen.** Im Parallelbetrieb pro Gerät
   (Tablet, Court-Monitor) als Badge sichtbar machen, ob es bts-light über
