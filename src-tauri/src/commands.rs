@@ -207,11 +207,15 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
-    if config.badhub.password.is_empty() {
-        return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
-    }
-    if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
-        return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
+    // Badhub-Zugang nur im Normalbetrieb nötig — ein Ansage-Slave pusht nie
+    // nach badhub und braucht weder Passwort noch (Cloud-)Installations-ID.
+    if !config.slave_mode {
+        if config.badhub.password.is_empty() {
+            return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
+        }
+        if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
+            return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
+        }
     }
 
     // Vor dem Move von `config` in den Tablet-Kontext merken.
@@ -752,6 +756,10 @@ pub async fn confirm_walkover(
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
+    // Ansage-Slave schreibt nie nach BTP (Wertungen nur am Master).
+    if config.slave_mode {
+        return Err("Ansage-Slave-Modus: Wertungen nur am Master-PC.".to_string());
+    }
     let tablet = state.tablet.clone();
 
     let proposal = tablet
@@ -805,6 +813,10 @@ pub async fn assign_court(
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
+    // Ansage-Slave schreibt nie nach BTP (nur der Master vergibt Felder).
+    if config.slave_mode {
+        return Err("Ansage-Slave-Modus: Feldvergabe nur am Master-PC.".to_string());
+    }
     // Disziplin/Klasse→Halle-Regel: manuelle Vergabe in eine nicht erlaubte
     // Halle hart verhindern (Hard-Block, gleiche Regel wie die Auto-Vergabe).
     if let Some(snap) = state.tablet.snapshot_clone() {
@@ -859,6 +871,10 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
+    // Ansage-Slave schreibt nie nach BTP.
+    if config.slave_mode {
+        return Err("Ansage-Slave-Modus: Feldvergabe nur am Master-PC.".to_string());
+    }
     // Das aktuell auf dem Feld stehende Match auflösen, um dessen CourtID zu löschen.
     let match_courts = match state.tablet.match_for_court(court_id) {
         Some(m) => vec![crate::btp::proto::MatchCourt {
