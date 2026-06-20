@@ -948,6 +948,10 @@ pub struct PreparationCandidate {
     /// Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") – für die
     /// Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind).
     pub draw_name: String,
+    /// Runden-/Spielbezeichnung (z. B. „G1", „Finale") für die Tabellenanzeige.
+    pub round_name: String,
+    /// Angesetzte Spielzeit (BTP `PlannedTime`) als `YYYYMMDDHHMM`; `null` ohne.
+    pub planned_time: Option<i64>,
     /// Spieler-Namen Team 1 (1 bei Einzel, 2 bei Doppel).
     pub team1: Vec<String>,
     /// Spieler-Namen Team 2.
@@ -1026,6 +1030,8 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                     .to_string(),
                 discipline: m.discipline.as_str().to_string(),
                 draw_name: m.draw_name.clone(),
+                round_name: m.round_name.clone(),
+                planned_time: m.planned_time,
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
                 team2: m.team2.iter().map(|p| p.name.clone()).collect(),
                 team1_nationalities: m
@@ -1109,6 +1115,80 @@ pub fn tournament_draws(state: State<'_, AppState>) -> Vec<DrawInfo> {
             .then(a.draw_name.cmp(&b.draw_name))
     });
     out
+}
+
+/// Eine Zeile der „Abgeschlossene Spiele"-Tabelle (Spielübersicht).
+#[derive(Serialize)]
+pub struct FinishedMatchRow {
+    pub match_id: i64,
+    /// Auslosung/Klasse (z. B. „HE A").
+    pub draw_name: String,
+    /// Runde (z. B. „Finale", „G1").
+    pub round_name: String,
+    pub match_num: Option<i64>,
+    /// Angesetzte Spielzeit (`YYYYMMDDHHMM`), `null` ohne Ansetzung.
+    pub planned_time: Option<i64>,
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    /// Sieger-Team (1 oder 2).
+    pub winner: u8,
+    /// Satz-Ergebnisse als (Team1, Team2)-Paare, z. B. [[15,9],[11,15],[14,16]].
+    pub sets: Vec<(i64, i64)>,
+    /// Art der Entscheidung: `normal` · `walkover` · `retired` · `disqualified`.
+    pub result: String,
+    /// Feldname, auf dem gespielt wurde (leer, falls nicht zugewiesen).
+    pub court: String,
+    /// Halle (BTP-Location-Name; leer bei Ein-Hallen-Turnieren).
+    pub location: String,
+    /// Zeitpunkt der Beendigung (Unix-ms) – für die Sortierung (neueste zuerst).
+    pub finished_at: Option<u64>,
+}
+
+/// Abgeschlossene Spiele (mit Sieger) für die Spielübersicht-Tabelle, neueste
+/// zuerst. Reiner Lesepfad aus dem aktuellen Snapshot.
+#[tauri::command]
+pub fn finished_matches(state: State<'_, AppState>) -> Vec<FinishedMatchRow> {
+    use crate::btp::model::{MatchResult, MatchStatus};
+    let Some(snapshot) = state.tablet.snapshot_clone() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<FinishedMatchRow> = snapshot
+        .matches
+        .iter()
+        .filter(|m| m.status == MatchStatus::Finished && m.winner.is_some())
+        .map(|m| FinishedMatchRow {
+            match_id: m.id,
+            draw_name: m.draw_name.clone(),
+            round_name: m.round_name.clone(),
+            match_num: m.match_num,
+            planned_time: m.planned_time,
+            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+            winner: m.winner.unwrap_or(0),
+            sets: m.sets.clone(),
+            result: match m.result {
+                MatchResult::Normal => "normal",
+                MatchResult::Walkover => "walkover",
+                MatchResult::Retired => "retired",
+                MatchResult::Disqualified => "disqualified",
+            }
+            .to_string(),
+            court: m.court.clone().unwrap_or_default(),
+            location: m
+                .court_id
+                .map(|cid| snapshot.court_location_name(cid))
+                .unwrap_or_default(),
+            finished_at: m.finished_at,
+        })
+        .collect();
+    // Neueste zuerst (stabil nach Beendigungszeit, sonst Spielnummer/ID).
+    rows.sort_by(|a, b| {
+        b.finished_at
+            .cmp(&a.finished_at)
+            .then(b.match_num.cmp(&a.match_num))
+            .then(b.match_id.cmp(&a.match_id))
+    });
+    rows
 }
 
 /// Master: eine Freitext-Ansage ablegen. `hall` = Ziel-Halle (BTP-Location-Name;

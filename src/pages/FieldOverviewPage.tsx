@@ -8,6 +8,7 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from "react"
 import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
 import {
   assignCourt,
+  finishedMatches,
   freeCourt,
   preparationCandidates,
   setCourtLocked,
@@ -23,6 +24,7 @@ import type {
   CallTimerConfig,
   CourtOverview,
   DisciplineHallRule,
+  FinishedMatchRow,
   PreparationCandidate,
 } from "../types";
 
@@ -32,6 +34,28 @@ function teamsLabel(t1: string[], t2: string[]): string {
   const a = t1.join(" / ") || "—";
   const b = t2.join(" / ") || "—";
   return `${a} – ${b}`;
+}
+
+// BTP-PlannedTime (YYYYMMDDHHMM) → „HH:MM"; leer ohne Ansetzung.
+function fmtPlannedTime(t: number | null): string {
+  if (!t) return "";
+  const hh = Math.floor((t / 100) % 100);
+  const mm = t % 100;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+// Satz-Ergebnisse → „15:9 11:15 14:16".
+function fmtSets(sets: [number, number][]): string {
+  return sets.map(([a, b]) => `${a}:${b}`).join("  ");
+}
+
+// „Spiel"-Spalte: Zeit · Klasse · Runde (leere Teile weggelassen).
+function spielLabel(
+  time: number | null,
+  draw: string,
+  round: string,
+): string {
+  return [fmtPlannedTime(time), draw, round].filter(Boolean).join(" ");
 }
 
 export function FieldOverviewPage({
@@ -49,6 +73,7 @@ export function FieldOverviewPage({
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
+  const [finished, setFinished] = useState<FinishedMatchRow[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
@@ -61,12 +86,14 @@ export function FieldOverviewPage({
 
   const refresh = useCallback(async () => {
     try {
-      const [info, prep] = await Promise.all([
+      const [info, prep, fin] = await Promise.all([
         tabletOverview(),
         preparationCandidates(),
+        finishedMatches(),
       ]);
       setCourts(info.courts);
       setCandidates(prep.candidates);
+      setFinished(fin);
     } catch {
       /* Poll-Aussetzer tolerieren – letzter Stand bleibt stehen */
     }
@@ -209,8 +236,9 @@ export function FieldOverviewPage({
       <header>
         <h1 className="text-2xl font-semibold leading-tight">Spielübersicht</h1>
         <p className="text-sm text-slate-500">
-          Spielbereite Spiele oben auf eine freie (grüne) Feld-Spalte ziehen —
-          oder anklicken und dann auf die Spalte tippen. Schreibt nach BTP.
+          Oben die Felder, darunter die nicht zugewiesenen und die
+          abgeschlossenen Spiele. Ein offenes Spiel auf ein freies Feld ziehen
+          (oder anklicken + Feld tippen) → schreibt nach BTP.
         </p>
       </header>
 
@@ -220,54 +248,7 @@ export function FieldOverviewPage({
         </div>
       )}
 
-      {/* Pool: spielbereite Spiele (ziehbar) */}
-      <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <h2 className="text-sm font-semibold text-slate-700">
-          Spielbereit <span className="text-slate-400">({assignable.length})</span>
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {assignable.length === 0 && (
-            <span className="text-sm text-slate-400">Keine spielbereiten Spiele.</span>
-          )}
-          {assignable.map((m) => {
-            const active = selected === m.match_id;
-            return (
-              <button
-                key={m.match_id}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData("text/plain", String(m.match_id));
-                  e.dataTransfer.effectAllowed = "move";
-                }}
-                onClick={() => setSelected(active ? null : m.match_id)}
-                aria-pressed={active}
-                title={teamsLabel(m.team1, m.team2)}
-                className={`max-w-[16rem] cursor-grab rounded-lg border px-3 py-1.5 text-left text-sm
-                            transition-colors active:cursor-grabbing ${
-                              active
-                                ? "border-slate-800 bg-slate-800 text-white"
-                                : "border-slate-200 bg-white hover:border-slate-400"
-                            }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{m.label || "Spiel"}</span>
-                  {m.match_num != null && (
-                    <span className={active ? "text-slate-300" : "text-slate-400"}>
-                      #{m.match_num}
-                    </span>
-                  )}
-                </div>
-                <div
-                  className={`truncate text-xs ${active ? "text-slate-200" : "text-slate-500"}`}
-                >
-                  {teamsLabel(m.team1, m.team2)}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
+      {/* Felder oben: Board (Drop-Ziel für die offenen Spiele unten). */}
       <HallFilter halls={allHalls} value={hallFilter} onChange={setHallFilter} />
 
       {/* Board: Felder als Spalten, je Halle eine Gruppe. */}
@@ -357,6 +338,13 @@ export function FieldOverviewPage({
                           >
                             {teamsLabel(c.team1, c.team2)}
                           </div>
+                          {/* Tabletbediener (= „Schiedsrichter"-Spalte, bis das
+                              Schiri-Modul echte Schiris liefert). */}
+                          {c.scorekeeper.length > 0 && (
+                            <div className="truncate text-[11px] text-slate-400">
+                              Bediener: {c.scorekeeper.join(" / ")}
+                            </div>
+                          )}
                           {callTimer.enabled && c.on_court_since_ms != null && (
                             <CallTimerBadge
                               sinceMs={c.on_court_since_ms}
@@ -414,6 +402,161 @@ export function FieldOverviewPage({
           Keine Felder in „{hallFilter}". Über „Alle" siehst du alle Felder.
         </p>
       )}
+
+      {/* Nicht zugewiesene Spiele: per Drag&Drop (oder Klick) auf ein Feld. */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Nicht zugewiesene Spiele{" "}
+          <span className="text-slate-400">({assignable.length})</span>
+        </h2>
+        {assignable.length === 0 ? (
+          <p className="text-sm text-slate-400">Keine spielbereiten Spiele.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-medium">#</th>
+                  <th className="px-3 py-2 font-medium">Spiel</th>
+                  <th className="px-3 py-2 font-medium">Spieler</th>
+                  <th className="px-3 py-2 font-medium">Halle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignable.map((m) => {
+                  const active = selected === m.match_id;
+                  const hall = allowedHallForMatch(m);
+                  return (
+                    <tr
+                      key={m.match_id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", String(m.match_id));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onClick={() => setSelected(active ? null : m.match_id)}
+                      className={`cursor-grab border-t border-slate-100 active:cursor-grabbing ${
+                        active ? "bg-slate-800 text-white" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <td className="px-3 py-2 tabular-nums">
+                        {m.match_num ?? ""}
+                      </td>
+                      <td className="px-3 py-2">
+                        {spielLabel(m.planned_time, m.draw_name, m.round_name) ||
+                          m.label}
+                      </td>
+                      <td className="px-3 py-2">
+                        {teamsLabel(m.team1, m.team2)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {hall ? (
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-xs ${
+                              active
+                                ? "bg-white/20"
+                                : "bg-violet-100 text-violet-800"
+                            }`}
+                          >
+                            {hall}
+                          </span>
+                        ) : (
+                          <span
+                            className={active ? "text-slate-300" : "text-slate-400"}
+                          >
+                            —
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-xs text-slate-400">
+          Zeile auf ein freies (grünes) Feld oben ziehen — oder anklicken und
+          dann auf die Feld-Spalte tippen. „Halle" = durch die Disziplin-Regel
+          vorgegebene Halle.
+        </p>
+      </section>
+
+      {/* Abgeschlossene Spiele (neueste zuerst). */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Abgeschlossene Spiele{" "}
+          <span className="text-slate-400">({finished.length})</span>
+        </h2>
+        {finished.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            Noch keine abgeschlossenen Spiele.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Feld</th>
+                  <th className="px-3 py-2 font-medium">#</th>
+                  <th className="px-3 py-2 font-medium">Spiel</th>
+                  <th className="px-3 py-2 font-medium">Spieler</th>
+                  <th className="px-3 py-2 font-medium">Schiedsrichter</th>
+                  <th className="px-3 py-2 font-medium">Ergebnis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {finished.map((m) => {
+                  const t1 = m.team1.join(" / ") || "—";
+                  const t2 = m.team2.join(" / ") || "—";
+                  const fieldLabel = m.location
+                    ? `${m.location} · ${m.court}`
+                    : m.court || "—";
+                  const resultLabel: Record<string, string> = {
+                    walkover: "kampflos",
+                    retired: "Aufgabe",
+                    disqualified: "DQ",
+                  };
+                  return (
+                    <tr
+                      key={m.match_id}
+                      className="border-t border-slate-100 hover:bg-slate-50"
+                    >
+                      <td className="px-3 py-2">{fieldLabel}</td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {m.match_num ?? ""}
+                      </td>
+                      <td className="px-3 py-2">
+                        {spielLabel(m.planned_time, m.draw_name, m.round_name)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={m.winner === 1 ? "font-semibold" : ""}>
+                          {t1}
+                        </span>
+                        <span className="text-slate-400"> – </span>
+                        <span className={m.winner === 2 ? "font-semibold" : ""}>
+                          {t2}
+                        </span>
+                      </td>
+                      {/* Tabletbediener/Schiri liegt je abgeschlossenem Spiel noch
+                          nicht vor (kommt mit dem Schiri-Modul). */}
+                      <td className="px-3 py-2 text-slate-300">—</td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {fmtSets(m.sets)}
+                        {resultLabel[m.result] && (
+                          <span className="ml-1.5 rounded bg-slate-100 px-1 py-0.5 text-xs text-slate-500">
+                            {resultLabel[m.result]}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* Sicherheitsabfrage vor dem Freigeben eines belegten Felds. */}
       {confirmFree && liveConfirm && (

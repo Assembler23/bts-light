@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.132
+
+- **Spielübersicht tabellarisch (BTS-Stil).** Oben die Felder, darunter zwei Tabellen: **Nicht zugewiesene
+  Spiele** (per Drag&Drop oder Klick aufs Feld vergeben; mit Spalten #, Spiel = Zeit/Klasse/Runde,
+  Spieler, **Halle** – die durch die Disziplin→Halle-Regel vorgegebene Halle wird angezeigt) und
+  **Abgeschlossene Spiele** (Feld, #, Spiel, Spieler mit fett markiertem Sieger, Schiedsrichter, Ergebnis
+  = Sätze). Neuer Befehl `finished_matches`. Die **Schiedsrichter**-Spalte zeigt vorerst den
+  **Tabletbediener** (bei laufenden Feldern; je abgeschlossenem Spiel folgt der echte Schiedsrichter mit
+  dem späteren Schiri-Modul).
+
 ## v0.9.131
 
 - **Freitext-Ansage.** Auf der Seite „Ansagen" gibt es ein Textfeld: Text eintippen, Halle wählen
