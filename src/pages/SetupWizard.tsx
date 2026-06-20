@@ -33,19 +33,13 @@ import {
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
-import { playNameTest, playTestAnnouncement } from "../io/announcer";
-import { azureOption } from "../io/azureAnnounce";
-import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
 import { PRESETS, findPreset } from "../presets";
-import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
 import type {
-  AnnounceLanguageMode,
   AppConfig,
   ConnectionMode,
   CourtAd,
   DisciplineHallRule,
   DrawInfo,
-  NameOverride,
 } from "../types";
 
 interface Props {
@@ -252,34 +246,9 @@ export function SetupWizard({
   );
   // Ansage-Slave-Modus: nur BTP lesen + eigene Halle ansagen.
   const [slaveMode, setSlaveMode] = useState(initialConfig.slave_mode ?? false);
+  // Ansage-Modul: hier nur an/aus. Alle Detail-Einstellungen (Stimmen, Azure,
+  // Halle, Aussprache …) liegen auf der Ansagen-Seite (AnnounceSettings).
   const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
-  const [annLang, setAnnLang] = useState<AnnounceLanguageMode>(
-    initialConfig.announce.language_mode,
-  );
-  const [annVoiceDe, setAnnVoiceDe] = useState(initialConfig.announce.voice_de);
-  const [annVoiceEn, setAnnVoiceEn] = useState(initialConfig.announce.voice_en);
-  const [annRate, setAnnRate] = useState(initialConfig.announce.rate);
-  const [annGong, setAnnGong] = useState(initialConfig.announce.gong);
-  // Phonetische Aussprache-Korrekturen (Name/Namensteil → gesprochene Form),
-  // z. B. für asiatische Namen, die die de/en-Stimme falsch ausspricht.
-  const [annNameOverrides, setAnnNameOverrides] = useState<NameOverride[]>(
-    initialConfig.announce.name_overrides ?? [],
-  );
-  const [annOverridesEnabled, setAnnOverridesEnabled] = useState(
-    initialConfig.announce.name_overrides_enabled ?? true,
-  );
-  // Mehr-Hallen: diese Instanz sagt nur Spiele dieser Halle an (leer = alle).
-  const [annHall, setAnnHall] = useState(
-    initialConfig.announce.announce_hall ?? "",
-  );
-  // Azure Neural TTS (hochwertige Cloud-Ansage, opt-in).
-  const az = initialConfig.azure_tts;
-  const [azEnabled, setAzEnabled] = useState(az?.enabled ?? false);
-  const [azRegion, setAzRegion] = useState(az?.region ?? "");
-  const [azKey, setAzKey] = useState(az?.key ?? "");
-  const [azVoice, setAzVoice] = useState(
-    az?.voice || "de-DE-SeraphinaMultilingualNeural",
-  );
   // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
   const ct = initialConfig.call_timer;
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
@@ -304,7 +273,6 @@ export function SetupWizard({
   const [cmComboVertical, setCmComboVertical] = useState(cm.combo_vertical ?? false);
   const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
-  const voices = useAvailableVoices();
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -395,26 +363,14 @@ export function SetupWizard({
       install_id: initialConfig.install_id,
       connection_mode: connectionMode,
       slave_mode: slaveMode,
+      // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
+      // (Stimmen, Azure, Halle …) leben auf der Ansagen-Seite und bleiben hier
+      // unverändert erhalten.
       announce: {
+        ...initialConfig.announce,
         enabled: annEnabled,
-        language_mode: annLang,
-        voice_de: annVoiceDe,
-        voice_en: annVoiceEn,
-        rate: annRate,
-        gong: annGong,
-        name_overrides: annNameOverrides
-          // Leere Zeilen (weder Name noch Aussprache) beim Speichern verwerfen.
-          .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
-          .filter((o) => o.name && o.say),
-        name_overrides_enabled: annOverridesEnabled,
-        announce_hall: annHall.trim(),
       },
-      azure_tts: {
-        enabled: azEnabled,
-        region: azRegion.trim(),
-        key: azKey.trim(),
-        voice: azVoice,
-      },
+      azure_tts: initialConfig.azure_tts,
       court_monitor: {
         enabled: cmEnabled,
         ad_interval_s: cmInterval,
@@ -841,10 +797,9 @@ export function SetupWizard({
         <SectionHeader icon={Volume2}>Ansagen</SectionHeader>
         <p className="text-xs text-slate-500">
           Das ganze Ansage-Modul: sagt jedes Spiel an, das in BTP auf ein Feld
-          gezogen wird (Gong, Feld, Disziplin, Paarung). Ein Schalter für alles —
-          ist er aus, gibt es keine Ansagen (auch keine Freitext-Ansagen). Alle
-          Ansage-Einstellungen (Sprache, Stimmen, Tempo, Gong, Halle, Aussprache,
-          Azure) stehen hier darunter.
+          gezogen wird (Gong, Feld, Disziplin, Paarung). Hier wird das Modul nur
+          <strong> an- oder ausgeschaltet</strong> — ist es aus, gibt es keine
+          Ansagen (auch keine Freitext-Ansagen).
         </p>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input
@@ -854,336 +809,12 @@ export function SetupWizard({
           />
           Ansagen aktivieren
         </label>
-
         {annEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            {/* Mehr-Hallen: nur eine Halle ansagen (jede Halle hört nur ihre
-                eigenen Ansagen). Nur sichtbar, wenn ≥2 Hallen erkannt wurden
-                oder bereits eine Halle eingestellt ist. */}
-            {(halls.length >= 2 || annHall !== "") && (
-              <label className="block rounded-lg bg-amber-50 p-3">
-                <span className="mb-1 block text-sm font-medium text-amber-900">
-                  Ansagen nur für Halle (Mehr-Hallen-Turnier)
-                </span>
-                <select
-                  value={annHall}
-                  onChange={(e) => setAnnHall(e.currentTarget.value)}
-                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm
-                             focus:border-amber-500 focus:outline-none"
-                >
-                  <option value="">Alle Hallen</option>
-                  {(annHall !== "" && !halls.includes(annHall)
-                    ? [...halls, annHall]
-                    : halls
-                  ).map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1 text-xs text-amber-700">
-                  Dieser PC sagt dann nur Spiele dieser Halle an. „Alle Hallen" =
-                  keine Einschränkung. So hört in einem 2-Hallen-Setup jede Halle
-                  nur ihre eigenen Ansagen.
-                </p>
-              </label>
-            )}
-
-            {/* Sprache */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-slate-600">
-                Sprache
-              </span>
-              <div className="flex gap-2">
-                {(
-                  [
-                    ["de", "Deutsch"],
-                    ["en", "Englisch"],
-                    ["auto", "Automatisch"],
-                  ] as const
-                ).map(([val, label]) => (
-                  <button
-                    key={val}
-                    onClick={() => setAnnLang(val)}
-                    className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-                      annLang === val
-                        ? "border-slate-800 bg-slate-800 text-white"
-                        : "border-slate-300 bg-white text-slate-600 hover:border-slate-400"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {annLang === "auto" && (
-                <p className="text-xs text-slate-500">
-                  Englisch, sobald mindestens die Hälfte der Spieler auf dem
-                  Feld international ist – sonst Deutsch.
-                </p>
-              )}
-            </div>
-
-            {/* Stimmen */}
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-600">
-                Deutsche Stimme
-              </span>
-              <select
-                value={annVoiceDe}
-                onChange={(e) => setAnnVoiceDe(e.currentTarget.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
-                           focus:border-slate-500 focus:outline-none"
-              >
-                <option value="">Standardstimme</option>
-                {voicesForLang(voices, "de").map((v) => (
-                  <option key={v.voiceURI} value={v.voiceURI}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-600">
-                Englische Stimme
-              </span>
-              <select
-                value={annVoiceEn}
-                onChange={(e) => setAnnVoiceEn(e.currentTarget.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
-                           focus:border-slate-500 focus:outline-none"
-              >
-                <option value="">Standardstimme</option>
-                {voicesForLang(voices, "en").map((v) => (
-                  <option key={v.voiceURI} value={v.voiceURI}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {/* Geschwindigkeit */}
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-600">
-                Geschwindigkeit: {annRate.toFixed(1)}×
-              </span>
-              <input
-                type="range"
-                min={0.5}
-                max={1.5}
-                step={0.1}
-                value={annRate}
-                onChange={(e) => setAnnRate(Number(e.currentTarget.value))}
-                className="w-full"
-              />
-            </label>
-
-            {/* Gong */}
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={annGong}
-                onChange={(e) => setAnnGong(e.currentTarget.checked)}
-              />
-              Gong vor der Ansage
-            </label>
-
-            {/* Test */}
-            <div className="flex flex-col gap-1">
-              <button
-                onClick={() =>
-                  void playTestAnnouncement(annLang === "en" ? "en" : "de", {
-                    rate: annRate,
-                    voiceURI:
-                      (annLang === "en" ? annVoiceEn : annVoiceDe) || undefined,
-                    gong: annGong,
-                    nameOverrides: annNameOverrides,
-                    nameOverridesEnabled: annOverridesEnabled,
-                    // Azure nutzt den GESPEICHERTEN Key (Backend) — zum Testen
-                    // einer neuen Stimme/Konfig vorher speichern.
-                    azure: azureOption({
-                      enabled: azEnabled,
-                      region: azRegion,
-                      key: azKey,
-                      voice: azVoice,
-                    }),
-                  })
-                }
-                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                           text-slate-700 transition-colors hover:bg-slate-200"
-              >
-                Test-Ansage abspielen
-              </button>
-              <p className="text-xs text-slate-500">
-                Vor dem Turnier einmal drücken – das schaltet die Tonausgabe
-                am Rechner frei.
-              </p>
-            </div>
-
-            {/* Aussprache-Korrekturen (Phonetik-Tabelle) */}
-            <div className="flex flex-col gap-2 border-t border-slate-200 pt-4">
-              <span className="text-sm font-medium text-slate-700">
-                Aussprache-Korrekturen
-              </span>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={annOverridesEnabled}
-                  onChange={(e) => setAnnOverridesEnabled(e.currentTarget.checked)}
-                />
-                Aussprache-Korrekturen anwenden
-              </label>
-              <p className="text-xs text-slate-500">
-                Ein mitgeliefertes <strong>Basis-Wörterbuch</strong> (
-                {BASE_NAME_OVERRIDES.length} gängige internationale Nach- und
-                Vornamen, u. a. vietnamesisch, chinesisch, indisch, französisch,
-                spanisch, türkisch, polnisch) wird automatisch angewendet, damit
-                die Stimme fremdsprachige Namen besser trifft. Eigene Korrekturen unten haben
-                <strong> Vorrang</strong>: trage <strong>Name oder Namensteil</strong>
-                und die gewünschte <strong>Aussprache</strong> (Lautschrift) ein –
-                ein Nachname wie „Nguyen“ reicht einmal. Mit ▶ hörst du die
-                Aussprache. (Korrekturen sind Näherungen, kein Ersatz für eine
-                perfekte Lautschrift.)
-              </p>
-
-              {annNameOverrides.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  {annNameOverrides.map((ov, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={ov.name}
-                        placeholder="Name / Namensteil"
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          setAnnNameOverrides((prev) =>
-                            prev.map((o, i) =>
-                              i === idx ? { ...o, name: v } : o,
-                            ),
-                          );
-                        }}
-                        className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                      />
-                      <span className="text-slate-400">→</span>
-                      <input
-                        type="text"
-                        value={ov.say}
-                        placeholder="Aussprache"
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          setAnnNameOverrides((prev) =>
-                            prev.map((o, i) =>
-                              i === idx ? { ...o, say: v } : o,
-                            ),
-                          );
-                        }}
-                        className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                      />
-                      <button
-                        type="button"
-                        title="Aussprache testen"
-                        onClick={() =>
-                          void playNameTest(
-                            ov.say || ov.name,
-                            annLang === "en" ? "en" : "de",
-                            {
-                              rate: annRate,
-                              voiceURI:
-                                (annLang === "en" ? annVoiceEn : annVoiceDe) ||
-                                undefined,
-                            },
-                          )
-                        }
-                        className="rounded-md bg-slate-100 px-2 py-1 text-sm text-slate-700 hover:bg-slate-200"
-                      >
-                        ▶
-                      </button>
-                      <button
-                        type="button"
-                        title="Zeile entfernen"
-                        onClick={() =>
-                          setAnnNameOverrides((prev) =>
-                            prev.filter((_, i) => i !== idx),
-                          )
-                        }
-                        className="rounded-md bg-slate-100 px-2 py-1 text-sm text-slate-500 hover:bg-rose-100 hover:text-rose-700"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={() =>
-                  setAnnNameOverrides((prev) => [...prev, { name: "", say: "" }])
-                }
-                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                           text-slate-700 transition-colors hover:bg-slate-200"
-              >
-                + Name hinzufügen
-              </button>
-            </div>
-
-            {/* Azure Neural TTS (hochwertige Cloud-Stimme) */}
-            <div className="flex flex-col gap-2 border-t border-slate-200 pt-4">
-              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={azEnabled}
-                  onChange={(e) => setAzEnabled(e.currentTarget.checked)}
-                />
-                Hochwertige Stimme über Azure (Cloud)
-              </label>
-              <p className="text-xs text-slate-500">
-                Spricht die ganze Ansage mit einer neuronalen Azure-Stimme und gibt
-                asiatische/internationale Namen <strong>nativ</strong> wieder (per
-                Sprach-Erkennung). Braucht Internet; bei Fehler/offline greift
-                automatisch die lokale Stimme. Schlüssel + Region aus deiner
-                Azure-Speech-Ressource. Wird nach dem Speichern aktiv.
-              </p>
-              {azEnabled && (
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm text-slate-600">
-                    Region
-                    <input
-                      type="text"
-                      value={azRegion}
-                      placeholder="westeurope"
-                      onChange={(e) => setAzRegion(e.currentTarget.value)}
-                      className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-                    />
-                  </label>
-                  <label className="text-sm text-slate-600">
-                    Schlüssel (KEY 1)
-                    <input
-                      type="password"
-                      value={azKey}
-                      placeholder="Azure Speech Key"
-                      onChange={(e) => setAzKey(e.currentTarget.value)}
-                      className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-                    />
-                  </label>
-                  <label className="text-sm text-slate-600">
-                    Stimme
-                    <select
-                      value={azVoice}
-                      onChange={(e) => setAzVoice(e.currentTarget.value)}
-                      className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-                    >
-                      <option value="de-DE-SeraphinaMultilingualNeural">
-                        Seraphina (weiblich, mehrsprachig)
-                      </option>
-                      <option value="de-DE-FlorianMultilingualNeural">
-                        Florian (männlich, mehrsprachig)
-                      </option>
-                    </select>
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
+          <p className="text-xs text-slate-500">
+            Sprache, Stimmen, Tempo, Gong, Aussprache-Korrekturen, Azure und die
+            Halle stellst du auf der Seite <strong>„Ansagen"</strong> ein
+            (Menüpunkt links).
+          </p>
         )}
       </section>
 

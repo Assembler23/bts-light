@@ -50,7 +50,10 @@ export interface AnnounceOptions {
 // kleinem Decay, ähnlich einem Hotel-Gong. Liefert eine Promise, die
 // resolved, wenn der Gong durchgespielt ist — damit die Sprache erst danach
 // startet.
-async function playGong(ctx: AudioContext): Promise<void> {
+async function playGong(
+  ctx: AudioContext,
+  kind: "match" | "info" = "match",
+): Promise<void> {
   const now = ctx.currentTime;
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.0001, now);
@@ -58,16 +61,20 @@ async function playGong(ctx: AudioContext): Promise<void> {
   gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
   gain.connect(ctx.destination);
 
+  // Spielaufruf = ABSTEIGEND (A5 → D5, wie gewohnt). Info/Freitext =
+  // AUFSTEIGEND (D5 → A5), damit man hört, dass es KEIN Spielaufruf ist.
+  const [first, second] = kind === "info" ? [587.33, 880] : [880, 587.33];
+
   const o1 = ctx.createOscillator();
   o1.type = "sine";
-  o1.frequency.value = 880; // A5
+  o1.frequency.value = first;
   o1.connect(gain);
   o1.start(now);
   o1.stop(now + 0.6);
 
   const o2 = ctx.createOscillator();
   o2.type = "sine";
-  o2.frequency.value = 587.33; // D5
+  o2.frequency.value = second;
   o2.connect(gain);
   o2.start(now + 0.18);
   o2.stop(now + 1.1);
@@ -152,8 +159,12 @@ function enqueueAnnouncement(task: () => Promise<void>): Promise<void> {
   return run;
 }
 
-// Spielt (optional) den Gong und wartet, bis er ausgeklungen ist.
-async function maybeGong(gong: boolean | undefined): Promise<void> {
+// Spielt (optional) den Gong und wartet, bis er ausgeklungen ist. `kind`
+// unterscheidet Spielaufruf (Standard) von Info/Freitext (anderer Klang).
+async function maybeGong(
+  gong: boolean | undefined,
+  kind: "match" | "info" = "match",
+): Promise<void> {
   if (gong === false) return;
   try {
     const ctx = getAudioContext();
@@ -164,7 +175,7 @@ async function maybeGong(gong: boolean | undefined): Promise<void> {
         // ignore
       }
     }
-    await playGong(ctx);
+    await playGong(ctx, kind);
   } catch {
     // Gong fehlgeschlagen → trotzdem sprechen.
   }
@@ -548,7 +559,8 @@ export function playFreeText(
   const t = (text || "").trim();
   if (!t) return Promise.resolve();
   return enqueueAnnouncement(async () => {
-    await maybeGong(opts.gong);
+    // Freitext = kein Spielaufruf → anderer (aufsteigender) Gong.
+    await maybeGong(opts.gong, "info");
     if (opts.azure) {
       try {
         const speakLang = lang === "de" ? "de-DE" : "en-US";

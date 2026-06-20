@@ -273,6 +273,8 @@ function App() {
             announce={config.announce}
             callTimer={config.call_timer}
             azureTts={config.azure_tts}
+            config={config}
+            onConfigSaved={(c) => setConfig(c)}
           />
         );
       case "monitors":

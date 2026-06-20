@@ -5,12 +5,14 @@
 import { useEffect, useState } from "react";
 import { Megaphone, Volume2 } from "lucide-react";
 import { publishFreetext, tabletOverview } from "../api";
+import { AnnounceSettings } from "../components/AnnounceSettings";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
 import { playTestAnnouncement } from "../io/announcer";
 import { useNow } from "../state/callTimer";
 import type {
   AnnounceConfig,
+  AppConfig,
   AzureTtsConfig,
   CallTimerConfig,
   CourtOverview,
@@ -27,10 +29,16 @@ export function AnnouncePage({
   announce,
   callTimer,
   azureTts,
+  config,
+  onConfigSaved,
 }: {
   announce: AnnounceConfig;
   callTimer: CallTimerConfig;
   azureTts?: AzureTtsConfig;
+  /** Volle Konfiguration + Rückmeldung beim Speichern – für die
+   *  Ansage-Einstellungen, die jetzt hier (nicht mehr in Einstellungen) liegen. */
+  config: AppConfig;
+  onConfigSaved: (config: AppConfig) => void;
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const now = useNow();
@@ -205,6 +213,10 @@ export function AnnouncePage({
           ))}
         </div>
       </section>
+
+      {/* Alle Ansage-Einstellungen (Sprache, Stimmen, Tempo, Gong, Aussprache,
+          Halle, Azure) — in den Einstellungen wird das Modul nur an-/ausgeschaltet. */}
+      <AnnounceSettings config={config} onSaved={onConfigSaved} />
     </main>
   );
 }
