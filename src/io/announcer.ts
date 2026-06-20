@@ -55,26 +55,52 @@ async function playGong(
   kind: "match" | "info" = "match",
 ): Promise<void> {
   const now = ctx.currentTime;
+
+  // Info/Freitext: KLAR anderer Klang als der Spielaufruf – drei helle,
+  // perlende Töne (C-Dur-Dreiklang aufsteigend, Triangle-Wellenform, kurz
+  // gestoßen). Unterscheidet sich in Tonzahl (3 statt 2), Klangfarbe
+  // (Triangle statt Sinus) und Bewegung deutlich vom tiefen 2-Ton-Spielaufruf.
+  if (kind === "info") {
+    const notes = [523.25, 659.25, 783.99]; // C5 – E5 – G5
+    const step = 0.15;
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * step;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.32, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      g.connect(ctx.destination);
+      const o = ctx.createOscillator();
+      o.type = "triangle";
+      o.frequency.value = notes[i];
+      o.connect(g);
+      o.start(t);
+      o.stop(t + 0.38);
+    }
+    // Auflösen, wenn der dritte Ton ausgeklungen ist (~0,85 s).
+    return new Promise((resolve) => {
+      setTimeout(resolve, 850);
+    });
+  }
+
+  // Spielaufruf = tiefer, zweitöniger ABSTEIGENDER Sinus-Gong (A5 → D5),
+  // wie ein Hotel-Gong.
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.0001, now);
   gain.gain.exponentialRampToValueAtTime(0.4, now + 0.05);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
   gain.connect(ctx.destination);
 
-  // Spielaufruf = ABSTEIGEND (A5 → D5, wie gewohnt). Info/Freitext =
-  // AUFSTEIGEND (D5 → A5), damit man hört, dass es KEIN Spielaufruf ist.
-  const [first, second] = kind === "info" ? [587.33, 880] : [880, 587.33];
-
   const o1 = ctx.createOscillator();
   o1.type = "sine";
-  o1.frequency.value = first;
+  o1.frequency.value = 880;
   o1.connect(gain);
   o1.start(now);
   o1.stop(now + 0.6);
 
   const o2 = ctx.createOscillator();
   o2.type = "sine";
-  o2.frequency.value = second;
+  o2.frequency.value = 587.33;
   o2.connect(gain);
   o2.start(now + 0.18);
   o2.stop(now + 1.1);

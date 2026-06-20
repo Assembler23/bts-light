@@ -93,6 +93,13 @@ dem Turnier einmal die Test-Ansage drücken.
 > Standard-Stimmen-Auswahl (`voice_de`/`voice_en`) aus — Azure spricht die ganze Ansage, die lokale Stimme
 > wäre wirkungslos (Fallback bei Fehler/offline greift weiterhin automatisch).
 
+## Gong-Klang (Spielaufruf vs. Freitext/Info)
+
+`playGong(ctx, kind)` in [`announcer.ts`](../src/io/announcer.ts) erzeugt zwei **deutlich verschiedene**
+Gongs: **Spielaufruf** (`kind="match"`, Default) = tiefer, zweitöniger absteigender Sinus-Gong (A5 → D5);
+**Freitext/Info** (`kind="info"`) = heller, dreitöniger aufsteigender Dreiklang (C5-E5-G5, Triangle). So ist
+sofort hörbar, ob es ein Spielaufruf oder eine sonstige Durchsage ist.
+
 ## Verlauf, erneutes Abspielen & gespeicherte Blöcke
 
 Auf der Ansagen-Seite ([`AnnouncePage.tsx`](../src/pages/AnnouncePage.tsx)):
