@@ -93,7 +93,18 @@ export function FieldOverviewPage({
       ]);
       setCourts(info.courts);
       setCandidates(prep.candidates);
-      setFinished(fin);
+      // Nur bei echter Änderung neu setzen → die (wachsende) Tabelle rendert
+      // nicht bei jedem 2,5-s-Poll neu.
+      setFinished((prev) =>
+        prev.length === fin.length &&
+        prev.every(
+          (r, i) =>
+            r.match_id === fin[i].match_id &&
+            r.finished_at === fin[i].finished_at,
+        )
+          ? prev
+          : fin,
+      );
     } catch {
       /* Poll-Aussetzer tolerieren – letzter Stand bleibt stehen */
     }
@@ -509,9 +520,8 @@ export function FieldOverviewPage({
                 {finished.map((m) => {
                   const t1 = m.team1.join(" / ") || "—";
                   const t2 = m.team2.join(" / ") || "—";
-                  const fieldLabel = m.location
-                    ? `${m.location} · ${m.court}`
-                    : m.court || "—";
+                  const fieldLabel =
+                    [m.location, m.court].filter(Boolean).join(" · ") || "—";
                   const resultLabel: Record<string, string> = {
                     walkover: "kampflos",
                     retired: "Aufgabe",
@@ -527,7 +537,9 @@ export function FieldOverviewPage({
                         {m.match_num ?? ""}
                       </td>
                       <td className="px-3 py-2">
-                        {spielLabel(m.planned_time, m.draw_name, m.round_name)}
+                        {spielLabel(m.planned_time, m.draw_name, m.round_name) ||
+                          m.draw_name ||
+                          "—"}
                       </td>
                       <td className="px-3 py-2">
                         <span className={m.winner === 1 ? "font-semibold" : ""}>

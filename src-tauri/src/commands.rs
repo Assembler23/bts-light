@@ -1181,11 +1181,14 @@ pub fn finished_matches(state: State<'_, AppState>) -> Vec<FinishedMatchRow> {
             finished_at: m.finished_at,
         })
         .collect();
-    // Neueste zuerst (stabil nach Beendigungszeit, sonst Spielnummer/ID).
+    // Neueste zuerst. `Option::cmp` würde `None` bei absteigender Sortierung
+    // nach OBEN ziehen (z. B. Walkover ohne Zeitstempel) — daher mit
+    // `unwrap_or(0)` explizit ans Ende statt an den Anfang.
     rows.sort_by(|a, b| {
         b.finished_at
-            .cmp(&a.finished_at)
-            .then(b.match_num.cmp(&a.match_num))
+            .unwrap_or(0)
+            .cmp(&a.finished_at.unwrap_or(0))
+            .then(b.match_num.unwrap_or(0).cmp(&a.match_num.unwrap_or(0)))
             .then(b.match_id.cmp(&a.match_id))
     });
     rows
