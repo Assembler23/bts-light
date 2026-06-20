@@ -185,6 +185,22 @@ export interface MonitorDeviceInfo {
   hall: string | null;
 }
 
+/** Eine Disziplin/Klasse→Halle-Regel (Rust: config::DisciplineHallRule).
+ *  `draw_name` leer = Kategorie-Default (alle Auslosungen der `discipline`);
+ *  gesetzt = Override für genau diese Auslosung (z. B. „HE A"). `discipline` =
+ *  snake_case-Schlüssel (`mens_singles` …). `hall` = BTP-Location-Name. */
+export interface DisciplineHallRule {
+  discipline: string;
+  draw_name: string;
+  hall: string;
+}
+
+/** Eine Auslosung/Klasse des Turniers (Rust: commands::DrawInfo). */
+export interface DrawInfo {
+  discipline: string;
+  draw_name: string;
+}
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
@@ -204,6 +220,9 @@ export interface AppConfig {
   call_timer: CallTimerConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
+  /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
+   *  ein (manuell + automatisch). Leer = keine Einschränkung. */
+  discipline_hall_rules: DisciplineHallRule[];
   /** Vom Operator gesperrte Felder (CourtIDs) – keine Auto-Vergabe. */
   locked_courts: number[];
   /** PIN fürs Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
@@ -367,6 +386,9 @@ export interface PreparationCandidate {
   /** Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed`, …;
    *  leer = unbekannt) — für die Ansage lokalisiert das Frontend selbst. */
   discipline: string;
+  /** Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") — für die
+   *  Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind). */
+  draw_name: string;
   /** Spieler-Namen Team 1 (1 bei Einzel, 2 bei Doppel). */
   team1: string[];
   /** Spieler-Namen Team 2. */

@@ -115,6 +115,7 @@ pub fn run() {
             commands::free_court,
             commands::set_court_locked,
             commands::preparation_candidates,
+            commands::tournament_draws,
             commands::call_preparation,
             commands::retract_preparation,
             commands::winners_overview,
