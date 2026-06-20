@@ -39,6 +39,7 @@ function defaultConfig(): AppConfig {
     upload_logs: false,
     install_id: "",
     connection_mode: "lan",
+    slave_mode: false,
     announce: {
       enabled: false,
       language_mode: "auto",

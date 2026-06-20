@@ -79,6 +79,7 @@ fn status_from(outcome: &SyncOutcome) -> SyncStatus {
         SyncOutcome::PushedFull => ("ok", "Verbunden – kompletter Stand gesendet".to_string()),
         SyncOutcome::PushedUpdate => ("ok", "Verbunden – Punktestand aktualisiert".to_string()),
         SyncOutcome::Idle => ("ok", "Verbunden – keine Änderung".to_string()),
+        SyncOutcome::SlaveActive => ("ok", "Ansage-Slave aktiv – nur Ansagen".to_string()),
         SyncOutcome::BtpError(e) => ("btp_error", format!("BTP nicht erreichbar: {e}")),
         SyncOutcome::PushError(e) => ("push_error", format!("Push fehlgeschlagen: {e}")),
     };
@@ -217,6 +218,9 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let upload_logs = config.upload_logs;
     let install_id = config.install_id.clone();
     let mode = config.connection_mode;
+    // Ansage-Slave: kein Tablet-Server/mDNS/Relay (nur BTP lesen + ansagen) –
+    // sonst Kollision mit dem Master (doppeltes bts-light.local, Liveticker).
+    let slave_mode = config.slave_mode;
 
     let tablet = state.tablet.clone();
 
@@ -277,7 +281,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Doppelmodus (`LanAndCloud`) laufen beide Wege für dieselbe
     // Turnierinstanz parallel. `lan_enabled()`/`cloud_enabled()` liefern
     // für die reinen Modi exakt dieselbe Wahl wie zuvor das `match`.
-    if mode.lan_enabled() {
+    if !slave_mode && mode.lan_enabled() {
         let mut server_slot = state
             .tablet_server
             .lock()
@@ -301,7 +305,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             }
         }
     }
-    if mode.cloud_enabled() {
+    if !slave_mode && mode.cloud_enabled() {
         let mut relay_slot = state
             .relay_task
             .lock()

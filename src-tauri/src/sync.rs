@@ -59,6 +59,8 @@ pub enum SyncOutcome {
     PushedUpdate,
     /// Keine Änderung – nichts gesendet.
     Idle,
+    /// Ansage-Slave-Modus: BTP gelesen, nur lokal angesagt (kein Push/Vergabe).
+    SlaveActive,
     /// BTP nicht erreichbar oder Antwort unbrauchbar.
     BtpError(String),
     /// Push an Badhub fehlgeschlagen.
@@ -510,18 +512,33 @@ impl SyncEngine {
         // Felder mit dem nächsten spielbereiten Match belegen (schreibt nach
         // BTP). Aus dem aktuellen Snapshot bestimmt – kollidiert so nicht mit
         // einer BTP-seitigen Zuweisung; der nächste Poll liest beides gleich.
-        let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
-        if !auto_courts.is_empty() {
-            match crate::tablet::server::write_courts_to_btp(config, &auto_courts, &auto_matches)
+        // Auto-Feldvergabe nur im Normalbetrieb – ein Ansage-Slave schreibt nie
+        // nach BTP (nur der Master vergibt Felder).
+        if !config.slave_mode {
+            let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
+            if !auto_courts.is_empty() {
+                match crate::tablet::server::write_courts_to_btp(
+                    config,
+                    &auto_courts,
+                    &auto_matches,
+                )
                 .await
-            {
-                Ok(()) => tracing::info!("Auto-Feldvergabe: {} Feld(er) belegt", auto_courts.len()),
-                Err(e) => tracing::warn!("Auto-Feldvergabe fehlgeschlagen: {e}"),
+                {
+                    Ok(()) => {
+                        tracing::info!("Auto-Feldvergabe: {} Feld(er) belegt", auto_courts.len())
+                    }
+                    Err(e) => tracing::warn!("Auto-Feldvergabe fehlgeschlagen: {e}"),
+                }
             }
         }
         // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());
+        // Ansage-Slave: nur lesen + lokal ansagen (MatchAnnouncer liest den
+        // Snapshot). KEIN Liveticker-Push (würde mit dem Master kollidieren).
+        if config.slave_mode {
+            return SyncOutcome::SlaveActive;
+        }
         tablet.apply_tablet_scores(&mut snapshot);
         // „In Vorbereitung" gerufene Spiele in den Snapshot stempeln, damit
         // der Aufruf-Zeitstempel im nächsten Push an badhub.de mitgeht.

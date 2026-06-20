@@ -250,6 +250,8 @@ export function SetupWizard({
   const [cloudEnabled, setCloudEnabled] = useState(
     initialConfig.connection_mode !== "lan",
   );
+  // Ansage-Slave-Modus: nur BTP lesen + eigene Halle ansagen.
+  const [slaveMode, setSlaveMode] = useState(initialConfig.slave_mode ?? false);
   const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
   const [annLang, setAnnLang] = useState<AnnounceLanguageMode>(
     initialConfig.announce.language_mode,
@@ -392,6 +394,7 @@ export function SetupWizard({
       upload_logs: uploadLogs,
       install_id: initialConfig.install_id,
       connection_mode: connectionMode,
+      slave_mode: slaveMode,
       announce: {
         enabled: annEnabled,
         language_mode: annLang,
@@ -608,6 +611,33 @@ export function SetupWizard({
           </p>
         </div>
       </header>
+
+      {/* Ansage-Slave-Modus: macht diese Instanz zum reinen Ansage-Rechner für
+          eine zweite Halle (nur BTP lesen + ansagen). */}
+      <section className="rounded-xl border border-violet-300 bg-violet-50 p-4">
+        <label className="flex items-start gap-2.5 text-sm">
+          <input
+            type="checkbox"
+            checked={slaveMode}
+            onChange={(e) => setSlaveMode(e.currentTarget.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold text-violet-900">
+              Ansage-Slave-Modus (zweite Halle)
+            </span>
+            <span className="mt-1 block text-violet-800">
+              Dieser Rechner liest nur BTP und sagt die unter „Sprachansagen"
+              gewählte Halle an — <strong>kein</strong> Liveticker,{" "}
+              <strong>keine</strong> Feldvergabe, <strong>keine</strong> Tablets.
+              Den Master (mit der laufenden BTP-Steuerung) gibt es genau einmal;
+              beliebig viele Slaves dürfen mitlaufen. Stelle hier nur die{" "}
+              <strong>BTP-Verbindung</strong> (zum BTP-Rechner) und unter
+              „Sprachansagen" die <strong>Halle</strong> + Stimme ein.
+            </span>
+          </span>
+        </label>
+      </section>
 
       {/* Schritt 1: Verband / Ziel */}
       <section className="flex flex-col gap-2">
