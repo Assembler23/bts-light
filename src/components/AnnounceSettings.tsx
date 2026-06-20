@@ -343,6 +343,9 @@ export function AnnounceSettings({
           besser trifft. Eigene Korrekturen unten haben <strong>Vorrang</strong>:
           trage <strong>Name oder Namensteil</strong> und die gewünschte
           <strong> Aussprache</strong> (Lautschrift) ein. Mit ▶ hörst du sie.
+          Die <strong>Sprache</strong> (Azure-Stimme) wird normalerweise automatisch
+          erkannt; stell sie nur um, wenn ein Name falsch klingt — sie wirkt auf den
+          <strong> vollständigen Namen</strong> dieser Zeile.
         </p>
 
         {annNameOverrides.length > 0 && (
