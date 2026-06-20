@@ -7,6 +7,7 @@ import {
   Volume2,
 } from "lucide-react";
 import {
+  monitorDevices,
   openExternal,
   openLiveView,
   saveConfig,
@@ -14,7 +15,13 @@ import {
   tournamentStats,
 } from "../api";
 import type { NavView, SettingsFocus } from "../components/SideNav";
-import type { AppConfig, SyncStatus, TournamentStats } from "../types";
+import type {
+  AppConfig,
+  CourtOverview,
+  MonitorDeviceInfo,
+  SyncStatus,
+  TournamentStats,
+} from "../types";
 
 interface Props {
   config: AppConfig;
@@ -78,12 +85,43 @@ function StatCard(props: { value: string | number; label: string }) {
   );
 }
 
+/** Abdeckungs-Balken „X / Y Felder" — voll = grün, sonst gelb (unvollständig). */
+function CoverageBar(props: {
+  label: string;
+  covered: number;
+  total: number;
+  note?: string;
+}) {
+  const pct = props.total > 0 ? Math.round((props.covered / props.total) * 100) : 0;
+  const full = props.total > 0 && props.covered >= props.total;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm font-medium text-slate-700">{props.label}</span>
+        <span className="text-sm text-slate-500">
+          {props.covered} / {props.total} Felder
+          {props.note ? <span className="text-slate-400"> · {props.note}</span> : null}
+        </span>
+      </div>
+      <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all ${full ? "bg-emerald-500" : "bg-amber-400"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) {
   const running = status?.running ?? false;
   // Turnier-Kennzahlen + Hallen sind erst NACH dem Start bekannt (dann steht
   // die BTP-Verbindung und die Turnierdatei ist geladen).
   const [stats, setStats] = useState<TournamentStats | null>(null);
   const [halls, setHalls] = useState<string[]>([]);
+  // Felder (für Tablet-Abdeckung) + Monitor-Geräte (für TV-Abdeckung).
+  const [courts, setCourts] = useState<CourtOverview[]>([]);
+  const [monitors, setMonitors] = useState<MonitorDeviceInfo[]>([]);
   const [savingHall, setSavingHall] = useState(false);
   const [hallSaveError, setHallSaveError] = useState(false);
 
@@ -91,6 +129,8 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
     if (!running) {
       setStats(null);
       setHalls([]);
+      setCourts([]);
+      setMonitors([]);
       return;
     }
     let active = true;
@@ -102,10 +142,11 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
           if (s) setHalls(s.halls);
         })
         .catch(() => {});
-      // Fallback-Hallen aus der Court-Übersicht, falls Stats (noch) leer sind.
+      // Court-Übersicht: Hallen-Fallback + Tablet-Abdeckung (tablet_connected).
       tabletOverview()
         .then((info) => {
           if (!active) return;
+          setCourts(info.courts ?? []);
           setHalls((prev) =>
             prev.length > 0
               ? prev
@@ -117,6 +158,12 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
                   ),
                 ].sort((a, b) => a.localeCompare(b, "de")),
           );
+        })
+        .catch(() => {});
+      // Monitor-Geräte für die TV-Abdeckung (einzeln/kombi).
+      monitorDevices()
+        .then((m) => {
+          if (active) setMonitors(m);
         })
         .catch(() => {});
     };
@@ -161,6 +208,35 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
     stats && stats.matches_total > 0
       ? Math.round((stats.matches_finished / stats.matches_total) * 100)
       : 0;
+
+  // Geräte-Abdeckung: wie viele Felder haben ein Tablet bzw. einen TV?
+  const courtIdSet = new Set(courts.map((c) => c.court_id));
+  const totalCourts = courts.length;
+  const tabletCovered = courts.filter((c) => c.tablet_connected).length;
+  // TV-Abdeckung aus den Monitor-Zuweisungen (Einzel + Kombi); nur Felder des
+  // Turniers zählen (ein Gerät könnte eine veraltete CourtID tragen).
+  const tvCovered = new Set<number>();
+  const tvCombo = new Set<number>();
+  let tvOfflineAssigned = 0;
+  for (const m of monitors) {
+    const t = m.target;
+    const ids =
+      t?.kind === "court"
+        ? [t.court_id]
+        : t?.kind === "court_combo"
+          ? t.court_ids
+          : [];
+    if (ids.length === 0) continue;
+    if (!m.online) tvOfflineAssigned += 1;
+    for (const id of ids) {
+      if (!courtIdSet.has(id)) continue;
+      tvCovered.add(id);
+      if (t?.kind === "court_combo") tvCombo.add(id);
+    }
+  }
+  const tvNoteParts: string[] = [];
+  if (tvCombo.size > 0) tvNoteParts.push(`${tvCombo.size} in Kombi`);
+  if (tvOfflineAssigned > 0) tvNoteParts.push(`${tvOfflineAssigned} offline`);
 
   return (
     <main className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 p-6 text-slate-800">
@@ -223,6 +299,23 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
               />
             </div>
           </div>
+
+          {/* Geräte-Abdeckung: Tablet + TV je Feld. */}
+          {totalCourts > 0 && (
+            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <CoverageBar
+                label="Tablets"
+                covered={tabletCovered}
+                total={totalCourts}
+              />
+              <CoverageBar
+                label="Monitore (TV)"
+                covered={tvCovered.size}
+                total={totalCourts}
+                note={tvNoteParts.join(", ") || undefined}
+              />
+            </div>
+          )}
 
           {halls.length > 0 && (
             <p className="text-xs text-slate-500">

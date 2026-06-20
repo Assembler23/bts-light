@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.141
+
+- **Geräte-Abdeckung auf dem Dashboard.** Zwei neue Balken zeigen auf einen Blick, ob jedes Feld
+  versorgt ist: **Tablets X/Y Felder** und **Monitore (TV) X/Y Felder** (Einzel- + Kombi-Anzeige;
+  mit Hinweis „N in Kombi" und „M offline"). Voll = grün, unvollständig = gelb. So sieht man sofort,
+  welchem Feld noch ein Tablet oder TV fehlt.
+
 ## v0.9.140
 
 - **Manuelle Sprach-Korrektur je Name.** In der Aussprache-Tabelle lässt sich pro Eintrag die
