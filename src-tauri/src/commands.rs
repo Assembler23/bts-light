@@ -174,10 +174,15 @@ fn pronunciations_cache_path(app: &AppHandle) -> std::path::PathBuf {
 }
 
 /// Ein Eintrag des geteilten Aussprache-Wörterbuchs (= `NameOverride`).
+/// `ipa` ist optional (nur für den Azure-`<phoneme>`-Pfad); fehlt es in der
+/// API-Antwort, bleibt es `None` und wird beim Senden weggelassen.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SharedPronunciation {
     pub name: String,
+    #[serde(default)]
     pub say: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipa: Option<String>,
 }
 
 #[derive(serde::Deserialize)]

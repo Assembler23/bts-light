@@ -114,6 +114,11 @@ lädt bts-light ein **gemeinsames Aussprache-Wörterbuch** von badhub
   Internet aus dem Cache → der reine LAN-Hallenbetrieb spricht weiter korrekt.
 - **Priorität** in `buildOverrideMap`: Basis-Wörterbuch < **geteiltes
   Wörterbuch** < lokale Nutzer-Tabelle (eigene Korrekturen gewinnen immer).
+- **IPA für Azure:** Einträge können zusätzlich ein `ipa`-Feld tragen. Im
+  Azure-Pfad baut `buildIpaMap` daraus eine Map und `nameSsml` spricht den Namen
+  über inline `<phoneme alphabet="ipa" ph="…">` (ganzer Name oder wortweise),
+  sonst Fallback `<lang>`-Erkennung. Web Speech (offline) ignoriert `ipa` und
+  nutzt `say`. Quelle: kuratiertes W3C-PLS-Lexikon (badhub).
 - **Teilen (opt-in):** Schalter „Meine Korrekturen mit der Community teilen"
   (`announce.share_corrections`, Default aus). Beim Speichern werden die eigenen
   Einträge via Rust-Command `share_pronunciations`

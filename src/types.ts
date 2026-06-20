@@ -65,6 +65,9 @@ export interface NameOverride {
   name: string;
   /** Phonetische Ersatz-Schreibweise, z. B. „Nguyen" → „Nwujen". */
   say: string;
+  /** Optionales IPA-Phoneme (W3C PLS) für den Azure-Pfad (`<phoneme>`).
+   *  Kommt aus dem geteilten Wörterbuch (Lexikon); im Web-Speech-Pfad ungenutzt. */
+  ipa?: string;
 }
 
 /** Einstellungen des Aufruf-Timers (Rust: config::CallTimerConfig). */
