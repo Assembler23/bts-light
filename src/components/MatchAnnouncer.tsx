@@ -71,6 +71,17 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
     prevEnabledRef.current = announce.enabled;
   }, [announce.enabled]);
 
+  // Wechselt die Ansage-Halle, die „gesehen"-Stände zurücksetzen — sonst gilt
+  // ein in der vorigen Halle still mitgeschriebener Stand als bekannt und die
+  // erste Belegung nach dem Wechsel würde nicht angesagt.
+  const prevHallRef = useRef(announce.announce_hall);
+  useEffect(() => {
+    if (prevHallRef.current !== announce.announce_hall) {
+      seenRef.current.clear();
+      prevHallRef.current = announce.announce_hall;
+    }
+  }, [announce.announce_hall]);
+
   // Einmaliger Klick-Listener: schaltet das WebView2-Audio für die Session
   // frei (der AudioContext startet sonst erst nach einer Nutzergeste).
   useEffect(() => {
@@ -86,14 +97,20 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
         .then((info) => {
           if (!alive) return;
           const cfg = cfgRef.current;
+          // Mehr-Hallen-Turnier: nur die eingestellte Halle ansagen (leer = alle).
+          // So hört in einem 2-Hallen-Setup jede Halle/Instanz nur ihre Spiele.
+          const announceHall = (cfg.announce_hall || "").trim();
           const newMatches: CourtOverview[] = [];
           for (const court of info.courts) {
             const prev = seenRef.current.get(court.court_id) ?? 0;
             seenRef.current.set(court.court_id, court.match_id);
+            const hallOk =
+              !announceHall || (court.location || "").trim() === announceHall;
             if (
               baselineRef.current &&
               court.match_id !== 0 &&
-              court.match_id !== prev
+              court.match_id !== prev &&
+              hallOk
             ) {
               newMatches.push(court);
             }

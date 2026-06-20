@@ -38,6 +38,9 @@ export interface AnnounceConfig {
   name_overrides: NameOverride[];
   /** Aussprache-Korrekturen anwenden (Basis-Wörterbuch + Einträge)? Default an. */
   name_overrides_enabled: boolean;
+  /** Mehr-Hallen-Turnier: nur Spiele dieser Halle (BTP-Location-Name) ansagen.
+   *  Leer = alle Hallen (Standard). So hört jede Halle nur ihre eigenen Ansagen. */
+  announce_hall: string;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */

@@ -114,6 +114,10 @@ pub struct AnnounceConfig {
     /// Aussprache-Korrekturen (Basis-Wörterbuch + obige Nutzer-Einträge)
     /// überhaupt anwenden? Default an; aus = Namen werden 1:1 vorgelesen.
     pub name_overrides_enabled: bool,
+    /// Mehr-Hallen-Turnier: Diese Instanz sagt NUR Spiele dieser Halle an
+    /// (BTP-Location-Name). Leer = alle Hallen (Standard, Einzelhalle unberührt).
+    /// So hört in einem 2-Hallen-Setup jede Halle nur ihre eigenen Ansagen.
+    pub announce_hall: String,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -136,6 +140,7 @@ impl Default for AnnounceConfig {
             gong: true,
             name_overrides: Vec::new(),
             name_overrides_enabled: true,
+            announce_hall: String::new(),
         }
     }
 }
@@ -430,6 +435,7 @@ mod tests {
                     say: "Nujen".to_string(),
                 }],
                 name_overrides_enabled: false,
+                announce_hall: "Halle A".to_string(),
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,

@@ -27,6 +27,7 @@ import {
   saveConfig,
   startSync,
   stopSync,
+  tabletOverview,
   testBtp,
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
@@ -262,6 +263,10 @@ export function SetupWizard({
   const [annOverridesEnabled, setAnnOverridesEnabled] = useState(
     initialConfig.announce.name_overrides_enabled ?? true,
   );
+  // Mehr-Hallen: diese Instanz sagt nur Spiele dieser Halle an (leer = alle).
+  const [annHall, setAnnHall] = useState(
+    initialConfig.announce.announce_hall ?? "",
+  );
   // Azure Neural TTS (hochwertige Cloud-Ansage, opt-in).
   const az = initialConfig.azure_tts;
   const [azEnabled, setAzEnabled] = useState(az?.enabled ?? false);
@@ -314,6 +319,39 @@ export function SetupWizard({
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focus]);
 
+  // Hallen des laufenden Turniers (für die „Ansagen nur für Halle X"-Auswahl bei
+  // Mehr-Hallen-Turnieren). Aus der Felder-Übersicht abgeleitet; leer, solange
+  // keine Turnierdatei verbunden ist.
+  const [halls, setHalls] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    // Wiederholt laden: die Wizard-Seite kann VOR der BTP-Verbindung offen sein
+    // (dann sind Hallen noch leer) — so erscheint die Auswahl nach, sobald die
+    // Turnierdatei verbunden ist, ohne dass man den Wizard neu öffnen muss.
+    const load = () => {
+      tabletOverview()
+        .then((info) => {
+          if (!active) return;
+          setHalls(
+            [
+              ...new Set(
+                (info.courts ?? [])
+                  .map((c) => c.location)
+                  .filter((l) => l !== ""),
+              ),
+            ].sort((a, b) => a.localeCompare(b, "de")),
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, []);
+
   const isManual = presetId === MANUAL;
 
   // Die beiden Modus-Schalter zurück auf einen connection_mode abbilden.
@@ -352,6 +390,7 @@ export function SetupWizard({
           .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
           .filter((o) => o.name && o.say),
         name_overrides_enabled: annOverridesEnabled,
+        announce_hall: annHall.trim(),
       },
       azure_tts: {
         enabled: azEnabled,
@@ -742,6 +781,38 @@ export function SetupWizard({
 
         {annEnabled && (
           <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            {/* Mehr-Hallen: nur eine Halle ansagen (jede Halle hört nur ihre
+                eigenen Ansagen). Nur sichtbar, wenn ≥2 Hallen erkannt wurden
+                oder bereits eine Halle eingestellt ist. */}
+            {(halls.length >= 2 || annHall !== "") && (
+              <label className="block rounded-lg bg-amber-50 p-3">
+                <span className="mb-1 block text-sm font-medium text-amber-900">
+                  Ansagen nur für Halle (Mehr-Hallen-Turnier)
+                </span>
+                <select
+                  value={annHall}
+                  onChange={(e) => setAnnHall(e.currentTarget.value)}
+                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm
+                             focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">Alle Hallen</option>
+                  {(annHall !== "" && !halls.includes(annHall)
+                    ? [...halls, annHall]
+                    : halls
+                  ).map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-amber-700">
+                  Dieser PC sagt dann nur Spiele dieser Halle an. „Alle Hallen" =
+                  keine Einschränkung. So hört in einem 2-Hallen-Setup jede Halle
+                  nur ihre eigenen Ansagen.
+                </p>
+              </label>
+            )}
+
             {/* Sprache */}
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-slate-600">
