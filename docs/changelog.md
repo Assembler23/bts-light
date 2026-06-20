@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.138
+
+- **Präzise Aussprache über IPA (Azure).** Das gemeinsame Wörterbuch trägt jetzt zusätzlich IPA-Phoneme.
+  Ist die hochwertige Azure-Stimme aktiv, spricht sie Namen über inline `<phoneme alphabet="ipa">` exakt
+  aus (z. B. „Wang" → ˈvaŋ) — gespeist aus einem kuratierten Lexikon (Start: ~765 Namen de-DE). Der
+  Offline-/Web-Speech-Pfad nutzt weiter die `say`-Lautschrift. Vorrang unverändert: eigene > Community > Basis.
+
 ## v0.9.137
 
 - **Gemeinsames Aussprache-Wörterbuch (Community).** bts-light lädt jetzt ein zentrales, von allen
