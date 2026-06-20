@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.133
+
+- **Ansage-Einstellungen jetzt auf der Seite „Ansagen".** Alle Detail-Einstellungen (Sprache, Stimmen,
+  Tempo, Gong, Aussprache-Korrekturen, **Azure**, Halle) sind von den Einstellungen auf die **Ansagen**-
+  Seite gewandert (Abschnitt „Ansage-Einstellungen" mit eigenem Speichern). In den **Einstellungen** gibt
+  es für Ansagen nur noch den **An/Aus-Schalter**.
+- **Eigener Gong für Freitext-Ansagen.** Freitext-Ansagen nutzen jetzt einen **aufsteigenden** Gong
+  (statt des absteigenden Spielaufruf-Gongs) — so hört man sofort, dass es **kein Spielaufruf** ist.
+
 ## v0.9.132
 
 - **Spielübersicht tabellarisch (BTS-Stil).** Oben die Felder, darunter zwei Tabellen: **Nicht zugewiesene
