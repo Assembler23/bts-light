@@ -71,6 +71,17 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
     prevEnabledRef.current = announce.enabled;
   }, [announce.enabled]);
 
+  // Wechselt die Ansage-Halle, die „gesehen"-Stände zurücksetzen — sonst gilt
+  // ein in der vorigen Halle still mitgeschriebener Stand als bekannt und die
+  // erste Belegung nach dem Wechsel würde nicht angesagt.
+  const prevHallRef = useRef(announce.announce_hall);
+  useEffect(() => {
+    if (prevHallRef.current !== announce.announce_hall) {
+      seenRef.current.clear();
+      prevHallRef.current = announce.announce_hall;
+    }
+  }, [announce.announce_hall]);
+
   // Einmaliger Klick-Listener: schaltet das WebView2-Audio für die Session
   // frei (der AudioContext startet sonst erst nach einer Nutzergeste).
   useEffect(() => {

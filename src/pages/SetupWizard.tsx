@@ -325,20 +325,30 @@ export function SetupWizard({
   const [halls, setHalls] = useState<string[]>([]);
   useEffect(() => {
     let active = true;
-    tabletOverview()
-      .then((info) => {
-        if (!active) return;
-        setHalls(
-          [
-            ...new Set(
-              (info.courts ?? []).map((c) => c.location).filter((l) => l !== ""),
-            ),
-          ].sort((a, b) => a.localeCompare(b, "de")),
-        );
-      })
-      .catch(() => {});
+    // Wiederholt laden: die Wizard-Seite kann VOR der BTP-Verbindung offen sein
+    // (dann sind Hallen noch leer) — so erscheint die Auswahl nach, sobald die
+    // Turnierdatei verbunden ist, ohne dass man den Wizard neu öffnen muss.
+    const load = () => {
+      tabletOverview()
+        .then((info) => {
+          if (!active) return;
+          setHalls(
+            [
+              ...new Set(
+                (info.courts ?? [])
+                  .map((c) => c.location)
+                  .filter((l) => l !== ""),
+              ),
+            ].sort((a, b) => a.localeCompare(b, "de")),
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 15000);
     return () => {
       active = false;
+      clearInterval(id);
     };
   }, []);
 
