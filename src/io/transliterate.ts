@@ -17,7 +17,12 @@
 // unangetastet — deshalb sind innerhalb eines erkannten Namens auch aggressive
 // Regeln (v→w, d→j) gefahrlos.
 
-export type NameLang = "cn" | "vn";
+import { NAME_LANG_BASE } from "./nameLangBase";
+
+// Herkunftssprachen für die Aussprache. cn/vn haben zusätzlich eine deutsche
+// Umschrift-Engine (Web-Speech-Fallback); die übrigen werden nur im Azure-
+// `<lang>`-Pfad nativ gesprochen (keine deutsche Umschrift).
+export type NameLang = "cn" | "vn" | "es" | "fr" | "pl" | "tr" | "ms" | "in";
 
 // Diakritika/Sonderzeichen falten (wie announcer.normalizeName). đ wird hier
 // bewusst NICHT zu d gefaltet (die Onset-Logik braucht die Unterscheidung).
@@ -48,13 +53,24 @@ const VN_TRIGGERS = new Set([
   // das seltene VN Đàm ggf. über das Nutzer-Wörterbuch abdecken.
 ]);
 
-// Erkennt anhand der Tokens, ob der Name chinesisch/vietnamesisch ist. VN hat
-// Vorrang (manche Silben überlappen). `null` → keine Umschrift.
+// Erkennt die Herkunftssprache eines Namens. Reihenfolge = Konfidenz:
+// 1) markante CN/VN-Nachnamen (starkes Signal; VN vor CN, Silben überlappen);
+// 2) kuratierte Namenslisten `NAME_LANG_BASE` (es/fr/pl/tr/ms/in) — erst der
+//    ganze Name, dann Tokens, und NUR wenn EINDEUTIG genau eine Sprache.
+// Bei nichts/mehrdeutig → `null` (deutscher Default statt souverän falsch).
 export function detectNameLang(tokens: string[]): NameLang | null {
   const folded = tokens.map((t) => fold(t).replace(/[đĐ]/g, "d"));
   if (folded.some((k) => VN_TRIGGERS.has(k))) return "vn";
   if (folded.some((k) => CN_TRIGGERS.has(k))) return "cn";
-  return null;
+  // Ganzer Name zuerst (Vollname-Einträge), dann einzelne Tokens.
+  const full = NAME_LANG_BASE.get(folded.join(" "));
+  if (full) return full;
+  const hits = new Set<NameLang>();
+  for (const k of folded) {
+    const l = NAME_LANG_BASE.get(k);
+    if (l) hits.add(l);
+  }
+  return hits.size === 1 ? [...hits][0] : null;
 }
 
 function cap(w: string): string {
@@ -184,7 +200,12 @@ export function vietnameseToGerman(token: string): string {
   return cap(onset + rest);
 }
 
-// Setzt die passende Engine je erkannter Sprache auf einen Token an.
+// Setzt die passende Engine je erkannter Sprache auf einen Token an. Nur cn/vn
+// haben eine deutsche Umschrift; für es/fr/pl/tr/ms/in bleibt der Token roh
+// (deren native Aussprache läuft über den Azure-`<lang>`-Pfad, nicht über die
+// deutsche Web-Speech-Stimme).
 export function transliterateToken(token: string, lang: NameLang): string {
-  return lang === "cn" ? pinyinToGerman(token) : vietnameseToGerman(token);
+  if (lang === "cn") return pinyinToGerman(token);
+  if (lang === "vn") return vietnameseToGerman(token);
+  return token;
 }

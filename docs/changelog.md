@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.139
+
+- **Mehr Sprachen nativ (Azure `<lang>`).** Die Namens-Spracherkennung deckt jetzt neben
+  Chinesisch/Vietnamesisch auch **Spanisch, Französisch, Polnisch, Türkisch, Malaiisch und
+  indische Namen** ab (kuratierte Namenslisten, ~2.600 Einträge, mitgeliefert). Bei aktiver
+  Azure-Stimme wird jeder erkannte Name in seiner Sprache nativ gesprochen
+  (`<lang xml:lang="…">`). **Mehrdeutige Namen bleiben deutsch** (kein Raten). Wenig Datenlast,
+  kein Netz-Lookup. Reihenfolge weiter: kuratiertes IPA → `<lang>` → deutsch.
+
 ## v0.9.138
 
 - **Präzise Aussprache über IPA (Azure).** Das gemeinsame Wörterbuch trägt jetzt zusätzlich IPA-Phoneme.

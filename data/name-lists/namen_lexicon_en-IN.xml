@@ -1,0 +1,1785 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lexicon version="1.0"
+      xmlns="http://www.w3.org/2005/01/pronunciation-lexicon"
+      alphabet="ipa" xml:lang="en-IN">
+  <lexeme>
+    <grapheme>Sharma</grapheme>
+    <phoneme>ˈʃaʁ.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Verma</grapheme>
+    <phoneme>ˈveʁ.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gupta</grapheme>
+    <phoneme>ˈgup.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kumar</grapheme>
+    <phoneme>ˈku.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Singh</grapheme>
+    <phoneme>ˈsiŋh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patel</grapheme>
+    <phoneme>ˈpa.tel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Reddy</grapheme>
+    <phoneme>ˈʁedi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rao</grapheme>
+    <phoneme>ˈʁa.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nair</grapheme>
+    <phoneme>ˈnaɪʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Menon</grapheme>
+    <phoneme>ˈme.non</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iyer</grapheme>
+    <phoneme>ˈi.jeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iyengar</grapheme>
+    <phoneme>i.ˈje.ŋaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pillai</grapheme>
+    <phoneme>ˈpi.laɪ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mukherjee</grapheme>
+    <phoneme>mu.keʁ.ˈdʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Banerjee</grapheme>
+    <phoneme>ba.neʁ.ˈdʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chatterjee</grapheme>
+    <phoneme>tʃa.teʁ.ˈdʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhattacharya</grapheme>
+    <phoneme>ba.tat.ˈʃaʁ.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Das</grapheme>
+    <phoneme>ˈdas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bose</grapheme>
+    <phoneme>ˈbo.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ghosh</grapheme>
+    <phoneme>ˈgoʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sen</grapheme>
+    <phoneme>ˈsen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dutta</grapheme>
+    <phoneme>ˈdu.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roy</grapheme>
+    <phoneme>ˈʁoj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chowdhury</grapheme>
+    <phoneme>ˈtʃov.duʁj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mehta</grapheme>
+    <phoneme>ˈmeh.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shah</grapheme>
+    <phoneme>ˈʃah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Desai</grapheme>
+    <phoneme>ˈde.saɪ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joshi</grapheme>
+    <phoneme>ˈdʒo.ʃi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Trivedi</grapheme>
+    <phoneme>tʁi.ˈve.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pandey</grapheme>
+    <phoneme>ˈpan.dej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mishra</grapheme>
+    <phoneme>ˈmiʃ.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dubey</grapheme>
+    <phoneme>ˈdu.bej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tiwari</grapheme>
+    <phoneme>ti.ˈva.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yadav</grapheme>
+    <phoneme>ˈja.dav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chauhan</grapheme>
+    <phoneme>ˈtʃaʊ.han</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rajput</grapheme>
+    <phoneme>ˈʁad.ʒput</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thakur</grapheme>
+    <phoneme>ˈta.kuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chaudhary</grapheme>
+    <phoneme>ˈtʃaʊ.da.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Malhotra</grapheme>
+    <phoneme>mal.ˈhot.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kapoor</grapheme>
+    <phoneme>ka.ˈpuːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khanna</grapheme>
+    <phoneme>ˈka.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chopra</grapheme>
+    <phoneme>ˈtʃop.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhatia</grapheme>
+    <phoneme>ba.ˈti.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arora</grapheme>
+    <phoneme>a.ˈʁo.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bajaj</grapheme>
+    <phoneme>ˈbad.ʒadʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sethi</grapheme>
+    <phoneme>ˈse.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sood</grapheme>
+    <phoneme>ˈsuːd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tandon</grapheme>
+    <phoneme>ˈtan.don</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anand</grapheme>
+    <phoneme>ˈa.nand</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhardwaj</grapheme>
+    <phoneme>ˈbaʁ.dvadʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Saxena</grapheme>
+    <phoneme>sa.ˈxe.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Srivastava</grapheme>
+    <phoneme>sʁi.vas.ˈta.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Agarwal</grapheme>
+    <phoneme>a.ˈgaʁ.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Goel</grapheme>
+    <phoneme>ˈgo.el</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jain</grapheme>
+    <phoneme>ˈdʒaɪn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bansal</grapheme>
+    <phoneme>ˈban.sal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mittal</grapheme>
+    <phoneme>ˈmi.tal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aggarwal</grapheme>
+    <phoneme>a.ˈgaʁ.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Garg</grapheme>
+    <phoneme>ˈgaʁg</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Goyal</grapheme>
+    <phoneme>ˈgo.jal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khurana</grapheme>
+    <phoneme>ku.ˈʁa.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishnan</grapheme>
+    <phoneme>ˈkʁiʃ.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Subramanian</grapheme>
+    <phoneme>sub.ʁa.ma.ˈni.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Venkatesan</grapheme>
+    <phoneme>ven.ka.ˈte.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raman</grapheme>
+    <phoneme>ˈʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natarajan</grapheme>
+    <phoneme>na.ta.ˈʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramachandran</grapheme>
+    <phoneme>ʁa.mat.ˈʃan.dʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sundaram</grapheme>
+    <phoneme>sun.ˈda.ʁam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murthy</grapheme>
+    <phoneme>ˈmuʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Prasad</grapheme>
+    <phoneme>ˈpʁa.sad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naidu</grapheme>
+    <phoneme>ˈnaɪ.du</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rajan</grapheme>
+    <phoneme>ˈʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kashyap</grapheme>
+    <phoneme>ˈkaʃ.jap</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhat</grapheme>
+    <phoneme>ˈbat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hegde</grapheme>
+    <phoneme>ˈheg.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shetty</grapheme>
+    <phoneme>ˈʃetj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamath</grapheme>
+    <phoneme>ˈka.mat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pai</grapheme>
+    <phoneme>ˈpaɪ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Acharya</grapheme>
+    <phoneme>at.ˈʃaʁ.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kulkarni</grapheme>
+    <phoneme>kul.ˈkaʁ.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deshpande</grapheme>
+    <phoneme>deʃ.ˈpan.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patil</grapheme>
+    <phoneme>ˈpa.til</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gokhale</grapheme>
+    <phoneme>go.ˈka.le</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Apte</grapheme>
+    <phoneme>ˈap.te</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karandikar</grapheme>
+    <phoneme>ka.ʁan.ˈdi.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sawant</grapheme>
+    <phoneme>ˈsa.vant</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gaikwad</grapheme>
+    <phoneme>ˈgaɪ.kvad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jadhav</grapheme>
+    <phoneme>ˈdʒa.dav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>More</grapheme>
+    <phoneme>ˈmo.ʁe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shinde</grapheme>
+    <phoneme>ˈʃin.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pawar</grapheme>
+    <phoneme>ˈpa.vaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kale</grapheme>
+    <phoneme>ˈka.le</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sane</grapheme>
+    <phoneme>ˈsa.ne</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Phadke</grapheme>
+    <phoneme>ˈfad.ke</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ranganathan</grapheme>
+    <phoneme>ʁa.ŋa.ˈna.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Balasubramanian</grapheme>
+    <phoneme>ba.la.sub.ʁa.ma.ˈni.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishnamurthy</grapheme>
+    <phoneme>kʁiʃ.ˈna.muʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vaidyanathan</grapheme>
+    <phoneme>vaɪ.dja.ˈna.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Swaminathan</grapheme>
+    <phoneme>sva.mi.ˈna.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gopalakrishnan</grapheme>
+    <phoneme>go.pa.lak.ˈʁiʃ.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramanujam</grapheme>
+    <phoneme>ʁa.ma.ˈnud.ʒam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Narayanan</grapheme>
+    <phoneme>na.ʁa.ˈja.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Subramaniam</grapheme>
+    <phoneme>sub.ʁa.ma.ˈni.am</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lakshmanan</grapheme>
+    <phoneme>lak.ˈʃma.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Venkataraman</grapheme>
+    <phoneme>ven.ka.ta.ˈʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chandrasekaran</grapheme>
+    <phoneme>tʃan.dʁa.se.ˈka.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Parthasarathy</grapheme>
+    <phoneme>paʁ.ta.ˈsa.ʁatj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raghavan</grapheme>
+    <phoneme>ʁa.ˈga.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Srinivasan</grapheme>
+    <phoneme>sʁi.ni.ˈva.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vishwanathan</grapheme>
+    <phoneme>viʃ.va.ˈna.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramamurthy</grapheme>
+    <phoneme>ʁa.ˈma.muʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mahadevan</grapheme>
+    <phoneme>ma.ha.ˈde.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kalyanaraman</grapheme>
+    <phoneme>kal.ja.na.ˈʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Govindarajan</grapheme>
+    <phoneme>go.vin.da.ˈʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sundararajan</grapheme>
+    <phoneme>sun.da.ʁa.ˈʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janardhanan</grapheme>
+    <phoneme>dʒa.naʁ.ˈda.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Padmanabhan</grapheme>
+    <phoneme>pad.ma.ˈna.ban</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anantharaman</grapheme>
+    <phoneme>a.nan.ta.ˈʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thyagarajan</grapheme>
+    <phoneme>tja.ga.ˈʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhagat</grapheme>
+    <phoneme>ˈba.gat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sinha</grapheme>
+    <phoneme>ˈsin.ha</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jha</grapheme>
+    <phoneme>ˈdʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thakkar</grapheme>
+    <phoneme>ˈta.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vora</grapheme>
+    <phoneme>ˈvo.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Parikh</grapheme>
+    <phoneme>ˈpa.ʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Modi</grapheme>
+    <phoneme>ˈmo.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dave</grapheme>
+    <phoneme>ˈda.ve</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pandya</grapheme>
+    <phoneme>ˈpan.dja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhagwat</grapheme>
+    <phoneme>ˈbag.vat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaur</grapheme>
+    <phoneme>ˈkaʊʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gill</grapheme>
+    <phoneme>ˈgil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandhu</grapheme>
+    <phoneme>ˈsan.du</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Brar</grapheme>
+    <phoneme>ˈbʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dhillon</grapheme>
+    <phoneme>ˈdi.lon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bedi</grapheme>
+    <phoneme>ˈbe.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sodhi</grapheme>
+    <phoneme>ˈso.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mann</grapheme>
+    <phoneme>ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grewal</grapheme>
+    <phoneme>ˈgʁe.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bains</grapheme>
+    <phoneme>ˈbaɪns</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sekhon</grapheme>
+    <phoneme>ˈse.kon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cheema</grapheme>
+    <phoneme>ˈtʃiːma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Toor</grapheme>
+    <phoneme>ˈtuːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sidhu</grapheme>
+    <phoneme>ˈsi.du</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aarav</grapheme>
+    <phoneme>ˈaːʁav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arjun</grapheme>
+    <phoneme>ˈaʁ.dʒun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vihaan</grapheme>
+    <phoneme>vi.ˈhaːn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aditya</grapheme>
+    <phoneme>a.ˈdit.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vivaan</grapheme>
+    <phoneme>vi.ˈvaːn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishna</grapheme>
+    <phoneme>ˈkʁiʃ.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishaan</grapheme>
+    <phoneme>i.ˈʃaːn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rohan</grapheme>
+    <phoneme>ˈʁo.han</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rahul</grapheme>
+    <phoneme>ˈʁa.hul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amit</grapheme>
+    <phoneme>ˈa.mit</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanjay</grapheme>
+    <phoneme>ˈsan.dʒaj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vijay</grapheme>
+    <phoneme>ˈvid.ʒaj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rajesh</grapheme>
+    <phoneme>ˈʁad.ʒeʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Suresh</grapheme>
+    <phoneme>ˈsu.ʁeʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramesh</grapheme>
+    <phoneme>ˈʁa.meʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anil</grapheme>
+    <phoneme>ˈa.nil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sunil</grapheme>
+    <phoneme>ˈsu.nil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manoj</grapheme>
+    <phoneme>ˈma.nodʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepak</grapheme>
+    <phoneme>ˈdiːpak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ashok</grapheme>
+    <phoneme>ˈa.ʃok</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vikram</grapheme>
+    <phoneme>ˈvik.ʁam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karan</grapheme>
+    <phoneme>ˈka.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aryan</grapheme>
+    <phoneme>ˈaʁ.jan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kabir</grapheme>
+    <phoneme>ˈka.biʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dev</grapheme>
+    <phoneme>ˈdev</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Reyansh</grapheme>
+    <phoneme>ˈʁe.janʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Atharv</grapheme>
+    <phoneme>ˈa.taʁv</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shaurya</grapheme>
+    <phoneme>ˈʃaʊ.ʁja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aanya</grapheme>
+    <phoneme>ˈaːnja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aadhya</grapheme>
+    <phoneme>ˈaːdja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Saanvi</grapheme>
+    <phoneme>ˈsaːnvi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ananya</grapheme>
+    <phoneme>a.ˈnan.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diya</grapheme>
+    <phoneme>ˈdi.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pari</grapheme>
+    <phoneme>ˈpa.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anika</grapheme>
+    <phoneme>a.ˈni.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Navya</grapheme>
+    <phoneme>ˈnav.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Riya</grapheme>
+    <phoneme>ˈʁi.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Priya</grapheme>
+    <phoneme>ˈpʁi.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pooja</grapheme>
+    <phoneme>ˈpuːdʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Neha</grapheme>
+    <phoneme>ˈne.ha</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kavya</grapheme>
+    <phoneme>ˈkav.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shreya</grapheme>
+    <phoneme>ˈʃʁe.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sneha</grapheme>
+    <phoneme>ˈsne.ha</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Divya</grapheme>
+    <phoneme>ˈdiv.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anjali</grapheme>
+    <phoneme>an.ˈdʒa.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Meera</grapheme>
+    <phoneme>ˈmiːʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lakshmi</grapheme>
+    <phoneme>ˈlak.ʃmi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sita</grapheme>
+    <phoneme>ˈsi.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Radha</grapheme>
+    <phoneme>ˈʁa.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geeta</grapheme>
+    <phoneme>ˈgiːta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sunita</grapheme>
+    <phoneme>su.ˈni.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anita</grapheme>
+    <phoneme>a.ˈni.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rekha</grapheme>
+    <phoneme>ˈʁe.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Asha</grapheme>
+    <phoneme>ˈa.ʃa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Usha</grapheme>
+    <phoneme>ˈu.ʃa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nisha</grapheme>
+    <phoneme>ˈni.ʃa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sapna</grapheme>
+    <phoneme>ˈsap.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Komal</grapheme>
+    <phoneme>ˈko.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Swati</grapheme>
+    <phoneme>ˈsva.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepa</grapheme>
+    <phoneme>ˈdiːpa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sangeeta</grapheme>
+    <phoneme>sa.ˈŋiːta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Padma</grapheme>
+    <phoneme>ˈpad.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vandana</grapheme>
+    <phoneme>van.ˈda.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhavna</grapheme>
+    <phoneme>ˈbav.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tara</grapheme>
+    <phoneme>ˈta.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mira</grapheme>
+    <phoneme>ˈmi.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Veena</grapheme>
+    <phoneme>ˈviːna</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lata</grapheme>
+    <phoneme>ˈla.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maya</grapheme>
+    <phoneme>ˈma.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shanti</grapheme>
+    <phoneme>ˈʃan.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aishwarya</grapheme>
+    <phoneme>aɪ.ˈʃvaʁ.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aarti</grapheme>
+    <phoneme>ˈaːʁti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nandini</grapheme>
+    <phoneme>nan.ˈdi.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishita</grapheme>
+    <phoneme>i.ˈʃi.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kriti</grapheme>
+    <phoneme>ˈkʁi.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tanvi</grapheme>
+    <phoneme>ˈtan.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aditi</grapheme>
+    <phoneme>a.ˈdi.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vaishnavi</grapheme>
+    <phoneme>vaɪ.ˈʃna.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Venkat</grapheme>
+    <phoneme>ˈven.kat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ganesh</grapheme>
+    <phoneme>ˈga.neʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murugan</grapheme>
+    <phoneme>mu.ˈʁu.gan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Selvam</grapheme>
+    <phoneme>ˈsel.vam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karthik</grapheme>
+    <phoneme>ˈkaʁ.tik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bala</grapheme>
+    <phoneme>ˈba.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mani</grapheme>
+    <phoneme>ˈma.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raju</grapheme>
+    <phoneme>ˈʁad.ʒu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naveen</grapheme>
+    <phoneme>na.ˈviːn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arun</grapheme>
+    <phoneme>ˈa.ʁun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dinesh</grapheme>
+    <phoneme>ˈdi.neʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mahesh</grapheme>
+    <phoneme>ˈma.heʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rakesh</grapheme>
+    <phoneme>ˈʁa.keʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yash</grapheme>
+    <phoneme>ˈjaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Harsh</grapheme>
+    <phoneme>ˈhaʁʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nikhil</grapheme>
+    <phoneme>ˈni.kil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sameer</grapheme>
+    <phoneme>sa.ˈmiːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Varun</grapheme>
+    <phoneme>ˈva.ʁun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gaurav</grapheme>
+    <phoneme>ˈgaʊ.ʁav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akash</grapheme>
+    <phoneme>ˈa.kaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ankit</grapheme>
+    <phoneme>ˈan.kit</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav</grapheme>
+    <phoneme>ˈpʁa.nav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siddharth</grapheme>
+    <phoneme>ˈsi.daʁt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aniket</grapheme>
+    <phoneme>a.ˈni.ket</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanjay Apte</grapheme>
+    <phoneme>ˈsan.dʒaj.ap.te</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav Rajput</grapheme>
+    <phoneme>ˈpʁa.nav.ʁad.ʒput</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lata More</grapheme>
+    <phoneme>ˈla.ta.mo.ʁe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murugan Kumar</grapheme>
+    <phoneme>mu.ˈʁu.gan.ku.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bala Gupta</grapheme>
+    <phoneme>ˈba.la.gup.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Atharv Bose</grapheme>
+    <phoneme>ˈa.taʁv.bo.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karthik Shetty</grapheme>
+    <phoneme>ˈkaʁ.tik.ʃetj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diya Shah</grapheme>
+    <phoneme>ˈdi.ja.ʃah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kriti Thakur</grapheme>
+    <phoneme>ˈkʁi.ti.ta.kuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aadhya Tandon</grapheme>
+    <phoneme>ˈaːdja.tan.don</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ankit Janardhanan</grapheme>
+    <phoneme>ˈan.kit.dʒa.naʁ.da.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anjali Kapoor</grapheme>
+    <phoneme>an.ˈdʒa.li.ka.puːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Atharv Lakshmanan</grapheme>
+    <phoneme>ˈa.taʁv.lak.ʃma.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siddharth Mann</grapheme>
+    <phoneme>ˈsi.daʁt.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karan Chowdhury</grapheme>
+    <phoneme>ˈka.ʁan.tʃov.duʁj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mani Cheema</grapheme>
+    <phoneme>ˈma.ni.tʃiːma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav Kamath</grapheme>
+    <phoneme>ˈpʁa.nav.ka.mat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Reyansh Dave</grapheme>
+    <phoneme>ˈʁe.janʃ.da.ve</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arun Jain</grapheme>
+    <phoneme>ˈa.ʁun.dʒaɪn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lata Sen</grapheme>
+    <phoneme>ˈla.ta.sen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nikhil Kalyanaraman</grapheme>
+    <phoneme>ˈni.kil.kal.ja.na.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mani Pandey</grapheme>
+    <phoneme>ˈma.ni.pan.dej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aarti Mishra</grapheme>
+    <phoneme>ˈaːʁti.miʃ.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pari Raghavan</grapheme>
+    <phoneme>ˈpa.ʁi.ʁa.ga.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aadhya Rajput</grapheme>
+    <phoneme>ˈaːdja.ʁad.ʒput</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sangeeta Dave</grapheme>
+    <phoneme>sa.ˈŋiːta.da.ve</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aarti Banerjee</grapheme>
+    <phoneme>ˈaːʁti.ba.neʁ.dʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Padma Bhagat</grapheme>
+    <phoneme>ˈpad.ma.ba.gat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepak Modi</grapheme>
+    <phoneme>ˈdiːpak.mo.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ananya Pandya</grapheme>
+    <phoneme>a.ˈnan.ja.pan.dja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karan Bains</grapheme>
+    <phoneme>ˈka.ʁan.baɪns</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aditi Verma</grapheme>
+    <phoneme>a.ˈdi.ti.veʁ.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vikram Gokhale</grapheme>
+    <phoneme>ˈvik.ʁam.go.ka.le</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepa Pandya</grapheme>
+    <phoneme>ˈdiːpa.pan.dja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mani Shetty</grapheme>
+    <phoneme>ˈma.ni.ʃetj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepa Balasubramanian</grapheme>
+    <phoneme>ˈdiːpa.ba.la.sub.ʁa.ma.ni.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Usha Raghavan</grapheme>
+    <phoneme>ˈu.ʃa.ʁa.ga.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raju Ghosh</grapheme>
+    <phoneme>ˈʁad.ʒu.goʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kabir Sane</grapheme>
+    <phoneme>ˈka.biʁ.sa.ne</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murugan Rao</grapheme>
+    <phoneme>mu.ˈʁu.gan.ʁa.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vihaan Iyengar</grapheme>
+    <phoneme>vi.ˈhaːn.i.je.ŋaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naveen Karandikar</grapheme>
+    <phoneme>na.ˈviːn.ka.ʁan.di.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rajesh Gill</grapheme>
+    <phoneme>ˈʁad.ʒeʃ.gil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Padma Parikh</grapheme>
+    <phoneme>ˈpad.ma.pa.ʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Varun Thakur</grapheme>
+    <phoneme>ˈva.ʁun.ta.kuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vivaan Jain</grapheme>
+    <phoneme>vi.ˈvaːn.dʒaɪn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rakesh Parthasarathy</grapheme>
+    <phoneme>ˈʁa.keʃ.paʁ.ta.sa.ʁatj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ganesh Tiwari</grapheme>
+    <phoneme>ˈga.neʃ.ti.va.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Divya Mehta</grapheme>
+    <phoneme>ˈdiv.ja.meh.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bala Phadke</grapheme>
+    <phoneme>ˈba.la.fad.ke</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Divya Jha</grapheme>
+    <phoneme>ˈdiv.ja.dʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ankit Bedi</grapheme>
+    <phoneme>ˈan.kit.be.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aishwarya Goel</grapheme>
+    <phoneme>aɪ.ˈʃvaʁ.ja.go.el</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Riya Mahadevan</grapheme>
+    <phoneme>ˈʁi.ja.ma.ha.de.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Divya Srinivasan</grapheme>
+    <phoneme>ˈdiv.ja.sʁi.ni.va.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diya Toor</grapheme>
+    <phoneme>ˈdi.ja.tuːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishaan Hegde</grapheme>
+    <phoneme>i.ˈʃaːn.heg.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Priya Pawar</grapheme>
+    <phoneme>ˈpʁi.ja.pa.vaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhavna Lakshmanan</grapheme>
+    <phoneme>ˈbav.na.lak.ʃma.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sneha Bhagwat</grapheme>
+    <phoneme>ˈsne.ha.bag.vat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anika Kaur</grapheme>
+    <phoneme>a.ˈni.ka.kaʊʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anjali Agarwal</grapheme>
+    <phoneme>an.ˈdʒa.li.a.gaʁ.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karthik Dave</grapheme>
+    <phoneme>ˈkaʁ.tik.da.ve</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siddharth Mishra</grapheme>
+    <phoneme>ˈsi.daʁt.miʃ.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sneha Bhardwaj</grapheme>
+    <phoneme>ˈsne.ha.baʁ.dvadʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kavya Kamath</grapheme>
+    <phoneme>ˈkav.ja.ka.mat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sunil Roy</grapheme>
+    <phoneme>ˈsu.nil.ʁoj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav Iyer</grapheme>
+    <phoneme>ˈpʁa.nav.i.jeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anita Toor</grapheme>
+    <phoneme>a.ˈni.ta.tuːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anita Sekhon</grapheme>
+    <phoneme>a.ˈni.ta.se.kon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishita Pillai</grapheme>
+    <phoneme>i.ˈʃi.ta.pi.laɪ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anita Kamath</grapheme>
+    <phoneme>a.ˈni.ta.ka.mat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Suresh Verma</grapheme>
+    <phoneme>ˈsu.ʁeʃ.veʁ.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishna Anand</grapheme>
+    <phoneme>ˈkʁiʃ.na.a.nand</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sangeeta Chatterjee</grapheme>
+    <phoneme>sa.ˈŋiːta.tʃa.teʁ.dʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav Bhagwat</grapheme>
+    <phoneme>ˈpʁa.nav.bag.vat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shanti Krishnamurthy</grapheme>
+    <phoneme>ˈʃan.ti.kʁiʃ.na.muʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishnan Chaudhary</grapheme>
+    <phoneme>ˈkʁiʃ.nan.tʃaʊ.da.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ganesh Dutta</grapheme>
+    <phoneme>ˈga.neʃ.du.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shaurya Iyer</grapheme>
+    <phoneme>ˈʃaʊ.ʁja.i.jeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mani Anantharaman</grapheme>
+    <phoneme>ˈma.ni.a.nan.ta.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ganesh Bajaj</grapheme>
+    <phoneme>ˈga.neʃ.bad.ʒadʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rajesh Sood</grapheme>
+    <phoneme>ˈʁad.ʒeʃ.suːd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vivaan Raghavan</grapheme>
+    <phoneme>vi.ˈvaːn.ʁa.ga.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ankit Shah</grapheme>
+    <phoneme>ˈan.kit.ʃah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karthik Kumar</grapheme>
+    <phoneme>ˈkaʁ.tik.ku.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sita Rajput</grapheme>
+    <phoneme>ˈsi.ta.ʁad.ʒput</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav Kulkarni</grapheme>
+    <phoneme>ˈpʁa.nav.kul.kaʁ.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aarti Ramachandran</grapheme>
+    <phoneme>ˈaːʁti.ʁa.mat.ʃan.dʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pooja Tandon</grapheme>
+    <phoneme>ˈpuːdʒa.tan.don</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Asha Nair</grapheme>
+    <phoneme>ˈa.ʃa.naɪʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kavya Patel</grapheme>
+    <phoneme>ˈkav.ja.pa.tel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nisha Mukherjee</grapheme>
+    <phoneme>ˈni.ʃa.mu.keʁ.dʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bhavna Dhillon</grapheme>
+    <phoneme>ˈbav.na.di.lon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishna Mishra</grapheme>
+    <phoneme>ˈkʁiʃ.na.miʃ.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ankit Raghavan</grapheme>
+    <phoneme>ˈan.kit.ʁa.ga.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishita Lakshmanan</grapheme>
+    <phoneme>i.ˈʃi.ta.lak.ʃma.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Komal Das</grapheme>
+    <phoneme>ˈko.mal.das</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arjun Gopalakrishnan</grapheme>
+    <phoneme>ˈaʁ.dʒun.go.pa.lak.ʁiʃ.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aditi Kapoor</grapheme>
+    <phoneme>a.ˈdi.ti.ka.puːʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sangeeta Chandrasekaran</grapheme>
+    <phoneme>sa.ˈŋiːta.tʃan.dʁa.se.ka.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aishwarya Desai</grapheme>
+    <phoneme>aɪ.ˈʃvaʁ.ja.de.saɪ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanjay Sinha</grapheme>
+    <phoneme>ˈsan.dʒaj.sin.ha</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shaurya Malhotra</grapheme>
+    <phoneme>ˈʃaʊ.ʁja.mal.hot.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ganesh Kumar</grapheme>
+    <phoneme>ˈga.neʃ.ku.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Usha Verma</grapheme>
+    <phoneme>ˈu.ʃa.veʁ.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arjun Dubey</grapheme>
+    <phoneme>ˈaʁ.dʒun.du.bej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vijay Bansal</grapheme>
+    <phoneme>ˈvid.ʒaj.ban.sal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anil Yadav</grapheme>
+    <phoneme>ˈa.nil.ja.dav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sangeeta Singh</grapheme>
+    <phoneme>sa.ˈŋiːta.siŋh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Navya Subramanian</grapheme>
+    <phoneme>ˈnav.ja.sub.ʁa.ma.ni.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Komal Tandon</grapheme>
+    <phoneme>ˈko.mal.tan.don</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishaan Phadke</grapheme>
+    <phoneme>i.ˈʃaːn.fad.ke</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ankit Chaudhary</grapheme>
+    <phoneme>ˈan.kit.tʃaʊ.da.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Harsh Dutta</grapheme>
+    <phoneme>ˈhaʁʃ.du.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Priya Sidhu</grapheme>
+    <phoneme>ˈpʁi.ja.si.du</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mahesh Pandya</grapheme>
+    <phoneme>ˈma.heʃ.pan.dja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Swati Natarajan</grapheme>
+    <phoneme>ˈsva.ti.na.ta.ʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishaan Nair</grapheme>
+    <phoneme>i.ˈʃaːn.naɪʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arjun Chatterjee</grapheme>
+    <phoneme>ˈaʁ.dʒun.tʃa.teʁ.dʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arjun Sen</grapheme>
+    <phoneme>ˈaʁ.dʒun.sen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geeta Kulkarni</grapheme>
+    <phoneme>ˈgiːta.kul.kaʁ.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Neha Bhatia</grapheme>
+    <phoneme>ˈne.ha.ba.ti.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vandana Chatterjee</grapheme>
+    <phoneme>van.ˈda.na.tʃa.teʁ.dʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kavya Ranganathan</grapheme>
+    <phoneme>ˈkav.ja.ʁa.ŋa.na.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishita Kalyanaraman</grapheme>
+    <phoneme>i.ˈʃi.ta.kal.ja.na.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sangeeta Bhatia</grapheme>
+    <phoneme>sa.ˈŋiːta.ba.ti.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepak Pandey</grapheme>
+    <phoneme>ˈdiːpak.pan.dej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lakshmi Chopra</grapheme>
+    <phoneme>ˈlak.ʃmi.tʃop.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ganesh Parthasarathy</grapheme>
+    <phoneme>ˈga.neʃ.paʁ.ta.sa.ʁatj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Padma Swaminathan</grapheme>
+    <phoneme>ˈpad.ma.sva.mi.na.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anika Sawant</grapheme>
+    <phoneme>a.ˈni.ka.sa.vant</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Priya Rajan</grapheme>
+    <phoneme>ˈpʁi.ja.ʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rohan Sawant</grapheme>
+    <phoneme>ˈʁo.han.sa.vant</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vaishnavi Kumar</grapheme>
+    <phoneme>vaɪ.ˈʃna.vi.ku.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ashok Kulkarni</grapheme>
+    <phoneme>ˈa.ʃok.kul.kaʁ.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kriti Vishwanathan</grapheme>
+    <phoneme>ˈkʁi.ti.viʃ.va.na.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ananya Krishnamurthy</grapheme>
+    <phoneme>a.ˈnan.ja.kʁiʃ.na.muʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geeta Krishnamurthy</grapheme>
+    <phoneme>ˈgiːta.kʁiʃ.na.muʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vaishnavi Goyal</grapheme>
+    <phoneme>vaɪ.ˈʃna.vi.go.jal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Komal Kashyap</grapheme>
+    <phoneme>ˈko.mal.kaʃ.jap</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arun Sharma</grapheme>
+    <phoneme>ˈa.ʁun.ʃaʁ.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shreya Sundaram</grapheme>
+    <phoneme>ˈʃʁe.ja.sun.da.ʁam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anika Srinivasan</grapheme>
+    <phoneme>a.ˈni.ka.sʁi.ni.va.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vikram Iyer</grapheme>
+    <phoneme>ˈvik.ʁam.i.jeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Riya Thakur</grapheme>
+    <phoneme>ˈʁi.ja.ta.kuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ishita Chaudhary</grapheme>
+    <phoneme>i.ˈʃi.ta.tʃaʊ.da.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Navya Cheema</grapheme>
+    <phoneme>ˈnav.ja.tʃiːma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naveen Pandya</grapheme>
+    <phoneme>na.ˈviːn.pan.dja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anjali Mann</grapheme>
+    <phoneme>an.ˈdʒa.li.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanjay Bains</grapheme>
+    <phoneme>ˈsan.dʒaj.baɪns</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aishwarya Parikh</grapheme>
+    <phoneme>aɪ.ˈʃvaʁ.ja.pa.ʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aniket Vaidyanathan</grapheme>
+    <phoneme>a.ˈni.ket.vaɪ.dja.na.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Reyansh Goyal</grapheme>
+    <phoneme>ˈʁe.janʃ.go.jal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Neha Banerjee</grapheme>
+    <phoneme>ˈne.ha.ba.neʁ.dʒiː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raju Narayanan</grapheme>
+    <phoneme>ˈʁad.ʒu.na.ʁa.ja.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deepa Agarwal</grapheme>
+    <phoneme>ˈdiːpa.a.gaʁ.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diya Gupta</grapheme>
+    <phoneme>ˈdi.ja.gup.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siddharth Swaminathan</grapheme>
+    <phoneme>ˈsi.daʁt.sva.mi.na.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Swati Bains</grapheme>
+    <phoneme>ˈsva.ti.baɪns</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vijay Grewal</grapheme>
+    <phoneme>ˈvid.ʒaj.gʁe.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Meera Bhattacharya</grapheme>
+    <phoneme>ˈmiːʁa.ba.tat.ʃaʁ.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aadhya Narayanan</grapheme>
+    <phoneme>ˈaːdja.na.ʁa.ja.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kriti Dhillon</grapheme>
+    <phoneme>ˈkʁi.ti.di.lon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pari Dhillon</grapheme>
+    <phoneme>ˈpa.ʁi.di.lon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shreya Thakkar</grapheme>
+    <phoneme>ˈʃʁe.ja.ta.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tara Srivastava</grapheme>
+    <phoneme>ˈta.ʁa.sʁi.vas.ta.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dev Jain</grapheme>
+    <phoneme>ˈdev.dʒaɪn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dev Chowdhury</grapheme>
+    <phoneme>ˈdev.tʃov.duʁj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kabir Hegde</grapheme>
+    <phoneme>ˈka.biʁ.heg.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lakshmi Kale</grapheme>
+    <phoneme>ˈlak.ʃmi.ka.le</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anita Brar</grapheme>
+    <phoneme>a.ˈni.ta.bʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ashok Venkatesan</grapheme>
+    <phoneme>ˈa.ʃok.ven.ka.te.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krishna Dave</grapheme>
+    <phoneme>ˈkʁiʃ.na.da.ve</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sita Joshi</grapheme>
+    <phoneme>ˈsi.ta.dʒo.ʃi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sita Thyagarajan</grapheme>
+    <phoneme>ˈsi.ta.tja.ga.ʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pranav Sen</grapheme>
+    <phoneme>ˈpʁa.nav.sen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ashok Deshpande</grapheme>
+    <phoneme>ˈa.ʃok.deʃ.pan.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aditi Rao</grapheme>
+    <phoneme>a.ˈdi.ti.ʁa.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anjali Rajan</grapheme>
+    <phoneme>an.ˈdʒa.li.ʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Veena Patel</grapheme>
+    <phoneme>ˈviːna.pa.tel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rajesh Nair</grapheme>
+    <phoneme>ˈʁad.ʒeʃ.naɪʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Atharv Parikh</grapheme>
+    <phoneme>ˈa.taʁv.pa.ʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tanvi Jain</grapheme>
+    <phoneme>ˈtan.vi.dʒaɪn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pari Rajan</grapheme>
+    <phoneme>ˈpa.ʁi.ʁad.ʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Usha Mehta</grapheme>
+    <phoneme>ˈu.ʃa.meh.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Komal Yadav</grapheme>
+    <phoneme>ˈko.mal.ja.dav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diya Menon</grapheme>
+    <phoneme>ˈdi.ja.me.non</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Divya Srivastava</grapheme>
+    <phoneme>ˈdiv.ja.sʁi.vas.ta.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kabir Krishnamurthy</grapheme>
+    <phoneme>ˈka.biʁ.kʁiʃ.na.muʁtj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanjay Rao</grapheme>
+    <phoneme>ˈsan.dʒaj.ʁa.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aarti Ranganathan</grapheme>
+    <phoneme>ˈaːʁti.ʁa.ŋa.na.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mahesh Anantharaman</grapheme>
+    <phoneme>ˈma.heʃ.a.nan.ta.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vandana Bhattacharya</grapheme>
+    <phoneme>van.ˈda.na.ba.tat.ʃaʁ.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aditi Narayanan</grapheme>
+    <phoneme>a.ˈdi.ti.na.ʁa.ja.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anil Chowdhury</grapheme>
+    <phoneme>ˈa.nil.tʃov.duʁj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diya Patil</grapheme>
+    <phoneme>ˈdi.ja.pa.til</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nandini Goyal</grapheme>
+    <phoneme>nan.ˈdi.ni.go.jal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Selvam Roy</grapheme>
+    <phoneme>ˈsel.vam.ʁoj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mani Kaur</grapheme>
+    <phoneme>ˈma.ni.kaʊʁ</phoneme>
+  </lexeme>
+</lexicon>

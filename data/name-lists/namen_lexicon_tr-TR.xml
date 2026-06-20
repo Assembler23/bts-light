@@ -1,0 +1,1813 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lexicon version="1.0"
+      xmlns="http://www.w3.org/2005/01/pronunciation-lexicon"
+      alphabet="ipa" xml:lang="tr-TR">
+  <lexeme>
+    <grapheme>Yılmaz</grapheme>
+    <phoneme>jəl.ˈmaz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaya</grapheme>
+    <phoneme>ka.ˈja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demir</grapheme>
+    <phoneme>de.ˈmiʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şahin</grapheme>
+    <phoneme>ʃa.ˈhin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çelik</grapheme>
+    <phoneme>tʃe.ˈlik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yıldız</grapheme>
+    <phoneme>jəl.ˈdəz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yıldırım</grapheme>
+    <phoneme>jəl.də.ˈʁəm</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Öztürk</grapheme>
+    <phoneme>øz.ˈtyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aydın</grapheme>
+    <phoneme>aj.ˈdən</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özdemir</grapheme>
+    <phoneme>øz.de.ˈmiʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arslan</grapheme>
+    <phoneme>aʁ.ˈslan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Doğan</grapheme>
+    <phoneme>doː.ˈan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kılıç</grapheme>
+    <phoneme>kə.ˈlətʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aslan</grapheme>
+    <phoneme>as.ˈlan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çetin</grapheme>
+    <phoneme>tʃe.ˈtin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kara</grapheme>
+    <phoneme>ka.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Koç</grapheme>
+    <phoneme>ˈkotʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kurt</grapheme>
+    <phoneme>ˈkuʁt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özkan</grapheme>
+    <phoneme>øz.ˈkan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şimşek</grapheme>
+    <phoneme>ʃim.ˈʃek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Polat</grapheme>
+    <phoneme>po.ˈlat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Korkmaz</grapheme>
+    <phoneme>koʁ.ˈkmaz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakır</grapheme>
+    <phoneme>tʃa.ˈkəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Erdoğan</grapheme>
+    <phoneme>eʁ.doː.ˈan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Güneş</grapheme>
+    <phoneme>gy.ˈneʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aktaş</grapheme>
+    <phoneme>ak.ˈtaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yağız</grapheme>
+    <phoneme>jaː.ˈəz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yalçın</grapheme>
+    <phoneme>jal.ˈtʃən</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Türk</grapheme>
+    <phoneme>ˈtyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Acar</grapheme>
+    <phoneme>ad.ˈʒaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aksoy</grapheme>
+    <phoneme>ak.ˈsoj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bulut</grapheme>
+    <phoneme>bu.ˈlut</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eren</grapheme>
+    <phoneme>e.ˈʁen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Avcı</grapheme>
+    <phoneme>av.ˈdʒə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Taş</grapheme>
+    <phoneme>ˈtaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aydoğan</grapheme>
+    <phoneme>aj.doː.ˈan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Güler</grapheme>
+    <phoneme>gy.ˈleʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karaca</grapheme>
+    <phoneme>ka.ʁad.ˈʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tekin</grapheme>
+    <phoneme>te.ˈkin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bozkurt</grapheme>
+    <phoneme>boz.ˈkuʁt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Köse</grapheme>
+    <phoneme>kø.ˈse</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yavuz</grapheme>
+    <phoneme>ja.ˈvuz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Can</grapheme>
+    <phoneme>ˈdʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çoban</grapheme>
+    <phoneme>tʃo.ˈban</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demirci</grapheme>
+    <phoneme>de.miʁ.ˈdʒi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sezer</grapheme>
+    <phoneme>se.ˈzeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaplan</grapheme>
+    <phoneme>kap.ˈlan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakmak</grapheme>
+    <phoneme>tʃak.ˈmak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Toprak</grapheme>
+    <phoneme>top.ˈʁak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ünal</grapheme>
+    <phoneme>y.ˈnal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Erdem</grapheme>
+    <phoneme>eʁ.ˈdem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yüksel</grapheme>
+    <phoneme>jyk.ˈsel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Güngör</grapheme>
+    <phoneme>gyn.ˈgøʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aydemir</grapheme>
+    <phoneme>aj.de.ˈmiʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karataş</grapheme>
+    <phoneme>ka.ʁa.ˈtaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çiftçi</grapheme>
+    <phoneme>tʃif.ˈtʃi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Keskin</grapheme>
+    <phoneme>kes.ˈkin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Soylu</grapheme>
+    <phoneme>soj.ˈlu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çınar</grapheme>
+    <phoneme>tʃə.ˈnaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Turan</grapheme>
+    <phoneme>tu.ˈʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şen</grapheme>
+    <phoneme>ˈʃen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akın</grapheme>
+    <phoneme>a.ˈkən</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özer</grapheme>
+    <phoneme>ø.ˈzeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Duman</grapheme>
+    <phoneme>du.ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bayram</grapheme>
+    <phoneme>baj.ˈʁam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gül</grapheme>
+    <phoneme>ˈgyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sarı</grapheme>
+    <phoneme>sa.ˈʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kahraman</grapheme>
+    <phoneme>kah.ʁa.ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tunç</grapheme>
+    <phoneme>ˈtuntʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şahan</grapheme>
+    <phoneme>ʃa.ˈhan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çevik</grapheme>
+    <phoneme>tʃe.ˈvik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yıldan</grapheme>
+    <phoneme>jəl.ˈdan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demiröz</grapheme>
+    <phoneme>de.mi.ˈʁøz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karadağ</grapheme>
+    <phoneme>ka.ʁa.daː.ˈ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aktürk</grapheme>
+    <phoneme>ak.ˈtyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakıroğlu</grapheme>
+    <phoneme>tʃa.kə.ʁoː.ˈlu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Balcı</grapheme>
+    <phoneme>bal.ˈdʒə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yorulmaz</grapheme>
+    <phoneme>jo.ʁul.ˈmaz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Uçar</grapheme>
+    <phoneme>ut.ˈʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şentürk</grapheme>
+    <phoneme>ʃen.ˈtyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özbek</grapheme>
+    <phoneme>øz.ˈbek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çolak</grapheme>
+    <phoneme>tʃo.ˈlak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yetkin</grapheme>
+    <phoneme>jet.ˈkin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bilgin</grapheme>
+    <phoneme>bil.ˈgin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Coşkun</grapheme>
+    <phoneme>dʒoʃ.ˈkun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demirtaş</grapheme>
+    <phoneme>de.miʁ.ˈtaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karaman</grapheme>
+    <phoneme>ka.ʁa.ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özışık</grapheme>
+    <phoneme>ø.zə.ˈʃək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aydınlı</grapheme>
+    <phoneme>aj.dən.ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tosun</grapheme>
+    <phoneme>to.ˈsun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Güvenç</grapheme>
+    <phoneme>gy.ˈventʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çiçek</grapheme>
+    <phoneme>tʃit.ˈʃek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akyıldız</grapheme>
+    <phoneme>ak.jəl.ˈdəz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kömür</grapheme>
+    <phoneme>kø.ˈmyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Saraç</grapheme>
+    <phoneme>sa.ˈʁatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakal</grapheme>
+    <phoneme>tʃa.ˈkal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yörük</grapheme>
+    <phoneme>jø.ˈʁyk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demiral</grapheme>
+    <phoneme>de.mi.ˈʁal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karabulut</grapheme>
+    <phoneme>ka.ʁa.bu.ˈlut</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özçelik</grapheme>
+    <phoneme>øz.tʃe.ˈlik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aytaç</grapheme>
+    <phoneme>aj.ˈtatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tuncel</grapheme>
+    <phoneme>tun.ˈdʒel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Güçlü</grapheme>
+    <phoneme>gyt.ˈʃly</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çamlıca</grapheme>
+    <phoneme>tʃam.ləd.ˈʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akkaya</grapheme>
+    <phoneme>a.ka.ˈja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kuş</grapheme>
+    <phoneme>ˈkuʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sönmez</grapheme>
+    <phoneme>søn.ˈmez</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çalış</grapheme>
+    <phoneme>tʃa.ˈləʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yağcı</grapheme>
+    <phoneme>jaː.ˈdʒə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demirel</grapheme>
+    <phoneme>de.mi.ˈʁel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özgül</grapheme>
+    <phoneme>øz.ˈgyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ayhan</grapheme>
+    <phoneme>aj.ˈhan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Topal</grapheme>
+    <phoneme>to.ˈpal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gümüş</grapheme>
+    <phoneme>gy.ˈmyʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakmakçı</grapheme>
+    <phoneme>tʃak.mak.ˈtʃə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akgün</grapheme>
+    <phoneme>ak.ˈgyn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kurnaz</grapheme>
+    <phoneme>kuʁ.ˈnaz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Soysal</grapheme>
+    <phoneme>soj.ˈsal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çetinkaya</grapheme>
+    <phoneme>tʃe.tin.ka.ˈja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yağmur</grapheme>
+    <phoneme>jaː.ˈmuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karahan</grapheme>
+    <phoneme>ka.ʁa.ˈhan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özgür</grapheme>
+    <phoneme>øz.ˈgyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ayık</grapheme>
+    <phoneme>a.ˈjək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Toker</grapheme>
+    <phoneme>to.ˈkeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gündüz</grapheme>
+    <phoneme>gyn.ˈdyz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakı</grapheme>
+    <phoneme>tʃa.ˈkə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akman</grapheme>
+    <phoneme>ak.ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kuştepe</grapheme>
+    <phoneme>kuʃ.te.ˈpe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sarıoğlu</grapheme>
+    <phoneme>sa.ʁə.oː.ˈlu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çetiner</grapheme>
+    <phoneme>tʃe.ti.ˈneʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demirbaş</grapheme>
+    <phoneme>de.miʁ.ˈbaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karaçay</grapheme>
+    <phoneme>ka.ʁat.ˈʃaj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özen</grapheme>
+    <phoneme>ø.ˈzen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aytekin</grapheme>
+    <phoneme>aj.te.ˈkin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Topçu</grapheme>
+    <phoneme>top.ˈtʃu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Güllü</grapheme>
+    <phoneme>gy.ˈly</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çakırca</grapheme>
+    <phoneme>tʃa.kəʁ.ˈdʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Akova</grapheme>
+    <phoneme>a.ko.ˈva</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kutlu</grapheme>
+    <phoneme>kut.ˈlu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sarıkaya</grapheme>
+    <phoneme>sa.ʁə.ka.ˈja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çetintaş</grapheme>
+    <phoneme>tʃe.tin.ˈtaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yağcılar</grapheme>
+    <phoneme>jaːdʒə.ˈlaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Demircan</grapheme>
+    <phoneme>de.miʁ.ˈdʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karaağaç</grapheme>
+    <phoneme>ka.ʁaː.ˈatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özkök</grapheme>
+    <phoneme>øz.ˈkøk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aytemiz</grapheme>
+    <phoneme>aj.te.ˈmiz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Topaloğlu</grapheme>
+    <phoneme>to.pa.loː.ˈlu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mehmet</grapheme>
+    <phoneme>meh.ˈmet</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mustafa</grapheme>
+    <phoneme>mus.ta.ˈfa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ahmet</grapheme>
+    <phoneme>ah.ˈmet</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali</grapheme>
+    <phoneme>a.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hüseyin</grapheme>
+    <phoneme>hy.se.ˈjin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hasan</grapheme>
+    <phoneme>ha.ˈsan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İbrahim</grapheme>
+    <phoneme>i̇.bʁa.ˈhim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Osman</grapheme>
+    <phoneme>os.ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusuf</grapheme>
+    <phoneme>ju.ˈsuf</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murat</grapheme>
+    <phoneme>mu.ˈʁat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ömer</grapheme>
+    <phoneme>ø.ˈmeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramazan</grapheme>
+    <phoneme>ʁa.ma.ˈzan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Süleyman</grapheme>
+    <phoneme>sy.lej.ˈman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halil</grapheme>
+    <phoneme>ha.ˈlil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İsmail</grapheme>
+    <phoneme>i̇.sma.ˈil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Recep</grapheme>
+    <phoneme>ʁed.ˈʒep</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kemal</grapheme>
+    <phoneme>ke.ˈmal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emre</grapheme>
+    <phoneme>em.ˈʁe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burak</grapheme>
+    <phoneme>bu.ˈʁak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cem</grapheme>
+    <phoneme>ˈdʒem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deniz</grapheme>
+    <phoneme>de.ˈniz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Furkan</grapheme>
+    <phoneme>fuʁ.ˈkan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kerem</grapheme>
+    <phoneme>ke.ˈʁem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Onur</grapheme>
+    <phoneme>o.ˈnuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Serkan</grapheme>
+    <phoneme>seʁ.ˈkan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tolga</grapheme>
+    <phoneme>tol.ˈga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Uğur</grapheme>
+    <phoneme>uː.ˈuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Volkan</grapheme>
+    <phoneme>vol.ˈkan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yiğit</grapheme>
+    <phoneme>jiː.ˈit</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Berk</grapheme>
+    <phoneme>ˈbeʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arda</grapheme>
+    <phoneme>aʁ.ˈda</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaan</grapheme>
+    <phoneme>ˈkan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mert</grapheme>
+    <phoneme>ˈmeʁt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Efe</grapheme>
+    <phoneme>e.ˈfe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Çağlar</grapheme>
+    <phoneme>tʃaː.ˈlaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barış</grapheme>
+    <phoneme>ba.ˈʁəʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sinan</grapheme>
+    <phoneme>si.ˈnan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tarık</grapheme>
+    <phoneme>ta.ˈʁək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Okan</grapheme>
+    <phoneme>o.ˈkan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ozan</grapheme>
+    <phoneme>o.ˈzan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Selim</grapheme>
+    <phoneme>se.ˈlim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fatma</grapheme>
+    <phoneme>fat.ˈma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ayşe</grapheme>
+    <phoneme>aj.ˈʃe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emine</grapheme>
+    <phoneme>e.mi.ˈne</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hatice</grapheme>
+    <phoneme>ha.tid.ˈʒe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeynep</grapheme>
+    <phoneme>zej.ˈnep</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elif</grapheme>
+    <phoneme>e.ˈlif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Meryem</grapheme>
+    <phoneme>meʁ.ˈjem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şerife</grapheme>
+    <phoneme>ʃe.ʁi.ˈfe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zehra</grapheme>
+    <phoneme>zeh.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sultan</grapheme>
+    <phoneme>sul.ˈtan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hanife</grapheme>
+    <phoneme>ha.ni.ˈfe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Havva</grapheme>
+    <phoneme>ha.ˈva</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esra</grapheme>
+    <phoneme>es.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Merve</grapheme>
+    <phoneme>meʁ.ˈve</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Büşra</grapheme>
+    <phoneme>byʃ.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tuğba</grapheme>
+    <phoneme>tuː.ˈba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dilek</grapheme>
+    <phoneme>di.ˈlek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pınar</grapheme>
+    <phoneme>pə.ˈnaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sevgi</grapheme>
+    <phoneme>sev.ˈgi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aslı</grapheme>
+    <phoneme>as.ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burcu</grapheme>
+    <phoneme>buʁ.ˈdʒu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ceren</grapheme>
+    <phoneme>dʒe.ˈʁen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damla</grapheme>
+    <phoneme>dam.ˈla</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ebru</grapheme>
+    <phoneme>eb.ˈʁu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gamze</grapheme>
+    <phoneme>gam.ˈze</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gizem</grapheme>
+    <phoneme>gi.ˈzem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hande</grapheme>
+    <phoneme>han.ˈde</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İrem</grapheme>
+    <phoneme>i̇.ˈʁem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Melek</grapheme>
+    <phoneme>me.ˈlek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nur</grapheme>
+    <phoneme>ˈnuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özge</grapheme>
+    <phoneme>øz.ˈge</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Seda</grapheme>
+    <phoneme>se.ˈda</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Selin</grapheme>
+    <phoneme>se.ˈlin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şeyma</grapheme>
+    <phoneme>ʃej.ˈma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasemin</grapheme>
+    <phoneme>ja.se.ˈmin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yeliz</grapheme>
+    <phoneme>je.ˈliz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleyna</grapheme>
+    <phoneme>a.lej.ˈna</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beren</grapheme>
+    <phoneme>be.ˈʁen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Defne</grapheme>
+    <phoneme>def.ˈne</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ela</grapheme>
+    <phoneme>e.ˈla</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eylül</grapheme>
+    <phoneme>ej.ˈlyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naz</grapheme>
+    <phoneme>ˈnaz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nehir</grapheme>
+    <phoneme>ne.ˈhiʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Su</grapheme>
+    <phoneme>ˈsu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeliha</grapheme>
+    <phoneme>ze.li.ˈha</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bahar</grapheme>
+    <phoneme>ba.ˈhaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cansu</grapheme>
+    <phoneme>dʒan.ˈsu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Derya</grapheme>
+    <phoneme>deʁ.ˈja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ferda</grapheme>
+    <phoneme>feʁ.ˈda</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gönül</grapheme>
+    <phoneme>gø.ˈnyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Handan</grapheme>
+    <phoneme>han.ˈdan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kübra</grapheme>
+    <phoneme>kyb.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leyla</grapheme>
+    <phoneme>lej.ˈla</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Münevver</grapheme>
+    <phoneme>my.ne.ˈveʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nesrin</grapheme>
+    <phoneme>nes.ˈʁin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pervin</grapheme>
+    <phoneme>peʁ.ˈvin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rabia</grapheme>
+    <phoneme>ʁa.bi.ˈa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sema</grapheme>
+    <phoneme>se.ˈma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tülay</grapheme>
+    <phoneme>ty.ˈlaj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ümran</grapheme>
+    <phoneme>ym.ˈʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vildan</grapheme>
+    <phoneme>vil.ˈdan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bilge</grapheme>
+    <phoneme>bil.ˈge</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cemre</grapheme>
+    <phoneme>dʒem.ˈʁe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Doruk</grapheme>
+    <phoneme>do.ˈʁuk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Handan Akova</grapheme>
+    <phoneme>han.ˈdan.a.ko.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Doruk Bulut</grapheme>
+    <phoneme>do.ˈʁuk.bu.lut</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nesrin Çakıroğlu</grapheme>
+    <phoneme>nes.ˈʁin.tʃa.kə.ʁoː.lu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barış Yıldan</grapheme>
+    <phoneme>ba.ˈʁəʃ.jəl.dan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Melek Tunç</grapheme>
+    <phoneme>me.ˈlek.tuntʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeynep Gül</grapheme>
+    <phoneme>zej.ˈnep.gyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gönül Sarı</grapheme>
+    <phoneme>gø.ˈnyl.sa.ʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Onur Topal</grapheme>
+    <phoneme>o.ˈnuʁ.to.pal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Berk Çakmak</grapheme>
+    <phoneme>ˈbeʁk.tʃak.mak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Berk Şen</grapheme>
+    <phoneme>ˈbeʁk.ʃen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Can Demiröz</grapheme>
+    <phoneme>ˈdʒan.de.mi.ʁøz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özge Toprak</grapheme>
+    <phoneme>øz.ˈge.top.ʁak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ozan Koç</grapheme>
+    <phoneme>o.ˈzan.kotʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şerife Bayram</grapheme>
+    <phoneme>ʃe.ʁi.ˈfe.baj.ʁam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Berk Çetiner</grapheme>
+    <phoneme>ˈbeʁk.tʃe.ti.neʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ebru Turan</grapheme>
+    <phoneme>eb.ˈʁu.tu.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ela Aktaş</grapheme>
+    <phoneme>e.ˈla.ak.taʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ela Çetinkaya</grapheme>
+    <phoneme>e.ˈla.tʃe.tin.ka.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hüseyin Yağız</grapheme>
+    <phoneme>hy.se.ˈjin.jaː.əz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mehmet Özgür</grapheme>
+    <phoneme>meh.ˈmet.øz.gyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ümran Turan</grapheme>
+    <phoneme>ym.ˈʁan.tu.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cemre Çakmakçı</grapheme>
+    <phoneme>dʒem.ˈʁe.tʃak.mak.tʃə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeynep Arslan</grapheme>
+    <phoneme>zej.ˈnep.aʁ.slan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barış Turan</grapheme>
+    <phoneme>ba.ˈʁəʃ.tu.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Recep Kılıç</grapheme>
+    <phoneme>ʁed.ˈʒep.kə.lətʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kerem Ünal</grapheme>
+    <phoneme>ke.ˈʁem.y.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murat Çakal</grapheme>
+    <phoneme>mu.ˈʁat.tʃa.kal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ceren Sezer</grapheme>
+    <phoneme>dʒe.ˈʁen.se.zeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Büşra Sarı</grapheme>
+    <phoneme>byʃ.ˈʁa.sa.ʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nesrin Kaya</grapheme>
+    <phoneme>nes.ˈʁin.ka.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halil Tosun</grapheme>
+    <phoneme>ha.ˈlil.to.sun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tolga Özdemir</grapheme>
+    <phoneme>tol.ˈga.øz.de.miʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeynep Özışık</grapheme>
+    <phoneme>zej.ˈnep.ø.zə.ʃək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burak Doğan</grapheme>
+    <phoneme>bu.ˈʁak.doː.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Serkan Gül</grapheme>
+    <phoneme>seʁ.ˈkan.gyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hüseyin Güngör</grapheme>
+    <phoneme>hy.se.ˈjin.gyn.gøʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ümran Demir</grapheme>
+    <phoneme>ym.ˈʁan.de.miʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ümran Bilgin</grapheme>
+    <phoneme>ym.ˈʁan.bil.gin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sultan Çakal</grapheme>
+    <phoneme>sul.ˈtan.tʃa.kal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Furkan Şentürk</grapheme>
+    <phoneme>fuʁ.ˈkan.ʃen.tyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Murat Güngör</grapheme>
+    <phoneme>mu.ˈʁat.gyn.gøʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hüseyin Akman</grapheme>
+    <phoneme>hy.se.ˈjin.ak.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hande Toker</grapheme>
+    <phoneme>han.ˈde.to.keʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusuf Akkaya</grapheme>
+    <phoneme>ju.ˈsuf.a.ka.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Süleyman Tuncel</grapheme>
+    <phoneme>sy.lej.ˈman.tun.dʒel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eylül Çetintaş</grapheme>
+    <phoneme>ej.ˈlyl.tʃe.tin.taʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Can Çakırca</grapheme>
+    <phoneme>ˈdʒan.tʃa.kəʁ.dʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramazan Yavuz</grapheme>
+    <phoneme>ʁa.ma.ˈzan.ja.vuz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şerife Şahan</grapheme>
+    <phoneme>ʃe.ʁi.ˈfe.ʃa.han</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sultan Demiröz</grapheme>
+    <phoneme>sul.ˈtan.de.mi.ʁøz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naz Uçar</grapheme>
+    <phoneme>ˈnaz.ut.ʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hanife Aslan</grapheme>
+    <phoneme>ha.ni.ˈfe.as.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tarık Aytemiz</grapheme>
+    <phoneme>ta.ˈʁək.aj.te.miz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emine Sönmez</grapheme>
+    <phoneme>e.mi.ˈne.søn.mez</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hanife Çelik</grapheme>
+    <phoneme>ha.ni.ˈfe.tʃe.lik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Münevver Kömür</grapheme>
+    <phoneme>my.ne.ˈveʁ.kø.myʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Defne Erdem</grapheme>
+    <phoneme>def.ˈne.eʁ.dem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şerife Çamlıca</grapheme>
+    <phoneme>ʃe.ʁi.ˈfe.tʃam.ləd.ʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Serkan Kaya</grapheme>
+    <phoneme>seʁ.ˈkan.ka.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esra Köse</grapheme>
+    <phoneme>es.ˈʁa.kø.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Havva Acar</grapheme>
+    <phoneme>ha.ˈva.ad.ʒaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vildan Erdoğan</grapheme>
+    <phoneme>vil.ˈdan.eʁ.doː.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zehra Kömür</grapheme>
+    <phoneme>zeh.ˈʁa.kø.myʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tuğba Yavuz</grapheme>
+    <phoneme>tuː.ˈba.ja.vuz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kemal Şahin</grapheme>
+    <phoneme>ke.ˈmal.ʃa.hin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İbrahim Yağcılar</grapheme>
+    <phoneme>i̇.bʁa.ˈhim.jaːdʒə.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burak Tuncel</grapheme>
+    <phoneme>bu.ˈʁak.tun.dʒel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramazan Topaloğlu</grapheme>
+    <phoneme>ʁa.ma.ˈzan.to.pa.loː.lu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yeliz Saraç</grapheme>
+    <phoneme>je.ˈliz.sa.ʁatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gönül Çetiner</grapheme>
+    <phoneme>gø.ˈnyl.tʃe.ti.neʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deniz Karaca</grapheme>
+    <phoneme>de.ˈniz.ka.ʁad.ʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ayşe Demiröz</grapheme>
+    <phoneme>aj.ˈʃe.de.mi.ʁøz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cem Aytekin</grapheme>
+    <phoneme>ˈdʒem.aj.te.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deniz Kurt</grapheme>
+    <phoneme>de.ˈniz.kuʁt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halil Karabulut</grapheme>
+    <phoneme>ha.ˈlil.ka.ʁa.bu.lut</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sevgi Erdem</grapheme>
+    <phoneme>sev.ˈgi.eʁ.dem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sinan Eren</grapheme>
+    <phoneme>si.ˈnan.e.ʁen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cemre Doğan</grapheme>
+    <phoneme>dʒem.ˈʁe.doː.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pınar Özbek</grapheme>
+    <phoneme>pə.ˈnaʁ.øz.bek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İbrahim Özçelik</grapheme>
+    <phoneme>i̇.bʁa.ˈhim.øz.tʃe.lik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beren Keskin</grapheme>
+    <phoneme>be.ˈʁen.kes.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yeliz Çamlıca</grapheme>
+    <phoneme>je.ˈliz.tʃam.ləd.ʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasemin Erdem</grapheme>
+    <phoneme>ja.se.ˈmin.eʁ.dem</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bilge Özgür</grapheme>
+    <phoneme>bil.ˈge.øz.gyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Furkan Özkök</grapheme>
+    <phoneme>fuʁ.ˈkan.øz.køk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tolga Arslan</grapheme>
+    <phoneme>tol.ˈga.aʁ.slan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zehra Özen</grapheme>
+    <phoneme>zeh.ˈʁa.ø.zen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cem Karabulut</grapheme>
+    <phoneme>ˈdʒem.ka.ʁa.bu.lut</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emine Bulut</grapheme>
+    <phoneme>e.mi.ˈne.bu.lut</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Can Duman</grapheme>
+    <phoneme>ˈdʒan.du.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Derya Ünal</grapheme>
+    <phoneme>deʁ.ˈja.y.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hasan Karaağaç</grapheme>
+    <phoneme>ha.ˈsan.ka.ʁaː.atʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cemre Özdemir</grapheme>
+    <phoneme>dʒem.ˈʁe.øz.de.miʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naz Yetkin</grapheme>
+    <phoneme>ˈnaz.jet.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Recep Özçelik</grapheme>
+    <phoneme>ʁed.ˈʒep.øz.tʃe.lik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Selin Kurnaz</grapheme>
+    <phoneme>se.ˈlin.kuʁ.naz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hande Uçar</grapheme>
+    <phoneme>han.ˈde.ut.ʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ela Çalış</grapheme>
+    <phoneme>e.ˈla.tʃa.ləʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tarık Duman</grapheme>
+    <phoneme>ta.ˈʁək.du.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Havva Özçelik</grapheme>
+    <phoneme>ha.ˈva.øz.tʃe.lik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eylül Saraç</grapheme>
+    <phoneme>ej.ˈlyl.sa.ʁatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Büşra Sarıoğlu</grapheme>
+    <phoneme>byʃ.ˈʁa.sa.ʁə.oː.lu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Merve Sezer</grapheme>
+    <phoneme>meʁ.ˈve.se.zeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ahmet Yılmaz</grapheme>
+    <phoneme>ah.ˈmet.jəl.maz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yeliz Çakı</grapheme>
+    <phoneme>je.ˈliz.tʃa.kə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dilek Şen</grapheme>
+    <phoneme>di.ˈlek.ʃen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Büşra Soysal</grapheme>
+    <phoneme>byʃ.ˈʁa.soj.sal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cemre Sezer</grapheme>
+    <phoneme>dʒem.ˈʁe.se.zeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tülay Özgür</grapheme>
+    <phoneme>ty.ˈlaj.øz.gyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zehra Yalçın</grapheme>
+    <phoneme>zeh.ˈʁa.jal.tʃən</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusuf Eren</grapheme>
+    <phoneme>ju.ˈsuf.e.ʁen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emine Özgül</grapheme>
+    <phoneme>e.mi.ˈne.øz.gyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hatice Erdoğan</grapheme>
+    <phoneme>ha.tid.ˈʒe.eʁ.doː.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sema Gümüş</grapheme>
+    <phoneme>se.ˈma.gy.myʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burcu Demirbaş</grapheme>
+    <phoneme>buʁ.ˈdʒu.de.miʁ.baʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eylül Arslan</grapheme>
+    <phoneme>ej.ˈlyl.aʁ.slan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hasan Avcı</grapheme>
+    <phoneme>ha.ˈsan.av.dʒə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ömer Özbek</grapheme>
+    <phoneme>ø.ˈmeʁ.øz.bek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nesrin Demirbaş</grapheme>
+    <phoneme>nes.ˈʁin.de.miʁ.baʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ömer Aslan</grapheme>
+    <phoneme>ø.ˈmeʁ.as.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kübra Çetiner</grapheme>
+    <phoneme>kyb.ˈʁa.tʃe.ti.neʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elif Taş</grapheme>
+    <phoneme>e.ˈlif.taʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali Koç</grapheme>
+    <phoneme>a.ˈli.kotʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasemin Türk</grapheme>
+    <phoneme>ja.se.ˈmin.tyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kerem Avcı</grapheme>
+    <phoneme>ke.ˈʁem.av.dʒə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sevgi Karadağ</grapheme>
+    <phoneme>sev.ˈgi.ka.ʁa.daː</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tülay Can</grapheme>
+    <phoneme>ty.ˈlaj.dʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Su Keskin</grapheme>
+    <phoneme>ˈsu.kes.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusuf Tosun</grapheme>
+    <phoneme>ju.ˈsuf.to.sun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasemin Bayram</grapheme>
+    <phoneme>ja.se.ˈmin.baj.ʁam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cem Yetkin</grapheme>
+    <phoneme>ˈdʒem.jet.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasemin Çevik</grapheme>
+    <phoneme>ja.se.ˈmin.tʃe.vik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ümran Kurnaz</grapheme>
+    <phoneme>ym.ˈʁan.kuʁ.naz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burak Gül</grapheme>
+    <phoneme>bu.ˈʁak.gyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Burcu Ayık</grapheme>
+    <phoneme>buʁ.ˈdʒu.a.jək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Serkan Kahraman</grapheme>
+    <phoneme>seʁ.ˈkan.kah.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasemin Çetiner</grapheme>
+    <phoneme>ja.se.ˈmin.tʃe.ti.neʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yiğit Çolak</grapheme>
+    <phoneme>jiː.ˈit.tʃo.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeynep Özdemir</grapheme>
+    <phoneme>zej.ˈnep.øz.de.miʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Onur Kaplan</grapheme>
+    <phoneme>o.ˈnuʁ.kap.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zehra Yavuz</grapheme>
+    <phoneme>zeh.ˈʁa.ja.vuz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beren Yıldan</grapheme>
+    <phoneme>be.ˈʁen.jəl.dan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nehir Bilgin</grapheme>
+    <phoneme>ne.ˈhiʁ.bil.gin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elif Çoban</grapheme>
+    <phoneme>e.ˈlif.tʃo.ban</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rabia Kahraman</grapheme>
+    <phoneme>ʁa.bi.ˈa.kah.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İsmail Güllü</grapheme>
+    <phoneme>i̇.sma.ˈil.gy.ly</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>İbrahim Akyıldız</grapheme>
+    <phoneme>i̇.bʁa.ˈhim.ak.jəl.dəz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Büşra Demircan</grapheme>
+    <phoneme>byʃ.ˈʁa.de.miʁ.dʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damla Yağız</grapheme>
+    <phoneme>dam.ˈla.jaː.əz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arda Akova</grapheme>
+    <phoneme>aʁ.ˈda.a.ko.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleyna Aytaç</grapheme>
+    <phoneme>a.lej.ˈna.aj.tatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gönül Çakal</grapheme>
+    <phoneme>gø.ˈnyl.tʃa.kal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaan Yörük</grapheme>
+    <phoneme>ˈkan.jø.ʁyk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zeynep Karaca</grapheme>
+    <phoneme>zej.ˈnep.ka.ʁad.ʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hatice Coşkun</grapheme>
+    <phoneme>ha.tid.ˈʒe.dʒoʃ.kun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leyla Polat</grapheme>
+    <phoneme>lej.ˈla.po.lat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Merve Çınar</grapheme>
+    <phoneme>meʁ.ˈve.tʃə.naʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eren Kılıç</grapheme>
+    <phoneme>e.ˈʁen.kə.lətʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barış Özen</grapheme>
+    <phoneme>ba.ˈʁəʃ.ø.zen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arda Şentürk</grapheme>
+    <phoneme>aʁ.ˈda.ʃen.tyʁk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beren Özbek</grapheme>
+    <phoneme>be.ˈʁen.øz.bek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ferda Yılmaz</grapheme>
+    <phoneme>feʁ.ˈda.jəl.maz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Handan Aydın</grapheme>
+    <phoneme>han.ˈdan.aj.dən</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Uğur Tekin</grapheme>
+    <phoneme>uː.ˈuʁ.te.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barış Özgül</grapheme>
+    <phoneme>ba.ˈʁəʃ.øz.gyl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hanife Karaçay</grapheme>
+    <phoneme>ha.ni.ˈfe.ka.ʁat.ʃaj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hatice Kılıç</grapheme>
+    <phoneme>ha.tid.ˈʒe.kə.lətʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kemal Çakı</grapheme>
+    <phoneme>ke.ˈmal.tʃa.kə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Volkan Doğan</grapheme>
+    <phoneme>vol.ˈkan.doː.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ahmet Aslan</grapheme>
+    <phoneme>ah.ˈmet.as.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mehmet Aytemiz</grapheme>
+    <phoneme>meh.ˈmet.aj.te.miz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emine Yorulmaz</grapheme>
+    <phoneme>e.mi.ˈne.jo.ʁul.maz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halil Aytekin</grapheme>
+    <phoneme>ha.ˈlil.aj.te.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emine Çakırca</grapheme>
+    <phoneme>e.mi.ˈne.tʃa.kəʁ.dʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Uğur Kuş</grapheme>
+    <phoneme>uː.ˈuʁ.kuʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Özge Yorulmaz</grapheme>
+    <phoneme>øz.ˈge.jo.ʁul.maz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Seda Taş</grapheme>
+    <phoneme>se.ˈda.taʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Serkan Kömür</grapheme>
+    <phoneme>seʁ.ˈkan.kø.myʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yeliz Özgür</grapheme>
+    <phoneme>je.ˈliz.øz.gyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cem Taş</grapheme>
+    <phoneme>ˈdʒem.taʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mustafa Özer</grapheme>
+    <phoneme>mus.ta.ˈfa.ø.zeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bahar Tekin</grapheme>
+    <phoneme>ba.ˈhaʁ.te.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Büşra Güneş</grapheme>
+    <phoneme>byʃ.ˈʁa.gy.neʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusuf Karaca</grapheme>
+    <phoneme>ju.ˈsuf.ka.ʁad.ʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naz Şahan</grapheme>
+    <phoneme>ˈnaz.ʃa.han</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zehra Kahraman</grapheme>
+    <phoneme>zeh.ˈʁa.kah.ʁa.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mustafa Çetin</grapheme>
+    <phoneme>mus.ta.ˈfa.tʃe.tin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Defne Karaağaç</grapheme>
+    <phoneme>def.ˈne.ka.ʁaː.atʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ayşe Gümüş</grapheme>
+    <phoneme>aj.ˈʃe.gy.myʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Şeyma Özen</grapheme>
+    <phoneme>ʃej.ˈma.ø.zen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ferda Akman</grapheme>
+    <phoneme>feʁ.ˈda.ak.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Berk Can</grapheme>
+    <phoneme>ˈbeʁk.dʒan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mehmet Doğan</grapheme>
+    <phoneme>meh.ˈmet.doː.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Osman Çakırca</grapheme>
+    <phoneme>os.ˈman.tʃa.kəʁ.dʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali Çamlıca</grapheme>
+    <phoneme>a.ˈli.tʃam.ləd.ʒa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Furkan Şen</grapheme>
+    <phoneme>fuʁ.ˈkan.ʃen</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cem Çetin</grapheme>
+    <phoneme>ˈdʒem.tʃe.tin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nesrin Yağız</grapheme>
+    <phoneme>nes.ˈʁin.jaː.əz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mustafa Yağcılar</grapheme>
+    <phoneme>mus.ta.ˈfa.jaːdʒə.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eylül Erdem</grapheme>
+    <phoneme>ej.ˈlyl.eʁ.dem</phoneme>
+  </lexeme>
+</lexicon>

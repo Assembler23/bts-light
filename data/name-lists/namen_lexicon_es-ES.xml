@@ -1,0 +1,1841 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lexicon version="1.0"
+      xmlns="http://www.w3.org/2005/01/pronunciation-lexicon"
+      alphabet="ipa" xml:lang="es-ES">
+  <lexeme>
+    <grapheme>García</grapheme>
+    <phoneme>gaʁ.ˈsi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rodríguez</grapheme>
+    <phoneme>ʁod.ˈʁi.ges</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>González</grapheme>
+    <phoneme>gon.ˈsa.les</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fernández</grapheme>
+    <phoneme>feʁ.ˈnan.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>López</grapheme>
+    <phoneme>ˈlo.pes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martínez</grapheme>
+    <phoneme>maʁ.ˈti.nes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sánchez</grapheme>
+    <phoneme>ˈsan.tʃes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pérez</grapheme>
+    <phoneme>ˈpe.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gómez</grapheme>
+    <phoneme>ˈgo.mes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martín</grapheme>
+    <phoneme>ˈmaʁ.tin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jiménez</grapheme>
+    <phoneme>xi.ˈme.nes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ruiz</grapheme>
+    <phoneme>ˈʁu.is</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hernández</grapheme>
+    <phoneme>eʁ.ˈnan.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Díaz</grapheme>
+    <phoneme>ˈdi.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Moreno</grapheme>
+    <phoneme>mo.ˈʁe.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Álvarez</grapheme>
+    <phoneme>al.ˈba.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Muñoz</grapheme>
+    <phoneme>ˈmun.jos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Romero</grapheme>
+    <phoneme>ʁo.ˈme.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alonso</grapheme>
+    <phoneme>a.ˈlon.so</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gutiérrez</grapheme>
+    <phoneme>gu.ti.ˈe.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Navarro</grapheme>
+    <phoneme>na.ˈba.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Torres</grapheme>
+    <phoneme>ˈto.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Domínguez</grapheme>
+    <phoneme>do.ˈmin.ges</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vázquez</grapheme>
+    <phoneme>ˈbas.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramos</grapheme>
+    <phoneme>ˈʁa.mos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gil</grapheme>
+    <phoneme>ˈxil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramírez</grapheme>
+    <phoneme>ʁa.ˈmi.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Serrano</grapheme>
+    <phoneme>se.ˈʁa.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Blanco</grapheme>
+    <phoneme>ˈblan.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Suárez</grapheme>
+    <phoneme>su.ˈa.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Molina</grapheme>
+    <phoneme>mo.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Morales</grapheme>
+    <phoneme>mo.ˈʁa.les</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ortega</grapheme>
+    <phoneme>oʁ.ˈte.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Delgado</grapheme>
+    <phoneme>del.ˈga.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Castro</grapheme>
+    <phoneme>ˈkas.tʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ortiz</grapheme>
+    <phoneme>ˈoʁ.tis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rubio</grapheme>
+    <phoneme>ʁu.ˈbi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marín</grapheme>
+    <phoneme>ˈma.ʁin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanz</grapheme>
+    <phoneme>ˈsans</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Núñez</grapheme>
+    <phoneme>ˈnun.jes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iglesias</grapheme>
+    <phoneme>ig.le.ˈsi.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Medina</grapheme>
+    <phoneme>me.ˈdi.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Garrido</grapheme>
+    <phoneme>ga.ˈʁi.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cortés</grapheme>
+    <phoneme>ˈkoʁ.tes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Castillo</grapheme>
+    <phoneme>kas.ˈti.jo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Santos</grapheme>
+    <phoneme>ˈsan.tos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lozano</grapheme>
+    <phoneme>lo.ˈsa.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guerrero</grapheme>
+    <phoneme>ge.ˈʁe.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cano</grapheme>
+    <phoneme>ˈka.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Prieto</grapheme>
+    <phoneme>pʁi.ˈe.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Méndez</grapheme>
+    <phoneme>ˈmen.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cruz</grapheme>
+    <phoneme>ˈkʁus</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Calvo</grapheme>
+    <phoneme>ˈkal.bo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gallego</grapheme>
+    <phoneme>ga.ˈje.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vidal</grapheme>
+    <phoneme>ˈbi.dal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>León</grapheme>
+    <phoneme>ˈle.on</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Herrera</grapheme>
+    <phoneme>e.ˈʁe.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Márquez</grapheme>
+    <phoneme>ˈmaʁ.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Peña</grapheme>
+    <phoneme>ˈpen.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Flores</grapheme>
+    <phoneme>ˈflo.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cabrera</grapheme>
+    <phoneme>kab.ˈʁe.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Campos</grapheme>
+    <phoneme>ˈkam.pos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vega</grapheme>
+    <phoneme>ˈbe.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fuentes</grapheme>
+    <phoneme>fu.ˈen.tes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carrasco</grapheme>
+    <phoneme>ka.ˈʁas.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diez</grapheme>
+    <phoneme>ˈdi.es</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Caballero</grapheme>
+    <phoneme>ka.ba.ˈje.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Reyes</grapheme>
+    <phoneme>ˈʁe.jes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nieto</grapheme>
+    <phoneme>ni.ˈe.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aguilar</grapheme>
+    <phoneme>a.ˈgi.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pascual</grapheme>
+    <phoneme>pas.ˈku.al</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Herrero</grapheme>
+    <phoneme>e.ˈʁe.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Santana</grapheme>
+    <phoneme>san.ˈta.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lorenzo</grapheme>
+    <phoneme>lo.ˈʁen.so</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hidalgo</grapheme>
+    <phoneme>i.ˈdal.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Montero</grapheme>
+    <phoneme>mon.ˈte.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ibáñez</grapheme>
+    <phoneme>i.ˈban.jes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ferrer</grapheme>
+    <phoneme>ˈfe.ʁeʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Durán</grapheme>
+    <phoneme>ˈdu.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Santiago</grapheme>
+    <phoneme>san.ti.ˈa.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vicente</grapheme>
+    <phoneme>bi.ˈsen.te</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Benítez</grapheme>
+    <phoneme>be.ˈni.tes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mora</grapheme>
+    <phoneme>ˈmo.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vargas</grapheme>
+    <phoneme>ˈbaʁ.gas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arias</grapheme>
+    <phoneme>a.ˈʁi.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carmona</grapheme>
+    <phoneme>kaʁ.ˈmo.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Crespo</grapheme>
+    <phoneme>ˈkʁes.po</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Román</grapheme>
+    <phoneme>ˈʁo.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pastor</grapheme>
+    <phoneme>ˈpas.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Soto</grapheme>
+    <phoneme>ˈso.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sáez</grapheme>
+    <phoneme>ˈsa.es</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Velasco</grapheme>
+    <phoneme>be.ˈlas.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Moya</grapheme>
+    <phoneme>ˈmo.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Soler</grapheme>
+    <phoneme>ˈso.leʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esteban</grapheme>
+    <phoneme>es.ˈte.ban</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Parra</grapheme>
+    <phoneme>ˈpa.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bravo</grapheme>
+    <phoneme>ˈbʁa.bo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gallardo</grapheme>
+    <phoneme>ga.ˈjaʁ.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rojas</grapheme>
+    <phoneme>ˈʁo.xas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pardo</grapheme>
+    <phoneme>ˈpaʁ.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Merino</grapheme>
+    <phoneme>me.ˈʁi.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Franco</grapheme>
+    <phoneme>ˈfʁan.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Espinosa</grapheme>
+    <phoneme>es.pi.ˈno.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lara</grapheme>
+    <phoneme>ˈla.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rey</grapheme>
+    <phoneme>ˈʁe.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rivera</grapheme>
+    <phoneme>ʁi.ˈbe.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silva</grapheme>
+    <phoneme>ˈsil.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vera</grapheme>
+    <phoneme>ˈbe.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ríos</grapheme>
+    <phoneme>ˈʁi.os</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Acosta</grapheme>
+    <phoneme>a.ˈkos.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luna</grapheme>
+    <phoneme>ˈlu.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aguilera</grapheme>
+    <phoneme>a.gi.ˈle.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pacheco</grapheme>
+    <phoneme>pat.ˈʃe.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cuesta</grapheme>
+    <phoneme>ku.ˈes.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gimeno</grapheme>
+    <phoneme>xi.ˈme.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mendoza</grapheme>
+    <phoneme>men.ˈdo.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Robles</grapheme>
+    <phoneme>ˈʁob.les</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cuevas</grapheme>
+    <phoneme>ku.ˈe.bas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salas</grapheme>
+    <phoneme>ˈsa.las</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bernal</grapheme>
+    <phoneme>ˈbeʁ.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Galán</grapheme>
+    <phoneme>ˈga.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vila</grapheme>
+    <phoneme>ˈbi.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roca</grapheme>
+    <phoneme>ˈʁo.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mateo</grapheme>
+    <phoneme>ma.ˈte.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roldán</grapheme>
+    <phoneme>ˈʁol.dan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sierra</grapheme>
+    <phoneme>si.ˈe.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Andrés</grapheme>
+    <phoneme>ˈan.dʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Trujillo</grapheme>
+    <phoneme>tʁu.ˈxi.jo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ojeda</grapheme>
+    <phoneme>o.ˈxe.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Páez</grapheme>
+    <phoneme>ˈpa.es</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salazar</grapheme>
+    <phoneme>sa.ˈla.saʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Escudero</grapheme>
+    <phoneme>es.ku.ˈde.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maldonado</grapheme>
+    <phoneme>mal.do.ˈna.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cordero</grapheme>
+    <phoneme>koʁ.ˈde.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Camacho</grapheme>
+    <phoneme>ka.ˈmat.ʃo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Heredia</grapheme>
+    <phoneme>e.ʁe.ˈdi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pereira</grapheme>
+    <phoneme>pe.ʁe.ˈi.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vela</grapheme>
+    <phoneme>ˈbe.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mata</grapheme>
+    <phoneme>ˈma.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aparicio</grapheme>
+    <phoneme>a.pa.ʁi.ˈsi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vallejo</grapheme>
+    <phoneme>ba.ˈje.xo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Macías</grapheme>
+    <phoneme>ma.ˈsi.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Palomo</grapheme>
+    <phoneme>pa.ˈlo.mo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rivas</grapheme>
+    <phoneme>ˈʁi.bas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vásquez</grapheme>
+    <phoneme>ˈbas.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Quintana</grapheme>
+    <phoneme>kin.ˈta.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carvajal</grapheme>
+    <phoneme>kaʁ.ˈba.xal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomás</grapheme>
+    <phoneme>ˈto.mas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ponce</grapheme>
+    <phoneme>ˈpon.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carrillo</grapheme>
+    <phoneme>ka.ˈʁi.jo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bermúdez</grapheme>
+    <phoneme>beʁ.ˈmu.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Conde</grapheme>
+    <phoneme>ˈkon.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hurtado</grapheme>
+    <phoneme>uʁ.ˈta.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>José</grapheme>
+    <phoneme>ˈxo.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>María</grapheme>
+    <phoneme>ma.ˈʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antonio</grapheme>
+    <phoneme>an.to.ˈni.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuel</grapheme>
+    <phoneme>ma.ˈnu.el</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Francisco</grapheme>
+    <phoneme>fʁan.ˈsis.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Juan</grapheme>
+    <phoneme>ˈxu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>David</grapheme>
+    <phoneme>ˈda.bid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carlos</grapheme>
+    <phoneme>ˈkaʁ.los</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Javier</grapheme>
+    <phoneme>xa.ˈbi.eʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>José Luis</grapheme>
+    <phoneme>ˈxo.se.lu.is</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel</grapheme>
+    <phoneme>da.ˈni.el</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Miguel</grapheme>
+    <phoneme>ˈmi.gel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rafael</grapheme>
+    <phoneme>ʁa.ˈfa.el</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pedro</grapheme>
+    <phoneme>ˈped.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ángel</grapheme>
+    <phoneme>ˈan.xel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alejandro</grapheme>
+    <phoneme>a.le.ˈxan.dʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fernando</grapheme>
+    <phoneme>feʁ.ˈnan.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sergio</grapheme>
+    <phoneme>seʁ.ˈxi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pablo</grapheme>
+    <phoneme>ˈpab.lo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jorge</grapheme>
+    <phoneme>ˈxoʁ.xe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alberto</grapheme>
+    <phoneme>al.ˈbeʁ.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luis</grapheme>
+    <phoneme>ˈlu.is</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Álvaro</grapheme>
+    <phoneme>al.ˈba.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adrián</grapheme>
+    <phoneme>ad.ˈʁi.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diego</grapheme>
+    <phoneme>di.ˈe.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raúl</grapheme>
+    <phoneme>ˈʁa.ul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iván</grapheme>
+    <phoneme>ˈi.ban</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rubén</grapheme>
+    <phoneme>ˈʁu.ben</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Óscar</grapheme>
+    <phoneme>ˈos.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Enrique</grapheme>
+    <phoneme>en.ˈʁi.ke</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramón</grapheme>
+    <phoneme>ˈʁa.mon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcos</grapheme>
+    <phoneme>ˈmaʁ.kos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Víctor</grapheme>
+    <phoneme>ˈbik.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mario</grapheme>
+    <phoneme>ma.ˈʁi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jesús</grapheme>
+    <phoneme>ˈxe.sus</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roberto</grapheme>
+    <phoneme>ʁo.ˈbeʁ.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eduardo</grapheme>
+    <phoneme>e.du.ˈaʁ.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ignacio</grapheme>
+    <phoneme>ig.na.ˈsi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gonzalo</grapheme>
+    <phoneme>gon.ˈsa.lo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hugo</grapheme>
+    <phoneme>ˈu.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aitor</grapheme>
+    <phoneme>a.ˈi.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carmen</grapheme>
+    <phoneme>ˈkaʁ.men</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ana</grapheme>
+    <phoneme>ˈa.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Isabel</grapheme>
+    <phoneme>i.ˈsa.bel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dolores</grapheme>
+    <phoneme>do.ˈlo.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pilar</grapheme>
+    <phoneme>ˈpi.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Teresa</grapheme>
+    <phoneme>te.ˈʁe.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rosa</grapheme>
+    <phoneme>ˈʁo.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cristina</grapheme>
+    <phoneme>kʁis.ˈti.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marta</grapheme>
+    <phoneme>ˈmaʁ.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laura</grapheme>
+    <phoneme>la.ˈu.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucía</grapheme>
+    <phoneme>lu.ˈsi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elena</grapheme>
+    <phoneme>e.ˈle.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sara</grapheme>
+    <phoneme>ˈsa.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paula</grapheme>
+    <phoneme>pa.ˈu.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patricia</grapheme>
+    <phoneme>pat.ʁi.ˈsi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra</grapheme>
+    <phoneme>ˈsan.dʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raquel</grapheme>
+    <phoneme>ˈʁa.kel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beatriz</grapheme>
+    <phoneme>be.ˈat.ʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silvia</grapheme>
+    <phoneme>sil.ˈbi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Andrea</grapheme>
+    <phoneme>an.ˈdʁe.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rocío</grapheme>
+    <phoneme>ʁo.ˈsi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alba</grapheme>
+    <phoneme>ˈal.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julia</grapheme>
+    <phoneme>xu.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nuria</grapheme>
+    <phoneme>nu.ˈʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eva</grapheme>
+    <phoneme>ˈe.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inés</grapheme>
+    <phoneme>ˈi.nes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irene</grapheme>
+    <phoneme>i.ˈʁe.ne</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claudia</grapheme>
+    <phoneme>kla.u.ˈdi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia</grapheme>
+    <phoneme>na.ta.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mónica</grapheme>
+    <phoneme>mo.ˈni.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Verónica</grapheme>
+    <phoneme>be.ʁo.ˈni.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Noelia</grapheme>
+    <phoneme>no.e.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ángela</grapheme>
+    <phoneme>an.ˈxe.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marina</grapheme>
+    <phoneme>ma.ˈʁi.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carla</grapheme>
+    <phoneme>ˈkaʁ.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofía</grapheme>
+    <phoneme>so.ˈfi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nerea</grapheme>
+    <phoneme>ne.ˈʁe.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lorena</grapheme>
+    <phoneme>lo.ˈʁe.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esther</grapheme>
+    <phoneme>ˈes.teʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yolanda</grapheme>
+    <phoneme>jo.ˈlan.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mar</grapheme>
+    <phoneme>ˈmaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Celia</grapheme>
+    <phoneme>se.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ainhoa</grapheme>
+    <phoneme>a.i.ˈno.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carolina</grapheme>
+    <phoneme>ka.ʁo.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esperanza</grapheme>
+    <phoneme>es.pe.ˈʁan.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Concepción</grapheme>
+    <phoneme>kon.sep.ˈsi.on</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Montserrat</grapheme>
+    <phoneme>mon.ˈtse.ʁat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inmaculada</grapheme>
+    <phoneme>in.ma.ku.ˈla.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Encarnación</grapheme>
+    <phoneme>en.kaʁ.na.ˈsi.on</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amparo</grapheme>
+    <phoneme>am.ˈpa.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Begoña</grapheme>
+    <phoneme>be.ˈgon.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gloria</grapheme>
+    <phoneme>glo.ˈʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Consuelo</grapheme>
+    <phoneme>kon.su.ˈe.lo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuela</grapheme>
+    <phoneme>ma.nu.ˈe.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Josefa</grapheme>
+    <phoneme>xo.ˈse.fa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antonia</grapheme>
+    <phoneme>an.to.ˈni.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Francisca</grapheme>
+    <phoneme>fʁan.ˈsis.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Catalina</grapheme>
+    <phoneme>ka.ta.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Águeda</grapheme>
+    <phoneme>a.ˈge.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillermo</grapheme>
+    <phoneme>gi.ˈjeʁ.mo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joaquín</grapheme>
+    <phoneme>xo.ˈa.kin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salvador</grapheme>
+    <phoneme>sal.ˈba.doʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emilio</grapheme>
+    <phoneme>e.mi.ˈli.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Felipe</grapheme>
+    <phoneme>fe.ˈli.pe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gabriel</grapheme>
+    <phoneme>gab.ˈʁi.el</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martín Sanz</grapheme>
+    <phoneme>ˈmaʁ.tin.sans</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cristina Hernández</grapheme>
+    <phoneme>kʁis.ˈti.na.eʁ.nan.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>José Luis Vela</grapheme>
+    <phoneme>ˈxo.se.lu.is.be.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rafael Soler</grapheme>
+    <phoneme>ʁa.ˈfa.el.so.leʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Noelia Moreno</grapheme>
+    <phoneme>no.e.ˈli.a.mo.ʁe.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alba Vidal</grapheme>
+    <phoneme>ˈal.ba.bi.dal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Francisco Domínguez</grapheme>
+    <phoneme>fʁan.ˈsis.ko.do.min.ges</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sara Vera</grapheme>
+    <phoneme>ˈsa.ʁa.be.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Javier Campos</grapheme>
+    <phoneme>xa.ˈbi.eʁ.kam.pos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Miguel Macías</grapheme>
+    <phoneme>ˈmi.gel.ma.si.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elena Álvarez</grapheme>
+    <phoneme>e.ˈle.na.al.ba.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emilio Méndez</grapheme>
+    <phoneme>e.mi.ˈli.o.men.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alejandro Márquez</grapheme>
+    <phoneme>a.le.ˈxan.dʁo.maʁ.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lorena Ponce</grapheme>
+    <phoneme>lo.ˈʁe.na.pon.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carlos Carvajal</grapheme>
+    <phoneme>ˈkaʁ.los.kaʁ.ba.xal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Noelia Franco</grapheme>
+    <phoneme>no.e.ˈli.a.fʁan.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>David Herrera</grapheme>
+    <phoneme>ˈda.bid.e.ʁe.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Juan Palomo</grapheme>
+    <phoneme>ˈxu.an.pa.lo.mo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gabriel Castro</grapheme>
+    <phoneme>gab.ˈʁi.el.kas.tʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eduardo Vera</grapheme>
+    <phoneme>e.du.ˈaʁ.do.be.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pablo Mata</grapheme>
+    <phoneme>ˈpab.lo.ma.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alejandro Quintana</grapheme>
+    <phoneme>a.le.ˈxan.dʁo.kin.ta.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gonzalo Rivas</grapheme>
+    <phoneme>gon.ˈsa.lo.ʁi.bas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salvador Lozano</grapheme>
+    <phoneme>sal.ˈba.doʁ.lo.sa.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pedro Tomás</grapheme>
+    <phoneme>ˈped.ʁo.to.mas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Verónica Cano</grapheme>
+    <phoneme>be.ʁo.ˈni.ka.ka.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pilar Ramos</grapheme>
+    <phoneme>ˈpi.laʁ.ʁa.mos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claudia Muñoz</grapheme>
+    <phoneme>kla.u.ˈdi.a.mun.jos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mónica Álvarez</grapheme>
+    <phoneme>mo.ˈni.ka.al.ba.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nerea Calvo</grapheme>
+    <phoneme>ne.ˈʁe.a.kal.bo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rocío Pereira</grapheme>
+    <phoneme>ʁo.ˈsi.o.pe.ʁe.i.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elena Vicente</grapheme>
+    <phoneme>e.ˈle.na.bi.sen.te</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raquel Ponce</grapheme>
+    <phoneme>ˈʁa.kel.pon.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra Moya</grapheme>
+    <phoneme>ˈsan.dʁa.mo.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ignacio Fuentes</grapheme>
+    <phoneme>ig.na.ˈsi.o.fu.en.tes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Águeda Lozano</grapheme>
+    <phoneme>a.ˈge.da.lo.sa.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Montserrat Vega</grapheme>
+    <phoneme>mon.ˈtse.ʁat.be.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel Carvajal</grapheme>
+    <phoneme>da.ˈni.el.kaʁ.ba.xal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ignacio Camacho</grapheme>
+    <phoneme>ig.na.ˈsi.o.ka.mat.ʃo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rocío Román</grapheme>
+    <phoneme>ʁo.ˈsi.o.ʁo.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Begoña Gimeno</grapheme>
+    <phoneme>be.ˈgon.ja.xi.me.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roberto Alonso</grapheme>
+    <phoneme>ʁo.ˈbeʁ.to.a.lon.so</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alejandro Escudero</grapheme>
+    <phoneme>a.le.ˈxan.dʁo.es.ku.de.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucía Garrido</grapheme>
+    <phoneme>lu.ˈsi.a.ga.ʁi.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuela Román</grapheme>
+    <phoneme>ma.nu.ˈe.la.ʁo.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jorge Sierra</grapheme>
+    <phoneme>ˈxoʁ.xe.si.e.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucía Jiménez</grapheme>
+    <phoneme>lu.ˈsi.a.xi.me.nes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ainhoa Gutiérrez</grapheme>
+    <phoneme>a.i.ˈno.a.gu.ti.e.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Josefa Palomo</grapheme>
+    <phoneme>xo.ˈse.fa.pa.lo.mo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Verónica Vicente</grapheme>
+    <phoneme>be.ʁo.ˈni.ka.bi.sen.te</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carmen Soto</grapheme>
+    <phoneme>ˈkaʁ.men.so.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marina Trujillo</grapheme>
+    <phoneme>ma.ˈʁi.na.tʁu.xi.jo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Noelia Robles</grapheme>
+    <phoneme>no.e.ˈli.a.ʁob.les</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Javier Vázquez</grapheme>
+    <phoneme>xa.ˈbi.eʁ.bas.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mario Vila</grapheme>
+    <phoneme>ma.ˈʁi.o.bi.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Montserrat Muñoz</grapheme>
+    <phoneme>mon.ˈtse.ʁat.mun.jos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carlos Santiago</grapheme>
+    <phoneme>ˈkaʁ.los.san.ti.a.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yolanda Carvajal</grapheme>
+    <phoneme>jo.ˈlan.da.kaʁ.ba.xal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esperanza Gimeno</grapheme>
+    <phoneme>es.pe.ˈʁan.sa.xi.me.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roberto Rojas</grapheme>
+    <phoneme>ʁo.ˈbeʁ.to.ʁo.xas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ainhoa Pastor</grapheme>
+    <phoneme>a.i.ˈno.a.pas.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antonio Salas</grapheme>
+    <phoneme>an.to.ˈni.o.sa.las</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Isabel Cortés</grapheme>
+    <phoneme>i.ˈsa.bel.koʁ.tes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofía Suárez</grapheme>
+    <phoneme>so.ˈfi.a.su.a.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rocío Álvarez</grapheme>
+    <phoneme>ʁo.ˈsi.o.al.ba.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rubén Lorenzo</grapheme>
+    <phoneme>ˈʁu.ben.lo.ʁen.so</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fernando Fuentes</grapheme>
+    <phoneme>feʁ.ˈnan.do.fu.en.tes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cristina Merino</grapheme>
+    <phoneme>kʁis.ˈti.na.me.ʁi.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rocío Navarro</grapheme>
+    <phoneme>ʁo.ˈsi.o.na.ba.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luis Gimeno</grapheme>
+    <phoneme>ˈlu.is.xi.me.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marta Vallejo</grapheme>
+    <phoneme>ˈmaʁ.ta.ba.je.xo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jesús Ortiz</grapheme>
+    <phoneme>ˈxe.sus.oʁ.tis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salvador Luna</grapheme>
+    <phoneme>sal.ˈba.doʁ.lu.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claudia Herrero</grapheme>
+    <phoneme>kla.u.ˈdi.a.e.ʁe.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inmaculada Silva</grapheme>
+    <phoneme>in.ma.ku.ˈla.da.sil.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Isabel Gallardo</grapheme>
+    <phoneme>i.ˈsa.bel.ga.jaʁ.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Enrique Sanz</grapheme>
+    <phoneme>en.ˈʁi.ke.sans</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel Santos</grapheme>
+    <phoneme>da.ˈni.el.san.tos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jorge Flores</grapheme>
+    <phoneme>ˈxoʁ.xe.flo.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Celia Flores</grapheme>
+    <phoneme>se.ˈli.a.flo.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>María Roldán</grapheme>
+    <phoneme>ma.ˈʁi.a.ʁol.dan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomás Carrillo</grapheme>
+    <phoneme>ˈto.mas.ka.ʁi.jo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adrián Reyes</grapheme>
+    <phoneme>ad.ˈʁi.an.ʁe.jes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roberto Rodríguez</grapheme>
+    <phoneme>ʁo.ˈbeʁ.to.ʁod.ʁi.ges</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pablo Vera</grapheme>
+    <phoneme>ˈpab.lo.be.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inés Esteban</grapheme>
+    <phoneme>ˈi.nes.es.te.ban</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofía Méndez</grapheme>
+    <phoneme>so.ˈfi.a.men.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hugo Ortega</grapheme>
+    <phoneme>ˈu.go.oʁ.te.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Concepción Escudero</grapheme>
+    <phoneme>kon.sep.ˈsi.on.es.ku.de.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nerea Díaz</grapheme>
+    <phoneme>ne.ˈʁe.a.di.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra Rivas</grapheme>
+    <phoneme>ˈsan.dʁa.ʁi.bas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cristina Franco</grapheme>
+    <phoneme>kʁis.ˈti.na.fʁan.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marta Merino</grapheme>
+    <phoneme>ˈmaʁ.ta.me.ʁi.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pedro Mateo</grapheme>
+    <phoneme>ˈped.ʁo.ma.te.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esther Espinosa</grapheme>
+    <phoneme>ˈes.teʁ.es.pi.no.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carlos Cano</grapheme>
+    <phoneme>ˈkaʁ.los.ka.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Javier Gallego</grapheme>
+    <phoneme>xa.ˈbi.eʁ.ga.je.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paula Medina</grapheme>
+    <phoneme>pa.ˈu.la.me.di.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ángel Román</grapheme>
+    <phoneme>ˈan.xel.ʁo.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marina Díaz</grapheme>
+    <phoneme>ma.ˈʁi.na.di.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pedro García</grapheme>
+    <phoneme>ˈped.ʁo.gaʁ.si.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mónica Sanz</grapheme>
+    <phoneme>mo.ˈni.ka.sans</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inés Gil</grapheme>
+    <phoneme>ˈi.nes.xil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dolores Sánchez</grapheme>
+    <phoneme>do.ˈlo.ʁes.san.tʃes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>José Luis Gallego</grapheme>
+    <phoneme>ˈxo.se.lu.is.ga.je.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofía Bravo</grapheme>
+    <phoneme>so.ˈfi.a.bʁa.bo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jorge Carrasco</grapheme>
+    <phoneme>ˈxoʁ.xe.ka.ʁas.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ana Soler</grapheme>
+    <phoneme>ˈa.na.so.leʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beatriz Morales</grapheme>
+    <phoneme>be.ˈat.ʁis.mo.ʁa.les</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ángel Roldán</grapheme>
+    <phoneme>ˈan.xel.ʁol.dan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raquel Roca</grapheme>
+    <phoneme>ˈʁa.kel.ʁo.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silvia Santiago</grapheme>
+    <phoneme>sil.ˈbi.a.san.ti.a.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel Rubio</grapheme>
+    <phoneme>da.ˈni.el.ʁu.bi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pedro Román</grapheme>
+    <phoneme>ˈped.ʁo.ʁo.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gloria Reyes</grapheme>
+    <phoneme>glo.ˈʁi.a.ʁe.jes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silvia Medina</grapheme>
+    <phoneme>sil.ˈbi.a.me.di.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nuria Martínez</grapheme>
+    <phoneme>nu.ˈʁi.a.maʁ.ti.nes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iván Heredia</grapheme>
+    <phoneme>ˈi.ban.e.ʁe.di.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dolores Marín</grapheme>
+    <phoneme>do.ˈlo.ʁes.ma.ʁin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Concepción Aparicio</grapheme>
+    <phoneme>kon.sep.ˈsi.on.a.pa.ʁi.si.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuel Heredia</grapheme>
+    <phoneme>ma.ˈnu.el.e.ʁe.di.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ignacio Vázquez</grapheme>
+    <phoneme>ig.na.ˈsi.o.bas.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Montserrat Caballero</grapheme>
+    <phoneme>mon.ˈtse.ʁat.ka.ba.je.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nuria Soler</grapheme>
+    <phoneme>nu.ˈʁi.a.so.leʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luis Velasco</grapheme>
+    <phoneme>ˈlu.is.be.las.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antonia Márquez</grapheme>
+    <phoneme>an.to.ˈni.a.maʁ.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inés Mata</grapheme>
+    <phoneme>ˈi.nes.ma.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Francisca Ojeda</grapheme>
+    <phoneme>fʁan.ˈsis.ka.o.xe.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aitor Márquez</grapheme>
+    <phoneme>a.ˈi.toʁ.maʁ.kes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofía Prieto</grapheme>
+    <phoneme>so.ˈfi.a.pʁi.e.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joaquín Campos</grapheme>
+    <phoneme>xo.ˈa.kin.kam.pos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salvador Espinosa</grapheme>
+    <phoneme>sal.ˈba.doʁ.es.pi.no.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gloria Peña</grapheme>
+    <phoneme>glo.ˈʁi.a.pen.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raúl Maldonado</grapheme>
+    <phoneme>ˈʁa.ul.mal.do.na.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rocío Velasco</grapheme>
+    <phoneme>ʁo.ˈsi.o.be.las.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Begoña Pérez</grapheme>
+    <phoneme>be.ˈgon.ja.pe.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuel Herrero</grapheme>
+    <phoneme>ma.ˈnu.el.e.ʁe.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beatriz Caballero</grapheme>
+    <phoneme>be.ˈat.ʁis.ka.ba.je.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Diego Pastor</grapheme>
+    <phoneme>di.ˈe.go.pas.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patricia Soto</grapheme>
+    <phoneme>pat.ʁi.ˈsi.a.so.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dolores Navarro</grapheme>
+    <phoneme>do.ˈlo.ʁes.na.ba.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Óscar Ramírez</grapheme>
+    <phoneme>ˈos.kaʁ.ʁa.mi.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Enrique Galán</grapheme>
+    <phoneme>en.ˈʁi.ke.ga.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raúl Crespo</grapheme>
+    <phoneme>ˈʁa.ul.kʁes.po</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iván Mateo</grapheme>
+    <phoneme>ˈi.ban.ma.te.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nerea García</grapheme>
+    <phoneme>ne.ˈʁe.a.gaʁ.si.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silvia Pastor</grapheme>
+    <phoneme>sil.ˈbi.a.pas.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillermo Torres</grapheme>
+    <phoneme>gi.ˈjeʁ.mo.to.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomás Molina</grapheme>
+    <phoneme>ˈto.mas.mo.li.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rosa Cruz</grapheme>
+    <phoneme>ˈʁo.sa.kʁus</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silvia Santos</grapheme>
+    <phoneme>sil.ˈbi.a.san.tos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sara Carmona</grapheme>
+    <phoneme>ˈsa.ʁa.kaʁ.mo.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Miguel Franco</grapheme>
+    <phoneme>ˈmi.gel.fʁan.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raquel Espinosa</grapheme>
+    <phoneme>ˈʁa.kel.es.pi.no.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Consuelo Torres</grapheme>
+    <phoneme>kon.su.ˈe.lo.to.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amparo Iglesias</grapheme>
+    <phoneme>am.ˈpa.ʁo.ig.le.si.as</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luis Ortega</grapheme>
+    <phoneme>ˈlu.is.oʁ.te.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuel Sanz</grapheme>
+    <phoneme>ma.ˈnu.el.sans</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ángela Bernal</grapheme>
+    <phoneme>an.ˈxe.la.beʁ.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joaquín Marín</grapheme>
+    <phoneme>xo.ˈa.kin.ma.ʁin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofía Conde</grapheme>
+    <phoneme>so.ˈfi.a.kon.de</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beatriz Soto</grapheme>
+    <phoneme>be.ˈat.ʁis.so.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jorge Vallejo</grapheme>
+    <phoneme>ˈxoʁ.xe.ba.je.xo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claudia Delgado</grapheme>
+    <phoneme>kla.u.ˈdi.a.del.ga.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antonio Fernández</grapheme>
+    <phoneme>an.to.ˈni.o.feʁ.nan.des</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillermo Ramírez</grapheme>
+    <phoneme>gi.ˈjeʁ.mo.ʁa.mi.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eva Ortiz</grapheme>
+    <phoneme>ˈe.ba.oʁ.tis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sara Prieto</grapheme>
+    <phoneme>ˈsa.ʁa.pʁi.e.to</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emilio Vidal</grapheme>
+    <phoneme>e.mi.ˈli.o.bi.dal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manuel Carrasco</grapheme>
+    <phoneme>ma.ˈnu.el.ka.ʁas.ko</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rubén Hidalgo</grapheme>
+    <phoneme>ˈʁu.ben.i.dal.go</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alba Campos</grapheme>
+    <phoneme>ˈal.ba.kam.pos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Josefa Carrillo</grapheme>
+    <phoneme>xo.ˈse.fa.ka.ʁi.jo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martín Caballero</grapheme>
+    <phoneme>ˈmaʁ.tin.ka.ba.je.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irene Vera</grapheme>
+    <phoneme>i.ˈʁe.ne.be.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomás Delgado</grapheme>
+    <phoneme>ˈto.mas.del.ga.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carlos Sáez</grapheme>
+    <phoneme>ˈkaʁ.los.sa.es</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra Ponce</grapheme>
+    <phoneme>ˈsan.dʁa.pon.se</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salvador Maldonado</grapheme>
+    <phoneme>sal.ˈba.doʁ.mal.do.na.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucía Ojeda</grapheme>
+    <phoneme>lu.ˈsi.a.o.xe.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fernando Pereira</grapheme>
+    <phoneme>feʁ.ˈnan.do.pe.ʁe.i.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jorge Camacho</grapheme>
+    <phoneme>ˈxoʁ.xe.ka.mat.ʃo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julia López</grapheme>
+    <phoneme>xu.ˈli.a.lo.pes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paula Lozano</grapheme>
+    <phoneme>pa.ˈu.la.lo.sa.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carla Rodríguez</grapheme>
+    <phoneme>ˈkaʁ.la.ʁod.ʁi.ges</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Francisca Sanz</grapheme>
+    <phoneme>fʁan.ˈsis.ka.sans</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Álvaro Rubio</grapheme>
+    <phoneme>al.ˈba.ʁo.ʁu.bi.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beatriz Molina</grapheme>
+    <phoneme>be.ˈat.ʁis.mo.li.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia Álvarez</grapheme>
+    <phoneme>na.ta.ˈli.a.al.ba.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martín Maldonado</grapheme>
+    <phoneme>ˈmaʁ.tin.mal.do.na.do</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eva Palomo</grapheme>
+    <phoneme>ˈe.ba.pa.lo.mo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Silvia Serrano</grapheme>
+    <phoneme>sil.ˈbi.a.se.ʁa.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia Moreno</grapheme>
+    <phoneme>na.ta.ˈli.a.mo.ʁe.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ramón Cano</grapheme>
+    <phoneme>ˈʁa.mon.ka.no</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jesús Jiménez</grapheme>
+    <phoneme>ˈxe.sus.xi.me.nes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antonia Gil</grapheme>
+    <phoneme>an.to.ˈni.a.xil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alba Mendoza</grapheme>
+    <phoneme>ˈal.ba.men.do.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia Pérez</grapheme>
+    <phoneme>na.ta.ˈli.a.pe.ʁes</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Josefa Muñoz</grapheme>
+    <phoneme>xo.ˈse.fa.mun.jos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paula Vargas</grapheme>
+    <phoneme>pa.ˈu.la.baʁ.gas</phoneme>
+  </lexeme>
+</lexicon>

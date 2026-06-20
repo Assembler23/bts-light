@@ -1,0 +1,1817 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lexicon version="1.0"
+      xmlns="http://www.w3.org/2005/01/pronunciation-lexicon"
+      alphabet="ipa" xml:lang="pl-PL">
+  <lexeme>
+    <grapheme>Nowak</grapheme>
+    <phoneme>ˈno.vak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kowalski</grapheme>
+    <phoneme>ko.ˈval.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiśniewski</grapheme>
+    <phoneme>viʃ.ni.ˈev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wójcik</grapheme>
+    <phoneme>ˈvuj.tsik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kowalczyk</grapheme>
+    <phoneme>ko.ˈval.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamiński</grapheme>
+    <phoneme>ka.ˈmin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lewandowski</grapheme>
+    <phoneme>le.van.ˈdov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zieliński</grapheme>
+    <phoneme>zi.e.ˈlin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szymański</grapheme>
+    <phoneme>ʃi.ˈman.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Woźniak</grapheme>
+    <phoneme>voʒ.ˈni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dąbrowski</grapheme>
+    <phoneme>dɔŋ.ˈbʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kozłowski</grapheme>
+    <phoneme>koz.ˈvov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jankowski</grapheme>
+    <phoneme>jan.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mazur</grapheme>
+    <phoneme>ˈma.zuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kwiatkowski</grapheme>
+    <phoneme>kvi.at.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krawczyk</grapheme>
+    <phoneme>ˈkʁav.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Piotrowski</grapheme>
+    <phoneme>pi.ot.ˈʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grabowski</grapheme>
+    <phoneme>gʁa.ˈbov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nowakowski</grapheme>
+    <phoneme>no.va.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pawłowski</grapheme>
+    <phoneme>pa.ˈvov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michalski</grapheme>
+    <phoneme>mi.ˈxal.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nowicki</grapheme>
+    <phoneme>no.ˈvit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adamczyk</grapheme>
+    <phoneme>a.ˈdam.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dudek</grapheme>
+    <phoneme>ˈdu.dek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zając</grapheme>
+    <phoneme>ˈza.jɔŋts</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wieczorek</grapheme>
+    <phoneme>vi.et.ˈʃo.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jabłoński</grapheme>
+    <phoneme>jab.ˈvon.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Król</grapheme>
+    <phoneme>ˈkʁul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Majewski</grapheme>
+    <phoneme>ma.ˈjev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Olszewski</grapheme>
+    <phoneme>ol.ˈʃev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jaworski</grapheme>
+    <phoneme>ja.ˈvoʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wróbel</grapheme>
+    <phoneme>ˈvʁu.bel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Malinowski</grapheme>
+    <phoneme>ma.li.ˈnov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pawlak</grapheme>
+    <phoneme>ˈpav.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Witkowski</grapheme>
+    <phoneme>vit.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Walczak</grapheme>
+    <phoneme>ˈval.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stępień</grapheme>
+    <phoneme>stɛŋ.ˈpi.enj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Górski</grapheme>
+    <phoneme>ˈguʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rutkowski</grapheme>
+    <phoneme>ʁut.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michalak</grapheme>
+    <phoneme>mi.ˈxa.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sikora</grapheme>
+    <phoneme>si.ˈko.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ostrowski</grapheme>
+    <phoneme>os.ˈtʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Baran</grapheme>
+    <phoneme>ˈba.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Duda</grapheme>
+    <phoneme>ˈdu.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szewczyk</grapheme>
+    <phoneme>ˈʃev.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wojciechowski</grapheme>
+    <phoneme>voj.tsi.e.ˈxov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kucharski</grapheme>
+    <phoneme>ku.ˈxaʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wilk</grapheme>
+    <phoneme>ˈvilk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kalinowski</grapheme>
+    <phoneme>ka.li.ˈnov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lis</grapheme>
+    <phoneme>ˈlis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mazurek</grapheme>
+    <phoneme>ma.ˈzu.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wojcik</grapheme>
+    <phoneme>ˈvoj.tsik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sokołowski</grapheme>
+    <phoneme>so.ko.ˈvov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szczepański</grapheme>
+    <phoneme>ʃtʃe.ˈpan.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kucharczyk</grapheme>
+    <phoneme>ku.ˈxaʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wasilewski</grapheme>
+    <phoneme>va.si.ˈlev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czarnecki</grapheme>
+    <phoneme>tʃaʁ.ˈnet.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kołodziej</grapheme>
+    <phoneme>ko.vod.ˈʒi.ej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sadowski</grapheme>
+    <phoneme>sa.ˈdov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marciniak</grapheme>
+    <phoneme>maʁ.tsi.ˈni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zalewski</grapheme>
+    <phoneme>za.ˈlev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wróblewski</grapheme>
+    <phoneme>vʁub.ˈlev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jasiński</grapheme>
+    <phoneme>ja.ˈsin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zawadzki</grapheme>
+    <phoneme>za.ˈvat.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sawicki</grapheme>
+    <phoneme>sa.ˈvit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gajewski</grapheme>
+    <phoneme>ga.ˈjev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sobczak</grapheme>
+    <phoneme>ˈsob.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lewicki</grapheme>
+    <phoneme>le.ˈvit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chmielewski</grapheme>
+    <phoneme>xmi.e.ˈlev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Borkowski</grapheme>
+    <phoneme>boʁ.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Przybylski</grapheme>
+    <phoneme>pʒi.ˈbil.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomaszewski</grapheme>
+    <phoneme>to.ma.ˈʃev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiśniewska</grapheme>
+    <phoneme>viʃ.ni.ˈev.ska</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaczmarek</grapheme>
+    <phoneme>kat.ˈʃma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sikorski</grapheme>
+    <phoneme>si.ˈkoʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czerwiński</grapheme>
+    <phoneme>tʃeʁ.ˈvin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bąk</grapheme>
+    <phoneme>ˈbɔŋk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Urbański</grapheme>
+    <phoneme>uʁ.ˈban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grzegorzewski</grapheme>
+    <phoneme>gʒe.go.ˈʒev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kubiak</grapheme>
+    <phoneme>ku.ˈbi.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maciejewski</grapheme>
+    <phoneme>mat.si.e.ˈjev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaczmarczyk</grapheme>
+    <phoneme>kat.ˈʃmaʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sienkiewicz</grapheme>
+    <phoneme>si.en.ki.ˈe.vitʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sobański</grapheme>
+    <phoneme>so.ˈban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kołodziejczyk</grapheme>
+    <phoneme>ko.vod.ʒi.ˈej.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pietrzak</grapheme>
+    <phoneme>pi.ˈet.ʒak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marek</grapheme>
+    <phoneme>ˈma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zięba</grapheme>
+    <phoneme>zi.ˈɛŋ.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mróz</grapheme>
+    <phoneme>ˈmʁuz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Korzeniowski</grapheme>
+    <phoneme>ko.ʒe.ni.ˈov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Głowacki</grapheme>
+    <phoneme>gvo.ˈvat.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krupa</grapheme>
+    <phoneme>ˈkʁu.pa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sobolewski</grapheme>
+    <phoneme>so.bo.ˈlev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wysocki</grapheme>
+    <phoneme>vi.ˈsot.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adamski</grapheme>
+    <phoneme>a.ˈdam.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Skowroński</grapheme>
+    <phoneme>skov.ˈʁon.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mikołajczyk</grapheme>
+    <phoneme>mi.ko.ˈvaj.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laskowski</grapheme>
+    <phoneme>las.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zakrzewski</grapheme>
+    <phoneme>zak.ˈʒev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sołtys</grapheme>
+    <phoneme>ˈsov.tis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cieślak</grapheme>
+    <phoneme>tsi.ˈeʃ.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maj</grapheme>
+    <phoneme>ˈmaj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kozioł</grapheme>
+    <phoneme>ko.ˈzi.ov</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Brzeziński</grapheme>
+    <phoneme>bʒe.ˈzin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czajka</grapheme>
+    <phoneme>ˈtʃaj.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaźmierczak</grapheme>
+    <phoneme>kaʒ.mi.ˈeʁ.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bednarek</grapheme>
+    <phoneme>bed.ˈna.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Włodarczyk</grapheme>
+    <phoneme>vo.ˈdaʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Markowski</grapheme>
+    <phoneme>maʁ.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomczak</grapheme>
+    <phoneme>ˈtom.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pawlik</grapheme>
+    <phoneme>ˈpav.lik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ziółkowski</grapheme>
+    <phoneme>zi.uv.ˈkov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szulc</grapheme>
+    <phoneme>ˈʃults</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janik</grapheme>
+    <phoneme>ˈja.nik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wawrzyniak</grapheme>
+    <phoneme>vav.ʒi.ˈni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Konieczny</grapheme>
+    <phoneme>ko.ni.ˈet.ʃni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jakubowski</grapheme>
+    <phoneme>ja.ku.ˈbov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dziedzic</grapheme>
+    <phoneme>dʒi.ˈed.ʒits</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kaczmar</grapheme>
+    <phoneme>ˈkat.ʃmaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mucha</grapheme>
+    <phoneme>ˈmu.xa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stankiewicz</grapheme>
+    <phoneme>stan.ki.ˈe.vitʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kruk</grapheme>
+    <phoneme>ˈkʁuk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Polak</grapheme>
+    <phoneme>ˈpo.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szczepaniak</grapheme>
+    <phoneme>ʃtʃe.pa.ˈni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Domański</grapheme>
+    <phoneme>do.ˈman.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Błaszczyk</grapheme>
+    <phoneme>ˈbvaʃ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sosnowski</grapheme>
+    <phoneme>sos.ˈnov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gajda</grapheme>
+    <phoneme>ˈgaj.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bielecki</grapheme>
+    <phoneme>bi.e.ˈlet.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karpiński</grapheme>
+    <phoneme>kaʁ.ˈpin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jarosz</grapheme>
+    <phoneme>ˈja.ʁoʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mazurkiewicz</grapheme>
+    <phoneme>ma.zuʁ.ki.ˈe.vitʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Borowski</grapheme>
+    <phoneme>bo.ˈʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chrzanowski</grapheme>
+    <phoneme>xʒa.ˈnov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Owczarek</grapheme>
+    <phoneme>ov.ˈtʃa.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mroczek</grapheme>
+    <phoneme>ˈmʁot.ʃek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pietrzyk</grapheme>
+    <phoneme>pi.ˈet.ʒik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Klimek</grapheme>
+    <phoneme>ˈkli.mek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bednarczyk</grapheme>
+    <phoneme>bed.ˈnaʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wróblewska</grapheme>
+    <phoneme>vʁub.ˈlev.ska</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szczęsny</grapheme>
+    <phoneme>ˈʃtʃɛŋ.sni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lipiński</grapheme>
+    <phoneme>li.ˈpin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kowalewski</grapheme>
+    <phoneme>ko.va.ˈlev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czech</grapheme>
+    <phoneme>ˈtʃex</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wieczorkiewicz</grapheme>
+    <phoneme>vi.et.ʃoʁ.ki.ˈe.vitʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sieradzki</grapheme>
+    <phoneme>si.e.ˈʁat.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tracz</grapheme>
+    <phoneme>ˈtʁatʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sowa</grapheme>
+    <phoneme>ˈso.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jan</grapheme>
+    <phoneme>ˈjan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stanisław</grapheme>
+    <phoneme>sta.ˈnis.vav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Andrzej</grapheme>
+    <phoneme>ˈan.dʒej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Józef</grapheme>
+    <phoneme>ˈju.zef</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tadeusz</grapheme>
+    <phoneme>ta.ˈde.uʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jerzy</grapheme>
+    <phoneme>ˈje.ʒi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zbigniew</grapheme>
+    <phoneme>zbig.ˈni.ev</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krzysztof</grapheme>
+    <phoneme>ˈkʒiʃ.tof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henryk</grapheme>
+    <phoneme>ˈxen.ʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ryszard</grapheme>
+    <phoneme>ˈʁi.ʃaʁd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kazimierz</grapheme>
+    <phoneme>ka.zi.ˈmi.eʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mariusz</grapheme>
+    <phoneme>ma.ˈʁi.uʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Piotr</grapheme>
+    <phoneme>ˈpi.otʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tomasz</grapheme>
+    <phoneme>ˈto.maʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paweł</grapheme>
+    <phoneme>ˈpa.vev</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcin</grapheme>
+    <phoneme>ˈmaʁ.tsin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michał</grapheme>
+    <phoneme>ˈmi.xav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grzegorz</grapheme>
+    <phoneme>ˈgʒe.goʒ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adam</grapheme>
+    <phoneme>ˈa.dam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Łukasz</grapheme>
+    <phoneme>ˈvu.kaʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wojciech</grapheme>
+    <phoneme>voj.ˈtsi.ex</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mateusz</grapheme>
+    <phoneme>ma.ˈte.uʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rafał</grapheme>
+    <phoneme>ˈʁa.fav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jakub</grapheme>
+    <phoneme>ˈja.kub</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamil</grapheme>
+    <phoneme>ˈka.mil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bartłomiej</grapheme>
+    <phoneme>baʁ.tvo.ˈmi.ej</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dawid</grapheme>
+    <phoneme>ˈda.vid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patryk</grapheme>
+    <phoneme>ˈpat.ʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sebastian</grapheme>
+    <phoneme>se.bas.ˈti.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damian</grapheme>
+    <phoneme>da.ˈmi.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik</grapheme>
+    <phoneme>do.ˈmi.nik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Filip</grapheme>
+    <phoneme>ˈfi.lip</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szymon</grapheme>
+    <phoneme>ˈʃi.mon</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiktor</grapheme>
+    <phoneme>ˈvik.toʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antoni</grapheme>
+    <phoneme>an.ˈto.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Franciszek</grapheme>
+    <phoneme>fʁan.ˈtsi.ʃek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anna</grapheme>
+    <phoneme>ˈa.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maria</grapheme>
+    <phoneme>ma.ˈʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Katarzyna</grapheme>
+    <phoneme>ka.ta.ˈʒi.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Małgorzata</grapheme>
+    <phoneme>mav.go.ˈʒa.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Agnieszka</grapheme>
+    <phoneme>ag.ni.ˈeʃ.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krystyna</grapheme>
+    <phoneme>kʁis.ˈti.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barbara</grapheme>
+    <phoneme>baʁ.ˈba.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ewa</grapheme>
+    <phoneme>ˈe.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elżbieta</grapheme>
+    <phoneme>el.ʒbi.ˈe.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zofia</grapheme>
+    <phoneme>zo.ˈfi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janina</grapheme>
+    <phoneme>ja.ˈni.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Teresa</grapheme>
+    <phoneme>te.ˈʁe.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joanna</grapheme>
+    <phoneme>jo.ˈa.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Magdalena</grapheme>
+    <phoneme>mag.da.ˈle.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Monika</grapheme>
+    <phoneme>mo.ˈni.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jadwiga</grapheme>
+    <phoneme>jad.ˈvi.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta</grapheme>
+    <phoneme>da.ˈnu.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halina</grapheme>
+    <phoneme>xa.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irena</grapheme>
+    <phoneme>i.ˈʁe.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beata</grapheme>
+    <phoneme>be.ˈa.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleksandra</grapheme>
+    <phoneme>a.lek.ˈsan.dʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marta</grapheme>
+    <phoneme>ˈmaʁ.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dorota</grapheme>
+    <phoneme>do.ˈʁo.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marzena</grapheme>
+    <phoneme>ma.ˈʒe.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justyna</grapheme>
+    <phoneme>jus.ˈti.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karolina</grapheme>
+    <phoneme>ka.ʁo.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia</grapheme>
+    <phoneme>na.ta.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patrycja</grapheme>
+    <phoneme>pat.ˈʁit.sja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paulina</grapheme>
+    <phoneme>pa.u.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sylwia</grapheme>
+    <phoneme>sil.ˈvi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Renata</grapheme>
+    <phoneme>ʁe.ˈna.ta</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iwona</grapheme>
+    <phoneme>i.ˈvo.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grażyna</grapheme>
+    <phoneme>gʁa.ˈʒi.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bożena</grapheme>
+    <phoneme>bo.ˈʒe.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Urszula</grapheme>
+    <phoneme>uʁ.ˈʃu.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wanda</grapheme>
+    <phoneme>ˈvan.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Helena</grapheme>
+    <phoneme>xe.ˈle.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stanisława</grapheme>
+    <phoneme>sta.nis.ˈva.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Genowefa</grapheme>
+    <phoneme>ge.no.ˈve.fa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czesława</grapheme>
+    <phoneme>tʃes.ˈva.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiesława</grapheme>
+    <phoneme>vi.es.ˈva.va</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alicja</grapheme>
+    <phoneme>a.ˈlit.sja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kinga</grapheme>
+    <phoneme>ˈkin.ga</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Weronika</grapheme>
+    <phoneme>ve.ʁo.ˈni.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiktoria</grapheme>
+    <phoneme>vik.to.ˈʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzanna</grapheme>
+    <phoneme>zu.ˈza.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julia</grapheme>
+    <phoneme>ju.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maja</grapheme>
+    <phoneme>ˈma.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lena</grapheme>
+    <phoneme>ˈle.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Oliwia</grapheme>
+    <phoneme>o.li.ˈvi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amelia</grapheme>
+    <phoneme>a.me.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hanna</grapheme>
+    <phoneme>ˈxa.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzia</grapheme>
+    <phoneme>zu.ˈzi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nikola</grapheme>
+    <phoneme>ni.ˈko.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gabriela</grapheme>
+    <phoneme>gab.ʁi.ˈe.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Klaudia</grapheme>
+    <phoneme>kla.u.ˈdi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra</grapheme>
+    <phoneme>ˈsan.dʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emilia</grapheme>
+    <phoneme>e.mi.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roman</grapheme>
+    <phoneme>ˈʁo.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mirosław</grapheme>
+    <phoneme>mi.ˈʁos.vav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiesław</grapheme>
+    <phoneme>vi.ˈes.vav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janusz</grapheme>
+    <phoneme>ˈja.nuʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czesław</grapheme>
+    <phoneme>ˈtʃes.vav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Edward</grapheme>
+    <phoneme>ˈed.vaʁd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Władysław</grapheme>
+    <phoneme>va.ˈdis.vav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bogdan</grapheme>
+    <phoneme>ˈbog.dan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leszek</grapheme>
+    <phoneme>ˈle.ʃek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zdzisław</grapheme>
+    <phoneme>ˈzdʒis.vav</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eugeniusz</grapheme>
+    <phoneme>e.u.ge.ˈni.uʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Łukasz Nowak</grapheme>
+    <phoneme>ˈvu.kaʃ.no.vak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karolina Konieczny</grapheme>
+    <phoneme>ka.ʁo.ˈli.na.ko.ni.et.ʃni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Monika Urbański</grapheme>
+    <phoneme>mo.ˈni.ka.uʁ.ban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra Stępień</grapheme>
+    <phoneme>ˈsan.dʁa.stɛŋ.pi.enj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta Mróz</grapheme>
+    <phoneme>da.ˈnu.ta.mʁuz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Teresa Maciejewski</grapheme>
+    <phoneme>te.ˈʁe.sa.mat.si.e.jev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paweł Kołodziejczyk</grapheme>
+    <phoneme>ˈpa.vev.ko.vod.ʒi.ej.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jan Sobański</grapheme>
+    <phoneme>ˈjan.so.ban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mirosław Marek</grapheme>
+    <phoneme>mi.ˈʁos.vav.ma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Magdalena Jaworski</grapheme>
+    <phoneme>mag.da.ˈle.na.ja.voʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamil Wójcik</grapheme>
+    <phoneme>ˈka.mil.vuj.tsik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emilia Sikorski</grapheme>
+    <phoneme>e.mi.ˈli.a.si.koʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Filip Skowroński</grapheme>
+    <phoneme>ˈfi.lip.skov.ʁon.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henryk Cieślak</grapheme>
+    <phoneme>ˈxen.ʁik.tsi.eʃ.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joanna Pawłowski</grapheme>
+    <phoneme>jo.ˈa.na.pa.vov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zofia Tomczak</grapheme>
+    <phoneme>zo.ˈfi.a.tom.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mirosław Przybylski</grapheme>
+    <phoneme>mi.ˈʁos.vav.pʒi.bil.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zbigniew Tomaszewski</grapheme>
+    <phoneme>zbig.ˈni.ev.to.ma.ʃev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marek Mazur</grapheme>
+    <phoneme>ˈma.ʁek.ma.zuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maja Kaczmarek</grapheme>
+    <phoneme>ˈma.ja.kat.ʃma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiktoria Rutkowski</grapheme>
+    <phoneme>vik.to.ˈʁi.a.ʁut.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Chmielewski</grapheme>
+    <phoneme>do.ˈmi.nik.xmi.e.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irena Jarosz</grapheme>
+    <phoneme>i.ˈʁe.na.ja.ʁoʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Małgorzata Kalinowski</grapheme>
+    <phoneme>mav.go.ˈʒa.ta.ka.li.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janusz Skowroński</grapheme>
+    <phoneme>ˈja.nuʃ.skov.ʁon.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Edward Tomczak</grapheme>
+    <phoneme>ˈed.vaʁd.tom.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Józef Kozioł</grapheme>
+    <phoneme>ˈju.zef.ko.zi.ov</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bożena Szczęsny</grapheme>
+    <phoneme>bo.ˈʒe.na.ʃtʃɛŋ.sni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bartłomiej Michalski</grapheme>
+    <phoneme>baʁ.tvo.ˈmi.ej.mi.xal.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zbigniew Kaźmierczak</grapheme>
+    <phoneme>zbig.ˈni.ev.kaʒ.mi.eʁ.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleksandra Walczak</grapheme>
+    <phoneme>a.lek.ˈsan.dʁa.val.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzanna Kaczmarek</grapheme>
+    <phoneme>zu.ˈza.na.kat.ʃma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karolina Jankowski</grapheme>
+    <phoneme>ka.ʁo.ˈli.na.jan.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bożena Malinowski</grapheme>
+    <phoneme>bo.ˈʒe.na.ma.li.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wojciech Stankiewicz</grapheme>
+    <phoneme>voj.ˈtsi.ex.stan.ki.e.vitʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta Zięba</grapheme>
+    <phoneme>da.ˈnu.ta.zi.ɛŋ.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Franciszek Bąk</grapheme>
+    <phoneme>fʁan.ˈtsi.ʃek.bɔŋk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Filip Sobczak</grapheme>
+    <phoneme>ˈfi.lip.sob.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Monika Wróblewski</grapheme>
+    <phoneme>mo.ˈni.ka.vʁub.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maria Szczepaniak</grapheme>
+    <phoneme>ma.ˈʁi.a.ʃtʃe.pa.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Urszula Cieślak</grapheme>
+    <phoneme>uʁ.ˈʃu.la.tsi.eʃ.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paweł Baran</grapheme>
+    <phoneme>ˈpa.vev.ba.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzanna Ostrowski</grapheme>
+    <phoneme>zu.ˈza.na.os.tʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ryszard Szczepański</grapheme>
+    <phoneme>ˈʁi.ʃaʁd.ʃtʃe.pan.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patrycja Gajda</grapheme>
+    <phoneme>pat.ˈʁit.sja.gaj.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bożena Czarnecki</grapheme>
+    <phoneme>bo.ˈʒe.na.tʃaʁ.net.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleksandra Pietrzak</grapheme>
+    <phoneme>a.lek.ˈsan.dʁa.pi.et.ʒak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiesław Konieczny</grapheme>
+    <phoneme>vi.ˈes.vav.ko.ni.et.ʃni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halina Walczak</grapheme>
+    <phoneme>xa.ˈli.na.val.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bożena Lis</grapheme>
+    <phoneme>bo.ˈʒe.na.lis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Dudek</grapheme>
+    <phoneme>do.ˈmi.nik.du.dek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mateusz Zięba</grapheme>
+    <phoneme>ma.ˈte.uʃ.zi.ɛŋ.ba</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Urszula Dudek</grapheme>
+    <phoneme>uʁ.ˈʃu.la.du.dek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Małgorzata Wróblewski</grapheme>
+    <phoneme>mav.go.ˈʒa.ta.vʁub.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janina Sobczak</grapheme>
+    <phoneme>ja.ˈni.na.sob.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leszek Sieradzki</grapheme>
+    <phoneme>ˈle.ʃek.si.e.ʁat.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamil Kamiński</grapheme>
+    <phoneme>ˈka.mil.ka.min.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roman Kaźmierczak</grapheme>
+    <phoneme>ˈʁo.man.kaʒ.mi.eʁ.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joanna Kaźmierczak</grapheme>
+    <phoneme>jo.ˈa.na.kaʒ.mi.eʁ.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roman Owczarek</grapheme>
+    <phoneme>ˈʁo.man.ov.tʃa.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bartłomiej Mikołajczyk</grapheme>
+    <phoneme>baʁ.tvo.ˈmi.ej.mi.ko.vaj.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiktor Marek</grapheme>
+    <phoneme>ˈvik.toʁ.ma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mirosław Krawczyk</grapheme>
+    <phoneme>mi.ˈʁos.vav.kʁav.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia Tomaszewski</grapheme>
+    <phoneme>na.ta.ˈli.a.to.ma.ʃev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Helena Sobolewski</grapheme>
+    <phoneme>xe.ˈle.na.so.bo.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcin Bielecki</grapheme>
+    <phoneme>ˈmaʁ.tsin.bi.e.let.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Renata Wasilewski</grapheme>
+    <phoneme>ʁe.ˈna.ta.va.si.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mariusz Borkowski</grapheme>
+    <phoneme>ma.ˈʁi.uʃ.boʁ.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Zakrzewski</grapheme>
+    <phoneme>do.ˈmi.nik.zak.ʒev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Monika Wawrzyniak</grapheme>
+    <phoneme>mo.ˈni.ka.vav.ʒi.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irena Kubiak</grapheme>
+    <phoneme>i.ˈʁe.na.ku.bi.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zdzisław Kamiński</grapheme>
+    <phoneme>ˈzdʒis.vav.ka.min.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcin Szymański</grapheme>
+    <phoneme>ˈmaʁ.tsin.ʃi.man.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halina Kruk</grapheme>
+    <phoneme>xa.ˈli.na.kʁuk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Genowefa Błaszczyk</grapheme>
+    <phoneme>ge.no.ˈve.fa.bvaʃ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jan Nowakowski</grapheme>
+    <phoneme>ˈjan.no.va.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Magdalena Mroczek</grapheme>
+    <phoneme>mag.da.ˈle.na.mʁot.ʃek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dorota Wawrzyniak</grapheme>
+    <phoneme>do.ˈʁo.ta.vav.ʒi.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Król</grapheme>
+    <phoneme>do.ˈmi.nik.kʁul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patryk Michalak</grapheme>
+    <phoneme>ˈpat.ʁik.mi.xa.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adam Chrzanowski</grapheme>
+    <phoneme>ˈa.dam.xʒa.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amelia Król</grapheme>
+    <phoneme>a.me.ˈli.a.kʁul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eugeniusz Dziedzic</grapheme>
+    <phoneme>e.u.ge.ˈni.uʃ.dʒi.ed.ʒits</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kazimierz Lipiński</grapheme>
+    <phoneme>ka.zi.ˈmi.eʒ.li.pin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czesław Dąbrowski</grapheme>
+    <phoneme>ˈtʃes.vav.dɔŋ.bʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jan Malinowski</grapheme>
+    <phoneme>ˈjan.ma.li.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sebastian Sieradzki</grapheme>
+    <phoneme>se.bas.ˈti.an.si.e.ʁat.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tadeusz Urbański</grapheme>
+    <phoneme>ta.ˈde.uʃ.uʁ.ban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcin Sawicki</grapheme>
+    <phoneme>ˈmaʁ.tsin.sa.vit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Renata Ziółkowski</grapheme>
+    <phoneme>ʁe.ˈna.ta.zi.uv.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzia Majewski</grapheme>
+    <phoneme>zu.ˈzi.a.ma.jev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Piotr Nowakowski</grapheme>
+    <phoneme>ˈpi.otʁ.no.va.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maria Owczarek</grapheme>
+    <phoneme>ma.ˈʁi.a.ov.tʃa.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stanisława Lis</grapheme>
+    <phoneme>sta.nis.ˈva.va.lis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joanna Sobczak</grapheme>
+    <phoneme>jo.ˈa.na.sob.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patryk Nowak</grapheme>
+    <phoneme>ˈpat.ʁik.no.vak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stanisław Klimek</grapheme>
+    <phoneme>sta.ˈnis.vav.kli.mek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maria Dziedzic</grapheme>
+    <phoneme>ma.ˈʁi.a.dʒi.ed.ʒits</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antoni Maciejewski</grapheme>
+    <phoneme>an.ˈto.ni.mat.si.e.jev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzanna Jasiński</grapheme>
+    <phoneme>zu.ˈza.na.ja.sin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marzena Owczarek</grapheme>
+    <phoneme>ma.ˈʒe.na.ov.tʃa.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damian Szczęsny</grapheme>
+    <phoneme>da.ˈmi.an.ʃtʃɛŋ.sni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Zieliński</grapheme>
+    <phoneme>do.ˈmi.nik.zi.e.lin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jadwiga Grzegorzewski</grapheme>
+    <phoneme>jad.ˈvi.ga.gʒe.go.ʒev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krzysztof Kamiński</grapheme>
+    <phoneme>ˈkʒiʃ.tof.ka.min.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jakub Gajda</grapheme>
+    <phoneme>ˈja.kub.gaj.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Oliwia Włodarczyk</grapheme>
+    <phoneme>o.li.ˈvi.a.vo.daʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kazimierz Gajewski</grapheme>
+    <phoneme>ka.zi.ˈmi.eʒ.ga.jev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sebastian Markowski</grapheme>
+    <phoneme>se.bas.ˈti.an.maʁ.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janina Sadowski</grapheme>
+    <phoneme>ja.ˈni.na.sa.dov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia Szymański</grapheme>
+    <phoneme>na.ta.ˈli.a.ʃi.man.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zuzia Marek</grapheme>
+    <phoneme>zu.ˈzi.a.ma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gabriela Włodarczyk</grapheme>
+    <phoneme>gab.ʁi.ˈe.la.vo.daʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zofia Maj</grapheme>
+    <phoneme>zo.ˈfi.a.maj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamil Kowalski</grapheme>
+    <phoneme>ˈka.mil.ko.val.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bogdan Sikorski</grapheme>
+    <phoneme>ˈbog.dan.si.koʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emilia Karpiński</grapheme>
+    <phoneme>e.mi.ˈli.a.kaʁ.pin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henryk Sokołowski</grapheme>
+    <phoneme>ˈxen.ʁik.so.ko.vov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Natalia Wojcik</grapheme>
+    <phoneme>na.ta.ˈli.a.voj.tsik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Katarzyna Lis</grapheme>
+    <phoneme>ka.ta.ˈʒi.na.lis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sebastian Mucha</grapheme>
+    <phoneme>se.bas.ˈti.an.mu.xa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patryk Lewicki</grapheme>
+    <phoneme>ˈpat.ʁik.le.vit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiesław Czerwiński</grapheme>
+    <phoneme>vi.ˈes.vav.tʃeʁ.vin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marek Sosnowski</grapheme>
+    <phoneme>ˈma.ʁek.sos.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alicja Wilk</grapheme>
+    <phoneme>a.ˈlit.sja.vilk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patryk Domański</grapheme>
+    <phoneme>ˈpat.ʁik.do.man.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta Kwiatkowski</grapheme>
+    <phoneme>da.ˈnu.ta.kvi.at.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czesława Górski</grapheme>
+    <phoneme>tʃes.ˈva.va.guʁ.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Magdalena Mazur</grapheme>
+    <phoneme>mag.da.ˈle.na.ma.zuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dawid Lewandowski</grapheme>
+    <phoneme>ˈda.vid.le.van.dov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czesława Stępień</grapheme>
+    <phoneme>tʃes.ˈva.va.stɛŋ.pi.enj</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta Mazur</grapheme>
+    <phoneme>da.ˈnu.ta.ma.zuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nikola Krawczyk</grapheme>
+    <phoneme>ni.ˈko.la.kʁav.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rafał Cieślak</grapheme>
+    <phoneme>ˈʁa.fav.tsi.eʃ.lak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleksandra Maciejewski</grapheme>
+    <phoneme>a.lek.ˈsan.dʁa.mat.si.e.jev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandra Majewski</grapheme>
+    <phoneme>ˈsan.dʁa.ma.jev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kazimierz Baran</grapheme>
+    <phoneme>ka.zi.ˈmi.eʒ.ba.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krystyna Kalinowski</grapheme>
+    <phoneme>kʁis.ˈti.na.ka.li.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rafał Owczarek</grapheme>
+    <phoneme>ˈʁa.fav.ov.tʃa.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roman Mucha</grapheme>
+    <phoneme>ˈʁo.man.mu.xa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tadeusz Kubiak</grapheme>
+    <phoneme>ta.ˈde.uʃ.ku.bi.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lena Mikołajczyk</grapheme>
+    <phoneme>ˈle.na.mi.ko.vaj.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janina Kołodziejczyk</grapheme>
+    <phoneme>ja.ˈni.na.ko.vod.ʒi.ej.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Beata Duda</grapheme>
+    <phoneme>be.ˈa.ta.du.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marek Nowak</grapheme>
+    <phoneme>ˈma.ʁek.no.vak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kazimierz Tomaszewski</grapheme>
+    <phoneme>ka.zi.ˈmi.eʒ.to.ma.ʃev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kazimierz Korzeniowski</grapheme>
+    <phoneme>ka.zi.ˈmi.eʒ.ko.ʒe.ni.ov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta Wróbel</grapheme>
+    <phoneme>da.ˈnu.ta.vʁu.bel</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Urszula Szczepański</grapheme>
+    <phoneme>uʁ.ˈʃu.la.ʃtʃe.pan.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Teresa Krupa</grapheme>
+    <phoneme>te.ˈʁe.sa.kʁu.pa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Janusz Kubiak</grapheme>
+    <phoneme>ˈja.nuʃ.ku.bi.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eugeniusz Pawlik</grapheme>
+    <phoneme>e.u.ge.ˈni.uʃ.pav.lik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mariusz Jankowski</grapheme>
+    <phoneme>ma.ˈʁi.uʃ.jan.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nikola Kruk</grapheme>
+    <phoneme>ni.ˈko.la.kʁuk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamil Skowroński</grapheme>
+    <phoneme>ˈka.mil.skov.ʁon.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grażyna Wawrzyniak</grapheme>
+    <phoneme>gʁa.ˈʒi.na.vav.ʒi.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jakub Sienkiewicz</grapheme>
+    <phoneme>ˈja.kub.si.en.ki.e.vitʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zofia Kruk</grapheme>
+    <phoneme>zo.ˈfi.a.kʁuk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Józef Kaźmierczak</grapheme>
+    <phoneme>ˈju.zef.kaʒ.mi.eʁ.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Brzeziński</grapheme>
+    <phoneme>do.ˈmi.nik.bʒe.zin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jerzy Mikołajczyk</grapheme>
+    <phoneme>ˈje.ʒi.mi.ko.vaj.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tadeusz Kaczmar</grapheme>
+    <phoneme>ta.ˈde.uʃ.kat.ʃmaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henryk Krawczyk</grapheme>
+    <phoneme>ˈxen.ʁik.kʁav.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Filip Lis</grapheme>
+    <phoneme>ˈfi.lip.lis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roman Piotrowski</grapheme>
+    <phoneme>ˈʁo.man.pi.ot.ʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiesława Marek</grapheme>
+    <phoneme>vi.es.ˈva.va.ma.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zofia Borkowski</grapheme>
+    <phoneme>zo.ˈfi.a.boʁ.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Krystyna Kozłowski</grapheme>
+    <phoneme>kʁis.ˈti.na.koz.vov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szymon Kaczmarczyk</grapheme>
+    <phoneme>ˈʃi.mon.kat.ʃmaʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antoni Bąk</grapheme>
+    <phoneme>an.ˈto.ni.bɔŋk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jan Piotrowski</grapheme>
+    <phoneme>ˈjan.pi.ot.ʁov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Józef Marciniak</grapheme>
+    <phoneme>ˈju.zef.maʁ.tsi.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marek Kruk</grapheme>
+    <phoneme>ˈma.ʁek.kʁuk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gabriela Mucha</grapheme>
+    <phoneme>gab.ʁi.ˈe.la.mu.xa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Czesław Zakrzewski</grapheme>
+    <phoneme>ˈtʃes.vav.zak.ʒev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Władysław Sawicki</grapheme>
+    <phoneme>va.ˈdis.vav.sa.vit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irena Sosnowski</grapheme>
+    <phoneme>i.ˈʁe.na.sos.nov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcin Gajda</grapheme>
+    <phoneme>ˈmaʁ.tsin.gaj.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rafał Wiśniewski</grapheme>
+    <phoneme>ˈʁa.fav.viʃ.ni.ev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bogdan Urbański</grapheme>
+    <phoneme>ˈbog.dan.uʁ.ban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eugeniusz Rutkowski</grapheme>
+    <phoneme>e.u.ge.ˈni.uʃ.ʁut.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wiesława Zalewski</grapheme>
+    <phoneme>vi.es.ˈva.va.za.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Agnieszka Kaczmarczyk</grapheme>
+    <phoneme>ag.ni.ˈeʃ.ka.kat.ʃmaʁ.tʃik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marta Sobolewski</grapheme>
+    <phoneme>ˈmaʁ.ta.so.bo.lev.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Edward Michalski</grapheme>
+    <phoneme>ˈed.vaʁd.mi.xal.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paulina Mazurek</grapheme>
+    <phoneme>pa.u.ˈli.na.ma.zu.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Magdalena Sikora</grapheme>
+    <phoneme>mag.da.ˈle.na.si.ko.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominik Czajka</grapheme>
+    <phoneme>do.ˈmi.nik.tʃaj.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henryk Szymański</grapheme>
+    <phoneme>ˈxen.ʁik.ʃi.man.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justyna Lipiński</grapheme>
+    <phoneme>jus.ˈti.na.li.pin.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Grażyna Sobański</grapheme>
+    <phoneme>gʁa.ˈʒi.na.so.ban.jski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Łukasz Tomczak</grapheme>
+    <phoneme>ˈvu.kaʃ.tom.tʃak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marek Nowakowski</grapheme>
+    <phoneme>ˈma.ʁek.no.va.kov.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Szymon Nowicki</grapheme>
+    <phoneme>ˈʃi.mon.no.vit.ski</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bartłomiej Zając</grapheme>
+    <phoneme>baʁ.tvo.ˈmi.ej.za.jɔŋts</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danuta Gajda</grapheme>
+    <phoneme>da.ˈnu.ta.gaj.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nikola Wawrzyniak</grapheme>
+    <phoneme>ni.ˈko.la.vav.ʒi.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mateusz Marciniak</grapheme>
+    <phoneme>ma.ˈte.uʃ.maʁ.tsi.ni.ak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michał Bednarek</grapheme>
+    <phoneme>ˈmi.xav.bed.na.ʁek</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marta Zalewski</grapheme>
+    <phoneme>ˈmaʁ.ta.za.lev.ski</phoneme>
+  </lexeme>
+</lexicon>
