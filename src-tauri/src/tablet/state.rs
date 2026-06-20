@@ -789,6 +789,11 @@ impl TabletState {
     /// Eine Freitext-Ansage ablegen (Master). `hall` leer = alle Hallen.
     /// Liefert die neue laufende ID.
     pub fn publish_freetext(&self, hall: String, text: String) -> u64 {
+        // ID monoton AUCH über einen Master-Neustart: auf mindestens die
+        // aktuelle Uhrzeit (ms) heben. Sonst begännen die IDs nach Neustart
+        // wieder klein und ein Slave mit gemerkter `lastId` verstummte, bis die
+        // ID seinen Stand übersteigt.
+        self.freetext_seq.fetch_max(now_ms(), Ordering::Relaxed);
         let id = self.freetext_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let mut g = self.freetext.write().unwrap();
         g.push(FreetextItem { id, hall, text });

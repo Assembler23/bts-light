@@ -1144,7 +1144,14 @@ pub async fn pending_freetext(
         url.query_pairs_mut()
             .append_pair("hall", &hall)
             .append_pair("since", &since.to_string());
-        let client = push::build_client();
+        // Kurzer Timeout für den LAN-Poll (alle 3 s): der Master antwortet im
+        // LAN sofort oder gar nicht — der 15-s-Internet-Timeout von build_client
+        // würde bei hängender Verbindung Anfragen stauen.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap_or_else(|_| push::build_client());
         let resp = match client.get(url).send().await {
             Ok(r) if r.status().is_success() => r,
             // Master (noch) nicht erreichbar → leer, der Poller versucht es erneut.
