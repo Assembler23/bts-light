@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.136
+
+- **Freitext-Gong klar unterscheidbar.** Der Gong für Freitext-/Info-Ansagen ist jetzt ein heller,
+  dreitöniger perlender Dreiklang (C-Dur aufsteigend, weicher Triangle-Klang) statt nur derselben zwei
+  Töne wie der Spielaufruf in umgekehrter Reihenfolge. Der **Spielaufruf** bleibt der tiefe, zweitönige
+  absteigende Gong — beide sind nun auf Anhieb auseinanderzuhalten.
+
 ## v0.9.135
 
 - **Verlauf der letzten 10 Ansagen + erneut abspielen.** Auf der Ansagen-Seite werden die zuletzt
