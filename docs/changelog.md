@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.131
+
+- **Freitext-Ansage.** Auf der Seite „Ansagen" gibt es ein Textfeld: Text eintippen, Halle wählen
+  (oder „alle Hallen") → wird angesagt (Gong + Stimme wie eingestellt, Azure falls aktiv). Der **Master**
+  legt den Text ab; **Slaves** holen ihn vom Master und sagen ihre Halle an — so kommt eine Freitext-
+  Ansage „für Halle B" auch dorthin, ohne Audio über die Leitung (nur der kurze Text).
+- **Ansage-Einstellungen gebündelt.** Der Einstellungs-Abschnitt heißt jetzt „Ansagen" und ist EIN
+  Modul: ein Schalter aktiviert/deaktiviert alles (auch Freitext); darunter liegen Sprache, Stimmen,
+  Tempo, Gong, Halle, Aussprache-Korrekturen **und Azure**.
+
 ## v0.9.130
 
 - **Ansage-Slave-Modus (Mehr-Hallen, Phase 2).** Neuer Schalter „Ansage-Slave-Modus": macht aus einem

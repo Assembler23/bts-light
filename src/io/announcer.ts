@@ -537,6 +537,35 @@ export function playAnnouncement(
   });
 }
 
+// Spielt Gong + spricht einen FREIEN Text (manuelle Ansage). Azure, wenn
+// konfiguriert (Text 1:1 in SSML), sonst Web Speech. Strikt sequenziell über
+// dieselbe Warteschlange wie die Spiel-Ansagen.
+export function playFreeText(
+  text: string,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): Promise<void> {
+  const t = (text || "").trim();
+  if (!t) return Promise.resolve();
+  return enqueueAnnouncement(async () => {
+    await maybeGong(opts.gong);
+    if (opts.azure) {
+      try {
+        const speakLang = lang === "de" ? "de-DE" : "en-US";
+        const ssml =
+          `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
+          `<voice name="${xmlEscape(opts.azure.voice)}">${xmlEscape(t)}</voice></speak>`;
+        const b64 = await opts.azure.synthesize(ssml);
+        await playMp3Base64(b64);
+        return;
+      } catch {
+        /* Azure aus/Netzfehler → Web Speech unten */
+      }
+    }
+    await speakSegments([t], lang, clampRate(opts.rate), opts.voiceURI);
+  });
+}
+
 // Test-Ansage für die Einstellungen — feste Beispieldaten, damit der Klang
 // vor dem Turnier prüfbar ist (und der Klick das WebView2-Audio entsperrt).
 export async function playTestAnnouncement(

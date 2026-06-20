@@ -4,7 +4,7 @@
 // Aufruf (Call-Timer) bekommen hier später ihren Platz.
 import { useEffect, useState } from "react";
 import { Megaphone, Volume2 } from "lucide-react";
-import { tabletOverview } from "../api";
+import { publishFreetext, tabletOverview } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
 import { playTestAnnouncement } from "../io/announcer";
@@ -34,6 +34,10 @@ export function AnnouncePage({
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const now = useNow();
+  // Freitext-Ansage (Master → eigene Halle/„alle"; Slaves holen sie ab).
+  const [freeText, setFreeText] = useState("");
+  const [freeHall, setFreeHall] = useState(""); // "" = alle Hallen
+  const [freeSent, setFreeSent] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +57,22 @@ export function AnnouncePage({
   }, []);
 
   const onField = courts.filter((c) => c.match_id > 0);
+  const halls = [
+    ...new Set(courts.map((c) => c.location).filter((l) => l !== "")),
+  ].sort((a, b) => a.localeCompare(b, "de"));
+
+  async function sendFreetext() {
+    const t = freeText.trim();
+    if (!t) return;
+    try {
+      await publishFreetext(freeHall, t);
+      setFreeText("");
+      setFreeSent(true);
+      window.setTimeout(() => setFreeSent(false), 3000);
+    } catch {
+      /* Senden fehlgeschlagen – Text bleibt stehen, erneut versuchen */
+    }
+  }
 
   return (
     <main className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 p-6 text-slate-800">
@@ -83,6 +103,59 @@ export function AnnouncePage({
       >
         <Volume2 size={16} /> Test-Ansage abspielen
       </button>
+
+      {/* Freitext-Ansage: eintippen → in einer Halle oder allen ansagen. */}
+      <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-slate-700">Freitext-Ansage</h2>
+        <p className="text-xs text-slate-500">
+          Text eintippen und in einer Halle oder allen Hallen ansagen (Gong +
+          Stimme wie in den Einstellungen). Slave-Rechner holen die Ansage vom
+          Master.
+        </p>
+        <textarea
+          value={freeText}
+          onChange={(e) => setFreeText(e.currentTarget.value)}
+          rows={2}
+          placeholder="z. B. „Die Siegerehrung beginnt in 10 Minuten in Halle 1.“"
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+                     focus:border-slate-500 focus:outline-none"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          {halls.length >= 2 && (
+            <select
+              value={freeHall}
+              onChange={(e) => setFreeHall(e.currentTarget.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+            >
+              <option value="">Alle Hallen</option>
+              {halls.map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => void sendFreetext()}
+            disabled={!freeText.trim() || !announce.enabled}
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-3.5 py-2 text-sm
+                       font-medium text-white transition-colors hover:bg-slate-700
+                       disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Megaphone size={16} /> Ansagen
+          </button>
+          {!announce.enabled && (
+            <span className="text-xs text-amber-600">
+              Ansagen sind in den Einstellungen deaktiviert.
+            </span>
+          )}
+          {freeSent && (
+            <span className="text-xs font-medium text-emerald-600">
+              Gesendet ✓
+            </span>
+          )}
+        </div>
+      </section>
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-slate-700">

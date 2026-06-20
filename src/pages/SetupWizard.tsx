@@ -838,10 +838,13 @@ export function SetupWizard({
 
       {/* Sprachansagen */}
       <section id="section-ansagen" className="flex flex-col gap-2 scroll-mt-4">
-        <SectionHeader icon={Volume2}>Sprachansagen</SectionHeader>
+        <SectionHeader icon={Volume2}>Ansagen</SectionHeader>
         <p className="text-xs text-slate-500">
-          Sagt jedes Spiel an, das in BTP auf ein Feld gezogen wird – mit
-          Gong, Feldnummer, Disziplin und Paarung.
+          Das ganze Ansage-Modul: sagt jedes Spiel an, das in BTP auf ein Feld
+          gezogen wird (Gong, Feld, Disziplin, Paarung). Ein Schalter für alles —
+          ist er aus, gibt es keine Ansagen (auch keine Freitext-Ansagen). Alle
+          Ansage-Einstellungen (Sprache, Stimmen, Tempo, Gong, Halle, Aussprache,
+          Azure) stehen hier darunter.
         </p>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input
@@ -849,7 +852,7 @@ export function SetupWizard({
             checked={annEnabled}
             onChange={(e) => setAnnEnabled(e.currentTarget.checked)}
           />
-          Sprachansagen aktivieren
+          Ansagen aktivieren
         </label>
 
         {annEnabled && (

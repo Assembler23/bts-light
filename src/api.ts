@@ -5,6 +5,7 @@ import type {
   AppConfig,
   CourtAd,
   DrawInfo,
+  FreetextItem,
   MonitorDeviceInfo,
   MonitorTarget,
   PreparationView,
@@ -99,6 +100,15 @@ export const preparationCandidates = (): Promise<PreparationView> =>
 /** Auslosungen (Disziplin + draw_name) des Turniers — für die Disziplin→Halle-Einstellung. */
 export const tournamentDraws = (): Promise<DrawInfo[]> =>
   invoke("tournament_draws");
+
+/** Master: eine Freitext-Ansage ablegen (Halle leer = alle). Liefert die ID. */
+export const publishFreetext = (hall: string, text: string): Promise<number> =>
+  invoke("publish_freetext", { hall, text });
+
+/** Neue Freitext-Ansagen (id > since) für die eigene Halle (Master: lokal,
+ *  Slave: vom Master geholt). */
+export const pendingFreetext = (since: number): Promise<FreetextItem[]> =>
+  invoke("pending_freetext", { since });
 
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (

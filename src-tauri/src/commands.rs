@@ -1111,6 +1111,53 @@ pub fn tournament_draws(state: State<'_, AppState>) -> Vec<DrawInfo> {
     out
 }
 
+/// Master: eine Freitext-Ansage ablegen. `hall` = Ziel-Halle (BTP-Location-Name;
+/// leer = alle Hallen). Master + Slaves pollen sie über `pending_freetext`.
+#[tauri::command]
+pub fn publish_freetext(state: State<'_, AppState>, hall: String, text: String) -> u64 {
+    state
+        .tablet
+        .publish_freetext(hall.trim().to_string(), text.trim().to_string())
+}
+
+/// Neue Freitext-Ansagen (`id > since`) für die eigene Halle. Im Slave-Modus
+/// vom Master (BTP-Rechner, `:8088`) geholt, sonst aus dem lokalen Stand.
+#[tauri::command]
+pub async fn pending_freetext(
+    state: State<'_, AppState>,
+    since: u64,
+) -> Result<Vec<crate::tablet::state::FreetextItem>, String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let hall = config.announce.announce_hall.clone();
+    if config.slave_mode {
+        // Vom Master holen – gleiches Netz vorausgesetzt (BTP-Host = Master-PC).
+        // URL über `reqwest::Url` bauen (das `query`-Feature ist nicht aktiv).
+        let mut url = reqwest::Url::parse(&format!(
+            "http://{}:8088/info/announce/freetext",
+            config.btp.host
+        ))
+        .map_err(|e| e.to_string())?;
+        url.query_pairs_mut()
+            .append_pair("hall", &hall)
+            .append_pair("since", &since.to_string());
+        let client = push::build_client();
+        let resp = match client.get(url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            // Master (noch) nicht erreichbar → leer, der Poller versucht es erneut.
+            _ => return Ok(Vec::new()),
+        };
+        resp.json::<Vec<crate::tablet::state::FreetextItem>>()
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Ok(state.tablet.freetext_since(&hall, since))
+    }
+}
+
 /// Ruft die ausgewählten Spiele „in Vorbereitung". `location_id` bindet den
 /// Aufruf an eine Halle (oder `None` bei einem hallenunabhängigen Aufruf).
 #[tauri::command]

@@ -230,6 +230,20 @@ pub struct TabletState {
     /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
     /// bewusst gesteuert (Leute fotografieren das Podium).
     winners_selection: RwLock<Option<i64>>,
+    /// Freitext-Ansagen (Master legt ab; Master + Slaves pollen + sprechen die
+    /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
+    freetext: RwLock<Vec<FreetextItem>>,
+    freetext_seq: AtomicU64,
+}
+
+/// Eine manuelle Freitext-Ansage. `hall` = Ziel-Halle (BTP-Location-Name;
+/// leer = alle Hallen). `id` ist fortlaufend, damit Sprecher (Master/Slaves)
+/// nur neue Einträge ansagen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FreetextItem {
+    pub id: u64,
+    pub hall: String,
+    pub text: String,
 }
 
 /// Auf Platte gesicherter Live-Stand eines Felds (für den App-Neustart).
@@ -770,6 +784,38 @@ impl TabletState {
     /// Aktuell für die Siegerehrung gewählte Disziplin (Draw-ID), falls eine.
     pub fn winners_selection(&self) -> Option<i64> {
         *self.winners_selection.read().unwrap()
+    }
+
+    /// Eine Freitext-Ansage ablegen (Master). `hall` leer = alle Hallen.
+    /// Liefert die neue laufende ID.
+    pub fn publish_freetext(&self, hall: String, text: String) -> u64 {
+        let id = self.freetext_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut g = self.freetext.write().unwrap();
+        g.push(FreetextItem { id, hall, text });
+        // Nur die letzten 50 behalten (Speicher beschränken).
+        let len = g.len();
+        if len > 50 {
+            g.drain(0..len - 50);
+        }
+        id
+    }
+
+    /// Freitexte mit `id > since`, die für `hall` bestimmt sind. Eine leere
+    /// Instanz-Halle (`hall`) bekommt ALLE; sonst die an „alle" oder an genau
+    /// diese Halle gerichteten.
+    pub fn freetext_since(&self, hall: &str, since: u64) -> Vec<FreetextItem> {
+        let h = hall.trim();
+        self.freetext
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|f| f.id > since)
+            .filter(|f| {
+                let target = f.hall.trim();
+                h.is_empty() || target.is_empty() || target.eq_ignore_ascii_case(h)
+            })
+            .cloned()
+            .collect()
     }
 
     pub fn overview(&self) -> Vec<CourtOverview> {

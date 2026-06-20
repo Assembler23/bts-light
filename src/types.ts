@@ -201,6 +201,14 @@ export interface DrawInfo {
   draw_name: string;
 }
 
+/** Eine manuelle Freitext-Ansage (Rust: tablet::state::FreetextItem).
+ *  `hall` = Ziel-Halle (leer = alle Hallen); `id` fortlaufend (Dedup). */
+export interface FreetextItem {
+  id: number;
+  hall: string;
+  text: string;
+}
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
