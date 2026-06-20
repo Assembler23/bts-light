@@ -87,6 +87,24 @@ dem Turnier einmal die Test-Ansage drücken.
 | `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
 | `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). `MatchAnnouncer` filtert neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
+| `saved_announcements` | Gespeicherte Ansage-Blöcke (wiederkehrende Freitext-Ansagen), Liste `string` (Default leer). |
+
+> **UX:** Ist `azure_tts.enabled` aktiv, blendet [`AnnounceSettings`](../src/components/AnnounceSettings.tsx) die
+> Standard-Stimmen-Auswahl (`voice_de`/`voice_en`) aus — Azure spricht die ganze Ansage, die lokale Stimme
+> wäre wirkungslos (Fallback bei Fehler/offline greift weiterhin automatisch).
+
+## Verlauf, erneutes Abspielen & gespeicherte Blöcke
+
+Auf der Ansagen-Seite ([`AnnouncePage.tsx`](../src/pages/AnnouncePage.tsx)):
+
+- **Verlauf (letzte 10):** Jede **manuell** ausgelöste Ansage (Freitext + manuelle Feld-Ansage) wird in
+  [`src/state/announceHistory.ts`](../src/state/announceHistory.ts) protokolliert (localStorage, max. 10,
+  neueste zuerst). **Automatische Spielaufrufe landen NICHT im Verlauf.** Jeder Eintrag hat „Erneut" —
+  Freitext wird neu über den Master verschickt (`publish_freetext`), eine Feld-Ansage lokal neu abgespielt
+  (aus dem mitgespeicherten `CourtOverview`-Schnappschuss).
+- **Gespeicherte Blöcke:** Aktuellen Freitext per „Als Block speichern" in `announce.saved_announcements`
+  ablegen (dedupliziert, persistiert). Jeder Block lässt sich direkt ansagen (Halle wie im Freitext-Selektor,
+  Master → Slaves), ins Textfeld laden oder löschen.
 
 ## Aussprache-Korrekturen (`name_overrides`)
 

@@ -118,6 +118,10 @@ pub struct AnnounceConfig {
     /// (BTP-Location-Name). Leer = alle Hallen (Standard, Einzelhalle unberührt).
     /// So hört in einem 2-Hallen-Setup jede Halle nur ihre eigenen Ansagen.
     pub announce_hall: String,
+    /// Gespeicherte Ansage-Blöcke für wiederkehrende Freitext-Ansagen
+    /// (z. B. „Siegerehrung in 10 Minuten"). Werden auf der Ansagen-Seite
+    /// per Knopfdruck abgespielt (wie Freitext, Halle wählbar).
+    pub saved_announcements: Vec<String>,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -141,6 +145,7 @@ impl Default for AnnounceConfig {
             name_overrides: Vec::new(),
             name_overrides_enabled: true,
             announce_hall: String::new(),
+            saved_announcements: Vec::new(),
         }
     }
 }
@@ -593,6 +598,7 @@ mod tests {
                 }],
                 name_overrides_enabled: false,
                 announce_hall: "Halle A".to_string(),
+                saved_announcements: vec!["Siegerehrung in 10 Minuten".to_string()],
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,

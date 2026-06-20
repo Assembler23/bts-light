@@ -1,15 +1,25 @@
-// Ansagen-Seite. Vorerst manuelle Feld-Ansage: für jedes Spiel, das gerade auf
-// einem Feld steht, lässt sich die Hallen-Ansage (Gong + Feld + Disziplin +
-// Paarung) per Knopfdruck auslösen. Die hochzählende Aufruf-Uhr und der 2./3.
-// Aufruf (Call-Timer) bekommen hier später ihren Platz.
+// Ansagen-Seite. Manuelle Feld-Ansage (für Spiele, die gerade auf einem Feld
+// stehen), Freitext-Ansage (Master → Halle/„alle"), gespeicherte Ansage-Blöcke
+// für wiederkehrende Ansagen und ein Verlauf der letzten zehn manuell/Freitext
+// ausgelösten Ansagen mit „Erneut abspielen". Alle Ansage-Detail-Einstellungen
+// liegen unten im Abschnitt „Ansage-Einstellungen".
 import { useEffect, useState } from "react";
-import { Megaphone, Volume2 } from "lucide-react";
-import { publishFreetext, tabletOverview } from "../api";
+import {
+  Bookmark,
+  Megaphone,
+  Pencil,
+  RotateCcw,
+  Save,
+  Trash2,
+  Volume2,
+} from "lucide-react";
+import { publishFreetext, saveConfig, tabletOverview } from "../api";
 import { AnnounceSettings } from "../components/AnnounceSettings";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
 import { playTestAnnouncement } from "../io/announcer";
 import { useNow } from "../state/callTimer";
+import { recordAnnounce, useAnnounceHistory } from "../state/announceHistory";
 import type {
   AnnounceConfig,
   AppConfig,
@@ -25,6 +35,21 @@ function teamsLabel(t1: string[], t2: string[]): string {
   return `${t1.join(" / ") || "—"} – ${t2.join(" / ") || "—"}`;
 }
 
+function fieldEntryText(c: CourtOverview): string {
+  return `Feld ${c.court}: ${teamsLabel(c.team1, c.team2)}`;
+}
+
+function timeLabel(ts: number): string {
+  try {
+    return new Date(ts).toLocaleTimeString("de-DE", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export function AnnouncePage({
   announce,
   callTimer,
@@ -36,7 +61,7 @@ export function AnnouncePage({
   callTimer: CallTimerConfig;
   azureTts?: AzureTtsConfig;
   /** Volle Konfiguration + Rückmeldung beim Speichern – für die
-   *  Ansage-Einstellungen, die jetzt hier (nicht mehr in Einstellungen) liegen. */
+   *  Ansage-Einstellungen und die gespeicherten Ansage-Blöcke. */
   config: AppConfig;
   onConfigSaved: (config: AppConfig) => void;
 }) {
@@ -46,6 +71,8 @@ export function AnnouncePage({
   const [freeText, setFreeText] = useState("");
   const [freeHall, setFreeHall] = useState(""); // "" = alle Hallen
   const [freeSent, setFreeSent] = useState(false);
+  const history = useAnnounceHistory();
+  const savedBlocks = config.announce.saved_announcements ?? [];
 
   useEffect(() => {
     let active = true;
@@ -69,26 +96,96 @@ export function AnnouncePage({
     ...new Set(courts.map((c) => c.location).filter((l) => l !== "")),
   ].sort((a, b) => a.localeCompare(b, "de"));
 
+  function flashSent() {
+    setFreeSent(true);
+    window.setTimeout(() => setFreeSent(false), 3000);
+  }
+
+  // Freitext (oder einen Block) in einer Halle/allen ansagen + protokollieren.
+  // Liefert true bei Erfolg, damit der Aufrufer das Textfeld nur dann leert.
+  async function announceText(text: string, hall: string): Promise<boolean> {
+    const t = text.trim();
+    if (!t) return false;
+    try {
+      await publishFreetext(hall, t);
+      recordAnnounce({ kind: "freetext", text: t, hall });
+      flashSent();
+      return true;
+    } catch {
+      // Senden fehlgeschlagen – Text bleibt stehen, erneut versuchen.
+      return false;
+    }
+  }
+
   async function sendFreetext() {
     const t = freeText.trim();
     if (!t) return;
+    if (await announceText(t, freeHall)) setFreeText("");
+  }
+
+  // Manuelle Feld-Ansage (lokal am Steuer-PC) + protokollieren.
+  function announceField(c: CourtOverview) {
+    announceCourt(c, announce, azureTts);
+    recordAnnounce({
+      kind: "field",
+      text: fieldEntryText(c),
+      hall: c.location,
+      court: c,
+    });
+  }
+
+  // Aktuellen Freitext als wiederkehrenden Block speichern (dedupliziert).
+  async function saveBlock() {
+    const t = freeText.trim();
+    if (!t || savedBlocks.includes(t)) return;
+    const next: AppConfig = {
+      ...config,
+      announce: {
+        ...config.announce,
+        saved_announcements: [...savedBlocks, t],
+      },
+    };
     try {
-      await publishFreetext(freeHall, t);
-      setFreeText("");
-      setFreeSent(true);
-      window.setTimeout(() => setFreeSent(false), 3000);
+      await saveConfig(next);
+      onConfigSaved(next);
     } catch {
-      /* Senden fehlgeschlagen – Text bleibt stehen, erneut versuchen */
+      /* Speichern fehlgeschlagen */
     }
   }
+
+  async function removeBlock(text: string) {
+    const next: AppConfig = {
+      ...config,
+      announce: {
+        ...config.announce,
+        saved_announcements: savedBlocks.filter((b) => b !== text),
+      },
+    };
+    try {
+      await saveConfig(next);
+      onConfigSaved(next);
+    } catch {
+      /* Löschen fehlgeschlagen */
+    }
+  }
+
+  function replay(entry: (typeof history)[number]) {
+    if (entry.kind === "freetext") {
+      void announceText(entry.text, entry.hall);
+    } else if (entry.court) {
+      announceField(entry.court);
+    }
+  }
+
+  const blockSaved = freeText.trim() !== "" && savedBlocks.includes(freeText.trim());
 
   return (
     <main className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 p-6 text-slate-800">
       <header>
         <h1 className="text-2xl font-semibold leading-tight">Ansagen</h1>
         <p className="text-sm text-slate-500">
-          Feld-Ansagen manuell auslösen. Stimme, Sprache und Gong stellst du in
-          den Einstellungen ein.
+          Feld-Ansagen manuell auslösen. Stimme, Sprache und Gong stellst du
+          unten ein.
         </p>
       </header>
 
@@ -116,9 +213,9 @@ export function AnnouncePage({
       <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-700">Freitext-Ansage</h2>
         <p className="text-xs text-slate-500">
-          Text eintippen und in einer Halle oder allen Hallen ansagen (Gong +
-          Stimme wie in den Einstellungen). Slave-Rechner holen die Ansage vom
-          Master.
+          Text eintippen und in einer Halle oder allen Hallen ansagen (eigener
+          Gong, Stimme wie unten eingestellt). Slave-Rechner holen die Ansage
+          vom Master.
         </p>
         <textarea
           value={freeText}
@@ -152,9 +249,23 @@ export function AnnouncePage({
           >
             <Megaphone size={16} /> Ansagen
           </button>
+          <button
+            onClick={() => void saveBlock()}
+            disabled={!freeText.trim() || blockSaved}
+            title={
+              blockSaved
+                ? "Dieser Text ist bereits als Block gespeichert"
+                : "Diesen Text als wiederkehrende Ansage speichern"
+            }
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3.5 py-2 text-sm
+                       font-medium text-slate-700 transition-colors hover:bg-slate-200
+                       disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Save size={16} /> {blockSaved ? "Gespeichert" : "Als Block speichern"}
+          </button>
           {!announce.enabled && (
             <span className="text-xs text-amber-600">
-              Ansagen sind in den Einstellungen deaktiviert.
+              Ansagen sind unten deaktiviert.
             </span>
           )}
           {freeSent && (
@@ -164,6 +275,54 @@ export function AnnouncePage({
           )}
         </div>
       </section>
+
+      {/* Gespeicherte Ansage-Blöcke (wiederkehrende Ansagen). */}
+      {savedBlocks.length > 0 && (
+        <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+            <Bookmark size={15} /> Gespeicherte Ansagen
+          </h2>
+          <div className="flex flex-col gap-1.5">
+            {savedBlocks.map((block) => (
+              <div
+                key={block}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+              >
+                <span
+                  className="min-w-0 flex-1 truncate text-sm text-slate-700"
+                  title={block}
+                >
+                  {block}
+                </span>
+                <button
+                  onClick={() => void announceText(block, freeHall)}
+                  disabled={!announce.enabled}
+                  title="Diesen Block jetzt ansagen"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5
+                             text-sm font-medium text-white transition-colors hover:bg-slate-700
+                             disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Megaphone size={14} /> Ansagen
+                </button>
+                <button
+                  onClick={() => setFreeText(block)}
+                  title="In das Textfeld laden (bearbeiten)"
+                  className="shrink-0 rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200"
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  onClick={() => void removeBlock(block)}
+                  title="Block löschen"
+                  className="shrink-0 rounded-lg bg-slate-100 p-1.5 text-slate-500 hover:bg-rose-100 hover:text-rose-700"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-slate-700">
@@ -202,7 +361,7 @@ export function AnnouncePage({
                 </div>
               </div>
               <button
-                onClick={() => announceCourt(c, announce, azureTts)}
+                onClick={() => announceField(c)}
                 title="Dieses Feld ansagen"
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5
                            text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
@@ -213,6 +372,52 @@ export function AnnouncePage({
           ))}
         </div>
       </section>
+
+      {/* Verlauf der letzten zehn manuell/Freitext ausgelösten Ansagen. */}
+      {history.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+            <RotateCcw size={15} /> Letzte Ansagen
+          </h2>
+          <div className="flex flex-col gap-1.5">
+            {history.map((entry) => (
+              <div
+                key={entry.id}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+              >
+                <span
+                  className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                  title={entry.kind === "field" ? "Feld-Ansage" : "Freitext"}
+                >
+                  {entry.kind === "field" ? "Feld" : "Text"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm text-slate-700" title={entry.text}>
+                    {entry.text}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {timeLabel(entry.ts)}
+                    {entry.hall ? ` · ${entry.hall}` : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => replay(entry)}
+                  disabled={
+                    !announce.enabled ||
+                    (entry.kind === "field" && !entry.court)
+                  }
+                  title="Diese Ansage erneut abspielen"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5
+                             text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200
+                             disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RotateCcw size={14} /> Erneut
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Alle Ansage-Einstellungen (Sprache, Stimmen, Tempo, Gong, Aussprache,
           Halle, Azure) — in den Einstellungen wird das Modul nur an-/ausgeschaltet. */}

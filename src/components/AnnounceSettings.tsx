@@ -88,6 +88,9 @@ export function AnnounceSettings({
           .filter((o) => o.name && o.say),
         name_overrides_enabled: annOverridesEnabled,
         announce_hall: annHall.trim(),
+        // Diese Form verwaltet die Blöcke nicht – aktuellen Stand bewahren
+        // (sonst würde ein paralleler Block-Speichervorgang überschrieben).
+        saved_announcements: config.announce.saved_announcements,
       },
       azure_tts: {
         enabled: azEnabled,
@@ -199,43 +202,55 @@ export function AnnounceSettings({
         )}
       </div>
 
-      {/* Stimmen */}
-      <label className="block">
-        <span className="mb-1 block text-sm font-medium text-slate-600">
-          Deutsche Stimme
-        </span>
-        <select
-          value={annVoiceDe}
-          onChange={(e) => setAnnVoiceDe(e.currentTarget.value)}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
-                     focus:border-slate-500 focus:outline-none"
-        >
-          <option value="">Standardstimme</option>
-          {voicesForLang(voices, "de").map((v) => (
-            <option key={v.voiceURI} value={v.voiceURI}>
-              {v.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-sm font-medium text-slate-600">
-          Englische Stimme
-        </span>
-        <select
-          value={annVoiceEn}
-          onChange={(e) => setAnnVoiceEn(e.currentTarget.value)}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
-                     focus:border-slate-500 focus:outline-none"
-        >
-          <option value="">Standardstimme</option>
-          {voicesForLang(voices, "en").map((v) => (
-            <option key={v.voiceURI} value={v.voiceURI}>
-              {v.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* Stimmen — nur wählbar, solange die hochwertige Azure-Stimme AUS ist.
+          Ist Azure an, spricht es die ganze Ansage und die Standard-Stimmen
+          hätten keinen Effekt → ausblenden statt verwirren. */}
+      {azEnabled ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          Hochwertige <strong>Azure-Stimme</strong> ist aktiv – sie spricht alle
+          Ansagen. Die Standard-Stimmenauswahl ist deshalb deaktiviert. (Bei
+          Fehler/offline springt automatisch die lokale Stimme ein.)
+        </div>
+      ) : (
+        <>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-slate-600">
+              Deutsche Stimme
+            </span>
+            <select
+              value={annVoiceDe}
+              onChange={(e) => setAnnVoiceDe(e.currentTarget.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+                         focus:border-slate-500 focus:outline-none"
+            >
+              <option value="">Standardstimme</option>
+              {voicesForLang(voices, "de").map((v) => (
+                <option key={v.voiceURI} value={v.voiceURI}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-slate-600">
+              Englische Stimme
+            </span>
+            <select
+              value={annVoiceEn}
+              onChange={(e) => setAnnVoiceEn(e.currentTarget.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+                         focus:border-slate-500 focus:outline-none"
+            >
+              <option value="">Standardstimme</option>
+              {voicesForLang(voices, "en").map((v) => (
+                <option key={v.voiceURI} value={v.voiceURI}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
 
       {/* Geschwindigkeit */}
       <label className="block">
