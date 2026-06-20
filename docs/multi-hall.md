@@ -106,7 +106,34 @@ LAN zum Turnier-PC.
 vorher — Default bleibt `Lan`. Details im Cloud-Pfad:
 [cloud-relay.md](cloud-relay.md), Details im LAN-Pfad: [tablet.md](tablet.md).
 
+## Ansagen je Halle (Phase 1, v0.9.128)
+
+Bis v0.9.127 liefen Feld-Ansagen **global** auf dem Haupt-PC (jede neue
+Feldbelegung, egal welche Halle). In einem 2-Hallen-Setup soll aber jede Halle
+**nur ihre eigenen** Ansagen hören.
+
+- **Einstellung** `AnnounceConfig.announce_hall` (BTP-Location-Name; leer = alle
+  Hallen). UI im SetupWizard-Abschnitt „Sprachansagen" (Auswahl erscheint ab
+  ≥2 erkannten Hallen). `config.rs`, `src/types.ts`, `SetupWizard.tsx`.
+- **Filter:** `MatchAnnouncer.tsx` sagt eine neue Feldbelegung nur an, wenn
+  `court.location == announce_hall` (sonst alle). Einzelhallen-Turniere bleiben
+  unverändert (Feld leer).
+- **Infobox:** sobald `is_multi_hall()` greift, zeigt die Status-Seite
+  (`Dashboard.tsx`) einen Hinweis mit den erkannten Hallen + Sprung zur
+  Einstellung.
+
+Damit löst sich **Turnier B** (zwei Hallen, je eigene Turnierleitung): zwei
+eigenständige bts-light-Master, jeder auf seine Halle gescoped — sofern beide an
+dieselben Turnierdaten kommen (BTP-Zugang). **Turnier A** (eine Turnierleitung,
+Ansage-Gerät in der zweiten Halle) folgt in Phase 2/3 (Ansage-Slave als
+Info-Display über LAN bzw. Cloud-Relay). Konzept: siehe Master-Slave-Plan.
+
 ## Offene Punkte
+
+- **Ansage-Slave (Phase 2/3).** Ein reines Ansage-Gerät (Browser-Seite, nur Ton)
+  je Halle, das die Ansagen seiner Halle abspielt — über LAN (lokaler Server)
+  bzw. Cloud-Relay. Cloud-Info-Displays sind heute LAN-only (Relay trägt nur
+  Court-Monitore), das ist der größere Teil von Phase 3.
 
 - **Verbindungsweg je Gerät anzeigen.** Im Parallelbetrieb pro Gerät
   (Tablet, Court-Monitor) als Badge sichtbar machen, ob es bts-light über

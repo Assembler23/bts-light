@@ -86,6 +86,7 @@ dem Turnier einmal die Test-Ansage drücken.
 | `gong` | Gong vor der Ansage (Default an) |
 | `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
+| `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). `MatchAnnouncer` filtert neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
 
 ## Aussprache-Korrekturen (`name_overrides`)
 

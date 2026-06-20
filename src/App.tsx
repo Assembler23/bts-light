@@ -48,6 +48,7 @@ function defaultConfig(): AppConfig {
       gong: true,
       name_overrides: [],
       name_overrides_enabled: true,
+      announce_hall: "",
     },
     azure_tts: {
       enabled: false,
@@ -247,7 +248,9 @@ function App() {
   function activePage(v: NavView) {
     switch (v) {
       case "dashboard":
-        return <Dashboard config={config} status={status} />;
+        return (
+          <Dashboard config={config} status={status} onNavigate={navigate} />
+        );
       case "fields":
         return (
           <FieldOverviewPage

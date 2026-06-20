@@ -6,8 +6,10 @@ import {
   Monitor,
   Radio,
   RefreshCw,
+  Volume2,
 } from "lucide-react";
 import { openExternal, openLiveView, openLogDir, tabletOverview } from "../api";
+import type { NavView, SettingsFocus } from "../components/SideNav";
 import { useUpdate } from "../components/UpdateBanner";
 import type { AppConfig, SyncStatus } from "../types";
 
@@ -15,6 +17,8 @@ interface Props {
   config: AppConfig;
   /** Live-Status – kommt von App (geteilt mit der Kopfzeile). */
   status: SyncStatus | null;
+  /** Navigation in andere Bereiche (z. B. Einstellungen → Ansagen). */
+  onNavigate?: (view: NavView, focus?: SettingsFocus) => void;
 }
 
 function dotColor(status: SyncStatus): string {
@@ -55,7 +59,7 @@ function ActionButton(props: {
   );
 }
 
-export function Dashboard({ config, status }: Props) {
+export function Dashboard({ config, status, onNavigate }: Props) {
   const { phase: updatePhase, checkNow } = useUpdate();
   const [updateChecked, setUpdateChecked] = useState(false);
   // Hallen erst NACH dem Start bekannt (dann steht die BTP-Verbindung und
@@ -142,6 +146,38 @@ export function Dashboard({ config, status }: Props) {
           Letzter Stand: {ago(status.updated_at_ms)}
         </p>
       </section>
+
+      {/* Mehr-Hallen-Infobox: erscheint, sobald BTP ≥2 Hallen meldet. Lädt zum
+          Einstellen der Ansage-Halle ein (jede Halle nur ihre eigenen Ansagen). */}
+      {halls.length >= 2 && (
+        <section className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="flex items-center gap-2 font-medium text-amber-900">
+            <Volume2 size={18} className="shrink-0" />
+            Mehr-Hallen-Turnier erkannt
+          </div>
+          <p className="text-sm text-amber-800">
+            Hallen: {halls.join(", ")}. Lege fest, welche Halle dieser PC ansagt,
+            damit jede Halle nur ihre eigenen Ansagen hört.
+          </p>
+          <p className="text-sm text-amber-800">
+            Aktuell:{" "}
+            <span className="font-medium">
+              {config.announce.announce_hall
+                ? `nur „${config.announce.announce_hall}"`
+                : "alle Hallen"}
+            </span>
+          </p>
+          <div>
+            <button
+              onClick={() => onNavigate?.("settings", "ansagen")}
+              className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5
+                         text-sm font-medium text-white transition-colors hover:bg-amber-700"
+            >
+              <Volume2 size={15} /> Ansage-Halle einstellen
+            </button>
+          </div>
+        </section>
+      )}
 
       {config.badhub.live_url !== "" && (
         <section className="flex flex-col gap-2">

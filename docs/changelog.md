@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.128
+
+- **Mehr-Hallen: Ansagen je Halle (Phase 1).** Neue Einstellung „Ansagen nur für Halle X" (Sprachansagen).
+  Ist sie gesetzt, sagt dieser PC **nur Spiele dieser Halle** an — so hört in einem 2-Hallen-Setup jede
+  Halle nur ihre eigenen Ansagen (z. B. zwei eigenständige Steuer-PCs, je Halle einer). Leer = alle Hallen
+  (Einzelhallen-Turniere unverändert). Sobald BTP ≥2 Hallen meldet, erscheint auf der Status-Seite eine
+  **Infobox**, die direkt zur Einstellung führt. Fundament für das Ansage-Gerät (Slave) in Phase 2/3.
+
 ## v0.9.127
 
 - **Vereinslogos auf einheitlichem weißen Chip.** Logos kommen mit sehr unterschiedlichen Hintergründen
