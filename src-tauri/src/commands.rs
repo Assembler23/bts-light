@@ -801,6 +801,28 @@ pub async fn assign_court(
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
+    // Disziplin/Klasse→Halle-Regel: manuelle Vergabe in eine nicht erlaubte
+    // Halle hart verhindern (Hard-Block, gleiche Regel wie die Auto-Vergabe).
+    if let Some(snap) = state.tablet.snapshot_clone() {
+        if let Some(m) = snap.matches.iter().find(|m| m.id == match_id) {
+            let court_hall = snap.court_location_name(court_id);
+            if !config.hall_allows_match(m.discipline.as_str(), &m.draw_name, &court_hall) {
+                let what = if m.draw_name.trim().is_empty() {
+                    m.discipline.as_str().to_string()
+                } else {
+                    m.draw_name.trim().to_string()
+                };
+                let allowed = config
+                    .allowed_hall_for(m.discipline.as_str(), &m.draw_name)
+                    .unwrap_or("");
+                let here = court_hall.trim();
+                return Err(format!(
+                    "„{what}“ darf nur in Halle „{allowed}“ vergeben werden — dieses Feld liegt in „{}“.",
+                    if here.is_empty() { "—" } else { here }
+                ));
+            }
+        }
+    }
     // Court→Match verknüpfen UND die Feldzuordnung am Match selbst setzen
     // (Halle+Feld erscheinen so konsistent in den BTP-Match-Eigenschaften).
     let match_courts = match state.tablet.match_planning(match_id) {
@@ -903,6 +925,9 @@ pub struct PreparationCandidate {
     /// Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed`, …;
     /// leer = unbekannt) – das Frontend lokalisiert für die Ansage selbst.
     pub discipline: String,
+    /// Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") – für die
+    /// Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind).
+    pub draw_name: String,
     /// Spieler-Namen Team 1 (1 bei Einzel, 2 bei Doppel).
     pub team1: Vec<String>,
     /// Spieler-Namen Team 2.
@@ -980,6 +1005,7 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                     .trim()
                     .to_string(),
                 discipline: m.discipline.as_str().to_string(),
+                draw_name: m.draw_name.clone(),
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
                 team2: m.team2.iter().map(|p| p.name.clone()).collect(),
                 team1_nationalities: m
@@ -1026,6 +1052,43 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
         candidates,
         locations,
     }
+}
+
+/// Eine Auslosung/Klasse des Turniers für die Disziplin/Klasse→Halle-Einstellung.
+#[derive(Serialize)]
+pub struct DrawInfo {
+    /// Disziplin als snake_case-Schlüssel (`mens_singles` …) = Kategorie.
+    pub discipline: String,
+    /// Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A").
+    pub draw_name: String,
+}
+
+/// Liefert die im Turnier vorkommenden Auslosungen (Disziplin + `draw_name`),
+/// dedupliziert – Grundlage der Disziplin/Klasse→Halle-Einstellung im Frontend.
+#[tauri::command]
+pub fn tournament_draws(state: State<'_, AppState>) -> Vec<DrawInfo> {
+    let Some(snapshot) = state.tablet.snapshot_clone() else {
+        return Vec::new();
+    };
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut out: Vec<DrawInfo> = Vec::new();
+    for m in &snapshot.matches {
+        let disc = m.discipline.as_str().to_string();
+        let draw = m.draw_name.trim().to_string();
+        if seen.insert((disc.clone(), draw.clone())) {
+            out.push(DrawInfo {
+                discipline: disc,
+                draw_name: draw,
+            });
+        }
+    }
+    // Stabil nach Disziplin, dann Auslosung sortieren.
+    out.sort_by(|a, b| {
+        a.discipline
+            .cmp(&b.discipline)
+            .then(a.draw_name.cmp(&b.draw_name))
+    });
+    out
 }
 
 /// Ruft die ausgewählten Spiele „in Vorbereitung". `location_id` bindet den

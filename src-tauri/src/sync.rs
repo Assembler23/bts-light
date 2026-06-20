@@ -361,6 +361,8 @@ impl SyncEngine {
                     continue;
                 }
             }
+            // Hallenname dieses Felds (für die Disziplin→Halle-Regeln).
+            let court_hall = snapshot.court_location_name(court.id);
             let free_since = self.court_free_since.get(&court.id).copied().unwrap_or(now);
             if now.saturating_sub(free_since) < wait_ms {
                 continue;
@@ -386,6 +388,11 @@ impl SyncEngine {
                     true
                 });
                 if !player_free {
+                    return false;
+                }
+                // Disziplin/Klasse→Halle-Regel: Match darf nur in seine erlaubte
+                // Halle (manuell wie automatisch). Ohne Regel: keine Einschränkung.
+                if !config.hall_allows_match(m.discipline.as_str(), &m.draw_name, &court_hall) {
                     return false;
                 }
                 if require_call {

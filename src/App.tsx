@@ -79,6 +79,7 @@ function defaultConfig(): AppConfig {
       pause_minutes: 0,
       active_hall: "",
     },
+    discipline_hall_rules: [],
     locked_courts: [],
     tablet_settings_pin: "0000",
     tournament_logo: { data: "", mime: "", background_color: "" },
@@ -257,6 +258,7 @@ function App() {
             callTimer={config.call_timer}
             announce={config.announce}
             azureTts={config.azure_tts}
+            disciplineHallRules={config.discipline_hall_rules}
           />
         );
       case "tablets":

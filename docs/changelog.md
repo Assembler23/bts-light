@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.129
+
+- **Mehr-Hallen: Disziplinen je Halle (Vergabe-Constraint, Phase 1b).** Neue Einstellung „Disziplinen je
+  Halle" (bei ≥2 Hallen): lege fest, in welcher Halle eine Disziplin/Klasse gespielt wird. Spiele dürfen
+  dann **nur in ihre Halle** vergeben werden — **manuell wie automatisch** (Hard-Block). Zwei Ebenen:
+  „Alle HE" als **Kategorie-Standard**, einzelne Auslosungen (z. B. „HE A") **überschreiben** ihn (z. B.
+  HE A/B in Halle 1, HE C/D in Halle 2). Ohne Eintrag: keine Einschränkung. In der Spielübersicht werden
+  nicht erlaubte Felder fürs gewählte Spiel ausgegraut; eine Vergabe dorthin wird mit Hinweis abgewiesen.
+
 ## v0.9.128
 
 - **Mehr-Hallen: Ansagen je Halle (Phase 1).** Neue Einstellung „Ansagen nur für Halle X" (Sprachansagen).

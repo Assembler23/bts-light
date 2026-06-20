@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
   CourtAd,
+  DrawInfo,
   MonitorDeviceInfo,
   MonitorTarget,
   PreparationView,
@@ -94,6 +95,10 @@ export const dismissWalkover = (proposalId: string): Promise<void> =>
 /** Ruf-bare Spiele + Hallen des Turniers für den „In Vorbereitung"-Tab. */
 export const preparationCandidates = (): Promise<PreparationView> =>
   invoke("preparation_candidates");
+
+/** Auslosungen (Disziplin + draw_name) des Turniers — für die Disziplin→Halle-Einstellung. */
+export const tournamentDraws = (): Promise<DrawInfo[]> =>
+  invoke("tournament_draws");
 
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (

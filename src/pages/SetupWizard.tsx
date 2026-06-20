@@ -29,6 +29,7 @@ import {
   stopSync,
   tabletOverview,
   testBtp,
+  tournamentDraws,
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
@@ -42,6 +43,8 @@ import type {
   AppConfig,
   ConnectionMode,
   CourtAd,
+  DisciplineHallRule,
+  DrawInfo,
   NameOverride,
 } from "../types";
 
@@ -323,11 +326,17 @@ export function SetupWizard({
   // Mehr-Hallen-Turnieren). Aus der Felder-Übersicht abgeleitet; leer, solange
   // keine Turnierdatei verbunden ist.
   const [halls, setHalls] = useState<string[]>([]);
+  // Auslosungen des Turniers (für die Disziplin/Klasse→Halle-Tabelle).
+  const [draws, setDraws] = useState<DrawInfo[]>([]);
+  // Disziplin/Klasse→Halle-Regeln (Mehr-Hallen-Vergabe-Constraint).
+  const [disciplineHallRules, setDisciplineHallRules] = useState<
+    DisciplineHallRule[]
+  >(initialConfig.discipline_hall_rules ?? []);
   useEffect(() => {
     let active = true;
     // Wiederholt laden: die Wizard-Seite kann VOR der BTP-Verbindung offen sein
-    // (dann sind Hallen noch leer) — so erscheint die Auswahl nach, sobald die
-    // Turnierdatei verbunden ist, ohne dass man den Wizard neu öffnen muss.
+    // (dann sind Hallen/Auslosungen noch leer) — so erscheint die Auswahl nach,
+    // sobald die Turnierdatei verbunden ist, ohne den Wizard neu zu öffnen.
     const load = () => {
       tabletOverview()
         .then((info) => {
@@ -341,6 +350,11 @@ export function SetupWizard({
               ),
             ].sort((a, b) => a.localeCompare(b, "de")),
           );
+        })
+        .catch(() => {});
+      tournamentDraws()
+        .then((d) => {
+          if (active) setDraws(d);
         })
         .catch(() => {});
     };
@@ -431,6 +445,10 @@ export function SetupWizard({
         // Aktive Halle (Tages-Halle) für Mehr-Hallen-Turniere; leer = alle.
         active_hall: aaActiveHall.trim(),
       },
+      // Disziplin/Klasse→Halle-Regeln: nur vollständige Zeilen speichern.
+      discipline_hall_rules: disciplineHallRules.filter(
+        (r) => r.hall.trim() !== "" && (r.discipline !== "" || r.draw_name !== ""),
+      ),
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
       // Tablet-Einstellungs-PIN: nur Ziffern, leer → Default „0000".
@@ -547,6 +565,31 @@ export function SetupWizard({
       setSaving(false);
     }
   }
+
+  // ── Disziplin/Klasse→Halle: abgeleitete Auswahl-Optionen ──────────────
+  const DISC_LABEL: Record<string, string> = {
+    mens_singles: "HE",
+    womens_singles: "DE",
+    mens_doubles: "HD",
+    womens_doubles: "DD",
+    mixed: "MX",
+  };
+  const disciplineLabel = (d: string) => DISC_LABEL[d] ?? d ?? "?";
+  const categoriesPresent = [...new Set(draws.map((d) => d.discipline))];
+  const scopeOptions = [
+    ...categoriesPresent.map((d) => ({
+      value: `cat:${d}`,
+      label: `Alle ${disciplineLabel(d)}`,
+    })),
+    ...draws
+      .filter((d) => d.draw_name)
+      .map((d) => ({
+        value: `draw:${d.discipline}:${d.draw_name}`,
+        label: `${d.draw_name}`,
+      })),
+  ];
+  const hallOptionsFor = (cur: string) =>
+    cur && !halls.includes(cur) ? [...halls, cur] : halls;
 
   return (
     <main className="mx-auto flex min-h-full max-w-xl flex-col gap-6 p-6 text-slate-800">
@@ -1226,6 +1269,118 @@ export function SetupWizard({
           </div>
         )}
       </section>
+
+      {/* Disziplinen je Halle (Mehr-Hallen-Vergabe-Constraint). Nur sichtbar bei
+          ≥2 Hallen oder wenn bereits Regeln bestehen. */}
+      {(halls.length >= 2 || disciplineHallRules.length > 0) && (
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={LayoutGrid}>Disziplinen je Halle</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Lege fest, welche Disziplinen/Klassen in welcher Halle gespielt
+            werden. Spiele dürfen dann nur in ihre Halle vergeben werden —
+            manuell wie automatisch. „Alle HE" = Kategorie-Standard; eine
+            einzelne Klasse (z. B. „HE A") überschreibt ihn. Ohne Eintrag: keine
+            Einschränkung.
+          </p>
+          <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+            {disciplineHallRules.length === 0 && (
+              <p className="text-xs text-slate-400">Noch keine Regel.</p>
+            )}
+            {disciplineHallRules.map((rule, i) => {
+              const scopeVal = rule.draw_name
+                ? `draw:${rule.discipline}:${rule.draw_name}`
+                : `cat:${rule.discipline}`;
+              const scopeKnown = scopeOptions.some((o) => o.value === scopeVal);
+              return (
+                <div
+                  key={`${scopeVal}-${i}`}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <select
+                    value={scopeVal}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      setDisciplineHallRules((rs) =>
+                        rs.map((r, j) => {
+                          if (j !== i) return r;
+                          if (v.startsWith("cat:")) {
+                            return { ...r, discipline: v.slice(4), draw_name: "" };
+                          }
+                          const rest = v.slice(5); // nach "draw:"
+                          const sep = rest.indexOf(":");
+                          return {
+                            ...r,
+                            discipline: rest.slice(0, sep),
+                            draw_name: rest.slice(sep + 1),
+                          };
+                        }),
+                      );
+                    }}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                  >
+                    {!scopeKnown && (
+                      <option value={scopeVal}>
+                        {rule.draw_name || disciplineLabel(rule.discipline)}
+                      </option>
+                    )}
+                    {scopeOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-slate-400">→</span>
+                  <select
+                    value={rule.hall}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      setDisciplineHallRules((rs) =>
+                        rs.map((r, j) => (j === i ? { ...r, hall: v } : r)),
+                      );
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                  >
+                    <option value="">Halle wählen …</option>
+                    {hallOptionsFor(rule.hall).map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDisciplineHallRules((rs) =>
+                        rs.filter((_, j) => j !== i),
+                      )
+                    }
+                    title="Regel entfernen"
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() =>
+                setDisciplineHallRules((rs) => [
+                  ...rs,
+                  {
+                    discipline: categoriesPresent[0] ?? "",
+                    draw_name: "",
+                    hall: "",
+                  },
+                ])
+              }
+              className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              + Regel hinzufügen
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Court-Monitor */}
       <section id="section-court-monitor" className="flex flex-col gap-2 scroll-mt-4">

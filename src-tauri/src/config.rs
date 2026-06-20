@@ -256,6 +256,23 @@ impl Default for AutoAssignConfig {
     }
 }
 
+/// Eine Disziplin/Klasse→Halle-Regel (Mehr-Hallen-Turniere). Schränkt die
+/// Feldvergabe ein: Spiele dieser Disziplin (bzw. genau dieser Auslosung) dürfen
+/// NUR auf Felder der angegebenen Halle — manuell wie automatisch.
+///
+/// `draw_name` leer = **Kategorie-Default** (gilt für alle Auslosungen der
+/// `discipline`); `draw_name` gesetzt = **Override** für genau diese Auslosung
+/// (z. B. „HE A"), schlägt den Kategorie-Default. `discipline` ist der
+/// snake_case-Schlüssel (`Discipline::as_str()`, z. B. „mens_singles").
+/// `hall` = BTP-`Location`-Name; leer = Regel ohne Wirkung.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DisciplineHallRule {
+    pub discipline: String,
+    #[serde(default)]
+    pub draw_name: String,
+    pub hall: String,
+}
+
 /// Turnierlogo für den badhub-Liveticker. BTP liefert kein Logo (verifiziert),
 /// deshalb lädt es der Operator in den Einstellungen hoch; bts-light schickt es
 /// im `tset`-Event mit, wo badhubs `#live-logo`-Element es anzeigt — genau wie
@@ -338,6 +355,11 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub auto_assign: AutoAssignConfig,
+    /// Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
+    /// ein (manuell + automatisch). Leer = keine Einschränkung. `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub discipline_hall_rules: Vec<DisciplineHallRule>,
     /// Turnierlogo für den badhub-Liveticker (Upload in den Einstellungen).
     /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
@@ -359,6 +381,53 @@ pub struct AppConfig {
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
 fn default_tablet_settings_pin() -> String {
     "0000".to_string()
+}
+
+impl AppConfig {
+    /// Erlaubte Halle (BTP-`Location`-Name) für ein Match anhand seiner
+    /// Disziplin (`Discipline::as_str()`) und Auslosung (`draw_name`).
+    /// `None` = keine Einschränkung (alle Hallen erlaubt). Ein Klassen-Override
+    /// (exakte `draw_name`-Regel) schlägt den Kategorie-Default.
+    pub fn allowed_hall_for(&self, discipline: &str, draw_name: &str) -> Option<&str> {
+        let dn = draw_name.trim();
+        // 1) Klassen-Override: exakte Auslosung (draw_name) DERSELBEN Disziplin
+        //    gewinnt (gleicher draw_name in zwei Disziplinen wäre sonst mehrdeutig).
+        if !dn.is_empty() {
+            if let Some(r) = self.discipline_hall_rules.iter().find(|r| {
+                r.discipline == discipline
+                    && !r.draw_name.trim().is_empty()
+                    && r.draw_name.trim().eq_ignore_ascii_case(dn)
+                    && !r.hall.trim().is_empty()
+            }) {
+                return Some(r.hall.trim());
+            }
+        }
+        // 2) Kategorie-Default: Regel ohne draw_name für diese Disziplin.
+        self.discipline_hall_rules
+            .iter()
+            .find(|r| {
+                r.draw_name.trim().is_empty()
+                    && r.discipline == discipline
+                    && !r.hall.trim().is_empty()
+            })
+            .map(|r| r.hall.trim())
+    }
+
+    /// Darf ein Match (Disziplin + Auslosung) auf ein Feld in `court_hall`
+    /// (BTP-`Location`-Name, leer = keine Halle) vergeben werden? Ohne passende
+    /// Regel: immer erlaubt.
+    pub fn hall_allows_match(&self, discipline: &str, draw_name: &str, court_hall: &str) -> bool {
+        // Sicherung: ohne ermittelbare Hallenzuordnung (Ein-Hallen-Turnier oder
+        // Feld ohne Location) NICHT blocken — sonst würde eine versehentlich
+        // mitgeschleppte Regel die Vergabe lahmlegen.
+        if court_hall.trim().is_empty() {
+            return true;
+        }
+        match self.allowed_hall_for(discipline, draw_name) {
+            None => true,
+            Some(allowed) => court_hall.trim().eq_ignore_ascii_case(allowed),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -402,6 +471,86 @@ mod tests {
         let path = std::env::temp_dir().join("bts-light-does-not-exist-xyz.json");
         let _ = std::fs::remove_file(&path);
         assert_eq!(AppConfig::load_from(&path).unwrap(), AppConfig::default());
+    }
+
+    fn rule(disc: &str, draw: &str, hall: &str) -> DisciplineHallRule {
+        DisciplineHallRule {
+            discipline: disc.to_string(),
+            draw_name: draw.to_string(),
+            hall: hall.to_string(),
+        }
+    }
+
+    #[test]
+    fn no_rules_means_no_restriction() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.allowed_hall_for("mens_singles", "HE A"), None);
+        assert!(cfg.hall_allows_match("mens_singles", "HE A", "Halle 2"));
+    }
+
+    #[test]
+    fn category_default_restricts_all_draws_of_discipline() {
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![rule("mens_singles", "", "Halle 1")],
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            cfg.allowed_hall_for("mens_singles", "HE A"),
+            Some("Halle 1")
+        );
+        assert!(cfg.hall_allows_match("mens_singles", "HE A", "Halle 1"));
+        assert!(!cfg.hall_allows_match("mens_singles", "HE A", "Halle 2"));
+        // Andere Disziplin bleibt unbeschränkt.
+        assert!(cfg.hall_allows_match("womens_singles", "DE A", "Halle 2"));
+    }
+
+    #[test]
+    fn class_override_beats_category_default() {
+        // HE-Default Halle 1, aber HE C ausdrücklich Halle 2.
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![
+                rule("mens_singles", "", "Halle 1"),
+                rule("mens_singles", "HE C", "Halle 2"),
+            ],
+            ..AppConfig::default()
+        };
+        assert!(cfg.hall_allows_match("mens_singles", "HE A", "Halle 1"));
+        assert!(!cfg.hall_allows_match("mens_singles", "HE A", "Halle 2"));
+        assert!(cfg.hall_allows_match("mens_singles", "HE C", "Halle 2"));
+        assert!(!cfg.hall_allows_match("mens_singles", "HE C", "Halle 1"));
+    }
+
+    #[test]
+    fn hall_match_is_case_and_space_insensitive() {
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![rule("mixed", "", "  Halle B ")],
+            ..AppConfig::default()
+        };
+        assert!(cfg.hall_allows_match("mixed", "MX A", "halle b"));
+    }
+
+    #[test]
+    fn draw_override_is_scoped_to_its_discipline() {
+        // Gleicher draw_name „A" in zwei Disziplinen, verschiedene Hallen.
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![
+                rule("mens_singles", "A", "Halle 1"),
+                rule("womens_singles", "A", "Halle 2"),
+            ],
+            ..AppConfig::default()
+        };
+        assert_eq!(cfg.allowed_hall_for("mens_singles", "A"), Some("Halle 1"));
+        assert_eq!(cfg.allowed_hall_for("womens_singles", "A"), Some("Halle 2"));
+    }
+
+    #[test]
+    fn empty_court_hall_never_blocks() {
+        // Ein-Hallen-Turnier (court_hall leer) + versehentliche Regel → nicht blocken.
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![rule("mens_singles", "", "Halle 1")],
+            ..AppConfig::default()
+        };
+        assert!(cfg.hall_allows_match("mens_singles", "HE A", ""));
     }
 
     #[test]
@@ -466,6 +615,11 @@ mod tests {
                 pause_minutes: 2.0,
                 active_hall: "Halle A".to_string(),
             },
+            discipline_hall_rules: vec![DisciplineHallRule {
+                discipline: "mens_singles".to_string(),
+                draw_name: String::new(),
+                hall: "Halle A".to_string(),
+            }],
             locked_courts: vec![3, 7],
             tablet_settings_pin: "1234".to_string(),
             tournament_logo: LogoConfig {

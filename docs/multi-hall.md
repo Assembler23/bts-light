@@ -128,6 +128,29 @@ dieselben Turnierdaten kommen (BTP-Zugang). **Turnier A** (eine Turnierleitung,
 Ansage-Gerät in der zweiten Halle) folgt in Phase 2/3 (Ansage-Slave als
 Info-Display über LAN bzw. Cloud-Relay). Konzept: siehe Master-Slave-Plan.
 
+## Disziplinen je Halle — Vergabe-Constraint (Phase 1b, v0.9.129)
+
+Welche Disziplin/Klasse in welcher Halle gespielt wird, ist einstellbar und
+**beschränkt die Feldvergabe** (manuell **und** automatisch).
+
+- **Config:** `AppConfig.discipline_hall_rules: Vec<DisciplineHallRule>`
+  (`{ discipline, draw_name, hall }`). `draw_name` leer = **Kategorie-Default**
+  (gilt für alle Auslosungen der `discipline`, snake_case `Discipline::as_str()`);
+  `draw_name` gesetzt = **Override** für genau diese Auslosung (z. B. „HE A"),
+  schlägt den Default. `hall` = BTP-`Location`-Name. (`config.rs`)
+- **Auflösung:** `AppConfig::allowed_hall_for(discipline, draw_name)` (Override →
+  Default → `None` = keine Einschränkung) und `hall_allows_match(…, court_hall)`.
+- **Erzwingung:** Auto-Vergabe filtert in `sync.rs` (Court-Pick-Closure) auf die
+  erlaubte Halle; die manuelle Vergabe (`commands::assign_court`) liefert bei
+  Verstoß einen **Hard-Block** (`Err`, Hinweistext). Beide nutzen dieselbe Regel.
+- **UI:** SetupWizard-Abschnitt „Disziplinen je Halle" (Tabelle, Quelle der
+  Auslosungen = `tournament_draws`-Command). In der Spielübersicht
+  (`FieldOverviewPage`) werden nicht erlaubte Felder fürs gewählte Spiel
+  ausgegraut; ein Drop dorthin wird abgewiesen (Backend erzwingt es zusätzlich).
+
+Damit deckt **Turnier B** auch den Fall ab, dass Kategorie X fest in Halle A und
+andere in Halle B laufen (Felder gehen nur in ihre Halle).
+
 ## Offene Punkte
 
 - **Ansage-Slave (Phase 2/3).** Ein reines Ansage-Gerät (Browser-Seite, nur Ton)

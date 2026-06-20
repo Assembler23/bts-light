@@ -22,6 +22,7 @@ import type {
   AzureTtsConfig,
   CallTimerConfig,
   CourtOverview,
+  DisciplineHallRule,
   PreparationCandidate,
 } from "../types";
 
@@ -37,10 +38,14 @@ export function FieldOverviewPage({
   callTimer,
   announce,
   azureTts,
+  disciplineHallRules,
 }: {
   callTimer: CallTimerConfig;
   announce: AnnounceConfig;
   azureTts?: AzureTtsConfig;
+  /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): nicht erlaubte Felder werden
+   *  ausgegraut; eine Vergabe dorthin wird abgewiesen (Backend erzwingt es). */
+  disciplineHallRules: DisciplineHallRule[];
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
@@ -89,14 +94,56 @@ export function FieldOverviewPage({
     }
   }
 
+  // Disziplin/Klasse→Halle: erlaubte Halle eines Matches (oder null = frei).
+  // Spiegelt die Backend-Regel (config::AppConfig::allowed_hall_for): exakte
+  // Auslosung (draw_name) schlägt den Kategorie-Default.
+  function allowedHallForMatch(m: PreparationCandidate | undefined): string | null {
+    if (!m) return null;
+    const dn = (m.draw_name || "").trim().toLowerCase();
+    if (dn) {
+      const cls = disciplineHallRules.find(
+        (r) =>
+          r.discipline === m.discipline &&
+          r.draw_name.trim() !== "" &&
+          r.draw_name.trim().toLowerCase() === dn &&
+          r.hall.trim() !== "",
+      );
+      if (cls) return cls.hall.trim();
+    }
+    const cat = disciplineHallRules.find(
+      (r) =>
+        r.draw_name.trim() === "" &&
+        r.discipline === m.discipline &&
+        r.hall.trim() !== "",
+    );
+    return cat ? cat.hall.trim() : null;
+  }
+  function courtAllowedFor(
+    m: PreparationCandidate | undefined,
+    c: CourtOverview,
+  ): boolean {
+    const allowed = allowedHallForMatch(m);
+    if (!allowed) return true;
+    return (c.location || "").trim().toLowerCase() === allowed.toLowerCase();
+  }
+
   // Ein Match (per Klick-Auswahl oder Drag&Drop) einem freien Feld zuweisen.
   function assignTo(matchId: number, c: CourtOverview) {
     if (busy || c.locked || c.match_id > 0) return;
     // Spiel könnte seit dem Auswählen/Ziehen aus den spielbereiten gefallen
     // sein (anderer Operator, BTP-Wechsel) → dann nicht blind nach BTP schreiben.
-    if (!candidates.some((m) => m.match_id === matchId)) {
+    const cand = candidates.find((m) => m.match_id === matchId);
+    if (!cand) {
       setSelected(null);
       setError("Das Spiel ist nicht mehr spielbereit — bitte neu wählen.");
+      return;
+    }
+    // Disziplin/Klasse→Halle-Regel: Vergabe in die falsche Halle früh abweisen
+    // (das Backend erzwingt es zusätzlich). Auswahl bleibt → anderes Feld wählbar.
+    if (!courtAllowedFor(cand, c)) {
+      setError(
+        `„${cand.draw_name || cand.label}" darf nur in Halle „${allowedHallForMatch(cand)}" vergeben werden — dieses Feld liegt in „${c.location || "—"}".`,
+      );
       return;
     }
     // Auswahl erst nach erfolgreicher Zuweisung leeren – schlägt der BTP-Write
@@ -131,6 +178,11 @@ export function FieldOverviewPage({
   const liveConfirm = confirmFree
     ? courts.find((c) => c.court_id === confirmFree.court_id) ?? confirmFree
     : null;
+  // Aktuell gewähltes Spiel (für das Ausgrauen nicht erlaubter Hallen-Felder).
+  const selCand =
+    selected != null
+      ? candidates.find((m) => m.match_id === selected)
+      : undefined;
 
   // Felder als Board-Spalten, bei ≥2 Hallen nach Halle gruppiert.
   const allHalls = [
@@ -235,6 +287,11 @@ export function FieldOverviewPage({
               {g.courts.map((c) => {
                 const occupied = c.match_id > 0;
                 const clickable = !c.locked && !occupied && !busy;
+                // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
+                // nicht erlaubt ist → ausgrauen (Klick zeigt trotzdem die
+                // Begründung; das Backend erzwingt die Regel ohnehin).
+                const blockedByHall =
+                  clickable && selCand ? !courtAllowedFor(selCand, c) : false;
                 // Ampel: Kopfzeile farbig je Status.
                 const head = c.locked
                   ? "bg-rose-100 text-rose-800"
@@ -246,12 +303,19 @@ export function FieldOverviewPage({
                     key={c.court_id}
                     onClick={() => onCourtClick(c)}
                     onDragOver={(e) => {
-                      if (clickable) e.preventDefault();
+                      if (clickable && !blockedByHall) e.preventDefault();
                     }}
-                    onDrop={(e) => clickable && onCourtDrop(e, c)}
+                    onDrop={(e) =>
+                      clickable && !blockedByHall && onCourtDrop(e, c)
+                    }
+                    title={
+                      blockedByHall
+                        ? `Für „${selCand?.draw_name || selCand?.label}" nicht erlaubt (andere Halle)`
+                        : undefined
+                    }
                     className={`flex w-44 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${
                       clickable ? "cursor-pointer hover:border-slate-400 hover:shadow-sm" : ""
-                    }`}
+                    } ${blockedByHall ? "opacity-40" : ""}`}
                   >
                     {/* Spaltenkopf: Feldname + Ampelpunkt + Sperren-Schalter. */}
                     <div className={`flex items-center justify-between gap-1 px-2.5 py-1.5 ${head}`}>
