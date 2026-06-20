@@ -5,6 +5,7 @@ import type {
   AppConfig,
   CourtAd,
   DrawInfo,
+  FinishedMatchRow,
   FreetextItem,
   MonitorDeviceInfo,
   MonitorTarget,
@@ -96,6 +97,10 @@ export const dismissWalkover = (proposalId: string): Promise<void> =>
 /** Ruf-bare Spiele + Hallen des Turniers für den „In Vorbereitung"-Tab. */
 export const preparationCandidates = (): Promise<PreparationView> =>
   invoke("preparation_candidates");
+
+/** Abgeschlossene Spiele (mit Sieger) für die Spielübersicht-Tabelle. */
+export const finishedMatches = (): Promise<FinishedMatchRow[]> =>
+  invoke("finished_matches");
 
 /** Auslosungen (Disziplin + draw_name) des Turniers — für die Disziplin→Halle-Einstellung. */
 export const tournamentDraws = (): Promise<DrawInfo[]> =>

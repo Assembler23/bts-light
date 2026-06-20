@@ -401,6 +401,10 @@ export interface PreparationCandidate {
   /** Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") — für die
    *  Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind). */
   draw_name: string;
+  /** Runden-/Spielbezeichnung (z. B. „G1", „Finale") für die Tabellenanzeige. */
+  round_name: string;
+  /** Angesetzte Spielzeit (BTP `PlannedTime`) als YYYYMMDDHHMM; null ohne. */
+  planned_time: number | null;
   /** Spieler-Namen Team 1 (1 bei Einzel, 2 bei Doppel). */
   team1: string[];
   /** Spieler-Namen Team 2. */
@@ -426,4 +430,27 @@ export interface PreparationLocation {
 export interface PreparationView {
   candidates: PreparationCandidate[];
   locations: PreparationLocation[];
+}
+
+/** Eine Zeile der „Abgeschlossene Spiele"-Tabelle (Rust: commands::FinishedMatchRow). */
+export interface FinishedMatchRow {
+  match_id: number;
+  draw_name: string;
+  round_name: string;
+  match_num: number | null;
+  /** Angesetzte Spielzeit (YYYYMMDDHHMM), null ohne. */
+  planned_time: number | null;
+  team1: string[];
+  team2: string[];
+  /** Sieger-Team (1 oder 2). */
+  winner: number;
+  /** Satz-Ergebnisse als [Team1, Team2]-Paare. */
+  sets: [number, number][];
+  /** `normal` · `walkover` · `retired` · `disqualified`. */
+  result: string;
+  /** Feldname, auf dem gespielt wurde (leer = unzugewiesen). */
+  court: string;
+  /** Halle (leer bei Ein-Hallen-Turnieren). */
+  location: string;
+  finished_at: number | null;
 }
