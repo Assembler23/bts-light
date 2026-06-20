@@ -390,10 +390,12 @@ impl AppConfig {
     /// (exakte `draw_name`-Regel) schlägt den Kategorie-Default.
     pub fn allowed_hall_for(&self, discipline: &str, draw_name: &str) -> Option<&str> {
         let dn = draw_name.trim();
-        // 1) Klassen-Override: exakte Auslosung (draw_name) gewinnt.
+        // 1) Klassen-Override: exakte Auslosung (draw_name) DERSELBEN Disziplin
+        //    gewinnt (gleicher draw_name in zwei Disziplinen wäre sonst mehrdeutig).
         if !dn.is_empty() {
             if let Some(r) = self.discipline_hall_rules.iter().find(|r| {
-                !r.draw_name.trim().is_empty()
+                r.discipline == discipline
+                    && !r.draw_name.trim().is_empty()
                     && r.draw_name.trim().eq_ignore_ascii_case(dn)
                     && !r.hall.trim().is_empty()
             }) {
@@ -415,6 +417,12 @@ impl AppConfig {
     /// (BTP-`Location`-Name, leer = keine Halle) vergeben werden? Ohne passende
     /// Regel: immer erlaubt.
     pub fn hall_allows_match(&self, discipline: &str, draw_name: &str, court_hall: &str) -> bool {
+        // Sicherung: ohne ermittelbare Hallenzuordnung (Ein-Hallen-Turnier oder
+        // Feld ohne Location) NICHT blocken — sonst würde eine versehentlich
+        // mitgeschleppte Regel die Vergabe lahmlegen.
+        if court_hall.trim().is_empty() {
+            return true;
+        }
         match self.allowed_hall_for(discipline, draw_name) {
             None => true,
             Some(allowed) => court_hall.trim().eq_ignore_ascii_case(allowed),
@@ -519,6 +527,30 @@ mod tests {
             ..AppConfig::default()
         };
         assert!(cfg.hall_allows_match("mixed", "MX A", "halle b"));
+    }
+
+    #[test]
+    fn draw_override_is_scoped_to_its_discipline() {
+        // Gleicher draw_name „A" in zwei Disziplinen, verschiedene Hallen.
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![
+                rule("mens_singles", "A", "Halle 1"),
+                rule("womens_singles", "A", "Halle 2"),
+            ],
+            ..AppConfig::default()
+        };
+        assert_eq!(cfg.allowed_hall_for("mens_singles", "A"), Some("Halle 1"));
+        assert_eq!(cfg.allowed_hall_for("womens_singles", "A"), Some("Halle 2"));
+    }
+
+    #[test]
+    fn empty_court_hall_never_blocks() {
+        // Ein-Hallen-Turnier (court_hall leer) + versehentliche Regel → nicht blocken.
+        let cfg = AppConfig {
+            discipline_hall_rules: vec![rule("mens_singles", "", "Halle 1")],
+            ..AppConfig::default()
+        };
+        assert!(cfg.hall_allows_match("mens_singles", "HE A", ""));
     }
 
     #[test]

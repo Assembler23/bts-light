@@ -103,6 +103,7 @@ export function FieldOverviewPage({
     if (dn) {
       const cls = disciplineHallRules.find(
         (r) =>
+          r.discipline === m.discipline &&
           r.draw_name.trim() !== "" &&
           r.draw_name.trim().toLowerCase() === dn &&
           r.hall.trim() !== "",
@@ -304,7 +305,9 @@ export function FieldOverviewPage({
                     onDragOver={(e) => {
                       if (clickable && !blockedByHall) e.preventDefault();
                     }}
-                    onDrop={(e) => clickable && onCourtDrop(e, c)}
+                    onDrop={(e) =>
+                      clickable && !blockedByHall && onCourtDrop(e, c)
+                    }
                     title={
                       blockedByHall
                         ? `Für „${selCand?.draw_name || selCand?.label}" nicht erlaubt (andere Halle)`
