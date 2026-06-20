@@ -11,6 +11,7 @@ import {
   Tablet,
   Trophy,
   Tv,
+  Wrench,
 } from "lucide-react";
 import type { AppConfig } from "../types";
 
@@ -22,7 +23,8 @@ export type NavView =
   | "announce"
   | "monitors"
   | "winners"
-  | "settings";
+  | "settings"
+  | "maintenance";
 
 /** Abschnitts-Anker in den Einstellungen (für den Sprung aus einem
  *  ausgegrauten Menüpunkt). */
@@ -68,6 +70,12 @@ function items(config: AppConfig): NavItem[] {
       view: "settings",
       label: "Einstellungen",
       icon: SlidersHorizontal,
+      enabled: true,
+    },
+    {
+      view: "maintenance",
+      label: "Wartung",
+      icon: Wrench,
       enabled: true,
     },
   ];

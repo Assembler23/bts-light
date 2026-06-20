@@ -20,6 +20,7 @@ import { AnnouncePage } from "./pages/AnnouncePage";
 import { CourtMonitorPanel } from "./pages/CourtMonitorPanel";
 import { Dashboard } from "./pages/Dashboard";
 import { FieldOverviewPage } from "./pages/FieldOverviewPage";
+import { MaintenancePage } from "./pages/MaintenancePage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
 import { WinnersPage } from "./pages/WinnersPage";
@@ -252,7 +253,12 @@ function App() {
     switch (v) {
       case "dashboard":
         return (
-          <Dashboard config={config} status={status} onNavigate={navigate} />
+          <Dashboard
+            config={config}
+            status={status}
+            onNavigate={navigate}
+            onConfigSaved={(c) => setConfig(c)}
+          />
         );
       case "fields":
         return (
@@ -295,6 +301,8 @@ function App() {
             onDone={(c) => setConfig(c)}
           />
         );
+      case "maintenance":
+        return <MaintenancePage />;
       default: {
         // Erzwingt zur Compile-Zeit, dass jeder NavView-Fall behandelt ist.
         const _exhaustive: never = v;
