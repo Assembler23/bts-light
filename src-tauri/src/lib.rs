@@ -117,6 +117,8 @@ pub fn run() {
             commands::preparation_candidates,
             commands::tournament_draws,
             commands::tournament_stats,
+            commands::fetch_pronunciations,
+            commands::share_pronunciations,
             commands::finished_matches,
             commands::publish_freetext,
             commands::pending_freetext,

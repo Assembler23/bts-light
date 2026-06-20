@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.137
+
+- **Gemeinsames Aussprache-Wörterbuch (Community).** bts-light lädt jetzt ein zentrales, von allen
+  Nutzern gepflegtes Aussprache-Wörterbuch von badhub (beim Start + alle 3 h) und **cached es offline**
+  für den LAN-Hallenbetrieb. So sprechen fremdsprachige Namen über alle Turniere hinweg korrekt, ohne dass
+  jeder sie selbst pflegen muss. Priorität: eigene Korrekturen > Community > mitgeliefertes Basis-Wörterbuch.
+- **Eigene Korrekturen teilen (opt-in).** Schalter „Meine Korrekturen mit der Community teilen" in den
+  Ansage-Einstellungen — beim Speichern werden die eigenen Einträge zur gemeinsamen Datenbank beigetragen.
+
 ## v0.9.136
 
 - **Freitext-Gong klar unterscheidbar.** Der Gong für Freitext-/Info-Ansagen ist jetzt ein heller,

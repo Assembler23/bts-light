@@ -9,6 +9,7 @@ import type {
   FreetextItem,
   MonitorDeviceInfo,
   MonitorTarget,
+  NameOverride,
   PreparationView,
   InternetStatus,
   SyncStatus,
@@ -110,6 +111,14 @@ export const tournamentDraws = (): Promise<DrawInfo[]> =>
 /** Turnier-Kennzahlen fürs Dashboard (null ohne Snapshot). */
 export const tournamentStats = (): Promise<TournamentStats | null> =>
   invoke("tournament_stats");
+
+/** Geteiltes Aussprache-Wörterbuch von badhub laden (offline: aus Cache). */
+export const fetchPronunciations = (): Promise<NameOverride[]> =>
+  invoke("fetch_pronunciations");
+
+/** Eigene Aussprache-Korrekturen mit der Community-DB teilen (opt-in). */
+export const sharePronunciations = (entries: NameOverride[]): Promise<number> =>
+  invoke("share_pronunciations", { entries });
 
 /** Master: eine Freitext-Ansage ablegen (Halle leer = alle). Liefert die ID. */
 export const publishFreetext = (hall: string, text: string): Promise<number> =>
