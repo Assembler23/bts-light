@@ -13,6 +13,7 @@ import type {
   InternetStatus,
   SyncStatus,
   TabletInfo,
+  TournamentStats,
   WalkoverProposal,
   WalkoverResult,
   WifiStatus,
@@ -105,6 +106,10 @@ export const finishedMatches = (): Promise<FinishedMatchRow[]> =>
 /** Auslosungen (Disziplin + draw_name) des Turniers — für die Disziplin→Halle-Einstellung. */
 export const tournamentDraws = (): Promise<DrawInfo[]> =>
   invoke("tournament_draws");
+
+/** Turnier-Kennzahlen fürs Dashboard (null ohne Snapshot). */
+export const tournamentStats = (): Promise<TournamentStats | null> =>
+  invoke("tournament_stats");
 
 /** Master: eine Freitext-Ansage ablegen (Halle leer = alle). Liefert die ID. */
 export const publishFreetext = (hall: string, text: string): Promise<number> =>

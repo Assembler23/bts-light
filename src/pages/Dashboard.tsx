@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
 import {
-  FolderOpen,
   ListOrdered,
   type LucideIcon,
   Monitor,
   Radio,
-  RefreshCw,
   Volume2,
 } from "lucide-react";
-import { openExternal, openLiveView, openLogDir, tabletOverview } from "../api";
+import {
+  openExternal,
+  openLiveView,
+  saveConfig,
+  tabletOverview,
+  tournamentStats,
+} from "../api";
 import type { NavView, SettingsFocus } from "../components/SideNav";
-import { useUpdate } from "../components/UpdateBanner";
-import type { AppConfig, SyncStatus } from "../types";
+import type { AppConfig, SyncStatus, TournamentStats } from "../types";
 
 interface Props {
   config: AppConfig;
@@ -19,6 +22,8 @@ interface Props {
   status: SyncStatus | null;
   /** Navigation in andere Bereiche (z. B. Einstellungen → Ansagen). */
   onNavigate?: (view: NavView, focus?: SettingsFocus) => void;
+  /** Speichern der Config (für die Ansage-Halle-Schnellwahl direkt hier). */
+  onConfigSaved?: (config: AppConfig) => void;
 }
 
 function dotColor(status: SyncStatus): string {
@@ -59,58 +64,88 @@ function ActionButton(props: {
   );
 }
 
-export function Dashboard({ config, status, onNavigate }: Props) {
-  const { phase: updatePhase, checkNow } = useUpdate();
-  const [updateChecked, setUpdateChecked] = useState(false);
-  // Hallen erst NACH dem Start bekannt (dann steht die BTP-Verbindung und
-  // die Felder/Hallen aus der Turnierdatei). Bei ≥2 Hallen blenden wir je
-  // Halle einen lokalen Hallen-Monitor-Button ein.
+/** Eine Kennzahl-Kachel (große Zahl + Beschriftung), BTP-Vorbild. */
+function StatCard(props: { value: string | number; label: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="text-2xl font-semibold leading-none text-slate-800">
+        {props.value}
+      </div>
+      <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+        {props.label}
+      </div>
+    </div>
+  );
+}
+
+export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) {
   const running = status?.running ?? false;
+  // Turnier-Kennzahlen + Hallen sind erst NACH dem Start bekannt (dann steht
+  // die BTP-Verbindung und die Turnierdatei ist geladen).
+  const [stats, setStats] = useState<TournamentStats | null>(null);
   const [halls, setHalls] = useState<string[]>([]);
+  const [savingHall, setSavingHall] = useState(false);
+  const [hallSaveError, setHallSaveError] = useState(false);
+
   useEffect(() => {
     if (!running) {
+      setStats(null);
       setHalls([]);
       return;
     }
     let active = true;
     const load = () => {
+      tournamentStats()
+        .then((s) => {
+          if (!active) return;
+          setStats(s);
+          if (s) setHalls(s.halls);
+        })
+        .catch(() => {});
+      // Fallback-Hallen aus der Court-Übersicht, falls Stats (noch) leer sind.
       tabletOverview()
         .then((info) => {
           if (!active) return;
-          setHalls(
-            [
-              ...new Set(
-                (info.courts ?? [])
-                  .map((c) => c.location)
-                  .filter((l) => l !== ""),
-              ),
-            ].sort((a, b) => a.localeCompare(b, "de")),
+          setHalls((prev) =>
+            prev.length > 0
+              ? prev
+              : [
+                  ...new Set(
+                    (info.courts ?? [])
+                      .map((c) => c.location)
+                      .filter((l) => l !== ""),
+                  ),
+                ].sort((a, b) => a.localeCompare(b, "de")),
           );
         })
         .catch(() => {});
     };
     load();
-    const id = setInterval(load, 20000);
+    const id = setInterval(load, 15000);
     return () => {
       active = false;
       clearInterval(id);
     };
   }, [running]);
 
-  async function handleCheckUpdate() {
-    setUpdateChecked(true);
-    await checkNow();
-  }
-
-  // Rückmeldung nur nach einem manuellen Klick zeigen – der Auto-Check
-  // beim Start soll hier keine Meldung hinterlassen.
-  function updateMessage(): string {
-    if (!updateChecked) return "";
-    if (updatePhase === "checking") return "Prüfe auf Update …";
-    if (updatePhase === "available") return "Update verfügbar – siehe Banner oben.";
-    if (updatePhase === "current") return "Aktuell auf dem neuesten Stand.";
-    if (updatePhase === "error") return "Update-Prüfung fehlgeschlagen (offline?).";
-    return "";
+  // Ansage-Halle direkt hier umstellen (statt unten in den Einstellungen).
+  async function changeAnnounceHall(hall: string) {
+    setSavingHall(true);
+    setHallSaveError(false);
+    try {
+      const next: AppConfig = {
+        ...config,
+        announce: { ...config.announce, announce_hall: hall },
+      };
+      await saveConfig(next);
+      onConfigSaved?.(next);
+    } catch {
+      // Speichern fehlgeschlagen – Auswahl springt (über die kontrollierte
+      // Select-Bindung) auf den alten Wert zurück, Hinweis anzeigen.
+      setHallSaveError(true);
+    } finally {
+      setSavingHall(false);
+    }
   }
 
   if (!status) {
@@ -121,15 +156,26 @@ export function Dashboard({ config, status, onNavigate }: Props) {
     );
   }
 
-  const updateMsg = updateMessage();
+  const multiHall = halls.length >= 2;
+  const finishedPct =
+    stats && stats.matches_total > 0
+      ? Math.round((stats.matches_finished / stats.matches_total) * 100)
+      : 0;
 
   return (
-    <main className="mx-auto flex min-h-full max-w-xl flex-col gap-5 p-6 text-slate-800">
+    <main className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 p-6 text-slate-800">
       <header>
-        <h1 className="text-2xl font-semibold leading-tight">Status</h1>
-        <p className="text-sm text-slate-500">Liveticker-Status</p>
+        <h1 className="text-2xl font-semibold leading-tight">
+          {stats?.tournament_name.trim() || "Dashboard"}
+        </h1>
+        <p className="text-sm text-slate-500">
+          {stats?.tournament_name.trim()
+            ? "Turnier-Übersicht"
+            : "Turnier-Übersicht & Liveticker-Status"}
+        </p>
       </header>
 
+      {/* Liveticker-Status */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-2.5">
           <span
@@ -147,35 +193,102 @@ export function Dashboard({ config, status, onNavigate }: Props) {
         </p>
       </section>
 
-      {/* Mehr-Hallen-Infobox: erscheint, sobald BTP ≥2 Hallen meldet. Lädt zum
-          Einstellen der Ansage-Halle ein (jede Halle nur ihre eigenen Ansagen). */}
-      {halls.length >= 2 && (
+      {/* Turnier-Kennzahlen (nur sinnvoll, wenn der Liveticker läuft). */}
+      {running && stats && (
+        <section className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatCard value={stats.n_disciplines} label="Konkurrenzen" />
+            <StatCard value={stats.n_players} label="Spieler" />
+            <StatCard value={stats.matches_total} label="Spiele" />
+            <StatCard value={stats.n_courts} label="Felder" />
+            <StatCard value={stats.matches_running} label="Laufend" />
+            <StatCard value={halls.length || 1} label="Hallen" />
+          </div>
+
+          {/* Spiel-Fortschritt: abgeschlossen / gesamt */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-medium text-slate-700">
+                Abgeschlossene Spiele
+              </span>
+              <span className="text-sm text-slate-500">
+                {stats.matches_finished} / {stats.matches_total} ({finishedPct}
+                %)
+              </span>
+            </div>
+            <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all"
+                style={{ width: `${finishedPct}%` }}
+              />
+            </div>
+          </div>
+
+          {halls.length > 0 && (
+            <p className="text-xs text-slate-500">
+              Hallen: <span className="font-medium">{halls.join(", ")}</span>
+            </p>
+          )}
+        </section>
+      )}
+
+      {running && !stats && (
+        <p className="text-xs text-slate-400">
+          Turnierdaten werden geladen …
+        </p>
+      )}
+
+      {/* Mehr-Hallen-Schnellwahl: Ansage-Halle direkt hier setzen (gespeichert
+          wird sofort) — kein Scrollen ans Ende der Einstellungen mehr. */}
+      {multiHall && (
         <section className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
           <div className="flex items-center gap-2 font-medium text-amber-900">
             <Volume2 size={18} className="shrink-0" />
             Mehr-Hallen-Turnier erkannt
           </div>
           <p className="text-sm text-amber-800">
-            Hallen: {halls.join(", ")}. Lege fest, welche Halle dieser PC ansagt,
-            damit jede Halle nur ihre eigenen Ansagen hört.
+            Lege fest, welche Halle dieser PC ansagt, damit jede Halle nur ihre
+            eigenen Ansagen hört.
           </p>
-          <p className="text-sm text-amber-800">
-            Aktuell:{" "}
-            <span className="font-medium">
-              {config.announce.announce_hall
-                ? `nur „${config.announce.announce_hall}"`
-                : "alle Hallen"}
-            </span>
-          </p>
-          <div>
-            <button
-              onClick={() => onNavigate?.("settings", "ansagen")}
-              className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5
-                         text-sm font-medium text-white transition-colors hover:bg-amber-700"
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm font-medium text-amber-900">
+              Dieser PC sagt an:
+            </label>
+            <select
+              value={config.announce.announce_hall}
+              disabled={savingHall}
+              onChange={(e) => void changeAnnounceHall(e.currentTarget.value)}
+              className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-sm
+                         text-slate-800 focus:border-amber-500 focus:outline-none
+                         disabled:opacity-50"
             >
-              <Volume2 size={15} /> Ansage-Halle einstellen
-            </button>
+              <option value="">Alle Hallen</option>
+              {halls.map((h) => (
+                <option key={h} value={h}>
+                  nur {h}
+                </option>
+              ))}
+            </select>
+            {savingHall && (
+              <span className="text-xs text-amber-700">Speichere …</span>
+            )}
+            {hallSaveError && (
+              <span className="text-xs font-medium text-rose-600">
+                Speichern fehlgeschlagen
+              </span>
+            )}
           </div>
+          {!config.announce.enabled && (
+            <p className="text-sm text-amber-800">
+              Ansagen sind aktuell deaktiviert.{" "}
+              <button
+                onClick={() => onNavigate?.("settings", "ansagen")}
+                className="font-medium underline underline-offset-2 hover:text-amber-900"
+              >
+                In den Einstellungen aktivieren
+              </button>
+            </p>
+          )}
         </section>
       )}
 
@@ -227,7 +340,7 @@ export function Dashboard({ config, status, onNavigate }: Props) {
           )}
           {/* Ab 2 Hallen je Halle ein lokaler Hallen-Monitor (Court-Übersicht
               dieser Halle) – am PC im Browser geöffnet. */}
-          {running && halls.length >= 2 && (
+          {running && multiHall && (
             <div className="mt-1 flex flex-col gap-1.5">
               <span className="text-xs text-slate-500">
                 Hallen-Monitor je Halle (lokal):
@@ -251,28 +364,6 @@ export function Dashboard({ config, status, onNavigate }: Props) {
           )}
         </section>
       )}
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">Wartung</h2>
-        <div className="flex flex-wrap gap-2.5">
-          <ActionButton
-            icon={RefreshCw}
-            label="Nach Update prüfen"
-            onClick={handleCheckUpdate}
-            disabled={updatePhase === "checking"}
-            title="Auf eine neue BTS-Light-Version prüfen"
-          />
-          <ActionButton
-            icon={FolderOpen}
-            label="Logs öffnen"
-            onClick={() => void openLogDir()}
-            title="Den Ordner mit den Diagnose-Logdateien öffnen"
-          />
-        </div>
-        {updateMsg !== "" && (
-          <p className="mt-1 text-xs text-slate-500">{updateMsg}</p>
-        )}
-      </section>
     </main>
   );
 }

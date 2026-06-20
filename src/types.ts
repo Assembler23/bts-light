@@ -201,6 +201,19 @@ export interface DrawInfo {
   draw_name: string;
 }
 
+/** Turnier-Kennzahlen fürs Dashboard (Rust: commands::TournamentStats).
+ *  `null`, solange kein Snapshot vorliegt (Liveticker nicht gestartet). */
+export interface TournamentStats {
+  tournament_name: string;
+  n_disciplines: number;
+  n_players: number;
+  matches_total: number;
+  matches_finished: number;
+  matches_running: number;
+  n_courts: number;
+  halls: string[];
+}
+
 /** Eine manuelle Freitext-Ansage (Rust: tablet::state::FreetextItem).
  *  `hall` = Ziel-Halle (leer = alle Hallen); `id` fortlaufend (Dedup). */
 export interface FreetextItem {

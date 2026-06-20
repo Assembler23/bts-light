@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.134
+
+- **Startseite ist jetzt ein Turnier-Dashboard.** Die Status-Seite zeigt oben den **Turniernamen** und
+  Kennzahlen-Kacheln (**Konkurrenzen, Spieler, Spiele, Felder, Laufend, Hallen**) sowie einen
+  **Fortschrittsbalken** „Abgeschlossene Spiele X/Y" — Überblick über das ganze Turnier auf einen Blick
+  (sobald der Liveticker läuft).
+- **Ansage-Halle direkt auf dem Dashboard.** Bei einem Mehr-Hallen-Turnier lässt sich „Dieser PC sagt an:
+  alle/nur Halle X" direkt auf der Startseite umstellen — **wird sofort gespeichert**, kein Scrollen ans
+  Ende der Einstellungen mehr.
+- **Wartung als eigener Menüpunkt.** Update-Prüfung, Logs und Versionsanzeige sind vom Dashboard in den
+  neuen Menüpunkt **„Wartung"** (unter Einstellungen) gewandert.
+
 ## v0.9.133
 
 - **Ansage-Einstellungen jetzt auf der Seite „Ansagen".** Alle Detail-Einstellungen (Sprache, Stimmen,

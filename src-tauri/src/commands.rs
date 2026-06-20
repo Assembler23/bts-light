@@ -1117,6 +1117,76 @@ pub fn tournament_draws(state: State<'_, AppState>) -> Vec<DrawInfo> {
     out
 }
 
+/// Turnier-Kennzahlen fürs Dashboard (Startseite). Aus dem aktuellen
+/// BTP-Snapshot abgeleitet; `None`, solange noch kein Snapshot vorliegt
+/// (Liveticker nicht gestartet bzw. erste Antwort steht noch aus).
+#[derive(Serialize)]
+pub struct TournamentStats {
+    /// Turniername (BTP-Setting 1001).
+    pub tournament_name: String,
+    /// Anzahl Konkurrenzen = eindeutige Auslosungen (Disziplin + `draw_name`).
+    pub n_disciplines: usize,
+    /// Anzahl eindeutiger Spieler (über alle Paarungen, nach Name dedupliziert).
+    pub n_players: usize,
+    /// Spiele gesamt.
+    pub matches_total: usize,
+    /// Abgeschlossene Spiele (Sieger steht fest).
+    pub matches_finished: usize,
+    /// Laufende Spiele (einem Feld zugewiesen, noch ohne Sieger).
+    pub matches_running: usize,
+    /// Anzahl Felder (alle Courts des Turniers).
+    pub n_courts: usize,
+    /// Hallen-Namen (BTP `Locations`), alphabetisch.
+    pub halls: Vec<String>,
+}
+
+/// Liefert die Turnier-Kennzahlen fürs Dashboard aus dem aktuellen Snapshot.
+#[tauri::command]
+pub fn tournament_stats(state: State<'_, AppState>) -> Option<TournamentStats> {
+    let snapshot = state.tablet.snapshot_clone()?;
+    let mut draws: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut players: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut finished = 0usize;
+    let mut running = 0usize;
+    for m in &snapshot.matches {
+        draws.insert((
+            m.discipline.as_str().to_string(),
+            m.draw_name.trim().to_string(),
+        ));
+        for p in m.team1.iter().chain(m.team2.iter()) {
+            let name = p.name.trim();
+            if !name.is_empty() {
+                players.insert(name.to_string());
+            }
+        }
+        if m.winner.is_some() {
+            finished += 1;
+        } else if m.court_id.is_some() {
+            running += 1;
+        }
+    }
+    let mut halls: Vec<String> = snapshot
+        .locations
+        .iter()
+        .map(|l| l.name.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect();
+    halls.sort_by_key(|a| a.to_lowercase());
+    halls.dedup();
+    Some(TournamentStats {
+        tournament_name: snapshot.tournament_name.clone(),
+        n_disciplines: draws.len(),
+        n_players: players.len(),
+        matches_total: snapshot.matches.len(),
+        matches_finished: finished,
+        matches_running: running,
+        // court_infos = Felder mit echter CourtID (strukturiert); courts wäre
+        // die Namensliste – beide zählen dieselben physischen Felder.
+        n_courts: snapshot.court_infos.len(),
+        halls,
+    })
+}
+
 /// Eine Zeile der „Abgeschlossene Spiele"-Tabelle (Spielübersicht).
 #[derive(Serialize)]
 pub struct FinishedMatchRow {
