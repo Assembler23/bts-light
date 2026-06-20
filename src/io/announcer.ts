@@ -12,6 +12,7 @@
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
+import type { NameLang } from "./transliterate";
 
 export type AnnounceLang = "de" | "en";
 
@@ -528,11 +529,30 @@ function phonemeSsml(text: string, ipa: string): string {
   return `<phoneme alphabet="ipa" ph="${xmlEscape(ipa)}">${xmlEscape(text)}</phoneme>`;
 }
 
-// Fallback ohne IPA: Namen ggf. in ein `<lang>`-Span hüllen, damit Azure ihn
-// nativ spricht (chinesisch/vietnamesisch erkannt über `detectNameLang`).
+// Erkannte Herkunftssprache → Azure-Locale für den `<lang>`-Tag.
+const LANG_LOCALE: Record<NameLang, string> = {
+  cn: "zh-CN",
+  vn: "vi-VN",
+  es: "es-ES",
+  fr: "fr-FR",
+  pl: "pl-PL",
+  tr: "tr-TR",
+  ms: "ms-MY",
+  in: "en-IN",
+};
+
+// Fallback ohne IPA: Namen in seiner erkannten Sprache als `<lang>`-Span hüllen,
+// damit die mehrsprachige Azure-Stimme ihn nativ spricht. Nur bei eindeutiger
+// Erkennung (`detectNameLang`) — sonst roh (deutscher Default).
 function langWrapSsml(name: string): string {
-  const l = detectNameLang(name.split(/\s+/).filter(Boolean));
-  const tag = l === "cn" ? "zh-CN" : l === "vn" ? "vi-VN" : null;
+  // Für die Erkennung an Wort-Rändern hängende Satzzeichen entfernen (sonst
+  // verfehlt der Wörterbuch-Lookup, z. B. „Garcia," → „garcia,").
+  const toks = name
+    .split(/\s+/)
+    .map((t) => t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter(Boolean);
+  const l = detectNameLang(toks);
+  const tag = l ? LANG_LOCALE[l] : null;
   return tag
     ? `<lang xml:lang="${tag}">${xmlEscape(name)}</lang>`
     : xmlEscape(name);

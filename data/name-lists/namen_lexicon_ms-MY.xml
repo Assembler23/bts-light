@@ -1,0 +1,1601 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lexicon version="1.0"
+      xmlns="http://www.w3.org/2005/01/pronunciation-lexicon"
+      alphabet="ipa" xml:lang="ms-MY">
+  <lexeme>
+    <grapheme>Abdullah</grapheme>
+    <phoneme>ab.ˈdu.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ahmad</grapheme>
+    <phoneme>ˈah.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali</grapheme>
+    <phoneme>ˈa.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hassan</grapheme>
+    <phoneme>ˈha.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ibrahim</grapheme>
+    <phoneme>ib.ˈʁa.him</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ismail</grapheme>
+    <phoneme>is.ˈma.il</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusof</grapheme>
+    <phoneme>ˈju.sof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Omar</grapheme>
+    <phoneme>ˈo.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Othman</grapheme>
+    <phoneme>ˈot.hman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rahman</grapheme>
+    <phoneme>ˈʁah.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Salleh</grapheme>
+    <phoneme>ˈsa.ləh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aziz</grapheme>
+    <phoneme>ˈa.ziz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bakar</grapheme>
+    <phoneme>ˈba.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hamzah</grapheme>
+    <phoneme>ˈham.zah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hashim</grapheme>
+    <phoneme>ˈhas.him</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hussin</grapheme>
+    <phoneme>ˈhu.sin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jaafar</grapheme>
+    <phoneme>ˈdʒa.faʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kassim</grapheme>
+    <phoneme>ˈka.sim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mahmud</grapheme>
+    <phoneme>ˈmah.mud</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mansor</grapheme>
+    <phoneme>ˈman.soʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mohamed</grapheme>
+    <phoneme>mo.ˈha.məd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mohd</grapheme>
+    <phoneme>ˈmohd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Musa</grapheme>
+    <phoneme>ˈmu.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Noor</grapheme>
+    <phoneme>ˈnoʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rashid</grapheme>
+    <phoneme>ˈʁas.hid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Razak</grapheme>
+    <phoneme>ˈʁa.zak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sani</grapheme>
+    <phoneme>ˈsa.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sulaiman</grapheme>
+    <phoneme>su.la.ˈi.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tahir</grapheme>
+    <phoneme>ˈta.hiʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wahab</grapheme>
+    <phoneme>ˈva.hab</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yaakob</grapheme>
+    <phoneme>ˈja.kob</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zainal</grapheme>
+    <phoneme>za.ˈi.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zakaria</grapheme>
+    <phoneme>za.ka.ˈʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daud</grapheme>
+    <phoneme>ˈda.ud</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Latif</grapheme>
+    <phoneme>ˈla.tif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manan</grapheme>
+    <phoneme>ˈma.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nasir</grapheme>
+    <phoneme>ˈna.siʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rahim</grapheme>
+    <phoneme>ˈʁa.him</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Saad</grapheme>
+    <phoneme>ˈsad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Samad</grapheme>
+    <phoneme>ˈsa.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Talib</grapheme>
+    <phoneme>ˈta.lib</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yahya</grapheme>
+    <phoneme>ˈjah.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adnan</grapheme>
+    <phoneme>ˈad.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anuar</grapheme>
+    <phoneme>a.ˈnu.aʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bakri</grapheme>
+    <phoneme>ˈbak.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fauzi</grapheme>
+    <phoneme>fa.ˈu.zi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ghani</grapheme>
+    <phoneme>ˈga.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim</grapheme>
+    <phoneme>ˈha.lim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Idris</grapheme>
+    <phoneme>ˈid.ʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jamal</grapheme>
+    <phoneme>ˈdʒa.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karim</grapheme>
+    <phoneme>ˈka.ʁim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lah</grapheme>
+    <phoneme>ˈlah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Majid</grapheme>
+    <phoneme>ˈmad.ʒid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nordin</grapheme>
+    <phoneme>ˈnoʁ.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Osman</grapheme>
+    <phoneme>ˈos.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pawanchik</grapheme>
+    <phoneme>pa.ˈvan.tʃhik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Qasim</grapheme>
+    <phoneme>ˈka.sim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ridzuan</grapheme>
+    <phoneme>ʁid.ˈzu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shariff</grapheme>
+    <phoneme>ˈsha.ʁif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tajuddin</grapheme>
+    <phoneme>tad.ˈʒu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Umar</grapheme>
+    <phoneme>ˈu.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wahid</grapheme>
+    <phoneme>ˈva.hid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yakub</grapheme>
+    <phoneme>ˈja.kub</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zabidi</grapheme>
+    <phoneme>za.ˈbi.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arshad</grapheme>
+    <phoneme>ˈaʁ.shad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Basir</grapheme>
+    <phoneme>ˈba.siʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Che</grapheme>
+    <phoneme>ˈtʃhə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dollah</grapheme>
+    <phoneme>ˈdo.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Embong</grapheme>
+    <phoneme>ˈəm.boŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fadzil</grapheme>
+    <phoneme>ˈfad.zil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ghazali</grapheme>
+    <phoneme>ga.ˈza.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Harun</grapheme>
+    <phoneme>ˈha.ʁun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iskandar</grapheme>
+    <phoneme>is.ˈkan.daʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jalil</grapheme>
+    <phoneme>ˈdʒa.lil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamarudin</grapheme>
+    <phoneme>ka.ma.ˈʁu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lokman</grapheme>
+    <phoneme>ˈlok.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maarof</grapheme>
+    <phoneme>ˈma.ʁof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nawawi</grapheme>
+    <phoneme>na.ˈva.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Puteh</grapheme>
+    <phoneme>ˈpu.təh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rosli</grapheme>
+    <phoneme>ˈʁos.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Subramaniam</grapheme>
+    <phoneme>sub.ʁa.ma.ˈni.am</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tengku</grapheme>
+    <phoneme>ˈtəŋ.ku</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Usman</grapheme>
+    <phoneme>ˈus.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wan</grapheme>
+    <phoneme>ˈvan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yunus</grapheme>
+    <phoneme>ˈju.nus</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zahari</grapheme>
+    <phoneme>za.ˈha.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amin</grapheme>
+    <phoneme>ˈa.min</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Baharin</grapheme>
+    <phoneme>ba.ˈha.ʁin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daim</grapheme>
+    <phoneme>ˈda.im</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Effendi</grapheme>
+    <phoneme>ə.ˈfən.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fikri</grapheme>
+    <phoneme>ˈfik.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gani</grapheme>
+    <phoneme>ˈga.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hamid</grapheme>
+    <phoneme>ˈha.mid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Imran</grapheme>
+    <phoneme>ˈim.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jais</grapheme>
+    <phoneme>ˈdʒa.is</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kadir</grapheme>
+    <phoneme>ˈka.diʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Latiff</grapheme>
+    <phoneme>ˈla.tif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mat</grapheme>
+    <phoneme>ˈmat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nik</grapheme>
+    <phoneme>ˈnik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ong</grapheme>
+    <phoneme>ˈoŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pendek</grapheme>
+    <phoneme>ˈpən.dək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roslan</grapheme>
+    <phoneme>ˈʁos.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sapuan</grapheme>
+    <phoneme>sa.ˈpu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tan</grapheme>
+    <phoneme>ˈtan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ujang</grapheme>
+    <phoneme>ˈud.ʒaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wahyu</grapheme>
+    <phoneme>ˈvah.ju</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yatim</grapheme>
+    <phoneme>ˈja.tim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zin</grapheme>
+    <phoneme>ˈzin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Asri</grapheme>
+    <phoneme>ˈas.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Borhan</grapheme>
+    <phoneme>ˈboʁ.han</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chik</grapheme>
+    <phoneme>ˈtʃhik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dahlan</grapheme>
+    <phoneme>ˈdah.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Esa</grapheme>
+    <phoneme>ˈə.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Faris</grapheme>
+    <phoneme>ˈfa.ʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gul</grapheme>
+    <phoneme>ˈgul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hanafi</grapheme>
+    <phoneme>ha.ˈna.fi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iliyas</grapheme>
+    <phoneme>i.ˈli.jas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jamil</grapheme>
+    <phoneme>ˈdʒa.mil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kamal</grapheme>
+    <phoneme>ˈka.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lim</grapheme>
+    <phoneme>ˈlim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marican</grapheme>
+    <phoneme>ma.ˈʁit.ʃan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nasrudin</grapheme>
+    <phoneme>nas.ˈʁu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Obeng</grapheme>
+    <phoneme>ˈo.bəŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pakhri</grapheme>
+    <phoneme>ˈpax.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rauf</grapheme>
+    <phoneme>ˈʁa.uf</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sallehuddin</grapheme>
+    <phoneme>sa.lə.ˈhu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tarmizi</grapheme>
+    <phoneme>taʁ.ˈmi.zi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Uda</grapheme>
+    <phoneme>ˈu.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wati</grapheme>
+    <phoneme>ˈva.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yaacob</grapheme>
+    <phoneme>ˈjat.ʃob</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zamri</grapheme>
+    <phoneme>ˈzam.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Azlan</grapheme>
+    <phoneme>ˈaz.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Muhammad</grapheme>
+    <phoneme>mu.ˈha.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Abdul</grapheme>
+    <phoneme>ˈab.dul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nur</grapheme>
+    <phoneme>ˈnuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nurul</grapheme>
+    <phoneme>ˈnu.ʁul</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siti</grapheme>
+    <phoneme>ˈsi.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aisyah</grapheme>
+    <phoneme>a.ˈi.ʃah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fatimah</grapheme>
+    <phoneme>fa.ˈti.mah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khadijah</grapheme>
+    <phoneme>xa.ˈdid.ʒah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aminah</grapheme>
+    <phoneme>a.ˈmi.nah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zainab</grapheme>
+    <phoneme>za.ˈi.nab</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maryam</grapheme>
+    <phoneme>ˈmaʁ.jam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hafiz</grapheme>
+    <phoneme>ˈha.fiz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Haziq</grapheme>
+    <phoneme>ˈha.zik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iman</grapheme>
+    <phoneme>ˈi.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aiman</grapheme>
+    <phoneme>a.ˈi.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danish</grapheme>
+    <phoneme>ˈda.nish</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adam</grapheme>
+    <phoneme>ˈa.dam</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aqil</grapheme>
+    <phoneme>ˈa.kil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Harith</grapheme>
+    <phoneme>ˈha.ʁith</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irfan</grapheme>
+    <phoneme>ˈiʁ.fan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zikri</grapheme>
+    <phoneme>ˈzik.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Amir</grapheme>
+    <phoneme>ˈa.miʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hakim</grapheme>
+    <phoneme>ˈha.kim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Syafiq</grapheme>
+    <phoneme>ˈʃa.fik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luqman</grapheme>
+    <phoneme>ˈluk.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naufal</grapheme>
+    <phoneme>na.ˈu.fal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rayyan</grapheme>
+    <phoneme>ˈʁa.jan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaid</grapheme>
+    <phoneme>ˈza.id</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleeya</grapheme>
+    <phoneme>a.lə.ˈə.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alia</grapheme>
+    <phoneme>a.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Balqis</grapheme>
+    <phoneme>ˈbal.kis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dahlia</grapheme>
+    <phoneme>dah.ˈli.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eryna</grapheme>
+    <phoneme>ˈəʁ.jna</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hana</grapheme>
+    <phoneme>ˈha.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Insyirah</grapheme>
+    <phoneme>in.ˈʃi.ʁah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jannah</grapheme>
+    <phoneme>ˈdʒa.nah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khaleeda</grapheme>
+    <phoneme>xa.lə.ˈə.da</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laila</grapheme>
+    <phoneme>la.ˈi.la</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mariam</grapheme>
+    <phoneme>ma.ˈʁi.am</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nadia</grapheme>
+    <phoneme>na.ˈdi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Qistina</grapheme>
+    <phoneme>kis.ˈti.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rania</grapheme>
+    <phoneme>ʁa.ˈni.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofia</grapheme>
+    <phoneme>so.ˈfi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wardina</grapheme>
+    <phoneme>vaʁ.ˈdi.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasmin</grapheme>
+    <phoneme>ˈjas.min</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zahra</grapheme>
+    <phoneme>ˈzah.ʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aqilah</grapheme>
+    <phoneme>a.ˈki.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Batrisyia</grapheme>
+    <phoneme>bat.ʁi.ˈʃi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damia</grapheme>
+    <phoneme>da.ˈmi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elina</grapheme>
+    <phoneme>ə.ˈli.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Farah</grapheme>
+    <phoneme>ˈfa.ʁah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hidayah</grapheme>
+    <phoneme>hi.ˈda.jah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iffah</grapheme>
+    <phoneme>ˈi.fah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Liyana</grapheme>
+    <phoneme>li.ˈja.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maisarah</grapheme>
+    <phoneme>ma.i.ˈsa.ʁah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Najwa</grapheme>
+    <phoneme>ˈnad.ʒva</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Puteri</grapheme>
+    <phoneme>pu.ˈtə.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sabrina</grapheme>
+    <phoneme>sab.ˈʁi.na</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wani</grapheme>
+    <phoneme>ˈva.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Faisal</grapheme>
+    <phoneme>fa.ˈi.sal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nazri</grapheme>
+    <phoneme>ˈnaz.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shafiq</grapheme>
+    <phoneme>ˈsha.fik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaki</grapheme>
+    <phoneme>ˈza.ki</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Azman</grapheme>
+    <phoneme>ˈaz.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Johari</grapheme>
+    <phoneme>dʒo.ˈha.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anwar</grapheme>
+    <phoneme>ˈan.vaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hafidz</grapheme>
+    <phoneme>ˈha.fidz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Haziq Wahyu</grapheme>
+    <phoneme>ˈha.zik.vah.ju</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irfan Yaacob</grapheme>
+    <phoneme>ˈiʁ.fan.jat.ʃob</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shafiq Yatim</grapheme>
+    <phoneme>ˈsha.fik.ja.tim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mahmud Bakri</grapheme>
+    <phoneme>ˈmah.mud.bak.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Puteri Rosli</grapheme>
+    <phoneme>pu.ˈtə.ʁi.ʁos.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nur Maarof</grapheme>
+    <phoneme>ˈnuʁ.ma.ʁof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Othman Bakar</grapheme>
+    <phoneme>ˈot.hman.ba.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Johari Obeng</grapheme>
+    <phoneme>dʒo.ˈha.ʁi.o.bəŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim Ahmad</grapheme>
+    <phoneme>ˈha.lim.ah.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nadia Dahlan</grapheme>
+    <phoneme>na.ˈdi.a.dah.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mansor Lim</grapheme>
+    <phoneme>ˈman.soʁ.lim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siti Hanafi</grapheme>
+    <phoneme>ˈsi.ti.ha.na.fi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adam Ridzuan</grapheme>
+    <phoneme>ˈa.dam.ʁid.zu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khadijah Che</grapheme>
+    <phoneme>xa.ˈdid.ʒah.tʃhə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hakim Rahman</grapheme>
+    <phoneme>ˈha.kim.ʁah.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zainab Zahari</grapheme>
+    <phoneme>za.ˈi.nab.za.ha.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mansor Dollah</grapheme>
+    <phoneme>ˈman.soʁ.do.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim Hamzah</grapheme>
+    <phoneme>ˈha.lim.ham.zah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naufal Dahlan</grapheme>
+    <phoneme>na.ˈu.fal.dah.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaki Dollah</grapheme>
+    <phoneme>ˈza.ki.do.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleeya Pawanchik</grapheme>
+    <phoneme>a.lə.ˈə.ja.pa.van.tʃhik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Siti Yaacob</grapheme>
+    <phoneme>ˈsi.ti.jat.ʃob</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ahmad Anuar</grapheme>
+    <phoneme>ˈah.mad.a.nu.aʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luqman Umar</grapheme>
+    <phoneme>ˈluk.man.u.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mansor Lah</grapheme>
+    <phoneme>ˈman.soʁ.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aiman Wan</grapheme>
+    <phoneme>a.ˈi.man.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Harith Ong</grapheme>
+    <phoneme>ˈha.ʁith.oŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hana Wahid</grapheme>
+    <phoneme>ˈha.na.va.hid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nadia Marican</grapheme>
+    <phoneme>na.ˈdi.a.ma.ʁit.ʃan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hidayah Ahmad</grapheme>
+    <phoneme>hi.ˈda.jah.ah.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali Dahlan</grapheme>
+    <phoneme>ˈa.li.dah.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Johari Tajuddin</grapheme>
+    <phoneme>dʒo.ˈha.ʁi.tad.ʒu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hamzah Puteh</grapheme>
+    <phoneme>ˈham.zah.pu.təh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daim Osman</grapheme>
+    <phoneme>ˈda.im.os.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rania Mansor</grapheme>
+    <phoneme>ʁa.ˈni.a.man.soʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ghani Anuar</grapheme>
+    <phoneme>ˈga.ni.a.nu.aʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Haziq Othman</grapheme>
+    <phoneme>ˈha.zik.ot.hman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali Tahir</grapheme>
+    <phoneme>ˈa.li.ta.hiʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khadijah Yahya</grapheme>
+    <phoneme>xa.ˈdid.ʒah.jah.ja</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jannah Nasir</grapheme>
+    <phoneme>ˈdʒa.nah.na.siʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Borhan Omar</grapheme>
+    <phoneme>ˈboʁ.han.o.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ali Salleh</grapheme>
+    <phoneme>ˈa.li.sa.ləh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hafiz Salleh</grapheme>
+    <phoneme>ˈha.fiz.sa.ləh</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Borhan Kassim</grapheme>
+    <phoneme>ˈboʁ.han.ka.sim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Latif Aziz</grapheme>
+    <phoneme>ˈla.tif.a.ziz</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nur Imran</grapheme>
+    <phoneme>ˈnuʁ.im.ʁan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irfan Jaafar</grapheme>
+    <phoneme>ˈiʁ.fan.dʒa.faʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nasir Nik</grapheme>
+    <phoneme>ˈna.siʁ.nik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khadijah Zabidi</grapheme>
+    <phoneme>xa.ˈdid.ʒah.za.bi.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zikri Majid</grapheme>
+    <phoneme>ˈzik.ʁi.mad.ʒid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aminah Othman</grapheme>
+    <phoneme>a.ˈmi.nah.ot.hman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Abdul Musa</grapheme>
+    <phoneme>ˈab.dul.mu.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nasir Jalil</grapheme>
+    <phoneme>ˈna.siʁ.dʒa.lil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iffah Razak</grapheme>
+    <phoneme>ˈi.fah.ʁa.zak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maryam Razak</grapheme>
+    <phoneme>ˈmaʁ.jam.ʁa.zak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daim Majid</grapheme>
+    <phoneme>ˈda.im.mad.ʒid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aleeya Tengku</grapheme>
+    <phoneme>a.lə.ˈə.ja.təŋ.ku</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Insyirah Asri</grapheme>
+    <phoneme>in.ˈʃi.ʁah.as.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luqman Ismail</grapheme>
+    <phoneme>ˈluk.man.is.ma.il</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jannah Basir</grapheme>
+    <phoneme>ˈdʒa.nah.ba.siʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaid Bakar</grapheme>
+    <phoneme>ˈza.id.ba.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim Jais</grapheme>
+    <phoneme>ˈha.lim.dʒa.is</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eryna Wati</grapheme>
+    <phoneme>ˈəʁ.jna.va.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hidayah Jalil</grapheme>
+    <phoneme>hi.ˈda.jah.dʒa.lil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nazri Omar</grapheme>
+    <phoneme>ˈnaz.ʁi.o.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anwar Wahyu</grapheme>
+    <phoneme>ˈan.vaʁ.vah.ju</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sabrina Razak</grapheme>
+    <phoneme>sab.ˈʁi.na.ʁa.zak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jannah Marican</grapheme>
+    <phoneme>ˈdʒa.nah.ma.ʁit.ʃan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fauzi Bakar</grapheme>
+    <phoneme>fa.ˈu.zi.ba.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aziz Pawanchik</grapheme>
+    <phoneme>ˈa.ziz.pa.van.tʃhik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim Noor</grapheme>
+    <phoneme>ˈha.lim.noʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hamzah Jalil</grapheme>
+    <phoneme>ˈham.zah.dʒa.lil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danish Dahlan</grapheme>
+    <phoneme>ˈda.nish.dah.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Muhammad Lah</grapheme>
+    <phoneme>mu.ˈha.mad.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaid Hamzah</grapheme>
+    <phoneme>ˈza.id.ham.zah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Muhammad Effendi</grapheme>
+    <phoneme>mu.ˈha.mad.ə.fən.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Liyana Rashid</grapheme>
+    <phoneme>li.ˈja.na.ʁas.hid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Liyana Halim</grapheme>
+    <phoneme>li.ˈja.na.ha.lim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maisarah Daim</grapheme>
+    <phoneme>ma.i.ˈsa.ʁah.da.im</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Puteri Che</grapheme>
+    <phoneme>pu.ˈtə.ʁi.tʃhə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hamzah Talib</grapheme>
+    <phoneme>ˈham.zah.ta.lib</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaid Osman</grapheme>
+    <phoneme>ˈza.id.os.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Borhan Tajuddin</grapheme>
+    <phoneme>ˈboʁ.han.tad.ʒu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maisarah Adnan</grapheme>
+    <phoneme>ma.i.ˈsa.ʁah.ad.nan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aminah Mohamed</grapheme>
+    <phoneme>a.ˈmi.nah.mo.ha.məd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Liyana Sani</grapheme>
+    <phoneme>li.ˈja.na.sa.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Othman Wan</grapheme>
+    <phoneme>ˈot.hman.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khaleeda Rashid</grapheme>
+    <phoneme>xa.lə.ˈə.da.ʁas.hid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofia Roslan</grapheme>
+    <phoneme>so.ˈfi.a.ʁos.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mansor Musa</grapheme>
+    <phoneme>ˈman.soʁ.mu.sa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zahra Yusof</grapheme>
+    <phoneme>ˈzah.ʁa.ju.sof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mariam Majid</grapheme>
+    <phoneme>ma.ˈʁi.am.mad.ʒid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alia Dollah</grapheme>
+    <phoneme>a.ˈli.a.do.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zahra Wati</grapheme>
+    <phoneme>ˈzah.ʁa.va.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danish Mat</grapheme>
+    <phoneme>ˈda.nish.mat</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Othman Tajuddin</grapheme>
+    <phoneme>ˈot.hman.tad.ʒu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elina Zakaria</grapheme>
+    <phoneme>ə.ˈli.na.za.ka.ʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aziz Othman</grapheme>
+    <phoneme>ˈa.ziz.ot.hman</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jannah Wan</grapheme>
+    <phoneme>ˈdʒa.nah.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sabrina Samad</grapheme>
+    <phoneme>sab.ˈʁi.na.sa.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damia Usman</grapheme>
+    <phoneme>da.ˈmi.a.us.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danish Kamal</grapheme>
+    <phoneme>ˈda.nish.ka.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Batrisyia Basir</grapheme>
+    <phoneme>bat.ʁi.ˈʃi.a.ba.siʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Idris Tajuddin</grapheme>
+    <phoneme>ˈid.ʁis.tad.ʒu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maryam Zahari</grapheme>
+    <phoneme>ˈmaʁ.jam.za.ha.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Farah Umar</grapheme>
+    <phoneme>ˈfa.ʁah.u.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Najwa Jamal</grapheme>
+    <phoneme>ˈnad.ʒva.dʒa.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naufal Nawawi</grapheme>
+    <phoneme>na.ˈu.fal.na.va.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nasir Samad</grapheme>
+    <phoneme>ˈna.siʁ.sa.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Johari Samad</grapheme>
+    <phoneme>dʒo.ˈha.ʁi.sa.mad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Syafiq Wan</grapheme>
+    <phoneme>ˈʃa.fik.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lokman Effendi</grapheme>
+    <phoneme>ˈlok.man.ə.fən.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aiman Umar</grapheme>
+    <phoneme>a.ˈi.man.u.maʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eryna Idris</grapheme>
+    <phoneme>ˈəʁ.jna.id.ʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Luqman Sani</grapheme>
+    <phoneme>ˈluk.man.sa.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danish Sani</grapheme>
+    <phoneme>ˈda.nish.sa.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irfan Nik</grapheme>
+    <phoneme>ˈiʁ.fan.nik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iman Rahim</grapheme>
+    <phoneme>ˈi.man.ʁa.him</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daim Nawawi</grapheme>
+    <phoneme>ˈda.im.na.va.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kassim Maarof</grapheme>
+    <phoneme>ˈka.sim.ma.ʁof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aqilah Ghazali</grapheme>
+    <phoneme>a.ˈki.lah.ga.za.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Irfan Sulaiman</grapheme>
+    <phoneme>ˈiʁ.fan.su.la.i.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Razak Sulaiman</grapheme>
+    <phoneme>ˈʁa.zak.su.la.i.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rayyan Majid</grapheme>
+    <phoneme>ˈʁa.jan.mad.ʒid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Qistina Kamal</grapheme>
+    <phoneme>kis.ˈti.na.ka.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Abdul Hassan</grapheme>
+    <phoneme>ˈab.dul.ha.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sofia Dahlan</grapheme>
+    <phoneme>so.ˈfi.a.dah.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Azman Qasim</grapheme>
+    <phoneme>ˈaz.man.ka.sim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Najwa Lokman</grapheme>
+    <phoneme>ˈnad.ʒva.lok.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Farah Ismail</grapheme>
+    <phoneme>ˈfa.ʁah.is.ma.il</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Haziq Basir</grapheme>
+    <phoneme>ˈha.zik.ba.siʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lokman Tan</grapheme>
+    <phoneme>ˈlok.man.tan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Muhammad Yakub</grapheme>
+    <phoneme>mu.ˈha.mad.ja.kub</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aqilah Zin</grapheme>
+    <phoneme>a.ˈki.lah.zin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hakim Shariff</grapheme>
+    <phoneme>ˈha.kim.sha.ʁif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yusof Ghani</grapheme>
+    <phoneme>ˈju.sof.ga.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Shafiq Zainal</grapheme>
+    <phoneme>ˈsha.fik.za.i.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Elina Chik</grapheme>
+    <phoneme>ə.ˈli.na.tʃhik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dahlia Che</grapheme>
+    <phoneme>dah.ˈli.a.tʃhə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Othman Razak</grapheme>
+    <phoneme>ˈot.hman.ʁa.zak</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasmin Yakub</grapheme>
+    <phoneme>ˈjas.min.ja.kub</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anwar Sapuan</grapheme>
+    <phoneme>ˈan.vaʁ.sa.pu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim Talib</grapheme>
+    <phoneme>ˈha.lim.ta.lib</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iskandar Asri</grapheme>
+    <phoneme>is.ˈkan.daʁ.as.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iffah Iliyas</grapheme>
+    <phoneme>ˈi.fah.i.li.jas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mohd Ujang</grapheme>
+    <phoneme>ˈmohd.ud.ʒaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sabrina Ghani</grapheme>
+    <phoneme>sab.ˈʁi.na.ga.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tarmizi Wan</grapheme>
+    <phoneme>taʁ.ˈmi.zi.van</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tahir Ali</grapheme>
+    <phoneme>ˈta.hiʁ.a.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Qistina Sallehuddin</grapheme>
+    <phoneme>kis.ˈti.na.sa.lə.hu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khadijah Rahman</grapheme>
+    <phoneme>xa.ˈdid.ʒah.ʁah.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iskandar Pawanchik</grapheme>
+    <phoneme>is.ˈkan.daʁ.pa.van.tʃhik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aiman Lah</grapheme>
+    <phoneme>a.ˈi.man.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sabrina Effendi</grapheme>
+    <phoneme>sab.ˈʁi.na.ə.fən.di</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fatimah Iliyas</grapheme>
+    <phoneme>fa.ˈti.mah.i.li.jas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bakar Majid</grapheme>
+    <phoneme>ˈba.kaʁ.mad.ʒid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Halim Nasrudin</grapheme>
+    <phoneme>ˈha.lim.nas.ʁu.din</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Puteri Ibrahim</grapheme>
+    <phoneme>pu.ˈtə.ʁi.ib.ʁa.him</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Razak Jais</grapheme>
+    <phoneme>ˈʁa.zak.dʒa.is</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sabrina Baharin</grapheme>
+    <phoneme>sab.ˈʁi.na.ba.ha.ʁin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wardina Iliyas</grapheme>
+    <phoneme>vaʁ.ˈdi.na.i.li.jas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zikri Halim</grapheme>
+    <phoneme>ˈzik.ʁi.ha.lim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rania Azlan</grapheme>
+    <phoneme>ʁa.ˈni.a.az.lan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rahim Zainal</grapheme>
+    <phoneme>ˈʁa.him.za.i.nal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Kassim Gani</grapheme>
+    <phoneme>ˈka.sim.ga.ni</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Razak Hashim</grapheme>
+    <phoneme>ˈʁa.zak.has.him</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iskandar Ghazali</grapheme>
+    <phoneme>is.ˈkan.daʁ.ga.za.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nadia Sapuan</grapheme>
+    <phoneme>na.ˈdi.a.sa.pu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Ismail Hassan</grapheme>
+    <phoneme>is.ˈma.il.ha.san</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nurul Zin</grapheme>
+    <phoneme>ˈnu.ʁul.zin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yasmin Fikri</grapheme>
+    <phoneme>ˈjas.min.fik.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Idris Dollah</grapheme>
+    <phoneme>ˈid.ʁis.do.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khadijah Ridzuan</grapheme>
+    <phoneme>xa.ˈdid.ʒah.ʁid.zu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alia Sapuan</grapheme>
+    <phoneme>a.ˈli.a.sa.pu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wani Qasim</grapheme>
+    <phoneme>ˈva.ni.ka.sim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hafidz Pendek</grapheme>
+    <phoneme>ˈha.fidz.pən.dək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Farah Osman</grapheme>
+    <phoneme>ˈfa.ʁah.os.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Danish Daud</grapheme>
+    <phoneme>ˈda.nish.da.ud</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tahir Kassim</grapheme>
+    <phoneme>ˈta.hiʁ.ka.sim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hafidz Jamal</grapheme>
+    <phoneme>ˈha.fidz.dʒa.mal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hidayah Ridzuan</grapheme>
+    <phoneme>hi.ˈda.jah.ʁid.zu.an</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Haziq Fikri</grapheme>
+    <phoneme>ˈha.zik.fik.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Wahab Wahyu</grapheme>
+    <phoneme>ˈva.hab.vah.ju</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Farah Lokman</grapheme>
+    <phoneme>ˈfa.ʁah.lok.man</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rahim Zakaria</grapheme>
+    <phoneme>ˈʁa.him.za.ka.ʁi.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tahir Marican</grapheme>
+    <phoneme>ˈta.hiʁ.ma.ʁit.ʃan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khaleeda Shariff</grapheme>
+    <phoneme>xa.lə.ˈə.da.sha.ʁif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Naufal Latiff</grapheme>
+    <phoneme>na.ˈu.fal.la.tif</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zaki Arshad</grapheme>
+    <phoneme>ˈza.ki.aʁ.shad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Zahra Halim</grapheme>
+    <phoneme>ˈzah.ʁa.ha.lim</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iffah Abdullah</grapheme>
+    <phoneme>ˈi.fah.ab.du.lah</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Johari Harun</grapheme>
+    <phoneme>dʒo.ˈha.ʁi.ha.ʁun</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Khaleeda Yakub</grapheme>
+    <phoneme>xa.lə.ˈə.da.ja.kub</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Tarmizi Nawawi</grapheme>
+    <phoneme>taʁ.ˈmi.zi.na.va.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eryna Obeng</grapheme>
+    <phoneme>ˈəʁ.jna.o.bəŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Liyana Borhan</grapheme>
+    <phoneme>li.ˈja.na.boʁ.han</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nazri Mohd</grapheme>
+    <phoneme>ˈnaz.ʁi.mohd</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Umar Hamid</grapheme>
+    <phoneme>ˈu.maʁ.ha.mid</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Iman Nawawi</grapheme>
+    <phoneme>ˈi.man.na.va.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Qistina Hashim</grapheme>
+    <phoneme>kis.ˈti.na.has.him</phoneme>
+  </lexeme>
+</lexicon>

@@ -119,6 +119,14 @@ lädt bts-light ein **gemeinsames Aussprache-Wörterbuch** von badhub
   über inline `<phoneme alphabet="ipa" ph="…">` (ganzer Name oder wortweise),
   sonst Fallback `<lang>`-Erkennung. Web Speech (offline) ignoriert `ipa` und
   nutzt `say`. Quelle: kuratiertes W3C-PLS-Lexikon (badhub).
+- **Sprach-Erkennung (`<lang>`-Pfad):** `detectNameLang` (`src/io/transliterate.ts`)
+  erkennt die Herkunftssprache: markante CN/VN-Nachnamen + kuratierte Namenslisten
+  `NAME_LANG_BASE` (es/fr/pl/tr/ms/in, generiert aus `data/name-lists/*.xml` via
+  `scripts/gen-name-lang-base.mjs`). **Konfidenz:** nur bei eindeutiger Sprache wird
+  `<lang xml:lang="…">` gesetzt (Locale-Map in `announcer.ts`), sonst deutscher
+  Default — mehrdeutige Namen werden nicht „geraten". Nur cn/vn haben zusätzlich
+  eine deutsche Umschrift (Web-Speech); die übrigen Sprachen wirken nur im
+  Azure-`<lang>`-Pfad. Plan: `docs/features/name-pronunciation-plan.md`.
 - **Teilen (opt-in):** Schalter „Meine Korrekturen mit der Community teilen"
   (`announce.share_corrections`, Default aus). Beim Speichern werden die eigenen
   Einträge via Rust-Command `share_pronunciations`

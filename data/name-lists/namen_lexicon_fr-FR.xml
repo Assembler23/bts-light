@@ -1,0 +1,1877 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lexicon version="1.0"
+      xmlns="http://www.w3.org/2005/01/pronunciation-lexicon"
+      alphabet="ipa" xml:lang="fr-FR">
+  <lexeme>
+    <grapheme>Martin</grapheme>
+    <phoneme>maʁ.ˈtɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bernard</grapheme>
+    <phoneme>bəʁ.ˈnaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thomas</grapheme>
+    <phoneme>tɔ.ˈŋa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Petit</grapheme>
+    <phoneme>pə.ˈti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Robert</grapheme>
+    <phoneme>ʁo.ˈbəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Richard</grapheme>
+    <phoneme>ʁi.ˈʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Durand</grapheme>
+    <phoneme>dy.ˈʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dubois</grapheme>
+    <phoneme>dyb.ˈwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Moreau</grapheme>
+    <phoneme>mo.ˈʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laurent</grapheme>
+    <phoneme>lo.ˈʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Simon</grapheme>
+    <phoneme>sɛ.ˈŋɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michel</grapheme>
+    <phoneme>mi.ˈʃəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lefebvre</grapheme>
+    <phoneme>lə.ˈfəbvʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leroy</grapheme>
+    <phoneme>lə.ʁo.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roux</grapheme>
+    <phoneme>ˈʁu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>David</grapheme>
+    <phoneme>da.ˈvi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bertrand</grapheme>
+    <phoneme>bəʁ.ˈtʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Morel</grapheme>
+    <phoneme>mo.ˈʁəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fournier</grapheme>
+    <phoneme>fuʁ.ni.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Girard</grapheme>
+    <phoneme>ʒi.ˈʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bonnet</grapheme>
+    <phoneme>bɔŋ.ˈnə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dupont</grapheme>
+    <phoneme>dy.ˈpɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lambert</grapheme>
+    <phoneme>laŋ.ˈbəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fontaine</grapheme>
+    <phoneme>fɔŋ.ˈtɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rousseau</grapheme>
+    <phoneme>ʁu.ˈso</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vincent</grapheme>
+    <phoneme>vɛŋ.ˈsaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Muller</grapheme>
+    <phoneme>my.ˈləʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lefevre</grapheme>
+    <phoneme>lə.ˈfəvʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Faure</grapheme>
+    <phoneme>ˈfoʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Andre</grapheme>
+    <phoneme>ˈaŋdʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mercier</grapheme>
+    <phoneme>məʁ.si.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Blanc</grapheme>
+    <phoneme>ˈblaŋs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guerin</grapheme>
+    <phoneme>gy.ə.ˈʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Boyer</grapheme>
+    <phoneme>bo.i.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Garnier</grapheme>
+    <phoneme>gaʁ.ni.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chevalier</grapheme>
+    <phoneme>ʃə.va.li.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Francois</grapheme>
+    <phoneme>fʁaŋ.ˈkwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Legrand</grapheme>
+    <phoneme>ləg.ˈʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gauthier</grapheme>
+    <phoneme>go.ti.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Garcia</grapheme>
+    <phoneme>gaʁ.si.ˈa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Perrin</grapheme>
+    <phoneme>pəʁ.ˈʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Robin</grapheme>
+    <phoneme>ʁo.ˈbɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clement</grapheme>
+    <phoneme>kla.ˈŋaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Morin</grapheme>
+    <phoneme>mo.ˈʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nicolas</grapheme>
+    <phoneme>ni.ko.ˈla</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henry</grapheme>
+    <phoneme>aŋ.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roussel</grapheme>
+    <phoneme>ʁu.ˈsəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mathieu</grapheme>
+    <phoneme>ma.ti.ˈø</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gautier</grapheme>
+    <phoneme>go.ti.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Masson</grapheme>
+    <phoneme>ma.ˈsɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marchand</grapheme>
+    <phoneme>maʁ.ˈʃaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Duval</grapheme>
+    <phoneme>dy.ˈval</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Denis</grapheme>
+    <phoneme>da.ˈŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dumont</grapheme>
+    <phoneme>dy.ˈmɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marie</grapheme>
+    <phoneme>ma.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lemaire</grapheme>
+    <phoneme>la.ˈŋɛʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Noel</grapheme>
+    <phoneme>no.ˈəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Meyer</grapheme>
+    <phoneme>mə.i.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dufour</grapheme>
+    <phoneme>dy.ˈfuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Meunier</grapheme>
+    <phoneme>mø.ni.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Brun</grapheme>
+    <phoneme>ˈbʁœŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Blanchard</grapheme>
+    <phoneme>blaŋ.ˈʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Giraud</grapheme>
+    <phoneme>ʒi.ˈʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Joly</grapheme>
+    <phoneme>ʒo.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Riviere</grapheme>
+    <phoneme>ʁi.vi.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucas</grapheme>
+    <phoneme>ly.ˈka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Brunet</grapheme>
+    <phoneme>bʁœ.ˈŋə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gaillard</grapheme>
+    <phoneme>gɛ.ˈlaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barbier</grapheme>
+    <phoneme>baʁ.bi.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arnaud</grapheme>
+    <phoneme>aʁ.ˈno</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martinez</grapheme>
+    <phoneme>maʁ.tɛ.ˈŋə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gerard</grapheme>
+    <phoneme>ʒə.ˈʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roche</grapheme>
+    <phoneme>ˈʁoʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Renard</grapheme>
+    <phoneme>ʁa.ˈŋaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Schmitt</grapheme>
+    <phoneme>ˈsʃmit</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roy</grapheme>
+    <phoneme>ʁo.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leroux</grapheme>
+    <phoneme>lə.ˈʁu</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Colin</grapheme>
+    <phoneme>ko.ˈlɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vidal</grapheme>
+    <phoneme>vi.ˈdal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Caron</grapheme>
+    <phoneme>ka.ˈʁɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Picard</grapheme>
+    <phoneme>pi.ˈkaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roger</grapheme>
+    <phoneme>ʁo.ˈʒəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fabre</grapheme>
+    <phoneme>ˈfabʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aubert</grapheme>
+    <phoneme>o.ˈbəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lemoine</grapheme>
+    <phoneme>laŋ.ˈwan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Renaud</grapheme>
+    <phoneme>ʁa.ˈŋo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dumas</grapheme>
+    <phoneme>dy.ˈma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lacroix</grapheme>
+    <phoneme>lak.ˈʁwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Olivier</grapheme>
+    <phoneme>o.li.vi.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Philippe</grapheme>
+    <phoneme>fi.ˈlip</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bourgeois</grapheme>
+    <phoneme>buʁ.ʒə.ˈwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pierre</grapheme>
+    <phoneme>pi.ˈəʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Benoit</grapheme>
+    <phoneme>baŋ.ˈwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rey</grapheme>
+    <phoneme>ʁə.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leclerc</grapheme>
+    <phoneme>lək.ˈləʁs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Payet</grapheme>
+    <phoneme>pa.i.ˈə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Rolland</grapheme>
+    <phoneme>ʁo.ˈlaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leclercq</grapheme>
+    <phoneme>lək.ˈləʁkk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillaume</grapheme>
+    <phoneme>gy.i.ˈlom</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lecomte</grapheme>
+    <phoneme>lə.ˈkɔŋt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lopez</grapheme>
+    <phoneme>lo.ˈpə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jean</grapheme>
+    <phoneme>ˈʒaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dupuy</grapheme>
+    <phoneme>dy.py.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillot</grapheme>
+    <phoneme>gy.i.ˈlo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hubert</grapheme>
+    <phoneme>y.ˈbəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Berger</grapheme>
+    <phoneme>bəʁ.ˈʒəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carpentier</grapheme>
+    <phoneme>kaʁ.paŋ.ti.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sanchez</grapheme>
+    <phoneme>saŋ.ˈʃə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dupuis</grapheme>
+    <phoneme>dy.py.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Moulin</grapheme>
+    <phoneme>mu.ˈlɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Louis</grapheme>
+    <phoneme>lu.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Deschamps</grapheme>
+    <phoneme>dəs.ˈʃaŋp</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Huet</grapheme>
+    <phoneme>y.ˈə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vasseur</grapheme>
+    <phoneme>va.ˈsøʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Perez</grapheme>
+    <phoneme>pə.ˈʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Boucher</grapheme>
+    <phoneme>bu.ˈʃəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fleury</grapheme>
+    <phoneme>flø.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Royer</grapheme>
+    <phoneme>ʁo.i.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Klein</grapheme>
+    <phoneme>ˈklɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jacquet</grapheme>
+    <phoneme>ʒa.ˈkə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adam</grapheme>
+    <phoneme>a.ˈdaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paris</grapheme>
+    <phoneme>pa.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Poirier</grapheme>
+    <phoneme>pwa.ʁi.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marty</grapheme>
+    <phoneme>maʁ.ˈti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aubry</grapheme>
+    <phoneme>ob.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guyot</grapheme>
+    <phoneme>gy.i.ˈo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Carre</grapheme>
+    <phoneme>ˈkaʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Charles</grapheme>
+    <phoneme>ʃaʁ.ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Renault</grapheme>
+    <phoneme>ʁa.ˈŋol</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Charpentier</grapheme>
+    <phoneme>ʃaʁ.paŋ.ti.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Menard</grapheme>
+    <phoneme>ma.ˈŋaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maillard</grapheme>
+    <phoneme>mɛ.ˈlaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Baron</grapheme>
+    <phoneme>ba.ˈʁɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bertin</grapheme>
+    <phoneme>bəʁ.ˈtɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bailly</grapheme>
+    <phoneme>bɛ.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Herve</grapheme>
+    <phoneme>ˈəʁv</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Schneider</grapheme>
+    <phoneme>sʃnɛ.ˈdəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fernandez</grapheme>
+    <phoneme>fəʁ.naŋ.ˈdə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Le</grapheme>
+    <phoneme>ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gall</grapheme>
+    <phoneme>ˈgal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Collet</grapheme>
+    <phoneme>ko.ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leger</grapheme>
+    <phoneme>lə.ˈʒəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bouvier</grapheme>
+    <phoneme>bu.vi.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julien</grapheme>
+    <phoneme>ʒy.li.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Prevost</grapheme>
+    <phoneme>pʁə.ˈvos</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Millet</grapheme>
+    <phoneme>mi.ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Perrot</grapheme>
+    <phoneme>pəʁ.ˈʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel</grapheme>
+    <phoneme>da.ŋi.ˈəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cousin</grapheme>
+    <phoneme>ku.ˈsɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Germain</grapheme>
+    <phoneme>ʒəʁ.ˈmɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Breton</grapheme>
+    <phoneme>bʁə.ˈtɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Besson</grapheme>
+    <phoneme>bə.ˈsɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Langlois</grapheme>
+    <phoneme>laŋ.ˈglwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Remy</grapheme>
+    <phoneme>ʁa.ˈŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Goff</grapheme>
+    <phoneme>ˈgof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pelletier</grapheme>
+    <phoneme>pə.lə.ti.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leveque</grapheme>
+    <phoneme>lə.ˈvək</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Perrier</grapheme>
+    <phoneme>pəʁ.ʁi.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Leblanc</grapheme>
+    <phoneme>ləb.ˈlaŋs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Barre</grapheme>
+    <phoneme>ˈbaʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lebrun</grapheme>
+    <phoneme>ləb.ˈʁœŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marchal</grapheme>
+    <phoneme>maʁ.ˈʃal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alain</grapheme>
+    <phoneme>a.ˈlɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>André</grapheme>
+    <phoneme>aŋ.ˈdʁe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jacques</grapheme>
+    <phoneme>ʒa.ˈkə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcel</grapheme>
+    <phoneme>maʁ.ˈsəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>René</grapheme>
+    <phoneme>ʁa.ˈŋe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claude</grapheme>
+    <phoneme>ˈklod</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christian</grapheme>
+    <phoneme>ʃʁis.ti.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henri</grapheme>
+    <phoneme>aŋ.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Georges</grapheme>
+    <phoneme>ʒə.oʁ.ˈʒə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paul</grapheme>
+    <phoneme>ˈpol</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christophe</grapheme>
+    <phoneme>ʃʁis.ˈtof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patrick</grapheme>
+    <phoneme>pat.ˈʁik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>François</grapheme>
+    <phoneme>fʁaŋ.ˈswa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thierry</grapheme>
+    <phoneme>ti.əʁ.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pascal</grapheme>
+    <phoneme>pas.ˈkal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sébastien</grapheme>
+    <phoneme>se.bas.ti.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stéphane</grapheme>
+    <phoneme>ste.ˈfaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Frédéric</grapheme>
+    <phoneme>fʁe.de.ˈʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eric</grapheme>
+    <phoneme>ə.ˈʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard</grapheme>
+    <phoneme>ʒe.ˈʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antoine</grapheme>
+    <phoneme>aŋ.ˈtwan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maxime</grapheme>
+    <phoneme>ma.ˈxɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alexandre</grapheme>
+    <phoneme>a.lə.ˈxaŋdʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hugo</grapheme>
+    <phoneme>y.ˈgo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Théo</grapheme>
+    <phoneme>te.ˈo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nathan</grapheme>
+    <phoneme>na.ˈtaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Enzo</grapheme>
+    <phoneme>aŋ.ˈzo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Léo</grapheme>
+    <phoneme>le.ˈo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gabriel</grapheme>
+    <phoneme>gab.ʁi.ˈəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raphaël</grapheme>
+    <phoneme>ʁa.ˈfaël</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Arthur</grapheme>
+    <phoneme>aʁ.ˈtyʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jules</grapheme>
+    <phoneme>ʒy.ˈlə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nathalie</grapheme>
+    <phoneme>na.ta.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Isabelle</grapheme>
+    <phoneme>i.sa.ˈbəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sylvie</grapheme>
+    <phoneme>sil.ˈvi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Catherine</grapheme>
+    <phoneme>ka.tə.ˈʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Françoise</grapheme>
+    <phoneme>fʁaŋ.ˈswas</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martine</grapheme>
+    <phoneme>maʁ.ˈtɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christine</grapheme>
+    <phoneme>ʃʁis.ˈtɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Monique</grapheme>
+    <phoneme>mɔ.ˈŋik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nicole</grapheme>
+    <phoneme>ni.ˈkol</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anne</grapheme>
+    <phoneme>ˈaŋn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sophie</grapheme>
+    <phoneme>so.ˈfi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Céline</grapheme>
+    <phoneme>se.ˈlɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Valérie</grapheme>
+    <phoneme>va.le.ˈʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandrine</grapheme>
+    <phoneme>saŋ.ˈdʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stéphanie</grapheme>
+    <phoneme>ste.fa.ˈŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Véronique</grapheme>
+    <phoneme>ve.ʁɔ.ˈŋik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Caroline</grapheme>
+    <phoneme>ka.ʁo.ˈlɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julie</grapheme>
+    <phoneme>ʒy.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Camille</grapheme>
+    <phoneme>ka.ˈŋil</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Léa</grapheme>
+    <phoneme>le.ˈa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manon</grapheme>
+    <phoneme>ma.ˈŋɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chloé</grapheme>
+    <phoneme>ʃlo.ˈe</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emma</grapheme>
+    <phoneme>aŋ.ˈma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sarah</grapheme>
+    <phoneme>sa.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laura</grapheme>
+    <phoneme>lo.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marine</grapheme>
+    <phoneme>ma.ˈʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pauline</grapheme>
+    <phoneme>po.ˈlɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mathilde</grapheme>
+    <phoneme>ma.ˈtild</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clara</grapheme>
+    <phoneme>kla.ˈʁa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucie</grapheme>
+    <phoneme>ly.ˈsi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine</grapheme>
+    <phoneme>ʒys.ˈtɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Océane</grapheme>
+    <phoneme>o.se.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inès</grapheme>
+    <phoneme>ɛ.ˈŋɛ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jade</grapheme>
+    <phoneme>ˈʒad</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Louise</grapheme>
+    <phoneme>lu.ˈis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alice</grapheme>
+    <phoneme>a.ˈlis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Charlotte</grapheme>
+    <phoneme>ʃaʁ.ˈlot</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Juliette</grapheme>
+    <phoneme>ʒy.li.ˈət</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Audrey</grapheme>
+    <phoneme>od.ʁə.ˈi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aurélie</grapheme>
+    <phoneme>o.ʁe.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Élodie</grapheme>
+    <phoneme>e.lo.ˈdi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Émilie</grapheme>
+    <phoneme>e.mi.ˈli</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Delphine</grapheme>
+    <phoneme>dəl.ˈfɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Virginie</grapheme>
+    <phoneme>viʁ.ʒɛ.ˈŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Karine</grapheme>
+    <phoneme>ka.ˈʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Florence</grapheme>
+    <phoneme>flo.ˈʁaŋs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hélène</grapheme>
+    <phoneme>e.ˈlɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Brigitte</grapheme>
+    <phoneme>bʁi.ˈʒit</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chantal</grapheme>
+    <phoneme>ʃaŋ.ˈtal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominique</grapheme>
+    <phoneme>dɔ.ŋɛ.ˈŋik</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patricia</grapheme>
+    <phoneme>pat.ʁi.si.ˈa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sylviane</grapheme>
+    <phoneme>sil.vi.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Corinne</grapheme>
+    <phoneme>ko.ˈʁɛŋn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Évelyne</grapheme>
+    <phoneme>e.və.ˈlin</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geneviève</grapheme>
+    <phoneme>ʒa.ŋə.vi.ˈɛv</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Josiane</grapheme>
+    <phoneme>ʒo.si.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Yvette</grapheme>
+    <phoneme>i.ˈvət</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Simone</grapheme>
+    <phoneme>sɛ.ˈŋɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Denise</grapheme>
+    <phoneme>da.ˈŋis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Suzanne</grapheme>
+    <phoneme>sy.ˈzaŋn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Madeleine</grapheme>
+    <phoneme>ma.də.ˈlɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claudine</grapheme>
+    <phoneme>klo.ˈdɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mireille</grapheme>
+    <phoneme>mi.ˈʁɛl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bruno</grapheme>
+    <phoneme>bʁœ.ˈŋo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Didier</grapheme>
+    <phoneme>di.di.ˈəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fabrice</grapheme>
+    <phoneme>fab.ˈʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cédric</grapheme>
+    <phoneme>sed.ˈʁis</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Damien</grapheme>
+    <phoneme>da.ŋi.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Romain</grapheme>
+    <phoneme>ʁɔ.ˈŋɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Quentin</grapheme>
+    <phoneme>kaŋ.ˈtɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Florian</grapheme>
+    <phoneme>flo.ʁi.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Adrien</grapheme>
+    <phoneme>ad.ʁi.ˈaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Benjamin</grapheme>
+    <phoneme>baŋ.ʒa.ˈŋɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clément</grapheme>
+    <phoneme>kle.ˈmaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clara Charpentier</grapheme>
+    <phoneme>kla.ˈʁa.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mathilde Maillard</grapheme>
+    <phoneme>ma.ˈtild.mɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Olivier Martinez</grapheme>
+    <phoneme>o.li.vi.ˈəʁ.maʁ.tɛ.ŋə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Monique Menard</grapheme>
+    <phoneme>mɔ.ˈŋik.ma.ŋaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Camille Poirier</grapheme>
+    <phoneme>ka.ˈŋil.pwa.ʁi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stéphanie Joly</grapheme>
+    <phoneme>ste.fa.ˈŋi.ʒo.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aurélie Bertin</grapheme>
+    <phoneme>o.ʁe.ˈli.bəʁ.tɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Mireille Brunet</grapheme>
+    <phoneme>mi.ˈʁɛl.bʁœ.ŋə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Romain Julien</grapheme>
+    <phoneme>ʁɔ.ˈŋɛn.ʒy.li.aŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Didier Duval</grapheme>
+    <phoneme>di.di.ˈəʁ.dy.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Simone Perez</grapheme>
+    <phoneme>sɛ.ˈŋɔŋ.pə.ʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roger Carpentier</grapheme>
+    <phoneme>ʁo.ˈʒəʁ.kaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Louis Lopez</grapheme>
+    <phoneme>lu.ˈi.lo.pə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christine Picard</grapheme>
+    <phoneme>ʃʁis.ˈtɛŋ.pi.kaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcel Blanchard</grapheme>
+    <phoneme>maʁ.ˈsəl.blaŋ.ʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Françoise Fournier</grapheme>
+    <phoneme>fʁaŋ.ˈswas.fuʁ.ni.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pascal Colin</grapheme>
+    <phoneme>pas.ˈkal.ko.lɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Patricia Blanc</grapheme>
+    <phoneme>pat.ʁi.si.ˈa.blaŋs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Didier Garcia</grapheme>
+    <phoneme>di.di.ˈəʁ.gaʁ.si.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Florian Rey</grapheme>
+    <phoneme>flo.ʁi.ˈaŋ.ʁə.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paul Riviere</grapheme>
+    <phoneme>ˈpol.ʁi.vi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bruno Chevalier</grapheme>
+    <phoneme>bʁœ.ˈŋo.ʃə.va.li.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clément Jacquet</grapheme>
+    <phoneme>kle.ˈmaŋ.ʒa.kə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sébastien Rousseau</grapheme>
+    <phoneme>se.bas.ti.ˈaŋ.ʁu.so</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nathalie Aubry</grapheme>
+    <phoneme>na.ta.ˈli.ob.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christophe Meyer</grapheme>
+    <phoneme>ʃʁis.ˈtof.mə.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christophe Louis</grapheme>
+    <phoneme>ʃʁis.ˈtof.lu.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Véronique Guillot</grapheme>
+    <phoneme>ve.ʁɔ.ˈŋik.gy.i.lo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Enzo Sanchez</grapheme>
+    <phoneme>aŋ.ˈzo.saŋ.ʃə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Olivier Pierre</grapheme>
+    <phoneme>o.li.vi.ˈəʁ.pi.əʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hugo Fontaine</grapheme>
+    <phoneme>y.ˈgo.fɔŋ.tɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Delphine Rey</grapheme>
+    <phoneme>dəl.ˈfɛŋ.ʁə.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michel Dumas</grapheme>
+    <phoneme>mi.ˈʃəl.dy.ma</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manon Royer</grapheme>
+    <phoneme>ma.ˈŋɔŋ.ʁo.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Christine Robert</grapheme>
+    <phoneme>ʃʁis.ˈtɛŋ.ʁo.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marie Lemoine</grapheme>
+    <phoneme>ma.ˈʁi.laŋ.wan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Caroline Barre</grapheme>
+    <phoneme>ka.ʁo.ˈlɛŋ.baʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alexandre Maillard</grapheme>
+    <phoneme>a.lə.ˈxaŋdʁ.mɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Benjamin Bertrand</grapheme>
+    <phoneme>baŋ.ʒa.ˈŋɛŋ.bəʁ.tʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Robert Dufour</grapheme>
+    <phoneme>ʁo.ˈbəʁ.dy.fuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillaume Muller</grapheme>
+    <phoneme>gy.i.ˈlom.my.ləʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>René Gaillard</grapheme>
+    <phoneme>ʁa.ˈŋe.gɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard Simon</grapheme>
+    <phoneme>ʒe.ˈʁaʁ.sɛ.ŋɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Fabrice Roussel</grapheme>
+    <phoneme>fab.ˈʁis.ʁu.səl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard Boyer</grapheme>
+    <phoneme>ʒe.ˈʁaʁ.bo.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geneviève Dupuis</grapheme>
+    <phoneme>ʒa.ŋə.vi.ˈɛv.dy.py.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Denise Brunet</grapheme>
+    <phoneme>da.ˈŋis.bʁœ.ŋə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Isabelle Gauthier</grapheme>
+    <phoneme>i.sa.ˈbəl.go.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Camille Maillard</grapheme>
+    <phoneme>ka.ˈŋil.mɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sarah Carre</grapheme>
+    <phoneme>sa.ˈʁa.kaʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Aurélie Aubert</grapheme>
+    <phoneme>o.ʁe.ˈli.o.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claude Gerard</grapheme>
+    <phoneme>ˈklod.ʒə.ʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jacques Roussel</grapheme>
+    <phoneme>ʒa.ˈkə.ʁu.səl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard Robert</grapheme>
+    <phoneme>ʒe.ˈʁaʁ.ʁo.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Océane Lambert</grapheme>
+    <phoneme>o.se.ˈaŋ.laŋ.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Corinne Brunet</grapheme>
+    <phoneme>ko.ˈʁɛŋn.bʁœ.ŋə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>René Pelletier</grapheme>
+    <phoneme>ʁa.ˈŋe.pə.lə.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Suzanne Noel</grapheme>
+    <phoneme>sy.ˈzaŋn.no.əl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel Gaillard</grapheme>
+    <phoneme>da.ŋi.ˈəl.gɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Madeleine Blanc</grapheme>
+    <phoneme>ma.də.ˈlɛn.blaŋs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nicole Thomas</grapheme>
+    <phoneme>ni.ˈkol.tɔ.ŋa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Enzo Leger</grapheme>
+    <phoneme>aŋ.ˈzo.lə.ʒəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Catherine Barbier</grapheme>
+    <phoneme>ka.tə.ˈʁɛŋ.baʁ.bi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucie Boyer</grapheme>
+    <phoneme>ly.ˈsi.bo.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bernard Bailly</grapheme>
+    <phoneme>bəʁ.ˈnaʁ.bɛ.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Élodie Blanchard</grapheme>
+    <phoneme>e.lo.ˈdi.blaŋ.ʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Florian Faure</grapheme>
+    <phoneme>flo.ʁi.ˈaŋ.foʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillaume Robin</grapheme>
+    <phoneme>gy.i.ˈlom.ʁo.bɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eric Lefebvre</grapheme>
+    <phoneme>ə.ˈʁis.lə.fəbvʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laurent Duval</grapheme>
+    <phoneme>lo.ˈʁaŋ.dy.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Quentin Caron</grapheme>
+    <phoneme>kaŋ.ˈtɛŋ.ka.ʁɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine Vidal</grapheme>
+    <phoneme>ʒys.ˈtɛŋ.vi.dal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julie Denis</grapheme>
+    <phoneme>ʒy.ˈli.da.ŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alexandre Perez</grapheme>
+    <phoneme>a.lə.ˈxaŋdʁ.pə.ʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stéphanie Henry</grapheme>
+    <phoneme>ste.fa.ˈŋi.aŋ.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard Olivier</grapheme>
+    <phoneme>ʒe.ˈʁaʁ.o.li.vi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Corinne Robert</grapheme>
+    <phoneme>ko.ˈʁɛŋn.ʁo.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vincent Laurent</grapheme>
+    <phoneme>vɛŋ.ˈsaŋ.lo.ʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pierre Robert</grapheme>
+    <phoneme>pi.ˈəʁʁ.ʁo.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Virginie Charpentier</grapheme>
+    <phoneme>viʁ.ʒɛ.ˈŋi.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Manon Gautier</grapheme>
+    <phoneme>ma.ˈŋɔŋ.go.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Véronique Paris</grapheme>
+    <phoneme>ve.ʁɔ.ˈŋik.pa.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Frédéric Perez</grapheme>
+    <phoneme>fʁe.de.ˈʁis.pə.ʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Henri Louis</grapheme>
+    <phoneme>aŋ.ˈʁi.lu.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Louise Carre</grapheme>
+    <phoneme>lu.ˈis.kaʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Léa Lopez</grapheme>
+    <phoneme>le.ˈa.lo.pə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillaume Charpentier</grapheme>
+    <phoneme>gy.i.ˈlom.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucas Lemaire</grapheme>
+    <phoneme>ly.ˈka.la.ŋɛʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julien Lacroix</grapheme>
+    <phoneme>ʒy.li.ˈaŋ.lak.ʁwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Olivier Chevalier</grapheme>
+    <phoneme>o.li.vi.ˈəʁ.ʃə.va.li.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Isabelle Olivier</grapheme>
+    <phoneme>i.sa.ˈbəl.o.li.vi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>André Boyer</grapheme>
+    <phoneme>aŋ.ˈdʁe.bo.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pierre Fournier</grapheme>
+    <phoneme>pi.ˈəʁʁ.fuʁ.ni.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine Lucas</grapheme>
+    <phoneme>ʒys.ˈtɛŋ.ly.ka</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Martine Robin</grapheme>
+    <phoneme>maʁ.ˈtɛŋ.ʁo.bɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jacques Dupont</grapheme>
+    <phoneme>ʒa.ˈkə.dy.pɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alice Leclercq</grapheme>
+    <phoneme>a.ˈlis.lək.ləʁkk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claudine Charpentier</grapheme>
+    <phoneme>klo.ˈdɛŋ.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alice Roche</grapheme>
+    <phoneme>a.ˈlis.ʁoʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pauline Giraud</grapheme>
+    <phoneme>po.ˈlɛŋ.ʒi.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Audrey Roy</grapheme>
+    <phoneme>od.ʁə.ˈi.ʁo.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bernard Royer</grapheme>
+    <phoneme>bəʁ.ˈnaʁ.ʁo.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laurent Perrin</grapheme>
+    <phoneme>lo.ˈʁaŋ.pəʁ.ʁɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard Perez</grapheme>
+    <phoneme>ʒe.ˈʁaʁ.pə.ʁə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jean Gaillard</grapheme>
+    <phoneme>ˈʒaŋ.gɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Raphaël Lemoine</grapheme>
+    <phoneme>ʁa.ˈfaël.laŋ.wan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillaume Collet</grapheme>
+    <phoneme>gy.i.ˈlom.ko.lə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Théo Giraud</grapheme>
+    <phoneme>te.ˈo.ʒi.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Philippe Caron</grapheme>
+    <phoneme>fi.ˈlip.ka.ʁɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Pascal Pierre</grapheme>
+    <phoneme>pas.ˈkal.pi.əʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Laurent Martin</grapheme>
+    <phoneme>lo.ˈʁaŋ.maʁ.tɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nathan Leclercq</grapheme>
+    <phoneme>na.ˈtaŋ.lək.ləʁkk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>René Paris</grapheme>
+    <phoneme>ʁa.ˈŋe.pa.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Antoine Renault</grapheme>
+    <phoneme>aŋ.ˈtwan.ʁa.ŋol</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jade Duval</grapheme>
+    <phoneme>ˈʒad.dy.val</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Frédéric Charpentier</grapheme>
+    <phoneme>fʁe.de.ˈʁis.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Dominique Bernard</grapheme>
+    <phoneme>dɔ.ŋɛ.ˈŋik.bəʁ.naʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claude Gaillard</grapheme>
+    <phoneme>ˈklod.gɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geneviève Lambert</grapheme>
+    <phoneme>ʒa.ŋə.vi.ˈɛv.laŋ.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paul Dupuy</grapheme>
+    <phoneme>ˈpol.dy.py.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marine Simon</grapheme>
+    <phoneme>ma.ˈʁɛŋ.sɛ.ŋɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nathalie Richard</grapheme>
+    <phoneme>na.ta.ˈli.ʁi.ʃaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thomas Colin</grapheme>
+    <phoneme>tɔ.ˈŋa.ko.lɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine Meunier</grapheme>
+    <phoneme>ʒys.ˈtɛŋ.mø.ni.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>René Germain</grapheme>
+    <phoneme>ʁa.ˈŋe.ʒəʁ.mɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Benjamin Herve</grapheme>
+    <phoneme>baŋ.ʒa.ˈŋɛŋ.əʁv</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Suzanne Garcia</grapheme>
+    <phoneme>sy.ˈzaŋn.gaʁ.si.a</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Louise Langlois</grapheme>
+    <phoneme>lu.ˈis.laŋ.glwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marie Aubert</grapheme>
+    <phoneme>ma.ˈʁi.o.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Delphine Carre</grapheme>
+    <phoneme>dəl.ˈfɛŋ.kaʁʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nicolas Roche</grapheme>
+    <phoneme>ni.ko.ˈla.ʁoʃ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Delphine Leblanc</grapheme>
+    <phoneme>dəl.ˈfɛŋ.ləb.laŋs</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inès Legrand</grapheme>
+    <phoneme>ɛ.ˈŋɛ.ləg.ʁaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bernard Maillard</grapheme>
+    <phoneme>bəʁ.ˈnaʁ.mɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine Moulin</grapheme>
+    <phoneme>ʒys.ˈtɛŋ.mu.lɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roger Bailly</grapheme>
+    <phoneme>ʁo.ˈʒəʁ.bɛ.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Hélène Charpentier</grapheme>
+    <phoneme>e.ˈlɛn.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Emma Robert</grapheme>
+    <phoneme>aŋ.ˈma.ʁo.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Josiane Germain</grapheme>
+    <phoneme>ʒo.si.ˈaŋ.ʒəʁ.mɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Corinne Dufour</grapheme>
+    <phoneme>ko.ˈʁɛŋn.dy.fuʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>René Dubois</grapheme>
+    <phoneme>ʁa.ˈŋe.dyb.wa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bernard Garnier</grapheme>
+    <phoneme>bəʁ.ˈnaʁ.gaʁ.ni.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Océane Benoit</grapheme>
+    <phoneme>o.se.ˈaŋ.baŋ.wa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Benjamin Muller</grapheme>
+    <phoneme>baŋ.ʒa.ˈŋɛŋ.my.ləʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jules Boucher</grapheme>
+    <phoneme>ʒy.ˈlə.bu.ʃəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chloé Lefebvre</grapheme>
+    <phoneme>ʃlo.ˈe.lə.fəbvʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine Robert</grapheme>
+    <phoneme>ʒys.ˈtɛŋ.ʁo.bəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Justine Schneider</grapheme>
+    <phoneme>ʒys.ˈtɛŋ.sʃnɛ.dəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Juliette Giraud</grapheme>
+    <phoneme>ʒy.li.ˈət.ʒi.ʁo</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Valérie Gaillard</grapheme>
+    <phoneme>va.le.ˈʁi.gɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Jean Fleury</grapheme>
+    <phoneme>ˈʒaŋ.flø.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Corinne Morel</grapheme>
+    <phoneme>ko.ˈʁɛŋn.mo.ʁəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Florence Renault</grapheme>
+    <phoneme>flo.ˈʁaŋs.ʁa.ŋol</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Didier Fernandez</grapheme>
+    <phoneme>di.di.ˈəʁ.fəʁ.naŋ.də</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claude Bailly</grapheme>
+    <phoneme>ˈklod.bɛ.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Daniel Paris</grapheme>
+    <phoneme>da.ŋi.ˈəl.pa.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vincent Girard</grapheme>
+    <phoneme>vɛŋ.ˈsaŋ.ʒi.ʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Denise Gaillard</grapheme>
+    <phoneme>da.ˈŋis.gɛ.laʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Stéphane Denis</grapheme>
+    <phoneme>ste.ˈfaŋ.da.ŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julien Royer</grapheme>
+    <phoneme>ʒy.li.ˈaŋ.ʁo.i.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Sandrine Leclercq</grapheme>
+    <phoneme>saŋ.ˈdʁɛŋ.lək.ləʁkk</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcel Poirier</grapheme>
+    <phoneme>maʁ.ˈsəl.pwa.ʁi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Cédric Renard</grapheme>
+    <phoneme>sed.ˈʁis.ʁa.ŋaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chantal Michel</grapheme>
+    <phoneme>ʃaŋ.ˈtal.mi.ʃəl</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clara Marchal</grapheme>
+    <phoneme>kla.ˈʁa.maʁ.ʃal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Inès Marchand</grapheme>
+    <phoneme>ɛ.ˈŋɛ.maʁ.ʃaŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcel Remy</grapheme>
+    <phoneme>maʁ.ˈsəl.ʁa.ŋi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Paul Lemoine</grapheme>
+    <phoneme>ˈpol.laŋ.wan</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Vincent Colin</grapheme>
+    <phoneme>vɛŋ.ˈsaŋ.ko.lɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Lucie Millet</grapheme>
+    <phoneme>ly.ˈsi.mi.lə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Roger Petit</grapheme>
+    <phoneme>ʁo.ˈʒəʁ.pə.ti</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Céline David</grapheme>
+    <phoneme>se.ˈlɛŋ.da.vi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Valérie Barbier</grapheme>
+    <phoneme>va.le.ˈʁi.baʁ.bi.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Guillaume Vincent</grapheme>
+    <phoneme>gy.i.ˈlom.vɛŋ.saŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Audrey Lemaire</grapheme>
+    <phoneme>od.ʁə.ˈi.la.ŋɛʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Charlotte Guyot</grapheme>
+    <phoneme>ʃaʁ.ˈlot.gy.i.o</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Alexandre Baron</grapheme>
+    <phoneme>a.lə.ˈxaŋdʁ.ba.ʁɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Maxime Klein</grapheme>
+    <phoneme>ma.ˈxɛŋ.klɛn</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Anne Jacquet</grapheme>
+    <phoneme>ˈaŋn.ʒa.kə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Chantal Mercier</grapheme>
+    <phoneme>ʃaŋ.ˈtal.məʁ.si.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Didier Collet</grapheme>
+    <phoneme>di.di.ˈəʁ.ko.lə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Olivier Caron</grapheme>
+    <phoneme>o.li.vi.ˈəʁ.ka.ʁɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Michel Schmitt</grapheme>
+    <phoneme>mi.ˈʃəl.sʃmit</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nicole Girard</grapheme>
+    <phoneme>ni.ˈkol.ʒi.ʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geneviève Charpentier</grapheme>
+    <phoneme>ʒa.ŋə.vi.ˈɛv.ʃaʁ.paŋ.ti.əʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Clément Boucher</grapheme>
+    <phoneme>kle.ˈmaŋ.bu.ʃəʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Gérard Lecomte</grapheme>
+    <phoneme>ʒe.ˈʁaʁ.lə.kɔŋt</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Thierry Dumont</grapheme>
+    <phoneme>ti.əʁ.ˈʁi.dy.mɔŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Marcel Cousin</grapheme>
+    <phoneme>maʁ.ˈsəl.ku.sɛŋ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Claude Francois</grapheme>
+    <phoneme>ˈklod.fʁaŋ.kwa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Florence Bailly</grapheme>
+    <phoneme>flo.ˈʁaŋs.bɛ.li</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Eric Benoit</grapheme>
+    <phoneme>ə.ˈʁis.baŋ.wa</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Georges Goff</grapheme>
+    <phoneme>ʒə.oʁ.ˈʒə.gof</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Geneviève Marchal</grapheme>
+    <phoneme>ʒa.ŋə.vi.ˈɛv.maʁ.ʃal</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Véronique Gerard</grapheme>
+    <phoneme>ve.ʁɔ.ˈŋik.ʒə.ʁaʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Bruno Faure</grapheme>
+    <phoneme>bʁœ.ˈŋo.foʁ</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Élodie Rey</grapheme>
+    <phoneme>e.lo.ˈdi.ʁə.i</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Julien Charles</grapheme>
+    <phoneme>ʒy.li.ˈaŋ.ʃaʁ.lə</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Didier Aubry</grapheme>
+    <phoneme>di.di.ˈəʁ.ob.ʁi</phoneme>
+  </lexeme>
+  <lexeme>
+    <grapheme>Nathalie Durand</grapheme>
+    <phoneme>na.ta.ˈli.dy.ʁaŋ</phoneme>
+  </lexeme>
+</lexicon>
