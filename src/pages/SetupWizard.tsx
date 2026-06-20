@@ -249,6 +249,12 @@ export function SetupWizard({
   // Ansage-Modul: hier nur an/aus. Alle Detail-Einstellungen (Stimmen, Azure,
   // Halle, Aussprache …) liegen auf der Ansagen-Seite (AnnounceSettings).
   const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
+  // Robustheit: ändert sich die Config von außen (z. B. Speichern auf der
+  // Ansagen-Seite), den Schalter nachziehen — sonst könnte ein späteres
+  // Speichern hier einen veralteten Stand zurückschreiben.
+  useEffect(() => {
+    setAnnEnabled(initialConfig.announce.enabled);
+  }, [initialConfig.announce.enabled]);
   // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
   const ct = initialConfig.call_timer;
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
