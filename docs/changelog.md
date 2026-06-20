@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.140
+
+- **Manuelle Sprach-Korrektur je Name.** In der Aussprache-Tabelle lässt sich pro Eintrag die
+  **Sprache erzwingen** (Auto / Deutsch / Chinesisch / Vietnamesisch / Spanisch / Französisch /
+  Polnisch / Türkisch / Malaiisch / Indisch), falls die automatische Erkennung mal danebenliegt.
+  „Deutsch" erzwingt den deutschen Default (kein `<lang>`). Vorrang im Azure-Pfad:
+  Sprach-Override → kuratiertes IPA → automatische `<lang>`-Erkennung.
+
 ## v0.9.139
 
 - **Mehr Sprachen nativ (Azure `<lang>`).** Die Namens-Spracherkennung deckt jetzt neben

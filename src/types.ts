@@ -68,6 +68,9 @@ export interface NameOverride {
   /** Optionales IPA-Phoneme (W3C PLS) für den Azure-Pfad (`<phoneme>`).
    *  Kommt aus dem geteilten Wörterbuch (Lexikon); im Web-Speech-Pfad ungenutzt. */
   ipa?: string;
+  /** Optionale manuelle Sprach-Korrektur für den Azure-`<lang>`-Pfad. Leer =
+   *  automatisch; `"de"` = erzwingt deutschen Default; sonst NameLang. */
+  lang?: string;
 }
 
 /** Einstellungen des Aufruf-Timers (Rust: config::CallTimerConfig). */
