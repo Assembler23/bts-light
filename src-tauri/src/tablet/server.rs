@@ -142,6 +142,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/winners", get(info_winners_page))
         .route("/info/winners/state", get(info_winners_state))
         .route("/info/club-logo", get(info_club_logo))
+        .route("/info/announce/freetext", get(info_announce_freetext))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
@@ -708,6 +709,24 @@ async fn info_club_logo(
             .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct FreetextQuery {
+    #[serde(default)]
+    hall: String,
+    #[serde(default)]
+    since: u64,
+}
+
+/// Freitext-Ansagen für eine Halle (`id > since`). Ein Ansage-Slave pollt das
+/// vom Master, um Freitexte seiner Halle (oder „alle") anzusagen.
+async fn info_announce_freetext(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<FreetextQuery>,
+) -> impl IntoResponse {
+    let items = ctx.tablet.freetext_since(&q.hall, q.since);
+    ([(header::CACHE_CONTROL, "no-store")], Json(items))
 }
 
 /// Liefert die HTML der Werbe-Anzeige. Pollt `/info/ad/state` für die

@@ -11,6 +11,7 @@ import {
 import { AlertBanner } from "./components/AlertBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
+import { FreetextAnnouncer } from "./components/FreetextAnnouncer";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import type { NavView, SettingsFocus } from "./components/SideNav";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
@@ -320,6 +321,10 @@ function App() {
         <Footer />
         <WalkoverPanel />
         <MatchAnnouncer announce={config.announce} azureTts={config.azure_tts} />
+        <FreetextAnnouncer
+          announce={config.announce}
+          azureTts={config.azure_tts}
+        />
       </div>
     </UpdateProvider>
   );
