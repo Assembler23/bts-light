@@ -164,6 +164,126 @@ pub fn save_config(
     Ok(())
 }
 
+/// Pfad zum Offline-Cache des geteilten Aussprache-Wörterbuchs. Liegt im
+/// App-Config-Verzeichnis neben der config.json.
+fn pronunciations_cache_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_config_dir()
+        .expect("App-Config-Verzeichnis ist verfügbar")
+        .join("pronunciations_cache.json")
+}
+
+/// Ein Eintrag des geteilten Aussprache-Wörterbuchs (= `NameOverride`).
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct SharedPronunciation {
+    pub name: String,
+    pub say: String,
+}
+
+#[derive(serde::Deserialize)]
+struct PronunciationsResp {
+    #[serde(default)]
+    entries: Vec<SharedPronunciation>,
+}
+
+/// Basis-Origin (`https://badhub.de`) aus der konfigurierten Badhub-URL.
+fn badhub_origin(url: &str) -> Option<String> {
+    let base = reqwest::Url::parse(url)
+        .ok()
+        .map(|u| u.origin().ascii_serialization())?;
+    if base == "null" {
+        None
+    } else {
+        Some(base)
+    }
+}
+
+/// Lädt das geteilte Aussprache-Wörterbuch von Badhub (öffentlicher GET).
+/// Erfolgreiche Antworten werden lokal gecached; bei fehlendem Internet wird
+/// der Cache geliefert, damit die Ansage auch im reinen LAN-Hallenbetrieb
+/// korrekt spricht. Liefert nie einen Fehler – schlimmstenfalls eine leere Liste.
+#[tauri::command]
+pub async fn fetch_pronunciations(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<SharedPronunciation>, String> {
+    // Basis-URL aus der Config ziehen (Guard vor dem await wieder freigeben).
+    let base = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        badhub_origin(&cfg.badhub.url)
+    };
+    let cache = pronunciations_cache_path(&app);
+
+    if let Some(base) = base {
+        let url = format!("{base}/api/v1/pronunciations");
+        let fetched: Option<Vec<SharedPronunciation>> = async {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .ok()?;
+            let resp = client.get(&url).send().await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let body: PronunciationsResp = resp.json().await.ok()?;
+            Some(body.entries)
+        }
+        .await;
+
+        if let Some(entries) = fetched {
+            // Cache schreiben (best effort – Fehler hier sind unkritisch).
+            if let Ok(json) = serde_json::to_string(&entries) {
+                if let Some(dir) = cache.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::write(&cache, json);
+            }
+            return Ok(entries);
+        }
+    }
+
+    // Offline/Fehler → zuletzt gecachte Liste (oder leer).
+    match std::fs::read_to_string(&cache) {
+        Ok(s) => Ok(serde_json::from_str(&s).unwrap_or_default()),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
+/// Teilt lokale Aussprache-Korrekturen mit der Community-DB (POST, opt-in).
+/// Wird vom Frontend nur aufgerufen, wenn `share_corrections` aktiv ist.
+#[tauri::command]
+pub async fn share_pronunciations(
+    state: State<'_, AppState>,
+    entries: Vec<SharedPronunciation>,
+) -> Result<usize, String> {
+    if entries.is_empty() {
+        return Ok(0);
+    }
+    let (base, install_id) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (badhub_origin(&cfg.badhub.url), cfg.install_id.clone())
+    };
+    let Some(base) = base else {
+        return Err("Badhub-URL ungültig".to_string());
+    };
+    let url = format!("{base}/api/v1/pronunciations");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let body = serde_json::json!({ "entries": entries, "install_id": install_id });
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    Ok(entries.len())
+}
+
 /// Testet die Verbindung zu BTP und liefert bei Erfolg den Turniernamen.
 #[tauri::command]
 pub async fn test_btp(host: String, port: u16, password: Option<String>) -> Result<String, String> {

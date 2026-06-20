@@ -100,6 +100,26 @@ Gongs: **Spielaufruf** (`kind="match"`, Default) = tiefer, zweitöniger absteige
 **Freitext/Info** (`kind="info"`) = heller, dreitöniger aufsteigender Dreiklang (C5-E5-G5, Triangle). So ist
 sofort hörbar, ob es ein Spielaufruf oder eine sonstige Durchsage ist.
 
+## Geteiltes Community-Wörterbuch (crowd-sourced)
+
+Zusätzlich zum mitgelieferten Basis-Wörterbuch und der lokalen Nutzer-Tabelle
+lädt bts-light ein **gemeinsames Aussprache-Wörterbuch** von badhub
+(`GET /api/v1/pronunciations`):
+
+- **Laden:** beim Start (kurz nach dem Config-Load) und danach alle 3 h, solange
+  Internet da ist (`App.tsx`). Die Liste geht über `setSharedOverrides()` in
+  [`announcer.ts`](../src/io/announcer.ts).
+- **Offline:** Der Rust-Command `fetch_pronunciations` cached die Liste lokal
+  (`pronunciations_cache.json` im App-Config-Verzeichnis) und liefert sie ohne
+  Internet aus dem Cache → der reine LAN-Hallenbetrieb spricht weiter korrekt.
+- **Priorität** in `buildOverrideMap`: Basis-Wörterbuch < **geteiltes
+  Wörterbuch** < lokale Nutzer-Tabelle (eigene Korrekturen gewinnen immer).
+- **Teilen (opt-in):** Schalter „Meine Korrekturen mit der Community teilen"
+  (`announce.share_corrections`, Default aus). Beim Speichern werden die eigenen
+  Einträge via Rust-Command `share_pronunciations`
+  (`POST /api/v1/pronunciations`) gesendet. Qualitätsmodell: sofort live, Admin
+  räumt nach. Server-Doku: badhub `docs/features/tts_pronunciations.md`.
+
 ## Verlauf, erneutes Abspielen & gespeicherte Blöcke
 
 Auf der Ansagen-Seite ([`AnnouncePage.tsx`](../src/pages/AnnouncePage.tsx)):

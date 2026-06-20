@@ -3,7 +3,7 @@
 // Einstellungen wird das Ansage-Modul nur noch an-/ausgeschaltet. Speichert die
 // geänderten Felder in die App-Konfiguration (announce + azure_tts).
 import { useEffect, useState } from "react";
-import { saveConfig, tabletOverview } from "../api";
+import { saveConfig, sharePronunciations, tabletOverview } from "../api";
 import { playNameTest, playTestAnnouncement } from "../io/announcer";
 import { azureOption } from "../io/azureAnnounce";
 import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
@@ -31,6 +31,7 @@ export function AnnounceSettings({
   const [annOverridesEnabled, setAnnOverridesEnabled] = useState(
     a.name_overrides_enabled ?? true,
   );
+  const [annShare, setAnnShare] = useState(a.share_corrections ?? false);
   const [annHall, setAnnHall] = useState(a.announce_hall ?? "");
   const [azEnabled, setAzEnabled] = useState(az?.enabled ?? false);
   const [azRegion, setAzRegion] = useState(az?.region ?? "");
@@ -74,6 +75,9 @@ export function AnnounceSettings({
   async function save() {
     setSaving(true);
     setErr("");
+    const cleanOverrides = annNameOverrides
+      .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
+      .filter((o) => o.name && o.say);
     const next: AppConfig = {
       ...config,
       announce: {
@@ -83,10 +87,9 @@ export function AnnounceSettings({
         voice_en: annVoiceEn,
         rate: annRate,
         gong: annGong,
-        name_overrides: annNameOverrides
-          .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
-          .filter((o) => o.name && o.say),
+        name_overrides: cleanOverrides,
         name_overrides_enabled: annOverridesEnabled,
+        share_corrections: annShare,
         announce_hall: annHall.trim(),
         // Diese Form verwaltet die Blöcke nicht – aktuellen Stand bewahren
         // (sonst würde ein paralleler Block-Speichervorgang überschrieben).
@@ -102,6 +105,11 @@ export function AnnounceSettings({
     try {
       await saveConfig(next);
       onSaved(next);
+      // Opt-in: eigene Korrekturen mit der Community teilen (fire-and-forget –
+      // ein Fehler hier darf das Speichern nicht scheitern lassen).
+      if (annShare && cleanOverrides.length > 0) {
+        void sharePronunciations(cleanOverrides).catch(() => {});
+      }
       setSaved(true);
       window.setTimeout(() => setSaved(false), 3000);
     } catch (e) {
@@ -404,6 +412,26 @@ export function AnnounceSettings({
         >
           + Name hinzufügen
         </button>
+
+        {/* Community-Wörterbuch: laden passiert immer automatisch; hier nur
+            das opt-in Teilen der EIGENEN Korrekturen. */}
+        <label className="mt-1 flex items-start gap-2 border-t border-slate-200 pt-3 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={annShare}
+            onChange={(e) => setAnnShare(e.currentTarget.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Meine Korrekturen mit der <strong>Community teilen</strong>
+            <span className="block text-xs text-slate-500">
+              Beim Speichern werden deine eigenen Aussprache-Einträge an die
+              gemeinsame Badhub-Datenbank gesendet, damit andere Turniere sie
+              automatisch nutzen. Das gemeinsame Wörterbuch wird ohnehin immer
+              geladen – dieser Schalter steuert nur das Senden.
+            </span>
+          </span>
+        </label>
       </div>
 
       {/* Azure Neural TTS (hochwertige Cloud-Stimme) */}

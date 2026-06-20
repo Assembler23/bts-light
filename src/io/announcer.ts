@@ -348,13 +348,30 @@ function normalizeName(s: string): string {
 // ÜBERSCHREIBEN die Basis bei gleichem Schlüssel (Nutzer hat Vorrang). Ist die
 // Korrektur ausgeschaltet (`enabled === false`), bleibt die Map leer → Namen
 // werden 1:1 vorgelesen.
+// Geteiltes Wörterbuch (crowd-sourced, von badhub geladen). Liegt zwischen
+// Basis-Wörterbuch (niedrigste Priorität) und Nutzer-Tabelle (höchste). Wird
+// beim Start/periodisch via `setSharedOverrides` aktualisiert; offline bleibt
+// der zuletzt geladene Stand erhalten (Rust-Cache liefert ihn nach).
+let sharedOverrides: NameOverride[] = [];
+
+/** Setzt das geteilte Aussprache-Wörterbuch (von der Community-DB). */
+export function setSharedOverrides(list: NameOverride[]): void {
+  sharedOverrides = Array.isArray(list) ? list : [];
+}
+
 function buildOverrideMap(
   userOverrides: NameOverride[] | undefined,
   enabled: boolean,
 ): Map<string, string> {
   const map = new Map<string, string>();
   if (!enabled) return map;
-  for (const o of [...BASE_NAME_OVERRIDES, ...(userOverrides ?? [])]) {
+  // Reihenfolge = Priorität (späterer Eintrag überschreibt): Basis < geteilt <
+  // Nutzer. So gewinnen eigene Korrekturen, dann die Community, dann die Basis.
+  for (const o of [
+    ...BASE_NAME_OVERRIDES,
+    ...sharedOverrides,
+    ...(userOverrides ?? []),
+  ]) {
     const key = normalizeName(o.name);
     const say = (o.say ?? "").trim();
     if (key && say) map.set(key, say);

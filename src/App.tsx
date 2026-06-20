@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  fetchPronunciations,
   getStatus,
   internetStatus,
   loadConfig,
@@ -8,6 +9,7 @@ import {
   stopSync,
   wifiStatus,
 } from "./api";
+import { setSharedOverrides } from "./io/announcer";
 import { AlertBanner } from "./components/AlertBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
@@ -53,6 +55,7 @@ function defaultConfig(): AppConfig {
       name_overrides_enabled: true,
       announce_hall: "",
       saved_announcements: [],
+      share_corrections: false,
     },
     azure_tts: {
       enabled: false,
@@ -119,6 +122,28 @@ function App() {
         setView(c.badhub.password ? "dashboard" : "wizard");
       })
       .catch(() => setView("wizard"));
+  }, []);
+
+  // Geteiltes Aussprache-Wörterbuch laden: einmal beim Start (nach dem
+  // Config-Load, damit die Badhub-URL steht) und danach alle 3 h, solange
+  // Internet da ist. Offline liefert der Rust-Cache den letzten Stand.
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      fetchPronunciations()
+        .then((list) => {
+          if (active) setSharedOverrides(list);
+        })
+        .catch(() => {});
+    };
+    // Kurzer Versatz, damit load_config den Rust-State zuerst gesetzt hat.
+    const initial = window.setTimeout(refresh, 1500);
+    const id = window.setInterval(refresh, 3 * 60 * 60 * 1000);
+    return () => {
+      active = false;
+      window.clearTimeout(initial);
+      window.clearInterval(id);
+    };
   }, []);
 
   // Status zentral pollen, sobald die App eingerichtet ist (nicht im

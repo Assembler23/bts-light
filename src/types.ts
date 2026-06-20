@@ -43,6 +43,8 @@ export interface AnnounceConfig {
   announce_hall: string;
   /** Gespeicherte Ansage-Blöcke für wiederkehrende Freitext-Ansagen. */
   saved_announcements: string[];
+  /** Opt-in: eigene Aussprache-Korrekturen mit der Community-DB teilen. */
+  share_corrections: boolean;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */
