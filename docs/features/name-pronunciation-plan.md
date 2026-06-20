@@ -1,4 +1,4 @@
-# Umsetzungsplan: Namensaussprache via Azure — `<lang>` nativ als Workhorse
+# Umsetzungsplan: Namensaussprache via Azure — Hybrid (`<lang>` nativ + kuratiertes IPA-Lexikon für Ausnahmen)
 
 > **Status: freigegebener Plan (zur Prüfung), noch nicht implementiert.**
 > Ergänzt/aktualisiert das Konzept in [tts-azure-concept.md](../tts-azure-concept.md) und
@@ -20,12 +20,20 @@ von „Lautqualität" zu „korrekter Klassifikation".
 **Ausnahme-Tier** erhalten, nicht verworfen.
 
 ## Entscheidungen
-- **Primär = `<lang>` nativ** (Workhorse). Klassifikation auf **es/fr/pl/tr/ms/in** erweitern;
-  kuratiertes IPA-`<phoneme>` nur noch als **Ausnahme**, wo `<lang>` schwächelt.
-  **Spike entscheidet final pro Sprache.**
+- **Hybrid** (gewählt): `<lang>` nativ als **breite Basis** (wenig Daten) **+ kuratiertes
+  IPA-`<phoneme>`-Lexikon nur für Namen, wo `<lang>` schlecht klingt**. Vorrang je Name:
+  kuratiertes IPA (Ausnahme) → `<lang>` (sicher klassifiziert) → roh (de-Default).
+- **Klassifikation** auf **es/fr/pl/tr/ms/in** erweitern (Name→Sprache aus den Lexika).
+  **Spike entscheidet pro Sprache**, wo `<lang>` reicht und wo IPA-Ausnahmen nötig sind.
+- **Rolle von badhub:** die `players`-Daten dienen als **Kuratierungs-Hilfe** — eine
+  (optionale, offline/Admin) **Abdeckungs-/Häufigkeitsanalyse** zeigt, welche realen
+  Spielernamen fremdsprachig + noch nicht abgedeckt sind → daraus wächst gezielt das
+  **IPA-Ausnahme-Lexikon** (statt für *jeden* Namen IPA zu erzeugen). Die kuratierten IPA
+  liegen in der `tts_pronunciations`-DB; `say` dient dem Web-Speech-Fallback.
 - **Datenschutz: dokumentieren** (opt-in `enabled=false`, EU-Region West Europe, nur Namen).
-- **Datenmenge**: gelöst durch `<lang>` — Klassifikations-Daten **mitgeliefert** (bundled, klein);
-  kein Pro-Turnier-Netz-Lookup, kein großes Runtime-Lexikon.
+- **Datenmenge**: beherrschbar — `<lang>` trägt die Masse ohne Pro-Name-Daten; das IPA-Lexikon
+  bleibt **klein (nur Ausnahmen)** und damit ladbar. Wächst es doch stark → Pro-Turnier-Abruf
+  als Option.
 
 ## Wiederverwendung / was bleibt
 - `detectNameLang` + CN/VN-Surname-Listen (`src/io/transliterate.ts`) — Basis der Klassifikation.
@@ -66,9 +74,14 @@ wo IPA-Ausnahme nötig, wo lieber de-Default).
   damit bei Netz-Aussetzern nicht „halb nativ / halb deutsch" entsteht.
 - **Datenschutz (dokumentieren):** `enabled=false` Default, EU-Region, nur Namen.
 
-## Bewusst NICHT (Scope-Reduktion ggü. IPA-Weg)
-Kein Server-Cron „Gap-Report", kein Pro-Turnier-IPA-Lookup-Endpoint, kein Massen-Import der 6
-IPA-Lexika — für `<lang>` unnötig. Die Lexika dienen nur als **Klassifikations-Listen**.
+## Bewusst NICHT (Scope-Disziplin)
+- **Kein** Pro-Name-IPA für *alle* Spieler (nur Ausnahmen, wo `<lang>` schwächelt) — sonst
+  wären es wieder zehntausende Einträge + Datenlast.
+- **Kein** Runtime-Players-API/Lookup im Ansage-Flow: die echten Namen kommen zur Laufzeit aus
+  **BTP** (geladene Turnierdatei), lokal klassifiziert. Die badhub-Abdeckungsanalyse ist eine
+  **separate, optionale Kuratierungs-Hilfe** (Admin/offline), kein Teil der Ansage.
+- Die kuratierten Lexika dienen **doppelt**: als Name→Sprache-Klassifikationslisten **und** als
+  IPA-Quelle für die Ausnahmen.
 
 ## Betroffene Dateien (Schwerpunkt bts-light)
 - `src/io/transliterate.ts` — `detectNameLang` erweitern + Konfidenz.
