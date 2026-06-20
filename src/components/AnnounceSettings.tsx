@@ -75,9 +75,15 @@ export function AnnounceSettings({
   async function save() {
     setSaving(true);
     setErr("");
+    // Eine Korrektur ist gültig, wenn ein Name UND mindestens eine Korrektur
+    // (Lautschrift ODER Sprach-Override) gesetzt ist.
     const cleanOverrides = annNameOverrides
-      .map((o) => ({ name: o.name.trim(), say: o.say.trim() }))
-      .filter((o) => o.name && o.say);
+      .map((o) => ({
+        name: o.name.trim(),
+        say: o.say.trim(),
+        lang: (o.lang ?? "").trim(),
+      }))
+      .filter((o) => o.name && (o.say || o.lang));
     const next: AppConfig = {
       ...config,
       announce: {
@@ -368,6 +374,28 @@ export function AnnounceSettings({
                   }}
                   className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
                 />
+                <select
+                  value={ov.lang ?? ""}
+                  title="Sprache erzwingen (Azure-Stimme); „Auto“ = automatische Erkennung"
+                  onChange={(e) => {
+                    const v = e.currentTarget.value;
+                    setAnnNameOverrides((prev) =>
+                      prev.map((o, i) => (i === idx ? { ...o, lang: v } : o)),
+                    );
+                  }}
+                  className="shrink-0 rounded-md border border-slate-300 px-1 py-1 text-sm text-slate-600"
+                >
+                  <option value="">Auto</option>
+                  <option value="de">Deutsch</option>
+                  <option value="cn">Chinesisch</option>
+                  <option value="vn">Vietnamesisch</option>
+                  <option value="es">Spanisch</option>
+                  <option value="fr">Französisch</option>
+                  <option value="pl">Polnisch</option>
+                  <option value="tr">Türkisch</option>
+                  <option value="ms">Malaiisch</option>
+                  <option value="in">Indisch</option>
+                </select>
                 <button
                   type="button"
                   title="Aussprache testen"

@@ -127,6 +127,12 @@ lädt bts-light ein **gemeinsames Aussprache-Wörterbuch** von badhub
   Default — mehrdeutige Namen werden nicht „geraten". Nur cn/vn haben zusätzlich
   eine deutsche Umschrift (Web-Speech); die übrigen Sprachen wirken nur im
   Azure-`<lang>`-Pfad. Plan: `docs/features/name-pronunciation-plan.md`.
+- **Manuelle Sprach-Korrektur:** `NameOverride.lang` (Nutzer-Tabelle) erzwingt je
+  Name die Sprache, wenn die Erkennung daneben liegt. `buildLangOverrideMap` +
+  `nameSsml` werten sie aus; Vorrang: Override (`"de"` = kein Tag, sonst
+  `<lang>`) → kuratiertes IPA → automatische Erkennung. Cache-Key in
+  `azure_tts.rs` hasht das vollständige SSML (inkl. `<lang>`/`<phoneme>`), daher
+  keine Kollision zwischen gleich geschriebenen Namen mit anderer Sprache.
 - **Teilen (opt-in):** Schalter „Meine Korrekturen mit der Community teilen"
   (`announce.share_corrections`, Default aus). Beim Speichern werden die eigenen
   Einträge via Rust-Command `share_pronunciations`

@@ -135,6 +135,11 @@ pub struct AnnounceConfig {
 pub struct NameOverride {
     pub name: String,
     pub say: String,
+    /// Optionale manuelle Sprach-Korrektur für den Azure-`<lang>`-Pfad, falls die
+    /// automatische Erkennung daneben liegt. Leer = automatisch; `"de"` = erzwingt
+    /// deutschen Default (kein `<lang>`); sonst ein `NameLang` ("cn","vn","es",…).
+    #[serde(default)]
+    pub lang: String,
 }
 
 impl Default for AnnounceConfig {
@@ -600,6 +605,7 @@ mod tests {
                 name_overrides: vec![NameOverride {
                     name: "Nguyen".to_string(),
                     say: "Nujen".to_string(),
+                    lang: "vn".to_string(),
                 }],
                 name_overrides_enabled: false,
                 announce_hall: "Halle A".to_string(),
