@@ -419,8 +419,10 @@ pub async fn fetch_announce_state(
         reqwest::Url::parse(&format!("{RELAY_HTTP}/{namespace}/info/announce/state")).ok()?;
     url.query_pairs_mut()
         .append_pair("hall", hall)
-        .append_pair("since", &since.to_string())
-        .append_pair("slave", slave);
+        .append_pair("since", &since.to_string());
+    if !slave.is_empty() {
+        url.query_pairs_mut().append_pair("slave", slave);
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()

@@ -620,8 +620,13 @@ async fn announce_state(
             if !q.slave.is_empty() {
                 let id: String = q.slave.chars().take(64).collect();
                 let hall: String = q.hall.chars().take(128).collect();
+                let now = now_ms();
+                // Veraltete Slaves (> 60 s ungesehen) entfernen → Slots werden
+                // frei, der Cap blockiert keine echten Slaves nach Altlasten.
+                n.slaves
+                    .retain(|_, (_, last)| now.saturating_sub(*last) < 60_000);
                 if n.slaves.len() < 64 || n.slaves.contains_key(&id) {
-                    n.slaves.insert(id, (hall, now_ms()));
+                    n.slaves.insert(id, (hall, now));
                 }
             }
             let courts: Vec<relay_proto::AnnounceCourt> = n
