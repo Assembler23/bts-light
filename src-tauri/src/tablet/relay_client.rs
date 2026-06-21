@@ -20,8 +20,8 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use relay_proto::{
-    AdUpload, CourtBrief, HostFrame, MonitorControl, MonitorDeviceInfo, MonitorUpload, RelayFrame,
-    ResultBody,
+    AdUpload, AnnounceState, CourtBrief, HostFrame, MonitorControl, MonitorDeviceInfo,
+    MonitorUpload, RelayFrame, ResultBody,
 };
 
 use crate::tablet::monitor;
@@ -81,6 +81,9 @@ async fn serve(
     // CourtID → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
     // 2-s-Ticker unverändert dasselbe Match immer wieder pusht.
     let mut last_match: HashMap<i64, Option<i64>> = HashMap::new();
+    // Zuletzt an den Relay gepushte Freitext-ID (B1a: Cloud-Ansage der fernen
+    // Halle). Nur neue Items (id > last) werden geschickt.
+    let mut last_freetext: u64 = 0;
     let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Court-Monitor-Upload: erster Tick feuert sofort → Werbung/Konfig
@@ -117,6 +120,7 @@ async fn serve(
             }
             _ = ticker.tick() => {
                 push_all_courts(ctx, &tx, &mut last_match);
+                push_freetext(ctx, &tx, &mut last_freetext);
             }
             _ = monitor_ticker.tick() => {
                 maybe_upload_monitor(ctx, install_id, &mut monitor_fp).await;
@@ -344,6 +348,7 @@ fn push_court(
     last_match: &mut HashMap<i64, Option<i64>>,
 ) {
     let court_label = ctx.tablet.court_display_label(court_id);
+    let hall = ctx.tablet.court_hall(court_id);
     let current = ctx.tablet.match_for_court(court_id);
     let current_id = current.as_ref().map(|m| m.id);
     if last_match.get(&court_id) == Some(&current_id) {
@@ -359,6 +364,7 @@ fn push_court(
             HostFrame::MatchAssigned {
                 court_id,
                 court_label,
+                hall,
                 match_brief: match_brief(&m, ctx.tablet.scorekeeper(court_id)),
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
                 // wie die Spielübersicht) – auch bei Reconnect identisch.
@@ -370,6 +376,7 @@ fn push_court(
             HostFrame::MatchCleared {
                 court_id,
                 court_label,
+                hall,
             }
         }
     };
@@ -384,6 +391,56 @@ fn push_all_courts(
 ) {
     for court in ctx.tablet.courts() {
         push_court(ctx, court.id, tx, last_match);
+    }
+}
+
+/// Cloud-Ansage-Slave (B1a): holt den Ansage-Status (hallengefilterte
+/// Court-Matches + neue Freitexte) aus dem Cloud-Relay des Masters. `namespace`
+/// = Kopplungs-Code des Masters, `hall` = eigene Halle (leer = alle),
+/// `since` = letzte gesehene Freitext-ID. `None` bei Netz-/Parse-Fehler.
+pub async fn fetch_announce_state(
+    namespace: &str,
+    hall: &str,
+    since: u64,
+) -> Option<AnnounceState> {
+    // Kopplungs-Code (= install_id-UUID) hart validieren: nur Hex+Bindestrich,
+    // plausible Länge. Schützt den URL-Pfad vor Fremdzeichen und erspart sinnlose
+    // Requests bei Tippfehlern.
+    if namespace.len() < 8
+        || namespace.len() > 64
+        || !namespace
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        return None;
+    }
+    let mut url =
+        reqwest::Url::parse(&format!("{RELAY_HTTP}/{namespace}/info/announce/state")).ok()?;
+    url.query_pairs_mut()
+        .append_pair("hall", hall)
+        .append_pair("since", &since.to_string());
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<AnnounceState>().await.ok()
+}
+
+/// 2-s-Ticker: neue Freitext-Ansagen (`id > last_freetext`) an den Relay pushen,
+/// damit der Cloud-Ansage-Slave der fernen Halle sie abholen kann (B1a).
+fn push_freetext(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_freetext: &mut u64) {
+    // hall="" → alle Hallen; der Relay/Slave filtert selbst nach Ziel-Halle.
+    for item in ctx.tablet.freetext_since("", *last_freetext) {
+        *last_freetext = (*last_freetext).max(item.id);
+        let _ = tx.send(text(&HostFrame::Freetext {
+            id: item.id,
+            hall: item.hall,
+            text: item.text,
+        }));
     }
 }
 

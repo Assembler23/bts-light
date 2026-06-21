@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.142
+
+- **Mehr-Hallen über Cloud — Ansage in der fernen Halle (B1a).** Sind die Hallen **nicht im selben
+  Netz** (km entfernt, getrennte LTE-Router), kann ein zweiter Rechner als **Cloud-Ansage-Slave** laufen:
+  Er holt die Matches **seiner** Halle + Freitext-Ansagen über den Cloud-Relay vom Master (statt aus BTP)
+  und sagt sie lokal an. Einrichtung: im **Ansage-Slave-Modus** den **Kopplungs-Code des Masters**
+  eintragen (der Code steht beim Master in den Einstellungen). Leer = klassischer LAN-Slave wie bisher.
+  *(Voraussetzung: aktualisierter Relay auf badhub.)*
+
 ## v0.9.141
 
 - **Geräte-Abdeckung auf dem Dashboard.** Zwei neue Balken zeigen auf einen Blick, ob jedes Feld

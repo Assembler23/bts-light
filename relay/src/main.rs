@@ -112,6 +112,11 @@ struct Namespace {
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
+    /// CourtID → Hallenname (BTP-Location) – für die hallengefilterte
+    /// Cloud-Ansage der fernen Halle (B1a).
+    court_hall: HashMap<i64, String>,
+    /// Freitext-Ansagen (Master → Slave), dedupliziert nach id, Cap 50.
+    freetext: Vec<relay_proto::FreetextItem>,
     /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
     /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
     courts: Vec<CourtBrief>,
@@ -138,6 +143,8 @@ impl Namespace {
             court_scores: HashMap::new(),
             court_on_court_since: HashMap::new(),
             court_labels: HashMap::new(),
+            court_hall: HashMap::new(),
+            freetext: Vec::new(),
             courts: Vec::new(),
             monitor: None,
             monitor_control: MonitorControl::default(),
@@ -267,6 +274,7 @@ async fn main() {
         .route("/{ns}/monitor/state", get(monitor_device_state))
         .route("/{ns}/monitor/control", post(monitor_control_upload))
         .route("/{ns}/monitor-devices", get(monitor_devices_list))
+        .route("/{ns}/info/announce/state", get(announce_state))
         .route("/{ns}/qr/{id}", get(qr_svg))
         .route("/{ns}/flags/{file}", get(flag_route))
         .route("/{ns}/ads/{idx}", get(ad_image))
@@ -574,6 +582,57 @@ async fn monitor_devices_list(
         None => Vec::new(),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(devices)).into_response()
+}
+
+/// Query für den Ansage-Status der fernen Halle.
+#[derive(serde::Deserialize)]
+struct AnnounceStateQuery {
+    #[serde(default)]
+    hall: String,
+    #[serde(default)]
+    since: u64,
+}
+
+/// Liefert dem Cloud-Ansage-Slave die hallengefilterten Court-Matches (für die
+/// Auto-Feld-Ansage) + neue Freitext-Ansagen (`id > since`). Leerer `hall` =
+/// keine Hallen-Einschränkung.
+async fn announce_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Query(q): Query<AnnounceStateQuery>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let map = broker.namespaces.lock().await;
+    let state = match map.get(&ns) {
+        Some(n) => {
+            let courts: Vec<relay_proto::AnnounceCourt> = n
+                .court_matches
+                .iter()
+                .filter(|(cid, _)| {
+                    let h = n.court_hall.get(cid).map(String::as_str).unwrap_or("");
+                    q.hall.is_empty() || h.is_empty() || h == q.hall
+                })
+                .map(|(cid, m)| relay_proto::AnnounceCourt {
+                    court_id: *cid,
+                    label: n.court_labels.get(cid).cloned().unwrap_or_default(),
+                    match_brief: Some(m.clone()),
+                })
+                .collect();
+            let freetext: Vec<relay_proto::FreetextItem> = n
+                .freetext
+                .iter()
+                .filter(|f| {
+                    f.id > q.since && (f.hall.is_empty() || q.hall.is_empty() || f.hall == q.hall)
+                })
+                .cloned()
+                .collect();
+            relay_proto::AnnounceState { courts, freetext }
+        }
+        None => relay_proto::AnnounceState::default(),
+    };
+    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
 }
 
 /// Leerer Monitor-Zustand (kein Match, keine Werbung) – Leerlauf-Anzeige.
@@ -1257,6 +1316,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
         HostFrame::MatchAssigned {
             court_id,
             court_label,
+            hall,
             match_brief,
             on_court_since_ms,
         } => {
@@ -1264,6 +1324,8 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             if !court_label.is_empty() {
                 namespace.court_labels.insert(court_id, court_label);
             }
+            // Halle des Felds merken – für die hallengefilterte Cloud-Ansage.
+            namespace.court_hall.insert(court_id, hall);
             // Satzstand/Spielzustand nur bei einem ECHTEN Match-Wechsel
             // zurücksetzen. Ein erneutes `MatchAssigned` fürs selbe Match
             // (z. B. nach einem kurzen Tablet-Reconnect) darf den Monitor
@@ -1298,16 +1360,35 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
         HostFrame::MatchCleared {
             court_id,
             court_label,
+            hall,
         } => {
             if !court_label.is_empty() {
                 namespace.court_labels.insert(court_id, court_label);
             }
+            namespace.court_hall.insert(court_id, hall);
             namespace.court_matches.remove(&court_id);
             namespace.court_scores.remove(&court_id);
             namespace.court_state.remove(&court_id);
             namespace.court_on_court_since.remove(&court_id);
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchCleared));
+            }
+        }
+        HostFrame::Freetext { id, hall, text } => {
+            // Längen hart begrenzen (Schutz vor RAM-Aufblähung durch
+            // pathologische Frames; char-genau, kein Byte-Slice-Panic).
+            let text: String = text.chars().take(1000).collect();
+            let hall: String = hall.chars().take(128).collect();
+            // Neue Freitext-Ansage zwischenspeichern (dedup nach id, Cap 50) –
+            // der Cloud-Ansage-Slave holt sie über /info/announce/state.
+            if !namespace.freetext.iter().any(|f| f.id == id) {
+                namespace
+                    .freetext
+                    .push(relay_proto::FreetextItem { id, hall, text });
+                let len = namespace.freetext.len();
+                if len > 50 {
+                    namespace.freetext.drain(0..len - 50);
+                }
             }
         }
         HostFrame::ResultAck { req_id, ok, error } => {
@@ -1399,6 +1480,7 @@ mod tests {
             HostFrame::MatchAssigned {
                 court_id: 101,
                 court_label: "Feld 1".into(),
+                hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: None,
             },
@@ -1426,6 +1508,7 @@ mod tests {
             HostFrame::MatchCleared {
                 court_id: 999,
                 court_label: "Feld 99".into(),
+                hall: String::new(),
             },
         )
         .await;
@@ -1452,6 +1535,7 @@ mod tests {
             HostFrame::MatchAssigned {
                 court_id: 401,
                 court_label: "1".into(),
+                hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: None,
             },
@@ -1479,6 +1563,7 @@ mod tests {
             HostFrame::MatchAssigned {
                 court_id: 101,
                 court_label: "Feld 1".into(),
+                hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: Some(1000),
             },
@@ -1502,6 +1587,7 @@ mod tests {
             HostFrame::MatchAssigned {
                 court_id: 101,
                 court_label: "Feld 1".into(),
+                hall: String::new(),
                 match_brief: brief(9),
                 on_court_since_ms: Some(2000),
             },

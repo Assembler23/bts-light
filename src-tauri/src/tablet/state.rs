@@ -398,6 +398,17 @@ impl TabletState {
             .unwrap_or_default()
     }
 
+    /// Hallenname (BTP-Location) eines Felds; leer bei Ein-Hallen-Turnieren
+    /// oder unbekanntem Feld. Für die hallengefilterte Cloud-Ansage.
+    pub fn court_hall(&self, court_id: i64) -> String {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.court_location_name(court_id))
+            .unwrap_or_default()
+    }
+
     /// Das Match, das BTP gerade diesem Feld (per CourtID) zugewiesen hat.
     pub fn match_for_court(&self, court_id: i64) -> Option<BtpMatch> {
         let guard = self.snapshot.read().unwrap();
@@ -789,6 +800,9 @@ impl TabletState {
     /// Eine Freitext-Ansage ablegen (Master). `hall` leer = alle Hallen.
     /// Liefert die neue laufende ID.
     pub fn publish_freetext(&self, hall: String, text: String) -> u64 {
+        // Längen begrenzen – konsistent mit dem Relay-Cap, kein Byte-Panic.
+        let text: String = text.chars().take(1000).collect();
+        let hall: String = hall.chars().take(128).collect();
         // ID monoton AUCH über einen Master-Neustart: auf mindestens die
         // aktuelle Uhrzeit (ms) heben. Sonst begännen die IDs nach Neustart
         // wieder klein und ein Slave mit gemerkter `lastId` verstummte, bis die

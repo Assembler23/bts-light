@@ -758,6 +758,11 @@ pub enum HostFrame {
         court_id: i64,
         #[serde(rename = "courtLabel", default)]
         court_label: String,
+        /// Hallenname (BTP-Location) des Felds – für die hallengefilterte
+        /// Cloud-Ansage der fernen Halle (B1a). `#[serde(default)]` = ältere
+        /// Hosts (leer → keine Hallen-Einschränkung).
+        #[serde(default)]
+        hall: String,
         #[serde(rename = "match")]
         match_brief: MatchBrief,
         /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem
@@ -777,6 +782,18 @@ pub enum HostFrame {
         court_id: i64,
         #[serde(rename = "courtLabel", default)]
         court_label: String,
+        /// Hallenname des Felds (wie bei `MatchAssigned`). `#[serde(default)]`.
+        #[serde(default)]
+        hall: String,
+    },
+    /// Freitext-Ansage (Master → Relay → ferne Halle). Der Cloud-Ansage-Slave
+    /// holt sie über `GET /{ns}/info/announce/freetext` und spricht sie lokal.
+    Freetext {
+        id: u64,
+        #[serde(default)]
+        hall: String,
+        #[serde(default)]
+        text: String,
     },
     /// Antwort auf eine zuvor weitergeleitete Ergebnis-Übermittlung.
     ResultAck {
@@ -792,6 +809,39 @@ pub enum HostFrame {
         #[serde(default)]
         courts: Vec<CourtBrief>,
     },
+}
+
+/// Eine Freitext-Ansage (Relay-Zwischenspeicher; Quelle = Master). `id`
+/// monoton zum Entduplizieren beim Slave.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FreetextItem {
+    pub id: u64,
+    #[serde(default)]
+    pub hall: String,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// Ein Feld im Ansage-Status (für den Cloud-Ansage-Slave): aktuelles Match
+/// (oder `None`) mit Anzeige-Label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnnounceCourt {
+    #[serde(rename = "courtId")]
+    pub court_id: i64,
+    #[serde(default)]
+    pub label: String,
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none", default)]
+    pub match_brief: Option<MatchBrief>,
+}
+
+/// Antwort von `GET /{ns}/info/announce/state?hall=&since=` — hallengefilterte
+/// Court-Matches (Auto-Ansage) + neue Freitext-Ansagen für den Cloud-Slave.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AnnounceState {
+    #[serde(default)]
+    pub courts: Vec<AnnounceCourt>,
+    #[serde(default)]
+    pub freetext: Vec<FreetextItem>,
 }
 
 /// Frames vom Relay an den bts-light-Host.
@@ -989,6 +1039,7 @@ mod tests {
         roundtrip(&HostFrame::MatchCleared {
             court_id: 2,
             court_label: "Feld 2".into(),
+            hall: String::new(),
         });
         roundtrip(&HostFrame::ResultAck {
             req_id: 42,
@@ -1044,6 +1095,7 @@ mod tests {
             HostFrame::MatchCleared {
                 court_id: 0,
                 court_label: "Feld 2".into(),
+                hall: String::new(),
             }
         );
     }

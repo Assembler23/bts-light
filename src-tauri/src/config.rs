@@ -357,6 +357,13 @@ pub struct AppConfig {
     /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub slave_mode: bool,
+    /// Cloud-Ansage-Slave (Mehr-Hallen über Cloud, B1a): Namespace/Kopplungs-Code
+    /// des MASTERS. Ist er gesetzt UND `slave_mode` aktiv, holt diese Instanz die
+    /// Hallen-Matches + Freitext NICHT aus BTP, sondern aus dem Cloud-Relay des
+    /// Masters und sagt sie lokal an. Leer = klassischer LAN-Slave (liest BTP).
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub master_namespace: String,
     /// Einstellungen der gesprochenen Feld-Ansagen. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -595,6 +602,7 @@ mod tests {
             install_id: "inst-abc123".to_string(),
             connection_mode: ConnectionMode::Cloud,
             slave_mode: false,
+            master_namespace: String::new(),
             announce: AnnounceConfig {
                 enabled: true,
                 language_mode: AnnounceLanguageMode::En,

@@ -13,6 +13,7 @@ import { setSharedOverrides } from "./io/announcer";
 import { AlertBanner } from "./components/AlertBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
+import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
 import { FreetextAnnouncer } from "./components/FreetextAnnouncer";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import type { NavView, SettingsFocus } from "./components/SideNav";
@@ -44,6 +45,7 @@ function defaultConfig(): AppConfig {
     install_id: "",
     connection_mode: "lan",
     slave_mode: false,
+    master_namespace: "",
     announce: {
       enabled: false,
       language_mode: "auto",
@@ -358,6 +360,10 @@ function App() {
         <WalkoverPanel />
         <MatchAnnouncer announce={config.announce} azureTts={config.azure_tts} />
         <FreetextAnnouncer
+          announce={config.announce}
+          azureTts={config.azure_tts}
+        />
+        <CloudAnnounceSlave
           announce={config.announce}
           azureTts={config.azure_tts}
         />
