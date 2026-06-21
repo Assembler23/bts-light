@@ -1412,6 +1412,12 @@ pub async fn pending_freetext(
         .clone();
     let hall = config.announce.announce_hall.clone();
     if config.slave_mode {
+        // Cloud-Ansage-Slave: Freitexte kommen ausschließlich über
+        // `cloud_announce_state` (CloudAnnounceSlave). Den LAN-Poll hier dann
+        // bewusst NICHT fahren — sonst sagte beides denselben Text an.
+        if !config.master_namespace.trim().is_empty() {
+            return Ok(Vec::new());
+        }
         // Vom Master holen – gleiches Netz vorausgesetzt (BTP-Host = Master-PC).
         // URL über `reqwest::Url` bauen (das `query`-Feature ist nicht aktiv).
         let mut url = reqwest::Url::parse(&format!(
