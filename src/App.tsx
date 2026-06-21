@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  cloudSlaves,
   fetchPronunciations,
   getStatus,
   internetStatus,
@@ -27,7 +28,13 @@ import { MaintenancePage } from "./pages/MaintenancePage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
 import { WinnersPage } from "./pages/WinnersPage";
-import type { AppConfig, InternetStatus, SyncStatus, WifiStatus } from "./types";
+import type {
+  AppConfig,
+  InternetStatus,
+  SlaveInfo,
+  SyncStatus,
+  WifiStatus,
+} from "./types";
 
 // "loading"/"wizard" sind Sonderzustände ohne Shell; alles andere sind die
 // über die Seitenleiste erreichbaren Bereiche (NavView).
@@ -107,6 +114,8 @@ function App() {
   const [wifi, setWifi] = useState<WifiStatus | null>(null);
   // Internet-/Uplink-Status (LTE/Cloud erreichbar?) für die Kopfzeile.
   const [internet, setInternet] = useState<InternetStatus | null>(null);
+  // Ferne Hallen (Cloud-Slaves) für die Kopfzeilen-Anzeige am Master.
+  const [slaves, setSlaves] = useState<SlaveInfo[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -216,6 +225,27 @@ function App() {
     };
     tick();
     const id = setInterval(tick, 30000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [view]);
+
+  // Ferne Hallen (Cloud-Slaves) alle 5 s prüfen – für die Kopfzeilen-Anzeige.
+  // Der Command liefert leer, wenn dieser PC kein Cloud-Master ist (kein
+  // Aufwand bei Einzelhallen).
+  useEffect(() => {
+    if (view === "loading" || view === "wizard") return;
+    let active = true;
+    const tick = () => {
+      cloudSlaves()
+        .then((s) => {
+          if (active) setSlaves(s);
+        })
+        .catch(() => {});
+    };
+    tick();
+    const id = setInterval(tick, 5000);
     return () => {
       active = false;
       clearInterval(id);
@@ -350,6 +380,7 @@ function App() {
           status={status}
           wifi={wifi}
           internet={internet}
+          slaves={slaves}
           busy={busy}
           onToggleRun={toggleRun}
           onNavigate={navigate}

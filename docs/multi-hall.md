@@ -186,7 +186,16 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
   Matches seiner Halle + Freitext lokal an (Stimme/Azure lokal).
 - **Pairing-UI**: SetupWizard zeigt den eigenen Kopplungs-Code (`install_id`)
   und nimmt im Slave-Modus den Master-Code entgegen.
-- **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame`).
+- **Einrichtung (Assistent, v0.9.143):** in den Einstellungen führt ein Schritt-
+  für-Schritt-Block durch die Kopplung. Der Slave-Schalter ist **immer** sichtbar
+  (eine ferne Halle hat kein BTP → kann Mehr-Hallen nicht erkennen). Master zeigt
+  seinen Code (Kopieren), Slave trägt ihn ein + wählt seine Halle.
+- **Slave-Online-Anzeige (v0.9.143):** der Slave meldet beim Relay-Poll seine
+  Präsenz (`?slave=<install_id>`), der Relay hält `slaves` (id → Halle + last-seen)
+  und liefert `GET /{ns}/slaves`; der Master pollt `cloud_slaves` und zeigt in der
+  Kopfzeile, ob die ferne Halle verbunden ist (online < 12 s). Rein informativ.
+- **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame` +
+  `/slaves`-Route).
 - **Noch offen (B1b/B2):** Cloud-**Info-/Kombi-Monitore** und **Steuerung** der
   fernen Halle (Feldvergabe/Tablets/Ergebnis). Siehe
   `docs/features/multihall-cloud-plan.md`.

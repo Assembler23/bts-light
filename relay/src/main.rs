@@ -117,6 +117,9 @@ struct Namespace {
     court_hall: HashMap<i64, String>,
     /// Freitext-Ansagen (Master → Slave), dedupliziert nach id, Cap 50.
     freetext: Vec<relay_proto::FreetextItem>,
+    /// Cloud-Ansage-Slaves: id → (Halle, letzter Poll Unix-ms). Für die
+    /// „ferne Halle online?"-Anzeige am Master. Rein informativ.
+    slaves: HashMap<String, (String, u64)>,
     /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
     /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
     courts: Vec<CourtBrief>,
@@ -145,6 +148,7 @@ impl Namespace {
             court_labels: HashMap::new(),
             court_hall: HashMap::new(),
             freetext: Vec::new(),
+            slaves: HashMap::new(),
             courts: Vec::new(),
             monitor: None,
             monitor_control: MonitorControl::default(),
@@ -275,6 +279,7 @@ async fn main() {
         .route("/{ns}/monitor/control", post(monitor_control_upload))
         .route("/{ns}/monitor-devices", get(monitor_devices_list))
         .route("/{ns}/info/announce/state", get(announce_state))
+        .route("/{ns}/slaves", get(slaves_list))
         .route("/{ns}/qr/{id}", get(qr_svg))
         .route("/{ns}/flags/{file}", get(flag_route))
         .route("/{ns}/ads/{idx}", get(ad_image))
@@ -591,11 +596,15 @@ struct AnnounceStateQuery {
     hall: String,
     #[serde(default)]
     since: u64,
+    /// Optionale Slave-ID – wenn gesetzt, registriert der Poll die Präsenz des
+    /// Slaves (für die „ferne Halle online?"-Anzeige am Master).
+    #[serde(default)]
+    slave: String,
 }
 
 /// Liefert dem Cloud-Ansage-Slave die hallengefilterten Court-Matches (für die
 /// Auto-Feld-Ansage) + neue Freitext-Ansagen (`id > since`). Leerer `hall` =
-/// keine Hallen-Einschränkung.
+/// keine Hallen-Einschränkung. Registriert nebenbei die Slave-Präsenz.
 async fn announce_state(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
@@ -604,9 +613,17 @@ async fn announce_state(
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let map = broker.namespaces.lock().await;
-    let state = match map.get(&ns) {
+    let mut map = broker.namespaces.lock().await;
+    let state = match map.get_mut(&ns) {
         Some(n) => {
+            // Präsenz des Slaves merken (rein informativ; Cap gegen Wildwuchs).
+            if !q.slave.is_empty() {
+                let id: String = q.slave.chars().take(64).collect();
+                let hall: String = q.hall.chars().take(128).collect();
+                if n.slaves.len() < 64 || n.slaves.contains_key(&id) {
+                    n.slaves.insert(id, (hall, now_ms()));
+                }
+            }
             let courts: Vec<relay_proto::AnnounceCourt> = n
                 .court_matches
                 .iter()
@@ -633,6 +650,34 @@ async fn announce_state(
         None => relay_proto::AnnounceState::default(),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+}
+
+/// Slaves gelten als online, wenn ihr letzter Poll < 12 s her ist (4 verpasste
+/// 3-s-Polls Toleranz).
+const SLAVE_ONLINE_MS: u64 = 12_000;
+
+/// Liefert dem Master die bekannten Cloud-Ansage-Slaves seines Namespaces samt
+/// Online-Status – für die „ferne Halle online?"-Anzeige in der Kopfzeile.
+async fn slaves_list(State(broker): State<Broker>, Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let now = now_ms();
+    let map = broker.namespaces.lock().await;
+    let slaves: Vec<relay_proto::SlaveInfo> = match map.get(&ns) {
+        Some(n) => n
+            .slaves
+            .iter()
+            .map(|(id, (hall, last))| relay_proto::SlaveInfo {
+                id: id.clone(),
+                hall: hall.clone(),
+                online: now.saturating_sub(*last) < SLAVE_ONLINE_MS,
+                last_seen_ms: *last,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    ([(header::CACHE_CONTROL, "no-store")], Json(slaves)).into_response()
 }
 
 /// Leerer Monitor-Zustand (kein Match, keine Werbung) – Leerlauf-Anzeige.

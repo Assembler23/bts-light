@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.143
+
+- **Master/Slave-Einrichtungshilfe (zwei Hallen über Cloud).** In den Einstellungen führt ein
+  Schritt-für-Schritt-Assistent durch die Cloud-Kopplung: Der **Master** zeigt seinen
+  **Kopplungs-Code** (mit „Kopieren"); die **ferne Halle** schaltet **„Ansage-Slave-Modus"** ein, trägt
+  den Code ein und wählt ihre Halle. Der Slave-Schalter ist **immer in den Einstellungen** verfügbar —
+  eine ferne Halle hat kein BTP und kann ein Mehr-Hallen-Turnier nicht selbst erkennen.
+- **„Ferne Halle online?" in der Kopfzeile.** Neben dem Internet-Status zeigt der Master jetzt, ob die
+  ferne Halle (Cloud-Ansage-Slave) verbunden ist (grün/rot je Halle). Fällt dort kurz das Internet aus,
+  springt die Anzeige auf rot und nach dem Reconnect automatisch zurück auf grün.
+
 ## v0.9.142
 
 - **Mehr-Hallen über Cloud — Ansage in der fernen Halle (B1a).** Sind die Hallen **nicht im selben
