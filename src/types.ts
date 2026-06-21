@@ -211,6 +211,24 @@ export interface DrawInfo {
   draw_name: string;
 }
 
+/** Ein Feld im Cloud-Ansage-Status (Rust: commands::CloudAnnounceCourt). */
+export interface CloudAnnounceCourt {
+  court_id: number;
+  court: string;
+  discipline: string;
+  team1: string[];
+  team2: string[];
+  team1_nationalities: string[];
+  team2_nationalities: string[];
+  match_id: number;
+}
+
+/** Cloud-Ansage-Status für den fernen Slave (Rust: commands::CloudAnnounce). */
+export interface CloudAnnounce {
+  courts: CloudAnnounceCourt[];
+  freetext: { id: number; hall: string; text: string }[];
+}
+
 /** Turnier-Kennzahlen fürs Dashboard (Rust: commands::TournamentStats).
  *  `null`, solange kein Snapshot vorliegt (Liveticker nicht gestartet). */
 export interface TournamentStats {
@@ -245,6 +263,10 @@ export interface AppConfig {
    *  kein Liveticker-Push/Auto-Vergabe/Tablet-Server. Zweiter Rechner in der
    *  anderen Halle, der nur Ansagen macht (es gibt genau einen Master). */
   slave_mode: boolean;
+  /** Cloud-Ansage-Slave (Mehr-Hallen über Cloud): Kopplungs-Code/Namespace des
+   *  Masters. Gesetzt + slave_mode → Hallen-Matches/Freitext kommen aus dem
+   *  Cloud-Relay statt BTP. Leer = klassischer LAN-Slave. */
+  master_namespace: string;
   /** Einstellungen der gesprochenen Feld-Ansagen. */
   announce: AnnounceConfig;
   /** Hochwertige Cloud-Ansage über Azure Neural TTS (opt-in). */

@@ -1443,6 +1443,96 @@ pub async fn pending_freetext(
     }
 }
 
+/// Ein Feld im Cloud-Ansage-Status (frontend-freundlich, wie `CourtOverview`
+/// fürs Ansagen): Feldname + aktuelle Paarung.
+#[derive(serde::Serialize)]
+pub struct CloudAnnounceCourt {
+    pub court_id: i64,
+    pub court: String,
+    pub discipline: String,
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    pub team1_nationalities: Vec<String>,
+    pub team2_nationalities: Vec<String>,
+    pub match_id: i64,
+}
+
+#[derive(serde::Serialize)]
+pub struct CloudFreetext {
+    pub id: u64,
+    pub hall: String,
+    pub text: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct CloudAnnounce {
+    pub courts: Vec<CloudAnnounceCourt>,
+    pub freetext: Vec<CloudFreetext>,
+}
+
+/// Cloud-Ansage-Slave (B1a): holt aus dem Cloud-Relay des Masters die Matches
+/// der eigenen Halle (für die Auto-Feld-Ansage) + neue Freitext-Ansagen. Leer,
+/// wenn nicht als Cloud-Slave konfiguriert (kein `slave_mode`/`master_namespace`).
+#[tauri::command]
+pub async fn cloud_announce_state(
+    state: State<'_, AppState>,
+    since: u64,
+) -> Result<CloudAnnounce, String> {
+    let (ns, hall) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        if !cfg.slave_mode || cfg.master_namespace.trim().is_empty() {
+            return Ok(CloudAnnounce {
+                courts: Vec::new(),
+                freetext: Vec::new(),
+            });
+        }
+        (
+            cfg.master_namespace.clone(),
+            cfg.announce.announce_hall.clone(),
+        )
+    };
+    let st = crate::tablet::relay_client::fetch_announce_state(&ns, &hall, since)
+        .await
+        .unwrap_or_default();
+
+    let names = |v: &[relay_proto::PlayerBrief]| v.iter().map(|p| p.name.clone()).collect();
+    let nats = |v: &[relay_proto::PlayerBrief]| {
+        v.iter()
+            .map(|p| p.nationality.clone().unwrap_or_default())
+            .collect()
+    };
+    let courts = st
+        .courts
+        .into_iter()
+        .filter_map(|c| {
+            let m = c.match_brief?;
+            // Anzeige-Label ist bei Mehr-Hallen "{Halle} · {Feld}" – fürs
+            // Ansagen nur den Feldteil verwenden.
+            let court = c.label.rsplit(" · ").next().unwrap_or(&c.label).to_string();
+            Some(CloudAnnounceCourt {
+                court_id: c.court_id,
+                court,
+                discipline: m.discipline.clone(),
+                team1: names(&m.team_a),
+                team2: names(&m.team_b),
+                team1_nationalities: nats(&m.team_a),
+                team2_nationalities: nats(&m.team_b),
+                match_id: m.match_id,
+            })
+        })
+        .collect();
+    let freetext = st
+        .freetext
+        .into_iter()
+        .map(|f| CloudFreetext {
+            id: f.id,
+            hall: f.hall,
+            text: f.text,
+        })
+        .collect();
+    Ok(CloudAnnounce { courts, freetext })
+}
+
 /// Ruft die ausgewählten Spiele „in Vorbereitung". `location_id` bindet den
 /// Aufruf an eine Halle (oder `None` bei einem hallenunabhängigen Aufruf).
 #[tauri::command]

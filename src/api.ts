@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  CloudAnnounce,
   CourtAd,
   DrawInfo,
   FinishedMatchRow,
@@ -111,6 +112,10 @@ export const tournamentDraws = (): Promise<DrawInfo[]> =>
 /** Turnier-Kennzahlen fürs Dashboard (null ohne Snapshot). */
 export const tournamentStats = (): Promise<TournamentStats | null> =>
   invoke("tournament_stats");
+
+/** Cloud-Ansage-Slave: Hallen-Matches + neue Freitexte aus dem Master-Relay. */
+export const cloudAnnounceState = (since: number): Promise<CloudAnnounce> =>
+  invoke("cloud_announce_state", { since });
 
 /** Geteiltes Aussprache-Wörterbuch von badhub laden (offline: aus Cache). */
 export const fetchPronunciations = (): Promise<NameOverride[]> =>

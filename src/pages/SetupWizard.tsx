@@ -246,6 +246,10 @@ export function SetupWizard({
   );
   // Ansage-Slave-Modus: nur BTP lesen + eigene Halle ansagen.
   const [slaveMode, setSlaveMode] = useState(initialConfig.slave_mode ?? false);
+  // Cloud-Ansage-Slave: Kopplungs-Code des Masters (leer = LAN-Slave, liest BTP).
+  const [masterNamespace, setMasterNamespace] = useState(
+    initialConfig.master_namespace ?? "",
+  );
   // Ansage-Modul: hier nur an/aus. Alle Detail-Einstellungen (Stimmen, Azure,
   // Halle, Aussprache …) liegen auf der Ansagen-Seite (AnnounceSettings).
   const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
@@ -369,6 +373,7 @@ export function SetupWizard({
       install_id: initialConfig.install_id,
       connection_mode: connectionMode,
       slave_mode: slaveMode,
+      master_namespace: masterNamespace.trim(),
       // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
       // (Stimmen, Azure, Halle …) leben auf der Ansagen-Seite und bleiben hier
       // unverändert erhalten.
@@ -599,6 +604,41 @@ export function SetupWizard({
             </span>
           </span>
         </label>
+
+        {/* Cloud-Pairing: für weit entfernte Hallen ohne gemeinsames Netz.
+            Master-Code eintragen → Slave holt Matches/Freitext über Internet. */}
+        {slaveMode && (
+          <div className="mt-3 border-t border-violet-200 pt-3">
+            <label className="block text-sm">
+              <span className="font-semibold text-violet-900">
+                Cloud-Kopplung (ferne Halle, kein gemeinsames Netz)
+              </span>
+              <span className="mt-1 block text-violet-800">
+                Trage hier den <strong>Kopplungs-Code des Masters</strong> ein,
+                wenn die Hallen <strong>nicht im selben Netz</strong> sind. Dann
+                kommen Matches + Freitext über das Internet (statt aus BTP).{" "}
+                <strong>Leer lassen</strong> = klassischer LAN-Slave (liest BTP
+                direkt).
+              </span>
+              <input
+                type="text"
+                value={masterNamespace}
+                placeholder="Kopplungs-Code des Masters"
+                onChange={(e) => setMasterNamespace(e.currentTarget.value)}
+                className="mt-2 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm
+                           focus:border-violet-500 focus:outline-none"
+              />
+            </label>
+          </div>
+        )}
+
+        {/* Eigener Kopplungs-Code (am MASTER ablesen, am Slave eintragen). */}
+        <p className="mt-3 border-t border-violet-200 pt-3 text-xs text-violet-700">
+          Kopplungs-Code dieses Geräts (für ferne Hallen):{" "}
+          <span className="select-all font-mono font-semibold">
+            {initialConfig.install_id || "—"}
+          </span>
+        </p>
       </section>
 
       {/* Schritt 1: Verband / Ziel */}

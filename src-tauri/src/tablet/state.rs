@@ -398,6 +398,17 @@ impl TabletState {
             .unwrap_or_default()
     }
 
+    /// Hallenname (BTP-Location) eines Felds; leer bei Ein-Hallen-Turnieren
+    /// oder unbekanntem Feld. Für die hallengefilterte Cloud-Ansage.
+    pub fn court_hall(&self, court_id: i64) -> String {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.court_location_name(court_id))
+            .unwrap_or_default()
+    }
+
     /// Das Match, das BTP gerade diesem Feld (per CourtID) zugewiesen hat.
     pub fn match_for_court(&self, court_id: i64) -> Option<BtpMatch> {
         let guard = self.snapshot.read().unwrap();

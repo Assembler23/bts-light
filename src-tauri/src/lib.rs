@@ -122,6 +122,7 @@ pub fn run() {
             commands::finished_matches,
             commands::publish_freetext,
             commands::pending_freetext,
+            commands::cloud_announce_state,
             commands::call_preparation,
             commands::retract_preparation,
             commands::winners_overview,

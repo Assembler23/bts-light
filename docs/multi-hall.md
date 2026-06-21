@@ -170,12 +170,28 @@ Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
   beliebig viele Slaves (read-only). Voraussetzung: der Slave erreicht den
   BTP-Rechner im selben Netz (LAN/WLAN).
 
-## Offene Punkte
+## Cloud-Ansage-Slave (B1a, v0.9.142)
 
-- **Ansage über die Distanz (Phase 3, Cloud).** Sind die Hallen NICHT im selben
-  Netz (km entfernt, getrennte LTE-Router), erreicht der Slave den BTP nicht.
-  Dann müsste der Master die Daten über den Cloud-Relay zum Slave bringen
-  (Relay trägt heute nur Court-Monitore). Größerer Umbau — separat.
+Sind die Hallen **nicht im selben Netz** (km entfernt, getrennte LTE-Router),
+erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
+- **Master** (cloud-aktiv) pusht zusätzlich pro Feld die **Halle**
+  (`HostFrame::MatchAssigned.hall`) und neue **Freitexte**
+  (`HostFrame::Freetext`) an den Relay.
+- **Relay** speichert je Namespace `court_hall` + `freetext` und liefert
+  `GET /{ns}/info/announce/state?hall=&since=` (hallengefilterte Matches +
+  neue Freitexte) — `relay/src/main.rs`, `relay-proto` (`AnnounceState`).
+- **Slave**: `slave_mode` + **`master_namespace`** (Kopplungs-Code des Masters).
+  Statt BTP zu lesen, pollt `CloudAnnounceSlave` (`cloud_announce_state`,
+  `src-tauri/src/commands.rs` → `relay_client::fetch_announce_state`) und sagt
+  Matches seiner Halle + Freitext lokal an (Stimme/Azure lokal).
+- **Pairing-UI**: SetupWizard zeigt den eigenen Kopplungs-Code (`install_id`)
+  und nimmt im Slave-Modus den Master-Code entgegen.
+- **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame`).
+- **Noch offen (B1b/B2):** Cloud-**Info-/Kombi-Monitore** und **Steuerung** der
+  fernen Halle (Feldvergabe/Tablets/Ergebnis). Siehe
+  `docs/features/multihall-cloud-plan.md`.
+
+## Offene Punkte
 
 - **Verbindungsweg je Gerät anzeigen.** Im Parallelbetrieb pro Gerät
   (Tablet, Court-Monitor) als Badge sichtbar machen, ob es bts-light über
