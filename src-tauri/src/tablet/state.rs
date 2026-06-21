@@ -800,6 +800,9 @@ impl TabletState {
     /// Eine Freitext-Ansage ablegen (Master). `hall` leer = alle Hallen.
     /// Liefert die neue laufende ID.
     pub fn publish_freetext(&self, hall: String, text: String) -> u64 {
+        // Längen begrenzen – konsistent mit dem Relay-Cap, kein Byte-Panic.
+        let text: String = text.chars().take(1000).collect();
+        let hall: String = hall.chars().take(128).collect();
         // ID monoton AUCH über einen Master-Neustart: auf mindestens die
         // aktuelle Uhrzeit (ms) heben. Sonst begännen die IDs nach Neustart
         // wieder klein und ein Slave mit gemerkter `lastId` verstummte, bis die

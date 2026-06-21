@@ -403,6 +403,17 @@ pub async fn fetch_announce_state(
     hall: &str,
     since: u64,
 ) -> Option<AnnounceState> {
+    // Kopplungs-Code (= install_id-UUID) hart validieren: nur Hex+Bindestrich,
+    // plausible Länge. Schützt den URL-Pfad vor Fremdzeichen und erspart sinnlose
+    // Requests bei Tippfehlern.
+    if namespace.len() < 8
+        || namespace.len() > 64
+        || !namespace
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        return None;
+    }
     let mut url =
         reqwest::Url::parse(&format!("{RELAY_HTTP}/{namespace}/info/announce/state")).ok()?;
     url.query_pairs_mut()

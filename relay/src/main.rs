@@ -1375,6 +1375,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             }
         }
         HostFrame::Freetext { id, hall, text } => {
+            // Längen hart begrenzen (Schutz vor RAM-Aufblähung durch
+            // pathologische Frames; char-genau, kein Byte-Slice-Panic).
+            let text: String = text.chars().take(1000).collect();
+            let hall: String = hall.chars().take(128).collect();
             // Neue Freitext-Ansage zwischenspeichern (dedup nach id, Cap 50) –
             // der Cloud-Ansage-Slave holt sie über /info/announce/state.
             if !namespace.freetext.iter().any(|f| f.id == id) {
