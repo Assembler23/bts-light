@@ -844,6 +844,18 @@ pub struct AnnounceState {
     pub freetext: Vec<FreetextItem>,
 }
 
+/// Präsenz-Info eines Cloud-Ansage-Slaves (für die „ferne Halle online?"-Anzeige
+/// am Master). `online` = zuletzt innerhalb des Timeouts gesehen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlaveInfo {
+    pub id: String,
+    #[serde(default)]
+    pub hall: String,
+    pub online: bool,
+    #[serde(rename = "lastSeenMs", default)]
+    pub last_seen_ms: u64,
+}
+
 /// Frames vom Relay an den bts-light-Host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

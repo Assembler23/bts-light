@@ -13,6 +13,7 @@ import type {
   NameOverride,
   PreparationView,
   InternetStatus,
+  SlaveInfo,
   SyncStatus,
   TabletInfo,
   TournamentStats,
@@ -116,6 +117,9 @@ export const tournamentStats = (): Promise<TournamentStats | null> =>
 /** Cloud-Ansage-Slave: Hallen-Matches + neue Freitexte aus dem Master-Relay. */
 export const cloudAnnounceState = (since: number): Promise<CloudAnnounce> =>
   invoke("cloud_announce_state", { since });
+
+/** Master: ferne Hallen (Cloud-Slaves) samt Online-Status. */
+export const cloudSlaves = (): Promise<SlaveInfo[]> => invoke("cloud_slaves");
 
 /** Geteiltes Aussprache-Wörterbuch von badhub laden (offline: aus Cache). */
 export const fetchPronunciations = (): Promise<NameOverride[]> =>

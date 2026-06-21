@@ -211,6 +211,14 @@ export interface DrawInfo {
   draw_name: string;
 }
 
+/** Präsenz einer fernen Halle / Cloud-Slave (Rust: relay_proto::SlaveInfo). */
+export interface SlaveInfo {
+  id: string;
+  hall: string;
+  online: boolean;
+  lastSeenMs: number;
+}
+
 /** Ein Feld im Cloud-Ansage-Status (Rust: commands::CloudAnnounceCourt). */
 export interface CloudAnnounceCourt {
   court_id: number;

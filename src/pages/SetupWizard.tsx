@@ -605,40 +605,73 @@ export function SetupWizard({
           </span>
         </label>
 
-        {/* Cloud-Pairing: für weit entfernte Hallen ohne gemeinsames Netz.
-            Master-Code eintragen → Slave holt Matches/Freitext über Internet. */}
+        {/* Geführte Cloud-Kopplung für die ferne Halle (Slave). */}
         {slaveMode && (
           <div className="mt-3 border-t border-violet-200 pt-3">
-            <label className="block text-sm">
-              <span className="font-semibold text-violet-900">
-                Cloud-Kopplung (ferne Halle, kein gemeinsames Netz)
-              </span>
-              <span className="mt-1 block text-violet-800">
-                Trage hier den <strong>Kopplungs-Code des Masters</strong> ein,
-                wenn die Hallen <strong>nicht im selben Netz</strong> sind. Dann
-                kommen Matches + Freitext über das Internet (statt aus BTP).{" "}
-                <strong>Leer lassen</strong> = klassischer LAN-Slave (liest BTP
-                direkt).
-              </span>
-              <input
-                type="text"
-                value={masterNamespace}
-                placeholder="Kopplungs-Code des Masters"
-                onChange={(e) => setMasterNamespace(e.currentTarget.value)}
-                className="mt-2 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm
-                           focus:border-violet-500 focus:outline-none"
-              />
-            </label>
+            <div className="text-sm font-semibold text-violet-900">
+              Ferne Halle über Cloud einrichten (kein gemeinsames Netz)
+            </div>
+            <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800">
+              <li>
+                Am <strong>Master</strong> (PC mit BTP) den{" "}
+                <strong>Kopplungs-Code</strong> ablesen (steht dort unten in
+                diesem Feld) und hier eintragen:
+              </li>
+            </ol>
+            <input
+              type="text"
+              value={masterNamespace}
+              placeholder="Kopplungs-Code des Masters"
+              onChange={(e) => setMasterNamespace(e.currentTarget.value)}
+              className="mt-2 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm
+                         focus:border-violet-500 focus:outline-none"
+            />
+            <ol
+              className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800"
+              start={2}
+            >
+              <li>
+                Unter <strong>„Sprachansagen"</strong> die <strong>Halle</strong>{" "}
+                dieser fernen Halle wählen (+ Stimme).
+              </li>
+              <li>
+                <strong>Internet</strong> muss da sein (LTE/WLAN) — die Ansagen
+                kommen über die Cloud vom Master.
+              </li>
+            </ol>
+            <p className="mt-2 text-xs text-violet-700">
+              Feld leer lassen = klassischer <strong>LAN-Slave</strong> (liest BTP
+              direkt im selben Netz).
+            </p>
           </div>
         )}
 
-        {/* Eigener Kopplungs-Code (am MASTER ablesen, am Slave eintragen). */}
-        <p className="mt-3 border-t border-violet-200 pt-3 text-xs text-violet-700">
-          Kopplungs-Code dieses Geräts (für ferne Hallen):{" "}
-          <span className="select-all font-mono font-semibold">
-            {initialConfig.install_id || "—"}
-          </span>
-        </p>
+        {/* Eigener Kopplungs-Code (am MASTER ablesen, an der fernen Halle
+            eintragen). Mit Kopieren-Knopf. */}
+        {!slaveMode && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-violet-200 pt-3">
+            <span className="text-sm text-violet-800">
+              <strong>Master-Kopplungs-Code</strong> (für ferne Hallen):
+            </span>
+            <span className="select-all rounded bg-white px-2 py-1 font-mono text-sm font-semibold text-violet-900">
+              {initialConfig.install_id || "—"}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                void navigator.clipboard?.writeText(initialConfig.install_id || "")
+              }
+              className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white
+                         transition-colors hover:bg-violet-700"
+            >
+              Kopieren
+            </button>
+            <span className="w-full text-xs text-violet-700">
+              An die ferne Halle geben. <strong>Cloud</strong> muss dafür oben
+              aktiv sein.
+            </span>
+          </div>
+        )}
       </section>
 
       {/* Schritt 1: Verband / Ziel */}

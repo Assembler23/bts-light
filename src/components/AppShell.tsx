@@ -7,6 +7,7 @@ import { tenantShortLabel } from "../presets";
 import type {
   AppConfig,
   InternetStatus,
+  SlaveInfo,
   SyncStatus,
   WifiStatus,
 } from "../types";
@@ -85,12 +86,39 @@ function InternetIndicator({ internet }: { internet: InternetStatus | null }) {
   );
 }
 
+// Ferne-Hallen-Anzeige (Cloud-Master): ist der Ansage-Slave der anderen Halle
+// online? Rein informativ; leer, wenn kein Slave bekannt ist (Einzelhalle).
+function SlaveIndicator({ slaves }: { slaves: SlaveInfo[] }) {
+  if (slaves.length === 0) return null;
+  return (
+    <div className="flex items-center gap-2.5">
+      {slaves.map((s) => (
+        <div
+          key={s.id}
+          className={`flex items-center gap-1 ${s.online ? "text-emerald-600" : "text-rose-500"}`}
+          title={
+            s.online
+              ? `Ferne Halle „${s.hall || "?"}" verbunden (Cloud)`
+              : `Ferne Halle „${s.hall || "?"}" offline – kein Internet? Ansage pausiert dort, bis sie wieder verbindet`
+          }
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${s.online ? "bg-emerald-500" : "bg-rose-400"}`}
+          />
+          <span className="text-xs font-medium">{s.hall || "Ferne Halle"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AppShell({
   current,
   config,
   status,
   wifi,
   internet,
+  slaves,
   busy,
   onToggleRun,
   onNavigate,
@@ -101,6 +129,7 @@ export function AppShell({
   status: SyncStatus | null;
   wifi: WifiStatus | null;
   internet: InternetStatus | null;
+  slaves: SlaveInfo[];
   busy: boolean;
   onToggleRun: () => void;
   onNavigate: (view: NavView, focus?: SettingsFocus) => void;
@@ -144,6 +173,13 @@ export function AppShell({
         <div className="ml-3 border-l border-slate-200 pl-3">
           <InternetIndicator internet={internet} />
         </div>
+
+        {/* Ferne Hallen (Cloud-Slaves) online? Nur sichtbar, wenn vorhanden. */}
+        {slaves.length > 0 && (
+          <div className="ml-3 border-l border-slate-200 pl-3">
+            <SlaveIndicator slaves={slaves} />
+          </div>
+        )}
 
         {/* Start/Stopp – von überall erreichbar. */}
         <button

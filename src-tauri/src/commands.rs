@@ -1484,7 +1484,7 @@ pub async fn cloud_announce_state(
     state: State<'_, AppState>,
     since: u64,
 ) -> Result<CloudAnnounce, String> {
-    let (ns, hall) = {
+    let (ns, hall, slave_id) = {
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
         if !cfg.slave_mode || cfg.master_namespace.trim().is_empty() {
             return Ok(CloudAnnounce {
@@ -1495,9 +1495,10 @@ pub async fn cloud_announce_state(
         (
             cfg.master_namespace.clone(),
             cfg.announce.announce_hall.clone(),
+            cfg.install_id.clone(),
         )
     };
-    let st = crate::tablet::relay_client::fetch_announce_state(&ns, &hall, since)
+    let st = crate::tablet::relay_client::fetch_announce_state(&ns, &hall, since, &slave_id)
         .await
         .unwrap_or_default();
 
@@ -1537,6 +1538,23 @@ pub async fn cloud_announce_state(
         })
         .collect();
     Ok(CloudAnnounce { courts, freetext })
+}
+
+/// Master: bekannte Cloud-Ansage-Slaves (ferne Hallen) samt Online-Status, für
+/// die Kopfzeilen-Anzeige. Leer, wenn dieser PC kein Cloud-Master ist.
+#[tauri::command]
+pub async fn cloud_slaves(
+    state: State<'_, AppState>,
+) -> Result<Vec<relay_proto::SlaveInfo>, String> {
+    let ns = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        // Nur ein Cloud-Master (nicht Slave) hat ferne Hallen zu zeigen.
+        if cfg.slave_mode || !cfg.connection_mode.cloud_enabled() {
+            return Ok(Vec::new());
+        }
+        cfg.install_id.clone()
+    };
+    Ok(crate::tablet::relay_client::fetch_slaves(&ns).await)
 }
 
 /// Ruft die ausgewählten Spiele „in Vorbereitung". `location_id` bindet den

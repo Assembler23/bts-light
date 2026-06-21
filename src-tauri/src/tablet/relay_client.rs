@@ -402,6 +402,7 @@ pub async fn fetch_announce_state(
     namespace: &str,
     hall: &str,
     since: u64,
+    slave: &str,
 ) -> Option<AnnounceState> {
     // Kopplungs-Code (= install_id-UUID) hart validieren: nur Hex+Bindestrich,
     // plausible Länge. Schützt den URL-Pfad vor Fremdzeichen und erspart sinnlose
@@ -419,6 +420,9 @@ pub async fn fetch_announce_state(
     url.query_pairs_mut()
         .append_pair("hall", hall)
         .append_pair("since", &since.to_string());
+    if !slave.is_empty() {
+        url.query_pairs_mut().append_pair("slave", slave);
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
@@ -428,6 +432,32 @@ pub async fn fetch_announce_state(
         return None;
     }
     resp.json::<AnnounceState>().await.ok()
+}
+
+/// Master: bekannte Cloud-Ansage-Slaves des eigenen Namespaces abfragen (für die
+/// „ferne Halle online?"-Anzeige). Leere Liste bei Netz-/Parse-Fehler.
+pub async fn fetch_slaves(namespace: &str) -> Vec<relay_proto::SlaveInfo> {
+    if namespace.len() < 8
+        || namespace.len() > 64
+        || !namespace
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        return Vec::new();
+    }
+    let url = format!("{RELAY_HTTP}/{namespace}/slaves");
+    let fetch = async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .ok()?;
+        let resp = client.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json::<Vec<relay_proto::SlaveInfo>>().await.ok()
+    };
+    fetch.await.unwrap_or_default()
 }
 
 /// 2-s-Ticker: neue Freitext-Ansagen (`id > last_freetext`) an den Relay pushen,
