@@ -1,0 +1,12 @@
+#!/bin/sh
+# Schwereres Gate vor dem Push: clippy (kompiliert) faengt echte Fehlermuster,
+# bevor eine CI-Minute verbraucht wird. Laeuft nur beim Push, nicht je Commit.
+# cargo test / npm run build bleiben in der CI. Bypass: git push --no-verify
+set -e
+
+if command -v cargo >/dev/null 2>&1; then
+  cargo clippy --workspace --all-targets -- -D warnings \
+    || { echo "✗ clippy — vor dem Push beheben (oder git push --no-verify)"; exit 1; }
+fi
+
+exit 0

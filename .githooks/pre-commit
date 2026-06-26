@@ -1,0 +1,14 @@
+#!/bin/sh
+# Schnelles Gate vor dem Commit (Schicht 1 des Quality-Playbooks).
+# Nur cargo fmt --check (kein Compile -> instant). clippy/test/build sind schwer
+# und laufen in pre-push bzw. der CI. Notfall-Bypass: git commit --no-verify
+set -e
+
+rsstaged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+
+# Fail-open ohne cargo (z. B. reine Doku-Commits / fehlende Toolchain).
+if [ -n "$rsstaged" ] && command -v cargo >/dev/null 2>&1; then
+  cargo fmt --check || { echo "✗ cargo fmt — fix mit: cargo fmt"; exit 1; }
+fi
+
+exit 0
