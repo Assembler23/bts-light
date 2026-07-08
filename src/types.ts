@@ -232,9 +232,9 @@ export interface CourtBrief {
  *  (`<relay_base>/court/<id>/display`). */
 export interface SlaveDeviceInfo {
   relay_base: string;
-  hall: string;
   /** Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) — Optionen
-   *  für die Hallen-Auswahl auf dem Cloud-Slave (der kein BTP hat). */
+   *  für die Hallen-Auswahl auf dem Cloud-Slave (der kein BTP hat). Die gewählte
+   *  Halle liest die UI aus der Config (`announce_hall`). */
   all_halls: string[];
   courts: CourtBrief[];
 }

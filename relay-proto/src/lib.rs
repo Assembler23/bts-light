@@ -766,7 +766,10 @@ pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
             halls.push(c.hall.clone());
         }
     }
-    halls.sort();
+    // Case-insensitiv sortieren – deckungsgleich mit der Master-Hallenliste
+    // (`tournamentStats`), damit dasselbe `announce_hall`-Dropdown in beiden
+    // Rollen gleich sortiert erscheint.
+    halls.sort_by_key(|h| h.to_lowercase());
     halls
 }
 

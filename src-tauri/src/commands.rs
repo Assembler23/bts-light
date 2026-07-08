@@ -1566,11 +1566,10 @@ pub async fn cloud_slaves(
 pub struct SlaveDeviceInfo {
     /// Relay-Basis des Master-Namespace (`https://badhub.de/bts-relay/<master_ns>`).
     pub relay_base: String,
-    /// Halle dieses Slaves (leer = noch nicht gewählt → alle Hallen).
-    pub hall: String,
     /// Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) —
     /// Optionen für die Hallen-Auswahl auf dem Slave. Der Cloud-Slave hat kein
-    /// BTP und kann die Hallennamen nur hierüber verlässlich anbieten.
+    /// BTP und kann die Hallennamen nur hierüber verlässlich anbieten. Die
+    /// gewählte Halle selbst liest das Frontend aus der Config (`announce_hall`).
     pub all_halls: Vec<String>,
     /// Felder der eigenen Halle: `id`, `label` (Anzeige), `hall`. Bei noch nicht
     /// gewählter Halle alle Felder (dann greift die Hallen-Auswahl davor).
@@ -1589,7 +1588,6 @@ pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo
         if !cfg.slave_mode || !crate::tablet::relay_client::valid_relay_namespace(&ns) {
             return Ok(SlaveDeviceInfo {
                 relay_base: String::new(),
-                hall: String::new(),
                 all_halls: Vec::new(),
                 courts: Vec::new(),
             });
@@ -1609,7 +1607,6 @@ pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo
     let relay_base = format!("https://badhub.de/bts-relay/{ns}");
     Ok(SlaveDeviceInfo {
         relay_base,
-        hall,
         all_halls,
         courts,
     })
