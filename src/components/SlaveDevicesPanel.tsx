@@ -12,13 +12,25 @@ const POLL_MS = 5000;
  * Masters — nicht am Slave-PC. Der Slave-PC sagt nur an. Diese Ansicht liefert
  * der Crew vor Ort die Adressen ihrer Felder, ohne auf den Master-Bildschirm
  * schauen zu müssen: je Feld ein scannbarer **Tablet-QR** und der **Monitor-
- * Link** für den TV. Beides zeigt auf den Namespace des Masters, die Ergebnisse
- * fließen darüber zurück ins Master-BTP.
+ * Link** für den TV.
+ *
+ * **Hallen-Auswahl:** Der Cloud-Slave hat kein BTP und kann die Hallennamen
+ * nicht aus einem lokalen Snapshot ziehen. Er bekommt sie deshalb über die
+ * Relay-Feldliste (`all_halls`) und lässt die Halle hier wählen — dieselbe
+ * `announce_hall`, die auch die Ansage steuert. Ohne gewählte Halle würde der
+ * Slave alle Hallen ansagen (auch die des Masters) und alle Felder zeigen;
+ * darum wird die Auswahl hier erzwungen.
  *
  * Sichtbar nur, wenn dieser PC als Cloud-Slave läuft (`slave_devices` liefert
  * dann eine `relay_base`); sonst rendert die Komponente nichts.
  */
-export function SlaveDevicesPanel() {
+export function SlaveDevicesPanel({
+  announceHall,
+  onPickHall,
+}: {
+  announceHall: string;
+  onPickHall: (hall: string) => void;
+}) {
   const [info, setInfo] = useState<SlaveDeviceInfo | null>(null);
 
   useEffect(() => {
@@ -42,15 +54,16 @@ export function SlaveDevicesPanel() {
   if (!info || !info.relay_base) return null;
 
   const base = info.relay_base;
+  const hallChosen = announceHall !== "";
 
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-violet-300 bg-violet-50 p-5 shadow-sm">
       <div className="flex items-center gap-2 font-medium text-violet-900">
         <MonitorSmartphone size={18} className="shrink-0" />
         Geräte dieser Halle anschließen
-        {info.hall && (
+        {announceHall && (
           <span className="rounded bg-violet-200 px-1.5 py-0.5 text-xs font-semibold text-violet-900">
-            {info.hall}
+            {announceHall}
           </span>
         )}
       </div>
@@ -60,17 +73,50 @@ export function SlaveDevicesPanel() {
         scannen; am TV den <strong>Monitor-Link</strong> im Browser öffnen.
       </p>
 
-      {!info.hall && (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Noch <strong>keine Halle</strong> gewählt — es werden{" "}
-          <strong>alle</strong> Felder gezeigt. Unter „Sprachansagen" die Halle
-          dieser fernen Halle wählen, dann bleibt nur sie übrig.
-        </p>
+      {/* Hallen-Auswahl (aus der Relay-Feldliste; steuert Ansage + Filter). */}
+      {info.all_halls.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/70 px-3 py-2">
+          <label className="text-sm font-medium text-violet-900">
+            Diese ferne Halle ist:
+          </label>
+          <select
+            value={announceHall}
+            onChange={(e) => onPickHall(e.currentTarget.value)}
+            className="rounded-lg border border-violet-300 bg-white px-2.5 py-1.5 text-sm
+                       text-slate-800 focus:border-violet-500 focus:outline-none"
+          >
+            <option value="">— bitte wählen —</option>
+            {info.all_halls.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-violet-700">
+            steuert zugleich die Ansage (nur diese Halle)
+          </span>
+        </div>
       )}
-      {info.courts.length === 0 ? (
+
+      {!hallChosen ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {info.all_halls.length > 0 ? (
+            <>
+              Bitte oben die <strong>Halle</strong> dieser fernen Halle wählen.
+              Sonst werden <strong>alle</strong> Hallen angesagt (auch die des
+              Masters) und die Feld-Codes gehören zur falschen Halle.
+            </>
+          ) : (
+            <>
+              Warte auf den Master … Sobald der Master läuft (Cloud aktiv, BTP
+              geladen), erscheinen hier die Hallen und Felder.
+            </>
+          )}
+        </p>
+      ) : info.courts.length === 0 ? (
         <p className="rounded-lg bg-white/70 px-3 py-2 text-sm text-violet-700">
-          Warte auf den Master … Sobald der Master läuft (Cloud aktiv, BTP
-          geladen), erscheinen hier die Felder dieser Halle.
+          Keine Felder für „{announceHall}" gefunden. Stimmt der Hallenname mit
+          BTP überein? Sonst oben eine andere Halle wählen.
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

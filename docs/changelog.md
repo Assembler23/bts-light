@@ -11,11 +11,13 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Halle A sitzt, geht jetzt ohne Telefon: Die Geräte der fernen Halle verbinden sich **direkt über
   die Cloud** mit dem Master; die Ergebnisse fließen zurück ins **Master-BTP**. Der Slave-PC sagt
   weiterhin nur an. Auf dem **Dashboard** des Slaves erscheint neu **„Geräte dieser Halle
-  anschließen"** — je Feld ein scannbarer **Tablet-QR** und der **Monitor-Link** für den TV, gefiltert
-  auf die eigene Halle. Voraussetzung: der Master läuft mit **Cloud** (bei eigenen LAN-Tablets in
-  Halle A: **LAN + Cloud**) und die Disziplinen sind je Halle zugeordnet (damit die Auto-Vergabe die
-  Matches in die richtige Halle legt). *(Voraussetzung: aktualisierter Relay auf badhub — neues
-  `hall`-Feld in der Feldliste.)* Architektur-Entscheid: [ADR 0002](adr/0002-ferne-halle-direkt-cloud-geraete.md).
+  anschließen"** — zuerst die **Hallen-Auswahl** (der Cloud-Slave hat kein BTP und bekommt die
+  Hallennamen jetzt über die Cloud), danach je Feld ein scannbarer **Tablet-QR** und der
+  **Monitor-Link** für den TV. Die gewählte Halle steuert zugleich die Ansage.
+- **Warnung „sagt alle Hallen an".** Der **Master** warnt jetzt deutlich auf dem Dashboard, wenn bei
+  einem Mehr-Hallen-Turnier keine Ansage-Halle gewählt ist (sonst sagt er auch die Spiele der fernen
+  Halle mit an). *(Voraussetzung Rollout: aktualisierter Relay auf badhub — neues `hall`-Feld in der
+  Feldliste.)* Architektur-Entscheid + Betriebs-Voraussetzungen: [ADR 0002](adr/0002-ferne-halle-direkt-cloud-geraete.md).
 
 ## v0.9.143
 

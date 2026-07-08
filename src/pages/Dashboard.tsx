@@ -252,9 +252,14 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
         </p>
       </header>
 
-      {/* Ferne Halle (Cloud-Slave): Tablet-QR + Monitor-Links der eigenen
-          Halle. Rendert nur, wenn dieser PC als Cloud-Slave läuft. */}
-      {config.slave_mode && <SlaveDevicesPanel />}
+      {/* Ferne Halle (Cloud-Slave): Hallen-Auswahl + Tablet-QR + Monitor-Links
+          der eigenen Halle. Rendert nur, wenn dieser PC als Cloud-Slave läuft. */}
+      {config.slave_mode && (
+        <SlaveDevicesPanel
+          announceHall={config.announce.announce_hall}
+          onPickHall={(h) => void changeAnnounceHall(h)}
+        />
+      )}
 
       {/* Liveticker-Status */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -348,6 +353,16 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
             Lege fest, welche Halle dieser PC ansagt, damit jede Halle nur ihre
             eigenen Ansagen hört.
           </p>
+          {/* Falle: leere Halle = alle Hallen ansagen. Bei aktiver Ansage
+              deutlich warnen, damit der Master nicht die Spiele der fernen
+              Halle mit ansagt. */}
+          {config.announce.enabled && config.announce.announce_hall === "" && (
+            <p className="rounded-lg bg-rose-100 px-3 py-2 text-sm font-medium text-rose-800">
+              ⚠️ Dieser PC sagt aktuell <strong>ALLE Hallen</strong> an — auch
+              die der fernen Halle. Für ein Zwei-Hallen-Setup hier die{" "}
+              <strong>eigene Halle</strong> wählen.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-sm font-medium text-amber-900">
               Dieser PC sagt an:

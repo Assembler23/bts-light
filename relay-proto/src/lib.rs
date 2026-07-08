@@ -755,6 +755,21 @@ pub struct CourtBrief {
     pub hall: String,
 }
 
+/// Die eindeutigen, nicht-leeren Hallennamen einer Feldliste – alphabetisch
+/// sortiert. Grundlage der Hallen-Auswahl auf dem **Cloud-Slave**, der kein BTP
+/// hat und die Hallennamen deshalb aus der Relay-Feldliste ziehen muss (statt
+/// wie der Master aus dem lokalen BTP-Snapshot).
+pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
+    let mut halls: Vec<String> = Vec::new();
+    for c in courts {
+        if !c.hall.is_empty() && !halls.contains(&c.hall) {
+            halls.push(c.hall.clone());
+        }
+    }
+    halls.sort();
+    halls
+}
+
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1138,6 +1153,38 @@ mod tests {
                 hall: String::new(),
             }
         );
+    }
+
+    #[test]
+    fn distinct_halls_dedups_sorts_and_drops_empty() {
+        let courts = vec![
+            CourtBrief {
+                id: 101,
+                label: "Halle 1 · 1".into(),
+                hall: "Halle 1".into(),
+            },
+            CourtBrief {
+                id: 401,
+                label: "Halle 2 · 1".into(),
+                hall: "Halle 2".into(),
+            },
+            CourtBrief {
+                id: 102,
+                label: "Halle 1 · 2".into(),
+                hall: "Halle 1".into(),
+            },
+            // Leere Halle (unbekannt) wird ausgelassen.
+            CourtBrief {
+                id: 9,
+                label: "Feld 9".into(),
+                hall: String::new(),
+            },
+        ];
+        assert_eq!(
+            distinct_halls(&courts),
+            vec!["Halle 1".to_string(), "Halle 2".to_string()]
+        );
+        assert!(distinct_halls(&[]).is_empty());
     }
 
     #[test]

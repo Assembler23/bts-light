@@ -233,6 +233,9 @@ export interface CourtBrief {
 export interface SlaveDeviceInfo {
   relay_base: string;
   hall: string;
+  /** Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) — Optionen
+   *  für die Hallen-Auswahl auf dem Cloud-Slave (der kein BTP hat). */
+  all_halls: string[];
   courts: CourtBrief[];
 }
 

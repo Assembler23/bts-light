@@ -51,12 +51,15 @@ an die Cloud-Tablet-QR-Codes und Monitor-Links **ihrer** Felder kommen. Dafür:
 1. `hall` als (serde-default) Feld an `CourtBrief` — der Master füllt es beim
    `Courts`-Push, der Relay liefert es unter `/{ns}/courts` mit aus.
 2. Slave-Command `slave_devices`, das die Feldliste des Master-Namespace holt,
-   auf die eigene Halle filtert und die Relay-Basis (`…/bts-relay/<master_ns>`)
-   liefert.
-3. Slave-UI „Geräte in dieser Halle anschließen": je Feld der Tablet-QR
-   (`<relay>/<ns>/qr/<court_id>`) und der Monitor-Link
+   die Hallen-Optionen (`distinct_halls`) bestimmt, auf die eigene Halle filtert
+   und die Relay-Basis (`…/bts-relay/<master_ns>`) liefert.
+3. Slave-UI „Geräte in dieser Halle anschließen": **zuerst die Hallen-Auswahl**
+   (aus der Relay-Feldliste, weil der Cloud-Slave kein BTP hat), dann je Feld
+   der Tablet-QR (`<relay>/<ns>/qr/<court_id>`) und der Monitor-Link
    (`<relay>/<ns>/court/<court_id>/display`).
-4. Wizard-Hinweis, dass der Master `LanAndCloud` sein muss.
+4. Master-Warnung, wenn bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst
+   sagt der Master beide Hallen an). Wizard-Hinweis, dass der Master
+   `LanAndCloud` sein muss.
 
 ## Alternativen
 
@@ -98,8 +101,21 @@ bleiben dann als Fallback bestehen).
   Tablet→Relay→Master-WS→BTP→Ack (20-s-Timeout). Fällt in der fernen Halle
   das Internet oder beim Master die Relay-Verbindung aus, schlägt `/result`
   sofort fehl und muss vom Bediener wiederholt werden.
-- **Master-Dauerpräsenz nötig.** Der Master muss durchgängig cloud-verbunden
-  (`LanAndCloud`) sein; ohne Host-Verbindung bekommt die ferne Halle weder
-  Match-Zuweisungen noch kann sie Ergebnisse abliefern.
+- **Master-Dauerpräsenz nötig (Single Point of Failure).** Der Master muss
+  durchgängig cloud-verbunden (`LanAndCloud`) sein; ohne Host-Verbindung
+  bekommt die ferne Halle weder Match-Zuweisungen noch Ansagen, und Ergebnisse
+  landen nicht im BTP (nur der Master schreibt). Kein Slave-Failover.
+- **`announce_hall` ist die load-bearing Einstellung** — an **beiden** Enden
+  nötig: der Master muss seine Halle setzen (sonst sagt er beide an), der Slave
+  seine (sonst hört Halle B auch Halle A / bekommt keine Feld-Codes). Der
+  Cloud-Slave hat kein BTP, deshalb speist sich seine Hallen-Auswahl aus der
+  Relay-Feldliste; der Vergleich ist byte-genau (`court_hall == announce_hall`).
+- **Feldvergabe bei zwei gleichzeitig bespielten Hallen ist nicht
+  „vollautomatisch".** Die aktive Halle bleibt leer → die Auto-Vergabe belegt
+  nur pro Halle **„in Vorbereitung" gerufene** Matches; die Disziplin-je-Halle-
+  Regeln wirken als Constraint, nicht als Verteiler.
+- **Cloud-Tablet-PIN = `0000`** und das Feldwechsel-Menü listet alle Hallen →
+  ein Halle-B-Tablet ließe sich auf ein Halle-A-Feld umstellen (abgemildert
+  durch Hallen-Präfix im Label). Bekannte Grenze, nicht neu durch dieses ADR.
 - Die ferne Halle kann **nicht** selbst Felder zuweisen — das ist hier
   gewollt (Steuerung nur in Halle A), aber eine bewusste Einschränkung.

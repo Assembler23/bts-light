@@ -1566,9 +1566,14 @@ pub async fn cloud_slaves(
 pub struct SlaveDeviceInfo {
     /// Relay-Basis des Master-Namespace (`https://badhub.de/bts-relay/<master_ns>`).
     pub relay_base: String,
-    /// Halle dieses Slaves (leer = alle Hallen).
+    /// Halle dieses Slaves (leer = noch nicht gewählt → alle Hallen).
     pub hall: String,
-    /// Felder der eigenen Halle: `id`, `label` (Anzeige), `hall`.
+    /// Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) —
+    /// Optionen für die Hallen-Auswahl auf dem Slave. Der Cloud-Slave hat kein
+    /// BTP und kann die Hallennamen nur hierüber verlässlich anbieten.
+    pub all_halls: Vec<String>,
+    /// Felder der eigenen Halle: `id`, `label` (Anzeige), `hall`. Bei noch nicht
+    /// gewählter Halle alle Felder (dann greift die Hallen-Auswahl davor).
     pub courts: Vec<relay_proto::CourtBrief>,
 }
 
@@ -1585,12 +1590,16 @@ pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo
             return Ok(SlaveDeviceInfo {
                 relay_base: String::new(),
                 hall: String::new(),
+                all_halls: Vec::new(),
                 courts: Vec::new(),
             });
         }
         (ns, cfg.announce.announce_hall.clone())
     };
     let all = crate::tablet::relay_client::fetch_courts(&ns).await;
+    // Hallen-Optionen aus der VOLLEN Feldliste (vor dem Filter) — damit die
+    // Auswahl auf dem Slave alle Hallen zeigt, auch die noch nicht gewählte.
+    let all_halls = relay_proto::distinct_halls(&all);
     // Auf die eigene Halle filtern (gleiche Logik wie die hallengefilterte
     // Ansage: leere Slave-Halle oder leere Feld-Halle = kein Filter).
     let courts: Vec<relay_proto::CourtBrief> = all
@@ -1601,6 +1610,7 @@ pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo
     Ok(SlaveDeviceInfo {
         relay_base,
         hall,
+        all_halls,
         courts,
     })
 }

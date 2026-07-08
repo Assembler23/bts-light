@@ -220,18 +220,53 @@ Adressen ihrer Felder ohne Blick auf den Master):
   (`relay_client.rs::push_courts`), der Relay liefert es unter `/{ns}/courts`
   mit aus (`relay/src/main.rs::courts_list`).
 - Command `slave_devices` (`commands.rs`) → holt die Feldliste des
-  Master-Namespace (`relay_client::fetch_courts`), filtert auf die eigene
-  Halle (`announce.announce_hall`), liefert `relay_base` +
-  `Vec<CourtBrief>`.
-- Slave-Dashboard-Panel `SlaveDevicesPanel.tsx` — je Feld ein Tablet-QR
-  (`<relay_base>/qr/<id>`) und der Monitor-Link
-  (`<relay_base>/court/<id>/display`).
+  Master-Namespace (`relay_client::fetch_courts`), liefert `relay_base`, die
+  Hallen-Optionen (`relay_proto::distinct_halls`) und die auf die eigene Halle
+  (`announce.announce_hall`) gefilterten `Vec<CourtBrief>`.
+- Slave-Dashboard-Panel `SlaveDevicesPanel.tsx` — **zuerst** die Hallen-Auswahl
+  (siehe unten), dann je Feld ein Tablet-QR (`<relay_base>/qr/<id>`) und der
+  Monitor-Link (`<relay_base>/court/<id>/display`).
 
-**Voraussetzungen (betrieblich, keine Bugs):** Master läuft mit `Cloud` bzw.
-`LanAndCloud` (durchgängige Host-Verbindung nötig); Disziplinen sind je Halle
-zugeordnet (Phase 1b), damit die Auto-Vergabe die Matches in die richtige
-Halle legt. **Grenze:** kein lokaler Puffer — jede Ergebnis-Übermittlung läuft
-synchron über die Cloud (20-s-Timeout); bei Aussetzern erneut senden.
+### Hallen-Auswahl auf dem Cloud-Slave — warum eigens
+
+`announce_hall` ist die eine Einstellung, die **sowohl** die Ansage (welche
+Halle spricht der Slave an) **als auch** den Geräte-Filter steuert. Der Match
+im Relay ist ein **Byte-genauer** Vergleich `court_hall == announce_hall`.
+Problem: alle Hallen-Dropdowns der App speisen sich aus dem **lokalen BTP**
+(`tabletOverview`/`tournamentStats`) — der Cloud-Slave hat **kein** BTP, also
+wäre die Liste leer und die Auswahl unsichtbar. Folgen ohne Fix: leeres
+`announce_hall` = **alle** Hallen (der Slave sagt Halle A mit an), oder ein
+manuell getippter, nicht exakt passender Name = **null** Ansagen/Felder.
+
+Lösung: der Slave zieht die Hallennamen aus der **Relay-Feldliste**
+(`slave_devices.all_halls`) und lässt sie im Panel wählen — dieselbe
+`announce_hall`. Ohne gewählte Halle zeigt das Panel keine Felder, sondern
+fordert die Auswahl ein. Der **Master** wiederum warnt auf dem Dashboard, wenn
+bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst sagt er beide an).
+
+**Voraussetzungen (betrieblich, keine Bugs):**
+
+- Master läuft mit `Cloud`/`LanAndCloud` und ist durchgängig verbunden (Single
+  Point of Failure: fällt der Master oder sein LTE aus, bekommt Halle B keine
+  neuen Ansagen/Zuweisungen und Ergebnisse landen nicht im BTP).
+- **Ansage-Halle gesetzt** — am Master (= Halle A) und am Slave (= Halle B).
+- **Feldvergabe bei zwei gleichzeitig bespielten Hallen:** die „aktive Halle"
+  (Tages-Halle) bleibt **leer** → die Auto-Vergabe belegt dann **nur** Matches,
+  die pro Halle **„in Vorbereitung" gerufen** wurden (`sync.rs`, `require_call`).
+  Die Disziplin-je-Halle-Regeln (Phase 1b) sind dabei ein **Constraint** (ein
+  gerufenes Match landet nur in der erlaubten Halle), **kein** selbsttätiger
+  Verteiler. Ablauf: TL ruft die nächsten Spiele je Halle in Vorbereitung, die
+  Regel sortiert sie in die richtige Halle.
+
+**Grenzen (bekannt):**
+
+- **Kein lokaler Puffer** — jede Ergebnis-Übermittlung läuft synchron über die
+  Cloud (20-s-Timeout); bei Aussetzern erneut senden.
+- **Cloud-Tablet-PIN = `0000`** (der Relay kennt den Operator-PIN nicht,
+  `relay/src/main.rs` `__TABLET_PIN__` leer → `tablet.html`-Fallback), und das
+  Cloud-Feldwechsel-Menü listet **alle** Hallen. Ein Helfer in Halle B könnte
+  ein Tablet auf ein Halle-A-Feld umstellen — abgemildert durch das
+  Hallen-Präfix im Feld-Label („Halle 2 · 6").
 
 - **Noch offen (B1b/B2):** Cloud-**Info-/Kombi-Monitore** und die
   **Slave-seitige TV-/Geräte-Zuweisung** der fernen Halle (Pi-Kiosk aus Halle B

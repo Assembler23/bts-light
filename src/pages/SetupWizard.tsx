@@ -600,8 +600,10 @@ export function SetupWizard({
               Master — ihre QR-Codes/Links erscheinen nach dem Koppeln auf dem{" "}
               <strong>Dashboard</strong>. Den Master (mit der laufenden
               BTP-Steuerung) gibt es genau einmal; beliebig viele Slaves dürfen
-              mitlaufen. Stelle unten den <strong>Master-Kopplungs-Code</strong>{" "}
-              und unter „Sprachansagen" die <strong>Halle</strong> + Stimme ein.
+              mitlaufen. Trage unten den <strong>Master-Kopplungs-Code</strong>{" "}
+              ein; die <strong>Halle</strong> wählst du danach auf dem{" "}
+              <strong>Dashboard</strong> („Geräte dieser Halle"), die Stimme
+              unter „Sprachansagen".
             </span>
           </span>
         </label>
