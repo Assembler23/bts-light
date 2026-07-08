@@ -594,13 +594,14 @@ export function SetupWizard({
               Ansage-Slave-Modus (zweite Halle)
             </span>
             <span className="mt-1 block text-violet-800">
-              Dieser Rechner liest nur BTP und sagt die unter „Sprachansagen"
-              gewählte Halle an — <strong>kein</strong> Liveticker,{" "}
-              <strong>keine</strong> Feldvergabe, <strong>keine</strong> Tablets.
-              Den Master (mit der laufenden BTP-Steuerung) gibt es genau einmal;
-              beliebig viele Slaves dürfen mitlaufen. Stelle hier nur die{" "}
-              <strong>BTP-Verbindung</strong> (zum BTP-Rechner) und unter
-              „Sprachansagen" die <strong>Halle</strong> + Stimme ein.
+              Dieser Rechner <strong>sagt nur an</strong> (keine{" "}
+              Feldvergabe, kein Liveticker). Die <strong>Tablets und TVs</strong>{" "}
+              dieser Halle hängen <strong>direkt über die Cloud</strong> am
+              Master — ihre QR-Codes/Links erscheinen nach dem Koppeln auf dem{" "}
+              <strong>Dashboard</strong>. Den Master (mit der laufenden
+              BTP-Steuerung) gibt es genau einmal; beliebig viele Slaves dürfen
+              mitlaufen. Stelle unten den <strong>Master-Kopplungs-Code</strong>{" "}
+              und unter „Sprachansagen" die <strong>Halle</strong> + Stimme ein.
             </span>
           </span>
         </label>
@@ -667,8 +668,9 @@ export function SetupWizard({
               Kopieren
             </button>
             <span className="w-full text-xs text-violet-700">
-              An die ferne Halle geben. <strong>Cloud</strong> muss dafür oben
-              aktiv sein.
+              An die ferne Halle geben. Der Master braucht dafür{" "}
+              <strong>Cloud</strong> (bei eigenen LAN-Tablets in dieser Halle:{" "}
+              <strong>LAN + Cloud</strong>) oben aktiv.
             </span>
           </div>
         )}

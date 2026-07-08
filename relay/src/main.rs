@@ -353,7 +353,7 @@ async fn courts_list(State(broker): State<Broker>, Path(ns): Path<String>) -> im
     };
     let items: Vec<serde_json::Value> = courts
         .into_iter()
-        .map(|c| serde_json::json!({ "id": c.id, "label": c.label }))
+        .map(|c| serde_json::json!({ "id": c.id, "label": c.label, "hall": c.hall }))
         .collect();
     (
         [(header::CACHE_CONTROL, "no-store")],

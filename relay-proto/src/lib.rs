@@ -746,6 +746,13 @@ impl ResultResponse {
 pub struct CourtBrief {
     pub id: i64,
     pub label: String,
+    /// Hallenname (BTP-Location) des Felds – damit der Cloud-Ansage-Slave die
+    /// Felder **seiner** Halle herausfiltern und ihre Tablet-QR-/Monitor-Links
+    /// anzeigen kann (ferne Halle: Geräte direkt am Cloud-Relay). Leer =
+    /// Ein-Hallen-Turnier / unbekannt. `#[serde(default)]` hält ältere
+    /// Hosts/Relays ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub hall: String,
 }
 
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
@@ -1107,6 +1114,27 @@ mod tests {
             HostFrame::MatchCleared {
                 court_id: 0,
                 court_label: "Feld 2".into(),
+                hall: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn court_brief_hall_roundtrips_and_defaults() {
+        // Neues Feld hält den Roundtrip.
+        roundtrip(&CourtBrief {
+            id: 401,
+            label: "Halle 2 · 1".into(),
+            hall: "Halle 2".into(),
+        });
+        // Älterer Host/Relay ohne `hall` bleibt lesbar (Default = leer).
+        let old = r#"{"id":7,"label":"Feld 3"}"#;
+        let brief: CourtBrief = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            brief,
+            CourtBrief {
+                id: 7,
+                label: "Feld 3".into(),
                 hall: String::new(),
             }
         );

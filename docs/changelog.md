@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.144
+
+- **Tablets & TVs in der fernen Halle (Weg A / Direkt-Cloud).** Ein Zwei-Hallen-Turnier,
+  bei dem **beide** Hallen Tablets **und** TVs haben, aber die Turnierleitung/Feldvergabe nur in
+  Halle A sitzt, geht jetzt ohne Telefon: Die Geräte der fernen Halle verbinden sich **direkt über
+  die Cloud** mit dem Master; die Ergebnisse fließen zurück ins **Master-BTP**. Der Slave-PC sagt
+  weiterhin nur an. Auf dem **Dashboard** des Slaves erscheint neu **„Geräte dieser Halle
+  anschließen"** — je Feld ein scannbarer **Tablet-QR** und der **Monitor-Link** für den TV, gefiltert
+  auf die eigene Halle. Voraussetzung: der Master läuft mit **Cloud** (bei eigenen LAN-Tablets in
+  Halle A: **LAN + Cloud**) und die Disziplinen sind je Halle zugeordnet (damit die Auto-Vergabe die
+  Matches in die richtige Halle legt). *(Voraussetzung: aktualisierter Relay auf badhub — neues
+  `hall`-Feld in der Feldliste.)* Architektur-Entscheid: [ADR 0002](adr/0002-ferne-halle-direkt-cloud-geraete.md).
+
 ## v0.9.143
 
 - **Master/Slave-Einrichtungshilfe (zwei Hallen über Cloud).** In den Einstellungen führt ein

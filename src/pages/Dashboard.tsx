@@ -14,6 +14,7 @@ import {
   tabletOverview,
   tournamentStats,
 } from "../api";
+import { SlaveDevicesPanel } from "../components/SlaveDevicesPanel";
 import type { NavView, SettingsFocus } from "../components/SideNav";
 import type {
   AppConfig,
@@ -250,6 +251,10 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
             : "Turnier-Übersicht & Liveticker-Status"}
         </p>
       </header>
+
+      {/* Ferne Halle (Cloud-Slave): Tablet-QR + Monitor-Links der eigenen
+          Halle. Rendert nur, wenn dieser PC als Cloud-Slave läuft. */}
+      {config.slave_mode && <SlaveDevicesPanel />}
 
       {/* Liveticker-Status */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

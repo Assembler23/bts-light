@@ -219,6 +219,23 @@ export interface SlaveInfo {
   lastSeenMs: number;
 }
 
+/** Ein Feld der Cloud-Feldliste (Rust: relay_proto::CourtBrief). */
+export interface CourtBrief {
+  id: number;
+  label: string;
+  hall: string;
+}
+
+/** Geräte-Anschluss der fernen Halle (Rust: commands::SlaveDeviceInfo).
+ *  `relay_base` = `https://badhub.de/bts-relay/<master_ns>`; je Feld baut die
+ *  UI daraus Tablet-QR (`<relay_base>/qr/<id>`) und Monitor-Link
+ *  (`<relay_base>/court/<id>/display`). */
+export interface SlaveDeviceInfo {
+  relay_base: string;
+  hall: string;
+  courts: CourtBrief[];
+}
+
 /** Ein Feld im Cloud-Ansage-Status (Rust: commands::CloudAnnounceCourt). */
 export interface CloudAnnounceCourt {
   court_id: number;
