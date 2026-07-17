@@ -123,20 +123,22 @@
       display: flex; flex-direction: column; min-width: 0;
       overflow: hidden; line-height: 1.03;
     }
-    /* Schriftgrößen bewusst groß (Turnier-Feedback 17.07.2026: Namen waren
-       aus Hallendistanz zu klein) — der laufende Satz gibt dafür etwas ab. */
+    /* Schriftgrößen bewusst SEHR groß (Turnier-Feedback 17.07.2026: Namen
+       aus Hallendistanz zu klein, auch 9.2 reichte nicht) — der Nachname
+       ist jetzt so groß wie der laufende Satz. Lange Namen kürzen per
+       Ellipsis; im Doppel stehen 2 Namen je Hälfte (vertikales Budget). */
     .name .given {
-      font-size: 3.6vmin; font-weight: 600; letter-spacing: .07em;
+      font-size: 4.4vmin; font-weight: 600; letter-spacing: .07em;
       text-transform: uppercase; color: #94a3b8;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .name .given:empty { display: none; }
     .name .family {
-      font-size: 9.2vmin; font-weight: 800;
+      font-size: 13vmin; font-weight: 800;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .players.doubles .name .given { font-size: 3vmin; }
-    .players.doubles .name .family { font-size: 6.4vmin; }
+    .players.doubles .name .given { font-size: 3.6vmin; }
+    .players.doubles .name .family { font-size: 8vmin; }
     .serve-dot {
       flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;

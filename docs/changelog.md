@@ -17,8 +17,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 ## v0.9.145
 
 - **TV-Anzeige: Spielernamen deutlich größer.** Auf der Einzelfeld-Anzeige (Court-Monitor)
-  waren die Namen aus Hallendistanz zu klein (Turnier-Feedback): Nachname jetzt 9.2 statt
-  7 vmin (Doppel 6.4 statt 5.4), Vorname entsprechend; der laufende Satzstand gibt dafür
+  waren die Namen aus Hallendistanz zu klein (Turnier-Feedback): Nachname jetzt 13 statt
+  7 vmin (Doppel 8 statt 5.4), Vorname entsprechend; der laufende Satzstand gibt dafür
   etwas ab (13 statt 15 vmin). Erreicht Cloud-TVs mit dem Relay-Deploy, LAN-Monitore mit
   diesem Release.
 - **Ansage nennt jetzt die Klasse: „Herreneinzel A".** Direkt hinter der Disziplin wird das
