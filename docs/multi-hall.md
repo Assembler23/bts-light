@@ -195,10 +195,25 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
   für-Schritt-Block durch die Kopplung. Der Slave-Schalter ist **immer** sichtbar
   (eine ferne Halle hat kein BTP → kann Mehr-Hallen nicht erkennen). Master zeigt
   seinen Code (Kopieren), Slave trägt ihn ein + wählt seine Halle.
+- **Telefon-Code (v0.9.145,
+  [ADR 0004](adr/0004-telefon-kopplungscode.md)):** statt der 36-stelligen
+  UUID kann der Master einen **8-stelligen Zahlen-Code** erzeugen
+  (Einstellungen → „Telefon-Code", braucht laufenden Cloud-Modus; 15 Min
+  gültig, neuer Code ersetzt den alten). Die ferne Halle tippt ihn ein; der
+  SetupWizard löst ihn automatisch beim Relay gegen den vollen
+  Kopplungs-Code ein (`pairing_code`/`resolve_pairing_code` in
+  `commands.rs` → `relay_client.rs`; Relay-Routen `POST /{ns}/pairing-code`,
+  `GET /pair/{code}`). Der lange Code bleibt als Fallback eingebbar.
 - **Slave-Online-Anzeige (v0.9.143):** der Slave meldet beim Relay-Poll seine
   Präsenz (`?slave=<install_id>`), der Relay hält `slaves` (id → Halle + last-seen)
   und liefert `GET /{ns}/slaves`; der Master pollt `cloud_slaves` und zeigt in der
   Kopfzeile, ob die ferne Halle verbunden ist (online < 12 s). Rein informativ.
+- **Verbindungs-Hinweis am Master (v0.9.145):** verbindet sich eine ferne
+  Halle neu (oder nach Ausfall wieder), zeigt der Master zusätzlich einen
+  kurzen grünen Banner („Ferne Halle „X" hat sich verbunden ✓",
+  `SlaveConnectBanner.tsx`) — die Kopplung ist damit ohne Blick auf die
+  Kopfzeile bestätigt. Beim App-Start bereits verbundene Hallen werden
+  nicht gemeldet (Baseline).
 - **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame` +
   `/slaves`-Route).
 

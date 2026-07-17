@@ -16,3 +16,6 @@ tracing-appender = "0.2.5"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 include_dir = "0.7"
 base64 = "0.22"
+# OS-Zufall für Telefon-Kopplungscodes (ADR 0004); ohnehin schon transitiv
+# im Workspace-Dependency-Baum.
+getrandom = "0.3"
