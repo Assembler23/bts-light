@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.145
+
+- **BTP beendet Spiele wieder automatisch (Regression seit v0.9.103).** Tablet-Ergebnisse
+  kamen zwar in BTP an, aber das Spiel blieb dort offen — Sieger musste je Match manuell
+  gewählt und gespeichert werden (Live-Befund Zwei-Hallen-Turnier 17.07.2026). Ursache:
+  v0.9.103 hatte das `Status`-Feld nicht nur aus der Feldzuweisung (dort richtig), sondern
+  versehentlich auch aus dem **Ergebnis**-`SENDUPDATE` entfernt. `Status` steht wieder im
+  Ergebnis (wie im Original-BTS); zusätzlich werden Ergebnis und Feldfreigabe jetzt in
+  **einem** Request geschrieben — der frühere zweite „nackte" Freigabe-Request konnte das
+  Ergebnis wieder entwerten. *(Vor dem Release am echten BTP gegenprüfen: Spiel schließt
+  automatisch, Feld wird frei, Spieler-Check-in bleibt bei Feldzuweisungen unangetastet.)*
+
 ## v0.9.144
 
 - **Tablets & TVs in der fernen Halle (Weg A / Direkt-Cloud).** Ein Zwei-Hallen-Turnier,

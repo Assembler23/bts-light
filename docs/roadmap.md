@@ -3,9 +3,39 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
-> Stand: 2026-05-23, nach Release v0.9.16. Mehr-Hallen-Unterstützung
-> ist als Architektur etabliert (siehe [multi-hall.md](multi-hall.md));
-> offen ist nur noch der Namens-Fallback-Cleanup.
+> Stand: 2026-07-17, nach dem ersten Zwei-Hallen-Praxisturnier (v0.9.144).
+> Die Prio-1-Punkte und Turnier-Wünsche stammen direkt aus diesem Einsatz.
+
+## Prio 1 — Lehren aus dem Zwei-Hallen-Turnier (17.07.2026)
+
+- **BTP-Ergebnis-Regression** *(Fix implementiert, wartet auf Release
+  v0.9.145)*: Spiele wurden in BTP nicht automatisch beendet — `Status`
+  fehlte seit v0.9.103 im Ergebnis-`SENDUPDATE`; zudem Ergebnis +
+  Feldfreigabe jetzt in einem Request. **Vor dem Release am echten BTP
+  gegenprüfen** (Spiel schließt automatisch; Aufgabe/Walkover; Check-in
+  bei Feldzuweisung unverändert). Details: [btp_protocol.md](btp_protocol.md).
+- **Master-Identität umziehen.** Ein Rechnertausch erzeugt eine neue
+  `install_id` → alle gekoppelten Geräte (Slave, Pis, Tablets, TVs)
+  verlieren still die Verbindung (Hauptursache des Turniertag-Chaos).
+  Geführter Config-Export/-Import bzw. Identitäts-Übernahme im SetupWizard
+  + Dashboard-Warnung, wenn bekannte Monitore länger offline sind.
+- **Slave-PC als eingebaute Monitor-Brücke.** bts-light im Cloud-Slave-Modus
+  soll selbst auf `:8088` lauschen (`/health` + Redirect `/monitor[?device=…]`
+  auf den Cloud-Monitor des Masters) — dann laufen die Bestands-Pis
+  (Tilos Image, Subnetz-Scan) in der fernen Halle ohne Zusatz-Skripte.
+  Ersetzt die Turnier-Notlösung (`pi-bridge`-Skripte auf Mac/Windows).
+
+## Turnier-Wünsche (17.07.2026)
+
+- **Court-Monitor: Spielernamen deutlich größer** (`assets/monitor.html`) —
+  aus Hallen-Distanz zu klein; erreicht Cloud-TVs per Relay-Redeploy ohne
+  Pi-Anfassen.
+- **Spielübersicht für die Slave-Halle**: laufende/anstehende Spiele der
+  eigenen Halle am Slave sehen (Datenquelle: Relay), nicht nur
+  Geräte-Anschluss + Ansagen.
+- **„Spiele in Vorbereitung" vom Slave (erneut) aufrufen**: Rückkanal über
+  den Relay nötig — Sicherheitsmodell beachten (Slave ist bisher bewusst
+  read-only, R4/R5).
 
 ## Mehr-Hallen-Unterstützung — Restposten
 
