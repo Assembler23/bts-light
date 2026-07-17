@@ -145,6 +145,11 @@ struct Namespace {
     /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
     /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
     courts: Vec<CourtBrief>,
+    /// Azure-TTS-Konfiguration des Masters für die Vererbung an Cloud-Ansage-
+    /// Slaves (ADR 0003). Kommt mit jedem `HostFrame::Courts`-Push; `None`
+    /// überschreibt bewusst — Azure am Master aus = Vererbung endet. Enthält
+    /// den Subscription-Key → niemals loggen.
+    azure_tts: Option<relay_proto::AzureTtsShare>,
     /// Court-Monitor-Konfiguration + Werbebilder, falls hochgeladen.
     monitor: Option<MonitorBundle>,
     /// Geräte-Steuerung (Feld-Zuweisungen + Fernbefehle), vom Host gepusht.
@@ -174,6 +179,7 @@ impl Namespace {
             freetext: Vec::new(),
             slaves: HashMap::new(),
             courts: Vec::new(),
+            azure_tts: None,
             monitor: None,
             monitor_control: MonitorControl::default(),
             monitor_seen: HashMap::new(),
@@ -674,7 +680,13 @@ async fn announce_state(
                 })
                 .cloned()
                 .collect();
-            relay_proto::AnnounceState { courts, freetext }
+            relay_proto::AnnounceState {
+                courts,
+                freetext,
+                // Geerbte Azure-Config (ADR 0003) — gleiche Vertrauensstufe
+                // wie der übrige Namespace-Inhalt (Bearer = install_id).
+                azure_tts: n.azure_tts.clone(),
+            }
         }
         None => relay_proto::AnnounceState::default(),
     };
@@ -1674,9 +1686,17 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 let _ = pending.send(ResultResponse { ok, error });
             }
         }
-        HostFrame::Courts { courts } => {
+        HostFrame::Courts { courts, azure_tts } => {
             // Vollständige Feld-Liste für das Cloud-Feldwechsel-Menü merken.
-            namespace.courts = courts;
+            // Leere Liste NICHT übernehmen: der Host schickt sie nur, um die
+            // Azure-Vererbung zu transportieren, solange BTP noch kein
+            // Turnier geladen hat — sie darf eine gültige Liste nicht wischen.
+            if !courts.is_empty() {
+                namespace.courts = courts;
+            }
+            // Azure-Vererbung: jeder Push ist autoritativ, auch `None`
+            // (Azure am Master deaktiviert → geerbte Config verfällt).
+            namespace.azure_tts = azure_tts;
         }
     }
     true

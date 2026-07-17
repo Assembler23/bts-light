@@ -517,7 +517,8 @@ fn push_freetext(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_fr
 
 /// Sendet die vollständige Feld-Liste an den Relay – Grundlage des Feldwechsels
 /// im PIN-Menü des Tablets im Cloud-Modus (LAN baut `/courts` direkt). Selten
-/// veränderlich; periodisch (alle 30 s) genügt.
+/// veränderlich; periodisch (alle 30 s) genügt. Huckepack dabei: die Azure-TTS-
+/// Vererbung an Cloud-Ansage-Slaves (ADR 0003).
 fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
     let courts: Vec<CourtBrief> = ctx
         .tablet
@@ -531,9 +532,29 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
             hall: ctx.tablet.court_hall(c.id),
         })
         .collect();
-    if !courts.is_empty() {
-        let _ = tx.send(text(&HostFrame::Courts { courts }));
+    // Auch bei (noch) leerer Feldliste senden, wenn es eine Azure-Config zu
+    // vererben gibt — sonst hinge die Vererbung daran, dass BTP schon ein
+    // Turnier geladen hat (Review-Befund). Der Relay übernimmt eine leere
+    // Feldliste nicht (schützt das Tablet-Feldwechsel-Menü bei Aussetzern).
+    let azure_tts = azure_share(ctx);
+    if !courts.is_empty() || azure_tts.is_some() {
+        let _ = tx.send(text(&HostFrame::Courts { courts, azure_tts }));
     }
+}
+
+/// Azure-TTS-Konfiguration für die Vererbung an Cloud-Slaves (ADR 0003).
+/// Frisch von Platte gelesen, damit Einstellungs-Änderungen ohne Neustart
+/// greifen. `None`, wenn Azure aus oder unvollständig ist — der Relay
+/// verwirft dann eine früher geerbte Config.
+fn azure_share(ctx: &ServerCtx) -> Option<relay_proto::AzureTtsShare> {
+    let az = ctx.app_config().azure_tts;
+    (az.enabled && !az.key.is_empty() && !az.region.is_empty()).then_some(
+        relay_proto::AzureTtsShare {
+            region: az.region,
+            key: az.key,
+            voice: az.voice,
+        },
+    )
 }
 
 /// Serialisiert einen Wert zu einem WebSocket-Text-Frame.

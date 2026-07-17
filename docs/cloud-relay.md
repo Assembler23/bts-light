@@ -138,6 +138,16 @@ den Relay-Cache mit den offline weitergezählten Punkten. Details:
   Tablet-Seiten ohne das Feld (matchId 0) laufen ungefiltert wie bisher.
 - Broker-Limits gegen Überlast: maximale Anzahl Namespaces, Tablets je
   Namespace und gleichzeitig offener Ergebnis-Übermittlungen.
+- **Azure-TTS-Vererbung** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md),
+  v0.9.145): Der Host schickt seine Azure-Speech-Config als optionales
+  `azureTts`-Feld im `HostFrame::Courts`-Push; der Relay hält sie je
+  Namespace **nur im RAM** und liefert sie im `AnnounceState`
+  (`/{ns}/info/announce/state`) an Cloud-Ansage-Slaves aus. Damit liegt ein
+  rotierbares Secret im Namespace — Zugriffsmodell bleibt die
+  `install_id`-Bearer-UUID (bewusste Abwägung, siehe ADR). Der Key darf in
+  Relay-Logs **nie** auftauchen. Alte Relays/Hosts bleiben kompatibel
+  (optionales Feld, `#[serde(default)]`); ohne neuen Relay entfällt nur die
+  Vererbung.
 
 ## Deployment
 

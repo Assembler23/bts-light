@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { saveConfig, sharePronunciations, tabletOverview } from "../api";
 import { playNameTest, playTestAnnouncement } from "../io/announcer";
 import { azureOption } from "../io/azureAnnounce";
+import { useInheritedAzureVoice } from "../state/azureStatus";
 import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
 import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
 import type { AnnounceLanguageMode, AppConfig, NameOverride } from "../types";
@@ -18,6 +19,7 @@ export function AnnounceSettings({
   onSaved: (config: AppConfig) => void;
 }) {
   const voices = useAvailableVoices();
+  const inheritedVoice = useInheritedAzureVoice();
   const a = config.announce;
   const az = config.azure_tts;
   const [annLang, setAnnLang] = useState<AnnounceLanguageMode>(a.language_mode);
@@ -482,6 +484,28 @@ export function AnnounceSettings({
           Schlüssel + Region aus deiner Azure-Speech-Ressource. Wird nach dem
           Speichern aktiv.
         </p>
+        {/* Cloud-Slave: Azure-Zugang kommt vom Master (ADR 0003) — dann sind
+            lokale Eingaben optional und dienen nur als Übersteuerung. */}
+        {inheritedVoice && (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            <strong>Vom Master geerbt ✓</strong> — dieser PC nutzt die
+            Azure-Zugangsdaten des Masters (Stimme: {inheritedVoice}). Es sind
+            keine Eingaben nötig; lokale, vollständige Eingaben hätten Vorrang.
+          </p>
+        )}
+        {/* Genau der stumme Turnier-Bug: Schalter an, aber Key/Region fehlen →
+            ohne Vererbung bliebe nur die Standardstimme. Sichtbar warnen. */}
+        {azEnabled && !inheritedVoice && (!azKey.trim() || !azRegion.trim()) && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <strong>Unvollständig:</strong> Ohne{" "}
+            {!azKey.trim() && !azRegion.trim()
+              ? "Schlüssel und Region"
+              : !azKey.trim()
+                ? "Schlüssel"
+                : "Region"}{" "}
+            bleibt die Azure-Stimme aus — es spricht die Standardstimme.
+          </p>
+        )}
         {azEnabled && (
           <div className="flex flex-col gap-2">
             <label className="text-sm text-slate-600">

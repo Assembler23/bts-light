@@ -183,7 +183,12 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
 - **Slave**: `slave_mode` + **`master_namespace`** (Kopplungs-Code des Masters).
   Statt BTP zu lesen, pollt `CloudAnnounceSlave` (`cloud_announce_state`,
   `src-tauri/src/commands.rs` → `relay_client::fetch_announce_state`) und sagt
-  Matches seiner Halle + Freitext lokal an (Stimme/Azure lokal).
+  Matches seiner Halle + Freitext lokal an. **Azure-Zugang erbt der Slave seit
+  v0.9.145 vom Master** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md),
+  Details [announcements.md](announcements.md)): Master pusht die Config im
+  `Courts`-Frame, Relay reicht sie im `AnnounceState` durch, der Slave hält sie
+  nur im RAM — vollständige lokale Eingaben hätten Vorrang. Web-Speech-Stimme/
+  Tempo bleiben lokal konfiguriert.
 - **Pairing-UI**: SetupWizard zeigt den eigenen Kopplungs-Code (`install_id`)
   und nimmt im Slave-Modus den Master-Code entgegen.
 - **Einrichtung (Assistent, v0.9.143):** in den Einstellungen führt ein Schritt-

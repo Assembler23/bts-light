@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { cloudAnnounceState } from "../api";
-import { azureOption } from "../io/azureAnnounce";
+import { azureOption, inheritedAzureOption } from "../io/azureAnnounce";
 import { playAnnouncement, playFreeText, resolveAnnouncementLanguage } from "../io/announcer";
+import { setInheritedAzureVoice } from "../state/azureStatus";
 import type { AnnounceConfig, AzureTtsConfig, Discipline } from "../types";
 
 const POLL_MS = 3000;
@@ -39,6 +40,10 @@ export function CloudAnnounceSlave({
         .then((state) => {
           if (!alive) return;
           const cfg = cfgRef.current;
+          // Vererbungs-Status für die Ansage-Einstellungen publizieren
+          // („vom Master geerbt ✓"). Null = keine Vererbung (kein Slave,
+          // Azure am Master aus oder alter Relay).
+          setInheritedAzureVoice(state.azure_voice);
           // Höchste Freitext-ID merken (Items sind bereits nur neue).
           if (state.freetext.length > 0) {
             lastFreetextId.current = state.freetext.reduce(
@@ -60,6 +65,11 @@ export function CloudAnnounceSlave({
           }
           const lang = cfg.language_mode === "en" ? "en" : "de";
           const voiceURI = (lang === "de" ? cfg.voice_de : cfg.voice_en) || undefined;
+          // Azure: vollständige lokale Config gewinnt, sonst die vom Master
+          // geerbte (ADR 0003) — der Rust-Command wendet dieselbe Vorrangregel
+          // auf Key/Region an.
+          const azure =
+            azureOption(azureRef.current) ?? inheritedAzureOption(state.azure_voice);
           // Neue Feld-Belegungen ansagen.
           for (const c of state.courts) {
             const prev = lastMatch.current.get(c.court_id);
@@ -85,7 +95,7 @@ export function CloudAnnounceSlave({
                 gong: cfg.gong,
                 nameOverrides: cfg.name_overrides,
                 nameOverridesEnabled: cfg.name_overrides_enabled,
-                azure: azureOption(azureRef.current),
+                azure,
               },
             );
           }
@@ -95,7 +105,7 @@ export function CloudAnnounceSlave({
               rate: cfg.rate,
               voiceURI,
               gong: cfg.gong,
-              azure: azureOption(azureRef.current),
+              azure,
             });
           }
         })

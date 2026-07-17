@@ -12,6 +12,7 @@ import {
 } from "./api";
 import { setSharedOverrides } from "./io/announcer";
 import { AlertBanner } from "./components/AlertBanner";
+import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
 import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
@@ -291,6 +292,7 @@ function App() {
         <div className="flex h-full flex-col bg-slate-50">
           <UpdateBanner />
           <AlertBanner />
+          <AzureFallbackBanner />
           <div className="min-h-0 flex-1 overflow-auto">
             <SetupWizard
               initialConfig={config}
@@ -374,6 +376,7 @@ function App() {
       <div className="flex h-full flex-col bg-slate-50">
         <UpdateBanner />
         <AlertBanner />
+        <AzureFallbackBanner />
         <AppShell
           current={view}
           config={config}
