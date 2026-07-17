@@ -51,6 +51,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      # Manueller Build (workflow_dispatch, KEIN Tag): die .exe als
+      # herunterladbares Artefakt bereitstellen — für die manuelle Installation
+      # auf EINEM einzelnen Rechner (z. B. Test auf dem Slave-PC), ganz OHNE
+      # `latest.json`/Auto-Update zu berühren. Der reguläre Tag-Release nutzt
+      # weiterhin das GitHub-Release als Transportmedium (kein Artefakt, Quota).
+      - name: Test-Installer als Artefakt hochladen
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bts-light-test-setup
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
       # GitHub-Release dient als Changelog/Backup UND als Transportmedium
       # für den Linux-Publish-Job (kein upload-artifact → keine Quota).
       - name: GitHub-Release anlegen
