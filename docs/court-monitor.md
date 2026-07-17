@@ -42,7 +42,7 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
   Anpassung.
 - **Schriftgrößen** (seit v0.9.145, Turnier-Feedback „Namen zu klein"):
   Nachname 13vmin (Doppel 8), Vorname 4.4vmin (Doppel 3.6), laufender
-  Satz 13vmin. Lange Namen kürzen weiterhin per Ellipsis statt umzubrechen.
+  Satz 17vmin. Lange Namen kürzen weiterhin per Ellipsis statt umzubrechen.
 
 Die Anzeige-Seite ist `src-tauri/assets/monitor.html` — eine
 eigenständige HTML/CSS/JS-Datei, read-only Geschwister von `tablet.html`.
