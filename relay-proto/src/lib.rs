@@ -783,6 +783,12 @@ pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
 }
 
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
+// `MatchAssigned` trägt ein volles `MatchBrief` und ist damit deutlich
+// größer als die schlanken Varianten (`MatchCleared` etc.) — bewusst
+// akzeptiert: Diese Frames werden serialisiert übertragen, nicht in großer
+// Zahl auf dem Stack gehalten; Boxing würde ~20 Konstruktions-/Match-
+// Stellen aufblähen ohne realen Gewinn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostFrame {
