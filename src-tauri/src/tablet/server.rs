@@ -1177,6 +1177,7 @@ pub(crate) fn match_brief(m: &BtpMatch, scorekeeper: Vec<String>) -> MatchBrief 
         cap_score: m.scoring.cap_score,
         interval_at: m.scoring.interval_at,
         discipline: m.discipline.as_str().to_string(),
+        class_label: m.class_label.clone(),
         match_number: m.match_num,
         scorekeeper,
     }
@@ -1521,6 +1522,7 @@ mod tests {
             planning_id: 1001,
             draw_name: "HE".into(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".into(),
             match_num: Some(1),
             planned_time: None,

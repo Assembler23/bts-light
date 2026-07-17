@@ -73,6 +73,7 @@ export function CloudAnnounceSlave({
               {
                 courtLabel: c.court,
                 discipline: c.discipline as Discipline,
+                className: c.class_label,
                 teamANames: c.team1,
                 teamBNames: c.team2,
               },

@@ -98,6 +98,7 @@ mod tests {
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".to_string(),
             match_num: Some(id),
             planned_time: None,
