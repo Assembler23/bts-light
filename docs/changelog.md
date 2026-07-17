@@ -18,6 +18,14 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   übernimmt weiterhin nahtlos die Standardstimme — aber ein **quittierbarer Banner** zeigt den
   Fehler jetzt app-weit an, und die Ansage-Einstellungen **warnen sichtbar**, wenn der
   Azure-Schalter an ist, aber Schlüssel/Region fehlen.
+- **Kopplung per 8-stelligem Telefon-Code.** Der Master erzeugt in den Einstellungen einen
+  **8-stelligen Zahlen-Code** (15 Minuten gültig), den man der fernen Halle **telefonisch
+  durchsagen** kann — dort eintippen, fertig: Die App löst ihn automatisch gegen den vollen
+  Kopplungs-Code ein. Der lange Code funktioniert weiterhin. Sicherheits-Abwägung:
+  [ADR 0004](adr/0004-telefon-kopplungscode.md). *(Voraussetzung: aktualisierter Relay.)*
+- **„Ferne Halle hat sich verbunden ✓".** Verbindet sich ein Ansage-Slave neu (oder nach einem
+  Ausfall wieder), zeigt der Master kurz einen grünen Banner — die Kopplung ist damit auf einen
+  Blick bestätigt, zusätzlich zum Punkt in der Kopfzeile.
 
 ## v0.9.144
 

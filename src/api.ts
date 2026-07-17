@@ -11,6 +11,7 @@ import type {
   MonitorDeviceInfo,
   MonitorTarget,
   NameOverride,
+  PairingCode,
   PreparationView,
   InternetStatus,
   SlaveInfo,
@@ -121,6 +122,14 @@ export const cloudAnnounceState = (since: number): Promise<CloudAnnounce> =>
 
 /** Master: ferne Hallen (Cloud-Slaves) samt Online-Status. */
 export const cloudSlaves = (): Promise<SlaveInfo[]> => invoke("cloud_slaves");
+
+/** Master: kurzlebigen 8-stelligen Telefon-Kopplungscode erzeugen (ADR 0004).
+ *  Braucht laufenden Cloud-Modus; 15 Minuten gültig. */
+export const pairingCode = (): Promise<PairingCode> => invoke("pairing_code");
+
+/** Slave: Telefon-Code gegen den vollen Master-Kopplungs-Code einlösen. */
+export const resolvePairingCode = (code: string): Promise<string> =>
+  invoke("resolve_pairing_code", { code });
 
 /** Slave: Relay-Basis + Felder der eigenen Halle für den Geräte-Anschluss
  *  (Tablet-QR + Monitor-Link je Feld). Leer, wenn kein Cloud-Slave. */
