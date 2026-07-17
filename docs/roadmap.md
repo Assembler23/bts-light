@@ -27,9 +27,10 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
 ## Turnier-Wünsche (17.07.2026)
 
-- **Court-Monitor: Spielernamen deutlich größer** (`assets/monitor.html`) —
-  aus Hallen-Distanz zu klein; erreicht Cloud-TVs per Relay-Redeploy ohne
-  Pi-Anfassen.
+- ~~**Court-Monitor: Spielernamen deutlich größer**~~ → umgesetzt in
+  v0.9.145 (`assets/monitor.html`; Cloud-TVs per Relay-Deploy).
+- ~~**Ansage nennt die Klasse** („Herreneinzel A")~~ → umgesetzt in
+  v0.9.145 (`model::class_label`, Details [announcements.md](announcements.md)).
 - **Spielübersicht für die Slave-Halle**: laufende/anstehende Spiele der
   eigenen Halle am Slave sehen (Datenquelle: Relay), nicht nur
   Geräte-Anschluss + Ansagen.

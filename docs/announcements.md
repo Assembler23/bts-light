@@ -1,9 +1,10 @@
 # Sprachansagen für Feld-Aufrufe
 
 Wird in BTP ein Spiel auf ein Feld gezogen, spielt bts-light auf dem
-Turnier-PC eine gesprochene Ansage ab: **Gong → „Feld X" → Disziplin →
-Paarung → „Feld X"**. Deutsch oder Englisch, wählbare Stimmen,
-einstellbares Tempo. Eingeführt in v0.6.0.
+Turnier-PC eine gesprochene Ansage ab: **Gong → „Feld X" → Disziplin
+(+ Klasse) → Paarung → „Feld X"**. Deutsch oder Englisch, wählbare Stimmen,
+einstellbares Tempo. Eingeführt in v0.6.0; Klassen-Ansage
+(„Herreneinzel **A**") seit v0.9.145.
 
 ## Funktionsweise
 
@@ -33,6 +34,20 @@ dem BTP-**Event**, nicht aus dem Draw-Namen. Auflösungskette im Parser
 
 Lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
 in der Ansage weggelassen.
+
+### Klasse (seit v0.9.145)
+
+Direkt hinter der Disziplin wird das **Klassen-Kürzel** angesagt
+(„Herreneinzel **A**"). Es kommt aus `model::class_label`: bevorzugt aus dem
+**Event-Namen** (trägt die Klasse auch in der Gruppenphase, wo Draws nur
+„Gruppe 1…n" heißen), sonst aus dem **Draw-Namen** („HE A" in der
+K.-o.-Phase). Bekannte Disziplin-Wörter werden entfernt; übrig bleiben darf
+nur EIN kurzes Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15") — **Gruppen-
+oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
+(Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die
+Ansage wie bisher („Herreneinzel"). Durchgereicht wird das Kürzel als
+`class_label` (CourtOverview, `MatchBrief.classLabel` für den Cloud-Slave,
+`PreparationCandidate`) und als `className` in den Announcer-Eingaben.
 
 ## K.-o.-Runde (ab Viertelfinale)
 

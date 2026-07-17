@@ -230,6 +230,7 @@ mod tests {
             planning_id: 0,
             draw_name: "JE U17 D".into(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: round.into(),
             match_num: None,
             planned_time: None,

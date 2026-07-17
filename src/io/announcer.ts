@@ -29,6 +29,10 @@ export interface AnnounceMatchInput {
   /** Reine BTP-Runde (z. B. "VF", "Finale"). Wird AB Viertelfinale vor der
    *  Paarung mitangesagt; frühere Runden/Gruppen werden nicht angesagt. */
   roundName?: string;
+  /** Klassen-Kürzel („A", „B", „U15" …) — wird direkt hinter der Disziplin
+   *  angesagt („Herreneinzel A"). Leer/fehlend = keine Klasse. Gruppen-
+   *  namen gehören hier NICHT hinein (Nutzer-Vorgabe: nie „Gruppe 3"). */
+  className?: string;
 }
 
 export interface AnnounceOptions {
@@ -329,6 +333,19 @@ function disciplineWord(d: Discipline, lang: AnnounceLang): string {
   return words[lang][d] ?? "";
 }
 
+// Disziplin + Klassen-Kürzel („Herreneinzel A") — die Klasse kommt direkt
+// hinter die Disziplin (Turnier-Wunsch 17.07.2026). Ohne erkannte Disziplin
+// wird auch keine Klasse angesagt (ein nacktes „A." wäre unverständlich).
+function disciplineWithClass(
+  d: Discipline,
+  className: string | undefined,
+  lang: AnnounceLang,
+): string {
+  const disc = disciplineWord(d, lang);
+  const cls = (className || "").trim();
+  return disc && cls ? `${disc} ${cls}` : disc;
+}
+
 // Schlüssel-Normalisierung fürs Matching: Diakritika UND fremde Sonderbuchstaben
 // falten, damit z. B. „Nguyên"/„Nguyen", „Yıldız"/„Yildiz", „García"/„Garcia"
 // alle denselben Wörterbuch-Eintrag treffen. NFD + Entfernen kombinierender
@@ -485,7 +502,7 @@ export function buildAnnouncementSegments(
   const teamA = joinNames(input.teamANames, lang, overrides, nameOverridesEnabled);
   const teamB = joinNames(input.teamBNames, lang, overrides, nameOverridesEnabled);
   const versus = lang === "de" ? "gegen" : "versus";
-  const disc = disciplineWord(input.discipline, lang);
+  const disc = disciplineWithClass(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
@@ -638,7 +655,7 @@ export function buildAnnouncementSsml(
   langMap?: Map<string, string>,
 ): string {
   const court = xmlEscape(resolveCourtPhrase(input.courtLabel, lang));
-  const disc = xmlEscape(disciplineWord(input.discipline, lang));
+  const disc = xmlEscape(disciplineWithClass(input.discipline, input.className, lang));
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
@@ -738,6 +755,8 @@ export async function playTestAnnouncement(
     {
       courtLabel: "2",
       discipline: "mens_doubles",
+      // Beispiel-Klasse, damit der Test das neue Format hörbar macht.
+      className: "A",
       teamANames: ["Anna Müller", "Bert Klein"],
       teamBNames: ["Clara Wolf", "Dirk Stein"],
     },
@@ -793,6 +812,8 @@ export interface AnnouncePreparationInput {
   /** Halle, in die gerufen wurde (BTP-`Location`-Name). Leer/undefined =
    *  hallenunabhängiger Aufruf (Ein-Hallen-Turnier). */
   hall?: string;
+  /** Klassen-Kürzel („A", „B", …) — direkt hinter der Disziplin angesagt. */
+  className?: string;
   /** Reine BTP-Runde; wird ab Viertelfinale vor der Paarung mitangesagt. */
   roundName?: string;
 }
@@ -810,7 +831,7 @@ export function buildPreparationSegments(
   const teamA = joinNames(input.teamANames, lang, overrides, nameOverridesEnabled);
   const teamB = joinNames(input.teamBNames, lang, overrides, nameOverridesEnabled);
   const versus = lang === "de" ? "gegen" : "versus";
-  const disc = disciplineWord(input.discipline, lang);
+  const disc = disciplineWithClass(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const hall = (input.hall || "").trim();
 
@@ -843,7 +864,7 @@ export function buildPreparationSsml(
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
 ): string {
-  const disc = xmlEscape(disciplineWord(input.discipline, lang));
+  const disc = xmlEscape(disciplineWithClass(input.discipline, input.className, lang));
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
