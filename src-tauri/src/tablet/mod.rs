@@ -7,5 +7,6 @@ pub mod mdns;
 pub mod monitor;
 pub mod relay_client;
 pub mod server;
+pub mod slave_bridge;
 pub mod state;
 pub mod winners;

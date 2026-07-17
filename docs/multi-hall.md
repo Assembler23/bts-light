@@ -227,6 +227,32 @@ Adressen ihrer Felder ohne Blick auf den Master):
   (siehe unten), dann je Feld ein Tablet-QR (`<relay_base>/qr/<id>`) und der
   Monitor-Link (`<relay_base>/court/<id>/display`).
 
+### Court-Monitor-Pis der fernen Halle — Slave als Monitor-Brücke
+
+Tilos Bestands-Court-Monitor-Pis (`pi/shared-startbrowser.sh`) suchen den
+Anzeige-Server per **Subnetz-Scan auf `:8088/health`** im Hallennetz — sie
+kennen keine Cloud-URL. In der fernen Halle läuft aber **kein** LAN-Server
+(der Slave sagt nur an). Damit die Pis dort trotzdem ohne Extra-Rechner den
+Master-Cloud-Monitor zeigen, betreibt der Cloud-Slave eine **Monitor-Brücke**
+(`tablet/slave_bridge.rs`, seit v0.9.146):
+
+- lauscht auf `0.0.0.0:8088` — im `slave_mode` ist der reguläre
+  LAN-Tablet-Server aus, der Port also frei;
+- `GET /health` → `200` (macht der Subnetz-Scan fündig);
+- `GET /monitor[?device=…]` → **302** auf
+  `https://badhub.de/bts-relay/<master_namespace>/monitor…` (Query 1:1
+  durchgereicht; der **Master-Relay** löst Gerät→Feld wie gewohnt auf);
+- zusätzlich mDNS `bts-light.local` (für neue-Image-Pis, die diesen Namen
+  laden). Das setzt voraus, dass Slave und Master in **getrennten
+  Broadcast-Domains** sitzen (typischer Zwei-Hallen-Fall: eigene Router/
+  Netze) — nur dann gibt es keinen `bts-light.local`-Konflikt mit dem
+  Master. Bei einer gebrückten Topologie (Site-to-Site-VPN, gemeinsames
+  L2) wäre das eine bekannte Grenze.
+
+Gestartet in `commands.rs::start_sync` nur bei gültigem `master_namespace`,
+beendet in `stop_sync`. **Tablets bleiben Direkt-Cloud** (Weg A) — die Brücke
+ist nur für Monitore, weil Tablet-Ergebnisse ins Master-BTP müssen.
+
 ### Hallen-Auswahl auf dem Cloud-Slave — warum eigens
 
 `announce_hall` ist die eine Einstellung, die **sowohl** die Ansage (welche
