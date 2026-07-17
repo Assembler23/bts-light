@@ -1756,6 +1756,26 @@ pub async fn cloud_slaves(
     Ok(crate::tablet::relay_client::fetch_slaves(&ns).await)
 }
 
+/// Master: kurzlebigen 8-stelligen Telefon-Kopplungscode beim Relay
+/// anfordern (ADR 0004) — zum Durchsagen an die ferne Halle. 15 Minuten
+/// gültig; ein neuer Code ersetzt den alten.
+#[tauri::command]
+pub async fn pairing_code(state: State<'_, AppState>) -> Result<relay_proto::PairingCode, String> {
+    let ns = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.install_id.clone()
+    };
+    crate::tablet::relay_client::request_pairing_code(&ns).await
+}
+
+/// Slave: 8-stelligen Telefon-Kopplungscode gegen den vollen
+/// Master-Kopplungs-Code einlösen (ADR 0004). Liefert den Namespace, den
+/// das Frontend als `master_namespace` speichert.
+#[tauri::command]
+pub async fn resolve_pairing_code(code: String) -> Result<String, String> {
+    crate::tablet::relay_client::resolve_pairing_code(code.trim()).await
+}
+
 /// Geräte-Anschluss der fernen Halle (Slave): Relay-Basis des Masters +
 /// die Felder **dieser** Halle, damit die Slave-Oberfläche je Feld den
 /// Tablet-QR (`<relay_base>/qr/<id>`) und den Monitor-Link

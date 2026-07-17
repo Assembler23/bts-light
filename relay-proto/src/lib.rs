@@ -943,6 +943,24 @@ pub struct AnnounceState {
     pub azure_tts: Option<AzureTtsShare>,
 }
 
+/// Antwort von `POST /{ns}/pairing-code` — kurzlebiger 8-stelliger
+/// Telefon-Kopplungscode (ADR 0004). Der Relay hält ihn nur im RAM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingCode {
+    /// Genau 8 Ziffern (führende Nullen möglich) — telefonisch diktierbar.
+    pub code: String,
+    /// Restgültigkeit in Sekunden ab Ausstellung.
+    #[serde(rename = "expiresInS", default)]
+    pub expires_in_s: u64,
+}
+
+/// Antwort von `GET /pair/{code}` — der aufgelöste Master-Namespace
+/// (= `install_id`), den der Slave als `master_namespace` speichert.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingResolved {
+    pub namespace: String,
+}
+
 /// Präsenz-Info eines Cloud-Ansage-Slaves (für die „ferne Halle online?"-Anzeige
 /// am Master). `online` = zuletzt innerhalb des Timeouts gesehen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
