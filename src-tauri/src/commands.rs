@@ -351,6 +351,8 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let upload_logs = config.upload_logs;
     let install_id = config.install_id.clone();
     let master_namespace = config.master_namespace.trim().to_string();
+    // Halle des Slaves — filtert die Feld-Auswahlseite der Brücke.
+    let announce_hall = config.announce.announce_hall.clone();
     let mode = config.connection_mode;
     // Ansage-Slave: kein Tablet-Server/mDNS/Relay (nur BTP lesen + ansagen) –
     // sonst Kollision mit dem Master (doppeltes bts-light.local, Liveticker).
@@ -465,9 +467,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             .expect("Slave-Brücke-Mutex nicht vergiftet");
         if bridge_slot.is_none() {
             let ns = master_namespace.clone();
+            let hall = announce_hall.clone();
             *bridge_slot = Some(tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::tablet::slave_bridge::run(ns).await {
-                    tracing::error!("Slave-Monitor-Brücke beendet: {e}");
+                if let Err(e) = crate::tablet::slave_bridge::run(ns, hall).await {
+                    tracing::error!("Slave-Brücke beendet: {e}");
                 }
             }));
         }
