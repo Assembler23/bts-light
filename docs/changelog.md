@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.146
+
+- **Ferne Halle: Court-Monitor-TVs ohne Extra-Rechner.** Der Cloud-Ansage-Slave betreibt jetzt
+  selbst eine **Monitor-Brücke** auf `:8088`: Tilos Court-Monitor-Pis (die im Hallennetz einen
+  lokalen Server suchen) finden den Slave-PC per Subnetz-Scan und werden auf den Court-Monitor
+  des Masters umgeleitet — die separate Notbrücke (Mac/PowerShell-Skript vom Turnier) entfällt.
+  Zusätzlich meldet sich der Slave per mDNS als `bts-light.local`. Tablets laufen unverändert
+  direkt über die Cloud (Weg A). Details: [multi-hall.md](multi-hall.md).
+
 ## v0.9.144
 
 - **Tablets & TVs in der fernen Halle (Weg A / Direkt-Cloud).** Ein Zwei-Hallen-Turnier,

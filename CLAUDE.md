@@ -83,7 +83,7 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | **Spiele in Vorbereitung** (`tablet/state.rs` `PreparationCall`, `commands.rs` `preparation_*`, `badhub/payload.rs` `preparation_call_ts`/`hall`, `badhub/diff.rs` Fingerabdruck, `pages/PreparationPanel.tsx`) | `docs/preparation.md` |
 | Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`, Ansage-Knopf in `PreparationPanel`) | `docs/announcements.md` |
 | Court-Monitor (`tablet/monitor.rs`, `tablet/mdns.rs`, `assets/monitor.html`, `assets/overview.html`, `assets/preparation.html`, `assets/flags/`, Court-/Monitor-/`/info/*`-Routen in `server.rs` + `relay/`, `pages/CourtMonitorPanel.tsx`, `monitor_*`-Commands) | `docs/court-monitor.md` |
-| **Mehr-Hallen-Architektur** (CourtID-Identität in `btp/model.rs` + `tablet/state.rs`, Hallen-Gruppierung in den UIs, `ConnectionMode::LanAndCloud` in `config.rs`, `merge_device_lists` in `relay-proto`) | `docs/multi-hall.md` |
+| **Mehr-Hallen-Architektur** (CourtID-Identität in `btp/model.rs` + `tablet/state.rs`, Hallen-Gruppierung in den UIs, `ConnectionMode::LanAndCloud` in `config.rs`, `merge_device_lists` in `relay-proto`, Slave-Monitor-Brücke `tablet/slave_bridge.rs`) | `docs/multi-hall.md` |
 | `pi/` (Raspberry-Pi-Kiosk-Einrichtung) | `docs/pi-setup.md`, `docs/pi-master-image.md` |
 | `src-tauri/src/log_upload.rs` | `docs/logging.md` |
 | `.github/workflows/*`, Release-Ablauf | `docs/release.md` |
