@@ -119,9 +119,19 @@ jobs:
 
       # latest.json trägt die Signatur bereits inline – die separate
       # .sig-Datei wird vom Updater nicht abgefragt und nicht hochgeladen.
+      #
+      # Zusätzlich wird der Installer unter dem FESTEN Namen
+      # `BTS.Light-setup.exe` abgelegt → stabiler Download-Link
+      # https://badhub.de/download/bts-light/BTS.Light-setup.exe, der bei
+      # jedem Release automatisch auf die neueste Version zeigt (für
+      # Aushänge, QR-Codes, Mails an Vereine). Die Kopie entsteht erst NACH
+      # dem latest.json-Schritt, damit dessen `ls *-setup.exe | head -1`
+      # weiterhin nur den versionierten Installer sieht.
       - name: Nach badhub.de hochladen
         run: |
           set -euo pipefail
+          SETUP=$(cd rel && ls *_*-setup.exe | head -1)
+          cp "rel/${SETUP}" "rel/BTS.Light-setup.exe"
           rsync -av \
             rel/latest.json \
             rel/*-setup.exe \
