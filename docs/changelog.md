@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.146
+
+- **Ferne Halle: Tablets & TVs über die Slave-IP — ohne Extra-Rechner.** Der Cloud-Ansage-Slave
+  betreibt jetzt selbst eine **Brücke** auf `:8088`: Tilos Court-Monitor-Pis finden den Slave-PC
+  per Subnetz-Scan und werden auf den Court-Monitor des Masters umgeleitet (die separate
+  Notbrücke vom Turnier entfällt). Zusätzlich gibt es **`Slave-IP/felder`** als Feld-Auswahlseite
+  fürs Tablet — genau wie in der Master-Halle; jedes Feld öffnet die Cloud-Tablet-Seite des
+  Masters. Der Slave meldet sich zudem per mDNS als `bts-light.local`. Ergebnisse fließen
+  unverändert direkt über die Cloud ins Master-BTP (Weg A). Details: [multi-hall.md](multi-hall.md).
+
 ## v0.9.145
 
 - **TV-Anzeige: Spielernamen deutlich größer.** Auf der Einzelfeld-Anzeige (Court-Monitor)
