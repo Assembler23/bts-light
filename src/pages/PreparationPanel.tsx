@@ -154,6 +154,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     void playPreparationAnnouncement(
       {
         discipline: (c.discipline || "unknown") as Discipline,
+        className: c.class_label,
         teamANames: c.team1,
         teamBNames: c.team2,
         hall: c.call?.hall || undefined,

@@ -1682,6 +1682,7 @@ mod tests {
             cap_score: 30,
             interval_at: Some(11),
             discipline: "mens_singles".into(),
+            class_label: String::new(),
             match_number: Some(14),
             scorekeeper: Vec::new(),
         }

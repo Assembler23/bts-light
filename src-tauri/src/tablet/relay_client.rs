@@ -651,6 +651,7 @@ mod tests {
             planning_id: 1001,
             draw_name: "HE".into(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".into(),
             match_num: Some(1),
             planned_time: None,
