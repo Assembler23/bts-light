@@ -8,7 +8,19 @@ import type { AzureTtsConfig } from "../types";
 export function azureOption(
   az: AzureTtsConfig | undefined,
 ): AnnounceOptions["azure"] {
-  return az && az.enabled
+  // Nur bei vollständiger Config (Key + Region) — sonst würde der Rust-
+  // Command ohnehin ablehnen und die Ansage fiele still auf Web Speech
+  // zurück (genau der stumme Slave-Bug vom Zwei-Hallen-Test).
+  return az && az.enabled && az.key && az.region
     ? { voice: az.voice, synthesize: azureTtsSpeak }
     : undefined;
+}
+
+/** Azure-Option aus der vom Master geerbten Config (ADR 0003): Der Slave
+ *  kennt nur die Stimme; Key/Region hält das Rust-Backend (`AppState`).
+ *  Fallback, wenn die lokale Config unvollständig ist. */
+export function inheritedAzureOption(
+  voice: string | null | undefined,
+): AnnounceOptions["azure"] {
+  return voice ? { voice, synthesize: azureTtsSpeak } : undefined;
 }

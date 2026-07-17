@@ -101,6 +101,16 @@ Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
   Diese Prüfung ist dieselbe wie im LAN-Modus.
 - Broker-Limits gegen Überlast: maximale Anzahl Namespaces, Tablets je
   Namespace und gleichzeitig offener Ergebnis-Übermittlungen.
+- **Azure-TTS-Vererbung** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md),
+  v0.9.145): Der Host schickt seine Azure-Speech-Config als optionales
+  `azureTts`-Feld im `HostFrame::Courts`-Push; der Relay hält sie je
+  Namespace **nur im RAM** und liefert sie im `AnnounceState`
+  (`/{ns}/info/announce/state`) an Cloud-Ansage-Slaves aus. Damit liegt ein
+  rotierbares Secret im Namespace — Zugriffsmodell bleibt die
+  `install_id`-Bearer-UUID (bewusste Abwägung, siehe ADR). Der Key darf in
+  Relay-Logs **nie** auftauchen. Alte Relays/Hosts bleiben kompatibel
+  (optionales Feld, `#[serde(default)]`); ohne neuen Relay entfällt nur die
+  Vererbung.
 
 ## Deployment
 

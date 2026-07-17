@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.145
+
+- **Hochwertige Azure-Ansage: Slave erbt den Zugang vom Master.** Beim ersten
+  Zwei-Hallen-Praxistest sprach der Slave nur die Standardstimme — der Azure-Key war dort nicht
+  eingetragen und der Rückfall passierte **stumm**. Jetzt schickt der Master seine
+  Azure-Konfiguration über den Cloud-Relay mit; der Slave nutzt sie automatisch (nur im
+  Arbeitsspeicher, vollständige lokale Eingaben hätten Vorrang) und zeigt in den
+  Ansage-Einstellungen **„Vom Master geerbt ✓"**. Entscheidung + Sicherheitsabwägung:
+  [ADR 0003](adr/0003-azure-tts-vererbung-relay.md). *(Voraussetzung Rollout: aktualisierter
+  Relay auf badhub — sonst bleibt alles beim Alten, nur ohne Vererbung.)*
+- **Azure-Rückfall nie mehr stumm.** Schlägt die Azure-Synthese fehl (Key fehlt/falsch, Netz),
+  übernimmt weiterhin nahtlos die Standardstimme — aber ein **quittierbarer Banner** zeigt den
+  Fehler jetzt app-weit an, und die Ansage-Einstellungen **warnen sichtbar**, wenn der
+  Azure-Schalter an ist, aber Schlüssel/Region fehlen.
+
 ## v0.9.144
 
 - **Tablets & TVs in der fernen Halle (Weg A / Direkt-Cloud).** Ein Zwei-Hallen-Turnier,
