@@ -255,6 +255,9 @@ export interface CloudAnnounceCourt {
 export interface CloudAnnounce {
   courts: CloudAnnounceCourt[];
   freetext: { id: number; hall: string; text: string }[];
+  /** Stimme der vom Master geerbten Azure-Config (ADR 0003); `null`, wenn
+   *  keine Vererbung aktiv ist. Der Key selbst bleibt im Rust-Backend. */
+  azure_voice: string | null;
 }
 
 /** Turnier-Kennzahlen fürs Dashboard (Rust: commands::TournamentStats).

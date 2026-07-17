@@ -10,6 +10,7 @@
 // globaler Klick-Listener schalten das Audio für die Session frei.
 
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
+import { reportAzureFallback } from "../state/azureStatus";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -677,8 +678,10 @@ export function playAnnouncement(
         );
         await playMp3Base64(b64);
         return;
-      } catch {
-        /* Azure aus/Netzfehler → Fallback unten */
+      } catch (e) {
+        // Azure aus/Netzfehler → Fallback unten, aber sichtbar (Banner),
+        // damit der Rückfall auf die Standardstimme nicht mehr stumm passiert.
+        reportAzureFallback(e);
       }
     }
     await speakSegments(
@@ -717,8 +720,8 @@ export function playFreeText(
         const b64 = await opts.azure.synthesize(ssml);
         await playMp3Base64(b64);
         return;
-      } catch {
-        /* Azure aus/Netzfehler → Web Speech unten */
+      } catch (e) {
+        reportAzureFallback(e); // → Web Speech unten, mit sichtbarem Hinweis
       }
     }
     await speakSegments([t], lang, clampRate(opts.rate), opts.voiceURI);
@@ -885,8 +888,8 @@ export function playPreparationAnnouncement(
         );
         await playMp3Base64(b64);
         return;
-      } catch {
-        /* Fallback unten */
+      } catch (e) {
+        reportAzureFallback(e); // → Web Speech unten, mit sichtbarem Hinweis
       }
     }
     await speakSegments(
