@@ -20,6 +20,20 @@ Der Windows-Updater nutzt den **NSIS-Installer** (`*-setup.exe`); dessen
 `.sig`-Signatur steht inline im `latest.json`.
 Die `.msi` bleibt nur für manuelle Installationen.
 
+## Stabiler Download-Link
+
+Für Aushänge, QR-Codes und Mails an Vereine gibt es einen **festen** Link,
+der immer auf die neueste Version zeigt:
+
+    https://badhub.de/download/bts-light/BTS.Light-setup.exe
+
+Der `publish`-Job legt bei jedem Release zusätzlich zur versionierten Datei
+(`BTS.Light_X.Y.Z_x64-setup.exe`) eine Kopie unter diesem festen Namen ab.
+Der **Updater** nutzt weiterhin ausschließlich die versionierte URL aus
+`latest.json` — der stabile Link ist rein für Menschen. Das SD-Karten-Image
+des Court-Monitors hat ohnehin einen festen Namen
+(`bts-light-pi.img.xz`, siehe [pi-master-image.md](pi-master-image.md)).
+
 ## Einen Release veröffentlichen
 
 1. Version in **drei** Dateien identisch hochsetzen:
