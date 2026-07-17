@@ -108,7 +108,7 @@
     .players { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1.4vh; min-width: 0; }
     .player { display: flex; align-items: center; gap: 2.4vw; min-width: 0; }
     .flag {
-      flex: 0 0 auto; width: 11vmin; height: 6.6vmin; object-fit: cover;
+      flex: 0 0 auto; width: 10vmin; height: 6vmin; object-fit: cover;
       border-radius: .8vmin; background: #334155;
       box-shadow: 0 0 0 .2vmin rgba(255, 255, 255, .18),
                   0 .6vmin 1.6vmin rgba(0, 0, 0, .45);
@@ -123,18 +123,20 @@
       display: flex; flex-direction: column; min-width: 0;
       overflow: hidden; line-height: 1.03;
     }
+    /* Schriftgrößen bewusst groß (Turnier-Feedback 17.07.2026: Namen waren
+       aus Hallendistanz zu klein) — der laufende Satz gibt dafür etwas ab. */
     .name .given {
-      font-size: 2.9vmin; font-weight: 600; letter-spacing: .07em;
+      font-size: 3.6vmin; font-weight: 600; letter-spacing: .07em;
       text-transform: uppercase; color: #94a3b8;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .name .given:empty { display: none; }
     .name .family {
-      font-size: 7vmin; font-weight: 800;
+      font-size: 9.2vmin; font-weight: 800;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .players.doubles .name .given { font-size: 2.4vmin; }
-    .players.doubles .name .family { font-size: 5.4vmin; }
+    .players.doubles .name .given { font-size: 3vmin; }
+    .players.doubles .name .family { font-size: 6.4vmin; }
     .serve-dot {
       flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;
@@ -149,7 +151,7 @@
       font-variant-numeric: tabular-nums;
     }
     .set-current {
-      font-size: 15vmin; font-weight: 900; line-height: 1;
+      font-size: 13vmin; font-weight: 900; line-height: 1;
       font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center;
       padding: .4vmin 2.4vw; border-radius: 2vmin;
       color: #f8fafc;

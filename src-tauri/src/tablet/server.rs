@@ -1009,6 +1009,11 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         team1_won,
         duration_mins: 0,
         score_status,
+        // Ergebnis + Feldfreigabe in EINEM Request (Court ohne MatchID +
+        // Match.CourtID=0): Der frühere separate Freigabe-Request mit
+        // „nacktem" Match-Knoten konnte das gerade geschriebene Ergebnis
+        // in BTP wieder entwerten.
+        free_court_id: Some(body.court_id),
     };
 
     tracing::info!(
@@ -1021,32 +1026,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     match write_result_to_btp(&ctx.config, &update).await {
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
-            tracing::info!("BTP-Schreiben OK: Match {}", m.id);
-            // Feld in BTP freigeben (Court ohne MatchID + Match.CourtID=0). Sonst
-            // bleibt das beendete Spiel dort „auf dem Feld" und die Spieler werden
-            // nicht wieder als verfügbar (rot) angezeigt — BTP räumt beendete
-            // Spiele nicht zuverlässig selbst ab. Best-effort: das Ergebnis ist
-            // bereits geschrieben, ein Fehler hier darf die Wertung nicht kippen.
-            if let Err(e) = write_courts_to_btp(
-                &ctx.config,
-                &[proto::CourtAssignment {
-                    court_id: body.court_id,
-                    match_id: None,
-                }],
-                &[proto::MatchCourt {
-                    match_id: m.id,
-                    draw_id: m.draw_id,
-                    planning_id: m.planning_id,
-                    court_id: 0,
-                }],
-            )
-            .await
-            {
-                tracing::warn!(
-                    "Feldfreigabe nach Ergebnis fehlgeschlagen (Match {}): {e}",
-                    m.id
-                );
-            }
+            tracing::info!("BTP-Schreiben OK: Match {} (Feld freigegeben)", m.id);
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
             // ausdrücklich gewählt hat (echte Verletzung → `cascade_walkover`).
@@ -1197,6 +1177,7 @@ pub(crate) fn match_brief(m: &BtpMatch, scorekeeper: Vec<String>) -> MatchBrief 
         cap_score: m.scoring.cap_score,
         interval_at: m.scoring.interval_at,
         discipline: m.discipline.as_str().to_string(),
+        class_label: m.class_label.clone(),
         match_number: m.match_num,
         scorekeeper,
     }
@@ -1541,6 +1522,7 @@ mod tests {
             planning_id: 1001,
             draw_name: "HE".into(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".into(),
             match_num: Some(1),
             planned_time: None,
@@ -1645,10 +1627,10 @@ mod tests {
         assert!(match_decided(5, &[(21, 1), (21, 2), (21, 3)])); // 3:0 – entschieden
     }
 
-    /// Regression (v0.9.113): Nach einem Ergebnis muss `process_result` das Feld
-    /// in BTP freigeben (Court ohne MatchID + Match.CourtID=0), sonst bleiben die
-    /// Spieler in BTP „auf dem Feld" (nicht wieder rot/verfügbar). GENAU ZWEI
-    /// SENDUPDATEs: das Ergebnis UND die Feldfreigabe.
+    /// Nach einem Ergebnis gibt `process_result` das Feld in BTP frei — seit
+    /// dem Regressions-Fix (Turnier 17.07.2026) in EINEM kombinierten
+    /// SENDUPDATE zusammen mit dem Ergebnis: Der frühere zweite, „nackte"
+    /// Match-Knoten konnte das Ergebnis in BTP wieder entwerten.
     #[tokio::test]
     async fn process_result_frees_court_in_btp() {
         let (port, recorded) = spawn_mock_btp().await;
@@ -1662,10 +1644,12 @@ mod tests {
         );
 
         let reqs = recorded.lock().unwrap();
-        assert_eq!(reqs.len(), 2, "Ergebnis + Feldfreigabe = 2 SENDUPDATE");
+        assert_eq!(reqs.len(), 1, "Ergebnis + Feldfreigabe = EIN SENDUPDATE");
 
-        // Zweiter SENDUPDATE = Feldfreigabe: Court 101 OHNE MatchID, Match.CourtID=0.
-        let upd = xml::find(&reqs[1], "Update").expect("Update");
+        // Der eine SENDUPDATE trägt beides: Feldfreigabe (Court 101 OHNE
+        // MatchID, Match.CourtID=0) UND das vollständige Ergebnis inkl.
+        // `Status` (Abschluss-Trigger, Regression v0.9.103).
+        let upd = xml::find(&reqs[0], "Update").expect("Update");
         let tour = xml::find(upd.children(), "Tournament").expect("Tournament");
         let courts = xml::find(tour.children(), "Courts").expect("Courts-Block (Feldfreigabe)");
         let court = xml::find(courts.children(), "Court").expect("Court");
@@ -1677,6 +1661,40 @@ mod tests {
         let matches = xml::find(tour.children(), "Matches").expect("Matches");
         let mnode = xml::find(matches.children(), "Match").expect("Match");
         assert_eq!(int(mnode.children(), "CourtID"), Some(0));
+        assert_eq!(int(mnode.children(), "Winner"), Some(1));
+        assert_eq!(int(mnode.children(), "Status"), Some(0));
+        assert!(
+            xml::find(mnode.children(), "Sets").is_some(),
+            "Sätze müssen im kombinierten Request stehen"
+        );
+    }
+
+    /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt
+    /// `ScoreStatus=2` + `Status` + Feldfreigabe (Courts-Block, CourtID=0) —
+    /// der Sonderfall aus dem Turnier-Befund vom 17.07.2026.
+    #[tokio::test]
+    async fn process_result_retired_combines_result_and_court_release() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+
+        let mut body = body_with(&[(21, 10), (5, 2)]);
+        body.retired = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(reqs.len(), 1, "auch bei Aufgabe genau EIN SENDUPDATE");
+        let m = match_fields(&reqs[0]);
+        assert_eq!(int(&m, "Winner"), Some(1));
+        assert_eq!(int(&m, "ScoreStatus"), Some(2), "2 = Aufgabe");
+        assert_eq!(int(&m, "Status"), Some(0));
+        assert_eq!(int(&m, "CourtID"), Some(0));
+        let upd = xml::find(&reqs[0], "Update").unwrap();
+        let tour = xml::find(upd.children(), "Tournament").unwrap();
+        let courts = xml::find(tour.children(), "Courts").expect("Feldfreigabe im selben Request");
+        let court = xml::find(courts.children(), "Court").unwrap();
+        assert_eq!(int(court.children(), "ID"), Some(101));
     }
 
     /// Sieger wird aus den Sätzen abgeleitet (Team 2 gewinnt 0:2) und als

@@ -87,6 +87,9 @@ pub struct CourtOverview {
     pub round_name: String,
     /// Disziplin des aktuellen Matches (für die Sprachansage).
     pub discipline: Discipline,
+    /// Klassen-Kürzel („A", „B", …) für die Ansage „Herreneinzel A";
+    /// leer, wenn keins erkennbar ist (siehe `model::class_label`).
+    pub class_label: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
     /// Nationalitäten von Team 1, parallel zu `team1` (leerer String,
@@ -917,6 +920,7 @@ impl TabletState {
                         .unwrap_or_default(),
                     round_name: m.map(|mm| mm.round_name.clone()).unwrap_or_default(),
                     discipline: m.map(|mm| mm.discipline).unwrap_or(Discipline::Unknown),
+                    class_label: m.map(|mm| mm.class_label.clone()).unwrap_or_default(),
                     team1: m
                         .map(|mm| mm.team1.iter().map(|p| p.name.clone()).collect())
                         .unwrap_or_default(),
@@ -1132,6 +1136,7 @@ mod tests {
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".to_string(),
             match_num: Some(id),
             planned_time: None,

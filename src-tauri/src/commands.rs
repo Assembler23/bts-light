@@ -909,6 +909,8 @@ pub async fn confirm_walkover(
             team1_won: !cand.retired_is_team1,
             duration_mins: 0,
             score_status: 1, // 1 = Walkover
+            // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben.
+            free_court_id: None,
         };
         match crate::tablet::server::write_result_to_btp(&config, &update).await {
             Ok(()) => written += 1,
@@ -1073,6 +1075,9 @@ pub struct PreparationCandidate {
     /// Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") – für die
     /// Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind).
     pub draw_name: String,
+    /// Klassen-Kürzel („A", „B", …) für die Ansage „Herreneinzel A"
+    /// (leer = keins erkennbar; aus Event-/Draw-Name extrahiert).
+    pub class_label: String,
     /// Runden-/Spielbezeichnung (z. B. „G1", „Finale") für die Tabellenanzeige.
     pub round_name: String,
     /// Angesetzte Spielzeit (BTP `PlannedTime`) als `YYYYMMDDHHMM`; `null` ohne.
@@ -1155,6 +1160,7 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                     .to_string(),
                 discipline: m.discipline.as_str().to_string(),
                 draw_name: m.draw_name.clone(),
+                class_label: m.class_label.clone(),
                 round_name: m.round_name.clone(),
                 planned_time: m.planned_time,
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
@@ -1456,6 +1462,8 @@ pub struct CloudAnnounceCourt {
     pub court_id: i64,
     pub court: String,
     pub discipline: String,
+    /// Klassen-Kürzel („A", „B", …) für „Herreneinzel A" (leer = keins).
+    pub class_label: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
     pub team1_nationalities: Vec<String>,
@@ -1520,6 +1528,7 @@ pub async fn cloud_announce_state(
                 court_id: c.court_id,
                 court,
                 discipline: m.discipline.clone(),
+                class_label: m.class_label.clone(),
                 team1: names(&m.team_a),
                 team2: names(&m.team_b),
                 team1_nationalities: nats(&m.team_a),

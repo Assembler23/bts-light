@@ -76,6 +76,15 @@ pub struct MatchBrief {
     /// `#[serde(default)]` hält ältere Frames lesbar.
     #[serde(default)]
     pub discipline: String,
+    /// Klassen-Kürzel („A", „B", …) für die Ansage „Herreneinzel A" am
+    /// Cloud-Slave. Leer = keine Klasse erkennbar. `#[serde(default)]` +
+    /// `skip_serializing_if` halten alte Relays/Clients kompatibel.
+    #[serde(
+        rename = "classLabel",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub class_label: String,
     /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Monitor-Fußzeile.
     #[serde(rename = "matchNumber", default)]
     pub match_number: Option<i64>,
@@ -774,6 +783,12 @@ pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
 }
 
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
+// `MatchAssigned` trägt ein volles `MatchBrief` und ist damit deutlich
+// größer als die schlanken Varianten (`MatchCleared` etc.) — bewusst
+// akzeptiert: Diese Frames werden serialisiert übertragen, nicht in großer
+// Zahl auf dem Stack gehalten; Boxing würde ~20 Konstruktions-/Match-
+// Stellen aufblähen ohne realen Gewinn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostFrame {
@@ -1061,6 +1076,7 @@ mod tests {
                 cap_score: 30,
                 interval_at: Some(11),
                 discipline: "mens_singles".into(),
+                class_label: String::new(),
                 match_number: Some(14),
                 scorekeeper: vec!["Cara / Dora".into()],
             },

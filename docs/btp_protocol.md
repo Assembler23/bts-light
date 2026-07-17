@@ -226,14 +226,18 @@ Request-Aufbau (zusätzlich zum Nachrichten-Skelett):
 Action  { ID: "SENDUPDATE", Unicode: <session-key> [, Password: <pw>] }
 Update {
   Tournament {
+    Courts {                        (nur bei Tablet-Ergebnis: Feldfreigabe)
+      Court { ID: <BTP-Court-ID> }  (Court OHNE MatchID = Feld frei)
+    }
     Matches {                       (bei Liga stattdessen PlayerMatches)
       Match {
         ID:          <BTP-Match-ID>
         Sets { Set { T1, T2 } ... } (ein Set-Knoten je Satz, Spielreihenfolge)
         Winner:      1 | 2
         ScoreStatus: 0              (0 = regulär; 1/2/3 = Walkover/Aufgabe/Disq.)
-        Status:      0
         Duration:    <Minuten>
+        Status:      0
+        CourtID:     0              (nur bei Feldfreigabe: Halle+Feld am Match löschen)
         DrawID:      <Draw des Matches>
         PlanningID:  <Planungsposition im Draw>
       }
@@ -247,6 +251,21 @@ Update {
 - Antwort wie beim Login: `Action.ID = "REPLY"`, Erfolg bei
   `Action.Result == 1`.
 - Jeder `SENDUPDATE` läuft über eine eigene, frische TCP-Verbindung.
+
+> ⚠️ **`Status` niemals aus dem Ergebnis-Request entfernen.** Ohne dieses
+> Feld schließt BTP das Match **nicht** ab: Die Sätze sind nach Doppelklick
+> sichtbar, aber die Turnierleitung muss je Spiel manuell den Sieger wählen
+> und speichern (Live-Befund Zwei-Hallen-Turnier 17.07.2026). Das
+> Original-BTS schreibt `Status` in jedem Ergebnis-Update mit
+> (letilo-bts `btp_proto.js`). Regressionsgeschichte: v0.9.103 entfernte
+> `Status` zu Recht aus der **Feldzuweisung** (`court_assign_request`,
+> Check-in-Bits der Spieler) — und versehentlich auch hier.
+>
+> **Ergebnis + Feldfreigabe = EIN Request** (seit dem Fix): Der frühere
+> zweite SENDUPDATE mit „nacktem" Match-Knoten (nur `ID`+`CourtID=0`)
+> konnte das gerade geschriebene Ergebnis wieder entwerten. Bei Walkover
+> aus der Turnierleitung (`free_court_id = None`) entfallen `Courts`-Block
+> und `CourtID`.
 
 **Voraussetzungen / Caveats:**
 

@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.145
+
+- **TV-Anzeige: Spielernamen deutlich größer.** Auf der Einzelfeld-Anzeige (Court-Monitor)
+  waren die Namen aus Hallendistanz zu klein (Turnier-Feedback): Nachname jetzt 9.2 statt
+  7 vmin (Doppel 6.4 statt 5.4), Vorname entsprechend; der laufende Satzstand gibt dafür
+  etwas ab (13 statt 15 vmin). Erreicht Cloud-TVs mit dem Relay-Deploy, LAN-Monitore mit
+  diesem Release.
+- **Ansage nennt jetzt die Klasse: „Herreneinzel A".** Direkt hinter der Disziplin wird das
+  Klassen-Kürzel (A, B, C, … / U15 …) mitangesagt — auf Master, Cloud-Slave und bei
+  Vorbereitungs-Aufrufen. Es wird aus dem BTP-Event-Namen (auch in der Gruppenphase) bzw.
+  dem Draw-Namen („HE A") extrahiert; **Gruppen-Namen werden nie angesagt**. Ohne
+  erkennbares Kürzel bleibt die Ansage unverändert.
+- **BTP beendet Spiele wieder automatisch (Regression seit v0.9.103).** Tablet-Ergebnisse
+  kamen zwar in BTP an, aber das Spiel blieb dort offen — Sieger musste je Match manuell
+  gewählt und gespeichert werden (Live-Befund Zwei-Hallen-Turnier 17.07.2026). Ursache:
+  v0.9.103 hatte das `Status`-Feld nicht nur aus der Feldzuweisung (dort richtig), sondern
+  versehentlich auch aus dem **Ergebnis**-`SENDUPDATE` entfernt. `Status` steht wieder im
+  Ergebnis (wie im Original-BTS); zusätzlich werden Ergebnis und Feldfreigabe jetzt in
+  **einem** Request geschrieben — der frühere zweite „nackte" Freigabe-Request konnte das
+  Ergebnis wieder entwerten. *(Vor dem Release am echten BTP gegenprüfen: Spiel schließt
+  automatisch, Feld wird frei, Spieler-Check-in bleibt bei Feldzuweisungen unangetastet.)*
+
 ## v0.9.144
 
 - **Tablets & TVs in der fernen Halle (Weg A / Direkt-Cloud).** Ein Zwei-Hallen-Turnier,
