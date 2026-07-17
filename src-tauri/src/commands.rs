@@ -1557,6 +1557,61 @@ pub async fn cloud_slaves(
     Ok(crate::tablet::relay_client::fetch_slaves(&ns).await)
 }
 
+/// Geräte-Anschluss der fernen Halle (Slave): Relay-Basis des Masters +
+/// die Felder **dieser** Halle, damit die Slave-Oberfläche je Feld den
+/// Tablet-QR (`<relay_base>/qr/<id>`) und den Monitor-Link
+/// (`<relay_base>/court/<id>/display`) zeigen kann. Leer, wenn dieser PC kein
+/// Cloud-Slave ist (`slave_mode` + `master_namespace`).
+#[derive(Serialize)]
+pub struct SlaveDeviceInfo {
+    /// Relay-Basis des Master-Namespace (`https://badhub.de/bts-relay/<master_ns>`).
+    pub relay_base: String,
+    /// Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) —
+    /// Optionen für die Hallen-Auswahl auf dem Slave. Der Cloud-Slave hat kein
+    /// BTP und kann die Hallennamen nur hierüber verlässlich anbieten. Die
+    /// gewählte Halle selbst liest das Frontend aus der Config (`announce_hall`).
+    pub all_halls: Vec<String>,
+    /// Felder der eigenen Halle: `id`, `label` (Anzeige), `hall`. Bei noch nicht
+    /// gewählter Halle alle Felder (dann greift die Hallen-Auswahl davor).
+    pub courts: Vec<relay_proto::CourtBrief>,
+}
+
+#[tauri::command]
+pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo, String> {
+    let (ns, hall) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        let ns = cfg.master_namespace.trim().to_string();
+        // Kein Slave / kein Code – oder ein syntaktisch ungültiger, vom Nutzer
+        // eingegebener Code: leeren Zustand liefern statt eine URL aus
+        // ungeprüftem Input zu bauen (der Code fließt in relay_base + QR-/
+        // Monitor-Links; `.`/`/` würden Pfad-Confusion erlauben).
+        if !cfg.slave_mode || !crate::tablet::relay_client::valid_relay_namespace(&ns) {
+            return Ok(SlaveDeviceInfo {
+                relay_base: String::new(),
+                all_halls: Vec::new(),
+                courts: Vec::new(),
+            });
+        }
+        (ns, cfg.announce.announce_hall.clone())
+    };
+    let all = crate::tablet::relay_client::fetch_courts(&ns).await;
+    // Hallen-Optionen aus der VOLLEN Feldliste (vor dem Filter) — damit die
+    // Auswahl auf dem Slave alle Hallen zeigt, auch die noch nicht gewählte.
+    let all_halls = relay_proto::distinct_halls(&all);
+    // Auf die eigene Halle filtern (gleiche Logik wie die hallengefilterte
+    // Ansage: leere Slave-Halle oder leere Feld-Halle = kein Filter).
+    let courts: Vec<relay_proto::CourtBrief> = all
+        .into_iter()
+        .filter(|c| hall.is_empty() || c.hall.is_empty() || c.hall == hall)
+        .collect();
+    let relay_base = format!("https://badhub.de/bts-relay/{ns}");
+    Ok(SlaveDeviceInfo {
+        relay_base,
+        all_halls,
+        courts,
+    })
+}
+
 /// Ruft die ausgewählten Spiele „in Vorbereitung". `location_id` bindet den
 /// Aufruf an eine Halle (oder `None` bei einem hallenunabhängigen Aufruf).
 #[tauri::command]

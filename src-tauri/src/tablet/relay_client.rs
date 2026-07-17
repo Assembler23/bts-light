@@ -460,6 +460,43 @@ pub async fn fetch_slaves(namespace: &str) -> Vec<relay_proto::SlaveInfo> {
     fetch.await.unwrap_or_default()
 }
 
+/// Prüft einen vom Nutzer eingegebenen Master-Kopplungs-Code (Relay-Namespace),
+/// bevor er in eine URL fließt: nur Hex + Bindestrich, plausible Länge. `.`/`/`
+/// sind damit ausgeschlossen → kein Pfad-Confusion (`../`) beim URL-Bau, keine
+/// sinnlosen Requests bei Tippfehlern. Bewusst großzügiger als die strikte
+/// 36-Zeichen-UUID-Prüfung des Relays (der Server weist Abweichungen ohnehin ab).
+pub fn valid_relay_namespace(namespace: &str) -> bool {
+    namespace.len() >= 8
+        && namespace.len() <= 64
+        && namespace
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+/// Slave: die vollständige Feld-Liste des Master-Namespace holen (`/{ns}/courts`,
+/// vom Master via `HostFrame::Courts` gepusht – inkl. roher Halle je Feld). Der
+/// Cloud-Ansage-Slave filtert daraus die Felder **seiner** Halle und zeigt deren
+/// Tablet-QR-/Monitor-Links (Geräte-Anschluss ferne Halle). Leer bei Netz-/
+/// Parse-Fehler oder solange der Master noch nichts gepusht hat.
+pub async fn fetch_courts(namespace: &str) -> Vec<CourtBrief> {
+    if !valid_relay_namespace(namespace) {
+        return Vec::new();
+    }
+    let url = format!("{RELAY_HTTP}/{namespace}/courts");
+    let fetch = async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .ok()?;
+        let resp = client.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json::<Vec<CourtBrief>>().await.ok()
+    };
+    fetch.await.unwrap_or_default()
+}
+
 /// 2-s-Ticker: neue Freitext-Ansagen (`id > last_freetext`) an den Relay pushen,
 /// damit der Cloud-Ansage-Slave der fernen Halle sie abholen kann (B1a).
 fn push_freetext(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_freetext: &mut u64) {
@@ -485,6 +522,9 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
         .map(|c| CourtBrief {
             id: c.id,
             label: ctx.tablet.court_display_label(c.id),
+            // Rohe Halle (BTP-Location) mitschicken – der Cloud-Ansage-Slave
+            // filtert damit auf die Felder seiner Halle (Geräte-Anschluss).
+            hall: ctx.tablet.court_hall(c.id),
         })
         .collect();
     if !courts.is_empty() {

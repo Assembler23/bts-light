@@ -14,6 +14,7 @@ import type {
   PreparationView,
   InternetStatus,
   SlaveInfo,
+  SlaveDeviceInfo,
   SyncStatus,
   TabletInfo,
   TournamentStats,
@@ -120,6 +121,11 @@ export const cloudAnnounceState = (since: number): Promise<CloudAnnounce> =>
 
 /** Master: ferne Hallen (Cloud-Slaves) samt Online-Status. */
 export const cloudSlaves = (): Promise<SlaveInfo[]> => invoke("cloud_slaves");
+
+/** Slave: Relay-Basis + Felder der eigenen Halle für den Geräte-Anschluss
+ *  (Tablet-QR + Monitor-Link je Feld). Leer, wenn kein Cloud-Slave. */
+export const slaveDevices = (): Promise<SlaveDeviceInfo> =>
+  invoke("slave_devices");
 
 /** Geteiltes Aussprache-Wörterbuch von badhub laden (offline: aus Cache). */
 export const fetchPronunciations = (): Promise<NameOverride[]> =>

@@ -219,6 +219,26 @@ export interface SlaveInfo {
   lastSeenMs: number;
 }
 
+/** Ein Feld der Cloud-Feldliste (Rust: relay_proto::CourtBrief). */
+export interface CourtBrief {
+  id: number;
+  label: string;
+  hall: string;
+}
+
+/** Geräte-Anschluss der fernen Halle (Rust: commands::SlaveDeviceInfo).
+ *  `relay_base` = `https://badhub.de/bts-relay/<master_ns>`; je Feld baut die
+ *  UI daraus Tablet-QR (`<relay_base>/qr/<id>`) und Monitor-Link
+ *  (`<relay_base>/court/<id>/display`). */
+export interface SlaveDeviceInfo {
+  relay_base: string;
+  /** Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) — Optionen
+   *  für die Hallen-Auswahl auf dem Cloud-Slave (der kein BTP hat). Die gewählte
+   *  Halle liest die UI aus der Config (`announce_hall`). */
+  all_halls: string[];
+  courts: CourtBrief[];
+}
+
 /** Ein Feld im Cloud-Ansage-Status (Rust: commands::CloudAnnounceCourt). */
 export interface CloudAnnounceCourt {
   court_id: number;

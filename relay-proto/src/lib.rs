@@ -746,6 +746,31 @@ impl ResultResponse {
 pub struct CourtBrief {
     pub id: i64,
     pub label: String,
+    /// Hallenname (BTP-Location) des Felds – damit der Cloud-Ansage-Slave die
+    /// Felder **seiner** Halle herausfiltern und ihre Tablet-QR-/Monitor-Links
+    /// anzeigen kann (ferne Halle: Geräte direkt am Cloud-Relay). Leer =
+    /// Ein-Hallen-Turnier / unbekannt. `#[serde(default)]` hält ältere
+    /// Hosts/Relays ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub hall: String,
+}
+
+/// Die eindeutigen, nicht-leeren Hallennamen einer Feldliste – alphabetisch
+/// sortiert. Grundlage der Hallen-Auswahl auf dem **Cloud-Slave**, der kein BTP
+/// hat und die Hallennamen deshalb aus der Relay-Feldliste ziehen muss (statt
+/// wie der Master aus dem lokalen BTP-Snapshot).
+pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
+    let mut halls: Vec<String> = Vec::new();
+    for c in courts {
+        if !c.hall.is_empty() && !halls.contains(&c.hall) {
+            halls.push(c.hall.clone());
+        }
+    }
+    // Case-insensitiv sortieren – deckungsgleich mit der Master-Hallenliste
+    // (`tournamentStats`), damit dasselbe `announce_hall`-Dropdown in beiden
+    // Rollen gleich sortiert erscheint.
+    halls.sort_by_key(|h| h.to_lowercase());
+    halls
 }
 
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
@@ -1110,6 +1135,59 @@ mod tests {
                 hall: String::new(),
             }
         );
+    }
+
+    #[test]
+    fn court_brief_hall_roundtrips_and_defaults() {
+        // Neues Feld hält den Roundtrip.
+        roundtrip(&CourtBrief {
+            id: 401,
+            label: "Halle 2 · 1".into(),
+            hall: "Halle 2".into(),
+        });
+        // Älterer Host/Relay ohne `hall` bleibt lesbar (Default = leer).
+        let old = r#"{"id":7,"label":"Feld 3"}"#;
+        let brief: CourtBrief = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            brief,
+            CourtBrief {
+                id: 7,
+                label: "Feld 3".into(),
+                hall: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn distinct_halls_dedups_sorts_and_drops_empty() {
+        let courts = vec![
+            CourtBrief {
+                id: 101,
+                label: "Halle 1 · 1".into(),
+                hall: "Halle 1".into(),
+            },
+            CourtBrief {
+                id: 401,
+                label: "Halle 2 · 1".into(),
+                hall: "Halle 2".into(),
+            },
+            CourtBrief {
+                id: 102,
+                label: "Halle 1 · 2".into(),
+                hall: "Halle 1".into(),
+            },
+            // Leere Halle (unbekannt) wird ausgelassen.
+            CourtBrief {
+                id: 9,
+                label: "Feld 9".into(),
+                hall: String::new(),
+            },
+        ];
+        assert_eq!(
+            distinct_halls(&courts),
+            vec!["Halle 1".to_string(), "Halle 2".to_string()]
+        );
+        assert!(distinct_halls(&[]).is_empty());
     }
 
     #[test]
