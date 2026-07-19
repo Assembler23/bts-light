@@ -149,21 +149,40 @@ Default reines HTTP; HTTPS nur als „bring your own certificate"-Option
 ohne Trust-Konzept für die Tablets; sein Installer setzt
 `enable_https: false`. Seine Akku-Anzeige zeigt ohne Secure Context „N/A".
 
-**Plan (Entscheidung als ADR, zwei Optionen):**
-- **Option A — Cloud-Weg als Akku-Kanal (empfohlen, S):** Tablets, die im
-  LAN laufen, sind Turnieren mit Internet ohnehin meist parallel
+**Praxis-Hinweis von Tilo (19.07.2026):** Er hat HTTPS mit
+selbstsigniertem Zertifikat betrieben und auf den Tablets im Browser
+schlicht die Warnung weggeklickt („trotzdem vertrauen"). Das genügt:
+Eine per Klick durchgelassene HTTPS-Seite gilt trotzdem als **Secure
+Context** — Battery-API (und Wake Lock) funktionieren dann.
+
+**Plan (Entscheidung als ADR, drei Optionen):**
+- **Option A — Cloud-Weg als Akku-Kanal (S):** Tablets, die im
+  LAN laufen, sind bei Turnieren mit Internet ohnehin meist parallel
   cloud-fähig (LAN+Cloud-Modus existiert). Kleinster Schritt: Doku +
   Setup-Hinweis „Akkustände brauchen den Cloud-Modus"; optional die
   Felder-Übersicht um den Hinweis „Akku n/v (LAN)" ergänzen. Kein
   Zertifikats-Betrieb, kein neuer Code im Server.
-- **Option B — echtes HTTPS im LAN (L, dauerhaft):** Eigene lokale CA beim
-  ersten Start erzeugen, Server-Zertifikat für die LAN-IP/`bts-light.local`
-  ausstellen, CA-Zertifikat per QR/Download auf die Tablets bringen
-  (einmalige Installation pro Gerät — im Verleih-Szenario realistisch, weil
-  die Tablets mitverliehen werden). Aufwändig: Zertifikats-Rotation,
-  IP-Wechsel, Android-Trust-Store-Handling. Erst angehen, wenn Option A
-  nicht reicht oder weitere Secure-Context-Features (Wake Lock!) nötig
-  werden.
+- **Option B — selbstsigniertes Zertifikat + Warnung wegklicken
+  (Tilos Weg, M):** bts-light erzeugt beim ersten Start ein
+  selbstsigniertes Zertifikat und bietet den Tablet-Server zusätzlich
+  auf `https://…:8443` an (HTTP bleibt für Pis/Monitore bestehen).
+  QR-Codes zeigen auf die HTTPS-URL; auf jedem Tablet einmal
+  „Erweitert → trotzdem fortfahren". Kein CA-Handling, keine
+  Trust-Store-Installation. Nachteile: abschreckende Warnung für
+  Schiedsrichter beim Ersteinrichten, Ausnahme gilt je Gerät (und muss
+  nach Zertifikatswechsel/IP-Wechsel neu bestätigt werden), manche
+  Kiosk-Browser erlauben das Wegklicken nicht (Fully Kiosk meldet den
+  Akku aber ohnehin über die eigene API).
+- **Option C — echtes HTTPS mit lokaler CA (L, dauerhaft):** Eigene CA
+  beim ersten Start erzeugen, Server-Zertifikat für die
+  LAN-IP/`bts-light.local` ausstellen, CA-Zertifikat per QR/Download auf
+  die Tablets bringen (einmalige Installation pro Gerät — im
+  Verleih-Szenario realistisch, weil die Tablets mitverliehen werden).
+  Aufwändig: Rotation, IP-Wechsel, Android-Trust-Store. Nur nötig, wenn
+  die Warnung aus Option B im Betrieb stört.
+
+Empfehlung: **A sofort dokumentieren, B als Umsetzung** (bestätigte
+Praxis aus Tilos Betrieb), C nur bei Bedarf.
 
 ## 7. Spielübersicht für die Slave-Halle
 
