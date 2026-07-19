@@ -76,6 +76,15 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 - **Zähltafelbediener-Verwaltung** (wie Tilos BTS): Verlierer-Warteschlange,
   Zuweisung beim Feld-Aufruf, Mit-Ansage „Tabletbedienung: …",
   BTP-Auscheck, Mindestpause.
+- **Gong-Überlappung fixen** (Tilo 19.07.): Gong-Ende an echtes
+  Audio-Event koppeln statt an festen Timer — Plan 15 in
+  [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **Matchball-Einfärbung in der Felderübersicht** (Tilo-Idee, nur
+  Turnierleitung) — Plan 16.
+- **Altes Ergebnis bei Neu-Zuweisung** (Tilo + Log-Review HM-03):
+  Match-ID in Score-Frames + Server-Filter gegen veraltete
+  Tablet-Stände — Plan 17 (ersetzt den Log-Review-Punkt
+  „Score-Cache-Reset").
 - **badhub `/live?tab=done`: Tages-Filter** (Wunsch 19.07.), initial auf
   den aktuellen Tag. Die Beendet-Einträge tragen bereits `end_ts` →
   reines Frontend im badhub-Repo (`live.js`): nach Tag gruppieren/filtern,

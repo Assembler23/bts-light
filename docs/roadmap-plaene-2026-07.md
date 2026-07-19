@@ -403,7 +403,69 @@ hinzufügen); auf den Court-Displays erscheint er nicht.
 6. Konfiguration minimal: Schalter „Zähltafelbediener verwalten" +
    Mindestpause-Sekunden; Tilos Spezialoptionen erst bei Bedarf.
 
-## 15. Übrige Punkte (bereits geplant/laufend)
+## 15. Gong überlappt das erste Ansage-Wort
+
+**Tilo-Befund 19.07.:** „Ansageton kommt manchmal zu spät und dann im
+ersten Wort." **Ursache** (`io/announcer.ts`): Der Gong läuft auf der
+Web-Audio-Uhr, sein Ende wird aber per festem `setTimeout` (1250/850 ms,
+announcer.ts:86/115) signalisiert. Startet der AudioContext verzögert
+(WebView2-Resume), klingt der Gong real später als der Timer → die
+Sprache setzt in den Nachklang ein. Master, Announcer und Cloud-Slave
+teilen den Code — ein Fix wirkt überall. (Tilos BTS hat keinen Gong,
+verkettet aber seine Sprach-Teile über echte `onend`-Events — gleiches
+Prinzip.)
+
+**Plan (S):** `playGong()` am echten Audio-Ende auflösen (`onended` des
+letzten OscillatorNode statt setTimeout); `ctx.resume()` vollständig
+abwarten, bevor auf `ctx.currentTime` geplant wird; ~150 ms Atempause
+zwischen Gong-Ende und TTS. Manuell auf Windows-WebView2 testen.
+
+## 16. Matchball-Einfärbung in der Felderübersicht (nur Turnierleitung)
+
+**Tilo-Idee 19.07.**, Scope-Entscheidung 20.07.: **nur** die
+bts-light-Felderübersicht (Planung des nächsten Spiels), nicht die
+Hallen-TVs. Bei Tilo existiert das Konzept nicht — eigener Entwurf.
+
+**Plan (S):** Die Satzball/Matchball-Regel existiert bereits im Tablet
+(`umpPointBadge`, tablet.html:2708: Führender ≥ target−1 und ≥1 vorn;
+Matchball, wenn damit der entscheidende Satz fällt). `CourtOverview`
+(state.rs:68) um `best_of`/`target_score`/`cap_score` ergänzen (reine
+Tauri-Struktur, keine Wire-Kompatibilität nötig); in `TabletPanel.tsx`
+die Regel als kleine TS-Funktion portieren und die Court-Karte
+einfärben (Vorschlag: Gelb = Satzball, Rot/pulsierend + Badge =
+Matchball — Farben bei Umsetzung abstimmen).
+
+## 17. Altes Ergebnis am Feld bei Neu-Zuweisung (echte Lücke)
+
+**Tilo-Befund 19.07.** („beim Neu-Zuweisen steht noch das alte Ergebnis
+dran, erst beim Start springt es um") + identischer Live-Beleg HM-03 im
+[Log-Review](turnier-log-review-2026-07.md). **Ursache:** Die
+Reset-Guards existieren größtenteils (Relay leert `court_scores`/
+`court_state` beim Match-Wechsel, main.rs:1449; Anzeigen nutzen
+Tablet-Sätze nur bei passender `session.match_id`, state.rs:889/1018) —
+aber ein Tablet, das noch im **alten** Match hängt (Doze/Reconnect),
+sendet nach dem Aufwachen `score_update`/`state_sync` **ohne Match-ID**
+und befüllt den frisch geleerten Cache wieder mit dem alten Stand.
+Tilos BTS bestätigt den Fix-Ansatz: Er verwirft Score-Updates von
+„stale panels", deren Match nicht mehr zum Court passt.
+
+**Plan (S/M):**
+1. `TabletMsg::ScoreUpdate` um `matchId` erweitern (relay-proto,
+   `#[serde(default)]` → alte Seiten kompatibel); tablet.html sendet die
+   Match-ID des gezählten Spiels mit.
+2. Server (`handle_score`) und Relay (`forward_score`/
+   `store_court_state`): Frames verwerfen, deren Match-ID nicht zum
+   aktuellen Court-Match passt (beim `state_sync` steckt die Match-ID
+   schon im State-JSON — parsen). Leere ID (alte Seiten) = Verhalten
+   wie heute.
+3. Ergibt: Neu-Zuweisung zeigt sofort 0:0/BTP-Stand; Nachzügler alter
+   Matches können nichts mehr überschreiben (komplettiert den
+   „nachlaufende Frames"-Fix aus 0.9.147). Erledigt zugleich den
+   Log-Review-Auftrag „Score-Cache-Reset bei Match-Wechsel".
+4. Tests: Relay „fremde matchId verworfen", state.rs analog,
+   Serde-Roundtrip ±matchId. Auslieferung: App + Relay-Deploy.
+
+## 18. Übrige Punkte (bereits geplant/laufend)
 
 - **Log-Review 20.07.2026** — Ablauf steht in
   [roadmap.md](roadmap.md#nach-dem-turnier-wochenende-stand-19072026).
