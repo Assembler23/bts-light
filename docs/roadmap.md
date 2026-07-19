@@ -40,7 +40,8 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
 ## Turnier-Wünsche (18./19.07.2026 — zweites Wochenende)
 
-Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen):
+Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
+**Umsetzungspläne je Punkt:** [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 
 - **Gezielter zweiter/dritter Aufruf — auch je Partei.** Ist ein Spiel
   aufgerufen, aber nur eine Seite erschienen, soll die Turnierleitung
@@ -51,10 +52,11 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen):
 - **„Nächste Spiele pro Halle"** (Idee von Nik, Turnierleitung): BTP führt
   den **Spielort bereits an der Ansetzung** (Spalte „Spielort"/Feld, z. B.
   `WR-6`, `HM-05`) — diese Info kommt schon per `SENDTOURNAMENTINFO`.
-  Daraus eine Aufruf-/Nächste-Spiele-Liste **je Halle** bauen;
-  `badhub.de/live?t=…&display=next` braucht dafür einen Hallen-Filter
-  (z. B. `&halle=WR`), die globale Liste ist im Mehr-Hallen-Betrieb wenig
-  hilfreich.
+  Daraus eine Aufruf-/Nächste-Spiele-Liste **je Halle** bauen.
+  *Recherche 19.07.:* Der Hallen-Filter `&halle=…` existiert auf
+  `badhub.de/live?display=next` **bereits** — es fehlt nur die
+  senderseitige Hallen-Info an den angesetzten Spielen (bts-light,
+  `planned_court_id` parsen). Details: [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 - **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
   schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei
