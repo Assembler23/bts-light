@@ -133,6 +133,7 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
             const input: AnnounceMatchInput = {
               courtLabel: court.court,
               discipline: court.discipline,
+              className: court.class_label,
               teamANames: court.team1,
               teamBNames: court.team2,
               roundName: court.round_name,

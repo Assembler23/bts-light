@@ -279,6 +279,7 @@ mod tests {
 
     fn player(name: &str, member: Option<&str>, nat: Option<&str>) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: name.to_string(),
             first: String::new(),
             last: name.to_string(),
@@ -295,6 +296,7 @@ mod tests {
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".to_string(),
             match_num: Some(id),
             planned_time: None,

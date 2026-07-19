@@ -4,6 +4,57 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.147
+
+- **BTP bekommt Feld, Spieldauer und Spielende (Tilo-Feedback 18.07.2026).** Beim
+  Tablet-Ergebnis behält das Match jetzt seine **echte CourtID** (vorher `0` → die Feld-Info
+  verschwand in BTP; die Freigabe übernimmt allein der Courts-Block), die **`Duration`** wird
+  aus dem Aufruf-Zeitstempel in ganzen Minuten berechnet (vorher immer 0), und je Spieler wird
+  das **Spielende** gesetzt: `LastTimeOnCourt` (lokale Uhrzeit) + `CheckedIn: false` — Tilos
+  Original-Mechanismus, die Spieler sind damit sofort wieder einplanbar.
+  Details: [btp_protocol.md](btp_protocol.md).
+- **Tablet-Reconnect verliert keine Punkte mehr (Turnier-Befund 18.07.2026).** Zwei Ursachen
+  behoben: (1) Jedes Tablet sendet jetzt eine **persistente Geräte-Kennung** — meldet sich
+  dasselbe Gerät nach einem Netz-Aussetzer zurück, löst es seine tote Session nahtlos ab statt
+  fälschlich „ein anderes Tablet hat übernommen" zu sehen (LAN + Cloud). (2) Eine
+  **Stand-Revision** im gespeicherten Spielstand sorgt beim Reconnect für „**neuer gewinnt**":
+  Der während des Aussetzers veraltete Server-Stand überbügelt nicht mehr die offline
+  weitergezählten Punkte; das Tablet behält seinen Stand und der Liveticker zieht nach.
+  Cloud-Tablets brauchen dafür den Relay-Deploy + einmal Seite neu laden.
+  Details: [tablet.md](tablet.md), [cloud-relay.md](cloud-relay.md).
+
+## v0.9.146
+
+- **Ferne Halle: Tablets & TVs über die Slave-IP — ohne Extra-Rechner.** Der Cloud-Ansage-Slave
+  betreibt jetzt selbst eine **Brücke** auf `:8088`: Tilos Court-Monitor-Pis finden den Slave-PC
+  per Subnetz-Scan und werden auf den Court-Monitor des Masters umgeleitet (die separate
+  Notbrücke vom Turnier entfällt). Zusätzlich gibt es **`Slave-IP/felder`** als Feld-Auswahlseite
+  fürs Tablet — genau wie in der Master-Halle; jedes Feld öffnet die Cloud-Tablet-Seite des
+  Masters. Der Slave meldet sich zudem per mDNS als `bts-light.local`. Ergebnisse fließen
+  unverändert direkt über die Cloud ins Master-BTP (Weg A). Details: [multi-hall.md](multi-hall.md).
+
+## v0.9.145
+
+- **TV-Anzeige: Spielernamen deutlich größer.** Auf der Einzelfeld-Anzeige (Court-Monitor)
+  waren die Namen aus Hallendistanz zu klein (Turnier-Feedback): Nachname jetzt 13 statt
+  7 vmin (Doppel 8 statt 5.4), Vorname entsprechend; der laufende Satzstand gibt dafür
+  etwas ab (13 statt 15 vmin). Erreicht Cloud-TVs mit dem Relay-Deploy, LAN-Monitore mit
+  diesem Release.
+- **Ansage nennt jetzt die Klasse: „Herreneinzel A".** Direkt hinter der Disziplin wird das
+  Klassen-Kürzel (A, B, C, … / U15 …) mitangesagt — auf Master, Cloud-Slave und bei
+  Vorbereitungs-Aufrufen. Es wird aus dem BTP-Event-Namen (auch in der Gruppenphase) bzw.
+  dem Draw-Namen („HE A") extrahiert; **Gruppen-Namen werden nie angesagt**. Ohne
+  erkennbares Kürzel bleibt die Ansage unverändert.
+- **BTP beendet Spiele wieder automatisch (Regression seit v0.9.103).** Tablet-Ergebnisse
+  kamen zwar in BTP an, aber das Spiel blieb dort offen — Sieger musste je Match manuell
+  gewählt und gespeichert werden (Live-Befund Zwei-Hallen-Turnier 17.07.2026). Ursache:
+  v0.9.103 hatte das `Status`-Feld nicht nur aus der Feldzuweisung (dort richtig), sondern
+  versehentlich auch aus dem **Ergebnis**-`SENDUPDATE` entfernt. `Status` steht wieder im
+  Ergebnis (wie im Original-BTS); zusätzlich werden Ergebnis und Feldfreigabe jetzt in
+  **einem** Request geschrieben — der frühere zweite „nackte" Freigabe-Request konnte das
+  Ergebnis wieder entwerten. *(Vor dem Release am echten BTP gegenprüfen: Spiel schließt
+  automatisch, Feld wird frei, Spieler-Check-in bleibt bei Feldzuweisungen unangetastet.)*
+
 ## v0.9.144
 
 - **Tablets & TVs in der fernen Halle (Weg A / Direkt-Cloud).** Ein Zwei-Hallen-Turnier,

@@ -244,6 +244,8 @@ export interface CloudAnnounceCourt {
   court_id: number;
   court: string;
   discipline: string;
+  /** Klassen-Kürzel („A", „B", …) für „Herreneinzel A"; leer = keins. */
+  class_label: string;
   team1: string[];
   team2: string[];
   team1_nationalities: string[];
@@ -378,6 +380,8 @@ export interface CourtOverview {
   round_name: string;
   /** Disziplin des aktuellen Matches. */
   discipline: Discipline;
+  /** Klassen-Kürzel („A", „B", …) für „Herreneinzel A"; leer = keins. */
+  class_label: string;
   team1: string[];
   team2: string[];
   /** Nationalitäten parallel zu team1 (leerer String = unbekannt). */
@@ -474,6 +478,8 @@ export interface PreparationCandidate {
   /** Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") — für die
    *  Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind). */
   draw_name: string;
+  /** Klassen-Kürzel („A", „B", …) für „Herreneinzel A"; leer = keins. */
+  class_label: string;
   /** Runden-/Spielbezeichnung (z. B. „G1", „Finale") für die Tabellenanzeige. */
   round_name: string;
   /** Angesetzte Spielzeit (BTP `PlannedTime`) als YYYYMMDDHHMM; null ohne. */

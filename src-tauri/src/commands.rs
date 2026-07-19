@@ -62,8 +62,12 @@ pub struct AppState {
     pub relay_task: Mutex<Option<JoinHandle<()>>>,
     /// Handle des Diagnose-Log-Uploads, falls aktiv.
     pub log_task: Mutex<Option<JoinHandle<()>>>,
-    /// Laufende mDNS-Bekanntgabe (`bts-light.local`, nur LAN-Modus).
+    /// Laufende mDNS-Bekanntgabe (`bts-light.local`) – LAN-Modus ODER
+    /// Slave-Monitor-Brücke.
     pub mdns: Mutex<Option<mdns_sd::ServiceDaemon>>,
+    /// Handle der Slave-Monitor-Brücke (`:8088` → Cloud-Monitor des Masters,
+    /// nur im `slave_mode`), falls aktiv.
+    pub slave_bridge: Mutex<Option<JoinHandle<()>>>,
 }
 
 fn now_ms() -> u64 {
@@ -346,6 +350,9 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Vor dem Move von `config` in den Tablet-Kontext merken.
     let upload_logs = config.upload_logs;
     let install_id = config.install_id.clone();
+    let master_namespace = config.master_namespace.trim().to_string();
+    // Halle des Slaves — filtert die Feld-Auswahlseite der Brücke.
+    let announce_hall = config.announce.announce_hall.clone();
     let mode = config.connection_mode;
     // Ansage-Slave: kein Tablet-Server/mDNS/Relay (nur BTP lesen + ansagen) –
     // sonst Kollision mit dem Master (doppeltes bts-light.local, Liveticker).
@@ -446,6 +453,36 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             ));
         }
     }
+    // Cloud-Ansage-Slave: zusätzlich die Monitor-Brücke auf `:8088` starten,
+    // damit Tilos Court-Monitor-Pis der fernen Halle den Slave per
+    // Subnetz-Scan finden und auf den Cloud-Monitor des Masters umgeleitet
+    // werden (kein Extra-Rechner nötig). Nur bei gültigem Master-Namespace.
+    // mDNS (`bts-light.local`) für neue-Image-Pis kommt oben drauf. Setzt
+    // getrennte Broadcast-Domains von Slave und Master voraus (Zwei-Hallen-
+    // Standard: eigene Netze) — sonst konkurrierten zwei `bts-light.local`.
+    if slave_mode && crate::tablet::relay_client::valid_relay_namespace(&master_namespace) {
+        let mut bridge_slot = state
+            .slave_bridge
+            .lock()
+            .expect("Slave-Brücke-Mutex nicht vergiftet");
+        if bridge_slot.is_none() {
+            let ns = master_namespace.clone();
+            let hall = announce_hall.clone();
+            *bridge_slot = Some(tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::tablet::slave_bridge::run(ns, hall).await {
+                    tracing::error!("Slave-Brücke beendet: {e}");
+                }
+            }));
+        }
+        drop(bridge_slot);
+        let mut mdns_slot = state.mdns.lock().expect("mDNS-Mutex nicht vergiftet");
+        if mdns_slot.is_none() {
+            match crate::tablet::mdns::advertise() {
+                Ok(daemon) => *mdns_slot = Some(daemon),
+                Err(e) => tracing::warn!("mDNS (Slave-Brücke) fehlgeschlagen: {e}"),
+            }
+        }
+    }
 
     // Optionaler Diagnose-Log-Upload (nur wenn vom Nutzer aktiviert).
     if upload_logs {
@@ -504,6 +541,14 @@ pub fn stop_sync(state: State<'_, AppState>) {
         .log_task
         .lock()
         .expect("Log-Task-Mutex nicht vergiftet")
+        .take()
+    {
+        handle.abort();
+    }
+    if let Some(handle) = state
+        .slave_bridge
+        .lock()
+        .expect("Slave-Brücke-Mutex nicht vergiftet")
         .take()
     {
         handle.abort();
@@ -909,6 +954,11 @@ pub async fn confirm_walkover(
             team1_won: !cand.retired_is_team1,
             duration_mins: 0,
             score_status: 1, // 1 = Walkover
+            // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben,
+            // niemand war auf dem Feld → keine Spieler-/Endzeit-Updates.
+            free_court_id: None,
+            player_ids: Vec::new(),
+            end_ts_ms: None,
         };
         match crate::tablet::server::write_result_to_btp(&config, &update).await {
             Ok(()) => written += 1,
@@ -1073,6 +1123,9 @@ pub struct PreparationCandidate {
     /// Name der Auslosung/Klasse (BTP `draw_name`, z. B. „HE A") – für die
     /// Disziplin/Klasse→Halle-Regel (welche Felder erlaubt sind).
     pub draw_name: String,
+    /// Klassen-Kürzel („A", „B", …) für die Ansage „Herreneinzel A"
+    /// (leer = keins erkennbar; aus Event-/Draw-Name extrahiert).
+    pub class_label: String,
     /// Runden-/Spielbezeichnung (z. B. „G1", „Finale") für die Tabellenanzeige.
     pub round_name: String,
     /// Angesetzte Spielzeit (BTP `PlannedTime`) als `YYYYMMDDHHMM`; `null` ohne.
@@ -1155,6 +1208,7 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                     .to_string(),
                 discipline: m.discipline.as_str().to_string(),
                 draw_name: m.draw_name.clone(),
+                class_label: m.class_label.clone(),
                 round_name: m.round_name.clone(),
                 planned_time: m.planned_time,
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
@@ -1456,6 +1510,8 @@ pub struct CloudAnnounceCourt {
     pub court_id: i64,
     pub court: String,
     pub discipline: String,
+    /// Klassen-Kürzel („A", „B", …) für „Herreneinzel A" (leer = keins).
+    pub class_label: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
     pub team1_nationalities: Vec<String>,
@@ -1520,6 +1576,7 @@ pub async fn cloud_announce_state(
                 court_id: c.court_id,
                 court,
                 discipline: m.discipline.clone(),
+                class_label: m.class_label.clone(),
                 team1: names(&m.team_a),
                 team2: names(&m.team_b),
                 team1_nationalities: nats(&m.team_a),

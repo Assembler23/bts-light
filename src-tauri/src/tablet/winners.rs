@@ -208,6 +208,7 @@ mod tests {
 
     fn p(name: &str, club: Option<&str>) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: name.to_string(),
             first: String::new(),
             last: name.to_string(),
@@ -230,6 +231,7 @@ mod tests {
             planning_id: 0,
             draw_name: "JE U17 D".into(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: round.into(),
             match_num: None,
             planned_time: None,

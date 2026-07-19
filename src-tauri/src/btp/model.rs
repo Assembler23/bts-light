@@ -100,6 +100,9 @@ impl Discipline {
 /// Ein Spieler einer Paarung.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtpPlayer {
+    /// BTP-interne `PlayerID` — für Spieler-Updates im `SENDUPDATE`
+    /// (`Player.LastTimeOnCourt`/`CheckedIn` beim Spielende). 0 = unbekannt.
+    pub id: i64,
     /// Anzeigename ("Vorname Nachname" bzw. nur Nachname).
     pub name: String,
     /// Vorname(n) (BTP `Firstname`) – getrennt geführt, damit der
@@ -217,6 +220,10 @@ pub struct BtpMatch {
     pub draw_name: String,
     /// Disziplin des Matches (aus dem BTP-Event abgeleitet).
     pub discipline: Discipline,
+    /// Klassen-Kürzel („A", „B", „U15" …) für die Ansage — aus Event- bzw.
+    /// Draw-Name extrahiert ([`class_label`]). Leer, wenn keins erkennbar
+    /// ist; Gruppen-/Auslosungsnamen („Gruppe 3") zählen bewusst NICHT.
+    pub class_label: String,
     /// Runden-/Spielbezeichnung, z. B. "G1".
     pub round_name: String,
     /// Spielnummer (BTP `MatchNr`), falls vergeben.
@@ -355,6 +362,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     let courts = court_map(t);
     let draws = draw_map(t);
     let disciplines = draw_discipline_map(t);
+    let classes = draw_class_map(t);
     let scoring = scoring_by_draw(t);
 
     // Court-Namen nach CourtID sortiert – das ergibt die BTP-Anlegereihenfolge.
@@ -374,6 +382,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
             &courts,
             &draws,
             &disciplines,
+            &classes,
             &scoring,
         ),
         courts: court_names,
@@ -404,6 +413,7 @@ fn player_map(t: &[Node], clubs: &HashMap<i64, String>) -> HashMap<i64, BtpPlaye
         map.insert(
             id,
             BtpPlayer {
+                id,
                 name,
                 first: first.to_string(),
                 last: last.to_string(),
@@ -510,6 +520,72 @@ fn court_list(t: &[Node]) -> Vec<BtpCourt> {
 /// DrawID → Draw-Name.
 fn draw_map(t: &[Node]) -> HashMap<i64, String> {
     id_name_map(t, "Draws")
+}
+
+/// Extrahiert das Klassen-Kürzel aus einem Event- oder Draw-Namen: bekannte
+/// Disziplin-Wörter werden entfernt, übrig bleiben darf nur EIN kurzes
+/// Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15"). Alles andere — insbesondere
+/// Gruppen-/Auslosungsnamen wie „Gruppe 3" oder „Hauptrunde" — ergibt Leer:
+/// Die Ansage nennt nach Nutzer-Vorgabe NUR Disziplin + Klasse, nie Gruppen.
+fn class_from(name: &str) -> String {
+    const DISCIPLINE_TOKENS: &[&str] = &[
+        "herreneinzel",
+        "dameneinzel",
+        "herrendoppel",
+        "damendoppel",
+        "gemischtes",
+        "mixed",
+        "einzel",
+        "doppel",
+        "he",
+        "de",
+        "hd",
+        "dd",
+        "gd",
+        "mx",
+    ];
+    let rest: Vec<&str> = name
+        .split_whitespace()
+        .filter(|tok| !DISCIPLINE_TOKENS.contains(&tok.to_lowercase().as_str()))
+        .collect();
+    match rest.as_slice() {
+        [tok] if tok.chars().count() <= 4 && tok.chars().all(|c| c.is_alphanumeric()) => {
+            (*tok).to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// Klassen-Kürzel eines Draws: bevorzugt aus dem Event-Namen (trägt die
+/// Klasse auch in der Gruppenphase, wo Draws nur „Gruppe 1…n" heißen),
+/// sonst aus dem Draw-Namen („HE A" in der K.-o.-Phase).
+pub fn class_label(event_name: &str, draw_name: &str) -> String {
+    let from_event = class_from(event_name);
+    if !from_event.is_empty() {
+        return from_event;
+    }
+    class_from(draw_name)
+}
+
+/// DrawID → Klassen-Kürzel (über Event-Name des Draws, sonst Draw-Name).
+fn draw_class_map(t: &[Node]) -> HashMap<i64, String> {
+    let event_names = id_name_map(t, "Events");
+    let draw_names = id_name_map(t, "Draws");
+    let mut map = HashMap::new();
+    if let Some(group) = xml::find(t, "Draws") {
+        for d in group.children() {
+            let Some(draw_id) = child_int(d, "ID") else {
+                continue;
+            };
+            let event_name = child_int(d, "EventID")
+                .and_then(|eid| event_names.get(&eid))
+                .map(String::as_str)
+                .unwrap_or("");
+            let draw_name = draw_names.get(&draw_id).map(String::as_str).unwrap_or("");
+            map.insert(draw_id, class_label(event_name, draw_name));
+        }
+    }
+    map
 }
 
 /// DrawID → Disziplin. BTP führt die Disziplin am Event (`GameTypeID` +
@@ -624,6 +700,7 @@ fn parse_matches(
     courts: &HashMap<i64, String>,
     draws: &HashMap<i64, String>,
     disciplines: &HashMap<i64, Discipline>,
+    classes: &HashMap<i64, String>,
     scoring: &HashMap<i64, ScoringFormat>,
 ) -> Vec<BtpMatch> {
     let mut out = Vec::new();
@@ -670,6 +747,9 @@ fn parse_matches(
             discipline: draw_id
                 .and_then(|id| disciplines.get(&id).copied())
                 .unwrap_or(Discipline::Unknown),
+            class_label: draw_id
+                .and_then(|id| classes.get(&id).cloned())
+                .unwrap_or_default(),
             round_name: child_str(m, "RoundName").unwrap_or_default().to_string(),
             match_num: child_int(m, "MatchNr").filter(|&n| n > 0),
             planned_time: parse_planned_time(m),
@@ -803,6 +883,31 @@ mod tests {
     #[test]
     fn missing_tournament_is_an_error() {
         assert!(matches!(parse_snapshot(&[]), Err(ModelError::NoTournament)));
+    }
+
+    #[test]
+    fn class_label_extracts_short_class_tokens() {
+        // Event-Name trägt die Klasse (auch in der Gruppenphase).
+        assert_eq!(class_label("Herreneinzel A", "Gruppe 3"), "A");
+        assert_eq!(class_label("HE A", "Gruppe 1"), "A");
+        assert_eq!(class_label("DD B", ""), "B");
+        assert_eq!(class_label("Gemischtes Doppel C", ""), "C");
+        assert_eq!(class_label("Dameneinzel U15", ""), "U15");
+        // Ohne Event-Klasse greift der Draw-Name (K.-o.-Phase „HE A").
+        assert_eq!(class_label("Herreneinzel", "HE A"), "A");
+        assert_eq!(class_label("", "HE B"), "B");
+    }
+
+    #[test]
+    fn class_label_never_announces_groups_or_long_names() {
+        // Nutzer-Vorgabe: nie Gruppen-/Auslosungsnamen als „Klasse" ansagen.
+        assert_eq!(class_label("", "Gruppe 3"), "");
+        assert_eq!(class_label("Herreneinzel", "Gruppe 12"), "");
+        assert_eq!(class_label("Herreneinzel", "Hauptrunde"), "");
+        assert_eq!(class_label("HE", "HE"), "");
+        assert_eq!(class_label("", ""), "");
+        // Mehr als ein Rest-Token → kein eindeutiges Kürzel.
+        assert_eq!(class_label("Herreneinzel A Nord", ""), "");
     }
 
     #[test]

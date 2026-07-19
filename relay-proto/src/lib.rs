@@ -76,6 +76,15 @@ pub struct MatchBrief {
     /// `#[serde(default)]` hält ältere Frames lesbar.
     #[serde(default)]
     pub discipline: String,
+    /// Klassen-Kürzel („A", „B", …) für die Ansage „Herreneinzel A" am
+    /// Cloud-Slave. Leer = keine Klasse erkennbar. `#[serde(default)]` +
+    /// `skip_serializing_if` halten alte Relays/Clients kompatibel.
+    #[serde(
+        rename = "classLabel",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub class_label: String,
     /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Monitor-Fußzeile.
     #[serde(rename = "matchNumber", default)]
     pub match_number: Option<i64>,
@@ -613,6 +622,13 @@ pub enum TabletMsg {
         /// `court_id`.
         #[serde(rename = "courtLabel", default)]
         court_label: String,
+        /// Persistente Geräte-Kennung des Tablets (zufällig, localStorage).
+        /// Meldet sich DASSELBE Gerät nach einem Verbindungsabriss neu,
+        /// erkennt der Server das als Reconnect (nahtlos weiter) statt als
+        /// fremde Übernahme („Feld belegt"). Leer bei alten Tablet-Seiten
+        /// (`#[serde(default)]`) → Verhalten wie bisher.
+        #[serde(rename = "deviceId", default)]
+        device_id: String,
     },
     /// Laufender Punktestand des aktuellen Satzes plus die schon
     /// abgeschlossenen Sätze.
@@ -634,7 +650,11 @@ pub enum TabletMsg {
     Alert { injury: bool, official: bool },
     /// Das Tablet möchte einen bereits belegten Court übernehmen.
     #[serde(rename = "take_over")]
-    TakeOver,
+    TakeOver {
+        /// Geräte-Kennung des übernehmenden Tablets (wie bei `Identify`).
+        #[serde(rename = "deviceId", default)]
+        device_id: String,
+    },
     /// Voller Spielzustand des Tablets als JSON-String – der Server hält
     /// ihn vor, damit ein übernehmendes Gerät das laufende Spiel bekommt.
     #[serde(rename = "state_sync")]
@@ -774,6 +794,12 @@ pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
 }
 
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
+// `MatchAssigned` trägt ein volles `MatchBrief` und ist damit deutlich
+// größer als die schlanken Varianten (`MatchCleared` etc.) — bewusst
+// akzeptiert: Diese Frames werden serialisiert übertragen, nicht in großer
+// Zahl auf dem Stack gehalten; Boxing würde ~20 Konstruktions-/Match-
+// Stellen aufblähen ohne realen Gewinn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostFrame {
@@ -1004,7 +1030,45 @@ mod tests {
             msg,
             TabletMsg::Identify {
                 court_id: 7,
-                court_label: "Feld 1".to_string()
+                court_label: "Feld 1".to_string(),
+                device_id: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn tablet_msg_identify_with_device_id() {
+        // Neue Tablet-Seiten schicken ihre persistente Geräte-Kennung mit —
+        // Grundlage der Reconnect-Erkennung (Reconnect ≠ Übernahme).
+        let json = r#"{"type":"identify","role":"tablet","courtId":7,"courtLabel":"Feld 1","deviceId":"dev-abc"}"#;
+        let msg: TabletMsg = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg,
+            TabletMsg::Identify {
+                court_id: 7,
+                court_label: "Feld 1".to_string(),
+                device_id: "dev-abc".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn tablet_msg_take_over_with_and_without_device_id() {
+        // Alte Tablet-Seiten schicken take_over ohne deviceId — muss
+        // weiterhin parsen (leere Kennung).
+        let old: TabletMsg = serde_json::from_str(r#"{"type":"take_over"}"#).unwrap();
+        assert_eq!(
+            old,
+            TabletMsg::TakeOver {
+                device_id: String::new()
+            }
+        );
+        let new: TabletMsg =
+            serde_json::from_str(r#"{"type":"take_over","deviceId":"dev-abc"}"#).unwrap();
+        assert_eq!(
+            new,
+            TabletMsg::TakeOver {
+                device_id: "dev-abc".to_string()
             }
         );
     }
@@ -1018,7 +1082,8 @@ mod tests {
             msg,
             TabletMsg::Identify {
                 court_id: 0,
-                court_label: "Feld 1".to_string()
+                court_label: "Feld 1".to_string(),
+                device_id: String::new()
             }
         );
     }
@@ -1061,6 +1126,7 @@ mod tests {
                 cap_score: 30,
                 interval_at: Some(11),
                 discipline: "mens_singles".into(),
+                class_label: String::new(),
                 match_number: Some(14),
                 scorekeeper: vec!["Cara / Dora".into()],
             },

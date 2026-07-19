@@ -63,6 +63,22 @@ impl Node {
         }
     }
 
+    /// Konstruiert ein `ITEM` mit Bool-Wert.
+    pub fn boolean(id: impl Into<String>, value: bool) -> Node {
+        Node::Item {
+            id: id.into(),
+            value: Value::Bool(value),
+        }
+    }
+
+    /// Konstruiert ein `ITEM` mit DateTime-Wert (`<DATETIME Y MM D H M S MS/>`).
+    pub fn datetime(id: impl Into<String>, value: DateTime) -> Node {
+        Node::Item {
+            id: id.into(),
+            value: Value::DateTime(value),
+        }
+    }
+
     /// ID dieses Knotens.
     pub fn id(&self) -> &str {
         match self {

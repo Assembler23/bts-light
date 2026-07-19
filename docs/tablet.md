@@ -189,6 +189,27 @@ Tablet ausfällt. Das übernehmende Gerät setzt das **laufende Spiel mit
 aktuellem Stand** fort (das aktive Tablet spiegelt seinen Stand dafür
 laufend an den Server). Nach der Übernahme ist das alte Gerät gesperrt.
 
+### Reconnect ist keine Übernahme (seit v0.9.147)
+
+Jedes Tablet trägt eine **persistente Geräte-Kennung** (`deviceId`,
+localStorage, einmalig erzeugt) und sendet sie bei `identify` und
+`take_over` mit. Verliert ein Tablet kurz das Netz, hält seine tote
+Verbindung das Feld serverseitig noch einige Sekunden — meldet sich
+**dasselbe Gerät** zurück, löst es diese alte Session **nahtlos** ab:
+kein „Feld belegt"-Overlay, kein manueller Übernehmen-Tap. Nur ein
+**fremdes** Gerät sieht weiterhin den Übernehmen-Dialog. Alte
+Tablet-Seiten ohne Kennung verhalten sich wie bisher.
+
+Zusätzlich schützt eine **Stand-Revision** die offline gezählten Punkte:
+Jede lokale Änderung zählt `rev` im persistierten Snapshot hoch. Schickt
+der Server beim Reconnect seinen (während des Aussetzers veralteten)
+Spielstand (`state_restore`), gilt **„neuer gewinnt"**: Hat das Tablet
+zum selben Match einen gleich neuen oder neueren Stand, behält es ihn
+und spiegelt ihn sofort zurück (Server-Cache + Liveticker ziehen nach) —
+vorher überbügelte der alte Server-Stand die weitergezählten Punkte
+(Turnier-Befund 18.07.2026). Ein frisches Gerät (Reload ohne Stand,
+Ersatz-Tablet, echte Übernahme) übernimmt den Server-Stand unverändert.
+
 ## Einrichtung im Turnier
 
 1. In bts-light den Liveticker starten (BTP muss verbunden sein) – der

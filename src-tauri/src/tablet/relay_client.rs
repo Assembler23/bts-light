@@ -549,6 +549,7 @@ mod tests {
 
     fn player(n: &str) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: n.to_string(),
             first: String::new(),
             last: n.to_string(),
@@ -565,6 +566,7 @@ mod tests {
             planning_id: 1001,
             draw_name: "HE".into(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".into(),
             match_num: Some(1),
             planned_time: None,

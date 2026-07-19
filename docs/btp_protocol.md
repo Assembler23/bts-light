@@ -226,16 +226,27 @@ Request-Aufbau (zusätzlich zum Nachrichten-Skelett):
 Action  { ID: "SENDUPDATE", Unicode: <session-key> [, Password: <pw>] }
 Update {
   Tournament {
+    Courts {                        (nur bei Tablet-Ergebnis: Feldfreigabe)
+      Court { ID: <BTP-Court-ID> }  (Court OHNE MatchID = Feld frei)
+    }
     Matches {                       (bei Liga stattdessen PlayerMatches)
       Match {
         ID:          <BTP-Match-ID>
         Sets { Set { T1, T2 } ... } (ein Set-Knoten je Satz, Spielreihenfolge)
         Winner:      1 | 2
         ScoreStatus: 0              (0 = regulär; 1/2/3 = Walkover/Aufgabe/Disq.)
+        Duration:    <Minuten>      (Spieldauer seit dem 1. Aufruf, ganze Minuten)
         Status:      0
-        Duration:    <Minuten>
+        CourtID:     <BTP-Court-ID> (das ECHTE Feld bleibt am Match — s. u.)
         DrawID:      <Draw des Matches>
         PlanningID:  <Planungsposition im Draw>
+      }
+    }
+    Players {                       (nur bei Tablet-Ergebnis: Spielende je Spieler)
+      Player {
+        ID:              <BTP-Player-ID>
+        LastTimeOnCourt: <DateTime, lokale Uhrzeit des Spielendes>
+        CheckedIn:       false      (Spieler wieder für die Planung verfügbar)
       }
     }
   }
@@ -244,9 +255,38 @@ Update {
 
 - Das Match wird über `ID` + `DrawID` + `PlanningID` adressiert.
 - `Sets` enthält je Satz einen `Set`-Knoten mit `T1`/`T2` (Punkte Team 1/2).
+- **`CourtID` bleibt das echte Feld** (seit v0.9.147): BTP zeigt so am
+  beendeten Spiel, WO es lief. Die Freigabe des Felds übernimmt allein der
+  `Courts`-Block (Court ohne MatchID = frei) — genau wie im Original-BTS
+  (letilo-bts `btp_proto.js`). `CourtID: 0` zu schreiben (so der frühere
+  Stand) löschte die Feld-Info am Match (Tilo-Feedback 18.07.2026).
+- **`Duration`** kommt aus dem Aufruf-Zeitstempel (`on_court_since`,
+  1. Aufruf des Matches auf dem Feld) bis zum Ergebnis-Eingang, in ganzen
+  Minuten; 0, wenn der Startzeitpunkt nicht bekannt ist (z. B. App-Neustart
+  mitten im Spiel).
+- **`Players`-Block = Spielende-Uhrzeit:** BTP kennt kein „Spielende" am
+  Match — Tilos Mechanismus setzt je Spieler `LastTimeOnCourt` (lokale
+  Uhrzeit) und `CheckedIn: false` (wieder einplanbar). Entfällt beim
+  Walkover aus der Turnierleitung (niemand stand auf dem Feld) und für
+  Spieler ohne bekannte BTP-PlayerID.
 - Antwort wie beim Login: `Action.ID = "REPLY"`, Erfolg bei
   `Action.Result == 1`.
 - Jeder `SENDUPDATE` läuft über eine eigene, frische TCP-Verbindung.
+
+> ⚠️ **`Status` niemals aus dem Ergebnis-Request entfernen.** Ohne dieses
+> Feld schließt BTP das Match **nicht** ab: Die Sätze sind nach Doppelklick
+> sichtbar, aber die Turnierleitung muss je Spiel manuell den Sieger wählen
+> und speichern (Live-Befund Zwei-Hallen-Turnier 17.07.2026). Das
+> Original-BTS schreibt `Status` in jedem Ergebnis-Update mit
+> (letilo-bts `btp_proto.js`). Regressionsgeschichte: v0.9.103 entfernte
+> `Status` zu Recht aus der **Feldzuweisung** (`court_assign_request`,
+> Check-in-Bits der Spieler) — und versehentlich auch hier.
+>
+> **Ergebnis + Feldfreigabe = EIN Request** (seit dem Fix): Der frühere
+> zweite SENDUPDATE mit „nacktem" Match-Knoten (nur `ID`+`CourtID=0`)
+> konnte das gerade geschriebene Ergebnis wieder entwerten. Bei Walkover
+> aus der Turnierleitung (`free_court_id = None`) entfallen `Courts`-Block
+> und `CourtID`.
 
 **Voraussetzungen / Caveats:**
 

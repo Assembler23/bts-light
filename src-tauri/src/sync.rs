@@ -624,10 +624,12 @@ mod tests {
                 planning_id: 1001,
                 draw_name: "HE".to_string(),
                 discipline: Discipline::MensSingles,
+                class_label: String::new(),
                 round_name: "G1".to_string(),
                 match_num: Some(1),
                 planned_time: None,
                 team1: vec![BtpPlayer {
+                    id: 0,
                     name: "A".to_string(),
                     first: String::new(),
                     last: "A".to_string(),
@@ -636,6 +638,7 @@ mod tests {
                     club: None,
                 }],
                 team2: vec![BtpPlayer {
+                    id: 0,
                     name: "B".to_string(),
                     first: String::new(),
                     last: "B".to_string(),
@@ -701,6 +704,7 @@ mod tests {
 
     fn player(n: &str) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: n.to_string(),
             first: String::new(),
             last: n.to_string(),
@@ -718,6 +722,7 @@ mod tests {
             planning_id: 1000 + id,
             draw_name: "HE".to_string(),
             discipline: Discipline::MensSingles,
+            class_label: String::new(),
             round_name: "G1".to_string(),
             match_num: Some(num),
             planned_time: None,

@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.144"
+version = "0.9.147"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -43,6 +43,9 @@ tauri-plugin-dialog = "2"
 include_dir = "0.7"
 base64 = "0.22"
 mdns-sd = "0.13"
+# Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
+# transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

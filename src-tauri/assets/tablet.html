@@ -754,6 +754,21 @@
 // Mehr-Hallen-Turnieren, die CourtID nicht.
 const COURT_ID = Number('__COURT_ID__') || 0;
 const COURT_LABEL = '__COURT_LABEL__';
+// Persistente Geräte-Kennung (einmalig erzeugt, überlebt Reloads): damit
+// erkennt der Server einen Reconnect DESSELBEN Geräts und unterscheidet
+// ihn von einer echten Übernahme durch ein fremdes Tablet. Gerätweit
+// (nicht per Feld) — das Gerät bleibt dasselbe, egal welches Feld es zählt.
+const DEVICE_ID = (() => {
+  const KEY = 'badhub.tablet.deviceId';
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) {
+      id = 'dev-' + Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36);
+      localStorage.setItem(KEY, id);
+    }
+    return id;
+  } catch { return ''; } // ohne localStorage: wie altes Tablet (leer)
+})();
 // PIN fürs Einstellungs-Menü (Feldwechsel ohne QR). Vom Server getemplatet
 // (Live-Config, Default „0000"). Reiner Bedien-Schutz, KEINE Sicherheitsgrenze.
 // Defensiv: wird der Platzhalter mal nicht ersetzt (z. B. älterer Relay) oder
@@ -1060,10 +1075,30 @@ function connect() {
     }
     else if (msg.type === 'session_superseded') { tlog('warn', 'session_superseded'); clearReidentify(); STATE.locked = true; STATE.occupied = false; render(); }
     else if (msg.type === 'state_restore') {
-      tlog('info', 'state_restore');
       try {
         const p = JSON.parse(msg.state);
-        if (p) { applyPersistedState(p); persistState(); render(); }
+        if (p) {
+          // „Neuer gewinnt": Der Server-Cache ist während eines Netz-
+          // Aussetzers veraltet — hat DIESES Tablet zum SELBEN Match einen
+          // gleich neuen oder neueren Stand (rev), bleibt der lokale Stand
+          // stehen und wird sofort zurückgespiegelt (state_sync + score),
+          // statt dass offline gezählte Punkte überbügelt werden.
+          const sameMatch = STATE.match && p.match
+            && STATE.match.matchId === p.match.matchId;
+          const localRev = STATE.rev || 0;
+          const incomingRev = typeof p.rev === 'number' ? p.rev : 0;
+          if (sameMatch && localRev >= incomingRev) {
+            tlog('info', 'state_restore_kept_local', { localRev, incomingRev });
+            persistState(true); // repariert den Server-Cache mit unserem Stand
+            sendScoreUpdate();  // Liveticker/TV ziehen nach
+            render();
+          } else {
+            tlog('info', 'state_restore_applied', { localRev, incomingRev });
+            applyPersistedState(p);
+            persistState(true);
+            render();
+          }
+        }
       } catch (e) { tlog('warn', 'state_restore_failed', String(e)); }
     }
   };
@@ -1107,7 +1142,7 @@ function startConnectionWatchdog() {
 // solange das Feld „belegt" gemeldet wird – per Retry erneut gesendet.
 function sendIdentify() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtId: COURT_ID, courtLabel: COURT_LABEL }));
+  ws.send(JSON.stringify({ type: 'identify', role: 'tablet', courtId: COURT_ID, courtLabel: COURT_LABEL, deviceId: DEVICE_ID }));
 }
 
 // Reconnect-Selbstheilung: Meldet sich das Tablet nach einem Netzausfall neu
@@ -1489,11 +1524,18 @@ function computeServing() {
   return { team: teamKey, index: idx };
 }
 
-function persistState() {
+function persistState(fromRestore) {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
   // Übermittlung, das muss einen Reload überleben.
   if (!STATE.match && !STATE.pendingResult) return;
+  // Monotone Stand-Revision: jede lokale Änderung zählt hoch. Reist im
+  // Snapshot mit → beim Reconnect entscheidet „neuer gewinnt" (state_restore-
+  // Guard), damit ein veralteter Server-Cache nie offline gezählte Punkte
+  // überbügelt. NICHT hochzählen, wenn wir gerade einen empfangenen Stand
+  // spiegeln (fromRestore) — sonst wäre der Vergleich verfälscht.
+  if (!fromRestore) STATE.rev = (STATE.rev || 0) + 1;
   const snap = {
+    rev: STATE.rev || 0,
     match: STATE.match,
     setsCompleted: STATE.setsCompleted,
     currentSet: STATE.currentSet,
@@ -1544,6 +1586,7 @@ function clearPersistedState() {
 
 // Übernimmt einen gespeicherten oder per Übernahme empfangenen Zustand.
 function applyPersistedState(p) {
+  STATE.rev = typeof p.rev === 'number' ? p.rev : 0;
   STATE.match = p.match ?? null;
   STATE.setsCompleted = Array.isArray(p.setsCompleted) ? p.setsCompleted : [];
   STATE.currentSet = p.currentSet ?? { left: 0, right: 0 };
@@ -2868,7 +2911,7 @@ els.retireWinnerA.addEventListener('click', () => { STATE.retiredWinner = 'a'; p
 els.retireWinnerB.addEventListener('click', () => { STATE.retiredWinner = 'b'; persistState(); render(); });
 els.takeoverBtn.addEventListener('click', () => {
   clearReidentify(); // manuelle Übernahme ersetzt den Auto-Retry
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'take_over' }));
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'take_over', deviceId: DEVICE_ID }));
   tlog('info', 'take_over');
   STATE.occupied = false;
   STATE.locked = false;

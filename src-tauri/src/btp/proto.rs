@@ -84,6 +84,43 @@ pub struct MatchUpdate {
     pub duration_mins: i64,
     /// BTP `ScoreStatus`: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
     pub score_status: i64,
+    /// BTP-Feld, auf dem gespielt wurde: schreibt im selben Request einen
+    /// `Courts`-Block (Court ohne MatchID = **Feld frei** für die
+    /// Neuvergabe) und `Match.CourtID = <genau diese ID>` — das beendete
+    /// Match **behält** sein Feld in BTP (Turnier-Doku „wo wurde gespielt";
+    /// Vorbild Original-BTS, das CourtID am fertigen Match nie löscht).
+    /// `None` = keine Feldfreigabe/kein Feld (z. B. Walkover aus der
+    /// Turnierleitung für nie aufgerufene Spiele). Ein EINZIGER Request
+    /// statt Ergebnis + separatem Freigabe-Update — der frühere zweite,
+    /// „nackte" Match-Knoten konnte das Ergebnis in BTP wieder entwerten.
+    pub free_court_id: Option<i64>,
+    /// BTP-`PlayerID`s aller Spieler des Matches — bekommen beim Spielende
+    /// je ein `Player`-Update (`LastTimeOnCourt` + `CheckedIn: false`),
+    /// wie im Original-BTS. Leer = kein Spieler-Update (Walkover).
+    pub player_ids: Vec<i64>,
+    /// Spielende (Unix-ms). Zusammen mit `player_ids` Grundlage der
+    /// `Player.LastTimeOnCourt`-Zeitstempel (lokale Uhrzeit).
+    pub end_ts_ms: Option<u64>,
+}
+
+/// Unix-Millisekunden → BTP-`DateTime` in **lokaler** Zeit (BTP zeigt
+/// Wanduhr-Zeiten; das Original-BTS konvertiert ebenso in die lokale
+/// Zeitzone, letilo-bts btp_proto.js:350-371).
+fn local_datetime(unix_ms: u64) -> xml::DateTime {
+    use chrono::{Datelike, Local, TimeZone, Timelike};
+    let dt = Local
+        .timestamp_millis_opt(unix_ms as i64)
+        .single()
+        .unwrap_or_else(|| Local.timestamp_millis_opt(0).unwrap());
+    xml::DateTime {
+        year: dt.year(),
+        month: dt.month(),
+        day: dt.day(),
+        hour: dt.hour(),
+        minute: dt.minute(),
+        second: dt.second(),
+        millis: dt.timestamp_subsec_millis(),
+    }
 }
 
 /// Fertige Wire-Bytes für einen `SENDUPDATE`-Request – schreibt ein
@@ -101,31 +138,77 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
         })
         .collect();
 
-    let match_node = Node::group(
-        "Match",
-        vec![
-            Node::integer("ID", update.btp_match_id),
-            Node::group("Sets", sets),
-            Node::integer("Winner", if update.team1_won { 1 } else { 2 }),
-            // ScoreStatus: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
-            Node::integer("ScoreStatus", update.score_status),
-            Node::integer("Duration", update.duration_mins),
-            // KEIN `Status` schreiben: das ist in BTP ein Bitfeld mit den
-            // Check-in-Bits der Spieler. Hart auf 0 zu setzen würde sie als
-            // „nicht eingecheckt" markieren (rot→gelb in BTP). Wir lassen das
-            // Feld weg, dann behält BTP seinen Stand (so macht es auch BTS).
-            Node::integer("DrawID", update.draw_id),
-            Node::integer("PlanningID", update.planning_id),
-        ],
-    );
+    let mut match_children = vec![
+        Node::integer("ID", update.btp_match_id),
+        Node::group("Sets", sets),
+        Node::integer("Winner", if update.team1_won { 1 } else { 2 }),
+        // ScoreStatus: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
+        Node::integer("ScoreStatus", update.score_status),
+        Node::integer("Duration", update.duration_mins),
+        // `Status` MUSS im Ergebnis-Request stehen, sonst schließt BTP das
+        // Match nicht ab (Sieger bleibt unbestätigt, Turnierleitung muss
+        // jedes Spiel manuell speichern — Live-Befund Turnier 17.07.2026).
+        // Das Original-BTS schreibt es in jedem Ergebnis-Update mit
+        // (letilo-bts btp_proto.js:90). ACHTUNG Regressionsgeschichte:
+        // v0.9.103 hat `Status` wegen der Check-in-Bits aus der
+        // FELDZUWEISUNG entfernt (dort korrekt, siehe
+        // `court_assign_request`) — und versehentlich auch hier. Nie wieder
+        // aus dem Ergebnis-Pfad entfernen!
+        Node::integer("Status", 0),
+    ];
+    if let Some(court_id) = update.free_court_id {
+        // Das beendete Match BEHÄLT sein Feld (Turnier-Doku „wo wurde
+        // gespielt" — Tilo-Feedback 19.07.2026, Vorbild Original-BTS).
+        // Die Freigabe des physischen Felds übernimmt allein der
+        // Courts-Block unten. NICHT auf 0 setzen — das löschte die Info.
+        match_children.push(Node::integer("CourtID", court_id));
+    }
+    match_children.push(Node::integer("DrawID", update.draw_id));
+    match_children.push(Node::integer("PlanningID", update.planning_id));
+    let match_node = Node::group("Match", match_children);
+
+    let mut tournament_children = Vec::new();
+    if let Some(court_id) = update.free_court_id {
+        // Court ohne MatchID = Feld frei (gleiche Semantik wie in
+        // `court_assign_request`).
+        tournament_children.push(Node::group(
+            "Courts",
+            vec![Node::group("Court", vec![Node::integer("ID", court_id)])],
+        ));
+    }
+    tournament_children.push(Node::group("Matches", vec![match_node]));
+
+    // Spielende je Spieler (wie Original-BTS, btp_proto.js:163-188):
+    // `LastTimeOnCourt` = Endzeit (lokal) + `CheckedIn: false` — der
+    // Spieler ist wieder verfügbar und die Turnierleitung sieht, wann das
+    // Spiel endete. Bewusst NUR beim echten Spielende (end_ts_ms gesetzt);
+    // das ist ein anderer Mechanismus als das `Status`-Bitfeld-Verbot bei
+    // Feldzuweisungen (siehe Kommentar in `court_assign_request`).
+    if let Some(end_ms) = update.end_ts_ms {
+        if !update.player_ids.is_empty() {
+            let end = local_datetime(end_ms);
+            let players: Vec<Node> = update
+                .player_ids
+                .iter()
+                .map(|&pid| {
+                    Node::group(
+                        "Player",
+                        vec![
+                            Node::integer("ID", pid),
+                            Node::datetime("LastTimeOnCourt", end.clone()),
+                            Node::boolean("CheckedIn", false),
+                        ],
+                    )
+                })
+                .collect();
+            tournament_children.push(Node::group("Players", players));
+        }
+    }
 
     let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
     nodes.push(Node::group(
         "Update",
-        vec![Node::group(
-            "Tournament",
-            vec![Node::group("Matches", vec![match_node])],
-        )],
+        vec![Node::group("Tournament", tournament_children)],
     ));
     wire::encode_message(&xml::encode(&nodes))
 }
@@ -383,6 +466,9 @@ mod tests {
             team1_won: true,
             duration_mins: 28,
             score_status: 0,
+            free_court_id: None,
+            player_ids: Vec::new(),
+            end_ts_ms: None,
         }
     }
 
@@ -421,8 +507,96 @@ mod tests {
         assert_eq!(child_int(&m, "Winner"), Some(1));
         assert_eq!(child_int(&m, "Duration"), Some(28));
         assert_eq!(child_int(&m, "ScoreStatus"), Some(0));
-        // `Status` wird bewusst NICHT mehr geschrieben (Check-in-Bitfeld in BTP).
-        assert_eq!(child_int(&m, "Status"), None);
+        // `Status` MUSS im Ergebnis stehen, sonst schließt BTP das Match
+        // nicht ab (Regression v0.9.103, Live-Befund Turnier 17.07.2026).
+        assert_eq!(child_int(&m, "Status"), Some(0));
+    }
+
+    #[test]
+    fn update_request_without_court_release_has_no_court_nodes() {
+        // Walkover aus der Turnierleitung: kein Feld → kein Courts-Block,
+        // kein CourtID am Match.
+        let wire = update_request(&sample_update(), "S", None);
+        let m = match_node(&wire);
+        assert_eq!(child_int(&m, "CourtID"), None);
+        let nodes = decode_response(&wire).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        assert!(xml::find(tournament.children(), "Courts").is_none());
+    }
+
+    #[test]
+    fn update_request_with_court_release_frees_court_in_same_request() {
+        // Tablet-Ergebnis: EIN Request trägt Ergebnis + Feldfreigabe.
+        // Das Match BEHÄLT seine echte CourtID (Turnier-Doku „wo wurde
+        // gespielt", Tilo-Feedback 19.07.); frei wird das Feld allein über
+        // den Courts-Block (Court ohne MatchID).
+        let mut u = sample_update();
+        u.free_court_id = Some(311);
+        let wire = update_request(&u, "S", None);
+        let m = match_node(&wire);
+        assert_eq!(child_int(&m, "CourtID"), Some(311), "echte CourtID bleibt");
+        assert_eq!(child_int(&m, "Winner"), Some(1));
+        assert_eq!(child_int(&m, "Status"), Some(0));
+        let nodes = decode_response(&wire).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        let courts = xml::find(tournament.children(), "Courts").unwrap();
+        let court = xml::find(courts.children(), "Court").unwrap();
+        assert_eq!(child_int(court.children(), "ID"), Some(311));
+        // Court ohne MatchID = frei.
+        assert!(xml::find(court.children(), "MatchID").is_none());
+    }
+
+    #[test]
+    fn update_request_sends_player_end_time_and_checkout() {
+        // Spielende je Spieler (wie Original-BTS): LastTimeOnCourt als
+        // DATETIME + CheckedIn=false für jede Player-ID.
+        let mut u = sample_update();
+        u.free_court_id = Some(311);
+        u.player_ids = vec![7, 8];
+        u.end_ts_ms = Some(1_784_300_000_000); // fester Zeitpunkt
+        let wire = update_request(&u, "S", None);
+        let nodes = decode_response(&wire).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        let players = xml::find(tournament.children(), "Players").expect("Players-Block");
+        let entries: Vec<_> = players.children().iter().collect();
+        assert_eq!(entries.len(), 2);
+        for (p, want_id) in entries.iter().zip([7i64, 8]) {
+            assert_eq!(child_int(p.children(), "ID"), Some(want_id));
+            let ltoc = xml::find(p.children(), "LastTimeOnCourt").expect("LastTimeOnCourt");
+            assert!(
+                matches!(ltoc.value(), Some(Value::DateTime(_))),
+                "LastTimeOnCourt muss DateTime sein"
+            );
+            assert_eq!(
+                xml::find(p.children(), "CheckedIn").and_then(|n| n.value()?.as_bool()),
+                Some(false)
+            );
+        }
+    }
+
+    #[test]
+    fn update_request_without_end_time_has_no_players_block() {
+        // Walkover aus der Turnierleitung: niemand war auf dem Feld.
+        let wire = update_request(&sample_update(), "S", None);
+        let nodes = decode_response(&wire).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        assert!(xml::find(tournament.children(), "Players").is_none());
+    }
+
+    #[test]
+    fn local_datetime_produces_plausible_components() {
+        // 17.07.2026 ~12:00 UTC → lokale Zeit liegt am selben oder
+        // benachbarten Tag; Komponenten in gültigen Bereichen. (Bewusst
+        // tolerant — die lokale Zeitzone des Rechners variiert.)
+        let dt = local_datetime(1_784_296_800_000);
+        assert_eq!(dt.year, 2026);
+        assert!((1..=12).contains(&dt.month));
+        assert!((1..=31).contains(&dt.day));
+        assert!(dt.hour < 24 && dt.minute < 60 && dt.second < 60);
     }
 
     #[test]
