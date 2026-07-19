@@ -115,19 +115,19 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 
 Gesammelte Nacharbeiten, sobald das Turnier vorbei ist:
 
-- **Log-Review des Turnier-Wochenendes (geplant 20.07.2026):** Relay-Logs,
-  hochgeladene App-Logs (Master + Slave, per `install_id`) und nginx-Log
-  systematisch nach Auffälligkeiten durchgehen — insbesondere
-  Tablet-Reconnects/State-Restores (Bug vom Samstag), Ergebnis-Übertragung
-  nach BTP, Monitor-Ausfälle. **Live-Befunde vom 19.07. mitnehmen:**
-  (a) BTP lieferte um 08:38:46 (und vermutlich 08:27) einen **leeren
-  Snapshot** (0 Hallen/Felder/Matches) → Massen-Freigabe aller Felder,
-  6 s später Wiederzuweisung; Abwehr prüfen (leeren Snapshot nach
-  gefülltem erst nach 2. Bestätigung übernehmen + Warnung).
-  (b) Ergebnis-Log-Zeile mit **leerem Hallen-Label** „Feld 38 ('')" —
-  Label-Lookup schlug fehl, weil die Zuweisung schon aufgehoben war
-  (kosmetisch). (c) HM-Tablets im Minutentakt „still >10s"-Zyklen —
-  Bildschirm-/WLAN-Doze; Keep-Awake-Empfehlung in die Tablet-Doku.
+- ~~**Log-Review des Turnier-Wochenendes**~~ → **durchgeführt 20.07.2026**,
+  Ergebnis: [turnier-log-review-2026-07.md](turnier-log-review-2026-07.md).
+  Kernzahlen: 148/148 Ergebnisse OK (So), Reconnect-Fix mit
+  Vorher/Nachher-Beweis (Sa 33× „belegt"/42 Übernahmen → So 0/1).
+  Abgeleitete Fixes für die offizielle Version:
+  1. **Leer-Snapshot-Guard** (2× leerer BTP-Snapshot am So → Massen-Reset).
+  2. **Zombie-Host-Ablösung im Relay** (333× „Zweiter Host abgewiesen"
+     in 17 min nach Netzwechsel — Host-Ping-Timeout analog Tablets).
+  3. Keep-Awake-Empfehlung in tablet.md (140 Doze-Zyklen/Tag); Wake Lock
+     später via ADR 0005.
+  4. Score-Cache-Reset bei Match-Wechsel + leeres Hallen-Label im
+     Ergebnis-Log (Kosmetik).
+  5. DNS-Betriebshinweis (23 DNS-Ausfälle des Hallen-Routers am So).
 - **Offizielles Release schnüren** (> 0.9.147, mit Auto-Update): Inhalte
   der TEST-Builds (BTP-Ergebnis-Fix, TV-Schrift, Klassen-Ansage,
   Slave-Brücke, 0.9.147 BTP-Felder + Tablet-Reconnect) plus der wartenden
