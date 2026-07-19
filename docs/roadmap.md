@@ -79,7 +79,15 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 - **badhub `/live?tab=done`: Tages-Filter** (Wunsch 19.07.), initial auf
   den aktuellen Tag. Die Beendet-Einträge tragen bereits `end_ts` →
   reines Frontend im badhub-Repo (`live.js`): nach Tag gruppieren/filtern,
-  kleines Tages-Dropdown.
+  kleines Tages-Dropdown. **Achtung Befund 19.07.:** Nach einem
+  App-Neustart stempelt bts-light ALLE schon beendeten Spiele mit
+  frischem `end_ts` → für den Tages-Filter Zeitquelle prüfen/festigen.
+- **Beendet-Liste: Aufgabe/kampflos kennzeichnen** (Befund 19.07.).
+  In BTP direkt gewertete Aufgaben erscheinen im Ticker als „beendet"
+  mit Teil-Spielstand (z. B. 14:16, 15:10, 0:0) und wirken fehlerhaft.
+  Fix: `score_status` (Aufgabe/Walkover) aus dem BTP-Snapshot in die
+  `recent_finished`-Einträge des Payloads übernehmen (bts-light) und im
+  Ticker als Badge „Aufgabe"/„kampflos" anzeigen (badhub `live.js`).
 - *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
   anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
   Datenquelle: `on_court_since`/Aufruf-Zeitstempel).
