@@ -66,6 +66,16 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 - **TV-Leerlauf: Feldnummer groß + badhub.de-Branding.** Ohne laufendes
   Spiel (z. B. Slave-Halle zwischen den Runden) soll der TV die Feldnummer
   prominent zeigen, darunter groß „badhub.de" (Orientierung + Werbung).
+- **Spielstand direkt eintragen (Tablet + Turnierleitung).** Endstand
+  eintippen, wenn niemand gezählt hat; Zwischenstand eintragen und ab da
+  live weiterzählen, wenn ein Zähler verspätet einsteigt (nur Aufschläger,
+  im Doppel Rückschläger, plus Satz nötig — Positionen folgen der
+  BWF-Paritätsregel). Button offen sichtbar.
+- **Klick-Delay am Tablet verkürzen.** Punkt soll bei Berührung zählen
+  (`pointerdown` statt `click`), Persist/Sync raus aus dem Tap-Pfad.
+- **Zähltafelbediener-Verwaltung** (wie Tilos BTS): Verlierer-Warteschlange,
+  Zuweisung beim Feld-Aufruf, Mit-Ansage „Tabletbedienung: …",
+  BTP-Auscheck, Mindestpause.
 - *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
   anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
   Datenquelle: `on_court_since`/Aufruf-Zeitstempel).

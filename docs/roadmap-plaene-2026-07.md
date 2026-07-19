@@ -307,7 +307,103 @@ Systeme sind seit 0.9.147 im Kern gleichwertig; drei Übernahmen lohnen:
 - Zurückgestellt: Check-in-Bits, Officials/Umpire, Shuttles, MatchOrder,
   eigenständige Spieler-Updates (Begründung im Vergleichs-Dokument).
 
-## 12. Übrige Punkte (bereits geplant/laufend)
+## 12. Spielstand direkt eintragen (Tablet + Turnierleitung)
+
+**Wunsch (19.07., Nutzer + Tilo):** Endstand eintippen, wenn niemand
+live gezählt hat — und: findet sich mitten im Spiel doch ein Zähler,
+trägt der den **Zwischenstand** ein und zählt ab da normal weiter. Der
+Button ist **offen sichtbar** (Spieler müssen ihn zur Not selbst
+bedienen können).
+
+**Befund Tilos BTS:** Beides ist dort Funktion des externen
+bup-Umpire-Panels („Edit mode"); der Server übernimmt bei jedem
+score_update den kompletten Zustand **ungeprüft** (keine
+Satzplausibilität) und schreibt über denselben BTP-Weg. Unser Ansatz ist
+gleichwertig, aber strenger: die serverseitige `process_result`-
+Validierung (R5) bleibt auch für die Direkteingabe aktiv.
+
+**Plan (M):**
+- *(a) Endstand am Tablet (S):* Button „Spielstand direkt eintragen" auf
+  dem Match-Screen (UI-Vorlage `openFinishModal`, tablet.html:2059).
+  Dialog mit zwei Zahlenfeldern je Satz; Client-Plausibilität über die
+  vorhandene Satzregel `setWinnerSide` (tablet.html:1253, target/cap aus
+  MatchBrief). Absenden über den **bestehenden** Weg (`pendingResult` →
+  `trySubmitPending()` → POST /result → `process_result`) — kein neuer
+  Server-Code.
+- *(a2) Endstand aus der Turnierleitung (S/M):* Neuer Command
+  `enter_result(match_id, sets)` nach dem Muster `confirm_walkover`
+  (commands.rs:911); gleiche Plausibilitätsprüfung wie `process_result`
+  (Prüf-Logik in gemeinsame Funktion auslagern). Dialog in der
+  Spielübersicht, Optik wie WalkoverPanel.tsx. Deckt Spiele ab, die nie
+  auf einem Feld standen.
+- *(b) Zwischenstand am Tablet + weiterzählen (M):* Im selben Dialog
+  Umschalter „Spiel läuft noch": abgeschlossene Sätze + aktueller
+  Punktestand + Satz eingeben, danach die **bestehenden**
+  Setup-Schritte `chooseSide` → `chooseServer` → (Doppel)
+  `chooseReceiver` → `finalizeSetup` (tablet.html:1759) — die leiten
+  Positionen/Aufschlagfeld bereits regelkonform aus der Score-Parität
+  ab (BWF-Regel; fachliche Vorgabe: mehr als Aufschläger/Rückschläger/
+  Satz muss niemand angeben). STATE-Befüllung per
+  `applyPersistedState`-Muster; `intervalDoneThisGame`/
+  `midGameSwitchDone` aus dem Stand ableiten. Ab da normaler Zähl-Flow.
+- Doku: docs/tablet.md, changelog; Rust-Tests für die geteilte
+  Plausibilitäts-Funktion. Auslieferung: App-Release + Relay-Deploy.
+
+## 13. Klick-Delay am Tablet verkürzen
+
+**Wunsch (19.07.):** Die Verzögerung zwischen Tipp auf +1 und sichtbarer
+Punkteänderung ist zu lang. **Befund:** `touch-action: manipulation` ist
+bereits gesetzt (kein 300-ms-Browser-Delay), aber die Plus-/Undo-Buttons
+hören auf `click` (tablet.html:2882-2884) — das feuert erst beim
+**Loslassen** des Fingers; zusätzlich laufen Voll-Render + `persistState`
+(JSON + localStorage + WS) synchron im Tap-Pfad.
+
+**Plan (S):**
+1. Score-kritische Buttons auf `pointerdown` umstellen (Punkt zählt bei
+   Berührung); Guard gegen nachlaufendes click-Doppelfeuer,
+   `pointercancel` beachten. Modals/Einstellungen bleiben auf click.
+2. Im Tap-Pfad nur STATE + minimales Score-DOM-Update sofort;
+   `persistState()`/`sendScoreUpdate()` per `queueMicrotask` direkt
+   danach (Persistenz-Garantie bleibt im selben Task-Umlauf).
+3. Vorher/nachher am echten Turnier-Tablet messen (tlog-Timing).
+4. Auslieferung: App-Release + Relay-Deploy (tablet.html doppelt).
+
+## 14. Zähltafelbediener (Tabletoperator)
+
+**Wunsch (19.07.):** Zähltafelbediener-Verwaltung wie in Tilos BTS.
+
+**So macht es Tilos BTS (Recherche 19.07.):** Nach jedem regulär
+beendeten Spiel kommt der **Verlierer** automatisch in eine
+FIFO-Warteschlange (Option: ab Viertelfinale der Gewinner; Doppel
+optional gesplittet; Walkover/Aufgabe erzeugen keinen Eintrag). Beim
+Feld-Aufruf wird der am längsten Wartende dem Match zugewiesen —
+bevorzugt auf dem Feld, auf dem er selbst gespielt hat. **Er wird mit
+angesagt** („Tabletbedienung: {Name}"), es gibt eigene
+Zweitaufruf-Ansagen. Absicherung: Bei Zuweisung wird er in BTP
+**ausgecheckt** (kann nicht parallel eingeplant werden), nach dem Dienst
+optional garantierte Mindestpause (Default 300 s). Verwaltung über eine
+Warteliste im Admin (vorziehen/zurückstellen/entfernen/manuell
+hinzufügen); auf den Court-Displays erscheint er nicht.
+
+**Plan für bts-light (L — eigenes Feature, eigene docs/*.md):**
+1. Warteschlange im Rust-State: Verlierer nach erfolgreichem
+   `process_result` einreihen (Walkover ausgenommen), FIFO + manuelle
+   Pflege-Commands.
+2. Zuweisung beim Feld-Aufruf (`sync.rs auto_assign` + manuelles
+   `assign_court`); bevorzugt aufs zuletzt gespielte Feld.
+3. Ansage-Segment „Tabletbedienung: {Name}" (Feld- und
+   Vorbereitungs-Ansage, announcer.ts) + Zweitaufruf-Button —
+   verzahnt mit Plan 1 („2. Aufruf je Partei").
+4. UI: Warteliste-Panel in der App; Anzeige am Match in der
+   Felder-Übersicht.
+5. BTP: Operator beim Spielende mit in den Players-Block; das
+   Auschecken bei Zuweisung braucht Tilos eigenständiges
+   Spieler-Update — der im BTP-Vergleich (Plan 11) zurückgestellte
+   Punkt wird damit Bestandteil dieses Features.
+6. Konfiguration minimal: Schalter „Zähltafelbediener verwalten" +
+   Mindestpause-Sekunden; Tilos Spezialoptionen erst bei Bedarf.
+
+## 15. Übrige Punkte (bereits geplant/laufend)
 
 - **Log-Review 20.07.2026** — Ablauf steht in
   [roadmap.md](roadmap.md#nach-dem-turnier-wochenende-stand-19072026).
