@@ -208,6 +208,7 @@ mod tests {
 
     fn p(name: &str, club: Option<&str>) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: name.to_string(),
             first: String::new(),
             last: name.to_string(),

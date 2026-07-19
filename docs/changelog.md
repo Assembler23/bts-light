@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.147
+
+- **BTP bekommt Feld, Spieldauer und Spielende (Tilo-Feedback 18.07.2026).** Beim
+  Tablet-Ergebnis behält das Match jetzt seine **echte CourtID** (vorher `0` → die Feld-Info
+  verschwand in BTP; die Freigabe übernimmt allein der Courts-Block), die **`Duration`** wird
+  aus dem Aufruf-Zeitstempel in ganzen Minuten berechnet (vorher immer 0), und je Spieler wird
+  das **Spielende** gesetzt: `LastTimeOnCourt` (lokale Uhrzeit) + `CheckedIn: false` — Tilos
+  Original-Mechanismus, die Spieler sind damit sofort wieder einplanbar.
+  Details: [btp_protocol.md](btp_protocol.md).
+- **Tablet-Reconnect verliert keine Punkte mehr (Turnier-Befund 18.07.2026).** Zwei Ursachen
+  behoben: (1) Jedes Tablet sendet jetzt eine **persistente Geräte-Kennung** — meldet sich
+  dasselbe Gerät nach einem Netz-Aussetzer zurück, löst es seine tote Session nahtlos ab statt
+  fälschlich „ein anderes Tablet hat übernommen" zu sehen (LAN + Cloud). (2) Eine
+  **Stand-Revision** im gespeicherten Spielstand sorgt beim Reconnect für „**neuer gewinnt**":
+  Der während des Aussetzers veraltete Server-Stand überbügelt nicht mehr die offline
+  weitergezählten Punkte; das Tablet behält seinen Stand und der Liveticker zieht nach.
+  Cloud-Tablets brauchen dafür den Relay-Deploy + einmal Seite neu laden.
+  Details: [tablet.md](tablet.md), [cloud-relay.md](cloud-relay.md).
+
 ## v0.9.146
 
 - **Ferne Halle: Tablets & TVs über die Slave-IP — ohne Extra-Rechner.** Der Cloud-Ansage-Slave

@@ -404,10 +404,11 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.146"
+version = "0.9.147"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "chrono",
  "flate2",
  "futures-util",
  "include_dir",

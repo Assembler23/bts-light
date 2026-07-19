@@ -100,6 +100,9 @@ impl Discipline {
 /// Ein Spieler einer Paarung.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtpPlayer {
+    /// BTP-interne `PlayerID` — für Spieler-Updates im `SENDUPDATE`
+    /// (`Player.LastTimeOnCourt`/`CheckedIn` beim Spielende). 0 = unbekannt.
+    pub id: i64,
     /// Anzeigename ("Vorname Nachname" bzw. nur Nachname).
     pub name: String,
     /// Vorname(n) (BTP `Firstname`) – getrennt geführt, damit der
@@ -410,6 +413,7 @@ fn player_map(t: &[Node], clubs: &HashMap<i64, String>) -> HashMap<i64, BtpPlaye
         map.insert(
             id,
             BtpPlayer {
+                id,
                 name,
                 first: first.to_string(),
                 last: last.to_string(),

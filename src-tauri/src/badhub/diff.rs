@@ -103,6 +103,7 @@ mod tests {
             match_num: Some(id),
             planned_time: None,
             team1: vec![BtpPlayer {
+                id: 0,
                 name: "A".to_string(),
                 first: String::new(),
                 last: "A".to_string(),
@@ -111,6 +112,7 @@ mod tests {
                 club: None,
             }],
             team2: vec![BtpPlayer {
+                id: 0,
                 name: "B".to_string(),
                 first: String::new(),
                 last: "B".to_string(),

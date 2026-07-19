@@ -622,6 +622,13 @@ pub enum TabletMsg {
         /// `court_id`.
         #[serde(rename = "courtLabel", default)]
         court_label: String,
+        /// Persistente Geräte-Kennung des Tablets (zufällig, localStorage).
+        /// Meldet sich DASSELBE Gerät nach einem Verbindungsabriss neu,
+        /// erkennt der Server das als Reconnect (nahtlos weiter) statt als
+        /// fremde Übernahme („Feld belegt"). Leer bei alten Tablet-Seiten
+        /// (`#[serde(default)]`) → Verhalten wie bisher.
+        #[serde(rename = "deviceId", default)]
+        device_id: String,
     },
     /// Laufender Punktestand des aktuellen Satzes plus die schon
     /// abgeschlossenen Sätze.
@@ -643,7 +650,11 @@ pub enum TabletMsg {
     Alert { injury: bool, official: bool },
     /// Das Tablet möchte einen bereits belegten Court übernehmen.
     #[serde(rename = "take_over")]
-    TakeOver,
+    TakeOver {
+        /// Geräte-Kennung des übernehmenden Tablets (wie bei `Identify`).
+        #[serde(rename = "deviceId", default)]
+        device_id: String,
+    },
     /// Voller Spielzustand des Tablets als JSON-String – der Server hält
     /// ihn vor, damit ein übernehmendes Gerät das laufende Spiel bekommt.
     #[serde(rename = "state_sync")]
@@ -1019,7 +1030,45 @@ mod tests {
             msg,
             TabletMsg::Identify {
                 court_id: 7,
-                court_label: "Feld 1".to_string()
+                court_label: "Feld 1".to_string(),
+                device_id: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn tablet_msg_identify_with_device_id() {
+        // Neue Tablet-Seiten schicken ihre persistente Geräte-Kennung mit —
+        // Grundlage der Reconnect-Erkennung (Reconnect ≠ Übernahme).
+        let json = r#"{"type":"identify","role":"tablet","courtId":7,"courtLabel":"Feld 1","deviceId":"dev-abc"}"#;
+        let msg: TabletMsg = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg,
+            TabletMsg::Identify {
+                court_id: 7,
+                court_label: "Feld 1".to_string(),
+                device_id: "dev-abc".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn tablet_msg_take_over_with_and_without_device_id() {
+        // Alte Tablet-Seiten schicken take_over ohne deviceId — muss
+        // weiterhin parsen (leere Kennung).
+        let old: TabletMsg = serde_json::from_str(r#"{"type":"take_over"}"#).unwrap();
+        assert_eq!(
+            old,
+            TabletMsg::TakeOver {
+                device_id: String::new()
+            }
+        );
+        let new: TabletMsg =
+            serde_json::from_str(r#"{"type":"take_over","deviceId":"dev-abc"}"#).unwrap();
+        assert_eq!(
+            new,
+            TabletMsg::TakeOver {
+                device_id: "dev-abc".to_string()
             }
         );
     }
@@ -1033,7 +1082,8 @@ mod tests {
             msg,
             TabletMsg::Identify {
                 court_id: 0,
-                court_label: "Feld 1".to_string()
+                court_label: "Feld 1".to_string(),
+                device_id: String::new()
             }
         );
     }

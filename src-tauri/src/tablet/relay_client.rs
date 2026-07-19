@@ -549,6 +549,7 @@ mod tests {
 
     fn player(n: &str) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: n.to_string(),
             first: String::new(),
             last: n.to_string(),

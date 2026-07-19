@@ -235,11 +235,18 @@ Update {
         Sets { Set { T1, T2 } ... } (ein Set-Knoten je Satz, Spielreihenfolge)
         Winner:      1 | 2
         ScoreStatus: 0              (0 = regulär; 1/2/3 = Walkover/Aufgabe/Disq.)
-        Duration:    <Minuten>
+        Duration:    <Minuten>      (Spieldauer seit dem 1. Aufruf, ganze Minuten)
         Status:      0
-        CourtID:     0              (nur bei Feldfreigabe: Halle+Feld am Match löschen)
+        CourtID:     <BTP-Court-ID> (das ECHTE Feld bleibt am Match — s. u.)
         DrawID:      <Draw des Matches>
         PlanningID:  <Planungsposition im Draw>
+      }
+    }
+    Players {                       (nur bei Tablet-Ergebnis: Spielende je Spieler)
+      Player {
+        ID:              <BTP-Player-ID>
+        LastTimeOnCourt: <DateTime, lokale Uhrzeit des Spielendes>
+        CheckedIn:       false      (Spieler wieder für die Planung verfügbar)
       }
     }
   }
@@ -248,6 +255,20 @@ Update {
 
 - Das Match wird über `ID` + `DrawID` + `PlanningID` adressiert.
 - `Sets` enthält je Satz einen `Set`-Knoten mit `T1`/`T2` (Punkte Team 1/2).
+- **`CourtID` bleibt das echte Feld** (seit v0.9.147): BTP zeigt so am
+  beendeten Spiel, WO es lief. Die Freigabe des Felds übernimmt allein der
+  `Courts`-Block (Court ohne MatchID = frei) — genau wie im Original-BTS
+  (letilo-bts `btp_proto.js`). `CourtID: 0` zu schreiben (so der frühere
+  Stand) löschte die Feld-Info am Match (Tilo-Feedback 18.07.2026).
+- **`Duration`** kommt aus dem Aufruf-Zeitstempel (`on_court_since`,
+  1. Aufruf des Matches auf dem Feld) bis zum Ergebnis-Eingang, in ganzen
+  Minuten; 0, wenn der Startzeitpunkt nicht bekannt ist (z. B. App-Neustart
+  mitten im Spiel).
+- **`Players`-Block = Spielende-Uhrzeit:** BTP kennt kein „Spielende" am
+  Match — Tilos Mechanismus setzt je Spieler `LastTimeOnCourt` (lokale
+  Uhrzeit) und `CheckedIn: false` (wieder einplanbar). Entfällt beim
+  Walkover aus der Turnierleitung (niemand stand auf dem Feld) und für
+  Spieler ohne bekannte BTP-PlayerID.
 - Antwort wie beim Login: `Action.ID = "REPLY"`, Erfolg bei
   `Action.Result == 1`.
 - Jeder `SENDUPDATE` läuft über eine eigene, frische TCP-Verbindung.

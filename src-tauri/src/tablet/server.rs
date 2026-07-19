@@ -1001,19 +1001,40 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         }
         (team1_sets > team2_sets, 0)
     };
+    // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
+    // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
+    // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
+    // (z. B. App-Neustart mitten im Spiel).
+    let end_ms = now_ms();
+    let duration_mins = ctx
+        .tablet
+        .on_court_since_ms(body.court_id, m.id)
+        .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
+        .unwrap_or(0);
+    // Spieler-BTP-IDs beider Teams — bekommen im selben Request das
+    // Spielende (`LastTimeOnCourt` + `CheckedIn: false`).
+    let player_ids: Vec<i64> = m
+        .team1
+        .iter()
+        .chain(m.team2.iter())
+        .map(|p| p.id)
+        .filter(|&id| id != 0)
+        .collect();
     let update = proto::MatchUpdate {
         btp_match_id: m.id,
         draw_id: m.draw_id,
         planning_id: m.planning_id,
         sets,
         team1_won,
-        duration_mins: 0,
+        duration_mins,
         score_status,
-        // Ergebnis + Feldfreigabe in EINEM Request (Court ohne MatchID +
-        // Match.CourtID=0): Der frühere separate Freigabe-Request mit
-        // „nacktem" Match-Knoten konnte das gerade geschriebene Ergebnis
-        // in BTP wieder entwerten.
+        // Ergebnis + Feldfreigabe in EINEM Request: Courts-Block gibt das
+        // Feld frei, das Match BEHÄLT seine CourtID (Turnier-Doku „wo
+        // wurde gespielt"). Der frühere separate Freigabe-Request mit
+        // „nacktem" Match-Knoten konnte das Ergebnis wieder entwerten.
         free_court_id: Some(body.court_id),
+        player_ids,
+        end_ts_ms: Some(end_ms),
     };
 
     tracing::info!(
@@ -1210,6 +1231,9 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
     let mut superseded = false;
+    // Persistente Geräte-Kennung des Tablets (aus identify/take_over) —
+    // leer bei alten Tablet-Seiten. Für die Reconnect-Erkennung.
+    let mut my_device = String::new();
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Zeitpunkt der letzten empfangenen Nachricht (jede Art, inkl. App-Ping
@@ -1239,14 +1263,22 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 match msg {
                     Message::Text(text) => {
                         match serde_json::from_str::<TabletMsg>(text.as_str()) {
-                            Ok(TabletMsg::Identify { court_id, .. }) => {
+                            Ok(TabletMsg::Identify { court_id, device_id, .. }) => {
                                 court = Some(court_id);
                                 last_match = None;
-                                if ctx.tablet.court_occupied(court_id) {
+                                my_device = device_id;
+                                // Reconnect-Erkennung: Hält DIESES Gerät das Feld
+                                // bereits (tote Vorgänger-Session nach Netz-Abriss),
+                                // darf es nahtlos neu claimen — kein „Feld belegt"-
+                                // Overlay für das eigene Gerät. Fremde Geräte sehen
+                                // weiterhin den Übernehmen-Dialog.
+                                let occupied = ctx.tablet.court_occupied(court_id)
+                                    && !ctx.tablet.court_held_by_device(court_id, &my_device);
+                                if occupied {
                                     tracing::info!("Feld {court_id} belegt – Tablet wartet auf Übernahme");
                                     send_msg(&mut socket, &ServerMsg::CourtOccupied).await;
                                 } else {
-                                    my_token = Some(ctx.tablet.claim_court(court_id));
+                                    my_token = Some(ctx.tablet.claim_court(court_id, &my_device));
                                     ctx.tablet.attach_tablet(court_id);
                                     tracing::info!("Tablet verbunden für Feld {court_id}");
                                     // Gespeicherten Spielstand auch beim normalen
@@ -1263,9 +1295,12 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     push_match(court_id, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }
-                            Ok(TabletMsg::TakeOver) => {
+                            Ok(TabletMsg::TakeOver { device_id }) => {
                                 if let (Some(c), None, false) = (court, my_token, superseded) {
-                                    my_token = Some(ctx.tablet.claim_court(c));
+                                    if !device_id.is_empty() {
+                                        my_device = device_id;
+                                    }
+                                    my_token = Some(ctx.tablet.claim_court(c, &my_device));
                                     ctx.tablet.attach_tablet(c);
                                     last_match = None;
                                     tracing::info!("Tablet übernimmt Feld {c}");
@@ -1275,9 +1310,18 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     push_match(c, &ctx, &mut socket, &mut last_match).await;
                                 }
                             }
+                            // Score/Alert/StateSync nur vom AKTUELLEN Halter des
+                            // Felds annehmen (is_court_active), nicht von jeder
+                            // Session mit irgendeinem Token: Nach einem Reconnect-
+                            // Reclaim lebt die abgelöste Session evtl. noch kurz
+                            // weiter (Ticker erkennt das erst nach bis zu 2 s) —
+                            // ihre nachlaufenden Frames würden sonst den Cache/
+                            // Liveticker wieder mit dem ALTEN Stand füllen.
                             Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
-                                if let (Some(c), Some(_)) = (court, my_token) {
-                                    handle_score(c, score_a, score_b, &sets_history, &ctx).await;
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t) {
+                                        handle_score(c, score_a, score_b, &sets_history, &ctx).await;
+                                    }
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
@@ -1286,13 +1330,17 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                 }
                             }
                             Ok(TabletMsg::Alert { injury, official }) => {
-                                if let (Some(c), Some(_)) = (court, my_token) {
-                                    ctx.tablet.record_alert(c, injury, official);
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t) {
+                                        ctx.tablet.record_alert(c, injury, official);
+                                    }
                                 }
                             }
                             Ok(TabletMsg::StateSync { state }) => {
-                                if let (Some(c), Some(_)) = (court, my_token) {
-                                    ctx.tablet.set_court_state(c, state);
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t) {
+                                        ctx.tablet.set_court_state(c, state);
+                                    }
                                 }
                             }
                             Ok(TabletMsg::Ping) => {
@@ -1505,6 +1553,9 @@ mod tests {
 
     fn player(n: &str) -> BtpPlayer {
         BtpPlayer {
+            // Stabile Pseudo-PlayerID aus dem Namen — für die
+            // Players-Block-Assertions (Spielende je Spieler).
+            id: n.bytes().map(|b| b as i64).sum::<i64>().max(1),
             name: n.to_string(),
             first: String::new(),
             last: n.to_string(),
@@ -1660,18 +1711,31 @@ mod tests {
         );
         let matches = xml::find(tour.children(), "Matches").expect("Matches");
         let mnode = xml::find(matches.children(), "Match").expect("Match");
-        assert_eq!(int(mnode.children(), "CourtID"), Some(0));
+        // Das Match BEHÄLT seine echte CourtID (Turnier-Doku „wo wurde
+        // gespielt", Tilo-Feedback 19.07.) — frei wird nur der Court-Block.
+        assert_eq!(int(mnode.children(), "CourtID"), Some(101));
         assert_eq!(int(mnode.children(), "Winner"), Some(1));
         assert_eq!(int(mnode.children(), "Status"), Some(0));
         assert!(
             xml::find(mnode.children(), "Sets").is_some(),
             "Sätze müssen im kombinierten Request stehen"
         );
+        // Spielende je Spieler: Players-Block mit LastTimeOnCourt +
+        // CheckedIn=false für alle Spieler des Matches.
+        let players = xml::find(tour.children(), "Players").expect("Players-Block (Spielende)");
+        assert!(!players.children().is_empty());
+        for p in players.children() {
+            assert!(xml::find(p.children(), "LastTimeOnCourt").is_some());
+            assert_eq!(
+                xml::find(p.children(), "CheckedIn").and_then(|n| n.value()?.as_bool()),
+                Some(false)
+            );
+        }
     }
 
     /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt
-    /// `ScoreStatus=2` + `Status` + Feldfreigabe (Courts-Block, CourtID=0) —
-    /// der Sonderfall aus dem Turnier-Befund vom 17.07.2026.
+    /// `ScoreStatus=2` + `Status` + Feldfreigabe (Courts-Block; das Match
+    /// behält seine CourtID) — Sonderfall aus dem Turnier-Befund 17.07.2026.
     #[tokio::test]
     async fn process_result_retired_combines_result_and_court_release() {
         let (port, recorded) = spawn_mock_btp().await;
@@ -1689,7 +1753,7 @@ mod tests {
         assert_eq!(int(&m, "Winner"), Some(1));
         assert_eq!(int(&m, "ScoreStatus"), Some(2), "2 = Aufgabe");
         assert_eq!(int(&m, "Status"), Some(0));
-        assert_eq!(int(&m, "CourtID"), Some(0));
+        assert_eq!(int(&m, "CourtID"), Some(101), "echte CourtID bleibt");
         let upd = xml::find(&reqs[0], "Update").unwrap();
         let tour = xml::find(upd.children(), "Tournament").unwrap();
         let courts = xml::find(tour.children(), "Courts").expect("Feldfreigabe im selben Request");

@@ -89,6 +89,17 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 Reconnect: bts-light verbindet bei Abriss mit Backoff (1 s → 30 s) neu,
 Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
 
+**Tablet-Reconnect ≠ Übernahme (seit v0.9.147):** Der Relay merkt sich je
+Feld die persistente Geräte-Kennung (`deviceId`) des aktiven Tablets.
+Meldet sich **dasselbe** Gerät nach einem Netz-Aussetzer erneut, ersetzt
+es seine tote Vorgänger-Session nahtlos (kein „Feld belegt"); fremde
+Geräte sehen weiterhin den Übernehmen-Dialog. Den gespiegelten Spielstand
+schickt der Relay wie bisher als `state_restore` — das Tablet wendet ihn
+aber nur noch an, wenn er **neuer** ist als sein lokaler Stand
+(Stand-Revision `rev` im Snapshot, „neuer gewinnt"), sonst repariert es
+den Relay-Cache mit den offline weitergezählten Punkten. Details:
+[tablet.md](tablet.md).
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die

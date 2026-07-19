@@ -98,6 +98,10 @@ struct Namespace {
     host: Option<Tx>,
     /// CourtID → Sende-Ende zur Tablet-WebSocket.
     tablets: HashMap<i64, Tx>,
+    /// CourtID → Geräte-Kennung des aktiven Tablets (leer bei alten
+    /// Tablet-Seiten). Reconnect-Erkennung: dasselbe Gerät darf seine
+    /// eigene, tote Session nahtlos ablösen (kein „Feld belegt").
+    tablet_devices: HashMap<i64, String>,
     /// CourtID → zuletzt gespiegelter Spielzustand (JSON) des aktiven
     /// Tablets – wird einem übernehmenden Gerät übergeben.
     court_state: HashMap<i64, String>,
@@ -141,6 +145,7 @@ impl Namespace {
         Self {
             host: None,
             tablets: HashMap::new(),
+            tablet_devices: HashMap::new(),
             court_state: HashMap::new(),
             court_matches: HashMap::new(),
             court_scores: HashMap::new(),
@@ -971,6 +976,9 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     // Schiedst dieses Tablet das Feld aktiv? Passive Tablets warten auf
     // „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
     let mut active = false;
+    // Persistente Geräte-Kennung (aus identify/take_over) — leer bei
+    // alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
+    let mut my_device = String::new();
     let mut ping = tokio::time::interval(HEARTBEAT);
 
     loop {
@@ -980,8 +988,9 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                 match msg {
                     Message::Text(t) => {
                         match serde_json::from_str::<TabletMsg>(t.as_str()) {
-                            Ok(TabletMsg::Identify { court_id, .. }) => {
-                                match attach_tablet(&broker, &ns, court_id, &tx).await {
+                            Ok(TabletMsg::Identify { court_id, device_id, .. }) => {
+                                my_device = device_id;
+                                match attach_tablet(&broker, &ns, court_id, &my_device, &tx).await {
                                     AttachResult::Active => {
                                         tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
                                         active = true;
@@ -998,16 +1007,19 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     }
                                 }
                             }
-                            Ok(TabletMsg::TakeOver) => {
+                            Ok(TabletMsg::TakeOver { device_id }) => {
                                 if let (Some(c), false) = (court, active) {
-                                    take_over_court(&broker, &ns, c, &tx).await;
+                                    if !device_id.is_empty() {
+                                        my_device = device_id;
+                                    }
+                                    take_over_court(&broker, &ns, c, &my_device, &tx).await;
                                     active = true;
                                     tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
                                 }
                             }
                             Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
                                 if let (Some(c), true) = (court, active) {
-                                    forward_score(&broker, &ns, c, score_a, score_b, sets_history).await;
+                                    forward_score(&broker, &ns, c, score_a, score_b, sets_history, &tx).await;
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
@@ -1017,12 +1029,12 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                             }
                             Ok(TabletMsg::Alert { injury, official }) => {
                                 if let (Some(c), true) = (court, active) {
-                                    forward_alert(&broker, &ns, c, injury, official).await;
+                                    forward_alert(&broker, &ns, c, injury, official, &tx).await;
                                 }
                             }
                             Ok(TabletMsg::StateSync { state }) => {
                                 if let (Some(c), true) = (court, active) {
-                                    store_court_state(&broker, &ns, c, state).await;
+                                    store_court_state(&broker, &ns, c, state, &tx).await;
                                 }
                             }
                             Ok(TabletMsg::Ping) => {
@@ -1079,7 +1091,13 @@ fn label_of(namespace: &Namespace, court_id: i64) -> String {
 /// Versucht, ein Tablet als aktiv schiedsendes Gerät an einem Feld (per
 /// CourtID) zu registrieren. Ist das Feld schon belegt, bleibt das Tablet
 /// passiv.
-async fn attach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> AttachResult {
+async fn attach_tablet(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    device_id: &str,
+    tx: &Tx,
+) -> AttachResult {
     let mut map = broker.namespaces.lock().await;
     if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
         tracing::warn!("Namespace-Limit erreicht – Tablet für '{ns}' abgewiesen");
@@ -1087,13 +1105,28 @@ async fn attach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> Att
     }
     let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
     if namespace.tablets.contains_key(&court_id) {
-        return AttachResult::Occupied;
+        // Reconnect-Erkennung: Meldet sich DASSELBE Gerät erneut (tote
+        // Vorgänger-Session nach Netz-Abriss), löst es seine alte Session
+        // nahtlos ab — kein „Feld belegt"-Overlay fürs eigene Gerät.
+        // Leere Kennungen (alte Tablet-Seiten) zählen nie als „dasselbe".
+        let same_device = !device_id.is_empty()
+            && namespace.tablet_devices.get(&court_id).map(String::as_str) == Some(device_id);
+        if !same_device {
+            return AttachResult::Occupied;
+        }
+        if let Some(old) = namespace.tablets.remove(&court_id) {
+            let _ = old.send(text(&ServerMsg::SessionSuperseded));
+        }
+        tracing::info!("Feld {court_id} (Namespace '{ns}'): Reconnect desselben Geräts");
     }
     if namespace.tablets.len() >= MAX_TABLETS_PER_NS {
         tracing::warn!("Namespace '{ns}' am Tablet-Limit – Feld {court_id} abgewiesen");
         return AttachResult::Rejected;
     }
     namespace.tablets.insert(court_id, tx.clone());
+    namespace
+        .tablet_devices
+        .insert(court_id, device_id.to_string());
     // Laufenden Spielstand auch beim NORMALEN Verbinden wiederherstellen
     // (Crash/Ersatz-Tablet) – nicht nur bei Übernahme. Das Tablet behält ihn
     // nur, wenn die matchId zum gleich gepushten Match passt, sonst überschreibt
@@ -1125,12 +1158,15 @@ async fn attach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> Att
 
 /// Übernimmt ein belegtes Feld für ein bisher passives Tablet – das
 /// zuvor aktive Tablet wird mit `SessionSuperseded` gesperrt.
-async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
+async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, device_id: &str, tx: &Tx) {
     let mut map = broker.namespaces.lock().await;
     let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
     if let Some(old) = namespace.tablets.insert(court_id, tx.clone()) {
         let _ = old.send(text(&ServerMsg::SessionSuperseded));
     }
+    namespace
+        .tablet_devices
+        .insert(court_id, device_id.to_string());
     // Laufenden Spielstand an das übernehmende Tablet übergeben.
     if let Some(state) = namespace.court_state.get(&court_id) {
         let len = state.len();
@@ -1152,14 +1188,29 @@ async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
     }
 }
 
+/// Ist `tx` noch das am Feld eingetragene (aktive) Tablet? Nach einem
+/// Reconnect-Reclaim lebt die abgelöste Session evtl. noch kurz weiter —
+/// ihre nachlaufenden Frames dürfen Cache und Host nicht mehr mit dem
+/// ALTEN Stand füttern (sonst kehrt genau der überbügelte Stand zurück,
+/// den die Reconnect-Logik verhindert).
+fn is_holder(namespace: &Namespace, court_id: i64, tx: &Tx) -> bool {
+    namespace
+        .tablets
+        .get(&court_id)
+        .map(|t| t.same_channel(tx))
+        .unwrap_or(false)
+}
+
 /// Speichert den gespiegelten Spielzustand des aktiven Tablets am Feld.
-async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: String) {
+async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: String, tx: &Tx) {
     if state.len() > MAX_STATE_LEN {
         return;
     }
     let mut map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get_mut(ns) {
-        namespace.court_state.insert(court_id, state);
+        if is_holder(namespace, court_id, tx) {
+            namespace.court_state.insert(court_id, state);
+        }
     }
 }
 
@@ -1177,6 +1228,7 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
         .unwrap_or(false);
     if still_ours {
         namespace.tablets.remove(&court_id);
+        namespace.tablet_devices.remove(&court_id);
         let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
             let _ = host.send(text(&RelayFrame::TabletDisconnected {
@@ -1199,11 +1251,15 @@ async fn forward_score(
     score_a: i64,
     score_b: i64,
     sets_history: Vec<SetAb>,
+    tx: &Tx,
 ) {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(ns) else {
         return;
     };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
     // Vollständige Satzliste (abgeschlossene Sätze + laufender Satz) für
     // die Court-Monitor-Anzeige merken.
     let mut sets = sets_history.clone();
@@ -1241,11 +1297,21 @@ async fn forward_battery(broker: &Broker, ns: &str, court_id: i64, percent: i64,
 }
 
 /// Leitet den Meldungs-Zustand eines Felds an den Host weiter.
-async fn forward_alert(broker: &Broker, ns: &str, court_id: i64, injury: bool, official: bool) {
+async fn forward_alert(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    injury: bool,
+    official: bool,
+    tx: &Tx,
+) {
     let map = broker.namespaces.lock().await;
     let Some(namespace) = map.get(ns) else {
         return;
     };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = namespace.host.as_ref() {
         let _ = host.send(text(&RelayFrame::Alert {
@@ -1675,12 +1741,16 @@ mod tests {
     async fn score_from_tablet_is_forwarded_to_the_host() {
         let broker = Broker::new("x".into());
         let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        // Der Sender muss als aktives Tablet des Felds eingetragen sein —
+        // nur der aktuelle Halter darf Scores liefern (is_holder).
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
             ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
         }
-        forward_score(&broker, "ns1", 101, 11, 9, vec![]).await;
+        forward_score(&broker, "ns1", 101, 11, 9, vec![], &tablet_tx).await;
         let msg = host_rx.try_recv().expect("Host bekommt den Score");
         let Message::Text(t) = msg else {
             panic!("Text-Frame erwartet")
@@ -1707,5 +1777,102 @@ mod tests {
         ns.host = Some(tx);
         // Genau diese Bedingung prüft host_conn vor dem Registrieren.
         assert!(ns.host.is_some(), "zweiter Host würde abgewiesen");
+    }
+
+    /// Reconnect-Erkennung: Meldet sich DASSELBE Gerät erneut an einem
+    /// belegten Feld, löst es seine tote Vorgänger-Session nahtlos ab —
+    /// kein „Feld belegt" fürs eigene Gerät (Turnier-Feedback 18.07.2026:
+    /// Tablet verlor nach Netz-Aussetzer den Stand an sein „fremdes" Ich).
+    #[tokio::test]
+    async fn same_device_reconnect_replaces_old_session() {
+        let (broker, mut old_rx) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.tablet_devices.insert(101, "dev-x".into());
+        }
+        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
+        assert!(
+            matches!(res, AttachResult::Active),
+            "eigenes Gerät kommt sofort rein"
+        );
+        // Die alte Session wird gesperrt, damit sie nicht weiterzählt.
+        let msg = old_rx
+            .try_recv()
+            .expect("alte Session bekommt SessionSuperseded");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let parsed: ServerMsg = serde_json::from_str(t.as_str()).unwrap();
+        assert_eq!(parsed, ServerMsg::SessionSuperseded);
+    }
+
+    /// Ein FREMDES Gerät sieht weiterhin „belegt" (Übernehmen-Dialog).
+    #[tokio::test]
+    async fn foreign_device_still_sees_occupied() {
+        let (broker, mut old_rx) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut("ns1")
+                .unwrap()
+                .tablet_devices
+                .insert(101, "dev-x".into());
+        }
+        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let res = attach_tablet(&broker, "ns1", 101, "dev-anders", &new_tx).await;
+        assert!(
+            matches!(res, AttachResult::Occupied),
+            "fremdes Gerät bleibt draußen"
+        );
+        assert!(old_rx.try_recv().is_err(), "alte Session bleibt aktiv");
+    }
+
+    /// Nachlaufende Frames einer ABGELÖSTEN Session (Reconnect-Reclaim/
+    /// Übernahme) dürfen Cache und Host nicht mehr erreichen — sonst kehrt
+    /// genau der alte Stand zurück, den die Reconnect-Logik verhindert.
+    #[tokio::test]
+    async fn superseded_session_frames_are_dropped() {
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (holder_tx, _holder_rx) = mpsc::unbounded_channel();
+        let (old_tx, _old_rx) = mpsc::unbounded_channel::<Message>();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, holder_tx); // aktueller Halter ist ein ANDERER
+        }
+        forward_score(&broker, "ns1", 101, 3, 1, vec![], &old_tx).await;
+        store_court_state(&broker, "ns1", 101, "{\"alt\":true}".into(), &old_tx).await;
+        assert!(
+            host_rx.try_recv().is_err(),
+            "Score der alten Session wird verworfen"
+        );
+        let map = broker.namespaces.lock().await;
+        assert!(
+            !map.get("ns1").unwrap().court_state.contains_key(&101),
+            "alter Stand landet nicht im Cache"
+        );
+    }
+
+    /// Alte Tablet-Seiten (ohne deviceId) zählen nie als „dasselbe Gerät" —
+    /// leere Kennungen dürfen einander nicht matchen.
+    #[tokio::test]
+    async fn empty_device_id_never_matches() {
+        let (broker, _old_rx) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut("ns1")
+                .unwrap()
+                .tablet_devices
+                .insert(101, String::new());
+        }
+        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let res = attach_tablet(&broker, "ns1", 101, "", &new_tx).await;
+        assert!(
+            matches!(res, AttachResult::Occupied),
+            "leer = wie bisher belegt"
+        );
     }
 }

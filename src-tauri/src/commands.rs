@@ -954,8 +954,11 @@ pub async fn confirm_walkover(
             team1_won: !cand.retired_is_team1,
             duration_mins: 0,
             score_status: 1, // 1 = Walkover
-            // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben.
+            // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben,
+            // niemand war auf dem Feld → keine Spieler-/Endzeit-Updates.
             free_court_id: None,
+            player_ids: Vec::new(),
+            end_ts_ms: None,
         };
         match crate::tablet::server::write_result_to_btp(&config, &update).await {
             Ok(()) => written += 1,

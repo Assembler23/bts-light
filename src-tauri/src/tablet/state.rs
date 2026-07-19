@@ -188,9 +188,10 @@ pub struct TabletState {
     snapshot: RwLock<Option<BtpSnapshot>>,
     /// CourtID → laufende Tablet-Session des Felds.
     courts: RwLock<HashMap<i64, CourtSession>>,
-    /// CourtID → Token des aktuell schiedsenden Tablets (LAN-Tablet-
-    /// Übernahme). Fehlt der Eintrag, ist der Court frei.
-    active: RwLock<HashMap<i64, u64>>,
+    /// CourtID → (Token, Geräte-ID) des aktuell schiedsenden Tablets
+    /// (LAN-Tablet-Übernahme + Reconnect-Erkennung). Fehlt der Eintrag,
+    /// ist der Court frei. Geräte-ID leer bei alten Tablet-Seiten.
+    active: RwLock<HashMap<i64, (u64, String)>>,
     /// Fortlaufender Zähler, vergibt eindeutige Court-Tokens.
     token_seq: AtomicU64,
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
@@ -578,15 +579,25 @@ impl TabletState {
 
     /// Beansprucht das Feld für ein Tablet und gibt dessen Token zurück.
     /// Ein bereits aktives Tablet wird dadurch abgelöst (Tablet-Übernahme).
-    pub fn claim_court(&self, court_id: i64) -> u64 {
+    /// `device_id` = persistente Geräte-Kennung des Tablets (leer bei alten
+    /// Tablet-Seiten) — Grundlage der Reconnect-Erkennung.
+    pub fn claim_court(&self, court_id: i64, device_id: &str) -> u64 {
         let token = self.token_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        self.active.write().unwrap().insert(court_id, token);
+        self.active
+            .write()
+            .unwrap()
+            .insert(court_id, (token, device_id.to_string()));
         token
     }
 
     /// Ist `token` noch das aktive Tablet dieses Felds?
     pub fn is_court_active(&self, court_id: i64, token: u64) -> bool {
-        self.active.read().unwrap().get(&court_id) == Some(&token)
+        self.active
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .map(|(t, _)| *t == token)
+            .unwrap_or(false)
     }
 
     /// Wird das Feld bereits von einem Tablet geschiedst?
@@ -594,10 +605,25 @@ impl TabletState {
         self.active.read().unwrap().contains_key(&court_id)
     }
 
+    /// Hält GENAU DIESES Gerät das Feld gerade? (Reconnect-Erkennung: das
+    /// zurückkehrende Tablet darf seine eigene, tote Session nahtlos
+    /// ablösen, ohne das „Feld belegt"-Overlay zu sehen.) Leere Geräte-IDs
+    /// zählen nie als „dasselbe Gerät" (alte Tablet-Seiten).
+    pub fn court_held_by_device(&self, court_id: i64, device_id: &str) -> bool {
+        !device_id.is_empty()
+            && self
+                .active
+                .read()
+                .unwrap()
+                .get(&court_id)
+                .map(|(_, d)| d == device_id)
+                .unwrap_or(false)
+    }
+
     /// Gibt das Feld frei – nur, wenn `token` noch der aktive ist.
     pub fn release_court(&self, court_id: i64, token: u64) {
         let mut active = self.active.write().unwrap();
-        if active.get(&court_id) == Some(&token) {
+        if active.get(&court_id).map(|(t, _)| *t) == Some(token) {
             active.remove(&court_id);
         }
     }
@@ -1118,6 +1144,7 @@ mod tests {
 
     fn player(name: &str) -> BtpPlayer {
         BtpPlayer {
+            id: 0,
             name: name.to_string(),
             first: String::new(),
             last: name.to_string(),
@@ -1647,5 +1674,40 @@ mod tests {
         // Feld wird frei: Eintrag verschwindet.
         st.reconcile_on_court(&HashMap::new(), 9000);
         assert_eq!(st.on_court_since_ms(1, 200), None);
+    }
+
+    /// Reconnect-Erkennung (Turnier-Feedback 18.07.2026): Das Feld merkt
+    /// sich die Geräte-Kennung des Halters — nur DASSELBE Gerät gilt beim
+    /// Wiederverbinden als Halter, fremde und leere Kennungen nicht.
+    #[test]
+    fn claim_court_tracks_holder_device() {
+        let st = TabletState::default();
+        let token = st.claim_court(1, "dev-x");
+        assert!(st.court_occupied(1));
+        assert!(st.is_court_active(1, token));
+        assert!(st.court_held_by_device(1, "dev-x"));
+        assert!(!st.court_held_by_device(1, "dev-anders"));
+        // Leere Kennung (alte Tablet-Seite) matcht nie — auch nicht leer↔leer.
+        let st2 = TabletState::default();
+        st2.claim_court(2, "");
+        assert!(!st2.court_held_by_device(2, ""));
+    }
+
+    /// Ein Re-Claim desselben Geräts löst den alten Token ab; die alte
+    /// Session kann das Feld danach nicht mehr freigeben.
+    #[test]
+    fn reclaim_supersedes_old_token() {
+        let st = TabletState::default();
+        let old = st.claim_court(1, "dev-x");
+        let new = st.claim_court(1, "dev-x");
+        assert!(!st.is_court_active(1, old), "alter Token ist abgelöst");
+        assert!(st.is_court_active(1, new));
+        // Aufräumen der toten alten Session darf das Feld NICHT freigeben.
+        st.release_court(1, old);
+        assert!(st.court_occupied(1), "Feld bleibt beim neuen Token");
+        // Der aktive Halter kann regulär freigeben.
+        st.release_court(1, new);
+        assert!(!st.court_occupied(1));
+        assert!(!st.court_held_by_device(1, "dev-x"));
     }
 }
