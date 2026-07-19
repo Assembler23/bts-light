@@ -111,7 +111,15 @@ Gesammelte Nacharbeiten, sobald das Turnier vorbei ist:
   hochgeladene App-Logs (Master + Slave, per `install_id`) und nginx-Log
   systematisch nach Auffälligkeiten durchgehen — insbesondere
   Tablet-Reconnects/State-Restores (Bug vom Samstag), Ergebnis-Übertragung
-  nach BTP, Monitor-Ausfälle.
+  nach BTP, Monitor-Ausfälle. **Live-Befunde vom 19.07. mitnehmen:**
+  (a) BTP lieferte um 08:38:46 (und vermutlich 08:27) einen **leeren
+  Snapshot** (0 Hallen/Felder/Matches) → Massen-Freigabe aller Felder,
+  6 s später Wiederzuweisung; Abwehr prüfen (leeren Snapshot nach
+  gefülltem erst nach 2. Bestätigung übernehmen + Warnung).
+  (b) Ergebnis-Log-Zeile mit **leerem Hallen-Label** „Feld 38 ('')" —
+  Label-Lookup schlug fehl, weil die Zuweisung schon aufgehoben war
+  (kosmetisch). (c) HM-Tablets im Minutentakt „still >10s"-Zyklen —
+  Bildschirm-/WLAN-Doze; Keep-Awake-Empfehlung in die Tablet-Doku.
 - **Offizielles Release schnüren** (> 0.9.147, mit Auto-Update): Inhalte
   der TEST-Builds (BTP-Ergebnis-Fix, TV-Schrift, Klassen-Ansage,
   Slave-Brücke, 0.9.147 BTP-Felder + Tablet-Reconnect) plus der wartenden
