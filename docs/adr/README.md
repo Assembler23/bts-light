@@ -12,3 +12,5 @@ hier eintragen.
 | Nr. | Titel | Status |
 |---|---|---|
 | [0001](0001-quality-gate-und-branch-protection.md) | Quality-Gate & Branch Protection | accepted |
+| [0002](0002-ferne-halle-direkt-cloud-geraete.md) | Ferne Halle: Tablets & Monitore per Direkt-Cloud statt Slave-Multiplex | accepted |
+| [0005](0005-lan-https-selbstsigniert.md) | LAN-Tablet-Server: HTTPS mit selbstsigniertem Zertifikat | akzeptiert |

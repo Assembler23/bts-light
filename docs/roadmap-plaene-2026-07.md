@@ -91,18 +91,30 @@ Hallen-Info. badhub-Code muss dafür nicht angefasst werden.
 Score 2.2 rem (Z. 123), Plus-Buttons 4.5 rem (Z. 82), Spielernamen
 `clamp(.8–1.2rem)` (Z. 193).
 
+**Warum das dunkle Design bei wenig Helligkeit versagt:** Auf
+LCD-Tablets leuchtet das Backlight immer gleichmäßig — ein dunkles UI
+lässt fast nichts davon durch. In einer hellen Sporthalle konkurriert der
+dunkle Schirm zusätzlich mit Spiegelungen → die Schiedsrichter drehen die
+Helligkeit hoch, und **die Helligkeit ist der Akkufresser**, nicht die
+Pixelfarbe (das wäre nur bei OLED anders). Ein **helles UI kehrt das
+um**: Weißer Grund nutzt das Backlight maximal aus, dieselbe Ablesbarkeit
+gelingt mit deutlich niedrigerer Helligkeitsstufe.
+
 **Plan (M):**
 1. Farbwerte auf CSS-Variablen heben (`:root { --bg, --fg, --panel, … }`)
    — reine Fleißarbeit, keine Logik.
-2. **Helles Theme als Standard** (dunkle Schrift auf hellem Grund ist bei
-   minimaler Display-Helligkeit deutlich besser ablesbar und spart auf
-   LCD-Tablets Energie, weil das Backlight runtergedreht werden kann);
-   Umschalter im Tablet-Einstellungs-Menü (hell/dunkel), Wahl in
-   localStorage.
+2. **Helles Maximal-Kontrast-Theme als Standard:** nahezu weißer Grund,
+   nahezu schwarze Schrift (kein Mittelgrau!), Funktionsfarben als
+   **großflächig gefüllte** Buttons statt farbiger Dünnschrift
+   (links/rechts-Zuordnung z. B. über kräftige Rahmen + Füllung).
+   Fette Schriftschnitte für Ziffern (dünne Strokes verschwimmen bei
+   niedriger Helligkeit zuerst). Umschalter hell/dunkel im
+   Tablet-Einstellungs-Menü, Wahl in localStorage.
 3. Schriftgrößen anheben: Score-Ziffern und Namen ca. +30 %, Plus-Buttons
    moderat — auf 8-Zoll-Tablets gegentesten (kein Scrollen im
    Spielzustand!).
-4. Kontrast-Check bei niedrigster Helligkeit am echten Turnier-Tablet.
+4. Abnahme-Kriterium: bei **20–30 % Display-Helligkeit** aus 1 m
+   Abstand in heller Umgebung ablesbar (echtes Turnier-Tablet).
    Auslieferung wie gehabt: App-Release für LAN **und** Relay-Deploy für
    Cloud-Tablets.
 
@@ -181,8 +193,28 @@ Context** — Battery-API (und Wake Lock) funktionieren dann.
   Aufwändig: Rotation, IP-Wechsel, Android-Trust-Store. Nur nötig, wenn
   die Warnung aus Option B im Betrieb stört.
 
-Empfehlung: **A sofort dokumentieren, B als Umsetzung** (bestätigte
-Praxis aus Tilos Betrieb), C nur bei Bedarf.
+**Entschieden (19.07.2026): Option B wird umgesetzt** —
+[ADR 0005](adr/0005-lan-https-selbstsigniert.md). Umsetzung erst **nach**
+dem Turnier-Wochenende, mit der übrigen Roadmap.
+
+**Umsetzungs-Schritte Option B (M):**
+1. Dependency-Check (dependency-auditor): `rcgen` (Zertifikats-Erzeugung)
+   + `axum-server`/rustls-Anbindung — rustls ist über reqwest/
+   tokio-tungstenite bereits im Baum.
+2. Zertifikat beim ersten Start erzeugen (SANs: `bts-light.local`,
+   aktuelle LAN-IPs, `localhost`; Gültigkeit lang, z. B. 10 Jahre) und im
+   Config-Verzeichnis **persistieren** — die weggeklickte Warnung hängt
+   am Zertifikat; ein Neustart darf sie nicht erneut auslösen.
+3. Tablet-Server zusätzlich auf `:8443` (TLS) binden — gleicher
+   axum-Router, HTTP `:8088` bleibt unverändert (Pis/Monitore).
+4. QR-Codes/Tablet-URLs im Dashboard auf `https://…:8443` umstellen;
+   Monitor-URLs bleiben HTTP.
+5. Setup-Hinweis in der App + `docs/tablet.md`: Einmal-Bestätigung der
+   Warnung je Tablet, Screenshot der Chrome-Dialogfolge.
+6. Tests: Zertifikats-Erzeugung/-Wiederverwendung (Unit), Server startet
+   mit beiden Ports; manuell: Battery-Badge erscheint für ein
+   LAN-Tablet über HTTPS.
+7. Windows-Firewall-Doku ergänzen (neuer Port 8443).
 
 ## 7. Spielübersicht für die Slave-Halle
 
