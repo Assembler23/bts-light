@@ -465,7 +465,40 @@ Tilos BTS bestätigt den Fix-Ansatz: Er verwirft Score-Updates von
 4. Tests: Relay „fremde matchId verworfen", state.rs analog,
    Serde-Roundtrip ±matchId. Auslieferung: App + Relay-Deploy.
 
-## 18. Übrige Punkte (bereits geplant/laufend)
+## 18. Release-Seite: Versions-Downloads + Kompakt-Changelog
+
+**Wunsch (20.07.2026):** Eine öffentliche Seite, auf der man jede
+Version herunterladen kann und je Version die Änderungen kompakt sieht.
+
+**Lage:** Beide Zutaten existieren schon — der Download-Bereich
+`badhub.de/download/bts-light/` behält alle Versions-Installer
+(lückenlos seit 0.4.6), und [changelog.md](changelog.md) pflegt die
+Kompakt-Änderungen je Version (Commit-Pflicht laut CLAUDE.md). Es fehlt
+nur die öffentliche Darstellung. Verwandter Alt-Punkt „Changelog pro
+Version sichtbar machen" (roadmap.md → Geplant) geht hierin auf.
+
+**Plan (S/M):**
+1. **Generator im Release-Workflow:** Beim Tag-Release baut ein
+   Script (Node/Python im Workflow) aus `docs/changelog.md` eine
+   statische `index.html` für `download/bts-light/`: Tabelle je Version
+   mit Datum, Download-Link (`BTS.Light_X.Y.Z_x64-setup.exe`) und den
+   Changelog-Stichpunkten; neueste Version prominent oben („Aktuelle
+   Version"). Upload zusammen mit Installer + latest.json (bestehender
+   Deploy-Schritt).
+2. **Auto-Update-Notes:** Denselben Changelog-Auszug der Version in
+   `latest.json → notes` schreiben — das Update-Fenster in der App
+   zeigt dann „Was ist neu" (erledigt den Alt-Punkt mit).
+3. Alte Versionen: Liste aus den vorhandenen Exe-Dateien im
+   Download-Verzeichnis generieren (Server-seitig einmalig erfasst oder
+   im Workflow gepflegt); Versionen ohne Changelog-Eintrag nur mit
+   Datum/Link.
+4. Doku: docs/release.md (neuer Abschnitt „Release-Seite"), Test =
+   Trockenlauf des Generators in CI (HTML entsteht, Links valide).
+5. Hinweis: `public/download/` ist vom badhub-rsync ausgenommen — die
+   Seite lebt wie die Exes nur auf dem Server; Deploy ausschließlich
+   über den bts-light-Release-Workflow.
+
+## 19. Übrige Punkte (bereits geplant/laufend)
 
 - **Log-Review 20.07.2026** — Ablauf steht in
   [roadmap.md](roadmap.md#nach-dem-turnier-wochenende-stand-19072026).
