@@ -38,6 +38,56 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   den Relay nötig — Sicherheitsmodell beachten (Slave ist bisher bewusst
   read-only, R4/R5).
 
+## Turnier-Wünsche (18./19.07.2026 — zweites Wochenende)
+
+Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen):
+
+- **Gezielter zweiter/dritter Aufruf — auch je Partei.** Ist ein Spiel
+  aufgerufen, aber nur eine Seite erschienen, soll die Turnierleitung
+  einen **zweiten Aufruf nur für die fehlende Partei** auslösen können
+  (Ansage z. B. „Zweiter Aufruf für …"). Gewünscht auf dem **Master und
+  vom Slave aus** — hängt am selben Relay-Rückkanal wie der
+  Vorbereitungs-Aufruf vom Slave (siehe oben, R4/R5 beachten).
+- **„Nächste Spiele pro Halle"** (Idee von Nik, Turnierleitung): BTP führt
+  den **Spielort bereits an der Ansetzung** (Spalte „Spielort"/Feld, z. B.
+  `WR-6`, `HM-05`) — diese Info kommt schon per `SENDTOURNAMENTINFO`.
+  Daraus eine Aufruf-/Nächste-Spiele-Liste **je Halle** bauen;
+  `badhub.de/live?t=…&display=next` braucht dafür einen Hallen-Filter
+  (z. B. `&halle=WR`), die globale Liste ist im Mehr-Hallen-Betrieb wenig
+  hilfreich.
+- **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
+  Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
+  schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei
+  **minimaler Helligkeit** klar ablesbar ist.
+- **Tablet-Schrift größer** (analog zur TV-Vergrößerung aus v0.9.145).
+- *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
+  anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
+  Datenquelle: `on_court_since`/Aufruf-Zeitstempel).
+- *Nice-to-have:* **Pausenuhr als Overlay.** Die Pausenuhr auf den TVs ist
+  gut — der Spielstand soll dabei aber sichtbar bleiben (Overlay statt
+  Vollbild-Wechsel).
+- **Analyse (badhub-Repo): Spielerprofil-Links auf `/live` teils defekt.**
+  Die Links auf Spielerprofile funktionierten schon einmal; aktuell gehen
+  einige, andere nicht — Ursache klären (Namens-Matching?).
+
+## Nach dem Turnier-Wochenende (Stand 19.07.2026)
+
+Gesammelte Nacharbeiten, sobald das Turnier vorbei ist:
+
+- **Offizielles Release schnüren** (> 0.9.147, mit Auto-Update): Inhalte
+  der TEST-Builds (BTP-Ergebnis-Fix, TV-Schrift, Klassen-Ansage,
+  Slave-Brücke, 0.9.147 BTP-Felder + Tablet-Reconnect) plus der wartenden
+  PRs #76 (Azure-TTS-Vererbung) und #78 (8-stelliger Kopplungscode).
+  **Änderung am Kopplungscode: Gültigkeit 1 Stunde statt 15 Minuten.**
+- **Server aufräumen:** nginx-Namespace-Rewrite (alte→neue Master-ID),
+  Kurzlinks `wr1–6`/`wrtv1–6`, `pi-bridge-wr.ps1`, TEST-Exes im
+  Download-Verzeichnis.
+- **Azure-Speech-Key rotieren** (wurde während des Turniers im Klartext
+  geteilt).
+- **Pi-Kiosk-Image untersuchen:** Warum fahren frisch beschriebene Karten
+  teils nicht hoch (Turnier-Befund; Tilos Image vs. unser Image).
+- **Bug prüfen: Region-Feld am Slave nicht änderbar** (Azure-Ansagen).
+
 ## Mehr-Hallen-Unterstützung — Restposten
 
 Die Mehr-Hallen-Architektur ist umgesetzt — CourtID-Identität, Hallen-
