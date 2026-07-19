@@ -288,7 +288,26 @@ passend zum Score-Design. Gilt automatisch für LAN- und Cloud-TVs
 Gegencheck: Nach Spielende/Feldfreigabe muss der Wechsel zurück in den
 Leerlauf sauber aussehen (kein Flackern mit der Ergebnis-Anzeige).
 
-## 11. Übrige Punkte (bereits geplant/laufend)
+## 11. BTP-Rückschreibung: Übernahmen aus Tilos Original-BTS
+
+**Analyse 19.07.2026** (vollständiger Vergleich:
+[btp-write-vergleich-letilo.md](btp-write-vergleich-letilo.md)). Beide
+Systeme sind seit 0.9.147 im Kern gleichwertig; drei Übernahmen lohnen:
+
+- **P1 (S/M): `Highlight` für Vorbereitungs-Aufrufe** — Tilos Aufrufe
+  sind in BTP sichtbar (Match-Feld `Highlight`), unsere nicht. Beim
+  Aufruf Highlight:1, bei Rücknahme/Feld-Ruf Highlight:0 schreiben —
+  ohne `Status`-Feld (v0.9.103-Falle). Turnierleitung sieht Aufrufe dann
+  direkt in BTP.
+- **P2 (M): Retry-Queue für Ergebnis-Writes** — von BTP nicht bestätigte
+  Ergebnisse beim nächsten Kontakt nachschieben (Tilos
+  `needsync`/`pushall`); Players-Checkout nur binnen 5 min.
+- **P3 (S): Disqualifikation (`ScoreStatus 3`)** als dritte Option im
+  Turnierleitungs-Dialog.
+- Zurückgestellt: Check-in-Bits, Officials/Umpire, Shuttles, MatchOrder,
+  eigenständige Spieler-Updates (Begründung im Vergleichs-Dokument).
+
+## 12. Übrige Punkte (bereits geplant/laufend)
 
 - **Log-Review 20.07.2026** — Ablauf steht in
   [roadmap.md](roadmap.md#nach-dem-turnier-wochenende-stand-19072026).

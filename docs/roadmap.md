@@ -75,6 +75,11 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 - **Analyse (badhub-Repo): Spielerprofil-Links auf `/live` teils defekt.**
   Die Links auf Spielerprofile funktionierten schon einmal; aktuell gehen
   einige, andere nicht — Ursache klären (Namens-Matching?).
+- **BTP-Rückschreibung: Übernahmen aus Tilos Original-BTS** (Analyse
+  19.07., [btp-write-vergleich-letilo.md](btp-write-vergleich-letilo.md)):
+  Aufrufe als `Highlight` nach BTP melden, Retry-Queue für nicht
+  bestätigte Ergebnisse, Disqualifikations-Code — Pläne in
+  [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md), Punkt 11.
 - **HTTPS für den LAN-Tablet-Server — Akkustände auch im LAN sehen.**
   Browser geben die Battery-API (`navigator.getBattery`) nur in
   **sicheren Kontexten** frei: Cloud-Tablets (https via badhub.de) melden
