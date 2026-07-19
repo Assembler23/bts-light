@@ -203,13 +203,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `softprops/action-gh-release@v2`) — vor dem erzwungenen Node-24-Umstieg
   (ab 2026-06-02) aktualisieren. Außerdem leitet GitHub `windows-latest`
   ab 2026-06-15 auf `windows-2025` um — Build dort gegenprüfen.
-- **Changelog pro Version sichtbar machen.** [`docs/changelog.md`](changelog.md)
-  pflegt die Versionshistorie bereits, ist aber nirgends für Nutzer
-  sichtbar — das Auto-Update zeigt aktuell nur „BTS Light X.Y.Z". Ziel:
-  den Changelog-Eintrag der jeweiligen Version in die Update-Meldung
-  (`latest.json` → `notes`) und in die GitHub-Release-Notes übernehmen,
-  optional ein „Was ist neu"-Hinweis in der App. So sieht man, was sich
-  von Version zu Version geändert hat.
+- **Release-Seite: Versions-Downloads + Kompakt-Changelog** (Wunsch
+  20.07., ersetzt den früheren Punkt „Changelog sichtbar machen"):
+  Öffentliche Seite unter `download/bts-light/` mit allen Versionen
+  (Installer liegen dort bereits lückenlos) und den Änderungen je
+  Version aus changelog.md; beim Release automatisch generiert,
+  Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
+  zeigt „Was ist neu"). Plan 18 in
+  [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 
 ## Feature-Wünsche
 
