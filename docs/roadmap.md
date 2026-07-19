@@ -61,7 +61,11 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
   schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei
   **minimaler Helligkeit** klar ablesbar ist.
-- **Tablet-Schrift größer** (analog zur TV-Vergrößerung aus v0.9.145).
+- **Tablet-Schrift größer** — ausdrücklich auch der **Spielstand** und die
+  Texte allgemein (analog zur TV-Vergrößerung aus v0.9.145).
+- **TV-Leerlauf: Feldnummer groß + badhub.de-Branding.** Ohne laufendes
+  Spiel (z. B. Slave-Halle zwischen den Runden) soll der TV die Feldnummer
+  prominent zeigen, darunter groß „badhub.de" (Orientierung + Werbung).
 - *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
   anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
   Datenquelle: `on_court_since`/Aufruf-Zeitstempel).

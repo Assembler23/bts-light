@@ -110,8 +110,10 @@ gelingt mit deutlich niedrigerer Helligkeitsstufe.
    Fette Schriftschnitte für Ziffern (dünne Strokes verschwimmen bei
    niedriger Helligkeit zuerst). Umschalter hell/dunkel im
    Tablet-Einstellungs-Menü, Wahl in localStorage.
-3. Schriftgrößen anheben: Score-Ziffern und Namen ca. +30 %, Plus-Buttons
-   moderat — auf 8-Zoll-Tablets gegentesten (kein Scrollen im
+3. Schriftgrößen anheben — ausdrücklich auch der **Spielstand**: aktuelle
+   Score-Ziffern (heute 2.2 rem) und Satz-Historie deutlich größer,
+   Namen ca. +30 %, Plus-Buttons moderat; generell alle Texte eine Stufe
+   rauf. Auf 8-Zoll-Tablets gegentesten (kein Scrollen im
    Spielzustand!).
 4. Abnahme-Kriterium: bei **20–30 % Display-Helligkeit** aus 1 m
    Abstand in heller Umgebung ablesbar (echtes Turnier-Tablet).
@@ -270,7 +272,23 @@ Resolve-Endpoint anwenden + Validierungs-Regex entsprechend lockern
 Restfällen (1)/(2) übrig bleibt. Punkt 4 nur angehen, falls real
 beobachtet (z. B. Verband des Turniers bevorzugen).
 
-## 10. Übrige Punkte (bereits geplant/laufend)
+## 10. TV-Leerlauf-Anzeige: große Feldnummer + badhub.de-Branding
+
+**Wunsch (19.07.2026):** Steht auf einem Feld kein Spiel (typisch in der
+Slave-Halle zwischen den Runden), soll der TV die **Feldnummer groß und
+gut sichtbar** zeigen — und darunter groß **badhub.de** (doppelter
+Nutzen: Orientierung in der Halle + Werbung).
+
+**Plan (S):** Leerlauf-Zustand in `monitor.html` gestalten (der Zustand
+„kein Match zugewiesen" existiert dort bereits, ist aber unscheinbar):
+Feldnummer bzw. -name in sehr großer Schrift (vmin-basiert wie die
+Spielernamen), darunter „badhub.de" als große Wortmarke; dezente Optik
+passend zum Score-Design. Gilt automatisch für LAN- und Cloud-TVs
+(gleiche Datei, Auslieferung wie gehabt App-Release + Relay-Deploy).
+Gegencheck: Nach Spielende/Feldfreigabe muss der Wechsel zurück in den
+Leerlauf sauber aussehen (kein Flackern mit der Ergebnis-Anzeige).
+
+## 11. Übrige Punkte (bereits geplant/laufend)
 
 - **Log-Review 20.07.2026** — Ablauf steht in
   [roadmap.md](roadmap.md#nach-dem-turnier-wochenende-stand-19072026).
