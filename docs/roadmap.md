@@ -76,6 +76,10 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 - **Zähltafelbediener-Verwaltung** (wie Tilos BTS): Verlierer-Warteschlange,
   Zuweisung beim Feld-Aufruf, Mit-Ansage „Tabletbedienung: …",
   BTP-Auscheck, Mindestpause.
+- **badhub `/live?tab=done`: Tages-Filter** (Wunsch 19.07.), initial auf
+  den aktuellen Tag. Die Beendet-Einträge tragen bereits `end_ts` →
+  reines Frontend im badhub-Repo (`live.js`): nach Tag gruppieren/filtern,
+  kleines Tages-Dropdown.
 - *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
   anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
   Datenquelle: `on_court_since`/Aufruf-Zeitstempel).
