@@ -69,11 +69,24 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen):
 - **Analyse (badhub-Repo): Spielerprofil-Links auf `/live` teils defekt.**
   Die Links auf Spielerprofile funktionierten schon einmal; aktuell gehen
   einige, andere nicht — Ursache klären (Namens-Matching?).
+- **HTTPS für den LAN-Tablet-Server — Akkustände auch im LAN sehen.**
+  Browser geben die Battery-API (`navigator.getBattery`) nur in
+  **sicheren Kontexten** frei: Cloud-Tablets (https via badhub.de) melden
+  ihren Akkustand an die Felder-Übersicht, LAN-Tablets (`http://IP:8088`)
+  können das prinzipbedingt nicht. Damit die Turnierleitung **alle**
+  Tablet-Akkus sieht, braucht der eingebettete Server HTTPS (Optionen
+  bewerten: eigenes lokales Zertifikat + Vertrauensstellung auf den
+  Tablets vs. alles über den Cloud-Weg — Entscheidung als ADR).
 
 ## Nach dem Turnier-Wochenende (Stand 19.07.2026)
 
 Gesammelte Nacharbeiten, sobald das Turnier vorbei ist:
 
+- **Log-Review des Turnier-Wochenendes (geplant 20.07.2026):** Relay-Logs,
+  hochgeladene App-Logs (Master + Slave, per `install_id`) und nginx-Log
+  systematisch nach Auffälligkeiten durchgehen — insbesondere
+  Tablet-Reconnects/State-Restores (Bug vom Samstag), Ergebnis-Übertragung
+  nach BTP, Monitor-Ausfälle.
 - **Offizielles Release schnüren** (> 0.9.147, mit Auto-Update): Inhalte
   der TEST-Builds (BTP-Ergebnis-Fix, TV-Schrift, Klassen-Ansage,
   Slave-Brücke, 0.9.147 BTP-Felder + Tablet-Reconnect) plus der wartenden
