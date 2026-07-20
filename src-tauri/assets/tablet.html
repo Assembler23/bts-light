@@ -1942,6 +1942,16 @@ function startScoreCooldown() {
   scoreCooldownTimer = setTimeout(clearScoreCooldown, SCORE_COOLDOWN_MS);
 }
 
+// Klick-Delay verkürzen (Plan 13): Der sichtbare Punktstand wird SOFORT
+// gerendert; das schwerere JSON.stringify + localStorage + WS-Send
+// (persistState/sendScoreUpdate) läuft direkt danach per queueMicrotask –
+// derselbe Task-Umlauf, also bleibt die Persistenz-Garantie erhalten, aber
+// der Tap-Handler kehrt schneller zurück und die Zahl steht ohne Wartezeit.
+function commitScoreView() {
+  render();
+  queueMicrotask(() => { persistState(); sendScoreUpdate(); });
+}
+
 function addPointOnSide(side) {
   if (STATE.pause) return; // während einer offiziellen Pause keine Punkte
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing' || !STATE.positions) return;
@@ -2041,11 +2051,11 @@ function addPointOnSide(side) {
 
   // Für die Schiri-Ansage: war das ein Aufschlagwechsel?
   STATE.lastEvent = { type: 'point', serveChanged: side !== prevServing };
-  persistState();
-  render();
-  sendScoreUpdate();
   if (triggeredMidGameSwitch) showSwitchToast();
   if (triggeredBreak) startBreak(triggeredBreak);
+  // Anzeige sofort, Persistenz/Push nachgelagert (siehe commitScoreView).
+  // Nach startBreak, damit der persistierte Stand die Pause mit einschließt.
+  commitScoreView();
 }
 
 // Komplettes Seitentauschen: physikalisch wechseln die Spieler die Court-
@@ -2109,9 +2119,7 @@ function undo() {
   }
   restoreSnapshot(STATE.history.pop());
   STATE.lastEvent = null; // nach Undo neutralen Stand ansagen (kein „Aufschlagwechsel")
-  persistState();
-  render();
-  sendScoreUpdate();
+  commitScoreView();
 }
 
 function finishManually() {
@@ -2954,9 +2962,29 @@ els.settingsPinPad.addEventListener('click', (e) => {
   if (btn) pinKey(btn.dataset.k);
 });
 
-els.plusLeft.addEventListener('click', () => addPointOnSide('left'));
-els.plusRight.addEventListener('click', () => addPointOnSide('right'));
-els.undoBtns.forEach(b => b.addEventListener('click', undo));
+// Klick-Delay verkürzen (Plan 13): Score-kritische Flächen zählen beim
+// BERÜHREN (pointerdown), nicht erst beim Loslassen (touchend/click). Der
+// nachlaufende synthetische Click wird unterdrückt, damit der Punkt nicht
+// doppelt fällt. Umgebungen ohne Pointer-Events (sehr alte Browser,
+// Tastatur) fallen auf den regulären Click zurück. Der Spielfeld-Bereich
+// scrollt nicht (overflow hidden, touch-action: manipulation) – ein
+// pointerdown hier ist immer ein bewusster Tap, kein Scroll-Beginn.
+function onScoreTap(el, fn) {
+  var downAt = 0;
+  el.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'touch' && e.button !== 0) return; // nur primärer Tap/Klick
+    downAt = e.timeStamp;
+    fn();
+  });
+  el.addEventListener('click', function (e) {
+    // Ghost-Click kurz nach dem pointerdown schlucken (kein Doppel-Punkt).
+    if (e.timeStamp - downAt < 700) { e.preventDefault(); e.stopPropagation(); return; }
+    fn(); // Fallback: Umgebungen ohne Pointer-Events / Tastatur.
+  });
+}
+onScoreTap(els.plusLeft, () => addPointOnSide('left'));
+onScoreTap(els.plusRight, () => addPointOnSide('right'));
+els.undoBtns.forEach(b => onScoreTap(b, undo));
 els.finishBtn.addEventListener('click', openFinishModal);
 els.finishRetireOne.addEventListener('click', () => finishAs('retired', false));
 els.finishRetireInjury.addEventListener('click', () => finishAs('retired', true));
