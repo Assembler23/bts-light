@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.153
+
+- **Ferne Halle per Telefon-Code koppeln.** Statt die lange install-ID
+  abzutippen, erzeugt der Master-PC einen **8-stelligen Zahlen-Code** (im
+  Setup unter „Telefon-Code"), den man der fernen Halle einfach durchsagt —
+  dort eingegeben, verbindet sich der Slave automatisch mit dem Master. Der
+  Code ist **1 Stunde gültig** (bequem beim Turnier-Aufbau).
+- **Sprachansagen in der fernen Halle ohne eigene Azure-Einrichtung.** Ein
+  Cloud-Slave übernimmt die Azure-Sprachkonfiguration automatisch vom Master
+  (nur im Arbeitsspeicher); ein Hinweis-Banner zeigt, wenn stattdessen die
+  Standardstimme genutzt wird.
+
 ## v0.9.152
 
 - **Mitten im Spiel einsteigen und weiterzählen.** Findet sich erst während
