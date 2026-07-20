@@ -9,8 +9,15 @@ je Halle (`?display=next&halle=…`) zeigt dann nur die Spiele *seiner*
 Halle, und bts-light kann je gerufenem Spiel eine **gesprochene Hallen-
 Ansage** auslösen (Knopf neben dem Aufruf).
 
-BTP kennt keinen Vorbereitungs-Zustand — bts-light verwaltet ihn selbst,
-genau wie die Walkover-Vorschläge ([walkover.md](walkover.md)).
+BTP kennt keinen eigenen Vorbereitungs-Zustand — bts-light verwaltet ihn
+selbst, genau wie die Walkover-Vorschläge ([walkover.md](walkover.md)).
+**Seit v0.9.160 (P1)** spiegelt bts-light den Aufruf zusätzlich in das
+`Match.Highlight`-Feld von BTP: gerufene Spiele werden im BTP-Planer
+hervorgehoben, beim Ruf aufs Feld / Rücknahme / Spielende wieder normal. Der
+Abgleich läuft im Sync-Loop (`reconcile_highlights`, nur der Diff) — siehe
+[btp_protocol.md](btp_protocol.md). Der interne Aufruf-Zustand (Anzeige,
+Ansage, `display=next`) funktioniert unabhängig davon weiter, auch wenn der
+BTP-Write mal fehlschlägt.
 
 Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 (badhub-Seite); Hallen-Ansage mit v0.9.16.

@@ -6,7 +6,7 @@
 //! mit dem aktuellen Komplettstand. Die Turnierdaten liegen ohnehin in
 //! BTP und werden bei jedem Zyklus neu abgefragt.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::badhub::diff::{diff, Update};
@@ -110,6 +110,10 @@ pub struct SyncEngine {
     /// Anzahl der direkt aufeinanderfolgenden leeren Snapshots, die der
     /// Guard bereits verworfen hat.
     suspect_empty_polls: u32,
+    /// Match-IDs, für die in BTP zuletzt `Highlight:1` geschrieben wurde
+    /// (P1). Grundlage der Highlight-Reconciliation: nur der Diff zum
+    /// aktuellen Aufruf-Stand wird nach BTP geschrieben.
+    highlight_written: HashSet<i64>,
 }
 
 /// Wie lange eine offene Auto-Zuweisung als „unterwegs" gilt, bevor sie als
@@ -192,6 +196,49 @@ fn prepare_btp_retry(
     RetryAction::Write(Box::new(update))
 }
 
+/// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
+/// Snapshot noch ruf-bar (Scheduled, beide Mannschaften stehen). Aufs Feld
+/// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0. Rein.
+fn highlight_desired(
+    calls: &[crate::tablet::state::PreparationCall],
+    snapshot: &BtpSnapshot,
+) -> HashSet<i64> {
+    calls
+        .iter()
+        .filter_map(|c| snapshot.matches.iter().find(|m| m.id == c.match_id))
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+        })
+        .map(|m| m.id)
+        .collect()
+}
+
+/// Diff `desired` gegen `written` → nur die geänderten Matches als
+/// `HighlightEntry` (Identität aus dem Snapshot). Matches, die nicht mehr im
+/// Snapshot stehen, werden ausgelassen (kein Knoten baubar). Rein & testbar.
+fn highlight_entries(
+    desired: &HashSet<i64>,
+    written: &HashSet<i64>,
+    snapshot: &BtpSnapshot,
+) -> Vec<crate::btp::proto::HighlightEntry> {
+    snapshot
+        .matches
+        .iter()
+        .filter_map(|m| {
+            let want = desired.contains(&m.id);
+            if want == written.contains(&m.id) {
+                return None;
+            }
+            Some(crate::btp::proto::HighlightEntry {
+                match_id: m.id,
+                draw_id: m.draw_id,
+                planning_id: m.planning_id,
+                on: want,
+            })
+        })
+        .collect()
+}
+
 impl Default for SyncEngine {
     fn default() -> Self {
         Self::new()
@@ -212,6 +259,50 @@ impl SyncEngine {
             last_btp_retry_flush: None,
             seen_matches: false,
             suspect_empty_polls: 0,
+            highlight_written: HashSet::new(),
+        }
+    }
+
+    /// Highlight-Reconciliation (P1): macht „in Vorbereitung"-Aufrufe in BTP
+    /// sichtbar. Vergleicht die Menge aktuell gerufener, noch ruf-barer Spiele
+    /// (Scheduled, Paarung steht) mit dem zuletzt geschriebenen Stand und
+    /// schreibt NUR den Diff — `Highlight:1` für neu gerufene, `Highlight:0`
+    /// für nicht mehr gerufene (zurückgenommen / aufs Feld gerufen / beendet).
+    /// Läuft im Master-Zyklus, wenn BTP nachweislich erreichbar ist; kein
+    /// Schreiben, solange sich nichts geändert hat. Fehler sind nicht fatal —
+    /// der Stand wird dann NICHT übernommen, sodass der nächste Zyklus es
+    /// erneut versucht.
+    async fn reconcile_highlights(
+        &mut self,
+        config: &AppConfig,
+        tablet: &TabletState,
+        snapshot: &BtpSnapshot,
+    ) {
+        // Gewünschter Stand: gerufene Matches, die im Snapshot noch ruf-bar sind.
+        let desired = highlight_desired(&tablet.preparation_calls(), snapshot);
+        if desired == self.highlight_written {
+            return; // nichts zu tun – kein BTP-Write
+        }
+        // Diff → HighlightEntry (Identität aus dem Snapshot).
+        let entries = highlight_entries(&desired, &self.highlight_written, snapshot);
+        if entries.is_empty() {
+            // Alle Diffs betrafen Matches, die nicht mehr im Snapshot stehen
+            // (z. B. gelöscht) — Stand trotzdem übernehmen, um erneute Versuche
+            // zu vermeiden.
+            self.highlight_written = desired;
+            return;
+        }
+        match crate::tablet::server::write_highlight_to_btp(config, &entries).await {
+            Ok(()) => {
+                tracing::info!(
+                    "BTP-Highlight aktualisiert: {} Änderung(en) ({} gerufen)",
+                    entries.len(),
+                    desired.len()
+                );
+                self.highlight_written = desired;
+            }
+            // Nicht übernehmen → nächster Zyklus versucht es erneut.
+            Err(e) => tracing::warn!("BTP-Highlight-Update fehlgeschlagen: {e}"),
         }
     }
 
@@ -425,7 +516,6 @@ impl SyncEngine {
         Vec<crate::btp::proto::CourtAssignment>,
         Vec<crate::btp::proto::MatchCourt>,
     ) {
-        use std::collections::HashSet;
         let now = now_ms();
         // Belegt = irgendein Match referenziert das Feld (OnCourt ODER noch
         // nicht abgeräumtes beendetes Spiel) → solche Felder sind nicht frei.
@@ -791,6 +881,9 @@ impl SyncEngine {
         // „In Vorbereitung" gerufene Spiele in den Snapshot stempeln, damit
         // der Aufruf-Zeitstempel im nächsten Push an badhub.de mitgeht.
         tablet.apply_preparation_calls(&mut snapshot);
+        // Aufrufe zusätzlich in BTP sichtbar machen (P1, Highlight-Flag) —
+        // nur der Diff zum letzten Stand, nur wenn sich etwas geändert hat.
+        self.reconcile_highlights(config, tablet, &snapshot).await;
         // Heartbeat: Ist regulär nichts zu senden, aber seit dem letzten
         // Push >60 s vergangen, wird ein voller `tset` als Lebenszeichen
         // erzwungen (Diff gegen `None`). badhub frischt damit `updated_at`
@@ -1040,6 +1133,52 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].match_id, 7);
         assert_eq!(matches[0].court_id, 1);
+    }
+
+    #[test]
+    fn highlight_desired_only_callable_scheduled_matches() {
+        // P1: nur gerufene Spiele, die noch Scheduled sind + Paarung steht.
+        let mut on_court = ready_match(8, 2);
+        on_court.status = MatchStatus::OnCourt;
+        on_court.court_id = Some(1);
+        let snap = snap_with(Vec::new(), vec![ready_match(7, 1), on_court], Vec::new());
+        let calls = vec![
+            PreparationCall {
+                match_id: 7,
+                location_id: None,
+                called_at_ms: 0,
+            }, // Scheduled → dabei
+            PreparationCall {
+                match_id: 8,
+                location_id: None,
+                called_at_ms: 0,
+            }, // aufs Feld gerufen → raus (Highlight:0)
+            PreparationCall {
+                match_id: 99,
+                location_id: None,
+                called_at_ms: 0,
+            }, // nicht im Snapshot → raus
+        ];
+        assert_eq!(highlight_desired(&calls, &snap), HashSet::from([7]));
+    }
+
+    #[test]
+    fn highlight_entries_only_the_diff() {
+        let snap = snap_with(
+            Vec::new(),
+            vec![ready_match(7, 1), ready_match(8, 2), ready_match(9, 3)],
+            Vec::new(),
+        );
+        // 7 neu gerufen (→ on), 9 nicht mehr gerufen (→ off), 8 unverändert.
+        let desired = HashSet::from([7, 8]);
+        let written = HashSet::from([8, 9]);
+        let entries = highlight_entries(&desired, &written, &snap);
+        let mut got: Vec<(i64, bool)> = entries.iter().map(|e| (e.match_id, e.on)).collect();
+        got.sort();
+        assert_eq!(got, vec![(7, true), (9, false)]);
+        // Identität (Draw/Planning) aus dem Snapshot mitgegeben.
+        let e7 = entries.iter().find(|e| e.match_id == 7).unwrap();
+        assert_eq!((e7.draw_id, e7.planning_id), (1, 1007));
     }
 
     #[test]

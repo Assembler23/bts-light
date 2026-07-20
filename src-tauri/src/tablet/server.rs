@@ -1387,6 +1387,38 @@ pub(crate) async fn write_courts_to_btp(
         .map_err(|e| e.to_string())
 }
 
+/// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
+/// Aufrufe in BTP sichtbar. Eigener Login + `highlight_request` (Match-Knoten
+/// nur mit Identität + Highlight, kein `Status`/Ergebnis). Best-effort-Aufrufer
+/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
+/// davon unberührt.
+pub(crate) async fn write_highlight_to_btp(
+    config: &AppConfig,
+    entries: &[proto::HighlightEntry],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let host = &config.btp.host;
+    let port = config.btp.port;
+    let pw = config.btp.password.as_deref();
+
+    let login_raw = client::send_request(host, port, &proto::login_request(pw))
+        .await
+        .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    let session = proto::parse_login_response(
+        &proto::decode_response(&login_raw).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let upd_raw =
+        client::send_request(host, port, &proto::highlight_request(entries, &session, pw))
+            .await
+            .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
 // ─────────────────────────────── WebSocket ────────────────────────────────
 
 /// Baut die Match-Kurzinfo fürs Tablet. BTP liefert das Spielsystem nicht
