@@ -241,8 +241,11 @@ pub fn import_identity(
 ) -> Result<AppConfig, String> {
     let imported: AppConfig =
         serde_json::from_str(&bundle).map_err(|_| "Ungültige Identitäts-Datei.".to_string())?;
-    if imported.install_id.trim().is_empty() {
-        return Err("Die Datei enthält keine Identität (install_id).".to_string());
+    // install_id ist Relay-Namespace + Log-Kennung → gegen dasselbe Format
+    // prüfen wie beim Kopplungs-Code (Hex+Bindestrich, 8–64), damit eine
+    // manuell verfälschte Datei keine kaputte Kennung in URLs/Header schleust.
+    if !crate::tablet::relay_client::valid_relay_namespace(imported.install_id.trim()) {
+        return Err("Die Datei enthält keine gültige Identität (install_id).".to_string());
     }
     // Passwörter des aktuellen PCs behalten — das Bündel enthält keine.
     let current = state
