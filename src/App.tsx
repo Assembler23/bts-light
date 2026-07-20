@@ -91,6 +91,10 @@ function defaultConfig(): AppConfig {
       second_call_minutes: 2,
       third_call_minutes: 4,
     },
+    scorekeeper: {
+      enabled: false,
+      break_seconds: 300,
+    },
     auto_assign: {
       enabled: false,
       wait_minutes: 1,
@@ -109,7 +113,9 @@ function App() {
   const [config, setConfig] = useState<AppConfig>(defaultConfig());
   // Einstellungen-Abschnitt, zu dem beim Öffnen gesprungen wird (Klick auf
   // einen ausgegrauten Menüpunkt).
-  const [settingsFocus, setSettingsFocus] = useState<SettingsFocus | undefined>();
+  const [settingsFocus, setSettingsFocus] = useState<
+    SettingsFocus | undefined
+  >();
   // Live-Status zentral – geteilt von Kopfzeile (Start/Stopp) und Status-Seite.
   const [status, setStatus] = useState<SyncStatus | null>(null);
   // WLAN des PCs für die Kopfzeile (zeigt, ob er im btsaccess-Netz hängt).
@@ -314,7 +320,10 @@ function App() {
             />
           </div>
           <Footer />
-          <MatchAnnouncer announce={config.announce} azureTts={config.azure_tts} />
+          <MatchAnnouncer
+            announce={config.announce}
+            azureTts={config.azure_tts}
+          />
         </div>
       </UpdateProvider>
     );
@@ -338,6 +347,7 @@ function App() {
             announce={config.announce}
             azureTts={config.azure_tts}
             disciplineHallRules={config.discipline_hall_rules}
+            manageScorekeepers={config.scorekeeper?.enabled ?? false}
           />
         );
       case "tablets":
@@ -404,7 +414,10 @@ function App() {
         </AppShell>
         <Footer />
         <WalkoverPanel />
-        <MatchAnnouncer announce={config.announce} azureTts={config.azure_tts} />
+        <MatchAnnouncer
+          announce={config.announce}
+          azureTts={config.azure_tts}
+        />
         <FreetextAnnouncer
           announce={config.announce}
           azureTts={config.azure_tts}

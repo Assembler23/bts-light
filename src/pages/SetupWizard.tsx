@@ -13,6 +13,7 @@ import {
   Target,
   Timer,
   Trash2,
+  Users,
   Volume2,
   Wifi,
   X,
@@ -223,13 +224,23 @@ export function SetupWizard({
   );
   const [host, setHost] = useState(initialConfig.btp.host);
   const [port, setPort] = useState(String(initialConfig.btp.port));
-  const [btpPassword, setBtpPassword] = useState(initialConfig.btp.password ?? "");
+  const [btpPassword, setBtpPassword] = useState(
+    initialConfig.btp.password ?? "",
+  );
   const [badhubUrl, setBadhubUrl] = useState(initialConfig.badhub.url);
-  const [badhubPassword, setBadhubPassword] = useState(initialConfig.badhub.password);
-  const [badhubLiveUrl, setBadhubLiveUrl] = useState(initialConfig.badhub.live_url);
+  const [badhubPassword, setBadhubPassword] = useState(
+    initialConfig.badhub.password,
+  );
+  const [badhubLiveUrl, setBadhubLiveUrl] = useState(
+    initialConfig.badhub.live_url,
+  );
   // Turnierlogo (badhub-Liveticker). BTP liefert keins → Upload.
-  const [logoData, setLogoData] = useState(initialConfig.tournament_logo?.data ?? "");
-  const [logoMime, setLogoMime] = useState(initialConfig.tournament_logo?.mime ?? "");
+  const [logoData, setLogoData] = useState(
+    initialConfig.tournament_logo?.data ?? "",
+  );
+  const [logoMime, setLogoMime] = useState(
+    initialConfig.tournament_logo?.mime ?? "",
+  );
   const [logoBg, setLogoBg] = useState(
     initialConfig.tournament_logo?.background_color ?? "",
   );
@@ -254,10 +265,14 @@ export function SetupWizard({
   );
   // Telefon-Kopplungscode (ADR 0004): am Master erzeugter 8-steller bzw.
   // Einlöse-Status am Slave.
-  const [phoneCode, setPhoneCode] = useState<{ code?: string; err?: string } | null>(null);
-  const [redeem, setRedeem] = useState<
-    { kind: "busy" | "ok" | "err"; msg: string } | null
-  >(null);
+  const [phoneCode, setPhoneCode] = useState<{
+    code?: string;
+    err?: string;
+  } | null>(null);
+  const [redeem, setRedeem] = useState<{
+    kind: "busy" | "ok" | "err";
+    msg: string;
+  } | null>(null);
 
   // Slave: 8-stellige Telefon-Codes automatisch gegen den vollen
   // Kopplungs-Code einlösen (ADR 0004). Der lange Code bleibt als
@@ -302,8 +317,14 @@ export function SetupWizard({
   // Aufruf-Timer (1./2./3. Aufruf) – Schwellen in Minuten.
   const ct = initialConfig.call_timer;
   const [ctEnabled, setCtEnabled] = useState(ct?.enabled ?? false);
-  const [ctSecond, setCtSecond] = useState(String(ct?.second_call_minutes ?? 2));
+  const [ctSecond, setCtSecond] = useState(
+    String(ct?.second_call_minutes ?? 2),
+  );
   const [ctThird, setCtThird] = useState(String(ct?.third_call_minutes ?? 4));
+  // Zähltafelbediener-Verwaltung (ADR 0007): Verlierer-Warteschlange führen.
+  const [skEnabled, setSkEnabled] = useState(
+    initialConfig.scorekeeper?.enabled ?? false,
+  );
   // Automatische Feldvergabe.
   const aa = initialConfig.auto_assign;
   const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
@@ -320,7 +341,9 @@ export function SetupWizard({
   const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
   const [cmAds, setCmAds] = useState(cm.show_ads);
   const [cmLayout, setCmLayout] = useState(cm.layout || "split");
-  const [cmComboVertical, setCmComboVertical] = useState(cm.combo_vertical ?? false);
+  const [cmComboVertical, setCmComboVertical] = useState(
+    cm.combo_vertical ?? false,
+  );
   const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
   const [test, setTest] = useState<TestState>({ kind: "idle" });
@@ -446,6 +469,10 @@ export function SetupWizard({
           third_call_minutes: thirdRaw > second ? thirdRaw : second + 1,
         };
       })(),
+      scorekeeper: {
+        enabled: skEnabled,
+        break_seconds: initialConfig.scorekeeper?.break_seconds ?? 300,
+      },
       auto_assign: {
         enabled: aaEnabled,
         // Negative/leere Eingabe abfangen; 0 ist erlaubt (sofort belegen).
@@ -457,7 +484,8 @@ export function SetupWizard({
       },
       // Disziplin/Klasse→Halle-Regeln: nur vollständige Zeilen speichern.
       discipline_hall_rules: disciplineHallRules.filter(
-        (r) => r.hall.trim() !== "" && (r.discipline !== "" || r.draw_name !== ""),
+        (r) =>
+          r.hall.trim() !== "" && (r.discipline !== "" || r.draw_name !== ""),
       ),
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
@@ -478,7 +506,10 @@ export function SetupWizard({
       const sel = await open({
         multiple: false,
         filters: [
-          { name: "Bilder", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"] },
+          {
+            name: "Bilder",
+            extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"],
+          },
         ],
       });
       if (!sel) return;
@@ -539,7 +570,11 @@ export function SetupWizard({
   async function runTest() {
     setTest({ kind: "testing" });
     try {
-      const name = await testBtp(host.trim(), Number(port) || 9901, btpPassword.trim() || null);
+      const name = await testBtp(
+        host.trim(),
+        Number(port) || 9901,
+        btpPassword.trim() || null,
+      );
       setTest({ kind: "ok", tournament: name });
     } catch (e) {
       setTest({ kind: "error", message: String(e) });
@@ -643,10 +678,10 @@ export function SetupWizard({
               Ansage-Slave-Modus (zweite Halle)
             </span>
             <span className="mt-1 block text-violet-800">
-              Dieser Rechner <strong>sagt nur an</strong> (keine{" "}
-              Feldvergabe, kein Liveticker). Die <strong>Tablets und TVs</strong>{" "}
-              dieser Halle hängen <strong>direkt über die Cloud</strong> am
-              Master — ihre QR-Codes/Links erscheinen nach dem Koppeln auf dem{" "}
+              Dieser Rechner <strong>sagt nur an</strong> (keine Feldvergabe,
+              kein Liveticker). Die <strong>Tablets und TVs</strong> dieser
+              Halle hängen <strong>direkt über die Cloud</strong> am Master —
+              ihre QR-Codes/Links erscheinen nach dem Koppeln auf dem{" "}
               <strong>Dashboard</strong>. Den Master (mit der laufenden
               BTP-Steuerung) gibt es genau einmal; beliebig viele Slaves dürfen
               mitlaufen. Trage unten den <strong>Master-Kopplungs-Code</strong>{" "}
@@ -666,9 +701,9 @@ export function SetupWizard({
             <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800">
               <li>
                 Am <strong>Master</strong> (PC mit BTP) den{" "}
-                <strong>8-stelligen Telefon-Code</strong> erzeugen lassen
-                (dort unten in diesem Feld) und hier eintippen — oder den
-                langen Kopplungs-Code einfügen:
+                <strong>8-stelligen Telefon-Code</strong> erzeugen lassen (dort
+                unten in diesem Feld) und hier eintippen — oder den langen
+                Kopplungs-Code einfügen:
               </li>
             </ol>
             <input
@@ -697,8 +732,8 @@ export function SetupWizard({
               start={2}
             >
               <li>
-                Unter <strong>„Sprachansagen"</strong> die <strong>Halle</strong>{" "}
-                dieser fernen Halle wählen (+ Stimme).
+                Unter <strong>„Sprachansagen"</strong> die{" "}
+                <strong>Halle</strong> dieser fernen Halle wählen (+ Stimme).
               </li>
               <li>
                 <strong>Internet</strong> muss da sein (LTE/WLAN) — die Ansagen
@@ -706,8 +741,8 @@ export function SetupWizard({
               </li>
             </ol>
             <p className="mt-2 text-xs text-violet-700">
-              Feld leer lassen = klassischer <strong>LAN-Slave</strong> (liest BTP
-              direkt im selben Netz).
+              Feld leer lassen = klassischer <strong>LAN-Slave</strong> (liest
+              BTP direkt im selben Netz).
             </p>
           </div>
         )}
@@ -739,13 +774,15 @@ export function SetupWizard({
               {phoneCode?.code ? "Neuen Code erzeugen" : "Code erzeugen"}
             </button>
             {phoneCode?.err && (
-              <span className="w-full text-xs text-rose-700">{phoneCode.err}</span>
+              <span className="w-full text-xs text-rose-700">
+                {phoneCode.err}
+              </span>
             )}
             <span className="w-full text-xs text-violet-700">
               Der fernen Halle telefonisch durchsagen — sie tippt ihn beim
-              Koppeln ein. Der Master braucht dafür <strong>Cloud</strong>{" "}
-              (bei eigenen LAN-Tablets in dieser Halle:{" "}
-              <strong>LAN + Cloud</strong>) oben aktiv und gestartet.
+              Koppeln ein. Der Master braucht dafür <strong>Cloud</strong> (bei
+              eigenen LAN-Tablets in dieser Halle: <strong>LAN + Cloud</strong>)
+              oben aktiv und gestartet.
             </span>
             <span className="w-full text-xs text-violet-700">
               Alternativ der lange <strong>Kopplungs-Code</strong>:{" "}
@@ -755,7 +792,9 @@ export function SetupWizard({
               <button
                 type="button"
                 onClick={() =>
-                  void navigator.clipboard?.writeText(initialConfig.install_id || "")
+                  void navigator.clipboard?.writeText(
+                    initialConfig.install_id || "",
+                  )
                 }
                 className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800
                            transition-colors hover:bg-violet-200"
@@ -855,7 +894,12 @@ export function SetupWizard({
       {/* Schritt 2: BTP-Verbindung */}
       <section className="flex flex-col gap-3">
         <SectionHeader icon={Server}>2 · BTP-Verbindung</SectionHeader>
-        <Field label="BTP-Adresse" value={host} onChange={setHost} placeholder="127.0.0.1" />
+        <Field
+          label="BTP-Adresse"
+          value={host}
+          onChange={setHost}
+          placeholder="127.0.0.1"
+        />
         <Field label="Port" value={port} onChange={setPort} type="number" />
         <Field
           label="BTP-Passwort (falls gesetzt)"
@@ -888,7 +932,11 @@ export function SetupWizard({
         <section className="flex flex-col gap-3">
           <SectionHeader icon={KeyRound}>3 · Badhub-Zugang</SectionHeader>
           <div className="flex gap-2.5 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-sm text-sky-900">
-            <Info size={18} strokeWidth={2} className="mt-0.5 shrink-0 text-sky-600" />
+            <Info
+              size={18}
+              strokeWidth={2}
+              className="mt-0.5 shrink-0 text-sky-600"
+            />
             <p>
               Für ein <strong>eigenes Turnier</strong> brauchst du einen eigenen
               Zugang. Wende dich vorab an{" "}
@@ -923,10 +971,10 @@ export function SetupWizard({
       <section className="flex flex-col gap-2">
         <SectionHeader icon={Wifi}>Tablet-Verbindung</SectionHeader>
         <p className="text-xs text-slate-500">
-          Wie erreichen die Schiedsrichter-Tablets diesen PC? Beide Wege
-          lassen sich zusammen aktivieren – etwa für ein Zwei-Hallen-Turnier
-          (eine Halle per LAN, die andere über die Cloud). Lässt sich später
-          in den Einstellungen umstellen.
+          Wie erreichen die Schiedsrichter-Tablets diesen PC? Beide Wege lassen
+          sich zusammen aktivieren – etwa für ein Zwei-Hallen-Turnier (eine
+          Halle per LAN, die andere über die Cloud). Lässt sich später in den
+          Einstellungen umstellen.
         </p>
         <ToggleCard
           icon={Wifi}
@@ -957,9 +1005,9 @@ export function SetupWizard({
             type="tel"
           />
           <p className="mt-1 text-xs text-slate-500">
-            Schützt das Zahnrad-Menü am Zähltablett (Feld wechseln ohne QR).
-            Nur Ziffern. Reiner Bedien-Schutz – die echte Kiosk-Sperre macht
-            der Kiosk-Browser (eigener Exit-PIN).
+            Schützt das Zahnrad-Menü am Zähltablett (Feld wechseln ohne QR). Nur
+            Ziffern. Reiner Bedien-Schutz – die echte Kiosk-Sperre macht der
+            Kiosk-Browser (eigener Exit-PIN).
           </p>
         </div>
       </section>
@@ -1037,9 +1085,30 @@ export function SetupWizard({
         )}
       </section>
 
+      {/* Zähltafelbediener-Verwaltung (ADR 0007) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Users}>Zähltafelbediener</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Wie im Original-BTS: der <strong>Verlierer</strong> eines regulär
+          beendeten Spiels kommt in eine Warteschlange und ist als nächster
+          Zähltafelbediener dran. Die Reihenfolge siehst und pflegst du in der
+          Spielübersicht. (Walkover/Aufgabe erzeugen keinen Eintrag.)
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={skEnabled}
+            onChange={(e) => setSkEnabled(e.currentTarget.checked)}
+          />
+          Zähltafelbediener-Warteschlange führen
+        </label>
+      </section>
+
       {/* Automatische Feldvergabe */}
       <section className="flex flex-col gap-2">
-        <SectionHeader icon={LayoutGrid}>Automatische Feldvergabe</SectionHeader>
+        <SectionHeader icon={LayoutGrid}>
+          Automatische Feldvergabe
+        </SectionHeader>
         <p className="text-xs text-slate-500">
           Belegt freie Felder automatisch mit dem nächsten spielbereiten Spiel –
           in der Reihenfolge der BTP-Ansetzung (Zeitplan von oben nach unten),
@@ -1090,17 +1159,18 @@ export function SetupWizard({
               placeholder="z. B. Halle A"
             />
             <p className="text-xs text-slate-500">
-              Nur für <strong>Mehr-Hallen-Turniere</strong>, bei denen an einem Tag
-              nur in <strong>einer</strong> Halle gespielt wird (z. B. eine Datei für
-              zwei Tage). Trägst du hier den Hallennamen ein (wie in BTP), verteilt
-              die Auto-Vergabe nur auf diese Halle — <strong>ohne</strong> dass du
-              Spiele erst „in Vorbereitung" rufen musst. Leer lassen bei
-              Ein-Hallen-Turnieren.
+              Nur für <strong>Mehr-Hallen-Turniere</strong>, bei denen an einem
+              Tag nur in <strong>einer</strong> Halle gespielt wird (z. B. eine
+              Datei für zwei Tage). Trägst du hier den Hallennamen ein (wie in
+              BTP), verteilt die Auto-Vergabe nur auf diese Halle —{" "}
+              <strong>ohne</strong> dass du Spiele erst „in Vorbereitung" rufen
+              musst. Leer lassen bei Ein-Hallen-Turnieren.
             </p>
             <p className="flex items-start gap-1.5 text-xs text-amber-700">
               <Info size={14} className="mt-0.5 shrink-0" />
-              Mehr-Hallen OHNE gesetzte aktive Halle: es werden nur Spiele verteilt,
-              die du für die jeweilige Halle „in Vorbereitung" gerufen hast.
+              Mehr-Hallen OHNE gesetzte aktive Halle: es werden nur Spiele
+              verteilt, die du für die jeweilige Halle „in Vorbereitung" gerufen
+              hast.
             </p>
           </div>
         )}
@@ -1140,7 +1210,11 @@ export function SetupWizard({
                         rs.map((r, j) => {
                           if (j !== i) return r;
                           if (v.startsWith("cat:")) {
-                            return { ...r, discipline: v.slice(4), draw_name: "" };
+                            return {
+                              ...r,
+                              discipline: v.slice(4),
+                              draw_name: "",
+                            };
                           }
                           const rest = v.slice(5); // nach "draw:"
                           const sep = rest.indexOf(":");
@@ -1219,7 +1293,10 @@ export function SetupWizard({
       )}
 
       {/* Court-Monitor */}
-      <section id="section-court-monitor" className="flex flex-col gap-2 scroll-mt-4">
+      <section
+        id="section-court-monitor"
+        className="flex flex-col gap-2 scroll-mt-4"
+      >
         <SectionHeader icon={Monitor}>Court-Monitor</SectionHeader>
         <p className="text-xs text-slate-500">
           TV-Anzeige am Spielfeld (Raspberry Pi): Werbung im Leerlauf, die
@@ -1278,7 +1355,10 @@ export function SetupWizard({
                           );
                         }}
                         onBlur={(e) => {
-                          void setCourtAdLabel(ad.file, e.currentTarget.value.trim());
+                          void setCourtAdLabel(
+                            ad.file,
+                            e.currentTarget.value.trim(),
+                          );
                         }}
                         className="flex-1 min-w-0 rounded border border-transparent bg-transparent
                                    px-1.5 py-0.5 text-sm text-slate-700 placeholder:text-slate-400
@@ -1324,7 +1404,9 @@ export function SetupWizard({
 
             {/* Anzeige-Optionen */}
             <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-slate-600">Anzeige</span>
+              <span className="text-sm font-medium text-slate-600">
+                Anzeige
+              </span>
               <label className="block">
                 <span className="mb-1 block text-xs text-slate-500">
                   Layout
@@ -1415,9 +1497,8 @@ export function SetupWizard({
             className="mt-0.5"
           />
           <span>
-            Diagnose-Logs automatisch an badhub senden – hilft, Fehler zu
-            finden und zu beheben. Enthält nur technische Daten (keine
-            Spielernamen).
+            Diagnose-Logs automatisch an badhub senden – hilft, Fehler zu finden
+            und zu beheben. Enthält nur technische Daten (keine Spielernamen).
           </span>
         </label>
       </section>

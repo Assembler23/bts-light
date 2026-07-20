@@ -80,6 +80,7 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | `src-tauri/src/tablet/server.rs`, `assets/tablet.html` | `docs/tablet.md` |
 | `src-tauri/src/tablet/relay_client.rs`, `relay/`, `relay-proto/` | `docs/cloud-relay.md` |
 | Walkover (`tablet/state.rs`, `server.rs`, `commands.rs` `walkover_*`) | `docs/walkover.md` |
+| **Zähltafelbediener** (`tablet/state.rs` `ScorekeeperEntry`/`*_scorekeeper`, `sync.rs` `track_scorekeepers`, `commands.rs` `scorekeeper_*`, `config.rs` `ScorekeeperConfig`, `pages/FieldOverviewPage.tsx`) | `docs/zaehltafelbediener.md` |
 | **Spiele in Vorbereitung** (`tablet/state.rs` `PreparationCall`, `commands.rs` `preparation_*`, `badhub/payload.rs` `preparation_call_ts`/`hall`, `badhub/diff.rs` Fingerabdruck, `pages/PreparationPanel.tsx`) | `docs/preparation.md` |
 | Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`, Ansage-Knopf in `PreparationPanel`) | `docs/announcements.md` |
 | Court-Monitor (`tablet/monitor.rs`, `tablet/mdns.rs`, `assets/monitor.html`, `assets/overview.html`, `assets/preparation.html`, `assets/flags/`, Court-/Monitor-/`/info/*`-Routen in `server.rs` + `relay/`, `pages/CourtMonitorPanel.tsx`, `monitor_*`-Commands) | `docs/court-monitor.md` |

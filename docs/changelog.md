@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.163
+
+- **Zähltafelbediener-Warteschlange (wie im Original-BTS), Phase 1.** Neu unter
+  Einstellungen → „Zähltafelbediener": Ist die Verwaltung aktiviert, kommt der
+  **Verlierer** eines regulär beendeten Spiels automatisch in eine
+  Warteschlange — er ist als nächster Zähltafelbediener dran. In der
+  Spielübersicht zeigt „Nächste Zähltafelbediener" die Reihenfolge; du kannst
+  vorziehen, entfernen und manuell jemanden hinzufügen. Walkover/Aufgabe
+  erzeugen keinen Eintrag. (Automatische Zuweisung ans Feld, Ansage und
+  BTP-Auscheck folgen in weiteren Schritten — siehe
+  [docs/zaehltafelbediener.md](docs/zaehltafelbediener.md).)
+
 ## v0.9.162
 
 - **Warnung, wenn eine ferne Halle offline geht.** Bisher meldete der Master

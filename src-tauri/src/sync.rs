@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::badhub::diff::{diff, Update};
 use crate::badhub::push;
 use crate::btp::client;
-use crate::btp::model::{BtpSnapshot, MatchStatus};
+use crate::btp::model::{BtpSnapshot, MatchResult, MatchStatus};
 use crate::config::AppConfig;
 use crate::tablet::state::TabletState;
 
@@ -466,7 +466,12 @@ impl SyncEngine {
     /// Zähltafelbediener fürs nächste Spiel auf diesem Feld. BTP behält die
     /// Feld-Zuordnung beendeter Spiele nicht zuverlässig — daher tracken
     /// wir den Übergang selbst über die Zyklen.
-    fn track_scorekeepers(&mut self, snapshot: &BtpSnapshot, tablet: &TabletState) {
+    fn track_scorekeepers(
+        &mut self,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+        manage_queue: bool,
+    ) {
         let oncourt_now: HashMap<i64, i64> = snapshot
             .matches
             .iter()
@@ -485,7 +490,13 @@ impl SyncEngine {
                         let loser = if w == 1 { &fm.team2 } else { &fm.team1 };
                         let names: Vec<String> = loser.iter().map(|p| p.name.clone()).collect();
                         if !names.is_empty() {
-                            tablet.set_scorekeeper(court_id, names);
+                            tablet.set_scorekeeper(court_id, names.clone());
+                            // Zähltafelbediener-Warteschlange (ADR 0007): nur
+                            // bei REGULÄR ausgespieltem Ergebnis einreihen —
+                            // Walkover/Aufgabe/DQ erzeugen keinen Bediener.
+                            if manage_queue && fm.result == MatchResult::Normal {
+                                tablet.enqueue_scorekeeper(fm.id, names, court_id, now_ms());
+                            }
                         }
                     }
                 }
@@ -826,7 +837,7 @@ impl SyncEngine {
         }
 
         self.stamp_finished(&mut snapshot);
-        self.track_scorekeepers(&snapshot, tablet);
+        self.track_scorekeepers(&snapshot, tablet, config.scorekeeper.enabled);
         // Aufruf-Timer: je Feld festhalten, seit wann das aktuelle Spiel dort
         // steht (1. Aufruf). Aus demselben OnCourt-Stand wie die Scorekeeper.
         // Bewusst VOR set_snapshot: so ist der Zeitstempel spätestens da, wenn
@@ -1692,7 +1703,7 @@ mod tests {
         let mut engine = SyncEngine::new();
         let tablet = TabletState::default();
         let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
-        engine.track_scorekeepers(&snap1, &tablet);
+        engine.track_scorekeepers(&snap1, &tablet, false);
         assert!(
             tablet.scorekeeper(5).is_empty(),
             "läuft noch → kein Bediener"
@@ -1703,8 +1714,64 @@ mod tests {
             vec![finished_named(1, 42, "A", "B")],
             Vec::new(),
         );
-        engine.track_scorekeepers(&snap2, &tablet);
+        engine.track_scorekeepers(&snap2, &tablet, false);
         assert_eq!(tablet.scorekeeper(5), vec!["B".to_string()]);
+    }
+
+    #[test]
+    fn scorekeeper_queue_enqueues_loser_of_regular_finish() {
+        // ADR 0007: bei regulär beendetem Spiel wird der Verlierer in die
+        // globale Warteschlange eingereiht (manage_queue = true).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet, true);
+        assert!(tablet.scorekeeper_queue().is_empty());
+        let snap2 = snap_with(
+            Vec::new(),
+            vec![finished_named(1, 42, "A", "B")],
+            Vec::new(),
+        );
+        engine.track_scorekeepers(&snap2, &tablet, true);
+        let q = tablet.scorekeeper_queue();
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0].names, vec!["B".to_string()]);
+        assert_eq!(q[0].from_court_id, 5);
+    }
+
+    #[test]
+    fn scorekeeper_queue_skips_walkover_finish() {
+        // Walkover erzeugt keinen Zähltafelbediener (Tilo: nur reguläre Spiele).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet, true);
+        let mut wo = finished_named(1, 42, "A", "B");
+        wo.result = MatchResult::Walkover;
+        let snap2 = snap_with(Vec::new(), vec![wo], Vec::new());
+        engine.track_scorekeepers(&snap2, &tablet, true);
+        assert!(tablet.scorekeeper_queue().is_empty());
+    }
+
+    #[test]
+    fn scorekeeper_queue_off_when_disabled() {
+        // manage_queue = false → keine Warteschlange (per-Feld-Hinweis bleibt).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet, false);
+        let snap2 = snap_with(
+            Vec::new(),
+            vec![finished_named(1, 42, "A", "B")],
+            Vec::new(),
+        );
+        engine.track_scorekeepers(&snap2, &tablet, false);
+        assert!(tablet.scorekeeper_queue().is_empty());
+        assert_eq!(
+            tablet.scorekeeper(5),
+            vec!["B".to_string()],
+            "Hinweis bleibt"
+        );
     }
 
     #[test]
@@ -1714,10 +1781,10 @@ mod tests {
         let mut engine = SyncEngine::new();
         let tablet = TabletState::default();
         let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
-        engine.track_scorekeepers(&snap1, &tablet);
+        engine.track_scorekeepers(&snap1, &tablet, false);
 
         let snap2 = snap_with(Vec::new(), vec![ready_named(1, None, "A", "B")], Vec::new());
-        engine.track_scorekeepers(&snap2, &tablet);
+        engine.track_scorekeepers(&snap2, &tablet, false);
         assert!(tablet.scorekeeper(5).is_empty());
     }
 }
