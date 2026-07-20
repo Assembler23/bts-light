@@ -163,6 +163,33 @@ bts-light gemeldet und per `SENDUPDATE` (`ScoreStatus`) nach BTP geschrieben
 (LAN- und Cloud-Modus). Aufgabe und Kampflos schließen sich aus — der Server
 weist beide gesetzten Flags ab.
 
+## Ergebnis direkt eintragen (niemand hat gezählt)
+
+Der ebenfalls dezente Button **„Ergebnis eintragen …"** in der Fußzeile
+(offen sichtbar — ein Spieler muss ihn zur Not selbst bedienen können)
+öffnet einen Dialog, in dem die **Satzstände** direkt eingetippt werden.
+Anwendungsfall: Es hat niemand live am Tablet gezählt, das reguläre
+Ergebnis soll trotzdem übermittelt werden.
+
+- Die Spalten sind mit den Team-Namen der **linken/rechten** Court-Hälfte
+  beschriftet; „+ Satz" ergänzt eine Zeile (bis zur Satzanzahl des
+  Formats). Der aktuelle Stand ist vorbelegt, falls doch schon gezählt
+  wurde.
+- **Plausibilität clientseitig:** Jeder Satz muss regulär zu Ende gespielt
+  sein (`setWinnerSide` gegen Ziel/Cap der BTP-Zählweise) und es muss ein
+  **eindeutiger Match-Sieger** herauskommen — sonst erscheint eine
+  Meldung im Dialog. Das ist dieselbe Regel wie serverseitig
+  (`server::set_is_complete`, siehe [walkover.md](walkover.md)).
+- „Übernehmen" füllt die Sätze, markiert das Match als beendet und öffnet
+  das **normale Match-Ende-Overlay** (Sieger + „Ergebnis übermitteln") —
+  ab da läuft alles über den bewährten, gegen Netzausfälle abgesicherten
+  Sende-/Retry-Weg wie beim Live-Zählen. „Korrektur — Match wieder
+  öffnen" macht die Eingabe rückgängig.
+
+Für Kampflos/Aufgabe ist weiterhin der Dialog **„Match beenden"** da; der
+Mid-Game-Einstieg (mitten im Spiel übernehmen und weiterzählen) ist noch
+offen (Roadmap Plan 12b).
+
 ## Kampflose Wertung nach Aufgabe
 
 **Nur auf ausdrückliche Wahl** (Dialog-Option „Verletzung – auch Folgespiele
