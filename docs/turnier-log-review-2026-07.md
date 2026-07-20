@@ -41,9 +41,10 @@ Sonntag war ein bewusster Gerätetausch (HM-06, 17:24) — gewollter Flow.
    je einen Abruf lang „0 Hallen/Felder/Matches" → Massen-Freigabe aller
    Felder, Sekunden später automatische Wiederzuweisung. Ursache
    BTP-seitig (u. a. während Tilos Gruppen-Umbau, der 5 laufende Spiele
-   kappte). **Fix: Leer-Snapshot-Guard** — einen leeren Snapshot direkt
-   nach einem gefüllten erst nach zweiter Bestätigung übernehmen +
-   Dashboard-Warnung. (S)
+   kappte). ~~**Fix: Leer-Snapshot-Guard**~~ → **umgesetzt (Cluster A2):**
+   leerer Snapshot nach gefülltem Stand wird verworfen und erst nach
+   Bestätigung im Folge-Abruf übernommen; Dashboard zeigt eine Warnung
+   (`sync.rs::empty_snapshot_is_suspect`, Doku in btp_protocol.md).
 2. **Zombie-Host blockiert Reconnect** — 18:22–18:39: **333×** „Zweiter
    Host abgewiesen" in 17 Minuten. Nach einem Netzwechsel hielt die tote
    alte Master-Verbindung den Namespace; der eigene Reconnect wurde als

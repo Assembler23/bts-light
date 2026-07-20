@@ -128,6 +128,14 @@ einen `Update`-Container.
 
 ## Response: SENDTOURNAMENTINFO
 
+> **Leer-Snapshot-Guard** (`sync.rs`, seit Cluster A): BTP kann vereinzelt
+> einen Abruf lang einen leeren Turnier-Stand liefern (Turnier-Befund
+> 19.07.2026, u. a. während eines Gruppen-Umbaus in BTP). Ein Snapshot
+> **ohne Matches direkt nach gefüllten Daten** wird deshalb verworfen und
+> erst übernommen, wenn der Folge-Abruf ihn bestätigt — vorher ändert der
+> Zyklus keinerlei Zustand (keine Feld-Freigabe, keine Auto-Vergabe, kein
+> Liveticker-Push). Das Dashboard zeigt den verworfenen Abruf als Warnung.
+
 Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 `Tournament` (jeder ist eine `GROUP`, jeder optional – fehlt wenn leer):
 

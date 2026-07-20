@@ -63,6 +63,9 @@ pub enum SyncOutcome {
     SlaveActive,
     /// BTP nicht erreichbar oder Antwort unbrauchbar.
     BtpError(String),
+    /// Verdächtig leerer BTP-Snapshot verworfen (Leer-Snapshot-Guard);
+    /// der Zyklus hat keinerlei Zustand verändert.
+    SnapshotDiscarded,
     /// Push an Badhub fehlgeschlagen.
     PushError(String),
 }
@@ -98,11 +101,24 @@ pub struct SyncEngine {
     /// Einträge fallen weg, sobald das Feld belegt erscheint oder nach
     /// [`PENDING_AUTO_TTL`] (fehlgeschlagener Write → erneuter Versuch).
     pending_auto: HashMap<i64, (i64, u64)>,
+    /// Leer-Snapshot-Guard: Hat diese Sitzung schon einen Snapshot MIT
+    /// Matches gesehen? Nur dann ist ein plötzlich leerer Stand verdächtig.
+    seen_matches: bool,
+    /// Anzahl der direkt aufeinanderfolgenden leeren Snapshots, die der
+    /// Guard bereits verworfen hat.
+    suspect_empty_polls: u32,
 }
 
 /// Wie lange eine offene Auto-Zuweisung als „unterwegs" gilt, bevor sie als
 /// fehlgeschlagen verworfen und neu versucht wird (BTP-Write nicht sichtbar).
 const PENDING_AUTO_TTL: Duration = Duration::from_secs(30);
+
+/// Leer-Snapshot-Guard: Beim wievielten aufeinanderfolgenden leeren Abruf
+/// der leere Stand als echt übernommen wird. 2 = ein einzelner leerer
+/// Abruf wird verworfen, die Bestätigung im Folge-Poll übernommen
+/// (Turnier-Befund 19.07.: BTP lieferte 2× je EINEN Abruf lang
+/// „0 Hallen/Felder/Matches" → Massen-Freigabe aller Felder).
+const EMPTY_CONFIRM_POLLS: u32 = 2;
 
 impl Default for SyncEngine {
     fn default() -> Self {
@@ -121,7 +137,43 @@ impl SyncEngine {
             oncourt_prev: HashMap::new(),
             court_free_since: HashMap::new(),
             pending_auto: HashMap::new(),
+            seen_matches: false,
+            suspect_empty_polls: 0,
         }
+    }
+
+    /// Leer-Snapshot-Guard (Turnier-Befund 19.07.2026): BTP lieferte
+    /// vereinzelt einen Abruf lang einen leeren Turnier-Stand — ungefiltert
+    /// gab das alle Felder frei (samt Auto-Neuvergabe Sekunden später) und
+    /// leerte den Liveticker. Ein leerer Snapshot direkt nach gefüllten
+    /// Daten wird deshalb verworfen und erst übernommen, wenn BTP ihn im
+    /// Folge-Poll bestätigt (echte Leerung, z. B. Turnier in BTP
+    /// geschlossen). R2 bleibt gewahrt: BTP ist die Wahrheit — nur eben
+    /// erst, wenn es zweimal dasselbe sagt.
+    ///
+    /// Liefert `true`, wenn der Snapshot verdächtig ist und der Zyklus
+    /// ohne jede Zustandsänderung abgebrochen werden soll.
+    fn empty_snapshot_is_suspect(&mut self, snapshot: &BtpSnapshot) -> bool {
+        if !snapshot.matches.is_empty() {
+            self.seen_matches = true;
+            self.suspect_empty_polls = 0;
+            return false;
+        }
+        // Noch nie Matches gesehen (Start vor Turnier-Aufbau) → leer ist
+        // der normale Zustand, nichts zu schützen.
+        if !self.seen_matches {
+            return false;
+        }
+        self.suspect_empty_polls += 1;
+        if self.suspect_empty_polls >= EMPTY_CONFIRM_POLLS {
+            // BTP bleibt dabei → leeren Stand als echt übernehmen. Guard
+            // zurücksetzen: leer ist ab jetzt der bekannte Zustand, bis
+            // wieder Matches auftauchen.
+            self.seen_matches = false;
+            self.suspect_empty_polls = 0;
+            return false;
+        }
+        true
     }
 
     /// Ist ein Heartbeat fällig? `true`, wenn noch nie gepusht wurde oder
@@ -457,6 +509,19 @@ impl SyncEngine {
             Ok(snapshot) => snapshot,
             Err(e) => return SyncOutcome::BtpError(e.to_string()),
         };
+
+        // Leer-Snapshot-Guard: verdächtig leere Stände verwerfen, BEVOR
+        // irgendetwas davon abgeleitet wird (Feld-Freigaben, Auto-Vergabe,
+        // Tablet-Snapshot, Liveticker-Push).
+        if self.empty_snapshot_is_suspect(&snapshot) {
+            tracing::warn!(
+                "BTP-Snapshot ohne Matches direkt nach gefülltem Stand — verworfen \
+                 (Abruf {}/{}), warte auf Bestätigung im nächsten Abruf",
+                self.suspect_empty_polls,
+                EMPTY_CONFIRM_POLLS
+            );
+            return SyncOutcome::SnapshotDiscarded;
+        }
 
         // Turnier-Topologie ins Diagnose-Log – nur bei Änderung, damit es
         // den Log nicht jeden Poll-Zyklus flutet. Zeigt u. a., ob ein
@@ -1103,6 +1168,73 @@ mod tests {
         assert!(
             courts.is_empty(),
             "Feld mit noch nicht abgeräumtem beendeten Spiel bleibt belegt"
+        );
+    }
+
+    // ───────────────────── Leer-Snapshot-Guard ─────────────────────
+
+    #[test]
+    fn empty_snapshot_before_any_data_is_not_suspect() {
+        // App startet vor dem Turnier-Aufbau: BTP liefert (noch) keine
+        // Matches — das ist der Normalzustand, kein Verdachtsfall.
+        let mut engine = SyncEngine::new();
+        let empty = snap_with(Vec::new(), Vec::new(), Vec::new());
+        assert!(!engine.empty_snapshot_is_suspect(&empty));
+        assert!(!engine.empty_snapshot_is_suspect(&empty));
+    }
+
+    #[test]
+    fn single_empty_snapshot_after_data_is_discarded() {
+        // Turnier-Befund 19.07.: BTP lieferte EINEN Abruf lang 0 Matches →
+        // ohne Guard Massen-Freigabe aller Felder. Der erste leere Abruf
+        // nach gefüllten Daten wird verworfen.
+        let mut engine = SyncEngine::new();
+        let full = snap_with(Vec::new(), vec![ready_match(1, 1)], Vec::new());
+        let empty = snap_with(Vec::new(), Vec::new(), Vec::new());
+        assert!(!engine.empty_snapshot_is_suspect(&full));
+        assert!(
+            engine.empty_snapshot_is_suspect(&empty),
+            "1. leerer Abruf → verwerfen"
+        );
+    }
+
+    #[test]
+    fn second_consecutive_empty_snapshot_is_accepted() {
+        // Bestätigt BTP den leeren Stand im Folge-Poll, ist er die Wahrheit
+        // (R2) — z. B. Turnier in BTP geschlossen. Danach ist leer der
+        // bekannte Zustand: keine weiteren Verwerfungen.
+        let mut engine = SyncEngine::new();
+        let full = snap_with(Vec::new(), vec![ready_match(1, 1)], Vec::new());
+        let empty = snap_with(Vec::new(), Vec::new(), Vec::new());
+        assert!(!engine.empty_snapshot_is_suspect(&full));
+        assert!(engine.empty_snapshot_is_suspect(&empty));
+        assert!(
+            !engine.empty_snapshot_is_suspect(&empty),
+            "2. leerer Abruf → übernehmen"
+        );
+        assert!(
+            !engine.empty_snapshot_is_suspect(&empty),
+            "leer bleibt akzeptiert"
+        );
+    }
+
+    #[test]
+    fn returning_matches_rearm_the_guard() {
+        // Kommen nach einem verworfenen leeren Abruf wieder Matches, war es
+        // ein Aussetzer: Zähler zurück, der NÄCHSTE leere Abruf wird wieder
+        // als erster (verdächtiger) gewertet.
+        let mut engine = SyncEngine::new();
+        let full = snap_with(Vec::new(), vec![ready_match(1, 1)], Vec::new());
+        let empty = snap_with(Vec::new(), Vec::new(), Vec::new());
+        assert!(!engine.empty_snapshot_is_suspect(&full));
+        assert!(engine.empty_snapshot_is_suspect(&empty));
+        assert!(
+            !engine.empty_snapshot_is_suspect(&full),
+            "Daten zurück → alles normal"
+        );
+        assert!(
+            engine.empty_snapshot_is_suspect(&empty),
+            "neuer Aussetzer → wieder verwerfen"
         );
     }
 
