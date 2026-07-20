@@ -190,3 +190,11 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   verbunden") oder ein zweiter Host belegt den Namespace.
 - Ergebnis-Übermittlung meldet „Zeitüberschreitung" → bts-light hat nicht
   geantwortet; meist BTP-seitig (Netzwerk-Edits in BTP nicht erlaubt).
+- **Wiederkehrende „Host unbekannt"-Fehler im App-Log** → der DNS des
+  Hallen-Routers ist unzuverlässig (Turnier-Log 19.07.2026: 23 Ausfälle
+  an einem Tag; der Backoff-Reconnect heilte jeden). **Empfehlung für
+  den Turnier-PC:** in den Windows-Netzwerkeinstellungen einen
+  öffentlichen DNS eintragen (bevorzugt `1.1.1.1`, alternativ `8.8.8.8`)
+  — Adaptereinstellungen → IPv4 → „Folgende DNS-Serveradressen
+  verwenden". Das macht Liveticker und Cloud-Relay unabhängig vom
+  Router-DNS.

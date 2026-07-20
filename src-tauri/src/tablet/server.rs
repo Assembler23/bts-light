@@ -1037,10 +1037,21 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         end_ts_ms: Some(end_ms),
     };
 
+    // Log-Label: Das Tablet liefert sein courtLabel nicht auf jedem Pfad
+    // (Turnier-Log 19.07.: 7× „Feld 38 ('')") — dann den Feldnamen aus
+    // dem Snapshot nachschlagen, damit die Zeile lesbar bleibt.
+    let court_label = if body.court_label.is_empty() {
+        ctx.tablet
+            .court_name_map()
+            .remove(&body.court_id)
+            .unwrap_or_else(|| "?".to_string())
+    } else {
+        body.court_label.clone()
+    };
     tracing::info!(
         "Ergebnis vom Tablet: Feld {} ('{}'), Match {}, Sätze {:?} – schreibe nach BTP",
         body.court_id,
-        body.court_label,
+        court_label,
         m.id,
         update.sets
     );
