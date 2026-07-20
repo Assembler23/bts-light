@@ -1,8 +1,13 @@
 import { useEffect, useRef } from "react";
 import { cloudAnnounceState } from "../api";
 import { azureOption, inheritedAzureOption } from "../io/azureAnnounce";
-import { playAnnouncement, playFreeText, resolveAnnouncementLanguage } from "../io/announcer";
+import {
+  playAnnouncement,
+  playFreeText,
+  resolveAnnouncementLanguage,
+} from "../io/announcer";
 import { setInheritedAzureVoice } from "../state/azureStatus";
+import { setPreparedGames } from "../state/preparedGames";
 import type { AnnounceConfig, AzureTtsConfig, Discipline } from "../types";
 
 const POLL_MS = 3000;
@@ -44,6 +49,9 @@ export function CloudAnnounceSlave({
           // („vom Master geerbt ✓"). Null = keine Vererbung (kein Slave,
           // Azure am Master aus oder alter Relay).
           setInheritedAzureVoice(state.azure_voice);
+          // Aufgerufene Spiele der eigenen Halle für die Ansagen-Seite
+          // (Cluster C Stufe 2) veröffentlichen — ein Poll, zwei Verbraucher.
+          setPreparedGames(state.prepared);
           // Höchste Freitext-ID merken (Items sind bereits nur neue).
           if (state.freetext.length > 0) {
             lastFreetextId.current = state.freetext.reduce(
@@ -53,23 +61,27 @@ export function CloudAnnounceSlave({
           }
           // Erste Runde nur als Baseline: aktuellen Stand merken, nichts ansagen.
           if (!baseline.current) {
-            for (const c of state.courts) lastMatch.current.set(c.court_id, c.match_id);
+            for (const c of state.courts)
+              lastMatch.current.set(c.court_id, c.match_id);
             baseline.current = true;
             return;
           }
           if (!cfg.enabled) {
             // Trotzdem den Stand nachführen, damit nach dem Aktivieren nicht
             // alle laufenden Spiele nachträglich angesagt werden.
-            for (const c of state.courts) lastMatch.current.set(c.court_id, c.match_id);
+            for (const c of state.courts)
+              lastMatch.current.set(c.court_id, c.match_id);
             return;
           }
           const lang = cfg.language_mode === "en" ? "en" : "de";
-          const voiceURI = (lang === "de" ? cfg.voice_de : cfg.voice_en) || undefined;
+          const voiceURI =
+            (lang === "de" ? cfg.voice_de : cfg.voice_en) || undefined;
           // Azure: vollständige lokale Config gewinnt, sonst die vom Master
           // geerbte (ADR 0003) — der Rust-Command wendet dieselbe Vorrangregel
           // auf Key/Region an.
           const azure =
-            azureOption(azureRef.current) ?? inheritedAzureOption(state.azure_voice);
+            azureOption(azureRef.current) ??
+            inheritedAzureOption(state.azure_voice);
           // Neue Feld-Belegungen ansagen.
           for (const c of state.courts) {
             const prev = lastMatch.current.get(c.court_id);
@@ -91,7 +103,8 @@ export function CloudAnnounceSlave({
               {
                 rate: cfg.rate,
                 voiceURI:
-                  (announceLang === "de" ? cfg.voice_de : cfg.voice_en) || undefined,
+                  (announceLang === "de" ? cfg.voice_de : cfg.voice_en) ||
+                  undefined,
                 gong: cfg.gong,
                 nameOverrides: cfg.name_overrides,
                 nameOverridesEnabled: cfg.name_overrides_enabled,

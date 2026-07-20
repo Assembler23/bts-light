@@ -265,9 +265,28 @@ Master-Fenster (kein Server-/Ticker-Zustand — wie Tilos Pass-Through-
 Zweitaufruf). Es wird **nur die genannte Seite** angesagt (die andere ist
 schon da). Englisch: „Second call for: …" / „Third and final call for: …".
 
-**Nur am Master.** Derselbe Nachruf **vom fernen Slave** (Nutzerwunsch)
-braucht einen Relay-Rückkanal + Kandidaten-Sicht am Slave — geplant als
-Stufe 2 zusammen mit der Slave-Spielübersicht (Roadmap).
+**Auch am fernen Slave (Stufe 2, v0.9.154).** Derselbe Nachruf geht jetzt
+vom Cloud-Slave der fernen Halle aus — und wird **lokal auf dem Slave-
+Rechner** angesagt, direkt dort, wo die fehlende Partei steht (kein
+Rückkanal zum Master nötig). Datenweg:
+
+- Der Master pusht seine **aufgerufenen Spiele** (nur gerufene, noch
+  ruf-bare Paarungen) periodisch als `HostFrame::Prepared` an den Relay –
+  gebündelt, nur bei Änderung (Fingerabdruck in `push_prepared`,
+  `relay_client.rs`; reine Liste über `build_prepared_list`). Ein leerer
+  Push leert die Relay-Liste (kein Aufruf mehr offen).
+- Der Relay hält sie je Namespace (`Namespace.prepared`) und gibt sie in
+  `GET /{ns}/info/announce/state` **hallengefiltert** zurück
+  (`AnnounceState.prepared`, gleiche Filterregel wie die Court-Matches).
+- Der Slave holt sie über `cloud_announce_state` (`CloudPrepared`) und
+  zeigt sie auf der Ansagen-Seite unter **„Aufgerufene Spiele"**. Die
+  zwei Nachruf-Knöpfe je Partei rufen dieselbe
+  `playPreparationAnnouncement`-Funktion mit `callStage` auf wie der
+  Master; der `(Spiel, Partei)`-Zähler lebt clientseitig im Slave-Fenster.
+
+Damit ist der Nachruf in beiden Rollen identisch – nur die Kandidatenliste
+kommt am Slave aus der Cloud statt aus BTP. Siehe auch
+[docs/multi-hall.md](multi-hall.md) und [docs/cloud-relay.md](cloud-relay.md).
 
 ## Bekannte Grenzen
 

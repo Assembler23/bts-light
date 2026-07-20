@@ -145,6 +145,10 @@ struct Namespace {
     /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
     /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
     courts: Vec<CourtBrief>,
+    /// Aufgerufene (in Vorbereitung gerufene) Spiele der fernen Hallen – für
+    /// die Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2).
+    /// Vom Host via `HostFrame::Prepared` gepusht; ersetzt jeweils die Liste.
+    prepared: Vec<relay_proto::PreparedMatch>,
     /// Azure-TTS-Konfiguration des Masters für die Vererbung an Cloud-Ansage-
     /// Slaves (ADR 0003). Kommt mit jedem `HostFrame::Courts`-Push; `None`
     /// überschreibt bewusst — Azure am Master aus = Vererbung endet. Enthält
@@ -176,6 +180,7 @@ impl Namespace {
             court_on_court_since: HashMap::new(),
             court_labels: HashMap::new(),
             court_hall: HashMap::new(),
+            prepared: Vec::new(),
             freetext: Vec::new(),
             slaves: HashMap::new(),
             courts: Vec::new(),
@@ -717,9 +722,18 @@ async fn announce_state(
                 })
                 .cloned()
                 .collect();
+            // Aufgerufene Spiele der Halle (Slave-Spielübersicht + Nachruf,
+            // Cluster C Stufe 2) — gleiche Hallenfilter-Regel wie bei courts.
+            let prepared: Vec<relay_proto::PreparedMatch> = n
+                .prepared
+                .iter()
+                .filter(|p| q.hall.is_empty() || p.hall.is_empty() || p.hall == q.hall)
+                .cloned()
+                .collect();
             relay_proto::AnnounceState {
                 courts,
                 freetext,
+                prepared,
                 // Geerbte Azure-Config (ADR 0003) — gleiche Vertrauensstufe
                 // wie der übrige Namespace-Inhalt (Bearer = install_id).
                 azure_tts: n.azure_tts.clone(),
@@ -1831,6 +1845,14 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // (Azure am Master deaktiviert → geerbte Config verfällt).
             namespace.azure_tts = azure_tts;
         }
+        HostFrame::Prepared { mut prepared } => {
+            // Aufgerufene Spiele der fernen Hallen für die Slave-Spielübersicht
+            // + den Nachruf merken (Cluster C Stufe 2). Jeder Push ersetzt die
+            // Liste vollständig — ein leerer Push (kein Aufruf offen) leert sie
+            // bewusst. Cap gegen pathologische Frames.
+            prepared.truncate(200);
+            namespace.prepared = prepared;
+        }
     }
     true
 }
@@ -2391,6 +2413,99 @@ mod tests {
             !map.get("ns1").unwrap().court_state.contains_key(&101),
             "alter Stand landet nicht im Cache"
         );
+    }
+
+    fn prepared(match_id: i64, hall: &str) -> relay_proto::PreparedMatch {
+        relay_proto::PreparedMatch {
+            match_id,
+            hall: hall.into(),
+            discipline: "mens_singles".into(),
+            class_label: "A".into(),
+            round_name: "G1".into(),
+            team_a: vec![PlayerBrief {
+                id: 1,
+                name: "Anna Weber".into(),
+                nationality: Some("GER".into()),
+            }],
+            team_b: vec![PlayerBrief {
+                id: 2,
+                name: "Bea Schulz".into(),
+                nationality: None,
+            }],
+            match_number: Some(101),
+            called_at_ms: 1_700_000_000_000,
+        }
+    }
+
+    /// `HostFrame::Prepared` ersetzt die Liste vollständig; ein leerer Push
+    /// leert sie (kein Aufruf mehr offen). Grundlage der Slave-Spielübersicht.
+    #[tokio::test]
+    async fn prepared_frame_replaces_and_clears_list() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &host).await;
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Prepared {
+                prepared: vec![prepared(42, "Halle 1"), prepared(43, "Halle 2")],
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            assert_eq!(map.get("ns1").unwrap().prepared.len(), 2);
+        }
+
+        // Zweiter Push mit nur einem Spiel ersetzt die Liste vollständig.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Prepared {
+                prepared: vec![prepared(43, "Halle 2")],
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let p = &map.get("ns1").unwrap().prepared;
+            assert_eq!(p.len(), 1);
+            assert_eq!(p[0].match_id, 43);
+        }
+
+        // Leerer Push leert die Liste (alle Aufrufe zurückgenommen/aufs Feld).
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Prepared { prepared: vec![] },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        assert!(map.get("ns1").unwrap().prepared.is_empty());
+    }
+
+    /// Der Hallenfilter der Ansage-Antwort zeigt jeder Halle nur ihre eigenen
+    /// aufgerufenen Spiele (leere Halle am Match = überall sichtbar).
+    #[test]
+    fn prepared_hall_filter_matches_court_rule() {
+        let all = [prepared(42, "Halle 1"), prepared(43, "Halle 2"), {
+            let mut p = prepared(44, "");
+            p.hall = String::new();
+            p
+        }];
+        let for_hall = |hall: &str| -> Vec<i64> {
+            all.iter()
+                .filter(|p| hall.is_empty() || p.hall.is_empty() || p.hall == hall)
+                .map(|p| p.match_id)
+                .collect()
+        };
+        assert_eq!(for_hall("Halle 1"), vec![42, 44]);
+        assert_eq!(for_hall("Halle 2"), vec![43, 44]);
+        assert_eq!(for_hall(""), vec![42, 43, 44]);
     }
 
     /// Alte Tablet-Seiten (ohne deviceId) zählen nie als „dasselbe Gerät" —

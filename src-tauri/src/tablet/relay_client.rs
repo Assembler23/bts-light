@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use relay_proto::{
     AdUpload, AnnounceState, CourtBrief, HostFrame, MonitorControl, MonitorDeviceInfo,
-    MonitorUpload, RelayFrame, ResultBody,
+    MonitorUpload, PlayerBrief, PreparedMatch, RelayFrame, ResultBody,
 };
 
 use crate::tablet::monitor;
@@ -91,6 +91,10 @@ async fn serve(
     let mut monitor_ticker = tokio::time::interval(MONITOR_TICK);
     monitor_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut monitor_fp: Option<String> = None;
+    // Fingerabdruck der zuletzt gesendeten „aufgerufene Spiele"-Liste
+    // (Cluster C Stufe 2) — `None` erzwingt das erste Senden nach dem
+    // Verbinden (auch für die Wiederbefüllung nach einem Reconnect).
+    let mut prepared_fp: Option<String> = None;
     // Geräte-Steuerung: Feld-Zuweisungen/Befehle pushen, Geräteliste holen.
     let mut control_ticker = tokio::time::interval(CONTROL_TICK);
     control_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -127,6 +131,9 @@ async fn serve(
                 // Feld-Liste fürs Cloud-Feldwechsel-Menü mitschicken (selten
                 // veränderlich; erster Tick feuert sofort nach dem Verbinden).
                 push_courts(ctx, &tx);
+                // Aufgerufene Spiele für die Slave-Spielübersicht + den Nachruf
+                // am Slave (Cluster C Stufe 2) — nur bei Änderung senden.
+                push_prepared(ctx, &tx, &mut prepared_fp);
             }
             _ = control_ticker.tick() => {
                 sync_monitor_control(ctx, install_id, &mut control_fp).await;
@@ -607,6 +614,77 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
     }
 }
 
+/// Baut die Liste der aufgerufenen Spiele (in Vorbereitung gerufen) für die
+/// Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2). Nur
+/// gerufene, noch eingeplante Paarungen mit zwei feststehenden Mannschaften;
+/// jede wird mit ihrem Hallennamen versehen (Grundlage der Hallenfilterung am
+/// Relay). Rein funktional → unit-testbar; gleiche Ruf-Barkeitsregel wie
+/// `preparation_candidates`.
+fn build_prepared_list(
+    snapshot: &crate::btp::model::BtpSnapshot,
+    calls: &[crate::tablet::state::PreparationCall],
+) -> Vec<PreparedMatch> {
+    let players = |ps: &[crate::btp::model::BtpPlayer]| -> Vec<PlayerBrief> {
+        ps.iter()
+            .map(|p| PlayerBrief {
+                id: p.id,
+                name: p.name.clone(),
+                nationality: p.nationality.clone(),
+            })
+            .collect()
+    };
+    calls
+        .iter()
+        .filter_map(|call| {
+            let m = snapshot.matches.iter().find(|m| m.id == call.match_id)?;
+            // Nur noch ruf-bare, echte Paarungen (wie preparation_candidates):
+            // Ergebnis/Feld-Ruf räumt den Aufruf beim nächsten Push weg.
+            if m.status != crate::btp::model::MatchStatus::Scheduled
+                || m.team1.is_empty()
+                || m.team2.is_empty()
+            {
+                return None;
+            }
+            let hall = call
+                .location_id
+                .and_then(|lid| snapshot.locations.iter().find(|l| l.id == lid))
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            Some(PreparedMatch {
+                match_id: m.id,
+                hall,
+                discipline: m.discipline.as_str().to_string(),
+                class_label: m.class_label.clone(),
+                round_name: m.round_name.clone(),
+                team_a: players(&m.team1),
+                team_b: players(&m.team2),
+                match_number: m.match_num,
+                called_at_ms: call.called_at_ms,
+            })
+        })
+        .collect()
+}
+
+/// Pusht die aufgerufenen Spiele an den Relay – nur bei Änderung gegenüber dem
+/// letzten Push (Fingerabdruck). Ein leerer Push leert die Relay-Liste bewusst
+/// (kein Aufruf mehr offen). `None`-Fingerabdruck erzwingt das erste Senden.
+fn push_prepared(
+    ctx: &ServerCtx,
+    tx: &mpsc::UnboundedSender<WsMessage>,
+    last_fp: &mut Option<String>,
+) {
+    let Some(snapshot) = ctx.tablet.snapshot_clone() else {
+        return;
+    };
+    let prepared = build_prepared_list(&snapshot, &ctx.tablet.preparation_calls());
+    let fp = serde_json::to_string(&prepared).unwrap_or_default();
+    if last_fp.as_deref() == Some(fp.as_str()) {
+        return;
+    }
+    *last_fp = Some(fp);
+    let _ = tx.send(text(&HostFrame::Prepared { prepared }));
+}
+
 /// Azure-TTS-Konfiguration für die Vererbung an Cloud-Slaves (ADR 0003).
 /// Frisch von Platte gelesen, damit Einstellungs-Änderungen ohne Neustart
 /// greifen. `None`, wenn Azure aus oder unvollständig ist — der Relay
@@ -708,6 +786,58 @@ mod tests {
             WsMessage::Text(t) => t.to_string(),
             _ => String::new(),
         }
+    }
+
+    fn scheduled_match(id: i64) -> BtpMatch {
+        let mut m = match_on_court(id, 0);
+        m.status = MatchStatus::Scheduled;
+        m.court = None;
+        m.court_id = None;
+        m
+    }
+
+    /// `build_prepared_list` liefert nur gerufene, noch eingeplante Paarungen –
+    /// mit aufgelöstem Hallennamen. Aufrufe zu Nicht-mehr-ruf-baren Matches
+    /// (aufs Feld / beendet / fehlend) fallen raus (Grundlage der Slave-
+    /// Spielübersicht, Cluster C Stufe 2).
+    #[test]
+    fn build_prepared_list_only_callable_with_hall() {
+        use crate::btp::model::BtpLocation;
+        use crate::tablet::state::PreparationCall;
+
+        let mut snap = snapshot(vec![
+            scheduled_match(42),
+            match_on_court(43, 101), // schon aufs Feld → nicht mehr ruf-bar
+        ]);
+        snap.locations = vec![BtpLocation {
+            id: 5,
+            name: "Halle 2".into(),
+        }];
+
+        let calls = vec![
+            PreparationCall {
+                match_id: 42,
+                location_id: Some(5),
+                called_at_ms: 1_700_000_000_000,
+            },
+            PreparationCall {
+                match_id: 43, // steht auf dem Feld → ausgefiltert
+                location_id: Some(5),
+                called_at_ms: 1_700_000_000_000,
+            },
+            PreparationCall {
+                match_id: 999, // kein Match im Snapshot → ausgefiltert
+                location_id: None,
+                called_at_ms: 1_700_000_000_000,
+            },
+        ];
+
+        let prepared = build_prepared_list(&snap, &calls);
+        assert_eq!(prepared.len(), 1, "nur das eine ruf-bare Spiel");
+        assert_eq!(prepared[0].match_id, 42);
+        assert_eq!(prepared[0].hall, "Halle 2", "LocationID → Hallenname");
+        assert_eq!(prepared[0].team_a.len(), 1);
+        assert_eq!(prepared[0].team_b.len(), 1);
     }
 
     /// Cloud-Feld-Diffing: erster Push meldet die Zuweisung, ein unveränderter

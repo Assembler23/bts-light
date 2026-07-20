@@ -376,7 +376,9 @@ function disciplineWord(d: Discipline, lang: AnnounceLang): string {
 // Disziplin + Klassen-Kürzel („Herreneinzel A") — die Klasse kommt direkt
 // hinter die Disziplin (Turnier-Wunsch 17.07.2026). Ohne erkannte Disziplin
 // wird auch keine Klasse angesagt (ein nacktes „A." wäre unverständlich).
-function disciplineWithClass(
+// Exportiert, damit die Slave-Spielübersicht (Cluster C Stufe 2) dieselbe
+// Beschriftung anzeigt, die auch angesagt wird.
+export function disciplineWithClass(
   d: Discipline,
   className: string | undefined,
   lang: AnnounceLang,

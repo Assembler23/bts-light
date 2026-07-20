@@ -214,6 +214,16 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
   `SlaveConnectBanner.tsx`) — die Kopplung ist damit ohne Blick auf die
   Kopfzeile bestätigt. Beim App-Start bereits verbundene Hallen werden
   nicht gemeldet (Baseline).
+- **Aufgerufene Spiele + Nachruf am Slave (Cluster C Stufe 2, v0.9.154):** der
+  Master pusht seine in Vorbereitung gerufenen Spiele als `HostFrame::Prepared`
+  (nur bei Änderung, `push_prepared`/`build_prepared_list` in `relay_client.rs`);
+  der Relay hält sie je Namespace (`Namespace.prepared`) und liefert sie
+  hallengefiltert in `AnnounceState.prepared`. Der Slave zeigt sie auf der
+  Ansagen-Seite unter „Aufgerufene Spiele" (`CloudPrepared`) und kann den
+  **Zweit-/Drittaufruf** einer fehlenden Partei **lokal** ansagen — dieselbe
+  `playPreparationAnnouncement`-Logik wie am Master, nur läuft die Ansage in
+  der Slave-Halle. Kein Rückkanal zum Master. Details:
+  [announcements.md](announcements.md).
 - **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame` +
   `/slaves`-Route).
 
