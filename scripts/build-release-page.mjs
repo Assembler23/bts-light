@@ -8,6 +8,11 @@
 //     --files vorhandene-exes.txt \      (eine Datei je Zeile; optional)
 //     --out index.html \
 //     --notes-out notes.txt --notes-version 0.9.147   (optional)
+//     --dates dates.txt                               (optional)
+//
+// --dates: Datei „<version> <YYYY-MM-DD>" je Zeile (Rest ignoriert) — die
+// Seite zeigt je Version das Datum (TT.MM.JJJJ). Quelle im Release-Workflow:
+// `git for-each-ref --format '%(refname:short) %(creatordate:short)' refs/tags`.
 //
 // --files: nur Versionen, deren Installer wirklich auf dem Server liegt,
 // bekommen einen Download-Knopf (alte/TEST-Versionen fehlen teils).
@@ -29,6 +34,9 @@ const filesPath = arg("files");
 const outPath = arg("out", "index.html");
 const notesOut = arg("notes-out");
 const notesVersion = arg("notes-version");
+// Optionale Datei „Version Datum" je Zeile (z. B. aus `git for-each-ref`
+// über die Tags). Fehlt sie, bleibt die Datumsangabe je Version leer.
+const datesPath = arg("dates");
 
 const md = readFileSync(changelogPath, "utf8");
 
@@ -81,6 +89,21 @@ function plainText(s) {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
 }
 
+// ── Release-Daten je Version (optional) ───────────────────────────────────
+// Zeilenformat „<version> <YYYY-MM-DD>" (weitere Spalten werden ignoriert),
+// z. B. direkt aus `git for-each-ref --format '%(refname:short) %(creatordate:short)'`
+// mit vorangestelltem „v"-Strip. Ausgabe: deutsches Datum TT.MM.JJJJ.
+const dates = new Map();
+if (datesPath) {
+  for (const line of readFileSync(datesPath, "utf8").split("\n")) {
+    const m = line.trim().match(/^v?(\d+\.\d+\.\d+)\s+(\d{4})-(\d{2})-(\d{2})/);
+    if (m) dates.set(m[1], `${m[4]}.${m[3]}.${m[2]}`);
+  }
+}
+function dateOf(version) {
+  return dates.get(version) || "";
+}
+
 // ── Vorhandene Installer (optional) ───────────────────────────────────────
 let available = null;
 if (filesPath) {
@@ -130,10 +153,12 @@ const versionHtml = sections
     const dl = hasInstaller(sec.version)
       ? `<a class="dl${i === 0 ? " primary" : ""}" href="${setupName(sec.version)}">Download</a>`
       : `<span class="nodl">kein Installer verfügbar</span>`;
+    const date = dateOf(sec.version);
+    const dateHtml = date ? ` <span class="vdate">${date}</span>` : "";
     return `
     <section class="version${i === 0 ? " latest" : ""}" id="v${sec.version}">
       <div class="vhead">
-        <h2>Version ${sec.version}${i === 0 ? ' <span class="badge">aktuell</span>' : ""}</h2>
+        <h2>Version ${sec.version}${dateHtml}${i === 0 ? ' <span class="badge">aktuell</span>' : ""}</h2>
         ${dl}
       </div>
       <ul>
@@ -168,6 +193,7 @@ const html = `<!DOCTYPE html>
   .vhead h2 { margin: 0; font-size: 1.15rem; }
   .badge { background: #2f855a; color: #fff; font-size: .7rem; padding: .15rem .5rem;
            border-radius: 999px; vertical-align: middle; }
+  .vdate { color: #718096; font-size: .8rem; font-weight: 400; margin-left: .1rem; }
   a.dl { background: #edf2f7; color: #1a202c; border: 1px solid #cbd5e0; padding: .35rem .9rem;
          border-radius: 7px; text-decoration: none; font-weight: 600; white-space: nowrap; }
   a.dl.primary { background: #2f855a; border-color: #2f855a; color: #fff; }
