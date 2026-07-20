@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.151
+
+- **Endstand direkt am Tablet eintragen.** Hat niemand live am Tablet gezählt,
+  lässt sich das Ergebnis jetzt am Tablet selbst eingeben: der offen sichtbare
+  Knopf „Ergebnis eintragen …" öffnet einen Dialog für die Satzstände. Jeder
+  Satz muss regulär zu Ende gespielt sein und es muss ein eindeutiger Sieger
+  herauskommen; danach erscheint das gewohnte Match-Ende-Fenster zum
+  Übermitteln. (Kampflos/Aufgabe laufen weiter über „Match beenden".)
+
 ## v0.9.150
 
 - **Schnelleres Zählen am Tablet.** Der Punkt zählt jetzt beim Berühren der
