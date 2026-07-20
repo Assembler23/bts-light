@@ -8,6 +8,7 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from "react"
 import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
 import {
   assignCourt,
+  enterResult,
   finishedMatches,
   freeCourt,
   preparationCandidates,
@@ -79,6 +80,10 @@ export function FieldOverviewPage({
   const [error, setError] = useState<string>("");
   // Feld, dessen Freigabe gerade bestätigt werden soll (Sicherheitsabfrage).
   const [confirmFree, setConfirmFree] = useState<CourtOverview | null>(null);
+  // Backend-Finalisierung (Plan 12): Feld, für dessen Spiel die
+  // Turnierleitung gerade ein Ergebnis eintippt, plus die editierbaren Sätze.
+  const [enterFor, setEnterFor] = useState<CourtOverview | null>(null);
+  const [enterSets, setEnterSets] = useState<[number, number][]>([]);
   // Hallen-Filter (null = alle Hallen).
   const [hallFilter, setHallFilter] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
@@ -130,6 +135,37 @@ export function FieldOverviewPage({
     } finally {
       setBusy(false);
     }
+  }
+
+  // Ergebnis-Dialog öffnen: mit dem aktuellen Live-Satzstand vorbelegen (der
+  // häufige Fall „Finalisieren vergessen" braucht dann nur eine Bestätigung),
+  // plus eine leere Zeile zum Ergänzen. Ohne Live-Stand eine leere Startzeile.
+  function openEnter(c: CourtOverview) {
+    const base = c.sets.map(([a, b]) => [a, b] as [number, number]);
+    setEnterSets(base.length ? [...base, [0, 0]] : [[0, 0]]);
+    setEnterFor(c);
+  }
+
+  function setEnterCell(row: number, col: 0 | 1, value: string) {
+    const n = Math.max(0, Math.min(99, Math.floor(Number(value) || 0)));
+    setEnterSets((prev) =>
+      prev.map((s, i) => {
+        if (i !== row) return s;
+        const next: [number, number] = [s[0], s[1]];
+        next[col] = n;
+        return next;
+      }),
+    );
+  }
+
+  async function submitEnterResult() {
+    if (!enterFor) return;
+    // 0:0-Zeilen (ungespielt / Platzhalter) verwerfen; der Server validiert
+    // Satzmehrheit/Plausibilität zusätzlich (R5, derive_result).
+    const sets = enterSets.filter(([a, b]) => a > 0 || b > 0);
+    const matchId = enterFor.match_id;
+    setEnterFor(null);
+    await run(() => enterResult(matchId, sets));
   }
 
   // Disziplin/Klasse→Halle: erlaubte Halle eines Matches (oder null = frei).
@@ -384,6 +420,18 @@ export function FieldOverviewPage({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                openEnter(c);
+                              }}
+                              disabled={busy}
+                              title="Ergebnis dieses Spiels selbst eintragen (z. B. wenn kein Tablet gezählt hat)"
+                              className="rounded-md bg-emerald-200/70 px-2.5 py-1 text-xs font-medium
+                                         text-emerald-900 hover:bg-emerald-200 disabled:opacity-50"
+                            >
+                              Ergebnis
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setConfirmFree(c);
                               }}
                               disabled={busy}
@@ -618,6 +666,98 @@ export function FieldOverviewPage({
                            transition-colors hover:bg-rose-700 disabled:opacity-50"
               >
                 Freigeben
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ergebnis aus der Turnierleitung eintragen (Backend-Finalisierung). */}
+      {enterFor && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="enter-result-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-xl">
+            <div className="border-b border-slate-200 px-5 py-3">
+              <h2
+                id="enter-result-title"
+                className="font-semibold text-slate-800"
+              >
+                Ergebnis eintragen — Feld {enterFor.court}
+              </h2>
+            </div>
+            <div className="px-5 py-4 text-sm text-slate-700">
+              <p className="text-slate-600">
+                {enterFor.match_name || "Spiel"} —{" "}
+                {teamsLabel(enterFor.team1, enterFor.team2)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Satzstände {enterFor.team1.join(" / ") || "Team 1"} :{" "}
+                {enterFor.team2.join(" / ") || "Team 2"}. Der aktuelle Stand ist
+                vorbelegt — bei Bedarf korrigieren.
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
+                {enterSets.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-12 text-xs text-slate-400">
+                      Satz {i + 1}
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={99}
+                      inputMode="numeric"
+                      value={s[0]}
+                      onChange={(e) => setEnterCell(i, 0, e.target.value)}
+                      className="w-16 rounded-md border border-slate-300 px-2 py-1 text-center tabular-nums"
+                      aria-label={`Satz ${i + 1}, ${enterFor.team1.join(" / ") || "Team 1"}`}
+                    />
+                    <span className="text-slate-400">:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={99}
+                      inputMode="numeric"
+                      value={s[1]}
+                      onChange={(e) => setEnterCell(i, 1, e.target.value)}
+                      className="w-16 rounded-md border border-slate-300 px-2 py-1 text-center tabular-nums"
+                      aria-label={`Satz ${i + 1}, ${enterFor.team2.join(" / ") || "Team 2"}`}
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setEnterSets((prev) => [...prev, [0, 0]])}
+                className="mt-2 text-xs font-medium text-slate-500 hover:text-slate-700"
+              >
+                + Satz hinzufügen
+              </button>
+              <p className="mt-3 text-xs text-slate-400">
+                Der Sieger ergibt sich aus der Satzmehrheit. Kampflos/Aufgabe
+                laufen über den Aufgabe-Dialog am Tablet. Steht das Spiel noch
+                auf dem Feld, wird es beim Eintragen freigegeben.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                onClick={() => setEnterFor(null)}
+                disabled={busy}
+                className="rounded-lg bg-slate-100 px-3.5 py-2 text-sm font-medium
+                           text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={() => void submitEnterResult()}
+                disabled={busy || !enterSets.some(([a, b]) => a > 0 || b > 0)}
+                className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white
+                           transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Ergebnis nach BTP schreiben
               </button>
             </div>
           </div>

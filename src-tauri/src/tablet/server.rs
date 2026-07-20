@@ -948,6 +948,68 @@ async fn result(
 /// Cloud-Relay-Client. Die Validierung ist zugleich die Sicherheits-
 /// Mitigation des Cloud-Modus (Match-ID muss zum Court-Match passen,
 /// Satzstand plausibel).
+/// Ergebnis von [`derive_result`]: (bereinigte Sätze, `team1_won`,
+/// BTP-`ScoreStatus`).
+type DerivedResult = (Vec<(i64, i64)>, bool, i64);
+
+/// Prüft die Satzliste und die Sonderfälle (Kampflos/Aufgabe) und leitet
+/// daraus Sieger (`team1_won`) und BTP-`ScoreStatus` ab. **Eine** Quelle
+/// der Wahrheit für den Tablet-Ergebnisweg (`process_result`) UND die
+/// Ergebnis-Eingabe aus der Turnierleitung (`enter_result`) — R5 gilt so
+/// für beide identisch.
+///
+/// - `walkover` = Kampflos (`ScoreStatus 1`), Sätze werden verworfen.
+/// - `retired` = Aufgabe (`ScoreStatus 2`), Sieger explizit.
+/// - sonst: regulär (`0`), Sieger aus der Satzmehrheit.
+///
+/// Rückgabe: (bereinigte Sätze, team1_won, score_status).
+pub(crate) fn derive_result(
+    mut sets: Vec<(i64, i64)>,
+    walkover: bool,
+    retired: bool,
+    winner: Option<i64>,
+) -> Result<DerivedResult, String> {
+    // Aufgabe und Kampflos schließen sich aus – beide gesetzt ist ein
+    // Fehler (das Status-Mapping würde sonst still walkover bevorzugen).
+    if walkover && retired {
+        return Err("Aufgabe und Kampflos zugleich – ungültig.".to_string());
+    }
+    if sets.len() > 9 {
+        return Err("Ungültige Satzanzahl.".to_string());
+    }
+    if sets
+        .iter()
+        .any(|&(a, b)| !(0..=99).contains(&a) || !(0..=99).contains(&b))
+    {
+        return Err("Ungültiger Satzstand.".to_string());
+    }
+    let result = if walkover {
+        sets.clear();
+        match winner {
+            Some(1) => (true, 1),
+            Some(2) => (false, 1),
+            _ => return Err("Kampflos ohne gültigen Sieger.".to_string()),
+        }
+    } else if retired {
+        match winner {
+            Some(1) => (true, 2),
+            Some(2) => (false, 2),
+            _ => return Err("Aufgabe ohne gültigen Sieger.".to_string()),
+        }
+    } else {
+        if sets.is_empty() {
+            return Err("Ungültige Satzanzahl.".to_string());
+        }
+        let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
+        let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
+        if team1_sets == team2_sets {
+            return Err("Unentschiedener Satzstand – kein Sieger ermittelbar.".to_string());
+        }
+        (team1_sets > team2_sets, 0)
+    };
+    Ok((sets, result.0, result.1))
+}
+
 pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
     let Some(m) = ctx.tablet.match_for_court(body.court_id) else {
         return ResultResponse::err("Kein Match auf diesem Court.");
@@ -956,51 +1018,12 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.");
     }
 
-    // Aufgabe und Kampflos schließen sich aus – beide gesetzt ist ein
-    // Client-Fehler (das Status-Mapping unten würde sonst stillschweigend
-    // walkover bevorzugen).
-    if body.walkover && body.retired {
-        return ResultResponse::err("Aufgabe und Kampflos zugleich – ungültig.");
-    }
-
-    let mut sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
-    if sets.len() > 9 {
-        return ResultResponse::err("Ungültige Satzanzahl.");
-    }
-    if sets
-        .iter()
-        .any(|&(a, b)| !(0..=99).contains(&a) || !(0..=99).contains(&b))
-    {
-        return ResultResponse::err("Ungültiger Satzstand.");
-    }
-    // Sieger + BTP-ScoreStatus (0=normal, 1=Walkover, 2=Aufgabe/Retired):
-    // Bei Kampflos (walkover) und Aufgabe (retired) ist der Sieger explizit
-    // angegeben; sonst wird er aus den Sätzen abgeleitet. Kampflos wird ohne
-    // gespielte Sätze gewertet → die Satzliste wird verworfen.
-    let (team1_won, score_status) = if body.walkover {
-        sets.clear();
-        match body.winner {
-            Some(1) => (true, 1),
-            Some(2) => (false, 1),
-            _ => return ResultResponse::err("Kampflos ohne gültigen Sieger."),
-        }
-    } else if body.retired {
-        match body.winner {
-            Some(1) => (true, 2),
-            Some(2) => (false, 2),
-            _ => return ResultResponse::err("Aufgabe ohne gültigen Sieger."),
-        }
-    } else {
-        if sets.is_empty() {
-            return ResultResponse::err("Ungültige Satzanzahl.");
-        }
-        let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
-        let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
-        if team1_sets == team2_sets {
-            return ResultResponse::err("Unentschiedener Satzstand – kein Sieger ermittelbar.");
-        }
-        (team1_sets > team2_sets, 0)
-    };
+    let raw_sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
+    let (sets, team1_won, score_status) =
+        match derive_result(raw_sets, body.walkover, body.retired, body.winner) {
+            Ok(v) => v,
+            Err(e) => return ResultResponse::err(e),
+        };
     // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
     // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
     // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
@@ -1716,6 +1739,49 @@ mod tests {
     // Die Logik hinter dem 0:0-Geistersatz-Fix: Zwischen den Sätzen ist das
     // Match NICHT entschieden → der laufende 0:0-Satz bleibt erhalten (Monitor
     // zeigt sofort 0:0). Erst wenn die Mehrheit der Sätze gewonnen ist, gilt
+    // ─────────────── Geteilte Ergebnis-Ableitung (derive_result) ───────────────
+
+    #[test]
+    fn derive_result_regular_winner_from_sets() {
+        // 2:0 → Team 1 gewinnt, Status 0, Sätze unverändert.
+        let (sets, t1, status) =
+            derive_result(vec![(21, 10), (21, 15)], false, false, None).unwrap();
+        assert_eq!(sets, vec![(21, 10), (21, 15)]);
+        assert!(t1);
+        assert_eq!(status, 0);
+        // Team 2 gewinnt 1:2.
+        let (_, t1b, _) =
+            derive_result(vec![(21, 10), (15, 21), (18, 21)], false, false, None).unwrap();
+        assert!(!t1b);
+    }
+
+    #[test]
+    fn derive_result_rejects_drawn_and_empty_and_oversized() {
+        assert!(derive_result(vec![(21, 10), (15, 21)], false, false, None).is_err()); // 1:1
+        assert!(derive_result(vec![], false, false, None).is_err()); // kein Satz
+        assert!(derive_result(vec![(1, 2); 10], false, false, None).is_err()); // >9 Sätze
+        assert!(derive_result(vec![(100, 0)], false, false, None).is_err()); // außer 0..=99
+    }
+
+    #[test]
+    fn derive_result_walkover_clears_sets_and_needs_winner() {
+        let (sets, t1, status) = derive_result(vec![(21, 0)], true, false, Some(2)).unwrap();
+        assert!(sets.is_empty(), "Kampflos verwirft die Sätze");
+        assert!(!t1);
+        assert_eq!(status, 1);
+        assert!(derive_result(vec![], true, false, None).is_err()); // ohne Sieger
+    }
+
+    #[test]
+    fn derive_result_retired_keeps_sets_status_two() {
+        let (sets, t1, status) =
+            derive_result(vec![(21, 10), (5, 3)], false, true, Some(1)).unwrap();
+        assert_eq!(sets, vec![(21, 10), (5, 3)]);
+        assert!(t1);
+        assert_eq!(status, 2);
+        assert!(derive_result(vec![(1, 0)], true, true, Some(1)).is_err()); // beides zugleich
+    }
+
     // ein 0:0 als Geistersatz nach Spielende und wird weggelassen.
     #[test]
     fn match_decided_best_of_3() {

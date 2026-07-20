@@ -71,6 +71,27 @@ feststeht (offene KO-Plätze werden übersprungen).
 jeweils **nicht** aufgebende Seite, und schreibt es per `SENDUPDATE`
 (`write_result_to_btp`).
 
+### Ergebnis aus der Turnierleitung eintragen (`enter_result`)
+
+Verwandte TL-Wertung (Plan 12, Backend-Finalisierung — Tilo 20.07.:
+„ein Spiel aus dem Backend beenden, wenn das Finalisieren vergessen wurde
+oder durch einen Verbindungsabbruch nicht klappte"):
+
+| Command | Zweck |
+|---|---|
+| `enter_result(match_id, sets)` | Trägt für ein Spiel ein **reguläres** Satz-Ergebnis nach BTP ein (Sieger aus der Satzmehrheit). |
+
+Erreichbar in der **Spielübersicht** über den Knopf „Ergebnis" auf einem
+belegten Feld; der Dialog ist mit dem aktuellen Live-Satzstand vorbelegt
+(häufiger Fall: nur bestätigen). Die **Satz-/Sieger-Validierung teilt
+sich `enter_result` mit dem Tablet-Weg** über `server::derive_result`
+(eine Quelle der Wahrheit, R5). Steht das Spiel noch auf einem Feld, wird
+es im selben `SENDUPDATE` freigegeben und die Spieler ausgecheckt; sonst
+geht nur das Ergebnis raus. Schutz: ein in BTP bereits gewertetes Spiel
+wird nie überschrieben, Kampflos/Aufgabe laufen weiter über den
+Walkover-/Aufgabe-Flow. Fehlgeschlagene Writes landen in der
+Nachschub-Queue (siehe [btp_protocol.md](btp_protocol.md)).
+
 ## Sicherheit & Robustheit
 
 - **Schreib-Grenze:** `confirm_walkover` löst die Kandidaten erneut live

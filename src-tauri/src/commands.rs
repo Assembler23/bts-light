@@ -992,6 +992,103 @@ pub async fn confirm_walkover(
     Ok(WalkoverResult { written, errors })
 }
 
+/// Ergebnis eines Spiels aus der **Turnierleitung** eintragen (Plan 12,
+/// Backend-Finalisierung, Tilo 20.07.: „ein Spiel aus dem Backend beenden,
+/// wenn das Finalisieren vergessen wurde oder z. B. durch einen
+/// Verbindungsabbruch nicht klappte"). Deckt Spiele ab, deren Ergebnis
+/// über kein Tablet kam.
+///
+/// Reguläres Satz-Ergebnis; Kampflos/Aufgabe laufen weiter über den
+/// Walkover-Flow. Dieselbe R5-Validierung wie der Tablet-Weg
+/// (`derive_result`). Steht das Spiel noch auf einem Feld, wird es im
+/// selben Request freigegeben und die Spieler ausgecheckt.
+#[tauri::command]
+pub async fn enter_result(
+    state: State<'_, AppState>,
+    match_id: i64,
+    sets: Vec<(i64, i64)>,
+) -> Result<(), String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if config.slave_mode {
+        return Err("Ansage-Slave-Modus: Wertungen nur am Master-PC.".to_string());
+    }
+    let tablet = state.tablet.clone();
+    let snapshot = tablet
+        .snapshot_clone()
+        .ok_or("Noch kein Turnier geladen.")?;
+    let m = snapshot
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .ok_or("Spiel nicht gefunden.")?;
+    // Nie ein bereits in BTP gewertetes Spiel überschreiben.
+    if m.winner.is_some() {
+        return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
+    }
+    if m.team1.is_empty() || m.team2.is_empty() {
+        return Err("Die Paarung steht noch nicht fest.".to_string());
+    }
+    // Geteilte R5-Validierung (reguläres Ergebnis: kein Walkover/Aufgabe).
+    let (sets, team1_won, score_status) =
+        crate::tablet::server::derive_result(sets, false, false, None)?;
+
+    // Skalare vor dem await herausziehen (Borrow auf den Snapshot lösen).
+    let (mid, draw_id, planning_id) = (m.id, m.draw_id, m.planning_id);
+    let end_ms = now_ms();
+    // Steht das Spiel (noch) auf einem Feld? Dann Feld freigeben + Spieler
+    // auschecken/Endzeit setzen (sie standen dort). Nie auf einem Feld
+    // gewesen → nur das Ergebnis, kein Feld-/Spieler-Block.
+    let (free_court_id, player_ids, duration_mins, end_ts_ms) = match m.court_id {
+        Some(cid) => {
+            let ids: Vec<i64> = m
+                .team1
+                .iter()
+                .chain(m.team2.iter())
+                .map(|p| p.id)
+                .filter(|&id| id != 0)
+                .collect();
+            let dur = tablet
+                .on_court_since_ms(cid, mid)
+                .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
+                .unwrap_or(0);
+            (Some(cid), ids, dur, Some(end_ms))
+        }
+        None => (None, Vec::new(), 0, None),
+    };
+    let update = crate::btp::proto::MatchUpdate {
+        btp_match_id: mid,
+        draw_id,
+        planning_id,
+        sets,
+        team1_won,
+        duration_mins,
+        score_status,
+        free_court_id,
+        player_ids,
+        end_ts_ms,
+    };
+    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+        Ok(()) => {
+            if let Some(cid) = free_court_id {
+                tablet.clear_court(cid);
+            }
+            tablet.clear_btp_retry(mid);
+            tablet.note_direct_btp_write(update.clone(), now_ms());
+            tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
+            Ok(())
+        }
+        Err(e) => {
+            // Nachschub-Queue (A5): der Sync-Loop reicht es nach.
+            tablet.queue_btp_retry(update, end_ms);
+            Err(format!("{e} (wird automatisch nachgereicht)"))
+        }
+    }
+}
+
 // ───────────────────────────── Feldvergabe (BTP-Write) ────────────────────
 
 /// Weist ein Match einem Feld zu – schreibt die Zuweisung nach BTP
