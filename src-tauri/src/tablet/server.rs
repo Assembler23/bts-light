@@ -948,6 +948,147 @@ async fn result(
 /// Cloud-Relay-Client. Die Validierung ist zugleich die Sicherheits-
 /// Mitigation des Cloud-Modus (Match-ID muss zum Court-Match passen,
 /// Satzstand plausibel).
+/// Ergebnis von [`derive_result`]: (bereinigte Sätze, `team1_won`,
+/// BTP-`ScoreStatus`).
+type DerivedResult = (Vec<(i64, i64)>, bool, i64);
+
+/// Ist ein Satz `(a, b)` regulär zu Ende gespielt? Gegen das Zählformat
+/// des Matches: erreicht bei `target` (2 Punkte Vorsprung) bzw. spätestens
+/// beim `cap` (dort reicht 1 Punkt). Der Tablet-Weg erzwingt das
+/// clientseitig; die manuelle Ergebnis-Eingabe der Turnierleitung
+/// (`enter_result`) hat keinen solchen Zwang und braucht diese Prüfung,
+/// damit ein noch LAUFENDER Satz nicht als gewonnener gewertet wird
+/// (Plan-12a2-Review). Sinnvolle Defaults, falls das Format fehlt: 21/30.
+pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
+    let target = if target > 0 { target } else { 21 };
+    let cap = if cap >= target { cap } else { target.max(30) };
+    let hi = a.max(b);
+    let lo = a.min(b);
+    if hi < target || hi > cap {
+        return false; // Ziel nicht erreicht oder über dem Deckel
+    }
+    hi >= cap || hi - lo >= 2 // am Deckel reicht 1 Punkt, sonst 2 Vorsprung
+}
+
+/// Prüft die Satzliste und die Sonderfälle (Kampflos/Aufgabe) und leitet
+/// daraus Sieger (`team1_won`) und BTP-`ScoreStatus` ab. **Eine** Quelle
+/// der Wahrheit für den Tablet-Ergebnisweg (`process_result`) UND die
+/// Ergebnis-Eingabe aus der Turnierleitung (`enter_result`) — R5 gilt so
+/// für beide identisch.
+///
+/// - `walkover` = Kampflos (`ScoreStatus 1`), Sätze werden verworfen.
+/// - `retired` = Aufgabe (`ScoreStatus 2`), Sieger explizit.
+/// - sonst: regulär (`0`), Sieger aus der Satzmehrheit.
+///
+/// Rückgabe: (bereinigte Sätze, team1_won, score_status).
+pub(crate) fn derive_result(
+    mut sets: Vec<(i64, i64)>,
+    walkover: bool,
+    retired: bool,
+    winner: Option<i64>,
+) -> Result<DerivedResult, String> {
+    // Aufgabe und Kampflos schließen sich aus – beide gesetzt ist ein
+    // Fehler (das Status-Mapping würde sonst still walkover bevorzugen).
+    if walkover && retired {
+        return Err("Aufgabe und Kampflos zugleich – ungültig.".to_string());
+    }
+    if sets.len() > 9 {
+        return Err("Ungültige Satzanzahl.".to_string());
+    }
+    if sets
+        .iter()
+        .any(|&(a, b)| !(0..=99).contains(&a) || !(0..=99).contains(&b))
+    {
+        return Err("Ungültiger Satzstand.".to_string());
+    }
+    let result = if walkover {
+        sets.clear();
+        match winner {
+            Some(1) => (true, 1),
+            Some(2) => (false, 1),
+            _ => return Err("Kampflos ohne gültigen Sieger.".to_string()),
+        }
+    } else if retired {
+        match winner {
+            Some(1) => (true, 2),
+            Some(2) => (false, 2),
+            _ => return Err("Aufgabe ohne gültigen Sieger.".to_string()),
+        }
+    } else {
+        if sets.is_empty() {
+            return Err("Ungültige Satzanzahl.".to_string());
+        }
+        let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
+        let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
+        if team1_sets == team2_sets {
+            return Err("Unentschiedener Satzstand – kein Sieger ermittelbar.".to_string());
+        }
+        (team1_sets > team2_sets, 0)
+    };
+    Ok((sets, result.0, result.1))
+}
+
+/// Baut aus einem Match + den von der Turnierleitung eingegebenen Sätzen
+/// den BTP-`MatchUpdate` für `enter_result` (Plan 12a2) — **rein &
+/// testbar**, ohne Netz/State. Prüft: bereits gewertet, unvollständige
+/// Paarung, R5 ([`derive_result`]) und Satz-Vollständigkeit
+/// ([`set_is_complete`]). Steht das Spiel auf einem Feld (`court_id`), wird
+/// es im selben Update freigegeben und die Spieler ausgecheckt;
+/// `on_court_since` (Aufruf-Stempel) liefert die Spieldauer.
+pub(crate) fn build_manual_result_update(
+    m: &BtpMatch,
+    sets: Vec<(i64, i64)>,
+    on_court_since: Option<u64>,
+    now: u64,
+) -> Result<proto::MatchUpdate, String> {
+    if m.winner.is_some() {
+        return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
+    }
+    if m.team1.is_empty() || m.team2.is_empty() {
+        return Err("Die Paarung steht noch nicht fest.".to_string());
+    }
+    let (sets, team1_won, score_status) = derive_result(sets, false, false, None)?;
+    let (target, cap) = (m.scoring.target_score, m.scoring.cap_score);
+    if let Some(&(a, b)) = sets
+        .iter()
+        .find(|&&(a, b)| !set_is_complete(a, b, target, cap))
+    {
+        return Err(format!(
+            "Satz {a}:{b} ist nicht regulär zu Ende gespielt (bis {}, Deckel {}).",
+            if target > 0 { target } else { 21 },
+            if cap >= target { cap } else { 30 },
+        ));
+    }
+    let (free_court_id, player_ids, duration_mins, end_ts_ms) = match m.court_id {
+        Some(cid) => {
+            let ids: Vec<i64> = m
+                .team1
+                .iter()
+                .chain(m.team2.iter())
+                .map(|p| p.id)
+                .filter(|&id| id != 0)
+                .collect();
+            let dur = on_court_since
+                .map(|since| (now.saturating_sub(since) / 60_000) as i64)
+                .unwrap_or(0);
+            (Some(cid), ids, dur, Some(now))
+        }
+        None => (None, Vec::new(), 0, None),
+    };
+    Ok(proto::MatchUpdate {
+        btp_match_id: m.id,
+        draw_id: m.draw_id,
+        planning_id: m.planning_id,
+        sets,
+        team1_won,
+        duration_mins,
+        score_status,
+        free_court_id,
+        player_ids,
+        end_ts_ms,
+    })
+}
+
 pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
     let Some(m) = ctx.tablet.match_for_court(body.court_id) else {
         return ResultResponse::err("Kein Match auf diesem Court.");
@@ -956,51 +1097,12 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.");
     }
 
-    // Aufgabe und Kampflos schließen sich aus – beide gesetzt ist ein
-    // Client-Fehler (das Status-Mapping unten würde sonst stillschweigend
-    // walkover bevorzugen).
-    if body.walkover && body.retired {
-        return ResultResponse::err("Aufgabe und Kampflos zugleich – ungültig.");
-    }
-
-    let mut sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
-    if sets.len() > 9 {
-        return ResultResponse::err("Ungültige Satzanzahl.");
-    }
-    if sets
-        .iter()
-        .any(|&(a, b)| !(0..=99).contains(&a) || !(0..=99).contains(&b))
-    {
-        return ResultResponse::err("Ungültiger Satzstand.");
-    }
-    // Sieger + BTP-ScoreStatus (0=normal, 1=Walkover, 2=Aufgabe/Retired):
-    // Bei Kampflos (walkover) und Aufgabe (retired) ist der Sieger explizit
-    // angegeben; sonst wird er aus den Sätzen abgeleitet. Kampflos wird ohne
-    // gespielte Sätze gewertet → die Satzliste wird verworfen.
-    let (team1_won, score_status) = if body.walkover {
-        sets.clear();
-        match body.winner {
-            Some(1) => (true, 1),
-            Some(2) => (false, 1),
-            _ => return ResultResponse::err("Kampflos ohne gültigen Sieger."),
-        }
-    } else if body.retired {
-        match body.winner {
-            Some(1) => (true, 2),
-            Some(2) => (false, 2),
-            _ => return ResultResponse::err("Aufgabe ohne gültigen Sieger."),
-        }
-    } else {
-        if sets.is_empty() {
-            return ResultResponse::err("Ungültige Satzanzahl.");
-        }
-        let team1_sets = sets.iter().filter(|(a, b)| a > b).count();
-        let team2_sets = sets.iter().filter(|(a, b)| b > a).count();
-        if team1_sets == team2_sets {
-            return ResultResponse::err("Unentschiedener Satzstand – kein Sieger ermittelbar.");
-        }
-        (team1_sets > team2_sets, 0)
-    };
+    let raw_sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
+    let (sets, team1_won, score_status) =
+        match derive_result(raw_sets, body.walkover, body.retired, body.winner) {
+            Ok(v) => v,
+            Err(e) => return ResultResponse::err(e),
+        };
     // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
     // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
     // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
@@ -1716,6 +1818,118 @@ mod tests {
     // Die Logik hinter dem 0:0-Geistersatz-Fix: Zwischen den Sätzen ist das
     // Match NICHT entschieden → der laufende 0:0-Satz bleibt erhalten (Monitor
     // zeigt sofort 0:0). Erst wenn die Mehrheit der Sätze gewonnen ist, gilt
+    // ─────────────── Geteilte Ergebnis-Ableitung (derive_result) ───────────────
+
+    #[test]
+    fn derive_result_regular_winner_from_sets() {
+        // 2:0 → Team 1 gewinnt, Status 0, Sätze unverändert.
+        let (sets, t1, status) =
+            derive_result(vec![(21, 10), (21, 15)], false, false, None).unwrap();
+        assert_eq!(sets, vec![(21, 10), (21, 15)]);
+        assert!(t1);
+        assert_eq!(status, 0);
+        // Team 2 gewinnt 1:2.
+        let (_, t1b, _) =
+            derive_result(vec![(21, 10), (15, 21), (18, 21)], false, false, None).unwrap();
+        assert!(!t1b);
+    }
+
+    #[test]
+    fn derive_result_rejects_drawn_and_empty_and_oversized() {
+        assert!(derive_result(vec![(21, 10), (15, 21)], false, false, None).is_err()); // 1:1
+        assert!(derive_result(vec![], false, false, None).is_err()); // kein Satz
+        assert!(derive_result(vec![(1, 2); 10], false, false, None).is_err()); // >9 Sätze
+        assert!(derive_result(vec![(100, 0)], false, false, None).is_err()); // außer 0..=99
+    }
+
+    #[test]
+    fn derive_result_walkover_clears_sets_and_needs_winner() {
+        let (sets, t1, status) = derive_result(vec![(21, 0)], true, false, Some(2)).unwrap();
+        assert!(sets.is_empty(), "Kampflos verwirft die Sätze");
+        assert!(!t1);
+        assert_eq!(status, 1);
+        assert!(derive_result(vec![], true, false, None).is_err()); // ohne Sieger
+    }
+
+    #[test]
+    fn set_is_complete_enforces_target_margin_and_cap() {
+        // 21er-Format, Deckel 30.
+        assert!(set_is_complete(21, 10, 21, 30)); // klar durch
+        assert!(set_is_complete(21, 19, 21, 30)); // 2 Punkte Vorsprung
+        assert!(!set_is_complete(21, 20, 21, 30)); // nur 1 Vorsprung, nicht am Deckel
+        assert!(set_is_complete(30, 29, 21, 30)); // am Deckel reicht 1
+        assert!(!set_is_complete(31, 29, 21, 30)); // über dem Deckel → ungültig
+        assert!(!set_is_complete(5, 3, 21, 30)); // laufender Satz → nicht fertig
+        assert!(!set_is_complete(11, 7, 21, 30)); // 1. Satz läuft → nicht fertig
+        assert!(!set_is_complete(20, 18, 21, 30)); // Ziel nicht erreicht
+                                                   // 15er-Format, Deckel 21.
+        assert!(set_is_complete(15, 5, 15, 21));
+        assert!(!set_is_complete(15, 14, 15, 21));
+        assert!(set_is_complete(21, 20, 15, 21));
+        // Fehlendes Format → Defaults 21/30.
+        assert!(set_is_complete(21, 15, 0, 0));
+        assert!(!set_is_complete(10, 5, 0, 0));
+    }
+
+    #[test]
+    fn derive_result_retired_keeps_sets_status_two() {
+        let (sets, t1, status) =
+            derive_result(vec![(21, 10), (5, 3)], false, true, Some(1)).unwrap();
+        assert_eq!(sets, vec![(21, 10), (5, 3)]);
+        assert!(t1);
+        assert_eq!(status, 2);
+        assert!(derive_result(vec![(1, 0)], true, true, Some(1)).is_err()); // beides zugleich
+    }
+
+    // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────
+
+    #[test]
+    fn manual_result_on_court_frees_field_and_checks_out() {
+        // Match 42 auf Feld 101, 2:0 → Feld wird freigegeben, Spieler
+        // ausgecheckt (Endzeit gesetzt), Dauer aus dem Aufruf-Stempel.
+        let m = match_on_court(); // court_id 101, scoring default (21/30)
+        let u =
+            build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000).unwrap();
+        assert_eq!(u.btp_match_id, 42);
+        assert!(u.team1_won);
+        assert_eq!(u.score_status, 0);
+        assert_eq!(u.free_court_id, Some(101));
+        assert_eq!(u.end_ts_ms, Some(61_000));
+        assert_eq!(u.duration_mins, 1); // (61000-1000)/60000
+        assert!(!u.player_ids.is_empty());
+    }
+
+    #[test]
+    fn manual_result_not_on_court_has_no_field_or_players() {
+        // Spiel ohne Feld (nie zugewiesen): nur das Ergebnis, kein
+        // Feld-/Spieler-Block.
+        let mut m = match_on_court();
+        m.court_id = None;
+        m.status = MatchStatus::Scheduled;
+        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000).unwrap();
+        assert_eq!(u.free_court_id, None);
+        assert!(u.player_ids.is_empty());
+        assert_eq!(u.end_ts_ms, None);
+        assert_eq!(u.duration_mins, 0);
+    }
+
+    #[test]
+    fn manual_result_rejects_already_decided_and_incomplete() {
+        // Bereits gewertet → nie überschreiben.
+        let mut done = match_on_court();
+        done.winner = Some(1);
+        assert!(build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0).is_err());
+        // Laufender Satz (5:3) → abgelehnt (nicht regulär zu Ende).
+        let m = match_on_court();
+        let err = build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0).unwrap_err();
+        assert!(
+            err.contains("5:3"),
+            "Fehler nennt den unfertigen Satz: {err}"
+        );
+        // Unentschiedener Satzstand (1:1) → kein Sieger.
+        assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0).is_err());
+    }
+
     // ein 0:0 als Geistersatz nach Spielende und wird weggelassen.
     #[test]
     fn match_decided_best_of_3() {

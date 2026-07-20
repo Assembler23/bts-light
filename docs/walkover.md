@@ -71,6 +71,34 @@ feststeht (offene KO-Plätze werden übersprungen).
 jeweils **nicht** aufgebende Seite, und schreibt es per `SENDUPDATE`
 (`write_result_to_btp`).
 
+### Ergebnis aus der Turnierleitung eintragen (`enter_result`)
+
+Verwandte TL-Wertung (Plan 12, Backend-Finalisierung — Tilo 20.07.:
+„ein Spiel aus dem Backend beenden, wenn das Finalisieren vergessen wurde
+oder durch einen Verbindungsabbruch nicht klappte"):
+
+| Command | Zweck |
+|---|---|
+| `enter_result(match_id, sets)` | Trägt für ein Spiel ein **reguläres** Satz-Ergebnis nach BTP ein (Sieger aus der Satzmehrheit). |
+
+Erreichbar in der **Spielübersicht** über den Knopf „Ergebnis" auf einem
+belegten Feld; der Dialog ist mit dem aktuellen Live-Satzstand vorbelegt
+(häufiger Fall: nur bestätigen). Die **Satz-/Sieger-Validierung teilt
+sich `enter_result` mit dem Tablet-Weg** über `server::derive_result`
+(eine Quelle der Wahrheit, R5). Weil die manuelle Eingabe — anders als
+das Tablet — die Satzregeln nicht clientseitig erzwingt, prüft
+`server::set_is_complete` zusätzlich, dass **jeder Satz regulär zu Ende
+gespielt** ist (gegen das Zählformat des Matches: Ziel + 2 Punkte bzw.
+Deckel) — so wird ein noch laufender Satz aus der Vorbelegung nicht als
+gewonnener gewertet. Die gesamte Kernlogik (Guards, Validierung,
+`MatchUpdate`-Bau) liegt rein & getestet in
+`server::build_manual_result_update`. Steht das Spiel noch auf einem Feld, wird
+es im selben `SENDUPDATE` freigegeben und die Spieler ausgecheckt; sonst
+geht nur das Ergebnis raus. Schutz: ein in BTP bereits gewertetes Spiel
+wird nie überschrieben, Kampflos/Aufgabe laufen weiter über den
+Walkover-/Aufgabe-Flow. Fehlgeschlagene Writes landen in der
+Nachschub-Queue (siehe [btp_protocol.md](btp_protocol.md)).
+
 ## Sicherheit & Robustheit
 
 - **Schreib-Grenze:** `confirm_walkover` löst die Kandidaten erneut live

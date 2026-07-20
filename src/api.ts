@@ -95,6 +95,17 @@ export const confirmWalkover = (
 ): Promise<WalkoverResult> =>
   invoke("confirm_walkover", { proposalId, matchIds });
 
+/**
+ * Ergebnis eines Spiels aus der Turnierleitung eintragen (Backend-
+ * Finalisierung): `sets` als [[team1, team2], …]. Reguläres Ergebnis;
+ * serverseitig R5-validiert. Steht das Spiel noch auf einem Feld, wird es
+ * im selben Zug freigegeben.
+ */
+export const enterResult = (
+  matchId: number,
+  sets: [number, number][],
+): Promise<void> => invoke("enter_result", { matchId, sets });
+
 /** Verwirft einen Walkover-Vorschlag, ohne ihn umzusetzen. */
 export const dismissWalkover = (proposalId: string): Promise<void> =>
   invoke("dismiss_walkover", { proposalId });

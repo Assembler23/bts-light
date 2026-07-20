@@ -992,6 +992,70 @@ pub async fn confirm_walkover(
     Ok(WalkoverResult { written, errors })
 }
 
+/// Ergebnis eines Spiels aus der **Turnierleitung** eintragen (Plan 12,
+/// Backend-Finalisierung, Tilo 20.07.: „ein Spiel aus dem Backend beenden,
+/// wenn das Finalisieren vergessen wurde oder z. B. durch einen
+/// Verbindungsabbruch nicht klappte"). Deckt Spiele ab, deren Ergebnis
+/// über kein Tablet kam.
+///
+/// Reguläres Satz-Ergebnis; Kampflos/Aufgabe laufen weiter über den
+/// Walkover-Flow. Dieselbe R5-Validierung wie der Tablet-Weg
+/// (`derive_result`). Steht das Spiel noch auf einem Feld, wird es im
+/// selben Request freigegeben und die Spieler ausgecheckt.
+#[tauri::command]
+pub async fn enter_result(
+    state: State<'_, AppState>,
+    match_id: i64,
+    sets: Vec<(i64, i64)>,
+) -> Result<(), String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if config.slave_mode {
+        return Err("Ansage-Slave-Modus: Wertungen nur am Master-PC.".to_string());
+    }
+    let tablet = state.tablet.clone();
+    let snapshot = tablet
+        .snapshot_clone()
+        .ok_or("Noch kein Turnier geladen.")?;
+    let m = snapshot
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .ok_or("Spiel nicht gefunden.")?;
+    // Kernlogik (Guards, R5-Validierung, Satz-Vollständigkeit,
+    // MatchUpdate-Bau) ist rein & getestet in server::build_manual_result_update.
+    // Annahme: der zuletzt gepollte Snapshot ist aktuell genug — dieselbe
+    // Poll-Staleness-Grundlage wie assign_court/free_court/confirm_walkover
+    // (R2); der `winner.is_some()`-Guard deckt den bereits-gewertet-Fall ab.
+    let end_ms = now_ms();
+    let on_court_since = m
+        .court_id
+        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
+    let update =
+        crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms)?;
+    let mid = update.btp_match_id;
+    let free_court_id = update.free_court_id;
+    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+        Ok(()) => {
+            if let Some(cid) = free_court_id {
+                tablet.clear_court(cid);
+            }
+            tablet.clear_btp_retry(mid);
+            tablet.note_direct_btp_write(update.clone(), now_ms());
+            tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
+            Ok(())
+        }
+        Err(e) => {
+            // Nachschub-Queue (A5): der Sync-Loop reicht es nach.
+            tablet.queue_btp_retry(update, end_ms);
+            Err(format!("{e} (wird automatisch nachgereicht)"))
+        }
+    }
+}
+
 // ───────────────────────────── Feldvergabe (BTP-Write) ────────────────────
 
 /// Weist ein Match einem Feld zu – schreibt die Zuweisung nach BTP
