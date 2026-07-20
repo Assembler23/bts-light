@@ -11,7 +11,7 @@ nicht durch Vorsicht, sondern durch Tests.
 
 - CI-Workflow [`ci.yml`](../.github/workflows/ci.yml) (Pflicht-Check
   `build` der Branch-Protection auf `main`) führt bei jedem PR aus:
-  `cargo fmt --check` · `cargo clippy --workspace --all-targets -D warnings`
+  `cargo fmt --check` · `cargo clippy --workspace --all-targets -- -D warnings`
   · **`cargo test --workspace`** · `npm run build` (tsc + vite).
 - `main` erlaubt nur Squash-Merges über PRs — kein Weg an der Suite vorbei.
 - Lokal spiegeln die Hooks (`.githooks/`, siehe
@@ -27,8 +27,9 @@ anpassen:
 |---|---|
 | **R5-Ergebnis-Validierung**: jedes Tablet-Ergebnis wird geprüft (Match zum Feld, Satzplausibilität, Walkover/Aufgabe-Regeln) | `tablet/server.rs` — `rejects_*`, `result_*`, `match_decided_*`, `process_result_*` (16) |
 | **BTP-Schreibpfad** (0.9.147): SENDUPDATE mit Sets/Winner/Duration, Players-Block (LastTimeOnCourt, CheckedIn), CourtID bleibt am beendeten Match, Feld-Freigabe im selben Request | `btp/proto.rs` — `update_request_*`, `court_assign_*`, `courts_update_*` (27) |
-| **Tablet-Reconnect** (0.9.147): dasselbe Gerät übernimmt seine Session nahtlos, fremde Geräte sehen „belegt", Frames abgelöster Sessions werden verworfen, leere `deviceId` matcht nie | `tablet/state.rs` — `same_device_reconnect_*`, `foreign_device_*`, `empty_device_id_*`, `superseded_session_*` (21) · `relay/main.rs` — Host-/Tablet-Routing (13) |
-| **Auto-Feldvergabe**: nur freie/entsperrte Felder, Wartezeit, Spieler-Pause, keine Doppelvergabe, Mehr-Hallen nur mit Aufruf bzw. aktiver Halle | `sync.rs` — `auto_assign_*` (17) |
+| **Tablet-Reconnect** (0.9.147): dasselbe Gerät übernimmt seine Session nahtlos, fremde Geräte sehen „belegt", Frames abgelöster Sessions werden verworfen, leere `deviceId` matcht nie | `relay/main.rs` — `same_device_reconnect_*`, `foreign_device_*`, `superseded_session_*`, `empty_device_id_*` + Host-/Tablet-Routing (13) · `tablet/state.rs` — `claim_court_tracks_holder_device`, `reclaim_supersedes_old_token` |
+| **Feld-/Anzeige-Logik am Host**: Court→Match-Auflösung, Live-Score-Vertrauen (auch getrennt), Overview/Monitor, Walkover-Kandidaten, Vorbereitungs-Aufrufe | `tablet/state.rs` (21) |
+| **Auto-Feldvergabe**: nur freie/entsperrte Felder, Wartezeit, Spieler-Pause, keine Doppelvergabe, Mehr-Hallen nur mit Aufruf bzw. aktiver Halle | `sync.rs` — `auto_assign_*` (16) |
 | **Zähltafelbediener-Übergang + Endezeit-Stempel** | `sync.rs` — `track_scorekeepers_*`, `stamp_finished_*` |
 | **Liveticker-Diff/Heartbeat**: erster Push voll, unverändert = nichts, nach Fehler wieder voll | `sync.rs` — `*_plan_*`, `heartbeat_*` · `badhub/diff.rs`, `badhub/payload.rs` (17) |
 | **Wire-Kompatibilität App↔Relay**: Serde-Roundtrips aller Frames, `#[serde(default)]`-Abwärtskompatibilität, `merge_device_lists` | `relay-proto/lib.rs` (25) |
