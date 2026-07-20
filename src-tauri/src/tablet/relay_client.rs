@@ -464,6 +464,71 @@ pub async fn fetch_slaves(namespace: &str) -> Vec<relay_proto::SlaveInfo> {
     fetch.await.unwrap_or_default()
 }
 
+/// Master: kurzlebigen 8-stelligen Telefon-Kopplungscode beim Relay
+/// anfordern (ADR 0004). Der Relay stellt ihn nur aus, wenn der Host dieses
+/// Namespace gerade verbunden ist (Cloud-Modus läuft).
+pub async fn request_pairing_code(namespace: &str) -> Result<relay_proto::PairingCode, String> {
+    if !valid_relay_namespace(namespace) {
+        return Err("Ungültiger Kopplungs-Code (install_id)".to_string());
+    }
+    let url = format!("{RELAY_HTTP}/{namespace}/pairing-code");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .post(&url)
+        .send()
+        .await
+        .map_err(|_| "Relay nicht erreichbar – Internet prüfen".to_string())?;
+    match resp.status() {
+        s if s.is_success() => resp
+            .json::<relay_proto::PairingCode>()
+            .await
+            .map_err(|e| e.to_string()),
+        reqwest::StatusCode::CONFLICT => Err(
+            "Der Master ist nicht mit der Cloud verbunden – erst „Start“ drücken (Verbindungsart Cloud bzw. LAN + Cloud).".to_string(),
+        ),
+        // Alter Relay kennt die Route nicht (404) → verständlich melden.
+        reqwest::StatusCode::NOT_FOUND => Err(
+            "Der Cloud-Server kennt den Telefon-Code noch nicht (Update ausstehend). Solange den langen Kopplungs-Code verwenden.".to_string(),
+        ),
+        s => Err(format!("Relay-Fehler {s}")),
+    }
+}
+
+/// Slave: 8-stelligen Telefon-Kopplungscode beim Relay gegen den vollen
+/// Master-Kopplungs-Code (Namespace/`install_id`) einlösen (ADR 0004).
+pub async fn resolve_pairing_code(code: &str) -> Result<String, String> {
+    if code.len() != 8 || !code.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Der Telefon-Code hat genau 8 Ziffern".to_string());
+    }
+    let url = format!("{RELAY_HTTP}/pair/{code}");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|_| "Relay nicht erreichbar – Internet prüfen".to_string())?;
+    match resp.status() {
+        s if s.is_success() => resp
+            .json::<relay_proto::PairingResolved>()
+            .await
+            .map(|p| p.namespace)
+            .map_err(|e| e.to_string()),
+        reqwest::StatusCode::TOO_MANY_REQUESTS => {
+            Err("Zu viele Fehlversuche am Server – eine Minute warten".to_string())
+        }
+        _ => Err(
+            "Code unbekannt oder abgelaufen – am Master einen neuen Telefon-Code erzeugen"
+                .to_string(),
+        ),
+    }
+}
+
 /// Prüft einen vom Nutzer eingegebenen Master-Kopplungs-Code (Relay-Namespace),
 /// bevor er in eine URL fließt: nur Hex + Bindestrich, plausible Länge. `.`/`/`
 /// sind damit ausgeschlossen → kein Pfad-Confusion (`../`) beim URL-Bau, keine
@@ -517,7 +582,8 @@ fn push_freetext(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_fr
 
 /// Sendet die vollständige Feld-Liste an den Relay – Grundlage des Feldwechsels
 /// im PIN-Menü des Tablets im Cloud-Modus (LAN baut `/courts` direkt). Selten
-/// veränderlich; periodisch (alle 30 s) genügt.
+/// veränderlich; periodisch (alle 30 s) genügt. Huckepack dabei: die Azure-TTS-
+/// Vererbung an Cloud-Ansage-Slaves (ADR 0003).
 fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
     let courts: Vec<CourtBrief> = ctx
         .tablet
@@ -531,9 +597,29 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
             hall: ctx.tablet.court_hall(c.id),
         })
         .collect();
-    if !courts.is_empty() {
-        let _ = tx.send(text(&HostFrame::Courts { courts }));
+    // Auch bei (noch) leerer Feldliste senden, wenn es eine Azure-Config zu
+    // vererben gibt — sonst hinge die Vererbung daran, dass BTP schon ein
+    // Turnier geladen hat (Review-Befund). Der Relay übernimmt eine leere
+    // Feldliste nicht (schützt das Tablet-Feldwechsel-Menü bei Aussetzern).
+    let azure_tts = azure_share(ctx);
+    if !courts.is_empty() || azure_tts.is_some() {
+        let _ = tx.send(text(&HostFrame::Courts { courts, azure_tts }));
     }
+}
+
+/// Azure-TTS-Konfiguration für die Vererbung an Cloud-Slaves (ADR 0003).
+/// Frisch von Platte gelesen, damit Einstellungs-Änderungen ohne Neustart
+/// greifen. `None`, wenn Azure aus oder unvollständig ist — der Relay
+/// verwirft dann eine früher geerbte Config.
+fn azure_share(ctx: &ServerCtx) -> Option<relay_proto::AzureTtsShare> {
+    let az = ctx.app_config().azure_tts;
+    (az.enabled && !az.key.is_empty() && !az.region.is_empty()).then_some(
+        relay_proto::AzureTtsShare {
+            region: az.region,
+            key: az.key,
+            voice: az.voice,
+        },
+    )
 }
 
 /// Serialisiert einen Wert zu einem WebSocket-Text-Frame.

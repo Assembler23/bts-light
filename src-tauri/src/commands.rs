@@ -62,6 +62,10 @@ pub struct AppState {
     pub relay_task: Mutex<Option<JoinHandle<()>>>,
     /// Handle des Diagnose-Log-Uploads, falls aktiv.
     pub log_task: Mutex<Option<JoinHandle<()>>>,
+    /// Cloud-Slave: vom Master geerbte Azure-TTS-Konfiguration (ADR 0003).
+    /// Bewusst nur im Arbeitsspeicher – wird nie in die `config.json`
+    /// geschrieben; eine vollständige lokale Azure-Config hat Vorrang.
+    pub inherited_azure: Mutex<Option<relay_proto::AzureTtsShare>>,
     /// Laufende mDNS-Bekanntgabe (`bts-light.local`) – LAN-Modus ODER
     /// Slave-Monitor-Brücke.
     pub mdns: Mutex<Option<mdns_sd::ServiceDaemon>>,
@@ -311,24 +315,49 @@ pub async fn test_btp(host: String, port: u16, password: Option<String>) -> Resu
 }
 
 /// Synthetisiert eine Ansage per Azure Neural TTS und liefert das MP3 als
-/// Base64. Key/Region kommen aus der gespeicherten Konfiguration (bleiben im
-/// Backend). Ergebnis wird je SSML auf Platte gecacht. Fehler → `Err`, das
+/// Base64. Key/Region kommen aus der gespeicherten Konfiguration oder – am
+/// Cloud-Slave – aus der vom Master geerbten Config (ADR 0003); beides bleibt
+/// im Backend. Ergebnis wird je SSML auf Platte gecacht. Fehler → `Err`, das
 /// Frontend fällt dann auf die lokale Web-Speech-Ansage zurück.
 #[tauri::command]
-pub async fn azure_tts_speak(app: AppHandle, ssml: String) -> Result<String, String> {
+pub async fn azure_tts_speak(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ssml: String,
+) -> Result<String, String> {
     use base64::Engine;
     let cfg = AppConfig::load_from(&config_path(&app)).map_err(|e| e.to_string())?;
-    let az = cfg.azure_tts;
-    if !az.enabled || az.key.is_empty() || az.region.is_empty() {
-        return Err("Azure TTS nicht konfiguriert".to_string());
-    }
+    let inherited = state
+        .inherited_azure
+        .lock()
+        .expect("inherited_azure-Mutex nicht vergiftet")
+        .clone();
+    let (region, key) = match effective_azure(&cfg.azure_tts, inherited.as_ref()) {
+        Some(rk) => rk,
+        None => return Err("Azure TTS nicht konfiguriert".to_string()),
+    };
     let cache_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("tts-cache");
-    let bytes = crate::azure_tts::synthesize(&az.region, &az.key, &ssml, &cache_dir).await?;
+    let bytes = crate::azure_tts::synthesize(&region, &key, &ssml, &cache_dir).await?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Vorrangregel der Azure-Zugangsdaten (ADR 0003): vollständige lokale Config
+/// (aktiv + Key + Region) gewinnt, sonst die vom Master geerbte. `None`, wenn
+/// keine von beiden nutzbar ist.
+fn effective_azure(
+    local: &crate::config::AzureTtsConfig,
+    inherited: Option<&relay_proto::AzureTtsShare>,
+) -> Option<(String, String)> {
+    if local.enabled && !local.key.is_empty() && !local.region.is_empty() {
+        return Some((local.region.clone(), local.key.clone()));
+    }
+    inherited
+        .filter(|a| !a.key.is_empty() && !a.region.is_empty())
+        .map(|a| (a.region.clone(), a.key.clone()))
 }
 
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).
@@ -1615,6 +1644,9 @@ pub struct CloudFreetext {
 pub struct CloudAnnounce {
     pub courts: Vec<CloudAnnounceCourt>,
     pub freetext: Vec<CloudFreetext>,
+    /// Stimme der vom Master geerbten Azure-Config (ADR 0003), `None` ohne
+    /// Vererbung. Bewusst nur die Stimme: der Key bleibt im Backend.
+    pub azure_voice: Option<String>,
 }
 
 /// Cloud-Ansage-Slave (B1a): holt aus dem Cloud-Relay des Masters die Matches
@@ -1631,6 +1663,7 @@ pub async fn cloud_announce_state(
             return Ok(CloudAnnounce {
                 courts: Vec::new(),
                 freetext: Vec::new(),
+                azure_voice: None,
             });
         }
         (
@@ -1639,9 +1672,29 @@ pub async fn cloud_announce_state(
             cfg.install_id.clone(),
         )
     };
-    let st = crate::tablet::relay_client::fetch_announce_state(&ns, &hall, since, &slave_id)
-        .await
-        .unwrap_or_default();
+    let fetched =
+        crate::tablet::relay_client::fetch_announce_state(&ns, &hall, since, &slave_id).await;
+    // Geerbte Azure-Config nur bei erfolgreichem Poll übernehmen – ein
+    // Netz-Aussetzer soll die Vererbung nicht verwerfen (ADR 0003). Ein
+    // erfolgreicher Poll ist dagegen autoritativ, auch wenn er `None`
+    // liefert (Azure am Master deaktiviert).
+    let azure_voice = match &fetched {
+        Some(st) => {
+            let voice = st.azure_tts.as_ref().map(|a| a.voice.clone());
+            *state
+                .inherited_azure
+                .lock()
+                .expect("inherited_azure-Mutex nicht vergiftet") = st.azure_tts.clone();
+            voice
+        }
+        None => state
+            .inherited_azure
+            .lock()
+            .expect("inherited_azure-Mutex nicht vergiftet")
+            .as_ref()
+            .map(|a| a.voice.clone()),
+    };
+    let st = fetched.unwrap_or_default();
 
     let names = |v: &[relay_proto::PlayerBrief]| v.iter().map(|p| p.name.clone()).collect();
     let nats = |v: &[relay_proto::PlayerBrief]| {
@@ -1679,7 +1732,11 @@ pub async fn cloud_announce_state(
             text: f.text,
         })
         .collect();
-    Ok(CloudAnnounce { courts, freetext })
+    Ok(CloudAnnounce {
+        courts,
+        freetext,
+        azure_voice,
+    })
 }
 
 /// Master: bekannte Cloud-Ansage-Slaves (ferne Hallen) samt Online-Status, für
@@ -1697,6 +1754,26 @@ pub async fn cloud_slaves(
         cfg.install_id.clone()
     };
     Ok(crate::tablet::relay_client::fetch_slaves(&ns).await)
+}
+
+/// Master: kurzlebigen 8-stelligen Telefon-Kopplungscode beim Relay
+/// anfordern (ADR 0004) — zum Durchsagen an die ferne Halle. 1 Stunde
+/// gültig; ein neuer Code ersetzt den alten.
+#[tauri::command]
+pub async fn pairing_code(state: State<'_, AppState>) -> Result<relay_proto::PairingCode, String> {
+    let ns = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.install_id.clone()
+    };
+    crate::tablet::relay_client::request_pairing_code(&ns).await
+}
+
+/// Slave: 8-stelligen Telefon-Kopplungscode gegen den vollen
+/// Master-Kopplungs-Code einlösen (ADR 0004). Liefert den Namespace, den
+/// das Frontend als `master_namespace` speichert.
+#[tauri::command]
+pub async fn resolve_pairing_code(code: String) -> Result<String, String> {
+    crate::tablet::relay_client::resolve_pairing_code(code.trim()).await
 }
 
 /// Geräte-Anschluss der fernen Halle (Slave): Relay-Basis des Masters +
@@ -2103,6 +2180,59 @@ pub fn monitor_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local_az(enabled: bool, key: &str, region: &str) -> crate::config::AzureTtsConfig {
+        crate::config::AzureTtsConfig {
+            enabled,
+            region: region.into(),
+            key: key.into(),
+            voice: "lokal-stimme".into(),
+        }
+    }
+
+    fn share(key: &str, region: &str) -> relay_proto::AzureTtsShare {
+        relay_proto::AzureTtsShare {
+            region: region.into(),
+            key: key.into(),
+            voice: "master-stimme".into(),
+        }
+    }
+
+    #[test]
+    fn effective_azure_prefers_complete_local_config() {
+        // Vollständige lokale Config gewinnt gegen die geerbte (ADR 0003).
+        let got = effective_azure(
+            &local_az(true, "lokal", "germanywestcentral"),
+            Some(&share("geerbt", "westeurope")),
+        );
+        assert_eq!(got, Some(("germanywestcentral".into(), "lokal".into())));
+    }
+
+    #[test]
+    fn effective_azure_falls_back_to_inherited_when_local_incomplete() {
+        // Genau der Turnier-Bug: Schalter an, Key fehlt → geerbte Config zieht.
+        let got = effective_azure(
+            &local_az(true, "", "westeurope"),
+            Some(&share("geerbt", "westeurope")),
+        );
+        assert_eq!(got, Some(("westeurope".into(), "geerbt".into())));
+        // Auch bei lokal komplett aus.
+        let got = effective_azure(
+            &local_az(false, "", ""),
+            Some(&share("geerbt", "westeurope")),
+        );
+        assert_eq!(got, Some(("westeurope".into(), "geerbt".into())));
+    }
+
+    #[test]
+    fn effective_azure_none_without_usable_config() {
+        assert_eq!(effective_azure(&local_az(true, "", ""), None), None);
+        // Unvollständig geerbte Config (defensiv) zählt nicht.
+        assert_eq!(
+            effective_azure(&local_az(false, "", ""), Some(&share("", "westeurope"))),
+            None
+        );
+    }
 
     #[test]
     fn parse_netsh_ssid_reads_ssid_not_bssid() {

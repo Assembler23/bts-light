@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Check,
   Cloud,
@@ -27,6 +27,8 @@ import {
   saveConfig,
   startSync,
   stopSync,
+  pairingCode,
+  resolvePairingCode,
   tabletOverview,
   testBtp,
   tournamentDraws,
@@ -250,6 +252,44 @@ export function SetupWizard({
   const [masterNamespace, setMasterNamespace] = useState(
     initialConfig.master_namespace ?? "",
   );
+  // Telefon-Kopplungscode (ADR 0004): am Master erzeugter 8-steller bzw.
+  // Einlöse-Status am Slave.
+  const [phoneCode, setPhoneCode] = useState<{ code?: string; err?: string } | null>(null);
+  const [redeem, setRedeem] = useState<
+    { kind: "busy" | "ok" | "err"; msg: string } | null
+  >(null);
+
+  // Slave: 8-stellige Telefon-Codes automatisch gegen den vollen
+  // Kopplungs-Code einlösen (ADR 0004). Der lange Code bleibt als
+  // Direkteingabe möglich (dann passiert hier nichts). Der Sequenz-Zähler
+  // verwirft veraltete Antworten: Tippt jemand schnell einen zweiten Code,
+  // darf die langsamere erste Antwort das Ergebnis nicht überschreiben
+  // (Review-Befund) — gleiche Idee wie die inflight-Guards in App.tsx.
+  const redeemSeq = useRef(0);
+  function onMasterCodeInput(value: string) {
+    setMasterNamespace(value);
+    redeemSeq.current += 1; // jede Eingabe entwertet laufende Auflösungen
+    const v = value.trim();
+    if (!/^\d{8}$/.test(v)) {
+      setRedeem(null);
+      return;
+    }
+    const seq = redeemSeq.current;
+    setRedeem({ kind: "busy", msg: "Telefon-Code wird eingelöst …" });
+    resolvePairingCode(v)
+      .then((ns) => {
+        if (seq !== redeemSeq.current) return; // veraltete Antwort
+        setMasterNamespace(ns);
+        setRedeem({
+          kind: "ok",
+          msg: "Telefon-Code eingelöst ✓ — Kopplungs-Code übernommen.",
+        });
+      })
+      .catch((e) => {
+        if (seq !== redeemSeq.current) return;
+        setRedeem({ kind: "err", msg: String(e) });
+      });
+  }
   // Ansage-Modul: hier nur an/aus. Alle Detail-Einstellungen (Stimmen, Azure,
   // Halle, Aussprache …) liegen auf der Ansagen-Seite (AnnounceSettings).
   const [annEnabled, setAnnEnabled] = useState(initialConfig.announce.enabled);
@@ -511,7 +551,16 @@ export function SetupWizard({
     setSaveError("");
     setSaved(false);
     try {
-      const config = buildConfig();
+      // Steht im Kopplungs-Feld noch ein uneingelöster 8-stelliger
+      // Telefon-Code (Auto-Einlösen fehlgeschlagen/übersprungen), hier
+      // letztmalig einlösen — sonst würde ein Code statt des echten
+      // Namespace gespeichert und der Slave fände den Master nie.
+      let resolvedNamespace = masterNamespace.trim();
+      if (slaveMode && /^\d{8}$/.test(resolvedNamespace)) {
+        resolvedNamespace = await resolvePairingCode(resolvedNamespace);
+        setMasterNamespace(resolvedNamespace);
+      }
+      const config = { ...buildConfig(), master_namespace: resolvedNamespace };
       await saveConfig(config);
       // Sync sauber neu starten, damit ein geänderter Modus (LAN/Cloud)
       // sicher übernommen wird – ein laufender Sync würde sonst weiterlaufen.
@@ -617,18 +666,32 @@ export function SetupWizard({
             <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800">
               <li>
                 Am <strong>Master</strong> (PC mit BTP) den{" "}
-                <strong>Kopplungs-Code</strong> ablesen (steht dort unten in
-                diesem Feld) und hier eintragen:
+                <strong>8-stelligen Telefon-Code</strong> erzeugen lassen
+                (dort unten in diesem Feld) und hier eintippen — oder den
+                langen Kopplungs-Code einfügen:
               </li>
             </ol>
             <input
               type="text"
               value={masterNamespace}
-              placeholder="Kopplungs-Code des Masters"
-              onChange={(e) => setMasterNamespace(e.currentTarget.value)}
+              placeholder="Telefon-Code (8 Ziffern) oder langer Kopplungs-Code"
+              onChange={(e) => onMasterCodeInput(e.currentTarget.value)}
               className="mt-2 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm
                          focus:border-violet-500 focus:outline-none"
             />
+            {redeem && (
+              <p
+                className={`mt-1 text-xs ${
+                  redeem.kind === "ok"
+                    ? "text-emerald-700"
+                    : redeem.kind === "err"
+                      ? "text-rose-700"
+                      : "text-violet-700"
+                }`}
+              >
+                {redeem.msg}
+              </p>
+            )}
             <ol
               className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800"
               start={2}
@@ -653,26 +716,52 @@ export function SetupWizard({
             eintragen). Mit Kopieren-Knopf. */}
         {!slaveMode && (
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-violet-200 pt-3">
+            {/* Telefon-Code (ADR 0004): 8 Ziffern, 1 Stunde gültig — zum
+                Durchsagen. Braucht laufenden Cloud-Modus (Host verbunden). */}
             <span className="text-sm text-violet-800">
-              <strong>Master-Kopplungs-Code</strong> (für ferne Hallen):
+              <strong>Telefon-Code</strong> (für ferne Hallen, 1 Stunde gültig):
             </span>
-            <span className="select-all rounded bg-white px-2 py-1 font-mono text-sm font-semibold text-violet-900">
-              {initialConfig.install_id || "—"}
-            </span>
+            {phoneCode?.code ? (
+              <span className="select-all rounded bg-white px-2.5 py-1 font-mono text-lg font-bold tracking-wider text-violet-900">
+                {phoneCode.code.slice(0, 4)}&thinsp;{phoneCode.code.slice(4)}
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() =>
-                void navigator.clipboard?.writeText(initialConfig.install_id || "")
+                void pairingCode()
+                  .then((p) => setPhoneCode({ code: p.code }))
+                  .catch((e) => setPhoneCode({ err: String(e) }))
               }
               className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white
                          transition-colors hover:bg-violet-700"
             >
-              Kopieren
+              {phoneCode?.code ? "Neuen Code erzeugen" : "Code erzeugen"}
             </button>
+            {phoneCode?.err && (
+              <span className="w-full text-xs text-rose-700">{phoneCode.err}</span>
+            )}
             <span className="w-full text-xs text-violet-700">
-              An die ferne Halle geben. Der Master braucht dafür{" "}
-              <strong>Cloud</strong> (bei eigenen LAN-Tablets in dieser Halle:{" "}
-              <strong>LAN + Cloud</strong>) oben aktiv.
+              Der fernen Halle telefonisch durchsagen — sie tippt ihn beim
+              Koppeln ein. Der Master braucht dafür <strong>Cloud</strong>{" "}
+              (bei eigenen LAN-Tablets in dieser Halle:{" "}
+              <strong>LAN + Cloud</strong>) oben aktiv und gestartet.
+            </span>
+            <span className="w-full text-xs text-violet-700">
+              Alternativ der lange <strong>Kopplungs-Code</strong>:{" "}
+              <span className="select-all rounded bg-white px-1.5 py-0.5 font-mono text-xs font-semibold text-violet-900">
+                {initialConfig.install_id || "—"}
+              </span>{" "}
+              <button
+                type="button"
+                onClick={() =>
+                  void navigator.clipboard?.writeText(initialConfig.install_id || "")
+                }
+                className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800
+                           transition-colors hover:bg-violet-200"
+              >
+                Kopieren
+              </button>
             </span>
           </div>
         )}

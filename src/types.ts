@@ -219,6 +219,13 @@ export interface SlaveInfo {
   lastSeenMs: number;
 }
 
+/** Kurzlebiger 8-stelliger Telefon-Kopplungscode des Masters
+ *  (Rust: relay_proto::PairingCode, ADR 0004). */
+export interface PairingCode {
+  code: string;
+  expiresInS: number;
+}
+
 /** Ein Feld der Cloud-Feldliste (Rust: relay_proto::CourtBrief). */
 export interface CourtBrief {
   id: number;
@@ -257,6 +264,9 @@ export interface CloudAnnounceCourt {
 export interface CloudAnnounce {
   courts: CloudAnnounceCourt[];
   freetext: { id: number; hall: string; text: string }[];
+  /** Stimme der vom Master geerbten Azure-Config (ADR 0003); `null`, wenn
+   *  keine Vererbung aktiv ist. Der Key selbst bleibt im Rust-Backend. */
+  azure_voice: string | null;
 }
 
 /** Turnier-Kennzahlen fürs Dashboard (Rust: commands::TournamentStats).

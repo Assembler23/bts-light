@@ -282,9 +282,23 @@ Stimme die Namen **nativ** spricht. Ablauf:
 - **Cache:** MP3 je SSML-Hash unter `app_data_dir/tts-cache/` → Wiederholungen/„nochmal aufrufen"
   kosten kein Netz/Geld.
 - **Fallback:** Azure aus / kein Key / Netzfehler → nahtlos die lokale Web-Speech-Ansage (mit Wörterbuch
-  + Regel-Umschrift). Nie stumm, nie blockierend.
+  + Regel-Umschrift). Nie stumm, nie blockierend — aber **sichtbar**: jeder Azure→Web-Speech-Rückfall
+  setzt über `reportAzureFallback` (`src/state/azureStatus.ts`) den App-weiten
+  [`AzureFallbackBanner`](../src/components/AzureFallbackBanner.tsx) (quittierbar) und landet als
+  `console.warn` im Diagnose-Log. Zusätzlich warnt `AnnounceSettings`, wenn der Schalter an ist,
+  aber Key/Region fehlen (das Frontend-Gate `azureOption` liefert dann gar keine Azure-Option mehr).
 - **Konfig** (`AppConfig.azure_tts`): `enabled`, `region`, `key`, `voice`. Einrichtung im Setup →
   *Ansagen*. Spielernamen werden XML-escaped in die SSML eingesetzt.
+- **Vererbung an Cloud-Slaves** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md)): Der Master
+  schickt seine Azure-Config (nur wenn aktiv **und** vollständig) huckepack im
+  `HostFrame::Courts`-Push an den Relay; der Relay liefert sie im `AnnounceState`
+  (`azureTts`-Feld) an den Cloud-Slave aus. Dort hält `AppState.inherited_azure` sie **nur im
+  RAM** (nie in der `config.json`); `azure_tts_speak` wendet die Vorrangregel `effective_azure`
+  an: vollständige lokale Config gewinnt, sonst die geerbte. Das Frontend bekommt bewusst **nur
+  die Stimme** (`CloudAnnounce.azure_voice`) — der Key bleibt im Backend. Die Ansage-Einstellungen
+  zeigen am Slave „Vom Master geerbt ✓". Ein Slave braucht damit **keine** Azure-Eingaben mehr;
+  der Zwei-Hallen-Bug „Schalter an, Key fehlt → still Standardstimme" ist doppelt abgedeckt
+  (Vererbung + Warnung/Banner).
 - **Datenschutz:** Bei aktivem Azure-TTS werden die **Namen der gerufenen Paarung** zur Synthese an
   Azure (Region wählbar, z. B. West Europe/EU) gesendet — öffentliche Wettkampfdaten, opt-in über
   `enabled`. Ist Azure aus, verlässt nichts das Gerät.

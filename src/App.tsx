@@ -12,6 +12,8 @@ import {
 } from "./api";
 import { setSharedOverrides } from "./io/announcer";
 import { AlertBanner } from "./components/AlertBanner";
+import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
+import { SlaveConnectBanner } from "./components/SlaveConnectBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
 import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
@@ -116,6 +118,9 @@ function App() {
   const [internet, setInternet] = useState<InternetStatus | null>(null);
   // Ferne Hallen (Cloud-Slaves) für die Kopfzeilen-Anzeige am Master.
   const [slaves, setSlaves] = useState<SlaveInfo[]>([]);
+  // Erst nach dem ersten echten cloudSlaves-Ergebnis wahr — Gate für den
+  // SlaveConnectBanner, damit dessen Baseline nicht der leere Anfangszustand ist.
+  const [slavesLoaded, setSlavesLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -240,7 +245,14 @@ function App() {
     const tick = () => {
       cloudSlaves()
         .then((s) => {
-          if (active) setSlaves(s);
+          if (!active) return;
+          setSlaves(s);
+          // Erst nach dem ersten ECHTEN Poll-Ergebnis darf der
+          // SlaveConnectBanner seine Baseline ziehen — sonst gälte der
+          // leere Anfangszustand als Baseline und bereits verbundene
+          // Hallen würden beim App-Start fälschlich als „neu verbunden"
+          // gemeldet (Review-Befund).
+          setSlavesLoaded(true);
         })
         .catch(() => {});
     };
@@ -291,6 +303,7 @@ function App() {
         <div className="flex h-full flex-col bg-slate-50">
           <UpdateBanner />
           <AlertBanner />
+          <AzureFallbackBanner />
           <div className="min-h-0 flex-1 overflow-auto">
             <SetupWizard
               initialConfig={config}
@@ -374,6 +387,8 @@ function App() {
       <div className="flex h-full flex-col bg-slate-50">
         <UpdateBanner />
         <AlertBanner />
+        <AzureFallbackBanner />
+        {slavesLoaded && <SlaveConnectBanner slaves={slaves} />}
         <AppShell
           current={view}
           config={config}

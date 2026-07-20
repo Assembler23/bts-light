@@ -879,7 +879,30 @@ pub enum HostFrame {
     Courts {
         #[serde(default)]
         courts: Vec<CourtBrief>,
+        /// Azure-TTS-Konfiguration des Masters für die Vererbung an
+        /// Cloud-Ansage-Slaves (ADR 0003). `None` = Azure am Master aus →
+        /// ein zuvor geerbter Wert wird beim Slave verworfen. Optionales
+        /// Feld statt neuem Frame-Typ, damit alte Relays den Frame weiter
+        /// parsen (Serde ignoriert unbekannte Felder).
+        #[serde(rename = "azureTts", skip_serializing_if = "Option::is_none", default)]
+        azure_tts: Option<AzureTtsShare>,
     },
+}
+
+/// Vom Master an Cloud-Slaves vererbte Azure-TTS-Konfiguration (ADR 0003).
+/// Enthält bewusst kein `enabled`: gesendet wird sie nur, wenn Azure am
+/// Master aktiv und vollständig konfiguriert ist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AzureTtsShare {
+    /// Azure-Region der Speech-Ressource, z. B. „westeurope".
+    #[serde(default)]
+    pub region: String,
+    /// Subscription-Key der Speech-Ressource. Achtung: Secret — nie loggen.
+    #[serde(default)]
+    pub key: String,
+    /// Stimme, z. B. „de-DE-SeraphinaMultilingualNeural".
+    #[serde(default)]
+    pub voice: String,
 }
 
 /// Eine Freitext-Ansage (Relay-Zwischenspeicher; Quelle = Master). `id`
@@ -913,6 +936,29 @@ pub struct AnnounceState {
     pub courts: Vec<AnnounceCourt>,
     #[serde(default)]
     pub freetext: Vec<FreetextItem>,
+    /// Vom Master geerbte Azure-TTS-Konfiguration (ADR 0003). `None` bei
+    /// altem Relay oder ausgeschaltetem Azure am Master — der Slave nutzt
+    /// dann seine lokale Config bzw. die Web-Speech-Standardstimme.
+    #[serde(rename = "azureTts", skip_serializing_if = "Option::is_none", default)]
+    pub azure_tts: Option<AzureTtsShare>,
+}
+
+/// Antwort von `POST /{ns}/pairing-code` — kurzlebiger 8-stelliger
+/// Telefon-Kopplungscode (ADR 0004). Der Relay hält ihn nur im RAM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingCode {
+    /// Genau 8 Ziffern (führende Nullen möglich) — telefonisch diktierbar.
+    pub code: String,
+    /// Restgültigkeit in Sekunden ab Ausstellung.
+    #[serde(rename = "expiresInS", default)]
+    pub expires_in_s: u64,
+}
+
+/// Antwort von `GET /pair/{code}` — der aufgelöste Master-Namespace
+/// (= `install_id`), den der Slave als `master_namespace` speichert.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingResolved {
+    pub namespace: String,
 }
 
 /// Präsenz-Info eines Cloud-Ansage-Slaves (für die „ferne Halle online?"-Anzeige
@@ -1240,6 +1286,53 @@ mod tests {
             winner: Some(2),
             cascade_walkover: false,
         });
+    }
+
+    #[test]
+    fn azure_tts_share_roundtrips_and_defaults() {
+        // Courts-Frame mit Azure-Vererbung (ADR 0003) hält den Roundtrip …
+        roundtrip(&HostFrame::Courts {
+            courts: vec![],
+            azure_tts: Some(AzureTtsShare {
+                region: "westeurope".into(),
+                key: "geheim".into(),
+                voice: "de-DE-SeraphinaMultilingualNeural".into(),
+            }),
+        });
+        // … und ohne Azure wird das Feld gar nicht erst serialisiert
+        // (alte Relays sehen exakt das bisherige Frame-Format).
+        let json = serde_json::to_string(&HostFrame::Courts {
+            courts: vec![],
+            azure_tts: None,
+        })
+        .unwrap();
+        assert!(!json.contains("azureTts"));
+
+        // Älterer Host ohne azureTts-Feld bleibt für den neuen Relay lesbar.
+        let frame: HostFrame = serde_json::from_str(r#"{"type":"courts","courts":[]}"#).unwrap();
+        assert_eq!(
+            frame,
+            HostFrame::Courts {
+                courts: vec![],
+                azure_tts: None
+            }
+        );
+
+        // AnnounceState: alter Relay ohne azureTts → None; mit → Wert kommt an.
+        let st: AnnounceState = serde_json::from_str(r#"{"courts":[],"freetext":[]}"#).unwrap();
+        assert_eq!(st.azure_tts, None);
+        let st: AnnounceState = serde_json::from_str(
+            r#"{"courts":[],"freetext":[],"azureTts":{"region":"westeurope","key":"k","voice":"v"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            st.azure_tts,
+            Some(AzureTtsShare {
+                region: "westeurope".into(),
+                key: "k".into(),
+                voice: "v".into(),
+            })
+        );
     }
 
     #[test]
