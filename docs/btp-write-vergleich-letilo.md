@@ -62,10 +62,12 @@ zurück, und was davon lohnt die Übernahme?
   das Highlight dort dargestellt wird. Betroffene Stellen:
   `btp/proto.rs` (neuer schlanker Request), `commands.rs`
   (`call_matches`/`remove_preparation_call`), Doku `preparation.md`.
-- **P2 — Retry-Queue für Ergebnis-Writes (M):** `needsync`-Prinzip:
-  von BTP nicht bestätigte Ergebnisse (Result ≠ 1 / Verbindungsfehler)
-  merken und beim nächsten erfolgreichen Kontakt nachschieben.
-  Players-Checkout dabei nur binnen 5 min seit Spielende (Tilos Guard).
+- ~~**P2 — Retry-Queue für Ergebnis-Writes (M)**~~ → **umgesetzt
+  (Cluster A5):** Nachschub-Queue im Sync-Loop (periodisch alle 30 s,
+  robuster als Tilos nur-beim-Reconnect-`pushall`), 5-Minuten-Guard für
+  den Players-Checkout, Nie-Überschreiben-Regel und bedingte
+  Feld-Freigabe — Details in
+  [btp_protocol.md](btp_protocol.md) → „Nachschub-Queue".
 - **P3 — Disqualifikation als `ScoreStatus 3` (S):** dritte Option im
   Turnierleitungs-Dialog; kein Tablet-UI nötig.
 - **Bewusst zurückgestellt:** Check-in-Bits (nur mit

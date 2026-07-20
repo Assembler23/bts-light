@@ -1058,6 +1058,10 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     match write_result_to_btp(&ctx.config, &update).await {
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
+            // Ein evtl. früher eingereihter Fehlversuch dieses Matches ist
+            // damit erledigt (das Tablet wiederholt selbst — gelingt sein
+            // Retry, darf die Nachschub-Queue nicht später erneut schreiben).
+            ctx.tablet.clear_btp_retry(m.id);
             tracing::info!("BTP-Schreiben OK: Match {} (Feld freigegeben)", m.id);
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
@@ -1071,7 +1075,16 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             ResultResponse::ok()
         }
         Err(e) => {
-            tracing::warn!("BTP-Schreiben fehlgeschlagen (Match {}): {e}", m.id);
+            // Nachschub-Queue (A5): Das Tablet wiederholt zwar selbst, aber
+            // wenn es aufgibt/offline geht, wäre das Ergebnis verloren. Der
+            // Sync-Loop schiebt den Write nach, sobald BTP wieder antwortet.
+            // Bezugszeitpunkt = Spielende (steuert das 5-Minuten-Fenster
+            // des Spieler-Checkouts beim Nachschub).
+            ctx.tablet.queue_btp_retry(update.clone(), end_ms);
+            tracing::warn!(
+                "BTP-Schreiben fehlgeschlagen (Match {}): {e} — in Nachschub-Queue eingereiht",
+                m.id
+            );
             ResultResponse::err(e)
         }
     }
@@ -1733,6 +1746,21 @@ mod tests {
             vec![(10, 8)],
             "Stand des aktuellen Matches bleibt unangetastet"
         );
+    }
+
+    /// Nachschub-Queue (A5): Schlägt der BTP-Write fehl, landet der
+    /// komplette MatchUpdate in der Queue — der Sync-Loop reicht ihn nach,
+    /// sobald BTP wieder antwortet.
+    #[tokio::test]
+    async fn process_result_failure_queues_btp_retry() {
+        let ctx = make_ctx(1); // Port 1: Verbindung wird sofort abgewiesen
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(!resp.ok, "Write gegen toten BTP-Port schlägt fehl");
+        let q = ctx.tablet.btp_retries();
+        assert_eq!(q.len(), 1, "Fehlschlag ist eingereiht");
+        assert_eq!(q[0].update.btp_match_id, 42);
+        assert_eq!(q[0].update.sets, vec![(21, 10), (21, 15)]);
+        assert!(q[0].enqueued_ms > 0, "Bezugszeitpunkt = Spielende gesetzt");
     }
 
     /// Nach einem Ergebnis gibt `process_result` das Feld in BTP frei — seit
