@@ -88,6 +88,9 @@ export function FieldOverviewPage({
   // Turnierleitung gerade ein Ergebnis eintippt, plus die editierbaren Sätze.
   const [enterFor, setEnterFor] = useState<CourtOverview | null>(null);
   const [enterSets, setEnterSets] = useState<[number, number][]>([]);
+  // Zwei-Schritt-Bestätigung der Disqualifikation (folgenreich): erst Team
+  // wählen, dann bestätigen. null = keine Auswahl offen.
+  const [dqConfirm, setDqConfirm] = useState<1 | 2 | null>(null);
   // Hallen-Filter (null = alle Hallen).
   const [hallFilter, setHallFilter] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
@@ -148,6 +151,7 @@ export function FieldOverviewPage({
     const base = c.sets.map(([a, b]) => [a, b] as [number, number]);
     setEnterSets(base.length ? [...base, [0, 0]] : [[0, 0]]);
     setError("");
+    setDqConfirm(null);
     setEnterFor(c);
   }
 
@@ -848,26 +852,56 @@ export function FieldOverviewPage({
                   Ein Team disqualifizieren — der Gegner gewinnt (BTP-Status 3).
                   Ein oben eingetragener Zwischenstand bleibt erhalten.
                 </p>
-                <div className="mt-1.5 flex flex-wrap gap-2">
-                  {([1, 2] as const).map((team) => {
-                    const names = team === 1 ? enterFor.team1 : enterFor.team2;
-                    return (
-                      <button
-                        key={team}
-                        type="button"
-                        onClick={() => void submitDisqualify(team)}
-                        disabled={busy}
-                        className="inline-flex items-center gap-1 rounded-md border border-rose-300
-                                   bg-white px-2.5 py-1 text-xs font-medium text-rose-700
-                                   transition-colors hover:bg-rose-100 disabled:opacity-50"
-                      >
-                        <Ban size={13} />
-                        {(names.join(" / ") || `Team ${team}`) +
-                          " disqualifizieren"}
-                      </button>
-                    );
-                  })}
-                </div>
+                {dqConfirm === null ? (
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    {([1, 2] as const).map((team) => {
+                      const names =
+                        team === 1 ? enterFor.team1 : enterFor.team2;
+                      return (
+                        <button
+                          key={team}
+                          type="button"
+                          onClick={() => setDqConfirm(team)}
+                          disabled={busy}
+                          className="inline-flex items-center gap-1 rounded-md border border-rose-300
+                                     bg-white px-2.5 py-1 text-xs font-medium text-rose-700
+                                     transition-colors hover:bg-rose-100 disabled:opacity-50"
+                        >
+                          <Ban size={13} />
+                          {(names.join(" / ") || `Team ${team}`) +
+                            " disqualifizieren"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-medium text-rose-800">
+                      {(dqConfirm === 1 ? enterFor.team1 : enterFor.team2).join(
+                        " / ",
+                      ) || `Team ${dqConfirm}`}{" "}
+                      wirklich disqualifizieren?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void submitDisqualify(dqConfirm)}
+                      disabled={busy}
+                      className="rounded-md bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white
+                                 transition-colors hover:bg-rose-700 disabled:opacity-50"
+                    >
+                      Ja, disqualifizieren
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDqConfirm(null)}
+                      disabled={busy}
+                      className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600
+                                 transition-colors hover:bg-slate-200 disabled:opacity-50"
+                    >
+                      Abbrechen
+                    </button>
+                  </div>
+                )}
               </div>
               {error && (
                 <p className="mt-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">

@@ -105,7 +105,11 @@ Abschnitt „Disqualifikation" mit je einem Knopf pro Team. `disqualify_match`
 baut den `MatchUpdate` über `server::build_manual_dq_update`: der Gegner des
 disqualifizierten Teams gewinnt, `ScoreStatus = 3`, und ein bereits
 eingetippter Zwischenstand bleibt erhalten — eine Disqualifikation kann
-mitten im Spiel fallen, daher **keine** Satz-Vollständigkeitsprüfung. Sieger-/
+mitten im Spiel fallen, daher **keine** Satz-Vollständigkeitsprüfung — der
+eingetippte Zwischenstand wird (außer dem 0..=99-Bereich + Satzanzahl) **nicht
+auf Scoring-Plausibilität geprüft**; die Verantwortung dafür liegt bewusst bei
+der Turnierleitung (jede Regel-Prüfung würde den „mitten im Spiel"-Zweck
+verhindern). In der UI ist die DQ zweistufig bestätigt. Sieger-/
 Status-Ableitung teilt sich `disqualify_match` über den erweiterten
 `server::derive_result` (`disqualified`-Zweig) mit den anderen Wegen; Feld-
 Freigabe, Auscheck-Block und Nachschub-Queue sind identisch zu `enter_result`.

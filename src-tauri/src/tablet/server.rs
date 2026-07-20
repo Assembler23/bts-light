@@ -1133,6 +1133,13 @@ fn manual_finish_fields(
 /// der Gegner gewinnt. Bereits gespielte `sets` bleiben erhalten — eine
 /// Disqualifikation kann mitten im Spiel fallen, daher **keine**
 /// Satz-Vollständigkeitsprüfung. Rein & testbar.
+///
+/// **Bewusst akzeptiertes Risiko (Change-Gate Punkt 5):** Der Teilstand wird
+/// NICHT auf Scoring-Plausibilität geprüft (nur der 0..=99-Bereich + Satzanzahl
+/// in `derive_result`). Ein von der Turnierleitung eingetippter Zwischenstand
+/// geht so, wie er ist, nach BTP — die Verantwortung dafür liegt bei der
+/// Turnierleitung (jede Satz-Regel-Prüfung würde den „mitten im Spiel"-Zweck
+/// von P3 verhindern).
 pub(crate) fn build_manual_dq_update(
     m: &BtpMatch,
     loser_team: i64,
@@ -2055,6 +2062,22 @@ mod tests {
         let mut done = match_on_court();
         done.winner = Some(2);
         assert!(build_manual_dq_update(&done, 1, vec![], None, 0).is_err());
+    }
+
+    #[test]
+    fn manual_dq_without_court_has_no_field_or_players() {
+        // Disqualifikation eines nie zugewiesenen Spiels (kein Feld): nur die
+        // Wertung (Status 3), kein Feld-/Spieler-/Endzeit-Block.
+        let mut m = match_on_court();
+        m.court_id = None;
+        m.status = MatchStatus::Scheduled;
+        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000).unwrap();
+        assert_eq!(u.score_status, 3);
+        assert!(u.team1_won, "Team 2 disqualifiziert → Team 1 gewinnt");
+        assert_eq!(u.free_court_id, None);
+        assert!(u.player_ids.is_empty());
+        assert_eq!(u.end_ts_ms, None);
+        assert_eq!(u.duration_mins, 0);
     }
 
     // ein 0:0 als Geistersatz nach Spielende und wird weggelassen.
