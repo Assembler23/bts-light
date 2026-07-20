@@ -134,7 +134,14 @@ einen `Update`-Container.
 > **ohne Matches direkt nach gefüllten Daten** wird deshalb verworfen und
 > erst übernommen, wenn der Folge-Abruf ihn bestätigt — vorher ändert der
 > Zyklus keinerlei Zustand (keine Feld-Freigabe, keine Auto-Vergabe, kein
-> Liveticker-Push). Das Dashboard zeigt den verworfenen Abruf als Warnung.
+> Liveticker-Push). Das Dashboard zeigt den verworfenen Abruf als
+> orangene Warnung (kein Rot — der Guard heilt sich selbst).
+> Bewusste Grenzen: Nach einem App-**Neustart** kennt der Guard noch
+> keinen gefüllten Stand — ein Aussetzer exakt im allerersten Poll würde
+> durchrutschen (akzeptiertes Restrisiko). BTP-**Verbindungsfehler**
+> zwischen zwei leeren Abrufen setzen den Bestätigungs-Zähler nicht
+> zurück (BTP hat zweimal „leer" gesagt — der Fehl-Poll dazwischen ändert
+> daran nichts).
 
 Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 `Tournament` (jeder ist eine `GROUP`, jeder optional – fehlt wenn leer):

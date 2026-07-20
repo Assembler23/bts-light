@@ -151,6 +151,13 @@ impl SyncEngine {
     /// geschlossen). R2 bleibt gewahrt: BTP ist die Wahrheit — nur eben
     /// erst, wenn es zweimal dasselbe sagt.
     ///
+    /// Bewusste Grenzen: (a) Nach einem App-Neustart ist `seen_matches`
+    /// leer — trifft der Aussetzer exakt den allerersten Poll, greift der
+    /// Guard nicht (Neustart mitten im Turnier + Aussetzer im selben
+    /// Moment: akzeptiertes Restrisiko). (b) `BtpError`-Zyklen dazwischen
+    /// setzen den Zähler NICHT zurück — zwei leere Abrufe, getrennt nur
+    /// durch technische Fehl-Polls, gelten weiter als Bestätigung.
+    ///
     /// Liefert `true`, wenn der Snapshot verdächtig ist und der Zyklus
     /// ohne jede Zustandsänderung abgebrochen werden soll.
     fn empty_snapshot_is_suspect(&mut self, snapshot: &BtpSnapshot) -> bool {
@@ -169,6 +176,10 @@ impl SyncEngine {
             // BTP bleibt dabei → leeren Stand als echt übernehmen. Guard
             // zurücksetzen: leer ist ab jetzt der bekannte Zustand, bis
             // wieder Matches auftauchen.
+            tracing::info!(
+                "BTP bestätigt den leeren Turnier-Stand ({}. Abruf in Folge) — übernommen",
+                self.suspect_empty_polls
+            );
             self.seen_matches = false;
             self.suspect_empty_polls = 0;
             return false;
@@ -512,7 +523,9 @@ impl SyncEngine {
 
         // Leer-Snapshot-Guard: verdächtig leere Stände verwerfen, BEVOR
         // irgendetwas davon abgeleitet wird (Feld-Freigaben, Auto-Vergabe,
-        // Tablet-Snapshot, Liveticker-Push).
+        // Tablet-Snapshot, Liveticker-Push). MUSS der erste Schritt nach
+        // fetch_snapshot bleiben — jeder Schritt davor würde bei einem
+        // Aussetzer bereits Zustand aus dem leeren Stand ableiten.
         if self.empty_snapshot_is_suspect(&snapshot) {
             tracing::warn!(
                 "BTP-Snapshot ohne Matches direkt nach gefülltem Stand — verworfen \
