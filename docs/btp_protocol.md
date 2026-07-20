@@ -324,3 +324,36 @@ Update {
 - **Verbindungsabbruch:** Socket-Error / Timeout / vorzeitiges `end`.
 - **Malformed Frame:** zu wenige Bytes (`< 4`) oder gunzip-Fehler.
 - Es gibt keine In-Band-Fehlertexte über numerische `Result`-Codes hinaus.
+
+### Nachschub-Queue für Ergebnis-Writes (Cluster A5)
+
+Schlägt ein Ergebnis-`SENDUPDATE` fehl (BTP nicht erreichbar oder
+`Result != 1`), landet der komplette `MatchUpdate` in einer
+Nachschub-Queue (je Match ein Eintrag, neuester Stand gewinnt). Der
+Sync-Loop schiebt die Einträge nach, sobald BTP wieder antwortet —
+frühestens alle 30 s (Tilos `needsync`-Prinzip, aber **periodisch**
+statt nur beim Reconnect; bei Tilo bleiben fachliche Rejects bis zum
+nächsten Socket-Fehler liegen). Schutzregeln beim Nachschub:
+
+- **Nie überschreiben:** Kennt BTP für das Match inzwischen ein Ergebnis
+  (z. B. von der Turnierleitung manuell nachgetragen), wird der Eintrag
+  verworfen.
+- **Spieler-Checkout nur binnen 5 min seit Spielende** (Tilos Guard):
+  danach geht das Ergebnis OHNE Players-Block raus — späte Replays
+  dürfen Spieler nicht erneut auschecken/umstempeln.
+- **Feld-Freigabe nur, solange das Feld laut Snapshot noch dieses Match
+  trägt** — sonst räumte das Replay einem neu belegten Feld die frische
+  Zuweisung weg.
+- Einträge älter als 24 h verfallen.
+
+Das Tablet wiederholt seine Übermittlung unabhängig davon selbst; gelingt
+sie, wird der Queue-Eintrag entfernt und der Flush prüft das direkt vor
+jedem Write erneut. **Race-Selbstheilung:** Geht während eines
+(hängenden) Nachschub-Writes eine Korrektur direkt durch, hätte der
+ältere Stand sie überschrieben — der Flush erkennt das (Vermerk der
+erfolgreichen Direkt-Writes) und schreibt die neuere Korrektur sofort
+erneut; schlägt auch das fehl, wird sie wieder eingereiht. Ein doppelter
+*identischer* Write ist unschädlich (Players-Block setzt Werte, er
+toggelt nichts). Die Queue lebt im Speicher — ein App-Neustart leert sie
+(das Tablet hält sein Ergebnis ohnehin bis zum `ok:true`). Bei bestätigt
+leerem Turnier-Stand (Leer-Snapshot-Guard) pausiert der Nachschub.

@@ -101,6 +101,9 @@ pub struct SyncEngine {
     /// Einträge fallen weg, sobald das Feld belegt erscheint oder nach
     /// [`PENDING_AUTO_TTL`] (fehlgeschlagener Write → erneuter Versuch).
     pending_auto: HashMap<i64, (i64, u64)>,
+    /// Zeitpunkt des letzten Nachschub-Flushs (A5) — drosselt die
+    /// Wiederholversuche auf [`BTP_RETRY_FLUSH_EVERY`].
+    last_btp_retry_flush: Option<Instant>,
     /// Leer-Snapshot-Guard: Hat diese Sitzung schon einen Snapshot MIT
     /// Matches gesehen? Nur dann ist ein plötzlich leerer Stand verdächtig.
     seen_matches: bool,
@@ -120,6 +123,75 @@ const PENDING_AUTO_TTL: Duration = Duration::from_secs(30);
 /// „0 Hallen/Felder/Matches" → Massen-Freigabe aller Felder).
 const EMPTY_CONFIRM_POLLS: u32 = 2;
 
+/// Nachschub-Queue (A5): frühestens alle 30 s einen Flush versuchen —
+/// der Poll-Zyklus läuft alle ~2 s, ein strauchelndes BTP soll nicht im
+/// Sekundentakt mit Login+SENDUPDATE beharkt werden.
+const BTP_RETRY_FLUSH_EVERY: Duration = Duration::from_secs(30);
+
+/// Spieler-Checkout-Fenster (Tilos 5-Minuten-Guard): Wird ein Ergebnis
+/// später als 5 min nach Spielende nachgeschoben, bleibt der
+/// Players-Block weg — sonst würde ein Replay die Spieler erneut
+/// auschecken/umstempeln, obwohl sie längst im nächsten Spiel stecken.
+const PLAYER_CHECKOUT_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+/// Höchst-Lebensdauer eines Queue-Eintrags — danach ist das Turnier
+/// vorbei bzw. der Fall manuell geklärt; ein Uralt-Replay wäre nur
+/// noch riskant.
+const BTP_RETRY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Entscheidung der Nachschub-Queue für EINEN Eintrag (rein, testbar).
+#[derive(Debug, PartialEq)]
+enum RetryAction {
+    /// Eintrag verwerfen (Grund fürs Log).
+    Drop(&'static str),
+    /// Diesen (ggf. entschärften) Stand nach BTP schreiben.
+    Write(Box<crate::btp::proto::MatchUpdate>),
+}
+
+/// Bereitet einen Nachschub-Write vor — oder verwirft ihn:
+/// - BTP kennt für das Match bereits ein Ergebnis (z. B. von der
+///   Turnierleitung manuell nachgetragen) → NIE überschreiben.
+/// - Älter als [`BTP_RETRY_MAX_AGE`] → verwerfen.
+/// - Außerhalb des [`PLAYER_CHECKOUT_WINDOW`] → Players-Block entfernen
+///   (Tilos 5-Minuten-Guard gegen späte Spieler-Replays).
+/// - Feld-Freigabe nur, wenn das Feld laut Snapshot noch UNSER Match
+///   trägt — sonst würde das Replay einem inzwischen neu belegten Feld
+///   die frische Zuweisung wegräumen.
+fn prepare_btp_retry(
+    entry: &crate::tablet::state::PendingBtpWrite,
+    snapshot: &BtpSnapshot,
+    now: u64,
+) -> RetryAction {
+    // winner.is_some() impliziert im Modell Finished (model.rs setzt den
+    // Status genau dann) — der Sieger allein ist das Kriterium.
+    let already_decided = snapshot
+        .matches
+        .iter()
+        .any(|m| m.id == entry.update.btp_match_id && m.winner.is_some());
+    if already_decided {
+        return RetryAction::Drop("BTP hat bereits ein Ergebnis");
+    }
+    let age = now.saturating_sub(entry.enqueued_ms);
+    if age > BTP_RETRY_MAX_AGE.as_millis() as u64 {
+        return RetryAction::Drop("Eintrag zu alt");
+    }
+    let mut update = entry.update.clone();
+    if age > PLAYER_CHECKOUT_WINDOW.as_millis() as u64 {
+        update.player_ids.clear();
+        update.end_ts_ms = None;
+    }
+    if let Some(fc) = update.free_court_id {
+        let still_ours = snapshot
+            .matches
+            .iter()
+            .any(|m| m.id == update.btp_match_id && m.court_id == Some(fc));
+        if !still_ours {
+            update.free_court_id = None;
+        }
+    }
+    RetryAction::Write(Box::new(update))
+}
+
 impl Default for SyncEngine {
     fn default() -> Self {
         Self::new()
@@ -137,8 +209,99 @@ impl SyncEngine {
             oncourt_prev: HashMap::new(),
             court_free_since: HashMap::new(),
             pending_auto: HashMap::new(),
+            last_btp_retry_flush: None,
             seen_matches: false,
             suspect_empty_polls: 0,
+        }
+    }
+
+    /// Nachschub-Queue flushen (A5): fehlgeschlagene Ergebnis-Writes
+    /// erneut nach BTP schreiben. Läuft nur im Master-Modus, frühestens
+    /// alle [`BTP_RETRY_FLUSH_EVERY`], und nur wenn der aktuelle Poll BTP
+    /// erreicht hat (der Snapshot dieses Zyklus liegt vor) — das ist
+    /// Tilos needsync-Prinzip, nur periodisch statt nur beim Reconnect.
+    async fn flush_btp_retries(
+        &mut self,
+        config: &AppConfig,
+        tablet: &TabletState,
+        snapshot: &BtpSnapshot,
+    ) {
+        let entries = tablet.btp_retries();
+        if entries.is_empty() {
+            return;
+        }
+        // Bestätigt leerer Snapshot (Turnier in BTP geschlossen/entladen):
+        // ein Nachschub in ein nicht (mehr) geladenes Turnier ergibt keinen
+        // Sinn — Einträge bleiben liegen, bis wieder Matches da sind oder
+        // die Höchst-Lebensdauer greift.
+        if snapshot.matches.is_empty() {
+            return;
+        }
+        if self
+            .last_btp_retry_flush
+            .is_some_and(|t| t.elapsed() < BTP_RETRY_FLUSH_EVERY)
+        {
+            return;
+        }
+        self.last_btp_retry_flush = Some(Instant::now());
+        let now = now_ms();
+        let mut still_failing = 0usize;
+        for entry in entries {
+            let match_id = entry.update.btp_match_id;
+            // Direkt vor dem Write erneut prüfen: Hat ein zwischenzeitlich
+            // erfolgreicher Direkt-Write (Tablet-Retry) den Eintrag schon
+            // geräumt, entfällt der Nachschub.
+            if !tablet.btp_retry_pending(match_id) {
+                continue;
+            }
+            match prepare_btp_retry(&entry, snapshot, now) {
+                RetryAction::Drop(reason) => {
+                    tablet.clear_btp_retry(match_id);
+                    tracing::warn!("Nachschub für Match {match_id} verworfen: {reason}");
+                }
+                RetryAction::Write(update) => {
+                    let write_started = now_ms();
+                    match crate::tablet::server::write_result_to_btp(config, &update).await {
+                        Ok(()) => {
+                            tablet.clear_btp_retry(match_id);
+                            tracing::info!("Nachschub OK: Match {match_id} nach BTP geschrieben");
+                            // Race-Selbstheilung: Ist WÄHREND unseres Writes
+                            // eine Korrektur direkt durchgegangen, hat unser
+                            // (älterer) Stand sie gerade überschrieben —
+                            // die neuere Korrektur sofort erneut schreiben.
+                            if let Some(newer) =
+                                tablet.direct_btp_write_since(match_id, write_started)
+                            {
+                                tracing::warn!(
+                                    "Nachschub für Match {match_id} hat eine \
+                                     zwischenzeitliche Korrektur überholt — schreibe \
+                                     die Korrektur erneut"
+                                );
+                                if let Err(e) =
+                                    crate::tablet::server::write_result_to_btp(config, &newer).await
+                                {
+                                    // Korrektur erneut einreihen — der nächste
+                                    // Flush versucht es wieder.
+                                    tablet.queue_btp_retry(newer, now);
+                                    tracing::warn!(
+                                        "Korrektur-Rewrite für Match {match_id} \
+                                         fehlgeschlagen ({e}) — wieder eingereiht"
+                                    );
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Eintrag bleibt — nächster Versuch in ≥30 s.
+                            // Sammel-Log statt einer Zeile je Match (Queue
+                            // kann viele Einträge halten).
+                            still_failing += 1;
+                        }
+                    }
+                }
+            }
+        }
+        if still_failing > 0 {
+            tracing::info!("Nachschub-Queue: {still_failing} Eintrag/Einträge weiter erfolglos");
         }
     }
 
@@ -593,6 +756,13 @@ impl SyncEngine {
         // Auto-Feldvergabe nur im Normalbetrieb – ein Ansage-Slave schreibt nie
         // nach BTP (nur der Master vergibt Felder).
         if !config.slave_mode {
+            // Nachschub-Queue (A5): liegengebliebene Ergebnis-Writes
+            // nachreichen — BTP ist in diesem Zyklus nachweislich erreichbar.
+            // Kollidiert nicht mit der Auto-Vergabe direkt darunter: beide
+            // arbeiten auf DEMSELBEN (vor dem Flush geladenen) Snapshot, ein
+            // hier frisch freigegebenes Feld erscheint dort noch belegt und
+            // wird frühestens im nächsten Poll neu vergeben.
+            self.flush_btp_retries(config, tablet, &snapshot).await;
             let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
             if !auto_courts.is_empty() {
                 match crate::tablet::server::write_courts_to_btp(
@@ -1249,6 +1419,102 @@ mod tests {
             engine.empty_snapshot_is_suspect(&empty),
             "neuer Aussetzer → wieder verwerfen"
         );
+    }
+
+    // ───────────────────── Nachschub-Queue (A5) ─────────────────────
+
+    use crate::tablet::state::PendingBtpWrite;
+
+    fn upd(match_id: i64, free_court: Option<i64>) -> crate::btp::proto::MatchUpdate {
+        crate::btp::proto::MatchUpdate {
+            btp_match_id: match_id,
+            draw_id: 1,
+            planning_id: 1000 + match_id,
+            sets: vec![(21, 15), (21, 17)],
+            team1_won: true,
+            duration_mins: 33,
+            score_status: 0,
+            free_court_id: free_court,
+            player_ids: vec![11, 12],
+            end_ts_ms: Some(500_000),
+        }
+    }
+
+    fn pending(match_id: i64, free_court: Option<i64>, enqueued_ms: u64) -> PendingBtpWrite {
+        PendingBtpWrite {
+            update: upd(match_id, free_court),
+            enqueued_ms,
+        }
+    }
+
+    #[test]
+    fn retry_is_dropped_when_btp_already_has_a_result() {
+        // Turnierleitung hat das Ergebnis inzwischen manuell nachgetragen →
+        // der Nachschub darf es NIE überschreiben.
+        let snap = snap_with(Vec::new(), vec![finished_named(7, 1, "A", "B")], Vec::new());
+        assert_eq!(
+            prepare_btp_retry(&pending(7, None, 0), &snap, 1_000),
+            RetryAction::Drop("BTP hat bereits ein Ergebnis")
+        );
+    }
+
+    #[test]
+    fn retry_is_dropped_after_max_age() {
+        let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
+        let too_old = BTP_RETRY_MAX_AGE.as_millis() as u64 + 1;
+        assert_eq!(
+            prepare_btp_retry(&pending(7, None, 0), &snap, too_old),
+            RetryAction::Drop("Eintrag zu alt")
+        );
+    }
+
+    #[test]
+    fn retry_strips_player_checkout_after_five_minutes() {
+        // Tilos 5-Minuten-Guard: späte Replays dürfen Spieler nicht erneut
+        // auschecken/umstempeln — Ergebnis + Sätze bleiben unverändert.
+        let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
+        let late = PLAYER_CHECKOUT_WINDOW.as_millis() as u64 + 1;
+        let RetryAction::Write(u) = prepare_btp_retry(&pending(7, None, 0), &snap, late) else {
+            panic!("Write erwartet");
+        };
+        assert!(u.player_ids.is_empty());
+        assert_eq!(u.end_ts_ms, None);
+        assert_eq!(u.sets, vec![(21, 15), (21, 17)], "Ergebnis unangetastet");
+    }
+
+    #[test]
+    fn retry_keeps_court_release_only_while_court_is_still_ours() {
+        // Feld trägt laut Snapshot noch UNSER Match → Freigabe bleibt.
+        let mut ours = ready_match(7, 1);
+        ours.court_id = Some(5);
+        let snap = snap_with(Vec::new(), vec![ours], Vec::new());
+        let RetryAction::Write(u) = prepare_btp_retry(&pending(7, Some(5), 0), &snap, 1_000) else {
+            panic!("Write erwartet");
+        };
+        assert_eq!(u.free_court_id, Some(5));
+
+        // Feld inzwischen anderweitig belegt (unser Match hat es verloren) →
+        // Freigabe entfällt, sonst räumte das Replay die neue Zuweisung weg.
+        let mut other = ready_match(9, 2);
+        other.court_id = Some(5);
+        let snap2 = snap_with(Vec::new(), vec![other], Vec::new());
+        let RetryAction::Write(u2) = prepare_btp_retry(&pending(7, Some(5), 0), &snap2, 1_000)
+        else {
+            panic!("Write erwartet");
+        };
+        assert_eq!(u2.free_court_id, None);
+    }
+
+    #[test]
+    fn fresh_retry_is_written_unchanged() {
+        let mut ours = ready_match(7, 1);
+        ours.court_id = Some(5);
+        let snap = snap_with(Vec::new(), vec![ours], Vec::new());
+        let entry = pending(7, Some(5), 0);
+        let RetryAction::Write(u) = prepare_btp_retry(&entry, &snap, 1_000) else {
+            panic!("Write erwartet");
+        };
+        assert_eq!(*u, entry.update, "frischer Eintrag geht 1:1 raus");
     }
 
     // ──────────────── Spielende-Stempel & Zähltafelbediener ────────────────

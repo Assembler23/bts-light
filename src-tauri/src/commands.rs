@@ -969,8 +969,21 @@ pub async fn confirm_walkover(
             end_ts_ms: None,
         };
         match crate::tablet::server::write_result_to_btp(&config, &update).await {
-            Ok(()) => written += 1,
-            Err(e) => errors.push(format!("{}: {e}", cand.round_name)),
+            Ok(()) => {
+                tablet.clear_btp_retry(cand.match_id);
+                // Für die Race-Erkennung des Nachschubs (Selbstheilung).
+                tablet.note_direct_btp_write(update.clone(), now_ms());
+                written += 1;
+            }
+            Err(e) => {
+                // Nachschub-Queue (A5): Der Sync-Loop reicht den Walkover
+                // nach, sobald BTP wieder antwortet.
+                tablet.queue_btp_retry(update.clone(), now_ms());
+                errors.push(format!(
+                    "{}: {e} (wird automatisch nachgereicht)",
+                    cand.round_name
+                ));
+            }
         }
     }
     if errors.is_empty() {

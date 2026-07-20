@@ -238,7 +238,32 @@ pub struct TabletState {
     /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
     freetext: RwLock<Vec<FreetextItem>>,
     freetext_seq: AtomicU64,
+    /// Fehlgeschlagene BTP-Ergebnis-Writes, die der Sync-Loop nachschiebt
+    /// (Nachschub-Queue, Cluster A5 — needsync-Prinzip aus Tilos BTS,
+    /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
+    /// höchstens ein Eintrag, der neueste Stand gewinnt.
+    btp_retry: RwLock<Vec<PendingBtpWrite>>,
+    /// Match-ID → (letzter ERFOLGREICHER Direkt-Write, Zeitpunkt Unix-ms).
+    /// Schließt das Nachschub-Race: Landet ein (langsamer) Queue-Write NACH
+    /// einer zwischenzeitlich erfolgreichen Korrektur, erkennt der Flush
+    /// das hieran und schreibt die neuere Korrektur sofort erneut
+    /// (Selbstheilung statt stillem Überschreiben).
+    last_direct_btp_write: RwLock<HashMap<i64, (crate::btp::proto::MatchUpdate, u64)>>,
 }
+
+/// Ein fehlgeschlagener BTP-Ergebnis-Write in der Nachschub-Queue.
+#[derive(Debug, Clone)]
+pub struct PendingBtpWrite {
+    pub update: crate::btp::proto::MatchUpdate,
+    /// Bezugszeitpunkt (Unix-ms) — Spielende bzw. erste Einreihung. Steuert
+    /// das 5-Minuten-Fenster des Spieler-Checkouts und die Höchst-Lebensdauer
+    /// (bleibt beim Ersetzen durch einen neueren Stand erhalten).
+    pub enqueued_ms: u64,
+}
+
+/// Kapazitäts-Deckel der Nachschub-Queue — weit über jedem realen Turnier
+/// (148 Ergebnisse am stärksten Tag); schützt nur vor Endlos-Wachstum.
+const BTP_RETRY_CAP: usize = 200;
 
 /// Eine manuelle Freitext-Ansage. `hall` = Ziel-Halle (BTP-Location-Name;
 /// leer = alle Hallen). `id` ist fortlaufend, damit Sprecher (Master/Slaves)
@@ -261,6 +286,80 @@ impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
         *self.snapshot.write().unwrap() = Some(snapshot);
+    }
+
+    /// Reiht einen fehlgeschlagenen BTP-Ergebnis-Write in die
+    /// Nachschub-Queue ein (Cluster A5). Existiert für das Match schon ein
+    /// Eintrag, ersetzt der neuere Stand den alten — der Bezugszeitpunkt
+    /// des ERSTEN Fehlschlags bleibt (er steuert das Spieler-Checkout-
+    /// Fenster und die Höchst-Lebensdauer).
+    pub fn queue_btp_retry(&self, update: crate::btp::proto::MatchUpdate, now: u64) {
+        let mut q = self.btp_retry.write().unwrap();
+        if let Some(e) = q
+            .iter_mut()
+            .find(|e| e.update.btp_match_id == update.btp_match_id)
+        {
+            e.update = update;
+            return;
+        }
+        if q.len() >= BTP_RETRY_CAP {
+            q.remove(0); // ältesten opfern — Queue darf nie unbegrenzt wachsen
+        }
+        q.push(PendingBtpWrite {
+            update,
+            enqueued_ms: now,
+        });
+    }
+
+    /// Entfernt den Queue-Eintrag eines Matches — nach erfolgreichem Write
+    /// (egal ob durch Nachschub oder den regulären Weg gelungen).
+    pub fn clear_btp_retry(&self, match_id: i64) {
+        self.btp_retry
+            .write()
+            .unwrap()
+            .retain(|e| e.update.btp_match_id != match_id);
+    }
+
+    /// Kopie der aktuellen Nachschub-Queue (für den Flush im Sync-Loop).
+    pub fn btp_retries(&self) -> Vec<PendingBtpWrite> {
+        self.btp_retry.read().unwrap().clone()
+    }
+
+    /// Steht das Match noch in der Nachschub-Queue? Der Flush prüft das
+    /// unmittelbar vor jedem Write erneut — ein zwischenzeitlich
+    /// erfolgreicher Direkt-Write (Tablet-Retry) hat den Eintrag dann
+    /// bereits geräumt und der Nachschub entfällt.
+    pub fn btp_retry_pending(&self, match_id: i64) -> bool {
+        self.btp_retry
+            .read()
+            .unwrap()
+            .iter()
+            .any(|e| e.update.btp_match_id == match_id)
+    }
+
+    /// Vermerkt einen ERFOLGREICHEN Direkt-Write (process_result /
+    /// Turnierleitungs-Walkover) für die Race-Erkennung des Nachschubs.
+    pub fn note_direct_btp_write(&self, update: crate::btp::proto::MatchUpdate, now: u64) {
+        self.last_direct_btp_write
+            .write()
+            .unwrap()
+            .insert(update.btp_match_id, (update, now));
+    }
+
+    /// Gab es seit `since_ms` einen erfolgreichen Direkt-Write für das
+    /// Match? Liefert dessen Stand — der Flush schreibt ihn dann erneut,
+    /// falls sein eigener (älterer) Write die Korrektur überholt hat.
+    pub fn direct_btp_write_since(
+        &self,
+        match_id: i64,
+        since_ms: u64,
+    ) -> Option<crate::btp::proto::MatchUpdate> {
+        self.last_direct_btp_write
+            .read()
+            .unwrap()
+            .get(&match_id)
+            .filter(|(_, ts)| *ts >= since_ms)
+            .map(|(u, _)| u.clone())
     }
 
     /// Merkt den Zähltafelbediener (Verlierer-Team-Namen) für ein Feld.
@@ -1709,5 +1808,65 @@ mod tests {
         st.release_court(1, new);
         assert!(!st.court_occupied(1));
         assert!(!st.court_held_by_device(1, "dev-x"));
+    }
+
+    // ───────────────────── Nachschub-Queue (A5) ─────────────────────
+
+    fn upd(match_id: i64, duration: i64) -> crate::btp::proto::MatchUpdate {
+        crate::btp::proto::MatchUpdate {
+            btp_match_id: match_id,
+            draw_id: 1,
+            planning_id: 1000 + match_id,
+            sets: vec![(21, 10)],
+            team1_won: true,
+            duration_mins: duration,
+            score_status: 0,
+            free_court_id: None,
+            player_ids: Vec::new(),
+            end_ts_ms: None,
+        }
+    }
+
+    #[test]
+    fn btp_retry_queue_dedups_per_match_and_keeps_first_timestamp() {
+        let st = TabletState::default();
+        st.queue_btp_retry(upd(7, 30), 1_000);
+        // Zweiter Fehlschlag desselben Matches mit neuerem Stand: Update
+        // ersetzt, Bezugszeitpunkt des ERSTEN Fehlschlags bleibt (steuert
+        // das Spieler-Checkout-Fenster).
+        st.queue_btp_retry(upd(7, 31), 9_000);
+        st.queue_btp_retry(upd(8, 20), 2_000);
+        let q = st.btp_retries();
+        assert_eq!(q.len(), 2);
+        let seven = q.iter().find(|e| e.update.btp_match_id == 7).unwrap();
+        assert_eq!(seven.update.duration_mins, 31, "neuester Stand gewinnt");
+        assert_eq!(seven.enqueued_ms, 1_000, "erster Zeitpunkt bleibt");
+    }
+
+    #[test]
+    fn direct_btp_write_note_and_since() {
+        // Race-Erkennung des Nachschubs: Nur Direkt-Writes AB dem
+        // Vergleichszeitpunkt zählen (ts >= since).
+        let st = TabletState::default();
+        assert!(st.direct_btp_write_since(7, 0).is_none());
+        st.note_direct_btp_write(upd(7, 30), 5_000);
+        assert!(
+            st.direct_btp_write_since(7, 6_000).is_none(),
+            "Write liegt VOR dem Vergleichszeitpunkt"
+        );
+        let u = st.direct_btp_write_since(7, 5_000).expect("Write ab 5000");
+        assert_eq!(u.duration_mins, 30);
+        assert!(st.direct_btp_write_since(8, 0).is_none(), "fremdes Match");
+    }
+
+    #[test]
+    fn btp_retry_clear_removes_only_that_match() {
+        let st = TabletState::default();
+        st.queue_btp_retry(upd(7, 30), 1_000);
+        st.queue_btp_retry(upd(8, 20), 2_000);
+        st.clear_btp_retry(7);
+        let q = st.btp_retries();
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0].update.btp_match_id, 8);
     }
 }
