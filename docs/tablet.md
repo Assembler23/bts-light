@@ -61,7 +61,13 @@ den Relay statt direkt.
 1. **Match-Zuweisung** – der Server prüft alle 2 s `match_for_court` und
    schickt dem Tablet `match_assigned` / `match_cleared`.
 2. **Live-Score** – jeder Punkt am Tablet → `score_update` → bts-light baut
-   ein `tupdate_match` und pusht es an den Liveticker.
+   ein `tupdate_match` und pusht es an den Liveticker. `score_update` und
+   `state_sync` tragen die **Match-ID** des gezählten Spiels: Passt sie
+   nicht (mehr) zum aktuellen Match des Felds, verwirft der Server den
+   Frame (**Stale-Filter, Cluster A4** — ein nach Doze/Reconnect im alten
+   Spiel hängendes Tablet darf beim Neu-Zuweisen nicht den alten Stand
+   unters neue Spiel schreiben; Turnier-Befund HM-03 19.07.2026). Alte
+   Tablet-Seiten ohne das Feld laufen ungefiltert weiter.
 3. **Endergebnis** – „Ergebnis übermitteln" → `POST /result` → bts-light
    meldet sich per LOGIN an und schreibt das Match mit `SENDUPDATE` zurück
    nach BTP (siehe [btp_protocol.md](btp_protocol.md)).
