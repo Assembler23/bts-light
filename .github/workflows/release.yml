@@ -121,8 +121,10 @@ jobs:
       - name: Release-Seite + Notes bauen
         run: |
           set -euo pipefail
+          # grep ohne Treffer (leeres Verzeichnis) darf den Release NICHT
+          # abbrechen — dann gibt es eben vorerst keine Download-Knöpfe.
           ssh badhub@178.104.221.177 \
-            'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$"' > exes.txt
+            'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$" || true' > exes.txt
           (cd rel && ls *-setup.exe) >> exes.txt
           node scripts/build-release-page.mjs \
             --changelog docs/changelog.md \

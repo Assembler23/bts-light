@@ -19,7 +19,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+  const v = i >= 0 ? process.argv[i + 1] : undefined;
+  // Folgt direkt das nächste Flag, wurde der Wert vergessen → Fallback.
+  return v && !v.startsWith("--") ? v : fallback;
 }
 
 const changelogPath = arg("changelog", "docs/changelog.md");
@@ -99,6 +101,14 @@ function hasInstaller(version) {
 // ── notes.txt für latest.json (eine Version, Klartext) ────────────────────
 if (notesOut && notesVersion) {
   const sec = sections.find((s) => s.version === notesVersion);
+  if (!sec) {
+    // Sichtbar warnen: die Version fehlt im Changelog → das Update-Fenster
+    // bekäme nur einen generischen Einzeiler (release.md: Abschnitt VOR
+    // dem Taggen anlegen!). Kein Abbruch — der Release selbst ist gültig.
+    console.error(
+      `WARNUNG: docs/changelog.md hat keinen Abschnitt '## v${notesVersion}' — notes bleiben generisch.`
+    );
+  }
   const text = sec
     ? bullets(sec.lines)
         .map((b) => "• " + plainText(b))
