@@ -49,9 +49,11 @@ Sonntag war ein bewusster Gerätetausch (HM-06, 17:24) — gewollter Flow.
    Host abgewiesen" in 17 Minuten. Nach einem Netzwechsel hielt die tote
    alte Master-Verbindung den Namespace; der eigene Reconnect wurde als
    „zweiter Host" abgewiesen, bis TCP die Leiche erkannte. In der Zeit
-   war die Cloud-Halle vom Master abgeschnitten. **Fix: Host-Stale-
-   Erkennung im Relay** (Ping/Pong-Timeout wie bei Tablets; ein neuer
-   Host ersetzt einen stummen alten nach ~15 s). (S/M)
+   war die Cloud-Halle vom Master abgeschnitten. ~~**Fix: Host-Stale-
+   Erkennung im Relay**~~ → **umgesetzt (Cluster A3):** Host-Ping alle
+   5 s, ≥ 15 s stumm = tot (Selbst-Abbruch + Ablösung durch den neuen
+   Host, Sender-Guard gegen wiedererwachte Alt-Verbindungen); Details in
+   cloud-relay.md.
 3. **DNS-Ausfälle am Master-PC** — 23× über den ganzen Sonntag verteilt
    („Host unbekannt", 06:51–16:31): Hallen-Router-DNS unzuverlässig.
    Backoff-Reconnect hat jedes Mal geheilt; Ausfälle je ≤ Backoff-Dauer.

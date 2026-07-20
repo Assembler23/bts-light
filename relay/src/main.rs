@@ -61,6 +61,18 @@ const MAX_TABLETS_PER_NS: usize = 64;
 /// WebSocket-Ping-Intervall – hält Verbindungen über NAT/LB offen.
 const HEARTBEAT: Duration = Duration::from_secs(30);
 
+/// Ping-Intervall der HOST-Verbindung – bewusst enger als [`HEARTBEAT`],
+/// damit `host_last_seen` (Pong-Stempel) höchstens ~5 s alt ist und die
+/// Stale-Erkennung schnell und sicher entscheiden kann.
+const HOST_PING: Duration = Duration::from_secs(5);
+
+/// Nach so viel Empfangs-Stille gilt eine Host-Verbindung als tot
+/// (= 3 verpasste Pongs bei [`HOST_PING`]): Die Verbindung beendet sich
+/// selbst, und ein neu verbindender Host darf den Slot übernehmen.
+/// Ein LEBENDIGER Host antwortet binnen ~5 s auf Pings — die Übernahme
+/// kann also nie einen gesunden Host verdrängen (R4 bleibt gewahrt).
+const HOST_STALE: Duration = Duration::from_secs(15);
+
 /// Wie lange der Relay auf die `ResultAck` von bts-light wartet.
 const RESULT_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -96,6 +108,12 @@ struct MonitorBundle {
 struct Namespace {
     /// Sende-Ende zur Host-WebSocket (bts-light), falls verbunden.
     host: Option<Tx>,
+    /// Zeitpunkt (Unix-ms) des letzten Lebenszeichens der Host-Verbindung
+    /// (Frame oder Pong). Grundlage der Zombie-Host-Ablösung: ein neuer
+    /// Host darf einen seit [`HOST_STALE`] stummen alten ersetzen
+    /// (Turnier-Befund 19.07.: tote TCP-Verbindung nach Netzwechsel hielt
+    /// den Slot 17 Minuten — der Master war so lange ausgesperrt).
+    host_last_seen: u64,
     /// CourtID → Sende-Ende zur Tablet-WebSocket.
     tablets: HashMap<i64, Tx>,
     /// CourtID → Geräte-Kennung des aktiven Tablets (leer bei alten
@@ -144,6 +162,7 @@ impl Namespace {
     fn new() -> Self {
         Self {
             host: None,
+            host_last_seen: 0,
             tablets: HashMap::new(),
             tablet_devices: HashMap::new(),
             court_state: HashMap::new(),
@@ -1337,9 +1356,39 @@ async fn host_ws(
         .into_response()
 }
 
+/// Ergebnis eines Host-Registrierungsversuchs ([`try_claim_host`]).
+enum HostClaim {
+    /// Slot übernommen; `true`, wenn dabei eine stumme alte Verbindung
+    /// verdrängt wurde.
+    Accepted { superseded: bool },
+    /// Ein lebendiger Host hält den Slot — Verbindung abweisen.
+    Refused,
+}
+
+/// Versucht, den Host-Slot eines Namespace zu übernehmen. Genau ein Host
+/// ist erlaubt; ein LEBENDIGER Inhaber wird nie verdrängt (R4 — kein
+/// fremder Host übernimmt die Kontrolle). Ist der Inhaber aber seit
+/// [`HOST_STALE`] stumm (kein Frame, kein Pong), gilt er als tote
+/// TCP-Leiche und der neue Host ersetzt ihn (Zombie-Host-Ablösung —
+/// Turnier-Befund 19.07.: 333× „Zweiter Host abgewiesen" in 17 Minuten,
+/// weil die tote alte Verbindung den Slot hielt).
+fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
+    let stale = namespace.host.is_some()
+        && now.saturating_sub(namespace.host_last_seen) >= HOST_STALE.as_millis() as u64;
+    match (&namespace.host, stale) {
+        (Some(_), false) => HostClaim::Refused,
+        (old, _) => {
+            let superseded = old.is_some();
+            namespace.host = Some(tx.clone());
+            namespace.host_last_seen = now;
+            HostClaim::Accepted { superseded }
+        }
+    }
+}
+
 /// Die Host-Verbindung (bts-light) eines Namespace. Genau eine ist erlaubt;
-/// eine zweite wird abgewiesen, damit kein fremder Host die Kontrolle
-/// übernimmt.
+/// eine zweite wird abgewiesen — außer der bisherige Host ist nachweislich
+/// stumm ([`try_claim_host`]), dann ersetzt ihn die neue Verbindung.
 async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
@@ -1351,12 +1400,20 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             return;
         }
         let namespace = map.entry(ns.clone()).or_insert_with(Namespace::new);
-        if namespace.host.is_some() {
-            tracing::warn!("Zweiter Host für Namespace '{ns}' abgewiesen");
-            let _ = socket.send(Message::Close(None)).await;
-            return;
+        match try_claim_host(namespace, &tx, now_ms()) {
+            HostClaim::Refused => {
+                tracing::warn!("Zweiter Host für Namespace '{ns}' abgewiesen");
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+            HostClaim::Accepted { superseded } => {
+                if superseded {
+                    tracing::warn!(
+                        "Stummen alten Host für Namespace '{ns}' ersetzt (Zombie-Ablösung)"
+                    );
+                }
+            }
         }
-        namespace.host = Some(tx.clone());
         // Schon verbundene Tablets nachmelden, damit der Host ihre Matches
         // sofort pusht.
         let connected: Vec<i64> = namespace.tablets.keys().copied().collect();
@@ -1370,15 +1427,43 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     }
     tracing::info!("Host verbunden für Namespace '{ns}'");
 
-    let mut ping = tokio::time::interval(HEARTBEAT);
+    // Enger Ping-Takt + Stale-Abbruch: Eine tote TCP-Verbindung fällt beim
+    // `send` u. U. minutenlang nicht auf (Kernel puffert) — deshalb zählt
+    // hier die EMPFANGS-Seite: bleibt jedes Lebenszeichen (Frame/Pong)
+    // länger als HOST_STALE aus, beendet sich die Verbindung selbst und
+    // gibt den Slot frei.
+    let mut ping = tokio::time::interval(HOST_PING);
+    let mut last_incoming = tokio::time::Instant::now();
     loop {
         tokio::select! {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
+                last_incoming = tokio::time::Instant::now();
                 match msg {
                     Message::Text(t) => {
                         if let Ok(frame) = serde_json::from_str::<HostFrame>(t.as_str()) {
-                            handle_host_frame(&broker, &ns, frame).await;
+                            if !handle_host_frame(&broker, &ns, frame, &tx).await {
+                                // Wir sind nicht mehr der eingetragene Host
+                                // (wiedererwachte Alt-Verbindung nach einer
+                                // Ablösung) → sauber beenden; bts-light
+                                // verbindet sich neu und sieht die Lage.
+                                tracing::warn!(
+                                    "Abgelöste Host-Verbindung für '{ns}' meldet sich zurück – getrennt"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    Message::Pong(_) => {
+                        // Pong-Stempel für die Zombie-Erkennung festhalten —
+                        // aber nur, solange wir der eingetragene Host sind
+                        // (eine abgelöste Verbindung darf den Stempel des
+                        // neuen Hosts nicht verfälschen).
+                        let mut map = broker.namespaces.lock().await;
+                        if let Some(namespace) = map.get_mut(&ns) {
+                            if namespace.host.as_ref().is_some_and(|h| h.same_channel(&tx)) {
+                                namespace.host_last_seen = now_ms();
+                            }
                         }
                     }
                     Message::Close(_) => break,
@@ -1392,6 +1477,13 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                 }
             }
             _ = ping.tick() => {
+                if last_incoming.elapsed() >= HOST_STALE {
+                    tracing::warn!(
+                        "Host für Namespace '{ns}' seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs()
+                    );
+                    break;
+                }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
             }
         }
@@ -1402,14 +1494,7 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     {
         let mut map = broker.namespaces.lock().await;
         if let Some(namespace) = map.get_mut(&ns) {
-            if namespace
-                .host
-                .as_ref()
-                .map(|h| h.same_channel(&tx))
-                .unwrap_or(false)
-            {
-                namespace.host = None;
-            }
+            release_host_slot(namespace, &tx);
             for (_, pending) in namespace.pending.drain() {
                 let _ = pending.send(ResultResponse::err("Verbindung zu bts-light verloren."));
             }
@@ -1421,13 +1506,45 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     tracing::info!("Host getrennt für Namespace '{ns}'");
 }
 
+/// Gibt den Host-Slot frei — aber nur, wenn `tx` noch der eingetragene
+/// Host ist. Eine per Zombie-Ablösung verdrängte Alt-Verbindung, die
+/// später stirbt, darf den Slot des NEUEN Hosts nicht abräumen. Liefert
+/// `true`, wenn der Slot tatsächlich freigegeben wurde.
+fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
+    if namespace
+        .host
+        .as_ref()
+        .map(|h| h.same_channel(tx))
+        .unwrap_or(false)
+    {
+        namespace.host = None;
+        return true;
+    }
+    false
+}
+
 /// Verarbeitet ein Frame vom Host: an das passende Tablet weiterleiten bzw.
 /// eine wartende Ergebnis-Übermittlung abschließen.
-async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
+///
+/// `sender` ist das Sende-Ende der aufrufenden Host-Verbindung: Frames
+/// werden nur verarbeitet, wenn sie vom AKTUELL eingetragenen Host
+/// stammen — eine per Zombie-Ablösung verdrängte Alt-Verbindung, die
+/// wieder erwacht, darf den Zustand nicht mehr verändern. Liefert
+/// `false`, wenn der Sender nicht (mehr) der eingetragene Host ist.
+async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: &Tx) -> bool {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(ns) else {
-        return;
+        return false;
     };
+    if !namespace
+        .host
+        .as_ref()
+        .is_some_and(|h| h.same_channel(sender))
+    {
+        return false;
+    }
+    // Jedes Host-Frame ist ein Lebenszeichen für die Zombie-Erkennung.
+    namespace.host_last_seen = now_ms();
     match frame {
         HostFrame::MatchAssigned {
             court_id,
@@ -1517,6 +1634,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
             namespace.courts = courts;
         }
     }
+    true
 }
 
 #[cfg(test)]
@@ -1576,21 +1694,33 @@ mod tests {
         }
     }
 
-    /// Legt einen Namespace mit einem Tablet an (an Feld `court_id`) und
-    /// gibt dessen Empfangsende zurück.
-    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::UnboundedReceiver<Message>) {
+    /// Registriert `tx` als Host des Namespace (wie eine frisch
+    /// angenommene Host-Verbindung).
+    async fn register_host(broker: &Broker, ns: &str, tx: &Tx) {
+        let mut map = broker.namespaces.lock().await;
+        let namespace = map.entry(ns.into()).or_insert_with(Namespace::new);
+        namespace.host = Some(tx.clone());
+        namespace.host_last_seen = now_ms();
+    }
+
+    /// Legt einen Namespace mit registriertem Host und einem Tablet (an
+    /// Feld `court_id`) an; liefert Tablet-Empfangsende + Host-Sender.
+    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::UnboundedReceiver<Message>, Tx) {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let (tx, rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
         let mut map = broker.namespaces.lock().await;
         let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
         ns.tablets.insert(court_id, tx);
+        ns.host = Some(host_tx.clone());
+        ns.host_last_seen = now_ms();
         drop(map);
-        (broker, rx)
+        (broker, rx, host_tx)
     }
 
     #[tokio::test]
     async fn host_match_assigned_reaches_the_courts_tablet() {
-        let (broker, mut rx) = broker_with_tablet(101).await;
+        let (broker, mut rx, host) = broker_with_tablet(101).await;
         handle_host_frame(
             &broker,
             "ns1",
@@ -1601,6 +1731,7 @@ mod tests {
                 match_brief: brief(7),
                 on_court_since_ms: None,
             },
+            &host,
         )
         .await;
         let msg = rx.try_recv().expect("Tablet bekommt das Frame");
@@ -1618,7 +1749,7 @@ mod tests {
 
     #[tokio::test]
     async fn host_frame_for_unknown_court_is_dropped() {
-        let (broker, mut rx) = broker_with_tablet(101).await;
+        let (broker, mut rx, host) = broker_with_tablet(101).await;
         handle_host_frame(
             &broker,
             "ns1",
@@ -1627,6 +1758,7 @@ mod tests {
                 court_label: "Feld 99".into(),
                 hall: String::new(),
             },
+            &host,
         )
         .await;
         assert!(rx.try_recv().is_err(), "fremdes Feld bekommt nichts");
@@ -1640,12 +1772,14 @@ mod tests {
         let broker = Broker::new("x".into());
         let (tx_a, mut rx_a) = mpsc::unbounded_channel();
         let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (host, _host_rx) = mpsc::unbounded_channel();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
             ns.tablets.insert(101, tx_a); // Halle 1 · Feld „1"
             ns.tablets.insert(401, tx_b); // Halle 2 · Feld „1"
         }
+        register_host(&broker, "ns1", &host).await;
         handle_host_frame(
             &broker,
             "ns1",
@@ -1656,6 +1790,7 @@ mod tests {
                 match_brief: brief(7),
                 on_court_since_ms: None,
             },
+            &host,
         )
         .await;
         // Nur das Tablet von Feld 401 bekommt das Match.
@@ -1666,12 +1801,14 @@ mod tests {
     #[tokio::test]
     async fn reassign_same_match_keeps_the_score() {
         let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
             ns.court_matches.insert(101, brief(7));
             ns.court_scores.insert(101, vec![SetAb { a: 21, b: 15 }]);
         }
+        register_host(&broker, "ns1", &host).await;
         // Erneutes MatchAssigned fürs SELBE Match (Tablet-Reconnect) →
         // der gemerkte Satzstand bleibt erhalten.
         handle_host_frame(
@@ -1684,6 +1821,7 @@ mod tests {
                 match_brief: brief(7),
                 on_court_since_ms: Some(1000),
             },
+            &host,
         )
         .await;
         assert_eq!(
@@ -1708,6 +1846,7 @@ mod tests {
                 match_brief: brief(9),
                 on_court_since_ms: Some(2000),
             },
+            &host,
         )
         .await;
         let ns = broker.namespaces.lock().await;
@@ -1719,11 +1858,13 @@ mod tests {
     async fn result_ack_resolves_the_pending_request() {
         let broker = Broker::new("x".into());
         let (ack_tx, ack_rx) = oneshot::channel();
+        let (host, _host_rx) = mpsc::unbounded_channel();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
             ns.pending.insert(5, ack_tx);
         }
+        register_host(&broker, "ns1", &host).await;
         handle_host_frame(
             &broker,
             "ns1",
@@ -1732,6 +1873,7 @@ mod tests {
                 ok: true,
                 error: None,
             },
+            &host,
         )
         .await;
         assert_eq!(ack_rx.await.unwrap(), ResultResponse::ok());
@@ -1768,15 +1910,104 @@ mod tests {
         );
     }
 
+    #[test]
+    fn second_host_for_a_namespace_is_refused_while_first_is_live() {
+        // R4: Ein LEBENDIGER Host wird nie verdrängt — der zweite
+        // Verbindungsversuch (z. B. versehentlich zweiter Master mit
+        // derselben install_id) wird abgewiesen.
+        let mut ns = Namespace::new();
+        let (tx1, _rx1) = mpsc::unbounded_channel();
+        let (tx2, _rx2) = mpsc::unbounded_channel();
+        assert!(matches!(
+            try_claim_host(&mut ns, &tx1, 1_000_000),
+            HostClaim::Accepted { superseded: false }
+        ));
+        // 5 s später (Host hat gerade gepongt): Abweisung.
+        ns.host_last_seen = 1_000_000;
+        assert!(matches!(
+            try_claim_host(&mut ns, &tx2, 1_005_000),
+            HostClaim::Refused
+        ));
+        assert!(ns.host.as_ref().unwrap().same_channel(&tx1));
+    }
+
+    #[test]
+    fn silent_host_is_superseded_after_stale_timeout() {
+        // Zombie-Ablösung (Turnier-Befund 19.07.: tote TCP-Verbindung
+        // hielt den Slot 17 Minuten): Ist der Inhaber ≥ HOST_STALE stumm,
+        // übernimmt die neue Verbindung.
+        let mut ns = Namespace::new();
+        let (tx1, _rx1) = mpsc::unbounded_channel();
+        let (tx2, _rx2) = mpsc::unbounded_channel();
+        try_claim_host(&mut ns, &tx1, 1_000_000);
+        let stale_ms = HOST_STALE.as_millis() as u64;
+        // 1 ms UNTER der Schwelle: noch abgewiesen (Grenze ist `>=`).
+        assert!(matches!(
+            try_claim_host(&mut ns, &tx2, 1_000_000 + stale_ms - 1),
+            HostClaim::Refused
+        ));
+        // Genau an der Schwelle: Übernahme.
+        assert!(matches!(
+            try_claim_host(&mut ns, &tx2, 1_000_000 + stale_ms),
+            HostClaim::Accepted { superseded: true }
+        ));
+        assert!(
+            ns.host.as_ref().unwrap().same_channel(&tx2),
+            "neuer Host hält den Slot"
+        );
+    }
+
+    #[test]
+    fn superseded_connection_does_not_release_the_new_hosts_slot() {
+        // Der wichtigste Korrektheits-Baustein der Ablösung: Stirbt die
+        // verdrängte Alt-Verbindung SPÄTER, darf ihr Aufräumen den Slot
+        // des neuen Hosts nicht leeren.
+        let mut ns = Namespace::new();
+        let (old_tx, _old_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        try_claim_host(&mut ns, &old_tx, 0);
+        let stale_ms = HOST_STALE.as_millis() as u64;
+        try_claim_host(&mut ns, &new_tx, stale_ms);
+        // Alt-Verbindung stirbt und räumt auf → Slot bleibt beim neuen Host.
+        assert!(!release_host_slot(&mut ns, &old_tx));
+        assert!(ns.host.as_ref().unwrap().same_channel(&new_tx));
+        // Der echte Inhaber gibt den Slot dagegen frei.
+        assert!(release_host_slot(&mut ns, &new_tx));
+        assert!(ns.host.is_none());
+    }
+
     #[tokio::test]
-    async fn second_host_for_a_namespace_is_refused() {
-        let broker = Broker::new("x".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let mut map = broker.namespaces.lock().await;
-        let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
-        ns.host = Some(tx);
-        // Genau diese Bedingung prüft host_conn vor dem Registrieren.
-        assert!(ns.host.is_some(), "zweiter Host würde abgewiesen");
+    async fn frames_from_superseded_host_are_ignored() {
+        // Eine verdrängte Alt-Verbindung, die wieder erwacht, darf den
+        // Namespace-Zustand nicht mehr verändern (Sender-Guard).
+        let (broker, _rx, host) = broker_with_tablet(101).await;
+        let (old_host, _old_rx) = mpsc::unbounded_channel();
+        let accepted = handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchCleared {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+            },
+            &old_host,
+        )
+        .await;
+        assert!(!accepted, "fremder/abgelöster Sender wird abgewiesen");
+        // Der eingetragene Host bleibt unangetastet.
+        assert!(broker.namespaces.lock().await["ns1"]
+            .host
+            .as_ref()
+            .unwrap()
+            .same_channel(&host));
+    }
+
+    #[test]
+    fn host_frame_stamps_liveness() {
+        // Konstanten-Beziehung der Stale-Erkennung: Ein gesunder Host
+        // pongt alle HOST_PING — die Übernahme-Schwelle muss deutlich
+        // darüber liegen, sonst würde ein lebendiger Host verdrängt.
+        assert!(HOST_STALE >= HOST_PING * 3);
     }
 
     /// Reconnect-Erkennung: Meldet sich DASSELBE Gerät erneut an einem
@@ -1785,7 +2016,7 @@ mod tests {
     /// Tablet verlor nach Netz-Aussetzer den Stand an sein „fremdes" Ich).
     #[tokio::test]
     async fn same_device_reconnect_replaces_old_session() {
-        let (broker, mut old_rx) = broker_with_tablet(101).await;
+        let (broker, mut old_rx, _host) = broker_with_tablet(101).await;
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.get_mut("ns1").unwrap();
@@ -1811,7 +2042,7 @@ mod tests {
     /// Ein FREMDES Gerät sieht weiterhin „belegt" (Übernehmen-Dialog).
     #[tokio::test]
     async fn foreign_device_still_sees_occupied() {
-        let (broker, mut old_rx) = broker_with_tablet(101).await;
+        let (broker, mut old_rx, _host) = broker_with_tablet(101).await;
         {
             let mut map = broker.namespaces.lock().await;
             map.get_mut("ns1")
@@ -1860,7 +2091,7 @@ mod tests {
     /// leere Kennungen dürfen einander nicht matchen.
     #[tokio::test]
     async fn empty_device_id_never_matches() {
-        let (broker, _old_rx) = broker_with_tablet(101).await;
+        let (broker, _old_rx, _host) = broker_with_tablet(101).await;
         {
             let mut map = broker.namespaces.lock().await;
             map.get_mut("ns1")

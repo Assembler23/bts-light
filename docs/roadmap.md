@@ -19,6 +19,14 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   verlieren still die Verbindung (Hauptursache des Turniertag-Chaos).
   Geführter Config-Export/-Import bzw. Identitäts-Übernahme im SetupWizard
   + Dashboard-Warnung, wenn bekannte Monitore länger offline sind.
+  Seit der Zombie-Host-Ablösung (Cluster A3) zusätzlich die eigentliche
+  Gegenmaßnahme bei geleakter `install_id` (Sicherheits-Abwägung in
+  [cloud-relay.md](cloud-relay.md)).
+- **Host-Ablösung sichtbar machen.** Wird der Host-Slot per
+  Zombie-Ablösung übernommen (Cluster A3), sieht die Turnierleitung das
+  heute nur im Relay-Log. Wunsch aus dem A3-Review: eine sichtbare
+  Warnung in der App („dein Host-Slot wurde übernommen"), damit eine
+  echte Fremd-Übernahme auffiele.
 - **Slave-PC als eingebaute Monitor-Brücke.** bts-light im Cloud-Slave-Modus
   soll selbst auf `:8088` lauschen (`/health` + Redirect `/monitor[?device=…]`
   auf den Cloud-Monitor des Masters) — dann laufen die Bestands-Pis
