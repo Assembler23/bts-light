@@ -189,9 +189,27 @@ Ergebnis soll trotzdem übermittelt werden.
   Sende-/Retry-Weg wie beim Live-Zählen. „Korrektur — Match wieder
   öffnen" macht die Eingabe rückgängig.
 
-Für Kampflos/Aufgabe ist weiterhin der Dialog **„Match beenden"** da; der
-Mid-Game-Einstieg (mitten im Spiel übernehmen und weiterzählen) ist noch
-offen (Roadmap Plan 12b).
+Für Kampflos/Aufgabe ist weiterhin der Dialog **„Match beenden"** da.
+
+### Mitten im Spiel einsteigen und weiterzählen (Plan 12b)
+
+Findet sich erst mitten im Spiel jemand zum Zählen, schaltet der Haken
+**„Spiel läuft noch"** im selben Dialog den Übernahme-Modus ein:
+
+- Oben die **abgeschlossenen Sätze**, darunter der **aktuelle Satz
+  (läuft)** — beides wird plausibilisiert (abgeschlossene Sätze regulär
+  zu Ende, das Match darf damit noch **nicht** entschieden sein; der
+  laufende Satz darf **noch nicht** entschieden sein).
+- „Weiterzählen" übernimmt den Stand und führt durch die gewohnte
+  **Aufstellung** (Seitenwahl → Aufschläger → im Doppel Annehmer). Danach
+  zählt das Tablet ab dem eingegebenen Stand normal weiter.
+- **Aufschlagposition:** `finalizeSetup` platziert die Service-Courts
+  regelkonform zum Stand — steht das aufschlagende Team auf einem
+  **ungeraden** Punktestand, spielt es aus dem linken Service-Court
+  (BWF-Parität, `computeServing`). Die Intervall-/Decider-Flags
+  (`intervalDoneThisGame`, `midGameSwitchDone`) werden aus dem
+  eingegebenen Stand abgeleitet, damit die 60-s-Pause bzw. der
+  Entscheidungssatz-Seitenwechsel nicht doppelt kommt.
 
 ## Kampflose Wertung nach Aufgabe
 
