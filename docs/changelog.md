@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.152
+
+- **Mitten im Spiel einsteigen und weiterzählen.** Findet sich erst während
+  eines laufenden Spiels jemand zum Zählen, schaltet der Haken „Spiel läuft
+  noch" im „Ergebnis eintragen"-Dialog den Übernahme-Modus ein: abgeschlossene
+  Sätze und den aktuellen Satzstand eingeben, „Weiterzählen" führt durch die
+  Aufstellung (Seite, Aufschläger, im Doppel Annehmer) — danach zählt das
+  Tablet ab dem eingegebenen Stand ganz normal weiter. Die Aufschlagposition
+  wird regelkonform aus dem Stand abgeleitet.
+
 ## v0.9.151
 
 - **Endstand direkt am Tablet eintragen.** Hat niemand live am Tablet gezählt,
