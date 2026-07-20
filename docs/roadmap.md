@@ -139,6 +139,27 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   bewerten: eigenes lokales Zertifikat + Vertrauensstellung auf den
   Tablets vs. alles über den Cloud-Weg — Entscheidung als ADR).
 
+## Tilo-Feedback (20.07.2026 — Cluster-Zuordnung)
+
+Fünf nachgereichte Punkte. Drei sind bereits geplant, zwei brauchen
+Ergänzungen, einer ist neu (Plan 20):
+
+| Tilos Punkt | Cluster | Status |
+|---|---|---|
+| Tablet-Schrift größer (Lesebrille) | **D** | ✅ geplant — Plan 3 (Schritt 3 hebt Größen inkl. Spielstand) |
+| Spiel aus dem Backend beenden/finalisieren (vergessen/Abbruch) | **D** | ✅ geplant — Plan 12 a2 (`enter_result` aus der Turnierleitung) |
+| Laufende Zeit nach Aufruf auf TV/Backend/**Tablet** | **C** | ⚠️ Plan 4 deckt TV + Backend — **Tablet-Anzeige ergänzt** |
+| Multifeld-/Felderübersicht: Pausenzeiten **und** Zeit nach Aufruf | **C/E** | ⚠️ Plan 4 (Zeit) + Plan 5 (Pause) — **auf overview.html/Felderübersicht ausgeweitet** |
+| Feldnummer am Tablet sichtbar, auch bei Erst-Zuweisung | **D** | 🆕 **neu — Plan 20** |
+
+**Zum neuen Punkt (Plan 20):** Tilo hatte zu Beginn 11 Spiele über die
+Turnierleitung den Tablets zugeordnet und konnte danach nicht mehr
+sehen, welches Tablet an welchem Feld hängt — die Feldnummer ist am
+Tablet zu unauffällig, besonders vor Spielstart. Plan:
+[roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md) Punkt 20.
+**Plan 4** bekommt zusätzlich die Tablet-Anzeige „Zeit seit Aufruf" und
+die Zeit-/Pausenangabe in der Felderübersicht (`overview.html`).
+
 ## Nach dem Turnier-Wochenende (Stand 19.07.2026)
 
 **Oberste Direktive (20.07.2026): Der erprobte Stand darf nicht mehr
@@ -157,15 +178,16 @@ ALLE weiteren Arbeiten:
 
 ### Cluster-Übersicht (Arbeitspakete, Stand 20.07.2026)
 
-Die 18 Pläne ([roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md)),
-BTP-Übernahmen (P1–P3) und Log-Review-Fixes, sinnvoll gebündelt:
+Die Pläne ([roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md)),
+BTP-Übernahmen (P1–P3) und Log-Review-Fixes, sinnvoll gebündelt.
+**Cluster A ist umgesetzt (v0.9.148, 20.07.2026)** — durchgestrichen:
 
 | Cluster | Inhalt (Plan-Nr.) | Zweck |
 |---|---|---|
-| **A — Stabilität & Regressionsschutz** | Regressions-Suite · Leer-Snapshot-Guard · Zombie-Host-Ablösung · Stale-Score-Filter (17) · BTP-Retry-Queue (P2) · Label-Kosmetik · Keep-Awake-/DNS-Doku | Erprobtes absichern — **zuerst** |
+| ~~**A — Stabilität & Regressionsschutz**~~ ✅ | ~~Regressions-Suite · Leer-Snapshot-Guard · Zombie-Host-Ablösung · Stale-Score-Filter (17) · BTP-Retry-Queue (P2) · Label-Kosmetik · Keep-Awake-/DNS-Doku~~ → **v0.9.148** | Erprobtes absichern — **erledigt** |
 | **B — Release & Infrastruktur** | **Release-Seite (18, GESTARTET)** · App-Log-Rotation · LAN-HTTPS/ADR 0005 (6) · Code-Signing · CI-Wartung · Repo-Umbenennung | Auslieferung professionalisieren |
-| **C — Aufrufe & Ansagen** | 2./3. Aufruf je Partei (1) · Highlight nach/aus BTP (P1) · Gong-Fix (15) · **Vorbereitungs-/next-Monitor je Halle (NEU, s. u.)** · Nächste Spiele pro Halle (2) · Zeit seit Aufruf (4) | Der komplette Aufruf-Workflow |
-| **D — Tablet-Bedienung** | Spielstand-Direkteingabe (12) · Klick-Delay (13) · helles Theme + Schrift (3) · Kopplungscode 1 h (8) | Schiedsrichter-Alltag |
+| **C — Aufrufe & Ansagen** | 2./3. Aufruf je Partei (1) · Highlight nach/aus BTP (P1) · Gong-Fix (15) · **Vorbereitungs-/next-Monitor je Halle (NEU, s. u.)** · Nächste Spiele pro Halle (2) · Zeit seit Aufruf — TV/Backend/**Tablet** + **Felderübersicht/Pausenzeiten** (4) | Der komplette Aufruf-Workflow |
+| **D — Tablet-Bedienung** | Spielstand-Direkteingabe + **Backend-Finalisierung** (12) · Klick-Delay (13) · helles Theme + Schrift (3) · **Feldnummer prominent, auch vor Spielstart (20)** · Kopplungscode 1 h (8) | Schiedsrichter-Alltag |
 | **E — Anzeigen & Ticker** | Pausenuhr-Overlay (5) · TV-Leerlauf-Branding (10) · Matchball-Färbung TL (16) · Aufgabe-Badge · Tages-Filter tab=done · Profil-Link-Fix (9) · Slave-Spielübersicht (7) | Sichtbarkeit für Halle & Publikum |
 | **F — Große Features** | Zähltafelbediener (14) · Master-Identität umziehen · Disqualifikation (P3) · Azure-Key-Vererbung (#76) · Pi-Image-Untersuchung | Je ein eigenes Projekt |
 

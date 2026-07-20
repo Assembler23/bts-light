@@ -136,6 +136,16 @@ auf `/live?display=next` als „vor X Min aufgerufen" gezeigt.
 3. bts-light-App: In `PreparationPanel.tsx` und der Spielübersicht die
    Minuten seit Aufruf anzeigen (Ticker im Frontend, Zeitstempel kommen
    schon über die bestehenden Commands).
+4. **Felderübersicht/Court-Übersicht `overview.html`** (Tilo 20.07.):
+   die Multifeldanzeige um dieselbe „Zeit seit Aufruf" je Feld ergänzen
+   — plus die **Pausenzeiten** (aus `court_state`/`pause`, die die
+   Einzelanzeige schon kennt), damit die Turnierleitung Aufruf- und
+   Pausenlage auf einen Blick sieht. Daten sind vorhanden; reine
+   Anzeige-Erweiterung analog `renderCallTimer` (monitor.html:622).
+5. **Tablet-Kopfzeile** (Tilo 20.07.): kleine „aufgerufen vor X min"-
+   Angabe neben der Spieluhr am Tablet (`tablet.html`, `match-clock`-
+   Bereich) — der Schiedsrichter sieht die Aufrufdauer ohne Blick auf
+   TV/Backend. `on_court_since_ms` kommt bereits im MatchBrief mit.
 
 ## 5. Pausenuhr: Spielstand sichtbar lassen
 
@@ -497,6 +507,36 @@ Version sichtbar machen" (roadmap.md → Geplant) geht hierin auf.
 5. Hinweis: `public/download/` ist vom badhub-rsync ausgenommen — die
    Seite lebt wie die Exes nur auf dem Server; Deploy ausschließlich
    über den bts-light-Release-Workflow.
+
+## 20. Feldnummer am Tablet prominent — auch vor Spielstart (Tilo 20.07.)
+
+**Wunsch:** Tilo hatte zu Turnierbeginn 11 Spiele über die
+Turnierleitung den Tablets zugeordnet und konnte danach nicht mehr
+erkennen, welches Tablet an welchem Feld steht. Die Feldnummer steht am
+Tablet nur klein in der Kopfzeile (`.court-label`, tablet.html:428/57)
+und ist vor dem Spielstart neben „— kein Match —" leicht zu übersehen.
+
+**Ist-Zustand:** `__COURT_LABEL__` wird serverseitig in die Kopfzeile
+und den Einstellungsdialog ersetzt (tablet.html:428/679). Der
+Leerlauf-/Wartezustand („kein Match") zeigt sonst nichts Großes.
+
+**Plan (S, nur `tablet.html` — LAN + Cloud teilen die Datei):**
+1. **Leerlauf-Großanzeige:** Solange dem Feld kein Match zugewiesen ist
+   (`event-label` = „— kein Match —"), die **Feldnummer groß und
+   zentral** im Zähltafel-Bereich einblenden (vmin-basiert wie die
+   TV-Leerlaufanzeige, Plan 10) — darunter dezent „bereit". So ist aus
+   Armlänge sofort erkennbar, welches Tablet welches Feld bedient.
+   Sobald ein Match kommt, weicht die Großanzeige der normalen
+   Zähltafel.
+2. **Kopfzeile schärfen:** `.court-label` etwas größer/kontrastreicher,
+   damit die Feldnummer auch während des Spiels ablesbar bleibt
+   (verzahnt mit Plan 3 „größere Schrift").
+3. Keine Server-/Protokolländerung; rein clientseitig. Test manuell am
+   Tablet (LAN + Cloud). Auslieferung: App-Release + Relay-Deploy
+   (tablet.html liegt doppelt).
+
+Cluster D. Klein und risikoarm — guter Kandidat, um mit Plan 3 (helles
+Theme + Schrift) gebündelt umgesetzt zu werden.
 
 ## 19. Übrige Punkte (bereits geplant/laufend)
 
