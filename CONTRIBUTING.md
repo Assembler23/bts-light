@@ -26,7 +26,9 @@ spiegeln die CI — Notfall-Bypass: `git commit --no-verify`.
 
 1. **Branch** pro Thema: `feature/…`, `fix/…`, `docs/…`.
 2. **Pull Request** öffnen → Template ausfüllen. Die CI (`build`: fmt + clippy + `cargo test` +
-   `npm run build`) läuft.
+   `npm run build`) läuft — das ist zugleich die **Regressions-Suite**: welche Verhaltensgarantien
+   sie festnagelt und welche Regeln für neue Änderungen gelten, steht in
+   [`docs/regression-suite.md`](docs/regression-suite.md).
 3. **Self-Merge**, sobald `build` grün ist — `main` ist geschützt (kein Direkt-/Force-Push;
    Merge-Button erst bei grüner CI). Keine Approval-Pflicht.
 

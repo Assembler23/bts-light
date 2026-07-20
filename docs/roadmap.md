@@ -138,15 +138,12 @@ kaputtgehen.** v0.9.147 lief das Turnier stabil (148/148 Ergebnisse) und
 wird unverändert als offizielles Release konserviert. Daraus folgt für
 ALLE weiteren Arbeiten:
 
-- **Regressionstests zuerst:** Bevor Features aus den Plänen umgesetzt
-  werden, wird eine benannte Regressions-Suite aufgebaut, die die
-  erprobten Kern-Invarianten festnagelt (Ergebnis-SENDUPDATE-Feldliste
-  inkl. Status/CourtID/Players-Block; court_assign OHNE Status;
-  deviceId-Reconnect-Semantik; rev-Guard „neuer gewinnt";
-  is_holder/is_court_active-Filter; Walkover-Pfade). Viele dieser Tests
-  existieren schon — sie werden als Regressions-Suite markiert/ergänzt
-  und sind ab dann Merge-Pflicht: **kein Feature-Merge, wenn die Suite
-  rot ist.**
+- ~~**Regressionstests zuerst**~~ → **eingerichtet 20.07.2026:**
+  [regression-suite.md](regression-suite.md) benennt die garantierten
+  Kernpfade samt Tests (~240, via CI-Pflicht-Check `build` durchgesetzt)
+  und die Regeln für jede Änderung. **Kein Feature-Merge, wenn die
+  Suite rot ist.** Bekannte Lücken (Snapshot-Übernahme, tablet.html-JS)
+  stehen dort mit Plan.
 - Features/Fixes einzeln, klein, review't — nie gebündelt mit dem
   stabilen Release (auch #76/#78 kommen einzeln, wenn priorisiert).
 
