@@ -2970,17 +2970,24 @@ els.settingsPinPad.addEventListener('click', (e) => {
 // scrollt nicht (overflow hidden, touch-action: manipulation) – ein
 // pointerdown hier ist immer ein bewusster Tap, kein Scroll-Beginn.
 function onScoreTap(el, fn) {
-  var downAt = 0;
+  // Flag-basiert (nicht zeitbasiert): Ein pointerdown „scharf" schaltet, der
+  // unmittelbar folgende synthetische Click wird geschluckt — egal wie LANGE
+  // gedrückt wurde. Rein zeitbasiert (< X ms) würde langes Drücken den Click
+  // durchlassen und die Aktion doppelt auslösen (kritisch bei Undo, das
+  // keinen Punkt-Cooldown hat).
+  var armed = false;
   el.addEventListener('pointerdown', function (e) {
     if (e.pointerType !== 'touch' && e.button !== 0) return; // nur primärer Tap/Klick
-    downAt = e.timeStamp;
+    armed = true;
     fn();
   });
   el.addEventListener('click', function (e) {
-    // Ghost-Click kurz nach dem pointerdown schlucken (kein Doppel-Punkt).
-    if (e.timeStamp - downAt < 700) { e.preventDefault(); e.stopPropagation(); return; }
-    fn(); // Fallback: Umgebungen ohne Pointer-Events / Tastatur.
+    if (armed) { armed = false; e.preventDefault(); e.stopPropagation(); return; }
+    fn(); // Fallback: kein vorheriges pointerdown (Tastatur / alte Browser).
   });
+  // Abgebrochene Geste (Scroll/System) → Scharfschaltung zurücknehmen, damit
+  // ein späterer echter Click (Fallback) nicht fälschlich geschluckt wird.
+  el.addEventListener('pointercancel', function () { armed = false; });
 }
 onScoreTap(els.plusLeft, () => addPointOnSide('left'));
 onScoreTap(els.plusRight, () => addPointOnSide('right'));
