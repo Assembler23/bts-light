@@ -198,7 +198,7 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
 - **Telefon-Code (v0.9.145,
   [ADR 0004](adr/0004-telefon-kopplungscode.md)):** statt der 36-stelligen
   UUID kann der Master einen **8-stelligen Zahlen-Code** erzeugen
-  (Einstellungen → „Telefon-Code", braucht laufenden Cloud-Modus; 15 Min
+  (Einstellungen → „Telefon-Code", braucht laufenden Cloud-Modus; 1 h
   gültig, neuer Code ersetzt den alten). Die ferne Halle tippt ihn ein; der
   SetupWizard löst ihn automatisch beim Relay gegen den vollen
   Kopplungs-Code ein (`pairing_code`/`resolve_pairing_code` in

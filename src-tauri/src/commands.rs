@@ -1757,7 +1757,7 @@ pub async fn cloud_slaves(
 }
 
 /// Master: kurzlebigen 8-stelligen Telefon-Kopplungscode beim Relay
-/// anfordern (ADR 0004) — zum Durchsagen an die ferne Halle. 15 Minuten
+/// anfordern (ADR 0004) — zum Durchsagen an die ferne Halle. 1 Stunde
 /// gültig; ein neuer Code ersetzt den alten.
 #[tauri::command]
 pub async fn pairing_code(state: State<'_, AppState>) -> Result<relay_proto::PairingCode, String> {
