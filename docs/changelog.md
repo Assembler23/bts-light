@@ -4,6 +4,31 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.148
+
+- **Stabilitäts-Release nach dem Zwei-Hallen-Turnier (Cluster A):** alle fünf
+  Befunde aus der Log-Auswertung des Turnier-Wochenendes behoben.
+- **BTP-Aussetzer lösen keinen Massen-Reset mehr aus.** Liefert BTP einen
+  Abruf lang einen leeren Turnier-Stand (beim Turnier 2× passiert: alle Felder
+  freigegeben, Ticker leer), wird er verworfen und erst nach Bestätigung im
+  Folge-Abruf übernommen; das Dashboard zeigt eine orangene Warnung.
+- **Altes Ergebnis erscheint nicht mehr unter neuem Spiel.** Punktestand und
+  Spielzustand tragen jetzt die Match-Kennung — ein nach Funkloch/Schlafmodus
+  im alten Spiel hängendes Tablet kann die Anzeige des Felds nicht mehr mit
+  dem alten Stand überschreiben (in App **und** Cloud-Relay geprüft).
+- **Toter Master blockiert die Cloud-Halle nicht mehr.** Nach einem
+  Netzwechsel hielt eine tote Verbindung den Cloud-Zugang bis zu 17 Minuten —
+  jetzt wird sie nach 15 Sekunden Stille abgelöst (Relay-seitig bereits aktiv).
+- **Liegengebliebene Ergebnisse werden automatisch nachgereicht.** Schlägt das
+  Schreiben eines Ergebnisses nach BTP fehl, versucht es die App alle 30 s
+  erneut — mit Schutzregeln: manuell nachgetragene Ergebnisse werden nie
+  überschrieben, Spieler werden nur binnen 5 Minuten nach Spielende
+  ausgecheckt.
+- **Betrieb:** Empfehlung „Bildschirm-Schlaf am Tablet aus" (140
+  Schlaf-Reconnects an einem Turniertag) und öffentlicher DNS (1.1.1.1) für
+  den Turnier-PC in der Doku; Ergebnis-Logzeilen zeigen wieder immer den
+  Feldnamen.
+
 ## v0.9.147
 
 - **BTP bekommt Feld, Spieldauer und Spielende (Tilo-Feedback 18.07.2026).** Beim
