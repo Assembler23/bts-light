@@ -1393,14 +1393,16 @@ function syncServerClock() {
 syncServerClock();
 setInterval(syncServerClock, 30000);
 
-function startBreak(kind) {
+// `skipCommit`: Ruft der Aufrufer gleich selbst persistState()+render()
+// (bzw. commitScoreView), lassen wir das hier weg – sonst rendert/persistiert
+// ein Punkt, der eine Pause auslöst, doppelt (Plan-13-Review).
+function startBreak(kind, skipCommit) {
   const secs = BREAK_SECONDS[kind]; // undefined bei 'injury' – kein Countdown
   STATE.pause = { kind, endsAt: secs ? serverNow() + secs * 1000 : null };
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   if (STATE.pause.endsAt) breakTimer = setInterval(tickBreak, 250);
   tlog('info', 'break_start', { kind });
-  persistState();
-  render();
+  if (!skipCommit) { persistState(); render(); }
 }
 
 function endBreak() {
@@ -1942,6 +1944,16 @@ function startScoreCooldown() {
   scoreCooldownTimer = setTimeout(clearScoreCooldown, SCORE_COOLDOWN_MS);
 }
 
+// Klick-Delay verkürzen (Plan 13): Der sichtbare Punktstand wird SOFORT
+// gerendert; das schwerere JSON.stringify + localStorage + WS-Send
+// (persistState/sendScoreUpdate) läuft direkt danach per queueMicrotask –
+// derselbe Task-Umlauf, also bleibt die Persistenz-Garantie erhalten, aber
+// der Tap-Handler kehrt schneller zurück und die Zahl steht ohne Wartezeit.
+function commitScoreView() {
+  render();
+  queueMicrotask(() => { persistState(); sendScoreUpdate(); });
+}
+
 function addPointOnSide(side) {
   if (STATE.pause) return; // während einer offiziellen Pause keine Punkte
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing' || !STATE.positions) return;
@@ -2041,11 +2053,12 @@ function addPointOnSide(side) {
 
   // Für die Schiri-Ansage: war das ein Aufschlagwechsel?
   STATE.lastEvent = { type: 'point', serveChanged: side !== prevServing };
-  persistState();
-  render();
-  sendScoreUpdate();
   if (triggeredMidGameSwitch) showSwitchToast();
-  if (triggeredBreak) startBreak(triggeredBreak);
+  // skipCommit=true: commitScoreView() unten übernimmt render+persist einmalig
+  // (die Pause ist im STATE gesetzt, wird also mit persistiert).
+  if (triggeredBreak) startBreak(triggeredBreak, true);
+  // Anzeige sofort, Persistenz/Push nachgelagert (siehe commitScoreView).
+  commitScoreView();
 }
 
 // Komplettes Seitentauschen: physikalisch wechseln die Spieler die Court-
@@ -2109,9 +2122,7 @@ function undo() {
   }
   restoreSnapshot(STATE.history.pop());
   STATE.lastEvent = null; // nach Undo neutralen Stand ansagen (kein „Aufschlagwechsel")
-  persistState();
-  render();
-  sendScoreUpdate();
+  commitScoreView();
 }
 
 function finishManually() {
@@ -2954,9 +2965,47 @@ els.settingsPinPad.addEventListener('click', (e) => {
   if (btn) pinKey(btn.dataset.k);
 });
 
-els.plusLeft.addEventListener('click', () => addPointOnSide('left'));
-els.plusRight.addEventListener('click', () => addPointOnSide('right'));
-els.undoBtns.forEach(b => b.addEventListener('click', undo));
+// Klick-Delay verkürzen (Plan 13): Score-kritische Flächen zählen beim
+// BERÜHREN (pointerdown), nicht erst beim Loslassen (touchend/click). Der
+// nachlaufende synthetische Click wird unterdrückt, damit der Punkt nicht
+// doppelt fällt. Umgebungen ohne Pointer-Events (sehr alte Browser,
+// Tastatur) fallen auf den regulären Click zurück. Der Spielfeld-Bereich
+// scrollt nicht (overflow hidden, touch-action: manipulation) – ein
+// pointerdown hier ist immer ein bewusster Tap, kein Scroll-Beginn.
+function onScoreTap(el, fn) {
+  // Flag-basiert (nicht zeitbasiert): Ein pointerdown „scharf" schaltet, der
+  // unmittelbar folgende synthetische Click wird geschluckt — egal wie LANGE
+  // gedrückt wurde. Rein zeitbasiert (< X ms) würde langes Drücken den Click
+  // durchlassen und die Aktion doppelt auslösen (kritisch bei Undo, das
+  // keinen Punkt-Cooldown hat).
+  var armed = false;
+  var lastAt = 0;
+  // Kurzes Entprellen: Ein zweiter (Multi-Touch-)pointerdown oder ein
+  // durchgerutschter Click innerhalb 250 ms löst NICHT erneut aus. Das
+  // schützt vor allem den Undo-Button (kein Punkt-Cooldown) gegen
+  // Zwei-Finger-Doppelauslösung. Bewusste Wiederholungen (>250 ms
+  // auseinander) bleiben möglich.
+  function fire(ts) {
+    if (ts - lastAt < 250) return;
+    lastAt = ts;
+    fn();
+  }
+  el.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'touch' && e.button !== 0) return; // nur primärer Tap/Klick
+    armed = true;
+    fire(e.timeStamp);
+  });
+  el.addEventListener('click', function (e) {
+    if (armed) { armed = false; e.preventDefault(); e.stopPropagation(); return; }
+    fire(e.timeStamp); // Fallback: kein vorheriges pointerdown (Tastatur / alte Browser).
+  });
+  // Abgebrochene Geste (Scroll/System) → Scharfschaltung zurücknehmen, damit
+  // ein späterer echter Click (Fallback) nicht fälschlich geschluckt wird.
+  el.addEventListener('pointercancel', function () { armed = false; });
+}
+onScoreTap(els.plusLeft, () => addPointOnSide('left'));
+onScoreTap(els.plusRight, () => addPointOnSide('right'));
+els.undoBtns.forEach(b => onScoreTap(b, undo));
 els.finishBtn.addEventListener('click', openFinishModal);
 els.finishRetireOne.addEventListener('click', () => finishAs('retired', false));
 els.finishRetireInjury.addEventListener('click', () => finishAs('retired', true));
