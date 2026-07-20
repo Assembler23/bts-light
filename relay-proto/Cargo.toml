@@ -6,6 +6,6 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
+# Für state_sync_match_id (Stale-Filter): beide Seiten (App + Relay)
+# nutzen serde_json ohnehin — keine neue Abhängigkeit im Workspace.
 serde_json = "1"

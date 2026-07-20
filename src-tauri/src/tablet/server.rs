@@ -1317,10 +1317,10 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             // weiter (Ticker erkennt das erst nach bis zu 2 s) —
                             // ihre nachlaufenden Frames würden sonst den Cache/
                             // Liveticker wieder mit dem ALTEN Stand füllen.
-                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
+                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history, match_id }) => {
                                 if let (Some(c), Some(t)) = (court, my_token) {
                                     if ctx.tablet.is_court_active(c, t) {
-                                        handle_score(c, score_a, score_b, &sets_history, &ctx).await;
+                                        handle_score(c, score_a, score_b, &sets_history, match_id, &ctx).await;
                                     }
                                 }
                             }
@@ -1339,7 +1339,20 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             Ok(TabletMsg::StateSync { state }) => {
                                 if let (Some(c), Some(t)) = (court, my_token) {
                                     if ctx.tablet.is_court_active(c, t) {
-                                        ctx.tablet.set_court_state(c, state);
+                                        // Stale-Filter (A4): State eines ALTEN Matches
+                                        // (Tablet hing nach Doze/Reconnect noch im
+                                        // vorigen Spiel) nicht in den Cache übernehmen.
+                                        let stale = relay_proto::state_sync_match_id(&state)
+                                            .zip(ctx.tablet.match_for_court(c))
+                                            .is_some_and(|(sm, m)| sm != m.id);
+                                        if stale {
+                                            tracing::info!(
+                                                "State von Feld {c} verworfen: Tablet-State \
+                                                 trägt ein anderes Match als das Feld"
+                                            );
+                                        } else {
+                                            ctx.tablet.set_court_state(c, state);
+                                        }
                                     }
                                 }
                             }
@@ -1451,11 +1464,25 @@ pub(crate) async fn handle_score(
     score_a: i64,
     score_b: i64,
     history: &[SetAb],
+    match_id: i64,
     ctx: &ServerCtx,
 ) {
     let Some(m) = ctx.tablet.match_for_court(court_id) else {
         return;
     };
+    // Stale-Filter (A4, Turnier-Befund HM-03): Nennt das Tablet ein
+    // Match (≠ 0) und das Feld hat inzwischen ein ANDERES, ist der Score
+    // ein Nachzügler des alten Spiels — verwerfen statt den frisch
+    // geleerten Stand des neuen Spiels zu überschreiben. matchId 0 =
+    // alte Tablet-Seite → Verhalten wie bisher.
+    if match_id != 0 && m.id != match_id {
+        tracing::info!(
+            "Score von Feld {court_id} verworfen: Tablet zählt Match {match_id}, \
+             Feld hat Match {}",
+            m.id
+        );
+        return;
+    }
     if history.len() > 9 {
         return; // unplausibel viele Sätze – Nachricht verwerfen
     }
@@ -1676,6 +1703,25 @@ mod tests {
         assert!(match_decided(1, &[(21, 15)])); // 1:0 in Bo1 → entschieden
         assert!(!match_decided(5, &[(21, 1), (21, 2)])); // 2:0 in Bo5 – noch offen
         assert!(match_decided(5, &[(21, 1), (21, 2), (21, 3)])); // 3:0 – entschieden
+    }
+
+    /// Stale-Filter (A4, Turnier-Befund HM-03): Feld 101 hat Match 42 —
+    /// ein Score-Update, das ein ANDERES Match nennt (hängengebliebenes
+    /// Tablet nach Doze/Reconnect), wird verworfen, bevor Cache oder
+    /// Liveticker angefasst werden. matchId 0 (alte Tablet-Seite) und die
+    /// passende matchId laufen weiter durch.
+    #[tokio::test]
+    async fn handle_score_drops_score_of_foreign_match() {
+        let ctx = make_ctx(1); // toter Port — es kommt nie zu BTP/Netz
+        ctx.tablet.record_score(101, 42, vec![(10, 8)]);
+        // Nachzügler des alten Matches 7 → verworfen (kein Netz-Push, da
+        // die Funktion vor dem record_score/Push zurückkehrt).
+        handle_score(101, 14, 16, &[], 7, &ctx).await;
+        assert_eq!(
+            ctx.tablet.monitor_court(101).sets,
+            vec![(10, 8)],
+            "Stand des aktuellen Matches bleibt unangetastet"
+        );
     }
 
     /// Nach einem Ergebnis gibt `process_result` das Feld in BTP frei — seit

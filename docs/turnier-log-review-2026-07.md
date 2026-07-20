@@ -66,9 +66,11 @@ Sonntag war ein bewusster Gerätetausch (HM-06, 17:24) — gewollter Flow.
    braucht Secure Context → Synergie mit ADR 0005 (LAN-HTTPS).
 5. **Kosmetik:** 7 Ergebnis-Logzeilen mit leerem Hallen-Label
    („Feld 38 ('')") — Label-Lookup nach bereits aufgehobener Zuweisung.
-   Mini-Fix im Logging. — Ferner zeigt der Court-Score-Cache nach
-   Match-Wechsel kurz den alten Stand unterm neuen Spiel (HM-03-Befund):
-   Cache beim Zuweisungswechsel serverseitig leeren.
+   Mini-Fix im Logging. — ~~Ferner zeigt der Court-Score-Cache nach
+   Match-Wechsel kurz den alten Stand unterm neuen Spiel (HM-03-Befund)~~
+   → **umgesetzt (Cluster A4, Stale-Filter):** `score_update`/`state_sync`
+   tragen die Match-ID; Server und Relay verwerfen Nachzügler alter
+   Matches (Details in tablet.md / cloud-relay.md).
 
 ### 4. Unauffällig / Kontext
 

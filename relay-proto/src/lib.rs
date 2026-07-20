@@ -587,6 +587,17 @@ pub fn build_device_list(
 /// Felder stammen aus dem ersten Vorkommen (LAN zuerst). Die Ausgabe ist
 /// sortiert wie [`build_device_list`] (nach Feldname, dann Code – noch nicht
 /// zugewiesene Geräte zuerst, weil `None` vor `Some(_)` sortiert).
+/// Extrahiert die Match-ID aus einem `state_sync`-JSON. tablet.html
+/// persistiert seinen Spielzustand als `{ "match": { "matchId": … }, … }`
+/// — Server (LAN) und Relay (Cloud) verwerfen einen State, dessen Match
+/// nicht mehr zum aktuellen Court-Match passt (Stale-Filter, Cluster A4).
+/// `None`, wenn das JSON kein Match trägt oder nicht parsebar ist —
+/// dann greift bewusst KEIN Filter (Verhalten wie vor dem Feature).
+pub fn state_sync_match_id(state: &str) -> Option<i64> {
+    let v: serde_json::Value = serde_json::from_str(state).ok()?;
+    v.get("match")?.get("matchId")?.as_i64()
+}
+
 pub fn merge_device_lists(
     lan: &[MonitorDeviceInfo],
     cloud: &[MonitorDeviceInfo],
@@ -640,6 +651,15 @@ pub enum TabletMsg {
         score_b: i64,
         #[serde(rename = "setsHistory", default)]
         sets_history: Vec<SetAb>,
+        /// Match, das dieses Tablet gerade zählt. Server/Relay verwerfen
+        /// den Stand, wenn er nicht zum aktuellen Court-Match passt —
+        /// ein nach Doze/Reconnect im ALTEN Spiel hängendes Tablet darf
+        /// den frisch geleerten Score-Cache des Felds nicht wieder mit
+        /// dem alten Stand befüllen (Turnier-Befund HM-03, 19.07.2026;
+        /// Tilos BTS verwirft solche Frames als „stale panel state").
+        /// 0 bei alten Tablet-Seiten (`#[serde(default)]`) → wie bisher.
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
     },
     /// Akkustand des Tablets (nur Android/Chrome – iPads liefern ihn nicht).
     #[serde(rename = "battery")]
@@ -937,6 +957,12 @@ pub enum RelayFrame {
         score_b: i64,
         #[serde(rename = "setsHistory", default)]
         sets_history: Vec<SetAb>,
+        /// Match, das das Tablet gerade zählt (durchgereicht aus
+        /// [`TabletMsg::ScoreUpdate`]) — der Host filtert damit auch bei
+        /// einem ALTEN Relay ohne eigenen Stale-Filter. 0 = unbekannt
+        /// (alte Tablet-Seite/alter Relay) → Verhalten wie bisher.
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
     },
     /// Endergebnis von einem Tablet – `req_id` korreliert die `ResultAck`.
     Result {
@@ -1101,8 +1127,36 @@ mod tests {
                 score_a: 21,
                 score_b: 19,
                 sets_history: vec![SetAb { a: 21, b: 15 }],
+                match_id: 0,
             }
         );
+    }
+
+    #[test]
+    fn score_update_carries_match_id_and_roundtrips() {
+        // Stale-Filter (A4): neue Tablet-Seiten senden die matchId mit;
+        // alte Seiten ohne das Feld parsen weiter (Default 0 = kein Filter).
+        let msg = TabletMsg::ScoreUpdate {
+            score_a: 5,
+            score_b: 3,
+            sets_history: vec![],
+            match_id: 4711,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"matchId\":4711"));
+        assert_eq!(serde_json::from_str::<TabletMsg>(&json).unwrap(), msg);
+    }
+
+    #[test]
+    fn state_sync_match_id_extracts_or_declines() {
+        // tablet.html persistiert { match: { matchId: … }, … }.
+        assert_eq!(
+            state_sync_match_id(r#"{"match":{"matchId":42,"teamA":[]},"finished":false}"#),
+            Some(42)
+        );
+        // Kein Match (Leerlauf-State) / kaputtes JSON → kein Filter.
+        assert_eq!(state_sync_match_id(r#"{"match":null}"#), None);
+        assert_eq!(state_sync_match_id("kein json"), None);
     }
 
     #[test]
