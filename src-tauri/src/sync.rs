@@ -502,6 +502,24 @@ impl SyncEngine {
                 }
             }
         }
+        // Zuweisung beim Feld-Aufruf (ADR 0007, Scheibe 2): jedem belegten Feld
+        // einen Bediener aus der Warteschlange zuordnen (idempotent je Spiel);
+        // Zuweisungen frei gewordener/gewechselter Felder räumen. Ist die
+        // Verwaltung aus, alle Zuweisungen löschen — sonst bliebe eine alte
+        // Zuweisung in der Anzeige hängen (Review-Befund).
+        if manage_queue {
+            // Nach CourtID sortiert zuweisen → deterministische, faire
+            // FIFO-Verteilung bei mehreren gleichzeitig neu belegten Feldern
+            // (HashMap-Iteration wäre zufällig).
+            let mut courts: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
+            courts.sort_by_key(|&(c, _)| c);
+            for (court_id, match_id) in courts {
+                tablet.assign_scorekeeper_for_court(court_id, match_id);
+            }
+            tablet.retain_scorekeeper_assignments(&oncourt_now);
+        } else {
+            tablet.clear_scorekeeper_assignments();
+        }
         self.oncourt_prev = oncourt_now;
     }
 
@@ -1751,6 +1769,51 @@ mod tests {
         let snap2 = snap_with(Vec::new(), vec![wo], Vec::new());
         engine.track_scorekeepers(&snap2, &tablet, true);
         assert!(tablet.scorekeeper_queue().is_empty());
+    }
+
+    #[test]
+    fn scorekeeper_assignment_cleared_when_management_disabled() {
+        // Review-Befund (HIGH): wird die Verwaltung mitten im Turnier aus-
+        // geschaltet, darf keine alte Zuweisung in der Anzeige hängen bleiben.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.enqueue_scorekeeper(1, vec!["A".into()], 5, 1_000);
+        let snap = snap_with(Vec::new(), vec![oncourt_named(9, 5, "X", "Y")], Vec::new());
+        engine.track_scorekeepers(&snap, &tablet, true);
+        assert!(
+            tablet.assigned_scorekeeper(5).is_some(),
+            "manage=on → zugewiesen"
+        );
+        engine.track_scorekeepers(&snap, &tablet, false);
+        assert!(
+            tablet.assigned_scorekeeper(5).is_none(),
+            "manage=off → geräumt"
+        );
+    }
+
+    #[test]
+    fn scorekeeper_assignment_deterministic_by_court_order() {
+        // Zwei Felder gleichzeitig neu belegt, ein Wartender ohne „eigenes Feld"
+        // → das Feld mit der KLEINEREN CourtID bekommt ihn (sortierte Zuweisung,
+        // nicht die zufällige HashMap-Reihenfolge).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.enqueue_scorekeeper(1, vec!["A".into()], 99, 1_000);
+        let snap = snap_with(
+            Vec::new(),
+            vec![
+                oncourt_named(10, 3, "X", "Y"),
+                oncourt_named(11, 7, "P", "Q"),
+            ],
+            Vec::new(),
+        );
+        engine.track_scorekeepers(&snap, &tablet, true);
+        assert_eq!(
+            tablet.assigned_scorekeeper(3),
+            Some(vec!["A".to_string()]),
+            "kleinere CourtID zuerst"
+        );
+        assert_eq!(tablet.assigned_scorekeeper(7), None, "Schlange danach leer");
     }
 
     #[test]

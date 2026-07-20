@@ -35,11 +35,25 @@ Commands: `scorekeeper_queue`, `remove_scorekeeper`, `advance_scorekeeper`,
 `config::ScorekeeperConfig { enabled, break_seconds }` (break_seconds Default
 300 s, wirkt erst mit der Zuweisung in einer späteren Scheibe).
 
+## Zuweisung beim Feld-Aufruf (Scheibe 2, v0.9.164)
+
+Sobald ein Feld belegt wird, zieht der Sync-Loop einen Bediener aus der
+Warteschlange (`assign_scorekeeper_for_court`): **bevorzugt jemanden mit
+`from_court_id == court` (spielte zuletzt auf genau diesem Feld — der Verlierer
+des Vorspiels), sonst den ältesten** Wartenden. Idempotent je (Feld, Match);
+ist die Schlange leer, bleibt das Feld ohne Bediener. Wird das Feld frei oder
+wechselt das Spiel, räumt `retain_scorekeeper_assignments` die Zuweisung.
+
+Der zugewiesene Bediener ersetzt in `CourtOverview.scorekeeper` den pro-Feld-
+Hinweis (wenn die Verwaltung aktiv ist) und erscheint so in der Spielübersicht
+je Feld („Bediener: …"). Wird die Verwaltung mitten im Turnier **abgeschaltet**,
+löscht der Sync-Loop alle Zuweisungen (`clear_scorekeeper_assignments`) — es
+bleibt kein veralteter Name in der Anzeige hängen; angezeigt wird dann wieder
+der pro-Feld-Hinweis. Bei mehreren gleichzeitig neu belegten Feldern wird
+nach CourtID sortiert zugewiesen (deterministisch/fair).
+
 ## Noch offen (nächste Scheiben, Phase 1)
 
-- **Zuweisung beim Feld-Aufruf:** beim Aufruf/der Auto-Vergabe den ältesten
-  Wartenden ans Match heften (bevorzugt aufs zuletzt gespielte Feld),
-  serialisiert.
 - **Ansage** „Tabletbedienung: {Name}" als Segment der Feld-/
   Vorbereitungs-Ansage + Zweitaufruf-Knopf.
 - **Mindestpause** (`break_seconds`) beim Ziehen berücksichtigen.
