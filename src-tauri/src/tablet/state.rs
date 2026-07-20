@@ -525,6 +525,12 @@ impl TabletState {
             .retain(|court_id, (match_id, _)| active.get(court_id) == Some(match_id));
     }
 
+    /// Alle Bediener-Zuweisungen löschen. Wird gerufen, sobald die Verwaltung
+    /// aus ist, damit keine veraltete Zuweisung in der Anzeige hängen bleibt.
+    pub fn clear_scorekeeper_assignments(&self) {
+        self.assigned_scorekeeper.write().unwrap().clear();
+    }
+
     /// Gesperrte Felder beim Start aus der Config übernehmen.
     pub fn set_locked_courts(&self, ids: impl IntoIterator<Item = i64>) {
         *self.locked_courts.write().unwrap() = ids.into_iter().collect();

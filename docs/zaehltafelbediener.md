@@ -46,7 +46,11 @@ wechselt das Spiel, räumt `retain_scorekeeper_assignments` die Zuweisung.
 
 Der zugewiesene Bediener ersetzt in `CourtOverview.scorekeeper` den pro-Feld-
 Hinweis (wenn die Verwaltung aktiv ist) und erscheint so in der Spielübersicht
-je Feld („Bediener: …").
+je Feld („Bediener: …"). Wird die Verwaltung mitten im Turnier **abgeschaltet**,
+löscht der Sync-Loop alle Zuweisungen (`clear_scorekeeper_assignments`) — es
+bleibt kein veralteter Name in der Anzeige hängen; angezeigt wird dann wieder
+der pro-Feld-Hinweis. Bei mehreren gleichzeitig neu belegten Feldern wird
+nach CourtID sortiert zugewiesen (deterministisch/fair).
 
 ## Noch offen (nächste Scheiben, Phase 1)
 
