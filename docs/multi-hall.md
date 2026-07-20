@@ -240,8 +240,14 @@ und ferne Hallen ohne Neu-Koppeln weiter. Das Bündel enthält den Bearer-Token
 warnt). Datei-I/O läuft über den WebView (Blob-Download / File-Input), die
 reine Logik (`identity_bundle`, `apply_imported_identity`) ist testbar in
 `commands.rs`. Details: [ADR 0006](adr/0006-master-identitaet-umziehen.md).
-*Offen (Folgeschritt): eine Übersicht bekannter Geräte mit Offline-Warnung
-nach dem Umzug.*
+
+**Offline-Warnung (v0.9.162):** Bricht eine zuvor verbundene ferne Halle weg
+(z. B. nach einem missglückten Umzug oder Netzausfall), zeigt der Master einen
+**persistenten amberfarbenen Warn-Banner** (`SlaveConnectBanner`, Übergang
+`online→offline` via `slaveTransition`) — das Wegbrechen wird sichtbar statt
+still. Monitore sind bereits über die „Court-Monitore"-Seite (online/offline)
+und Tablets über die Felderübersicht (`tablet_connected`) sichtbar; eine
+konsolidierte Geräte-Seite bleibt ein möglicher weiterer Schritt.
 
 ## Tablets & TVs in der fernen Halle — Direkt-Cloud (Weg A, v0.9.144)
 

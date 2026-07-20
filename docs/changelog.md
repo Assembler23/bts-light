@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.162
+
+- **Warnung, wenn eine ferne Halle offline geht.** Bisher meldete der Master
+  nur, wenn sich eine ferne Halle **verbindet** (grüner Hinweis). Jetzt
+  erscheint auch ein **amberfarbener Warn-Banner, wenn eine zuvor verbundene
+  ferne Halle wegbricht** (z. B. nach einem PC-Wechsel oder Netzausfall) — er
+  bleibt stehen, bis die Halle zurück ist oder man ihn wegklickt. So fällt ein
+  Wegbrechen sofort auf, statt still zu passieren (Teil der Geräte-Übersicht
+  aus [ADR 0006](adr/0006-master-identitaet-umziehen.md)).
+
 ## v0.9.161
 
 - **Master-Identität auf einen neuen PC umziehen.** Muss der Turnier-PC
