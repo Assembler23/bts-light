@@ -1,20 +1,38 @@
 import { useEffect, useRef, useState } from "react";
-import { Link2, X } from "lucide-react";
+import { Link2, Unlink, X } from "lucide-react";
 import type { SlaveInfo } from "../types";
 
+/** Ein Zustandswechsel einer fernen Halle, aus prev/now abgeleitet. Rein, damit
+ *  die Entscheidungslogik ohne React nachvollziehbar (und leicht prüfbar) ist.
+ *  `prev`: zuletzt bekannter Online-Status (undefined = erstmals gesehen). */
+export function slaveTransition(
+  prev: boolean | undefined,
+  now: boolean,
+): "connected" | "reconnected" | "offline" | null {
+  if (now && prev !== true)
+    return prev === undefined ? "connected" : "reconnected";
+  if (!now && prev === true) return "offline";
+  return null;
+}
+
 /**
- * Master-Hinweis bei Mehr-Hallen-Turnieren: Wenn sich eine ferne Halle
- * (Cloud-Ansage-Slave) NEU verbindet oder nach einem Ausfall zurückkommt,
- * erscheint kurz ein grüner Banner — die Turnierleitung sieht sofort, dass
- * die Kopplung geklappt hat, ohne auf den kleinen Kopfzeilen-Punkt achten
- * zu müssen. Bereits beim App-Start verbundene Hallen werden nicht gemeldet
- * (Baseline), die zeigt die Kopfzeile dauerhaft.
+ * Master-Hinweis bei Mehr-Hallen-Turnieren (ADR 0006, Geräte-Übersicht):
+ * - Verbindet sich eine ferne Halle NEU oder kommt nach einem Ausfall zurück,
+ *   erscheint kurz ein grüner Banner (Kopplung geklappt).
+ * - Bricht eine zuvor verbundene ferne Halle WEG (z. B. nach einem PC-Wechsel
+ *   oder Netzausfall), erscheint ein **persistenter amberfarbener Warn-Banner**,
+ *   damit das Wegbrechen sichtbar wird statt still zu passieren.
+ * Bereits beim App-Start verbundene Hallen lösen keinen Banner aus (Baseline);
+ * ihren Dauerstatus zeigt die Kopfzeile.
  */
 export function SlaveConnectBanner({ slaves }: { slaves: SlaveInfo[] }) {
   // id → zuletzt gesehener Online-Status; null = Baseline steht noch aus.
   const known = useRef<Map<string, boolean> | null>(null);
   const hideTimer = useRef<number | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{
+    text: string;
+    tone: "ok" | "warn";
+  } | null>(null);
 
   useEffect(() => {
     if (known.current === null) {
@@ -25,15 +43,31 @@ export function SlaveConnectBanner({ slaves }: { slaves: SlaveInfo[] }) {
     for (const s of slaves) {
       const prev = map.get(s.id);
       map.set(s.id, s.online);
-      if (!s.online || prev === true) continue;
+      const event = slaveTransition(prev, s.online);
+      if (event === null) continue;
       const hall = s.hall || "Ferne Halle";
-      setNotice(
-        prev === undefined
-          ? `Ferne Halle „${hall}" hat sich verbunden ✓`
-          : `Ferne Halle „${hall}" ist wieder verbunden ✓`,
-      );
-      if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
-      hideTimer.current = window.setTimeout(() => setNotice(null), 12000);
+      if (event === "offline") {
+        // Wegbruch: persistente Warnung (kein Auto-Ausblenden).
+        if (hideTimer.current !== null) {
+          window.clearTimeout(hideTimer.current);
+          hideTimer.current = null;
+        }
+        setNotice({
+          text: `Ferne Halle „${hall}" ist offline gegangen`,
+          tone: "warn",
+        });
+      } else {
+        // (Wieder-)Verbindung: grüner Hinweis, blendet nach 12 s aus.
+        setNotice({
+          text:
+            event === "connected"
+              ? `Ferne Halle „${hall}" hat sich verbunden ✓`
+              : `Ferne Halle „${hall}" ist wieder verbunden ✓`,
+          tone: "ok",
+        });
+        if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+        hideTimer.current = window.setTimeout(() => setNotice(null), 12000);
+      }
     }
   }, [slaves]);
 
@@ -45,15 +79,26 @@ export function SlaveConnectBanner({ slaves }: { slaves: SlaveInfo[] }) {
   );
 
   if (!notice) return null;
+  const warn = notice.tone === "warn";
   return (
-    <div className="flex items-center gap-2 bg-emerald-600 px-4 py-2 text-sm font-medium text-white">
-      <Link2 size={16} className="shrink-0" />
-      <span className="min-w-0">{notice}</span>
+    <div
+      className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-white ${
+        warn ? "bg-amber-600" : "bg-emerald-600"
+      }`}
+    >
+      {warn ? (
+        <Unlink size={16} className="shrink-0" />
+      ) : (
+        <Link2 size={16} className="shrink-0" />
+      )}
+      <span className="min-w-0">{notice.text}</span>
       <button
         type="button"
         title="Hinweis ausblenden"
         onClick={() => setNotice(null)}
-        className="ml-auto shrink-0 rounded p-0.5 transition-colors hover:bg-emerald-700"
+        className={`ml-auto shrink-0 rounded p-0.5 transition-colors ${
+          warn ? "hover:bg-amber-700" : "hover:bg-emerald-700"
+        }`}
       >
         <X size={16} />
       </button>
