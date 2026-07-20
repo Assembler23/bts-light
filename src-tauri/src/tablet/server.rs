@@ -987,6 +987,8 @@ pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
 ///
 /// - `walkover` = Kampflos (`ScoreStatus 1`), Sätze werden verworfen.
 /// - `retired` = Aufgabe (`ScoreStatus 2`), Sieger explizit.
+/// - `disqualified` = Disqualifikation (`ScoreStatus 3`), Sieger (= Gegner)
+///   explizit; bereits gespielte Sätze bleiben (kann mitten im Spiel fallen).
 /// - sonst: regulär (`0`), Sieger aus der Satzmehrheit.
 ///
 /// Rückgabe: (bereinigte Sätze, team1_won, score_status).
@@ -994,12 +996,18 @@ pub(crate) fn derive_result(
     mut sets: Vec<(i64, i64)>,
     walkover: bool,
     retired: bool,
+    disqualified: bool,
     winner: Option<i64>,
 ) -> Result<DerivedResult, String> {
-    // Aufgabe und Kampflos schließen sich aus – beide gesetzt ist ein
-    // Fehler (das Status-Mapping würde sonst still walkover bevorzugen).
-    if walkover && retired {
-        return Err("Aufgabe und Kampflos zugleich – ungültig.".to_string());
+    // Die Sonderfälle schließen sich gegenseitig aus – mehr als einer gesetzt
+    // ist ein Fehler (das Status-Mapping würde sonst still einen bevorzugen).
+    if [walkover, retired, disqualified]
+        .iter()
+        .filter(|&&x| x)
+        .count()
+        > 1
+    {
+        return Err("Kampflos, Aufgabe und Disqualifikation schließen sich aus.".to_string());
     }
     if sets.len() > 9 {
         return Err("Ungültige Satzanzahl.".to_string());
@@ -1022,6 +1030,14 @@ pub(crate) fn derive_result(
             Some(1) => (true, 2),
             Some(2) => (false, 2),
             _ => return Err("Aufgabe ohne gültigen Sieger.".to_string()),
+        }
+    } else if disqualified {
+        // Disqualifikation: der Gegner des Disqualifizierten gewinnt; bereits
+        // gespielte Sätze bleiben erhalten (Status 3, kann mitten im Spiel sein).
+        match winner {
+            Some(1) => (true, 3),
+            Some(2) => (false, 3),
+            _ => return Err("Disqualifikation ohne gültigen Sieger.".to_string()),
         }
     } else {
         if sets.is_empty() {
@@ -1056,7 +1072,7 @@ pub(crate) fn build_manual_result_update(
     if m.team1.is_empty() || m.team2.is_empty() {
         return Err("Die Paarung steht noch nicht fest.".to_string());
     }
-    let (sets, team1_won, score_status) = derive_result(sets, false, false, None)?;
+    let (sets, team1_won, score_status) = derive_result(sets, false, false, false, None)?;
     let (target, cap) = (m.scoring.target_score, m.scoring.cap_score);
     if let Some(&(a, b)) = sets
         .iter()
@@ -1068,7 +1084,33 @@ pub(crate) fn build_manual_result_update(
             if cap >= target { cap } else { 30 },
         ));
     }
-    let (free_court_id, player_ids, duration_mins, end_ts_ms) = match m.court_id {
+    let (free_court_id, player_ids, duration_mins, end_ts_ms) =
+        manual_finish_fields(m, on_court_since, now);
+    Ok(proto::MatchUpdate {
+        btp_match_id: m.id,
+        draw_id: m.draw_id,
+        planning_id: m.planning_id,
+        sets,
+        team1_won,
+        duration_mins,
+        score_status,
+        free_court_id,
+        player_ids,
+        end_ts_ms,
+    })
+}
+
+/// Feld-Abschlussfelder eines manuell (Turnierleitung) gewerteten Spiels:
+/// steht es auf einem Feld, wird es freigegeben (`free_court_id`), die Spieler
+/// werden ausgecheckt (`player_ids`) und die Spieldauer aus dem Aufruf-Stempel
+/// berechnet. Ohne Feld bleibt alles leer. Geteilt von regulärem Eintrag und
+/// Disqualifikation.
+fn manual_finish_fields(
+    m: &BtpMatch,
+    on_court_since: Option<u64>,
+    now: u64,
+) -> (Option<i64>, Vec<i64>, i64, Option<u64>) {
+    match m.court_id {
         Some(cid) => {
             let ids: Vec<i64> = m
                 .team1
@@ -1083,7 +1125,35 @@ pub(crate) fn build_manual_result_update(
             (Some(cid), ids, dur, Some(now))
         }
         None => (None, Vec::new(), 0, None),
+    }
+}
+
+/// Baut den BTP-`MatchUpdate` für eine **Disqualifikation** aus der
+/// Turnierleitung (P3, ScoreStatus 3): `loser_team` (1/2) wird disqualifiziert,
+/// der Gegner gewinnt. Bereits gespielte `sets` bleiben erhalten — eine
+/// Disqualifikation kann mitten im Spiel fallen, daher **keine**
+/// Satz-Vollständigkeitsprüfung. Rein & testbar.
+pub(crate) fn build_manual_dq_update(
+    m: &BtpMatch,
+    loser_team: i64,
+    sets: Vec<(i64, i64)>,
+    on_court_since: Option<u64>,
+    now: u64,
+) -> Result<proto::MatchUpdate, String> {
+    if m.winner.is_some() {
+        return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
+    }
+    if m.team1.is_empty() || m.team2.is_empty() {
+        return Err("Die Paarung steht noch nicht fest.".to_string());
+    }
+    let winner = match loser_team {
+        1 => 2,
+        2 => 1,
+        _ => return Err("Ungültiges disqualifiziertes Team (1 oder 2).".to_string()),
     };
+    let (sets, team1_won, score_status) = derive_result(sets, false, false, true, Some(winner))?;
+    let (free_court_id, player_ids, duration_mins, end_ts_ms) =
+        manual_finish_fields(m, on_court_since, now);
     Ok(proto::MatchUpdate {
         btp_match_id: m.id,
         draw_id: m.draw_id,
@@ -1108,7 +1178,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
 
     let raw_sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
     let (sets, team1_won, score_status) =
-        match derive_result(raw_sets, body.walkover, body.retired, body.winner) {
+        match derive_result(raw_sets, body.walkover, body.retired, false, body.winner) {
             Ok(v) => v,
             Err(e) => return ResultResponse::err(e),
         };
@@ -1833,31 +1903,38 @@ mod tests {
     fn derive_result_regular_winner_from_sets() {
         // 2:0 → Team 1 gewinnt, Status 0, Sätze unverändert.
         let (sets, t1, status) =
-            derive_result(vec![(21, 10), (21, 15)], false, false, None).unwrap();
+            derive_result(vec![(21, 10), (21, 15)], false, false, false, None).unwrap();
         assert_eq!(sets, vec![(21, 10), (21, 15)]);
         assert!(t1);
         assert_eq!(status, 0);
         // Team 2 gewinnt 1:2.
-        let (_, t1b, _) =
-            derive_result(vec![(21, 10), (15, 21), (18, 21)], false, false, None).unwrap();
+        let (_, t1b, _) = derive_result(
+            vec![(21, 10), (15, 21), (18, 21)],
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap();
         assert!(!t1b);
     }
 
     #[test]
     fn derive_result_rejects_drawn_and_empty_and_oversized() {
-        assert!(derive_result(vec![(21, 10), (15, 21)], false, false, None).is_err()); // 1:1
-        assert!(derive_result(vec![], false, false, None).is_err()); // kein Satz
-        assert!(derive_result(vec![(1, 2); 10], false, false, None).is_err()); // >9 Sätze
-        assert!(derive_result(vec![(100, 0)], false, false, None).is_err()); // außer 0..=99
+        assert!(derive_result(vec![(21, 10), (15, 21)], false, false, false, None).is_err()); // 1:1
+        assert!(derive_result(vec![], false, false, false, None).is_err()); // kein Satz
+        assert!(derive_result(vec![(1, 2); 10], false, false, false, None).is_err()); // >9 Sätze
+        assert!(derive_result(vec![(100, 0)], false, false, false, None).is_err());
+        // außer 0..=99
     }
 
     #[test]
     fn derive_result_walkover_clears_sets_and_needs_winner() {
-        let (sets, t1, status) = derive_result(vec![(21, 0)], true, false, Some(2)).unwrap();
+        let (sets, t1, status) = derive_result(vec![(21, 0)], true, false, false, Some(2)).unwrap();
         assert!(sets.is_empty(), "Kampflos verwirft die Sätze");
         assert!(!t1);
         assert_eq!(status, 1);
-        assert!(derive_result(vec![], true, false, None).is_err()); // ohne Sieger
+        assert!(derive_result(vec![], true, false, false, None).is_err()); // ohne Sieger
     }
 
     #[test]
@@ -1883,11 +1960,26 @@ mod tests {
     #[test]
     fn derive_result_retired_keeps_sets_status_two() {
         let (sets, t1, status) =
-            derive_result(vec![(21, 10), (5, 3)], false, true, Some(1)).unwrap();
+            derive_result(vec![(21, 10), (5, 3)], false, true, false, Some(1)).unwrap();
         assert_eq!(sets, vec![(21, 10), (5, 3)]);
         assert!(t1);
         assert_eq!(status, 2);
-        assert!(derive_result(vec![(1, 0)], true, true, Some(1)).is_err()); // beides zugleich
+        assert!(derive_result(vec![(1, 0)], true, true, false, Some(1)).is_err());
+        // beides zugleich
+    }
+
+    #[test]
+    fn derive_result_disqualified_keeps_sets_status_three() {
+        // Disqualifikation: bereits gespielte Sätze bleiben, Sieger explizit,
+        // ScoreStatus 3. Ohne Sieger → Fehler; mehr als ein Sonderfall → Fehler.
+        let (sets, t1, status) =
+            derive_result(vec![(21, 10), (11, 8)], false, false, true, Some(2)).unwrap();
+        assert_eq!(sets, vec![(21, 10), (11, 8)], "Sätze bleiben erhalten");
+        assert!(!t1, "Team 2 gewinnt (Team 1 disqualifiziert)");
+        assert_eq!(status, 3);
+        assert!(derive_result(vec![], false, false, true, None).is_err());
+        assert!(derive_result(vec![(1, 0)], false, true, true, Some(1)).is_err());
+        // retired+dq
     }
 
     // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────
@@ -1937,6 +2029,32 @@ mod tests {
         );
         // Unentschiedener Satzstand (1:1) → kein Sieger.
         assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0).is_err());
+    }
+
+    #[test]
+    fn manual_dq_frees_field_keeps_partial_sets() {
+        // Disqualifikation (P3): Team 1 disqualifiziert → Team 2 gewinnt,
+        // ScoreStatus 3, ein LAUFENDER Satz (5:3) bleibt erhalten (anders als
+        // beim regulären Eintrag, der ihn ablehnt), Feld wird freigegeben.
+        let m = match_on_court(); // court_id 101
+        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000).unwrap();
+        assert_eq!(u.score_status, 3);
+        assert!(!u.team1_won, "disqualifiziertes Team 1 verliert");
+        assert_eq!(u.sets, vec![(21, 10), (5, 3)], "Teil-Satz bleibt");
+        assert_eq!(u.free_court_id, Some(101));
+        assert!(!u.player_ids.is_empty());
+        assert_eq!(u.duration_mins, 1);
+    }
+
+    #[test]
+    fn manual_dq_rejects_invalid_team_and_already_decided() {
+        let m = match_on_court();
+        // Ungültiges Team (nur 1/2 erlaubt).
+        assert!(build_manual_dq_update(&m, 3, vec![], None, 0).is_err());
+        // Bereits gewertet → nie überschreiben.
+        let mut done = match_on_court();
+        done.winner = Some(2);
+        assert!(build_manual_dq_update(&done, 1, vec![], None, 0).is_err());
     }
 
     // ein 0:0 als Geistersatz nach Spielende und wird weggelassen.

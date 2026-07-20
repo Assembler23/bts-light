@@ -14,6 +14,7 @@ import {
 import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
 import {
   assignCourt,
+  disqualifyMatch,
   enterResult,
   finishedMatches,
   freeCourt,
@@ -176,6 +177,25 @@ export function FieldOverviewPage({
       // Nur bei Erfolg schließen — bei einem Fehler (z. B. „Satz läuft noch")
       // bleibt der Dialog offen, damit die eingetippten Werte nicht verloren
       // gehen und die Meldung im Dialog sichtbar ist.
+      setEnterFor(null);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Disqualifikation (P3): `loserTeam` wird disqualifiziert, der Gegner
+  // gewinnt (BTP-ScoreStatus 3). Ein oben eingetragener Teilstand bleibt.
+  async function submitDisqualify(loserTeam: 1 | 2) {
+    if (!enterFor) return;
+    const sets = enterSets.filter(([a, b]) => a > 0 || b > 0);
+    const matchId = enterFor.match_id;
+    setBusy(true);
+    setError("");
+    try {
+      await disqualifyMatch(matchId, loserTeam, sets);
       setEnterFor(null);
       await refresh();
     } catch (e) {
@@ -817,6 +837,38 @@ export function FieldOverviewPage({
                 Aufgabe-Dialog am Tablet. Steht das Spiel noch auf dem Feld,
                 wird es beim Eintragen freigegeben.
               </p>
+
+              {/* Disqualifikation (P3): selten, daher dezent abgesetzt. Der
+                  oben eingetippte Teilstand bleibt erhalten (Status 3). */}
+              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50/60 p-2.5">
+                <p className="text-xs font-semibold text-rose-800">
+                  Disqualifikation
+                </p>
+                <p className="mt-0.5 text-[11px] text-rose-600">
+                  Ein Team disqualifizieren — der Gegner gewinnt (BTP-Status 3).
+                  Ein oben eingetragener Zwischenstand bleibt erhalten.
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {([1, 2] as const).map((team) => {
+                    const names = team === 1 ? enterFor.team1 : enterFor.team2;
+                    return (
+                      <button
+                        key={team}
+                        type="button"
+                        onClick={() => void submitDisqualify(team)}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1 rounded-md border border-rose-300
+                                   bg-white px-2.5 py-1 text-xs font-medium text-rose-700
+                                   transition-colors hover:bg-rose-100 disabled:opacity-50"
+                      >
+                        <Ban size={13} />
+                        {(names.join(" / ") || `Team ${team}`) +
+                          " disqualifizieren"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               {error && (
                 <p className="mt-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">
                   {error}
