@@ -31,17 +31,27 @@ export function gamePointKind(c) {
   const last = sets[sets.length - 1] || [0, 0];
   const l = last[0] || 0,
     r = last[1] || 0;
+  const cap = c.cap_score || 0;
   // Aktueller Satz schon entschieden → kein Ball (verhindert „Matchball" auf
   // einem gerade gewonnenen/beendeten Satz).
-  if (setDecided(l, r, target, c.cap_score || 0)) return null;
+  if (setDecided(l, r, target, cap)) return null;
   const lead = Math.max(l, r),
     trail = Math.min(l, r);
-  if (!(lead - trail >= 1 && lead >= target - 1)) return null;
+  // Ball, wenn der Führende einen Punkt vom Satzgewinn entfernt ist ODER der
+  // Stand direkt vor dem Cap steht (dann entscheidet der nächste Punkt den
+  // Satz für den Punktgewinner — auch bei Gleichstand, z. B. 29:29 bei Cap 30).
+  const capBall = cap > 0 && lead === cap - 1;
+  const normalBall = lead - trail >= 1 && lead >= target - 1;
+  if (!capBall && !normalBall) return null;
   const need = setsToWin(c.best_of);
-  const leaderLeft = l >= r;
   const completed = sets.slice(0, -1);
-  const wins = completed.filter((s) =>
-    leaderLeft ? (s[0] || 0) > (s[1] || 0) : (s[1] || 0) > (s[0] || 0),
-  ).length;
-  return wins === need - 1 ? "match" : "set";
+  const leftWins = completed.filter((s) => (s[0] || 0) > (s[1] || 0)).length;
+  const rightWins = completed.filter((s) => (s[1] || 0) > (s[0] || 0)).length;
+  // Bei Gleichstand (Cap-Patt) können BEIDE Seiten den Satz mit dem nächsten
+  // Punkt gewinnen → Matchball, sobald EINE Seite damit das Match gewinnt.
+  if (l === r) {
+    return leftWins === need - 1 || rightWins === need - 1 ? "match" : "set";
+  }
+  const leaderWins = l > r ? leftWins : rightWins;
+  return leaderWins === need - 1 ? "match" : "set";
 }

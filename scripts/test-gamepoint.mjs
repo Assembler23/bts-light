@@ -31,11 +31,7 @@ eq("20:19 nicht entschieden", setDecided(20, 19, 21, 30), false);
 // Kein Ball
 eq("0:0 kein Ball", gamePointKind(c([[0, 0]])), null);
 eq("15:10 kein Ball", gamePointKind(c([[15, 10]])), null);
-eq(
-  "kein Match",
-  gamePointKind(c([[20, 5]]) && { ...c([[20, 5]]), match_id: 0 }),
-  null,
-);
+eq("kein Match", gamePointKind({ ...c([[20, 5]]), match_id: 0 }), null);
 eq("leere Sätze", gamePointKind(c([])), null);
 
 // Satzball im 1. Satz (führt, aber Satz gewinnt Match noch nicht)
@@ -69,6 +65,28 @@ eq(
 eq("21:19 (Satz vorbei) → null", gamePointKind(c([[21, 19]])), null);
 // Cap-Satzball: 29:28 ist ein Ball (bei 30 Cap gewinnt der nächste Punkt).
 eq("29:28 → Satzball (Cap-Nähe)", gamePointKind(c([[29, 28]])), "set");
+// Cap-Patt 29:29: nächster Punkt entscheidet für BEIDE → Ball trotz 0 Vorsprung.
+eq("29:29 (Satz 1) → Satzball", gamePointKind(c([[29, 29]])), "set");
+eq(
+  "29:29 mit 1 Satzvorsprung → Matchball (eine Seite kann beenden)",
+  gamePointKind(
+    c([
+      [21, 10],
+      [29, 29],
+    ]),
+  ),
+  "match",
+);
+eq(
+  "29:29 mit Gegner-Satzvorsprung → Matchball (Gegner kann beenden)",
+  gamePointKind(
+    c([
+      [10, 21],
+      [29, 29],
+    ]),
+  ),
+  "match",
+);
 // Decider-Matchball: 1:1 Sätze, 20:18 im 3. Satz.
 eq(
   "1:1 Sätze + 20:18 → Matchball",

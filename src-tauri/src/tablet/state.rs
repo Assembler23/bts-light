@@ -1423,6 +1423,27 @@ mod tests {
     }
 
     #[test]
+    fn overview_carries_scoring_format_for_matchball_hint() {
+        // Plan 16: overview() reicht das Zählformat (best_of/target/cap) des
+        // Matches durch, damit die Felderübersicht Satz-/Matchball rechnen
+        // kann. Belegtes Feld → Werte aus mm.scoring; leeres Feld → 0/0/0
+        // (dann zeigt die Übersicht bewusst keinen „Ball").
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
+        ));
+        let ov = st.overview();
+        let c1 = ov.iter().find(|o| o.court_id == 101).unwrap();
+        // ScoringFormat::default = 3×21, Cap 30.
+        assert_eq!(c1.best_of, 3);
+        assert_eq!(c1.target_score, 21);
+        assert_eq!(c1.cap_score, 30);
+        let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
+        assert_eq!((c2.best_of, c2.target_score, c2.cap_score), (0, 0, 0));
+    }
+
+    #[test]
     fn overview_extracts_pause_and_serving_from_court_state() {
         // overview() übernimmt Pause + Aufschlag-Info 1:1 aus dem Tablet-
         // court_state (Grundlage für Kombi-Pausen-Countdown + Aufschlag-Punkt).

@@ -342,8 +342,9 @@ export function FieldOverviewPage({
               {g.courts.map((c) => {
                 const occupied = c.match_id > 0;
                 // Satz-/Matchball (Plan 16): nur als Planungshinweis für die
-                // Turnierleitung – „Matchball" = Feld wird gleich frei.
-                const ball = occupied ? gamePointKind(c) : null;
+                // Turnierleitung – „Matchball" = Feld wird gleich frei. Nicht
+                // bei gesperrtem Feld (dort zeigt die Karte „Gesperrt").
+                const ball = occupied && !c.locked ? gamePointKind(c) : null;
                 const clickable = !c.locked && !occupied && !busy;
                 // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
                 // nicht erlaubt ist → ausgrauen (Klick zeigt trotzdem die
