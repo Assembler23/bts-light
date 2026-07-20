@@ -2240,8 +2240,17 @@ function renderEnterScoreRows() {
     inL.value = String(s.left); inR.value = String(s.right);
     inL.setAttribute('aria-label', `Satz ${i + 1}, ${sideTeamName('left')}`);
     inR.setAttribute('aria-label', `Satz ${i + 1}, ${sideTeamName('right')}`);
-    inL.addEventListener('input', () => { enterScoreSets[i].left = clampScoreInput(inL.value); });
-    inR.addEventListener('input', () => { enterScoreSets[i].right = clampScoreInput(inR.value); });
+    // Clamp auf 0..99 UND die Anzeige mit dem übernommenen Wert
+    // synchronisieren (nur bei Über-/Unterlauf umschreiben, damit normales
+    // Tippen und ein leeres Feld nicht gestört werden).
+    const bindScoreInput = (inp, apply) => inp.addEventListener('input', () => {
+      const raw = Number(inp.value);
+      const v = clampScoreInput(inp.value);
+      apply(v);
+      if (!Number.isInteger(raw) || raw !== v) inp.value = String(v);
+    });
+    bindScoreInput(inL, (v) => { enterScoreSets[i].left = v; });
+    bindScoreInput(inR, (v) => { enterScoreSets[i].right = v; });
     const colon = document.createElement('span');
     colon.textContent = ':'; colon.style.cssText = 'font-size:1.4rem;color:#cbd5e1';
     row.append(label, inL, colon, inR);
@@ -2287,6 +2296,15 @@ function submitEnterScore() {
   const r = sets.filter(s => s.right > s.left).length;
   if (sets.length === 0 || (l < need && r < need) || l === r) {
     els.enterScoreError.textContent = 'Kein eindeutiger Sieger — bitte Satzstände prüfen.';
+    els.enterScoreError.hidden = false;
+    return;
+  }
+  // Keine überzähligen Sätze: der Sieg muss erst mit dem LETZTEN Satz
+  // feststehen (best of 3 mit 2:0 darf keinen 3., nie gespielten Satz tragen).
+  const priorL = sets.slice(0, -1).filter(s => s.left > s.right).length;
+  const priorR = sets.slice(0, -1).filter(s => s.right > s.left).length;
+  if (priorL >= need || priorR >= need) {
+    els.enterScoreError.textContent = 'Zu viele Sätze — das Match war schon vorher entschieden.';
     els.enterScoreError.hidden = false;
     return;
   }

@@ -176,10 +176,13 @@ Ergebnis soll trotzdem übermittelt werden.
   Formats). Der aktuelle Stand ist vorbelegt, falls doch schon gezählt
   wurde.
 - **Plausibilität clientseitig:** Jeder Satz muss regulär zu Ende gespielt
-  sein (`setWinnerSide` gegen Ziel/Cap der BTP-Zählweise) und es muss ein
-  **eindeutiger Match-Sieger** herauskommen — sonst erscheint eine
-  Meldung im Dialog. Das ist dieselbe Regel wie serverseitig
-  (`server::set_is_complete`, siehe [walkover.md](walkover.md)).
+  sein (`setWinnerSide` gegen Ziel/Cap der BTP-Zählweise; im **Zeitformat**
+  `target ≥ 99` genügt ein Satz, sobald er **nicht unentschieden** ist), es
+  muss ein **eindeutiger Match-Sieger** herauskommen und es dürfen **keine
+  überzähligen Sätze** dabei sein (der Sieg muss erst mit dem letzten Satz
+  feststehen) — sonst erscheint eine Meldung im Dialog. Die Satzregel ist
+  dieselbe wie serverseitig (`server::set_is_complete`, siehe
+  [walkover.md](walkover.md)).
 - „Übernehmen" füllt die Sätze, markiert das Match als beendet und öffnet
   das **normale Match-Ende-Overlay** (Sieger + „Ergebnis übermitteln") —
   ab da läuft alles über den bewährten, gegen Netzausfälle abgesicherten
