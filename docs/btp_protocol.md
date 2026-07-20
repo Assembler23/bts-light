@@ -347,6 +347,13 @@ nächsten Socket-Fehler liegen). Schutzregeln beim Nachschub:
 - Einträge älter als 24 h verfallen.
 
 Das Tablet wiederholt seine Übermittlung unabhängig davon selbst; gelingt
-sie, wird der Queue-Eintrag entfernt (kein Doppel-Write). Die Queue lebt
-im Speicher — ein App-Neustart leert sie (das Tablet hält sein Ergebnis
-ohnehin bis zum `ok:true`).
+sie, wird der Queue-Eintrag entfernt und der Flush prüft das direkt vor
+jedem Write erneut. **Race-Selbstheilung:** Geht während eines
+(hängenden) Nachschub-Writes eine Korrektur direkt durch, hätte der
+ältere Stand sie überschrieben — der Flush erkennt das (Vermerk der
+erfolgreichen Direkt-Writes) und schreibt die neuere Korrektur sofort
+erneut; schlägt auch das fehl, wird sie wieder eingereiht. Ein doppelter
+*identischer* Write ist unschädlich (Players-Block setzt Werte, er
+toggelt nichts). Die Queue lebt im Speicher — ein App-Neustart leert sie
+(das Tablet hält sein Ergebnis ohnehin bis zum `ok:true`). Bei bestätigt
+leerem Turnier-Stand (Leer-Snapshot-Guard) pausiert der Nachschub.

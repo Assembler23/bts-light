@@ -162,9 +162,12 @@ fn prepare_btp_retry(
     snapshot: &BtpSnapshot,
     now: u64,
 ) -> RetryAction {
-    let already_decided = snapshot.matches.iter().any(|m| {
-        m.id == entry.update.btp_match_id && m.status == MatchStatus::Finished && m.winner.is_some()
-    });
+    // winner.is_some() impliziert im Modell Finished (model.rs setzt den
+    // Status genau dann) — der Sieger allein ist das Kriterium.
+    let already_decided = snapshot
+        .matches
+        .iter()
+        .any(|m| m.id == entry.update.btp_match_id && m.winner.is_some());
     if already_decided {
         return RetryAction::Drop("BTP hat bereits ein Ergebnis");
     }
@@ -227,6 +230,13 @@ impl SyncEngine {
         if entries.is_empty() {
             return;
         }
+        // Bestätigt leerer Snapshot (Turnier in BTP geschlossen/entladen):
+        // ein Nachschub in ein nicht (mehr) geladenes Turnier ergibt keinen
+        // Sinn — Einträge bleiben liegen, bis wieder Matches da sind oder
+        // die Höchst-Lebensdauer greift.
+        if snapshot.matches.is_empty() {
+            return;
+        }
         if self
             .last_btp_retry_flush
             .is_some_and(|t| t.elapsed() < BTP_RETRY_FLUSH_EVERY)
@@ -235,26 +245,63 @@ impl SyncEngine {
         }
         self.last_btp_retry_flush = Some(Instant::now());
         let now = now_ms();
+        let mut still_failing = 0usize;
         for entry in entries {
             let match_id = entry.update.btp_match_id;
+            // Direkt vor dem Write erneut prüfen: Hat ein zwischenzeitlich
+            // erfolgreicher Direkt-Write (Tablet-Retry) den Eintrag schon
+            // geräumt, entfällt der Nachschub.
+            if !tablet.btp_retry_pending(match_id) {
+                continue;
+            }
             match prepare_btp_retry(&entry, snapshot, now) {
                 RetryAction::Drop(reason) => {
                     tablet.clear_btp_retry(match_id);
                     tracing::warn!("Nachschub für Match {match_id} verworfen: {reason}");
                 }
                 RetryAction::Write(update) => {
+                    let write_started = now_ms();
                     match crate::tablet::server::write_result_to_btp(config, &update).await {
                         Ok(()) => {
                             tablet.clear_btp_retry(match_id);
                             tracing::info!("Nachschub OK: Match {match_id} nach BTP geschrieben");
+                            // Race-Selbstheilung: Ist WÄHREND unseres Writes
+                            // eine Korrektur direkt durchgegangen, hat unser
+                            // (älterer) Stand sie gerade überschrieben —
+                            // die neuere Korrektur sofort erneut schreiben.
+                            if let Some(newer) =
+                                tablet.direct_btp_write_since(match_id, write_started)
+                            {
+                                tracing::warn!(
+                                    "Nachschub für Match {match_id} hat eine \
+                                     zwischenzeitliche Korrektur überholt — schreibe \
+                                     die Korrektur erneut"
+                                );
+                                if let Err(e) =
+                                    crate::tablet::server::write_result_to_btp(config, &newer).await
+                                {
+                                    // Korrektur erneut einreihen — der nächste
+                                    // Flush versucht es wieder.
+                                    tablet.queue_btp_retry(newer, now);
+                                    tracing::warn!(
+                                        "Korrektur-Rewrite für Match {match_id} \
+                                         fehlgeschlagen ({e}) — wieder eingereiht"
+                                    );
+                                }
+                            }
                         }
-                        Err(e) => {
+                        Err(_) => {
                             // Eintrag bleibt — nächster Versuch in ≥30 s.
-                            tracing::info!("Nachschub für Match {match_id} weiter erfolglos: {e}");
+                            // Sammel-Log statt einer Zeile je Match (Queue
+                            // kann viele Einträge halten).
+                            still_failing += 1;
                         }
                     }
                 }
             }
+        }
+        if still_failing > 0 {
+            tracing::info!("Nachschub-Queue: {still_failing} Eintrag/Einträge weiter erfolglos");
         }
     }
 
@@ -711,6 +758,10 @@ impl SyncEngine {
         if !config.slave_mode {
             // Nachschub-Queue (A5): liegengebliebene Ergebnis-Writes
             // nachreichen — BTP ist in diesem Zyklus nachweislich erreichbar.
+            // Kollidiert nicht mit der Auto-Vergabe direkt darunter: beide
+            // arbeiten auf DEMSELBEN (vor dem Flush geladenen) Snapshot, ein
+            // hier frisch freigegebenes Feld erscheint dort noch belegt und
+            // wird frühestens im nächsten Poll neu vergeben.
             self.flush_btp_retries(config, tablet, &snapshot).await;
             let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
             if !auto_courts.is_empty() {

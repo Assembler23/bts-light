@@ -1062,6 +1062,11 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             // damit erledigt (das Tablet wiederholt selbst — gelingt sein
             // Retry, darf die Nachschub-Queue nicht später erneut schreiben).
             ctx.tablet.clear_btp_retry(m.id);
+            // Erfolg vermerken: Überholt ein noch laufender Nachschub-Write
+            // diese (neuere) Korrektur, schreibt der Flush sie danach
+            // selbstheilend erneut. Zeitstempel = SCHREIBzeit (nicht
+            // Spielende) — der Flush vergleicht gegen seinen Startzeitpunkt.
+            ctx.tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("BTP-Schreiben OK: Match {} (Feld freigegeben)", m.id);
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das

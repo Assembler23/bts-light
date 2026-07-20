@@ -971,6 +971,8 @@ pub async fn confirm_walkover(
         match crate::tablet::server::write_result_to_btp(&config, &update).await {
             Ok(()) => {
                 tablet.clear_btp_retry(cand.match_id);
+                // Für die Race-Erkennung des Nachschubs (Selbstheilung).
+                tablet.note_direct_btp_write(update.clone(), now_ms());
                 written += 1;
             }
             Err(e) => {

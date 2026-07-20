@@ -243,6 +243,12 @@ pub struct TabletState {
     /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
     /// höchstens ein Eintrag, der neueste Stand gewinnt.
     btp_retry: RwLock<Vec<PendingBtpWrite>>,
+    /// Match-ID → (letzter ERFOLGREICHER Direkt-Write, Zeitpunkt Unix-ms).
+    /// Schließt das Nachschub-Race: Landet ein (langsamer) Queue-Write NACH
+    /// einer zwischenzeitlich erfolgreichen Korrektur, erkennt der Flush
+    /// das hieran und schreibt die neuere Korrektur sofort erneut
+    /// (Selbstheilung statt stillem Überschreiben).
+    last_direct_btp_write: RwLock<HashMap<i64, (crate::btp::proto::MatchUpdate, u64)>>,
 }
 
 /// Ein fehlgeschlagener BTP-Ergebnis-Write in der Nachschub-Queue.
@@ -317,6 +323,43 @@ impl TabletState {
     /// Kopie der aktuellen Nachschub-Queue (für den Flush im Sync-Loop).
     pub fn btp_retries(&self) -> Vec<PendingBtpWrite> {
         self.btp_retry.read().unwrap().clone()
+    }
+
+    /// Steht das Match noch in der Nachschub-Queue? Der Flush prüft das
+    /// unmittelbar vor jedem Write erneut — ein zwischenzeitlich
+    /// erfolgreicher Direkt-Write (Tablet-Retry) hat den Eintrag dann
+    /// bereits geräumt und der Nachschub entfällt.
+    pub fn btp_retry_pending(&self, match_id: i64) -> bool {
+        self.btp_retry
+            .read()
+            .unwrap()
+            .iter()
+            .any(|e| e.update.btp_match_id == match_id)
+    }
+
+    /// Vermerkt einen ERFOLGREICHEN Direkt-Write (process_result /
+    /// Turnierleitungs-Walkover) für die Race-Erkennung des Nachschubs.
+    pub fn note_direct_btp_write(&self, update: crate::btp::proto::MatchUpdate, now: u64) {
+        self.last_direct_btp_write
+            .write()
+            .unwrap()
+            .insert(update.btp_match_id, (update, now));
+    }
+
+    /// Gab es seit `since_ms` einen erfolgreichen Direkt-Write für das
+    /// Match? Liefert dessen Stand — der Flush schreibt ihn dann erneut,
+    /// falls sein eigener (älterer) Write die Korrektur überholt hat.
+    pub fn direct_btp_write_since(
+        &self,
+        match_id: i64,
+        since_ms: u64,
+    ) -> Option<crate::btp::proto::MatchUpdate> {
+        self.last_direct_btp_write
+            .read()
+            .unwrap()
+            .get(&match_id)
+            .filter(|(_, ts)| *ts >= since_ms)
+            .map(|(u, _)| u.clone())
     }
 
     /// Merkt den Zähltafelbediener (Verlierer-Team-Namen) für ein Feld.
@@ -1798,6 +1841,22 @@ mod tests {
         let seven = q.iter().find(|e| e.update.btp_match_id == 7).unwrap();
         assert_eq!(seven.update.duration_mins, 31, "neuester Stand gewinnt");
         assert_eq!(seven.enqueued_ms, 1_000, "erster Zeitpunkt bleibt");
+    }
+
+    #[test]
+    fn direct_btp_write_note_and_since() {
+        // Race-Erkennung des Nachschubs: Nur Direkt-Writes AB dem
+        // Vergleichszeitpunkt zählen (ts >= since).
+        let st = TabletState::default();
+        assert!(st.direct_btp_write_since(7, 0).is_none());
+        st.note_direct_btp_write(upd(7, 30), 5_000);
+        assert!(
+            st.direct_btp_write_since(7, 6_000).is_none(),
+            "Write liegt VOR dem Vergleichszeitpunkt"
+        );
+        let u = st.direct_btp_write_since(7, 5_000).expect("Write ab 5000");
+        assert_eq!(u.duration_mins, 30);
+        assert!(st.direct_btp_write_since(8, 0).is_none(), "fremdes Match");
     }
 
     #[test]
