@@ -76,9 +76,20 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
 - **Zähltafelbediener-Verwaltung** (wie Tilos BTS): Verlierer-Warteschlange,
   Zuweisung beim Feld-Aufruf, Mit-Ansage „Tabletbedienung: …",
   BTP-Auscheck, Mindestpause.
-- **Gong-Überlappung fixen** (Tilo 19.07.): Gong-Ende an echtes
-  Audio-Event koppeln statt an festen Timer — Plan 15 in
-  [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **Vorbereitungs-/next-Monitor je Halle zeigte keine Spiele**
+  (Turnier-Befund 19.07., nachgemeldet 20.07.): Der Browser-Monitor
+  `…display=next&halle=…` blieb leer. **Diagnose:** `upcoming_matches[].hall`
+  wird heute NUR gefüllt, wenn der Aufruf über bts-lights
+  „Spiele in Vorbereitung" läuft (`preparation_hall`, payload.rs:156) —
+  beim Turnier liefen die Aufrufe aber über BTP/mündlich → Hallen-Feld
+  überall leer → der (funktionierende) badhub-Filter fand nichts, und
+  die leere Liste ohne Fallback ist dort gewollt. **Dreiteiliger Fix:**
+  (a) Plan 2 — `planned_court_id` aus BTP parsen → Halle für ALLE
+  angesetzten Spiele; (b) P1 erweitern — BTP-`Highlight` nicht nur
+  schreiben, sondern auch **lesen**, damit in BTP gemachte Aufrufe bei
+  uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
+  Original-BTS seine „upcoming"-Ticker-Anzeige speist
+  (ticker_manager/highlight) — ggf. weitere Mechanik übernehmen.
 - **Matchball-Einfärbung in der Felderübersicht** (Tilo-Idee, nur
   Turnierleitung) — Plan 16.
 - **Altes Ergebnis bei Neu-Zuweisung** (Tilo + Log-Review HM-03):
@@ -138,6 +149,24 @@ ALLE weiteren Arbeiten:
   rot ist.**
 - Features/Fixes einzeln, klein, review't — nie gebündelt mit dem
   stabilen Release (auch #76/#78 kommen einzeln, wenn priorisiert).
+
+### Cluster-Übersicht (Arbeitspakete, Stand 20.07.2026)
+
+Die 18 Pläne ([roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md)),
+BTP-Übernahmen (P1–P3) und Log-Review-Fixes, sinnvoll gebündelt:
+
+| Cluster | Inhalt (Plan-Nr.) | Zweck |
+|---|---|---|
+| **A — Stabilität & Regressionsschutz** | Regressions-Suite · Leer-Snapshot-Guard · Zombie-Host-Ablösung · Stale-Score-Filter (17) · BTP-Retry-Queue (P2) · Label-Kosmetik · Keep-Awake-/DNS-Doku | Erprobtes absichern — **zuerst** |
+| **B — Release & Infrastruktur** | **Release-Seite (18, GESTARTET)** · App-Log-Rotation · LAN-HTTPS/ADR 0005 (6) · Code-Signing · CI-Wartung · Repo-Umbenennung | Auslieferung professionalisieren |
+| **C — Aufrufe & Ansagen** | 2./3. Aufruf je Partei (1) · Highlight nach/aus BTP (P1) · Gong-Fix (15) · **Vorbereitungs-/next-Monitor je Halle (NEU, s. u.)** · Nächste Spiele pro Halle (2) · Zeit seit Aufruf (4) | Der komplette Aufruf-Workflow |
+| **D — Tablet-Bedienung** | Spielstand-Direkteingabe (12) · Klick-Delay (13) · helles Theme + Schrift (3) · Kopplungscode 1 h (8) | Schiedsrichter-Alltag |
+| **E — Anzeigen & Ticker** | Pausenuhr-Overlay (5) · TV-Leerlauf-Branding (10) · Matchball-Färbung TL (16) · Aufgabe-Badge · Tages-Filter tab=done · Profil-Link-Fix (9) · Slave-Spielübersicht (7) | Sichtbarkeit für Halle & Publikum |
+| **F — Große Features** | Zähltafelbediener (14) · Master-Identität umziehen · Disqualifikation (P3) · Azure-Key-Vererbung (#76) · Pi-Image-Untersuchung | Je ein eigenes Projekt |
+
+Innerhalb eines Clusters teilen sich die Punkte Code-Stellen und
+Testaufwand — sie sollten möglichst am Stück umgesetzt werden.
+Cluster C und E hängen teils an Cluster A (Regressions-Suite zuerst).
 
 Gesammelte Nacharbeiten, sobald das Turnier vorbei ist:
 
