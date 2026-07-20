@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.158
+
+- **Pausenuhr verdeckt den Spielstand nicht mehr (TV).** Die Split-Flap-
+  Pausenuhr (60-Sekunden-Pause, Satzpause, Behandlung) lag bisher vollflächig
+  über der Anzeige. Jetzt ist sie ein kompakter, halbtransparenter **Banner
+  am oberen Rand** – Satzstand und Namen bleiben darunter sichtbar.
+- **TV im Leerlauf zeigt badhub.de.** Steht auf einem Feld kein Spiel, zeigt
+  der Monitor weiterhin groß die Feldnummer und darunter jetzt prominent
+  **badhub.de** – Orientierung in der Halle und dezente Werbung in einem.
+
 ## v0.9.157
 
 - **Satz- und Matchball in der Felderübersicht.** Läuft an einem Feld ein
