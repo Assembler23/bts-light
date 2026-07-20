@@ -436,6 +436,11 @@ export interface CourtOverview {
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
    *  steht; null = kein Spiel. Grundlage des Aufruf-Timers. */
   on_court_since_ms: number | null;
+  /** Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap) für die
+   *  Satz-/Matchball-Anzeige (Plan 16); 0 = kein Match/unbekannt. */
+  best_of: number;
+  target_score: number;
+  cap_score: number;
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

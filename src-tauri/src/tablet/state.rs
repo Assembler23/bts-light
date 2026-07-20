@@ -128,6 +128,12 @@ pub struct CourtOverview {
     /// steht. `None`, wenn kein Spiel auf dem Feld ist. Grundlage des
     /// Aufruf-Timers (hochzählende Uhr + 2./3. Aufruf).
     pub on_court_since_ms: Option<u64>,
+    /// Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap), damit die
+    /// Felderübersicht Satz-/Matchball berechnen kann (Plan 16). 0 = kein
+    /// Match / unbekannt (dann keine Satzball-Anzeige).
+    pub best_of: i64,
+    pub target_score: i64,
+    pub cap_score: i64,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -1084,6 +1090,9 @@ impl TabletState {
                     },
                     locked: self.locked_courts.read().unwrap().contains(&court.id),
                     on_court_since_ms: m.and_then(|mm| self.on_court_since_ms(court.id, mm.id)),
+                    best_of: m.map(|mm| mm.scoring.best_of).unwrap_or(0),
+                    target_score: m.map(|mm| mm.scoring.target_score).unwrap_or(0),
+                    cap_score: m.map(|mm| mm.scoring.cap_score).unwrap_or(0),
                 }
             })
             .collect()
