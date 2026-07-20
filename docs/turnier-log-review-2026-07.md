@@ -57,16 +57,19 @@ Sonntag war ein bewusster Gerätetausch (HM-06, 17:24) — gewollter Flow.
 3. **DNS-Ausfälle am Master-PC** — 23× über den ganzen Sonntag verteilt
    („Host unbekannt", 06:51–16:31): Hallen-Router-DNS unzuverlässig.
    Backoff-Reconnect hat jedes Mal geheilt; Ausfälle je ≤ Backoff-Dauer.
-   Maßnahme: Betriebs-Doku (öffentlichen DNS 1.1.1.1/8.8.8.8 am
-   Turnier-PC eintragen); optional Resolver-Fallback in der App prüfen.
+   ~~Maßnahme: Betriebs-Doku~~ → **dokumentiert (Cluster A6):**
+   DNS-Empfehlung (1.1.1.1/8.8.8.8) in cloud-relay.md → Fehlersuche;
+   optionaler Resolver-Fallback in der App bleibt Roadmap-Idee.
 4. **Tablet-Doze (HM/LAN)** — **140** Stale-Schließungen am Sonntag:
    Display-/WLAN-Schlaf der LAN-Tablets erzeugt Dauer-Reconnect-Zyklen
-   (funktional folgenlos, aber Rauschen + träge Anzeige). Maßnahme:
-   Keep-Screen-On-Empfehlung in docs/tablet.md; langfristig Wake Lock —
-   braucht Secure Context → Synergie mit ADR 0005 (LAN-HTTPS).
-5. **Kosmetik:** 7 Ergebnis-Logzeilen mit leerem Hallen-Label
-   („Feld 38 ('')") — Label-Lookup nach bereits aufgehobener Zuweisung.
-   Mini-Fix im Logging. — ~~Ferner zeigt der Court-Score-Cache nach
+   (funktional folgenlos, aber Rauschen + träge Anzeige).
+   ~~Maßnahme: Keep-Screen-On-Empfehlung~~ → **dokumentiert (Cluster
+   A6):** tablet.md → Voraussetzungen; langfristig Wake Lock — braucht
+   Secure Context → Synergie mit ADR 0005 (LAN-HTTPS).
+5. **Kosmetik:** ~~7 Ergebnis-Logzeilen mit leerem Hallen-Label
+   („Feld 38 ('')")~~ → **behoben (Cluster A6):** fehlt das
+   Tablet-Label, schlägt das Log den Feldnamen im Snapshot nach.
+   — ~~Ferner zeigt der Court-Score-Cache nach
    Match-Wechsel kurz den alten Stand unterm neuen Spiel (HM-03-Befund)~~
    → **umgesetzt (Cluster A4, Stale-Filter):** `score_update`/`state_sync`
    tragen die Match-ID; Server und Relay verwerfen Nachzügler alter

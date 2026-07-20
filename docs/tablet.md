@@ -229,6 +229,14 @@ Ersatz-Tablet, echte Übernahme) übernimmt den Server-Stand unverändert.
 ## Voraussetzungen
 
 - Tablet und bts-light-PC im **selben WLAN**.
+- **Bildschirm-Schlaf am Tablet ausschalten** (Keep Screen On — in
+  Fully Kiosk die Option „Bildschirm an lassen", sonst in den
+  Android-/iPad-Display-Einstellungen den Timeout auf „nie" stellen).
+  Turnier-Log 19.07.2026: **140** Doze-Reconnect-Zyklen an einem Tag —
+  funktional folgenlos (der Reconnect heilt sich seit v0.9.147 selbst),
+  aber jede Doze-Phase macht die Anzeige träge und flutet das Log.
+  Ein programmatischer Wake Lock braucht HTTPS (Secure Context) und
+  kommt mit ADR 0005 (LAN-HTTPS).
 - **Windows-Firewall**: beim ersten Start fragt Windows, ob der Zugriff
   erlaubt werden soll – „Zugriff zulassen" (private Netze). Ohne Freigabe
   erreichen die Tablets bts-light nicht. Auf gesperrten Turnier-PCs ohne
