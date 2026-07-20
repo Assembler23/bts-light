@@ -55,11 +55,17 @@ anpassen:
 - **Snapshot-Übernahme in `sync.rs::run_once`**: heute bedingungslos
   (`set_snapshot`), der Leer-Snapshot-Guard (Cluster A) schließt die
   Lücke samt Tests.
-- **`assets/tablet.html`** (Vanilla-JS, ~3000 Zeilen): kein JS-Test-
-  Harness. Absicherung heute: die Server-Seite validiert jedes Ergebnis
-  (R5) und die Rust-Tests decken die Gegenstelle ab. Ein Harness ist
-  bewusst zurückgestellt — Änderungen dort brauchen einen manuellen
-  Test am echten Tablet (siehe [tablet.md](tablet.md)).
+- **`assets/tablet.html`** (Vanilla-JS, ~3000 Zeilen): kein vollständiges
+  JS-Test-Harness. Absicherung: die Server-Seite validiert jedes Ergebnis
+  (R5) und die Rust-Tests decken die Gegenstelle ab; die
+  **sicherheitskritische BWF-Aufschlag-Positionierung** (`computeServing`
+  + `finalizeSetup`-Paritätstausch + `addPointOnSide`, u. a. für den
+  Mid-Game-Einstieg Plan 12b) ist zusätzlich durch den reinen Node-Test
+  [`scripts/test-serving.mjs`](../scripts/test-serving.mjs) im CI
+  abgesichert (Invariante: Einstieg bei beliebigem Stand == ununterbrochene
+  Zählung). Ein volles DOM-Harness ist bewusst zurückgestellt — sonstige
+  Änderungen an tablet.html brauchen einen manuellen Test am echten Tablet
+  (siehe [tablet.md](tablet.md)).
 - **`run_once`-Gesamtzyklus** (Netz + BTP + badhub zusammen): nur in
   Teilen testbar; die Einzelschritte sind abgedeckt.
 
