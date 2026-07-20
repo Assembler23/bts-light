@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.149
+
+- **Tablet-Spielzettel: helles Design und größere Schrift (Tilo-Feedback).**
+  Die Zähloberfläche ist jetzt hell statt dunkel – so bleibt sie auch bei
+  niedriger Display-Helligkeit gut lesbar (schont den Akku, weil niemand mehr
+  hochdrehen muss) und ist ohne Lesebrille besser zu erkennen. Satzstand,
+  Spielernamen und Bedientexte durchgängig größer; das Spielfeld mit dem
+  Aufschläger-Punkt bleibt gut sichtbar. Die Optik orientiert sich am
+  erprobten Umpire-Panel (hell, kräftige Team-Farben).
+- **Feldnummer prominent, auch vor Spielstart.** Solange dem Tablet kein
+  Spiel zugewiesen ist, steht die Feldnummer jetzt groß und zentral auf dem
+  Bildschirm – beim Verteilen der Tablets ist damit sofort erkennbar, welches
+  Gerät an welchem Feld hängt. Auch im laufenden Spiel ist die Feldnummer in
+  der Kopfzeile deutlicher.
+
 ## v0.9.148
 
 - **Stabilitäts-Release nach dem Zwei-Hallen-Turnier (Cluster A):** alle fünf
