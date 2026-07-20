@@ -1393,14 +1393,16 @@ function syncServerClock() {
 syncServerClock();
 setInterval(syncServerClock, 30000);
 
-function startBreak(kind) {
+// `skipCommit`: Ruft der Aufrufer gleich selbst persistState()+render()
+// (bzw. commitScoreView), lassen wir das hier weg – sonst rendert/persistiert
+// ein Punkt, der eine Pause auslöst, doppelt (Plan-13-Review).
+function startBreak(kind, skipCommit) {
   const secs = BREAK_SECONDS[kind]; // undefined bei 'injury' – kein Countdown
   STATE.pause = { kind, endsAt: secs ? serverNow() + secs * 1000 : null };
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   if (STATE.pause.endsAt) breakTimer = setInterval(tickBreak, 250);
   tlog('info', 'break_start', { kind });
-  persistState();
-  render();
+  if (!skipCommit) { persistState(); render(); }
 }
 
 function endBreak() {
@@ -2052,9 +2054,10 @@ function addPointOnSide(side) {
   // Für die Schiri-Ansage: war das ein Aufschlagwechsel?
   STATE.lastEvent = { type: 'point', serveChanged: side !== prevServing };
   if (triggeredMidGameSwitch) showSwitchToast();
-  if (triggeredBreak) startBreak(triggeredBreak);
+  // skipCommit=true: commitScoreView() unten übernimmt render+persist einmalig
+  // (die Pause ist im STATE gesetzt, wird also mit persistiert).
+  if (triggeredBreak) startBreak(triggeredBreak, true);
   // Anzeige sofort, Persistenz/Push nachgelagert (siehe commitScoreView).
-  // Nach startBreak, damit der persistierte Stand die Pause mit einschließt.
   commitScoreView();
 }
 
@@ -2976,14 +2979,25 @@ function onScoreTap(el, fn) {
   // durchlassen und die Aktion doppelt auslösen (kritisch bei Undo, das
   // keinen Punkt-Cooldown hat).
   var armed = false;
+  var lastAt = 0;
+  // Kurzes Entprellen: Ein zweiter (Multi-Touch-)pointerdown oder ein
+  // durchgerutschter Click innerhalb 250 ms löst NICHT erneut aus. Das
+  // schützt vor allem den Undo-Button (kein Punkt-Cooldown) gegen
+  // Zwei-Finger-Doppelauslösung. Bewusste Wiederholungen (>250 ms
+  // auseinander) bleiben möglich.
+  function fire(ts) {
+    if (ts - lastAt < 250) return;
+    lastAt = ts;
+    fn();
+  }
   el.addEventListener('pointerdown', function (e) {
     if (e.pointerType !== 'touch' && e.button !== 0) return; // nur primärer Tap/Klick
     armed = true;
-    fn();
+    fire(e.timeStamp);
   });
   el.addEventListener('click', function (e) {
     if (armed) { armed = false; e.preventDefault(); e.stopPropagation(); return; }
-    fn(); // Fallback: kein vorheriges pointerdown (Tastatur / alte Browser).
+    fire(e.timeStamp); // Fallback: kein vorheriges pointerdown (Tastatur / alte Browser).
   });
   // Abgebrochene Geste (Scroll/System) → Scharfschaltung zurücknehmen, damit
   // ein späterer echter Click (Fallback) nicht fälschlich geschluckt wird.
