@@ -106,7 +106,16 @@ den Relay-Cache mit den offline weitergezählten Punkten. Details:
   heutige LAN-URL. Der Relay weist Namespaces ab, die nicht wie eine
   kanonische UUID aussehen.
 - Genau **ein Host pro Namespace**: eine zweite Host-Verbindung wird
-  serverseitig abgewiesen → kein Host-Takeover.
+  serverseitig abgewiesen → kein Host-Takeover. **Ausnahme
+  (Zombie-Host-Ablösung, Cluster A3):** Ist der eingetragene Host
+  nachweislich stumm (≥ 15 s weder Frame noch Pong — eine tote
+  TCP-Verbindung, z. B. nach einem Netzwechsel des Masters), ersetzt ihn
+  die neue Verbindung. Ein lebendiger Host pongt alle 5 s
+  (Host-Ping-Takt) und kann daher nie verdrängt werden; zusätzlich
+  beendet sich eine ≥ 15 s stumme Host-Verbindung selbst und gibt den
+  Slot frei. Frames einer verdrängten Alt-Verbindung werden verworfen
+  (Sender-Guard). Turnier-Befund 19.07.2026: ohne diese Ablösung hielt
+  eine TCP-Leiche den Slot 17 Minuten — der Master war ausgesperrt.
 - bts-light validiert jedes eingehende Ergebnis (`process_result`):
   Match-ID muss zum aktuellen Court-Match passen, Satzstand plausibel.
   Diese Prüfung ist dieselbe wie im LAN-Modus.
