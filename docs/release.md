@@ -34,6 +34,27 @@ Der **Updater** nutzt weiterhin ausschließlich die versionierte URL aus
 des Court-Monitors hat ohnehin einen festen Namen
 (`bts-light-pi.img.xz`, siehe [pi-master-image.md](pi-master-image.md)).
 
+## Release-Seite (Downloads + Änderungen je Version)
+
+`https://badhub.de/download/bts-light/` zeigt alle Versionen mit
+Download-Link und den Kompakt-Änderungen aus
+[changelog.md](changelog.md); die neueste Version steht prominent oben
+(plus der stabile Link). Die Seite wird bei **jedem Tag-Release
+automatisch** neu erzeugt (`scripts/build-release-page.mjs` im
+publish-Job) und zusammen mit Installer + `latest.json` hochgeladen.
+Download-Knöpfe erscheinen nur für Versionen, deren Installer wirklich
+auf dem Server liegt. Derselbe Changelog-Auszug der Version landet in
+`latest.json → notes` — das Update-Fenster der App zeigt damit
+„Was ist neu". **Konsequenz:** `docs/changelog.md` muss VOR dem Taggen
+den Abschnitt `## vX.Y.Z` der neuen Version enthalten (ist ohnehin
+Commit-Pflicht laut CLAUDE.md).
+
+Lokal testen:
+
+```sh
+node scripts/build-release-page.mjs --changelog docs/changelog.md --out /tmp/index.html
+```
+
 ## Einen Release veröffentlichen
 
 1. Version in **drei** Dateien identisch hochsetzen:

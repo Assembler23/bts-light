@@ -93,6 +93,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Repo wird für den Release-Seiten-Generator + docs/changelog.md
+      # gebraucht (scripts/build-release-page.mjs).
+      - uses: actions/checkout@v4
+
       - name: Release-Assets holen
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,9 +106,37 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" --dir rel
           ls -la rel
 
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # Release-Seite (index.html) + Update-Notes aus docs/changelog.md.
+      # Download-Knöpfe nur für Installer, die wirklich auf dem Server
+      # liegen (alte/TEST-Versionen fehlen teils) — Liste per ssh geholt,
+      # der frisch gebaute Installer wird ergänzt (liegt erst nach dem
+      # Upload-Schritt auf dem Server).
+      - name: Release-Seite + Notes bauen
+        run: |
+          set -euo pipefail
+          # grep ohne Treffer (leeres Verzeichnis) darf den Release NICHT
+          # abbrechen — dann gibt es eben vorerst keine Download-Knöpfe.
+          ssh badhub@178.104.221.177 \
+            'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$" || true' > exes.txt
+          (cd rel && ls *-setup.exe) >> exes.txt
+          node scripts/build-release-page.mjs \
+            --changelog docs/changelog.md \
+            --files exes.txt \
+            --out rel/index.html \
+            --notes-out notes.txt \
+            --notes-version "${GITHUB_REF_NAME#v}"
+
       # Tauri-2-Updater-Manifest. signature = Inhalt der .sig-Datei,
       # url = die badhub.de-Adresse des NSIS-Installers (-setup.exe) – das
-      # ist unter Windows zugleich das Updater-Artefakt.
+      # ist unter Windows zugleich das Updater-Artefakt. notes = die
+      # Changelog-Stichpunkte der Version („Was ist neu" im Update-Fenster).
       - name: latest.json erzeugen
         run: |
           set -euo pipefail
@@ -116,19 +148,13 @@ jobs:
             --arg sig "$SIG" \
             --arg url "https://badhub.de/download/bts-light/${SETUP}" \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --rawfile notes notes.txt \
             '{version: $version,
-              notes: ("BTS Light " + $version),
+              notes: $notes,
               pub_date: $date,
               platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' \
             > rel/latest.json
           cat rel/latest.json
-
-      - name: SSH einrichten
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
 
       # latest.json trägt die Signatur bereits inline – die separate
       # .sig-Datei wird vom Updater nicht abgefragt und nicht hochgeladen.
@@ -147,5 +173,6 @@ jobs:
           cp "rel/${SETUP}" "rel/BTS.Light-setup.exe"
           rsync -av \
             rel/latest.json \
+            rel/index.html \
             rel/*-setup.exe \
             badhub@178.104.221.177:/var/www/badhub/public/download/bts-light/
