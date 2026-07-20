@@ -28,7 +28,11 @@
       --court: #15803d;         /* Badminton-Feld (Grün bleibt) */
       --primary: #15803d;       /* „Ergebnis übermitteln" */
       --danger: #b91c1c;
-      --scrim: rgba(15, 23, 42, .55);   /* Overlay-Abdunklung */
+      --scrim: rgba(15, 23, 42, .92);   /* Overlay-Abdunklung: fast opak, damit
+                                           heller Text auf den Overlays (Modal,
+                                           Pause, Sperre) klar lesbar bleibt —
+                                           der Scrim dunkelt nur ab, er ist keine
+                                           Theme-Fläche. */
     }
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
@@ -98,13 +102,13 @@
       text-align: center;
     }
     .empty .idle-court {
-      font-size: clamp(4rem, 32vmin, 20rem); font-weight: 800; line-height: .95;
+      font-size: clamp(3.5rem, 26vmin, 16rem); font-weight: 800; line-height: .95;
       letter-spacing: .02em; color: var(--team-a);
     }
     .empty .idle-court-cap { font-size: 1.1rem; font-weight: 700; color: var(--muted);
       letter-spacing: .12em; text-transform: uppercase; }
     .empty .idle-wait { font-size: 1.15rem; color: var(--muted); max-width: 26rem; }
-    .empty .idle-hint { font-size: .9rem; color: #94a3b8; max-width: 24rem; }
+    .empty .idle-hint { font-size: .95rem; color: var(--muted); max-width: 24rem; }
 
     /* ─── Hauptbereich: Score + Court + Plus-Buttons ──────────────────── */
     .main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -131,14 +135,17 @@
     .plus-btn.cooling { opacity: .4; pointer-events: none; transition: opacity .15s; }
 
     /* Court + Score Block in der Mitte */
-    .center { display: flex; flex-direction: column; min-height: 0; gap: .35rem; }
+    /* min-width: 0 → die mittlere Spalte darf schrumpfen; sonst könnte der
+       große Satzstand auf schmalen Displays die Plus-Button-Spalten
+       verdrängen, statt dass die Ziffern via clamp kleiner ankern. */
+    .center { display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: .35rem; }
     .score-board {
       display: flex; align-items: center; justify-content: center;
       background: var(--surface); padding: .4rem .6rem .4rem .4rem; gap: .6rem;
       border-radius: .6rem; border: 1px solid var(--line); flex-shrink: 0;
       box-shadow: 0 1px 3px rgba(15,23,42,.08);
     }
-    .score-stack { display: flex; flex-direction: column; align-items: center; gap: .1rem; flex: 1; }
+    .score-stack { display: flex; flex-direction: column; align-items: center; gap: .1rem; flex: 1; min-width: 0; }
     /* Undo-Button im Score-Board: groß und kontrastreich, sitzt mittig auf
        dem Bildschirm und kann nicht von Safari-Bottom-Bars oder dem Home-
        Indicator abgeschnitten werden. Heller Amber-Ton + Glow für klare
@@ -157,16 +164,18 @@
     }
     .board-undo:disabled {
       opacity: 1; cursor: not-allowed;
-      background: var(--surface-2); color: #94a3b8;
+      background: var(--surface-2); color: var(--muted);
       border-color: var(--line);
       box-shadow: none;
     }
     .board-undo:active:not(:disabled) { background: #f59e0b; transform: scale(.96); }
-    /* Der laufende Satzstand ist die Hauptinformation → so groß wie möglich,
-       vmin-basiert (wächst mit dem Bildschirm), fette Ziffern. Vorher nur
-       2.2rem – aus Hallendistanz/ohne Brille zu klein (Tilo 20.07.). */
+    /* Der laufende Satzstand deutlich größer als vorher (war fixe 2.2rem –
+       ohne Brille zu klein, Tilo 20.07.), aber bewusst gedeckelt: das
+       Score-Board darf das Spielfeld darunter NICHT verdrängen (der Court
+       mit dem Aufschläger-Punkt bleibt die zweite Hauptinformation).
+       vmin → wächst maßvoll mit dem Bildschirm. */
     .current-score {
-      font-size: clamp(3.5rem, 19vmin, 13rem); font-weight: 800; line-height: 1;
+      font-size: clamp(2.6rem, 12vmin, 6.5rem); font-weight: 800; line-height: 1;
       font-variant-numeric: tabular-nums;
       display: flex; gap: .5rem; align-items: baseline;
     }
@@ -264,7 +273,7 @@
       cursor: pointer; touch-action: manipulation; font-family: inherit;
       min-height: 3rem;
     }
-    button:disabled { opacity: .55; cursor: not-allowed; background: var(--surface-2); color: #94a3b8; }
+    button:disabled { opacity: .55; cursor: not-allowed; background: var(--surface-2); color: var(--muted); }
     button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
     button.primary:disabled { background: #a7d3b5; color: #f0fdf4; border-color: #a7d3b5; }
     button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
@@ -307,7 +316,7 @@
     .modal .opt.team-a { border-color: var(--team-a); }
     .modal .opt.team-b { border-color: var(--team-b); }
     .modal .opt .partner { font-size: .85rem; color: var(--muted); margin-top: .3rem; font-weight: 400; }
-    .modal .opt .club { font-size: .8rem; color: #94a3b8; margin-top: .25rem; font-weight: 400; }
+    .modal .opt .club { font-size: .8rem; color: var(--muted); margin-top: .25rem; font-weight: 400; }
     /* Englische Übersetzung unter dem deutschen Text (zweisprachige Anzeige). */
     .modal .title .t-en {
       display: block; font-size: 1rem; font-weight: 600;
@@ -460,10 +469,14 @@
     .megaphone-text { max-width: 30rem; color: #cbd5e1; font-size: 1rem; line-height: 1.45; }
 
     @media (orientation: portrait) {
-      /* Hochformat: Buttons sehr schmal — Hinweis zum Drehen einblenden? */
+      /* Hochformat: Buttons sehr schmal — vmin = Breite, deshalb Satzstand
+         und Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die
+         schmale Anzeige nicht sprengen. */
       .play { grid-template-columns: 1fr 2fr 1fr; }
       .plus-btn .plus { font-size: 3rem; }
       .plus-btn .label { font-size: .7rem; }
+      .current-score { font-size: clamp(2.2rem, 14vw, 5rem); }
+      .empty .idle-court { font-size: clamp(3rem, 34vw, 11rem); }
     }
   </style>
 </head>
