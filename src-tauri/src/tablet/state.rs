@@ -128,6 +128,12 @@ pub struct CourtOverview {
     /// steht. `None`, wenn kein Spiel auf dem Feld ist. Grundlage des
     /// Aufruf-Timers (hochzählende Uhr + 2./3. Aufruf).
     pub on_court_since_ms: Option<u64>,
+    /// Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap), damit die
+    /// Felderübersicht Satz-/Matchball berechnen kann (Plan 16). 0 = kein
+    /// Match / unbekannt (dann keine Satzball-Anzeige).
+    pub best_of: i64,
+    pub target_score: i64,
+    pub cap_score: i64,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -1084,6 +1090,9 @@ impl TabletState {
                     },
                     locked: self.locked_courts.read().unwrap().contains(&court.id),
                     on_court_since_ms: m.and_then(|mm| self.on_court_since_ms(court.id, mm.id)),
+                    best_of: m.map(|mm| mm.scoring.best_of).unwrap_or(0),
+                    target_score: m.map(|mm| mm.scoring.target_score).unwrap_or(0),
+                    cap_score: m.map(|mm| mm.scoring.cap_score).unwrap_or(0),
                 }
             })
             .collect()
@@ -1411,6 +1420,27 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    #[test]
+    fn overview_carries_scoring_format_for_matchball_hint() {
+        // Plan 16: overview() reicht das Zählformat (best_of/target/cap) des
+        // Matches durch, damit die Felderübersicht Satz-/Matchball rechnen
+        // kann. Belegtes Feld → Werte aus mm.scoring; leeres Feld → 0/0/0
+        // (dann zeigt die Übersicht bewusst keinen „Ball").
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
+        ));
+        let ov = st.overview();
+        let c1 = ov.iter().find(|o| o.court_id == 101).unwrap();
+        // ScoringFormat::default = 3×21, Cap 30.
+        assert_eq!(c1.best_of, 3);
+        assert_eq!(c1.target_score, 21);
+        assert_eq!(c1.cap_score, 30);
+        let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
+        assert_eq!((c2.best_of, c2.target_score, c2.cap_score), (0, 0, 0));
     }
 
     #[test]

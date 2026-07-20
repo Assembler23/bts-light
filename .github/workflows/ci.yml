@@ -41,6 +41,10 @@ jobs:
       - name: Gong-Timing (JS)
         run: node scripts/test-gong-timing.mjs
 
+      # Satz-/Matchball-Erkennung der Felderübersicht (Plan 16).
+      - name: Satz-/Matchball (JS)
+        run: node scripts/test-gamepoint.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

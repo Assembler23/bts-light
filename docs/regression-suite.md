@@ -72,6 +72,12 @@ anpassen:
   im CI abgesichert (onended-Pfad, Fallback-Pfad, done-Guard über einen
   Fake-Timer). Die Web-Audio-Kopplung + die hörbare Wirkung (WebView2-
   Resume-Latenz) bleiben ein manueller Test unter Windows.
+- **Satz-/Matchball-Erkennung** (Felderübersicht, Plan 16): die reine Logik
+  liegt in [`gamePoint.mjs`](../src/io/gamePoint.mjs) und ist durch
+  [`scripts/test-gamepoint.mjs`](../scripts/test-gamepoint.mjs) im CI
+  abgesichert (Satzball/Matchball/kein Ball, entschiedener Satz, Cap-Nähe,
+  Decider). Rein informativ – ein falsches Badge ist kosmetisch, keine
+  Wertung.
 - **`run_once`-Gesamtzyklus** (Netz + BTP + badhub zusammen): nur in
   Teilen testbar; die Einzelschritte sind abgedeckt.
 

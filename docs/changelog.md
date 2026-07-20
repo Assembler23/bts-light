@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.157
+
+- **Satz- und Matchball in der Felderübersicht.** Läuft an einem Feld ein
+  Satz- oder Matchball, markiert die Turnierleitungs-Felderübersicht das
+  betroffene Feld: gelbes Badge „Satzball", rotes pulsierendes „Matchball"
+  (das Feld wird gleich frei). Das hilft beim Planen des nächsten Spiels.
+  Rein informativ, nur in der bts-light-Oberfläche – die Hallen-TVs bleiben
+  unverändert. Die Erkennung nutzt dasselbe Prinzip wie das Tablet
+  (Führender einen Punkt vom Satzgewinn entfernt; Matchball, wenn damit der
+  entscheidende Satz fällt).
+
 ## v0.9.156
 
 - **„Zeit seit Aufruf" auf der großen Court-Übersicht (TV).** Die

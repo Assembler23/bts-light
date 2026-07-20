@@ -4,7 +4,13 @@
 // → Zuweisung wird nach BTP geschrieben (bidirektional). Belegtes Feld →
 // freigeben (mit Sicherheitsabfrage). Sperren-Umschalter je Feld. Bei ≥2 Hallen
 // nach Halle gruppiert + Hallen-Filter.
-import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
 import {
   assignCourt,
@@ -18,6 +24,7 @@ import {
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
 import { announceCourt } from "../io/announceCourt";
+import { gamePointKind } from "../io/gamePoint.mjs";
 import { useNow } from "../state/callTimer";
 import type {
   AnnounceConfig,
@@ -51,11 +58,7 @@ function fmtSets(sets: [number, number][]): string {
 }
 
 // „Spiel"-Spalte: Zeit · Klasse · Runde (leere Teile weggelassen).
-function spielLabel(
-  time: number | null,
-  draw: string,
-  round: string,
-): string {
+function spielLabel(time: number | null, draw: string, round: string): string {
   return [fmtPlannedTime(time), draw, round].filter(Boolean).join(" ");
 }
 
@@ -185,7 +188,9 @@ export function FieldOverviewPage({
   // Disziplin/Klasse→Halle: erlaubte Halle eines Matches (oder null = frei).
   // Spiegelt die Backend-Regel (config::AppConfig::allowed_hall_for): exakte
   // Auslosung (draw_name) schlägt den Kategorie-Default.
-  function allowedHallForMatch(m: PreparationCandidate | undefined): string | null {
+  function allowedHallForMatch(
+    m: PreparationCandidate | undefined,
+  ): string | null {
     if (!m) return null;
     const dn = (m.draw_name || "").trim().toLowerCase();
     if (dn) {
@@ -245,7 +250,9 @@ export function FieldOverviewPage({
   function onCourtClick(c: CourtOverview) {
     if (busy || c.locked || c.match_id > 0) return;
     if (selected == null) {
-      setError("Erst oben ein Spiel wählen (oder es auf eine Feld-Spalte ziehen).");
+      setError(
+        "Erst oben ein Spiel wählen (oder es auf eine Feld-Spalte ziehen).",
+      );
       return;
     }
     assignTo(selected, c);
@@ -259,12 +266,14 @@ export function FieldOverviewPage({
 
   // Bereits auf einem Feld stehende Matches nicht in der Auswahl-Liste, aber
   // separat „Auf Feld" farblich markiert anzeigen (gewünschter Überblick).
-  const onCourtMatchIds = new Set(courts.map((c) => c.match_id).filter((id) => id > 0));
+  const onCourtMatchIds = new Set(
+    courts.map((c) => c.match_id).filter((id) => id > 0),
+  );
   const assignable = candidates.filter((m) => !onCourtMatchIds.has(m.match_id));
   // Anzeige im Bestätigungs-Dialog stets aus dem Live-Stand des Felds ziehen
   // (über die stabile court_id), damit sie bei einem Poll-Wechsel nicht veraltet.
   const liveConfirm = confirmFree
-    ? courts.find((c) => c.court_id === confirmFree.court_id) ?? confirmFree
+    ? (courts.find((c) => c.court_id === confirmFree.court_id) ?? confirmFree)
     : null;
   // Aktuell gewähltes Spiel (für das Ausgrauen nicht erlaubter Hallen-Felder).
   const selCand =
@@ -310,7 +319,11 @@ export function FieldOverviewPage({
       )}
 
       {/* Felder oben: Board (Drop-Ziel für die offenen Spiele unten). */}
-      <HallFilter halls={allHalls} value={hallFilter} onChange={setHallFilter} />
+      <HallFilter
+        halls={allHalls}
+        value={hallFilter}
+        onChange={setHallFilter}
+      />
 
       {/* Board: Felder als Spalten, je Halle eine Gruppe. */}
       {courts.length === 0 ? (
@@ -328,6 +341,10 @@ export function FieldOverviewPage({
             <div className="flex flex-wrap gap-2.5">
               {g.courts.map((c) => {
                 const occupied = c.match_id > 0;
+                // Satz-/Matchball (Plan 16): nur als Planungshinweis für die
+                // Turnierleitung – „Matchball" = Feld wird gleich frei. Nicht
+                // bei gesperrtem Feld (dort zeigt die Karte „Gesperrt").
+                const ball = occupied && !c.locked ? gamePointKind(c) : null;
                 const clickable = !c.locked && !occupied && !busy;
                 // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
                 // nicht erlaubt ist → ausgrauen (Klick zeigt trotzdem die
@@ -355,16 +372,30 @@ export function FieldOverviewPage({
                         ? `Für „${selCand?.draw_name || selCand?.label}" nicht erlaubt (andere Halle)`
                         : undefined
                     }
-                    className={`flex w-44 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${
-                      clickable ? "cursor-pointer hover:border-slate-400 hover:shadow-sm" : ""
+                    className={`flex w-44 flex-col overflow-hidden rounded-xl border bg-white ${
+                      ball === "match"
+                        ? "border-rose-400 ring-2 ring-rose-300"
+                        : ball === "set"
+                          ? "border-amber-300"
+                          : "border-slate-200"
+                    } ${
+                      clickable
+                        ? "cursor-pointer hover:border-slate-400 hover:shadow-sm"
+                        : ""
                     } ${blockedByHall ? "opacity-40" : ""}`}
                   >
                     {/* Spaltenkopf: Feldname + Ampelpunkt + Sperren-Schalter. */}
-                    <div className={`flex items-center justify-between gap-1 px-2.5 py-1.5 ${head}`}>
+                    <div
+                      className={`flex items-center justify-between gap-1 px-2.5 py-1.5 ${head}`}
+                    >
                       <span className="flex items-center gap-1.5 font-semibold">
                         <span
                           className={`h-2 w-2 rounded-full ${
-                            c.locked ? "bg-rose-500" : occupied ? "bg-amber-500" : "bg-emerald-500"
+                            c.locked
+                              ? "bg-rose-500"
+                              : occupied
+                                ? "bg-amber-500"
+                                : "bg-emerald-500"
                           }`}
                         />
                         Feld {c.court}
@@ -399,6 +430,19 @@ export function FieldOverviewPage({
                           >
                             {teamsLabel(c.team1, c.team2)}
                           </div>
+                          {/* Satz-/Matchball-Hinweis (Plan 16): Matchball rot +
+                              pulsierend (Feld wird gleich frei), Satzball gelb. */}
+                          {ball && (
+                            <div
+                              className={`inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold ${
+                                ball === "match"
+                                  ? "animate-pulse bg-rose-200 text-rose-900"
+                                  : "bg-amber-200 text-amber-900"
+                              }`}
+                            >
+                              {ball === "match" ? "Matchball" : "Satzball"}
+                            </div>
+                          )}
                           {/* Tabletbediener (= „Schiedsrichter"-Spalte, bis das
                               Schiri-Modul echte Schiris liefert). */}
                           {c.scorekeeper.length > 0 && (
@@ -458,7 +502,9 @@ export function FieldOverviewPage({
                         </>
                       ) : (
                         <div className="flex flex-1 items-center justify-center text-center text-xs text-emerald-700">
-                          {selected != null ? "klicken/ziehen zum Zuweisen" : "frei"}
+                          {selected != null
+                            ? "klicken/ziehen zum Zuweisen"
+                            : "frei"}
                         </div>
                       )}
                     </div>
@@ -504,7 +550,10 @@ export function FieldOverviewPage({
                       key={m.match_id}
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData("text/plain", String(m.match_id));
+                        e.dataTransfer.setData(
+                          "text/plain",
+                          String(m.match_id),
+                        );
                         e.dataTransfer.effectAllowed = "move";
                       }}
                       onClick={() => setSelected(active ? null : m.match_id)}
@@ -516,8 +565,11 @@ export function FieldOverviewPage({
                         {m.match_num ?? ""}
                       </td>
                       <td className="px-3 py-2">
-                        {spielLabel(m.planned_time, m.draw_name, m.round_name) ||
-                          m.label}
+                        {spielLabel(
+                          m.planned_time,
+                          m.draw_name,
+                          m.round_name,
+                        ) || m.label}
                       </td>
                       <td className="px-3 py-2">
                         {teamsLabel(m.team1, m.team2)}
@@ -535,7 +587,9 @@ export function FieldOverviewPage({
                           </span>
                         ) : (
                           <span
-                            className={active ? "text-slate-300" : "text-slate-400"}
+                            className={
+                              active ? "text-slate-300" : "text-slate-400"
+                            }
                           >
                             —
                           </span>
@@ -599,7 +653,11 @@ export function FieldOverviewPage({
                         {m.match_num ?? ""}
                       </td>
                       <td className="px-3 py-2">
-                        {spielLabel(m.planned_time, m.draw_name, m.round_name) ||
+                        {spielLabel(
+                          m.planned_time,
+                          m.draw_name,
+                          m.round_name,
+                        ) ||
                           m.draw_name ||
                           "—"}
                       </td>
@@ -642,7 +700,10 @@ export function FieldOverviewPage({
         >
           <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-xl">
             <div className="border-b border-slate-200 px-5 py-3">
-              <h2 id="free-confirm-title" className="font-semibold text-slate-800">
+              <h2
+                id="free-confirm-title"
+                className="font-semibold text-slate-800"
+              >
                 Feld {liveConfirm.court} freigeben?
               </h2>
             </div>
