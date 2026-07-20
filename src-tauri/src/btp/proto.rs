@@ -238,6 +238,53 @@ pub struct MatchCourt {
     pub court_id: i64,
 }
 
+/// Ein Match, dessen `Highlight`-Flag in BTP gesetzt/gelöscht werden soll
+/// (P1: „in Vorbereitung"-Aufruf in BTP sichtbar machen, wie im Original-BTS).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HighlightEntry {
+    pub match_id: i64,
+    pub draw_id: i64,
+    pub planning_id: i64,
+    /// `true` = Highlight:1 (aufgerufen), `false` = Highlight:0 (Aufruf weg).
+    pub on: bool,
+}
+
+/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **ausschließlich** das
+/// `Match.Highlight`-Flag setzt/löscht (P1). Der Match-Knoten trägt NUR die
+/// Identität (`ID`/`DrawID`/`PlanningID`) + `Highlight` — bewusst **kein**
+/// `Status` (Check-in-Bitfeld, v0.9.103-Falle) und keine Ergebnisfelder, damit
+/// der Aufruf-Marker nichts anderes am Match verändert (gleiche Vorsicht wie
+/// `court_assign_request`).
+pub fn highlight_request(
+    entries: &[HighlightEntry],
+    session_key: &str,
+    password: Option<&str>,
+) -> Vec<u8> {
+    let match_nodes: Vec<Node> = entries
+        .iter()
+        .map(|h| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("ID", h.match_id),
+                    Node::integer("DrawID", h.draw_id),
+                    Node::integer("PlanningID", h.planning_id),
+                    Node::integer("Highlight", if h.on { 1 } else { 0 }),
+                ],
+            )
+        })
+        .collect();
+    let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
+    nodes.push(Node::group(
+        "Update",
+        vec![Node::group(
+            "Tournament",
+            vec![Node::group("Matches", match_nodes)],
+        )],
+    ));
+    wire::encode_message(&xml::encode(&nodes))
+}
+
 /// Fertige Wire-Bytes für einen `SENDUPDATE`, der **Feld-Zuweisungen** nach BTP
 /// schreibt: einen `Courts`-Block (`Court{ID,[MatchID]}`, MatchID weglassen =
 /// frei) UND optional einen `Matches`-Block, der `Match.CourtID` setzt/löscht.
@@ -747,6 +794,53 @@ mod tests {
             xml::find(&m, "Status").is_none(),
             "kein Status (Check-in-Bitfeld)"
         );
+    }
+
+    #[test]
+    fn highlight_request_sets_flag_without_status_or_result() {
+        // P1: Highlight:1 setzen — Match-Knoten trägt nur Identität + Highlight.
+        let req = highlight_request(
+            &[HighlightEntry {
+                match_id: 42,
+                draw_id: 7,
+                planning_id: 1001,
+                on: true,
+            }],
+            "S-9",
+            None,
+        );
+        let action = action_of(&req);
+        assert_eq!(child_str(&action, "ID"), Some("SENDUPDATE"));
+        assert_eq!(child_str(&action, "Unicode"), Some("S-9"));
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "ID"), Some(42));
+        assert_eq!(child_int(&m, "DrawID"), Some(7));
+        assert_eq!(child_int(&m, "PlanningID"), Some(1001));
+        assert_eq!(child_int(&m, "Highlight"), Some(1));
+        // KEIN Status (Check-in-Falle) und KEINE Ergebnis-/Feldfelder — der
+        // Aufruf-Marker darf sonst nichts am Match verändern.
+        assert!(xml::find(&m, "Status").is_none(), "kein Status-Bitfeld");
+        assert!(xml::find(&m, "ScoreStatus").is_none());
+        assert!(xml::find(&m, "Sets").is_none());
+        assert!(xml::find(&m, "Winner").is_none());
+        assert!(xml::find(&m, "CourtID").is_none());
+    }
+
+    #[test]
+    fn highlight_request_clears_flag() {
+        // P1: Highlight:0 (Aufruf zurückgenommen / aufs Feld gerufen).
+        let req = highlight_request(
+            &[HighlightEntry {
+                match_id: 1,
+                draw_id: 2,
+                planning_id: 3,
+                on: false,
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "Highlight"), Some(0));
     }
 
     /// Regression: Ein freigegebenes Feld muss als `Court` OHNE `MatchID`

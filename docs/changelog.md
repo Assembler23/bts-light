@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.160
+
+- **„In Vorbereitung"-Aufrufe erscheinen jetzt auch in BTP.** Ruft die
+  Turnierleitung ein Spiel in die Vorbereitung, setzt bts-light das
+  `Highlight`-Feld des Matches in BTP (wie das Original-BTS) — die Aufrufe
+  sind so direkt im BTP-Planer sichtbar. Beim Ruf aufs Feld, bei Rücknahme
+  oder Spielende wird die Markierung automatisch wieder entfernt. Der Abgleich
+  läuft im Hintergrund und schreibt nur, wenn sich etwas geändert hat.
+
 ## v0.9.159
 
 - **Disqualifikation aus der Turnierleitung.** Im „Ergebnis eintragen"-Dialog

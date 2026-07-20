@@ -303,6 +303,20 @@ Update {
 > aus der Turnierleitung (`free_court_id = None`) entfallen `Courts`-Block
 > und `CourtID`.
 
+### Vorbereitungs-Aufruf-Highlight (P1)
+
+`highlight_request` (proto.rs) schreibt ausschließlich `Match.Highlight`
+(1 = aufgerufen, 0 = nicht mehr), Match-Knoten NUR mit Identität
+(`ID`/`DrawID`/`PlanningID`) — **kein** `Status` (dieselbe Check-in-Falle wie
+oben) und keine Ergebnisfelder. Der Sync-Loop (`sync.rs`,
+`reconcile_highlights`) gleicht die Menge gerufener, noch ruf-barer Spiele
+gegen den zuletzt geschriebenen Stand ab und schreibt **nur den Diff** — also
+gar nichts, solange sich nichts ändert. So sieht die Turnierleitung „in
+Vorbereitung"-Aufrufe direkt im BTP-Planer (Vorbild Original-BTS); beim Ruf
+aufs Feld / Rücknahme / Spielende fällt das Match aus der gewünschten Menge
+und bekommt `Highlight:0`. Wie BTP das Highlight darstellt, ist einmalig am
+echten BTP gegenzuprüfen.
+
 **Voraussetzungen / Caveats:**
 
 - BTP muss Netzwerk-Edits zulassen (Einstellung im BTP) – sonst antwortet
