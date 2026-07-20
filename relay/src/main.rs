@@ -1275,17 +1275,21 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
 }
 
 /// Passt die vom Tablet gemeldete Match-ID zum aktuellen Court-Match?
-/// Verworfen wird NUR bei positivem Widerspruch: Tablet nennt ein Match
-/// (≠ 0) UND der Relay kennt fürs Feld ein ANDERES. Fehlt eine der
-/// beiden Angaben (alte Tablet-Seite, Host-Push noch nicht da), greift
-/// kein Filter — Verhalten wie vor dem Feature (Stale-Filter, A4).
+/// `match_id == 0` (alte Tablet-Seite ohne das Feld) → kein Filter,
+/// Verhalten wie vor dem Feature. Nennt das Tablet ein Match, wird
+/// verworfen, wenn der Relay fürs Feld ein ANDERES kennt — **oder gar
+/// keins**: Nach `MatchCleared` (Feld frei) ist ein Frame mit Match-ID
+/// per Definition ein Nachzügler des alten Spiels und darf den gerade
+/// geleerten Cache nicht wieder befüllen (A4-Review-Befund). Gefahrlos,
+/// weil `MatchAssigned` den Cache füllt, BEVOR das Tablet die Zuweisung
+/// sieht — ein legitimes neues Match ist hier immer schon bekannt.
 fn match_id_matches_court(namespace: &Namespace, court_id: i64, match_id: i64) -> bool {
     if match_id == 0 {
         return true;
     }
     match namespace.court_matches.get(&court_id) {
         Some(current) => current.match_id == match_id,
-        None => true,
+        None => false,
     }
 }
 
@@ -2009,6 +2013,28 @@ mod tests {
         assert!(broker.namespaces.lock().await["ns1"]
             .court_state
             .contains_key(&101));
+    }
+
+    #[tokio::test]
+    async fn score_after_match_cleared_is_dropped() {
+        // A4-Review-Befund: Nach MatchCleared (Feld frei, kein Eintrag in
+        // court_matches) ist ein Frame MIT Match-ID ein Nachzügler des
+        // alten Spiels — er darf den geleerten Cache nicht neu befüllen.
+        // Nur matchId 0 (alte Tablet-Seite) läuft weiter durch.
+        let broker = Broker::new("x".into());
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.tablets.insert(101, tablet_tx.clone());
+            // KEIN court_matches-Eintrag — wie nach MatchCleared.
+        }
+        forward_score(&broker, "ns1", 101, 21, 15, vec![], 7, &tablet_tx).await;
+        let stale = r#"{"match":{"matchId":7}}"#.to_string();
+        store_court_state(&broker, "ns1", 101, stale, &tablet_tx).await;
+        let map = broker.namespaces.lock().await;
+        assert!(!map["ns1"].court_scores.contains_key(&101));
+        assert!(!map["ns1"].court_state.contains_key(&101));
     }
 
     #[test]
