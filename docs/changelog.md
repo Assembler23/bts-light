@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.150
+
+- **Schnelleres Zählen am Tablet.** Der Punkt zählt jetzt beim Berühren der
+  Fläche (statt erst beim Loslassen) – die Zähltafel reagiert spürbar direkter.
+  Doppel-Auslösungen (langes Drücken, zwei Finger) sind abgesichert, der
+  Doppel-Tap-Schutz bleibt.
+- **Ergebnis aus der Turnierleitung eintragen.** Wurde ein Spiel nicht am
+  Tablet abgeschlossen (z. B. vergessen oder Verbindungsabbruch), kann die
+  Turnierleitung es jetzt selbst finalisieren: in der Spielübersicht auf einem
+  belegten Feld „Ergebnis" wählen, Satzstände bestätigen/eintippen – das
+  Ergebnis geht nach BTP, das Feld wird freigegeben. Der aktuelle Stand ist
+  vorbelegt; jeder Satz muss regulär zu Ende gespielt sein (Kampflos/Aufgabe
+  laufen weiter über den Aufgabe-Dialog am Tablet).
+
 ## v0.9.149
 
 - **Tablet-Spielzettel: helles Design und größere Schrift (Tilo-Feedback).**
