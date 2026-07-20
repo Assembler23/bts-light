@@ -116,6 +116,16 @@ den Relay-Cache mit den offline weitergezählten Punkten. Details:
   Slot frei. Frames einer verdrängten Alt-Verbindung werden verworfen
   (Sender-Guard). Turnier-Befund 19.07.2026: ohne diese Ablösung hielt
   eine TCP-Leiche den Slot 17 Minuten — der Master war ausgesperrt.
+  **Bewusste Sicherheits-Abwägung:** Die `install_id` ist der
+  Zugangs-Token (R6). Vorher konnte ein Angreifer mit geleakter ID den
+  Slot nur bei komplett geschlossener Master-Verbindung besetzen — jetzt
+  reichen 15 s Master-Stille. Das ist der Preis des Zombie-Fixes und
+  akzeptiert, weil (a) ein gesunder Master alle 5 s pongt und im Betrieb
+  praktisch nie 15 s stumm ist, (b) der echte Master beim Reconnect die
+  „Zweiter Host"-Warnung sieht (Übernahme fällt auf) und (c) bei
+  geleakter ID der Namespace ohnehin als kompromittiert gilt →
+  Roadmap-Feature „Master-Identität umziehen" ist die eigentliche
+  Gegenmaßnahme.
 - bts-light validiert jedes eingehende Ergebnis (`process_result`):
   Match-ID muss zum aktuellen Court-Match passen, Satzstand plausibel.
   Diese Prüfung ist dieselbe wie im LAN-Modus.

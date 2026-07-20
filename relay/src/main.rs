@@ -1494,14 +1494,7 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     {
         let mut map = broker.namespaces.lock().await;
         if let Some(namespace) = map.get_mut(&ns) {
-            if namespace
-                .host
-                .as_ref()
-                .map(|h| h.same_channel(&tx))
-                .unwrap_or(false)
-            {
-                namespace.host = None;
-            }
+            release_host_slot(namespace, &tx);
             for (_, pending) in namespace.pending.drain() {
                 let _ = pending.send(ResultResponse::err("Verbindung zu bts-light verloren."));
             }
@@ -1511,6 +1504,23 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
         }
     }
     tracing::info!("Host getrennt für Namespace '{ns}'");
+}
+
+/// Gibt den Host-Slot frei — aber nur, wenn `tx` noch der eingetragene
+/// Host ist. Eine per Zombie-Ablösung verdrängte Alt-Verbindung, die
+/// später stirbt, darf den Slot des NEUEN Hosts nicht abräumen. Liefert
+/// `true`, wenn der Slot tatsächlich freigegeben wurde.
+fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
+    if namespace
+        .host
+        .as_ref()
+        .map(|h| h.same_channel(tx))
+        .unwrap_or(false)
+    {
+        namespace.host = None;
+        return true;
+    }
+    false
 }
 
 /// Verarbeitet ein Frame vom Host: an das passende Tablet weiterleiten bzw.
@@ -1931,6 +1941,11 @@ mod tests {
         let (tx2, _rx2) = mpsc::unbounded_channel();
         try_claim_host(&mut ns, &tx1, 1_000_000);
         let stale_ms = HOST_STALE.as_millis() as u64;
+        // 1 ms UNTER der Schwelle: noch abgewiesen (Grenze ist `>=`).
+        assert!(matches!(
+            try_claim_host(&mut ns, &tx2, 1_000_000 + stale_ms - 1),
+            HostClaim::Refused
+        ));
         // Genau an der Schwelle: Übernahme.
         assert!(matches!(
             try_claim_host(&mut ns, &tx2, 1_000_000 + stale_ms),
@@ -1940,6 +1955,25 @@ mod tests {
             ns.host.as_ref().unwrap().same_channel(&tx2),
             "neuer Host hält den Slot"
         );
+    }
+
+    #[test]
+    fn superseded_connection_does_not_release_the_new_hosts_slot() {
+        // Der wichtigste Korrektheits-Baustein der Ablösung: Stirbt die
+        // verdrängte Alt-Verbindung SPÄTER, darf ihr Aufräumen den Slot
+        // des neuen Hosts nicht leeren.
+        let mut ns = Namespace::new();
+        let (old_tx, _old_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        try_claim_host(&mut ns, &old_tx, 0);
+        let stale_ms = HOST_STALE.as_millis() as u64;
+        try_claim_host(&mut ns, &new_tx, stale_ms);
+        // Alt-Verbindung stirbt und räumt auf → Slot bleibt beim neuen Host.
+        assert!(!release_host_slot(&mut ns, &old_tx));
+        assert!(ns.host.as_ref().unwrap().same_channel(&new_tx));
+        // Der echte Inhaber gibt den Slot dagegen frei.
+        assert!(release_host_slot(&mut ns, &new_tx));
+        assert!(ns.host.is_none());
     }
 
     #[tokio::test]
