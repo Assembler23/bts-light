@@ -129,6 +129,13 @@ den Relay-Cache mit den offline weitergezählten Punkten. Details:
 - bts-light validiert jedes eingehende Ergebnis (`process_result`):
   Match-ID muss zum aktuellen Court-Match passen, Satzstand plausibel.
   Diese Prüfung ist dieselbe wie im LAN-Modus.
+- **Stale-Filter (Cluster A4):** `score_update`/`state_sync` tragen die
+  Match-ID des gezählten Spiels; Relay UND Host verwerfen Frames, deren
+  Match nicht (mehr) zum Feld passt — ein nach Doze/Reconnect im alten
+  Spiel hängendes Tablet kann den beim Match-Wechsel geleerten
+  Score-Cache nicht wieder mit dem alten Stand befüllen (Turnier-Befund
+  HM-03; dasselbe Prinzip wie Tilos „stale panel rejected"). Alte
+  Tablet-Seiten ohne das Feld (matchId 0) laufen ungefiltert wie bisher.
 - Broker-Limits gegen Überlast: maximale Anzahl Namespaces, Tablets je
   Namespace und gleichzeitig offener Ergebnis-Übermittlungen.
 

@@ -1182,6 +1182,10 @@ function sendScoreUpdate() {
     type: 'score_update',
     courtId: COURT_ID,
     courtLabel: COURT_LABEL,
+    // Welches Match dieses Tablet zählt: Server/Relay verwerfen den
+    // Stand, wenn das Feld inzwischen ein anderes Spiel hat
+    // (Stale-Filter — hängengebliebenes Tablet nach Doze/Reconnect).
+    matchId: STATE.match.matchId,
     scoreA: current.a, scoreB: current.b,
     currentSet: setsHistory.length + 1,
     setsA, setsB,

@@ -1036,9 +1036,9 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
                                 }
                             }
-                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history }) => {
+                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history, match_id }) => {
                                 if let (Some(c), true) = (court, active) {
-                                    forward_score(&broker, &ns, c, score_a, score_b, sets_history, &tx).await;
+                                    forward_score(&broker, &ns, c, score_a, score_b, sets_history, match_id, &tx).await;
                                 }
                             }
                             Ok(TabletMsg::Battery { percent, charging }) => {
@@ -1227,9 +1227,22 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
     }
     let mut map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get_mut(ns) {
-        if is_holder(namespace, court_id, tx) {
-            namespace.court_state.insert(court_id, state);
+        if !is_holder(namespace, court_id, tx) {
+            return;
         }
+        // Stale-Filter (A4): Ein State des ALTEN Matches darf den beim
+        // Match-Wechsel geleerten Cache nicht wieder befüllen — sonst
+        // bekäme ein übernehmendes Gerät das falsche Spiel.
+        if let Some(state_match) = relay_proto::state_sync_match_id(&state) {
+            if !match_id_matches_court(namespace, court_id, state_match) {
+                tracing::info!(
+                    "State von Feld {court_id} verworfen: Tablet-State trägt Match \
+                     {state_match}, Feld hat ein anderes (Namespace '{ns}')"
+                );
+                return;
+            }
+        }
+        namespace.court_state.insert(court_id, state);
     }
 }
 
@@ -1261,8 +1274,28 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
     }
 }
 
+/// Passt die vom Tablet gemeldete Match-ID zum aktuellen Court-Match?
+/// `match_id == 0` (alte Tablet-Seite ohne das Feld) → kein Filter,
+/// Verhalten wie vor dem Feature. Nennt das Tablet ein Match, wird
+/// verworfen, wenn der Relay fürs Feld ein ANDERES kennt — **oder gar
+/// keins**: Nach `MatchCleared` (Feld frei) ist ein Frame mit Match-ID
+/// per Definition ein Nachzügler des alten Spiels und darf den gerade
+/// geleerten Cache nicht wieder befüllen (A4-Review-Befund). Gefahrlos,
+/// weil `MatchAssigned` den Cache füllt, BEVOR das Tablet die Zuweisung
+/// sieht — ein legitimes neues Match ist hier immer schon bekannt.
+fn match_id_matches_court(namespace: &Namespace, court_id: i64, match_id: i64) -> bool {
+    if match_id == 0 {
+        return true;
+    }
+    match namespace.court_matches.get(&court_id) {
+        Some(current) => current.match_id == match_id,
+        None => false,
+    }
+}
+
 /// Leitet einen Live-Score von einem Tablet an den Host weiter und merkt
 /// ihn zugleich für die Court-Monitor-Anzeige.
+#[allow(clippy::too_many_arguments)]
 async fn forward_score(
     broker: &Broker,
     ns: &str,
@@ -1270,6 +1303,7 @@ async fn forward_score(
     score_a: i64,
     score_b: i64,
     sets_history: Vec<SetAb>,
+    match_id: i64,
     tx: &Tx,
 ) {
     let mut map = broker.namespaces.lock().await;
@@ -1277,6 +1311,16 @@ async fn forward_score(
         return;
     };
     if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    // Stale-Filter (Turnier-Befund HM-03): Ein nach Doze/Reconnect noch
+    // im ALTEN Spiel hängendes Tablet darf den beim Match-Wechsel frisch
+    // geleerten Score-Cache nicht wieder mit dem alten Stand befüllen.
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        tracing::info!(
+            "Score von Feld {court_id} verworfen: Tablet zählt Match {match_id}, \
+             Feld hat ein anderes (Namespace '{ns}')"
+        );
         return;
     }
     // Vollständige Satzliste (abgeschlossene Sätze + laufender Satz) für
@@ -1295,6 +1339,7 @@ async fn forward_score(
             score_a,
             score_b,
             sets_history,
+            match_id,
         }));
     }
 }
@@ -1892,7 +1937,7 @@ mod tests {
             ns.host = Some(host_tx);
             ns.tablets.insert(101, tablet_tx.clone());
         }
-        forward_score(&broker, "ns1", 101, 11, 9, vec![], &tablet_tx).await;
+        forward_score(&broker, "ns1", 101, 11, 9, vec![], 0, &tablet_tx).await;
         let msg = host_rx.try_recv().expect("Host bekommt den Score");
         let Message::Text(t) = msg else {
             panic!("Text-Frame erwartet")
@@ -1906,8 +1951,90 @@ mod tests {
                 score_a: 11,
                 score_b: 9,
                 sets_history: vec![],
+                match_id: 0,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn score_for_foreign_match_is_dropped() {
+        // Stale-Filter (A4, Turnier-Befund HM-03): Das Feld hat Match 9,
+        // ein hängengebliebenes Tablet meldet noch Match 7 → Score wird
+        // weder gecacht noch an den Host weitergereicht. Mit passender
+        // (oder ohne) matchId fließt er normal.
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(9));
+        }
+        forward_score(&broker, "ns1", 101, 14, 16, vec![], 7, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "fremder Match-Score verworfen");
+        assert!(
+            !broker.namespaces.lock().await["ns1"]
+                .court_scores
+                .contains_key(&101),
+            "Cache bleibt leer"
+        );
+        // Passende matchId → normal verarbeitet.
+        forward_score(&broker, "ns1", 101, 1, 0, vec![], 9, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_ok(), "passender Score fließt");
+        assert!(broker.namespaces.lock().await["ns1"]
+            .court_scores
+            .contains_key(&101));
+    }
+
+    #[tokio::test]
+    async fn state_sync_for_foreign_match_is_dropped() {
+        // Stale-Filter (A4): Ein state_sync des ALTEN Matches darf den
+        // beim Match-Wechsel geleerten court_state nicht wieder befüllen.
+        let broker = Broker::new("x".into());
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(9));
+        }
+        let stale = r#"{"match":{"matchId":7},"finished":false}"#.to_string();
+        store_court_state(&broker, "ns1", 101, stale, &tablet_tx).await;
+        assert!(
+            !broker.namespaces.lock().await["ns1"]
+                .court_state
+                .contains_key(&101),
+            "alter Match-State verworfen"
+        );
+        let current = r#"{"match":{"matchId":9},"finished":false}"#.to_string();
+        store_court_state(&broker, "ns1", 101, current, &tablet_tx).await;
+        assert!(broker.namespaces.lock().await["ns1"]
+            .court_state
+            .contains_key(&101));
+    }
+
+    #[tokio::test]
+    async fn score_after_match_cleared_is_dropped() {
+        // A4-Review-Befund: Nach MatchCleared (Feld frei, kein Eintrag in
+        // court_matches) ist ein Frame MIT Match-ID ein Nachzügler des
+        // alten Spiels — er darf den geleerten Cache nicht neu befüllen.
+        // Nur matchId 0 (alte Tablet-Seite) läuft weiter durch.
+        let broker = Broker::new("x".into());
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.tablets.insert(101, tablet_tx.clone());
+            // KEIN court_matches-Eintrag — wie nach MatchCleared.
+        }
+        forward_score(&broker, "ns1", 101, 21, 15, vec![], 7, &tablet_tx).await;
+        let stale = r#"{"match":{"matchId":7}}"#.to_string();
+        store_court_state(&broker, "ns1", 101, stale, &tablet_tx).await;
+        let map = broker.namespaces.lock().await;
+        assert!(!map["ns1"].court_scores.contains_key(&101));
+        assert!(!map["ns1"].court_state.contains_key(&101));
     }
 
     #[test]
@@ -2074,7 +2201,7 @@ mod tests {
             ns.host = Some(host_tx);
             ns.tablets.insert(101, holder_tx); // aktueller Halter ist ein ANDERER
         }
-        forward_score(&broker, "ns1", 101, 3, 1, vec![], &old_tx).await;
+        forward_score(&broker, "ns1", 101, 3, 1, vec![], 0, &old_tx).await;
         store_court_state(&broker, "ns1", 101, "{\"alt\":true}".into(), &old_tx).await;
         assert!(
             host_rx.try_recv().is_err(),
