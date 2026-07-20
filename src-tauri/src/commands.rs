@@ -1025,52 +1025,19 @@ pub async fn enter_result(
         .iter()
         .find(|m| m.id == match_id)
         .ok_or("Spiel nicht gefunden.")?;
-    // Nie ein bereits in BTP gewertetes Spiel überschreiben.
-    if m.winner.is_some() {
-        return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
-    }
-    if m.team1.is_empty() || m.team2.is_empty() {
-        return Err("Die Paarung steht noch nicht fest.".to_string());
-    }
-    // Geteilte R5-Validierung (reguläres Ergebnis: kein Walkover/Aufgabe).
-    let (sets, team1_won, score_status) =
-        crate::tablet::server::derive_result(sets, false, false, None)?;
-
-    // Skalare vor dem await herausziehen (Borrow auf den Snapshot lösen).
-    let (mid, draw_id, planning_id) = (m.id, m.draw_id, m.planning_id);
+    // Kernlogik (Guards, R5-Validierung, Satz-Vollständigkeit,
+    // MatchUpdate-Bau) ist rein & getestet in server::build_manual_result_update.
+    // Annahme: der zuletzt gepollte Snapshot ist aktuell genug — dieselbe
+    // Poll-Staleness-Grundlage wie assign_court/free_court/confirm_walkover
+    // (R2); der `winner.is_some()`-Guard deckt den bereits-gewertet-Fall ab.
     let end_ms = now_ms();
-    // Steht das Spiel (noch) auf einem Feld? Dann Feld freigeben + Spieler
-    // auschecken/Endzeit setzen (sie standen dort). Nie auf einem Feld
-    // gewesen → nur das Ergebnis, kein Feld-/Spieler-Block.
-    let (free_court_id, player_ids, duration_mins, end_ts_ms) = match m.court_id {
-        Some(cid) => {
-            let ids: Vec<i64> = m
-                .team1
-                .iter()
-                .chain(m.team2.iter())
-                .map(|p| p.id)
-                .filter(|&id| id != 0)
-                .collect();
-            let dur = tablet
-                .on_court_since_ms(cid, mid)
-                .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
-                .unwrap_or(0);
-            (Some(cid), ids, dur, Some(end_ms))
-        }
-        None => (None, Vec::new(), 0, None),
-    };
-    let update = crate::btp::proto::MatchUpdate {
-        btp_match_id: mid,
-        draw_id,
-        planning_id,
-        sets,
-        team1_won,
-        duration_mins,
-        score_status,
-        free_court_id,
-        player_ids,
-        end_ts_ms,
-    };
+    let on_court_since = m
+        .court_id
+        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
+    let update =
+        crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms)?;
+    let mid = update.btp_match_id;
+    let free_court_id = update.free_court_id;
     match crate::tablet::server::write_result_to_btp(&config, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {

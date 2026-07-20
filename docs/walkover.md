@@ -85,7 +85,14 @@ Erreichbar in der **Spielübersicht** über den Knopf „Ergebnis" auf einem
 belegten Feld; der Dialog ist mit dem aktuellen Live-Satzstand vorbelegt
 (häufiger Fall: nur bestätigen). Die **Satz-/Sieger-Validierung teilt
 sich `enter_result` mit dem Tablet-Weg** über `server::derive_result`
-(eine Quelle der Wahrheit, R5). Steht das Spiel noch auf einem Feld, wird
+(eine Quelle der Wahrheit, R5). Weil die manuelle Eingabe — anders als
+das Tablet — die Satzregeln nicht clientseitig erzwingt, prüft
+`server::set_is_complete` zusätzlich, dass **jeder Satz regulär zu Ende
+gespielt** ist (gegen das Zählformat des Matches: Ziel + 2 Punkte bzw.
+Deckel) — so wird ein noch laufender Satz aus der Vorbelegung nicht als
+gewonnener gewertet. Die gesamte Kernlogik (Guards, Validierung,
+`MatchUpdate`-Bau) liegt rein & getestet in
+`server::build_manual_result_update`. Steht das Spiel noch auf einem Feld, wird
 es im selben `SENDUPDATE` freigegeben und die Spieler ausgecheckt; sonst
 geht nur das Ergebnis raus. Schutz: ein in BTP bereits gewertetes Spiel
 wird nie überschrieben, Kampflos/Aufgabe laufen weiter über den

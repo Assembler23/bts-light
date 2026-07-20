@@ -143,6 +143,7 @@ export function FieldOverviewPage({
   function openEnter(c: CourtOverview) {
     const base = c.sets.map(([a, b]) => [a, b] as [number, number]);
     setEnterSets(base.length ? [...base, [0, 0]] : [[0, 0]]);
+    setError("");
     setEnterFor(c);
   }
 
@@ -161,11 +162,24 @@ export function FieldOverviewPage({
   async function submitEnterResult() {
     if (!enterFor) return;
     // 0:0-Zeilen (ungespielt / Platzhalter) verwerfen; der Server validiert
-    // Satzmehrheit/Plausibilität zusätzlich (R5, derive_result).
+    // Satzmehrheit + Satz-Vollständigkeit zusätzlich (derive_result +
+    // set_is_complete gegen das Zählformat).
     const sets = enterSets.filter(([a, b]) => a > 0 || b > 0);
     const matchId = enterFor.match_id;
-    setEnterFor(null);
-    await run(() => enterResult(matchId, sets));
+    setBusy(true);
+    setError("");
+    try {
+      await enterResult(matchId, sets);
+      // Nur bei Erfolg schließen — bei einem Fehler (z. B. „Satz läuft noch")
+      // bleibt der Dialog offen, damit die eingetippten Werte nicht verloren
+      // gehen und die Meldung im Dialog sichtbar ist.
+      setEnterFor(null);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Disziplin/Klasse→Halle: erlaubte Halle eines Matches (oder null = frei).
@@ -737,10 +751,16 @@ export function FieldOverviewPage({
                 + Satz hinzufügen
               </button>
               <p className="mt-3 text-xs text-slate-400">
-                Der Sieger ergibt sich aus der Satzmehrheit. Kampflos/Aufgabe
-                laufen über den Aufgabe-Dialog am Tablet. Steht das Spiel noch
-                auf dem Feld, wird es beim Eintragen freigegeben.
+                Der Sieger ergibt sich aus der Satzmehrheit; jeder Satz muss
+                regulär zu Ende gespielt sein. Kampflos/Aufgabe laufen über den
+                Aufgabe-Dialog am Tablet. Steht das Spiel noch auf dem Feld,
+                wird es beim Eintragen freigegeben.
               </p>
+              {error && (
+                <p className="mt-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {error}
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
               <button
