@@ -36,6 +36,11 @@ jobs:
       - name: Tablet-Aufschlagpositionen (JS)
         run: node scripts/test-serving.mjs
 
+      # Gong-Auflöse-Timing (Plan 15) — onended-/Fallback-Pfad + done-Guard
+      # der geteilten gongTiming.mjs (kein Überlappen der ersten Silbe).
+      - name: Gong-Timing (JS)
+        run: node scripts/test-gong-timing.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

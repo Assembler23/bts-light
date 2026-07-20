@@ -11,6 +11,7 @@
 
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { reportAzureFallback } from "../state/azureStatus";
+import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -52,33 +53,28 @@ export interface AnnounceOptions {
   azure?: { voice: string; synthesize: (ssml: string) => Promise<string> };
 }
 
-// Kleine Atempause zwischen Gong-Ende und Sprachbeginn (ms) – klingt
-// natürlicher und puffert Restjitter der Audio-/OS-Uhr.
-const GONG_BREATH_MS = 150;
-
 // Löst auf, sobald der Gong WIRKLICH ausgeklungen ist: am echten Audio-Ende
 // (`onended` des zuletzt stoppenden Oszillators) statt auf einer festen
 // Wall-Clock-Uhr. Startet der AudioContext in WebView2 verzögert, verschiebt
 // sich das Ende real mit — die Sprache setzt dann nicht mehr in den
 // Gong-Nachklang ein (Tilo-Befund 19.07.: „Gong überlappt das erste Wort").
-// Fallback-Timer etwas nach dem geplanten Ende, falls `onended` in WebView2
-// ausnahmsweise ausbleibt (die Ansage-Queue darf nie hängen).
+// Die Race-/Fallback-Logik selbst liegt testbar in `gongTiming.mjs`; hier wird
+// sie nur an den echten OscillatorNode + die Audio-Uhr gekoppelt.
 function gongFinished(
   ctx: AudioContext,
   lastOsc: OscillatorNode,
   scheduledEndSec: number,
 ): Promise<void> {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      setTimeout(resolve, GONG_BREATH_MS);
-    };
-    lastOsc.onended = finish;
-    const fallbackMs =
-      Math.max(0, (scheduledEndSec - ctx.currentTime) * 1000) + 250;
-    setTimeout(finish, fallbackMs);
+  // Fallback-Frist etwas nach dem geplanten Audio-Ende, falls `onended` in
+  // WebView2 ausnahmsweise ausbleibt (die Ansage-Queue darf nie hängen).
+  const fallbackMs =
+    Math.max(0, (scheduledEndSec - ctx.currentTime) * 1000) + 250;
+  return gongResolveRace({
+    subscribeEnded: (cb) => {
+      lastOsc.onended = cb;
+    },
+    fallbackMs,
+    breathMs: GONG_BREATH_MS,
   });
 }
 
@@ -118,7 +114,8 @@ async function playGong(
       lastOsc = o;
       lastStop = stopAt;
     }
-    // Auflösen, wenn der dritte Ton ausgeklungen ist (~0,85 s ab now).
+    // Auflösen am echten Ende des dritten Tons (`o.stop` bei ~0,68 s ab now:
+    // 2·0,15 + 0,38) + Atempause.
     return lastOsc ? gongFinished(ctx, lastOsc, lastStop) : Promise.resolve();
   }
 
@@ -144,9 +141,11 @@ async function playGong(
   o2.start(now + 0.18);
   o2.stop(now + 1.1);
 
-  // Erst auflösen, wenn die Gain-Hülle ausgeklungen ist (~1,2 s) – am echten
-  // Ende des zuletzt stoppenden Oszillators (o2), damit die Sprachausgabe
-  // nicht in den Gong-Nachklang einsetzt.
+  // Auflösen am echten Ende des zuletzt stoppenden Oszillators (o2): `o2.stop`
+  // bei ~1,1 s beendet den Ton hart, die Gain-Rampe bis 1,2 s ist danach
+  // wirkungslos — `onended` feuert real bei ~1,1 s. Plus Atempause, damit die
+  // Sprachausgabe nicht in den Gong-Nachklang einsetzt. Der scheduledEnd-Wert
+  // (1,2 s) dient nur der konservativen Fallback-Frist.
   return gongFinished(ctx, o2, now + 1.2);
 }
 
