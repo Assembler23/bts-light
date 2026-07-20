@@ -6,65 +6,109 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Spielzettel</title>
   <style>
+    /* Helles, akkuschonendes Theme (Plan 3): auf hellem Grund bleibt die
+       Anzeige auch bei MINIMALER Display-Helligkeit klar lesbar → Akku
+       schont sich, weil niemand mehr hochdrehen muss. Farben zentral als
+       Variablen (wie Tilos bup-Panel), damit das Theme an EINER Stelle
+       stimmt und später umschaltbar bleibt. Schriften bewusst groß
+       (Schiedsrichter ohne Lesebrille in heller Halle). */
+    :root {
+      --bg: #eef2f6;            /* Seitengrund (leicht getönt, weniger Blendung) */
+      --surface: #ffffff;       /* Karten/Kopfzeile/Score-Board */
+      --surface-2: #f1f5f9;     /* dezente Flächen (Buttons neutral, Modal-Optionen) */
+      --surface-3: #e2e8f0;     /* aktiv/gedrückt */
+      --text: #0f172a;          /* Haupttext (fast schwarz, kein Mittelgrau) */
+      --muted: #475569;         /* Sekundärtext – dunkel genug für Kontrast */
+      --line: #cbd5e1;          /* Rahmen/Trennlinien */
+      --team-a: #1d4ed8;        /* Team links (Blau) */
+      --team-a-strong: #1e40af;
+      --team-b: #be123c;        /* Team rechts (Rot/Magenta) */
+      --team-b-strong: #9f1239;
+      --accent: #d97706;        /* Aufschläger/Undo (Amber, dunkler für hellen Grund) */
+      --court: #15803d;         /* Badminton-Feld (Grün bleibt) */
+      --primary: #15803d;       /* „Ergebnis übermitteln" */
+      --danger: #b91c1c;
+      --scrim: rgba(15, 23, 42, .92);   /* Overlay-Abdunklung: fast opak, damit
+                                           heller Text auf den Overlays (Modal,
+                                           Pause, Sperre) klar lesbar bleibt —
+                                           der Scrim dunkelt nur ab, er ist keine
+                                           Theme-Fläche. */
+    }
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
       margin: 0; padding: 0; height: 100%; overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
-      background: #0f172a; color: #f8fafc;
+      background: var(--bg); color: var(--text);
       -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
     }
     .app { display: flex; flex-direction: column; height: 100dvh; min-height: 100vh; }
     header {
       display: flex; align-items: center; gap: .6rem;
-      padding: .35rem .8rem; background: #1e293b; border-bottom: 1px solid #334155;
-      font-size: .85rem; flex-shrink: 0;
+      padding: .35rem .8rem; background: var(--surface); border-bottom: 1px solid var(--line);
+      font-size: 1rem; flex-shrink: 0;
     }
     .header-info { flex: 1; min-width: 0; }
     .header-undo {
       flex: 0 0 auto;
-      width: 2.6rem; height: 2.6rem;
+      width: 2.8rem; height: 2.8rem;
       padding: 0; min-height: 0;
       display: inline-flex; align-items: center; justify-content: center;
-      font-size: 1.4rem; font-weight: 700; line-height: 1;
-      background: #475569; color: #f8fafc;
-      border: 0; border-radius: .5rem; cursor: pointer;
+      font-size: 1.5rem; font-weight: 700; line-height: 1;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--line); border-radius: .5rem; cursor: pointer;
       touch-action: manipulation;
     }
     .header-undo:disabled { opacity: .35; cursor: not-allowed; }
-    .header-undo:active:not(:disabled) { background: #64748b; }
+    .header-undo:active:not(:disabled) { background: var(--surface-3); }
     /* Verletzungs- und Megafon-Button rechts in der Kopfzeile. */
     .header-btn {
       flex: 0 0 auto;
-      width: 2.6rem; height: 2.6rem;
+      width: 2.8rem; height: 2.8rem;
       padding: 0; min-height: 0;
       display: inline-flex; align-items: center; justify-content: center;
-      font-size: 1.3rem; line-height: 1; color: #f8fafc;
+      font-size: 1.4rem; line-height: 1; color: #fff;
       border: 0; border-radius: .5rem; cursor: pointer;
       touch-action: manipulation;
     }
-    .header-btn.injury { background: #7f1d1d; }
+    .header-btn.injury { background: #b91c1c; }
     .header-btn.injury:active { background: #991b1b; }
     .header-btn.injury.on { background: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,.4); }
-    .header-btn.megaphone { background: #78350f; }
+    .header-btn.megaphone { background: #b45309; }
     .header-btn.megaphone:active { background: #92400e; }
     .header-btn.megaphone.on { background: #f59e0b; color: #1f2937; box-shadow: 0 0 0 3px rgba(245,158,11,.4); }
     .header-btn:disabled { opacity: .35; cursor: not-allowed; }
     .match-clock {
       flex: 0 0 auto; font-variant-numeric: tabular-nums;
-      font-size: .95rem; font-weight: 600; opacity: .8;
+      font-size: 1.1rem; font-weight: 700; color: var(--muted);
       min-width: 3rem; text-align: right;
     }
-    .court-label { font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-    .event-label { opacity: .7; }
-    .conn { display: flex; align-items: center; gap: .4rem; font-size: .75rem; }
-    .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #64748b; }
-    .dot.ok { background: #22c55e; }
-    .dot.bad { background: #ef4444; }
+    /* Feldnummer in der Kopfzeile: kräftig, damit auch im Spiel klar ist,
+       welches Tablet welches Feld bedient (Tilo 20.07.). */
+    .court-label {
+      font-weight: 800; font-size: 1.3rem; letter-spacing: .03em;
+      text-transform: uppercase; color: var(--text);
+    }
+    .event-label { color: var(--muted); font-size: 1rem; font-weight: 600; }
+    .conn { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--muted); }
+    .dot { width: .7rem; height: .7rem; border-radius: 50%; background: #94a3b8; }
+    .dot.ok { background: #16a34a; }
+    .dot.bad { background: #dc2626; }
+    /* Leerlauf-Ansicht (kein Match): die Feldnummer GROSS und zentral —
+       so erkennt die Turnierleitung beim Verteilen der Tablets auf einen
+       Blick, welches Gerät an welchem Feld steht (Plan 20, Tilo 20.07.). */
     .empty {
       flex: 1; display: flex; align-items: center; justify-content: center;
-      flex-direction: column; gap: 1rem; opacity: .4; padding: 2rem;
-      text-align: center; font-size: 1.1rem;
+      flex-direction: column; gap: .6rem; padding: 1.5rem;
+      text-align: center;
     }
+    .empty .idle-court {
+      font-size: clamp(3.5rem, 26vmin, 16rem); font-weight: 800; line-height: .95;
+      letter-spacing: .02em; color: var(--team-a);
+    }
+    .empty .idle-court-cap { font-size: 1.1rem; font-weight: 700; color: var(--muted);
+      letter-spacing: .12em; text-transform: uppercase; }
+    .empty .idle-wait { font-size: 1.15rem; color: var(--muted); max-width: 26rem; }
+    .empty .idle-hint { font-size: .95rem; color: var(--muted); max-width: 24rem; }
 
     /* ─── Hauptbereich: Score + Court + Plus-Buttons ──────────────────── */
     .main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -79,24 +123,29 @@
       transition: background 80ms ease;
       padding: 1rem .25rem;
     }
-    .plus-btn .plus { font-size: 4.5rem; line-height: 1; }
-    .plus-btn .label { font-size: .85rem; opacity: .85; margin-top: .5rem; letter-spacing: .05em; text-transform: uppercase; }
-    .plus-left { background: #1e3a8a; }
-    .plus-left:active { background: #1e40af; }
-    .plus-right { background: #831843; }
-    .plus-right:active { background: #9d174d; }
+    .plus-btn { color: #fff; }
+    .plus-btn .plus { font-size: 5rem; line-height: 1; }
+    .plus-btn .label { font-size: 1rem; opacity: .92; margin-top: .5rem; letter-spacing: .05em; text-transform: uppercase; font-weight: 800; }
+    .plus-left { background: var(--team-a); }
+    .plus-left:active { background: var(--team-a-strong); }
+    .plus-right { background: var(--team-b); }
+    .plus-right:active { background: var(--team-b-strong); }
     /* Doppel-Eingabe-Schutz: kurz nach einem Punkt gesperrt (gedimmt, keine
        Taps) – verhindert versehentliche zweite Punkte. */
     .plus-btn.cooling { opacity: .4; pointer-events: none; transition: opacity .15s; }
 
     /* Court + Score Block in der Mitte */
-    .center { display: flex; flex-direction: column; min-height: 0; gap: .35rem; }
+    /* min-width: 0 → die mittlere Spalte darf schrumpfen; sonst könnte der
+       große Satzstand auf schmalen Displays die Plus-Button-Spalten
+       verdrängen, statt dass die Ziffern via clamp kleiner ankern. */
+    .center { display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: .35rem; }
     .score-board {
       display: flex; align-items: center; justify-content: center;
-      background: #020617; padding: .25rem .5rem .25rem .25rem; gap: .5rem;
-      border-radius: .5rem; border: 1px solid #1e293b; flex-shrink: 0;
+      background: var(--surface); padding: .4rem .6rem .4rem .4rem; gap: .6rem;
+      border-radius: .6rem; border: 1px solid var(--line); flex-shrink: 0;
+      box-shadow: 0 1px 3px rgba(15,23,42,.08);
     }
-    .score-stack { display: flex; flex-direction: column; align-items: center; gap: .1rem; flex: 1; }
+    .score-stack { display: flex; flex-direction: column; align-items: center; gap: .1rem; flex: 1; min-width: 0; }
     /* Undo-Button im Score-Board: groß und kontrastreich, sitzt mittig auf
        dem Bildschirm und kann nicht von Safari-Bottom-Bars oder dem Home-
        Indicator abgeschnitten werden. Heller Amber-Ton + Glow für klare
@@ -107,28 +156,34 @@
       padding: 0; min-height: 0;
       display: inline-flex; align-items: center; justify-content: center;
       font-size: 2.8rem; font-weight: 800; line-height: 1;
-      background: #fbbf24; color: #0f172a;
-      border: 2px solid #fde68a;
+      background: #f59e0b; color: #1f2937;
+      border: 2px solid #fbbf24;
       border-radius: .75rem; cursor: pointer;
       touch-action: manipulation;
-      box-shadow: 0 0 0 3px rgba(251, 191, 36, .25), 0 4px 12px rgba(0,0,0,.4);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, .25), 0 4px 12px rgba(15,23,42,.15);
     }
     .board-undo:disabled {
       opacity: 1; cursor: not-allowed;
-      background: #475569; color: #94a3b8;
-      border-color: #334155;
+      background: var(--surface-2); color: var(--muted);
+      border-color: var(--line);
       box-shadow: none;
     }
     .board-undo:active:not(:disabled) { background: #f59e0b; transform: scale(.96); }
+    /* Der laufende Satzstand deutlich größer als vorher (war fixe 2.2rem –
+       ohne Brille zu klein, Tilo 20.07.), aber bewusst gedeckelt: das
+       Score-Board darf das Spielfeld darunter NICHT verdrängen (der Court
+       mit dem Aufschläger-Punkt bleibt die zweite Hauptinformation).
+       vmin → wächst maßvoll mit dem Bildschirm. */
     .current-score {
-      font-size: 2.2rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums;
-      display: flex; gap: .6rem; align-items: baseline;
+      font-size: clamp(1.9rem, 7vmin, 3.6rem); font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums;
+      display: flex; gap: .5rem; align-items: baseline;
     }
-    .current-score .left-score { color: #93c5fd; }
-    .current-score .right-score { color: #fda4af; }
-    .current-score .colon { opacity: .4; font-size: 1.7rem; color: #f8fafc; }
-    .current-set-label { font-size: .7rem; opacity: .6; letter-spacing: .05em; text-transform: uppercase; }
-    .set-history { display: flex; gap: .5rem; font-size: .8rem; opacity: .65; font-variant-numeric: tabular-nums; flex-wrap: wrap; justify-content: center; }
+    .current-score .left-score { color: var(--team-a); }
+    .current-score .right-score { color: var(--team-b); }
+    .current-score .colon { opacity: .35; font-size: .7em; color: var(--muted); }
+    .current-set-label { font-size: 1rem; color: var(--muted); font-weight: 700; letter-spacing: .03em; }
+    .set-history { display: flex; gap: .6rem; font-size: 1.05rem; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; flex-wrap: wrap; justify-content: center; }
 
     /* Badminton-Court mit echten Linien-Markierungen.
        Maße im Original: 13.40 × 6.10 m → viewBox 134 × 61 (1 Einheit = 0.1 m).
@@ -190,7 +245,7 @@
       50%      { box-shadow: 0 0 0 8px rgba(251, 191, 36, .15); }
     }
     .court .cell .player-name {
-      font-size: clamp(.8rem, 1.8vw, 1.2rem);
+      font-size: clamp(1rem, 2.6vw, 1.9rem);
       text-shadow: 0 1px 2px rgba(0,0,0,.6);
       line-height: 1.15; word-break: keep-all; hyphens: none;
       max-width: 100%;
@@ -208,38 +263,41 @@
     footer {
       display: flex; gap: .5rem; padding: .6rem;
       padding-bottom: max(.6rem, env(safe-area-inset-bottom));
-      background: #0b1220; flex-shrink: 0;
-      border-top: 1px solid #334155;
+      background: var(--surface); flex-shrink: 0;
+      border-top: 1px solid var(--line);
     }
     button {
-      flex: 1; padding: 1rem .8rem; font-size: 1.05rem; font-weight: 700;
-      background: #475569; color: #f8fafc; border: 0; border-radius: .5rem;
+      flex: 1; padding: 1rem .8rem; font-size: 1.1rem; font-weight: 700;
+      background: var(--surface-2); color: var(--text); border: 1px solid var(--line);
+      border-radius: .5rem;
       cursor: pointer; touch-action: manipulation; font-family: inherit;
       min-height: 3rem;
     }
-    button:disabled { opacity: .55; cursor: not-allowed; background: #1e293b; color: #64748b; }
-    button.primary { background: #16a34a; }
-    button.primary:disabled { background: #1f2937; color: #94a3b8; }
-    button.danger { background: #b91c1c; }
+    button:disabled { opacity: .55; cursor: not-allowed; background: var(--surface-2); color: var(--muted); }
+    button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    button.primary:disabled { background: #a7d3b5; color: #f0fdf4; border-color: #a7d3b5; }
+    button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
     /* „Match beenden": ab 0:0 verfügbar, aber bewusst dezent (gedämpft, klein,
        nicht raumgreifend) – die Punktzählung bleibt die Haupthandlung. */
     button.subtle {
       flex: 0 0 auto; min-height: 2.6rem; padding: .5rem 1rem;
-      font-size: .85rem; font-weight: 600;
-      background: #1e293b; color: #94a3b8; border: 1px solid #334155;
+      font-size: .9rem; font-weight: 600;
+      background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
     }
-    button.subtle:active { background: #334155; }
+    button.subtle:active { background: var(--surface-3); }
 
     /* ─── Setup-Modal ────────────────────────────────────────────────── */
     .modal {
-      position: fixed; inset: 0; background: rgba(2,6,23,.94);
+      position: fixed; inset: 0; background: var(--scrim);
       display: none; align-items: center; justify-content: center;
       flex-direction: column; gap: 1.5rem; padding: 2rem; text-align: center;
       z-index: 10;
     }
-    .modal.visible { display: flex; }
-    .modal .title { font-size: 1.4rem; font-weight: 700; }
-    .modal .subtitle { font-size: .9rem; opacity: .65; margin-top: -.8rem; }
+    /* Modal-Inhalt liegt auf einer hellen Karte (der Scrim dunkelt nur den
+       Hintergrund ab). Titel/Optionen erben --text. */
+    .modal.visible { display: flex; color: var(--text); }
+    .modal .title { font-size: 1.6rem; font-weight: 800; color: #fff; }
+    .modal .subtitle { font-size: 1rem; color: #e2e8f0; margin-top: -.8rem; }
     .modal .options {
       display: flex; flex-wrap: wrap; gap: .75rem;
       justify-content: center; max-width: 60rem; width: 100%;
@@ -247,24 +305,24 @@
     .modal .opt {
       flex: 1 1 14rem; min-width: 12rem; max-width: 24rem;
       padding: 1.25rem 1rem;
-      background: #1e293b;
-      border: 2px solid #334155;
+      background: var(--surface);
+      border: 2px solid var(--line);
       border-radius: .75rem;
-      font-size: 1.1rem; font-weight: 600;
+      font-size: 1.2rem; font-weight: 700; color: var(--text);
       cursor: pointer;
     }
-    .modal .opt:active { background: #334155; }
+    .modal .opt:active { background: var(--surface-2); }
     .modal .opt[hidden] { display: none; }
-    .modal .opt.team-a { border-color: #3b82f6; }
-    .modal .opt.team-b { border-color: #ec4899; }
-    .modal .opt .partner { font-size: .8rem; opacity: .65; margin-top: .3rem; font-weight: 400; }
-    .modal .opt .club { font-size: .75rem; opacity: .55; margin-top: .25rem; font-weight: 400; }
+    .modal .opt.team-a { border-color: var(--team-a); }
+    .modal .opt.team-b { border-color: var(--team-b); }
+    .modal .opt .partner { font-size: .85rem; color: var(--muted); margin-top: .3rem; font-weight: 400; }
+    .modal .opt .club { font-size: .8rem; color: var(--muted); margin-top: .25rem; font-weight: 400; }
     /* Englische Übersetzung unter dem deutschen Text (zweisprachige Anzeige). */
     .modal .title .t-en {
-      display: block; font-size: .95rem; font-weight: 600;
-      color: #94a3b8; margin-top: .2rem;
+      display: block; font-size: 1rem; font-weight: 600;
+      color: #cbd5e1; margin-top: .2rem;
     }
-    .modal .subtitle .s-en { display: block; font-style: italic; }
+    .modal .subtitle .s-en { display: block; font-style: italic; color: #cbd5e1; }
     /* Zurück-Schritt im Setup-Assistenten. `flex: 0 0 auto` hebt das
        `flex: 1` der Basis-Button-Regel auf – im Modal (Flex-Spalte) würde
        der Button sonst die ganze Höhe füllen. */
@@ -290,20 +348,20 @@
       gap: 1.25rem; width: 100%;
     }
     .modal .settings-view[hidden] { display: none; }
-    .modal .settings-section { font-size: 1rem; font-weight: 700; opacity: .8; }
+    .modal .settings-section { font-size: 1.05rem; font-weight: 700; color: #e2e8f0; }
     .pin-display {
-      font-size: 2rem; letter-spacing: .6rem; min-height: 2.4rem; font-weight: 700;
+      font-size: 2rem; letter-spacing: .6rem; min-height: 2.4rem; font-weight: 700; color: #fff;
     }
     .pin-pad { display: grid; grid-template-columns: repeat(3, 5rem); gap: .75rem; }
     .pin-pad button {
       width: 5rem; height: 4rem; font-size: 1.5rem; font-weight: 700;
-      background: #1e293b; border: 2px solid #334155; border-radius: .75rem;
-      color: #fff; cursor: pointer;
+      background: var(--surface); border: 2px solid var(--line); border-radius: .75rem;
+      color: var(--text); cursor: pointer;
     }
-    .pin-pad button:active { background: #334155; }
-    .pin-pad button.pin-aux { font-size: 1.2rem; opacity: .8; }
+    .pin-pad button:active { background: var(--surface-2); }
+    .pin-pad button.pin-aux { font-size: 1.2rem; color: var(--muted); }
     .modal .opt.settings-wide { flex: 0 0 auto; min-width: 16rem; }
-    .modal .opt.court-current { border-color: #22c55e; opacity: .55; }
+    .modal .opt.court-current { border-color: var(--primary); opacity: .55; }
     /* Über den Lock-/Belegt-Overlays (z-index 25), damit das PIN-Menü auch
        dann oben liegt und bedienbar bleibt (Feldwechsel als Recovery). */
     #settings-modal { z-index: 28; }
@@ -311,105 +369,114 @@
     /* Schiri-Modus: Ansage-Leiste (immer sichtbar, zum Vorlesen). */
     .umpire-bar {
       margin: .5rem auto 0; max-width: 52rem; width: 100%;
-      background: #0f172a; border: 2px solid #1e3a8a; border-radius: .75rem;
+      background: #eff6ff; border: 2px solid var(--team-a); border-radius: .75rem;
       padding: .55rem .9rem; text-align: center;
     }
     .umpire-bar[hidden] { display: none; }
     .umpire-badge {
       display: inline-block; margin-bottom: .3rem; padding: .12rem .7rem;
-      border-radius: 999px; font-size: .8rem; font-weight: 800;
+      border-radius: 999px; font-size: .85rem; font-weight: 800;
       letter-spacing: .04em; text-transform: uppercase;
       background: #f59e0b; color: #1a1206;
     }
     .umpire-badge[hidden] { display: none; }
-    .umpire-say { font-size: 1.45rem; font-weight: 700; line-height: 1.25; color: #e2e8f0; }
+    .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); }
     .umpire-cards { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; margin-top: .4rem; }
     .umpire-cards:empty { display: none; }
     .umpire-cards .card-chip {
-      font-size: .8rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px;
-      background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+      font-size: .85rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px;
+      background: var(--surface); border: 1px solid var(--line); color: var(--text);
     }
     .umpire-card-btn {
-      margin-top: .5rem; padding: .45rem 1rem; font-size: .95rem; font-weight: 700;
-      background: #1e293b; border: 2px solid #334155; border-radius: .6rem; color: #fff; cursor: pointer;
+      margin-top: .5rem; padding: .45rem 1rem; font-size: 1rem; font-weight: 700;
+      background: var(--surface); border: 2px solid var(--line); border-radius: .6rem; color: var(--text); cursor: pointer;
     }
-    .umpire-card-btn:active { background: #334155; }
+    .umpire-card-btn:active { background: var(--surface-2); }
     .modal .opt.card-yellow { border-color: #f59e0b; }
     .modal .opt.card-red { border-color: #ef4444; }
     .modal .opt.card-black { border-color: #64748b; }
 
     /* ─── Finish-Overlay ─────────────────────────────────────────────── */
     .match-finished-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,.85);
+      position: fixed; inset: 0; background: var(--scrim);
       display: none; align-items: center; justify-content: center;
       flex-direction: column; gap: 1rem; padding: 2rem; text-align: center;
+      color: #fff;
       z-index: 10;
     }
     .match-finished-overlay.visible { display: flex; }
-    .winner-banner { font-size: 1.8rem; font-weight: 800; color: #fbbf24; }
-    .set-summary { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
-    .submit-status { font-size: .9rem; opacity: .7; min-height: 1.2em; }
+    .winner-banner { font-size: 2rem; font-weight: 800; color: #fbbf24; }
+    .set-summary { font-size: 1.3rem; font-variant-numeric: tabular-nums; color: #e2e8f0; }
+    .submit-status { font-size: .95rem; color: #cbd5e1; min-height: 1.2em; }
 
     /* ─── Sieger-Wahl bei Aufgabe ────────────────────────────────────── */
-    .retire-pick-label { font-size: 1rem; opacity: .75; margin-bottom: .6rem; }
+    .retire-pick-label { font-size: 1.05rem; color: #e2e8f0; margin-bottom: .6rem; }
     .retire-options {
       display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center;
     }
     .retire-btn {
       flex: 1 1 13rem; min-width: 11rem;
       padding: 1.4rem 1rem;
-      font-size: 1.25rem; font-weight: 700; color: #f8fafc;
+      font-size: 1.3rem; font-weight: 800; color: #fff;
       border: 2px solid; border-radius: .75rem;
       cursor: pointer; touch-action: manipulation;
     }
-    .retire-btn.team-a { background: #1e3a8a; border-color: #3b82f6; }
-    .retire-btn.team-a:active { background: #1e40af; }
-    .retire-btn.team-b { background: #831843; border-color: #ec4899; }
-    .retire-btn.team-b:active { background: #9d174d; }
+    .retire-btn.team-a { background: var(--team-a); border-color: var(--team-a-strong); }
+    .retire-btn.team-a:active { background: var(--team-a-strong); }
+    .retire-btn.team-b { background: var(--team-b); border-color: var(--team-b-strong); }
+    .retire-btn.team-b:active { background: var(--team-b-strong); }
 
     /* ─── Pausen-Overlay (offizielle BWF-Intervalle) ─────────────────── */
     .break-overlay {
-      position: fixed; inset: 0; background: rgba(2,6,23,.94);
+      position: fixed; inset: 0; background: var(--scrim);
       display: none; align-items: center; justify-content: center;
       flex-direction: column; gap: 1.25rem; padding: 2rem; text-align: center;
+      color: #fff;
       z-index: 15;
     }
     .break-overlay.visible { display: flex; }
     .break-title {
-      font-size: 1.5rem; font-weight: 700; color: #38bdf8;
+      font-size: 1.7rem; font-weight: 800; color: #7dd3fc;
       letter-spacing: .03em; text-transform: uppercase;
     }
+    /* Pausenuhr behält den Spielstand sichtbar – die große Zahl bleibt gut
+       lesbar auf dem abgedunkelten Hintergrund. */
     .break-countdown {
-      font-size: 5.5rem; font-weight: 800; line-height: 1;
-      font-variant-numeric: tabular-nums; color: #f8fafc;
+      font-size: 6rem; font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums; color: #fff;
     }
-    .break-hint { font-size: .85rem; opacity: .55; max-width: 22rem; }
+    .break-hint { font-size: .95rem; color: #cbd5e1; max-width: 22rem; }
     /* Schiri-Ansage in der Pausen-Überlagerung (Satzende/„Bitte spielen" …). */
     .break-umpire {
-      max-width: 42rem; font-size: 1.4rem; font-weight: 700; line-height: 1.3;
-      color: #e2e8f0; background: #0f172a; border: 2px solid #1e3a8a;
+      max-width: 42rem; font-size: 1.5rem; font-weight: 700; line-height: 1.3;
+      color: #f8fafc; background: rgba(15,23,42,.6); border: 2px solid #3b82f6;
       border-radius: .75rem; padding: .7rem 1.1rem;
     }
     .break-umpire[hidden] { display: none; }
 
     /* ─── Belegt-/Gesperrt-Overlay (Tablet-Übernahme) ────────────────── */
     .lock-overlay {
-      position: fixed; inset: 0; background: rgba(2,6,23,.96);
+      position: fixed; inset: 0; background: var(--scrim);
       display: none; align-items: center; justify-content: center;
       flex-direction: column; gap: 1rem; padding: 2rem; text-align: center;
+      color: #fff;
       z-index: 25;
     }
     .lock-overlay.visible { display: flex; }
     .lock-icon { font-size: 3rem; }
-    .lock-title { font-size: 1.4rem; font-weight: 700; }
-    .lock-text { font-size: .95rem; opacity: .65; max-width: 24rem; line-height: 1.45; }
-    .megaphone-text { max-width: 30rem; opacity: .7; font-size: .95rem; line-height: 1.45; }
+    .lock-title { font-size: 1.5rem; font-weight: 800; }
+    .lock-text { font-size: 1rem; color: #cbd5e1; max-width: 24rem; line-height: 1.45; }
+    .megaphone-text { max-width: 30rem; color: #cbd5e1; font-size: 1rem; line-height: 1.45; }
 
     @media (orientation: portrait) {
-      /* Hochformat: Buttons sehr schmal — Hinweis zum Drehen einblenden? */
+      /* Hochformat: Buttons sehr schmal — vmin = Breite, deshalb Satzstand
+         und Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die
+         schmale Anzeige nicht sprengen. */
       .play { grid-template-columns: 1fr 2fr 1fr; }
       .plus-btn .plus { font-size: 3rem; }
       .plus-btn .label { font-size: .7rem; }
+      .current-score { font-size: clamp(1.8rem, 9vw, 3.2rem); }
+      .empty .idle-court { font-size: clamp(3rem, 34vw, 11rem); }
     }
   </style>
 </head>
@@ -457,9 +524,13 @@
 
   <div class="main" id="main">
     <div class="empty" id="empty-view">
-      <div style="font-size:2.5rem">🏸</div>
-      <div>Warte auf Match-Zuweisung durch die Turnierleitung…</div>
-      <div style="font-size:.85rem;opacity:.6">Tablet bleibt aktiv, sobald ein Match zugewiesen wird startet die Zähltafel automatisch.</div>
+      <!-- Plan 20: Feldnummer GROSS, damit beim Verteilen der Tablets sofort
+           erkennbar ist, welches Gerät an welchem Feld steht. __COURT_LABEL__
+           wird serverseitig ersetzt (wie in der Kopfzeile). -->
+      <div class="idle-court-cap">Feld · Court</div>
+      <div class="idle-court">__COURT_LABEL__</div>
+      <div class="idle-wait">Warte auf Match-Zuweisung durch die Turnierleitung…</div>
+      <div class="idle-hint">Tablet bleibt aktiv; sobald ein Match zugewiesen wird, startet die Zähltafel automatisch.</div>
     </div>
 
     <div id="play-view" class="play" style="display:none">
