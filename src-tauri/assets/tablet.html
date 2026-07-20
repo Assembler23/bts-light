@@ -606,8 +606,24 @@
 
   <footer>
     <button id="undo-btn-bottom" disabled>↩ Letzten Punkt zurück</button>
+    <button id="enter-score-btn" class="subtle" disabled>Ergebnis eintragen …</button>
     <button id="finish-btn" class="subtle" disabled>Match beenden …</button>
   </footer>
+</div>
+
+<!-- Endstand direkt eintragen (Plan 12a): wenn niemand live gezählt hat,
+     kann das Ergebnis hier per Satzstände eingegeben werden. Offen sichtbar
+     (ein Spieler muss es zur Not selbst bedienen können). Zweisprachig. -->
+<div class="modal" id="enter-score-modal">
+  <div class="title" id="enter-score-title">Ergebnis eintragen<span class="t-en">Enter result</span></div>
+  <div class="subtitle" id="enter-score-subtitle"></div>
+  <div class="options" id="enter-score-rows" style="flex-direction:column; max-width:26rem"></div>
+  <button type="button" id="enter-score-add" class="setup-back">+ Satz · Add set</button>
+  <div class="sk-hint" id="enter-score-error" hidden></div>
+  <div class="options" style="max-width:26rem">
+    <button type="button" id="enter-score-cancel" class="opt" style="min-width:9rem">Abbrechen · Cancel</button>
+    <button type="button" id="enter-score-ok" class="opt team-a" style="min-width:9rem">Übernehmen · Apply</button>
+  </div>
 </div>
 
 <!-- Setup-Modal: Seitenwahl, Aufschläger + (bei Doppel) Annehmer.
@@ -1009,6 +1025,14 @@ const els = {
   ].filter(Boolean)),
   undoBtnBottom: document.getElementById('undo-btn-bottom'),
   finishBtn: document.getElementById('finish-btn'),
+  enterScoreBtn: document.getElementById('enter-score-btn'),
+  enterScoreModal: document.getElementById('enter-score-modal'),
+  enterScoreSubtitle: document.getElementById('enter-score-subtitle'),
+  enterScoreRows: document.getElementById('enter-score-rows'),
+  enterScoreError: document.getElementById('enter-score-error'),
+  enterScoreAdd: document.getElementById('enter-score-add'),
+  enterScoreCancel: document.getElementById('enter-score-cancel'),
+  enterScoreOk: document.getElementById('enter-score-ok'),
   setupModal: document.getElementById('setup-modal'),
   setupTitle: document.getElementById('setup-title'),
   setupSubtitle: document.getElementById('setup-subtitle'),
@@ -2163,6 +2187,144 @@ function closeFinishModal() {
   els.finishModal.classList.remove('visible');
 }
 
+// ─────────────── Endstand direkt eintragen (Plan 12a) ───────────────
+// Wenn niemand live gezählt hat, kann der Endstand hier per Satzstände
+// eingegeben werden. Füllt STATE.setsCompleted und markiert das Match als
+// beendet → das normale Match-Ende-Overlay zeigt Sieger + „Ergebnis
+// übermitteln" (derselbe robuste Sende-/Retry-Weg wie beim Live-Zählen).
+let enterScoreSets = [];
+
+function clampScoreInput(v) {
+  return Math.max(0, Math.min(99, Math.floor(Number(v) || 0)));
+}
+
+// Team-Name auf der linken bzw. rechten Court-Hälfte (für die Spalten).
+function sideTeamName(side) {
+  if (!STATE.match || !STATE.teamOnSide) return '';
+  const key = STATE.teamOnSide.a === side ? 'a' : 'b';
+  return STATE.match[key === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ');
+}
+
+function openEnterScore() {
+  if (!STATE.match || STATE.finished || STATE.setup !== 'playing'
+      || STATE.locked || STATE.occupied || !STATE.teamOnSide) return;
+  // Vorbelegen: schon gezählte Sätze + laufender Satz (falls != 0:0); sonst
+  // eine leere Startzeile. (Meist wird nichts vorbelegt sein — niemand zählte.)
+  const base = STATE.setsCompleted.map(s => ({ left: s.left, right: s.right }));
+  if (STATE.currentSet.left > 0 || STATE.currentSet.right > 0) {
+    base.push({ left: STATE.currentSet.left, right: STATE.currentSet.right });
+  }
+  enterScoreSets = base.length ? base : [{ left: 0, right: 0 }];
+  els.enterScoreError.hidden = true;
+  els.enterScoreSubtitle.textContent = `${sideTeamName('left')}  –  ${sideTeamName('right')}`;
+  renderEnterScoreRows();
+  els.enterScoreModal.classList.add('visible');
+}
+
+function renderEnterScoreRows() {
+  els.enterScoreRows.innerHTML = '';
+  enterScoreSets.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:.5rem;justify-content:center;width:100%';
+    const label = document.createElement('span');
+    // Labels sitzen auf dem dunklen Modal-Scrim → helle Farbe.
+    label.style.cssText = 'width:4rem;font-size:.95rem;color:#cbd5e1;text-align:right';
+    label.textContent = `Satz ${i + 1}`;
+    const inL = document.createElement('input');
+    const inR = document.createElement('input');
+    for (const inp of [inL, inR]) {
+      inp.type = 'number'; inp.min = '0'; inp.max = '99'; inp.inputMode = 'numeric';
+      inp.style.cssText = 'width:4.5rem;padding:.6rem;text-align:center;font-size:1.4rem;'
+        + 'font-weight:700;border:1px solid var(--line);border-radius:.5rem;background:#fff;color:var(--text)';
+    }
+    inL.value = String(s.left); inR.value = String(s.right);
+    inL.setAttribute('aria-label', `Satz ${i + 1}, ${sideTeamName('left')}`);
+    inR.setAttribute('aria-label', `Satz ${i + 1}, ${sideTeamName('right')}`);
+    // Clamp auf 0..99 UND die Anzeige mit dem übernommenen Wert
+    // synchronisieren (nur bei Über-/Unterlauf umschreiben, damit normales
+    // Tippen und ein leeres Feld nicht gestört werden).
+    const bindScoreInput = (inp, apply) => inp.addEventListener('input', () => {
+      const raw = Number(inp.value);
+      const v = clampScoreInput(inp.value);
+      apply(v);
+      if (!Number.isInteger(raw) || raw !== v) inp.value = String(v);
+    });
+    bindScoreInput(inL, (v) => { enterScoreSets[i].left = v; });
+    bindScoreInput(inR, (v) => { enterScoreSets[i].right = v; });
+    const colon = document.createElement('span');
+    colon.textContent = ':'; colon.style.cssText = 'font-size:1.4rem;color:#cbd5e1';
+    row.append(label, inL, colon, inR);
+    els.enterScoreRows.appendChild(row);
+  });
+}
+
+function addEnterScoreRow() {
+  const maxSets = (STATE.match && STATE.match.bestOfSets) || 3;
+  if (enterScoreSets.length >= maxSets) return;
+  enterScoreSets.push({ left: 0, right: 0 });
+  renderEnterScoreRows();
+}
+
+function closeEnterScore() {
+  els.enterScoreModal.classList.remove('visible');
+}
+
+function submitEnterScore() {
+  if (!STATE.match || !STATE.teamOnSide) return;
+  const target = STATE.match.targetScore;
+  // 0:0-Zeilen (Platzhalter) verwerfen.
+  const sets = enterScoreSets
+    .filter(s => s.left > 0 || s.right > 0)
+    .map(s => ({ left: s.left, right: s.right }));
+  // Jeder Satz muss regulär zu Ende gespielt sein (wie am Server:
+  // set_is_complete) — verhindert das Eintragen eines laufenden Satzes.
+  // Zeitformat (target >= 99): kein Ziel/Cap, es entscheidet der höhere
+  // Stand → ein Satz ist „fertig", sobald er nicht unentschieden ist.
+  const timeFormat = target >= 99;
+  const bad = sets.findIndex(s =>
+    timeFormat ? s.left === s.right : setWinnerSide(s, target) === null);
+  if (bad >= 0) {
+    els.enterScoreError.textContent = timeFormat
+      ? `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist unentschieden.`
+      : `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist nicht regulär zu Ende gespielt.`;
+    els.enterScoreError.hidden = false;
+    return;
+  }
+  // Eindeutiger Match-Sieger?
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const l = sets.filter(s => s.left > s.right).length;
+  const r = sets.filter(s => s.right > s.left).length;
+  if (sets.length === 0 || (l < need && r < need) || l === r) {
+    els.enterScoreError.textContent = 'Kein eindeutiger Sieger — bitte Satzstände prüfen.';
+    els.enterScoreError.hidden = false;
+    return;
+  }
+  // Keine überzähligen Sätze: der Sieg muss erst mit dem LETZTEN Satz
+  // feststehen (best of 3 mit 2:0 darf keinen 3., nie gespielten Satz tragen).
+  const priorL = sets.slice(0, -1).filter(s => s.left > s.right).length;
+  const priorR = sets.slice(0, -1).filter(s => s.right > s.left).length;
+  if (priorL >= need || priorR >= need) {
+    els.enterScoreError.textContent = 'Zu viele Sätze — das Match war schon vorher entschieden.';
+    els.enterScoreError.hidden = false;
+    return;
+  }
+  closeEnterScore();
+  // Snapshot für „Korrektur — Match wieder öffnen" (reopen).
+  STATE.history.push(snapshot());
+  STATE.setsCompleted = sets;
+  STATE.currentSet = { left: 0, right: 0 };
+  STATE.finished = true;
+  STATE.retired = false;
+  STATE.walkover = false;
+  STATE.cascadeWalkover = false;
+  STATE.retiredWinner = null;
+  STATE.lastEvent = null;
+  tlog('info', 'enter_score', { sets });
+  persistState();
+  render(); // → Match-Ende-Overlay mit Sieger + „Ergebnis übermitteln"
+  sendScoreUpdate();
+}
+
 // Beendet das Match per Aufgabe (retired) oder Kampflos (walkover). Der
 // Sieger wird danach im Match-Ende-Overlay gewählt.
 // `status`: 'walkover' (Kampflos) | 'retired' (Aufgabe). `cascade` nur bei
@@ -2518,6 +2680,15 @@ function render() {
   els.injuryBtn.classList.toggle('on', STATE.alertInjury);
   els.megaphoneBtn.classList.toggle('on', STATE.alertOfficial);
 
+  // Endstand-Dialog schließen, sobald er nicht mehr gültig ist (Match weg/
+  // gewechselt durch einen Server-Push, gesperrt, übernommen, schon beendet)
+  // — sonst zeigte er veraltete Team-Namen und würde aufs falsche Match wirken.
+  if (els.enterScoreModal.classList.contains('visible')
+      && !(STATE.match && STATE.setup === 'playing' && !STATE.finished
+           && !STATE.locked && !STATE.occupied)) {
+    closeEnterScore();
+  }
+
   if (!STATE.match) {
     els.eventLabel.textContent = '— kein Match —';
     els.emptyView.style.display = '';
@@ -2525,6 +2696,7 @@ function render() {
     els.finishedOverlay.classList.remove('visible');
     els.undoBtns.forEach(b => b.disabled = true);
     els.finishBtn.disabled = true;
+    els.enterScoreBtn.disabled = true;
     return;
   }
   els.eventLabel.textContent = STATE.match.eventLabel;
@@ -2555,6 +2727,9 @@ function render() {
   // „Match beenden" ist ab 0:0 verfügbar (dezent) – der Dialog bietet dann
   // Aufgabe/Kampflos; „Regulär beenden" erst, wenn schon gespielt wurde.
   els.finishBtn.disabled = STATE.finished || STATE.setup !== 'playing';
+  // Endstand-Eintragen: nur im laufenden Spiel, nicht gesperrt/passiv.
+  els.enterScoreBtn.disabled =
+    STATE.finished || STATE.setup !== 'playing' || STATE.locked || STATE.occupied;
 
   if (STATE.finished) {
     const teamName = (key) => STATE.match
@@ -3007,6 +3182,10 @@ onScoreTap(els.plusLeft, () => addPointOnSide('left'));
 onScoreTap(els.plusRight, () => addPointOnSide('right'));
 els.undoBtns.forEach(b => onScoreTap(b, undo));
 els.finishBtn.addEventListener('click', openFinishModal);
+els.enterScoreBtn.addEventListener('click', openEnterScore);
+els.enterScoreAdd.addEventListener('click', addEnterScoreRow);
+els.enterScoreCancel.addEventListener('click', closeEnterScore);
+els.enterScoreOk.addEventListener('click', submitEnterScore);
 els.finishRetireOne.addEventListener('click', () => finishAs('retired', false));
 els.finishRetireInjury.addEventListener('click', () => finishAs('retired', true));
 els.finishWalkover.addEventListener('click', () => finishAs('walkover', false));
