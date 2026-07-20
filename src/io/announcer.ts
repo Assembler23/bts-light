@@ -816,6 +816,23 @@ export interface AnnouncePreparationInput {
   className?: string;
   /** Reine BTP-Runde; wird ab Viertelfinale vor der Paarung mitangesagt. */
   roundName?: string;
+  /** Aufruf-Stufe: 1 = erster Aufruf („In Vorbereitung"), 2 = „Zweiter
+   *  Aufruf", 3 = „Dritter und letzter Aufruf". Bei 2/3 wird meist nur die
+   *  fehlende Partei genannt (teamBNames leer lassen). Default 1. */
+  callStage?: 1 | 2 | 3;
+}
+
+// Führt-Präfix je Aufruf-Stufe (an Tilos BTS angelehnt). null = Stufe 1
+// (normaler „In Vorbereitung"-Aufruf). Ab Stufe 2 leitet der Text mit
+// „Zweiter/Dritter … Aufruf für:" ein, danach folgen die Partei-Namen.
+function callStagePrefix(stage: 1 | 2 | 3 | undefined, lang: AnnounceLang): string | null {
+  if (stage === 3) {
+    return lang === "de" ? "Dritter und letzter Aufruf für:" : "Third and final call for:";
+  }
+  if (stage === 2) {
+    return lang === "de" ? "Zweiter Aufruf für:" : "Second call for:";
+  }
+  return null;
 }
 
 // Baut die Vorbereitungs-Ansage als Liste kurzer Segmente: „In
@@ -834,6 +851,26 @@ export function buildPreparationSegments(
   const disc = disciplineWithClass(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const hall = (input.hall || "").trim();
+  const stagePrefix = callStagePrefix(input.callStage, lang);
+
+  // Wiederholungsaufruf (Stufe 2/3): terse „Zweiter/Dritter Aufruf für:
+  // {Partei}. Bitte in {Halle}." — kein „In Vorbereitung", keine Disziplin
+  // (wie Tilos gezielter Zweitaufruf; genannt wird nur die fehlende Partei).
+  if (stagePrefix) {
+    const segments: string[] = [stagePrefix];
+    if (teamA && teamB) {
+      segments.push(`${teamA}.`);
+      segments.push(`${versus} ${teamB}.`);
+    } else if (teamA) {
+      segments.push(`${teamA}.`);
+    }
+    if (hall) {
+      segments.push(
+        lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
+      );
+    }
+    return segments;
+  }
 
   const segments: string[] = [
     lang === "de" ? "In Vorbereitung." : "Preparation call.",
@@ -870,8 +907,23 @@ export function buildPreparationSsml(
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap);
   const hall = xmlEscape((input.hall || "").trim());
+  const stagePrefix = callStagePrefix(input.callStage, lang);
 
-  const parts: string[] = [lang === "de" ? "In Vorbereitung." : "Preparation call."];
+  let parts: string[];
+  if (stagePrefix) {
+    // Wiederholungsaufruf (Stufe 2/3) — terse, nur die genannte Partei.
+    parts = [xmlEscape(stagePrefix)];
+    if (teamA && teamB) {
+      parts.push(`${teamA}.`);
+      parts.push(`${versus} ${teamB}.`);
+    } else if (teamA) {
+      parts.push(`${teamA}.`);
+    }
+    if (hall) {
+      parts.push(lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`);
+    }
+  } else {
+  parts = [lang === "de" ? "In Vorbereitung." : "Preparation call."];
   if (disc) parts.push(`${disc}.`);
   if (round) parts.push(`${xmlEscape(round)}.`);
   if (teamA && teamB) {
@@ -882,6 +934,7 @@ export function buildPreparationSsml(
   }
   if (hall) {
     parts.push(lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`);
+  }
   }
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (
