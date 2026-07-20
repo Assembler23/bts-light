@@ -40,7 +40,14 @@
        Monitor zeigt – auch wenn gerade kein Spiel läuft und keine Werbung kommt. */
     #ad-fallback .court { font-size: 17vmin; font-weight: 800; line-height: 1; margin: 1.5vmin 0; color: #f1f5f9; }
     #ad-fallback .court:empty { display: none; }
-    #ad-fallback .sub { font-size: 3.4vmin; opacity: .45; letter-spacing: .04em; }
+    /* badhub.de gross unter der Feldnummer: Orientierung + Werbung im Leerlauf
+       (Plan 10). Warmer Akzent, dezenter Atem-Glow passend zum Score-Design. */
+    #ad-fallback .brand {
+      font-size: 9vmin; font-weight: 800; letter-spacing: .01em; line-height: 1;
+      color: #fbbf24; margin-top: .5vmin;
+      text-shadow: 0 .4vmin 2vmin rgba(251,191,36,.18);
+    }
+    #ad-fallback .sub { font-size: 3.4vmin; opacity: .45; letter-spacing: .04em; margin-top: 1.5vmin; }
 
     /* ─── Match-Ansicht ───────────────────────────────────────────────── */
     #match-view { position: absolute; inset: 0; display: none; flex-direction: column; }
@@ -191,23 +198,29 @@
     footer.bar:empty { display: none; }
 
     /* ─── Retro-Pausen-Timer (Split-Flap, „Flughafentafel") ───────────── */
+    /* Pausen-Anzeige als BANNER im oberen Bereich (Plan 5): halbtransparent,
+       damit Satzstand + Namen darunter lesbar bleiben (die Match-View liegt
+       unverändert dahinter). Label links, Klappuhr rechts – kompakt. */
     #timer-overlay {
-      position: absolute; inset: 0; display: none;
-      flex-direction: column; align-items: center; justify-content: center;
-      gap: 4vh; background: rgba(2,6,23,.93);
+      position: absolute; top: 0; left: 0; right: 0; display: none;
+      flex-direction: row; align-items: center; justify-content: center;
+      gap: 3.5vmin; padding: 2vh 4vw;
+      background: rgba(2,6,23,.82);
+      border-bottom: .5vmin solid rgba(251,191,36,.55);
+      box-shadow: 0 1.2vmin 3vmin rgba(0,0,0,.5);
     }
     #timer-overlay.show { display: flex; }
     #timer-overlay .label {
-      font-size: 5vmin; font-weight: 800; letter-spacing: .12em;
+      font-size: 3.8vmin; font-weight: 800; letter-spacing: .1em;
       text-transform: uppercase; color: #fbbf24;
     }
-    .flaps { display: flex; gap: 1.2vmin; }
+    .flaps { display: flex; gap: 1vmin; }
     .flap {
-      position: relative; width: 13vmin; height: 19vmin;
-      background: #18202e; border-radius: 1.4vmin;
+      position: relative; width: 7vmin; height: 10vmin;
+      background: #18202e; border-radius: 1.2vmin;
       box-shadow: 0 1vmin 3vmin rgba(0,0,0,.6);
       display: flex; align-items: center; justify-content: center;
-      font-size: 15vmin; font-weight: 900; line-height: 1;
+      font-size: 8vmin; font-weight: 900; line-height: 1;
       font-variant-numeric: tabular-nums; color: #f1f5f9;
       overflow: hidden;
     }
@@ -216,7 +229,7 @@
       content: ""; position: absolute; left: 0; right: 0; top: 50%;
       height: .5vmin; background: #0b0f17; transform: translateY(-50%);
     }
-    .flap.colon { width: 6vmin; background: transparent; box-shadow: none; }
+    .flap.colon { width: 3.8vmin; background: transparent; box-shadow: none; }
     .flap.colon::after { display: none; }
     .flap.flip { animation: flap-flip .32s ease-in; }
     @keyframes flap-flip {
@@ -296,6 +309,7 @@
       <div id="ad-fallback">
         <div class="tn" id="fallback-tn">bts-light</div>
         <div class="court" id="fallback-court"></div>
+        <div class="brand">badhub.de</div>
         <div class="sub">Kein Spiel auf diesem Feld</div>
       </div>
     </div>

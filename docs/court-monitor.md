@@ -243,6 +243,19 @@ Läuft eine Pause (`court_state.pause`), zeigt der Monitor einen
 Flughafentafel). Greift bei den BWF-Satzpausen (Countdown) und bei
 Behandlungspausen (ohne Countdown). Im Tool ein-/abschaltbar.
 
+Seit v0.9.158 ist die Pausenuhr ein **kompakter, halbtransparenter Banner
+am oberen Rand** (`#timer-overlay`, Plan 5) statt eines Vollbild-Overlays —
+Satzstand und Namen der darunterliegenden Match-View bleiben lesbar. Das
+Verhalten (`renderTimer`) ist unverändert; nur Layout/Optik.
+
+## Leerlauf-Anzeige (kein Spiel auf dem Feld)
+
+Steht kein Spiel auf einem zugewiesenen Feld, zeigt der Monitor
+(`#ad-fallback`) den **Turniernamen**, die **Feldnummer sehr groß** und seit
+v0.9.158 darunter prominent **badhub.de** (Plan 10) — Orientierung in der
+Halle plus dezente Werbung. Gilt für LAN- und Cloud-TVs (gleiche
+`monitor.html`).
+
 ## Konfiguration
 
 Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tauri/src/config.rs)):
