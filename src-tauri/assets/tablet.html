@@ -982,6 +982,9 @@ const STATE = {
   // 'choose-server' zeigt NUR dieses Team, danach Annehmer-Wahl. null beim
   // Einzel und während des normalen Spiels.
   serveSetupTeam: /** @type {null | 'a'|'b'} */ (null),
+  // Läuft die Aufstellung gerade aus einem Mid-Game-Einstieg (Plan 12b)?
+  // Nur für die Wizard-Beschriftung ("gerade" statt "zuerst/eröffnet").
+  midGameSetup: false,
   // BWF-Regel: Im Entscheidungssatz tauschen die Spieler bei 11 Punkten
   // einmalig die Court-Seiten (egal welches Team führt). Wir merken uns,
   // ob das in diesem Match schon erfolgt ist.
@@ -1381,6 +1384,17 @@ function setWinnerSide(setScore, target) {
 
 function requiredSetsToWin(bestOfSets) { return Math.ceil(bestOfSets / 2); }
 
+// Intervall-/Seitenwechsel-Schwelle aus der BTP-Zählweise: 11 bei 21er-,
+// 8 bei 15er-Sätzen. `null` = Format ohne reguläre Intervall-Pause (dann
+// weder 60-s-Pause noch Decider-Seitenwechsel an dieser Schwelle). Fehlt
+// intervalAt (alter Frame/Relay), gilt für klassische 21er-Sätze die
+// BWF-Schwelle 11 – so verschwindet die Intervall-Pause nie unbemerkt.
+function intervalThreshold() {
+  if (!STATE.match) return null;
+  if (STATE.match.intervalAt != null && STATE.match.intervalAt > 0) return STATE.match.intervalAt;
+  return STATE.match.targetScore === 21 ? 11 : null;
+}
+
 function matchWinnerSide() {
   if (!STATE.match) return null;
   const need = requiredSetsToWin(STATE.match.bestOfSets);
@@ -1623,6 +1637,9 @@ const PERSIST_KEY = `badhub.tablet.state.${COURT_ID}`;
 // Seite { rightSC, leftSC } (Spieler-IDs), die addPointOnSide regelkonform
 // tauscht. Ergebnis { team:'a'|'b', index:0|1 } für die Monitor-Anzeige;
 // null, solange kein laufendes Spiel.
+// ⚠️ computeServing + der finalizeSetup-Paritätstausch + addPointOnSide sind
+// durch scripts/test-serving.mjs abgesichert (im CI). Änderungen HIER dort
+// mitziehen.
 function computeServing() {
   if (STATE.setup !== 'playing' || STATE.finished) return null;
   if (!STATE.positions || !STATE.servingSide || !STATE.teamOnSide || !STATE.match) return null;
@@ -1667,6 +1684,7 @@ function persistState(fromRestore) {
     // sonst stünde nach einem Reload während der Abfrage wieder die volle
     // Aufschläger-Liste statt nur des Gewinnerteams.
     serveSetupTeam: STATE.serveSetupTeam,
+    midGameSetup: STATE.midGameSetup,
     finished: STATE.finished,
     midGameSwitchDone: STATE.midGameSwitchDone,
     pause: STATE.pause,
@@ -1710,6 +1728,7 @@ function applyPersistedState(p) {
   STATE.positions = p.positions ?? null;
   STATE.servingSide = p.servingSide ?? null;
   STATE.setup = p.setup ?? 'playing';
+  STATE.midGameSetup = !!p.midGameSetup;
   STATE.serveSetupTeam = (p.serveSetupTeam === 'a' || p.serveSetupTeam === 'b')
     ? p.serveSetupTeam : null;
   STATE.finished = !!p.finished;
@@ -1907,6 +1926,7 @@ function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
   STATE.pendingServer = null;
   // Per-Satz-Aufschlagwahl abgeschlossen → Constraint aufheben.
   STATE.serveSetupTeam = null;
+  STATE.midGameSetup = false;
   // Spieldauer ab jetzt zählen (nur beim ersten Setup setzen).
   if (!STATE.startedAt) STATE.startedAt = Date.now();
   persistState();
@@ -2046,14 +2066,7 @@ function addPointOnSide(side) {
   const setsRight = STATE.setsCompleted.filter(s => s.right > s.left).length;
   const isDecider = STATE.match.bestOfSets > 1
     && setsLeft === need - 1 && setsRight === need - 1;
-  // Intervall-/Seitenwechsel-Schwelle aus der BTP-Zählweise: 11 bei 21er-,
-  // 8 bei 15er-Sätzen. `null` = Format ohne reguläre Intervall-Pause (dann
-  // weder 60-s-Pause noch Decider-Seitenwechsel an dieser Schwelle).
-  // Fehlt intervalAt (alter Frame/Relay), gilt für klassische 21er-Sätze
-  // die BWF-Schwelle 11 – so verschwindet die Intervall-Pause nie unbemerkt.
-  const intervalAt = (STATE.match.intervalAt != null && STATE.match.intervalAt > 0)
-    ? STATE.match.intervalAt
-    : (STATE.match.targetScore === 21 ? 11 : null);
+  const intervalAt = intervalThreshold();
   const reachedInterval = intervalAt != null
     && (STATE.currentSet.left === intervalAt || STATE.currentSet.right === intervalAt);
   let triggeredMidGameSwitch = false;
@@ -2392,9 +2405,7 @@ function submitEnterScore() {
     // Intervall-/Decider-Flags aus dem Stand ableiten: hat ein Team die
     // Intervall-Schwelle schon erreicht, ist die 60-s-Pause dieses Satzes
     // gelaufen; im Entscheidungssatz ggf. auch der Mid-Game-Seitenwechsel.
-    const interval = (STATE.match.intervalAt != null && STATE.match.intervalAt > 0)
-      ? STATE.match.intervalAt
-      : (target === 21 ? 11 : null);
+    const interval = intervalThreshold();
     const reached = interval != null && (cur.left >= interval || cur.right >= interval);
     STATE.intervalDoneThisGame = reached;
     const need = requiredSetsToWin(STATE.match.bestOfSets);
@@ -2410,6 +2421,7 @@ function submitEnterScore() {
     STATE.servingSide = null;
     STATE.pendingServer = null;
     STATE.serveSetupTeam = null;
+    STATE.midGameSetup = true;
     STATE.setup = 'choose-side';
     STATE.lastEvent = null;
     tlog('info', 'enter_score_midgame', { sets, current: cur });
@@ -2629,6 +2641,12 @@ function renderSetupModal() {
         'Neuer Satz — wer schlägt auf?', 'New set — who serves?',
         'Tippe den Aufschläger im Gewinnerteam des letzten Satzes an.',
         'Tap the server in the team that won the previous set.');
+    } else if (STATE.midGameSetup) {
+      // Einstieg mitten im Spiel (Plan 12b): das Match läuft schon.
+      setSetupText(
+        'Wer schlägt gerade auf?', 'Who is serving now?',
+        'Tippe auf den Spieler, der beim aktuellen Stand aufschlägt.',
+        'Tap the player serving at the current score.');
     } else {
       setSetupText(
         'Wer schlägt zuerst auf?', 'Who serves first?',

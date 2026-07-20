@@ -206,10 +206,19 @@ Findet sich erst mitten im Spiel jemand zum Zählen, schaltet der Haken
 - **Aufschlagposition:** `finalizeSetup` platziert die Service-Courts
   regelkonform zum Stand — steht das aufschlagende Team auf einem
   **ungeraden** Punktestand, spielt es aus dem linken Service-Court
-  (BWF-Parität, `computeServing`). Die Intervall-/Decider-Flags
+  (BWF-Parität, `computeServing`). Die Positionslogik ist durch
+  `scripts/test-serving.mjs` (CI) abgesichert. Die Intervall-/Decider-Flags
   (`intervalDoneThisGame`, `midGameSwitchDone`) werden aus dem
   eingegebenen Stand abgeleitet, damit die 60-s-Pause bzw. der
   Entscheidungssatz-Seitenwechsel nicht doppelt kommt.
+
+**Bekannte Feinheiten:** Liegt der eingegebene Stand **genau** auf der
+Intervall-Schwelle (z. B. 11), gilt die 60-s-Pause als bereits erledigt
+(Schutz gegen Doppel-Pause; im Grenzfall eine Annahme). Ein **Fehlgriff
+in der Aufstellung** (falsche Seite/Aufschläger) lässt sich am einfachsten
+korrigieren, indem man den kurzen Assistenten zu Ende führt und dann im
+Match-Ende- bzw. über „Korrektur" neu ansetzt — ein Rückschritt aus der
+Seitenwahl heraus gibt es (wie beim normalen Spielstart) nicht.
 
 ## Kampflose Wertung nach Aufgabe
 
