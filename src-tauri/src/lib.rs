@@ -113,6 +113,8 @@ pub fn run() {
             commands::confirm_walkover,
             commands::enter_result,
             commands::disqualify_match,
+            commands::export_identity,
+            commands::import_identity,
             commands::assign_court,
             commands::free_court,
             commands::set_court_locked,

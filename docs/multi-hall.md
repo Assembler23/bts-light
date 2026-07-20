@@ -227,6 +227,22 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
 - **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame` +
   `/slaves`-Route).
 
+## Master-Identität umziehen (v0.9.161, ADR 0006)
+
+Die `install_id` ist Relay-Namespace **und** Bearer-Token (R6) — ein PC-Wechsel
+erzeugt sonst eine neue ID und bricht alle gekoppelten Geräte still ab. Unter
+**Wartung → „Master-Identität umziehen"** exportiert der alte PC ein Bündel
+(`export_identity`: komplette Config **ohne** BTP-/Badhub-Passwort, aber mit
+`install_id`), der neue PC importiert es (`import_identity`: übernimmt die
+Identität, behält lokal gesetzte Passwörter). Danach laufen Tablets, Monitore
+und ferne Hallen ohne Neu-Koppeln weiter. Das Bündel enthält den Bearer-Token
+→ wie ein Passwort behandeln; nur **ein** Master gleichzeitig (R4 — der Import
+warnt). Datei-I/O läuft über den WebView (Blob-Download / File-Input), die
+reine Logik (`identity_bundle`, `apply_imported_identity`) ist testbar in
+`commands.rs`. Details: [ADR 0006](adr/0006-master-identitaet-umziehen.md).
+*Offen (Folgeschritt): eine Übersicht bekannter Geräte mit Offline-Warnung
+nach dem Umzug.*
+
 ## Tablets & TVs in der fernen Halle — Direkt-Cloud (Weg A, v0.9.144)
 
 Use-Case: **beide** Hallen haben Tablets **und** TVs, aber Turnierleitung und

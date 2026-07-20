@@ -1,6 +1,6 @@
 # ADR 0006 — Master-Identität per Export/Import auf einen neuen PC umziehen
 
-Status: vorgeschlagen
+Status: akzeptiert (2026-07-20)
 
 ## Kontext
 

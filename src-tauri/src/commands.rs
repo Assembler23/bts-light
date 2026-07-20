@@ -180,6 +180,90 @@ pub fn save_config(
     Ok(())
 }
 
+/// Master-Identität exportieren (ADR 0006): die komplette Konfiguration inkl.
+/// `install_id` als JSON-Bündel, damit ein neuer Turnier-PC dieselbe Identität
+/// (= Relay-Namespace) übernimmt und alle gekoppelten Geräte ohne Neu-Koppeln
+/// weiterlaufen. **Passwörter werden bewusst entfernt** (BTP + Badhub) — sie
+/// werden am neuen PC neu eingegeben; das Bündel enthält dennoch die
+/// `install_id` (= Bearer-Token) und ist wie ein Passwort zu behandeln.
+/// Entfernt ALLE Secrets aus einer Config fürs Export-Bündel (ADR 0006):
+/// BTP-Passwort, Badhub-Passwort UND den Azure-Subscription-Key. Die
+/// `install_id` bleibt — sie ist der Zweck des Umzugs (und selbst ein
+/// Bearer-Token, daher ist das Bündel wie ein Passwort zu behandeln). Rein &
+/// testbar.
+fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
+    cfg.btp.password = None;
+    cfg.badhub.password = String::new();
+    // Azure-Key ist ein echtes Secret (Speech-Ressource) — NIE mitexportieren.
+    cfg.azure_tts.key = String::new();
+    cfg
+}
+
+/// Übernimmt die importierte Identität, behält aber die am aktuellen PC bereits
+/// gesetzten Secrets (das Bündel enthält keine): BTP-/Badhub-Passwort +
+/// Azure-Key. Rein & testbar.
+fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppConfig {
+    if imported.btp.password.is_none() {
+        imported.btp.password = current.btp.password.clone();
+    }
+    if imported.badhub.password.is_empty() {
+        imported.badhub.password = current.badhub.password.clone();
+    }
+    if imported.azure_tts.key.is_empty() {
+        imported.azure_tts.key = current.azure_tts.key.clone();
+    }
+    imported
+}
+
+#[tauri::command]
+pub fn export_identity(state: State<'_, AppState>) -> Result<String, String> {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if cfg.install_id.trim().is_empty() {
+        return Err("Diese Installation hat noch keine Identität (install_id).".to_string());
+    }
+    serde_json::to_string_pretty(&identity_bundle(cfg)).map_err(|e| e.to_string())
+}
+
+/// Master-Identität importieren (ADR 0006): übernimmt `install_id` + alle
+/// Einstellungen aus einem Export-Bündel. Die am aktuellen PC bereits
+/// gesetzten Passwörter (BTP/Badhub) bleiben erhalten (das Bündel enthält
+/// keine). Überschreibt die lokale Identität — Aufrufer bestätigt vorher, und
+/// es darf nur EIN Master gleichzeitig laufen (R4).
+#[tauri::command]
+pub fn import_identity(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    bundle: String,
+) -> Result<AppConfig, String> {
+    let imported: AppConfig =
+        serde_json::from_str(&bundle).map_err(|_| "Ungültige Identitäts-Datei.".to_string())?;
+    // install_id ist Relay-Namespace + Log-Kennung → gegen dasselbe Format
+    // prüfen wie beim Kopplungs-Code (Hex+Bindestrich, 8–64), damit eine
+    // manuell verfälschte Datei keine kaputte Kennung in URLs/Header schleust.
+    if !crate::tablet::relay_client::valid_relay_namespace(imported.install_id.trim()) {
+        return Err("Die Datei enthält keine gültige Identität (install_id).".to_string());
+    }
+    // Passwörter des aktuellen PCs behalten — das Bündel enthält keine.
+    let current = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let imported = apply_imported_identity(imported, &current);
+    imported
+        .save_to(&config_path(&app))
+        .map_err(|e| e.to_string())?;
+    *state.config.lock().expect("Config-Mutex nicht vergiftet") = imported.clone();
+    tracing::info!(
+        "Master-Identität importiert (install_id übernommen) — gekoppelte Geräte bleiben verbunden"
+    );
+    Ok(imported)
+}
+
 /// Pfad zum Offline-Cache des geteilten Aussprache-Wörterbuchs. Liegt im
 /// App-Config-Verzeichnis neben der config.json.
 fn pronunciations_cache_path(app: &AppHandle) -> std::path::PathBuf {
@@ -2287,6 +2371,80 @@ mod tests {
             key: key.into(),
             voice: "master-stimme".into(),
         }
+    }
+
+    /// AppConfig mit gesetzter install_id + Secrets (Struct-Update, damit
+    /// clippy nicht über Feld-Zuweisung nach Default::default() meckert).
+    fn cfg_id(
+        install_id: &str,
+        btp_pw: Option<&str>,
+        badhub_pw: &str,
+        azure_key: &str,
+    ) -> AppConfig {
+        AppConfig {
+            install_id: install_id.into(),
+            btp: crate::config::BtpConfig {
+                password: btp_pw.map(Into::into),
+                ..Default::default()
+            },
+            badhub: crate::config::BadhubConfig {
+                password: badhub_pw.into(),
+                ..Default::default()
+            },
+            azure_tts: crate::config::AzureTtsConfig {
+                key: azure_key.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn identity_bundle_strips_all_secrets_keeps_install_id() {
+        // ADR 0006: Export-Bündel trägt die install_id, aber KEINE Secrets
+        // (BTP-/Badhub-Passwort, Azure-Key).
+        let bundle = identity_bundle(cfg_id(
+            "inst-xyz",
+            Some("btp-geheim"),
+            "badhub-geheim",
+            "azure-geheim",
+        ));
+        assert_eq!(bundle.install_id, "inst-xyz");
+        assert_eq!(bundle.btp.password, None);
+        assert!(bundle.badhub.password.is_empty());
+        assert!(bundle.azure_tts.key.is_empty(), "Azure-Key darf nie raus");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_current_secrets() {
+        // Import übernimmt die Identität, behält aber die lokal gesetzten
+        // Secrets (Bündel enthält keine).
+        let current = cfg_id(
+            "inst-alt",
+            Some("aktuell-btp"),
+            "aktuell-badhub",
+            "aktuell-azure",
+        );
+        let imported = cfg_id("inst-neu", None, "", "");
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu");
+        assert_eq!(merged.btp.password.as_deref(), Some("aktuell-btp"));
+        assert_eq!(merged.badhub.password, "aktuell-badhub");
+        assert_eq!(merged.azure_tts.key, "aktuell-azure");
+    }
+
+    #[test]
+    fn export_bundle_json_roundtrips_install_id() {
+        let json = serde_json::to_string(&identity_bundle(cfg_id(
+            "inst-roundtrip",
+            Some("x"),
+            "",
+            "",
+        )))
+        .unwrap();
+        let parsed: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.install_id, "inst-roundtrip");
+        assert_eq!(parsed.btp.password, None);
     }
 
     #[test]
