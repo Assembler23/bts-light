@@ -2269,10 +2269,15 @@ function submitEnterScore() {
     .map(s => ({ left: s.left, right: s.right }));
   // Jeder Satz muss regulär zu Ende gespielt sein (wie am Server:
   // set_is_complete) — verhindert das Eintragen eines laufenden Satzes.
-  const bad = sets.findIndex(s => setWinnerSide(s, target) === null);
+  // Zeitformat (target >= 99): kein Ziel/Cap, es entscheidet der höhere
+  // Stand → ein Satz ist „fertig", sobald er nicht unentschieden ist.
+  const timeFormat = target >= 99;
+  const bad = sets.findIndex(s =>
+    timeFormat ? s.left === s.right : setWinnerSide(s, target) === null);
   if (bad >= 0) {
-    els.enterScoreError.textContent =
-      `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist nicht regulär zu Ende gespielt.`;
+    els.enterScoreError.textContent = timeFormat
+      ? `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist unentschieden.`
+      : `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist nicht regulär zu Ende gespielt.`;
     els.enterScoreError.hidden = false;
     return;
   }
@@ -2656,6 +2661,15 @@ function render() {
   els.megaphoneBtn.disabled = !canSignal;
   els.injuryBtn.classList.toggle('on', STATE.alertInjury);
   els.megaphoneBtn.classList.toggle('on', STATE.alertOfficial);
+
+  // Endstand-Dialog schließen, sobald er nicht mehr gültig ist (Match weg/
+  // gewechselt durch einen Server-Push, gesperrt, übernommen, schon beendet)
+  // — sonst zeigte er veraltete Team-Namen und würde aufs falsche Match wirken.
+  if (els.enterScoreModal.classList.contains('visible')
+      && !(STATE.match && STATE.setup === 'playing' && !STATE.finished
+           && !STATE.locked && !STATE.occupied)) {
+    closeEnterScore();
+  }
 
   if (!STATE.match) {
     els.eventLabel.textContent = '— kein Match —';
