@@ -716,10 +716,10 @@ export function SetupWizard({
             eintragen). Mit Kopieren-Knopf. */}
         {!slaveMode && (
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-violet-200 pt-3">
-            {/* Telefon-Code (ADR 0004): 8 Ziffern, 15 Min gültig — zum
+            {/* Telefon-Code (ADR 0004): 8 Ziffern, 1 Stunde gültig — zum
                 Durchsagen. Braucht laufenden Cloud-Modus (Host verbunden). */}
             <span className="text-sm text-violet-800">
-              <strong>Telefon-Code</strong> (für ferne Hallen, 15 Min gültig):
+              <strong>Telefon-Code</strong> (für ferne Hallen, 1 Stunde gültig):
             </span>
             {phoneCode?.code ? (
               <span className="select-all rounded bg-white px-2.5 py-1 font-mono text-lg font-bold tracking-wider text-violet-900">

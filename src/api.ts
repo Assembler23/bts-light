@@ -135,7 +135,7 @@ export const cloudAnnounceState = (since: number): Promise<CloudAnnounce> =>
 export const cloudSlaves = (): Promise<SlaveInfo[]> => invoke("cloud_slaves");
 
 /** Master: kurzlebigen 8-stelligen Telefon-Kopplungscode erzeugen (ADR 0004).
- *  Braucht laufenden Cloud-Modus; 15 Minuten gültig. */
+ *  Braucht laufenden Cloud-Modus; 1 Stunde gültig. */
 export const pairingCode = (): Promise<PairingCode> => invoke("pairing_code");
 
 /** Slave: Telefon-Code gegen den vollen Master-Kopplungs-Code einlösen. */

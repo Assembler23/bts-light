@@ -19,14 +19,14 @@ Die `install_id` bleibt unverändert das Namespace-Geheimnis. Zusätzlich kann
 der Master beim Relay einen **kurzlebigen 8-stelligen Zahlen-Code** anfordern
 (`POST /{ns}/pairing-code`): Der Relay erzeugt ihn kryptographisch zufällig
 (`getrandom`, bereits im Dependency-Baum), hält ihn **nur im RAM**
-(Code → Namespace, **15 Minuten** gültig, genau **ein aktiver Code je
+(Code → Namespace, **1 Stunde** gültig, genau **ein aktiver Code je
 Namespace**, neuer Code ersetzt den alten). Die ferne Halle tippt die
 8 Ziffern ein; die App löst sie ein (`GET /pair/{code}`) und speichert die
 zurückgegebene volle `install_id` als `master_namespace`. Nach der Kopplung
 spielt der Code keine Rolle mehr; ein Code darf innerhalb seiner Gültigkeit
 mehrfach eingelöst werden (mehrere ferne Hallen, ein Telefonat).
 
-Schutz gegen Durchprobieren: 15-Minuten-Fenster, sehr dünn besetzter
+Schutz gegen Durchprobieren: begrenzte Gültigkeit (1 Stunde), sehr dünn besetzter
 Code-Raum (aktive Codes ≈ Anzahl gerade koppelnder Master) und ein globales
 Fehlversuchs-Limit am Relay (Sliding Window, danach `429`). Ein Code wird
 nur für einen **verbundenen** Host-Namespace ausgestellt.

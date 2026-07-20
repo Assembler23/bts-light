@@ -218,8 +218,9 @@ struct PairingEntry {
     expires_ms: u64,
 }
 
-/// Gültigkeit eines Telefon-Kopplungscodes.
-const PAIRING_TTL_MS: u64 = 15 * 60 * 1000;
+/// Gültigkeit eines Telefon-Kopplungscodes (Nutzerwunsch 19.07.2026:
+/// 1 Stunde statt 15 Minuten — bequemer beim Turnier-Aufbau).
+const PAIRING_TTL_MS: u64 = 60 * 60 * 1000;
 /// Fehlversuchs-Fenster + -Limit fürs Einlösen (danach 429). Großzügig für
 /// vertippte Menschen, viel zu knapp für 10⁸ Kombinationen.
 const PAIR_FAIL_WINDOW_MS: u64 = 60_000;
