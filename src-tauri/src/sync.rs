@@ -1105,4 +1105,69 @@ mod tests {
             "Feld mit noch nicht abgeräumtem beendeten Spiel bleibt belegt"
         );
     }
+
+    // ──────────────── Spielende-Stempel & Zähltafelbediener ────────────────
+
+    #[test]
+    fn stamp_finished_stamps_once_and_keeps_timestamp() {
+        // BTP liefert kein Endezeitpunkt-Feld — wir stempeln beim ERSTEN
+        // Poll, der das Spiel als beendet sieht, und der Stempel bleibt über
+        // alle folgenden Zyklen stabil (Pausen-Logik + Ticker hängen daran).
+        let mut engine = SyncEngine::new();
+        let mut snap = snap_with(
+            Vec::new(),
+            vec![finished_named(1, 0, "A", "B"), ready_match(2, 2)],
+            Vec::new(),
+        );
+        snap.matches[0].finished_at = None;
+        engine.stamp_finished(&mut snap);
+        let first = snap.matches[0].finished_at.expect("beendet → gestempelt");
+        assert!(
+            snap.matches[1].finished_at.is_none(),
+            "laufend/geplant bleibt ungestempelt"
+        );
+
+        // Nächster Poll-Zyklus: frischer Snapshot, gleicher Stempel.
+        let mut snap2 = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        snap2.matches[0].finished_at = None;
+        engine.stamp_finished(&mut snap2);
+        assert_eq!(snap2.matches[0].finished_at, Some(first));
+    }
+
+    #[test]
+    fn track_scorekeepers_remembers_loser_after_finish() {
+        // Turnier-Regel: Der Verlierer zählt das nächste Spiel auf dem Feld.
+        // Zyklus 1: Match 1 läuft auf Feld 5 — Zyklus 2: beendet, Sieger
+        // Team 1 → Verlierer „B" wird als Zähltafelbediener von Feld 5 gemerkt.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet);
+        assert!(
+            tablet.scorekeeper(5).is_empty(),
+            "läuft noch → kein Bediener"
+        );
+
+        let snap2 = snap_with(
+            Vec::new(),
+            vec![finished_named(1, 42, "A", "B")],
+            Vec::new(),
+        );
+        engine.track_scorekeepers(&snap2, &tablet);
+        assert_eq!(tablet.scorekeeper(5), vec!["B".to_string()]);
+    }
+
+    #[test]
+    fn track_scorekeepers_ignores_match_leaving_court_unfinished() {
+        // Verlässt ein Spiel das Feld OHNE beendet zu sein (z. B. Zuweisung in
+        // BTP zurückgenommen), gibt es keinen Verlierer → kein Bediener-Eintrag.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet);
+
+        let snap2 = snap_with(Vec::new(), vec![ready_named(1, None, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap2, &tablet);
+        assert!(tablet.scorekeeper(5).is_empty());
+    }
 }
