@@ -503,6 +503,7 @@ async fn health(
     Query(q): Query<DeviceHeartbeat>,
 ) -> Json<serde_json::Value> {
     note_heartbeat(&ctx, &q);
+    let ct = &ctx.app_config().call_timer;
     Json(serde_json::json!({
         "ok": true,
         "courts": ctx.tablet.overview(),
@@ -511,6 +512,14 @@ async fn health(
         // zeigen Tablet und TV denselben Countdown (sonst Drift durch
         // abweichende Geraeteuhren). v0.9.32.
         "serverNowMs": monitor::now_ms(),
+        // Aufruf-Timer-Konfiguration (camelCase wie im MonitorState), damit
+        // die Multifeld-Übersicht (overview.html) „Zeit seit Aufruf" je Feld
+        // gleich wie die Einzelanzeige gaten und beschriften kann (Plan 4).
+        "callTimer": {
+            "enabled": ct.enabled,
+            "secondCallMinutes": ct.second_call_minutes,
+            "thirdCallMinutes": ct.third_call_minutes,
+        },
     }))
 }
 

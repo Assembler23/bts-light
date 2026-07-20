@@ -101,6 +101,17 @@ main {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* Aufruf-Uhr in der Wartephase (Plan 4): Minuten seit 1. Aufruf + Ampel.
+   Ampelfarben wie die Einzelanzeige: ok neutral, warn gelb, due rot. */
+.callchip {
+  align-self: flex-start; margin: .4vh 0 0; padding: .3vh 1.4vw;
+  border-radius: 1vmin; font-size: 2.4vmin; font-weight: 800;
+  white-space: nowrap; letter-spacing: .01em;
+  background: rgba(148,163,184,.16); color: #cbd5e1;
+}
+.callchip.warn { background: rgba(251,191,36,.18); color: #fde68a; }
+.callchip.due  { background: rgba(244,63,94,.20); color: #fda4af; }
+
 /* Teams + Sätze: Name(n) links, Satzstand rechts gross. */
 .teams {
   display: flex; flex-direction: column; gap: .6vh;
@@ -258,6 +269,10 @@ main {
   var lastData = null; // letzte Daten, damit der Rotations-Timer neu rendern kann
   var hallIdx = 0; // aktuell gezeigte Halle (Index in der Hallen-Liste)
   var hallTimer = null;
+  // Aufruf-Timer: Server-Zeit + Config aus dem letzten /health-Poll (Plan 4),
+  // damit renderCourt „Zeit seit Aufruf" relativ zur Server-Uhr rechnen kann.
+  var callNow = 0;
+  var callTimer = null;
 
   // Anzeige-Cap bei sehr großen Turnieren (sollte nicht greifen, dient
   // nur als Sicherheit gegen pathologische Daten).
@@ -309,6 +324,38 @@ main {
       : (s.b != null ? s.b : (s[1] != null ? s[1] : 0));
   }
 
+  // „Zeit seit Aufruf"-Chip (Plan 4): hochzählende Minuten seit dem 1. Aufruf
+  // + Ampel (1. → 2. → Letzter Aufruf) wie auf der Einzelanzeige. Nur solange
+  // das Spiel aufgerufen, aber NOCH NICHT am Zählen ist (Wartephase) — sonst
+  // würde ein Board voller laufender Spiele nach 4 min komplett rot; der
+  // laufende Satzstand ist dann ohnehin der Status. Leer, wenn Timer aus/
+  // keine Aufrufzeit.
+  function callChip(c) {
+    if (!callTimer || !callTimer.enabled) return null;
+    if (typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return null;
+    var sec = Math.max(0, Math.floor((callNow - c.on_court_since_ms) / 1000));
+    var min = sec / 60;
+    var label = '1. Aufruf', tone = 'ok';
+    if (typeof callTimer.thirdCallMinutes === 'number' && callTimer.thirdCallMinutes > 0
+        && min >= callTimer.thirdCallMinutes) {
+      label = 'Letzter Aufruf'; tone = 'due';
+    } else if (typeof callTimer.secondCallMinutes === 'number' && callTimer.secondCallMinutes > 0
+        && min >= callTimer.secondCallMinutes) {
+      label = '2. Aufruf'; tone = 'warn';
+    }
+    var mins = Math.floor(min);
+    var txt = (mins < 1 ? 'gerade aufgerufen' : 'vor ' + mins + ' min') + ' · ' + label;
+    return h('span', 'callchip ' + tone, txt);
+  }
+
+  // Spielt das Feld schon (Punkte gefallen oder Aufschläger bekannt)? Dann ist
+  // es keine Wartephase mehr → kein Aufruf-Chip.
+  function hasStarted(c) {
+    if (c.serving_team && c.serving_team > 0) return true;
+    var sets = Array.isArray(c.sets) ? c.sets : [];
+    return sets.some(function (s) { return (setVal(s, 0) + setVal(s, 1)) > 0; });
+  }
+
   function renderCourt(c) {
     var card = h('div', 'court');
     var head = h('div', 'court__head');
@@ -336,6 +383,12 @@ main {
 
     head.appendChild(h('span', 'court__discipline', c.match_name || ''));
     card.appendChild(head);
+
+    // Aufruf-Uhr nur in der Wartephase (aufgerufen, noch nicht am Zählen).
+    if (!isPause && !hasStarted(c)) {
+      var chip = callChip(c);
+      if (chip) card.appendChild(chip);
+    }
 
     var sets = Array.isArray(c.sets) ? c.sets : [];
     var lastIdx = sets.length - 1;
@@ -415,6 +468,10 @@ main {
 
   function render(data) {
     lastData = data;
+    // Aufruf-Timer-Bezug aus dem Poll übernehmen (Server-Uhr gegen Geräte-Drift).
+    callNow = (data && typeof data.serverNowMs === 'number' && data.serverNowMs > 0)
+      ? data.serverNowMs : Date.now();
+    callTimer = (data && data.callTimer) || null;
     var board = document.getElementById('board');
     board.textContent = '';
 
