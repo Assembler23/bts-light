@@ -113,6 +113,10 @@ Aufstellung:
   Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
   Datenschutzgründen nicht her; dort bleibt die Anzeige leer.
+- **Kein Ton am Tablet (bewusst):** Das Tablet gibt **weder Gong noch
+  Sprachansage** aus – es ist ein reiner Spielzettel am Feld. Gong und
+  Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
+  ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
 
 ## Meldungen an die Turnierleitung
 

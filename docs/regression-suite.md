@@ -66,6 +66,12 @@ anpassen:
   Zählung). Ein volles DOM-Harness ist bewusst zurückgestellt — sonstige
   Änderungen an tablet.html brauchen einen manuellen Test am echten Tablet
   (siehe [tablet.md](tablet.md)).
+- **Gong-Auflöse-Timing** (`src/io/announcer.ts`, Plan 15): die reine
+  Race-Logik liegt in [`gongTiming.mjs`](../src/io/gongTiming.mjs) und ist
+  durch [`scripts/test-gong-timing.mjs`](../scripts/test-gong-timing.mjs)
+  im CI abgesichert (onended-Pfad, Fallback-Pfad, done-Guard über einen
+  Fake-Timer). Die Web-Audio-Kopplung + die hörbare Wirkung (WebView2-
+  Resume-Latenz) bleiben ein manueller Test unter Windows.
 - **`run_once`-Gesamtzyklus** (Netz + BTP + badhub zusammen): nur in
   Teilen testbar; die Einzelschritte sind abgedeckt.
 
