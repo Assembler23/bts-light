@@ -17,3 +17,4 @@ hier eintragen.
 | [0004](0004-telefon-kopplungscode.md) | Kopplung ferner Hallen über kurzlebigen 8-stelligen Telefon-Code | akzeptiert |
 | [0005](0005-lan-https-selbstsigniert.md) | LAN-Tablet-Server: HTTPS mit selbstsigniertem Zertifikat | akzeptiert |
 | [0006](0006-master-identitaet-umziehen.md) | Master-Identität per Export/Import auf einen neuen PC umziehen | akzeptiert |
+| [0007](0007-zaehltafelbediener.md) | Zähltafelbediener nach Vorbild Original-BTS, in zwei Phasen | akzeptiert |

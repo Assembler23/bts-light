@@ -83,6 +83,12 @@ export interface CallTimerConfig {
   third_call_minutes: number;
 }
 
+/** Zähltafelbediener-Verwaltung (Rust: config::ScorekeeperConfig, ADR 0007). */
+export interface ScorekeeperConfig {
+  enabled: boolean;
+  break_seconds: number;
+}
+
 /** Einstellungen der automatischen Feldvergabe (Rust: config::AutoAssignConfig). */
 export interface AutoAssignConfig {
   /** Automatische Feldvergabe aktiv? */
@@ -334,6 +340,8 @@ export interface AppConfig {
   court_monitor: CourtMonitorConfig;
   /** Einstellungen des Aufruf-Timers (1./2./3. Aufruf). */
   call_timer: CallTimerConfig;
+  /** Zähltafelbediener-Verwaltung (ADR 0007). */
+  scorekeeper: ScorekeeperConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
@@ -441,6 +449,16 @@ export interface CourtOverview {
   best_of: number;
   target_score: number;
   cap_score: number;
+}
+
+/** Ein Wartender in der Zähltafelbediener-Warteschlange (Rust:
+ *  tablet::state::ScorekeeperEntry, ADR 0007). */
+export interface ScorekeeperEntry {
+  key: string;
+  names: string[];
+  /** CourtID des zuletzt gespielten Felds (0 = manuell hinzugefügt). */
+  from_court_id: number;
+  enqueued_ms: number;
 }
 
 /** Tablet-Server-Adresse + Felder-Übersicht (Rust: commands::TabletInfo). */

@@ -13,6 +13,7 @@ import type {
   NameOverride,
   PairingCode,
   PreparationView,
+  ScorekeeperEntry,
   InternetStatus,
   SlaveInfo,
   SlaveDeviceInfo,
@@ -195,6 +196,23 @@ export const callPreparation = (
 /** Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück. */
 export const retractPreparation = (matchId: number): Promise<void> =>
   invoke("retract_preparation", { matchId });
+
+/** Zähltafelbediener-Warteschlange (FIFO) — Verlierer regulär beendeter Spiele
+ *  (ADR 0007). */
+export const scorekeeperQueue = (): Promise<ScorekeeperEntry[]> =>
+  invoke("scorekeeper_queue");
+
+/** Einen Wartenden aus der Zähltafelbediener-Schlange entfernen. */
+export const removeScorekeeper = (key: string): Promise<void> =>
+  invoke("remove_scorekeeper", { key });
+
+/** Einen Wartenden an den Anfang der Schlange ziehen (als Nächsten dran). */
+export const advanceScorekeeper = (key: string): Promise<void> =>
+  invoke("advance_scorekeeper", { key });
+
+/** Manuell einen Zähltafelbediener hinzufügen. */
+export const addScorekeeper = (names: string[]): Promise<void> =>
+  invoke("add_scorekeeper", { names });
 
 /** Podien aller ausgespielten Disziplinen + aktuell gewählte Disziplin. */
 export const winnersOverview = (): Promise<WinnersView> =>

@@ -2028,6 +2028,34 @@ pub fn retract_preparation(state: State<'_, AppState>, match_id: i64) {
     state.tablet.remove_preparation_call(match_id);
 }
 
+// ───────────────── Zähltafelbediener-Warteschlange (ADR 0007, Phase 1) ─────
+
+/// Aktuelle Zähltafelbediener-Warteschlange (FIFO) für die Warteliste-Anzeige.
+#[tauri::command]
+pub fn scorekeeper_queue(
+    state: State<'_, AppState>,
+) -> Vec<crate::tablet::state::ScorekeeperEntry> {
+    state.tablet.scorekeeper_queue()
+}
+
+/// Einen Wartenden aus der Schlange entfernen (manuelle Pflege).
+#[tauri::command]
+pub fn remove_scorekeeper(state: State<'_, AppState>, key: String) {
+    state.tablet.remove_scorekeeper(&key);
+}
+
+/// Einen Wartenden an den Anfang ziehen (als Nächsten dran).
+#[tauri::command]
+pub fn advance_scorekeeper(state: State<'_, AppState>, key: String) {
+    state.tablet.advance_scorekeeper(&key);
+}
+
+/// Manuell einen Zähltafelbediener hinzufügen (nicht aus einem Spielende).
+#[tauri::command]
+pub fn add_scorekeeper(state: State<'_, AppState>, names: Vec<String>) {
+    state.tablet.add_scorekeeper_manual(names, now_ms());
+}
+
 // ───────────────────────────── Siegerehrung ───────────────────────────────
 
 /// Podien der ausgespielten Disziplinen + aktuell gewählte Disziplin – für

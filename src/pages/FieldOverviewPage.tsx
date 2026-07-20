@@ -13,12 +13,16 @@ import {
 } from "react";
 import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
 import {
+  addScorekeeper,
+  advanceScorekeeper,
   assignCourt,
   disqualifyMatch,
   enterResult,
   finishedMatches,
   freeCourt,
   preparationCandidates,
+  removeScorekeeper,
+  scorekeeperQueue,
   setCourtLocked,
   tabletOverview,
 } from "../api";
@@ -35,6 +39,7 @@ import type {
   DisciplineHallRule,
   FinishedMatchRow,
   PreparationCandidate,
+  ScorekeeperEntry,
 } from "../types";
 
 const POLL_MS = 2500;
@@ -68,6 +73,7 @@ export function FieldOverviewPage({
   announce,
   azureTts,
   disciplineHallRules,
+  manageScorekeepers,
 }: {
   callTimer: CallTimerConfig;
   announce: AnnounceConfig;
@@ -75,6 +81,8 @@ export function FieldOverviewPage({
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): nicht erlaubte Felder werden
    *  ausgegraut; eine Vergabe dorthin wird abgewiesen (Backend erzwingt es). */
   disciplineHallRules: DisciplineHallRule[];
+  /** Zähltafelbediener-Warteschlange führen (ADR 0007, Config-Schalter). */
+  manageScorekeepers: boolean;
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
@@ -91,6 +99,9 @@ export function FieldOverviewPage({
   // Zwei-Schritt-Bestätigung der Disqualifikation (folgenreich): erst Team
   // wählen, dann bestätigen. null = keine Auswahl offen.
   const [dqConfirm, setDqConfirm] = useState<1 | 2 | null>(null);
+  // Zähltafelbediener-Warteschlange (ADR 0007) + Eingabe fürs manuelle Hinzufügen.
+  const [skQueue, setSkQueue] = useState<ScorekeeperEntry[]>([]);
+  const [skAdd, setSkAdd] = useState("");
   // Hallen-Filter (null = alle Hallen).
   const [hallFilter, setHallFilter] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
@@ -129,6 +140,24 @@ export function FieldOverviewPage({
       if (timer.current) window.clearInterval(timer.current);
     };
   }, [refresh]);
+
+  // Zähltafelbediener-Warteschlange separat pollen (nur wenn aktiviert).
+  const refreshSk = useCallback(() => {
+    if (!manageScorekeepers) return;
+    scorekeeperQueue()
+      .then(setSkQueue)
+      .catch(() => {});
+  }, [manageScorekeepers]);
+
+  useEffect(() => {
+    if (!manageScorekeepers) {
+      setSkQueue([]);
+      return;
+    }
+    refreshSk();
+    const id = window.setInterval(refreshSk, POLL_MS);
+    return () => window.clearInterval(id);
+  }, [manageScorekeepers, refreshSk]);
 
   // Eine BTP-schreibende Aktion ausführen, dann sofort neu laden.
   async function run(action: () => Promise<void>) {
@@ -632,6 +661,90 @@ export function FieldOverviewPage({
           vorgegebene Halle.
         </p>
       </section>
+
+      {/* Zähltafelbediener-Warteschlange (ADR 0007): Verlierer regulär
+          beendeter Spiele, FIFO. Nur bei aktivierter Verwaltung. */}
+      {manageScorekeepers && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Nächste Zähltafelbediener{" "}
+            <span className="text-slate-400">({skQueue.length})</span>
+          </h2>
+          <p className="text-xs text-slate-500">
+            Der Verlierer eines regulär beendeten Spiels ist als Nächster dran
+            (wie im Original-BTS). Reihenfolge hier pflegen.
+          </p>
+          {skQueue.length > 0 && (
+            <ol className="flex flex-col gap-1.5">
+              {skQueue.map((e, i) => (
+                <li
+                  key={e.key}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+                >
+                  <span className="w-5 shrink-0 text-xs font-semibold text-slate-400 tabular-nums">
+                    {i + 1}.
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm">
+                    {e.names.join(" / ")}
+                  </span>
+                  {i > 0 && (
+                    <button
+                      onClick={() =>
+                        void advanceScorekeeper(e.key).then(refreshSk)
+                      }
+                      title="Als Nächsten dran (nach oben)"
+                      className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium
+                                 text-slate-700 hover:bg-slate-200"
+                    >
+                      ▲ Vorziehen
+                    </button>
+                  )}
+                  <button
+                    onClick={() =>
+                      void removeScorekeeper(e.key).then(refreshSk)
+                    }
+                    title="Aus der Warteschlange entfernen"
+                    className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-rose-100 hover:text-rose-700"
+                  >
+                    <Ban size={14} />
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+          <div className="flex items-center gap-2">
+            <input
+              value={skAdd}
+              onChange={(e) => setSkAdd(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && skAdd.trim()) {
+                  void addScorekeeper([skAdd.trim()]).then(() => {
+                    setSkAdd("");
+                    refreshSk();
+                  });
+                }
+              }}
+              placeholder="Manuell hinzufügen (Name)"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm
+                         focus:border-slate-500 focus:outline-none"
+            />
+            <button
+              onClick={() => {
+                if (!skAdd.trim()) return;
+                void addScorekeeper([skAdd.trim()]).then(() => {
+                  setSkAdd("");
+                  refreshSk();
+                });
+              }}
+              disabled={!skAdd.trim()}
+              className="shrink-0 rounded-md bg-slate-800 px-3 py-1 text-sm font-medium text-white
+                         hover:bg-slate-700 disabled:opacity-50"
+            >
+              Hinzufügen
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Abgeschlossene Spiele (neueste zuerst). */}
       <section className="flex flex-col gap-2">

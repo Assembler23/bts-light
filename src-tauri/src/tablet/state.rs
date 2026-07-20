@@ -188,6 +188,23 @@ pub struct PreparationCall {
     pub called_at_ms: u64,
 }
 
+/// Ein Wartender in der Zähltafelbediener-Warteschlange (ADR 0007, Phase 1).
+/// Nach Tilos Vorbild ist das der Verlierer eines regulär beendeten Spiels;
+/// die FIFO-Reihenfolge bestimmt, wer als Nächstes ein Feld bedient. Ein
+/// Doppel steht als EIN Eintrag (das ganze Team).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ScorekeeperEntry {
+    /// Stabiler Schlüssel für die manuelle Pflege (Vorziehen/Entfernen).
+    pub key: String,
+    /// Spieler-Namen (1 bei Einzel, 2 bei Doppel).
+    pub names: Vec<String>,
+    /// BTP-CourtID des Felds, auf dem die Person zuletzt gespielt hat
+    /// (0 = manuell hinzugefügt) — für die „bevorzugt aufs eigene Feld"-Regel.
+    pub from_court_id: i64,
+    /// Zeitpunkt des Einreihens (Unix-ms) — FIFO-Reihenfolge + Mindestpause.
+    pub enqueued_ms: u64,
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -218,6 +235,12 @@ pub struct TabletState {
     /// Spiel). Vom Sync-Loop beim Übergang OnCourt→Finished gepflegt, weil
     /// BTP beendete Spiele nicht zuverlässig dem Feld zugeordnet behält.
     scorekeeper_by_court: RwLock<HashMap<i64, Vec<String>>>,
+    /// Globale FIFO-Warteschlange der Zähltafelbediener (ADR 0007, Phase 1):
+    /// Verlierer regulär beendeter Spiele, in Reihenfolge des Einreihens.
+    scorekeeper_queue: RwLock<Vec<ScorekeeperEntry>>,
+    /// Match-IDs, deren Verlierer bereits eingereiht wurde — Dedup gegen
+    /// Mehrfach-Einreihen desselben Spielendes.
+    enqueued_finishes: RwLock<HashSet<i64>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
     /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
     /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
@@ -375,6 +398,81 @@ impl TabletState {
             .write()
             .unwrap()
             .insert(court_id, loser_names);
+    }
+
+    // ── Zähltafelbediener-Warteschlange (ADR 0007, Phase 1) ────────────────
+
+    /// Reiht den Verlierer eines regulär beendeten Spiels in die globale
+    /// FIFO-Warteschlange ein (Tilos Modell). Idempotent je `match_id`
+    /// (Dedup über `enqueued_finishes`), damit ein Spielende nicht mehrfach
+    /// zählt. Leere Namen werden ignoriert.
+    pub fn enqueue_scorekeeper(
+        &self,
+        match_id: i64,
+        names: Vec<String>,
+        from_court_id: i64,
+        now_ms: u64,
+    ) {
+        if names.is_empty() {
+            return;
+        }
+        {
+            let mut done = self.enqueued_finishes.write().unwrap();
+            if !done.insert(match_id) {
+                return; // schon eingereiht
+            }
+        }
+        self.scorekeeper_queue
+            .write()
+            .unwrap()
+            .push(ScorekeeperEntry {
+                key: format!("m{match_id}-{now_ms}"),
+                names,
+                from_court_id,
+                enqueued_ms: now_ms,
+            });
+    }
+
+    /// Manuell einen Wartenden hinzufügen (nicht aus einem Spielende).
+    pub fn add_scorekeeper_manual(&self, names: Vec<String>, now_ms: u64) {
+        let names: Vec<String> = names
+            .into_iter()
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+        let mut q = self.scorekeeper_queue.write().unwrap();
+        let key = format!("x{}-{}", now_ms, q.len());
+        q.push(ScorekeeperEntry {
+            key,
+            names,
+            from_court_id: 0,
+            enqueued_ms: now_ms,
+        });
+    }
+
+    /// Aktuelle Warteschlange (FIFO-Reihenfolge) für die Anzeige.
+    pub fn scorekeeper_queue(&self) -> Vec<ScorekeeperEntry> {
+        self.scorekeeper_queue.read().unwrap().clone()
+    }
+
+    /// Einen Wartenden aus der Schlange entfernen (per Schlüssel).
+    pub fn remove_scorekeeper(&self, key: &str) {
+        self.scorekeeper_queue
+            .write()
+            .unwrap()
+            .retain(|e| e.key != key);
+    }
+
+    /// Einen Wartenden an den Anfang der Schlange ziehen (als Nächsten dran).
+    pub fn advance_scorekeeper(&self, key: &str) {
+        let mut q = self.scorekeeper_queue.write().unwrap();
+        if let Some(pos) = q.iter().position(|e| e.key == key) {
+            let e = q.remove(pos);
+            q.insert(0, e);
+        }
     }
 
     /// Gesperrte Felder beim Start aus der Config übernehmen.
@@ -1898,5 +1996,54 @@ mod tests {
         let q = st.btp_retries();
         assert_eq!(q.len(), 1);
         assert_eq!(q[0].update.btp_match_id, 8);
+    }
+
+    // ── Zähltafelbediener-Warteschlange (ADR 0007, Phase 1) ────────────────
+
+    #[test]
+    fn scorekeeper_enqueue_is_fifo_and_dedups_per_match() {
+        let st = TabletState::default();
+        st.enqueue_scorekeeper(1, vec!["A".into()], 5, 1_000);
+        st.enqueue_scorekeeper(2, vec!["B".into(), "C".into()], 6, 2_000);
+        // Zweiter Versuch für Match 1 → kein Duplikat.
+        st.enqueue_scorekeeper(1, vec!["A".into()], 5, 3_000);
+        let q = st.scorekeeper_queue();
+        assert_eq!(q.len(), 2, "kein Doppel-Eintrag je Spielende");
+        assert_eq!(q[0].names, vec!["A".to_string()]); // FIFO: ältester zuerst
+        assert_eq!(q[1].names, vec!["B".to_string(), "C".to_string()]);
+        // Leere Namen werden ignoriert.
+        st.enqueue_scorekeeper(3, vec![], 7, 4_000);
+        assert_eq!(st.scorekeeper_queue().len(), 2);
+    }
+
+    #[test]
+    fn scorekeeper_remove_and_advance_and_manual_add() {
+        let st = TabletState::default();
+        st.enqueue_scorekeeper(1, vec!["A".into()], 5, 1_000);
+        st.enqueue_scorekeeper(2, vec!["B".into()], 6, 2_000);
+        st.add_scorekeeper_manual(vec![" C ".into()], 3_000); // getrimmt
+        let keys: Vec<String> = st
+            .scorekeeper_queue()
+            .iter()
+            .map(|e| e.key.clone())
+            .collect();
+        assert_eq!(keys.len(), 3);
+        // Manuellen Eintrag „C" nach vorne ziehen.
+        let c_key = st
+            .scorekeeper_queue()
+            .into_iter()
+            .find(|e| e.names == vec!["C".to_string()])
+            .unwrap()
+            .key;
+        st.advance_scorekeeper(&c_key);
+        assert_eq!(st.scorekeeper_queue()[0].names, vec!["C".to_string()]);
+        // „A" entfernen.
+        st.remove_scorekeeper(&keys[0]);
+        let names: Vec<Vec<String>> = st
+            .scorekeeper_queue()
+            .into_iter()
+            .map(|e| e.names)
+            .collect();
+        assert_eq!(names, vec![vec!["C".to_string()], vec!["B".to_string()]]);
     }
 }

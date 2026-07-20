@@ -235,6 +235,28 @@ impl Default for CallTimerConfig {
     }
 }
 
+/// Zähltafelbediener-Verwaltung (ADR 0007, Phase 1). Opt-in — standardmäßig
+/// aus, damit Turniere ohne dieses Konzept unverändert laufen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ScorekeeperConfig {
+    /// Warteschlange der Zähltafelbediener führen (Verlierer einreihen)?
+    pub enabled: bool,
+    /// Garantierte Mindestpause (Sekunden) nach einem Bedien-Einsatz, bevor
+    /// jemand erneut gezogen wird. Wirkt erst mit der Zuweisung (Phase 1
+    /// Scheibe 2/3); hier bereits konfigurierbar. Default 300 s (Tilo).
+    pub break_seconds: u64,
+}
+
+impl Default for ScorekeeperConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            break_seconds: 300,
+        }
+    }
+}
+
 /// Einstellungen der automatischen Feldvergabe. Ist sie aktiv, weist bts-light
 /// ein spielbereites Match automatisch einem freien, nicht gesperrten Feld zu,
 /// sobald dieses lange genug frei ist – schreibt das wie die manuelle Vergabe
@@ -380,6 +402,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub call_timer: CallTimerConfig,
+    /// Zähltafelbediener-Verwaltung (ADR 0007). `#[serde(default)]` hält
+    /// ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub scorekeeper: ScorekeeperConfig,
     /// Einstellungen der automatischen Feldvergabe. `#[serde(default)]` hält
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -642,6 +668,10 @@ mod tests {
                 enabled: true,
                 second_call_minutes: 1.5,
                 third_call_minutes: 3.0,
+            },
+            scorekeeper: ScorekeeperConfig {
+                enabled: true,
+                break_seconds: 300,
             },
             auto_assign: AutoAssignConfig {
                 enabled: true,
