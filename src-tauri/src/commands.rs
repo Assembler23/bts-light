@@ -85,6 +85,14 @@ fn status_from(outcome: &SyncOutcome) -> SyncStatus {
         SyncOutcome::Idle => ("ok", "Verbunden – keine Änderung".to_string()),
         SyncOutcome::SlaveActive => ("ok", "Ansage-Slave aktiv – nur Ansagen".to_string()),
         SyncOutcome::BtpError(e) => ("btp_error", format!("BTP nicht erreichbar: {e}")),
+        // Bewusst "warn" (orange), nicht "btp_error" (rot): Der Guard
+        // heilt sich im Folge-Abruf selbst — für die Turnierleitung ist
+        // das kein Ausfall.
+        SyncOutcome::SnapshotDiscarded => (
+            "warn",
+            "BTP lieferte einen leeren Turnier-Stand – verworfen, warte auf Bestätigung"
+                .to_string(),
+        ),
         SyncOutcome::PushError(e) => ("push_error", format!("Push fehlgeschlagen: {e}")),
     };
     SyncStatus {

@@ -332,7 +332,7 @@ export interface LogoConfig {
 
 export interface SyncStatus {
   running: boolean;
-  /** "idle" | "ok" | "btp_error" | "push_error" */
+  /** "idle" | "ok" | "warn" | "btp_error" | "push_error" */
   kind: string;
   message: string;
   updated_at_ms: number;

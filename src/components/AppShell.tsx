@@ -17,6 +17,9 @@ function dotColor(status: SyncStatus | null): string {
   if (!status || !status.running) return "bg-slate-400";
   if (status.kind === "ok") return "bg-emerald-500";
   if (status.kind === "idle") return "bg-amber-400";
+  // "warn" = selbstheilender Zwischenzustand (z. B. verworfener leerer
+  // BTP-Snapshot) – bewusst KEIN Rot, das ist kein Ausfall.
+  if (status.kind === "warn") return "bg-orange-400";
   return "bg-rose-500";
 }
 
