@@ -94,8 +94,13 @@ jobs:
       contents: read
     steps:
       # Repo wird für den Release-Seiten-Generator + docs/changelog.md
-      # gebraucht (scripts/build-release-page.mjs).
+      # gebraucht (scripts/build-release-page.mjs). fetch-depth: 0 +
+      # fetch-tags: alle Tags samt Erstell-Datum, damit die Release-Seite
+      # je Version das Datum zeigen kann.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Release-Assets holen
         env:
@@ -126,9 +131,12 @@ jobs:
           ssh badhub@178.104.221.177 \
             'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$" || true' > exes.txt
           (cd rel && ls *-setup.exe) >> exes.txt
+          # Release-Daten je Version aus den Tags (Version → Erstell-Datum).
+          git for-each-ref --format '%(refname:short) %(creatordate:short)' refs/tags > dates.txt
           node scripts/build-release-page.mjs \
             --changelog docs/changelog.md \
             --files exes.txt \
+            --dates dates.txt \
             --out rel/index.html \
             --notes-out notes.txt \
             --notes-version "${GITHUB_REF_NAME#v}"

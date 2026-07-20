@@ -37,9 +37,12 @@ des Court-Monitors hat ohnehin einen festen Namen
 ## Release-Seite (Downloads + Änderungen je Version)
 
 `https://badhub.de/download/bts-light/` zeigt alle Versionen mit
-Download-Link und den Kompakt-Änderungen aus
+Download-Link, Datum und den Kompakt-Änderungen aus
 [changelog.md](changelog.md); die neueste Version steht prominent oben
-(plus der stabile Link). Die Seite wird bei **jedem Tag-Release
+(plus der stabile Link). Das **Datum je Version** kommt aus dem
+Erstell-Datum des Git-Tags (`git for-each-ref … refs/tags` →
+`--dates`-Datei; der publish-Job checkt dafür mit `fetch-depth: 0` +
+`fetch-tags` aus). Die Seite wird bei **jedem Tag-Release
 automatisch** neu erzeugt (`scripts/build-release-page.mjs` im
 publish-Job) und zusammen mit Installer + `latest.json` hochgeladen.
 Download-Knöpfe erscheinen nur für Versionen, deren Installer wirklich
