@@ -88,6 +88,16 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
    WebSocket-Frame an den Host → bts-light schreibt per `SENDUPDATE` nach
    BTP und antwortet mit `ResultAck`.
 
+**Aufgerufene Spiele in die ferne Halle (Cluster C Stufe 2, v0.9.154):**
+Der Host pusht seine in Vorbereitung gerufenen Spiele als
+`HostFrame::Prepared` (nur bei Änderung, Fingerabdruck) an den Relay; der
+hält sie je Namespace (`Namespace.prepared`) und gibt sie in
+`GET /{ns}/info/announce/state` **hallengefiltert** als
+`AnnounceState.prepared` zurück. Der Cloud-Slave zeigt sie unter
+„Aufgerufene Spiele" und sagt den **Zweit-/Drittaufruf** einer fehlenden
+Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
+[announcements.md](announcements.md).
+
 Reconnect: bts-light verbindet bei Abriss mit Backoff (1 s → 30 s) neu,
 Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
 

@@ -17,15 +17,23 @@ import { publishFreetext, saveConfig, tabletOverview } from "../api";
 import { AnnounceSettings } from "../components/AnnounceSettings";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
-import { playTestAnnouncement } from "../io/announcer";
+import {
+  disciplineWithClass,
+  playPreparationAnnouncement,
+  playTestAnnouncement,
+  resolveAnnouncementLanguage,
+} from "../io/announcer";
 import { useNow } from "../state/callTimer";
+import { usePreparedGames } from "../state/preparedGames";
 import { recordAnnounce, useAnnounceHistory } from "../state/announceHistory";
 import type {
   AnnounceConfig,
   AppConfig,
   AzureTtsConfig,
   CallTimerConfig,
+  CloudPrepared,
   CourtOverview,
+  Discipline,
 } from "../types";
 import { azureOption } from "../io/azureAnnounce";
 
@@ -37,6 +45,19 @@ function teamsLabel(t1: string[], t2: string[]): string {
 
 function fieldEntryText(c: CourtOverview): string {
   return `Feld ${c.court}: ${teamsLabel(c.team1, c.team2)}`;
+}
+
+/** „vor X Min." (bzw. „gerade eben") seit dem Aufruf-Zeitstempel. */
+function sinceLabel(calledAtMs: number, now: number): string {
+  const min = Math.floor((now - calledAtMs) / 60000);
+  if (min < 1) return "gerade eben";
+  return `vor ${min} Min.`;
+}
+
+/** Nachname (letztes Wort) als kurzes Knopf-Label; Fallback: ganzer Name. */
+function shortName(team: string[]): string {
+  const first = team[0] ?? "";
+  return first.trim().split(" ").filter(Boolean).slice(-1)[0] || first;
 }
 
 function timeLabel(ts: number): string {
@@ -66,6 +87,12 @@ export function AnnouncePage({
   onConfigSaved: (config: AppConfig) => void;
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
+  // Aufgerufene Spiele der eigenen Halle (nur Cloud-Slave, Cluster C Stufe 2):
+  // vom CloudAnnounceSlave-Poll veröffentlicht (ein Poll, zwei Verbraucher).
+  const prepared = usePreparedGames();
+  // MatchID:Seite → bereits erfolgter Aufruf (2 nach dem ersten Nachruf) →
+  // der nächste wird zum „Dritten und letzten Aufruf" (wie am Master).
+  const [callStages, setCallStages] = useState<Map<string, 2 | 3>>(new Map());
   const now = useNow();
   // Freitext-Ansage (Master → eigene Halle/„alle"; Slaves holen sie ab).
   const [freeText, setFreeText] = useState("");
@@ -90,6 +117,26 @@ export function AnnouncePage({
       clearInterval(id);
     };
   }, []);
+
+  // Nachruf-Zähler bereinigen, sobald ein Spiel nicht mehr aufgerufen ist
+  // (zurückgenommen / aufs Feld gerufen / beendet). Sonst startete ein später
+  // erneut gerufenes Match direkt beim „Dritten Aufruf" — der Master räumt
+  // seinen Zähler in `retract()` analog auf (Konsistenz beider Rollen).
+  useEffect(() => {
+    setCallStages((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(prepared.map((p) => p.match_id));
+      let changed = false;
+      const next = new Map(prev);
+      for (const key of next.keys()) {
+        if (!live.has(Number(key.split(":")[0]))) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [prepared]);
 
   const onField = courts.filter((c) => c.match_id > 0);
   const halls = [
@@ -121,6 +168,37 @@ export function AnnouncePage({
     const t = freeText.trim();
     if (!t) return;
     if (await announceText(t, freeHall)) setFreeText("");
+  }
+
+  // Gezielter Zweit-/Drittaufruf NUR einer Partei eines aufgerufenen Spiels –
+  // am Slave-PC, lokal in der eigenen Halle angesagt (Cluster C Stufe 2).
+  // Erster Nachruf = „Zweiter Aufruf", jeder weitere = „Dritter und letzter".
+  function secondCall(p: CloudPrepared, side: "a" | "b") {
+    const key = `${p.match_id}:${side}`;
+    const stage: 2 | 3 = callStages.get(key) ? 3 : 2;
+    setCallStages((m) => new Map(m).set(key, stage));
+    const names = side === "a" ? p.team1 : p.team2;
+    const nats = side === "a" ? p.team1_nationalities : p.team2_nationalities;
+    const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
+    void playPreparationAnnouncement(
+      {
+        discipline: (p.discipline || "unknown") as Discipline,
+        className: p.class_label,
+        teamANames: names,
+        teamBNames: [], // nur die fehlende Partei ansagen
+        hall: p.hall || undefined,
+        callStage: stage,
+      },
+      lang,
+      {
+        rate: announce.rate,
+        voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+        gong: announce.gong,
+        nameOverrides: announce.name_overrides,
+        nameOverridesEnabled: announce.name_overrides_enabled,
+        azure: azureOption(azureTts),
+      },
+    );
   }
 
   // Manuelle Feld-Ansage (lokal am Steuer-PC) + protokollieren.
@@ -177,7 +255,8 @@ export function AnnouncePage({
     }
   }
 
-  const blockSaved = freeText.trim() !== "" && savedBlocks.includes(freeText.trim());
+  const blockSaved =
+    freeText.trim() !== "" && savedBlocks.includes(freeText.trim());
 
   return (
     <main className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 p-6 text-slate-800">
@@ -191,17 +270,20 @@ export function AnnouncePage({
 
       <button
         onClick={() =>
-          void playTestAnnouncement(announce.language_mode === "en" ? "en" : "de", {
-            rate: announce.rate,
-            voiceURI:
-              (announce.language_mode === "en"
-                ? announce.voice_en
-                : announce.voice_de) || undefined,
-            gong: announce.gong,
-            nameOverrides: announce.name_overrides,
-            nameOverridesEnabled: announce.name_overrides_enabled,
-            azure: azureOption(azureTts),
-          })
+          void playTestAnnouncement(
+            announce.language_mode === "en" ? "en" : "de",
+            {
+              rate: announce.rate,
+              voiceURI:
+                (announce.language_mode === "en"
+                  ? announce.voice_en
+                  : announce.voice_de) || undefined,
+              gong: announce.gong,
+              nameOverrides: announce.name_overrides,
+              nameOverridesEnabled: announce.name_overrides_enabled,
+              azure: azureOption(azureTts),
+            },
+          )
         }
         className="inline-flex w-fit items-center gap-2 rounded-lg bg-slate-100 px-3.5 py-2
                    text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
@@ -211,7 +293,9 @@ export function AnnouncePage({
 
       {/* Freitext-Ansage: eintippen → in einer Halle oder allen ansagen. */}
       <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-700">Freitext-Ansage</h2>
+        <h2 className="text-sm font-semibold text-slate-700">
+          Freitext-Ansage
+        </h2>
         <p className="text-xs text-slate-500">
           Text eintippen und in einer Halle oder allen Hallen ansagen (eigener
           Gong, Stimme wie unten eingestellt). Slave-Rechner holen die Ansage
@@ -261,7 +345,8 @@ export function AnnouncePage({
                        font-medium text-slate-700 transition-colors hover:bg-slate-200
                        disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Save size={16} /> {blockSaved ? "Gespeichert" : "Als Block speichern"}
+            <Save size={16} />{" "}
+            {blockSaved ? "Gespeichert" : "Als Block speichern"}
           </button>
           {!announce.enabled && (
             <span className="text-xs text-amber-600">
@@ -321,6 +406,87 @@ export function AnnouncePage({
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* Cloud-Slave: aufgerufene Spiele der eigenen Halle (vom Master gepusht)
+          mit gezieltem Zweit-/Drittaufruf je fehlender Partei, lokal angesagt
+          (Cluster C Stufe 2). */}
+      {config.slave_mode && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Aufgerufene Spiele{" "}
+            <span className="text-slate-400">({prepared.length})</span>
+          </h2>
+          <p className="text-xs text-slate-500">
+            Von der Turnierleitung „in Vorbereitung" gerufene Spiele deiner
+            Halle. Fehlt eine Partei, kannst du sie hier gezielt nachrufen – die
+            Ansage läuft lokal auf diesem Rechner.
+          </p>
+          {prepared.length === 0 ? (
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400">
+              Aktuell wurde kein Spiel in die Vorbereitung gerufen.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {prepared.map((p) => (
+                <div
+                  key={p.match_id}
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {[
+                        disciplineWithClass(
+                          (p.discipline || "unknown") as Discipline,
+                          p.class_label,
+                          announce.language_mode === "en" ? "en" : "de",
+                        ),
+                        p.round_name,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "Spiel"}
+                    </div>
+                    <div className="truncate text-xs text-slate-500">
+                      {p.team1.length > 0 ? p.team1.join(" / ") : "—"}{" "}
+                      <span className="text-slate-400">gegen</span>{" "}
+                      {p.team2.length > 0 ? p.team2.join(" / ") : "—"}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-xs text-sky-700">
+                    {sinceLabel(p.called_at_ms, now)}
+                  </span>
+                  {/* Nachruf je Partei; nur wenn Ansagen aktiv sind. */}
+                  {announce.enabled &&
+                    (["a", "b"] as const).map((side) => {
+                      const team = side === "a" ? p.team1 : p.team2;
+                      if (team.length === 0) return null;
+                      const nextStage = callStages.get(`${p.match_id}:${side}`)
+                        ? 3
+                        : 2;
+                      return (
+                        <button
+                          key={side}
+                          onClick={() => secondCall(p, side)}
+                          title={`${nextStage === 3 ? "Dritter und letzter" : "Zweiter"} Aufruf für ${team.join(" / ")}`}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-md
+                                     bg-amber-100 px-2 py-1.5 text-xs font-medium text-amber-800
+                                     transition-colors hover:bg-amber-200"
+                        >
+                          {side === "a" ? "◂" : "▸"} {nextStage}. Ruf{" "}
+                          {shortName(team)}
+                        </button>
+                      );
+                    })}
+                  {!announce.enabled && (
+                    <span className="shrink-0 text-xs text-amber-600">
+                      Ansagen unten deaktiviert.
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -392,7 +558,10 @@ export function AnnouncePage({
                   {entry.kind === "field" ? "Feld" : "Text"}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-slate-700" title={entry.text}>
+                  <div
+                    className="truncate text-sm text-slate-700"
+                    title={entry.text}
+                  >
                     {entry.text}
                   </div>
                   <div className="text-xs text-slate-400">

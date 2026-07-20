@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.154
+
+- **Zweiter und dritter Aufruf einer einzelnen Partei — jetzt auch in der
+  fernen Halle.** Fehlt beim Aufruf nur eine Seite, ruft man gezielt diese
+  Partei nach: „Zweiter Aufruf für …", beim nächsten Mal „Dritter und letzter
+  Aufruf für …" (nur die genannten Namen, kurz gehalten). Das geht jetzt nicht
+  nur an der Turnierleitung (Tab „In Vorbereitung"), sondern auch am
+  **Slave-PC der fernen Halle**: dort zeigt die Ansagen-Seite unter
+  „Aufgerufene Spiele" die in Vorbereitung gerufenen Spiele der eigenen Halle,
+  und der Nachruf läuft **lokal auf dem Slave-Rechner** — genau da, wo die
+  fehlende Partei steht. Die Aufruf-Liste schiebt der Master automatisch über
+  die Cloud in die ferne Halle.
+
 ## v0.9.153
 
 - **Ferne Halle per Telefon-Code koppeln.** Statt die lange install-ID

@@ -866,6 +866,14 @@ pub enum HostFrame {
         #[serde(default)]
         text: String,
     },
+    /// Aufgerufene (in Vorbereitung gerufene) Spiele der fernen Hallen –
+    /// Grundlage der Slave-Spielübersicht und des Zweit-/Drittaufrufs am
+    /// Slave-PC (Cluster C Stufe 2). Periodisch vom Host gepusht (selten
+    /// veränderlich); ersetzt jeweils die komplette Liste im Relay.
+    Prepared {
+        #[serde(default)]
+        prepared: Vec<PreparedMatch>,
+    },
     /// Antwort auf eine zuvor weitergeleitete Ergebnis-Übermittlung.
     ResultAck {
         #[serde(rename = "reqId")]
@@ -928,6 +936,52 @@ pub struct AnnounceCourt {
     pub match_brief: Option<MatchBrief>,
 }
 
+/// Ein in Vorbereitung gerufenes Spiel einer Halle – für die Slave-
+/// Spielübersicht (Plan 7) und den gezielten Zweit-/Drittaufruf einer
+/// fehlenden Partei am Slave-PC (Cluster C Stufe 2). Der Slave sagt den
+/// Nachruf lokal in seiner Halle an; er braucht dafür nur die Paarung.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedMatch {
+    #[serde(rename = "matchId")]
+    pub match_id: i64,
+    /// Hallenname (BTP-Location), für den gerufen wurde – Grundlage der
+    /// Hallenfilterung am Relay (Slave sieht nur seine Halle).
+    #[serde(default)]
+    pub hall: String,
+    /// Disziplin als snake_case-Schlüssel (`mens_singles`, …; leer = unbekannt)
+    /// – der Slave lokalisiert die Ansage selbst.
+    #[serde(default)]
+    pub discipline: String,
+    /// Klassen-Kürzel („A", „B", …) für „Herreneinzel A" (leer = keins).
+    #[serde(
+        rename = "classLabel",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub class_label: String,
+    /// Runden-/Spielbezeichnung (z. B. „G1", „Finale") für die Übersicht.
+    #[serde(
+        rename = "roundName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub round_name: String,
+    #[serde(rename = "teamA", default)]
+    pub team_a: Vec<PlayerBrief>,
+    #[serde(rename = "teamB", default)]
+    pub team_b: Vec<PlayerBrief>,
+    /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Übersicht.
+    #[serde(
+        rename = "matchNumber",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub match_number: Option<i64>,
+    /// Zeitpunkt des Aufrufs (Unix-ms) – für „vor X Min." in der Übersicht.
+    #[serde(rename = "calledAtMs", default)]
+    pub called_at_ms: u64,
+}
+
 /// Antwort von `GET /{ns}/info/announce/state?hall=&since=` — hallengefilterte
 /// Court-Matches (Auto-Ansage) + neue Freitext-Ansagen für den Cloud-Slave.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -936,6 +990,10 @@ pub struct AnnounceState {
     pub courts: Vec<AnnounceCourt>,
     #[serde(default)]
     pub freetext: Vec<FreetextItem>,
+    /// Aufgerufene Spiele der Halle (Slave-Spielübersicht + Nachruf am Slave,
+    /// Cluster C Stufe 2). Leer bei altem Relay/Master oder ohne Aufrufe.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prepared: Vec<PreparedMatch>,
     /// Vom Master geerbte Azure-TTS-Konfiguration (ADR 0003). `None` bei
     /// altem Relay oder ausgeschaltetem Azure am Master — der Slave nutzt
     /// dann seine lokale Config bzw. die Web-Speech-Standardstimme.
@@ -1286,6 +1344,39 @@ mod tests {
             winner: Some(2),
             cascade_walkover: false,
         });
+    }
+
+    #[test]
+    fn prepared_frame_and_state_roundtrip() {
+        // Prepared-Frame (Cluster C Stufe 2) hält den Roundtrip …
+        roundtrip(&HostFrame::Prepared {
+            prepared: vec![PreparedMatch {
+                match_id: 42,
+                hall: "Halle 2".into(),
+                discipline: "mens_singles".into(),
+                class_label: "A".into(),
+                round_name: "G1".into(),
+                team_a: vec![PlayerBrief {
+                    id: 1,
+                    name: "Anna Weber".into(),
+                    nationality: Some("GER".into()),
+                }],
+                team_b: vec![PlayerBrief {
+                    id: 2,
+                    name: "Bea Schulz".into(),
+                    nationality: None,
+                }],
+                match_number: Some(101),
+                called_at_ms: 1_700_000_000_000,
+            }],
+        });
+
+        // … und ein alter Relay ohne prepared-Feld bleibt lesbar (Default leer).
+        let st: AnnounceState = serde_json::from_str(r#"{"courts":[],"freetext":[]}"#).unwrap();
+        assert!(st.prepared.is_empty());
+        // Leere prepared-Liste wird gar nicht erst serialisiert (altes Format).
+        let json = serde_json::to_string(&AnnounceState::default()).unwrap();
+        assert!(!json.contains("prepared"));
     }
 
     #[test]

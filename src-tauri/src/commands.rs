@@ -1640,10 +1640,29 @@ pub struct CloudFreetext {
     pub text: String,
 }
 
+/// Ein aufgerufenes Spiel für die Slave-Spielübersicht + den Nachruf am Slave
+/// (Cluster C Stufe 2), frontend-freundlich wie `PreparationCandidate`.
+#[derive(serde::Serialize)]
+pub struct CloudPrepared {
+    pub match_id: i64,
+    pub hall: String,
+    pub discipline: String,
+    pub class_label: String,
+    pub round_name: String,
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    pub team1_nationalities: Vec<String>,
+    pub team2_nationalities: Vec<String>,
+    pub called_at_ms: u64,
+}
+
 #[derive(serde::Serialize)]
 pub struct CloudAnnounce {
     pub courts: Vec<CloudAnnounceCourt>,
     pub freetext: Vec<CloudFreetext>,
+    /// Aufgerufene Spiele der eigenen Halle (Slave-Spielübersicht + Nachruf,
+    /// Cluster C Stufe 2). Leer bei altem Relay/Master oder ohne Aufrufe.
+    pub prepared: Vec<CloudPrepared>,
     /// Stimme der vom Master geerbten Azure-Config (ADR 0003), `None` ohne
     /// Vererbung. Bewusst nur die Stimme: der Key bleibt im Backend.
     pub azure_voice: Option<String>,
@@ -1663,6 +1682,7 @@ pub async fn cloud_announce_state(
             return Ok(CloudAnnounce {
                 courts: Vec::new(),
                 freetext: Vec::new(),
+                prepared: Vec::new(),
                 azure_voice: None,
             });
         }
@@ -1732,9 +1752,26 @@ pub async fn cloud_announce_state(
             text: f.text,
         })
         .collect();
+    let prepared = st
+        .prepared
+        .into_iter()
+        .map(|p| CloudPrepared {
+            match_id: p.match_id,
+            hall: p.hall,
+            discipline: p.discipline,
+            class_label: p.class_label,
+            round_name: p.round_name,
+            team1: names(&p.team_a),
+            team2: names(&p.team_b),
+            team1_nationalities: nats(&p.team_a),
+            team2_nationalities: nats(&p.team_b),
+            called_at_ms: p.called_at_ms,
+        })
+        .collect();
     Ok(CloudAnnounce {
         courts,
         freetext,
+        prepared,
         azure_voice,
     })
 }

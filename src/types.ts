@@ -260,10 +260,29 @@ export interface CloudAnnounceCourt {
   match_id: number;
 }
 
+/** Ein aufgerufenes Spiel im Cloud-Ansage-Status (Rust: commands::CloudPrepared).
+ *  Grundlage der Slave-Spielübersicht + des Nachrufs am Slave (Cluster C
+ *  Stufe 2). */
+export interface CloudPrepared {
+  match_id: number;
+  hall: string;
+  discipline: string;
+  class_label: string;
+  round_name: string;
+  team1: string[];
+  team2: string[];
+  team1_nationalities: string[];
+  team2_nationalities: string[];
+  called_at_ms: number;
+}
+
 /** Cloud-Ansage-Status für den fernen Slave (Rust: commands::CloudAnnounce). */
 export interface CloudAnnounce {
   courts: CloudAnnounceCourt[];
   freetext: { id: number; hall: string; text: string }[];
+  /** Aufgerufene Spiele der eigenen Halle (Slave-Spielübersicht + Nachruf,
+   *  Cluster C Stufe 2); leer bei altem Relay/Master oder ohne Aufrufe. */
+  prepared: CloudPrepared[];
   /** Stimme der vom Master geerbten Azure-Config (ADR 0003); `null`, wenn
    *  keine Vererbung aktiv ist. Der Key selbst bleibt im Rust-Backend. */
   azure_voice: string | null;
