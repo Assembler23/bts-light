@@ -72,8 +72,10 @@ export const freeCourt = (courtId: number): Promise<void> =>
   invoke("free_court", { courtId });
 
 /** Feld sperren/entsperren (bts-light-seitig, persistiert in Config). */
-export const setCourtLocked = (courtId: number, locked: boolean): Promise<void> =>
-  invoke("set_court_locked", { courtId, locked });
+export const setCourtLocked = (
+  courtId: number,
+  locked: boolean,
+): Promise<void> => invoke("set_court_locked", { courtId, locked });
 
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
@@ -106,6 +108,17 @@ export const enterResult = (
   matchId: number,
   sets: [number, number][],
 ): Promise<void> => invoke("enter_result", { matchId, sets });
+
+/**
+ * Disqualifikation aus der Turnierleitung (P3, BTP-ScoreStatus 3): `loserTeam`
+ * (1 oder 2) wird disqualifiziert, der Gegner gewinnt. Bereits gespielte `sets`
+ * bleiben erhalten (Disqualifikation kann mitten im Spiel fallen).
+ */
+export const disqualifyMatch = (
+  matchId: number,
+  loserTeam: 1 | 2,
+  sets: [number, number][],
+): Promise<void> => invoke("disqualify_match", { matchId, loserTeam, sets });
 
 /** Verwirft einen Walkover-Vorschlag, ohne ihn umzusetzen. */
 export const dismissWalkover = (proposalId: string): Promise<void> =>
@@ -168,8 +181,7 @@ export const pendingFreetext = (since: number): Promise<FreetextItem[]> =>
 export const callPreparation = (
   matchIds: number[],
   locationId: number | null,
-): Promise<void> =>
-  invoke("call_preparation", { matchIds, locationId });
+): Promise<void> => invoke("call_preparation", { matchIds, locationId });
 
 /** Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück. */
 export const retractPreparation = (matchId: number): Promise<void> =>

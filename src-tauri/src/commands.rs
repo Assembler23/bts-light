@@ -1085,6 +1085,60 @@ pub async fn enter_result(
     }
 }
 
+/// Disqualifikation aus der Turnierleitung (P3, ScoreStatus 3): das Team
+/// `loser_team` (1 oder 2) wird disqualifiziert, der Gegner gewinnt. Bereits
+/// gespielte `sets` bleiben erhalten (eine Disqualifikation kann mitten im
+/// Spiel fallen — keine Satz-Vollständigkeitsprüfung). Gleicher BTP-Schreibweg
+/// wie `enter_result` (write_result_to_btp + Nachschub-Queue bei Fehler).
+#[tauri::command]
+pub async fn disqualify_match(
+    state: State<'_, AppState>,
+    match_id: i64,
+    loser_team: i64,
+    sets: Vec<(i64, i64)>,
+) -> Result<(), String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if config.slave_mode {
+        return Err("Ansage-Slave-Modus: Wertungen nur am Master-PC.".to_string());
+    }
+    let tablet = state.tablet.clone();
+    let snapshot = tablet
+        .snapshot_clone()
+        .ok_or("Noch kein Turnier geladen.")?;
+    let m = snapshot
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .ok_or("Spiel nicht gefunden.")?;
+    let end_ms = now_ms();
+    let on_court_since = m
+        .court_id
+        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
+    let update =
+        crate::tablet::server::build_manual_dq_update(m, loser_team, sets, on_court_since, end_ms)?;
+    let mid = update.btp_match_id;
+    let free_court_id = update.free_court_id;
+    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+        Ok(()) => {
+            if let Some(cid) = free_court_id {
+                tablet.clear_court(cid);
+            }
+            tablet.clear_btp_retry(mid);
+            tablet.note_direct_btp_write(update.clone(), now_ms());
+            tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
+            Ok(())
+        }
+        Err(e) => {
+            tablet.queue_btp_retry(update, end_ms);
+            Err(format!("{e} (wird automatisch nachgereicht)"))
+        }
+    }
+}
+
 // ───────────────────────────── Feldvergabe (BTP-Write) ────────────────────
 
 /// Weist ein Match einem Feld zu – schreibt die Zuweisung nach BTP

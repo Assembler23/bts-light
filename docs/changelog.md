@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.159
+
+- **Disqualifikation aus der Turnierleitung.** Im „Ergebnis eintragen"-Dialog
+  (Felderübersicht) gibt es jetzt einen Abschnitt „Disqualifikation": ein Team
+  disqualifizieren, der Gegner gewinnt (BTP-ScoreStatus 3). Ein oben
+  eingetippter Zwischenstand bleibt erhalten – anders als beim regulären
+  Eintrag muss der Satz nicht zu Ende gespielt sein. Steht das Spiel noch auf
+  einem Feld, wird es dabei freigegeben. Nutzt denselben abgesicherten
+  BTP-Schreibweg (mit automatischem Nachreichen bei Verbindungsproblemen) wie
+  die normale Ergebnis-Eingabe.
+
 ## v0.9.158
 
 - **Pausenuhr verdeckt den Spielstand nicht mehr (TV).** Die Split-Flap-

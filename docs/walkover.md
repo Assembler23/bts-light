@@ -80,6 +80,7 @@ oder durch einen Verbindungsabbruch nicht klappte"):
 | Command | Zweck |
 |---|---|
 | `enter_result(match_id, sets)` | Trägt für ein Spiel ein **reguläres** Satz-Ergebnis nach BTP ein (Sieger aus der Satzmehrheit). |
+| `disqualify_match(match_id, loser_team, sets)` | **Disqualifikation** (P3, `ScoreStatus = 3`): `loser_team` (1/2) wird disqualifiziert, der Gegner gewinnt; ein Zwischenstand bleibt erhalten (keine Vollständigkeitsprüfung). |
 
 Erreichbar in der **Spielübersicht** über den Knopf „Ergebnis" auf einem
 belegten Feld; der Dialog ist mit dem aktuellen Live-Satzstand vorbelegt
@@ -98,6 +99,22 @@ geht nur das Ergebnis raus. Schutz: ein in BTP bereits gewertetes Spiel
 wird nie überschrieben, Kampflos/Aufgabe laufen weiter über den
 Walkover-/Aufgabe-Flow. Fehlgeschlagene Writes landen in der
 Nachschub-Queue (siehe [btp_protocol.md](btp_protocol.md)).
+
+**Disqualifikation (P3, v0.9.159):** Derselbe Ergebnis-Dialog hat einen
+Abschnitt „Disqualifikation" mit je einem Knopf pro Team. `disqualify_match`
+baut den `MatchUpdate` über `server::build_manual_dq_update`: der Gegner des
+disqualifizierten Teams gewinnt, `ScoreStatus = 3`, und ein bereits
+eingetippter Zwischenstand bleibt erhalten — eine Disqualifikation kann
+mitten im Spiel fallen, daher **keine** Satz-Vollständigkeitsprüfung — der
+eingetippte Zwischenstand wird (außer dem 0..=99-Bereich + Satzanzahl) **nicht
+auf Scoring-Plausibilität geprüft**; die Verantwortung dafür liegt bewusst bei
+der Turnierleitung (jede Regel-Prüfung würde den „mitten im Spiel"-Zweck
+verhindern). In der UI ist die DQ zweistufig bestätigt. Sieger-/
+Status-Ableitung teilt sich `disqualify_match` über den erweiterten
+`server::derive_result` (`disqualified`-Zweig) mit den anderen Wegen; Feld-
+Freigabe, Auscheck-Block und Nachschub-Queue sind identisch zu `enter_result`.
+`ScoreStatus = 3` sollte einmalig am echten BTP gegengeprüft werden (BTP-
+Anzeige des DQ-Status).
 
 ## Sicherheit & Robustheit
 

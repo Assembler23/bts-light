@@ -112,6 +112,7 @@ pub fn run() {
             commands::dismiss_walkover,
             commands::confirm_walkover,
             commands::enter_result,
+            commands::disqualify_match,
             commands::assign_court,
             commands::free_court,
             commands::set_court_locked,
