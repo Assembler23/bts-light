@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.156
+
+- **„Zeit seit Aufruf" auf der großen Court-Übersicht (TV).** Die
+  Multifeld-Anzeige (`overview.html`) zeigt jetzt je Feld, das aufgerufen
+  wurde, aber noch nicht spielt, wie lange der Aufruf her ist – mit derselben
+  Ampel wie die Einzelanzeige („1. Aufruf → 2. Aufruf → Letzter Aufruf", gelb/
+  rot). Sobald das Spiel zählt, verschwindet der Hinweis wieder (der Satzstand
+  ist dann der Status), damit das Board nicht in einer Farbwand endet. Nutzt
+  den vorhandenen Aufruf-Zeitstempel; die Turnierleitung sieht so auf einen
+  Blick, wo eine Partei zu lange auf sich warten lässt.
+
 ## v0.9.155
 
 - **Gong überlappt nicht mehr das erste Wort der Ansage.** Der Aufruf-Gong

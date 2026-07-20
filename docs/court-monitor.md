@@ -168,6 +168,25 @@ Zählt ein Tablet das Feld, kennt der Monitor den Spielbeginn
 laufende Spieldauer in Minuten (Stoppuhr-Symbol). Im Tool ein-/abschaltbar.
 Ohne zählendes Tablet bleibt die Anzeige leer.
 
+## Aufruf-Uhr „Zeit seit Aufruf" (Plan 4)
+
+Grundlage ist `on_court_since_ms` (Zeitpunkt des 1. Feld-Aufrufs) + die
+Server-Zeit (`serverNowMs`), damit die Anzeige nicht an der oft nicht
+synchronen Pi-Uhr driftet. Gated durch die `call_timer`-Einstellung
+(`enabled` + `secondCallMinutes`/`thirdCallMinutes`).
+
+- **Einzelanzeige** (`monitor.html`, `renderCallTimer`): hochzählende Uhr
+  `M:SS` + Ampel „1. Aufruf → 2. Aufruf → Letzter Aufruf" (neutral/gelb/rot),
+  solange ein Spiel auf dem Feld steht.
+- **Multifeld-Übersicht** (`overview.html`, v0.9.156): je Feld ein Chip
+  „vor X min · 1./2./Letzter Aufruf" mit derselben Ampel — **nur in der
+  Wartephase** (aufgerufen, aber noch nicht am Zählen; `hasStarted()` prüft
+  Punkte/Aufschläger). Sobald das Spiel zählt, verschwindet der Chip, damit
+  ein Board voller laufender Spiele nicht komplett rot wird. Datenquelle ist
+  der `/health`-Poll (`courts` + `serverNowMs` + `callTimer`); die
+  `overview.html` ist LAN-seitig (der Relay serviert nur die Einzelanzeige,
+  die die Aufruf-Uhr bereits selbst zeigt).
+
 ## Entschiedenes Match (kein Geister-Satz)
 
 Endet ein Best-of-3 in zwei Sätzen, schickt das Tablet die Sätze plus
