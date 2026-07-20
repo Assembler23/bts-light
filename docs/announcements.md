@@ -249,6 +249,26 @@ Engine: `playPreparationAnnouncement` / `buildPreparationSegments` in
 
 Eingeführt in v0.9.16.
 
+### Zweiter/Dritter Aufruf je Partei (Plan 1)
+
+Erscheint nur **eine** Partei, ruft die Turnierleitung gezielt die
+**fehlende** Seite nach. Je gerufenem Spiel in der Vorbereitungs-Übersicht
+gibt es dafür zwei kleine Knöpfe (einer je Partei, mit dem Nachnamen zur
+Unterscheidung). Ansage-Format (an Tilos BTS angelehnt, `callStage` in
+`AnnouncePreparationInput`):
+
+> **„Zweiter Aufruf für: {nur die genannte Partei}."** → „Bitte in *Halle*."
+
+Ein zweiter Druck auf dieselbe Partei macht daraus **„Dritter und letzter
+Aufruf für: …"**. Der Zähler je (Spiel, Partei) lebt clientseitig im
+Master-Fenster (kein Server-/Ticker-Zustand — wie Tilos Pass-Through-
+Zweitaufruf). Es wird **nur die genannte Seite** angesagt (die andere ist
+schon da). Englisch: „Second call for: …" / „Third and final call for: …".
+
+**Nur am Master.** Derselbe Nachruf **vom fernen Slave** (Nutzerwunsch)
+braucht einen Relay-Rückkanal + Kandidaten-Sicht am Slave — geplant als
+Stufe 2 zusammen mit der Slave-Spielübersicht (Roadmap).
+
 ## Bekannte Grenzen
 
 - Der 2-s-Poll kann ein extrem kurz belegtes und sofort wieder geräumtes

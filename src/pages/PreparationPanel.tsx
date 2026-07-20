@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Megaphone, Volume2, X } from "lucide-react";
-import { callPreparation, preparationCandidates, retractPreparation } from "../api";
+import {
+  callPreparation,
+  preparationCandidates,
+  retractPreparation,
+} from "../api";
 import {
   playPreparationAnnouncement,
   resolveAnnouncementLanguage,
@@ -40,6 +44,10 @@ export function PreparationPanel({ announce, azureTts }: Props) {
   // Gewählte Halle für den Aufruf (LocationID); null = ohne Halle.
   const [hallId, setHallId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  // Zweitaufruf je Partei (Plan 1): Schlüssel `${match_id}:a|b` → zuletzt
+  // gesagte Stufe. Erster Nachruf = 2 („Zweiter Aufruf"), weitere = 3
+  // („Dritter und letzter Aufruf"). Nur im Master-Fenster, kein Server-State.
+  const [callStages, setCallStages] = useState<Map<string, 2 | 3>>(new Map());
 
   useEffect(() => {
     let alive = true;
@@ -132,6 +140,15 @@ export function PreparationPanel({ announce, azureTts }: Props) {
 
   const retract = async (matchId: number) => {
     setBusy(true);
+    // Nachruf-Zähler dieses Spiels vergessen: wird es später erneut gerufen,
+    // beginnt der Nachruf wieder bei „Zweiter Aufruf" (statt am alten Stand
+    // hängen zu bleiben). Räumt zugleich die Map auf.
+    setCallStages((m) => {
+      const n = new Map(m);
+      n.delete(`${matchId}:a`);
+      n.delete(`${matchId}:b`);
+      return n;
+    });
     try {
       await retractPreparation(matchId);
       await refresh();
@@ -171,8 +188,39 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     );
   };
 
+  // Gezielter Zweit-/Drittaufruf NUR einer Partei (die noch fehlt) — nennt
+  // wie bei Tilo nur diese eine Seite. Erster Nachruf = „Zweiter Aufruf",
+  // jeder weitere = „Dritter und letzter Aufruf".
+  const secondCall = (c: PreparationCandidate, side: "a" | "b") => {
+    const key = `${c.match_id}:${side}`;
+    const stage: 2 | 3 = callStages.get(key) ? 3 : 2;
+    setCallStages((m) => new Map(m).set(key, stage));
+    const names = side === "a" ? c.team1 : c.team2;
+    const nats = side === "a" ? c.team1_nationalities : c.team2_nationalities;
+    const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
+    void playPreparationAnnouncement(
+      {
+        discipline: (c.discipline || "unknown") as Discipline,
+        className: c.class_label,
+        teamANames: names,
+        teamBNames: [], // nur die fehlende Partei ansagen
+        hall: c.call?.hall || undefined,
+        callStage: stage,
+      },
+      lang,
+      {
+        rate: announce.rate,
+        voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+        gong: announce.gong,
+        nameOverrides: announce.name_overrides,
+        nameOverridesEnabled: announce.name_overrides_enabled,
+        azure: azureOption(azureTts),
+      },
+    );
+  };
+
   const hallName = multiHall
-    ? locations.find((l) => l.id === hallId)?.name ?? ""
+    ? (locations.find((l) => l.id === hallId)?.name ?? "")
     : "";
   const callLabel = busy
     ? "Wird aufgerufen …"
@@ -208,9 +256,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                   />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="text-sm">
-                      <span className="font-medium">
-                        {c.label || "Spiel"}
-                      </span>
+                      <span className="font-medium">{c.label || "Spiel"}</span>
                       {c.match_num !== null && (
                         <span className="text-slate-400">
                           {" "}
@@ -277,10 +323,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                   <span className="text-sm">
                     <span className="font-medium">{c.label || "Spiel"}</span>
                     {c.call?.hall && (
-                      <span className="text-slate-500">
-                        {" "}
-                        · {c.call.hall}
-                      </span>
+                      <span className="text-slate-500"> · {c.call.hall}</span>
                     )}
                   </span>
                   <span className="truncate text-xs text-slate-500">
@@ -307,6 +350,32 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                     Ansage
                   </button>
                 )}
+                {/* Gezielter Zweit-/Drittaufruf je Partei: nennt nur die
+                    genannte Seite (die noch fehlt). */}
+                {announce.enabled &&
+                  (["a", "b"] as const).map((side) => {
+                    const team = side === "a" ? c.team1 : c.team2;
+                    if (team.length === 0) return null;
+                    const nextStage = callStages.get(`${c.match_id}:${side}`)
+                      ? 3
+                      : 2;
+                    const shortName =
+                      team[0].trim().split(" ").filter(Boolean).slice(-1)[0] ||
+                      team[0];
+                    return (
+                      <button
+                        key={side}
+                        onClick={() => secondCall(c, side)}
+                        disabled={busy}
+                        title={`${nextStage === 3 ? "Dritter und letzter" : "Zweiter"} Aufruf für ${team.join(" / ")}`}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md
+                                   bg-amber-100 px-1.5 py-1 text-xs font-medium text-amber-800
+                                   transition-colors hover:bg-amber-200 disabled:opacity-50"
+                      >
+                        {side === "a" ? "◂" : "▸"} {nextStage}. Ruf {shortName}
+                      </button>
+                    );
+                  })}
                 <button
                   onClick={() => retract(c.match_id)}
                   disabled={busy}
