@@ -40,6 +40,12 @@ export function SlaveConnectBanner({ slaves }: { slaves: SlaveInfo[] }) {
       return;
     }
     const map = known.current;
+    // Ereignisse des Ticks sammeln, dann entscheiden: eine Offline-Warnung
+    // GEWINNT gegen eine gleichzeitige (Wieder-)Verbindung — sonst könnte ein
+    // grüner Hinweis die persistente Warnung im selben Poll überschreiben,
+    // wenn zwei Hallen zugleich wechseln (Review-Befund).
+    let okNotice: string | null = null;
+    let offlineNotice: string | null = null;
     for (const s of slaves) {
       const prev = map.get(s.id);
       map.set(s.id, s.online);
@@ -47,27 +53,29 @@ export function SlaveConnectBanner({ slaves }: { slaves: SlaveInfo[] }) {
       if (event === null) continue;
       const hall = s.hall || "Ferne Halle";
       if (event === "offline") {
-        // Wegbruch: persistente Warnung (kein Auto-Ausblenden).
-        if (hideTimer.current !== null) {
-          window.clearTimeout(hideTimer.current);
-          hideTimer.current = null;
-        }
-        setNotice({
-          text: `Ferne Halle „${hall}" ist offline gegangen`,
-          tone: "warn",
-        });
+        offlineNotice = `Ferne Halle „${hall}" ist offline gegangen`;
       } else {
-        // (Wieder-)Verbindung: grüner Hinweis, blendet nach 12 s aus.
-        setNotice({
-          text:
-            event === "connected"
-              ? `Ferne Halle „${hall}" hat sich verbunden ✓`
-              : `Ferne Halle „${hall}" ist wieder verbunden ✓`,
-          tone: "ok",
-        });
-        if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
-        hideTimer.current = window.setTimeout(() => setNotice(null), 12000);
+        okNotice =
+          event === "connected"
+            ? `Ferne Halle „${hall}" hat sich verbunden ✓`
+            : `Ferne Halle „${hall}" ist wieder verbunden ✓`;
       }
+    }
+    if (offlineNotice !== null) {
+      // Persistente Warnung (kein Auto-Ausblenden).
+      if (hideTimer.current !== null) {
+        window.clearTimeout(hideTimer.current);
+        hideTimer.current = null;
+      }
+      setNotice({ text: offlineNotice, tone: "warn" });
+    } else if (okNotice !== null) {
+      // (Wieder-)Verbindung: grüner Hinweis, blendet nach 12 s aus.
+      setNotice({ text: okNotice, tone: "ok" });
+      if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+      hideTimer.current = window.setTimeout(() => {
+        setNotice(null);
+        hideTimer.current = null;
+      }, 12000);
     }
   }, [slaves]);
 
