@@ -80,6 +80,15 @@ export const setCourtLocked = (
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
 
+/** Master-Identität exportieren (ADR 0006): JSON-Bündel (install_id +
+ *  Einstellungen, OHNE Passwörter) für den Umzug auf einen neuen Turnier-PC. */
+export const exportIdentity = (): Promise<string> => invoke("export_identity");
+
+/** Master-Identität importieren (ADR 0006): übernimmt install_id + Einstellungen
+ *  aus dem Bündel; die lokal gesetzten Passwörter bleiben. Liefert die neue Config. */
+export const importIdentity = (bundle: string): Promise<AppConfig> =>
+  invoke("import_identity", { bundle });
+
 /** Installierte App-Version (Rust: CARGO_PKG_VERSION). */
 export const appVersion = (): Promise<string> => invoke("app_version");
 

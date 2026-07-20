@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.161
+
+- **Master-Identität auf einen neuen PC umziehen.** Muss der Turnier-PC
+  gewechselt werden, lässt sich die Identität jetzt mitnehmen: unter Wartung →
+  „Master-Identität umziehen" am alten PC **exportieren** (eine Datei mit der
+  Kopplungs-Kennung + allen Einstellungen, ohne Passwörter), am neuen PC
+  **importieren**. Danach bleiben alle gekoppelten Geräte — Tablets, Monitore,
+  ferne Hallen — ohne Neu-Koppeln verbunden. Die Datei enthält den
+  Kopplungs-Token und ist wie ein Passwort zu behandeln; es darf immer nur ein
+  Master gleichzeitig laufen (Import fragt zur Sicherheit nach). Grundlage:
+  [ADR 0006](adr/0006-master-identitaet-umziehen.md).
+
 ## v0.9.160
 
 - **„In Vorbereitung"-Aufrufe erscheinen jetzt auch in BTP.** Ruft die
