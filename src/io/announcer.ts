@@ -122,9 +122,11 @@ async function playGong(
 let cachedCtx: AudioContext | null = null;
 function getAudioContext(): AudioContext {
   if (cachedCtx == null) {
-    cachedCtx = new (window.AudioContext ||
+    cachedCtx = new (
+      window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext)();
+        .webkitAudioContext
+    )();
   }
   return cachedCtx;
 }
@@ -182,7 +184,9 @@ let announceGen = 0;
 
 function enqueueAnnouncement(task: () => Promise<void>): Promise<void> {
   const gen = announceGen;
-  const run = announceQueue.then(() => (gen === announceGen ? task() : undefined));
+  const run = announceQueue.then(() =>
+    gen === announceGen ? task() : undefined,
+  );
   // Kette auch nach einem Fehler weiterlaufen lassen.
   announceQueue = run.then(
     () => {},
@@ -281,14 +285,50 @@ async function speakSegments(
 // Browser-TTS spricht "Feld 1" gern als "Feld erste" (Ordinal-Heuristik).
 // Kleine Zahlen daher als Wort ausschreiben.
 const NUMBER_WORDS_DE = [
-  "", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht",
-  "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn",
-  "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig",
+  "",
+  "eins",
+  "zwei",
+  "drei",
+  "vier",
+  "fünf",
+  "sechs",
+  "sieben",
+  "acht",
+  "neun",
+  "zehn",
+  "elf",
+  "zwölf",
+  "dreizehn",
+  "vierzehn",
+  "fünfzehn",
+  "sechzehn",
+  "siebzehn",
+  "achtzehn",
+  "neunzehn",
+  "zwanzig",
 ];
 const NUMBER_WORDS_EN = [
-  "", "one", "two", "three", "four", "five", "six", "seven", "eight",
-  "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
-  "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+  "",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+  "twenty",
 ];
 
 function numberWord(n: number, lang: AnnounceLang): string {
@@ -499,8 +539,18 @@ export function buildAnnouncementSegments(
 ): string[] {
   const overrides = buildOverrideMap(nameOverrides, nameOverridesEnabled);
   const court = resolveCourtPhrase(input.courtLabel, lang);
-  const teamA = joinNames(input.teamANames, lang, overrides, nameOverridesEnabled);
-  const teamB = joinNames(input.teamBNames, lang, overrides, nameOverridesEnabled);
+  const teamA = joinNames(
+    input.teamANames,
+    lang,
+    overrides,
+    nameOverridesEnabled,
+  );
+  const teamB = joinNames(
+    input.teamBNames,
+    lang,
+    overrides,
+    nameOverridesEnabled,
+  );
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWithClass(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
@@ -639,7 +689,10 @@ function joinNamesSsml(
   if (clean.length === 1) return nameSsml(clean[0], ipaMap, langMap);
   const connector = lang === "de" ? " und " : " and ";
   return (
-    clean.slice(0, -1).map((n) => nameSsml(n, ipaMap, langMap)).join(", ") +
+    clean
+      .slice(0, -1)
+      .map((n) => nameSsml(n, ipaMap, langMap))
+      .join(", ") +
     connector +
     nameSsml(clean[clean.length - 1], ipaMap, langMap)
   );
@@ -655,7 +708,9 @@ export function buildAnnouncementSsml(
   langMap?: Map<string, string>,
 ): string {
   const court = xmlEscape(resolveCourtPhrase(input.courtLabel, lang));
-  const disc = xmlEscape(disciplineWithClass(input.discipline, input.className, lang));
+  const disc = xmlEscape(
+    disciplineWithClass(input.discipline, input.className, lang),
+  );
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
@@ -825,9 +880,14 @@ export interface AnnouncePreparationInput {
 // Führt-Präfix je Aufruf-Stufe (an Tilos BTS angelehnt). null = Stufe 1
 // (normaler „In Vorbereitung"-Aufruf). Ab Stufe 2 leitet der Text mit
 // „Zweiter/Dritter … Aufruf für:" ein, danach folgen die Partei-Namen.
-function callStagePrefix(stage: 1 | 2 | 3 | undefined, lang: AnnounceLang): string | null {
+function callStagePrefix(
+  stage: 1 | 2 | 3 | undefined,
+  lang: AnnounceLang,
+): string | null {
   if (stage === 3) {
-    return lang === "de" ? "Dritter und letzter Aufruf für:" : "Third and final call for:";
+    return lang === "de"
+      ? "Dritter und letzter Aufruf für:"
+      : "Third and final call for:";
   }
   if (stage === 2) {
     return lang === "de" ? "Zweiter Aufruf für:" : "Second call for:";
@@ -845,8 +905,18 @@ export function buildPreparationSegments(
   nameOverridesEnabled = true,
 ): string[] {
   const overrides = buildOverrideMap(nameOverrides, nameOverridesEnabled);
-  const teamA = joinNames(input.teamANames, lang, overrides, nameOverridesEnabled);
-  const teamB = joinNames(input.teamBNames, lang, overrides, nameOverridesEnabled);
+  const teamA = joinNames(
+    input.teamANames,
+    lang,
+    overrides,
+    nameOverridesEnabled,
+  );
+  const teamB = joinNames(
+    input.teamBNames,
+    lang,
+    overrides,
+    nameOverridesEnabled,
+  );
   const versus = lang === "de" ? "gegen" : "versus";
   const disc = disciplineWithClass(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
@@ -901,7 +971,9 @@ export function buildPreparationSsml(
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
 ): string {
-  const disc = xmlEscape(disciplineWithClass(input.discipline, input.className, lang));
+  const disc = xmlEscape(
+    disciplineWithClass(input.discipline, input.className, lang),
+  );
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
@@ -920,21 +992,25 @@ export function buildPreparationSsml(
       parts.push(`${teamA}.`);
     }
     if (hall) {
-      parts.push(lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`);
+      parts.push(
+        lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
+      );
     }
   } else {
-  parts = [lang === "de" ? "In Vorbereitung." : "Preparation call."];
-  if (disc) parts.push(`${disc}.`);
-  if (round) parts.push(`${xmlEscape(round)}.`);
-  if (teamA && teamB) {
-    parts.push(`${teamA}.`);
-    parts.push(`${versus} ${teamB}.`);
-  } else if (teamA) {
-    parts.push(`${teamA}.`);
-  }
-  if (hall) {
-    parts.push(lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`);
-  }
+    parts = [lang === "de" ? "In Vorbereitung." : "Preparation call."];
+    if (disc) parts.push(`${disc}.`);
+    if (round) parts.push(`${xmlEscape(round)}.`);
+    if (teamA && teamB) {
+      parts.push(`${teamA}.`);
+      parts.push(`${versus} ${teamB}.`);
+    } else if (teamA) {
+      parts.push(`${teamA}.`);
+    }
+    if (hall) {
+      parts.push(
+        lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
+      );
+    }
   }
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Megaphone, Volume2, X } from "lucide-react";
-import { callPreparation, preparationCandidates, retractPreparation } from "../api";
+import {
+  callPreparation,
+  preparationCandidates,
+  retractPreparation,
+} from "../api";
 import {
   playPreparationAnnouncement,
   resolveAnnouncementLanguage,
@@ -136,6 +140,15 @@ export function PreparationPanel({ announce, azureTts }: Props) {
 
   const retract = async (matchId: number) => {
     setBusy(true);
+    // Nachruf-Zähler dieses Spiels vergessen: wird es später erneut gerufen,
+    // beginnt der Nachruf wieder bei „Zweiter Aufruf" (statt am alten Stand
+    // hängen zu bleiben). Räumt zugleich die Map auf.
+    setCallStages((m) => {
+      const n = new Map(m);
+      n.delete(`${matchId}:a`);
+      n.delete(`${matchId}:b`);
+      return n;
+    });
     try {
       await retractPreparation(matchId);
       await refresh();
@@ -207,7 +220,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
   };
 
   const hallName = multiHall
-    ? locations.find((l) => l.id === hallId)?.name ?? ""
+    ? (locations.find((l) => l.id === hallId)?.name ?? "")
     : "";
   const callLabel = busy
     ? "Wird aufgerufen …"
@@ -243,9 +256,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                   />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="text-sm">
-                      <span className="font-medium">
-                        {c.label || "Spiel"}
-                      </span>
+                      <span className="font-medium">{c.label || "Spiel"}</span>
                       {c.match_num !== null && (
                         <span className="text-slate-400">
                           {" "}
@@ -312,10 +323,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                   <span className="text-sm">
                     <span className="font-medium">{c.label || "Spiel"}</span>
                     {c.call?.hall && (
-                      <span className="text-slate-500">
-                        {" "}
-                        · {c.call.hall}
-                      </span>
+                      <span className="text-slate-500"> · {c.call.hall}</span>
                     )}
                   </span>
                   <span className="truncate text-xs text-slate-500">
@@ -348,8 +356,12 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                   (["a", "b"] as const).map((side) => {
                     const team = side === "a" ? c.team1 : c.team2;
                     if (team.length === 0) return null;
-                    const nextStage = callStages.get(`${c.match_id}:${side}`) ? 3 : 2;
-                    const shortName = team[0].split(" ").slice(-1)[0] || team[0];
+                    const nextStage = callStages.get(`${c.match_id}:${side}`)
+                      ? 3
+                      : 2;
+                    const shortName =
+                      team[0].trim().split(" ").filter(Boolean).slice(-1)[0] ||
+                      team[0];
                     return (
                       <button
                         key={side}
