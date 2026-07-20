@@ -502,6 +502,15 @@ impl SyncEngine {
                 }
             }
         }
+        // Zuweisung beim Feld-Aufruf (ADR 0007, Scheibe 2): jedem belegten Feld
+        // einen Bediener aus der Warteschlange zuordnen (idempotent je Spiel);
+        // Zuweisungen frei gewordener/gewechselter Felder räumen.
+        if manage_queue {
+            for (&court_id, &match_id) in &oncourt_now {
+                tablet.assign_scorekeeper_for_court(court_id, match_id);
+            }
+            tablet.retain_scorekeeper_assignments(&oncourt_now);
+        }
         self.oncourt_prev = oncourt_now;
     }
 

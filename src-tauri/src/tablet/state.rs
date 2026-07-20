@@ -241,6 +241,10 @@ pub struct TabletState {
     /// Match-IDs, deren Verlierer bereits eingereiht wurde — Dedup gegen
     /// Mehrfach-Einreihen desselben Spielendes.
     enqueued_finishes: RwLock<HashSet<i64>>,
+    /// CourtID → (Match-ID, Bediener-Namen): der beim Feld-Aufruf aus der
+    /// Warteschlange gezogene Zähltafelbediener dieses Felds (ADR 0007,
+    /// Scheibe 2). Wird geräumt, sobald das Feld frei ist / das Spiel wechselt.
+    assigned_scorekeeper: RwLock<HashMap<i64, (i64, Vec<String>)>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
     /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
     /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
@@ -473,6 +477,52 @@ impl TabletState {
             let e = q.remove(pos);
             q.insert(0, e);
         }
+    }
+
+    /// Weist dem Feld beim Aufruf einen Zähltafelbediener aus der Warteschlange
+    /// zu (ADR 0007, Scheibe 2): bevorzugt jemanden, der zuletzt AUF DIESEM Feld
+    /// gespielt hat (`from_court_id`), sonst den ältesten Wartenden. Idempotent
+    /// je (Feld, Match): steht schon ein Bediener für genau dieses Spiel, passiert
+    /// nichts. Ist die Schlange leer, bleibt das Feld ohne Bediener.
+    pub fn assign_scorekeeper_for_court(&self, court_id: i64, match_id: i64) {
+        {
+            let assigned = self.assigned_scorekeeper.read().unwrap();
+            if assigned.get(&court_id).map(|(m, _)| *m) == Some(match_id) {
+                return; // schon zugewiesen für dieses Spiel
+            }
+        }
+        let mut q = self.scorekeeper_queue.write().unwrap();
+        // Bevorzugt „eigenes Feld", sonst der Älteste (Index 0, FIFO).
+        let pos = q
+            .iter()
+            .position(|e| e.from_court_id == court_id)
+            .or(if q.is_empty() { None } else { Some(0) });
+        if let Some(pos) = pos {
+            let e = q.remove(pos);
+            self.assigned_scorekeeper
+                .write()
+                .unwrap()
+                .insert(court_id, (match_id, e.names));
+        }
+    }
+
+    /// Zugewiesener Zähltafelbediener eines Felds (Namen), falls vorhanden.
+    pub fn assigned_scorekeeper(&self, court_id: i64) -> Option<Vec<String>> {
+        self.assigned_scorekeeper
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .map(|(_, names)| names.clone())
+    }
+
+    /// Räumt Bediener-Zuweisungen für Felder, die nicht mehr mit demselben
+    /// Match belegt sind (Feld frei / Spiel gewechselt / beendet). `active` =
+    /// CourtID → aktuell dort laufende Match-ID.
+    pub fn retain_scorekeeper_assignments(&self, active: &HashMap<i64, i64>) {
+        self.assigned_scorekeeper
+            .write()
+            .unwrap()
+            .retain(|court_id, (match_id, _)| active.get(court_id) == Some(match_id));
     }
 
     /// Gesperrte Felder beim Start aus der Config übernehmen.
@@ -1172,17 +1222,19 @@ impl TabletState {
                     serving_player: serving_info.and_then(|(_, p)| p),
                     // Pause am Feld (für den Kombi-Pausen-Countdown).
                     pause: pause_info,
-                    // Zähltafelbediener = Verlierer des zuletzt auf diesem
-                    // Feld beendeten Spiels. Wird vom Sync-Loop getrackt
-                    // (BTP behält die Feld-Zuordnung beendeter Spiele nicht
-                    // zuverlässig). Nur zeigen, wenn gerade ein Spiel läuft.
+                    // Zähltafelbediener: bei aktiver Warteschlangen-Verwaltung
+                    // (ADR 0007) der beim Aufruf ZUGEWIESENE Bediener; sonst der
+                    // pro-Feld-Hinweis (Verlierer des zuletzt hier beendeten
+                    // Spiels). Nur zeigen, wenn gerade ein Spiel läuft.
                     scorekeeper: if m.is_some() {
-                        self.scorekeeper_by_court
-                            .read()
-                            .unwrap()
-                            .get(&court.id)
-                            .cloned()
-                            .unwrap_or_default()
+                        self.assigned_scorekeeper(court.id).unwrap_or_else(|| {
+                            self.scorekeeper_by_court
+                                .read()
+                                .unwrap()
+                                .get(&court.id)
+                                .cloned()
+                                .unwrap_or_default()
+                        })
                     } else {
                         Vec::new()
                     },
@@ -2014,6 +2066,48 @@ mod tests {
         // Leere Namen werden ignoriert.
         st.enqueue_scorekeeper(3, vec![], 7, 4_000);
         assert_eq!(st.scorekeeper_queue().len(), 2);
+    }
+
+    #[test]
+    fn scorekeeper_assignment_prefers_own_court_then_oldest() {
+        let st = TabletState::default();
+        // A hat auf Feld 5 gespielt, B auf Feld 6, C manuell (Feld 0).
+        st.enqueue_scorekeeper(1, vec!["A".into()], 5, 1_000);
+        st.enqueue_scorekeeper(2, vec!["B".into()], 6, 2_000);
+        st.add_scorekeeper_manual(vec!["C".into()], 3_000);
+        // Feld 6 bekommt Match 42 → B bevorzugt (spielte auf 6).
+        st.assign_scorekeeper_for_court(6, 42);
+        assert_eq!(st.assigned_scorekeeper(6), Some(vec!["B".to_string()]));
+        // B ist aus der Schlange raus.
+        assert_eq!(st.scorekeeper_queue().len(), 2);
+        // Feld 9 (niemand spielte dort) → der Älteste (A).
+        st.assign_scorekeeper_for_court(9, 43);
+        assert_eq!(st.assigned_scorekeeper(9), Some(vec!["A".to_string()]));
+        // Idempotent: gleiche (Feld, Match) zieht nicht erneut.
+        st.assign_scorekeeper_for_court(9, 43);
+        assert_eq!(st.scorekeeper_queue().len(), 1); // nur noch C
+                                                     // Leere Schlange: nächstes Feld bekommt niemanden — erst C ziehen.
+        st.assign_scorekeeper_for_court(1, 44);
+        assert_eq!(st.assigned_scorekeeper(1), Some(vec!["C".to_string()]));
+        st.assign_scorekeeper_for_court(2, 45);
+        assert_eq!(st.assigned_scorekeeper(2), None, "Schlange leer");
+    }
+
+    #[test]
+    fn scorekeeper_assignment_is_cleared_when_court_frees() {
+        let st = TabletState::default();
+        st.enqueue_scorekeeper(1, vec!["A".into()], 5, 1_000);
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(st.assigned_scorekeeper(5).is_some());
+        // Feld 5 trägt jetzt ein ANDERES Match → alte Zuweisung räumen.
+        let mut active = std::collections::HashMap::new();
+        active.insert(5, 99);
+        st.retain_scorekeeper_assignments(&active);
+        assert_eq!(st.assigned_scorekeeper(5), None);
+        // Leeres active → alles geräumt.
+        st.assign_scorekeeper_for_court(5, 99);
+        st.retain_scorekeeper_assignments(&std::collections::HashMap::new());
+        assert_eq!(st.assigned_scorekeeper(5), None);
     }
 
     #[test]

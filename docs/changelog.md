@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.164
+
+- **Zähltafelbediener werden beim Feld-Aufruf zugewiesen (Phase 1, Scheibe 2).**
+  Ist die Verwaltung aktiv, bekommt jedes belegte Feld automatisch einen
+  Bediener aus der Warteschlange — **bevorzugt jemand, der zuletzt auf genau
+  diesem Feld gespielt hat** (also der Verlierer des Vorspiels), sonst der
+  Älteste in der Schlange. Der zugewiesene Bediener steht je Feld in der
+  Spielübersicht („Bediener: …"); wird das Feld frei oder wechselt das Spiel,
+  wird die Zuweisung wieder gelöst. (Ansage „Tabletbedienung: …" folgt als
+  nächster Schritt.)
+
 ## v0.9.163
 
 - **Zähltafelbediener-Warteschlange (wie im Original-BTS), Phase 1.** Neu unter
