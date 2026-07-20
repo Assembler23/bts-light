@@ -690,7 +690,9 @@ export function FieldOverviewPage({
                   {i > 0 && (
                     <button
                       onClick={() =>
-                        void advanceScorekeeper(e.key).then(refreshSk)
+                        void advanceScorekeeper(e.key)
+                          .then(refreshSk)
+                          .catch((err) => setError(String(err)))
                       }
                       title="Als Nächsten dran (nach oben)"
                       className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium
@@ -701,7 +703,9 @@ export function FieldOverviewPage({
                   )}
                   <button
                     onClick={() =>
-                      void removeScorekeeper(e.key).then(refreshSk)
+                      void removeScorekeeper(e.key)
+                        .then(refreshSk)
+                        .catch((err) => setError(String(err)))
                     }
                     title="Aus der Warteschlange entfernen"
                     className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-rose-100 hover:text-rose-700"
@@ -718,10 +722,12 @@ export function FieldOverviewPage({
               onChange={(e) => setSkAdd(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && skAdd.trim()) {
-                  void addScorekeeper([skAdd.trim()]).then(() => {
-                    setSkAdd("");
-                    refreshSk();
-                  });
+                  void addScorekeeper([skAdd.trim()])
+                    .then(() => {
+                      setSkAdd("");
+                      refreshSk();
+                    })
+                    .catch((err) => setError(String(err)));
                 }
               }}
               placeholder="Manuell hinzufügen (Name)"
@@ -731,10 +737,12 @@ export function FieldOverviewPage({
             <button
               onClick={() => {
                 if (!skAdd.trim()) return;
-                void addScorekeeper([skAdd.trim()]).then(() => {
-                  setSkAdd("");
-                  refreshSk();
-                });
+                void addScorekeeper([skAdd.trim()])
+                  .then(() => {
+                    setSkAdd("");
+                    refreshSk();
+                  })
+                  .catch((err) => setError(String(err)));
               }}
               disabled={!skAdd.trim()}
               className="shrink-0 rounded-md bg-slate-800 px-3 py-1 text-sm font-medium text-white
