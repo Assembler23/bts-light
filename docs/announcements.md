@@ -115,6 +115,13 @@ Gongs: **Spielaufruf** (`kind="match"`, Default) = tiefer, zweitöniger absteige
 **Freitext/Info** (`kind="info"`) = heller, dreitöniger aufsteigender Dreiklang (C5-E5-G5, Triangle). So ist
 sofort hörbar, ob es ein Spielaufruf oder eine sonstige Durchsage ist.
 
+**Timing (v0.9.155):** Der Gong wird auf der Audio-Uhr (`ctx.currentTime`) geplant, sein Ende aber am
+**echten Audio-Ende** signalisiert — `gongFinished()` löst auf dem `onended` des zuletzt stoppenden
+Oszillators auf (nicht auf einer festen Wall-Clock-`setTimeout`), plus `GONG_BREATH_MS` (150 ms) Atempause.
+Startet der AudioContext in WebView2 verzögert, verschiebt sich das Ende real mit → die Sprache setzt nicht
+mehr in den Nachklang ein (Tilo-Befund 19.07.). Ein Fallback-Timer kurz nach dem geplanten Ende verhindert,
+dass die Ansage-Queue hängt, falls `onended` ausnahmsweise ausbleibt.
+
 ## Geteiltes Community-Wörterbuch (crowd-sourced)
 
 Zusätzlich zum mitgelieferten Basis-Wörterbuch und der lokalen Nutzer-Tabelle

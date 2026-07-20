@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.155
+
+- **Gong überlappt nicht mehr das erste Wort der Ansage.** Der Aufruf-Gong
+  wartet jetzt auf sein **echtes Ende** (statt auf eine feste Stoppuhr), bevor
+  die Sprachausgabe einsetzt – plus eine kurze Atempause. Startet der Ton auf
+  dem Ansage-Rechner minimal verzögert (kommt unter Windows vor), verschiebt
+  sich der Sprechbeginn automatisch mit, statt in den Gong-Nachklang zu fallen.
+  Betrifft Feld-Ansage, Freitext und die ferne-Halle-Ansage gleichermaßen.
+  Das **Tablet** bleibt wie bisher ganz ohne Ton (reiner Spielzettel).
+
 ## v0.9.154
 
 - **Zweiter und dritter Aufruf einer einzelnen Partei — jetzt auch in der

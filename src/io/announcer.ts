@@ -52,6 +52,36 @@ export interface AnnounceOptions {
   azure?: { voice: string; synthesize: (ssml: string) => Promise<string> };
 }
 
+// Kleine Atempause zwischen Gong-Ende und Sprachbeginn (ms) – klingt
+// natürlicher und puffert Restjitter der Audio-/OS-Uhr.
+const GONG_BREATH_MS = 150;
+
+// Löst auf, sobald der Gong WIRKLICH ausgeklungen ist: am echten Audio-Ende
+// (`onended` des zuletzt stoppenden Oszillators) statt auf einer festen
+// Wall-Clock-Uhr. Startet der AudioContext in WebView2 verzögert, verschiebt
+// sich das Ende real mit — die Sprache setzt dann nicht mehr in den
+// Gong-Nachklang ein (Tilo-Befund 19.07.: „Gong überlappt das erste Wort").
+// Fallback-Timer etwas nach dem geplanten Ende, falls `onended` in WebView2
+// ausnahmsweise ausbleibt (die Ansage-Queue darf nie hängen).
+function gongFinished(
+  ctx: AudioContext,
+  lastOsc: OscillatorNode,
+  scheduledEndSec: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      setTimeout(resolve, GONG_BREATH_MS);
+    };
+    lastOsc.onended = finish;
+    const fallbackMs =
+      Math.max(0, (scheduledEndSec - ctx.currentTime) * 1000) + 250;
+    setTimeout(finish, fallbackMs);
+  });
+}
+
 // Synthesizer-Gong über Web Audio. Zwei kurze Sinus-Töne (hoch → tiefer) mit
 // kleinem Decay, ähnlich einem Hotel-Gong. Liefert eine Promise, die
 // resolved, wenn der Gong durchgespielt ist — damit die Sprache erst danach
@@ -69,6 +99,8 @@ async function playGong(
   if (kind === "info") {
     const notes = [523.25, 659.25, 783.99]; // C5 – E5 – G5
     const step = 0.15;
+    let lastOsc: OscillatorNode | null = null;
+    let lastStop = now;
     for (let i = 0; i < notes.length; i++) {
       const t = now + i * step;
       const g = ctx.createGain();
@@ -81,12 +113,13 @@ async function playGong(
       o.frequency.value = notes[i];
       o.connect(g);
       o.start(t);
-      o.stop(t + 0.38);
+      const stopAt = t + 0.38;
+      o.stop(stopAt);
+      lastOsc = o;
+      lastStop = stopAt;
     }
-    // Auflösen, wenn der dritte Ton ausgeklungen ist (~0,85 s).
-    return new Promise((resolve) => {
-      setTimeout(resolve, 850);
-    });
+    // Auflösen, wenn der dritte Ton ausgeklungen ist (~0,85 s ab now).
+    return lastOsc ? gongFinished(ctx, lastOsc, lastStop) : Promise.resolve();
   }
 
   // Spielaufruf = tiefer, zweitöniger ABSTEIGENDER Sinus-Gong (A5 → D5),
@@ -111,11 +144,10 @@ async function playGong(
   o2.start(now + 0.18);
   o2.stop(now + 1.1);
 
-  // Erst auflösen, wenn die Gain-Hülle ausgeklungen ist (~1,2 s) – sonst
-  // setzt die Sprachausgabe noch in den Gong-Nachklang ein.
-  return new Promise((resolve) => {
-    setTimeout(resolve, 1250);
-  });
+  // Erst auflösen, wenn die Gain-Hülle ausgeklungen ist (~1,2 s) – am echten
+  // Ende des zuletzt stoppenden Oszillators (o2), damit die Sprachausgabe
+  // nicht in den Gong-Nachklang einsetzt.
+  return gongFinished(ctx, o2, now + 1.2);
 }
 
 // Reusable AudioContext — Browser-Limit von 1–6 contexts pro Tab; einer reicht.
