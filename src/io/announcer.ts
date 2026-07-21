@@ -12,6 +12,7 @@
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
+import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -688,13 +689,22 @@ function langWrapSsml(name: string): string {
     : xmlEscape(name);
 }
 
-// Einen Spielernamen für Azure aufbereiten. Reihenfolge: 1) ganzer Name im
-// IPA-Wörterbuch → `<phoneme>`; 2) sonst wortweise IPA-Treffer als `<phoneme>`,
-// Rest mit `<lang>`-Erkennung; 3) ohne IPA-Map nur `<lang>`-Erkennung.
+// Einen Spielernamen für Azure aufbereiten. Rangfolge je Name/Wort:
+//   1) manuelle Sprach-Korrektur (Voll-Name) → `<lang>` bzw. deutscher Default;
+//   2) Korrektur (Voll-Name): IPA → `<phoneme>`, sonst `say`-Ersatzschreibweise
+//      als Text (`resolveNameCorrection` legt die Rangfolge fest);
+//   3) sonst wortweise dieselbe Korrektur, Rest mit `<lang>`-Erkennung —
+//      NUR wenn dieser Name wirklich einen Treffer hat;
+//   4) ohne jeden Treffer: ganzer Name über die `<lang>`-Erkennung (bessere
+//      Erkennung als wortweise, daher der Sonderfall).
+//
+// Wichtig: Die phonetische Ersatzschreibweise (`say`) wirkt hierüber jetzt auch
+// auf dem Azure-Pfad — bis dahin war sie nur der Web-Speech-Stimme bekannt.
 function nameSsml(
   name: string,
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
+  sayMap?: Map<string, string>,
 ): string {
   // 1) Manuelle Sprach-Korrektur (Voll-Name) hat Vorrang: "de" = deutscher
   //    Default (kein Tag), sonst die erzwungene Sprache als `<lang>`.
@@ -704,22 +714,34 @@ function nameSsml(
     const loc = LANG_LOCALE[lo as NameLang];
     if (loc) return `<lang xml:lang="${loc}">${xmlEscape(name)}</lang>`;
   }
-  // 2) Kuratiertes IPA (ganzer Name).
-  const full = ipaMap?.get(normalizeName(name));
-  if (full) return phonemeSsml(name, full);
-  // 3) Wortweise IPA-Treffer, Rest mit `<lang>`-Erkennung.
-  if (ipaMap && ipaMap.size > 0) {
-    return name
-      .split(/(\s+)/)
+  // 2) Korrektur für den ganzen Namen (IPA schlägt `say`).
+  const full = resolveNameCorrection(normalizeName(name), ipaMap, sayMap);
+  if (full) {
+    return full.kind === "ipa" ? phonemeSsml(name, full.value) : xmlEscape(full.value);
+  }
+  // 3) Wortweise — nur wenn mindestens ein Wort dieses Namens einen Treffer hat
+  //    (sonst würde die schlechtere wortweise Sprach-Erkennung greifen).
+  const stripEnds = (t: string) =>
+    t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  const tokens = name.split(/(\s+)/);
+  const hasHit = tokens.some((tok) => {
+    if (!/\S/.test(tok)) return false;
+    const key = normalizeName(stripEnds(tok));
+    return Boolean(ipaMap?.has(key) || sayMap?.has(key));
+  });
+  if (hasHit) {
+    return tokens
       .map((tok) => {
         if (!/\S/.test(tok)) return tok; // Whitespace unverändert
-        const stripped = tok.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-        const hit = ipaMap.get(normalizeName(stripped));
-        return hit ? phonemeSsml(tok, hit) : langWrapSsml(tok);
+        const stripped = stripEnds(tok);
+        const hit = resolveNameCorrection(normalizeName(stripped), ipaMap, sayMap);
+        if (hit?.kind === "ipa") return phonemeSsml(tok, hit.value);
+        if (hit?.kind === "say") return xmlEscape(hit.value);
+        return langWrapSsml(tok);
       })
       .join("");
   }
-  // 4) Reine `<lang>`-Erkennung.
+  // 4) Reine `<lang>`-Erkennung über den ganzen Namen.
   return langWrapSsml(name);
 }
 
@@ -728,18 +750,19 @@ function joinNamesSsml(
   lang: AnnounceLang,
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
+  sayMap?: Map<string, string>,
 ): string {
   const clean = names.map((n) => n.trim()).filter((n) => n.length > 0);
   if (clean.length === 0) return "";
-  if (clean.length === 1) return nameSsml(clean[0], ipaMap, langMap);
+  if (clean.length === 1) return nameSsml(clean[0], ipaMap, langMap, sayMap);
   const connector = lang === "de" ? " und " : " and ";
   return (
     clean
       .slice(0, -1)
-      .map((n) => nameSsml(n, ipaMap, langMap))
+      .map((n) => nameSsml(n, ipaMap, langMap, sayMap))
       .join(", ") +
     connector +
-    nameSsml(clean[clean.length - 1], ipaMap, langMap)
+    nameSsml(clean[clean.length - 1], ipaMap, langMap, sayMap)
   );
 }
 
@@ -751,6 +774,7 @@ export function buildAnnouncementSsml(
   voice: string,
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
+  sayMap?: Map<string, string>,
 ): string {
   const court = xmlEscape(resolveCourtPhrase(input.courtLabel, lang));
   const disc = xmlEscape(
@@ -758,8 +782,8 @@ export function buildAnnouncementSsml(
   );
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
-  const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
-  const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap);
+  const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap, sayMap);
+  const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
 
   const parts: string[] = [`${court}.`];
   if (disc) parts.push(`${disc}.`);
@@ -797,8 +821,16 @@ export function playAnnouncement(
         const enabled = opts.nameOverridesEnabled ?? true;
         const ipaMap = buildIpaMap(opts.nameOverrides, enabled);
         const langMap = buildLangOverrideMap(opts.nameOverrides, enabled);
+        const sayMap = buildOverrideMap(opts.nameOverrides, enabled);
         const b64 = await opts.azure.synthesize(
-          buildAnnouncementSsml(input, lang, opts.azure.voice, ipaMap, langMap),
+          buildAnnouncementSsml(
+            input,
+            lang,
+            opts.azure.voice,
+            ipaMap,
+            langMap,
+            sayMap,
+          ),
         );
         await playMp3Base64(b64);
         return;
@@ -1022,14 +1054,15 @@ export function buildPreparationSsml(
   voice: string,
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
+  sayMap?: Map<string, string>,
 ): string {
   const disc = xmlEscape(
     disciplineWithClass(input.discipline, input.className, lang),
   );
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
-  const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap);
-  const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap);
+  const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap, sayMap);
+  const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
   const hall = xmlEscape((input.hall || "").trim());
   const stagePrefix = callStagePrefix(input.callStage, lang);
 
@@ -1085,8 +1118,16 @@ export function playPreparationAnnouncement(
         const enabled = opts.nameOverridesEnabled ?? true;
         const ipaMap = buildIpaMap(opts.nameOverrides, enabled);
         const langMap = buildLangOverrideMap(opts.nameOverrides, enabled);
+        const sayMap = buildOverrideMap(opts.nameOverrides, enabled);
         const b64 = await opts.azure.synthesize(
-          buildPreparationSsml(input, lang, opts.azure.voice, ipaMap, langMap),
+          buildPreparationSsml(
+            input,
+            lang,
+            opts.azure.voice,
+            ipaMap,
+            langMap,
+            sayMap,
+          ),
         );
         await playMp3Base64(b64);
         return;

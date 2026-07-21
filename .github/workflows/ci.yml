@@ -45,6 +45,12 @@ jobs:
       - name: Satz-/Matchball (JS)
         run: node scripts/test-gamepoint.mjs
 
+      # Aussprache-Korrektur-Rangfolge auf dem Azure-Pfad (IPA > say-Respelling)
+      # — sorgt dafür, dass die phonetische Ersatzschreibweise auch bei Azure
+      # greift und IPA nicht verdrängt.
+      - name: Aussprache-Korrektur (JS)
+        run: node scripts/test-name-correction.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

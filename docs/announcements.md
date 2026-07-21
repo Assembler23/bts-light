@@ -141,9 +141,18 @@ lädt bts-light ein **gemeinsames Aussprache-Wörterbuch** von badhub
   Wörterbuch** < lokale Nutzer-Tabelle (eigene Korrekturen gewinnen immer).
 - **IPA für Azure:** Einträge können zusätzlich ein `ipa`-Feld tragen. Im
   Azure-Pfad baut `buildIpaMap` daraus eine Map und `nameSsml` spricht den Namen
-  über inline `<phoneme alphabet="ipa" ph="…">` (ganzer Name oder wortweise),
-  sonst Fallback `<lang>`-Erkennung. Web Speech (offline) ignoriert `ipa` und
-  nutzt `say`. Quelle: kuratiertes W3C-PLS-Lexikon (badhub).
+  über inline `<phoneme alphabet="ipa" ph="…">` (ganzer Name oder wortweise).
+  Web Speech (offline) ignoriert `ipa` und nutzt `say`. Quelle: kuratiertes
+  W3C-PLS-Lexikon (badhub).
+- **`say`-Ersatzschreibweise auch bei Azure (seit v0.9.167):** Fehlt IPA, nutzt
+  der Azure-Pfad jetzt ebenfalls die phonetische Ersatzschreibweise `say` (als
+  gesprochenen Text), statt sie zu ignorieren. Die Rangfolge je Name/Wort regelt
+  `resolveNameCorrection` (`src/io/nameCorrection.mjs`, node-testbar):
+  **IPA (`<phoneme>`) → `say`-Text → `<lang>`-Erkennung**. Damit wirkt eine im
+  Setup getippte Korrektur (z. B. „Chybych" → „Chübüch") auf **beiden** Stimmen
+  — vorher war `say` auf dem Azure-Pfad totes Feld. Der ganze-Name-`<lang>`-
+  Fallback greift unverändert nur, wenn dieser Name **keinen** Wort-Treffer hat
+  (bessere Sprach-Erkennung als wortweise).
 - **Sprach-Erkennung (`<lang>`-Pfad):** `detectNameLang` (`src/io/transliterate.ts`)
   erkennt die Herkunftssprache: markante CN/VN-Nachnamen + kuratierte Namenslisten
   `NAME_LANG_BASE` (es/fr/pl/tr/ms/in, generiert aus `data/name-lists/*.xml` via
@@ -155,7 +164,8 @@ lädt bts-light ein **gemeinsames Aussprache-Wörterbuch** von badhub
 - **Manuelle Sprach-Korrektur:** `NameOverride.lang` (Nutzer-Tabelle) erzwingt je
   Name die Sprache, wenn die Erkennung daneben liegt. `buildLangOverrideMap` +
   `nameSsml` werten sie aus; Vorrang: Override (`"de"` = kein Tag, sonst
-  `<lang>`) → kuratiertes IPA → automatische Erkennung. Cache-Key in
+  `<lang>`) → kuratiertes IPA → `say`-Ersatzschreibweise → automatische
+  Erkennung. Cache-Key in
   `azure_tts.rs` hasht das vollständige SSML (inkl. `<lang>`/`<phoneme>`), daher
   keine Kollision zwischen gleich geschriebenen Namen mit anderer Sprache.
 - **Teilen (opt-in):** Schalter „Meine Korrekturen mit der Community teilen"
