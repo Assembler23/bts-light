@@ -1,6 +1,6 @@
 # ADR 0008 — Automatische Aussprache-Vorschläge für Turnier-Namen entstehen serverseitig bei badhub (opt-in), nicht in der Desktop-App
 
-Status: vorgeschlagen
+Status: akzeptiert (2026-07-21)
 
 ## Kontext
 
