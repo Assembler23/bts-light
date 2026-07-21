@@ -18,4 +18,4 @@ hier eintragen.
 | [0005](0005-lan-https-selbstsigniert.md) | LAN-Tablet-Server: HTTPS mit selbstsigniertem Zertifikat | akzeptiert |
 | [0006](0006-master-identitaet-umziehen.md) | Master-Identität per Export/Import auf einen neuen PC umziehen | akzeptiert |
 | [0007](0007-zaehltafelbediener.md) | Zähltafelbediener nach Vorbild Original-BTS, in zwei Phasen | akzeptiert |
-| [0008](0008-auto-aussprache-serverseitig-badhub.md) | Automatische Aussprache-Vorschläge entstehen serverseitig bei badhub (opt-in) | vorgeschlagen |
+| [0008](0008-auto-aussprache-serverseitig-badhub.md) | Automatische Aussprache-Vorschläge entstehen serverseitig bei badhub (opt-in) | akzeptiert |
