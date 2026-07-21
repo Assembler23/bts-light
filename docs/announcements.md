@@ -4,7 +4,10 @@ Wird in BTP ein Spiel auf ein Feld gezogen, spielt bts-light auf dem
 Turnier-PC eine gesprochene Ansage ab: **Gong → „Feld X" → Disziplin
 (+ Klasse) → Paarung → „Feld X"**. Deutsch oder Englisch, wählbare Stimmen,
 einstellbares Tempo. Eingeführt in v0.6.0; Klassen-Ansage
-(„Herreneinzel **A**") seit v0.9.145.
+(„Herreneinzel **A**") seit v0.9.145. Ist die Zähltafelbediener-Verwaltung
+aktiv (ADR 0007), folgt am Ende zusätzlich „**Tabletbedienung: {Name}**"
+(`scorekeeperNames` in `AnnounceMatchInput`, nur bei zugewiesenem Bediener) —
+siehe [zaehltafelbediener.md](zaehltafelbediener.md).
 
 ## Funktionsweise
 

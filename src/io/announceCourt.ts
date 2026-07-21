@@ -23,6 +23,11 @@ export function announceCourt(
       teamANames: court.team1,
       teamBNames: court.team2,
       roundName: court.round_name,
+      // Zähltafelbediener nur ansagen, wenn er zugewiesen wurde (ADR 0007) —
+      // nicht der reine pro-Feld-Hinweis.
+      scorekeeperNames: court.scorekeeper_assigned
+        ? court.scorekeeper
+        : undefined,
     },
     lang,
     {

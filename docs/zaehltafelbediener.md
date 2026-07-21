@@ -52,11 +52,32 @@ bleibt kein veralteter Name in der Anzeige hängen; angezeigt wird dann wieder
 der pro-Feld-Hinweis. Bei mehreren gleichzeitig neu belegten Feldern wird
 nach CourtID sortiert zugewiesen (deterministisch/fair).
 
-## Noch offen (nächste Scheiben, Phase 1)
+## Ansage (Scheibe 3, v0.9.165)
 
-- **Ansage** „Tabletbedienung: {Name}" als Segment der Feld-/
-  Vorbereitungs-Ansage + Zweitaufruf-Knopf.
-- **Mindestpause** (`break_seconds`) beim Ziehen berücksichtigen.
+Ist ein Bediener zugewiesen (`CourtOverview.scorekeeper_assigned == true`),
+hängt die Feld-Ansage am Ende „**Tabletbedienung: {Name}.**" an (EN:
+„Scoreboard operator: …"). Umgesetzt in `announcer.ts`
+(`buildAnnouncementSegments` + `buildAnnouncementSsml`, Feld
+`scorekeeperNames`); die Auslöser (`announceCourt`, `MatchAnnouncer`) geben die
+Namen **nur** weiter, wenn `scorekeeper_assigned` — der reine pro-Feld-Hinweis
+wird nicht angesagt. Gilt für Standard- und Azure-Stimme.
+
+## Noch offen
+
+- **Cloud-Slave-Ansage (bekannte Grenze):** Warteschlange und Zuweisung leben
+  **auf dem Master** (Sync-Loop). Ein Cloud-Ansage-Slave einer fernen Halle
+  sagt seine Court-Matches an, kennt aber die Bediener-Zuweisung nicht — er
+  sagt „Tabletbedienung: …" daher **nicht** mit. Nur die Master-Ansage
+  (LAN-`MatchAnnouncer`) nennt den Bediener. Fix (später): den zugewiesenen
+  Bediener je Feld über den Relay an die ferne Halle pushen (analog
+  `AnnounceState.prepared`).
+- **Mindestpause** (`break_seconds`): in Phase 1 **ohne Wirkung** — ein
+  Bediener verlässt beim Zuweisen die Warteschlange und wird nicht automatisch
+  wieder eingereiht, eine „Pause nach dem Dienst" hat hier also keinen Effekt.
+  Die Pause greift erst mit **Phase 2** (BTP-Auscheck mit künstlich
+  verschobenem `last_time_on_court`), damit BTP den Bediener nicht zu früh für
+  ein eigenes Spiel einplant. Das Config-Feld ist bereits vorhanden.
+- Optional: ein Zweitaufruf-Knopf „… bitte als Tabletbedienung melden".
 
 ## Phase 2 (später, eigene Freigabe)
 

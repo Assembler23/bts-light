@@ -117,10 +117,13 @@ pub struct CourtOverview {
     /// Kombi-Anzeige den Pausen-Countdown direkt am betroffenen Feld. None =
     /// keine Pause. `endsAt` steht in Server-Zeit (vom Tablet so gesetzt).
     pub pause: Option<serde_json::Value>,
-    /// Voraussichtlicher Zähltafelbediener für das aktuelle Spiel: die
-    /// Namen des Verlierer-Teams des zuletzt auf diesem Feld beendeten
-    /// Spiels. Leer, wenn es kein Vorspiel auf dem Feld gab.
+    /// Zähltafelbediener für das aktuelle Spiel: bei aktiver Verwaltung der
+    /// beim Aufruf zugewiesene Bediener, sonst der pro-Feld-Hinweis (Verlierer
+    /// des Vorspiels). Leer, wenn keiner bekannt ist.
     pub scorekeeper: Vec<String>,
+    /// `true`, wenn `scorekeeper` aus einer echten Zuweisung stammt (Verwaltung
+    /// aktiv) — nur dann wird der Bediener angesagt (ADR 0007).
+    pub scorekeeper_assigned: bool,
     /// Feld vom Operator gesperrt (bts-light-seitig): wird nicht automatisch
     /// belegt und im UI rot markiert. BTP kennt keinen Sperr-Zustand.
     pub locked: bool,
@@ -1190,6 +1193,13 @@ impl TabletState {
                 let pause_info: Option<serde_json::Value> = court_state_json
                     .as_ref()
                     .and_then(|v| v.get("pause").filter(|p| !p.is_null()).cloned());
+                // Zugewiesener Zähltafelbediener (einmal lesen, für scorekeeper
+                // + scorekeeper_assigned wiederverwendet).
+                let assigned_sk = if m.is_some() {
+                    self.assigned_scorekeeper(court.id)
+                } else {
+                    None
+                };
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
@@ -1233,7 +1243,7 @@ impl TabletState {
                     // pro-Feld-Hinweis (Verlierer des zuletzt hier beendeten
                     // Spiels). Nur zeigen, wenn gerade ein Spiel läuft.
                     scorekeeper: if m.is_some() {
-                        self.assigned_scorekeeper(court.id).unwrap_or_else(|| {
+                        assigned_sk.clone().unwrap_or_else(|| {
                             self.scorekeeper_by_court
                                 .read()
                                 .unwrap()
@@ -1244,6 +1254,10 @@ impl TabletState {
                     } else {
                         Vec::new()
                     },
+                    // true nur, wenn der scorekeeper aus einer echten Zuweisung
+                    // stammt (Verwaltung an) — dann wird er auch angesagt; der
+                    // reine pro-Feld-Hinweis wird nicht angesagt.
+                    scorekeeper_assigned: assigned_sk.is_some(),
                     locked: self.locked_courts.read().unwrap().contains(&court.id),
                     on_court_since_ms: m.and_then(|mm| self.on_court_since_ms(court.id, mm.id)),
                     best_of: m.map(|mm| mm.scoring.best_of).unwrap_or(0),
@@ -2057,6 +2071,32 @@ mod tests {
     }
 
     // ── Zähltafelbediener-Warteschlange (ADR 0007, Phase 1) ────────────────
+
+    #[test]
+    fn overview_marks_assigned_scorekeeper_for_announcement() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        // Ohne Zuweisung: nicht angesagt (assigned = false).
+        let c = st
+            .overview()
+            .into_iter()
+            .find(|c| c.court_id == 101)
+            .unwrap();
+        assert!(!c.scorekeeper_assigned);
+        // Bediener zuweisen → assigned = true, Namen im scorekeeper.
+        st.enqueue_scorekeeper(9, vec!["A".into()], 101, 1_000);
+        st.assign_scorekeeper_for_court(101, 1);
+        let c = st
+            .overview()
+            .into_iter()
+            .find(|c| c.court_id == 101)
+            .unwrap();
+        assert!(c.scorekeeper_assigned);
+        assert_eq!(c.scorekeeper, vec!["A".to_string()]);
+    }
 
     #[test]
     fn scorekeeper_enqueue_is_fifo_and_dedups_per_match() {

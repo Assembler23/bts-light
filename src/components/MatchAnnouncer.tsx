@@ -137,6 +137,10 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
               teamANames: court.team1,
               teamBNames: court.team2,
               roundName: court.round_name,
+              // Zähltafelbediener nur bei echter Zuweisung ansagen (ADR 0007).
+              scorekeeperNames: court.scorekeeper_assigned
+                ? court.scorekeeper
+                : undefined,
             };
             // Strikt sequenziell über die globale Ansage-Warteschlange in
             // announcer.ts — kein Gong startet, während eine Ansage noch spricht.
