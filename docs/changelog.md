@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.167
+
+- **Phonetische Aussprache-Korrektur wirkt jetzt auch bei Azure.** Bislang
+  griff die im Setup getippte Ersatzschreibweise (`say`, z. B. „Chybych" →
+  „Chübüch") **nur** auf der Standard-Stimme; die hochwertige Azure-Stimme
+  ignorierte sie und sprach den Rohnamen — bei ungewöhnlichen Namen bis zum
+  Buchstabieren. Jetzt nutzt auch Azure die Ersatzschreibweise. Rangfolge je
+  Name: IPA-Lautschrift (präzise) → Ersatzschreibweise → automatische
+  Sprach-Erkennung. Eine einmal eingetragene Korrektur wirkt damit auf beiden
+  Stimmen (und wird, wenn geteilt, an alle verteilt).
+
 ## v0.9.166
 
 - **Bediener-Ansage auch in der fernen Halle (Cloud).** Ist die
