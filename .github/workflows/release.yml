@@ -25,9 +25,9 @@ jobs:
     permissions:
       contents: write # nötig, um das GitHub-Release anzulegen
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -97,7 +97,7 @@ jobs:
       # gebraucht (scripts/build-release-page.mjs). fetch-depth: 0 +
       # fetch-tags: alle Tags samt Erstell-Datum, damit die Release-Seite
       # je Version das Datum zeigen kann.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
