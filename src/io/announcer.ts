@@ -34,6 +34,9 @@ export interface AnnounceMatchInput {
    *  angesagt („Herreneinzel A"). Leer/fehlend = keine Klasse. Gruppen-
    *  namen gehören hier NICHT hinein (Nutzer-Vorgabe: nie „Gruppe 3"). */
   className?: string;
+  /** Zugewiesener Zähltafelbediener (ADR 0007) — wird am Ende als
+   *  „Tabletbedienung: {Name}." angesagt. Leer/fehlend = nicht ansagen. */
+  scorekeeperNames?: string[];
 }
 
 export interface AnnounceOptions {
@@ -595,6 +598,15 @@ export function buildAnnouncementSegments(
   if (teamA) segments.push(`${teamA}.`);
   if (teamB) segments.push(`${versus} ${teamB}.`);
   segments.push(`${court}.`);
+  // Zähltafelbediener am Ende (ADR 0007), wie im Original-BTS. Namen ohne
+  // Aussprache-Korrektur (es sind die Bediener, keine Spieler-Ansage).
+  const sk = (input.scorekeeperNames ?? [])
+    .map((n) => n.trim())
+    .filter(Boolean);
+  if (sk.length > 0) {
+    const label = lang === "de" ? "Tabletbedienung" : "Scoreboard operator";
+    segments.push(`${label}: ${sk.join(" / ")}.`);
+  }
   return segments;
 }
 
@@ -755,6 +767,13 @@ export function buildAnnouncementSsml(
   if (teamA) parts.push(`${teamA}.`);
   if (teamB) parts.push(`${versus} ${teamB}.`);
   parts.push(`${court}.`);
+  const sk = (input.scorekeeperNames ?? [])
+    .map((n) => n.trim())
+    .filter(Boolean);
+  if (sk.length > 0) {
+    const label = lang === "de" ? "Tabletbedienung" : "Scoreboard operator";
+    parts.push(`${xmlEscape(label)}: ${xmlEscape(sk.join(" / "))}.`);
+  }
 
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (

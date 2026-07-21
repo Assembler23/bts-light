@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.165
+
+- **Ansage „Tabletbedienung: {Name}" (Zähltafelbediener, Phase 1 Scheibe 3).**
+  Ist die Zähltafelbediener-Verwaltung aktiv, nennt die Feld-Ansage am Ende den
+  zugewiesenen Bediener — genau wie im Original-BTS. Gilt für die automatische
+  Feld-Ansage und den manuellen „Ansagen"-Knopf, für Standard- und
+  Azure-Stimme. Der reine pro-Feld-Hinweis (ohne aktivierte Verwaltung) wird
+  weiterhin nicht angesagt.
+
 ## v0.9.164
 
 - **Zähltafelbediener werden beim Feld-Aufruf zugewiesen (Phase 1, Scheibe 2).**

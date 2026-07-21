@@ -436,9 +436,12 @@ export interface CourtOverview {
   /** Aufschlagendes Team (1/2) bzw. Spieler-Index (0/1) – Monitor-Anzeige. */
   serving_team: number | null;
   serving_player: number | null;
-  /** Voraussichtlicher Zähltafelbediener (Verlierer-Team des Vorspiels auf
-   *  diesem Feld). Leer, wenn es kein Vorspiel gab. */
+  /** Zähltafelbediener: zugewiesener Bediener (bei aktiver Verwaltung) oder
+   *  pro-Feld-Hinweis (Verlierer des Vorspiels). Leer, wenn keiner bekannt. */
   scorekeeper: string[];
+  /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt — nur dann
+   *  wird er angesagt (ADR 0007). */
+  scorekeeper_assigned: boolean;
   /** Feld vom Operator gesperrt (bts-light-seitig) → rot, keine Auto-Vergabe. */
   locked: boolean;
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
