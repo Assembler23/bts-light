@@ -509,6 +509,17 @@ impl TabletState {
         }
     }
 
+    /// Anzuzeigender Zähltafelbediener eines Felds für Tablet/ferne Halle:
+    /// zugewiesener Bediener (Verwaltung aktiv) mit Flag `true`, sonst der
+    /// pro-Feld-Hinweis mit `false`. Nur bei `true` wird er angesagt.
+    pub fn scorekeeper_display(&self, court_id: i64) -> (Vec<String>, bool) {
+        if let Some(names) = self.assigned_scorekeeper(court_id) {
+            (names, true)
+        } else {
+            (self.scorekeeper(court_id), false)
+        }
+    }
+
     /// Zugewiesener Zähltafelbediener eines Felds (Namen), falls vorhanden.
     pub fn assigned_scorekeeper(&self, court_id: i64) -> Option<Vec<String>> {
         self.assigned_scorekeeper
@@ -2112,6 +2123,18 @@ mod tests {
         // Leere Namen werden ignoriert.
         st.enqueue_scorekeeper(3, vec![], 7, 4_000);
         assert_eq!(st.scorekeeper_queue().len(), 2);
+    }
+
+    #[test]
+    fn scorekeeper_display_flags_assigned_vs_hint() {
+        let st = TabletState::default();
+        // Nur pro-Feld-Hinweis (Verwaltung aus) → nicht als „zugewiesen".
+        st.set_scorekeeper(5, vec!["Hint".into()]);
+        assert_eq!(st.scorekeeper_display(5), (vec!["Hint".to_string()], false));
+        // Zugewiesener Bediener gewinnt → als „zugewiesen" markiert (angesagt).
+        st.enqueue_scorekeeper(1, vec!["Op".into()], 5, 1_000);
+        st.assign_scorekeeper_for_court(5, 42);
+        assert_eq!(st.scorekeeper_display(5), (vec!["Op".to_string()], true));
     }
 
     #[test]

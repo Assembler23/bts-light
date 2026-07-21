@@ -1937,6 +1937,7 @@ mod tests {
             class_label: String::new(),
             match_number: Some(14),
             scorekeeper: Vec::new(),
+            scorekeeper_assigned: false,
         }
     }
 

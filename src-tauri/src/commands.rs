@@ -1769,6 +1769,10 @@ pub struct CloudAnnounceCourt {
     pub team1_nationalities: Vec<String>,
     pub team2_nationalities: Vec<String>,
     pub match_id: i64,
+    /// Zähltafelbediener (ADR 0007) + ob er zugewiesen ist — der Slave sagt ihn
+    /// nur bei `scorekeeper_assigned` mit an.
+    pub scorekeeper: Vec<String>,
+    pub scorekeeper_assigned: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -1878,6 +1882,8 @@ pub async fn cloud_announce_state(
                 team1_nationalities: nats(&m.team_a),
                 team2_nationalities: nats(&m.team_b),
                 match_id: m.match_id,
+                scorekeeper: m.scorekeeper.clone(),
+                scorekeeper_assigned: m.scorekeeper_assigned,
             })
         })
         .collect();

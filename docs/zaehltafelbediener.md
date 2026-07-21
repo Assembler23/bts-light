@@ -62,15 +62,18 @@ hängt die Feld-Ansage am Ende „**Tabletbedienung: {Name}.**" an (EN:
 Namen **nur** weiter, wenn `scorekeeper_assigned` — der reine pro-Feld-Hinweis
 wird nicht angesagt. Gilt für Standard- und Azure-Stimme.
 
+## Cloud-Ansage der fernen Halle (v0.9.166)
+
+Warteschlange und Zuweisung leben auf dem Master (Sync-Loop). Damit die ferne
+Halle den Bediener trotzdem ansagen kann, schickt der Master ihn je Feld über
+den Relay mit: `MatchBrief` trägt `scorekeeper` + `scorekeeper_assigned`
+(gesetzt aus `scorekeeper_display`), der Command reicht sie als `CloudPrepared`/
+`CloudAnnounceCourt` durch, und `CloudAnnounceSlave` sagt „Tabletbedienung: …"
+**nur bei `scorekeeper_assigned`** an. Reicht die Cloud (relay-deploy für
+MatchBrief) + die App.
+
 ## Noch offen
 
-- **Cloud-Slave-Ansage (bekannte Grenze):** Warteschlange und Zuweisung leben
-  **auf dem Master** (Sync-Loop). Ein Cloud-Ansage-Slave einer fernen Halle
-  sagt seine Court-Matches an, kennt aber die Bediener-Zuweisung nicht — er
-  sagt „Tabletbedienung: …" daher **nicht** mit. Nur die Master-Ansage
-  (LAN-`MatchAnnouncer`) nennt den Bediener. Fix (später): den zugewiesenen
-  Bediener je Feld über den Relay an die ferne Halle pushen (analog
-  `AnnounceState.prepared`).
 - **Mindestpause** (`break_seconds`): in Phase 1 **ohne Wirkung** — ein
   Bediener verlässt beim Zuweisen die Warteschlange und wird nicht automatisch
   wieder eingereiht, eine „Pause nach dem Dienst" hat hier also keinen Effekt.
