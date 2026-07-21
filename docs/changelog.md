@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.166
+
+- **Bediener-Ansage auch in der fernen Halle (Cloud).** Ist die
+  Zähltafelbediener-Verwaltung aktiv, sagt jetzt auch die **ferne Halle** über
+  die Cloud „Tabletbedienung: {Name}" mit an — der zugewiesene Bediener wird
+  dafür über den Relay mitgeschickt. Bisher nannte ihn nur der Master-PC.
+
 ## v0.9.165
 
 - **Ansage „Tabletbedienung: {Name}" (Zähltafelbediener, Phase 1 Scheibe 3).**

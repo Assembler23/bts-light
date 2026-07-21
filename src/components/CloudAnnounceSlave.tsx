@@ -98,6 +98,10 @@ export function CloudAnnounceSlave({
                 className: c.class_label,
                 teamANames: c.team1,
                 teamBNames: c.team2,
+                // Zähltafelbediener nur bei echter Zuweisung ansagen (ADR 0007).
+                scorekeeperNames: c.scorekeeper_assigned
+                  ? c.scorekeeper
+                  : undefined,
               },
               announceLang,
               {

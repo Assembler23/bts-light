@@ -264,6 +264,9 @@ export interface CloudAnnounceCourt {
   team1_nationalities: string[];
   team2_nationalities: string[];
   match_id: number;
+  /** Zähltafelbediener (ADR 0007); nur bei scorekeeper_assigned angesagt. */
+  scorekeeper: string[];
+  scorekeeper_assigned: boolean;
 }
 
 /** Ein aufgerufenes Spiel im Cloud-Ansage-Status (Rust: commands::CloudPrepared).

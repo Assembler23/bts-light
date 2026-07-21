@@ -88,12 +88,16 @@ pub struct MatchBrief {
     /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Monitor-Fußzeile.
     #[serde(rename = "matchNumber", default)]
     pub match_number: Option<i64>,
-    /// Voraussichtlicher Zähltafelbediener fürs nächste Spiel: die Namen des
-    /// Verlierer-Teams des zuletzt auf diesem Feld beendeten Spiels. Wird dem
-    /// Tablet bei der Seitenwahl als Hinweis angezeigt. Leer, wenn es kein
-    /// Vorspiel auf dem Feld gab. `#[serde(default)]` hält ältere Frames lesbar.
+    /// Zähltafelbediener: bei aktiver Verwaltung der zugewiesene Bediener,
+    /// sonst der pro-Feld-Hinweis (Verlierer des Vorspiels). Wird dem Tablet
+    /// bei der Seitenwahl angezeigt. Leer, wenn keiner bekannt.
+    /// `#[serde(default)]` hält ältere Frames lesbar.
     #[serde(default)]
     pub scorekeeper: Vec<String>,
+    /// `true`, wenn `scorekeeper` aus einer echten Zuweisung stammt (Verwaltung
+    /// aktiv) — nur dann sagt die ferne Halle „Tabletbedienung" mit an (ADR 0007).
+    #[serde(rename = "scorekeeperAssigned", default)]
+    pub scorekeeper_assigned: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -1287,6 +1291,7 @@ mod tests {
                 class_label: String::new(),
                 match_number: Some(14),
                 scorekeeper: vec!["Cara / Dora".into()],
+                scorekeeper_assigned: false,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
