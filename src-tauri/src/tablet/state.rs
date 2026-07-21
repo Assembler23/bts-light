@@ -1193,6 +1193,13 @@ impl TabletState {
                 let pause_info: Option<serde_json::Value> = court_state_json
                     .as_ref()
                     .and_then(|v| v.get("pause").filter(|p| !p.is_null()).cloned());
+                // Zugewiesener Zähltafelbediener (einmal lesen, für scorekeeper
+                // + scorekeeper_assigned wiederverwendet).
+                let assigned_sk = if m.is_some() {
+                    self.assigned_scorekeeper(court.id)
+                } else {
+                    None
+                };
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
@@ -1236,7 +1243,7 @@ impl TabletState {
                     // pro-Feld-Hinweis (Verlierer des zuletzt hier beendeten
                     // Spiels). Nur zeigen, wenn gerade ein Spiel läuft.
                     scorekeeper: if m.is_some() {
-                        self.assigned_scorekeeper(court.id).unwrap_or_else(|| {
+                        assigned_sk.clone().unwrap_or_else(|| {
                             self.scorekeeper_by_court
                                 .read()
                                 .unwrap()
@@ -1250,8 +1257,7 @@ impl TabletState {
                     // true nur, wenn der scorekeeper aus einer echten Zuweisung
                     // stammt (Verwaltung an) — dann wird er auch angesagt; der
                     // reine pro-Feld-Hinweis wird nicht angesagt.
-                    scorekeeper_assigned: m.is_some()
-                        && self.assigned_scorekeeper(court.id).is_some(),
+                    scorekeeper_assigned: assigned_sk.is_some(),
                     locked: self.locked_courts.read().unwrap().contains(&court.id),
                     on_court_since_ms: m.and_then(|mm| self.on_court_since_ms(court.id, mm.id)),
                     best_of: m.map(|mm| mm.scoring.best_of).unwrap_or(0),

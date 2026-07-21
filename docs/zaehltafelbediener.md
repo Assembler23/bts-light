@@ -64,6 +64,13 @@ wird nicht angesagt. Gilt für Standard- und Azure-Stimme.
 
 ## Noch offen
 
+- **Cloud-Slave-Ansage (bekannte Grenze):** Warteschlange und Zuweisung leben
+  **auf dem Master** (Sync-Loop). Ein Cloud-Ansage-Slave einer fernen Halle
+  sagt seine Court-Matches an, kennt aber die Bediener-Zuweisung nicht — er
+  sagt „Tabletbedienung: …" daher **nicht** mit. Nur die Master-Ansage
+  (LAN-`MatchAnnouncer`) nennt den Bediener. Fix (später): den zugewiesenen
+  Bediener je Feld über den Relay an die ferne Halle pushen (analog
+  `AnnounceState.prepared`).
 - **Mindestpause** (`break_seconds`): in Phase 1 **ohne Wirkung** — ein
   Bediener verlässt beim Zuweisen die Warteschlange und wird nicht automatisch
   wieder eingereiht, eine „Pause nach dem Dienst" hat hier also keinen Effekt.
