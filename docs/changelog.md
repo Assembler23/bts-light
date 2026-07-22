@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.171
+
+- **Aussprache-Wörterbuch: Warm-up-Nachladen nach dem Start.** Ergänzend zum
+  serverseitigen On-Load-Trigger (badhub stößt beim Turnier-Push die
+  Generierung sofort an) lädt der Client das Wörterbuch nach dem Start in einem
+  kurzen Warm-up (nach ~2/7/15 Min) statt erst beim nächsten 30-Min-Poll — so
+  sind frisch generierte Aussprachen eines gerade geladenen Turniers binnen
+  weniger Minuten am Feld. Danach normaler 30-Min-Takt.
+
 ## v0.9.170
 
 - **Aussprache-Wörterbuch schneller aktualisiert.** Der Client lädt das geteilte
