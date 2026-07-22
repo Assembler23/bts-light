@@ -55,8 +55,11 @@ export interface AzureTtsConfig {
   region: string;
   /** Subscription-Key (KEY 1) der Speech-Ressource. */
   key: string;
-  /** Mehrsprachige Stimme, z. B. „de-DE-SeraphinaMultilingualNeural". */
+  /** Mehrsprachige Standard-/Hauptstimme, z. B. „de-DE-SeraphinaMultilingualNeural". */
   voice: string;
+  /** Optionale Stimme je Disziplin (Disziplin-Kürzel wie „mens_singles" →
+   *  Azure-Stimmenname). Fehlt eine Disziplin → `voice`. Frei wählbar. */
+  discipline_voices?: Record<string, string>;
 }
 
 /** Aussprache-Korrektur für die Ansage (Rust: config::NameOverride). */

@@ -41,6 +41,11 @@ export function AnnounceSettings({
   const [azVoice, setAzVoice] = useState(
     az?.voice ?? "de-DE-SeraphinaMultilingualNeural",
   );
+  // Optionale Stimme je Disziplin (Disziplin-Kürzel → Azure-Stimme). Leer =
+  // Standard-Stimme. Wird nur bei aktivem Azure angeboten.
+  const [azDiscVoices, setAzDiscVoices] = useState<Record<string, string>>(
+    az?.discipline_voices ?? {},
+  );
   const [halls, setHalls] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -108,6 +113,10 @@ export function AnnounceSettings({
         region: azRegion.trim(),
         key: azKey.trim(),
         voice: azVoice,
+        // Nur nicht-leere Zuordnungen speichern (leer = Standard-Stimme).
+        discipline_voices: Object.fromEntries(
+          Object.entries(azDiscVoices).filter(([, v]) => v && v.trim() !== ""),
+        ),
       },
     };
     try {
@@ -311,6 +320,7 @@ export function AnnounceSettings({
                 region: azRegion,
                 key: azKey,
                 voice: azVoice,
+                discipline_voices: azDiscVoices,
               }),
             })
           }
@@ -543,6 +553,55 @@ export function AnnounceSettings({
                 </option>
               </select>
             </label>
+
+            {/* Optional: Stimme je Disziplin. Leer = Standard-Stimme oben. */}
+            <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+              <span className="text-sm font-medium text-slate-700">
+                Stimme je Disziplin (optional)
+              </span>
+              <p className="text-xs text-slate-500">
+                Leer = Standard-Stimme oben. So kann z. B. Herreneinzel/-doppel
+                von der männlichen und die Damen-Disziplinen von der weiblichen
+                Stimme angesagt werden — frei pro Disziplin.
+              </p>
+              {(
+                [
+                  ["mens_singles", "Herreneinzel"],
+                  ["mens_doubles", "Herrendoppel"],
+                  ["womens_singles", "Dameneinzel"],
+                  ["womens_doubles", "Damendoppel"],
+                  ["mixed", "Mixed"],
+                ] as const
+              ).map(([key, label]) => (
+                <label
+                  key={key}
+                  className="flex items-center justify-between gap-2 text-sm text-slate-600"
+                >
+                  {label}
+                  <select
+                    value={azDiscVoices[key] ?? ""}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      setAzDiscVoices((prev) => {
+                        const next = { ...prev };
+                        if (v) next[key] = v;
+                        else delete next[key];
+                        return next;
+                      });
+                    }}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  >
+                    <option value="">Standard</option>
+                    <option value="de-DE-SeraphinaMultilingualNeural">
+                      Seraphina (weiblich)
+                    </option>
+                    <option value="de-DE-FlorianMultilingualNeural">
+                      Florian (männlich)
+                    </option>
+                  </select>
+                </label>
+              ))}
+            </div>
           </div>
         )}
       </div>

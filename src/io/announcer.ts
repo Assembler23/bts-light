@@ -13,6 +13,7 @@ import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
+import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -54,7 +55,13 @@ export interface AnnounceOptions {
   /** Hochwertige Azure-Ansage: ganze Ansage als SSML synthetisieren + abspielen.
    *  `synthesize(ssml)` liefert MP3 als Base64; wirft bei Fehler → Fallback auf
    *  Web Speech. Fehlt das Feld, läuft alles wie bisher (Web Speech). */
-  azure?: { voice: string; synthesize: (ssml: string) => Promise<string> };
+  azure?: {
+    voice: string;
+    /** Optionale Stimme je Disziplin (Disziplin-Kürzel → Azure-Stimme); leer
+     *  für eine Disziplin → `voice`. Frei pro Disziplin wählbar. */
+    disciplineVoices?: Record<string, string>;
+    synthesize: (ssml: string) => Promise<string>;
+  };
 }
 
 // Löst auf, sobald der Gong WIRKLICH ausgeklungen ist: am echten Audio-Ende
@@ -822,15 +829,15 @@ export function playAnnouncement(
         const ipaMap = buildIpaMap(opts.nameOverrides, enabled);
         const langMap = buildLangOverrideMap(opts.nameOverrides, enabled);
         const sayMap = buildOverrideMap(opts.nameOverrides, enabled);
+        // Stimme je Disziplin (optional): Herren-/Damen-Disziplinen können
+        // unterschiedliche Stimmen bekommen; sonst die Standard-Stimme.
+        const voice = voiceForDiscipline(
+          opts.azure.voice,
+          opts.azure.disciplineVoices,
+          input.discipline,
+        );
         const b64 = await opts.azure.synthesize(
-          buildAnnouncementSsml(
-            input,
-            lang,
-            opts.azure.voice,
-            ipaMap,
-            langMap,
-            sayMap,
-          ),
+          buildAnnouncementSsml(input, lang, voice, ipaMap, langMap, sayMap),
         );
         await playMp3Base64(b64);
         return;
@@ -1119,15 +1126,13 @@ export function playPreparationAnnouncement(
         const ipaMap = buildIpaMap(opts.nameOverrides, enabled);
         const langMap = buildLangOverrideMap(opts.nameOverrides, enabled);
         const sayMap = buildOverrideMap(opts.nameOverrides, enabled);
+        const voice = voiceForDiscipline(
+          opts.azure.voice,
+          opts.azure.disciplineVoices,
+          input.discipline,
+        );
         const b64 = await opts.azure.synthesize(
-          buildPreparationSsml(
-            input,
-            lang,
-            opts.azure.voice,
-            ipaMap,
-            langMap,
-            sayMap,
-          ),
+          buildPreparationSsml(input, lang, voice, ipaMap, langMap, sayMap),
         );
         await playMp3Base64(b64);
         return;

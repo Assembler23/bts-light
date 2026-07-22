@@ -51,6 +51,11 @@ jobs:
       - name: Aussprache-Korrektur (JS)
         run: node scripts/test-name-correction.mjs
 
+      # Stimmenwahl je Disziplin (optionales Azure-Feature): Override greift nur
+      # bei gesetztem, nicht-leerem Wert, sonst Standard-Stimme.
+      - name: Stimme je Disziplin (JS)
+        run: node scripts/test-discipline-voice.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check
