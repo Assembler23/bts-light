@@ -339,8 +339,15 @@ pub struct AzureTtsConfig {
     /// Subscription-Key (KEY 1) der Speech-Ressource.
     pub key: String,
     /// Stimme (mehrsprachig, für `<lang>`-Spans), z. B.
-    /// „de-DE-SeraphinaMultilingualNeural".
+    /// „de-DE-SeraphinaMultilingualNeural". Das ist die Standard-/Hauptstimme.
     pub voice: String,
+    /// Optionale Stimme **je Disziplin** (Schlüssel = Disziplin-Kürzel wie
+    /// „mens_singles", Wert = Azure-Stimmenname). Leer/fehlend für eine
+    /// Disziplin → es gilt `voice`. Damit lässt sich z. B. Herreneinzel/
+    /// -doppel von einer männlichen und Damen-Disziplinen von einer weiblichen
+    /// Stimme ansagen — frei pro Disziplin wählbar, kein Zwang.
+    #[serde(default)]
+    pub discipline_voices: std::collections::HashMap<String, String>,
 }
 
 impl Default for AzureTtsConfig {
@@ -350,6 +357,7 @@ impl Default for AzureTtsConfig {
             region: String::new(),
             key: String::new(),
             voice: "de-DE-SeraphinaMultilingualNeural".to_string(),
+            discipline_voices: std::collections::HashMap::new(),
         }
     }
 }
@@ -651,6 +659,10 @@ mod tests {
                 region: "westeurope".to_string(),
                 key: "secret-key".to_string(),
                 voice: "de-DE-FlorianMultilingualNeural".to_string(),
+                discipline_voices: std::collections::HashMap::from([(
+                    "womens_singles".to_string(),
+                    "de-DE-SeraphinaMultilingualNeural".to_string(),
+                )]),
             },
             court_monitor: CourtMonitorConfig {
                 enabled: true,

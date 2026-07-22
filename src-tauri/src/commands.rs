@@ -2396,6 +2396,7 @@ mod tests {
             region: region.into(),
             key: key.into(),
             voice: "lokal-stimme".into(),
+            discipline_voices: std::collections::HashMap::new(),
         }
     }
 

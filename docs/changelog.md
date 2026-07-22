@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.168
+
+- **Azure-Stimme je Disziplin wählbar (optional).** In den Ansage-Einstellungen
+  lässt sich bei aktivem Azure pro Disziplin eine eigene Stimme hinterlegen —
+  z. B. Herreneinzel/-doppel mit der männlichen (Florian), Damen-Disziplinen mit
+  der weiblichen Stimme (Seraphina); Mixed frei wählbar. Nichts gesetzt = die
+  Standard-Stimme wie bisher (opt-in, kein Zwang). Beide Stimmen sind
+  mehrsprachig → Aussprache-Korrekturen (IPA/`say`) wirken unverändert.
+  Auswahl-Logik node-testbar (`src/io/disciplineVoice.mjs`). *Hinweis:* Die
+  **Vererbung** dieser Pro-Disziplin-Stimmen an eine rein *geerbte* ferne
+  Cloud-Halle folgt später — eine ferne Halle mit eigener Azure-Config nutzt ihre
+  eigene Zuordnung, eine geerbte vorerst die eine Master-Stimme.
+
 ## v0.9.167
 
 - **Phonetische Aussprache-Korrektur wirkt jetzt auch bei Azure.** Bislang

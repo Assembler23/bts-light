@@ -12,7 +12,11 @@ export function azureOption(
   // Command ohnehin ablehnen und die Ansage fiele still auf Web Speech
   // zurück (genau der stumme Slave-Bug vom Zwei-Hallen-Test).
   return az && az.enabled && az.key && az.region
-    ? { voice: az.voice, synthesize: azureTtsSpeak }
+    ? {
+        voice: az.voice,
+        disciplineVoices: az.discipline_voices,
+        synthesize: azureTtsSpeak,
+      }
     : undefined;
 }
 

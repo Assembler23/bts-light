@@ -346,8 +346,18 @@ Stimme die Namen **nativ** spricht. Ablauf:
   [`AzureFallbackBanner`](../src/components/AzureFallbackBanner.tsx) (quittierbar) und landet als
   `console.warn` im Diagnose-Log. Zusätzlich warnt `AnnounceSettings`, wenn der Schalter an ist,
   aber Key/Region fehlen (das Frontend-Gate `azureOption` liefert dann gar keine Azure-Option mehr).
-- **Konfig** (`AppConfig.azure_tts`): `enabled`, `region`, `key`, `voice`. Einrichtung im Setup →
-  *Ansagen*. Spielernamen werden XML-escaped in die SSML eingesetzt.
+- **Konfig** (`AppConfig.azure_tts`): `enabled`, `region`, `key`, `voice`, `discipline_voices`.
+  Einrichtung im Setup → *Ansagen*. Spielernamen werden XML-escaped in die SSML eingesetzt.
+- **Stimme je Disziplin (optional, seit v0.9.168):** `discipline_voices` bildet Disziplin-Kürzel
+  (`mens_singles`, `mens_doubles`, `womens_singles`, `womens_doubles`, `mixed`) → Azure-Stimme ab.
+  Vor der Synthese wählt [`voiceForDiscipline`](../src/io/disciplineVoice.mjs) (node-testbar,
+  `scripts/test-discipline-voice.mjs`) je Ansage die Stimme: hinterlegter Eintrag, sonst die
+  Standard-`voice`. Damit lässt sich z. B. Herren-Disziplinen männlich (Florian), Damen-Disziplinen
+  weiblich (Seraphina) ansagen — frei pro Disziplin, leer = Standard (kein Zwang, abwärtskompatibel
+  per `#[serde(default)]`). Greift für Feld- **und** Vorbereitungs-Ansage; Freitext nutzt die
+  Standard-Stimme. **Grenze:** Die Vererbung von `discipline_voices` an eine rein *geerbte* Cloud-
+  Halle ist noch offen — der geerbte `azure_voice` ist weiterhin die eine Stimme; eine ferne Halle
+  mit **eigener** vollständiger Azure-Config nutzt ihre eigene Zuordnung.
 - **Vererbung an Cloud-Slaves** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md)): Der Master
   schickt seine Azure-Config (nur wenn aktiv **und** vollständig) huckepack im
   `HostFrame::Courts`-Push an den Relay; der Relay liefert sie im `AnnounceState`
