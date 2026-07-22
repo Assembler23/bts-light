@@ -398,6 +398,11 @@ export function FieldOverviewPage({
                 // Turnierleitung – „Matchball" = Feld wird gleich frei. Nicht
                 // bei gesperrtem Feld (dort zeigt die Karte „Gesperrt").
                 const ball = occupied && !c.locked ? gamePointKind(c) : null;
+                // „Spiel läuft" = es sind schon Punkte gefallen. Dann Live-Score
+                // zeigen und den Aufruf-Timer ausblenden (der zählt nur die Zeit
+                // bis die Spieler ans Feld kommen).
+                const playing =
+                  occupied && c.sets.some(([a, b]) => a > 0 || b > 0);
                 const clickable = !c.locked && !occupied && !busy;
                 // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
                 // nicht erlaubt ist → ausgrauen (Klick zeigt trotzdem die
@@ -503,6 +508,12 @@ export function FieldOverviewPage({
                           >
                             {teamsLabel(c.team1, c.team2)}
                           </div>
+                          {/* Live-Spielstand (Sätze inkl. laufendem Satz). */}
+                          {c.sets.length > 0 && (
+                            <div className="font-mono text-sm font-semibold tabular-nums text-slate-800">
+                              {fmtSets(c.sets)}
+                            </div>
+                          )}
                           {/* Satz-/Matchball-Hinweis (Plan 16): Matchball rot +
                               pulsierend (Feld wird gleich frei), Satzball gelb. */}
                           {ball && (
@@ -523,13 +534,15 @@ export function FieldOverviewPage({
                               Bediener: {c.scorekeeper.join(" / ")}
                             </div>
                           )}
-                          {callTimer.enabled && c.on_court_since_ms != null && (
-                            <CallTimerBadge
-                              sinceMs={c.on_court_since_ms}
-                              now={now}
-                              cfg={callTimer}
-                            />
-                          )}
+                          {callTimer.enabled &&
+                            c.on_court_since_ms != null &&
+                            !playing && (
+                              <CallTimerBadge
+                                sinceMs={c.on_court_since_ms}
+                                now={now}
+                                cfg={callTimer}
+                              />
+                            )}
                           <div className="mt-auto flex items-center gap-1.5">
                             {/* „Nochmal aufrufen" nur, wenn Ansagen aktiviert
                                 sind – sonst gibt es keine Sprachausgabe. */}
@@ -560,17 +573,10 @@ export function FieldOverviewPage({
                             >
                               Ergebnis
                             </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmFree(c);
-                              }}
-                              disabled={busy}
-                              className="rounded-md bg-amber-200/70 px-2.5 py-1 text-xs font-medium
-                                         text-amber-900 hover:bg-amber-200 disabled:opacity-50"
-                            >
-                              Freigeben
-                            </button>
+                            {/* „Freigeben" liegt jetzt als Mülleimer-Icon oben
+                                neben dem Sperren-Schloss (v0.9.172) — der frühere
+                                Knopf hier rutschte aus dem sichtbaren Kachel-
+                                Bereich. */}
                           </div>
                         </>
                       ) : (
