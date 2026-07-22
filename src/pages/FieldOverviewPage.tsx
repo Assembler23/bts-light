@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Ban, Lock, Megaphone, Unlock } from "lucide-react";
+import { Ban, Lock, Megaphone, Trash2, Unlock } from "lucide-react";
 import {
   addScorekeeper,
   advanceScorekeeper,
@@ -453,17 +453,37 @@ export function FieldOverviewPage({
                         />
                         Feld {c.court}
                       </span>
-                      <button
-                        disabled={busy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void run(() => setCourtLocked(c.court_id, !c.locked));
-                        }}
-                        title={c.locked ? "Feld entsperren" : "Feld sperren"}
-                        className="rounded p-0.5 hover:bg-white/50 disabled:opacity-50"
-                      >
-                        {c.locked ? <Lock size={14} /> : <Unlock size={14} />}
-                      </button>
+                      <span className="flex items-center gap-0.5">
+                        {/* Feld freigeben — immer griffbereit neben dem Schloss
+                            (auch wenn das Feld gesperrt ist), nur wenn belegt.
+                            Öffnet den Sicherheits-Dialog (Freigabe schreibt nach
+                            BTP). */}
+                        {occupied && (
+                          <button
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmFree(c);
+                            }}
+                            title="Feld freigeben"
+                            aria-label={`Feld ${c.court} freigeben`}
+                            className="rounded p-0.5 text-rose-700 hover:bg-white/50 disabled:opacity-50"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                        <button
+                          disabled={busy}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void run(() => setCourtLocked(c.court_id, !c.locked));
+                          }}
+                          title={c.locked ? "Feld entsperren" : "Feld sperren"}
+                          className="rounded p-0.5 hover:bg-white/50 disabled:opacity-50"
+                        >
+                          {c.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                        </button>
+                      </span>
                     </div>
 
                     {/* Spalteninhalt je Status. */}
