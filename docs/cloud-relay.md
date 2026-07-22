@@ -165,7 +165,11 @@ den Relay-Cache mit den offline weitergezählten Punkten. Details:
   `install_id`-Bearer-UUID (bewusste Abwägung, siehe ADR). Der Key darf in
   Relay-Logs **nie** auftauchen. Alte Relays/Hosts bleiben kompatibel
   (optionales Feld, `#[serde(default)]`); ohne neuen Relay entfällt nur die
-  Vererbung.
+  Vererbung. Seit **v0.9.169** trägt `AzureTtsShare` zusätzlich
+  `discipline_voices` (Disziplin-Kürzel → Stimme) → die ferne Halle sagt
+  dieselben Disziplinen mit denselben Stimmen an wie der Master; fürs
+  Slave-Frontend als `CloudAnnounce.azure_discipline_voices` exponiert. Auch
+  serde-abwärtskompatibel (alter Master ohne Feld → leere Zuordnung).
 
 ## Deployment
 

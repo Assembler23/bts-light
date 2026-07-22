@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.169
+
+- **Pro-Disziplin-Stimmen werden an die ferne Halle vererbt.** Die am Master
+  eingestellte Stimme je Disziplin (v0.9.168) kommt jetzt über den Relay auch
+  bei einer fernen Cloud-Halle an — sie sagt dieselben Disziplinen mit denselben
+  Stimmen an wie der Master. Umgesetzt entlang des bestehenden Azure-Vererbungs-
+  Pfads (ADR 0003): `AzureTtsShare.discipline_voices` (Master → Relay → Slave)
+  + `CloudAnnounce.azure_discipline_voices` fürs Slave-Frontend, alles serde-
+  abwärtskompatibel. Betrifft die automatische Feld-Ansage der fernen Halle
+  (`CloudAnnounceSlave`). **Relay-Redeploy nötig** (relay-proto geändert) — läuft
+  automatisch beim Merge.
+
 ## v0.9.168
 
 - **Azure-Stimme je Disziplin wählbar (optional).** In den Ansage-Einstellungen

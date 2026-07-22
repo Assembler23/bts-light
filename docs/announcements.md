@@ -355,9 +355,12 @@ Stimme die Namen **nativ** spricht. Ablauf:
   Standard-`voice`. Damit lässt sich z. B. Herren-Disziplinen männlich (Florian), Damen-Disziplinen
   weiblich (Seraphina) ansagen — frei pro Disziplin, leer = Standard (kein Zwang, abwärtskompatibel
   per `#[serde(default)]`). Greift für Feld- **und** Vorbereitungs-Ansage; Freitext nutzt die
-  Standard-Stimme. **Grenze:** Die Vererbung von `discipline_voices` an eine rein *geerbte* Cloud-
-  Halle ist noch offen — der geerbte `azure_voice` ist weiterhin die eine Stimme; eine ferne Halle
-  mit **eigener** vollständiger Azure-Config nutzt ihre eigene Zuordnung.
+  Standard-Stimme. **Vererbung (seit v0.9.169):** Die Pro-Disziplin-Stimmen werden über den
+  Azure-Vererbungs-Pfad (ADR 0003) an eine ferne Cloud-Halle mitvererbt —
+  `AzureTtsShare.discipline_voices` (Master → Relay → Slave-Backend) und
+  `CloudAnnounce.azure_discipline_voices` (Slave-Frontend). Die automatische Feld-Ansage der fernen
+  Halle (`CloudAnnounceSlave`) nutzt so dieselbe Zuordnung wie der Master; ein Slave mit **eigener**
+  vollständiger Azure-Config nutzt ohnehin seine eigene.
 - **Vererbung an Cloud-Slaves** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md)): Der Master
   schickt seine Azure-Config (nur wenn aktiv **und** vollständig) huckepack im
   `HostFrame::Courts`-Push an den Relay; der Relay liefert sie im `AnnounceState`

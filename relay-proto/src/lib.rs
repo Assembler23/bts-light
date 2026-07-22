@@ -912,9 +912,14 @@ pub struct AzureTtsShare {
     /// Subscription-Key der Speech-Ressource. Achtung: Secret — nie loggen.
     #[serde(default)]
     pub key: String,
-    /// Stimme, z. B. „de-DE-SeraphinaMultilingualNeural".
+    /// Stimme, z. B. „de-DE-SeraphinaMultilingualNeural" (Standard-/Hauptstimme).
     #[serde(default)]
     pub voice: String,
+    /// Optionale Stimme je Disziplin (Disziplin-Kürzel → Azure-Stimme). Wird
+    /// vom Master mitvererbt, damit die ferne Halle dieselbe Zuordnung nutzt.
+    /// Leer/fehlend → Standard-Stimme (abwärtskompatibel per Default).
+    #[serde(default)]
+    pub discipline_voices: std::collections::HashMap<String, String>,
 }
 
 /// Eine Freitext-Ansage (Relay-Zwischenspeicher; Quelle = Master). `id`
@@ -1393,6 +1398,10 @@ mod tests {
                 region: "westeurope".into(),
                 key: "geheim".into(),
                 voice: "de-DE-SeraphinaMultilingualNeural".into(),
+                discipline_voices: std::collections::HashMap::from([(
+                    "mens_singles".to_string(),
+                    "de-DE-FlorianMultilingualNeural".to_string(),
+                )]),
             }),
         });
         // … und ohne Azure wird das Feld gar nicht erst serialisiert
@@ -1421,13 +1430,28 @@ mod tests {
             r#"{"courts":[],"freetext":[],"azureTts":{"region":"westeurope","key":"k","voice":"v"}}"#,
         )
         .unwrap();
+        // Alter Master ohne discipline_voices → Default leer, bleibt lesbar.
         assert_eq!(
             st.azure_tts,
             Some(AzureTtsShare {
                 region: "westeurope".into(),
                 key: "k".into(),
                 voice: "v".into(),
+                discipline_voices: std::collections::HashMap::new(),
             })
+        );
+        // Neuer Master MIT discipline_voices → kommt beim Slave an.
+        let st: AnnounceState = serde_json::from_str(
+            r#"{"courts":[],"freetext":[],"azureTts":{"region":"we","key":"k","voice":"v","discipline_voices":{"mens_singles":"de-DE-FlorianMultilingualNeural"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            st.azure_tts
+                .unwrap()
+                .discipline_voices
+                .get("mens_singles")
+                .map(String::as_str),
+            Some("de-DE-FlorianMultilingualNeural")
         );
     }
 

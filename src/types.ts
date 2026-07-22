@@ -298,6 +298,9 @@ export interface CloudAnnounce {
   /** Stimme der vom Master geerbten Azure-Config (ADR 0003); `null`, wenn
    *  keine Vererbung aktiv ist. Der Key selbst bleibt im Rust-Backend. */
   azure_voice: string | null;
+  /** Vom Master geerbte Stimme je Disziplin (Disziplin-Kürzel → Stimme);
+   *  leer ohne Vererbung/Zuordnung → Slave nutzt die Standard-Stimme. */
+  azure_discipline_voices?: Record<string, string>;
 }
 
 /** Turnier-Kennzahlen fürs Dashboard (Rust: commands::TournamentStats).
