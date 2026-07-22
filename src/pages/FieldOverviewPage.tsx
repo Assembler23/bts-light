@@ -30,7 +30,7 @@ import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
 import { announceCourt } from "../io/announceCourt";
 import { gamePointKind } from "../io/gamePoint.mjs";
-import { useNow } from "../state/callTimer";
+import { callInfo, useNow } from "../state/callTimer";
 import type {
   AnnounceConfig,
   AzureTtsConfig,
@@ -92,6 +92,10 @@ export function FieldOverviewPage({
   const [error, setError] = useState<string>("");
   // Feld, dessen Freigabe gerade bestätigt werden soll (Sicherheitsabfrage).
   const [confirmFree, setConfirmFree] = useState<CourtOverview | null>(null);
+  // Aufruf-Stufe je Feld+Match (`${court_id}:${match_id}`): jeder „Aufrufen"-
+  // Druck zählt hoch (1 → 2 → 3). Neues Match auf dem Feld = neuer Key =
+  // beginnt wieder bei 1. Grundlage für „2./3. Aufruf" als gesprochene Ansage.
+  const [callStages, setCallStages] = useState<Map<string, number>>(new Map());
   // Backend-Finalisierung (Plan 12): Feld, für dessen Spiel die
   // Turnierleitung gerade ein Ergebnis eintippt, plus die editierbaren Sätze.
   const [enterFor, setEnterFor] = useState<CourtOverview | null>(null);
@@ -403,6 +407,20 @@ export function FieldOverviewPage({
                 // bis die Spieler ans Feld kommen).
                 const playing =
                   occupied && c.sets.some(([a, b]) => a > 0 || b > 0);
+                // Nächste Aufruf-Stufe für dieses Feld+Match (1 → 2 → 3).
+                // Synchron mit dem zeit-basierten Aufruf-Badge: der Knopf sagt
+                // mindestens die Stufe an, die der Timer bereits als fällig
+                // zeigt (sonst würden Badge „2. Aufruf fällig" und Knopf
+                // divergieren). Manuelles Drücken eskaliert darüber hinaus.
+                const callKey = `${c.court_id}:${c.match_id}`;
+                const timeStage =
+                  callTimer.enabled && c.on_court_since_ms != null && !playing
+                    ? callInfo(c.on_court_since_ms, now, callTimer).stage
+                    : 1;
+                const nextCallStage = Math.min(
+                  Math.max((callStages.get(callKey) ?? 0) + 1, timeStage),
+                  3,
+                ) as 1 | 2 | 3;
                 const clickable = !c.locked && !occupied && !busy;
                 // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
                 // nicht erlaubt ist → ausgrauen (Klick zeigt trotzdem die
@@ -550,15 +568,34 @@ export function FieldOverviewPage({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  announceCourt(c, announce, azureTts);
+                                  announceCourt(
+                                    c,
+                                    announce,
+                                    azureTts,
+                                    nextCallStage,
+                                  );
+                                  setCallStages((m) =>
+                                    new Map(m).set(callKey, nextCallStage),
+                                  );
                                 }}
                                 disabled={busy}
-                                aria-label={`Feld ${c.court} nochmal aufrufen`}
-                                title="Dieses Feld nochmal aufrufen (Ansage)"
+                                aria-label={`Feld ${c.court} ${
+                                  nextCallStage === 1
+                                    ? "aufrufen"
+                                    : `${nextCallStage}. Aufruf`
+                                }`}
+                                title={
+                                  nextCallStage === 1
+                                    ? "Dieses Feld aufrufen (Ansage)"
+                                    : `${nextCallStage}. Aufruf ansagen (Gong, Feld, Disziplin, „${nextCallStage === 2 ? "Zweiter" : "Dritter und letzter"} Aufruf", Spieler)`
+                                }
                                 className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1
                                            text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
                               >
-                                <Megaphone size={13} /> Aufrufen
+                                <Megaphone size={13} />{" "}
+                                {nextCallStage === 1
+                                  ? "Aufrufen"
+                                  : `${nextCallStage}. Aufruf`}
                               </button>
                             )}
                             <button

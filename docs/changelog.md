@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.174
+
+- **2./3. Aufruf mit Ansage aus der Spielübersicht.** Der „Aufrufen"-Knopf je
+  Feld zählt bei wiederholtem Drücken hoch: 1× = normaler Aufruf, danach
+  **„2. Aufruf" / „3. Aufruf"** — jeweils als vollständige Ansage (Gong, Feld,
+  Disziplin, „Zweiter/Dritter und letzter Aufruf", Spieler). Die Stufe wird je
+  Feld+Match geführt (neues Spiel auf dem Feld → beginnt wieder bei 1). Wirkt auf
+  Standard- und Azure-Stimme. Der Knopf zeigt die nächste Stufe an.
+
 ## v0.9.173
 
 - **Live-Spielstand wieder in der Spielübersicht.** Auf der Karte eines belegten
