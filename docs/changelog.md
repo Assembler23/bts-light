@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.172
+
+- **„Feld freigeben" wieder griffbereit in der Spielübersicht.** Neben dem
+  Sperren-Schloss jedes Felds gibt es jetzt ein **Papierkorb-Icon** (Tooltip
+  „Feld freigeben"), das bei belegtem Feld immer sichtbar ist — auch wenn das
+  Feld **gesperrt** ist (vorher steckte „Freigeben" nur im Kartentext eines
+  belegten, *ungesperrten* Felds und wirkte dadurch verschwunden). Löst den
+  bestehenden Sicherheits-Dialog aus; die eigentliche Freigabe (`free_court`,
+  Schreibpfad nach BTP) ist unverändert.
+
 ## v0.9.171
 
 - **Aussprache-Wörterbuch: Warm-up-Nachladen nach dem Start.** Ergänzend zum
