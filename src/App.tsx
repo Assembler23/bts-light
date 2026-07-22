@@ -147,8 +147,11 @@ function App() {
   }, []);
 
   // Geteiltes Aussprache-Wörterbuch laden: einmal beim Start (nach dem
-  // Config-Load, damit die Badhub-URL steht) und danach alle 3 h, solange
-  // Internet da ist. Offline liefert der Rust-Cache den letzten Stand.
+  // Config-Load, damit die Badhub-URL steht) und danach alle 30 Min, solange
+  // Internet da ist. Offline liefert der Rust-Cache den letzten Stand. Der
+  // 30-Min-Takt (früher 3 h) sorgt zusammen mit dem 15-Min-Server-Job + dem
+  // 5-Min-Edge-Cache dafür, dass Auto-Aussprachen eines laufenden Turniers
+  // zeitnah ankommen (nicht erst Stunden später).
   useEffect(() => {
     let active = true;
     const refresh = () => {
@@ -160,7 +163,7 @@ function App() {
     };
     // Kurzer Versatz, damit load_config den Rust-State zuerst gesetzt hat.
     const initial = window.setTimeout(refresh, 1500);
-    const id = window.setInterval(refresh, 3 * 60 * 60 * 1000);
+    const id = window.setInterval(refresh, 30 * 60 * 1000);
     return () => {
       active = false;
       window.clearTimeout(initial);

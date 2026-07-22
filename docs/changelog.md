@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.170
+
+- **Aussprache-Wörterbuch schneller aktualisiert.** Der Client lädt das geteilte
+  Wörterbuch jetzt **alle 30 Min** statt alle 3 h (offline weiter aus dem Cache).
+  Zusammen mit dem serverseitig auf **15 Min** verkürzten Generier-Takt und dem
+  **5-Min**-Edge-Cache erreichen Auto-Aussprachen eines laufenden Turniers zeitnah
+  die Ansage — statt erst Stunden später. Reine Intervall-Änderung, kein
+  Verhaltenswechsel.
+
 ## v0.9.169
 
 - **Pro-Disziplin-Stimmen werden an die ferne Halle vererbt.** Die am Master
