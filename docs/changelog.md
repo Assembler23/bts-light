@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.173
+
+- **Live-Spielstand wieder in der Spielübersicht.** Auf der Karte eines belegten
+  Felds steht jetzt wieder der aktuelle Satzstand (inkl. laufendem Satz).
+- **Aufruf-Timer verschwindet, sobald gespielt wird.** Der 1./2.-Aufruf-Timer
+  zählt nur die Wartezeit, bis die Spieler ans Feld kommen — er wird jetzt
+  ausgeblendet, sobald die ersten Punkte gefallen sind.
+- **„Feld freigeben" nur noch als Mülleimer-Icon oben** (neben dem Schloss,
+  v0.9.172): der frühere amber „Freigeben"-Knopf im Kartentext rutschte teils aus
+  dem sichtbaren Bereich und ist jetzt entfernt.
+
 ## v0.9.172
 
 - **„Feld freigeben" wieder griffbereit in der Spielübersicht.** Neben dem
