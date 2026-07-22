@@ -699,6 +699,7 @@ fn azure_share(ctx: &ServerCtx) -> Option<relay_proto::AzureTtsShare> {
             region: az.region,
             key: az.key,
             voice: az.voice,
+            discipline_voices: az.discipline_voices,
         },
     )
 }

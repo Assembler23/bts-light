@@ -21,10 +21,14 @@ export function azureOption(
 }
 
 /** Azure-Option aus der vom Master geerbten Config (ADR 0003): Der Slave
- *  kennt nur die Stimme; Key/Region hält das Rust-Backend (`AppState`).
- *  Fallback, wenn die lokale Config unvollständig ist. */
+ *  kennt nur die Stimme(n); Key/Region hält das Rust-Backend (`AppState`).
+ *  Fallback, wenn die lokale Config unvollständig ist. `disciplineVoices` wird
+ *  ebenfalls vom Master vererbt → die ferne Halle nutzt dieselbe Zuordnung. */
 export function inheritedAzureOption(
   voice: string | null | undefined,
+  disciplineVoices?: Record<string, string>,
 ): AnnounceOptions["azure"] {
-  return voice ? { voice, synthesize: azureTtsSpeak } : undefined;
+  return voice
+    ? { voice, disciplineVoices, synthesize: azureTtsSpeak }
+    : undefined;
 }

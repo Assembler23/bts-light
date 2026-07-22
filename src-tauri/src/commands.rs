@@ -1808,6 +1808,9 @@ pub struct CloudAnnounce {
     /// Stimme der vom Master geerbten Azure-Config (ADR 0003), `None` ohne
     /// Vererbung. Bewusst nur die Stimme: der Key bleibt im Backend.
     pub azure_voice: Option<String>,
+    /// Vom Master geerbte Stimme je Disziplin (Disziplin-Kürzel → Stimme).
+    /// Leer ohne Vererbung/ohne Zuordnung → der Slave nutzt die Standard-Stimme.
+    pub azure_discipline_voices: std::collections::HashMap<String, String>,
 }
 
 /// Cloud-Ansage-Slave (B1a): holt aus dem Cloud-Relay des Masters die Matches
@@ -1826,6 +1829,7 @@ pub async fn cloud_announce_state(
                 freetext: Vec::new(),
                 prepared: Vec::new(),
                 azure_voice: None,
+                azure_discipline_voices: std::collections::HashMap::new(),
             });
         }
         (
@@ -1840,21 +1844,34 @@ pub async fn cloud_announce_state(
     // Netz-Aussetzer soll die Vererbung nicht verwerfen (ADR 0003). Ein
     // erfolgreicher Poll ist dagegen autoritativ, auch wenn er `None`
     // liefert (Azure am Master deaktiviert).
-    let azure_voice = match &fetched {
+    // Geerbte Stimme UND Disziplin-Stimmen aus derselben Master-Config ableiten,
+    // damit die ferne Halle exakt dieselbe Zuordnung nutzt wie der Master.
+    let azure_voice;
+    let azure_discipline_voices;
+    match &fetched {
         Some(st) => {
-            let voice = st.azure_tts.as_ref().map(|a| a.voice.clone());
+            azure_voice = st.azure_tts.as_ref().map(|a| a.voice.clone());
+            azure_discipline_voices = st
+                .azure_tts
+                .as_ref()
+                .map(|a| a.discipline_voices.clone())
+                .unwrap_or_default();
             *state
                 .inherited_azure
                 .lock()
                 .expect("inherited_azure-Mutex nicht vergiftet") = st.azure_tts.clone();
-            voice
         }
-        None => state
-            .inherited_azure
-            .lock()
-            .expect("inherited_azure-Mutex nicht vergiftet")
-            .as_ref()
-            .map(|a| a.voice.clone()),
+        None => {
+            let guard = state
+                .inherited_azure
+                .lock()
+                .expect("inherited_azure-Mutex nicht vergiftet");
+            azure_voice = guard.as_ref().map(|a| a.voice.clone());
+            azure_discipline_voices = guard
+                .as_ref()
+                .map(|a| a.discipline_voices.clone())
+                .unwrap_or_default();
+        }
     };
     let st = fetched.unwrap_or_default();
 
@@ -1917,6 +1934,7 @@ pub async fn cloud_announce_state(
         freetext,
         prepared,
         azure_voice,
+        azure_discipline_voices,
     })
 }
 
@@ -2405,6 +2423,7 @@ mod tests {
             region: region.into(),
             key: key.into(),
             voice: "master-stimme".into(),
+            discipline_voices: std::collections::HashMap::new(),
         }
     }
 

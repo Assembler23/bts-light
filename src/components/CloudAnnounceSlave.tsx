@@ -81,7 +81,10 @@ export function CloudAnnounceSlave({
           // auf Key/Region an.
           const azure =
             azureOption(azureRef.current) ??
-            inheritedAzureOption(state.azure_voice);
+            inheritedAzureOption(
+              state.azure_voice,
+              state.azure_discipline_voices,
+            );
           // Neue Feld-Belegungen ansagen.
           for (const c of state.courts) {
             const prev = lastMatch.current.get(c.court_id);
