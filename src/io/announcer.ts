@@ -39,6 +39,10 @@ export interface AnnounceMatchInput {
   /** Zugewiesener Zähltafelbediener (ADR 0007) — wird am Ende als
    *  „Tabletbedienung: {Name}." angesagt. Leer/fehlend = nicht ansagen. */
   scorekeeperNames?: string[];
+  /** Aufruf-Stufe: 1 = normaler (erster) Aufruf, 2 = „Zweiter Aufruf",
+   *  3 = „Dritter und letzter Aufruf". Ab Stufe 2 wird das Label als eigenes
+   *  Segment hinter Disziplin/Runde vor die Paarung gesetzt. Default 1. */
+  callStage?: 1 | 2 | 3;
 }
 
 export interface AnnounceOptions {
@@ -603,6 +607,9 @@ export function buildAnnouncementSegments(
   if (disc) segments.push(`${disc}.`);
   // Runde ab Viertelfinale vor der Paarung ansagen (wertet die Ansage auf).
   if (round) segments.push(`${round}.`);
+  // Aufruf-Stufe (2./3. Aufruf) als eigenes Segment vor der Paarung.
+  const stage = callStageLabel(input.callStage, lang);
+  if (stage) segments.push(`${stage}.`);
   if (teamA) segments.push(`${teamA}.`);
   if (teamB) segments.push(`${versus} ${teamB}.`);
   segments.push(`${court}.`);
@@ -795,6 +802,8 @@ export function buildAnnouncementSsml(
   const parts: string[] = [`${court}.`];
   if (disc) parts.push(`${disc}.`);
   if (round) parts.push(`${xmlEscape(round)}.`);
+  const stageLabel = callStageLabel(input.callStage, lang);
+  if (stageLabel) parts.push(`${xmlEscape(stageLabel)}.`);
   if (teamA) parts.push(`${teamA}.`);
   if (teamB) parts.push(`${versus} ${teamB}.`);
   parts.push(`${court}.`);
@@ -982,6 +991,22 @@ function callStagePrefix(
   }
   if (stage === 2) {
     return lang === "de" ? "Zweiter Aufruf für:" : "Second call for:";
+  }
+  return null;
+}
+
+// Stufen-Label als eigenständiges Ansage-Segment (ohne „für:") für die
+// gestaffelte FELD-Ansage: „Zweiter Aufruf." / „Dritter und letzter Aufruf.".
+// Stufe 1 (normaler Erstaufruf) → null (kein Zusatz).
+function callStageLabel(
+  stage: 1 | 2 | 3 | undefined,
+  lang: AnnounceLang,
+): string | null {
+  if (stage === 3) {
+    return lang === "de" ? "Dritter und letzter Aufruf" : "Third and final call";
+  }
+  if (stage === 2) {
+    return lang === "de" ? "Zweiter Aufruf" : "Second call";
   }
   return null;
 }

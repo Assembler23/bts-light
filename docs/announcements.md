@@ -69,6 +69,30 @@ werden NICHT angesagt.**
   (`G1`, `Gruppe …`), `Achtelfinale`, `Runde/Round N`, Quali/Vorrunde → kein
   Label (→ keine Ansage). de/en gemäß Ansage-Sprache.
 
+## 2./3. Aufruf (gestaffelte Feld-Ansage, v0.9.174)
+
+Der **„Aufrufen"-Knopf** je Feld in der Spielübersicht
+([`FieldOverviewPage.tsx`](../src/pages/FieldOverviewPage.tsx)) zählt bei
+wiederholtem Drücken hoch: 1× = normaler Aufruf, danach **„2. Aufruf" / „3.
+Aufruf"**. Ab Stufe 2 wird ein Label-Segment **vor der Paarung** angesagt:
+
+> Gong → „Feld X" → Disziplin → (Runde) → **„Zweiter Aufruf" / „Dritter und
+> letzter Aufruf"** → Paarung → „Feld X".
+
+- Label: `callStageLabel()` in [`announcer.ts`](../src/io/announcer.ts);
+  eingefügt in `buildAnnouncementSegments` **und** `buildAnnouncementSsml`
+  (Segment- und Azure-SSML-Pfad identisch). `AnnounceMatchInput.callStage`
+  (1/2/3, Default 1) trägt die Stufe; `announceCourt(court, …, callStage)`.
+- Stufe je **Feld+Match** (`callStages`-Map, Key `court_id:match_id`) — ein
+  neues Match auf dem Feld beginnt wieder bei 1.
+- **Synchron mit dem zeit-basierten Aufruf-Badge:** Der Knopf sagt **mindestens**
+  die Stufe an, die der [`CallTimerBadge`](../src/components/CallTimerBadge.tsx)
+  (`callInfo().stage`, nach `second_/third_call_minutes`) bereits als fällig
+  zeigt — so laufen Badge und Ansage nicht auseinander; manuelles Drücken
+  eskaliert darüber hinaus. Der Knopf zeigt die **nächste** Stufe als Label.
+- Betrifft nur diese manuelle Feld-Ansage; die automatische Erst-Ansage
+  (`MatchAnnouncer`) und die Vorbereitungs-Ansage sind unberührt.
+
 ## Sprache: Deutsch / Englisch / Automatisch
 
 Einstellbar im Setup unter „Sprachansagen":

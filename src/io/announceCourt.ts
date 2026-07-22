@@ -10,6 +10,7 @@ export function announceCourt(
   court: CourtOverview,
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
+  callStage: 1 | 2 | 3 = 1,
 ): void {
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],
@@ -28,6 +29,7 @@ export function announceCourt(
       scorekeeperNames: court.scorekeeper_assigned
         ? court.scorekeeper
         : undefined,
+      callStage,
     },
     lang,
     {
