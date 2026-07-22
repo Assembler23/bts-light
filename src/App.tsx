@@ -162,11 +162,16 @@ function App() {
         .catch(() => {});
     };
     // Kurzer Versatz, damit load_config den Rust-State zuerst gesetzt hat.
-    const initial = window.setTimeout(refresh, 1500);
+    // Danach eine Warm-up-Phase: der Turnier-Push stößt serverseitig die
+    // Auto-Aussprache für die gerade geladenen Namen an (ADR 0008); die kurzen
+    // Nachlade-Zeitpunkte holen das Ergebnis binnen weniger Minuten ans Feld,
+    // statt bis zum nächsten 30-Min-Poll zu warten. Danach steady alle 30 Min.
+    const warmupMs = [1500, 2 * 60 * 1000, 7 * 60 * 1000, 15 * 60 * 1000];
+    const timers = warmupMs.map((ms) => window.setTimeout(refresh, ms));
     const id = window.setInterval(refresh, 30 * 60 * 1000);
     return () => {
       active = false;
-      window.clearTimeout(initial);
+      timers.forEach((t) => window.clearTimeout(t));
       window.clearInterval(id);
     };
   }, []);
