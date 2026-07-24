@@ -1,6 +1,6 @@
 # Hallen-Check-In — Spezifikation
 
-> Status: **Entwurf** (via /idee: Brief → Grill → How-To → Review), erarbeitet 2026-07-24.
+> Status: **abgestimmt 2026-07-24** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Idee + Chat-Abstimmung vom 24.07.2026.
 > Betroffene Crates: `src-tauri/` (btp, badhub, config, commands, sync) · `src/` (Seite, Ansage-Texte).
 > Zweites Repo: **badhub** (öffentliche Seite, Persistenz, Admin-Verwaltung).

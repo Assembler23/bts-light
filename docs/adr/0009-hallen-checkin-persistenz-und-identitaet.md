@@ -1,6 +1,6 @@
 # 0009 — Hallen-Check-In: Persistenz in badhub, Turnier-Identität ist die turnier.de-GUID
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-07-24
 
 Gehört zur Spezifikation
