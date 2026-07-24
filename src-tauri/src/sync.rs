@@ -988,6 +988,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![BtpMatch {
                 id: 1,
                 draw_id: 1,
@@ -1134,6 +1136,8 @@ mod tests {
             locations: locs,
             court_infos: courts,
             matches,
+            events: Vec::new(),
+            entries: Vec::new(),
         }
     }
 

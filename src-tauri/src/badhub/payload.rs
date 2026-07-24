@@ -325,6 +325,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![
                 sample_match(1, MatchStatus::OnCourt, Some("Feld 9")),
                 sample_match(3, MatchStatus::Scheduled, None),
@@ -347,6 +349,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![sample_match(14, MatchStatus::OnCourt, Some("1"))],
         };
         let m = &build_tset(&snapshot, 1).event.matches[0];
@@ -380,6 +384,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![early, late, unstamped],
         };
         let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
@@ -406,6 +412,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![a, b],
         };
         let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
@@ -421,6 +429,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![
                 sample_match(5, MatchStatus::Scheduled, None),
                 sample_match(6, MatchStatus::OnCourt, Some("1")),
@@ -449,6 +459,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![uncalled, called],
         };
         let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
@@ -473,6 +485,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![
                 sample_match(7, MatchStatus::Scheduled, None),
                 sample_match(3, MatchStatus::Scheduled, None),
@@ -492,6 +506,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
         let json = serde_json::to_string(&build_tset(&snapshot, 42)).unwrap();
@@ -519,6 +535,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![walkover, regular],
         };
         let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
@@ -554,6 +572,8 @@ mod tests {
                 sort_order: 1,
             }],
             matches: vec![m],
+            events: Vec::new(),
+            entries: Vec::new(),
         };
         let tset = build_tset(&snapshot, 1);
         assert_eq!(tset.event.courts.len(), 1);
@@ -571,6 +591,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
         let tset = build_tset(&snapshot, 1);

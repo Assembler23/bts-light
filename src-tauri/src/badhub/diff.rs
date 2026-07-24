@@ -143,6 +143,8 @@ mod tests {
             courts: Vec::new(),
             locations: Vec::new(),
             court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
         }
     }
 

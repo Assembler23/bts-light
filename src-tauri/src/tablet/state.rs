@@ -1494,6 +1494,8 @@ mod tests {
             courts: courts.into_iter().map(|(_, n)| n.to_string()).collect(),
             locations: Vec::new(),
             court_infos,
+            events: Vec::new(),
+            entries: Vec::new(),
         }
     }
 
