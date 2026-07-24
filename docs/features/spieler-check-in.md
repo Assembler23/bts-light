@@ -135,6 +135,30 @@ Erfolgskriterien, messbar beim nächsten Turnier:
 | Ansagen | Immer **per Klick**. Kein selbsttätiges Sprechen. |
 | Persistenz | badhub, unter der Turnier-GUID. |
 | Zustandsberechnung | **Serverseitig in badhub**, Zeitzone `Europe/Berlin`. Nie die Uhr des Spieler-Handys. |
+| Wer pflegt in badhub | Die Turnierleitung selbst, über die badhub-Rolle `liveticker`, beschränkt auf **eigene** Turniere (Ownership über `created_by_admin_id`). Siehe „Zugang der Turnierleitung". |
+
+### Zugang der Turnierleitung zur badhub-Verwaltung
+
+Die Rolle `liveticker` existiert in badhub und ist genau für diesen Zweck
+angelegt — eigene Turniere verwalten, mit Ownership-Prüfung, eigenem
+Login-Redirect, 2FA-Pfad und Pfad-Whitelist. Sie ist derzeit jedoch
+**funktionslos**: die einzige für sie freigegebene Seite weist sie mit HTTP 403
+ab. Das ist **kein Fehler, sondern eine bewusste Rücknahme** (badhub-Commit
+`c6bcf71`, 16.04.2026: „Zugangsbeschränkung von superadmin+liveticker auf
+nur-superadmin geändert — BTS-Nutzer brauchen kein Admin-Panel mehr"). Grund
+war der im selben Commit eingeführte Passwort-Versand per E-Mail: Zugangsdaten
+kommen seither per Mail, das Panel wurde überflüssig.
+
+Der Hallen-Check-In schafft erstmals einen Bedarf, den diese Begründung nicht
+abdeckt — Anfangszeiten, Anmeldeschlüsse und den Rückfrage-Status kann niemand
+außer der Turnierleitung pflegen.
+
+**Festlegung:** Die neue Check-In-Verwaltungsseite wird für die Rolle
+`liveticker` freigeschaltet (Aufnahme in `LIVETICKER_ADMIN_ALLOWED_PATHS`,
+Ownership über `created_by_admin_id`). Das **Zugangsverwaltungs-Panel**
+(Turniere anlegen, Passwörter rotieren/versenden) bleibt unverändert
+Superadmin-only — die Entscheidung von 04/2026 wird damit nicht angetastet,
+sondern nur um einen Gegenstand ergänzt, den es damals nicht gab.
 
 ## Umsetzung in drei Schnitten
 
@@ -176,6 +200,12 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
       weder gespeichert noch ausgeliefert.
 - [ ] **A12** Antwortet badhub mit 5xx, bleibt die App funktionsfähig; der
       nächste Zyklus sendet die vollständige Meldeliste erneut.
+- [ ] **A13** Ein Benutzer mit der badhub-Rolle `liveticker` erreicht nach dem
+      Login die Check-In-Verwaltung und kann dort Anfangszeit, Anmeldeschluss,
+      Doppel-Modus und den Rückfrage-Status pflegen — **nur für Turniere, die
+      ihm gehören**. Fremde Turniere sind weder sichtbar noch änderbar.
+- [ ] **A14** Dieselbe Rolle erhält auf dem Zugangsverwaltungs-Panel
+      (Turniere anlegen, Passwörter rotieren/versenden) weiterhin HTTP 403.
 
 ### Schnitt B — Öffentliche Check-In-Seite
 
@@ -269,6 +299,9 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
 **badhub (`php tests/unit/*_test.php`, kein PHPUnit):**
 
 - Auth über den Liveticker-Kanal; falsches Passwort → 401 (A9).
+- Rollen-Zugriff: `liveticker` erreicht die Check-In-Verwaltung und sieht nur
+  eigene Turniere (A13); dieselbe Rolle bleibt auf dem Zugangsverwaltungs-Panel
+  gesperrt (A14).
 - Push überschreibt keinen Zustand (A10); anonymisierte Spieler gefiltert (A11).
 - Zustandsberechnung `Europe/Berlin` inkl. Sommerzeitgrenze (B2–B4).
 - Ablehnung turnierfremder Spieler/Klassen (B9) und außerhalb des Fensters (B8).
@@ -296,25 +329,14 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
 
 ## Offene Fragen / Annahmen
 
-1. **Zugang der Turnierleitung zur badhub-Verwaltung — Betriebs-Blocker.**
-   Die Festlegung „TL pflegt Zeiten und den Rückfrage-Status vorab in badhub"
-   setzt voraus, dass ein Turnierleiter dort eine eigene Verwaltungsseite
-   erreichen kann. Die Rolle `liveticker` existiert und ist für genau diesen
-   Zweck angelegt (eigene Turniere verwalten, Ownership über
-   `created_by_admin_id`), **wird aber derzeit auf der einzigen für sie
-   vorgesehenen Seite mit HTTP 403 abgewiesen** (`isSuperAdmin()`-only).
-   Ob das ein Fehler oder eine bewusste Rücknahme ist, muss **vor Schnitt A**
-   geklärt werden. Bis dahin könnte nur ein Superadmin die Zeiten pflegen.
-   Zusätzlich müssen neue Seiten in die Pfad-Whitelist der Rolle aufgenommen
-   werden.
-2. **Stabilität der `EventID` über einen BTP-Neuimport.** Bestimmt, wie stark
+1. **Stabilität der `EventID` über einen BTP-Neuimport.** Bestimmt, wie stark
    der Klassenname als Absicherung gebraucht wird. Am echten Turnier zu prüfen.
-3. **Verfügbarkeit von `MemberID` und `ClubID` in echten Turnieren.** Im
+2. **Verfügbarkeit von `MemberID` und `ClubID` in echten Turnieren.** Im
    Testmitschnitt sind beide leer. Sie bestimmen, wie gut das
    Anonymisierungs-Gate greift und ob der Verein bei Namensgleichheit als
    Unterscheidungsmerkmal taugt. **Annahme:** Das Feature funktioniert
    vollständig ohne beide Felder.
-4. **Annahme:** Ein Turnier hat genau eine Turnier-GUID, die vor Turnierbeginn
+3. **Annahme:** Ein Turnier hat genau eine Turnier-GUID, die vor Turnierbeginn
    bekannt ist. Turniere ohne turnier.de-Eintrag können den Check-In nicht
    nutzen.
 
@@ -335,6 +357,10 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
 - `docs/schema_evolution.md` — Pflicht bei jeder Migration.
 - `CLAUDE.md` — Eintrag der R3-Ausnahme (Check-In-Tabellen ohne
   `federation_id`, weil verbandsübergreifend wie der Liveticker).
+- Rollen-Doku: die Wiederbelebung der Rolle `liveticker` für die
+  Check-In-Verwaltung festhalten — sie war seit 04/2026 faktisch stillgelegt.
+  Die Abgrenzung zum weiterhin gesperrten Zugangsverwaltungs-Panel gehört
+  ausdrücklich dazu.
 
 ## Umsetzungs-Hinweise
 

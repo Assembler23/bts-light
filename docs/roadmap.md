@@ -258,10 +258,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   bts-light), geschnitten in drei nacheinander lieferbare Stufen.
   Spec: [features/spieler-check-in.md](features/spieler-check-in.md) ·
   ADR: [adr/0009-hallen-checkin-persistenz-und-identitaet.md](adr/0009-hallen-checkin-persistenz-und-identitaet.md).
-  **Vor Umsetzungsbeginn zu klären:** ob ein Turnierleiter (Rolle
-  `liveticker`) in badhub eine eigene Turnier-Verwaltung erreichen kann —
-  derzeit weist die einzige dafür vorgesehene Seite diese Rolle mit HTTP 403
-  ab. Ohne Klärung kann nur ein Superadmin die Anfangszeiten pflegen.
+  **Vor Umsetzungsbeginn zu entscheiden:** ob die Check-In-Verwaltung in
+  badhub für die Rolle `liveticker` freigeschaltet wird. Deren Sperre ist
+  eine bewusste Rücknahme von 04/2026 (Zugangsdaten kommen seither per
+  E-Mail), die Rollen-Infrastruktur ist aber intakt. Ohne Freischaltung
+  müsste ein Superadmin die Anfangszeiten jedes Turniers pflegen.
 
 ## Geplant
 
