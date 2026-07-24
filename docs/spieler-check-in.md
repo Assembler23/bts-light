@@ -114,11 +114,22 @@ etwas erhielte.
 - **Braucht Internet.** Im reinen LAN-Betrieb ohne Internet ist der Check-In
   nicht verfügbar. Das Turnier läuft unverändert weiter — das Feature ist
   **additiv**, es hängt weder an der Feldvergabe noch an Ergebnissen.
+- **Reihenfolge im Sync-Zyklus.** Der Roster-Push läuft **nach** dem
+  Liveticker-Push. Der Liveticker ist die zeitkritische Funktion, der Check-In
+  die additive: stünde er davor, könnte ein hängender Check-In-Endpunkt die
+  Ergebnis-Übertragung um seinen ganzen Timeout verzögern — bei einem
+  5-Sekunden-Poll-Takt ein spürbarer Aussetzer.
 - **Versionsschiefstand.** bts-light kommt per Auto-Update auf alle
   Installationen, badhub wird unabhängig deployt. Antwortet badhub mit
-  **404/400**, kennt es den Check-In noch nicht → still für diese Sitzung,
-  kein erneutes Anklopfen. Ein **5xx** legt nichts still: der nächste Zyklus
-  sendet die vollständige Liste erneut.
+  **404/400**, kennt es den Check-In noch nicht → der Push pausiert 30 Minuten
+  und wird dann erneut versucht. Bewusst **keine** dauerhafte Stilllegung:
+  derselbe Status kann von einem kurzen Aussetzer während eines
+  badhub-Deploys stammen, und ein Turnier läuft über mehrere Tage. Ein **5xx**
+  pausiert gar nicht — der nächste Zyklus sendet die vollständige Liste erneut.
+- **Unvollständige Doppel-Meldung.** Nennt BTP zwei Spieler, ist aber einer
+  nicht auflösbar, bleibt die Meldung erhalten (der anwesende Partner soll
+  einchecken können) und erscheint als Einzel-Meldung. Das ist ein Datenfehler
+  in BTP und wird protokolliert, statt still zu bleiben.
 - **Ein Spieler in mehreren Klassen** checkt je Klasse einzeln ein. Der
   Check-In gilt je Klasse, nicht je Person.
 - **Kein Rückfluss nach BTP** und **keine Kopplung an die Feldvergabe** —

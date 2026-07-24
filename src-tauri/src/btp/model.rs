@@ -532,13 +532,28 @@ fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
         .filter_map(|e| {
             let id = child_int(e, "ID")?;
             let event_id = child_int(e, "EventID")?;
-            let resolved: Vec<BtpPlayer> = ["Player1ID", "Player2ID"]
+            let referenced: Vec<i64> = ["Player1ID", "Player2ID"]
                 .iter()
                 .filter_map(|field| child_int(e, field))
-                .filter_map(|pid| players.get(&pid).cloned())
+                .collect();
+            let resolved: Vec<BtpPlayer> = referenced
+                .iter()
+                .filter_map(|pid| players.get(pid).cloned())
                 .collect();
             if resolved.is_empty() {
                 return None;
+            }
+            // Teil-Auflösung bei einem Doppel: BTP nennt zwei Spieler, aber
+            // einer fehlt in `Players`. Die Meldung wird behalten — der
+            // anwesende Partner soll einchecken können —, aber sie erscheint
+            // dann als Einzel-Meldung. Das ist ein Datenfehler in BTP, der
+            // sonst still bliebe.
+            if resolved.len() < referenced.len() {
+                tracing::warn!(
+                    entry_id = id,
+                    event_id,
+                    "Meldung verweist auf unbekannte Spieler — Partner fehlt in der Meldeliste"
+                );
             }
             Some(BtpEntry {
                 id,
@@ -1213,6 +1228,43 @@ mod tests {
             snapshot.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
             vec![4]
         );
+    }
+
+    #[test]
+    fn roster_keeps_a_half_resolvable_doubles_entry() {
+        // BTP nennt zwei Spieler, einer fehlt in `Players`. Die Meldung bleibt
+        // erhalten, damit der anwesende Partner einchecken kann — sie ist dann
+        // aber nur noch einköpfig (und wird protokolliert).
+        let tree = tournament_with(vec![
+            Node::group(
+                "Players",
+                vec![Node::group(
+                    "Player",
+                    vec![
+                        Node::integer("ID", 1),
+                        Node::string("Firstname", "Anna"),
+                        Node::string("Lastname", "Beispiel"),
+                    ],
+                )],
+            ),
+            Node::group(
+                "Entries",
+                vec![Node::group(
+                    "Entry",
+                    vec![
+                        Node::integer("ID", 20),
+                        Node::integer("EventID", 3),
+                        Node::integer("Player1ID", 1),
+                        Node::integer("Player2ID", 999),
+                    ],
+                )],
+            ),
+        ]);
+
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].players.len(), 1);
+        assert_eq!(snapshot.entries[0].players[0].id, 1);
     }
 
     #[test]

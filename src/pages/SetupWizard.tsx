@@ -1132,8 +1132,12 @@ export function SetupWizard({
                 onChange={(e) => {
                   // Aus einer eingefügten Adresse die GUID herausziehen —
                   // kopiert wird fast immer die ganze URL aus dem Browser.
+                  // Nur dann ersetzen: sonst würde jedes Tippen mitten in
+                  // einer schon gültigen Kennung den Feldinhalt neu setzen
+                  // und den Cursor ans Ende springen lassen.
                   const raw = e.currentTarget.value;
-                  const found = extractTournamentGuid(raw);
+                  const looksLikeUrl = /[/:]/.test(raw);
+                  const found = looksLikeUrl ? extractTournamentGuid(raw) : "";
                   setCiUuid(found || raw);
                 }}
               />
