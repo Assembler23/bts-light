@@ -23,7 +23,7 @@ Das Feature ist in drei nacheinander lieferbare Schnitte geteilt.
 |---|---|---|
 | **A** | Meldelisten-Push (bts-light) + Persistenz und Verwaltung (badhub) | bts-light-Teil steht |
 | **B** | Öffentliche Check-In-Seite + QR-Aushang (badhub) | offen |
-| **C** | Turnierleitungs-Sicht + Ansagen (bts-light) | offen |
+| **C** | Turnierleitungs-Sicht, Zeiten-Pflege + Ansagen (bts-light) | offen |
 
 **Solange der badhub-Teil von Schnitt A nicht ausgerollt ist**, antwortet der
 Endpunkt mit 404 — bts-light legt den Meldelisten-Push dann für die laufende
@@ -105,6 +105,23 @@ Im Einrichtungs-Assistenten, Abschnitt **Hallen-Check-In**:
 Ohne gültige Kennung bleibt der Check-In **aus**, auch wenn das Häkchen
 gesetzt ist — sonst stünde er als „aktiv" im Dashboard, ohne dass badhub je
 etwas erhielte.
+
+## Wo die Zeiten gepflegt werden
+
+Anfangszeit und Anmeldeschluss sind **an beiden Stellen bedienbar**: vorab in
+badhub vom Schreibtisch (bevor BTP oder bts-light laufen) und am Turniertag in
+bts-light, wenn ein Turnier in Verzug gerät.
+
+**badhub speichert, bts-light schreibt durch.** Es gibt genau einen
+gespeicherten Wert und zwei Eingabemasken — bts-light hält **keine** eigene
+Kopie. Ein lokaler Zwischenspeicher würde die zweite Wahrheit erzeugen, die
+dieses Modell gerade vermeidet; ohne Verbindung sind die Zeiten in bts-light
+deshalb nur lesbar.
+
+Der **Rückfrage-Status** bleibt bewusst nur in badhub: er entsteht beim
+Zahlungsabgleich Tage vor dem Turnier.
+
+*(Die bts-light-Seite kommt mit Schnitt C.)*
 
 ## Grenzen und Randfälle
 

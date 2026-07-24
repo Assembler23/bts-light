@@ -124,8 +124,8 @@ Erfolgskriterien, messbar beim nächsten Turnier:
 | Turnier-Identität | **turnier.de-Turnier-GUID** (36 Zeichen, aus der URL `turnier.de/tournament/<GUID>/matches`), einmalig in bts-light eingetragen. Authentifiziert wird über den **bestehenden** Liveticker-Kanal. Siehe ADR 0009. |
 | Spieler-Identität | BTP-`PlayerID` innerhalb des Turniers (immer vorhanden). `MemberID` (Lizenznummer) wird mitgeschickt **wenn vorhanden**, nie Pflicht. |
 | Klassen-Schlüssel | BTP-`EventID` plus Event-Name als Anzeigetext. |
-| Anfangszeit | Manuell gepflegt, je Klasse. |
-| Anmeldeschluss | Eigener Zeitpunkt je Klasse, **Default = Anfangszeit**. |
+| Anfangszeit | Manuell gepflegt, je Klasse — **an beiden Stellen bedienbar** (siehe unten). |
+| Anmeldeschluss | Eigener Zeitpunkt je Klasse, **Default = Anfangszeit**. Ebenfalls an beiden Stellen bedienbar. |
 | Check-In-Fenster | Öffnet **1 h vor** der Anfangszeit, schließt zum Anmeldeschluss. |
 | Zugang | Offen, keine technische Hürde. Verteilung per QR-Code/Aushang in der Halle. |
 | Status | `offen` · `eingecheckt` · `Rückfrage an Turnierleitung`. |
@@ -136,6 +136,32 @@ Erfolgskriterien, messbar beim nächsten Turnier:
 | Persistenz | badhub, unter der Turnier-GUID. |
 | Zustandsberechnung | **Serverseitig in badhub**, Zeitzone `Europe/Berlin`. Nie die Uhr des Spieler-Handys. |
 | Wer pflegt in badhub | Die Turnierleitung selbst, über die badhub-Rolle `liveticker`, beschränkt auf **eigene** Turniere (Ownership über `created_by_admin_id`). Siehe „Zugang der Turnierleitung". |
+
+### Wo die Zeiten gepflegt werden
+
+Anfangszeit und Anmeldeschluss sind **an beiden Stellen bedienbar**, weil
+beide Situationen real vorkommen:
+
+- **In badhub, vorab vom Schreibtisch** — die Zeiten stehen fest, bevor BTP
+  oder bts-light überhaupt laufen; zusammen mit dem Rückfrage-Status.
+- **In bts-light, am Turniertag** — gerät das Turnier in Verzug oder wird
+  eine Klasse verschoben, sitzt die Turnierleitung an bts-light und soll
+  nicht das Werkzeug wechseln müssen.
+
+**badhub speichert, bts-light schreibt durch.** Es gibt genau einen
+gespeicherten Wert (unter der Turnier-GUID, siehe unten) und zwei
+Eingabemasken. bts-light hält **keine** eigene Kopie: Änderungen gehen sofort
+per Command an badhub, der nächste Abruf liefert den bestätigten Stand. Damit
+entfällt jeder Abgleich; der einzig denkbare Konflikt sind zwei Personen, die
+in derselben Sekunde dieselbe Klasse ändern — dort gewinnt der letzte
+Schreibvorgang.
+
+Ist badhub nicht erreichbar, sind die Zeiten in bts-light **nur lesbar** (der
+Bereich verhält sich wie in AK-C3). Ein lokaler Zwischenspeicher würde genau
+die zweite Wahrheit erzeugen, die dieses Modell vermeidet.
+
+Der **Rückfrage-Status** bleibt bewusst nur in badhub: er entsteht beim
+Zahlungsabgleich Tage vor dem Turnier, wenn kein bts-light läuft.
 
 ### Zugang der Turnierleitung zur badhub-Verwaltung
 
@@ -167,7 +193,7 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
 - **Schnitt A** — Meldelisten-Push (bts-light) + Persistenz und
   Admin-Verwaltung (badhub). Nichts ist öffentlich sichtbar.
 - **Schnitt B** — öffentliche Check-In-Seite + QR-Aushang (badhub).
-- **Schnitt C** — Turnierleitungs-Sicht + Ansage-Texte (bts-light).
+- **Schnitt C** — Turnierleitungs-Sicht, Zeiten-Pflege und Ansage-Texte (bts-light).
 
 ## Akzeptanzkriterien
 
@@ -274,6 +300,16 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
       Turnierleitung — die App sagt nie selbsttätig etwas an.
 - [ ] **C11** Wechselt das Turnier (neue GUID), zeigt die Sicht keine Stände des
       Vorturniers.
+- [ ] **C12** Die Turnierleitung kann Anfangszeit und Anmeldeschluss einer
+      Klasse **auch in bts-light** ändern; der Wert landet in badhub und ist
+      dort sofort sichtbar.
+- [ ] **C13** bts-light hält **keine** eigene Kopie der Zeiten. Nach einem
+      Neustart zeigt es die Zeiten aus badhub, nicht einen lokalen Stand.
+- [ ] **C14** Ist badhub nicht erreichbar, sind die Zeiten in bts-light nur
+      lesbar und ein Änderungsversuch wird verständlich abgelehnt — es
+      entsteht kein lokaler Zwischenspeicher.
+- [ ] **C15** Ein Anmeldeschluss vor der Anfangszeit wird auch in bts-light
+      abgelehnt (gleiche Regel wie in badhub).
 
 ## Tests
 
