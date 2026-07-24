@@ -107,6 +107,23 @@ export interface AutoAssignConfig {
   active_hall: string;
 }
 
+/** Einstellungen des Hallen-Check-Ins (Rust: config::CheckinConfig, ADR 0009).
+ *
+ *  Anfangszeiten, Anmeldeschlüsse und Check-In-Stände liegen bewusst NICHT
+ *  hier, sondern bei badhub unter der Turnier-GUID — lokal steht nur, welches
+ *  Turnier gerade läuft. */
+export interface CheckinConfig {
+  /** Hallen-Check-In für dieses Turnier aktiv? */
+  enabled: boolean;
+  /** turnier.de-Turnier-GUID (36 Zeichen) aus der Turnier-URL
+   *  `turnier.de/tournament/<GUID>/matches`. Leer = nicht eingerichtet.
+   *  BTP liefert sie nicht mit, sie wird einmalig eingetragen. */
+  tournament_uuid: string;
+  /** Bis zu wie vielen fehlenden Spielern nennt die Ansage Namen? Darüber
+   *  wird nur die Anzahl angesagt. */
+  missing_names_max: number;
+}
+
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
 export interface CourtMonitorConfig {
   /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der
@@ -353,6 +370,8 @@ export interface AppConfig {
   scorekeeper: ScorekeeperConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
+  /** Hallen-Check-In (ADR 0009). */
+  checkin: CheckinConfig;
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
    *  ein (manuell + automatisch). Leer = keine Einschränkung. */
   discipline_hall_rules: DisciplineHallRule[];

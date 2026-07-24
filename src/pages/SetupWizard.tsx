@@ -37,6 +37,7 @@ import {
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import { PRESETS, findPreset } from "../presets";
+import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
   ConnectionMode,
@@ -331,6 +332,13 @@ export function SetupWizard({
   const [aaWait, setAaWait] = useState(String(aa?.wait_minutes ?? 1));
   const [aaPause, setAaPause] = useState(String(aa?.pause_minutes ?? 0));
   const [aaActiveHall, setAaActiveHall] = useState(aa?.active_hall ?? "");
+  // Hallen-Check-In (ADR 0009): Spieler bestätigen ihre Anwesenheit selbst.
+  const ci = initialConfig.checkin;
+  const [ciEnabled, setCiEnabled] = useState(ci?.enabled ?? false);
+  const [ciUuid, setCiUuid] = useState(ci?.tournament_uuid ?? "");
+  const [ciMissingMax, setCiMissingMax] = useState(
+    String(ci?.missing_names_max ?? 8),
+  );
   const cm = initialConfig.court_monitor;
   const [cmEnabled, setCmEnabled] = useState(cm.enabled);
   const [cmInterval, setCmInterval] = useState(cm.ad_interval_s);
@@ -489,6 +497,15 @@ export function SetupWizard({
       ),
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
+      checkin: {
+        // Ohne gültige Turnier-Kennung bleibt der Check-In aus — sonst stünde
+        // er als „aktiv" im Dashboard, ohne dass badhub je etwas erhielte.
+        enabled: ciEnabled && isTournamentGuid(ciUuid),
+        tournament_uuid: extractTournamentGuid(ciUuid),
+        // Negative/leere Eingabe abfangen; 0 ist erlaubt (nie Namen nennen).
+        missing_names_max:
+          Number(ciMissingMax) >= 0 ? Number(ciMissingMax) : 8,
+      },
       // Tablet-Einstellungs-PIN: nur Ziffern, leer → Default „0000".
       tablet_settings_pin: tabletPin.replace(/\D/g, "").slice(0, 8) || "0000",
       tournament_logo: {
@@ -1086,6 +1103,78 @@ export function SetupWizard({
       </section>
 
       {/* Zähltafelbediener-Verwaltung (ADR 0007) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Users}>Hallen-Check-In</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Spieler bestätigen vor Beginn ihrer Spielklasse über eine Webseite
+          selbst, dass sie in der Halle sind — du siehst dann schon vor der
+          Auslosung, wer fehlt. Die Adresse verteilst du per QR-Aushang in der
+          Halle. Braucht Internet; ohne Verbindung läuft das Turnier
+          unverändert weiter.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={ciEnabled}
+            onChange={(e) => setCiEnabled(e.currentTarget.checked)}
+          />
+          Hallen-Check-In aktivieren
+        </label>
+
+        {ciEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              <span>Turnier bei turnier.de</span>
+              <input
+                className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+                placeholder="turnier.de-Adresse einfügen oder Turnier-GUID"
+                value={ciUuid}
+                onChange={(e) => {
+                  // Aus einer eingefügten Adresse die GUID herausziehen —
+                  // kopiert wird fast immer die ganze URL aus dem Browser.
+                  // Nur dann ersetzen: sonst würde jedes Tippen mitten in
+                  // einer schon gültigen Kennung den Feldinhalt neu setzen
+                  // und den Cursor ans Ende springen lassen.
+                  const raw = e.currentTarget.value;
+                  const looksLikeUrl = /[/:]/.test(raw);
+                  const found = looksLikeUrl ? extractTournamentGuid(raw) : "";
+                  setCiUuid(found || raw);
+                }}
+              />
+              <span className="text-xs text-slate-500">
+                Öffne dein Turnier auf turnier.de und füge die Adresse hier ein
+                — die Kennung wird automatisch herausgelesen. Sie verbindet den
+                Check-In mit deinem Turnier.
+              </span>
+              {ciUuid.trim() !== "" && !isTournamentGuid(ciUuid) && (
+                <span className="text-xs font-medium text-amber-600">
+                  Das sieht noch nicht nach einer Turnier-Kennung aus. Erwartet
+                  wird die Adresse deines Turniers bei turnier.de.
+                </span>
+              )}
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              <span>Namen in der „Es fehlen noch"-Ansage</span>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                className="w-24 rounded-lg border border-slate-300 px-3 py-2"
+                value={ciMissingMax}
+                onChange={(e) => setCiMissingMax(e.currentTarget.value)}
+              />
+              <span className="text-xs text-slate-500">
+                Bis zu so vielen fehlenden Spielern werden die Namen
+                vorgelesen. Darüber sagt die Ansage nur die Anzahl — sonst
+                läuft sie kurz nach Öffnung des Check-Ins minutenlang.
+              </span>
+            </label>
+          </div>
+        )}
+      </section>
+
+      {/* Zähltafelbediener */}
       <section className="flex flex-col gap-2">
         <SectionHeader icon={Users}>Zähltafelbediener</SectionHeader>
         <p className="text-xs text-slate-500">

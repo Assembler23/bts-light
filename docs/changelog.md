@@ -4,6 +4,30 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.175
+
+- **Hallen-Check-In, erste Stufe (Datenlieferung).** bts-light liest jetzt die
+  **Meldeliste je Spielklasse** aus BTP und schickt sie an badhub — die
+  Grundlage dafür, dass Spieler vor Beginn ihrer Klasse über eine Webseite
+  selbst bestätigen können, dass sie in der Halle sind. Möglich wird das durch
+  `Entry.EventID`: eine Meldung kennt ihre Klasse direkt und braucht dafür
+  weder Auslosung noch Spielplan, die Liste steht also **vor der Auslosung**
+  bereit. Einzurichten im Einrichtungs-Assistenten unter *Hallen-Check-In*:
+  Häkchen setzen und die Adresse des Turniers bei turnier.de einfügen — die
+  Kennung wird daraus automatisch herausgelesen.
+- **Standardmäßig aus.** Ohne Häkchen und gültige Turnier-Kennung wird nichts
+  gesendet; bestehende Installationen ändern ihr Verhalten nicht. Gesendet wird
+  außerdem nur bei echter Änderung der Meldeliste (Nachmeldung, Abmeldung,
+  korrigierter Name), nicht im Poll-Takt.
+- **Stört den Liveticker nicht.** Der Check-In-Push läuft *nach* dem
+  Liveticker-Push und mit eigenem Fehlerpfad. Kennt badhub das Feature noch
+  nicht, pausiert bts-light 30 Minuten und versucht es dann erneut. Im
+  Ansage-Slave-Modus wird grundsätzlich nichts gesendet — es schreibt genau ein
+  Master.
+- Sichtbar wird der Check-In für Spieler und Turnierleitung erst mit den
+  folgenden Stufen (öffentliche Seite, Turnierleitungs-Sicht, Ansagen).
+  Details: [spieler-check-in.md](spieler-check-in.md).
+
 ## v0.9.174
 
 - **2./3. Aufruf mit Ansage aus der Spielübersicht.** Der „Aufrufen"-Knopf je

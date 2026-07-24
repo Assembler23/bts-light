@@ -178,3 +178,89 @@ fn two_hall_capture_parses_locations_and_courts() {
         );
     }
 }
+
+/// Die Meldeliste steht **vor** der Auslosung bereit: Ein `Entry` trägt seine
+/// `EventID` direkt und braucht dafür weder Draw noch Match. Das ist die
+/// Grundlage des Hallen-Check-Ins (docs/features/spieler-check-in.md).
+///
+/// Der Mitschnitt hat 5 Spieler, die in **beiden** Klassen gemeldet sind —
+/// zugleich der Beleg, dass ein Spieler in mehreren Klassen vorkommt.
+#[test]
+fn real_capture_yields_the_roster_per_event() {
+    let nodes = proto::decode_response(TOURNAMENT_2HALLS).expect("Tournament-Antwort dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot parsebar");
+
+    // Zwei Klassen: „HE" (Herreneinzel) und „Test" (Mixed-Einzel).
+    let mut events: Vec<(i64, &str)> = snapshot
+        .events
+        .iter()
+        .map(|e| (e.id, e.name.as_str()))
+        .collect();
+    events.sort();
+    assert_eq!(events, vec![(1, "HE"), (2, "Test")]);
+    assert_eq!(
+        snapshot
+            .events
+            .iter()
+            .find(|e| e.id == 1)
+            .unwrap()
+            .discipline,
+        Discipline::MensSingles
+    );
+
+    // 10 Meldungen, gleichmäßig auf beide Klassen verteilt.
+    assert_eq!(snapshot.entries.len(), 10);
+    for event_id in [1, 2] {
+        assert_eq!(
+            snapshot
+                .entries
+                .iter()
+                .filter(|e| e.event_id == event_id)
+                .count(),
+            5,
+            "Event {event_id} sollte 5 Meldungen haben"
+        );
+    }
+
+    // Jede Meldung zeigt auf eine bekannte Klasse und hat aufgelöste Spieler.
+    for entry in &snapshot.entries {
+        assert!(
+            snapshot.events.iter().any(|e| e.id == entry.event_id),
+            "Meldung {} zeigt auf unbekanntes Event {}",
+            entry.id,
+            entry.event_id
+        );
+        assert!(
+            !entry.players.is_empty(),
+            "Meldung {} hat keine Spieler",
+            entry.id
+        );
+        for p in &entry.players {
+            assert!(
+                !p.name.trim().is_empty(),
+                "Spielername darf nicht leer sein"
+            );
+        }
+    }
+
+    // Einzel-Turnier: genau ein Spieler je Meldung.
+    assert!(snapshot.entries.iter().all(|e| e.players.len() == 1));
+
+    // Derselbe Spieler ist in beiden Klassen gemeldet.
+    let in_first: Vec<i64> = snapshot
+        .entries
+        .iter()
+        .filter(|e| e.event_id == 1)
+        .flat_map(|e| e.players.iter().map(|p| p.id))
+        .collect();
+    let in_second: Vec<i64> = snapshot
+        .entries
+        .iter()
+        .filter(|e| e.event_id == 2)
+        .flat_map(|e| e.players.iter().map(|p| p.id))
+        .collect();
+    assert!(
+        in_first.iter().any(|id| in_second.contains(id)),
+        "mind. ein Spieler sollte in beiden Klassen gemeldet sein"
+    );
+}

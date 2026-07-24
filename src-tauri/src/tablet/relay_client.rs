@@ -767,6 +767,8 @@ mod tests {
             courts: vec!["1".into()],
             locations: vec![],
             court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
         }
     }
 

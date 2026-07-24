@@ -119,6 +119,41 @@ pub struct BtpPlayer {
     pub club: Option<String>,
 }
 
+/// Eine Spielklasse des Turniers (BTP `Event`).
+///
+/// Trägt die Disziplin (`GameTypeID` + `GenderID`) und existiert unabhängig
+/// von jeder Auslosung — anders als ein `Draw`, der erst beim Losen entsteht.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtpEvent {
+    /// Stabile BTP-interne EventID.
+    pub id: i64,
+    /// Anzeigename der Klasse, wie in BTP gepflegt (z. B. "HE" oder "HD A").
+    pub name: String,
+    /// Disziplin der Klasse.
+    pub discipline: Discipline,
+}
+
+/// Eine Meldung zu einer Spielklasse (BTP `Entry`) — ein Spieler bei Einzel,
+/// zwei bei Doppel.
+///
+/// **Der `Entry` kennt seine Klasse direkt** (`EventID`) und braucht dafür
+/// weder Draw noch Match. Deshalb steht die Meldeliste einer Klasse schon
+/// **vor** der Auslosung bereit — die Voraussetzung des Hallen-Check-Ins
+/// (siehe `docs/features/spieler-check-in.md`). Die Slot-Kette
+/// (`From → Slot → Entry → Player`) weiter unten setzt dagegen Matches voraus
+/// und taugt dafür nicht.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtpEntry {
+    /// Stabile BTP-interne EntryID.
+    pub id: i64,
+    /// Klasse, zu der gemeldet wurde (BTP `Entry.EventID`).
+    pub event_id: i64,
+    /// Aufgelöste Spieler der Meldung. Nie leer — Meldungen, deren Spieler
+    /// sich nicht auflösen lassen, werden verworfen (sonst stünden namenlose
+    /// Einträge auf der öffentlichen Check-In-Seite).
+    pub players: Vec<BtpPlayer>,
+}
+
 /// Ein Standort/eine Halle des Turniers (BTP `Location`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtpLocation {
@@ -293,6 +328,12 @@ pub struct BtpSnapshot {
     /// Alle Felder mit Identität (CourtID), Hallen-Zuordnung und
     /// Sortierreihenfolge – sortiert nach Halle und BTP-`SortOrder`.
     pub court_infos: Vec<BtpCourt>,
+    /// Spielklassen des Turniers (BTP `Events`), nach EventID sortiert.
+    /// Leer, wenn BTP keine Events liefert.
+    pub events: Vec<BtpEvent>,
+    /// Meldeliste des Turniers (BTP `Entries`), nach EntryID sortiert —
+    /// **auch für Klassen ohne Auslosung**. Grundlage des Hallen-Check-Ins.
+    pub entries: Vec<BtpEntry>,
 }
 
 impl BtpSnapshot {
@@ -388,6 +429,8 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
         courts: court_names,
         locations: location_list(t),
         court_infos: court_list(t),
+        events: event_list(t),
+        entries: entry_list(t, &players),
     })
 }
 
@@ -444,6 +487,83 @@ fn entry_map(t: &[Node]) -> HashMap<i64, Vec<i64>> {
         map.insert(id, player_ids);
     }
     map
+}
+
+/// Spielklassen des Turniers (BTP `Events`), nach EventID sortiert.
+fn event_list(t: &[Node]) -> Vec<BtpEvent> {
+    let Some(events) = xml::find(t, "Events") else {
+        return Vec::new();
+    };
+    let mut list: Vec<BtpEvent> = events
+        .children()
+        .iter()
+        .filter_map(|e| {
+            let id = child_int(e, "ID")?;
+            Some(BtpEvent {
+                id,
+                name: child_str(e, "Name").unwrap_or_default().to_string(),
+                discipline: Discipline::from_event(
+                    child_int(e, "GameTypeID").unwrap_or_default(),
+                    child_int(e, "GenderID").unwrap_or_default(),
+                ),
+            })
+        })
+        .collect();
+    list.sort_by_key(|e| e.id);
+    list
+}
+
+/// Meldeliste des Turniers (BTP `Entries`) mit aufgelösten Spielern, nach
+/// EntryID sortiert.
+///
+/// Anders als [`entry_map`] (die nur `EntryID → PlayerIDs` für die
+/// Match-Auflösung liefert) wird hier die `EventID` **mitgeführt** — sie ist
+/// der Grund, warum die Meldeliste ohne Auslosung auskommt.
+///
+/// Meldungen ohne auflösbare Spieler werden verworfen: ein Eintrag ohne Namen
+/// wäre auf der Check-In-Seite nicht anklickbar und nur verwirrend.
+fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
+    let Some(entries) = xml::find(t, "Entries") else {
+        return Vec::new();
+    };
+    let mut list: Vec<BtpEntry> = entries
+        .children()
+        .iter()
+        .filter_map(|e| {
+            let id = child_int(e, "ID")?;
+            let event_id = child_int(e, "EventID")?;
+            let referenced: Vec<i64> = ["Player1ID", "Player2ID"]
+                .iter()
+                .filter_map(|field| child_int(e, field))
+                .collect();
+            let resolved: Vec<BtpPlayer> = referenced
+                .iter()
+                .filter_map(|pid| players.get(pid).cloned())
+                .collect();
+            if resolved.is_empty() {
+                return None;
+            }
+            // Teil-Auflösung bei einem Doppel: BTP nennt zwei Spieler, aber
+            // einer fehlt in `Players`. Die Meldung wird behalten — der
+            // anwesende Partner soll einchecken können —, aber sie erscheint
+            // dann als Einzel-Meldung. Das ist ein Datenfehler in BTP, der
+            // sonst still bliebe.
+            if resolved.len() < referenced.len() {
+                tracing::warn!(
+                    entry_id = id,
+                    event_id,
+                    "Meldung verweist auf unbekannte Spieler — Partner fehlt in der Meldeliste"
+                );
+            }
+            Some(BtpEntry {
+                id,
+                event_id,
+                players: resolved,
+            })
+        })
+        .collect();
+    list.sort_by_key(|e| e.id);
+    list
 }
 
 /// (DrawID, PlanningID) eines Teilnehmer-Slots → EntryID.
@@ -935,6 +1055,216 @@ mod tests {
         // Fehlende Locations-/Courts-Gruppen ergeben leere Listen, kein Fehler.
         assert!(snapshot.locations.is_empty());
         assert!(snapshot.court_infos.is_empty());
+        // Ebenso für die Meldeliste: ein Turnier ohne Events/Entries ist kein
+        // Fehlerfall, sondern nur ein Turnier ohne Check-In-Daten.
+        assert!(snapshot.events.is_empty());
+        assert!(snapshot.entries.is_empty());
+    }
+
+    /// Baut `Result > Tournament` um die übergebenen Container.
+    fn tournament_with(children: Vec<Node>) -> Vec<Node> {
+        vec![Node::group(
+            "Result",
+            vec![Node::group("Tournament", children)],
+        )]
+    }
+
+    #[test]
+    fn roster_resolves_entries_over_their_event_without_any_draw() {
+        // Ein Doppel-Event mit einer Meldung aus zwei Spielern. Es gibt weder
+        // Draws noch Matches — genau die Lage vor der Auslosung.
+        let tree = tournament_with(vec![
+            Node::group(
+                "Events",
+                vec![Node::group(
+                    "Event",
+                    vec![
+                        Node::integer("ID", 7),
+                        Node::string("Name", "HD A"),
+                        Node::integer("GameTypeID", 2),
+                        Node::integer("GenderID", 1),
+                    ],
+                )],
+            ),
+            Node::group(
+                "Players",
+                vec![
+                    Node::group(
+                        "Player",
+                        vec![
+                            Node::integer("ID", 1),
+                            Node::string("Firstname", "Anna"),
+                            Node::string("Lastname", "Beispiel"),
+                        ],
+                    ),
+                    Node::group(
+                        "Player",
+                        vec![
+                            Node::integer("ID", 2),
+                            Node::string("Firstname", "Bea"),
+                            Node::string("Lastname", "Muster"),
+                        ],
+                    ),
+                ],
+            ),
+            Node::group(
+                "Entries",
+                vec![Node::group(
+                    "Entry",
+                    vec![
+                        Node::integer("ID", 30),
+                        Node::integer("EventID", 7),
+                        Node::integer("Player1ID", 1),
+                        Node::integer("Player2ID", 2),
+                    ],
+                )],
+            ),
+        ]);
+
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(snapshot.matches.is_empty(), "kein Match, keine Auslosung");
+
+        assert_eq!(snapshot.events.len(), 1);
+        assert_eq!(snapshot.events[0].name, "HD A");
+        assert_eq!(snapshot.events[0].discipline, Discipline::MensDoubles);
+
+        assert_eq!(snapshot.entries.len(), 1);
+        let entry = &snapshot.entries[0];
+        assert_eq!((entry.id, entry.event_id), (30, 7));
+        assert_eq!(
+            entry
+                .players
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Anna Beispiel", "Bea Muster"]
+        );
+    }
+
+    #[test]
+    fn roster_tolerates_players_without_licence_or_club() {
+        // MemberID und ClubID sind in BTP optional und in vielen Turnieren
+        // leer (auch im Fixture-Mitschnitt). Der Check-In muss ohne sie gehen.
+        let tree = tournament_with(vec![
+            Node::group(
+                "Players",
+                vec![Node::group(
+                    "Player",
+                    vec![
+                        Node::integer("ID", 1),
+                        Node::string("Firstname", "Carl"),
+                        Node::string("Lastname", "Ohnelizenz"),
+                    ],
+                )],
+            ),
+            Node::group(
+                "Entries",
+                vec![Node::group(
+                    "Entry",
+                    vec![
+                        Node::integer("ID", 5),
+                        Node::integer("EventID", 1),
+                        Node::integer("Player1ID", 1),
+                    ],
+                )],
+            ),
+        ]);
+
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        let player = &snapshot.entries[0].players[0];
+        assert_eq!(player.name, "Carl Ohnelizenz");
+        assert_eq!(player.member_id, None);
+        assert_eq!(player.club, None);
+        assert_eq!(player.nationality, None);
+    }
+
+    #[test]
+    fn roster_drops_entries_without_event_or_resolvable_players() {
+        // Drei kaputte Meldungen: ohne EventID, mit unbekannter PlayerID und
+        // ganz ohne Spieler. Keine davon darf auf der Check-In-Seite landen.
+        let tree = tournament_with(vec![
+            Node::group(
+                "Players",
+                vec![Node::group(
+                    "Player",
+                    vec![Node::integer("ID", 1), Node::string("Lastname", "Da")],
+                )],
+            ),
+            Node::group(
+                "Entries",
+                vec![
+                    Node::group(
+                        "Entry",
+                        vec![Node::integer("ID", 1), Node::integer("Player1ID", 1)],
+                    ),
+                    Node::group(
+                        "Entry",
+                        vec![
+                            Node::integer("ID", 2),
+                            Node::integer("EventID", 1),
+                            Node::integer("Player1ID", 999),
+                        ],
+                    ),
+                    Node::group(
+                        "Entry",
+                        vec![Node::integer("ID", 3), Node::integer("EventID", 1)],
+                    ),
+                    // Nur diese ist vollständig.
+                    Node::group(
+                        "Entry",
+                        vec![
+                            Node::integer("ID", 4),
+                            Node::integer("EventID", 1),
+                            Node::integer("Player1ID", 1),
+                        ],
+                    ),
+                ],
+            ),
+        ]);
+
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(
+            snapshot.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![4]
+        );
+    }
+
+    #[test]
+    fn roster_keeps_a_half_resolvable_doubles_entry() {
+        // BTP nennt zwei Spieler, einer fehlt in `Players`. Die Meldung bleibt
+        // erhalten, damit der anwesende Partner einchecken kann — sie ist dann
+        // aber nur noch einköpfig (und wird protokolliert).
+        let tree = tournament_with(vec![
+            Node::group(
+                "Players",
+                vec![Node::group(
+                    "Player",
+                    vec![
+                        Node::integer("ID", 1),
+                        Node::string("Firstname", "Anna"),
+                        Node::string("Lastname", "Beispiel"),
+                    ],
+                )],
+            ),
+            Node::group(
+                "Entries",
+                vec![Node::group(
+                    "Entry",
+                    vec![
+                        Node::integer("ID", 20),
+                        Node::integer("EventID", 3),
+                        Node::integer("Player1ID", 1),
+                        Node::integer("Player2ID", 999),
+                    ],
+                )],
+            ),
+        ]);
+
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].players.len(), 1);
+        assert_eq!(snapshot.entries[0].players[0].id, 1);
     }
 
     #[test]
@@ -1384,6 +1714,8 @@ mod tests {
                     sort_order: 0,
                 })
                 .collect(),
+            events: Vec::new(),
+            entries: Vec::new(),
         }
     }
 

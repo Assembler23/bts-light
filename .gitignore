@@ -29,3 +29,7 @@ dist-ssr
 
 # Azure-Spike-Ausgabe (lokale Hörproben)
 spike-out/
+
+# Spec-Pipeline (/idee): Roh-Transkripte und Zwischenstände – können Namen
+# enthalten, committet wird nur die fertige Spec unter docs/features/
+docs/features/_intake/

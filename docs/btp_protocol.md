@@ -167,7 +167,16 @@ zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
-`NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w).
+`NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w),
+`MemberID` (Lizenznummer, Format `08-012002`), `ClubID` (→ `Clubs`),
+`CheckedIn`/`FirstCheckIn` (Bool), `LastTimeOnCourt` (DateTime).
+
+`MemberID` und `ClubID` sind **optional** und in vielen Turnieren leer (im
+Fixture-Mitschnitt fehlen beide) — Auswertungen dürfen sich nicht darauf
+verlassen. `CheckedIn`/`FirstCheckIn` hängen **am Spieler und gelten
+turnierweit**; sie können „in Klasse A anwesend, in Klasse B noch nicht" nicht
+abbilden (siehe [features/spieler-check-in.md](features/spieler-check-in.md)).
+Kein Geburtsjahr auslesen oder speichern — Projektregel.
 
 **Court:** `ID`, `Name`, `LocationID` (→ `Location`, ordnet das Feld einer
 Halle/einem Standort zu), `MatchID`, `SortOrder` (BTP-Sortierreihenfolge).
@@ -181,7 +190,19 @@ auf den jeweiligen.
 
 **Event:** `ID`, `Name`, `GameTypeID` (1 = Einzel, 2 = Doppel),
 `GenderID` (1 = Herren, 2 = Damen, 3 = Mixed).
-**Draw:** `ID`, `Name`, `EventID`. **Entry:** `ID`, `Player1ID`, `Player2ID`.
+**Draw:** `ID`, `Name`, `EventID`.
+**Entry:** `ID`, **`EventID`**, `Player1ID`, `Player2ID` (zweiter Spieler nur
+bei Doppel).
+
+> **`Entry.EventID` ist die Meldeliste.** Ein `Entry` kennt seine Klasse
+> **direkt** — unabhängig davon, ob für sie schon eine Auslosung existiert.
+> Wer die Teilnehmer einer Klasse **vor** der Auslosung braucht, geht also
+> `Entries → Entry.EventID → Event`, **nicht** über die Slot-Kette unten
+> (die setzt Matches voraus). Belegt am Mitschnitt
+> `tests/fixtures/btp-tournament-2halls.bin`. Der Parser
+> ([`btp/model.rs`](../src-tauri/src/btp/model.rs) `entry_map`) wertet heute
+> nur `EntryID → PlayerIDs` aus und verwirft die `EventID` — für die
+> Teilnehmer-Auflösung eines Matches reicht das, für eine Meldeliste nicht.
 **Team:** `ID`, `Name`.
 
 Die **Disziplin** eines Matches ergibt sich aus dem Event seines Draws:

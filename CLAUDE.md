@@ -82,6 +82,7 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | Walkover (`tablet/state.rs`, `server.rs`, `commands.rs` `walkover_*`) | `docs/walkover.md` |
 | **Zähltafelbediener** (`tablet/state.rs` `ScorekeeperEntry`/`*_scorekeeper`, `sync.rs` `track_scorekeepers`, `commands.rs` `scorekeeper_*`, `config.rs` `ScorekeeperConfig`, `pages/FieldOverviewPage.tsx`) | `docs/zaehltafelbediener.md` |
 | **Spiele in Vorbereitung** (`tablet/state.rs` `PreparationCall`, `commands.rs` `preparation_*`, `badhub/payload.rs` `preparation_call_ts`/`hall`, `badhub/diff.rs` Fingerabdruck, `pages/PreparationPanel.tsx`) | `docs/preparation.md` |
+| **Hallen-Check-In** (`btp/model.rs` `BtpEvent`/`BtpEntry`/`entry_list`, `badhub/payload.rs` `centry_list`, `badhub/diff.rs` `roster_update`, `sync.rs` `push_checkin_roster`, `config.rs` `CheckinConfig`, `src/tournamentGuid.ts`, Check-In-Abschnitt im `SetupWizard`) | `docs/spieler-check-in.md` |
 | Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`, Ansage-Knopf in `PreparationPanel`) | `docs/announcements.md` |
 | Court-Monitor (`tablet/monitor.rs`, `tablet/mdns.rs`, `assets/monitor.html`, `assets/overview.html`, `assets/preparation.html`, `assets/flags/`, Court-/Monitor-/`/info/*`-Routen in `server.rs` + `relay/`, `pages/CourtMonitorPanel.tsx`, `monitor_*`-Commands) | `docs/court-monitor.md` |
 | **Mehr-Hallen-Architektur** (CourtID-Identität in `btp/model.rs` + `tablet/state.rs`, Hallen-Gruppierung in den UIs, `ConnectionMode::LanAndCloud` in `config.rs`, `merge_device_lists` in `relay-proto`, Slave-Monitor-Brücke `tablet/slave_bridge.rs`) | `docs/multi-hall.md` |
@@ -98,6 +99,17 @@ einer fremden Datei.
 Bausteine berührt):** [`docs/multi-hall.md`](docs/multi-hall.md) — bindet
 CourtID-Refactor, Hallen-Gruppierung und LAN+Cloud-Parallelbetrieb zu
 einer Architektur-Erzählung.
+
+## Von der Idee zur Spec
+
+Neue Features starten **nicht** mit Code, sondern mit `/idee`: Brief → Grill →
+How-To → Spec+Review. Ergebnis ist eine freigegebene Spezifikation unter
+`docs/features/<slug>.md` (Zwischenstände gitignoriert unter
+`docs/features/_intake/`). Die Kern-Stufen `/grill-me` (Anforderung löchern) und
+`/how-to` (Umsetzungsplan entwerfen) sind auch einzeln nutzbar. Bis zur Freigabe
+der Spec wird kein Produktivcode geschrieben.
+
+Konzept und Funktionsweise: [docs/spec-pipeline-konzept.md](docs/spec-pipeline-konzept.md).
 
 ## Subagents
 
