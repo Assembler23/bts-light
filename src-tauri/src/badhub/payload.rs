@@ -8,7 +8,7 @@
 
 use serde::Serialize;
 
-use crate::btp::model::{BtpMatch, BtpSnapshot, MatchResult, MatchStatus};
+use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchResult, MatchStatus};
 
 /// Höchstzahl der beendeten Matches im `tset`. Großzügig bemessen, damit an
 /// einem Turniertag praktisch alle Spiele erscheinen; deckelt nur extrem
@@ -269,10 +269,128 @@ pub fn build_tupdate(m: &BtpMatch, rid: u64) -> TupdateMessage {
     }
 }
 
+// --- Hallen-Check-In: Meldeliste (ADR 0009) -------------------------------
+
+/// Eine `centry_list`-Nachricht: die Meldeliste des Turniers je Spielklasse.
+///
+/// Anders als `tset` hängt sie **nicht** an Courts oder Matches, sondern an
+/// den BTP-`Entries` — sie steht deshalb schon vor der Auslosung bereit.
+/// Adressiert wird über die turnier.de-Turnier-GUID; authentifiziert wird wie
+/// bei `tset` über das Liveticker-Passwort (ADR 0009).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct CheckinRosterMessage {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    /// turnier.de-Turnier-GUID — sagt badhub, zu welchem Turnier die Liste
+    /// gehört.
+    pub tournament_uuid: String,
+    /// Turniername zur Anzeige auf der Check-In-Seite.
+    pub tournament_name: String,
+    /// Spielklassen des Turniers.
+    pub classes: Vec<RosterClass>,
+    /// Meldungen, klassenweise auflösbar über `event_id`.
+    pub entries: Vec<RosterEntry>,
+    pub rid: u64,
+}
+
+/// Eine Spielklasse in der Meldeliste.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RosterClass {
+    pub event_id: i64,
+    /// Anzeigename der Klasse, wie in BTP gepflegt.
+    pub name: String,
+    /// Disziplin als snake_case-Schlüssel (`mens_singles`, `mixed` …);
+    /// badhub lokalisiert selbst.
+    pub discipline: Discipline,
+}
+
+/// Eine Meldung: ein Spieler bei Einzel, zwei bei Doppel.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RosterEntry {
+    pub entry_id: i64,
+    pub event_id: i64,
+    pub players: Vec<RosterPlayer>,
+}
+
+/// Ein gemeldeter Spieler.
+///
+/// Bewusst **kein Geburtsjahr** (Projektregel) — auch nicht mittelbar. Verein
+/// und Nationalität sind die einzigen Unterscheidungsmerkmale bei
+/// Namensgleichheit und in BTP optional; fehlen sie, werden die Felder
+/// weggelassen statt leer gesendet.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RosterPlayer {
+    /// BTP-`PlayerID` — der Schlüssel, unter dem der Check-In gespeichert
+    /// wird. Innerhalb eines Turniers stabil und immer vorhanden.
+    pub player_id: i64,
+    pub first: String,
+    pub last: String,
+    /// Lizenznummer (BTP `MemberID`), falls gepflegt. Brücke zu badhubs
+    /// `players.dbv_licence_nr` — nötig fürs Anonymisierungs-Gate, aber nie
+    /// Pflicht: ein Turnier ohne Lizenznummern funktioniert vollständig.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub club: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nationality: Option<String>,
+}
+
+/// Baut die `centry_list`-Nachricht aus dem Snapshot.
+///
+/// Klassen ohne jede Meldung werden weggelassen — sie hätten auf der
+/// Check-In-Seite eine leere Liste ergeben, in die niemand einchecken kann.
+pub fn build_checkin_roster(
+    snapshot: &BtpSnapshot,
+    tournament_uuid: &str,
+    rid: u64,
+) -> CheckinRosterMessage {
+    let entries: Vec<RosterEntry> = snapshot
+        .entries
+        .iter()
+        .map(|e| RosterEntry {
+            entry_id: e.id,
+            event_id: e.event_id,
+            players: e
+                .players
+                .iter()
+                .map(|p| RosterPlayer {
+                    player_id: p.id,
+                    first: p.first.clone(),
+                    last: p.last.clone(),
+                    member_id: p.member_id.clone(),
+                    club: p.club.clone(),
+                    nationality: p.nationality.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+
+    let classes: Vec<RosterClass> = snapshot
+        .events
+        .iter()
+        .filter(|ev| entries.iter().any(|e| e.event_id == ev.id))
+        .map(|ev| RosterClass {
+            event_id: ev.id,
+            name: ev.name.clone(),
+            discipline: ev.discipline,
+        })
+        .collect();
+
+    CheckinRosterMessage {
+        kind: "centry_list",
+        tournament_uuid: tournament_uuid.trim().to_string(),
+        tournament_name: snapshot.tournament_name.clone(),
+        classes,
+        entries,
+        rid,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::btp::model::{BtpCourt, BtpLocation, BtpPlayer, Discipline};
+    use crate::btp::model::{BtpCourt, BtpEntry, BtpEvent, BtpLocation, BtpPlayer, Discipline};
 
     /// Fester Bezugszeitpunkt für die Tests.
     const NOW: u64 = 1_700_000_000_000;
@@ -597,5 +715,140 @@ mod tests {
         };
         let tset = build_tset(&snapshot, 1);
         assert_eq!(tset.event.courts[0].hall, "");
+    }
+
+    // --- Hallen-Check-In: Meldeliste ---------------------------------------
+
+    fn roster_player(id: i64, first: &str, last: &str) -> BtpPlayer {
+        BtpPlayer {
+            id,
+            name: format!("{first} {last}"),
+            first: first.to_string(),
+            last: last.to_string(),
+            member_id: None,
+            nationality: None,
+            club: None,
+        }
+    }
+
+    fn roster_snapshot() -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "CP Open".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            matches: Vec::new(),
+            events: vec![
+                BtpEvent {
+                    id: 1,
+                    name: "HE A".to_string(),
+                    discipline: Discipline::MensSingles,
+                },
+                BtpEvent {
+                    id: 2,
+                    name: "HD B".to_string(),
+                    discipline: Discipline::MensDoubles,
+                },
+            ],
+            entries: vec![
+                BtpEntry {
+                    id: 10,
+                    event_id: 1,
+                    players: vec![roster_player(1, "Anna", "Beispiel")],
+                },
+                BtpEntry {
+                    id: 11,
+                    event_id: 2,
+                    players: vec![
+                        roster_player(1, "Anna", "Beispiel"),
+                        roster_player(2, "Bea", "Muster"),
+                    ],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn checkin_roster_serializes_to_expected_json_keys() {
+        let json =
+            serde_json::to_string(&build_checkin_roster(&roster_snapshot(), "GUID-1", 42)).unwrap();
+        assert!(json.contains(r#""type":"centry_list""#));
+        assert!(json.contains(r#""tournament_uuid":"GUID-1""#));
+        assert!(json.contains(r#""tournament_name":"CP Open""#));
+        assert!(json.contains(r#""rid":42"#));
+        assert!(json.contains(r#""event_id":1"#));
+        assert!(json.contains(r#""entry_id":10"#));
+        assert!(json.contains(r#""player_id":2"#));
+        // Disziplin als snake_case-Schluessel, badhub lokalisiert selbst.
+        assert!(json.contains(r#""discipline":"mens_doubles""#));
+        // Fehlende Optionalfelder werden weggelassen statt leer gesendet.
+        assert!(!json.contains("member_id"));
+        assert!(!json.contains("club"));
+        assert!(!json.contains("nationality"));
+        // Datenschutz: nie ein Geburtsjahr, auch nicht mittelbar.
+        assert!(!json.contains("birth"));
+    }
+
+    #[test]
+    fn checkin_roster_keeps_doubles_partners_together() {
+        let msg = build_checkin_roster(&roster_snapshot(), "GUID-1", 1);
+        let doubles = msg.entries.iter().find(|e| e.entry_id == 11).unwrap();
+        assert_eq!(doubles.players.len(), 2);
+        assert_eq!(
+            doubles
+                .players
+                .iter()
+                .map(|p| p.player_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        // Derselbe Spieler ist in beiden Klassen gemeldet und erscheint auch
+        // zweimal — der Check-In gilt je Klasse, nicht je Person.
+        let single = msg.entries.iter().find(|e| e.entry_id == 10).unwrap();
+        assert_eq!(single.players[0].player_id, 1);
+    }
+
+    #[test]
+    fn checkin_roster_carries_licence_and_club_when_btp_has_them() {
+        let mut snapshot = roster_snapshot();
+        snapshot.entries[0].players[0].member_id = Some("08-012002".to_string());
+        snapshot.entries[0].players[0].club = Some("BC Beispiel".to_string());
+        snapshot.entries[0].players[0].nationality = Some("GER".to_string());
+
+        let json = serde_json::to_string(&build_checkin_roster(&snapshot, "G", 1)).unwrap();
+        assert!(json.contains(r#""member_id":"08-012002""#));
+        assert!(json.contains(r#""club":"BC Beispiel""#));
+        assert!(json.contains(r#""nationality":"GER""#));
+    }
+
+    #[test]
+    fn checkin_roster_drops_classes_without_entries() {
+        // Eine Klasse ohne Meldung waere auf der Check-In-Seite eine leere
+        // Liste, in die niemand einchecken kann.
+        let mut snapshot = roster_snapshot();
+        snapshot.entries.retain(|e| e.event_id == 1);
+        let msg = build_checkin_roster(&snapshot, "G", 1);
+        assert_eq!(
+            msg.classes.iter().map(|c| c.event_id).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn checkin_roster_trims_the_tournament_guid() {
+        // Aus der Zwischenablage eingefuegte GUIDs tragen oft Leerzeichen.
+        let msg = build_checkin_roster(&roster_snapshot(), "  GUID-1  ", 1);
+        assert_eq!(msg.tournament_uuid, "GUID-1");
+    }
+
+    #[test]
+    fn checkin_roster_is_empty_for_a_tournament_without_entries() {
+        let mut snapshot = roster_snapshot();
+        snapshot.events.clear();
+        snapshot.entries.clear();
+        let msg = build_checkin_roster(&snapshot, "G", 1);
+        assert!(msg.classes.is_empty());
+        assert!(msg.entries.is_empty());
     }
 }
