@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use crate::badhub::diff::Update;
+use crate::badhub::payload::CheckinRosterMessage;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -43,6 +44,39 @@ pub async fn push_update(
         Update::None => return Ok(()),
     }
     .expect("tset/tupdate-Serialisierung kann nicht fehlschlagen");
+
+    let response = client
+        .post(url)
+        .bearer_auth(password)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await?;
+
+    match response.status().as_u16() {
+        200 => Ok(()),
+        401 | 403 => Err(PushError::Unauthorized),
+        other => Err(PushError::Status(other)),
+    }
+}
+
+/// Sendet die Meldeliste für den Hallen-Check-In (ADR 0009).
+///
+/// Gleicher Endpunkt und gleiche Bearer-Authentifizierung wie beim
+/// Liveticker-Push — nur ein anderer Nachrichtentyp. **HTTP 404 und 400
+/// bedeuten hier nicht „kaputt", sondern „badhub kennt den Check-In noch
+/// nicht"**: bts-light kommt per Auto-Update auf alle Installationen,
+/// während badhub unabhängig deployt wird. Der Aufrufer behandelt
+/// [`PushError::Status`] mit 404/400 deshalb als „Feature nicht verfügbar"
+/// und blendet den Bereich aus, statt einen Fehler zu zeigen.
+pub async fn push_checkin_roster(
+    client: &reqwest::Client,
+    url: &str,
+    password: &str,
+    roster: &CheckinRosterMessage,
+) -> Result<(), PushError> {
+    let body =
+        serde_json::to_vec(roster).expect("centry_list-Serialisierung kann nicht fehlschlagen");
 
     let response = client
         .post(url)

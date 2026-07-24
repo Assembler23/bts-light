@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::badhub::payload::{build_tset, build_tupdate, TsetMessage, TupdateMessage};
+use crate::badhub::payload::{
+    build_tset, build_tupdate, CheckinRosterMessage, TsetMessage, TupdateMessage,
+};
 use crate::btp::model::{BtpMatch, BtpSnapshot, MatchStatus};
 
 /// Ergebnis eines Snapshot-Vergleichs.
@@ -52,6 +54,27 @@ pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64) -> Upda
         [m] => Update::Single(build_tupdate(m, rid)),
         // Mehrere gleichzeitige Änderungen → der Einfachheit halber voll.
         _ => Update::Full(build_tset(current, rid)),
+    }
+}
+
+/// Entscheidet, ob die Meldeliste (Hallen-Check-In) gesendet werden muss.
+///
+/// Gibt die Nachricht nur zurück, wenn sie sich inhaltlich von der zuletzt
+/// gesendeten unterscheidet. Ohne diesen Filter gingen mehrere hundert Namen
+/// im 5-Sekunden-Poll-Takt über die Leitung, obwohl sich eine Meldeliste an
+/// einem Turniertag kaum ändert.
+///
+/// Anders als beim `tset` gibt es hier **keinen Heartbeat**: die Meldeliste
+/// ist Stammdaten, badhub hält sie dauerhaft. Erst eine echte Änderung
+/// (Nachmeldung, Abmeldung, korrigierter Name, neue Klasse) löst einen Push
+/// aus.
+pub fn roster_update(
+    prev: Option<&CheckinRosterMessage>,
+    current: CheckinRosterMessage,
+) -> Option<CheckinRosterMessage> {
+    match prev {
+        Some(p) if p.same_content_as(&current) => None,
+        _ => Some(current),
     }
 }
 
@@ -223,5 +246,130 @@ mod tests {
             match_on_court(2, "2", vec![(2, 3)]),
         ]);
         assert!(matches!(diff(Some(&a), &b, 1), Update::Full(_)));
+    }
+
+    // --- Meldeliste (Hallen-Check-In) --------------------------------------
+
+    fn roster_snapshot() -> BtpSnapshot {
+        let player = |id: i64, first: &str, last: &str| BtpPlayer {
+            id,
+            name: format!("{first} {last}"),
+            first: first.to_string(),
+            last: last.to_string(),
+            member_id: None,
+            nationality: None,
+            club: None,
+        };
+        BtpSnapshot {
+            tournament_name: "CP Open".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            matches: Vec::new(),
+            events: vec![crate::btp::model::BtpEvent {
+                id: 1,
+                name: "HE A".to_string(),
+                discipline: Discipline::MensSingles,
+            }],
+            entries: vec![crate::btp::model::BtpEntry {
+                id: 10,
+                event_id: 1,
+                players: vec![player(1, "Anna", "Beispiel")],
+            }],
+        }
+    }
+
+    fn roster_of(snapshot: &BtpSnapshot, rid: u64) -> CheckinRosterMessage {
+        crate::badhub::payload::build_checkin_roster(snapshot, "GUID-1", rid)
+    }
+
+    #[test]
+    fn roster_is_sent_when_nothing_was_sent_before() {
+        let snapshot = roster_snapshot();
+        assert!(roster_update(None, roster_of(&snapshot, 1)).is_some());
+    }
+
+    #[test]
+    fn unchanged_roster_is_not_sent_again() {
+        // Der Poll laeuft alle 5 s — ohne diesen Filter gingen mehrere hundert
+        // Namen im Poll-Takt ueber die Leitung.
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+        assert_eq!(roster_update(Some(&sent), roster_of(&snapshot, 2)), None);
+    }
+
+    #[test]
+    fn a_new_entry_triggers_a_push() {
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+
+        let mut with_extra = roster_snapshot();
+        with_extra.entries.push(crate::btp::model::BtpEntry {
+            id: 11,
+            event_id: 1,
+            players: vec![BtpPlayer {
+                id: 2,
+                name: "Bea Muster".to_string(),
+                first: "Bea".to_string(),
+                last: "Muster".to_string(),
+                member_id: None,
+                nationality: None,
+                club: None,
+            }],
+        });
+        assert!(roster_update(Some(&sent), roster_of(&with_extra, 2)).is_some());
+    }
+
+    #[test]
+    fn a_withdrawn_entry_triggers_a_push() {
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+
+        let mut without = roster_snapshot();
+        without.entries.clear();
+        assert!(roster_update(Some(&sent), roster_of(&without, 2)).is_some());
+    }
+
+    #[test]
+    fn a_corrected_player_name_triggers_a_push() {
+        // Tippfehler-Korrektur in BTP muss auf der Check-In-Seite ankommen,
+        // sonst findet der Spieler seinen Namen nicht.
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+
+        let mut renamed = roster_snapshot();
+        renamed.entries[0].players[0].last = "Beispiel-Meier".to_string();
+        assert!(roster_update(Some(&sent), roster_of(&renamed, 2)).is_some());
+    }
+
+    #[test]
+    fn a_renamed_class_triggers_a_push() {
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+
+        let mut renamed = roster_snapshot();
+        renamed.events[0].name = "HE Anfaenger".to_string();
+        assert!(roster_update(Some(&sent), roster_of(&renamed, 2)).is_some());
+    }
+
+    #[test]
+    fn a_late_licence_number_triggers_a_push() {
+        // Wird die Lizenznummer nachgepflegt, braucht badhub sie fuers
+        // Anonymisierungs-Gate.
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+
+        let mut with_licence = roster_snapshot();
+        with_licence.entries[0].players[0].member_id = Some("08-012002".to_string());
+        assert!(roster_update(Some(&sent), roster_of(&with_licence, 2)).is_some());
+    }
+
+    #[test]
+    fn switching_the_tournament_triggers_a_push() {
+        let snapshot = roster_snapshot();
+        let sent = roster_of(&snapshot, 1);
+        let other = crate::badhub::payload::build_checkin_roster(&snapshot, "GUID-2", 2);
+        assert!(roster_update(Some(&sent), other).is_some());
     }
 }

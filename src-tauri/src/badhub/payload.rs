@@ -336,6 +336,22 @@ pub struct RosterPlayer {
     pub nationality: Option<String>,
 }
 
+impl CheckinRosterMessage {
+    /// Inhaltsgleich zu einer zuvor gesendeten Meldeliste?
+    ///
+    /// Die `rid` bleibt außen vor — sie ist nur die laufende Nachrichtennummer
+    /// und ändert sich bei jedem Zyklus. Verglichen wird bewusst die
+    /// **Nachricht selbst** statt eines eigenen Fingerabdrucks: ein zweites
+    /// Feldschema würde beim nächsten zusätzlichen Payload-Feld stillschweigend
+    /// auseinanderlaufen, und die Meldeliste wäre dann nicht mehr aktuell.
+    pub fn same_content_as(&self, other: &Self) -> bool {
+        self.tournament_uuid == other.tournament_uuid
+            && self.tournament_name == other.tournament_name
+            && self.classes == other.classes
+            && self.entries == other.entries
+    }
+}
+
 /// Baut die `centry_list`-Nachricht aus dem Snapshot.
 ///
 /// Klassen ohne jede Meldung werden weggelassen — sie hätten auf der

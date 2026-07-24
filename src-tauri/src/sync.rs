@@ -9,7 +9,8 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::badhub::diff::{diff, Update};
+use crate::badhub::diff::{diff, roster_update, Update};
+use crate::badhub::payload::{build_checkin_roster, CheckinRosterMessage};
 use crate::badhub::push;
 use crate::btp::client;
 use crate::btp::model::{BtpSnapshot, MatchResult, MatchStatus};
@@ -114,6 +115,15 @@ pub struct SyncEngine {
     /// (P1). Grundlage der Highlight-Reconciliation: nur der Diff zum
     /// aktuellen Aufruf-Stand wird nach BTP geschrieben.
     highlight_written: HashSet<i64>,
+    /// Zuletzt erfolgreich gesendete Meldeliste (Hallen-Check-In, ADR 0009).
+    /// `None` = in dieser Sitzung noch nichts gesendet → der nächste Zyklus
+    /// schickt sie vollständig. Getrennt von `last_pushed`, weil Meldeliste
+    /// und Liveticker unabhängig voneinander scheitern dürfen.
+    last_roster: Option<CheckinRosterMessage>,
+    /// Hat badhub den Check-In-Endpunkt mit 404/400 abgelehnt? Dann läuft dort
+    /// eine ältere Version ohne das Feature — es wird für diese Sitzung
+    /// stillgelegt, statt jeden Zyklus erneut anzuklopfen und zu loggen.
+    checkin_unsupported: bool,
 }
 
 /// Wie lange eine offene Auto-Zuweisung als „unterwegs" gilt, bevor sie als
@@ -260,6 +270,58 @@ impl SyncEngine {
             seen_matches: false,
             suspect_empty_polls: 0,
             highlight_written: HashSet::new(),
+            last_roster: None,
+            checkin_unsupported: false,
+        }
+    }
+
+    /// Sendet die Meldeliste für den Hallen-Check-In (ADR 0009), sofern
+    /// eingerichtet und seit dem letzten Push geändert.
+    ///
+    /// Bewusst mit **eigenem Fehlerpfad**: Der Check-In ist additiv — geht er
+    /// schief, muss der Liveticker trotzdem laufen. Fehler werden deshalb nur
+    /// geloggt und ändern den [`SyncOutcome`] nicht.
+    async fn push_checkin_roster(
+        &mut self,
+        config: &AppConfig,
+        http: &reqwest::Client,
+        snapshot: &BtpSnapshot,
+    ) {
+        if self.checkin_unsupported || !config.checkin.is_ready() {
+            return;
+        }
+        let roster = build_checkin_roster(snapshot, &config.checkin.tournament_uuid, self.rid);
+        // Nur bei echter Änderung senden — die Meldeliste sind Stammdaten,
+        // kein Live-Stand (kein Heartbeat).
+        let Some(roster) = roster_update(self.last_roster.as_ref(), roster) else {
+            return;
+        };
+        match push::push_checkin_roster(http, &config.badhub.url, &config.badhub.password, &roster)
+            .await
+        {
+            Ok(()) => {
+                tracing::debug!(
+                    klassen = roster.classes.len(),
+                    meldungen = roster.entries.len(),
+                    "Meldeliste an badhub gesendet"
+                );
+                self.last_roster = Some(roster);
+            }
+            // badhub kennt den Nachrichtentyp nicht → dort läuft eine ältere
+            // Version. Für diese Sitzung stilllegen, statt jeden Zyklus
+            // erneut anzuklopfen (bts-light kommt per Auto-Update auf alle
+            // Installationen, badhub deployt unabhängig).
+            Err(push::PushError::Status(404)) | Err(push::PushError::Status(400)) => {
+                tracing::info!(
+                    "badhub kennt den Hallen-Check-In noch nicht — Meldeliste wird nicht gesendet"
+                );
+                self.checkin_unsupported = true;
+            }
+            Err(e) => {
+                // last_roster bleibt unverändert → der nächste Zyklus versucht
+                // es erneut mit der vollständigen Liste.
+                tracing::warn!("Meldeliste konnte nicht gesendet werden: {e}");
+            }
         }
     }
 
@@ -913,6 +975,10 @@ impl SyncEngine {
         // Aufrufe zusätzlich in BTP sichtbar machen (P1, Highlight-Flag) —
         // nur der Diff zum letzten Stand, nur wenn sich etwas geändert hat.
         self.reconcile_highlights(config, tablet, &snapshot).await;
+        // Meldeliste für den Hallen-Check-In (ADR 0009). Steht hinter dem
+        // Slave-Return, weil genau ein Master schreibt; eigener Fehlerpfad,
+        // damit ein Check-In-Problem den Liveticker nicht ausbremst.
+        self.push_checkin_roster(config, http, &snapshot).await;
         // Heartbeat: Ist regulär nichts zu senden, aber seit dem letzten
         // Push >60 s vergangen, wird ein voller `tset` als Lebenszeichen
         // erzwungen (Diff gegen `None`). badhub frischt damit `updated_at`
@@ -1853,5 +1919,159 @@ mod tests {
         let snap2 = snap_with(Vec::new(), vec![ready_named(1, None, "A", "B")], Vec::new());
         engine.track_scorekeepers(&snap2, &tablet, false);
         assert!(tablet.scorekeeper(5).is_empty());
+    }
+
+    // --- Meldeliste fuer den Hallen-Check-In (A-5) -------------------------
+
+    /// Mini-HTTP-Mock wie in `badhub::push`: nimmt eine Anfrage entgegen,
+    /// antwortet mit der vorgegebenen Statuszeile und meldet den empfangenen
+    /// Rumpf zurueck.
+    async fn spawn_checkin_mock(
+        status_line: &'static str,
+    ) -> (String, std::sync::Arc<tokio::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = vec![0u8; 65536];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                sink.lock()
+                    .await
+                    .push(String::from_utf8_lossy(&buf[..n]).to_string());
+                let body = r#"{"status":"ok"}"#;
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(response.as_bytes()).await;
+            }
+        });
+        (format!("http://{addr}/api/live_update.php"), seen)
+    }
+
+    fn roster_snapshot() -> BtpSnapshot {
+        let mut s = snapshot();
+        s.events = vec![crate::btp::model::BtpEvent {
+            id: 1,
+            name: "HE A".to_string(),
+            discipline: crate::btp::model::Discipline::MensSingles,
+        }];
+        s.entries = vec![crate::btp::model::BtpEntry {
+            id: 10,
+            event_id: 1,
+            players: vec![crate::btp::model::BtpPlayer {
+                id: 1,
+                name: "Anna Beispiel".to_string(),
+                first: "Anna".to_string(),
+                last: "Beispiel".to_string(),
+                member_id: None,
+                nationality: None,
+                club: None,
+            }],
+        }];
+        s
+    }
+
+    fn checkin_config(url: String, uuid: &str, enabled: bool) -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.badhub.url = url;
+        cfg.badhub.password = "pw".to_string();
+        cfg.checkin.enabled = enabled;
+        cfg.checkin.tournament_uuid = uuid.to_string();
+        cfg
+    }
+
+    #[tokio::test]
+    async fn roster_is_pushed_once_and_not_repeated_while_unchanged() {
+        let (url, seen) = spawn_checkin_mock("200 OK").await;
+        let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", true);
+        let http = crate::badhub::push::build_client();
+        let mut engine = SyncEngine::new();
+        let snap = roster_snapshot();
+
+        engine.push_checkin_roster(&cfg, &http, &snap).await;
+        engine.push_checkin_roster(&cfg, &http, &snap).await;
+
+        let requests = seen.lock().await;
+        assert_eq!(
+            requests.len(),
+            1,
+            "unveraenderte Meldeliste nur einmal senden"
+        );
+        assert!(requests[0].contains("centry_list"));
+        assert!(requests[0].contains("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"));
+    }
+
+    #[tokio::test]
+    async fn roster_is_not_pushed_without_a_tournament_guid() {
+        // Eingeschaltet, aber nicht eingerichtet: badhub wuesste nicht, zu
+        // welchem Turnier die Liste gehoert.
+        let (url, seen) = spawn_checkin_mock("200 OK").await;
+        let cfg = checkin_config(url, "", true);
+        let http = crate::badhub::push::build_client();
+        let mut engine = SyncEngine::new();
+
+        engine
+            .push_checkin_roster(&cfg, &http, &roster_snapshot())
+            .await;
+        assert!(seen.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn roster_is_not_pushed_when_checkin_is_off() {
+        let (url, seen) = spawn_checkin_mock("200 OK").await;
+        let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", false);
+        let http = crate::badhub::push::build_client();
+        let mut engine = SyncEngine::new();
+
+        engine
+            .push_checkin_roster(&cfg, &http, &roster_snapshot())
+            .await;
+        assert!(seen.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_old_badhub_disables_the_roster_push_for_this_session() {
+        // 404 heisst hier nicht "kaputt", sondern "badhub kennt den Check-In
+        // noch nicht" — dann nicht jeden Zyklus erneut anklopfen.
+        let (url, seen) = spawn_checkin_mock("404 Not Found").await;
+        let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", true);
+        let http = crate::badhub::push::build_client();
+        let mut engine = SyncEngine::new();
+        let snap = roster_snapshot();
+
+        engine.push_checkin_roster(&cfg, &http, &snap).await;
+        assert!(engine.checkin_unsupported);
+        engine.push_checkin_roster(&cfg, &http, &snap).await;
+        assert_eq!(
+            seen.lock().await.len(),
+            1,
+            "nach 404 nicht erneut anklopfen"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_roster_push_is_retried_with_the_full_list() {
+        // 500: last_roster bleibt leer, der naechste Zyklus sendet erneut.
+        let (url, seen) = spawn_checkin_mock("500 Internal Server Error").await;
+        let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", true);
+        let http = crate::badhub::push::build_client();
+        let mut engine = SyncEngine::new();
+        let snap = roster_snapshot();
+
+        engine.push_checkin_roster(&cfg, &http, &snap).await;
+        assert!(engine.last_roster.is_none());
+        assert!(
+            !engine.checkin_unsupported,
+            "500 legt das Feature nicht still"
+        );
+        engine.push_checkin_roster(&cfg, &http, &snap).await;
+        assert_eq!(seen.lock().await.len(), 2);
     }
 }
