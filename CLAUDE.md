@@ -99,6 +99,17 @@ Bausteine berührt):** [`docs/multi-hall.md`](docs/multi-hall.md) — bindet
 CourtID-Refactor, Hallen-Gruppierung und LAN+Cloud-Parallelbetrieb zu
 einer Architektur-Erzählung.
 
+## Von der Idee zur Spec
+
+Neue Features starten **nicht** mit Code, sondern mit `/idee`: Brief → Grill →
+How-To → Spec+Review. Ergebnis ist eine freigegebene Spezifikation unter
+`docs/features/<slug>.md` (Zwischenstände gitignoriert unter
+`docs/features/_intake/`). Die Kern-Stufen `/grill-me` (Anforderung löchern) und
+`/how-to` (Umsetzungsplan entwerfen) sind auch einzeln nutzbar. Bis zur Freigabe
+der Spec wird kein Produktivcode geschrieben.
+
+Konzept und Funktionsweise: [docs/spec-pipeline-konzept.md](docs/spec-pipeline-konzept.md).
+
 ## Subagents
 
 - **code-reviewer** — nach **jeder** Code-Änderung (Pflicht, in beiden
