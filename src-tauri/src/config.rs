@@ -257,6 +257,67 @@ impl Default for ScorekeeperConfig {
     }
 }
 
+/// Einstellungen des Hallen-Check-Ins (ADR 0009). Opt-in — standardmäßig aus,
+/// damit Turniere ohne Check-In unverändert laufen.
+///
+/// Die Anfangszeiten, Anmeldeschlüsse und Check-In-Stände liegen bewusst
+/// **nicht** hier, sondern bei badhub unter der Turnier-GUID: eine
+/// Installation läuft über Jahre über viele Turniere, und `AppConfig` kennt
+/// keine Turnier-Trennung. Lokal steht nur, welches Turnier gerade läuft.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CheckinConfig {
+    /// Hallen-Check-In für dieses Turnier aktiv?
+    pub enabled: bool,
+    /// turnier.de-Turnier-GUID (36 Zeichen, aus der Turnier-URL
+    /// `turnier.de/tournament/<GUID>/matches`). Leer = nicht eingerichtet;
+    /// ohne sie wird nichts an badhub gesendet. BTP liefert diese ID **nicht**
+    /// mit, sie muss einmalig eingetragen werden.
+    pub tournament_uuid: String,
+    /// Bis zu wie vielen fehlenden Spielern nennt die Ansage Namen? Darüber
+    /// wird nur die Anzahl angesagt („In Herrendoppel B fehlen noch 23
+    /// Anmeldungen") — sonst läuft die Ansage kurz nach Fensteröffnung
+    /// minutenlang, wenn noch fast niemand eingecheckt ist.
+    pub missing_names_max: u32,
+}
+
+impl Default for CheckinConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tournament_uuid: String::new(),
+            missing_names_max: 8,
+        }
+    }
+}
+
+impl CheckinConfig {
+    /// Ist der Check-In einsatzbereit — eingeschaltet **und** mit gültiger
+    /// Turnier-GUID? Ohne beides wird nichts gesendet und nichts angezeigt.
+    pub fn is_ready(&self) -> bool {
+        self.enabled && is_tournament_uuid(&self.tournament_uuid)
+    }
+}
+
+/// Prüft das Format einer turnier.de-Turnier-GUID:
+/// `8-4-4-4-12` Hex-Zeichen, z. B. `0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA`.
+///
+/// Geschweifte Klammern (BTP schreibt GUIDs als `{…}`) und Groß-/Kleinschreibung
+/// sind erlaubt; die Prüfung soll den Tippfehler abfangen, nicht den Nutzer
+/// über Formalien belehren.
+pub fn is_tournament_uuid(value: &str) -> bool {
+    let trimmed = value.trim().trim_start_matches('{').trim_end_matches('}');
+    let groups: Vec<&str> = trimmed.split('-').collect();
+    if groups.len() != 5 {
+        return false;
+    }
+    let expected = [8, 4, 4, 4, 12];
+    groups
+        .iter()
+        .zip(expected)
+        .all(|(g, len)| g.len() == len && g.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
 /// Einstellungen der automatischen Feldvergabe. Ist sie aktiv, weist bts-light
 /// ein spielbereites Match automatisch einem freien, nicht gesperrten Feld zu,
 /// sobald dieses lange genug frei ist – schreibt das wie die manuelle Vergabe
@@ -418,6 +479,10 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub auto_assign: AutoAssignConfig,
+    /// Hallen-Check-In (ADR 0009). `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub checkin: CheckinConfig,
     /// Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
     /// ein (manuell + automatisch). Leer = keine Einschränkung. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -691,6 +756,11 @@ mod tests {
                 pause_minutes: 2.0,
                 active_hall: "Halle A".to_string(),
             },
+            checkin: CheckinConfig {
+                enabled: true,
+                tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+                missing_names_max: 5,
+            },
             discipline_hall_rules: vec![DisciplineHallRule {
                 discipline: "mens_singles".to_string(),
                 draw_name: String::new(),
@@ -765,6 +835,63 @@ mod tests {
         assert_eq!(loaded.auto_assign.wait_minutes, 1.0);
         // Tablet-Einstellungs-PIN (vor diesem Feature unbekannt) → Default „0000".
         assert_eq!(loaded.tablet_settings_pin, "0000");
+        // Ebenso der Hallen-Check-In (ADR 0009) → Defaults, insbesondere aus.
+        // Eine Installation, die per Auto-Update auf diese Version kommt,
+        // darf ohne Zutun nichts an badhub senden.
+        assert_eq!(loaded.checkin, CheckinConfig::default());
+        assert!(!loaded.checkin.enabled);
+        assert!(loaded.checkin.tournament_uuid.is_empty());
+        assert_eq!(loaded.checkin.missing_names_max, 8);
+        assert!(!loaded.checkin.is_ready());
+    }
+
+    #[test]
+    fn checkin_is_only_ready_with_switch_and_valid_guid() {
+        // Eingeschaltet allein reicht nicht — ohne GUID weiß badhub nicht,
+        // zu welchem Turnier die Meldeliste gehört.
+        let mut cfg = CheckinConfig {
+            enabled: true,
+            ..CheckinConfig::default()
+        };
+        assert!(!cfg.is_ready(), "ohne GUID nicht bereit");
+
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        assert!(cfg.is_ready());
+
+        // Ausgeschaltet bleibt ausgeschaltet, auch mit gültiger GUID.
+        cfg.enabled = false;
+        assert!(!cfg.is_ready());
+    }
+
+    #[test]
+    fn tournament_uuid_accepts_real_turnier_de_guids() {
+        // Echte Turnier-GUID aus einer turnier.de-URL.
+        assert!(is_tournament_uuid("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"));
+        // Kleinschreibung, umgebende Leerzeichen und die BTP-Schreibweise
+        // mit geschweiften Klammern sind dasselbe Turnier.
+        assert!(is_tournament_uuid("0ea5fd86-a64f-4445-a8de-bae3dbf762ba"));
+        assert!(is_tournament_uuid(
+            "  0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA  "
+        ));
+        assert!(is_tournament_uuid("{0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA}"));
+    }
+
+    #[test]
+    fn tournament_uuid_rejects_typos_and_wrong_ids() {
+        assert!(!is_tournament_uuid(""));
+        // Zu kurz / zu lang in einer Gruppe (klassischer Tippfehler).
+        assert!(!is_tournament_uuid("0EA5FD8-A64F-4445-A8DE-BAE3DBF762BA"));
+        assert!(!is_tournament_uuid("0EA5FD866-A64F-4445-A8DE-BAE3DBF762BA"));
+        // Nicht-Hex-Zeichen.
+        assert!(!is_tournament_uuid("0EA5FD8G-A64F-4445-A8DE-BAE3DBF762BA"));
+        // Zu wenige Gruppen.
+        assert!(!is_tournament_uuid("0EA5FD86-A64F-4445-A8DE"));
+        // Die numerische turnier.de-Turniernummer ist NICHT die GUID.
+        assert!(!is_tournament_uuid("488544"));
+        // Eine ganze URL ist es auch nicht.
+        assert!(!is_tournament_uuid(
+            "https://www.turnier.de/tournament/0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        ));
     }
 
     #[test]

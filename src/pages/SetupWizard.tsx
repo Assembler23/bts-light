@@ -489,6 +489,13 @@ export function SetupWizard({
       ),
       // Sperrliste unverändert durchreichen – wird im Wizard nicht editiert.
       locked_courts: initialConfig.locked_courts ?? [],
+      // Hallen-Check-In unverändert durchreichen (eigener Schritt weiter unten
+      // im Wizard pflegt Schalter und Turnier-GUID).
+      checkin: initialConfig.checkin ?? {
+        enabled: false,
+        tournament_uuid: "",
+        missing_names_max: 8,
+      },
       // Tablet-Einstellungs-PIN: nur Ziffern, leer → Default „0000".
       tablet_settings_pin: tabletPin.replace(/\D/g, "").slice(0, 8) || "0000",
       tournament_logo: {

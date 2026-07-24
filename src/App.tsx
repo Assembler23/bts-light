@@ -101,6 +101,11 @@ function defaultConfig(): AppConfig {
       pause_minutes: 0,
       active_hall: "",
     },
+    checkin: {
+      enabled: false,
+      tournament_uuid: "",
+      missing_names_max: 8,
+    },
     discipline_hall_rules: [],
     locked_courts: [],
     tablet_settings_pin: "0000",
