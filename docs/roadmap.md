@@ -248,6 +248,21 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   brechen bestehende Installationen beim Auto-Update. Der angezeigte
   `productName` kann separat und mit Bedacht wechseln.
 
+## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
+
+- **Hallen-Check-In** — Spieler bestätigen vor Beginn ihrer Spielklasse über
+  eine öffentliche Webseite selbst, dass sie in der Halle sind; die
+  Turnierleitung sieht **vor der Auslosung**, wer fehlt, und kann Fehlende
+  gezielt ausrufen lassen. Spannt über zwei Repos (öffentliche Seite und
+  Persistenz in badhub, Meldelisten-Push und Turnierleitungs-Sicht in
+  bts-light), geschnitten in drei nacheinander lieferbare Stufen.
+  Spec: [features/spieler-check-in.md](features/spieler-check-in.md) ·
+  ADR: [adr/0009-hallen-checkin-persistenz-und-identitaet.md](adr/0009-hallen-checkin-persistenz-und-identitaet.md).
+  **Vor Umsetzungsbeginn zu klären:** ob ein Turnierleiter (Rolle
+  `liveticker`) in badhub eine eigene Turnier-Verwaltung erreichen kann —
+  derzeit weist die einzige dafür vorgesehene Seite diese Rolle mit HTTP 403
+  ab. Ohne Klärung kann nur ein Superadmin die Anfangszeiten pflegen.
+
 ## Geplant
 
 - **Code-Signing des Windows-Installers.** Aktuell unsigniert → Windows
