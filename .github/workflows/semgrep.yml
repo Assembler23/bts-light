@@ -1,0 +1,53 @@
+name: Semgrep (OWASP)
+
+# Statische Analyse des EIGENEN Codes gegen die OWASP-Top-10-Klassen.
+# Ergaenzt die CVE-Pruefung (Dependabot): dort Schwachstellen in Dependencies,
+# hier Schwachstellen-Klassen im Code. Muster + Begruendung: bvbb-hub ADR 0015.
+#
+# ZUNAECHST REPORT-ONLY: Der Job schlaegt nicht fehl. Funde stehen im Log und als
+# SARIF-Artefakt. Ist die Baseline gesichtet, wird der Gate scharf gestellt
+# (--error, siehe unten) — bewusst pro Repo, kein Automatismus.
+#
+# Datenschutz (Regel R6): Regeln werden aus der Registry geladen und laufen im
+# Container; der Quellcode wird NICHT hochgeladen. Telemetrie via --metrics=off aus.
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Montags 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: semgrep scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep OWASP-Scan (report-only)
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/javascript \
+            --config p/typescript \
+            --metrics=off \
+            --sarif-output=semgrep.sarif \
+            --text \
+            || true
+          # Gate spaeter scharf stellen: '|| true' entfernen und '--error' ergaenzen,
+          # sobald die Baseline einmal gesichtet ist.
+
+      - name: SARIF als Artefakt ablegen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: warn
