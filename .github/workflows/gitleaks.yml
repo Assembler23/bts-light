@@ -1,0 +1,120 @@
+name: Secret Scan
+
+# Sucht Zugangsdaten im Code UND in der gesamten Git-Historie.
+#
+# ── Warum ausgerechnet hier ──────────────────────────────────────────────────
+# Dieses Repo ist OEFFENTLICH, und seine Release-Pipeline haelt mit
+# TAURI_SIGNING_PRIVATE_KEY den Vertrauensanker jeder Installation — ein damit
+# signiertes Update landet per Auto-Update auf allen Rechnern. Zugangsdaten,
+# die hier hineinrutschen, sind sofort fuer jeden lesbar; es gibt kein
+# "privat, also halb so schlimm".
+#
+# ── Warum gitleaks zusaetzlich zu GitHub ─────────────────────────────────────
+# Bei OEFFENTLICHEN Repos greift GitHubs Secret Scanning grundsaetzlich — aber
+# erst NACH dem Push und mit anderem Regelsatz. Der pre-commit-Hook hier greift
+# eine Stufe frueher, und der Workflow prueft zusaetzlich die volle Historie.
+#
+# Zweite Verteidigungslinie zum pre-commit-Hook (.githooks/pre-commit). Der ist
+# bewusst fail-open, damit ein frischer Klon ohne Binary committen kann —
+# dieser Workflow ist es NICHT. Hier ist der Schutz verbindlich.
+#
+# ── Warum die Binaerdatei statt einer fertigen Action ────────────────────────
+# gitleaks-action verlangt fuer Organisationen einen Lizenzschluessel und waere
+# eine weitere Drittanbieter-Abhaengigkeit in der Kette. Der Release-Download
+# mit Pruefsummen-Abgleich ist transparenter.
+#
+# ── Allowlists statt Baseline ────────────────────────────────────────────────
+# Der Voll-Scan ueber 539 Commits fand am 2026-08-07 zwei Stellen. Beide sind
+# ECHTE Werte und eine bewusste Entwurfsentscheidung, die der Betreiber nach
+# Vorlage der Tragweite bestaetigt hat: die send_passwords der Verbands-Presets
+# und das PILOG_TOKEN. Begruendung, Tragweite und die Bedingungen fuer eine
+# Neubewertung stehen in .gitleaks.toml.
+#
+# Beide Ausnahmen sind mit condition = "AND" und regexTarget = "line" an das
+# konkrete Konstrukt gebunden, NICHT an den Dateipfad. Gegengeprueft: Ein
+# AWS-Key in presets.ts und ein zweites Token in shared-startbrowser.sh werden
+# weiterhin gemeldet. Ohne diese beiden Schalter waeren die zwei Dateien
+# komplette blinde Flecken geworden — ausgerechnet die, in denen ein kuenftiges
+# Geheimnis am ehesten landet.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Montags 06:00 UTC — faengt neue Regelsaetze auf Altbestand
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: "8.30.1"
+
+jobs:
+  scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Volle Historie: der Sinn dieses Scans ist gerade, dass ein Secret
+          # auch dann gefunden wird, wenn es laengst wieder entfernt wurde.
+          #
+          # REICHWEITE, ausdruecklich benannt: Gescannt wird, was vom
+          # ausgecheckten Ref aus ERREICHBAR ist — bei einem PR also master
+          # plus dieser Branch. Nachgemessen 2026-08-07: 200 Commits in der CI
+          # gegenueber 232 in einem gewachsenen lokalen Klon; die Differenz sind
+          # Refs, die die CI gar nicht auscheckt (39 Remote-Branches).
+          #
+          # Daraus folgt eine echte Luecke: Ein Secret auf einem Branch, der
+          # OHNE Pull Request gepusht und dann geloescht wird, liegt zwar noch
+          # im Objektspeicher von GitHub, ist aber von master nicht erreichbar
+          # und wird von keinem Lauf gesehen. Jeder Branch MIT PR wird dagegen
+          # abgedeckt, weil sein eigener Lauf ihn scannt.
+          # Das ist bewusst in Kauf genommen und keine stille Kappung.
+          fetch-depth: 0
+
+      - name: gitleaks holen (mit Pruefsummen-Abgleich)
+        run: |
+          set -euo pipefail
+          V="$GITLEAKS_VERSION"
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${V}"
+          # Dateiname MUSS dem in checksums.txt entsprechen: `sha256sum -c`
+          # liest den Namen aus der Pruefsummenzeile und oeffnet genau den.
+          TARBALL="gitleaks_${V}_linux_x64.tar.gz"
+          curl -sSL --retry 3 -o "$TARBALL"     "${BASE}/${TARBALL}"
+          curl -sSL --retry 3 -o checksums.txt  "${BASE}/gitleaks_${V}_checksums.txt"
+          # Ohne diesen Abgleich haetten wir den CDN nur gegen einen
+          # ungeprueften Download getauscht.
+          grep "$TARBALL" checksums.txt | sha256sum -c -
+          tar xzf "$TARBALL" gitleaks
+          chmod +x gitleaks
+          ./gitleaks version
+
+      - name: Scan (Arbeitsbaum + Historie)
+        run: |
+          set -euo pipefail
+          ./gitleaks git \
+            --redact \
+            --no-banner \
+            -c .gitleaks.toml \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            .
+
+      # Auch bei einem Fund hochladen — sonst fehlt genau dann der Bericht,
+      # wenn man ihn braucht. --redact sorgt dafuer, dass keine Werte drinstehen.
+      - name: Bericht als Artefakt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          retention-days: 30
+          if-no-files-found: warn
