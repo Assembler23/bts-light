@@ -1853,6 +1853,21 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             prepared.truncate(200);
             namespace.prepared = prepared;
         }
+        // TL-Web (Turnierleitungs-Oberfläche): Die Wire-Typen stehen, der
+        // Relay wertet sie aber noch nicht aus — Token-Map, Routen und
+        // Weiterleitung kommen in einem eigenen Schritt
+        // (docs/features/turnierleitung-web.md, ADR 0010/0011). Bis dahin
+        // bewusst folgenlos verworfen, damit ein Host, der schon pusht, die
+        // Verbindung nicht verliert. Absichtlich einzeln aufgeführt statt
+        // per Auffang-Arm: So zwingt der Compiler beim Ausbau dazu, jede
+        // Variante anzufassen.
+        //
+        // **Beim Ausbau zwingend:** `TlAck` muss die wartende Anfrage
+        // auflösen (Muster `ResultAck`). Bleibt dieser Arm stehen, verpufft
+        // auch die Absage, die der Host bereits sendet
+        // (src-tauri/src/tablet/relay_client.rs) — jedes Gerät liefe dann
+        // in den Zeitablauf statt eine Klartext-Meldung zu sehen.
+        HostFrame::TlAuth { .. } | HostFrame::TlState { .. } | HostFrame::TlAck { .. } => {}
     }
     true
 }

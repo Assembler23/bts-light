@@ -98,6 +98,46 @@ hält sie je Namespace (`Namespace.prepared`) und gibt sie in
 Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 [announcements.md](announcements.md).
 
+### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
+
+> **Stand:** Die Wire-Typen sind definiert und getestet (Schritt 1 der
+> Umsetzung); **Routen, Token-Prüfung und Weiterleitung im Relay gibt es
+> noch nicht.** Bis dahin ändert sich am Betrieb nichts. Fachliche
+> Grundlage: [features/turnierleitung-web.md](features/turnierleitung-web.md),
+> [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und
+> [ADR 0011](adr/0011-tl-web-geraete-identitaet.md).
+
+Turnierleitungs-Geräte sind eine **dritte Client-Klasse** neben Tablets und
+Monitoren: mehrere je Namespace (höchstens 8), **nicht** feldgebunden, und
+sie schreiben ausschließlich **über den Host**. Sie landen nie in der
+Tablet-Liste eines Namespace und übernehmen nie eine Court-Session — R4
+(„ein aktives Tablet je Court") bleibt unberührt.
+
+Die geteilten Typen in `relay-proto`:
+
+| Typ | Zweck |
+|---|---|
+| `TlAction` | Der **geschlossene** Satz erlaubter Aktionen (Feld belegen/räumen/umhängen, Vorbereitungs-Aufruf, erneuter Aufruf, Ergebnis, Walkover, Zähltafelbediener, Auto-Vergabe). Was hier nicht steht, ist nicht darstellbar. |
+| `CourtExpectation` | Was das Gerät auf dem Feld **vorgefunden** hat (`any` / `free` / `match`). Stimmt es nicht mehr, lehnt der Host ab — so überschreiben zwei Geräte einander nicht stillschweigend. |
+| `TlResponse` + `TlErrorCode` | Antwort mit **maschinenlesbarem** Grund, damit die Seite gezielt reagieren kann, plus der Revision, auf die sie sich neu ausrichten soll. Kennt auch „ausgeführt, aber mit Hinweis" (etwa: in dieser Halle ist kein Ansage-Gerät verbunden) — ausdrücklich kein Fehler. |
+| `RelayFrame::TlCommand` | Kommando an den Host; `reqId` korreliert die Antwort, `opId` ist der Idempotenzschlüssel gegen doppelte Schreibvorgänge nach einem Netzwackler, `viewRev` die Revision der Ansicht, auf der die Aktion beruhte (Grundlage der Altersprüfung). |
+| `HostFrame::TlAck` | Die Quittung — der Absender erfährt das Ergebnis **nach** dem BTP-Schreiben, kein Fire-and-forget. |
+| `HostFrame::TlAuth` | Die Menge zugelassener Gerätetokens. Der Host stellt sie aus, der Relay spiegelt sie nur; die Liste **ersetzt** die bisherige, und genau das ist der Widerruf. |
+| `HostFrame::TlState` | Der Anzeige-Zustand als **opakes** JSON plus Revision. Der Relay legt ihn nur ab und liefert ihn unverändert aus — wie beim Court-Zustand bleibt die Turnierlogik vollständig im Host. |
+
+**Die `install_id` verlässt den Master dabei nicht.** Anders als bei
+Tablets und Monitoren ist der Namespace kein Bestandteil der
+TL-Adressen; der Relay schlägt ihn über das Gerätetoken nach (ADR 0011).
+
+**Kein `#[serde(default)]` auf den TL-Feldern — anders als bei den
+Tablet-Typen.** Dort schützt der Default ältere Geräte, die im Feld sind.
+Hier gibt es keine ältere Gegenstelle: Die Typen sind neu, und ein
+stillschweigend ergänzter Wert würde jeweils die *weitreichendere* oder
+*ungeprüfte* Variante auslösen — ein fehlendes `expect` schaltete den
+Konfliktschutz ab, ein fehlendes `tokens` sperrte alle Geräte aus, ein
+fehlendes `side` riefe beide Parteien statt der einen fehlenden. Solche
+Frames werden verworfen, statt geraten zu werden.
+
 Reconnect: bts-light verbindet bei Abriss mit Backoff (1 s → 30 s) neu,
 Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
 

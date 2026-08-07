@@ -345,6 +345,25 @@ async fn handle_frame(
                 error: resp.error,
             }));
         }
+        // TL-Web: Der Kommando-Typ steht, die Ausführung folgt in einem
+        // eigenen Schritt (docs/features/turnierleitung-web.md). Bis dahin
+        // wird nichts ausgeführt, sondern abgesagt.
+        //
+        // Wirkung heute: **keine.** Der Relay kann noch gar kein
+        // `TlCommand` senden, und er verwirft `TlAck` derzeit folgenlos
+        // (relay/src/main.rs). Die Absage steht hier, damit sie greift,
+        // sobald der Relay den Kanal bekommt — der Schritt, der die Route
+        // baut, muss das Ack durchreichen, sonst läuft jeder Tipp am Gerät
+        // in den Zeitablauf statt in diese Klartext-Meldung.
+        RelayFrame::TlCommand { req_id, .. } => {
+            let _ = tx.send(text(&HostFrame::TlAck {
+                req_id,
+                response: relay_proto::TlResponse::err(
+                    relay_proto::TlErrorCode::Unsupported,
+                    "Diese bts-light-Version kennt die Turnierleitungs-Oberfläche noch nicht.",
+                ),
+            }));
+        }
     }
 }
 

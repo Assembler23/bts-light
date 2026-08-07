@@ -250,6 +250,23 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Turnierleitungs-Weboberfläche („TL-Web")** — eine Browser-Seite, auf
+  der mehrere Helfer gleichzeitig (im Hallennetz **und** aus dem Internet)
+  Spiele per Ziehen oder Antippen auf Felder legen, umhängen und
+  herunternehmen, aufrufen, Ergebnisse nachtragen und Aufgaben werten.
+  Öffnet den bisher read-only gehaltenen Cloud-Pfad kontrolliert für
+  Schreibzugriff: höchstens 8 Geräte je Turnier, je mit einem vom
+  Turnier-PC ausgestellten, widerrufbaren Token; die `install_id` verlässt
+  den Master nicht. Spec: [features/turnierleitung-web.md](features/turnierleitung-web.md) ·
+  ADR [0010](adr/0010-tl-web-schreibender-cloud-pfad.md) +
+  [0011](adr/0011-tl-web-geraete-identitaet.md).
+  **Überschneidet sich mit Cluster C und E** — 2./3. Aufruf, „Zeit seit
+  Aufruf" in der Felderübersicht, Pausenzeiten und die
+  Slave-Spielübersicht (Plan 7) werden von diesem Feature miterledigt bzw.
+  müssen mit ihm abgestimmt werden. **Vor Umsetzungsbeginn offen:** ein
+  Experiment am echten BTP, ob eine bereits gewertete Begegnung
+  überschrieben werden kann, ohne den Turnierbaum zu beschädigen — davon
+  hängt ab, wie weit „Ergebnis korrigieren" reicht.
 - **Hallen-Check-In** — Spieler bestätigen vor Beginn ihrer Spielklasse über
   eine öffentliche Webseite selbst, dass sie in der Halle sind; die
   Turnierleitung sieht **vor der Auslosung**, wer fehlt, und kann Fehlende
