@@ -100,9 +100,11 @@ Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 
 ### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
 
-> **Stand:** Die Wire-Typen sind definiert und getestet, und der Turnier-PC
-> kann die Geräte speichern (`tl_web` in der `config.json`, Default **aus**);
-> **Routen, Token-Prüfung und Weiterleitung im Relay gibt es noch nicht.**
+> **Stand:** Die Wire-Typen sind definiert und getestet, der Turnier-PC kann
+> die Geräte speichern (`tl_web` in der `config.json`, Default **aus**), die
+> Vergabe-Regeln liegen als geteiltes Tor in `tablet/assign.rs`, und der
+> Anzeige-Zustand wird in `tablet/tl.rs` gebaut. **Routen, Token-Prüfung und
+> Weiterleitung im Relay gibt es noch nicht.**
 > Bis dahin ändert sich am Betrieb nichts. Fachliche Grundlage:
 > [features/turnierleitung-web.md](features/turnierleitung-web.md),
 > [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und

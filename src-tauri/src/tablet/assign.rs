@@ -77,6 +77,69 @@ pub fn sort_key_parts(
     )
 }
 
+/// Woher die Hallen-Angabe eines noch nicht vergebenen Spiels stammt.
+///
+/// Die Herkunft wird mitgeliefert, damit die Turnierleitung einschätzen kann,
+/// wie belastbar die Angabe ist: Eine Turnier-Festlegung wiegt schwerer als
+/// eine Tagesentscheidung, und „unbekannt" muss als solches erkennbar sein.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HallSource {
+    /// Aus der Disziplin/Klasse→Halle-Regel (Turnier-Festlegung).
+    Rule,
+    /// Aus dem Vorbereitungs-Aufruf (Tagesentscheidung).
+    Call,
+    /// Nicht bekannt.
+    None,
+}
+
+/// In welche Halle gehört ein noch nicht vergebenes Spiel — und woher wissen
+/// wir das?
+///
+/// Kaskade: Disziplin-Regel → Vorbereitungs-Aufruf → unbekannt. Die Regel
+/// gewinnt, weil sie eine Turnier-Festlegung ist und auch die Vergabe selbst
+/// bindet (`hall_allows_match`); ein widersprechender Aufruf könnte gar nicht
+/// ausgeführt werden.
+///
+/// **Noch nicht enthalten:** der von BTP an der Ansetzung geführte Spielort.
+/// Er wäre die beste Quelle, weil er für *alle* angesetzten Spiele existiert —
+/// ob die Turniere ihn tatsächlich pflegen, ist aber noch nicht belegt
+/// (Spec, offener Punkt 2).
+pub fn hall_for_match(
+    config: &AppConfig,
+    snap: &BtpSnapshot,
+    m: &BtpMatch,
+    called_hall: Option<&str>,
+) -> (String, HallSource) {
+    if let Some(hall) = config.allowed_hall_for(m.discipline.as_str(), &m.draw_name) {
+        return (canonical_hall(snap, hall), HallSource::Rule);
+    }
+    match called_hall.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(hall) => (canonical_hall(snap, hall), HallSource::Call),
+        None => (String::new(), HallSource::None),
+    }
+}
+
+/// Übersetzt einen von Hand getippten Hallennamen in die Schreibweise, die
+/// BTP führt.
+///
+/// Die Vergabe vergleicht Hallennamen ohne Rücksicht auf Groß- und
+/// Kleinschreibung — eine Regel „halle b" belegt also korrekt Felder in
+/// „Halle B". Die Anzeige darf das nicht ignorieren: Gäbe sie die getippte
+/// Schreibweise aus, fände der Hallenfilter das Spiel nicht, und weil es
+/// eine Halle *hat*, landete es auch nicht im Abschnitt „ohne
+/// Hallenzuordnung" — es verschwände lautlos. Unbekannte Namen bleiben, wie
+/// sie sind (dann stimmt wenigstens die Anzeige mit der Konfiguration
+/// überein).
+fn canonical_hall(snap: &BtpSnapshot, name: &str) -> String {
+    let n = name.trim();
+    snap.locations
+        .iter()
+        .find(|l| l.name.trim().eq_ignore_ascii_case(n))
+        .map(|l| l.name.trim().to_string())
+        .unwrap_or_else(|| n.to_string())
+}
+
 /// Warum ein Spiel gerade nicht aufs Feld kann.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Blocked {
@@ -470,6 +533,12 @@ mod tests {
         }
     }
 
+    /// Turnier ohne bekannte Hallen — dann bleibt ein getippter Hallenname
+    /// so stehen, wie er konfiguriert wurde.
+    fn empty_snap() -> BtpSnapshot {
+        snap(Vec::new(), Vec::new(), Vec::new())
+    }
+
     fn a_court(id: i64, location_id: Option<i64>) -> BtpCourt {
         BtpCourt {
             id,
@@ -819,6 +888,64 @@ mod tests {
         assert_eq!(
             check(&s, &AppConfig::default(), 7, 99, CourtExpectation::Free).unwrap_err(),
             AssignError::UnknownCourt
+        );
+    }
+
+    #[test]
+    fn hall_comes_from_the_discipline_rule_when_one_is_configured() {
+        // Die Disziplin/Klasse→Halle-Regel ist die einzige Quelle, die
+        // *heute* schon für ungerufene Spiele existiert — und sie deckt
+        // sortenreine Turniere („Damen in Halle 2") vollständig ab.
+        let mut cfg = AppConfig::default();
+        cfg.discipline_hall_rules.push(DisciplineHallRule {
+            discipline: "mens_singles".to_string(),
+            draw_name: String::new(),
+            hall: "Halle A".to_string(),
+        });
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(&cfg, &empty_snap(), &m, None),
+            ("Halle A".to_string(), HallSource::Rule)
+        );
+    }
+
+    #[test]
+    fn hall_falls_back_to_the_preparation_call() {
+        // Ohne Regel weiß nur der Aufruf, wohin das Spiel soll.
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(&AppConfig::default(), &empty_snap(), &m, Some("Halle B")),
+            ("Halle B".to_string(), HallSource::Call)
+        );
+    }
+
+    #[test]
+    fn the_rule_wins_over_the_call() {
+        // Die Regel ist eine Turnier-Festlegung, der Aufruf eine
+        // Tagesentscheidung — widersprechen sie sich, gilt die Festlegung,
+        // genau wie bei der Vergabe selbst (`hall_allows_match`).
+        let mut cfg = AppConfig::default();
+        cfg.discipline_hall_rules.push(DisciplineHallRule {
+            discipline: "mens_singles".to_string(),
+            draw_name: String::new(),
+            hall: "Halle A".to_string(),
+        });
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(&cfg, &empty_snap(), &m, Some("Halle B")),
+            ("Halle A".to_string(), HallSource::Rule)
+        );
+    }
+
+    #[test]
+    fn without_rule_or_call_the_hall_is_openly_unknown() {
+        // Wichtig für die Anzeige: „unbekannt" muss unterscheidbar sein von
+        // „gehört in Halle X". Ein Spiel ohne Halle darf nicht stillschweigend
+        // aus dem gefilterten Bild fallen — es würde sonst nie vergeben.
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(&AppConfig::default(), &empty_snap(), &m, None),
+            (String::new(), HallSource::None)
         );
     }
 

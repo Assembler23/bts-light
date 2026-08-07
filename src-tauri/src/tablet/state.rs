@@ -1144,6 +1144,15 @@ impl TabletState {
         let Some(snap) = guard.as_ref() else {
             return Vec::new();
         };
+        self.overview_from(snap)
+    }
+
+    /// Wie [`Self::overview`], aber auf einem **übergebenen** Schnappschuss.
+    ///
+    /// Für Aufrufer, die mehrere Sichten aus demselben BTP-Stand bauen: Zwei
+    /// getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen, und
+    /// die Teilsichten beschrieben dann verschiedene Turnierstände.
+    pub fn overview_from(&self, snap: &BtpSnapshot) -> Vec<CourtOverview> {
         let courts = self.courts.read().unwrap();
         snap.court_infos
             .iter()
