@@ -4,6 +4,28 @@
 # und laufen in pre-push bzw. der CI. Notfall-Bypass: git commit --no-verify
 set -e
 
+# ── Secret-Scan ZUERST ───────────────────────────────────────────────────────
+# Dieses Repo ist OEFFENTLICH — ein gepushtes Geheimnis ist sofort fuer jeden
+# lesbar und nicht zurueckzuholen. Der Scan laeuft deshalb vor allen anderen
+# Pruefungen: Ein Fund soll auffallen, auch wenn der Commit ohnehin an fmt oder
+# clippy scheitern wuerde.
+#
+# `git --staged`, NICHT `protect`: Letzteres ist in gitleaks 8.30 entfernt und
+# wuerde mit "unknown command" JEDEN Commit blockieren.
+#
+# Fail-open ohne Binary: Ein frischer Klon soll committen koennen. Verbindlich
+# ist der Workflow in der CI. Installation: brew install gitleaks
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks git --staged --redact --no-banner -c .gitleaks.toml . 2>/dev/null; then
+    echo "✗ gitleaks: moeglicherweise ein Geheimnis in den gestagten Aenderungen."
+    echo "  Details:  gitleaks git --staged --redact -v -c .gitleaks.toml ."
+    echo "  Pruefen und ENTFERNEN — nicht per --no-verify durchdruecken."
+    echo "  Falsch-Positiv? Ausnahme MIT BEGRUENDUNG in .gitleaks.toml eintragen."
+    exit 1
+  fi
+fi
+
+
 rsstaged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
 
 # Fail-open ohne cargo (z. B. reine Doku-Commits / fehlende Toolchain).

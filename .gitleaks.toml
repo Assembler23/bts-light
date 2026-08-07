@@ -1,0 +1,84 @@
+# gitleaks — Secret-Scanning für bts-light
+#
+# WARUM AUSGERECHNET HIER: Dieses Repo ist ÖFFENTLICH, und seine Release-Pipeline
+# hält mit `TAURI_SIGNING_PRIVATE_KEY` den Vertrauensanker jeder Installation —
+# ein damit signiertes Update landet per Auto-Update auf allen Rechnern.
+# Zugangsdaten, die hier hineinrutschen, sind sofort für jeden lesbar; es gibt
+# kein "privat, also halb so schlimm".
+#
+# GitHubs Secret Scanning greift bei öffentlichen Repos zwar grundsätzlich,
+# meldet aber erst NACH dem Push und deckt den Regelsatz anders ab. Der
+# pre-commit-Hook hier greift eine Stufe früher.
+#
+# Läuft an zwei Stellen:
+#   1. .githooks/pre-commit — auf gestagte Dateien, fail-open ohne Binary
+#   2. .github/workflows/gitleaks.yml — auf die volle Historie, blockierend
+#
+# Regelsatz: die eingebauten Standardregeln.
+
+title = "bts-light"
+
+[extend]
+useDefault = true
+
+# ── Ausnahmen ────────────────────────────────────────────────────────────────
+# Der Voll-Scan über 539 Commits fand am 2026-08-07 zwei Stellen. Beide sind
+# eine bewusste Entwurfsentscheidung, die der Betreiber nach Vorlage der
+# Tragweite bestätigt hat.
+#
+# Dieses Repo ist ÖFFENTLICH. Die Begründungen unten sagen deshalb, DASS eine
+# Ausnahme bewusst ist und wo die vollständige Bewertung liegt — sie
+# wiederholen aber nicht, was ein Angreifer damit anfangen könnte. Das steht im
+# internen Repo.
+#
+# Wichtig: Beide Ausnahmen sind an das konkrete Konstrukt gebunden, NICHT an
+# den Dateipfad. Ein anderes Geheimnis in derselben Datei wird weiterhin
+# gemeldet.
+
+[[allowlists]]
+description = """
+src/presets.ts — die send_passwords der Verbands-Presets.
+
+BEWUSST AKZEPTIERT, nach Vorlage der Tragweite beim Betreiber. Das Preset
+existiert gerade, damit ein Turnierleiter keine Zugangsdaten eintippen muss;
+in einer verteilten Windows-Anwendung waeren sie ohnehin aus dem Paket lesbar.
+
+Die vollstaendige Bewertung — Tragweite, Abgrenzung, die Bedingungen fuer eine
+Neubewertung und der geplante Ausweg (Einmalcode beim Einrichten statt eines
+mitgelieferten Passworts) — steht bewusst NICHT hier, sondern im internen
+Repo: badhub/docs/features/liveticker_bts.md, Abschnitt "Bewusst akzeptiert".
+
+Grund fuer die Auslagerung: Dieses Repo ist oeffentlich. Eine akzeptierte
+Schwaeche zu dokumentieren ist richtig; eine Anleitung dazu zu veroeffentlichen
+nicht.
+"""
+# condition = "AND" ist hier tragend, nicht Beiwerk: Ohne sie verknuepft
+# gitleaks `paths` und `regexes` mit ODER — dann genuegt der Pfad, und die
+# GANZE Datei waere freigestellt. Nachgestellt 2026-08-07: Ein AWS-Key in
+# presets.ts wurde ohne diese Zeile nicht mehr gemeldet.
+condition = "AND"
+# regexTarget = "line": gitleaks prueft `regexes` sonst gegen den SECRET-Wert,
+# nicht gegen die Zeile — das Muster `password: "..."` haette dort nie gepasst.
+regexTarget = "line"
+paths = ['''^src/presets\.ts$''']
+regexes = ['''password:\s*"[^"]+"''']
+
+[[allowlists]]
+description = """
+pi/shared-startbrowser.sh — PILOG_TOKEN fuer den Log-Upload der Pi-Monitore.
+
+BEWUSST AKZEPTIERT: Das Token muss auf den Pis lesbar sein, sonst koennen sie
+ihre Logs nicht abliefern. Ein Geheimnis, das auf hunderten Endgeraeten liegt,
+ist keines — der Endpunkt in badhub rechnet ausdruecklich damit und ist
+entsprechend gedeckelt.
+
+Vollstaendige Bewertung im internen Repo (badhub, public/api/pi_log.php und
+docs/features/liveticker_bts.md). Hier bewusst kurz: Dieses Repo ist
+oeffentlich.
+"""
+condition = "AND"
+# regexTarget = "line": gitleaks prueft `regexes` sonst gegen den SECRET-Wert,
+# nicht gegen die Zeile — das Muster `password: "..."` haette dort nie gepasst.
+regexTarget = "line"
+paths = ['''^pi/shared-startbrowser\.sh$''']
+regexes = ['''PILOG_TOKEN\s*=''']
