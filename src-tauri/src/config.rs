@@ -504,11 +504,59 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default = "default_tablet_settings_pin")]
     pub tablet_settings_pin: String,
+    /// Turnierleitungs-Oberfläche im Browser (ADR 0010/0011). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien lesbar; der Default ist **aus**.
+    #[serde(default)]
+    pub tl_web: TlWebConfig,
 }
 
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
 fn default_tablet_settings_pin() -> String {
     "0000".to_string()
+}
+
+/// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011).
+///
+/// Das `token` ist der Zugang — **vom Turnier-PC ausgestellt**, damit die
+/// `install_id` (Relay-Namespace, Log-Kennung, Host-Slot, Azure-Erbe) den
+/// Master nicht verlässt. Es liegt im Klartext in der `config.json`, wie die
+/// bereits dort stehenden Passwörter: Wer Zugriff auf den Turnier-PC hat, hat
+/// ohnehin alles.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlDevice {
+    /// Stabile Kennung des Geräts — taucht im Protokoll auf, damit
+    /// nachvollziehbar bleibt, wer was ausgelöst hat.
+    pub id: String,
+    /// Der Zugang. Wird nie protokolliert und nie exportiert.
+    pub token: String,
+    /// Was die Turnierleitung in der Geräteliste liest („Tablet Meeting
+    /// Point"). Bleibt am Host — der Relay bekommt nur die Tokens.
+    pub label: String,
+    pub created_at_ms: u64,
+    /// Optionale Bindung an eine Halle. Leer = keine Einschränkung; in dieser
+    /// Stufe noch nicht erzwungen, aber vorgesehen, damit ein Helfer der
+    /// zweiten Halle später nicht versehentlich in der ersten vergibt.
+    pub hall: String,
+}
+
+/// Turnierleitungs-Oberfläche im Browser (ADR 0010/0011). Opt-in —
+/// standardmäßig **aus** (`enabled: false`, keine Geräte), damit Turniere
+/// ohne sie unverändert laufen.
+///
+/// Der Schalter ist zugleich die Sicherung des schreibenden Cloud-Pfads: Der
+/// Relay kennt Turnierleitungs-Geräte **ausschließlich** über die vom Host
+/// gepushten Tokens. Bleibt das Feature aus, pusht der Host nichts, die
+/// Token-Zuordnung im Relay bleibt leer, und jede Anfrage endet abgewiesen,
+/// bevor neuer Code Zustand berührt.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlWebConfig {
+    /// Oberfläche freigeschaltet?
+    pub enabled: bool,
+    /// Die gekoppelten Geräte. Entfernen = Zugang entziehen; mehr braucht
+    /// der Widerruf nicht.
+    pub devices: Vec<TlDevice>,
 }
 
 impl AppConfig {
@@ -573,7 +621,25 @@ impl AppConfig {
     /// die Default-Konfiguration zurückgegeben (erster Start).
     pub fn load_from(path: &std::path::Path) -> Result<AppConfig, ConfigError> {
         match std::fs::read_to_string(path) {
-            Ok(json) => Ok(serde_json::from_str(&json)?),
+            Ok(json) => {
+                let mut cfg: AppConfig = serde_json::from_str(&json)?;
+                // Turnierleitungs-Geräte ohne Zugang verwerfen. Ein leeres
+                // Token ist kein Gerät, sondern ein Loch: Die Autorisierung
+                // schlägt eingehende Tokens in dieser Liste nach, und eine
+                // Anfrage OHNE Token träfe sonst auf einen leeren Eintrag —
+                // und käme als vollwertiges Turnierleitungs-Gerät durch.
+                // Solche Einträge entstehen durch handgeschriebene oder halb
+                // geschriebene Dateien, nicht durch die Kopplung.
+                let before = cfg.tl_web.devices.len();
+                cfg.tl_web.devices.retain(|d| !d.token.trim().is_empty());
+                let dropped = before - cfg.tl_web.devices.len();
+                if dropped > 0 {
+                    tracing::warn!(
+                        "{dropped} Turnierleitungs-Gerät(e) ohne Zugang aus der Konfiguration verworfen"
+                    );
+                }
+                Ok(cfg)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AppConfig::default()),
             Err(e) => Err(ConfigError::Read(e)),
         }
@@ -773,6 +839,16 @@ mod tests {
                 mime: "image/png".to_string(),
                 background_color: "#112233".to_string(),
             },
+            tl_web: TlWebConfig {
+                enabled: true,
+                devices: vec![TlDevice {
+                    id: "dev-1".to_string(),
+                    token: "tok-1".to_string(),
+                    label: "Tablet Meeting Point".to_string(),
+                    created_at_ms: 1_700_000_000_000,
+                    hall: "Halle A".to_string(),
+                }],
+            },
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
@@ -843,6 +919,97 @@ mod tests {
         assert!(loaded.checkin.tournament_uuid.is_empty());
         assert_eq!(loaded.checkin.missing_names_max, 8);
         assert!(!loaded.checkin.is_ready());
+    }
+
+    #[test]
+    fn config_without_tl_web_loads_with_the_feature_switched_off() {
+        // Eine Installation, die per Auto-Update auf diese Version kommt,
+        // darf die Turnierleitungs-Oberfläche NICHT stillschweigend
+        // mitbringen: ohne Schalter ist der schreibende Cloud-Pfad
+        // unerreichbar, weil der Relay ohne gepushte Tokens niemanden
+        // hereinlässt (ADR 0010).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(loaded.tl_web, TlWebConfig::default());
+        assert!(!loaded.tl_web.enabled);
+        assert!(loaded.tl_web.devices.is_empty());
+    }
+
+    #[test]
+    fn tl_web_devices_survive_save_and_load() {
+        // Die Gerätetokens liegen am Host und müssen einen App-Neustart
+        // überleben — sonst müsste die Turnierleitung nach jedem Start alle
+        // Geräte neu koppeln (ADR 0011).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices.push(TlDevice {
+            id: "dev-1".to_string(),
+            token: "tok-geheim".to_string(),
+            label: "Tablet Turnierleitung".to_string(),
+            created_at_ms: 1_700_000_000_000,
+            hall: "Halle 2".to_string(),
+        });
+        cfg.save_to(&path).unwrap();
+
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert!(loaded.tl_web.enabled);
+        assert_eq!(loaded.tl_web.devices.len(), 1);
+        assert_eq!(loaded.tl_web.devices[0].token, "tok-geheim");
+        assert_eq!(loaded.tl_web.devices[0].label, "Tablet Turnierleitung");
+        assert_eq!(loaded.tl_web.devices[0].hall, "Halle 2");
+    }
+
+    #[test]
+    fn tl_device_without_a_token_is_dropped_on_load() {
+        // Ein Eintrag ohne Zugang ist kein Gerät, sondern ein Loch: Sobald
+        // die Autorisierung eingehende Tokens in dieser Liste nachschlägt,
+        // passte eine Anfrage *ohne* Token auf einen leeren Eintrag und
+        // käme als vollwertiges Turnierleitungs-Gerät durch — genau der
+        // Zugang, den ADR 0010 absichern soll. Solche Einträge entstehen
+        // durch handgeschriebene oder halb geschriebene Dateien.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"h","port":1,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tl_web":{"enabled":true,"devices":[
+                    {"id":"kaputt","label":"ohne Token","created_at_ms":1},
+                    {"id":"gut","token":"tok","label":"echt","created_at_ms":2}]}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(loaded.tl_web.devices.len(), 1);
+        assert_eq!(loaded.tl_web.devices[0].id, "gut");
+    }
+
+    #[test]
+    fn tl_device_without_hall_loads_unrestricted() {
+        // Die Hallen-Bindung ist optional (Ein-Hallen-Turniere, und der
+        // Scope wird in dieser Stufe noch nicht erzwungen). Ein Eintrag ohne
+        // das Feld muss lesbar bleiben statt das Laden scheitern zu lassen.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"h","port":1,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tl_web":{"enabled":true,"devices":[
+                    {"id":"d","token":"t","label":"L","created_at_ms":1}]}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(loaded.tl_web.devices.len(), 1);
+        assert!(loaded.tl_web.devices[0].hall.is_empty());
     }
 
     #[test]

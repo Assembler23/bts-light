@@ -383,6 +383,32 @@ export interface AppConfig {
   /** Turnierlogo für den badhub-Liveticker (#live-logo). Upload, da BTP keins
    *  liefert. Leere `data` = kein Logo. */
   tournament_logo: LogoConfig;
+  /** Turnierleitungs-Oberfläche im Browser (ADR 0010/0011). Opt-in, Default aus. */
+  tl_web: TlWebConfig;
+}
+
+/** Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011). */
+export interface TlDevice {
+  /** Stabile Kennung – erscheint im Protokoll, damit nachvollziehbar bleibt,
+   *  wer was ausgelöst hat. */
+  id: string;
+  /** Der Zugang. Vom Turnier-PC ausgestellt, damit die `install_id` den
+   *  Master nicht verlässt. Nie protokollieren, nie exportieren. */
+  token: string;
+  /** Anzeigename in der Geräteliste („Tablet Meeting Point"). */
+  label: string;
+  created_at_ms: number;
+  /** Optionale Bindung an eine Halle. Leer = keine Einschränkung. */
+  hall: string;
+}
+
+/** Turnierleitungs-Oberfläche (ADR 0010/0011). Der Schalter ist zugleich die
+ *  Sicherung des schreibenden Cloud-Pfads: ohne ihn pusht der Turnier-PC keine
+ *  Tokens, und der Relay lässt niemanden herein. */
+export interface TlWebConfig {
+  enabled: boolean;
+  /** Gekoppelte Geräte. Eintrag entfernen = Zugang entziehen. */
+  devices: TlDevice[];
 }
 
 /** Turnierlogo (Base64) für badhubs #live-logo. */

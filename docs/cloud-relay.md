@@ -100,10 +100,11 @@ Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 
 ### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
 
-> **Stand:** Die Wire-Typen sind definiert und getestet (Schritt 1 der
-> Umsetzung); **Routen, Token-Prüfung und Weiterleitung im Relay gibt es
-> noch nicht.** Bis dahin ändert sich am Betrieb nichts. Fachliche
-> Grundlage: [features/turnierleitung-web.md](features/turnierleitung-web.md),
+> **Stand:** Die Wire-Typen sind definiert und getestet, und der Turnier-PC
+> kann die Geräte speichern (`tl_web` in der `config.json`, Default **aus**);
+> **Routen, Token-Prüfung und Weiterleitung im Relay gibt es noch nicht.**
+> Bis dahin ändert sich am Betrieb nichts. Fachliche Grundlage:
+> [features/turnierleitung-web.md](features/turnierleitung-web.md),
 > [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und
 > [ADR 0011](adr/0011-tl-web-geraete-identitaet.md).
 
@@ -128,6 +129,14 @@ Die geteilten Typen in `relay-proto`:
 **Die `install_id` verlässt den Master dabei nicht.** Anders als bei
 Tablets und Monitoren ist der Namespace kein Bestandteil der
 TL-Adressen; der Relay schlägt ihn über das Gerätetoken nach (ADR 0011).
+
+Am Turnier-PC stehen die gekoppelten Geräte unter `tl_web` in der
+`config.json` (`enabled` plus je Gerät Kennung, Token, Anzeigename,
+Kopplungszeit und optionale Halle). Sie überleben damit einen App-Neustart.
+Ein **Identitäts-Umzug** (ADR 0006) nimmt sie **nicht** mit: Sonst bliebe
+der alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
+wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am neuen
+PC neu — ein Scan je Gerät. Der Schalter selbst wandert mit.
 
 **Kein `#[serde(default)]` auf den TL-Feldern — anders als bei den
 Tablet-Typen.** Dort schützt der Default ältere Geräte, die im Feld sind.

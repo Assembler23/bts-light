@@ -301,6 +301,36 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 
+## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
+
+Zwei **bestehende** Fehler, aufgefallen beim Review der TL-Web-Umsetzung.
+Beide betreffen den erprobten Stand und sind bewusst **nicht** nebenbei
+mitgeändert worden:
+
+- **Beschädigte `config.json` → Assistent überschreibt sie.** `load_config`
+  liefert bei jedem Parse-Fehler ein `Err`; das Frontend fängt das ab und
+  zeigt den Einrichtungs-Assistenten mit der **Default**-Konfiguration
+  (`App.tsx`, `defaultConfig()`). Der erste „Speichern & Starten"-Klick
+  schreibt diese Defaults über die noch vorhandene, nur unlesbare Datei —
+  inklusive **leerer `install_id`**, womit alle gekoppelten Geräte
+  wegfallen (genau das Chaos aus dem Turniertag-Bericht). Begünstigt wird
+  das durch `save_to`, das die Datei **nicht atomar** schreibt: ein Absturz
+  oder Stromausfall mitten im Speichern hinterlässt eine abgeschnittene
+  Datei. **Vorschlag:** atomar schreiben (temporäre Datei + `rename`),
+  beschädigte Datei beiseitelegen statt überschreiben, und dem Nutzer
+  ehrlich sagen, dass die alte Konfiguration nicht gelesen werden konnte —
+  statt ihm einen harmlos aussehenden Ersteinrichtungs-Assistenten zu
+  zeigen.
+- **`locked_courts` geht beim Speichern von Einstellungen verloren.**
+  `set_court_locked` schreibt die Sperrliste host-seitig in die
+  `config.json`; der Einrichtungs-Assistent schickt beim nächsten Speichern
+  seinen beim Öffnen aufgenommenen Stand zurück (`buildConfig`:
+  `locked_courts: initialConfig.locked_courts ?? []`) und setzt sie damit
+  zurück. Ablauf: Feld in der Übersicht sperren → in den Einstellungen
+  irgendetwas speichern → Sperre weg. Für die TL-Geräteliste ist dieser
+  Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
+  `locked_courts` gehört auf demselben Weg dazu.
+
 ## Feature-Wünsche
 
 Von der Turnierleitung gewünscht, noch nicht eingeplant:

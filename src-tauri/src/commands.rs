@@ -166,6 +166,28 @@ pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConf
     Ok(config)
 }
 
+/// Übernimmt Felder, die der **Host** verwaltet, aus dem aktuellen Stand —
+/// statt sie aus dem Fenster-Stand zu übernehmen.
+///
+/// Die Einstellungsseite schickt beim Speichern die **ganze** Konfiguration
+/// zurück, so wie sie beim Öffnen der Seite aussah. Für Einstellungen, die
+/// dort auch bearbeitet werden, ist das richtig. Die Liste der gekoppelten
+/// Turnierleitungs-Geräte wächst aber am Host (Kopplung) und wäre sonst auf
+/// den Stand von vor dem Öffnen zurückgesetzt — ein gerade gekoppeltes Gerät
+/// verlöre seinen Zugang, sobald jemand irgendeine Einstellung speichert.
+///
+/// Bewusst **nur** die Geräteliste, nicht der Schalter: Wird die Oberfläche
+/// abgeschaltet, sollen die Zugänge auch wirklich verschwinden. Rein &
+/// testbar.
+fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> AppConfig {
+    if incoming.tl_web.enabled {
+        incoming.tl_web.devices = current.tl_web.devices.clone();
+    } else {
+        incoming.tl_web.devices.clear();
+    }
+    incoming
+}
+
 /// Speichert die Konfiguration dauerhaft.
 #[tauri::command]
 pub fn save_config(
@@ -173,6 +195,12 @@ pub fn save_config(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<(), String> {
+    let current = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let config = keep_host_managed_fields(config, &current);
     config
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
@@ -196,6 +224,11 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     cfg.badhub.password = String::new();
     // Azure-Key ist ein echtes Secret (Speech-Ressource) — NIE mitexportieren.
     cfg.azure_tts.key = String::new();
+    // Turnierleitungs-Geräte wandern NICHT mit (ADR 0011): Sonst bliebe der
+    // alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
+    // wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am
+    // neuen PC neu — ein QR-Scan je Gerät. Der Schalter bleibt erhalten.
+    cfg.tl_web.devices.clear();
     cfg
 }
 
@@ -211,6 +244,14 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     }
     if imported.azure_tts.key.is_empty() {
         imported.azure_tts.key = current.azure_tts.key.clone();
+    }
+    // Turnierleitungs-Geräte kommen nie im Bündel (identity_bundle löscht
+    // sie) — die am DIESEM PC gekoppelten müssen deshalb erhalten bleiben.
+    // Der übliche Ablauf ist: neuen PC einrichten, Tablets koppeln, dann die
+    // Identität des alten holen. Ohne das würde genau dieser Schritt die
+    // frisch gekoppelten Geräte wieder aussperren.
+    if imported.tl_web.devices.is_empty() {
+        imported.tl_web.devices = current.tl_web.devices.clone();
     }
     imported
 }
@@ -258,8 +299,12 @@ pub fn import_identity(
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = imported.clone();
+    // Der Hinweis gilt für Tablets, Monitore und ferne Hallen — die hängen
+    // an der install_id. Turnierleitungs-Geräte hängen dagegen an eigenen
+    // Tokens, die das Bündel bewusst nicht enthält (ADR 0011); am neuen PC
+    // gekoppelte bleiben, vom alten PC übernommene gibt es nicht.
     tracing::info!(
-        "Master-Identität importiert (install_id übernommen) — gekoppelte Geräte bleiben verbunden"
+        "Master-Identität importiert (install_id übernommen) — Tablets, Monitore und ferne Hallen bleiben verbunden; Turnierleitungs-Geräte des alten PCs müssen neu gekoppelt werden"
     );
     Ok(imported)
 }
@@ -2467,6 +2512,120 @@ mod tests {
         assert_eq!(bundle.btp.password, None);
         assert!(bundle.badhub.password.is_empty());
         assert!(bundle.azure_tts.key.is_empty(), "Azure-Key darf nie raus");
+    }
+
+    #[test]
+    fn saving_settings_does_not_revert_the_paired_device_list() {
+        // Die Einstellungsseite schickt IHREN Stand der ganzen Config
+        // zurück — aufgenommen, als die Seite geöffnet wurde. Die
+        // Geräteliste wächst aber am Host (Kopplung). Ohne Schutz würde
+        // folgender Ablauf das frisch gekoppelte Gerät wieder aussperren:
+        // Einstellungen öffnen → Tablet koppeln → in den Einstellungen
+        // irgendetwas speichern.
+        let mut current = AppConfig::default();
+        current.tl_web.enabled = true;
+        current.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-frisch".to_string(),
+            token: "tok-frisch".to_string(),
+            label: "gerade gekoppelt".to_string(),
+            created_at_ms: 2,
+            hall: String::new(),
+        });
+
+        // Der Stand aus dem Fenster kennt das Gerät noch nicht.
+        let mut from_ui = AppConfig::default();
+        from_ui.tl_web.enabled = true;
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert_eq!(
+            merged.tl_web.devices.len(),
+            1,
+            "das inzwischen gekoppelte Gerät bleibt"
+        );
+        assert_eq!(merged.tl_web.devices[0].token, "tok-frisch");
+    }
+
+    #[test]
+    fn turning_the_feature_off_still_clears_the_devices() {
+        // Gegenprobe: Der Schutz darf keine Einbahnstraße sein. Schaltet
+        // die Turnierleitung die Oberfläche aus, sollen die Zugänge auch
+        // wirklich verschwinden.
+        let mut current = AppConfig::default();
+        current.tl_web.enabled = true;
+        current.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev".to_string(),
+            token: "tok".to_string(),
+            label: "l".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+
+        let from_ui = AppConfig::default(); // tl_web aus
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert!(!merged.tl_web.enabled);
+        assert!(
+            merged.tl_web.devices.is_empty(),
+            "Ausschalten entzieht die Zugänge"
+        );
+    }
+
+    #[test]
+    fn identity_bundle_strips_tl_device_tokens() {
+        // ADR 0011: Ein Identitäts-Umzug nimmt die Turnierleitungs-Geräte
+        // NICHT mit. Sonst bliebe der alte PC über die exportierten Tokens
+        // schreibberechtigt, und ein weitergegebenes Bündel wäre zugleich
+        // ein Satz gültiger Zugänge. Die Geräte koppeln sich am neuen PC
+        // neu — ein QR-Scan je Gerät.
+        let mut cfg = cfg_id("inst-xyz", None, "", "");
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-1".to_string(),
+            token: "tok-geheim".to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+
+        let bundle = identity_bundle(cfg);
+        assert!(
+            bundle.tl_web.devices.is_empty(),
+            "TL-Gerätetokens dürfen nie exportiert werden"
+        );
+        // Der Schalter selbst darf mitwandern — er ist kein Geheimnis, und
+        // der neue PC soll die Oberfläche nicht erst wieder suchen müssen.
+        assert!(bundle.tl_web.enabled);
+        // Und die Identität bleibt, das ist der Zweck des Umzugs.
+        assert_eq!(bundle.install_id, "inst-xyz");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_locally_paired_tl_devices() {
+        // Das Bündel trägt nie Geräte (identity_bundle löscht sie). Ohne
+        // Rückgabe des lokalen Stands würde ein Import die am NEUEN PC
+        // bereits gekoppelten Geräte löschen — der typische Ablauf ist ja:
+        // neuen PC einrichten, Tablets koppeln, dann die Identität holen.
+        // Dieselbe Regel wie bei den Passwörtern.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.tl_web.enabled = true;
+        current.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-lokal".to_string(),
+            token: "tok-lokal".to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+        let imported = cfg_id("inst-neu", None, "", "");
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu", "Identität wird übernommen");
+        assert_eq!(
+            merged.tl_web.devices.len(),
+            1,
+            "lokal gekoppelte Geräte bleiben"
+        );
+        assert_eq!(merged.tl_web.devices[0].token, "tok-lokal");
     }
 
     #[test]

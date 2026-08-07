@@ -185,6 +185,17 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - [ ] Ein Identitäts-Export enthält **keine** TL-Tokens.
 - [ ] Bei `tl_web.enabled = false` (Default) ist die Seite nicht
       erreichbar, und der Relay kennt kein einziges Token dieses Turniers.
+- [ ] Ist die Oberfläche **eingeschaltet, aber kein Gerät gekoppelt**, sagt
+      die App das ausdrücklich („eingeschaltet, kein Gerät gekoppelt —
+      Gerät hinzufügen"). Dieser Zustand entsteht regulär nach einem
+      Identitäts-Umzug und sähe sonst wie ein funktionierendes Setup aus,
+      während jede Anfrage abgewiesen wird.
+- [ ] Ein Gerät koppeln und danach in den Einstellungen etwas anderes
+      speichern lässt das gekoppelte Gerät **verbunden** (die
+      Einstellungsseite darf ihren beim Öffnen aufgenommenen Stand der
+      Geräteliste nicht zurückschreiben).
+- [ ] Ein Identitäts-Import lässt die am **neuen** PC bereits gekoppelten
+      Geräte unangetastet.
 
 **Ansicht**
 

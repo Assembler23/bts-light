@@ -513,6 +513,12 @@ export function SetupWizard({
         mime: logoMime,
         background_color: logoBg.trim(),
       },
+      // Turnierleitungs-Oberfläche unverändert durchreichen – hier nicht
+      // editiert. WICHTIG: Dieses Objekt wird Feld für Feld gebaut, nicht
+      // aus `initialConfig` gespreizt. Was hier fehlt, fehlt im gesendeten
+      // JSON, und der Rust-Default greift – hier hieße das: alle gekoppelten
+      // Geräte verlieren beim nächsten Speichern ihren Zugang.
+      tl_web: initialConfig.tl_web ?? { enabled: false, devices: [] },
     };
   }
 

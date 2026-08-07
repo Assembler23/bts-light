@@ -110,6 +110,8 @@ function defaultConfig(): AppConfig {
     locked_courts: [],
     tablet_settings_pin: "0000",
     tournament_logo: { data: "", mime: "", background_color: "" },
+    // Turnierleitungs-Oberfläche: aus, ohne gekoppelte Geräte (ADR 0010).
+    tl_web: { enabled: false, devices: [] },
   };
 }
 
