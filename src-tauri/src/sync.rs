@@ -32,24 +32,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Stabiler Schlüssel zur Spieler-Identität für die Verfügbarkeitsprüfung der
-/// Auto-Feldvergabe: bevorzugt die Lizenznummer (`member_id`), sonst der
-/// normalisierte Name. So greift die Prüfung auch über Disziplinen hinweg
-/// (dieselbe Person hat je Disziplin eine andere EntryID, aber dieselbe Lizenz).
-/// Achtung: Ohne `member_id` (Turniere ohne Lizenzen) können zwei verschiedene
-/// Spieler mit identischem Namen verschmelzen – in lizenzierten Turnieren ist
-/// die `member_id` praktisch immer gesetzt, daher hier akzeptiert.
-fn player_key(p: &crate::btp::model::BtpPlayer) -> String {
-    match p
-        .member_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        Some(id) => id.to_ascii_lowercase(),
-        None => p.name.trim().to_ascii_lowercase(),
-    }
-}
+// Die Spieler-Identität für die Verfügbarkeitsprüfung liegt in
+// `tablet::assign` — geteilt mit der Turnierleitungs-Anzeige, damit beide
+// dieselbe Person meinen.
+use crate::tablet::assign::player_key;
 
 /// Ergebnis eines Sync-Zyklus.
 #[derive(Debug)]
@@ -640,7 +626,10 @@ impl SyncEngine {
         let now = now_ms();
         // Belegt = irgendein Match referenziert das Feld (OnCourt ODER noch
         // nicht abgeräumtes beendetes Spiel) → solche Felder sind nicht frei.
-        let busy: HashSet<i64> = snapshot.matches.iter().filter_map(|m| m.court_id).collect();
+        // Die Definition liegt in `tablet::assign` und wird mit der manuellen
+        // Vergabe geteilt — sonst hielte der eine Pfad ein Feld für frei, das
+        // der andere als belegt sieht.
+        let busy: HashSet<i64> = crate::tablet::assign::occupied_courts(snapshot);
         // Frei-seit pflegen: belegte vergessen, freie stempeln, unbekannte raus.
         let known: HashSet<i64> = snapshot.court_infos.iter().map(|c| c.id).collect();
         self.court_free_since.retain(|id, _| known.contains(id));
@@ -726,59 +715,18 @@ impl SyncEngine {
         // sonst den BTP-Zeitplan von oben nach unten (PlannedTime), dann
         // Spielnummer/ID als Tiebreaker. Ohne Ansetzung → ans Ende der Zeit-
         // gruppe, danach greift die Spielnummer (Verhalten wie bisher).
-        ready.sort_by_key(|m| {
-            (
-                call_for(m.id).is_none(),
-                m.planned_time.unwrap_or(i64::MAX),
-                m.match_num.unwrap_or(i64::MAX),
-                m.id,
-            )
-        });
+        // Die Reihenfolge liegt in `tablet::assign` und wird mit der Anzeige
+        // geteilt — zeigte die Liste eine andere als die Automatik benutzt,
+        // verlöre die Turnierleitung das Vertrauen in beide.
+        ready.sort_by_key(|m| crate::tablet::assign::sort_key(m, call_for(m.id).is_some()));
 
         // ── Spieler-Verfügbarkeit ────────────────────────────────────────
-        // Spieler, die GERADE spielen (nur OnCourt). Bewusst NICHT „jedes Match
-        // mit court_id": ein beendetes Spiel kann seine Feld-Zuweisung in BTP
-        // noch tragen, hat den Spieler aber freigegeben – der unterliegt dann
-        // der Pausen-Logik, nicht dem harten Belegt-Block.
-        let busy_players: HashSet<String> = snapshot
-            .matches
-            .iter()
-            .filter(|m| m.court_id.is_some() && m.status == MatchStatus::OnCourt)
-            .flat_map(|m| m.team1.iter().chain(m.team2.iter()))
-            .map(player_key)
-            .collect();
-        // Pausen-Fenster: Override aus der Config (>0) sonst BTP-Setting 1303.
-        let pause_ms: u64 = {
-            let mins = if config.auto_assign.pause_minutes > 0.0 {
-                config.auto_assign.pause_minutes
-            } else {
-                snapshot.rest_minutes.unwrap_or(0) as f64
-            };
-            if mins.is_finite() && mins > 0.0 {
-                (mins * 60_000.0) as u64
-            } else {
-                0
-            }
-        };
-        // Letztes Spielende je Spieler (max finished_at) – nur nötig bei Pause.
-        let last_finish: HashMap<String, u64> = if pause_ms == 0 {
-            HashMap::new()
-        } else {
-            let mut lf: HashMap<String, u64> = HashMap::new();
-            for m in snapshot
-                .matches
-                .iter()
-                .filter(|m| m.status == MatchStatus::Finished)
-            {
-                if let Some(end) = m.finished_at {
-                    for p in m.team1.iter().chain(m.team2.iter()) {
-                        let e = lf.entry(player_key(p)).or_insert(0);
-                        *e = (*e).max(end);
-                    }
-                }
-            }
-            lf
-        };
+        // Wer gerade spielt und wer noch pausiert, liegt in `tablet::assign`
+        // — dieselbe Auskunft, die die Turnierleitungs-Anzeige gibt. Die
+        // zyklusinterne Regel „kein Spieler auf zwei gleichzeitig frei
+        // werdende Felder" bleibt hier, sie gilt nur innerhalb eines Laufs.
+        let availability =
+            crate::tablet::assign::PlayerAvailability::from_snapshot(snapshot, config);
 
         let mut courts = Vec::new();
         let mut match_courts = Vec::new();
@@ -810,23 +758,18 @@ impl SyncEngine {
                 if used.contains(&m.id) || pending_matches.contains(&m.id) {
                     return false;
                 }
-                // Verfügbarkeit: kein Spieler darf gerade spielen, in diesem
-                // Zyklus schon vergeben sein oder noch in seiner Pause stecken.
-                let player_free = m.team1.iter().chain(m.team2.iter()).all(|p| {
-                    let k = player_key(p);
-                    if busy_players.contains(&k) || used_players.contains(&k) {
-                        return false;
-                    }
-                    if pause_ms > 0 {
-                        if let Some(&end) = last_finish.get(&k) {
-                            if now.saturating_sub(end) < pause_ms {
-                                return false;
-                            }
-                        }
-                    }
-                    true
-                });
-                if !player_free {
+                // Verfügbarkeit: kein Spieler darf gerade spielen oder noch in
+                // seiner Pause stecken (geteilte Regel) …
+                if availability.blocked(m, now).is_some() {
+                    return false;
+                }
+                // … und keiner darf in DIESEM Zyklus schon ein Feld bekommen
+                // haben (rein zykluslokal, deshalb hier).
+                if m.team1
+                    .iter()
+                    .chain(m.team2.iter())
+                    .any(|p| used_players.contains(&player_key(p)))
+                {
                     return false;
                 }
                 // Disziplin/Klasse→Halle-Regel: Match darf nur in seine erlaubte
@@ -1454,6 +1397,10 @@ mod tests {
 
     #[test]
     fn player_key_prefers_member_id_then_name() {
+        // Die Funktion ist mit der Turnierleitungs-Anzeige geteilt und wird
+        // in `tablet::assign` wortgleich geprüft. Hier bleibt sie stehen,
+        // weil die Auto-Vergabe auf ihr aufbaut: Ginge die Spieler-Identität
+        // kaputt, käme derselbe Spieler auf zwei Felder gleichzeitig.
         let mut p = player("Müller");
         assert_eq!(player_key(&p), "müller");
         p.member_id = Some("  08-001234 ".to_string());

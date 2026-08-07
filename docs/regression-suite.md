@@ -30,6 +30,7 @@ anpassen:
 | **Tablet-Reconnect** (0.9.147): dasselbe Gerät übernimmt seine Session nahtlos, fremde Geräte sehen „belegt", Frames abgelöster Sessions werden verworfen, leere `deviceId` matcht nie | `relay/main.rs` — `same_device_reconnect_*`, `foreign_device_*`, `superseded_session_*`, `empty_device_id_*` + Host-/Tablet-Routing (13) · `tablet/state.rs` — `claim_court_tracks_holder_device`, `reclaim_supersedes_old_token` |
 | **Feld-/Anzeige-Logik am Host**: Court→Match-Auflösung, Live-Score-Vertrauen (auch getrennt), Overview/Monitor, Walkover-Kandidaten, Vorbereitungs-Aufrufe | `tablet/state.rs` (21) |
 | **Auto-Feldvergabe**: nur freie/entsperrte Felder, Wartezeit, Spieler-Pause, keine Doppelvergabe, Mehr-Hallen nur mit Aufruf bzw. aktiver Halle | `sync.rs` — `auto_assign_*` (16) |
+| **Vergabe-Regeln** (geteilt mit der Turnierleitungs-Oberfläche): Belegt-Begriff, Feld-Erwartung, Sperre, Doppelvergabe, Hallenregel, Spieler-Verfügbarkeit, Reihenfolge | `tablet/assign.rs` — `court_occupied_by`, `check_assign`, `check_free`, `PlayerAvailability`, `sort_key` |
 | **Zähltafelbediener-Übergang + Endezeit-Stempel** | `sync.rs` — `track_scorekeepers_*`, `stamp_finished_*` |
 | **Liveticker-Diff/Heartbeat**: erster Push voll, unverändert = nichts, nach Fehler wieder voll | `sync.rs` — `*_plan_*`, `heartbeat_*` · `badhub/diff.rs`, `badhub/payload.rs` (17) |
 | **Wire-Kompatibilität App↔Relay**: Serde-Roundtrips aller Frames, `#[serde(default)]`-Abwärtskompatibilität, `merge_device_lists` | `relay-proto/lib.rs` (25) |
