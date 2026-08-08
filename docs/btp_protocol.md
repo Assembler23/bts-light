@@ -166,6 +166,35 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
+### Wo gespielt wird, steht in keinem der vorliegenden Mitschnitte
+
+**Ein noch nicht aufgerufenes Spiel trägt keine Halle** — jedenfalls in
+allem, was hier an echten Daten vorliegt. Geprüft an zwei Mitschnitten
+(Ein- und Zwei-Hallen-Turnier, zusammen 914 echte Paarungen):
+
+- `Match` trägt **keine** `LocationID`. `CourtID` erscheint erst, wenn das
+  Spiel auf dem Feld steht (im Zwei-Hallen-Mitschnitt bei 5 von 36
+  Paarungen, je zusammen mit `StartTime`).
+- `Draw`, `Event` und `Stage` tragen ebenfalls keinen Ortsbezug — ihre
+  Felder sind Größe, Typ, Reihenfolge und Namen, sonst nichts.
+- Die einzige Ortsangabe im ganzen Protokoll ist **`Court.LocationID`**: Ein
+  *Feld* gehört zu einer Halle.
+
+**Aber: Das Konzept existiert in BTP.** Der Spielplan-Export („Spiele
+von …") hat die Spalten **Feld** und **Spielort**. In einem geprüften
+Turnier (540 angesetzte Spiele) sind sie in **jeder** Zeile leer — dieses
+Turnier pflegt sie schlicht nicht.
+
+Damit ist offen, was ein Turnier liefert, das sie **pflegt**: ob die Angabe
+dann auch über `SENDTOURNAMENTINFO` kommt und in welchem Feld. Das lässt
+sich nur mit einem Mitschnitt eines solchen Turniers beantworten.
+
+Bis dahin muss die Halle eines wartenden Spiels aus etwas anderem
+abgeleitet werden — in bts-light aus der Disziplin/Klasse→Halle-Regel und
+dem Vorbereitungs-Aufruf (`assign::hall_for_match`). Ein Test in
+`btp_capture.rs` hält den Befund fest und schlägt an, falls ein künftiger
+Mitschnitt doch eine Ansetzungs-Halle enthält.
+
 ### Die Reihenfolge der angesetzten Spiele
 
 **`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**

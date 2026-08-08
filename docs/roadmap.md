@@ -57,14 +57,24 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   (Ansage z. B. „Zweiter Aufruf für …"). Gewünscht auf dem **Master und
   vom Slave aus** — hängt am selben Relay-Rückkanal wie der
   Vorbereitungs-Aufruf vom Slave (siehe oben, R4/R5 beachten).
-- **„Nächste Spiele pro Halle"** (Idee von Nik, Turnierleitung): BTP führt
-  den **Spielort bereits an der Ansetzung** (Spalte „Spielort"/Feld, z. B.
-  `WR-6`, `HM-05`) — diese Info kommt schon per `SENDTOURNAMENTINFO`.
-  Daraus eine Aufruf-/Nächste-Spiele-Liste **je Halle** bauen.
-  *Recherche 19.07.:* Der Hallen-Filter `&halle=…` existiert auf
-  `badhub.de/live?display=next` **bereits** — es fehlt nur die
-  senderseitige Hallen-Info an den angesetzten Spielen (bts-light,
-  `planned_court_id` parsen). Details: [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **„Nächste Spiele pro Halle"** (Idee von Nik, Turnierleitung): Eine
+  Aufruf-/Nächste-Spiele-Liste **je Halle**. Der Hallen-Filter `&halle=…`
+  existiert auf `badhub.de/live?display=next` bereits — es fehlt die
+  senderseitige Hallen-Info an den **angesetzten** Spielen.
+  ⚠️ *Nachgemessen 08.08.:* Die ursprüngliche Annahme („BTP führt den
+  Spielort bereits an der Ansetzung, das kommt per `SENDTOURNAMENTINFO`")
+  **trägt nicht**. In zwei echten Mitschnitten (914 Paarungen) hat ein noch
+  nicht aufgerufenes `Match` **keine** `LocationID`; `CourtID` erscheint
+  erst beim Aufruf, und `Draw`/`Event`/`Stage` tragen gar keinen Ortsbezug.
+  Die Spalten „Feld"/„Spielort" **gibt es** im BTP-Spielplan-Export, im
+  geprüften Turnier sind sie aber in allen 540 Zeilen leer. **Offen bleibt
+  daher nur:** ob ein Turnier, das diese Spalten *pflegt*, sie auch über
+  die Schnittstelle liefert — das lässt sich erst mit einem Mitschnitt
+  eines solchen Turniers beantworten. Bis dahin ist die Halle abzuleiten
+  (Disziplin/Klasse→Halle-Regel + Vorbereitungs-Aufruf, siehe
+  `assign::hall_for_match`). Befund: [btp_protocol.md](btp_protocol.md),
+  Regressionstest in `btp_capture.rs`. Details:
+  [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 - **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
   schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei
@@ -92,8 +102,9 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   beim Turnier liefen die Aufrufe aber über BTP/mündlich → Hallen-Feld
   überall leer → der (funktionierende) badhub-Filter fand nichts, und
   die leere Liste ohne Fallback ist dort gewollt. **Dreiteiliger Fix:**
-  (a) Plan 2 — `planned_court_id` aus BTP parsen → Halle für ALLE
-  angesetzten Spiele; (b) P1 erweitern — BTP-`Highlight` nicht nur
+  (a) ~~Plan 2 — `planned_court_id` aus BTP parsen~~ → **nicht möglich**,
+  BTP liefert an ungespielten Matches keinen Ort (siehe Punkt „Nächste
+  Spiele pro Halle" oben); die Halle muss abgeleitet werden; (b) P1 erweitern — BTP-`Highlight` nicht nur
   schreiben, sondern auch **lesen**, damit in BTP gemachte Aufrufe bei
   uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
   Original-BTS seine „upcoming"-Ticker-Anzeige speist

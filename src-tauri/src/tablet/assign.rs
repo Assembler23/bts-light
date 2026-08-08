@@ -111,10 +111,17 @@ pub enum HallSource {
 /// bindet (`hall_allows_match`); ein widersprechender Aufruf könnte gar nicht
 /// ausgeführt werden.
 ///
-/// **Noch nicht enthalten:** der von BTP an der Ansetzung geführte Spielort.
-/// Er wäre die beste Quelle, weil er für *alle* angesetzten Spiele existiert —
-/// ob die Turniere ihn tatsächlich pflegen, ist aber noch nicht belegt
-/// (Spec, offener Punkt 2).
+/// **Eine bessere Quelle ist nicht in Sicht.** Die Spec hoffte auf einen von
+/// BTP an der Ansetzung geführten Spielort — in echten Daten kommt er nicht
+/// an: Weder `Match` noch `Draw`, `Event` oder `Stage` tragen eine
+/// `LocationID`. Die einzige Ortsangabe ist `Court.LocationID`, und ein Feld
+/// bekommt ein Spiel erst beim Aufruf. Nachgewiesen an zwei echten
+/// Mitschnitten (Ein- und Zwei-Hallen-Turnier, 914 Paarungen); ein Test in
+/// `btp_capture.rs` schlägt an, falls sich das je ändert.
+///
+/// Einschränkung: Der BTP-Spielplan-Export kennt Spalten „Feld"/„Spielort" —
+/// im geprüften Turnier durchgehend leer. Ob ein Turnier, das sie pflegt, den
+/// Ort auch über die Schnittstelle sendet, ist unbelegt.
 pub fn hall_for_match(
     config: &AppConfig,
     snap: &BtpSnapshot,

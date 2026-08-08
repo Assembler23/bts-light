@@ -482,11 +482,26 @@ Aktivierung unerreichbar ist, ist „aus" jederzeit ein gültiger Zustand.
    Baum bei einem Überschreiben neu rechnet. **Vorgehen:** Experiment an
    einem Test-BTP in Schritt 12, Ergebnis als Fixture einfrieren, danach
    eigenes ADR. **Bis dahin blockiert dieser Fall.**
-2. **Halle am noch nicht gerufenen Spiel.** Die Kaskade startet mit der
-   Disziplin/Klasse-Regel und dem Aufruf; die beste Quelle wäre der von BTP
-   an der Ansetzung geführte Spielort (Roadmap-Plan 2). Ob die vorhandenen
-   Mitschnitte ihn enthalten, ist **nicht** verifiziert — deshalb
-   nachgelagert (Schritt 15), analog zum Vorgehen bei den Schiedsrichtern.
+2. ~~**Halle am noch nicht gerufenen Spiel.**~~ **Beantwortet (Schritt 15,
+   09.08.2026): In echten Daten kommt kein solcher Spielort an.** Geprüft an
+   zwei Mitschnitten (Ein- und Zwei-Hallen-Turnier, zusammen 914 echte
+   Paarungen): Weder `Match` noch `Draw`, `Event` oder `Stage` tragen eine
+   `LocationID`. Die einzige Ortsangabe ist `Court.LocationID` — ein **Feld**
+   gehört zu einer Halle —, und `Match.CourtID` erscheint erst, wenn das
+   Spiel dort steht (im Zwei-Hallen-Mitschnitt bei 5 von 36 Paarungen, je
+   zusammen mit `StartTime`).
+
+   **Einschränkung, damit der Befund nicht überdehnt wird:** Das Konzept
+   existiert in BTP — der Spielplan-Export hat die Spalten „Feld" und
+   „Spielort". Im geprüften Turnier (540 angesetzte Spiele) sind sie in
+   *jeder* Zeile leer. Was ein Turnier liefert, das sie pflegt, ist damit
+   **nicht** beantwortet; dafür braucht es einen Mitschnitt eines solchen
+   Turniers.
+
+   **Folge für dieses Feature:** Die Kaskade bleibt, wie sie ist —
+   Disziplin/Klasse-Regel → Vorbereitungs-Aufruf → unbekannt. Ein Test in
+   `btp_capture.rs` hält den Befund fest und schlägt an, falls ein künftiger
+   Mitschnitt doch eine Ansetzungs-Halle enthält.
 3. **Annahme:** Ein Gerät je Halle mit eingeschalteter Ansage genügt als
    „Ansage-Gerät". Das entspricht dem heutigen Betriebsmodell (ein Master,
    ein Slave je Halle). Wird in einer Halle künftig mehr als ein

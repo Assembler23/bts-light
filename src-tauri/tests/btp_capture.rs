@@ -312,3 +312,46 @@ fn real_capture_carries_the_bracket_edges() {
          Nachfolger-Suche hier gegen echte Daten geprüft."
     );
 }
+
+/// **Ein noch nicht aufgerufenes Spiel bringt keine Halle mit.**
+///
+/// Die Spec hoffte auf einen „von BTP an der Ansetzung geführten Spielort"
+/// als beste Quelle für die Hallen-Zuordnung (offener Punkt 2). In echten
+/// Daten kommt er nicht an: Weder `Match` noch `Draw`, `Event` oder `Stage`
+/// tragen eine `LocationID`. Die einzige Ortsangabe ist `Court.LocationID` —
+/// das Feld gehört zu einer Halle —, und `Match.CourtID` erscheint erst,
+/// wenn das Spiel dort steht. Also bleibt die Kaskade aus Disziplin-Regel
+/// und Vorbereitungs-Aufruf.
+///
+/// Der Test prüft, was wir *senden* bekommen — nicht, was BTP intern kann:
+/// Der Spielplan-Export kennt Spalten „Feld"/„Spielort", im geprüften
+/// Turnier durchgehend leer. Schlägt der Test eines Tages an, hat ein
+/// Turnier sie gepflegt und die Kaskade lohnt eine Neubewertung.
+#[test]
+fn btp_gives_no_hall_to_a_match_before_it_is_called() {
+    for (name, raw) in [
+        ("Ein-Hallen-Mitschnitt", TOURNAMENT),
+        ("Zwei-Hallen-Mitschnitt", TOURNAMENT_2HALLS),
+    ] {
+        let nodes = proto::decode_response(raw).expect("dekodierbar");
+        let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+        // Ein Spiel ohne Feld hat auch keine Halle — es gibt schlicht kein
+        // Feld, über das sie sich ableiten ließe.
+        let ohne_feld = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.court_id.is_none())
+            .count();
+        assert!(
+            ohne_feld > 0,
+            "{name}: kein einziges Spiel ohne Feld — Fixture prüfen"
+        );
+        // Und die Felder tragen ihre Halle, nicht die Spiele.
+        if !snapshot.locations.is_empty() {
+            assert!(
+                snapshot.court_infos.iter().any(|c| c.location_id.is_some()),
+                "{name}: Hallen vorhanden, aber kein Feld hat eine"
+            );
+        }
+    }
+}
