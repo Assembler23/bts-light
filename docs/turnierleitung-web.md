@@ -42,8 +42,13 @@ dieses eine Mal zu sehen. Die Seite warnt in diesem Fall.
 - **Aufrufen:** Der Knopf am Feld löst den zweiten bzw. dritten Aufruf aus.
   Die Stufe zählt der Turnier-PC — alle Geräte, auch die Desktop-App, zeigen
   dieselbe Zahl.
-- **In Vorbereitung rufen** und **Nachruf** (beide Parteien oder nur eine)
-  aus der Warteliste.
+- **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
+  Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
+  den Aufruf zurück. Daneben der **Nachruf** (beide Parteien oder nur eine).
+- **Was steht wo:** Jedes Spiel nennt seine **Disziplin** (HE, DE, HD, DD,
+  GD) vor Auslosung und Runde — Turniere benennen ihre Gruppen frei, und
+  „Gruppe 6" allein verrät nicht, ob ein Einzel oder ein Doppel aufs Feld
+  soll.
 - **Ergebnis eintragen** für ein Spiel auf dem Feld.
 - **Automatik** an- und abschalten — der Schalter oben rechts.
 

@@ -173,13 +173,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row.blocked { background: #f8fafc; }
 .row .why { font-size: .82rem; color: var(--warn); flex-basis: 100%; }
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
+/* Der Vorbereitungs-Aufruf als Umschalter mit Sinnbild: quadratisch, so
+   groß wie ein Finger, ohne Text. Gedrückt = ist gerufen. */
 .row .prep {
-  font: inherit; font-size: .8rem; font-weight: 650;
-  padding: 6px 10px; min-height: 40px;
+  display: grid; place-items: center;
+  width: 40px; height: 40px; padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
 .row .prep:hover { border-color: var(--accent); color: var(--accent); }
+.row .prep[aria-pressed="true"] {
+  border-color: var(--accent); background: #eff6ff; color: var(--accent);
+}
 .row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 
 /* Nachruf: drei kleine Knöpfe an einer Beschriftung. Kleiner als der
@@ -298,6 +303,21 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
    Liste auf dem Tablet nicht mehr bewegen. */
 .row.pick { touch-action: pan-y; }
 
+/* Was man zieht oder antippt, markiert man nicht: Ohne das hinterlässt jeder
+   Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
+   Tablet springt zusätzlich die Lupe auf. Während eines laufenden Zugs gilt
+   es für die ganze Seite — der Zeiger wandert ja über alles. */
+.row.pick, .card, .action-bar, .halls, h2, .callbtn, .prep, .recall {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+
+/* Ohne Verbindung: Alles, was schreiben würde, sichtbar zurücknehmen. */
+body.offline .prep,
+body.offline .recall button,
+body.offline .callbtn,
+body.offline .wo .actions button { opacity: .45; }
+
 /* Rückmeldung zur letzten Aktion. Bleibt stehen, bis sie weggetippt wird
    oder die nächste Aktion beginnt. */
 .toast {
@@ -387,12 +407,6 @@ const token = readToken();
 const API = location.pathname.replace(/\/+$/, "") + "/api";
 
 const $ = (id) => document.getElementById(id);
-if (!token) {
-  $("gate").hidden = false;
-} else {
-  $("app").hidden = false;
-  start();
-}
 
 // ── Zeit ──────────────────────────────────────────────────────────────
 // Alle Zeitstempel kommen vom Turnier-PC. Die Geräte rechnen den Versatz
@@ -439,6 +453,31 @@ function callStage(court, timer) {
   if (min >= timer.second_call_minutes) return 2;
   return 1;
 }
+
+// ── Disziplin ─────────────────────────────────────────────────────────
+// Die Kurzform, wie sie auf jedem Aushang und in jedem Papierplan steht.
+// Turniere benennen ihre Auslosungen frei („Gruppe 6"); ohne dieses Kürzel
+// ist am Bildschirm nicht zu sehen, ob ein Einzel oder ein Doppel aufs Feld
+// soll.
+const DISZIPLIN = {
+  mens_singles: "HE",
+  womens_singles: "DE",
+  mens_doubles: "HD",
+  womens_doubles: "DD",
+  mixed: "GD",
+};
+const disziplin = (key) => DISZIPLIN[key] || "";
+
+// Sinnbild für den Vorbereitungs-Aufruf: ein Megafon. Als Inline-SVG, damit
+// es die Schriftfarbe erbt und auf jedem Gerät gleich aussieht — ein Emoji
+// wäre je nach System ein anderes Bild.
+const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="1.8"
+  stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 10v4a1 1 0 0 0 1 1h2l4 3.5V5.5L6 9H4a1 1 0 0 0-1 1Z"/>
+  <path d="M14.5 8.5a5 5 0 0 1 0 7"/>
+  <path d="M17.5 6a9 9 0 0 1 0 12"/>
+</svg>`;
 
 // ── Bedienzustand ─────────────────────────────────────────────────────
 // Drei Lagen, mehr braucht es nicht: nichts gewählt · ein Spiel gewählt ·
@@ -506,13 +545,13 @@ function renderActionBar() {
   if (!picked || dragging) { bar.classList.remove("show"); return; }
   const m = picked.match;
   const wer = [(m.team1 || []).join(" / "), (m.team2 || []).join(" / ")]
-    .filter(Boolean).join(" gegen ");
+    .filter(Boolean).join(" vs. ");
   const woher = picked.fromCourtId
     ? (state.courts.find((c) => c.court_id === picked.fromCourtId)?.court || "")
     : "";
   $("action-what").textContent = woher
     ? `${woher}: ${wer}`
-    : `${[m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
+    : `${[disziplin(m.discipline), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
   // Beim Umhängen ist „vom Feld nehmen" die zweite sinnvolle Handlung —
   // sie steht deshalb direkt neben dem Abbrechen, statt in einem Menü.
   $("action-free").hidden = !picked.fromCourtId;
@@ -648,7 +687,7 @@ function hallIdFor(hall) {
  * dieselbe wie am Zähltablett.
  */
 async function enterResult(court) {
-  const wer = `${(court.team1 || []).join(" / ")} gegen ${(court.team2 || []).join(" / ")}`;
+  const wer = `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`;
   const eingabe = prompt(
     `Endstand für ${court.court} — ${wer}\n\n`
     + `Sätze mit Komma trennen, zum Beispiel:  21:15, 19:21, 21:17`,
@@ -675,7 +714,7 @@ async function enterResult(court) {
 /** Ein Feld räumen — das Spiel geht zurück in die Warteliste. */
 async function freeCourt(court) {
   const running = court.match_id
-    ? `${(court.team1 || []).join(" / ")} gegen ${(court.team2 || []).join(" / ")}`
+    ? `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`
     : "";
   // Ein laufender Spielstand geht dabei verloren — dafür lohnt die Rückfrage.
   const hasScore = (court.sets || []).some(([a, b]) => a > 0 || b > 0);
@@ -705,7 +744,7 @@ async function assignTo(court) {
   if (problem) { toast(problem, true); return; }
 
   const { match, fromCourtId } = picked;
-  const wer = `${(match.team1 || []).join(" / ")} gegen ${(match.team2 || []).join(" / ")}`;
+  const wer = `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
   pending = { matchId: match.match_id, courtId: court.court_id };
   picked = null;
   hideToast();
@@ -782,6 +821,13 @@ async function poll() {
     const res = await fetch(API + "/state", { headers: kopf, cache: "no-store" });
     if (res.status === 304) {
       // Unverändert: Die Verbindung ist gesund, es gibt nur nichts Neues.
+      // Die Uhr trotzdem nachziehen: In einer ruhigen Phase ist **jede**
+      // Antwort ein 304, und ein Gerät, dessen Uhr inzwischen gestellt
+      // wurde (Zeitumstellung, Funkzeit nach dem Aufwachen), zeigte sonst
+      // bis zur nächsten Änderung überall die falsche Dauer — ausgerechnet
+      // in der Phase, in der man auf „seit wann aufgerufen" schaut.
+      const serverzeit = headerNow(res);
+      if (serverzeit) syncClock(serverzeit);
       failures = 0;
       lastOkMs = Date.now();
       renderConnection();
@@ -880,6 +926,12 @@ function renderConnection() {
     : level === "delayed" ? `Daten sind ${age} s alt`
     : "keine Verbindung";
 
+  // Ohne Verbindung sendet `send()` ohnehin nichts. Das muss man aber auch
+  // sehen können, bevor man tippt: Die Schreibknöpfe werden gedämpft, der
+  // Griff bleibt trotzdem anklickbar — wer doch tippt, bekommt die
+  // Begründung statt eines toten Knopfes.
+  document.body.classList.toggle("offline", level === "offline");
+
   const banner = $("banner");
   if (level === "offline") {
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
@@ -899,7 +951,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const pairOf = (t1, t2) =>
-  `${esc((t1 || []).join(" / ") || "?")} <span class="vs">gegen</span> ${esc((t2 || []).join(" / ") || "?")}`;
+  `${esc((t1 || []).join(" / ") || "?")} <span class="vs">vs.</span> ${esc((t2 || []).join(" / ") || "?")}`;
 
 /**
  * Kurzform einer Partei für die Nachruf-Knöpfe.
@@ -951,7 +1003,7 @@ function courtCard(c) {
   } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
     body = `<div class="pair">${pairOf(c.team1, c.team2)}</div>
-            <div class="meta">${esc([c.class_label, c.round_name].filter(Boolean).join(" · "))}</div>`;
+            <div class="meta">${esc([disziplin(c.discipline), c.class_label, c.round_name].filter(Boolean).join(" · "))}</div>`;
     const clockLabel =
       stage >= 3 ? "Letzter Aufruf" :
       stage >= 2 ? "2. Aufruf fällig" :
@@ -1053,6 +1105,7 @@ function wireCourts(box) {
       team2: court.team2,
       draw_name: "",
       round_name: court.round_name,
+      discipline: court.discipline,
       // Ein laufendes Spiel bleibt in seiner Halle — das Zielfeld wird
       // danach beurteilt.
       hall: court.location,
@@ -1097,7 +1150,7 @@ function queueRow(m) {
   const parts = [
     `<span class="no num">${m.match_num ?? "–"}</span>`,
     `<span class="who">${pairOf(m.team1, m.team2)}</span>`,
-    `<span class="draw">${esc([m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
+    `<span class="draw">${esc([disziplin(m.discipline), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
   ];
   if (m.prep_call) {
     parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
@@ -1112,8 +1165,15 @@ function queueRow(m) {
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
   // frei ist. Deshalb ein eigener Knopf statt einer Geste.
-  parts.push(`<button type="button" class="prep" data-prep="${m.match_id}">${
-    m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen"}</button>`);
+  //
+  // Als Sinnbild statt als Satz: In einer Liste mit 120 Zeilen frisst der
+  // ausgeschriebene Knopf die halbe Zeile. Ein Umschalter mit zwei Zuständen
+  // reicht — gedrückt heißt „ist gerufen". Beschriftung bleibt für
+  // Vorlesehilfen und als Tooltip erhalten, damit niemand raten muss.
+  const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
+  parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
+    aria-pressed="${m.prep_call ? "true" : "false"}"
+    title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
   // Nachruf, wenn jemand nicht erscheint. Getrennt nach Partei, weil in der
   // Regel nur eine fehlt — und wer schon da ist, muss sich nicht noch einmal
   // angesprochen fühlen.
@@ -1216,13 +1276,18 @@ function enableDrag(el, match, fromCourtId) {
         // kann). Ein Zeigegesten-Fang ist nicht nötig — die Ereignisse
         // hängen ohnehin am Fenster.
         dragging = true;
+        // Während des Zugs nirgends Text markieren: Der Zeiger wandert über
+        // Überschriften und Namen, und der Browser markiert alles auf dem
+        // Weg — die halbe Seite steht dann blau hinterlegt da.
+        document.body.classList.add("dragging");
+        document.getSelection()?.removeAllRanges();
         picked = { match, fromCourtId: fromCourtId ?? null };
         renderActionBar();
         renderCourts();
         ghost = document.createElement("div");
         ghost.className = "drag-ghost";
         ghost.textContent =
-          `${(match.team1 || []).join(" / ")} gegen ${(match.team2 || []).join(" / ")}`;
+          `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
         document.body.appendChild(ghost);
       }
       ghost.style.left = ev.clientX + 14 + "px";
@@ -1244,6 +1309,8 @@ function enableDrag(el, match, fromCourtId) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", cancel);
+      document.body.classList.remove("dragging");
+      document.getSelection()?.removeAllRanges();
       hovered?.classList.remove("hover-target");
       ghost?.remove();
       if (!ghost) { dragging = false; return; }  // war ein Tipp, der Klick greift
@@ -1485,6 +1552,16 @@ function start() {
     // veralteten Stand zu zeigen.
     if (!document.hidden) poll();
   });
+}
+
+// Erst hier loslegen — **nach** allen Deklarationen. Weiter oben griff der
+// erste Abruf auf noch nicht angelegte Variablen zu und starb; sichtbar
+// wurde nur eine Verzögerung, bis der Takt zwei Sekunden später nachlegte.
+if (!token) {
+  $("gate").hidden = false;
+} else {
+  $("app").hidden = false;
+  start();
 }
 </script>
 </body>

@@ -234,30 +234,44 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - [x] Ein nicht vergebbares Spiel bleibt sichtbar und nennt den Grund im
       Klartext samt Namen der blockierenden Spieler und der Uhrzeit, ab der
       es frei ist.
-- [~] „Seit wann aufgerufen", „Feld frei seit", Pausen- und
+- [x] „Seit wann aufgerufen", „Feld frei seit", Pausen- und
       Vorbereitungs-Uhren zählen im Sekundentakt hoch und zeigen auf **allen**
       Geräten dieselbe verstrichene Zeit, auch wenn die Gerätezeit falsch
-      geht.
+      geht. *Am laufenden System gemessen (09.08.): Gerätezeit um zwei
+      Stunden verstellt → Anzeige lief unbeirrt weiter (1:26 → 1:33). Der
+      erste Anlauf zeigte 2:03:53 und deckte den Fehler auf, dass die Uhr in
+      ruhigen Phasen nie nachgezogen wurde — dort kommen ausschließlich
+      304-Antworten, und deren Zweig rief `syncClock` nicht auf.*
 - [~] Bei einem Mehr-Hallen-Turnier filtert **ein** Filter im Kopf Felder,
       Spielliste, Bediener-Warteschlange und beendete Spiele gemeinsam.
       Spiele ohne Hallenzuordnung erscheinen in einem eigenen, immer
       sichtbaren Abschnitt mit Anzahl — sie werden nie stillschweigend
       ausgeblendet.
 - [x] Bei einem Ein-Hallen-Turnier wird kein Hallenfilter angeboten.
-- [~] Der Filter überlebt einen Reload und lässt sich per Link teilen.
+- [x] Der Filter überlebt einen Reload und lässt sich per Link teilen.
+      *Gemessen: Tipp auf „Kyritzer" → `?halle=Kyritzer` in der Adresse,
+      Feldzahl 18 → 12; nach einem Reload **ohne** Parameter blieb der Filter
+      gesetzt (aus dem lokalen Speicher).*
 
 **Bedienung**
 
 - [~] Ein Spiel lässt sich per **Antippen, dann Feld antippen** zuweisen —
-      auf iPad/Safari, Android/Chrome und Desktop.
-- [~] Dasselbe geht per **Ziehen**, auf denselben Geräten.
+      auf iPad/Safari, Android/Chrome und Desktop. *Auf dem Desktop belegt
+      (09.08.): Feld 02 übernahm das Spiel, Meldung „Feld 02 bekommt …", das
+      Spiel verschwand aus der Warteliste. iPad und Android stehen aus.*
+- [~] Dasselbe geht per **Ziehen**, auf denselben Geräten. *Auf dem Desktop
+      belegt (09.08.): Zug auf Feld 06 → „Feld 06 bekommt …". iPad und
+      Android stehen aus.*
 - [~] Bricht ein Ziehvorgang ab, bleibt das Spiel ausgewählt und lässt sich
       durch Antippen des Feldes zuweisen — ohne dass der Nutzer etwas
       zurücksetzen muss.
-- [~] Solange ein Spiel ausgewählt ist, zeigt ein festes Band oben, welches
+- [x] Solange ein Spiel ausgewählt ist, zeigt ein festes Band oben, welches
       Spiel gewählt ist, und bietet Abbrechen; erlaubte Felder sind
       hervorgehoben, nicht erlaubte gedimmt — ein Tipp darauf **nennt den
-      Grund**, statt ins Leere zu gehen.
+      Grund**, statt ins Leere zu gehen. *Gemessen: Band „Gruppe 6 · G1 — …
+      | jetzt ein Feld antippen | Abbrechen", 13 erlaubte und 5 gesperrte
+      Felder; Tipp auf ein gesperrtes: „Auf diesem Feld läuft ein Spiel." —
+      die Auswahl blieb bestehen.*
 - [x] Ein Spiel lässt sich von Feld A auf Feld B umhängen; das geht als
       **ein** BTP-Schreibvorgang, es gibt keinen Zwischenzustand ohne Feld.
 - [~] Ein Spiel lässt sich vom Feld herunternehmen; geht dabei ein
@@ -305,10 +319,13 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 **Konflikte und Fehlerfälle**
 
-- [~] Weisen zwei Geräte gleichzeitig dasselbe Feld zu, gewinnt genau
+- [x] Weisen zwei Geräte gleichzeitig dasselbe Feld zu, gewinnt genau
       eines; das andere bekommt „Feld wurde gerade von jemand anderem
       belegt" **mit dem Namen des Spiels, das dort steht**, und die Ansicht
       springt auf den echten Stand. Beide Ansichten sind danach gleich.
+      *Mit zwei Geräten am selben Turnier gemessen (09.08.): Gerät B auf
+      eingefrorenem Stand („Feld 05 frei") bekam „Feld wurde gerade von
+      jemand anderem belegt: Coën Corvin Van / Thomas Schulze."*
 - [ ] Eine Aktion, die auf einer über 60 s alten Ansicht beruht, wird
       abgelehnt statt ausgeführt.
       → **Bewusst nicht so gebaut.** Der Stand der Ansicht (`viewRev`) reist
@@ -322,14 +339,23 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
       bräuchte einen Zeitstempel im Zustand statt einer Revisionsdifferenz.
 - [x] Ein doppelter Tipp bei langsamer Verbindung erzeugt **genau eine**
       Zuweisung in BTP.
-- [~] Bricht die Verbindung zum Relay ab, zeigt die Seite binnen 15 s ein
-      rotes Band und **deaktiviert alle Schreibknöpfe**.
+- [x] Bricht die Verbindung zum Relay ab, zeigt die Seite binnen 15 s ein
+      rotes Band und **deaktiviert alle Schreibknöpfe**. *Im LAN gemessen
+      (09.08.): Übertragung gestoppt → Band „Keine Verbindung zum
+      Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten
+      bekannten Stand." Die Sperre sitzt zentral in `send()`, nicht als
+      `disabled` an 125 Knöpfen: Ein toter Knopf erklärt nichts, ein
+      gedämpfter, der beim Tippen „nichts wurde gesendet" sagt, schon. Die
+      Dämpfung kam aus dieser Messung — vorher sahen die Knöpfe voll
+      bedienbar aus.*
 - [~] Ist der Relay erreichbar, aber bts-light nicht, zeigt die Seite
       ausdrücklich „bts-light ist nicht verbunden" samt Alter der Daten —
       **nicht** „alle Felder frei".
-- [~] Eine Aktion, die während eines Ausfalls ausgelöst wurde, wird
+- [x] Eine Aktion, die während eines Ausfalls ausgelöst wurde, wird
       **nicht** nachgereicht; die Seite meldet „nicht bestätigt" und
-      aktualisiert, sobald sie wieder kann.
+      aktualisiert, sobald sie wieder kann. *Gemessen: Tipp bei gestoppter
+      Übertragung → „Keine Verbindung zum Turnier-PC — nichts wurde
+      gesendet."; nach dem Wiederanlauf kam nichts nach.*
 - [~] Nach 10 Minuten Standby zeigt die Seite beim Aufwecken sofort einen
       frischen Stand und keine falsch weitergelaufene Uhr.
 - [~] Ein BTP-Neustart erzeugt keine Geisterzuweisungen; die Liste erholt
@@ -341,11 +367,15 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 **Nachvollziehbarkeit**
 
-- [~] Jede ausgeführte Aktion wird im App-Log mit **Gerätename und Aktion**
+- [x] Jede ausgeführte Aktion wird im App-Log mit **Gerätename und Aktion**
       festgehalten — damit nach einem Turnier nachvollziehbar ist, wer was
       ausgelöst hat, und die Erfolgskriterien überhaupt prüfbar sind.
-- [~] Jede **abgelehnte** Aktion wird mit ihrem Grund protokolliert;
+      *Beleg aus der Abnahme: `TL-Web [abnahme-a]: Spiel 1316 auf Feld 2
+      (Ansicht 1)` gefolgt von `… ausgeführt`.*
+- [x] Jede **abgelehnte** Aktion wird mit ihrem Grund protokolliert;
       Konflikte („Feld war schon belegt") sind im Log als solche zählbar.
+      *Beleg: `TL-Web [abnahme-b]: Spiel 1311 auf Feld 5 abgelehnt (Feld
+      wurde gerade von jemand anderem belegt: …)`.*
 - [x] Im Log erscheint **kein** Gerätetoken — weder ganz noch teilweise.
 
 ### Was offen ist

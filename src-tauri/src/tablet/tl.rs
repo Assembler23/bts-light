@@ -1389,6 +1389,11 @@ pub struct TlCourt {
     pub match_name: String,
     pub round_name: String,
     pub class_label: String,
+    /// Disziplin als snake_case-Schlüssel (`mens_singles` …), wie überall
+    /// sonst auf der Wire-Ebene. Die Seite beschriftet selbst — nur so
+    /// erkennt der Helfer Einzel und Doppel, wenn die Auslosung „Gruppe 6"
+    /// heißt.
+    pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
     pub sets: Vec<(i64, i64)>,
@@ -1435,6 +1440,8 @@ pub struct TlMatch {
     pub draw_name: String,
     pub round_name: String,
     pub class_label: String,
+    /// Siehe [`TlCourt::discipline`].
+    pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
     /// In welche Halle das Spiel gehört, und woher wir das wissen.
@@ -1647,6 +1654,7 @@ pub(crate) fn build_state_limited(
             draw_name: m.draw_name.clone(),
             round_name: m.round_name.clone(),
             class_label: m.class_label.clone(),
+            discipline: m.discipline.as_str().to_string(),
             team1: m.team1.iter().map(|p| p.name.clone()).collect(),
             team2: m.team2.iter().map(|p| p.name.clone()).collect(),
             hall,
@@ -1789,6 +1797,7 @@ fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> 
         match_name: c.match_name,
         round_name: c.round_name,
         class_label: c.class_label,
+        discipline: c.discipline.as_str().to_string(),
         team1: c.team1,
         team2: c.team2,
         sets: c.sets,
@@ -3361,6 +3370,33 @@ mod tests {
     }
 
     #[test]
+    fn every_match_carries_its_discipline() {
+        // Turniere benennen ihre Auslosungen frei („Gruppe 6"). Steht dort
+        // nicht zufällig „HE" drin, ist am Bildschirm nicht zu erkennen, ob
+        // ein Einzel oder ein Doppel aufs Feld soll — der Helfer sieht es
+        // erst an der Zahl der Namen. Die Disziplin gehört deshalb an jedes
+        // Spiel, auf dem Feld wie in der Warteliste.
+        let tablet = TabletState::default();
+        let mut auf_dem_feld = a_match(1);
+        auf_dem_feld.status = MatchStatus::OnCourt;
+        auf_dem_feld.court_id = Some(1);
+        auf_dem_feld.draw_name = "Gruppe 6".to_string();
+        auf_dem_feld.discipline = Discipline::MensDoubles;
+        let mut wartend = a_match(2);
+        wartend.draw_name = "Gruppe 6".to_string();
+        wartend.discipline = Discipline::Mixed;
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![auf_dem_feld, wartend],
+            Vec::new(),
+        ));
+
+        let s = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        assert_eq!(s.courts[0].discipline, "mens_doubles");
+        assert_eq!(s.queue[0].discipline, "mixed");
+    }
+
+    #[test]
     fn open_walkover_proposals_reach_the_page_with_their_matches() {
         // Ohne die Vorschläge samt betroffener Spiele könnte die Seite
         // nicht anbieten, was gewertet werden soll — die Turnierleitung
@@ -3619,6 +3655,10 @@ mod tests {
             "match_name",
             "round_name",
             "class_label",
+            // Disziplin als Schlüssel („mens_singles"). Sagt etwas über das
+            // Spiel, nichts über die Personen — und steht ohnehin auf jedem
+            // Aushang.
+            "discipline",
             "team1",
             "team2",
             "sets",
