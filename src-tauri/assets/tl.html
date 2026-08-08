@@ -71,6 +71,24 @@ header {
 }
 .halls button:focus-visible, .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
+/* Schalter für die automatische Vergabe. Sein Zustand muss auf einen Blick
+   erkennbar sein: Läuft sie mit, während jemand von Hand umsortiert, räumt
+   sie ihm die Felder um, und niemand versteht, warum. */
+.auto {
+  font: inherit; font-size: .85rem; font-weight: 650;
+  padding: 7px 13px; min-height: 40px;
+  border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+  display: flex; align-items: center; gap: 7px;
+}
+.auto::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint);
+}
+.auto.on { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.auto.on::before { background: var(--ok); }
+.auto.off { border-color: #fed7aa; background: #fffbeb; color: #9a3412; }
+.auto.off::before { background: var(--warn); }
+
 /* Störungsband: nimmt die volle Breite, damit es niemand übersieht. */
 .banner {
   display: none; padding: 10px 16px; font-weight: 650;
@@ -270,12 +288,14 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
     <span class="brand">Turnierleitung</span>
     <span class="tournament" id="tournament"></span>
     <span class="halls" id="halls"></span>
+    <button type="button" class="auto" id="auto-toggle" hidden></button>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
   </header>
   <div class="banner" id="banner"></div>
   <div class="action-bar" id="action-bar">
     <span class="what" id="action-what"></span>
-    <span class="hint">jetzt ein Feld antippen</span>
+    <span class="hint" id="action-hint">jetzt ein Feld antippen</span>
+    <button type="button" id="action-free" hidden>Vom Feld nehmen</button>
     <button type="button" id="action-cancel">Abbrechen</button>
   </div>
   <main>
@@ -371,12 +391,16 @@ function callStage(court, timer) {
 // Drei Lagen, mehr braucht es nicht: nichts gewählt · ein Spiel gewählt ·
 // eine Zuweisung unterwegs. Der Drag später setzt denselben Automaten, statt
 // einen zweiten Weg zu eröffnen.
-let picked = null;   // gewähltes Spiel aus der Liste
+// `picked` trägt seine Herkunft mit: aus der Warteliste (dann ist es eine
+// Zuweisung) oder von einem Feld (dann ein Umhängen). Damit deckt EIN
+// Automat und EINE Geste beide Fälle ab, statt zwei getrennte Wege zu
+// eröffnen, die man auseinanderhalten müsste.
+let picked = null;   // { match, fromCourtId }
 let pending = null;  // { matchId, courtId } — unterwegs zum Turnier-PC
 
-function pick(match) {
-  // Dasselbe Spiel erneut antippen hebt die Auswahl auf.
-  picked = picked && picked.match_id === match.match_id ? null : match;
+function pick(match, fromCourtId) {
+  const same = picked && picked.match.match_id === match.match_id;
+  picked = same ? null : { match, fromCourtId: fromCourtId ?? null };
   renderActionBar();
   renderCourts();
   renderQueue();
@@ -396,10 +420,21 @@ function renderActionBar() {
   // transportiert wird — das Band ist für den Antipp-Weg da, wo man nach
   // zwei Wischern sonst nicht mehr weiß, was gewählt ist.
   if (!picked || dragging) { bar.classList.remove("show"); return; }
-  const wer = [(picked.team1 || []).join(" / "), (picked.team2 || []).join(" / ")]
+  const m = picked.match;
+  const wer = [(m.team1 || []).join(" / "), (m.team2 || []).join(" / ")]
     .filter(Boolean).join(" gegen ");
-  $("action-what").textContent =
-    `${[picked.draw_name, picked.round_name].filter(Boolean).join(" · ")} — ${wer}`;
+  const woher = picked.fromCourtId
+    ? (state.courts.find((c) => c.court_id === picked.fromCourtId)?.court || "")
+    : "";
+  $("action-what").textContent = woher
+    ? `${woher}: ${wer}`
+    : `${[m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
+  // Beim Umhängen ist „vom Feld nehmen" die zweite sinnvolle Handlung —
+  // sie steht deshalb direkt neben dem Abbrechen, statt in einem Menü.
+  $("action-free").hidden = !picked.fromCourtId;
+  $("action-hint").textContent = picked.fromCourtId
+    ? "auf ein anderes Feld tippen"
+    : "jetzt ein Feld antippen";
   bar.classList.add("show");
 }
 
@@ -433,25 +468,81 @@ function hideToast() { $("toast").className = "toast"; }
  */
 function targetProblem(court) {
   if (!picked) return null;
+  if (picked.fromCourtId === court.court_id) return "Das Spiel steht schon auf diesem Feld.";
   if (court.locked) return "Dieses Feld ist gesperrt.";
   if (court.clearing) return "Dieses Feld wird noch geräumt — BTP hat es noch nicht freigegeben.";
   if (court.match_id) return "Auf diesem Feld läuft ein Spiel.";
-  if (picked.hall && court.location && picked.hall !== court.location) {
-    return `Dieses Spiel gehört nach ${picked.hall}.`;
+  const hall = picked.match.hall;
+  if (hall && court.location && hall !== court.location) {
+    return `Dieses Spiel gehört nach ${hall}.`;
   }
   return null;
 }
 
-async function assignTo(court) {
-  if (!picked) return;
+/** Ein Kommando senden und die Antwort verständlich anzeigen. */
+async function send(opId, action, onOk) {
   if (connectionLevel() === "offline") {
-    toast("Keine Verbindung zum Turnier-PC — die Zuweisung wurde nicht gesendet.", true);
+    toast("Keine Verbindung zum Turnier-PC — nichts wurde gesendet.", true);
+    return false;
+  }
+  try {
+    const res = await fetch(API + "/command", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ opId, action }),
+    });
+    const answer = await res.json();
+    if (answer.ok) {
+      toast(onOk);
+      if (answer.warning) toast(answer.warning, true);
+      return true;
+    }
+    toast(answer.error || "Die Aktion wurde abgelehnt.", true);
+    return false;
+  } catch (e) {
+    toast("Nicht bestätigt — bitte den Stand prüfen und gegebenenfalls wiederholen.", true);
+    return false;
+  } finally {
+    // Sofort nachfragen statt auf den nächsten Takt zu warten: Die Anzeige
+    // soll den echten Stand zeigen, nicht unsere Vermutung.
+    poll();
+  }
+}
+
+/** Ein Feld räumen — das Spiel geht zurück in die Warteliste. */
+async function freeCourt(court) {
+  const running = court.match_id
+    ? `${(court.team1 || []).join(" / ")} gegen ${(court.team2 || []).join(" / ")}`
+    : "";
+  // Ein laufender Spielstand geht dabei verloren — dafür lohnt die Rückfrage.
+  const hasScore = (court.sets || []).some(([a, b]) => a > 0 || b > 0);
+  if (hasScore && !confirm(
+    `${court.court}: ${running}\n\nDas Spiel läuft bereits. Beim Freigeben geht der `
+    + `Spielstand verloren. Wirklich vom Feld nehmen?`)) {
     return;
   }
+  picked = null;
+  renderActionBar();
+  await send(
+    `free-${court.court_id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    {
+      action: "free_court",
+      courtId: court.court_id,
+      expect: court.match_id
+        ? { kind: "match", matchId: court.match_id }
+        : { kind: "any" },
+    },
+    `${court.court} ist frei.`,
+  );
+}
+
+async function assignTo(court) {
+  if (!picked) return;
   const problem = targetProblem(court);
   if (problem) { toast(problem, true); return; }
 
-  const match = picked;
+  const { match, fromCourtId } = picked;
+  const wer = `${(match.team1 || []).join(" / ")} gegen ${(match.team2 || []).join(" / ")}`;
   pending = { matchId: match.match_id, courtId: court.court_id };
   picked = null;
   hideToast();
@@ -459,47 +550,42 @@ async function assignTo(court) {
   renderCourts();
   renderQueue();
 
-  try {
-    const res = await fetch(API + "/command", {
-      method: "POST",
-      headers: { "content-type": "application/json", Authorization: "Bearer " + token },
-      body: JSON.stringify({
-        // Vorgangskennung: Sie muss für dieselbe Absicht STABIL sein, sonst
-        // wäre der Schutz gegen Doppelausführung wirkungslos. Eine bei jedem
-        // Tipp neu gewürfelte Kennung hätte der Turnier-PC nie als
-        // Wiederholung erkannt. Deshalb aus der Absicht abgeleitet, mit
-        // grobem Zeitfenster: Zwei Tipps kurz hintereinander sind derselbe
-        // Vorgang, ein bewusster neuer Versuch eine Minute später nicht.
-        opId: opIdFor(match.match_id, court.court_id),
-        action: {
-          action: "assign_court",
-          courtId: court.court_id,
-          matchId: match.match_id,
-          // Was wir vorgefunden haben. Stimmt es nicht mehr, lehnt der
-          // Turnier-PC ab, statt jemandes Zuweisung zu überschreiben.
-          expect: { kind: "free" },
-        },
-      }),
-    });
-    const answer = await res.json();
-    if (answer.ok) {
-      toast(`${court.court} bekommt ${(match.team1 || []).join(" / ")} gegen ${(match.team2 || []).join(" / ")}.`);
-    } else {
-      // Die Ablehnung im Klartext, und die Auswahl kommt zurück — meist
-      // will man das Spiel dann auf ein anderes Feld legen.
-      toast(answer.error || "Die Zuweisung wurde abgelehnt.", true);
-      picked = match;
-      renderActionBar();
-    }
-  } catch (e) {
-    toast("Nicht bestätigt — bitte das Feld prüfen und gegebenenfalls wiederholen.", true);
-    picked = match;
+  // Umhängen ist eine eigene Handlung, kein Freigeben mit anschließendem
+  // Zuweisen: Nur so wird es ein einziger Schreibvorgang, und dazwischen ist
+  // kein Zustand sichtbar, in dem das Spiel auf keinem Feld steht.
+  const action = fromCourtId
+    ? {
+        action: "move_match",
+        fromCourtId,
+        toCourtId: court.court_id,
+        matchId: match.match_id,
+        expectFrom: { kind: "match", matchId: match.match_id },
+        expectTo: { kind: "free" },
+      }
+    : {
+        action: "assign_court",
+        courtId: court.court_id,
+        matchId: match.match_id,
+        // Was wir vorgefunden haben. Stimmt es nicht mehr, lehnt der
+        // Turnier-PC ab, statt jemandes Zuweisung zu überschreiben.
+        expect: { kind: "free" },
+      };
+
+  const ok = await send(
+    // Die Vorgangskennung muss für dieselbe Absicht STABIL sein, sonst wäre
+    // der Schutz gegen Doppelausführung wirkungslos.
+    opIdFor(match.match_id, court.court_id),
+    action,
+    fromCourtId ? `${wer} steht jetzt auf ${court.court}.` : `${court.court} bekommt ${wer}.`,
+  );
+  pending = null;
+  if (!ok) {
+    // Die Auswahl kommt zurück — meist will man das Spiel dann auf ein
+    // anderes Feld legen.
+    picked = { match, fromCourtId };
     renderActionBar();
-  } finally {
-    pending = null;
-    // Sofort nachfragen statt auf den nächsten Takt zu warten: Die Anzeige
-    // soll den echten Stand zeigen, nicht unsere Vermutung.
-    poll();
+    renderCourts();
+    renderQueue();
   }
 }
 
@@ -652,17 +738,44 @@ function courtCard(c) {
   </article>`;
 }
 
-/** Verdrahtet die Feld-Kacheln — nur nötig, solange ein Spiel gewählt ist. */
+/**
+ * Verdrahtet die Feld-Kacheln.
+ *
+ * Zwei Rollen, je nachdem, ob gerade ein Spiel gewählt ist: Ohne Auswahl ist
+ * ein belegtes Feld der **Griff** (antippen wählt das Spiel zum Umhängen,
+ * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
+ */
 function wireCourts(box) {
-  if (!picked) return;
   box.querySelectorAll(".card[data-court]").forEach((el) => {
     const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
     if (!court) return;
-    const go = () => assignTo(court);
+
+    if (picked) {
+      const go = () => { if (!suppressNextClick) assignTo(court); };
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
+      });
+      return;
+    }
+    // Ohne Auswahl: ein laufendes Spiel lässt sich von hier aufnehmen.
+    if (!court.match_id) return;
+    const asMatch = {
+      match_id: court.match_id,
+      team1: court.team1,
+      team2: court.team2,
+      draw_name: "",
+      round_name: court.round_name,
+      // Ein laufendes Spiel bleibt in seiner Halle — das Zielfeld wird
+      // danach beurteilt.
+      hall: court.location,
+    };
+    const go = () => { if (!suppressNextClick) pick(asMatch, court.court_id); };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
+    enableDrag(el, asMatch, court.court_id);
   });
 }
 
@@ -713,7 +826,7 @@ function queueRow(m) {
   // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
   // Ablehnung.
   const pickable = !m.blocked;
-  const selected = picked && picked.match_id === m.match_id;
+  const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
                data-match="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
@@ -725,12 +838,12 @@ function wireQueue(box) {
   box.querySelectorAll(".row.pick[data-match]").forEach((el) => {
     const match = state.queue.find((m) => String(m.match_id) === el.dataset.match);
     if (!match) return;
-    const go = () => { if (!suppressNextClick) pick(match); };
+    const go = () => { if (!suppressNextClick) pick(match, null); };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
-    enableDrag(el, match);
+    enableDrag(el, match, null);
   });
 }
 
@@ -751,7 +864,7 @@ let suppressNextClick = false;
 /** Läuft gerade ein Zug? Solange bleibt das Aktionsband aus (siehe dort). */
 let dragging = false;
 
-function enableDrag(el, match) {
+function enableDrag(el, match, fromCourtId) {
   el.addEventListener("pointerdown", (down) => {
     // Nur die primäre Taste/der erste Finger; Rechtsklick und Zweitfinger
     // dürfen nichts auslösen.
@@ -772,7 +885,7 @@ function enableDrag(el, match) {
         // kann). Ein Zeigegesten-Fang ist nicht nötig — die Ereignisse
         // hängen ohnehin am Fenster.
         dragging = true;
-        picked = match;
+        picked = { match, fromCourtId: fromCourtId ?? null };
         renderActionBar();
         renderCourts();
         ghost = document.createElement("div");
@@ -880,17 +993,47 @@ function renderQueue() {
   wireQueue(box);
 }
 
+function renderAutoToggle() {
+  const btn = $("auto-toggle");
+  const aa = state.auto_assign || {};
+  // Nur anbieten, wo er etwas bewirkt: Ist die automatische Vergabe in den
+  // Einstellungen gar nicht eingeschaltet, gäbe es hier nichts anzuhalten.
+  if (!aa.configured) { btn.hidden = true; return; }
+  btn.hidden = false;
+  btn.className = "auto " + (aa.enabled ? "on" : "off");
+  btn.textContent = aa.enabled ? "Automatik läuft" : "Automatik pausiert";
+  btn.setAttribute("aria-pressed", String(!!aa.enabled));
+  btn.title = aa.enabled
+    ? "Automatische Feldvergabe anhalten, solange von Hand umsortiert wird"
+    : "Automatische Feldvergabe wieder laufen lassen";
+}
+
+async function toggleAuto() {
+  const on = !(state.auto_assign && state.auto_assign.enabled);
+  await send(
+    `auto-${on}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "set_auto_assign", enabled: on },
+    on ? "Automatische Vergabe läuft wieder." : "Automatische Vergabe ist angehalten.",
+  );
+}
+
 function render() {
   if (!state) return;
   // Ein gewähltes Spiel, das inzwischen vergeben wurde, verschwindet auch
   // aus der Auswahl — sonst zeigte das Aktionsband ein Spiel an, das es in
   // der Liste nicht mehr gibt.
-  if (picked && !state.queue.some((m) => m.match_id === picked.match_id)) {
+  // Eine Auswahl aus der Warteliste, die inzwischen vergeben wurde,
+  // verschwindet auch aus der Auswahl — sonst zeigte das Aktionsband ein
+  // Spiel an, das es in der Liste nicht mehr gibt. Ein vom Feld gewähltes
+  // Spiel steht dagegen nie in der Liste und bleibt.
+  if (picked && !picked.fromCourtId
+      && !state.queue.some((m) => m.match_id === picked.match.match_id)) {
     picked = null;
   }
   $("tournament").textContent = state.tournament || "";
   renderConnection();
   renderHalls();
+  renderAutoToggle();
   renderActionBar();
   renderCourts();
   renderQueue();
@@ -916,6 +1059,11 @@ function tickClocks() {
 
 function start() {
   $("action-cancel").addEventListener("click", cancelPick);
+  $("action-free").addEventListener("click", () => {
+    const court = picked && state.courts.find((c) => c.court_id === picked.fromCourtId);
+    if (court) freeCourt(court);
+  });
+  $("auto-toggle").addEventListener("click", toggleAuto);
   $("toast-close").addEventListener("click", hideToast);
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
