@@ -1027,13 +1027,18 @@ pub enum TlErrorCode {
     NoAnnouncer,
     /// BTP hat den Schreibvorgang abgelehnt oder war nicht erreichbar.
     BtpError,
+    /// Der Turnier-PC ist nicht mit dem Relay verbunden oder hat nicht
+    /// geantwortet. **Nur der Relay** vergibt diesen Code — er ist die
+    /// Grundlage dafür, dass die Seite „bts-light ist nicht verbunden" sagen
+    /// kann, statt einen leeren Stand als „alle Felder frei" zu zeigen.
+    HostOffline,
 }
 
 impl TlErrorCode {
     /// Alle Codes — Grundlage des Wire-Roundtrip-Tests. Wächst das Enum,
     /// muss diese Liste mitwachsen (der Test erzwingt es nicht, aber der
     /// fehlende Eintrag fiele bei der nächsten Durchsicht auf).
-    pub const ALL: [TlErrorCode; 13] = [
+    pub const ALL: [TlErrorCode; 14] = [
         TlErrorCode::CourtTaken,
         TlErrorCode::CourtFree,
         TlErrorCode::CourtLocked,
@@ -1047,6 +1052,7 @@ impl TlErrorCode {
         TlErrorCode::Unsupported,
         TlErrorCode::NoAnnouncer,
         TlErrorCode::BtpError,
+        TlErrorCode::HostOffline,
     ];
 }
 
@@ -1190,12 +1196,18 @@ pub enum HostFrame {
         #[serde(rename = "azureTts", skip_serializing_if = "Option::is_none", default)]
         azure_tts: Option<AzureTtsShare>,
     },
-    /// Die Tokens der aktuell zugelassenen Turnierleitungs-Geräte. Der Host
-    /// stellt sie aus, der Relay spiegelt sie nur (ADR 0011) — die
-    /// `install_id` verlässt den Master nicht. Die Liste **ersetzt** die
-    /// bisherige: ein entferntes Gerät ist damit sofort ausgesperrt, und das
-    /// ist der gesamte Widerrufsmechanismus. Bewusst ohne Gerätenamen
-    /// (Datensparsamkeit) — der Relay braucht sie nicht.
+    /// Die aktuell zugelassenen Turnierleitungs-Geräte. Der Host stellt sie
+    /// aus, der Relay spiegelt sie nur (ADR 0011) — die `install_id`
+    /// verlässt den Master nicht. Die Liste **ersetzt** die bisherige: ein
+    /// entferntes Gerät ist damit sofort ausgesperrt, und das ist der
+    /// gesamte Widerrufsmechanismus.
+    ///
+    /// Bewusst **ohne Gerätenamen** (Datensparsamkeit): Der Relay bekommt die
+    /// zufällige Kennung, nicht das Etikett „Tablet Meeting Point". Die
+    /// Kennung braucht er, um sie mit dem Kommando zurückzuschicken — sonst
+    /// stünde im Protokoll des Turnier-PCs nicht, welches Gerät gehandelt
+    /// hat, oder er müsste sie aus dem Zugang ableiten, und der hat in
+    /// Protokollen nichts verloren.
     ///
     /// **Ohne `#[serde(default)]`:** Weil die Liste die bisherige ersetzt,
     /// hieße ein fehlendes Feld „alle Geräte aussperren". Ein verstümmeltes
@@ -1203,7 +1215,7 @@ pub enum HostFrame {
     /// abmelden — es wird verworfen, der bisherige Stand bleibt stehen. Die
     /// **leere** Liste ist dagegen zulässig und heißt ausdrücklich „kein
     /// Gerät mehr zugelassen".
-    TlAuth { tokens: Vec<String> },
+    TlAuth { devices: Vec<TlAuthDevice> },
     /// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche, **opak**: Der
     /// Relay legt ihn nur ab und liefert ihn unverändert aus, wie schon beim
     /// Court-Zustand. So bleibt die Turnierlogik vollständig im Host (R5).
@@ -1221,6 +1233,18 @@ pub enum HostFrame {
         req_id: u64,
         response: TlResponse,
     },
+}
+
+/// Ein zugelassenes Turnierleitungs-Gerät, wie der Host es dem Relay
+/// spiegelt: zufällige Kennung + Zugang, **kein** Name.
+///
+/// Die Kennung reist mit jedem Kommando zurück zum Host, damit sein
+/// Protokoll benennen kann, wer gehandelt hat. Der Zugang bleibt beim Relay
+/// und taucht nirgends sonst auf.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TlAuthDevice {
+    pub id: String,
+    pub token: String,
 }
 
 /// Vom Master an Cloud-Slaves vererbte Azure-TTS-Konfiguration (ADR 0003).
@@ -2358,11 +2382,22 @@ mod tests {
         // Der Host pusht die vollständige Token-Menge; sie ersetzt die
         // bisherige im Relay – das ist der Widerrufsmechanismus (ADR 0011).
         roundtrip(&HostFrame::TlAuth {
-            tokens: vec!["tok-a".to_string(), "tok-b".to_string()],
+            devices: vec![
+                TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "tok-a".to_string(),
+                },
+                TlAuthDevice {
+                    id: "tl-2".to_string(),
+                    token: "tok-b".to_string(),
+                },
+            ],
         });
         // Die leere Menge ist zulässig und bedeutet ausdrücklich „kein
         // Gerät zugelassen" – etwa nach dem Entfernen des letzten.
-        roundtrip(&HostFrame::TlAuth { tokens: Vec::new() });
+        roundtrip(&HostFrame::TlAuth {
+            devices: Vec::new(),
+        });
     }
 
     #[test]

@@ -72,8 +72,11 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - `relay-proto/src/lib.rs` — neue Wire-Typen `TlAction`, `CourtExpectation`,
   `TlResponse`, `TlErrorCode`, `TlState`; neue Frames `HostFrame::TlAuth |
   TlState | TlAck` und `RelayFrame::TlCommand`.
-- `relay/src/main.rs` — Token→Namespace-Map, Routen `/tl`, `/tl/lib/{file}`,
+- `relay/src/main.rs` — Token→Namespace-Map, Routen `/tl`,
   `/tl/api/state`, `/tl/api/command`; 8-Geräte-Cap; Env-Not-Aus.
+  *(Umgesetzt in Schritt 10. `/tl/lib/{file}` entfällt: Die Seite ist eine
+  einzige Datei ohne nachgeladene Bausteine — ein Pfad weniger, der aus dem
+  Internet erreichbar ist.)*
 - `src-tauri/src/tablet/tl.rs` **(neu)** — `authorize`, `state`, `execute`;
   von LAN-Server **und** Relay-Client aufgerufen (Muster `process_result`).
 - `src-tauri/src/tablet/assign.rs` **(neu)** — aus `sync.rs` extrahierte,

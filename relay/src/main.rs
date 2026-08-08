@@ -32,11 +32,17 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use relay_proto::{
     device_code, html_escape, path_encode, CourtBrief, HostFrame, MatchBrief, MonitorConfig,
     MonitorControl, MonitorDeviceInfo, MonitorMatch, MonitorPlayer, MonitorState, MonitorUpload,
-    PlayerBrief, RelayFrame, ResultBody, ResultResponse, ServerMsg, SetAb, TabletMsg,
+    PlayerBrief, RelayFrame, ResultBody, ResultResponse, ServerMsg, SetAb, TabletMsg, TlAction,
+    TlErrorCode, TlResponse,
 };
 
 /// Die Tablet-Spielzettel-UI – dieselbe Datei wie in der bts-light-App.
 const TABLET_HTML: &str = include_str!("../../src-tauri/assets/tablet.html");
+
+/// Die Turnierleitungs-Oberfläche – dieselbe Datei wie in der bts-light-App.
+/// Eine Quelle für LAN und Cloud: Was im Hallennetz erprobt wurde, ist
+/// unterwegs dieselbe Seite.
+const TL_HTML: &str = include_str!("../../src-tauri/assets/tl.html");
 
 /// Die Court-Monitor-Anzeige – dieselbe Datei wie in der bts-light-App.
 const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
@@ -165,6 +171,25 @@ struct Namespace {
     pending: HashMap<u64, oneshot::Sender<ResultResponse>>,
     /// Fortlaufende Request-ID für Ergebnis-Übermittlungen.
     next_req: u64,
+    /// Zugänge der Turnierleitungs-Geräte, vom Turnier-PC gespiegelt
+    /// (`HostFrame::TlAuth`): Zugang → Kennung des Geräts. Der Relay stellt
+    /// **keine** aus und merkt sich nichts über das Turnier hinaus: Was der
+    /// Host nicht mehr nennt, gilt nicht mehr. Das ist der Widerruf (ADR 0011).
+    /// Die Kennung reist mit jedem Kommando zurück, damit das Protokoll des
+    /// Turnier-PCs benennen kann, wer gehandelt hat.
+    tl_tokens: HashMap<String, String>,
+    /// Zuletzt gepushter Anzeige-Zustand: `(Revision, JSON)`. **Opak** — der
+    /// Relay liest ihn nie, er legt ihn ab und liefert ihn aus. So bleibt
+    /// jede Turnierlogik im Host (R5).
+    tl_state: Option<(u64, String)>,
+    /// Offene TL-Kommandos: `req_id` → wartender HTTP-Handler.
+    tl_pending: HashMap<u64, oneshot::Sender<TlResponse>>,
+    /// Belegte Geräteplätze: Zugang → letzter Zugriff (Unix-ms). Begrenzt,
+    /// damit nicht Dutzende Browser denselben Turnier-PC abfragen.
+    tl_devices: HashMap<String, u64>,
+    /// Zählt jede neue Host-Verbindung. Teil des ETags, weil die Revision
+    /// beim Neustart des Turnier-PCs wieder klein beginnt.
+    tl_gen: u64,
 }
 
 impl Namespace {
@@ -190,6 +215,11 @@ impl Namespace {
             monitor_seen: HashMap::new(),
             pending: HashMap::new(),
             next_req: 1,
+            tl_tokens: HashMap::new(),
+            tl_state: None,
+            tl_pending: HashMap::new(),
+            tl_devices: HashMap::new(),
+            tl_gen: 0,
         }
     }
 
@@ -213,6 +243,14 @@ struct Broker {
     /// Fehlversuchs-Zähler fürs Einlösen (globales Sliding Window gegen
     /// Durchprobieren): (Fensterbeginn Unix-ms, Fehlversuche im Fenster).
     pair_fails: Arc<Mutex<(u64, u32)>>,
+    /// Wegweiser der Turnierleitungs-Zugänge: Zugang → Namespace.
+    ///
+    /// Nötig, weil die TL-Adressen **keinen** Namespace tragen: Der ist die
+    /// `install_id` und damit zugleich der Zugang der Zähltablets
+    /// (`/{ns}/ws`). Stünde sie in der Adresse, die jeder Helfer auf dem
+    /// Bildschirm hat, könnte sich damit jeder als Tablet ausgeben (ADR 0011).
+    /// Der Zugang findet sein Turnier deshalb selbst.
+    tl_index: Arc<Mutex<HashMap<String, String>>>,
     /// Öffentliche Basis-URL für QR-Codes, z. B. `https://badhub.de/bts-relay`.
     public_base: String,
 }
@@ -237,6 +275,7 @@ impl Broker {
             namespaces: Arc::new(Mutex::new(HashMap::new())),
             pairings: Arc::new(Mutex::new(HashMap::new())),
             pair_fails: Arc::new(Mutex::new((0, 0))),
+            tl_index: Arc::new(Mutex::new(HashMap::new())),
             public_base,
         }
     }
@@ -361,8 +400,26 @@ async fn main() {
         )
         .route("/{ns}/ws", get(tablet_ws))
         .route("/{ns}/host-ws", get(host_ws))
-        .route("/{ns}/result", post(result))
-        .with_state(broker);
+        .route("/{ns}/result", post(result));
+
+    // Not-Aus für die Turnierleitungs-Oberfläche: `BTS_RELAY_TL=off` lässt
+    // die Routen gar nicht erst entstehen. Der Relay ist ein **globales**
+    // Binary für alle Installationen; träte im neuen Schreibweg ein Fehler
+    // auf, muss er sich ohne Rebuild und ohne Rückbau der übrigen Dienste
+    // abschalten lassen — mitten im Turnierbetrieb anderer.
+    let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
+    // **Ohne Namespace in der Adresse**: Der wäre die `install_id` und damit
+    // zugleich der Zugang der Zähltablets. Der Zugang des Geräts findet sein
+    // Turnier über den Wegweiser selbst (ADR 0011).
+    let app = if tl_an {
+        app.route("/tl", get(tl_page))
+            .route("/tl/api/state", get(tl_state_route))
+            .route("/tl/api/command", post(tl_command_route))
+    } else {
+        tracing::warn!("Turnierleitungs-Oberfläche per BTS_RELAY_TL=off abgeschaltet");
+        app
+    };
+    let app = app.with_state(broker);
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
@@ -1585,6 +1642,12 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
             let superseded = old.is_some();
             namespace.host = Some(tx.clone());
             namespace.host_last_seen = now;
+            // Neue Host-Verbindung = neue Generation. Sie steckt im ETag des
+            // Anzeige-Zustands, weil die Revision beim Neustart des
+            // Turnier-PCs wieder klein beginnt: Ein Gerät mit gemerkter
+            // Fassung „1" bekäme sonst „unverändert" auf einen völlig
+            // anderen Turnierstand und arbeitete auf einem Plan von vorhin.
+            namespace.tl_gen = namespace.tl_gen.wrapping_add(1);
             HostClaim::Accepted { superseded }
         }
     }
@@ -1698,7 +1761,18 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     {
         let mut map = broker.namespaces.lock().await;
         if let Some(namespace) = map.get_mut(&ns) {
-            release_host_slot(namespace, &tx);
+            // Nur aufräumen, wenn WIR der eingetragene Host waren: Eine per
+            // Zombie-Ablösung verdrängte Alt-Verbindung darf dem neuen Host
+            // nicht die Zugänge unter den Füßen wegziehen.
+            if release_host_slot(namespace, &tx) {
+                forget_tl_access(namespace);
+                // Den Wegweiser **hier** mitnehmen, unter derselben Sperre.
+                // Aufgeschoben liefe es in ein Rennen: Ein bereits neu
+                // verbundener Turnier-PC hätte seine frischen Zugänge schon
+                // eingetragen, und das nachlaufende Aufräumen risse sie
+                // wieder heraus. (Sperrreihenfolge: namespaces → tl_index.)
+                broker.tl_index.lock().await.retain(|_, n| n != &ns);
+            }
             for (_, pending) in namespace.pending.drain() {
                 let _ = pending.send(ResultResponse::err("Verbindung zu bts-light verloren."));
             }
@@ -1725,6 +1799,421 @@ fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
         return true;
     }
     false
+}
+
+// ──────────────────── Turnierleitungs-Oberfläche (TL-Web) ─────────────────
+//
+// Der Relay ist hier **Briefträger, nicht Schiedsrichter**. Er kennt weder
+// Spiele noch Felder; er prüft den Zugang, reicht das Kommando an den
+// Turnier-PC durch und trägt dessen Antwort zurück. Jede fachliche
+// Entscheidung — darf dieses Spiel auf dieses Feld? — fällt dort (R5). Das
+// ist zugleich die Sicherheits-Mitigation: Ein Fehler hier kann keine
+// Wertung erfinden, weil hier nichts entschieden wird.
+
+/// Höchstzahl gleichzeitig bedienter Turnierleitungs-Geräte je Turnier.
+///
+/// Ein Turnier hat eine Handvoll Helfer. Die Grenze schützt den Turnier-PC
+/// davor, von Dutzenden offenen Browsern abgefragt zu werden.
+const MAX_TL_DEVICES: usize = 8;
+
+/// Nach dieser Stille gilt ein Geräteplatz als frei. Wer nur den Tab
+/// geschlossen hat, soll seinen Platz nicht bis zum Turnierende blockieren.
+const TL_DEVICE_TTL_MS: u64 = 60_000;
+
+/// Höchstzahl der Zugänge, die ein Turnier-PC spiegeln darf.
+///
+/// Großzügig gegenüber [`MAX_TL_DEVICES`] (Geräte kommen und gehen, alte
+/// Kopplungen bleiben in der Liste), aber weit unter dem, was den Speicher
+/// gefährdet. Wird sie überschritten, verwirft der Relay das **ganze** Frame:
+/// Ein gekappter Widerruf wäre schlimmer als gar keiner.
+const MAX_TL_TOKENS: usize = 64;
+
+/// Wie lange eine Anfrage auf die Quittung des Turnier-PCs wartet.
+const TL_TIMEOUT: Duration = Duration::from_secs(20);
+
+// **Sperrreihenfolge:** Wird beides gebraucht, zuerst `namespaces`, dann
+// `tl_index` — nie umgekehrt. Die Handler lesen den Wegweiser deshalb in
+// einem eigenen Block, dessen Sperre fällt, bevor sie den Namespace greifen.
+
+/// Was der Relay über einen Zugang sagen kann.
+#[derive(Debug, PartialEq, Eq)]
+enum TlAccess {
+    /// Turnier gefunden, Turnier-PC verbunden, Zugang eingetragen.
+    Ok { ns: String, device_id: String },
+    /// Der Turnier-PC ist nicht verbunden. **Keine Aussage über den Zugang**
+    /// — ohne ihn weiß der Relay nicht, wer zugelassen ist.
+    HostOffline,
+    /// Der Turnier-PC ist da und kennt diesen Zugang nicht.
+    Unknown,
+}
+
+/// Was gilt für diesen Zugang gerade?
+///
+/// Die Unterscheidung ist der Kern: „Der Turnier-PC ist kurz weg" darf **nie**
+/// wie „dein Zugang wurde entzogen" aussehen. Sonst würfe jedes Gerät bei
+/// jedem Netzwackler seinen Zugang weg und müsste mitten im Turnier neu
+/// gekoppelt werden — vom Turnier-PC aus, quer durch die Halle.
+async fn tl_access_state(broker: &Broker, token: &str) -> TlAccess {
+    if token.is_empty() {
+        return TlAccess::HostOffline;
+    }
+    // Sperrreihenfolge: Der Wegweiser wird gelesen und wieder freigegeben,
+    // bevor der Namespace gegriffen wird.
+    let Some(ns) = broker.tl_index.lock().await.get(token).cloned() else {
+        // Kein Wegweiser-Eintrag: Entweder ist der Turnier-PC weg (dann sind
+        // seine Zugänge verfallen) oder der Zugang war nie einer. Der Relay
+        // kann beides nicht unterscheiden — und im Zweifel ist die
+        // zurückhaltende Auskunft auch die sicherere.
+        return TlAccess::HostOffline;
+    };
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(&ns) else {
+        return TlAccess::HostOffline;
+    };
+    if namespace.host.is_none() {
+        return TlAccess::HostOffline;
+    }
+    match tl_device_in(namespace, token) {
+        Some(device_id) => TlAccess::Ok { ns, device_id },
+        None => TlAccess::Unknown,
+    }
+}
+
+/// Zu welchem Turnier gehört dieser Zugang? (nur für Tests)
+#[cfg(test)]
+async fn tl_namespace_of(broker: &Broker, token: &str) -> Option<String> {
+    if token.is_empty() {
+        return None;
+    }
+    broker.tl_index.lock().await.get(token).cloned()
+}
+
+/// Entfernt alle Wegweiser-Einträge eines Turniers (nur für Tests — im
+/// Betrieb geschieht das unter derselben Sperre wie das Aufräumen selbst).
+#[cfg(test)]
+async fn forget_tl_index(broker: &Broker, ns: &str) {
+    broker.tl_index.lock().await.retain(|_, n| n != ns);
+}
+
+/// Gehört dieser Zugang zu diesem Turnier?
+///
+/// Die zweite Hürde: Auch wenn der Wegweiser stimmt, muss der Zugang im
+/// Turnier selbst eingetragen sein. Ein Zugang, den der eine Turnier-PC
+/// ausgestellt hat, ist im Turnier nebenan nichts wert.
+#[cfg(test)]
+async fn tl_lookup(broker: &Broker, ns: &str, token: &str) -> bool {
+    tl_device_id(broker, ns, token).await.is_some()
+}
+
+#[cfg(test)]
+async fn tl_device_id(broker: &Broker, ns: &str, token: &str) -> Option<String> {
+    let map = broker.namespaces.lock().await;
+    tl_device_in(map.get(ns)?, token)
+}
+
+/// Die Kennung des Geräts hinter diesem Zugang — `None`, wenn er in diesem
+/// Turnier nicht eingetragen ist.
+///
+/// Arbeitet auf dem bereits gesperrten Namespace, damit die Handler und die
+/// Tests **dieselbe** Prüfung benutzen: Eine zweite, inline abgeschriebene
+/// Fassung im Handler wäre genau die, die niemand testet.
+fn tl_device_in(namespace: &Namespace, token: &str) -> Option<String> {
+    if token.is_empty() {
+        return None;
+    }
+    namespace.tl_tokens.get(token).cloned()
+}
+
+/// Vergisst alle Zugänge und den Anzeige-Zustand eines Turniers.
+///
+/// Beim Verschwinden des Turnier-PCs: Ohne ihn gibt es nichts zu bedienen,
+/// und die Zugänge über das Turnier hinaus gültig zu halten wäre auf einem
+/// Relay, der viele Turniere sieht, die falsche Vorgabe.
+fn forget_tl_access(namespace: &mut Namespace) {
+    namespace.tl_tokens.clear();
+    namespace.tl_state = None;
+    namespace.tl_devices.clear();
+    for (_, pending) in namespace.tl_pending.drain() {
+        let _ = pending.send(TlResponse::err(
+            TlErrorCode::HostOffline,
+            "Die Verbindung zum Turnier-PC ist abgerissen.",
+        ));
+    }
+}
+
+/// Der abgelegte Anzeige-Zustand (Revision + JSON), falls einer da ist.
+#[cfg(test)]
+async fn tl_stored_state(broker: &Broker, ns: &str) -> Option<(u64, String)> {
+    let map = broker.namespaces.lock().await;
+    map.get(ns).and_then(|n| n.tl_state.clone())
+}
+
+/// Beansprucht einen Geräteplatz. `false` = das Turnier ist voll.
+///
+/// Ein bereits belegter Platz wird nur aufgefrischt. Stille Plätze verfallen
+/// nach [`TL_DEVICE_TTL_MS`].
+fn claim_tl_slot(namespace: &mut Namespace, token: &str, now: u64) -> bool {
+    namespace
+        .tl_devices
+        .retain(|_, seen| *seen + TL_DEVICE_TTL_MS > now);
+    if !namespace.tl_devices.contains_key(token) && namespace.tl_devices.len() >= MAX_TL_DEVICES {
+        return false;
+    }
+    namespace.tl_devices.insert(token.to_string(), now);
+    true
+}
+
+/// Reicht ein Kommando an den Turnier-PC durch und wartet auf seine Antwort.
+///
+/// Dasselbe erprobte Muster wie bei der Ergebnismeldung vom Tablet: eine
+/// laufende Nummer, ein wartender Kanal, ein Zeitablauf. Der Relay entscheidet
+/// nichts — er trägt nur.
+async fn tl_forward(
+    broker: &Broker,
+    ns: &str,
+    device_id: String,
+    op_id: String,
+    view_rev: u64,
+    action: TlAction,
+) -> TlResponse {
+    let (ack_tx, ack_rx) = oneshot::channel();
+    let req_id;
+    {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(ns) else {
+            return TlResponse::err(
+                TlErrorCode::HostOffline,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            );
+        };
+        let Some(host) = namespace.host.clone() else {
+            return TlResponse::err(
+                TlErrorCode::HostOffline,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            );
+        };
+        // Wie bei den Ergebnissen: Jede offene Anfrage hält bis zum Zeitablauf
+        // einen Platz. Ohne Grenze könnte ein einzelnes Gerät den Namespace
+        // mit wartenden Anfragen füllen.
+        if namespace.tl_pending.len() >= MAX_PENDING_PER_NS {
+            return TlResponse::err(
+                TlErrorCode::HostOffline,
+                "Zu viele offene Anfragen — bitte kurz warten.",
+            );
+        }
+        req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.tl_pending.insert(req_id, ack_tx);
+        let frame = RelayFrame::TlCommand {
+            req_id,
+            device_id,
+            op_id,
+            view_rev,
+            action,
+        };
+        if host.send(text(&frame)).is_err() {
+            namespace.tl_pending.remove(&req_id);
+            return TlResponse::err(
+                TlErrorCode::HostOffline,
+                "Der Turnier-PC ist nicht erreichbar.",
+            );
+        }
+    }
+    match tokio::time::timeout(TL_TIMEOUT, ack_rx).await {
+        Ok(Ok(resp)) => resp,
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(ns) {
+                namespace.tl_pending.remove(&req_id);
+            }
+            TlResponse::err(
+                TlErrorCode::HostOffline,
+                "Der Turnier-PC hat nicht geantwortet — bitte den Stand prüfen.",
+            )
+        }
+    }
+}
+
+/// Soll die Turnierleitungs-Oberfläche bedient werden?
+///
+/// Genau ein Wort schaltet ab: `off`. Der Relay ist ein globales Binary —
+/// der Not-Aus muss im Notfall sicher greifen, aber ein Tippfehler in der
+/// Umgebung darf nicht stillschweigend die halbe Turnierleitung lahmlegen.
+/// Im Zweifel bleibt die Oberfläche an; abschalten ist eine bewusste Tat.
+fn tl_enabled(env_value: Option<&str>) -> bool {
+    !env_value.is_some_and(|v| v.trim().eq_ignore_ascii_case("off"))
+}
+
+/// Die Turnierleitungs-Seite. **Ohne Zugangsprüfung** — genau wie die
+/// Tablet-Seite: Ausgeliefert wird nur eine leere Hülle, die ihren Zugang
+/// erst aus dem Adress-Fragment liest. Alles Verwertbare kommt über
+/// `/tl/api/state`, und das ist geschützt.
+async fn tl_page() -> impl IntoResponse {
+    ([(header::CACHE_CONTROL, "no-store")], Html(TL_HTML))
+}
+
+/// Liest den Zugang aus dem `Authorization: Bearer`-Kopf.
+fn bearer(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|t| t.trim().chars().take(256).collect())
+        .unwrap_or_default()
+}
+
+/// Der Anzeige-Zustand für ein Turnierleitungs-Gerät.
+///
+/// Der Relay liefert nur aus, was der Turnier-PC zuletzt gepusht hat — er
+/// baut nichts und ergänzt nichts. Fehlt der Stand, ist das **kein** leeres
+/// Turnier, sondern „nicht verbunden": Ein leerer Stand sähe aus wie „alle
+/// Felder frei" und lüde dazu ein, alles neu zu vergeben.
+async fn tl_state_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let token = bearer(&headers);
+    let now = now_ms();
+    // Der Zugang findet sein Turnier selbst.
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        // **Nicht 401**: Ohne Turnier-PC weiß der Relay nichts über den
+        // Zugang. Ein 401 hier hieße für die Seite „entzogen" — und ein
+        // Netzwackler kostete jedes Gerät seine Kopplung.
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(&ns) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+        )
+            .into_response();
+    };
+    if !claim_tl_slot(namespace, &token, now) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+        )
+            .into_response();
+    }
+    let Some((rev, json)) = namespace.tl_state.clone() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CACHE_CONTROL, "no-store")],
+            "Der Turnier-PC hat noch keinen Stand geliefert.",
+        )
+            .into_response();
+    };
+    // Generation **und** Revision als ETag: Ein Gerät, das denselben Stand
+    // schon hat, bekommt 304 und spart die Übertragung — bei einer Seite, die
+    // alle zwei Sekunden fragt, ist das der Unterschied zwischen sparsam und
+    // lästig. Die Generation muss mit hinein, weil die Revision beim Neustart
+    // des Turnier-PCs wieder klein beginnt.
+    let etag = format!("\"{}-{rev}\"", namespace.tl_gen);
+    let unveraendert = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag);
+    if unveraendert {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+        )
+            .into_response();
+    }
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ETAG, etag.as_str()),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        json,
+    )
+        .into_response()
+}
+
+/// Rumpf eines TL-Kommandos, wie ihn die Seite schickt.
+#[derive(serde::Deserialize)]
+struct TlCommandBody {
+    #[serde(rename = "opId", default)]
+    op_id: String,
+    #[serde(rename = "viewRev", default)]
+    view_rev: u64,
+    action: TlAction,
+}
+
+/// Ein Kommando eines Turnierleitungs-Geräts.
+///
+/// Der Relay prüft den Zugang und reicht durch. Ob die Aktion zulässig ist,
+/// entscheidet allein der Turnier-PC (R5) — er ist der Einzige, der den
+/// Turnierstand kennt.
+async fn tl_command_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<TlCommandBody>,
+) -> impl IntoResponse {
+    let token = bearer(&headers);
+    let now = now_ms();
+    // Die Kennung des Geräts kommt vom Turnier-PC und reist zu ihm zurück —
+    // sein Protokoll soll benennen können, wer gehandelt hat. Der Zugang
+    // selbst bleibt hier; in Protokollen hat er nichts verloren.
+    let (ns, device_id) = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, device_id } => (ns, device_id),
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::OK,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(TlResponse::err(
+                    TlErrorCode::HostOffline,
+                    "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+                )),
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::OK,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(TlResponse::err(
+                    TlErrorCode::HostOffline,
+                    "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+                )),
+            )
+                .into_response();
+        };
+        if !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
+    }
+    let op_id: String = body.op_id.chars().take(128).collect();
+    let antwort = tl_forward(&broker, &ns, device_id, op_id, body.view_rev, body.action).await;
+    (
+        StatusCode::OK,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(antwort),
+    )
+        .into_response()
 }
 
 /// Verarbeitet ein Frame vom Host: an das passende Tablet weiterleiten bzw.
@@ -1867,7 +2356,82 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
         // auch die Absage, die der Host bereits sendet
         // (src-tauri/src/tablet/relay_client.rs) — jedes Gerät liefe dann
         // in den Zeitablauf statt eine Klartext-Meldung zu sehen.
-        HostFrame::TlAuth { .. } | HostFrame::TlState { .. } | HostFrame::TlAck { .. } => {}
+        HostFrame::TlAuth { devices } => {
+            // Zu viele: das ganze Frame verwerfen. Kappen wäre schlimmer —
+            // dann gälte ein Teil der Geräte weiter und ein anderer nicht,
+            // und der Widerruf wäre nur noch halb wirksam. Ohne diese Grenze
+            // könnte ein fehlerhafter (oder feindlicher) Host mit einer
+            // Millionenliste den Relay-Prozess in den Speichertod treiben —
+            // und mit ihm die Tablets, Monitore und den Ergebnisweg **aller**
+            // gleichzeitig laufenden Turniere.
+            if devices.len() > MAX_TL_TOKENS {
+                tracing::warn!(
+                    "TlAuth für '{ns}' verworfen: {} Geräte (Grenze {MAX_TL_TOKENS})",
+                    devices.len()
+                );
+                return true;
+            }
+            // **Ersetzen, nicht ergänzen**: Das ist der Widerruf. Ein
+            // abhandengekommenes Tablet verliert seinen Zugang, sobald der
+            // Turnier-PC ihn nicht mehr nennt — ergänzten wir hier, bliebe er
+            // bis zum Turnierende gültig.
+            namespace.tl_tokens = devices
+                .into_iter()
+                .filter(|d| !d.token.is_empty())
+                .map(|d| (d.token, d.id))
+                .collect();
+            // Plätze von Geräten aufgeben, deren Zugang eben widerrufen wurde.
+            namespace
+                .tl_devices
+                .retain(|t, _| namespace.tl_tokens.contains_key(t));
+            // Den Wegweiser mitziehen — sonst zeigte ein widerrufener Zugang
+            // weiter auf sein Turnier, und nur die zweite Prüfung hielte ihn
+            // auf. (Sperrreihenfolge: namespaces ist gehalten, tl_index folgt.)
+            let mut index = broker.tl_index.lock().await;
+            index.retain(|_, n| n != ns);
+            for token in namespace.tl_tokens.keys() {
+                // Einen fremden Eintrag **nicht** überschreiben: Sonst könnte
+                // ein zweiter Namespace, der denselben Zugang nennt, ein
+                // fremdes Gerät zu sich umleiten — es bekäme den Stand eines
+                // fremden Turniers samt Spielernamen. Zufällige Zugänge
+                // kollidieren praktisch nie; ein Riegel ohne Riegel ist
+                // trotzdem keiner.
+                match index.get(token) {
+                    Some(vorhanden) if vorhanden != ns => {
+                        tracing::warn!(
+                            "TL-Zugang von '{ns}' kollidiert mit '{vorhanden}' — ignoriert"
+                        );
+                    }
+                    _ => {
+                        index.insert(token.clone(), ns.to_string());
+                    }
+                }
+            }
+        }
+        HostFrame::TlState { rev, json } => {
+            if json.len() > MAX_STATE_LEN {
+                // Zu groß: nicht ablegen — der Relay trägt viele Turniere,
+                // und ein Zustand, der aus dem Ruder läuft, darf sie nicht
+                // mitnehmen. **Und den alten mit wegwerfen:** Bliebe er
+                // liegen, bekäme jedes Gerät weiter 304 auf einen längst
+                // eingefrorenen Feldplan und läse dazu „aktuell". Eine
+                // ehrliche Fehlanzeige ist besser als ein falscher Plan, auf
+                // den jemand ein Spiel setzt.
+                tracing::warn!(
+                    "TL-Zustand für '{ns}' verworfen: {} Bytes (Grenze {MAX_STATE_LEN}) \
+                     — die Oberfläche meldet sich als nicht verbunden",
+                    json.len()
+                );
+                namespace.tl_state = None;
+            } else {
+                namespace.tl_state = Some((rev, json));
+            }
+        }
+        HostFrame::TlAck { req_id, response } => {
+            if let Some(pending) = namespace.tl_pending.remove(&req_id) {
+                let _ = pending.send(response);
+            }
+        }
     }
     true
 }
@@ -1875,7 +2439,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relay_proto::{MatchBrief, PlayerBrief};
+    use relay_proto::{CourtExpectation, MatchBrief, PlayerBrief};
 
     #[test]
     fn pairing_code_is_eight_digits_and_random() {
@@ -1978,6 +2542,533 @@ mod tests {
         ns.host_last_seen = now_ms();
         drop(map);
         (broker, rx, host_tx)
+    }
+
+    // ───────────────── Turnierleitungs-Oberfläche (TL-Web) ─────────────────
+    //
+    // Der Relay ist hier **Briefträger, nicht Schiedsrichter**: Er kennt
+    // weder Spiele noch Felder, prüft nur den Zugang und reicht durch. Jede
+    // fachliche Entscheidung fällt am Turnier-PC (R5). Getestet wird deshalb
+    // genau das, was der Relay verspricht: Wer darf durch, wer nicht, und
+    // kommt die Antwort zurück.
+
+    /// Namespace mit Host und einem eingetragenen Zugang.
+    async fn broker_with_tl_device(token: &str) -> (Broker, mpsc::UnboundedReceiver<Message>, Tx) {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx.clone());
+            ns.host_last_seen = now_ms();
+            ns.tl_tokens
+                .insert(token.to_string(), "tl-test".to_string());
+        }
+        // Wie im Betrieb: Der Wegweiser wird mit derselben Bewegung gepflegt.
+        broker
+            .tl_index
+            .lock()
+            .await
+            .insert(token.to_string(), "ns1".to_string());
+        (broker, host_rx, host_tx)
+    }
+
+    #[test]
+    fn the_emergency_switch_takes_only_an_explicit_off() {
+        // Der Relay ist ein globales Binary. Der Not-Aus muss im Notfall
+        // sicher greifen — aber ein Tippfehler in der Umgebung darf die
+        // Turnierleitung nicht stillschweigend abschalten. Deshalb zählt
+        // genau ein Wort, und im Zweifel bleibt die Oberfläche an.
+        assert!(!tl_enabled(Some("off")));
+        assert!(!tl_enabled(Some("OFF")));
+        assert!(tl_enabled(None), "ohne Angabe an");
+        assert!(tl_enabled(Some("on")));
+        assert!(tl_enabled(Some("")), "leer ist keine Abschaltung");
+        assert!(tl_enabled(Some("0")), "kein Rätselraten über 0/1");
+    }
+
+    #[tokio::test]
+    async fn a_short_host_outage_does_not_look_like_a_revoked_access() {
+        // Der schwerste Fehler, den dieser Weg haben kann: Ein Wackler in
+        // der Verbindung des Turnier-PCs sieht aus wie ein Widerruf, alle
+        // Geräte werfen ihren Zugang weg und müssen mitten im Turnier neu
+        // gekoppelt werden. Ohne Turnier-PC kann der Relay über einen Zugang
+        // GAR NICHTS sagen — also sagt er „nicht verbunden", nicht „kein
+        // Zugang".
+        let (broker, _rx, host) = broker_with_tl_device("token").await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            release_host_slot(ns, &host);
+            forget_tl_access(ns);
+        }
+        assert_eq!(
+            tl_access_state(&broker, "token").await,
+            TlAccess::HostOffline,
+            "der Turnier-PC ist weg — mehr weiß der Relay nicht"
+        );
+        // Über einen Zugang, den er nicht kennt, sagt der Relay ebenfalls
+        // nichts: Er kann „nie ausgestellt" nicht von „widerrufen" oder
+        // „Turnier vorbei" unterscheiden — und wer Zugänge durchprobiert,
+        // soll aus der Antwort nichts lernen.
+        let (broker2, _rx2, _host2) = broker_with_tl_device("echt").await;
+        assert_eq!(
+            tl_access_state(&broker2, "erfunden").await,
+            TlAccess::HostOffline
+        );
+        assert!(matches!(
+            tl_access_state(&broker2, "echt").await,
+            TlAccess::Ok { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_token_finds_its_own_tournament_without_naming_it() {
+        // Die Adresse der Turnierleitungs-Seite trägt **keinen** Namespace:
+        // Der ist die `install_id`, und die ist zugleich der Zugang der
+        // Zähltablets (`/{ns}/ws`). Stünde sie in der URL, die jeder Helfer
+        // auf dem Bildschirm hat, könnte sich damit jeder als Tablet
+        // ausgeben. Also findet der Zugang sein Turnier selbst.
+        let (broker, _rx, host) = broker_with_tl_device("token-a").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "token-a".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(
+            tl_namespace_of(&broker, "token-a").await.as_deref(),
+            Some("ns1")
+        );
+        assert!(tl_namespace_of(&broker, "unbekannt").await.is_none());
+        assert!(tl_namespace_of(&broker, "").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_revoked_token_no_longer_finds_any_tournament() {
+        // Der Widerruf muss auch den Wegweiser mitnehmen — sonst zeigte der
+        // Zugang weiter auf sein Turnier und nur die zweite Prüfung hielte
+        // ihn auf.
+        let (broker, _rx, host) = broker_with_tl_device("alt").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "alt".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        assert!(tl_namespace_of(&broker, "alt").await.is_some());
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-2".to_string(),
+                    token: "neu".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        assert!(
+            tl_namespace_of(&broker, "alt").await.is_none(),
+            "widerrufen"
+        );
+        assert_eq!(
+            tl_namespace_of(&broker, "neu").await.as_deref(),
+            Some("ns1")
+        );
+
+        // Und mit dem Turnier-PC verschwindet auch der Wegweiser.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            release_host_slot(ns, &host);
+            forget_tl_access(ns);
+        }
+        forget_tl_index(&broker, "ns1").await;
+        assert!(tl_namespace_of(&broker, "neu").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn only_a_registered_device_may_command_a_tournament() {
+        // Der Zugang ist die einzige Hürde vor einem Schreibweg, der aus dem
+        // Internet erreichbar ist. Ein unbekannter Zugang darf den Host nicht
+        // einmal erreichen — sonst wäre der Turnier-PC dem offenen Netz
+        // ausgesetzt und müsste jede Anfrage selbst abwehren.
+        let (broker, mut host_rx, _host) = broker_with_tl_device("gutes-token").await;
+
+        let abgewiesen = tl_lookup(&broker, "ns1", "falsches-token").await;
+        assert!(!abgewiesen, "fremder Zugang");
+        assert!(
+            host_rx.try_recv().is_err(),
+            "und der Turnier-PC hat davon nie erfahren"
+        );
+        assert!(tl_lookup(&broker, "ns1", "gutes-token").await);
+    }
+
+    #[tokio::test]
+    async fn a_token_from_one_tournament_never_reaches_another() {
+        // Zwei Turniere laufen gleichzeitig auf demselben Relay. Der Zugang
+        // des einen darf im anderen nichts bewirken — sonst könnte eine
+        // fremde Turnierleitung Felder umräumen.
+        let (broker, _rx, _host) = broker_with_tl_device("token-a").await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns2 = map.entry("ns2".into()).or_insert_with(Namespace::new);
+            let (tx, _rx) = mpsc::unbounded_channel();
+            ns2.host = Some(tx);
+            ns2.tl_tokens
+                .insert("token-b".to_string(), "tl-b".to_string());
+        }
+        assert!(!tl_lookup(&broker, "ns1", "token-b").await);
+        assert!(!tl_lookup(&broker, "ns2", "token-a").await);
+        assert!(tl_lookup(&broker, "ns2", "token-b").await);
+    }
+
+    #[tokio::test]
+    async fn revoking_a_device_takes_effect_with_the_next_push() {
+        // Der Widerruf ist die einzige Handhabe, wenn ein Tablet abhanden
+        // kommt. Deshalb **ersetzt** der Push die Menge, statt sie zu
+        // ergänzen: Was der Turnier-PC nicht mehr nennt, gilt nicht mehr.
+        let (broker, _rx, host) = broker_with_tl_device("altes-token").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-neu".to_string(),
+                    token: "neues-token".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        assert!(
+            !tl_lookup(&broker, "ns1", "altes-token").await,
+            "widerrufen"
+        );
+        assert!(tl_lookup(&broker, "ns1", "neues-token").await);
+    }
+
+    #[tokio::test]
+    async fn the_tournament_pc_going_away_takes_the_access_with_it() {
+        // Ohne Turnier-PC gibt es nichts zu bedienen. Die Zugänge dann
+        // liegenzulassen hieße, sie über das Turnier hinaus gültig zu halten
+        // — auf einem Relay, der viele Turniere sieht.
+        let (broker, _rx, host) = broker_with_tl_device("token").await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            release_host_slot(ns, &host);
+            forget_tl_access(ns);
+        }
+        assert!(!tl_lookup(&broker, "ns1", "token").await);
+    }
+
+    #[tokio::test]
+    async fn an_absurd_device_list_is_refused_whole() {
+        // Der Relay trägt alle Turniere zugleich. Eine Millionenliste würde
+        // ihn in den Speichertod treiben und Tablets, Monitore und den
+        // Ergebnisweg aller anderen mitreißen. Gekappt wird nicht: Ein halb
+        // wirksamer Widerruf ist schlimmer als ein verworfenes Frame.
+        let (broker, _rx, host) = broker_with_tl_device("gut").await;
+        let zu_viele: Vec<relay_proto::TlAuthDevice> = (0..MAX_TL_TOKENS + 1)
+            .map(|i| relay_proto::TlAuthDevice {
+                id: format!("tl-{i}"),
+                token: format!("t-{i}"),
+            })
+            .collect();
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth { devices: zu_viele },
+            &host,
+        )
+        .await;
+
+        assert!(
+            tl_lookup(&broker, "ns1", "gut").await,
+            "der alte Stand bleibt"
+        );
+        assert!(!tl_lookup(&broker, "ns1", "t-0").await, "nichts übernommen");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_state_also_drops_the_one_before_it() {
+        // Bliebe der alte Stand liegen, bekäme jedes Gerät weiter „unverändert"
+        // auf einen eingefrorenen Feldplan — und läse dazu „aktuell". Dann
+        // setzt jemand ein Spiel auf ein Feld, das seit zehn Minuten belegt
+        // ist. Eine ehrliche Fehlanzeige ist besser als ein falscher Plan.
+        let (broker, _rx, host) = broker_with_tl_device("token").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 5,
+                json: r#"{"rev":5}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+        assert!(tl_stored_state(&broker, "ns1").await.is_some());
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 6,
+                json: "x".repeat(MAX_STATE_LEN + 1),
+            },
+            &host,
+        )
+        .await;
+        assert!(
+            tl_stored_state(&broker, "ns1").await.is_none(),
+            "auch der alte Stand ist weg"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_state_is_served_unchanged_and_its_revision_stays_put() {
+        // Der Relay legt den Anzeige-Zustand nur ab — er versteht ihn nicht.
+        // Die Revision kommt vom Turnier-PC und ändert sich nur bei echter
+        // Änderung; daran erkennt ein Gerät, ob es neu zeichnen muss.
+        let (broker, _rx, host) = broker_with_tl_device("token").await;
+        let json = r#"{"rev":7,"courts":[]}"#;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 7,
+                json: json.to_string(),
+            },
+            &host,
+        )
+        .await;
+        let (rev, gespeichert) = tl_stored_state(&broker, "ns1").await.expect("Zustand da");
+        assert_eq!(rev, 7);
+        assert_eq!(gespeichert, json, "unverändert durchgereicht");
+
+        // Derselbe Stand erneut gepusht: Die Revision bleibt, was sie war.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 7,
+                json: json.to_string(),
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(tl_stored_state(&broker, "ns1").await.unwrap().0, 7);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_state_is_dropped_instead_of_filling_the_relay() {
+        // Der Relay trägt viele Turniere. Ein Zustand, der aus dem Ruder
+        // läuft, darf ihn nicht mitnehmen — dann fiele auch der
+        // Tablet-Spielzettel aller anderen aus.
+        let (broker, _rx, host) = broker_with_tl_device("token").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 1,
+                json: "x".repeat(MAX_STATE_LEN + 1),
+            },
+            &host,
+        )
+        .await;
+        assert!(
+            tl_stored_state(&broker, "ns1").await.is_none(),
+            "zu groß: gar nicht erst abgelegt"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_command_carries_the_device_name_not_its_access() {
+        // Der Turnier-PC protokolliert, wer was ausgelöst hat. Dafür braucht
+        // er die Kennung des Geräts — der Zugang selbst darf nirgends
+        // auftauchen, auch nicht in Teilen. Deshalb reist die Kennung mit dem
+        // Zugang mit, statt aus ihm abgeleitet zu werden.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx.clone());
+            ns.host_last_seen = now_ms();
+        }
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-3f2a".to_string(),
+                    token: "geheim".to_string(),
+                }],
+            },
+            &host_tx,
+        )
+        .await;
+        assert_eq!(
+            tl_device_id(&broker, "ns1", "geheim").await.as_deref(),
+            Some("tl-3f2a")
+        );
+        assert!(tl_device_id(&broker, "ns1", "falsch").await.is_none());
+
+        // Und im weitergeleiteten Kommando steht genau diese Kennung.
+        let broker2 = broker.clone();
+        tokio::spawn(async move {
+            tl_forward(
+                &broker2,
+                "ns1",
+                "tl-3f2a".to_string(),
+                "op".to_string(),
+                1,
+                TlAction::SetAutoAssign { enabled: false },
+            )
+            .await
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("kein Kommando")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text erwartet")
+        };
+        assert!(
+            t.as_str().contains("tl-3f2a"),
+            "die Kennung fehlt: {}",
+            t.as_str()
+        );
+        assert!(
+            !t.as_str().contains("geheim"),
+            "der Zugang darf nie mitreisen: {}",
+            t.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_reaches_the_host_and_its_answer_comes_back() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+
+        // Die Anfrage wartet auf die Quittung — wie bei der Ergebnismeldung.
+        let warten = tokio::spawn(async move {
+            tl_forward(
+                &broker2,
+                "ns1",
+                "dev-1".to_string(),
+                "op-1".to_string(),
+                12,
+                TlAction::FreeCourt {
+                    court_id: 3,
+                    expect: CourtExpectation::Any,
+                },
+            )
+            .await
+        });
+
+        // Der Host bekommt das Kommando mitsamt Kennungen.
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("kein Kommando beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        let RelayFrame::TlCommand {
+            req_id,
+            device_id,
+            op_id,
+            view_rev,
+            ..
+        } = frame
+        else {
+            panic!("TlCommand erwartet")
+        };
+        assert_eq!(device_id, "dev-1");
+        assert_eq!(op_id, "op-1", "der Doppelschutz muss mitreisen");
+        assert_eq!(view_rev, 12);
+
+        // Und seine Antwort löst die wartende Anfrage.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAck {
+                req_id,
+                response: TlResponse::ok(13),
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert!(antwort.ok);
+        assert_eq!(antwort.state_rev, 13);
+    }
+
+    #[tokio::test]
+    async fn without_a_tournament_pc_the_page_gets_a_clear_answer() {
+        // Kein Warten ins Leere: Die Seite soll sagen können, woran es liegt.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let antwort = tl_forward(
+            &broker,
+            "ns1",
+            "dev-1".to_string(),
+            "op-1".to_string(),
+            0,
+            TlAction::SetAutoAssign { enabled: true },
+        )
+        .await;
+        assert!(!antwort.ok);
+        assert_eq!(antwort.code, Some(TlErrorCode::HostOffline));
+    }
+
+    #[tokio::test]
+    async fn the_ninth_device_is_turned_away_and_a_stale_slot_frees_up() {
+        // Ein Turnier hat eine Handvoll Helfer. Die Grenze schützt den
+        // Turnier-PC davor, von Dutzenden Browsern abgefragt zu werden —
+        // aber ein Gerät, das nur den Tab geschlossen hat, darf seinen Platz
+        // nicht auf Dauer blockieren.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            let (tx, _rx) = mpsc::unbounded_channel();
+            ns.host = Some(tx);
+            for i in 0..9 {
+                ns.tl_tokens.insert(format!("token-{i}"), format!("tl-{i}"));
+            }
+            for i in 0..MAX_TL_DEVICES {
+                assert!(
+                    claim_tl_slot(ns, &format!("token-{i}"), 100_000),
+                    "Gerät {i} passt noch"
+                );
+            }
+            assert!(
+                !claim_tl_slot(ns, "token-8", 100_000),
+                "das neunte wird abgewiesen"
+            );
+            // Dasselbe Gerät noch einmal: kein neuer Platz nötig.
+            assert!(claim_tl_slot(ns, "token-0", 100_001));
+            // Eine Minute später sind die stummen Plätze frei.
+            assert!(claim_tl_slot(ns, "token-8", 100_000 + TL_DEVICE_TTL_MS + 1));
+        }
     }
 
     #[tokio::test]

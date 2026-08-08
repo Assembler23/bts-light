@@ -574,8 +574,27 @@ async function send(opId, action, onOk) {
     const res = await fetch(API + "/command", {
       method: "POST",
       headers: { "content-type": "application/json", Authorization: "Bearer " + token },
-      body: JSON.stringify({ opId, action }),
+      // `viewRev` ist der Stand, auf dem diese Entscheidung beruht. Ohne ihn
+      // könnte der Turnier-PC nicht erkennen, dass jemand nach zehn Minuten
+      // Standby auf einen überholten Plan getippt hat.
+      body: JSON.stringify({ opId, action, viewRev: (state && state.rev) || 0 }),
     });
+    // Nicht jede Antwort ist eine Antwort: Abgewiesene Anfragen kommen als
+    // Klartext, und `res.json()` darauf wirft. Der Fehlerzweig sagt dann
+    // „nicht bestätigt — bitte wiederholen", und der Helfer hämmert auf einen
+    // Knopf, der nie durchkommt.
+    if (res.status === 429) {
+      toast("Zu viele Turnierleitungs-Geräte — bitte eines schließen und erneut versuchen.", true);
+      return false;
+    }
+    if (res.status === 401) {
+      toast("Dieses Gerät ist nicht mehr freigegeben.", true);
+      return false;
+    }
+    if (!res.ok) {
+      toast("Der Turnier-PC hat die Anfrage abgewiesen (" + res.status + ").", true);
+      return false;
+    }
     const answer = await res.json();
     if (answer.ok) {
       // Erfolg und Einschränkung in EINER Meldung: Zwei nacheinander
@@ -739,6 +758,8 @@ let hallFilter = new URLSearchParams(location.search).get("halle")
   || localStorage.getItem("bts-tl-halle") || "";
 let failures = 0;
 let lastOkMs = 0;
+/// Mitschnitt der zuletzt erhaltenen Fassung — leer, solange keiner kam.
+let etag = "";
 
 function setHall(hall) {
   hallFilter = hall;
@@ -751,31 +772,94 @@ function setHall(hall) {
 
 async function poll() {
   try {
-    const res = await fetch(API + "/state", {
-      headers: { Authorization: "Bearer " + token },
-      cache: "no-store",
-    });
-    if (res.status === 401) {
-      // Der Zugang wurde entzogen. Ehrlich sagen, was zu tun ist — und den
-      // ungültigen Zugang wegräumen, damit die Seite nicht endlos scheitert.
-      localStorage.removeItem(STORE_KEY);
-      $("app").hidden = true;
-      $("gate").hidden = false;
-      $("gate").querySelector("h1").textContent = "Zugang wurde entzogen";
-      $("gate").querySelector("p").innerHTML =
-        "Dieses Gerät ist in bts-light nicht mehr freigegeben. "
-        + "Neu koppeln über <b>Turnierleitung → Geräte</b>.";
+    // Der Mitschnitt der letzten Fassung spart die Übertragung, solange sich
+    // nichts geändert hat: Bei einer Seite, die alle zwei Sekunden fragt, ist
+    // das über ein Turnier hinweg der Unterschied zwischen sparsam und
+    // lästig — besonders über Mobilfunk. Der Turnier-PC im Hallennetz
+    // beantwortet das nicht und schickt einfach den vollen Stand.
+    const kopf = { Authorization: "Bearer " + token };
+    if (etag) kopf["If-None-Match"] = etag;
+    const res = await fetch(API + "/state", { headers: kopf, cache: "no-store" });
+    if (res.status === 304) {
+      // Unverändert: Die Verbindung ist gesund, es gibt nur nichts Neues.
+      failures = 0;
+      lastOkMs = Date.now();
+      renderConnection();
       return;
     }
+    if (res.status === 429) {
+      // Mehr Geräte als das Turnier bedient. Ehrlich benennen — sonst
+      // erschiene es als Netzproblem und jemand lädt endlos neu. Die Sperre
+      // löst sich von selbst, sobald ein Platz frei wird.
+      showGate("Zu viele Geräte",
+        "In diesem Turnier sind bereits acht Turnierleitungs-Geräte aktiv. "
+        + "Ein nicht mehr benutztes Gerät schließen — der Platz wird nach "
+        + "einer Minute frei. Diese Seite versucht es weiter.");
+      return;
+    }
+    if (res.status === 401) {
+      // Der Zugang gilt nicht mehr. **Ohne ihn zu löschen**: Ein
+      // weggeworfener Zugang lässt sich nur am Turnier-PC neu vergeben —
+      // quer durch die Halle, mitten im Turnier. Und der Grund kann auch
+      // ein Missverständnis sein. Wer wirklich entzogen wurde, sieht die
+      // Meldung dauerhaft; alle anderen kommen von selbst zurück.
+      showGate("Zugang gilt nicht mehr",
+        "Dieses Gerät ist in bts-light nicht mehr freigegeben. "
+        + "Falls das ein Irrtum ist: Die Seite versucht es weiter. "
+        + "Sonst neu koppeln über Turnierleitung → Geräte.");
+      return;
+    }
+    if (res.status === 503) {
+      // Der Turnier-PC ist (gerade) nicht verbunden. Das ist ein
+      // Verbindungs-, kein Zugangsproblem — die Seite bleibt stehen und
+      // zeigt es an, statt einen leeren Stand als „alle Felder frei" zu
+      // deuten.
+      throw new Error("Turnier-PC nicht verbunden");
+    }
     if (!res.ok) throw new Error("HTTP " + res.status);
+    etag = res.headers.get("etag") || "";
     state = await res.json();
-    syncClock(state.server_now_ms);
+    // Die Serverzeit bevorzugt aus dem Kopf der Antwort: Über den Relay ist
+    // der Stand zwischengespeichert, sein `server_now_ms` also der Zeitpunkt
+    // des letzten Pushs. Nach einer ruhigen Viertelstunde gingen alle Uhren
+    // eine Viertelstunde nach — und die Seite meldete keinen einzigen
+    // fälligen Aufruf mehr.
+    syncClock(headerNow(res) || state.server_now_ms);
     failures = 0;
     lastOkMs = Date.now();
+    hideGate();
     render();
   } catch (e) {
     failures++;
+    // Der Mitschnitt gilt nur zu einem lebenden Gegenüber: Startet der
+    // Turnier-PC neu, beginnt seine Revision wieder klein, und ein alter
+    // Mitschnitt bekäme „unverändert" auf einen völlig anderen Stand.
+    etag = "";
     renderConnection();
+  }
+}
+
+/** Serverzeit aus dem Antwortkopf (ms), 0 wenn keiner mitkam. */
+function headerNow(res) {
+  const d = res.headers.get("date");
+  if (!d) return 0;
+  const t = Date.parse(d);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Die Seite gegen eine Erklärung tauschen. */
+function showGate(titel, text) {
+  $("app").hidden = true;
+  $("gate").hidden = false;
+  $("gate").querySelector("h1").textContent = titel;
+  $("gate").querySelector("p").textContent = text;
+}
+
+/** Und wieder zurück, sobald es weitergeht. */
+function hideGate() {
+  if (!$("gate").hidden) {
+    $("gate").hidden = true;
+    $("app").hidden = false;
   }
 }
 
