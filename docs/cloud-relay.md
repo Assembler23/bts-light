@@ -101,14 +101,16 @@ Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 
 ### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
 
-> **Stand:** Im **LAN** ist die Oberfläche vollständig bedienbar (siehe
-> [tablet.md](tablet.md)). Der **Relay** hat seit Schritt 10 Routen,
-> Zugangsprüfung und Weiterleitung — was noch fehlt, ist die Gegenseite am
-> Turnier-PC (`relay_client.rs` pusht `TlAuth`/`TlState` noch nicht und
-> beantwortet `TlCommand` noch nicht). Bis dahin bleibt der Cloud-Weg
-> unbenutzt: Ohne Push kennt der Relay kein einziges Token, und **jede**
-> Anfrage endet abgewiesen, bevor sie irgendetwas berührt. Fachliche
-> Grundlage: [features/turnierleitung-web.md](features/turnierleitung-web.md),
+> **Stand:** Der Weg steht in beiden Richtungen — im **LAN** (siehe
+> [tablet.md](tablet.md)) und über den **Relay**. Der Turnier-PC spiegelt
+> seine Zugänge (`TlAuth`) und seinen Anzeige-Zustand (`TlState`) und
+> beantwortet `TlCommand` mit **derselben** Ausführung wie im Hallennetz.
+> Was noch fehlt, ist die Geräteverwaltung in der Desktop-Oberfläche (QR
+> zum Koppeln, Widerruf) — bis dahin lassen sich Geräte nur von Hand in der
+> `config.json` eintragen, und ohne Opt-in (`tl_web.enabled`, Default aus)
+> kennt der Relay kein einziges Token: **Jede** Anfrage endet abgewiesen,
+> bevor sie irgendetwas berührt. Fachliche Grundlage:
+> [features/turnierleitung-web.md](features/turnierleitung-web.md),
 > [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und
 > [ADR 0011](adr/0011-tl-web-geraete-identitaet.md).
 
@@ -149,6 +151,36 @@ Der Relay ist dabei **Briefträger, nicht Schiedsrichter**: Er kennt weder
 Spiele noch Felder, prüft den Zugang und reicht durch. Ob eine Aktion
 zulässig ist, entscheidet allein der Turnier-PC (R5) — er ist der Einzige mit
 dem Turnierstand. Ein Fehler im Relay kann deshalb keine Wertung erfinden.
+
+**Was der Turnier-PC dazu tut** (`relay_client.rs`, 2-s-Takt):
+
+- `TlAuth` — die Zugänge, **nur bei Änderung**, aber immer einmal nach dem
+  Verbinden: Der Relay vergisst sie beim Abriss, und ohne diesen ersten Push
+  bliebe die Oberfläche nach jedem Reconnect ausgesperrt. Auch die leere
+  Liste wird geschickt; sie ist der Widerruf des letzten Geräts und die
+  Wirkung des Ausschalters.
+- `TlState` — der Anzeige-Zustand, **nur wenn die Revision steigt**. Sonst
+  liefe alle zwei Sekunden ein voller Turnierstand durchs Netz, auf
+  Mobilfunkgeräten der Turnierleitung.
+- `TlCommand` → `tl::execute` → `TlAck`: derselbe Ausführungsweg wie im
+  Hallennetz. Die Kennung aus dem Kommando wird gegen die **eigene**
+  Geräteliste gehalten, bevor irgendetwas geschieht — sonst hinge die
+  Nachvollziehbarkeit („wer hat was ausgelöst") allein am Relay.
+
+**Die Revision zählt der Turnier-PC, für beide Wege dieselbe**
+(`tl::build_state_with_rev`). Zwei getrennte Zähler wären schlimmer als
+keiner: Ein Gerät im Hallennetz und eines aus dem Internet meinten mit
+derselben Zahl verschiedene Stände. Der Fingerabdruck lässt Uhrzeit und
+Revision selbst außen vor — sonst zählte sie im Sekundentakt hoch, obwohl
+sich nichts geändert hat.
+
+**`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
+Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
+Turnier im Sekundentakt, in einer ruhigen Phase minutenlang gar nicht —
+dieselbe Zahl bedeutete mal Sekunden, mal eine Viertelstunde. Was ein
+veralteter Blick anrichten kann, fangen die fachlichen Prüfungen genauer ab:
+`expect` beim Feld, der beanspruchte Walkover-Vorschlag, die
+Ergebnisprüfung. Die Zahl dient der Nachvollziehbarkeit.
 
 Zwei Hürden vor dem Schreibweg: Der Zugang muss (1) im **Wegweiser** ein
 Turnier finden und (2) in genau diesem Turnier eingetragen sein. Ein Zugang

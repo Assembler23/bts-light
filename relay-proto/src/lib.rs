@@ -1235,6 +1235,23 @@ pub enum HostFrame {
     },
 }
 
+/// Höchstzahl der Turnierleitungs-Geräte, die der Relay spiegelt.
+///
+/// **Geteilt, weil beide Seiten dieselbe Zahl meinen müssen:** Der Relay
+/// verwirft eine längere Liste vollständig (ein halbierter Widerruf wäre
+/// schlimmer als keiner), und der Host muss das vorher wissen — sonst hielte
+/// er ein nie angekommenes Frame für zugestellt und die Cloud-Oberfläche
+/// bliebe stumm gesperrt.
+pub const MAX_TL_DEVICES_MIRRORED: usize = 64;
+
+/// Höchstgröße des Anzeige-Zustands in Bytes.
+///
+/// Ebenfalls geteilt: Der Relay legt größere Stände nicht ab, und der Host
+/// muss seinen Zustand vorher kürzen. Ohne dieses gemeinsame Maß liefe ein
+/// großes Turnier in eine dauerhaft tote Cloud-Oberfläche — je größer das
+/// Turnier, desto sicherer.
+pub const MAX_TL_STATE_LEN: usize = 64 * 1024;
+
 /// Ein zugelassenes Turnierleitungs-Gerät, wie der Host es dem Relay
 /// spiegelt: zufällige Kennung + Zugang, **kein** Name.
 ///

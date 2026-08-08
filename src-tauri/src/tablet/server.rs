@@ -105,6 +105,19 @@ impl ServerCtx {
         AppConfig::load_from(&self.config_path).unwrap_or_default()
     }
 
+    /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
+    ///
+    /// Für Entscheidungen, bei denen „Datei gerade nicht lesbar" etwas ganz
+    /// anderes bedeutet als „so ist es eingestellt": Der Widerruf der
+    /// Turnierleitungs-Zugänge etwa. Die Datei wird beim Speichern
+    /// abgeschnitten und neu geschrieben — trifft der Abgleich genau dieses
+    /// Fenster, ergäbe die Standard-Konfiguration „keine Geräte
+    /// zugelassen", und alle Turnierleitungs-Geräte flögen für einen Takt
+    /// hinaus.
+    pub fn app_config_result(&self) -> Result<AppConfig, String> {
+        AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())
+    }
+
     /// Lädt die Geräte→Target-Zuweisungen frisch von der Platte. Ein
     /// Target ist entweder eine CourtID (klassischer Court-Monitor) oder
     /// ein Info-Display (`InfoOverview` / `InfoPreparation`).
@@ -1006,15 +1019,26 @@ async fn tl_state(
     if tl_device(&ctx, &headers).is_none() {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
     }
-    let state = crate::tablet::tl::build_state(
-        &ctx.tablet,
-        &ctx.app_config(),
-        now_ms(),
-        // Die Revision zählt der Aufrufer erst, wenn die Seite sie braucht
-        // (Abruf mit „hat sich etwas geändert?"). Bis dahin ist sie 0.
-        0,
-    );
-    Json(state).into_response()
+    // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz und eines
+    // aus dem Internet müssen mit derselben Zahl denselben Stand meinen,
+    // sonst träfe die Altersprüfung am Turnier-PC zufällige Entscheidungen.
+    let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &ctx.app_config(), now_ms());
+    // Die Seite fragt alle zwei Sekunden und schickt ihre letzte Fassung mit.
+    // Hat sich nichts geändert, spart „unverändert" den ganzen Stand — auf
+    // demselben Rechner, der nebenher BTP und die Tablets bedient.
+    //
+    // Die Prozess-Kennung gehört mit hinein: Nach einem Neustart der App
+    // beginnt die Revision wieder bei 1, und ein Gerät mit gemerkter Fassung
+    // „1" bekäme sonst „unverändert" auf einen völlig anderen Turnierstand.
+    let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+    let unveraendert = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag);
+    if unveraendert {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response();
+    }
+    (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
 }
 
 /// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine
@@ -1028,6 +1052,10 @@ struct TlCommandBody {
     /// auswerten könnte.
     #[serde(rename = "opId", default)]
     op_id: String,
+    /// Der Stand, auf dem die Entscheidung beruhte. Ohne Angabe 0 — dann
+    /// fehlt nur die Angabe im Protokoll, geprüft wird ohnehin fachlich.
+    #[serde(rename = "viewRev", default)]
+    view_rev: u64,
     action: relay_proto::TlAction,
 }
 
@@ -1040,8 +1068,18 @@ async fn tl_command(
     let Some(device) = tl_device(&ctx, &headers) else {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
     };
-    Json(crate::tablet::tl::execute(&ctx, &device, &body.op_id, now_ms(), body.action).await)
-        .into_response()
+    Json(
+        crate::tablet::tl::execute(
+            &ctx,
+            &device,
+            &body.op_id,
+            now_ms(),
+            body.view_rev,
+            body.action,
+        )
+        .await,
+    )
+    .into_response()
 }
 
 /// Validiert ein Endergebnis vom Tablet und schreibt es per `SENDUPDATE`

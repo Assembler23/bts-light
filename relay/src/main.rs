@@ -1826,7 +1826,10 @@ const TL_DEVICE_TTL_MS: u64 = 60_000;
 /// Kopplungen bleiben in der Liste), aber weit unter dem, was den Speicher
 /// gefährdet. Wird sie überschritten, verwirft der Relay das **ganze** Frame:
 /// Ein gekappter Widerruf wäre schlimmer als gar keiner.
-const MAX_TL_TOKENS: usize = 64;
+///
+/// **Geteilt mit dem Host** (`relay_proto`), damit er vorher weiß, wo Schluss
+/// ist — sonst hielte er ein verworfenes Frame für zugestellt.
+const MAX_TL_TOKENS: usize = relay_proto::MAX_TL_DEVICES_MIRRORED;
 
 /// Wie lange eine Anfrage auf die Quittung des Turnier-PCs wartet.
 const TL_TIMEOUT: Duration = Duration::from_secs(20);

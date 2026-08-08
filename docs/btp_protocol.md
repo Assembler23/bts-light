@@ -350,6 +350,59 @@ echten BTP gegenzuprüfen.
 - Implementierung: [src-tauri/src/btp/proto.rs](../src-tauri/src/btp/proto.rs)
   (`update_request`, `parse_update_response`, `MatchUpdate`).
 
+## Offen: Was macht BTP beim Überschreiben einer Wertung?
+
+**Muss an einem Test-BTP beantwortet werden, bevor die Ergebnis-Korrektur in
+der Turnierleitungs-Oberfläche freigeschaltet wird** (Schritt 12 der
+[TL-Web-Spec](features/turnierleitung-web.md), offener Punkt 1). Bis dahin
+lehnt der Host jedes `overwrite` mit „noch nicht freigeschaltet" ab.
+
+**Warum die Frage zählt.** Eine beendete KO-Paarung bekommt selbst eine
+`EntryID` — den Sieger — und wirkt damit als Feeder-Slot der nächsten Runde
+(siehe oben). Der Sieger steht also **sofort** im nächsten Spiel. Eine
+strenge Auslegung („Nachfolger existiert und ist besetzt → nicht
+korrigierbar") hieße damit praktisch: nur im Finale und in Gruppen. Deshalb
+muss man wissen, ob BTP beim Überschreiben den Baum **selbst neu rechnet**.
+
+### Aufbau
+
+Ein Test-Turnier mit einem KO-Draw für vier Teilnehmer (zwei Halbfinals, ein
+Finale) und einer Gruppe mit drei Teilnehmern. Namen frei erfunden — das
+Turnier wird nicht veröffentlicht.
+
+Nach **jedem** Schritt einen Mitschnitt ziehen und durchnummeriert ablegen:
+
+```powershell
+.\tools\capture-btp.ps1 -Password "<TP-Network-Passwort>"
+# btp-tournament.bin wegkopieren, z. B. nach ov-1-hf1-gewertet.bin
+```
+
+### Die Versuche
+
+| # | Handlung | Zu beobachten |
+|---|---|---|
+| 1 | HF1 werten (A gewinnt) | Bekommt die HF1-Paarung eine `EntryID`? Welche? Steht A im Finale? |
+| 2 | HF1 **überschreiben** (B gewinnt), Finale noch **nicht** aufgerufen | Ändert sich die `EntryID` der HF1-Paarung auf B? Steht jetzt B im Finale — oder bleibt A stehen? Antwortet `SENDUPDATE` überhaupt mit `Result=1`? |
+| 3 | Finale auf ein Feld legen (läuft), dann HF1 überschreiben | Wird der Baum trotzdem umgerechnet, während das Folgespiel läuft? Bleibt das Finale auf dem Feld? |
+| 4 | Finale werten, dann HF1 überschreiben | Was passiert mit der Wertung des Finales? Bleibt sie stehen, wird sie verworfen, wird sie widersprüchlich? |
+| 5 | In der **Gruppe** ein bereits gewertetes Spiel überschreiben | Werden `Rank`, `SetRatio`, `GameRatio` der Tabelle neu gerechnet? |
+| 6 | Ein Spiel überschreiben, das in BTP von Hand geändert wurde | Bestätigt „last write wins" auch beim Überschreiben? |
+
+Bei jedem Versuch zusätzlich festhalten: Was zeigt die **BTP-Oberfläche**
+danach an — und stimmt sie mit dem überein, was über die Schnittstelle kommt?
+
+### Auswertung
+
+1. Die aussagekräftigsten Mitschnitte als Fixtures nach
+   `src-tauri/tests/fixtures/` legen und mit einem Test in
+   `btp_capture.rs` einfrieren — so ist das Verhalten dokumentiert, auch
+   wenn kein BTP zur Hand ist.
+2. Ergebnis in ein **eigenes ADR** gießen (welche Fälle die Oberfläche
+   freigibt und warum), dann `plan_result_action` entsprechend öffnen.
+3. Zeigt sich, dass BTP den Baum **nicht** neu rechnet, bleibt die
+   Korrektur auf die Fälle beschränkt, in denen es nichts umzurechnen gibt:
+   kein Nachfolger, oder Gruppen-Auslosung.
+
 ## Fehlerfälle
 
 - **Falsches Passwort:** LOGIN liefert trotzdem `Action ID="REPLY"`, aber

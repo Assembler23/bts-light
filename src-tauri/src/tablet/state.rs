@@ -333,6 +333,11 @@ pub struct TabletState {
     /// Nachrufe am Meeting Point: `(match_id, Partei) → Stufe`. Getrennt nach
     /// Partei, weil in der Regel nur eine fehlt.
     prep_call_stages: RwLock<HashMap<(i64, String), u8>>,
+    /// Revision des Anzeige-Zustands: `(Nummer, Fingerabdruck)`. Steigt nur
+    /// bei echter Änderung — **die eine** Quelle für LAN und Cloud. Zwei
+    /// getrennte Zähler wären schlimmer als keiner: Dieselbe Zahl meinte
+    /// dann verschiedene Stände.
+    tl_state_rev: RwLock<(u64, String)>,
     /// Freitext-Ansagen (Master legt ab; Master + Slaves pollen + sprechen die
     /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
     freetext: RwLock<Vec<FreetextItem>>,
@@ -1137,6 +1142,36 @@ impl TabletState {
             .write()
             .unwrap()
             .retain(|(mid, _), _| *mid != match_id);
+    }
+
+    /// Kennung **dieses Programmlaufs** — Teil der Fassungs-Marke des
+    /// Anzeige-Zustands.
+    ///
+    /// Die Revision beginnt nach einem Neustart der App wieder bei 1. Ein
+    /// Gerät mit gemerkter Fassung „1" bekäme sonst „unverändert" auf einen
+    /// völlig anderen Turnierstand und arbeitete auf einem Plan von vorhin.
+    ///
+    /// Bewusst **kein Feld**: `TabletState` wird über `Default` erzeugt, und
+    /// eine dort genullte Kennung wäre über Neustarts hinweg dieselbe —
+    /// genau das, was sie verhindern soll.
+    pub fn process_tag(&self) -> u64 {
+        static TAG: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        *TAG.get_or_init(now_ms)
+    }
+
+    /// Die Revision des Anzeige-Zustands zu diesem Fingerabdruck.
+    ///
+    /// Zählt **nur** hoch, wenn sich der Fingerabdruck geändert hat. Damit
+    /// erkennt ein abrufendes Gerät „nichts Neues" und der Turnier-PC einen
+    /// Tipp, der auf einem überholten Stand beruht. Die Zählung lebt hier,
+    /// weil LAN-Server und Relay-Weg dieselbe Zahl meinen müssen.
+    pub fn tl_revision(&self, fingerprint: &str) -> u64 {
+        let mut g = self.tl_state_rev.write().unwrap();
+        if g.1 != fingerprint {
+            g.0 += 1;
+            g.1 = fingerprint.to_string();
+        }
+        g.0
     }
 
     /// Sind auf diesem Feld schon Punkte gefallen?

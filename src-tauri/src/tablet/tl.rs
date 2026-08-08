@@ -45,6 +45,72 @@ pub fn authorize(config: &AppConfig, token: &str) -> Option<crate::config::TlDev
         .cloned()
 }
 
+/// Das Gerät zu einer **Kennung** — der Weg über den Relay.
+///
+/// Dort prüft der Relay den Zugang und schickt nur die Kennung weiter (ein
+/// Zugang hat in Protokollen nichts verloren). Der Turnier-PC schaut
+/// trotzdem in seiner eigenen Liste nach: Sonst hinge die
+/// Nachvollziehbarkeit allein am Relay, und ein Protokolleintrag benennte
+/// womöglich ein Gerät, das dieser Rechner nie gekoppelt hat.
+pub(crate) fn device_by_id(config: &AppConfig, device_id: &str) -> Option<crate::config::TlDevice> {
+    if !config.tl_web.enabled {
+        return None;
+    }
+    let id = device_id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    config.tl_web.devices.iter().find(|d| d.id == id).cloned()
+}
+
+/// Die Geräte, die der Relay kennen muss: Kennung und Zugang, **kein Name**.
+///
+/// Das Etikett bleibt am Turnier-PC — es kann einen Personennamen enthalten,
+/// und der hat auf einem fremden Server nichts zu suchen. Ist die
+/// Oberfläche abgeschaltet, ist die Liste leer, und das heißt beim Relay
+/// ausdrücklich „kein Gerät zugelassen".
+pub(crate) fn auth_devices(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice> {
+    if !config.tl_web.enabled {
+        return Vec::new();
+    }
+    config
+        .tl_web
+        .devices
+        .iter()
+        .filter(|d| !d.token.trim().is_empty())
+        .map(|d| relay_proto::TlAuthDevice {
+            id: d.id.clone(),
+            token: d.token.clone(),
+        })
+        .collect()
+}
+
+/// Erkennungsmerkmal der Geräteliste — **inklusive der Zugänge**, aber als
+/// Hash.
+///
+/// Der Abgleich darf nicht nur die Kennungen sehen: Wird der Zugang eines
+/// verlorenen Tablets ersetzt, bleibt seine Kennung dieselbe (sie ist die
+/// Geräte-Identität). Ein Abgleich über Kennungen allein hielte den alten
+/// Zugang beim Relay am Leben — das verlorene Gerät schriebe weiter mit.
+///
+/// Gehasht statt im Klartext, weil dieser Wert in einer Variablen lebt, die
+/// beim Suchen nach Fehlern schnell ausgegeben ist. Dasselbe FNV-1a wie beim
+/// Ansage-Cache: klein, stabil, ohne Abhängigkeit.
+pub(crate) fn auth_fingerprint(devices: &[relay_proto::TlAuthDevice]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for d in devices {
+        for b in
+            d.id.bytes()
+                .chain(b":".iter().copied())
+                .chain(d.token.bytes())
+        {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{}:{hash:016x}", devices.len())
+}
+
 /// Was eine Aktion in BTP schreiben würde — getrennt vom Schreiben selbst,
 /// damit die Entscheidung ohne Netz prüfbar bleibt (Muster
 /// `build_manual_result_update`).
@@ -357,6 +423,95 @@ pub(crate) fn apply_state_action(
     }
 }
 
+/// Baut den Anzeige-Zustand **mit** seiner Revision.
+///
+/// Die eine Stelle, an der die Revision entsteht — für den LAN-Server und
+/// den Relay-Weg gleichermaßen. Zwei getrennte Zähler wären schlimmer als
+/// keiner: Ein Gerät im Hallennetz und eines aus dem Internet meinten mit
+/// derselben Zahl verschiedene Stände, und die Altersprüfung träfe zufällige
+/// Entscheidungen.
+pub(crate) fn build_state_with_rev(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+) -> TlState {
+    let mut state = build_state(tablet, config, now_ms, 0);
+    state.rev = tablet.tl_revision(&state_fingerprint(&mut state));
+    state
+}
+
+/// Der Anzeige-Zustand als JSON für den Relay — **garantiert klein genug**.
+///
+/// Der Relay legt einen zu großen Zustand nicht ab und sagt es dem Host
+/// nicht. Ohne eigene Kürzung wäre die Cloud-Oberfläche also ausgerechnet in
+/// großen Turnieren tot, und niemand wüsste warum. Gekürzt wird die
+/// Warteliste — sie ist der große Teil und nach Dringlichkeit sortiert, die
+/// vorderen Spiele sind die, um die es geht. `truncated_halls` meldet es.
+///
+/// Liefert `(json, rev)`. Dass gekürzt wurde, steht im Zustand selbst
+/// (`truncated_halls`) — dort sieht es auch die Turnierleitung.
+pub(crate) fn state_for_relay(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+) -> (String, u64) {
+    // Stufen statt Feinsuche: wenige, vorhersagbare Größen sind im Betrieb
+    // leichter zu erklären als eine Zahl, die bei jedem Abruf anders ausfällt.
+    //
+    // Die erste Stufe ist **kürzer als im Hallennetz** (40 statt 120), und
+    // das ist Absicht: Der Zustand geht bei jedem Ballwechsel neu über die
+    // Leitung — die Live-Punktestände gehören dazu, sie sind der Grund, warum
+    // man hinsieht. Bei voller Liste wäre das ein Dauerstrom von zehner
+    // Kilobyte alle zwei Sekunden, auf einem Turnier-PC womöglich über
+    // Mobilfunk, neben dem Ergebnisweg nach BTP. Vierzig wartende Spiele je
+    // Halle sind mehr, als eine Turnierleitung unterwegs überblickt; was
+    // fehlt, meldet `truncated_halls` ehrlich, und im Hallennetz steht
+    // weiterhin die volle Liste.
+    const STUFEN: [usize; 4] = [40, 20, 10, 5];
+    let mut letzte = String::new();
+    let mut letzte_rev = 0;
+    for limit in STUFEN {
+        let mut state = build_state_limited(tablet, config, now_ms, 0, limit);
+        state.rev = tablet.tl_revision(&state_fingerprint(&mut state));
+        letzte_rev = state.rev;
+        letzte = serde_json::to_string(&state).unwrap_or_default();
+        if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
+            return (letzte, letzte_rev);
+        }
+    }
+    // Selbst die kürzeste Stufe passt nicht — dann liegt es nicht an der
+    // Warteliste. Lieber den zu großen Stand schicken und den Relay
+    // entscheiden lassen (er verwirft ihn und die Seite meldet sich als
+    // nicht verbunden), als hier stillschweigend gar nichts zu tun.
+    tracing::warn!(
+        "TL-Zustand bleibt mit {} Bytes über der Relay-Grenze ({}) — \
+         die Cloud-Oberfläche wird nichts anzeigen",
+        letzte.len(),
+        relay_proto::MAX_TL_STATE_LEN
+    );
+    (letzte, letzte_rev)
+}
+
+/// Fingerabdruck des Zustands **ohne** Uhrzeit.
+///
+/// Ohne diese Ausnahme zählte die Revision im Sekundentakt hoch, obwohl sich
+/// nichts geändert hat: Die Übertragungsersparnis wäre dahin, und jeder Tipp
+/// käme als „auf überholtem Stand" zurück.
+///
+/// Nimmt den Zustand **veränderlich** und stellt die Uhrzeit danach wieder
+/// her, statt ihn zu kopieren: Das hier ist der heißeste Pfad des Features
+/// — jedes Gerät fragt alle zwei Sekunden, und der Zustand kann zehner
+/// Kilobyte groß sein. Eine Kopie nur zum Wegwerfen wäre auf demselben
+/// Rechner spürbar, der nebenher BTP und die Tablets bedient. (`rev` ist
+/// beim Bau ohnehin 0.)
+fn state_fingerprint(state: &mut TlState) -> String {
+    let zeit = state.server_now_ms;
+    state.server_now_ms = 0;
+    let fp = serde_json::to_string(&state).unwrap_or_default();
+    state.server_now_ms = zeit;
+    fp
+}
+
 /// Kurzform einer Partei als Schlüssel der Nachruf-Zählung.
 fn side_key(side: &relay_proto::PrepCallSide) -> &'static str {
     match side {
@@ -563,9 +718,30 @@ pub(crate) async fn execute(
     device: &crate::config::TlDevice,
     op_id: &str,
     now_ms: u64,
+    view_rev: u64,
     action: relay_proto::TlAction,
 ) -> relay_proto::TlResponse {
     use relay_proto::{TlErrorCode as C, TlResponse};
+
+    // Ins Protokoll gehört die **Kennung** des Geräts, nie sein Etikett: Das
+    // kann „Tablet von Anna Meier" heißen, und die Protokolle werden zur
+    // Fehlersuche hochgeladen. Dazu der Stand, auf dem die Entscheidung
+    // beruhte — nach einer strittigen Aktion ist genau das die Frage.
+    //
+    // **Bewusst keine Schwellenprüfung auf `view_rev`.** Eine Grenze in
+    // Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem
+    // vollen Turnier also im Sekundentakt, in einer ruhigen Phase minutenlang
+    // gar nicht — dieselbe Zahl bedeutete mal Sekunden, mal eine
+    // Viertelstunde. Was ein veralteter Blick wirklich anrichten kann, fangen
+    // die **fachlichen** Prüfungen ab, und die sind genauer: `expect` beim
+    // Feld (das Spiel steht nicht mehr dort), der beanspruchte
+    // Walkover-Vorschlag (ist weg → „schon bearbeitet"), die
+    // Ergebnisprüfung (bereits gewertet).
+    tracing::info!(
+        "TL-Web [{}]: {} (Ansicht {view_rev})",
+        device.id,
+        action_label(&action)
+    );
 
     // Wiederholung? Dann die gespeicherte Antwort, ohne erneut zu schreiben.
     // Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal;
@@ -575,7 +751,7 @@ pub(crate) async fn execute(
     if let Some(known) = ctx.tablet.remembered_result(op_id, &fingerprint, now_ms) {
         tracing::info!(
             "TL-Web [{}]: {} war schon erledigt (Wiederholung)",
-            device.label,
+            device.id,
             action_label(&action)
         );
         return known;
@@ -612,7 +788,7 @@ pub(crate) async fn execute(
             Ok(ok) => {
                 tracing::info!(
                     "TL-Web [{}]: {} ausgeführt",
-                    device.label,
+                    device.id,
                     action_label(&action)
                 );
                 ok
@@ -620,7 +796,7 @@ pub(crate) async fn execute(
             Err(rejected) => {
                 tracing::info!(
                     "TL-Web [{}]: {} abgelehnt ({})",
-                    device.label,
+                    device.id,
                     action_label(&action),
                     rejected.error.as_deref().unwrap_or("ohne Grund")
                 );
@@ -645,7 +821,7 @@ pub(crate) async fn execute(
             // kamen. Der Zugang des Geräts taucht dabei nie auf.
             tracing::info!(
                 "TL-Web [{}]: {} abgelehnt ({})",
-                device.label,
+                device.id,
                 action_label(&action),
                 response.error.as_deref().unwrap_or("ohne Grund")
             );
@@ -667,7 +843,7 @@ pub(crate) async fn execute(
                 }
                 tracing::info!(
                     "TL-Web [{}]: {} abgelehnt (Feld gerade vergeben)",
-                    device.label,
+                    device.id,
                     action_label(&action)
                 );
                 return TlResponse::err(
@@ -703,7 +879,7 @@ pub(crate) async fn execute(
             }
             tracing::info!(
                 "TL-Web [{}]: {} ausgeführt",
-                device.label,
+                device.id,
                 action_label(&action)
             );
             let response = TlResponse::ok(0);
@@ -720,7 +896,7 @@ pub(crate) async fn execute(
             }
             tracing::warn!(
                 "TL-Web [{}]: {} — BTP-Schreibfehler: {e}",
-                device.label,
+                device.id,
                 action_label(&action)
             );
             // Fehlgeschlagene Schreibvorgänge werden NICHT gemerkt: Ein
@@ -830,7 +1006,7 @@ async fn execute_result_action(
 
     tracing::info!(
         "TL-Web [{}]: {} — {written} Wertung(en) geschrieben, {} offen",
-        device.label,
+        device.id,
         action_label(action),
         errors.len()
     );
@@ -1278,6 +1454,21 @@ type OrderedMatch<'a> = (
 /// `rev` gibt der Aufrufer vor — er entscheidet, ob sich gegenüber dem
 /// zuletzt ausgelieferten Stand überhaupt etwas geändert hat.
 pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u64) -> TlState {
+    build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT_PER_HALL)
+}
+
+/// Wie [`build_state`], aber mit vorgegebener Wartelisten-Länge je Halle.
+///
+/// Für den Weg über den Relay: Der legt einen zu großen Zustand gar nicht
+/// erst ab, und der Host erfährt davon nichts. Er muss also selbst kürzen —
+/// was wegfällt, meldet `truncated_halls` wie immer.
+pub(crate) fn build_state_limited(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+    rev: u64,
+    queue_limit: usize,
+) -> TlState {
     let Some(snap) = tablet.snapshot_clone() else {
         // Noch kein Turnier geladen: leerer, aber gültiger Zustand — die
         // Seite zeigt „warte auf Turnierdaten" statt eines Fehlers.
@@ -1352,7 +1543,7 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
     let mut queue: Vec<TlMatch> = Vec::new();
     for (_, m, hall) in ordered {
         let count = per_hall.entry(hall.clone()).or_insert(0);
-        if *count >= QUEUE_LIMIT_PER_HALL {
+        if *count >= queue_limit {
             truncated.insert(hall);
             continue;
         }
@@ -2187,6 +2378,184 @@ mod tests {
         m.court = Some(format!("Feld {court_id}"));
         m.status = crate::btp::model::MatchStatus::OnCourt;
         m
+    }
+
+    #[test]
+    fn a_device_the_tournament_pc_does_not_know_is_refused_even_from_the_relay() {
+        // Über den Relay kommt nur eine Kennung, kein Zugang — den hat der
+        // Relay geprüft. Der Turnier-PC schaut trotzdem in seiner eigenen
+        // Liste nach: Sonst hinge die Nachvollziehbarkeit („wer hat was
+        // ausgelöst") allein am Relay, und ein Protokolleintrag benennte ein
+        // Gerät, das dieser Rechner nie gekoppelt hat.
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices = vec![crate::config::TlDevice {
+            id: "tl-3f2a".to_string(),
+            token: "geheim".to_string(),
+            label: "Tablet Meeting Point".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        }];
+        assert_eq!(
+            device_by_id(&cfg, "tl-3f2a").map(|d| d.label),
+            Some("Tablet Meeting Point".to_string())
+        );
+        assert!(device_by_id(&cfg, "tl-fremd").is_none());
+        assert!(device_by_id(&cfg, "").is_none());
+
+        // Und bei abgeschalteter Oberfläche gilt kein Gerät — derselbe
+        // Riegel wie im Hallennetz.
+        cfg.tl_web.enabled = false;
+        assert!(device_by_id(&cfg, "tl-3f2a").is_none());
+    }
+
+    #[test]
+    fn a_board_too_big_for_the_relay_is_shortened_instead_of_lost() {
+        // Der Relay legt einen zu großen Zustand nicht ab — und der Host
+        // erfährt davon nichts. Ohne eigene Kürzung wäre die
+        // Cloud-Oberfläche in genau den Turnieren tot, in denen sie am
+        // meisten hülfe: je größer das Turnier, desto sicherer.
+        // Ein volles Zwei-Hallen-Turnier: Die Warteliste wird **je Halle**
+        // gekappt, also stehen bis zu 240 Spiele im Zustand — mit
+        // Doppelpaarungen und Namen, wie sie im Badminton vorkommen.
+        let mut cfg = AppConfig::default();
+        for (draw, halle) in [("HE A", "Halle A"), ("HE B", "Halle B")] {
+            cfg.discipline_hall_rules.push(DisciplineHallRule {
+                discipline: "mens_singles".to_string(),
+                draw_name: draw.to_string(),
+                hall: halle.to_string(),
+            });
+        }
+        let tablet = TabletState::default();
+        let mut matches = Vec::new();
+        for id in 1..=400 {
+            let mut m = a_match(id);
+            m.team1 = vec![
+                player("Maximiliane Charlotte von Hohenlohe-Waldenburg"),
+                player("Friederike Alexandra Schmidt-Blumenthal"),
+            ];
+            m.team2 = vec![
+                player("Konstantin Ferdinand Oppermann-Lindenau"),
+                player("Sebastian Aurelius Wittgenstein-Berleburg"),
+            ];
+            m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
+            m.round_name = "Achtelfinale der Trostrunde".to_string();
+            matches.push(m);
+        }
+        tablet.set_snapshot(snap(Vec::new(), matches, Vec::new()));
+
+        let (json, _rev) = state_for_relay(&tablet, &cfg, 1_000_000);
+        assert!(
+            json.len() <= relay_proto::MAX_TL_STATE_LEN,
+            "passt nicht: {} Bytes",
+            json.len()
+        );
+        // Und die Kürzung wird gemeldet, statt Spiele stillschweigend
+        // verschwinden zu lassen.
+        let state: TlState = serde_json::from_str(&json).unwrap();
+        assert!(
+            !state.truncated_halls.is_empty(),
+            "gekürzt, aber nicht gesagt"
+        );
+
+        // Ein kleines Turnier verliert nichts.
+        let klein = TabletState::default();
+        klein.set_snapshot(snap(Vec::new(), vec![a_match(1)], Vec::new()));
+        let (json, _rev) = state_for_relay(&klein, &AppConfig::default(), 1_000_000);
+        let state: TlState = serde_json::from_str(&json).unwrap();
+        assert!(state.truncated_halls.is_empty());
+        assert_eq!(state.queue.len(), 1);
+    }
+
+    #[test]
+    fn replacing_a_lost_devices_access_reaches_the_relay() {
+        // Ein Tablet geht verloren, sein Zugang wird ersetzt — die Kennung
+        // bleibt (sie ist die Geräte-Identität). Erkennt der Abgleich nur
+        // Kennungen, gilt der ALTE Zugang beim Relay weiter: Das verlorene
+        // Tablet schriebe bis Turnierende aus dem Internet mit, und das neu
+        // gekoppelte käme nicht durch.
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices = vec![crate::config::TlDevice {
+            id: "tl-1".to_string(),
+            token: "alt".to_string(),
+            label: "Tablet".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        }];
+        let vorher = auth_fingerprint(&auth_devices(&cfg));
+
+        cfg.tl_web.devices[0].token = "neu".to_string();
+        let nachher = auth_fingerprint(&auth_devices(&cfg));
+        assert_ne!(vorher, nachher, "der Zugangswechsel muss auffallen");
+
+        // Der Fingerabdruck selbst trägt keinen Zugang — er lebt in einer
+        // Variablen, die beim Suchen nach Fehlern schnell ausgegeben ist.
+        assert!(
+            !nachher.contains("neu"),
+            "kein Zugang im Klartext: {nachher}"
+        );
+    }
+
+    #[test]
+    fn the_devices_pushed_to_the_relay_carry_no_names() {
+        // Der Relay braucht Kennung und Zugang — mehr nicht. Das Etikett
+        // („Tablet Meeting Point") bleibt am Turnier-PC: Es kann einen
+        // Personennamen enthalten, und der hat auf einem fremden Server
+        // nichts zu suchen.
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices = vec![crate::config::TlDevice {
+            id: "tl-1".to_string(),
+            token: "tok".to_string(),
+            label: "Tablet von Anna Meier".to_string(),
+            created_at_ms: 1,
+            hall: "Halle A".to_string(),
+        }];
+        let devices = auth_devices(&cfg);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "tl-1");
+        assert_eq!(devices[0].token, "tok");
+        let json = serde_json::to_string(&devices).unwrap();
+        assert!(!json.contains("Anna"), "kein Name im Frame: {json}");
+        assert!(!json.contains("Halle"), "auch keine Halle: {json}");
+
+        // Abgeschaltet heißt: kein einziges Gerät zugelassen.
+        cfg.tl_web.enabled = false;
+        assert!(auth_devices(&cfg).is_empty());
+    }
+
+    #[test]
+    fn the_revision_only_moves_when_the_board_really_changed() {
+        // Die Revision ist die Grundlage von zweierlei: Der Relay spart mit
+        // ihr die Übertragung (gleiche Fassung → „unverändert"), und der
+        // Turnier-PC erkennt an ihr, ob ein Tipp auf einem überholten Plan
+        // beruhte. Beides bricht, wenn sie im Sekundentakt hochzählt, nur
+        // weil die Uhr weitergelaufen ist.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new()));
+        let cfg = AppConfig::default();
+
+        let erste = build_state_with_rev(&tablet, &cfg, 1_000_000);
+        assert!(erste.rev > 0, "eine Revision beginnt bei 1, nicht bei 0");
+        let spaeter = build_state_with_rev(&tablet, &cfg, 1_060_000);
+        assert_eq!(
+            spaeter.rev, erste.rev,
+            "eine Minute später, aber nichts passiert: dieselbe Fassung"
+        );
+        assert!(spaeter.server_now_ms > erste.server_now_ms, "die Uhr läuft");
+
+        // Jetzt eine echte Änderung.
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![a_match(7), a_match(8)],
+            Vec::new(),
+        ));
+        let danach = build_state_with_rev(&tablet, &cfg, 1_060_000);
+        assert!(
+            danach.rev > erste.rev,
+            "ein neues Spiel in der Liste ist eine neue Fassung"
+        );
     }
 
     #[test]
