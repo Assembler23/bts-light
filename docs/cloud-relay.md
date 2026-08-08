@@ -103,8 +103,10 @@ Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 > **Stand:** Die Wire-Typen sind definiert und getestet, der Turnier-PC kann
 > die Geräte speichern (`tl_web` in der `config.json`, Default **aus**), die
 > Vergabe-Regeln liegen als geteiltes Tor in `tablet/assign.rs`, und der
-> Anzeige-Zustand wird in `tablet/tl.rs` gebaut. **Routen, Token-Prüfung und
-> Weiterleitung im Relay gibt es noch nicht.**
+> Anzeige-Zustand wird in `tablet/tl.rs` gebaut. Im **LAN** sind
+> `/tl/api/state` und `/tl/api/command` bereits erreichbar (siehe
+> [tablet.md](tablet.md)). **Im Relay gibt es Routen, Token-Prüfung und
+> Weiterleitung noch nicht** — der Cloud-Weg ist also noch nicht nutzbar.
 > Bis dahin ändert sich am Betrieb nichts. Fachliche Grundlage:
 > [features/turnierleitung-web.md](features/turnierleitung-web.md),
 > [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und

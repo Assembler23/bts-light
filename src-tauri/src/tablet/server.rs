@@ -147,6 +147,12 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
         .route("/combo/state", get(combo_state))
+        // Turnierleitungs-Oberfläche. Ohne freigeschaltetes Feature und
+        // gültigen Zugang antworten beide Routen abweisend — die Prüfung
+        // sitzt in `tl::authorize` und liest die Konfiguration frisch, damit
+        // ein Widerruf ohne Neustart greift.
+        .route("/tl/api/state", get(tl_state))
+        .route("/tl/api/command", post(tl_command))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -950,6 +956,51 @@ async fn result(
     Json(body): Json<ResultBody>,
 ) -> Json<ResultResponse> {
     Json(process_result(&ctx, &body).await)
+}
+
+/// Liest den Zugang eines Turnierleitungs-Geräts aus dem `Authorization`-
+/// Kopf und schlägt das Gerät nach.
+///
+/// Der Zugang steht bewusst **nur** im Kopf und nie im Pfad: Pfade landen in
+/// Zugriffsprotokollen, Kopfzeilen nicht.
+fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::config::TlDevice> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    crate::tablet::tl::authorize(&ctx.app_config(), token)
+}
+
+/// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche.
+async fn tl_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    let state = crate::tablet::tl::build_state(
+        &ctx.tablet,
+        &ctx.app_config(),
+        now_ms(),
+        // Die Revision zählt der Aufrufer erst, wenn die Seite sie braucht
+        // (Abruf mit „hat sich etwas geändert?"). Bis dahin ist sie 0.
+        0,
+    );
+    Json(state).into_response()
+}
+
+/// Eine Aktion eines Turnierleitungs-Geräts.
+async fn tl_command(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    Json(action): Json<relay_proto::TlAction>,
+) -> impl IntoResponse {
+    let Some(device) = tl_device(&ctx, &headers) else {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    };
+    Json(crate::tablet::tl::execute(&ctx, &device, action).await).into_response()
 }
 
 /// Validiert ein Endergebnis vom Tablet und schreibt es per `SENDUPDATE`

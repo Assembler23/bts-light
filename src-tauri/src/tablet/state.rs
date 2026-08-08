@@ -912,6 +912,58 @@ impl TabletState {
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
+    /// Zieht den laufenden Spielstand eines Spiels auf ein anderes Feld um.
+    ///
+    /// Nötig, wenn die Turnierleitung ein **laufendes** Spiel umhängt: Der
+    /// Stand hängt am Feld, nicht am Spiel. Ohne den Umzug zeigte das neue
+    /// Feld 0:0 und das alte den stehengebliebenen Stand — auf dem
+    /// Court-Monitor wie im Liveticker, und ein neu verbundenes Zähltablett
+    /// finge bei null an.
+    ///
+    /// Das Tablet selbst wandert **nicht** mit: Es bleibt an seinem Feld.
+    /// Übertragen wird nur, was zum Spiel gehört (Satzstand und gespiegelter
+    /// Spielzustand), nicht der Gerätezustand (Verbindung, Akku, Meldungen).
+    pub fn move_match_score(&self, from_court_id: i64, to_court_id: i64, match_id: i64) {
+        {
+            let mut courts = self.courts.write().unwrap();
+            // Nur umziehen, wenn das Quellfeld wirklich dieses Spiel zählt —
+            // sonst überschriebe ein verspäteter Aufruf einen fremden Stand.
+            let Some(sets) = courts
+                .get(&from_court_id)
+                .filter(|s| s.match_id == match_id)
+                .map(|s| s.sets.clone())
+            else {
+                return;
+            };
+            let target = courts.entry(to_court_id).or_insert(CourtSession {
+                match_id,
+                sets: Vec::new(),
+                connected: false,
+                battery: None,
+                injury: false,
+                official: false,
+            });
+            target.match_id = match_id;
+            target.sets = sets;
+            // Das Quellfeld verliert Spiel und Stand, behält aber sein
+            // Tablet (Verbindung, Akku) — dort steht ja weiterhin ein Gerät.
+            if let Some(src) = courts.get_mut(&from_court_id) {
+                src.match_id = 0;
+                src.sets = Vec::new();
+                src.injury = false;
+                src.official = false;
+            }
+        }
+        // Den gespiegelten Spielzustand (Aufschlag, Pause) mitnehmen, damit
+        // ein Tablett am neuen Feld dort weiterzählen kann, wo aufgehört
+        // wurde.
+        let mirrored = self.court_state.write().unwrap().remove(&from_court_id);
+        if let Some(state) = mirrored {
+            self.court_state.write().unwrap().insert(to_court_id, state);
+        }
+        self.persist_scores();
+    }
+
     pub fn clear_court(&self, court_id: i64) {
         self.courts.write().unwrap().remove(&court_id);
         // Gespiegelten Spielstand löschen, sonst bekäme ein nach dem Ergebnis
@@ -1633,6 +1685,64 @@ mod tests {
         assert_eq!(c1.cap_score, 30);
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!((c2.best_of, c2.target_score, c2.cap_score), (0, 0, 0));
+    }
+
+    #[test]
+    fn moving_a_match_takes_its_score_along() {
+        // Der Spielstand hängt am Feld, nicht am Spiel. Hängt die
+        // Turnierleitung ein laufendes Spiel um, muss er mitwandern — sonst
+        // zeigt das neue Feld 0:0 und das alte den stehengebliebenen Stand,
+        // auf dem Court-Monitor wie im Liveticker.
+        let st = TabletState::default();
+        st.attach_tablet(1);
+        st.record_score(1, 42, vec![(21, 15), (11, 8)]);
+        st.set_court_state(1, r#"{"serving":{"team":"a"}}"#.to_string());
+
+        st.move_match_score(1, 2, 42);
+
+        // Nach dem Umzug steht das Spiel auf Feld 2 — so, wie BTP es nach
+        // dem Schreibvorgang meldet.
+        st.set_snapshot(snapshot(
+            vec![match_on(42, Some(2), MatchStatus::OnCourt)],
+            vec![(1, "Feld 1"), (2, "Feld 2")],
+        ));
+        let ov = st.overview();
+        let neu = ov.iter().find(|c| c.court_id == 2).unwrap();
+        let alt = ov.iter().find(|c| c.court_id == 1).unwrap();
+        assert_eq!(
+            neu.sets,
+            vec![(21, 15), (11, 8)],
+            "der Stand ist mitgewandert"
+        );
+        assert_eq!(alt.match_id, 0, "das alte Feld ist leer");
+        assert_eq!(
+            st.court_state(2).as_deref(),
+            Some(r#"{"serving":{"team":"a"}}"#),
+            "auch Aufschlag und Pause ziehen mit um"
+        );
+        assert_eq!(st.court_state(1), None);
+    }
+
+    #[test]
+    fn moving_does_not_touch_a_court_that_counts_another_match() {
+        // Ein verspäteter Umhänge-Auftrag darf keinen fremden Stand
+        // überschreiben.
+        let st = TabletState::default();
+        st.attach_tablet(1);
+        st.record_score(1, 99, vec![(5, 3)]); // ein ANDERES Spiel
+        st.move_match_score(1, 2, 42);
+
+        st.set_snapshot(snapshot(
+            vec![match_on(99, Some(1), MatchStatus::OnCourt)],
+            vec![(1, "Feld 1"), (2, "Feld 2")],
+        ));
+        let ov = st.overview();
+        assert_eq!(
+            ov.iter().find(|c| c.court_id == 1).unwrap().sets,
+            vec![(5, 3)],
+            "der fremde Stand bleibt, wo er ist"
+        );
+        assert_eq!(ov.iter().find(|c| c.court_id == 2).unwrap().match_id, 0);
     }
 
     #[test]

@@ -453,6 +453,91 @@ fn occupancy_error(snap: &BtpSnapshot, occupied: Option<i64>) -> AssignError {
     }
 }
 
+/// Darf dieses **laufende** Spiel auf jenes Feld umziehen?
+///
+/// Eigene Prüfung, weil zwei Bedingungen von [`check_assign`] hier
+/// erlaubterweise verletzt sind: Das Spiel steht bereits auf einem Feld (dem
+/// Quellfeld), und es ist nicht mehr „geplant", sondern läuft. Alles andere
+/// gilt unverändert — Zielfeld frei, nicht gesperrt, Hallenregel erfüllt.
+///
+/// **Genau deshalb wird die Voraussetzung hier zuerst geprüft**: Das Spiel
+/// muss wirklich auf dem Quellfeld stehen und wirklich laufen. Ohne diese
+/// Prüfung wäre Umhängen ein Zuweisen ohne jede Kontrolle — man könnte ein
+/// beliebiges, auch beendetes Spiel auf ein freies Feld setzen und dieses
+/// damit dauerhaft unbelegbar machen.
+///
+/// Die Spieler-Prüfung entfällt bewusst: Sie stehen ja bereits auf dem
+/// Quellfeld, und genau dieses Spiel soll umziehen.
+#[allow(clippy::too_many_arguments)]
+pub fn check_move_target(
+    snap: &BtpSnapshot,
+    config: &AppConfig,
+    locked: &[i64],
+    reserved: &[(i64, i64)],
+    match_id: i64,
+    from_court_id: i64,
+    to_court_id: i64,
+    expect_to: CourtExpectation,
+) -> Result<(), AssignError> {
+    if from_court_id == to_court_id {
+        // Keine Bewegung — vermutlich ein Fehlgriff, und ein sinnloser
+        // Schreibvorgang nach BTP.
+        return Err(AssignError::MatchElsewhere {
+            court_id: to_court_id,
+        });
+    }
+    let m = snap
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .ok_or(AssignError::UnknownMatch)?;
+
+    // Die tragende Voraussetzung, siehe oben.
+    if m.court_id != Some(from_court_id) {
+        return Err(match m.court_id {
+            Some(other) => AssignError::MatchElsewhere { court_id: other },
+            None => AssignError::MatchNotPlayable,
+        });
+    }
+    if m.status != MatchStatus::OnCourt {
+        // Ein beendetes Spiel umzuhängen machte das Zielfeld dauerhaft
+        // unbelegbar: Die Vergabe zählt es als besetzt, und niemand räumt
+        // es je wieder ab.
+        return Err(AssignError::MatchNotPlayable);
+    }
+    let court = snap
+        .court_infos
+        .iter()
+        .find(|c| c.id == to_court_id)
+        .ok_or(AssignError::UnknownCourt)?;
+
+    if locked.contains(&to_court_id) {
+        return Err(AssignError::CourtLocked);
+    }
+
+    let occupied = court_occupied_by(snap, to_court_id);
+    if !expectation_holds(occupied, expect_to) {
+        return Err(occupancy_error(snap, occupied));
+    }
+    if occupied.is_some() {
+        return Err(occupancy_error(snap, occupied));
+    }
+    if let Some(&(_, by_match)) = reserved.iter().find(|(c, _)| *c == to_court_id) {
+        if by_match != match_id {
+            return Err(AssignError::CourtTaken {
+                by_match,
+                finished: false,
+            });
+        }
+    }
+
+    let court_hall = snap.court_location_name(court.id);
+    if !config.hall_allows_match(m.discipline.as_str(), &m.draw_name, &court_hall) {
+        return Err(AssignError::HallNotAllowed);
+    }
+    Ok(())
+}
+
 /// Darf dieses Feld geräumt werden?
 ///
 /// Die Erwartung schützt davor, dass ein Gerät ein Feld freigibt, auf dem
@@ -1112,6 +1197,188 @@ mod tests {
         let s = snap(Vec::new(), vec![done, wanted.clone()], Vec::new());
         let av = PlayerAvailability::from_snapshot(&s, &AppConfig::default());
         assert_eq!(av.blocked(&wanted, 100_001), None);
+    }
+
+    #[test]
+    fn moving_a_running_match_to_a_free_court_is_allowed() {
+        // Beim Umhängen steht das Spiel erlaubterweise schon auf einem Feld
+        // (dem Quellfeld) und ist nicht mehr „geplant". Beides würde
+        // `check_assign` ablehnen — deshalb hat das Zielfeld seine eigene
+        // Prüfung.
+        let mut running = a_match(7);
+        running.court_id = Some(1);
+        running.status = MatchStatus::OnCourt;
+        let s = snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![running],
+            Vec::new(),
+        );
+        assert!(check_move_target(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            7,
+            1,
+            2,
+            CourtExpectation::Free
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn moving_a_match_that_does_not_stand_on_the_source_court_is_rejected() {
+        // DIE tragende Voraussetzung: Diese Prüfung lässt Spielbereitschaft
+        // und Spieler-Verfügbarkeit bewusst weg, weil das Spiel ja schon
+        // läuft. Stimmt das nicht, wäre Umhängen ein Zuweisen ohne jede
+        // Prüfung — man könnte ein beliebiges Spiel auf ein Feld setzen.
+        let s = snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![a_match(7)], // steht auf gar keinem Feld
+            Vec::new(),
+        );
+        assert!(
+            check_move_target(
+                &s,
+                &AppConfig::default(),
+                &[],
+                &[],
+                7,
+                1,
+                2,
+                CourtExpectation::Free
+            )
+            .is_err(),
+            "ohne Spiel auf dem Quellfeld darf nichts umgehängt werden"
+        );
+    }
+
+    #[test]
+    fn moving_a_finished_match_is_rejected() {
+        // Ein beendetes Spiel auf ein freies Feld zu setzen, machte dieses
+        // Feld dauerhaft unbelegbar: Die Vergabe zählt es als besetzt, und
+        // niemand räumt es je wieder ab.
+        let mut done = a_match(7);
+        done.court_id = Some(1);
+        done.status = MatchStatus::Finished;
+        let s = snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![done],
+            Vec::new(),
+        );
+        assert_eq!(
+            check_move_target(
+                &s,
+                &AppConfig::default(),
+                &[],
+                &[],
+                7,
+                1,
+                2,
+                CourtExpectation::Free
+            )
+            .unwrap_err(),
+            AssignError::MatchNotPlayable
+        );
+    }
+
+    #[test]
+    fn moving_onto_an_occupied_court_is_rejected() {
+        let mut running = a_match(7);
+        running.court_id = Some(1);
+        running.status = MatchStatus::OnCourt;
+        let mut other = a_match(8);
+        other.court_id = Some(2);
+        other.status = MatchStatus::OnCourt;
+        let s = snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![running, other],
+            Vec::new(),
+        );
+        assert_eq!(
+            check_move_target(
+                &s,
+                &AppConfig::default(),
+                &[],
+                &[],
+                7,
+                1,
+                2,
+                CourtExpectation::Free
+            )
+            .unwrap_err(),
+            AssignError::CourtTaken {
+                by_match: 8,
+                finished: false
+            }
+        );
+    }
+
+    #[test]
+    fn moving_respects_the_hall_rule_and_locks() {
+        let mut cfg = AppConfig::default();
+        cfg.discipline_hall_rules.push(DisciplineHallRule {
+            discipline: "mens_singles".to_string(),
+            draw_name: String::new(),
+            hall: "Halle A".to_string(),
+        });
+        let mut running = a_match(7);
+        running.court_id = Some(1);
+        running.status = MatchStatus::OnCourt;
+        let s = snap(
+            vec![a_court(1, Some(1)), a_court(2, Some(2))],
+            vec![running],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        assert_eq!(
+            check_move_target(&s, &cfg, &[], &[], 7, 1, 2, CourtExpectation::Free).unwrap_err(),
+            AssignError::HallNotAllowed
+        );
+        assert_eq!(
+            check_move_target(
+                &s,
+                &AppConfig::default(),
+                &[2],
+                &[],
+                7,
+                1,
+                2,
+                CourtExpectation::Free
+            )
+            .unwrap_err(),
+            AssignError::CourtLocked
+        );
+    }
+
+    #[test]
+    fn moving_a_match_to_the_court_it_already_stands_on_is_rejected() {
+        // Quelle und Ziel identisch ist keine Bewegung, sondern vermutlich
+        // ein Fehlgriff — und würde einen sinnlosen BTP-Schreibvorgang
+        // auslösen.
+        let mut running = a_match(7);
+        running.court_id = Some(1);
+        running.status = MatchStatus::OnCourt;
+        let s = snap(vec![a_court(1, None)], vec![running], Vec::new());
+        assert!(check_move_target(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            7,
+            1,
+            1,
+            CourtExpectation::Free
+        )
+        .is_err());
     }
 
     #[test]

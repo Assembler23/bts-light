@@ -55,6 +55,17 @@ den Relay statt direkt.
 | `GET /ws` | WebSocket (Match-Zuweisung, Live-Score) |
 | `POST /result` | Endergebnis vom Tablet → `SENDUPDATE` nach BTP |
 | `GET /health` | Status-Schnappschuss |
+| `GET /tl/api/state` | Anzeige-Zustand der Turnierleitungs-Oberfläche |
+| `POST /tl/api/command` | Aktion eines Turnierleitungs-Geräts |
+
+Die beiden `/tl/`-Routen gehören zur [Turnierleitungs-Oberfläche](features/turnierleitung-web.md).
+Sie verlangen einen **Zugang im `Authorization`-Kopf** (`Bearer …`) — bewusst
+im Kopf und nicht im Pfad, weil Pfade in Zugriffsprotokollen landen. Ohne
+freigeschaltetes Feature (`tl_web.enabled`, Default aus) und ohne bekanntes
+Gerät antworten beide mit `401`; die Prüfung liest die Konfiguration frisch
+von der Platte, damit ein Widerruf ohne Neustart greift. Der Kern
+(`tablet/tl.rs`) ist derselbe, den später auch der Cloud-Weg benutzt — jede
+Mutation wird genau einmal geprüft, wie schon bei den Ergebnissen (R5).
 
 ## Datenfluss
 

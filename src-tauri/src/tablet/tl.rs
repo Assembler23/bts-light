@@ -19,6 +19,354 @@ use crate::config::AppConfig;
 use crate::tablet::assign::{self, Blocked, HallSource, PlayerAvailability};
 use crate::tablet::state::TabletState;
 
+/// Erkennt das Gerät hinter einem mitgeschickten Zugang.
+///
+/// Liefert `None`, sobald irgendetwas nicht stimmt — unbekannter oder leerer
+/// Zugang, oder die Oberfläche ist gar nicht freigeschaltet. Der Schalter
+/// wird **hier** mitgeprüft und nicht nur beim Registrieren der Routen:
+/// Sonst bliebe ein früher gekoppeltes Gerät nach dem Abschalten weiter
+/// berechtigt.
+///
+/// Der Aufrufer liest die Konfiguration frisch von der Platte, damit ein
+/// Widerruf ohne Neustart greift.
+pub fn authorize(config: &AppConfig, token: &str) -> Option<crate::config::TlDevice> {
+    if !config.tl_web.enabled {
+        return None;
+    }
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    config
+        .tl_web
+        .devices
+        .iter()
+        .find(|d| d.token == token)
+        .cloned()
+}
+
+/// Was eine Aktion in BTP schreiben würde — getrennt vom Schreiben selbst,
+/// damit die Entscheidung ohne Netz prüfbar bleibt (Muster
+/// `build_manual_result_update`).
+#[derive(Debug)]
+pub(crate) struct CourtWrite {
+    pub courts: Vec<crate::btp::proto::CourtAssignment>,
+    pub match_courts: Vec<crate::btp::proto::MatchCourt>,
+}
+
+/// Prüft eine feldbezogene Aktion und übersetzt sie in den BTP-Schreibvorgang.
+///
+/// Rein: kein Netz, kein Zustand. Lehnt die Prüfung ab, entsteht **kein**
+/// Schreibvorgang — und die Antwort trägt den maschinenlesbaren Grund samt
+/// einer Meldung, die ein Mensch versteht.
+pub(crate) fn plan_court_action(
+    snap: &crate::btp::model::BtpSnapshot,
+    config: &AppConfig,
+    locked: &[i64],
+    reserved: &[(i64, i64)],
+    action: &relay_proto::TlAction,
+) -> Result<CourtWrite, relay_proto::TlResponse> {
+    use crate::btp::model::MatchStatus;
+    use crate::btp::proto::{CourtAssignment, MatchCourt};
+    use relay_proto::TlAction;
+
+    // Die Feldzuordnung führt BTP doppelt: am Feld und am Spiel. Beide
+    // Seiten gehören in denselben Schreibvorgang.
+    let match_side = |match_id: i64, court_id: i64| -> Vec<MatchCourt> {
+        snap.matches
+            .iter()
+            .find(|m| m.id == match_id)
+            .map(|m| {
+                vec![MatchCourt {
+                    match_id: m.id,
+                    draw_id: m.draw_id,
+                    planning_id: m.planning_id,
+                    court_id,
+                }]
+            })
+            .unwrap_or_default()
+    };
+
+    match action {
+        TlAction::AssignCourt {
+            court_id,
+            match_id,
+            expect,
+        } => {
+            assign::check_assign(
+                snap, config, locked, reserved, *match_id, *court_id, *expect,
+            )
+            .map_err(|e| assign_error_response(snap, e))?;
+            Ok(CourtWrite {
+                courts: vec![CourtAssignment {
+                    court_id: *court_id,
+                    match_id: Some(*match_id),
+                }],
+                match_courts: match_side(*match_id, *court_id),
+            })
+        }
+        TlAction::FreeCourt { court_id, expect } => {
+            assign::check_free(snap, *court_id, *expect)
+                .map_err(|e| assign_error_response(snap, e))?;
+            // Die Feldzuordnung am Spiel wird **nur** bei einem laufenden
+            // Spiel gelöscht. Bei einem beendeten hält BTP fest, wo gespielt
+            // wurde — das ist Turnier-Dokumentation, die der Ergebnispfad
+            // ausdrücklich bewahrt und die Desktop-Schaltfläche ebenso.
+            // Sonst hinge das Protokoll davon ab, über welche Oberfläche
+            // jemand das Feld freigegeben hat.
+            let running = snap
+                .matches
+                .iter()
+                .find(|m| m.court_id == Some(*court_id) && m.status == MatchStatus::OnCourt)
+                .map(|m| m.id);
+            Ok(CourtWrite {
+                courts: vec![CourtAssignment {
+                    court_id: *court_id,
+                    match_id: None,
+                }],
+                // 0 = Feldzuordnung am Spiel löschen.
+                match_courts: running.map(|m| match_side(m, 0)).unwrap_or_default(),
+            })
+        }
+        TlAction::MoveMatch {
+            from_court_id,
+            to_court_id,
+            match_id,
+            expect_from,
+            expect_to,
+        } => {
+            // Beide Seiten prüfen, bevor irgendetwas geschrieben wird.
+            assign::check_free(snap, *from_court_id, *expect_from)
+                .map_err(|e| assign_error_response(snap, e))?;
+            // Für das Zielfeld gilt dieselbe Prüfung wie beim Zuweisen —
+            // nur dass das Spiel hier erlaubterweise schon auf einem Feld
+            // steht (nämlich dem Quellfeld).
+            assign::check_move_target(
+                snap,
+                config,
+                locked,
+                reserved,
+                *match_id,
+                *from_court_id,
+                *to_court_id,
+                *expect_to,
+            )
+            .map_err(|e| assign_error_response(snap, e))?;
+            Ok(CourtWrite {
+                courts: vec![
+                    CourtAssignment {
+                        court_id: *from_court_id,
+                        match_id: None,
+                    },
+                    CourtAssignment {
+                        court_id: *to_court_id,
+                        match_id: Some(*match_id),
+                    },
+                ],
+                match_courts: match_side(*match_id, *to_court_id),
+            })
+        }
+        // Alles Übrige berührt keine Feldzuordnung und kommt in einem
+        // eigenen Schritt. Bis dahin ehrlich ablehnen, statt still ins
+        // Leere zu laufen.
+        _ => Err(relay_proto::TlResponse::err(
+            relay_proto::TlErrorCode::Unsupported,
+            "Diese Aktion ist noch nicht freigeschaltet.",
+        )),
+    }
+}
+
+/// Führt eine Aktion eines Turnierleitungs-Geräts aus.
+///
+/// Der **einzige** Weg, auf dem ein solches Gerät etwas verändert — im
+/// LAN-Betrieb vom eingebetteten Server aufgerufen, im Cloud-Betrieb vom
+/// Relay-Client mit demselben Aufruf. Damit wird jede Mutation genau einmal
+/// geprüft, so wie es bei den Ergebnissen der Tablets schon gehandhabt wird
+/// (R5).
+pub(crate) async fn execute(
+    ctx: &crate::tablet::server::ServerCtx,
+    device: &crate::config::TlDevice,
+    action: relay_proto::TlAction,
+) -> relay_proto::TlResponse {
+    use relay_proto::{TlErrorCode as C, TlResponse};
+
+    // Frisch von der Platte: So greifen Widerruf und Abschalten sofort.
+    let config = ctx.app_config();
+    if config.slave_mode {
+        return TlResponse::err(
+            C::NotAllowed,
+            "Dieser Rechner ist ein Ansage-Slave — Feldvergabe läuft nur am Turnier-PC.",
+        );
+    }
+    let Some(snap) = ctx.tablet.snapshot_clone() else {
+        return TlResponse::err(C::NotAllowed, "Es ist noch kein Turnier geladen.");
+    };
+    let locked = ctx.tablet.locked_courts();
+
+    // Der Schutz gegen „von BTP noch nicht bestätigte Zuweisung" kommt in
+    // einem eigenen Schritt; bis dahin gibt es keine Reservierungen zu
+    // berücksichtigen.
+    let plan = match plan_court_action(&snap, &config, &locked, &[], &action) {
+        Ok(plan) => plan,
+        Err(response) => {
+            // Auch Ablehnungen werden festgehalten — nur so lässt sich nach
+            // dem Turnier zählen, wie oft sich zwei Geräte in die Quere
+            // kamen. Der Zugang des Geräts taucht dabei nie auf.
+            tracing::info!(
+                "TL-Web [{}]: {} abgelehnt ({})",
+                device.label,
+                action_label(&action),
+                response.error.as_deref().unwrap_or("ohne Grund")
+            );
+            return response;
+        }
+    };
+
+    match crate::tablet::server::write_courts_to_btp(&config, &plan.courts, &plan.match_courts)
+        .await
+    {
+        Ok(()) => {
+            // Beim Umhängen wandert der laufende Spielstand mit — er hängt
+            // am Feld, nicht am Spiel. Ohne das zeigte das neue Feld 0:0 und
+            // das alte den stehengebliebenen Stand.
+            if let relay_proto::TlAction::MoveMatch {
+                from_court_id,
+                to_court_id,
+                match_id,
+                ..
+            } = &action
+            {
+                ctx.tablet
+                    .move_match_score(*from_court_id, *to_court_id, *match_id);
+            }
+            tracing::info!(
+                "TL-Web [{}]: {} ausgeführt",
+                device.label,
+                action_label(&action)
+            );
+            TlResponse::ok(0)
+        }
+        Err(e) => {
+            tracing::warn!(
+                "TL-Web [{}]: {} — BTP-Schreibfehler: {e}",
+                device.label,
+                action_label(&action)
+            );
+            TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
+        }
+    }
+}
+
+/// Kurzbeschreibung einer Aktion fürs Protokoll — ohne personenbezogene
+/// Angaben und **nie** mit dem Zugang des Geräts.
+fn action_label(action: &relay_proto::TlAction) -> String {
+    use relay_proto::TlAction as A;
+    match action {
+        A::AssignCourt {
+            court_id, match_id, ..
+        } => format!("Spiel {match_id} auf Feld {court_id}"),
+        A::FreeCourt { court_id, .. } => format!("Feld {court_id} freigeben"),
+        A::MoveMatch {
+            from_court_id,
+            to_court_id,
+            match_id,
+            ..
+        } => format!("Spiel {match_id} von Feld {from_court_id} auf Feld {to_court_id}"),
+        // Bewusst **ohne** Inhalt: Ein `{:?}` der ganzen Aktion schriebe
+        // Spielernamen ins Protokoll — und die Protokolle werden zur
+        // Fehlersuche hochgeladen. Die Art der Aktion genügt.
+        A::CallPreparation { .. } => "Vorbereitungs-Aufruf".to_string(),
+        A::RetractPreparation { .. } => "Vorbereitungs-Aufruf zurücknehmen".to_string(),
+        A::AnnounceCourtCall { court_id, .. } => format!("Erneuter Aufruf Feld {court_id}"),
+        A::AnnouncePrepCall { .. } => "Erneuter Vorbereitungs-Aufruf".to_string(),
+        A::EnterResult { match_id, .. } => format!("Ergebnis für Spiel {match_id}"),
+        A::ConfirmWalkover { .. } => "Kampflose Wertung".to_string(),
+        A::DismissWalkover { .. } => "Walkover-Vorschlag verwerfen".to_string(),
+        A::ScorekeeperAdvance { .. } => "Zähltafelbediener vorziehen".to_string(),
+        A::ScorekeeperRemove { .. } => "Zähltafelbediener entfernen".to_string(),
+        A::ScorekeeperAdd { .. } => "Zähltafelbediener ergänzen".to_string(),
+        A::SetAutoAssign { enabled } => {
+            format!(
+                "Automatische Vergabe {}",
+                if *enabled { "an" } else { "aus" }
+            )
+        }
+    }
+}
+
+/// Übersetzt eine Ablehnung der Vergabe-Prüfung in eine Antwort, die ein
+/// Mensch versteht und die Seite auswerten kann.
+fn assign_error_response(
+    snap: &crate::btp::model::BtpSnapshot,
+    err: assign::AssignError,
+) -> relay_proto::TlResponse {
+    use assign::AssignError as E;
+    use relay_proto::{TlErrorCode as C, TlResponse};
+
+    let name_of = |match_id: i64| -> String {
+        snap.matches
+            .iter()
+            .find(|m| m.id == match_id)
+            .map(|m| {
+                let a = m.team1.first().map(|p| p.name.as_str()).unwrap_or("?");
+                let b = m.team2.first().map(|p| p.name.as_str()).unwrap_or("?");
+                format!("{a} / {b}")
+            })
+            .unwrap_or_else(|| format!("Spiel {match_id}"))
+    };
+
+    match err {
+        E::CourtTaken { by_match, finished } if finished => TlResponse::err(
+            C::CourtTaken,
+            format!(
+                "Das Feld wird noch geräumt — {} ist beendet, aber BTP hat das Feld \
+                 noch nicht freigegeben.",
+                name_of(by_match)
+            ),
+        ),
+        E::CourtTaken { by_match, .. } => TlResponse::err(
+            C::CourtTaken,
+            format!(
+                "Feld wurde gerade von jemand anderem belegt: {}.",
+                name_of(by_match)
+            ),
+        ),
+        E::CourtFree => TlResponse::err(
+            C::CourtFree,
+            "Auf dem Feld steht nicht mehr das Spiel, das du gesehen hast.",
+        ),
+        E::CourtLocked => TlResponse::err(C::CourtLocked, "Das Feld ist gesperrt."),
+        E::MatchElsewhere { court_id } => TlResponse::err(
+            C::MatchElsewhere,
+            format!("Das Spiel steht bereits auf Feld {court_id}."),
+        ),
+        E::MatchNotPlayable => TlResponse::err(
+            C::NotAllowed,
+            "Das Spiel ist nicht spielbereit (schon beendet, schon auf dem Feld, \
+             oder die Paarung steht noch nicht fest).",
+        ),
+        E::PlayerOnCourt { players } => TlResponse::err(
+            C::NotAllowed,
+            format!(
+                "{} steht gerade auf einem anderen Feld.",
+                players.join(" und ")
+            ),
+        ),
+        E::HallNotAllowed => TlResponse::err(
+            C::HallNotAllowed,
+            "Diese Disziplin darf in dieser Halle nicht gespielt werden.",
+        ),
+        E::UnknownMatch => TlResponse::err(
+            C::NotAllowed,
+            "Das Spiel gibt es im aktuellen Turnierstand nicht mehr.",
+        ),
+        E::UnknownCourt => TlResponse::err(
+            C::NotAllowed,
+            "Das Feld gibt es im aktuellen Turnierstand nicht mehr.",
+        ),
+    }
+}
+
 /// Der komplette Anzeige-Zustand.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlState {
@@ -691,6 +1039,235 @@ mod tests {
         // Ohne Hallenzuordnung ist die Gruppe der leere Name — auch sie
         // meldet ihre Kappung, statt sie zu verschweigen.
         assert_eq!(s.truncated_halls, vec![String::new()]);
+    }
+
+    fn cfg_with_device(token: &str) -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-1".to_string(),
+            token: token.to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+        cfg
+    }
+
+    #[test]
+    fn a_known_token_identifies_its_device() {
+        let cfg = cfg_with_device("tok-geheim");
+        let dev = authorize(&cfg, "tok-geheim").expect("Gerät erkannt");
+        assert_eq!(dev.id, "dev-1");
+        assert_eq!(dev.label, "Tablet TL");
+    }
+
+    #[test]
+    fn an_unknown_or_empty_token_is_rejected() {
+        let cfg = cfg_with_device("tok-geheim");
+        assert!(authorize(&cfg, "tok-falsch").is_none());
+        assert!(authorize(&cfg, "").is_none(), "leer ist kein Zugang");
+        assert!(authorize(&cfg, "   ").is_none());
+    }
+
+    #[test]
+    fn no_token_works_while_the_feature_is_switched_off() {
+        // Der Schalter ist die Sicherung: Ohne ihn ist der schreibende Pfad
+        // unerreichbar, auch mit einem gültigen Token. Sonst bliebe ein
+        // früher gekoppeltes Gerät nach dem Abschalten weiter drin.
+        let mut cfg = cfg_with_device("tok-geheim");
+        cfg.tl_web.enabled = false;
+        assert!(authorize(&cfg, "tok-geheim").is_none());
+    }
+
+    #[test]
+    fn assigning_plans_both_the_court_and_the_match_side() {
+        // BTP führt die Zuordnung doppelt: am Feld und am Spiel. Fehlte
+        // eine Seite, zeigte BTP das Spiel ohne Feld oder das Feld ohne
+        // Spiel — beides hat die Turnierleitung schon erlebt.
+        let s = snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new());
+        let write = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::AssignCourt {
+                court_id: 1,
+                match_id: 7,
+                expect: relay_proto::CourtExpectation::Free,
+            },
+        )
+        .expect("erlaubt");
+        assert_eq!(write.courts.len(), 1);
+        assert_eq!(write.courts[0].court_id, 1);
+        assert_eq!(write.courts[0].match_id, Some(7));
+        assert_eq!(write.match_courts.len(), 1);
+        assert_eq!(write.match_courts[0].match_id, 7);
+        assert_eq!(write.match_courts[0].court_id, 1);
+    }
+
+    #[test]
+    fn freeing_plans_to_clear_both_sides_too() {
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        let s = snap(vec![a_court(1, None)], vec![running], Vec::new());
+        let write = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::FreeCourt {
+                court_id: 1,
+                expect: relay_proto::CourtExpectation::Match { match_id: 7 },
+            },
+        )
+        .expect("erlaubt");
+        assert_eq!(write.courts[0].match_id, None, "Feld wird leer");
+        assert_eq!(
+            write.match_courts[0].court_id, 0,
+            "und das Spiel verliert seine Feldzuordnung"
+        );
+    }
+
+    #[test]
+    fn moving_a_match_is_planned_as_a_single_write() {
+        // Als „freigeben + zuweisen" wäre zwischendurch ein Zustand
+        // sichtbar, in dem das Spiel auf keinem Feld steht — und die
+        // automatische Vergabe könnte das Zielfeld wegschnappen.
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        let s = snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![running],
+            Vec::new(),
+        );
+        let write = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::MoveMatch {
+                from_court_id: 1,
+                to_court_id: 2,
+                match_id: 7,
+                expect_from: relay_proto::CourtExpectation::Match { match_id: 7 },
+                expect_to: relay_proto::CourtExpectation::Free,
+            },
+        )
+        .expect("erlaubt");
+        assert_eq!(
+            write.courts.len(),
+            2,
+            "beide Felder in einem Schreibvorgang"
+        );
+        let from = write.courts.iter().find(|c| c.court_id == 1).unwrap();
+        let to = write.courts.iter().find(|c| c.court_id == 2).unwrap();
+        assert_eq!(from.match_id, None, "altes Feld wird leer");
+        assert_eq!(to.match_id, Some(7), "neues Feld bekommt das Spiel");
+        assert_eq!(write.match_courts.len(), 1);
+        assert_eq!(write.match_courts[0].court_id, 2);
+    }
+
+    #[test]
+    fn freeing_a_court_held_by_a_finished_match_keeps_its_court_in_btp() {
+        // BTP hält am beendeten Spiel fest, wo es gespielt wurde — das ist
+        // Turnier-Dokumentation. Der Ergebnispfad bewahrt sie ausdrücklich,
+        // und die Desktop-Schaltfläche auch. Der Web-Weg darf sie nicht als
+        // Nebenwirkung löschen, sonst hinge das Turnierprotokoll davon ab,
+        // welche Oberfläche jemand benutzt hat.
+        let mut done = a_match(7);
+        done.status = MatchStatus::Finished;
+        done.court_id = Some(1);
+        let s = snap(vec![a_court(1, None)], vec![done], Vec::new());
+        let write = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::FreeCourt {
+                court_id: 1,
+                expect: relay_proto::CourtExpectation::Match { match_id: 7 },
+            },
+        )
+        .expect("erlaubt");
+        assert_eq!(write.courts[0].match_id, None, "das Feld wird frei");
+        assert!(
+            write.match_courts.is_empty(),
+            "aber das beendete Spiel behält seine Feldangabe"
+        );
+    }
+
+    #[test]
+    fn a_rejected_action_is_not_planned_at_all() {
+        // Nichts wird nach BTP geschrieben, wenn die Prüfung ablehnt —
+        // die Ablehnung trägt den maschinenlesbaren Grund.
+        let mut taken = a_match(9);
+        taken.status = MatchStatus::OnCourt;
+        taken.court_id = Some(1);
+        let s = snap(vec![a_court(1, None)], vec![a_match(7), taken], Vec::new());
+        let err = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::AssignCourt {
+                court_id: 1,
+                match_id: 7,
+                expect: relay_proto::CourtExpectation::Free,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::CourtTaken));
+        assert!(
+            err.error.as_deref().unwrap_or_default().contains("belegt"),
+            "die Meldung muss für Menschen lesbar sein: {err:?}"
+        );
+    }
+
+    #[test]
+    fn a_court_being_cleared_is_rejected_with_its_own_wording() {
+        // „Feld ist belegt" wäre hier verwirrend: Auf dem Monitor ist das
+        // Feld leer, das Spiel nur noch nicht abgeräumt. Der Text muss das
+        // erklären, sonst sucht die Turnierleitung den Fehler bei sich.
+        let mut done = a_match(9);
+        done.status = MatchStatus::Finished;
+        done.court_id = Some(1);
+        let s = snap(vec![a_court(1, None)], vec![a_match(7), done], Vec::new());
+        let err = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::AssignCourt {
+                court_id: 1,
+                match_id: 7,
+                expect: relay_proto::CourtExpectation::Free,
+            },
+        )
+        .unwrap_err();
+        let text = err.error.unwrap_or_default();
+        assert!(
+            text.contains("geräumt") || text.contains("beendet"),
+            "erwartet ein Hinweis aufs Abräumen, war: {text}"
+        );
+    }
+
+    #[test]
+    fn actions_that_do_not_touch_courts_are_not_planned_here() {
+        // Die übrigen Aktionen kommen in einem eigenen Schritt. Bis dahin
+        // werden sie ehrlich abgelehnt, statt still ins Leere zu laufen.
+        let s = snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new());
+        let err = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::SetAutoAssign { enabled: true },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::Unsupported));
     }
 
     #[test]
