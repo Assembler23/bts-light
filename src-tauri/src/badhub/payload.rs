@@ -425,6 +425,7 @@ mod tests {
 
     fn sample_match(id: i64, status: MatchStatus, court: Option<&str>) -> BtpMatch {
         BtpMatch {
+            display_order: None,
             from1: None,
             from2: None,
             id,

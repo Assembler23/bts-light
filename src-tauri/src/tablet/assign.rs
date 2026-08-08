@@ -48,15 +48,23 @@ pub fn player_key(p: &BtpPlayer) -> String {
 }
 
 /// Reihenfolge, in der Spiele auf Felder kommen: manuell in die Vorbereitung
-/// gerufene zuerst, sonst der BTP-Zeitplan von oben nach unten, dann
-/// Spielnummer und ID als Gleichstand-Entscheider. Spiele ohne Ansetzung
-/// landen am Ende ihrer Gruppe.
+/// gerufene zuerst, dann der BTP-Zeitplan von oben nach unten, **dann die
+/// Ansetzungsreihenfolge des Turnierplans**, zuletzt Spielnummer und ID.
+/// Spiele ohne Ansetzung landen am Ende ihrer Gruppe.
+///
+/// Die Ansetzungsreihenfolge (`DisplayOrder`) muss vor die Spielnummer:
+/// In BTP tragen alle Spiele eines Zeitfensters dieselbe Zeit — ein ganzer
+/// Vormittag steht auf 9:00 —, und was darin zuerst drankommt, sagt allein
+/// dieses Feld. Ohne es entschied die Spielnummer, und die läuft quer: Aus
+/// der gedruckten Liste (Nr 2, 6, 2, 6 …) wurde „erst alle Nummer 2, dann
+/// alle Nummer 6". Die Turnierleitung sah eine Reihenfolge, die in ihrem
+/// Turnierplan nirgends steht.
 ///
 /// **Eine** Definition für automatische Vergabe und Anzeige: Zeigte die Liste
 /// eine andere Reihenfolge, als die Automatik verwendet, verlöre die
 /// Turnierleitung das Vertrauen in beide.
-pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64) {
-    sort_key_parts(called, m.planned_time, m.match_num, m.id)
+pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64, i64) {
+    sort_key_parts(called, m.planned_time, m.display_order, m.match_num, m.id)
 }
 
 /// Wie [`sort_key`], aber aus Einzelwerten — für Aufrufer, die kein
@@ -66,12 +74,14 @@ pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64) {
 pub fn sort_key_parts(
     called: bool,
     planned_time: Option<i64>,
+    display_order: Option<i64>,
     match_num: Option<i64>,
     id: i64,
-) -> (bool, i64, i64, i64) {
+) -> (bool, i64, i64, i64, i64) {
     (
         !called,
         planned_time.unwrap_or(i64::MAX),
+        display_order.unwrap_or(i64::MAX),
         match_num.unwrap_or(i64::MAX),
         id,
     )
@@ -592,6 +602,7 @@ mod tests {
 
     fn a_match(id: i64) -> BtpMatch {
         BtpMatch {
+            display_order: None,
             from1: None,
             from2: None,
             id,
@@ -1042,6 +1053,59 @@ mod tests {
         assert_eq!(player_key(&p), "müller");
         p.member_id = Some("  08-001234 ".to_string());
         assert_eq!(player_key(&p), "08-001234");
+    }
+
+    #[test]
+    fn matches_at_the_same_time_follow_the_tournament_plan() {
+        // In BTP haben alle Spiele eines Zeitfensters **dieselbe** angesetzte
+        // Zeit — der ganze Vormittag steht auf 9:00. Die Reihenfolge darin
+        // gibt `DisplayOrder` vor; das ist die Liste, die die Turnierleitung
+        // ausdruckt und abarbeitet.
+        //
+        // Ohne dieses Feld entschied die Spielnummer, und die läuft quer:
+        // Aus der echten Ansetzung (Nr 2, 6, 2, 6 …) wurde bei uns „erst
+        // alle Nummer 2, dann alle Nummer 6" — eine Reihenfolge, die im
+        // Turnierplan nirgends steht.
+        let plan = |id, nr, order| {
+            let mut m = a_match(id);
+            m.planned_time = Some(202_702_050_900); // alle 9:00
+            m.match_num = Some(nr);
+            m.display_order = Some(order);
+            m
+        };
+        // So setzt BTP an: abwechselnd, nach DisplayOrder.
+        let erst = plan(1241, 2, 1);
+        let dann = plan(1236, 6, 2);
+        let drittens = plan(1266, 2, 3);
+
+        let mut list = [
+            sort_key(&drittens, false),
+            sort_key(&dann, false),
+            sort_key(&erst, false),
+        ];
+        list.sort();
+        assert_eq!(list[0], sort_key(&erst, false), "1241 zuerst (Ansetzung 1)");
+        assert_eq!(list[1], sort_key(&dann, false), "dann 1236 — trotz Nr 6");
+        assert_eq!(list[2], sort_key(&drittens, false));
+    }
+
+    #[test]
+    fn without_a_tournament_plan_the_match_number_still_decides() {
+        // Nicht jedes Turnier pflegt die Ansetzungsreihenfolge. Fehlt sie,
+        // bleibt es beim bisherigen Verhalten — sonst würfe die Umstellung
+        // erprobte Turniere durcheinander.
+        let ohne = |id, nr| {
+            let mut m = a_match(id);
+            m.planned_time = Some(202_702_050_900);
+            m.match_num = Some(nr);
+            m.display_order = None;
+            m
+        };
+        let klein = ohne(500, 2);
+        let gross = ohne(400, 6);
+        let mut list = [sort_key(&gross, false), sort_key(&klein, false)];
+        list.sort();
+        assert_eq!(list[0], sort_key(&klein, false), "Nummer 2 vor Nummer 6");
     }
 
     #[test]

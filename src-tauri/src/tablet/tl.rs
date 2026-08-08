@@ -1532,7 +1532,7 @@ const QUEUE_LIMIT_PER_HALL: usize = 120;
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
 type OrderedMatch<'a> = (
-    (bool, i64, i64, i64),
+    (bool, i64, i64, i64, i64),
     &'a crate::btp::model::BtpMatch,
     String,
 );
@@ -1845,6 +1845,7 @@ mod tests {
             id,
             draw_id: 1,
             planning_id: id,
+            display_order: None,
             from1: None,
             from2: None,
             draw_name: "HE A".to_string(),

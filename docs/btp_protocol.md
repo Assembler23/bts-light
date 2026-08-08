@@ -166,6 +166,30 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
+### Die Reihenfolge der angesetzten Spiele
+
+**`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**
+Beides ist nötig, und beides war lange falsch bzw. gar nicht ausgewertet:
+
+- **`PlannedTime` ist ein `ITEM` vom Typ `DateTime`**, dessen Wert der
+  Knoten `<DATETIME Y="2027" MM="2" D="5" H="9" M="0" …/>` ist — Attribute,
+  keine Kind-Knoten, und die Kurznamen `D`/`H`/`M` statt `Day`/`Hour`/
+  `Minute`. Wer nach Kind-Knoten sucht, findet **nie** etwas und hält jedes
+  Turnier für unangesetzt.
+- **Alle Spiele eines Zeitfensters tragen dieselbe Zeit** — ein ganzer
+  Vormittag steht auf 9:00. Die Reihenfolge *innerhalb* des Fensters gibt
+  `DisplayOrder` vor (je Draw ab 1). Ohne dieses Feld entscheidet die
+  Spielnummer, und die läuft quer: Aus der gedruckten Liste (Nr 2, 6, 2, 6 …)
+  wird „erst alle Nummer 2, dann alle Nummer 6".
+
+Belegt an einem echten Turnier (878 Paarungen, 759 davon angesetzt): Die
+Sortierung `PlannedTime → DisplayOrder → MatchNr → ID` reproduziert die aus
+BTP exportierte Spielliste **Position für Position**.
+
+Implementierung: `parse_planned_time` in
+[model.rs](../src-tauri/src/btp/model.rs), `sort_key` in
+[assign.rs](../src-tauri/src/tablet/assign.rs).
+
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
 `NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w),
 `MemberID` (Lizenznummer, Format `08-012002`), `ClubID` (→ `Clubs`),

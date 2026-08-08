@@ -2014,6 +2014,7 @@ mod tests {
     /// Match id=42 auf Court 101 (OnCourt), zwei Einzel-Spieler.
     fn match_on_court() -> BtpMatch {
         BtpMatch {
+            display_order: None,
             from1: None,
             from2: None,
             id: 42,

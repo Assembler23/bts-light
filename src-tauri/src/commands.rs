@@ -1522,17 +1522,20 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
             }
         })
         .collect();
-    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), danach nach
-    // Spielnummer (ohne Nummer/Zeit zuletzt) – konsistent zur Auto-Feldvergabe.
-    let planned: std::collections::HashMap<i64, i64> = snapshot
+    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), dann nach der
+    // Ansetzungsreihenfolge des Turnierplans (DisplayOrder), danach nach
+    // Spielnummer – konsistent zur Auto-Feldvergabe.
+    let plan: std::collections::HashMap<i64, (Option<i64>, Option<i64>)> = snapshot
         .matches
         .iter()
-        .filter_map(|m| m.planned_time.map(|t| (m.id, t)))
+        .map(|m| (m.id, (m.planned_time, m.display_order)))
         .collect();
     candidates.sort_by_key(|c| {
+        let (zeit, reihenfolge) = plan.get(&c.match_id).copied().unwrap_or((None, None));
         crate::tablet::assign::sort_key_parts(
             c.call.is_some(),
-            planned.get(&c.match_id).copied(),
+            zeit,
+            reihenfolge,
             c.match_num,
             c.match_id,
         )
