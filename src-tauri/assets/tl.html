@@ -173,6 +173,29 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row.blocked { background: #f8fafc; }
 .row .why { font-size: .82rem; color: var(--warn); flex-basis: 100%; }
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
+.row .prep {
+  font: inherit; font-size: .8rem; font-weight: 650;
+  padding: 6px 10px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+}
+.row .prep:hover { border-color: var(--accent); color: var(--accent); }
+.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+
+/* Walkover-Vorschläge: nach einer Aufgabe entscheidet die Turnierleitung,
+   welche Folgespiele kampflos gehen. */
+.wo {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.wo h4 { margin: 0; font-size: .95rem; }
+.wo label { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: .9rem; }
+.wo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.wo button {
+  font: inherit; font-size: .85rem; font-weight: 650; padding: 8px 14px; min-height: 44px;
+  border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
+}
+.wo button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
 /* Aufklappbare Abschnitte müssen als solche erkennbar sein — ohne Zeichen
    wirken sie wie eine leere Sektion, und die Turnierleitung glaubt, es
    gäbe dort nichts. */
@@ -295,6 +318,7 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
   <div class="action-bar" id="action-bar">
     <span class="what" id="action-what"></span>
     <span class="hint" id="action-hint">jetzt ein Feld antippen</span>
+    <button type="button" id="action-result" hidden>Ergebnis eintragen</button>
     <button type="button" id="action-free" hidden>Vom Feld nehmen</button>
     <button type="button" id="action-cancel">Abbrechen</button>
   </div>
@@ -304,6 +328,7 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
       <div id="courts"></div>
     </section>
     <section>
+      <div id="walkovers"></div>
       <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
       <div id="queue"></div>
     </section>
@@ -432,6 +457,7 @@ function renderActionBar() {
   // Beim Umhängen ist „vom Feld nehmen" die zweite sinnvolle Handlung —
   // sie steht deshalb direkt neben dem Abbrechen, statt in einem Menü.
   $("action-free").hidden = !picked.fromCourtId;
+  $("action-result").hidden = !picked.fromCourtId;
   $("action-hint").textContent = picked.fromCourtId
     ? "auf ein anderes Feld tippen"
     : "jetzt ein Feld antippen";
@@ -507,6 +533,61 @@ async function send(opId, action, onOk) {
     // soll den echten Stand zeigen, nicht unsere Vermutung.
     poll();
   }
+}
+
+/** Ein Spiel in die Vorbereitung rufen (oder den Aufruf zurücknehmen). */
+async function togglePrepCall(match) {
+  const called = !!match.prep_call;
+  // In welche Halle? Bei einem Hallenfilter ist die Antwort klar, sonst
+  // nimmt der Aufruf die Halle des Spiels — und ohne beides bleibt er
+  // ohne Hallenangabe (Ein-Hallen-Turnier).
+  const hall = hallFilter || match.hall || "";
+  const locationId = hall ? hallIdFor(hall) : null;
+  await send(
+    `prep-${match.match_id}-${called}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    called
+      ? { action: "retract_preparation", matchId: match.match_id }
+      : { action: "call_preparation", matchIds: [match.match_id], locationId },
+    called ? "Aufruf zurückgenommen." : `In Vorbereitung gerufen${hall ? ` (${hall})` : ""}.`,
+  );
+}
+
+/** Die BTP-Kennung zu einem Hallennamen; `null`, wenn unbekannt. */
+function hallIdFor(hall) {
+  return state.halls.find((h) => h.name === hall)?.id ?? null;
+}
+
+/**
+ * Endstand nachtragen, wenn niemand gezählt hat.
+ *
+ * Bewusst über eine einfache Eingabe („21:15, 21:19") statt über ein
+ * Formular mit Satzfeldern: Die Turnierleitung hat den Zettel in der Hand
+ * und tippt ab, was daraufsteht. Die Prüfung macht ohnehin der Turnier-PC —
+ * dieselbe wie am Zähltablett.
+ */
+async function enterResult(court) {
+  const wer = `${(court.team1 || []).join(" / ")} gegen ${(court.team2 || []).join(" / ")}`;
+  const eingabe = prompt(
+    `Endstand für ${court.court} — ${wer}\n\n`
+    + `Sätze mit Komma trennen, zum Beispiel:  21:15, 19:21, 21:17`,
+    (court.sets || []).map(([a, b]) => `${a}:${b}`).join(", "),
+  );
+  if (eingabe === null) return;
+  const sets = eingabe.split(",").map((s) => {
+    const m = s.trim().match(/^(\d+)\s*[:\-]\s*(\d+)$/);
+    return m ? { a: Number(m[1]), b: Number(m[2]) } : null;
+  });
+  if (!sets.length || sets.some((s) => s === null)) {
+    toast("Der Endstand ließ sich nicht lesen. Beispiel: 21:15, 21:19", true);
+    return;
+  }
+  picked = null;
+  renderActionBar();
+  await send(
+    `result-${court.match_id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "enter_result", matchId: court.match_id, sets, retired: false, overwrite: false },
+    `Ergebnis für ${wer} eingetragen.`,
+  );
 }
 
 /** Ein Feld räumen — das Spiel geht zurück in die Warteliste. */
@@ -676,7 +757,7 @@ const pairOf = (t1, t2) =>
 function renderHalls() {
   const box = $("halls");
   if (!state || !state.multi_hall) { box.innerHTML = ""; return; }
-  const options = ["", ...state.halls];
+  const options = ["", ...state.halls.map((h) => h.name)];
   box.innerHTML = options.map((h) =>
     `<button type="button" data-hall="${esc(h)}" aria-pressed="${h === hallFilter}">${h ? esc(h) : "Alle Hallen"}</button>`
   ).join("");
@@ -822,6 +903,11 @@ function queueRow(m) {
       ? `${esc(who)} spielt gerade`
       : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
   }
+  // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
+  // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
+  // frei ist. Deshalb ein eigener Knopf statt einer Geste.
+  parts.push(`<button type="button" class="prep" data-prep="${m.match_id}">${
+    m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen"}</button>`);
   // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
   // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
   // Ablehnung.
@@ -835,6 +921,18 @@ function queueRow(m) {
 
 /** Verdrahtet die Zeilen der Warteliste. */
 function wireQueue(box) {
+  box.querySelectorAll("button[data-prep]").forEach((btn) => {
+    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
+    if (!match) return;
+    btn.addEventListener("click", (ev) => {
+      // Nicht bis zur Zeile durchreichen — sonst wählte der Klick zusätzlich
+      // das Spiel aus, und die Auswahl bliebe unbeabsichtigt stehen.
+      ev.stopPropagation();
+      togglePrepCall(match);
+    });
+    // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
   box.querySelectorAll(".row.pick[data-match]").forEach((el) => {
     const match = state.queue.find((m) => String(m.match_id) === el.dataset.match);
     if (!match) return;
@@ -993,6 +1091,52 @@ function renderQueue() {
   wireQueue(box);
 }
 
+/**
+ * Walkover-Vorschläge.
+ *
+ * Nach einer Aufgabe schlägt der Turnier-PC vor, die Folgespiele derselben
+ * Mannschaft kampflos zu werten. Welche das sein sollen, entscheidet die
+ * Turnierleitung — deshalb Kästchen zum Ankreuzen und keine Sammelaktion.
+ */
+function renderWalkovers() {
+  const box = $("walkovers");
+  const list = (state.walkovers || []);
+  if (!list.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<h2>Aufgaben <span class="count">(${list.length})</span></h2>` +
+    list.map((w) => `
+      <div class="wo" data-wo="${esc(w.id)}">
+        <h4>${esc(w.retired_team)} hat aufgegeben <span class="meta">· ${esc(w.draw_name)}</span></h4>
+        <div class="meta">Welche Spiele sollen kampflos gewertet werden?</div>
+        ${w.candidates.map((c) => `
+          <label><input type="checkbox" value="${c.match_id}" checked />
+            ${esc(c.round_name)} — ${esc(c.opponent)} kommt weiter</label>`).join("")}
+        <div class="actions">
+          <button type="button" class="primary" data-confirm="${esc(w.id)}">Kampflos werten</button>
+          <button type="button" data-dismiss="${esc(w.id)}">Verwerfen</button>
+        </div>
+      </div>`).join("");
+
+  box.querySelectorAll("[data-confirm]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".wo");
+      const ids = [...card.querySelectorAll("input:checked")].map((i) => Number(i.value));
+      if (!ids.length) { toast("Kein Spiel angekreuzt.", true); return; }
+      await send(
+        `wo-${btn.dataset.confirm}-${ids.join("_")}`,
+        { action: "confirm_walkover", proposalId: btn.dataset.confirm, matchIds: ids },
+        `${ids.length} Spiel(e) kampflos gewertet.`,
+      );
+    });
+  });
+  box.querySelectorAll("[data-dismiss]").forEach((btn) => {
+    btn.addEventListener("click", () => send(
+      `wo-dismiss-${btn.dataset.dismiss}`,
+      { action: "dismiss_walkover", proposalId: btn.dataset.dismiss },
+      "Vorschlag verworfen.",
+    ));
+  });
+}
+
 function renderAutoToggle() {
   const btn = $("auto-toggle");
   const aa = state.auto_assign || {};
@@ -1036,6 +1180,7 @@ function render() {
   renderAutoToggle();
   renderActionBar();
   renderCourts();
+  renderWalkovers();
   renderQueue();
 }
 
@@ -1062,6 +1207,10 @@ function start() {
   $("action-free").addEventListener("click", () => {
     const court = picked && state.courts.find((c) => c.court_id === picked.fromCourtId);
     if (court) freeCourt(court);
+  });
+  $("action-result").addEventListener("click", () => {
+    const court = picked && state.courts.find((c) => c.court_id === picked.fromCourtId);
+    if (court) enterResult(court);
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
   $("toast-close").addEventListener("click", hideToast);

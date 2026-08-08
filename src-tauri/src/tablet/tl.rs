@@ -270,6 +270,101 @@ pub(crate) fn apply_state_action(
     }
 }
 
+/// Übersetzt eine Ergebnis-Aktion in die BTP-Schreibvorgänge.
+///
+/// Rein und ohne Netz. Die eigentliche Prüfung (Satz-Vollständigkeit,
+/// Sieger-Ermittlung, bereits gewertet) liegt in
+/// `server::build_manual_result_update` und wird hier nur benutzt — es ist
+/// dieselbe, die auch am Zähltablett und in der Desktop-Oberfläche greift
+/// (R5).
+pub(crate) fn plan_result_action(
+    snap: &crate::btp::model::BtpSnapshot,
+    on_court_since: Option<u64>,
+    now_ms: u64,
+    action: &relay_proto::TlAction,
+) -> Result<Vec<crate::btp::proto::MatchUpdate>, relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+
+    match action {
+        A::EnterResult {
+            match_id,
+            sets,
+            retired,
+            overwrite,
+            ..
+        } => {
+            if *retired {
+                // Aufgabe und kampflose Wertung ziehen Folgen nach sich —
+                // wer kommt weiter, welche Spiele der Disziplin fallen mit.
+                // Diese Logik hängt am Walkover-Weg; eine halbe Umsetzung
+                // hier wäre schlimmer als eine klare Ansage.
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Eine Aufgabe wird über den Walkover-Vorschlag gewertet, nicht über \
+                     die Ergebnis-Eingabe.",
+                ));
+            }
+            if *overwrite {
+                // Steht bewusst aus, bis am echten BTP geprüft ist, was ein
+                // Überschreiben mit dem Turnierbaum macht.
+                return Err(TlResponse::err(
+                    C::Unsupported,
+                    "Ein bereits gewertetes Spiel lässt sich hier noch nicht überschreiben.",
+                ));
+            }
+            let m = snap
+                .matches
+                .iter()
+                .find(|m| m.id == *match_id)
+                .ok_or_else(|| {
+                    TlResponse::err(
+                        C::NotAllowed,
+                        "Das Spiel gibt es im aktuellen Turnierstand nicht mehr.",
+                    )
+                })?;
+            let pairs: Vec<(i64, i64)> = sets.iter().map(|s| (s.a, s.b)).collect();
+            let update =
+                crate::tablet::server::build_manual_result_update(m, pairs, on_court_since, now_ms)
+                    .map_err(|e| TlResponse::err(C::NotAllowed, e))?;
+            Ok(vec![update])
+        }
+        _ => Err(TlResponse::err(
+            C::Unsupported,
+            "Diese Aktion ist noch nicht freigeschaltet.",
+        )),
+    }
+}
+
+/// Baut die kampflosen Wertungen für die ausgewählten Spiele eines
+/// Walkover-Vorschlags.
+///
+/// Rein und ohne Netz. Die aufgebende Mannschaft verliert, der Gegner
+/// gewinnt — ohne Sätze, mit dem BTP-Vermerk für „kampflos". Kampflose
+/// Spiele stehen auf keinem Feld, also gibt es nichts freizugeben und keine
+/// Spieler auszuchecken.
+pub(crate) fn walkover_updates(
+    candidates: &[crate::tablet::state::WalkoverCandidate],
+    match_ids: &[i64],
+) -> Vec<crate::btp::proto::MatchUpdate> {
+    candidates
+        .iter()
+        .filter(|c| match_ids.contains(&c.match_id))
+        .map(|c| crate::btp::proto::MatchUpdate {
+            btp_match_id: c.match_id,
+            draw_id: c.draw_id,
+            planning_id: c.planning_id,
+            sets: Vec::new(),
+            // Sieger ist die jeweils NICHT aufgebende Mannschaft.
+            team1_won: !c.retired_is_team1,
+            duration_mins: 0,
+            score_status: 1, // 1 = kampflos
+            free_court_id: None,
+            player_ids: Vec::new(),
+            end_ts_ms: None,
+        })
+        .collect()
+}
+
 /// Berührt diese Aktion eine Feldzuordnung (und damit BTP)?
 fn touches_courts(action: &relay_proto::TlAction) -> bool {
     use relay_proto::TlAction as A;
@@ -320,6 +415,18 @@ pub(crate) async fn execute(
     let Some(snap) = ctx.tablet.snapshot_clone() else {
         return TlResponse::err(C::NotAllowed, "Es ist noch kein Turnier geladen.");
     };
+    // Wertungen: eigener Weg, weil sie Ergebnisse schreiben statt
+    // Feldzuordnungen — mit der Nachschub-Queue, die auch der Tablet- und
+    // der Desktop-Pfad benutzen. Fällt BTP kurz aus, reicht der Sync-Lauf
+    // die Wertung nach, statt sie zu verlieren.
+    if let Some(response) = execute_result_action(ctx, device, &config, now_ms, &action).await {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
+
     // Aktionen ohne Feldbezug ändern nur den Zustand am Turnier-PC: kein
     // Schreibvorgang nach BTP, also auch keine Reservierung und kein
     // Fehlschlag von dort.
@@ -444,6 +551,116 @@ pub(crate) async fn execute(
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
     }
+}
+
+/// Führt eine Wertung aus (Ergebnis eintragen, kampflos werten).
+///
+/// `None` heißt: keine Wertung, an anderer Stelle weiterbehandeln.
+///
+/// Wie im Tablet- und Desktop-Pfad landet ein fehlgeschlagener Schreibvorgang
+/// in der Nachschub-Queue — der Sync-Lauf reicht ihn nach, sobald BTP wieder
+/// antwortet. Eine Wertung darf nicht verlorengehen, nur weil das Netz
+/// kurz weg war.
+async fn execute_result_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    device: &crate::config::TlDevice,
+    config: &AppConfig,
+    now_ms: u64,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+
+    let updates = match action {
+        A::EnterResult { match_id, .. } => {
+            let snap = ctx.tablet.snapshot_clone()?;
+            let on_court_since = snap
+                .matches
+                .iter()
+                .find(|m| m.id == *match_id)
+                .and_then(|m| m.court_id)
+                .and_then(|cid| ctx.tablet.on_court_since_ms(cid, *match_id));
+            match plan_result_action(&snap, on_court_since, now_ms, action) {
+                Ok(u) => u,
+                Err(rejected) => return Some(rejected),
+            }
+        }
+        A::ConfirmWalkover {
+            proposal_id,
+            match_ids,
+        } => {
+            if match_ids.is_empty() {
+                return Some(TlResponse::err(C::NotAllowed, "Kein Spiel ausgewählt."));
+            }
+            let Some(proposal) = ctx
+                .tablet
+                .walkover_proposals()
+                .into_iter()
+                .find(|p| p.id == *proposal_id)
+            else {
+                return Some(TlResponse::err(
+                    C::AlreadyHandled,
+                    "Der Vorschlag ist nicht mehr offen — vermutlich hat ihn jemand anderes \
+                     schon bearbeitet.",
+                ));
+            };
+            walkover_updates(
+                &ctx.tablet.walkover_candidates(proposal.entry_id),
+                match_ids,
+            )
+        }
+        _ => return None,
+    };
+
+    let mut written = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for update in updates {
+        match crate::tablet::server::write_result_to_btp(config, &update).await {
+            Ok(()) => {
+                if let Some(cid) = update.free_court_id {
+                    ctx.tablet.clear_court(cid);
+                }
+                ctx.tablet.clear_btp_retry(update.btp_match_id);
+                // Für die Selbstheilung: Ein langsamer Nachschub-Write darf
+                // die frische Wertung nicht überschreiben.
+                ctx.tablet.note_direct_btp_write(update.clone(), now_ms);
+                written += 1;
+            }
+            Err(e) => {
+                ctx.tablet.queue_btp_retry(update, now_ms);
+                errors.push(e);
+            }
+        }
+    }
+
+    // Der Vorschlag verschwindet nur, wenn wirklich alles geschrieben wurde
+    // — sonst bleibt er für einen erneuten Versuch stehen.
+    if let A::ConfirmWalkover { proposal_id, .. } = action {
+        if errors.is_empty() {
+            ctx.tablet.remove_walkover_proposal(proposal_id);
+        }
+    }
+
+    tracing::info!(
+        "TL-Web [{}]: {} — {written} Wertung(en) geschrieben, {} offen",
+        device.label,
+        action_label(action),
+        errors.len()
+    );
+    Some(if errors.is_empty() {
+        TlResponse::ok(0)
+    } else if written > 0 {
+        // Teilweise durchgekommen: Das ist kein Fehlschlag, aber die
+        // Turnierleitung muss wissen, dass noch etwas unterwegs ist.
+        TlResponse::ok(0).with_warning(format!(
+            "{written} gewertet, {} wird automatisch nachgereicht.",
+            errors.len()
+        ))
+    } else {
+        TlResponse::err(
+            C::BtpError,
+            "BTP war nicht erreichbar — die Wertung wird automatisch nachgereicht.",
+        )
+    })
 }
 
 /// Kurzer, stabiler Fingerabdruck einer Aktion — erkennt, ob eine wiederholte
@@ -588,8 +805,12 @@ pub struct TlState {
     pub tournament: String,
     /// Mehr-Hallen-Turnier? Nur dann bietet die Seite einen Hallenfilter an.
     pub multi_hall: bool,
-    /// Alle Hallennamen des Turniers, alphabetisch.
-    pub halls: Vec<String>,
+    /// Alle Hallen des Turniers, alphabetisch nach Namen.
+    ///
+    /// Mit Kennung, nicht nur mit Namen: Ein Vorbereitungs-Aufruf braucht sie,
+    /// damit er auf der Meeting-Point-Anzeige **einer** Halle erscheint und
+    /// nicht auf allen.
+    pub halls: Vec<TlHall>,
     pub auto_assign: TlAutoAssign,
     /// Schwellen des Aufruf-Timers, damit die Seite die Aufruf-Stufe
     /// genauso einfärbt wie die Desktop-Oberfläche.
@@ -602,6 +823,10 @@ pub struct TlState {
     /// die automatische Vergabe arbeitet. Bewusst serverseitig sortiert:
     /// Sonst zeigten zwei Geräte zwei Reihenfolgen.
     pub queue: Vec<TlMatch>,
+    /// Offene Walkover-Vorschläge: Nach einer Aufgabe schlägt bts-light vor,
+    /// die Folgespiele derselben Mannschaft kampflos zu werten. Welche das
+    /// sein sollen, entscheidet die Turnierleitung.
+    pub walkovers: Vec<TlWalkover>,
     /// Hallen, deren Warteliste gekappt wurde (leerer Name = Spiele ohne
     /// Hallenzuordnung). Leer = nichts gekappt.
     ///
@@ -695,6 +920,35 @@ pub struct TlMatch {
     pub blocked: Option<TlBlocked>,
 }
 
+/// Eine Halle des Turniers.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlHall {
+    /// BTP-Kennung des Standorts — nötig für den Vorbereitungs-Aufruf.
+    pub id: i64,
+    pub name: String,
+}
+
+/// Ein offener Walkover-Vorschlag samt der Spiele, die er beträfe.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlWalkover {
+    pub id: String,
+    /// Die Mannschaft, die aufgegeben hat.
+    pub retired_team: String,
+    pub draw_name: String,
+    pub created_at_ms: u64,
+    /// Die Spiele, die kampflos gewertet werden könnten — die
+    /// Turnierleitung wählt aus.
+    pub candidates: Vec<TlWalkoverMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlWalkoverMatch {
+    pub match_id: i64,
+    pub round_name: String,
+    /// Wer davon profitieren würde.
+    pub opponent: String,
+}
+
 /// Eine laufende Pause am Feld (BWF-Intervall, Satzpause, Behandlung).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlPause {
@@ -773,6 +1027,7 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
             rest_minutes: None,
             courts: Vec::new(),
             queue: Vec::new(),
+            walkovers: Vec::new(),
             truncated_halls: Vec::new(),
         };
     };
@@ -856,14 +1111,17 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
         });
     }
 
-    let mut halls: Vec<String> = snap
+    let mut halls: Vec<TlHall> = snap
         .locations
         .iter()
-        .map(|l| l.name.trim().to_string())
-        .filter(|n| !n.is_empty())
+        .filter(|l| !l.name.trim().is_empty())
+        .map(|l| TlHall {
+            id: l.id,
+            name: l.name.trim().to_string(),
+        })
         .collect();
-    halls.sort_by_key(|h| h.to_lowercase());
-    halls.dedup();
+    halls.sort_by_key(|h| h.name.to_lowercase());
+    halls.dedup_by(|a, b| a.name == b.name);
 
     TlState {
         rev,
@@ -880,6 +1138,33 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
         rest_minutes: effective_rest_minutes(&snap, config),
         courts,
         queue,
+        // Vorschläge, deren Spiele inzwischen alle gewertet sind, fallen
+        // dabei heraus — sie hätten nichts mehr anzubieten.
+        walkovers: tablet
+            .walkover_proposals()
+            .into_iter()
+            .filter_map(|p| {
+                let candidates: Vec<TlWalkoverMatch> = tablet
+                    .walkover_candidates(p.entry_id)
+                    .into_iter()
+                    .map(|c| TlWalkoverMatch {
+                        match_id: c.match_id,
+                        round_name: c.round_name,
+                        opponent: c.opponent,
+                    })
+                    .collect();
+                if candidates.is_empty() {
+                    return None;
+                }
+                Some(TlWalkover {
+                    id: p.id,
+                    retired_team: p.retired_team,
+                    draw_name: p.draw_name,
+                    created_at_ms: p.created_at_ms,
+                    candidates,
+                })
+            })
+            .collect(),
         truncated_halls: truncated.into_iter().collect(),
     }
 }
@@ -1168,7 +1453,11 @@ mod tests {
         assert_eq!(m.hall, "Halle B");
         assert_eq!(m.hall_source, HallSource::Call);
         assert!(s.multi_hall);
-        assert_eq!(s.halls, vec!["Halle A".to_string(), "Halle B".to_string()]);
+        let namen: Vec<&str> = s.halls.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(namen, vec!["Halle A", "Halle B"]);
+        // Die Kennung muss mit, sonst könnte ein Vorbereitungs-Aufruf keine
+        // Halle benennen.
+        assert_eq!(s.halls[1].id, 2);
     }
 
     #[test]
@@ -1486,6 +1775,147 @@ mod tests {
     }
 
     #[test]
+    fn entering_a_result_builds_the_same_write_as_the_desktop_path() {
+        // Der Hauptfall: Niemand hat gezählt, die Turnierleitung trägt den
+        // Endstand nach. Dieselbe Prüfung wie am Zähltablett (R5) — sie
+        // liegt in `build_manual_result_update` und wird hier nur benutzt.
+        let mut m = a_match(7);
+        m.status = MatchStatus::OnCourt;
+        m.court_id = Some(1);
+        let s = snap(vec![a_court(1, None)], vec![m], Vec::new());
+
+        let updates = plan_result_action(
+            &s,
+            None,
+            9_000,
+            &relay_proto::TlAction::EnterResult {
+                match_id: 7,
+                sets: vec![
+                    relay_proto::SetAb { a: 21, b: 15 },
+                    relay_proto::SetAb { a: 21, b: 19 },
+                ],
+                retired: false,
+                winner: None,
+                overwrite: false,
+            },
+        )
+        .expect("erlaubt");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].btp_match_id, 7);
+        assert_eq!(updates[0].sets, vec![(21, 15), (21, 19)]);
+        assert!(updates[0].team1_won);
+        // Das Spiel stand auf einem Feld — das wird im selben Vorgang frei.
+        assert_eq!(updates[0].free_court_id, Some(1));
+    }
+
+    #[test]
+    fn an_incomplete_set_is_rejected_like_everywhere_else() {
+        // Ein noch laufender Satz darf nicht als gewonnener gewertet werden.
+        let s = snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new());
+        let err = plan_result_action(
+            &s,
+            None,
+            9_000,
+            &relay_proto::TlAction::EnterResult {
+                match_id: 7,
+                sets: vec![relay_proto::SetAb { a: 15, b: 12 }],
+                retired: false,
+                winner: None,
+                overwrite: false,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
+    }
+
+    #[test]
+    fn a_retirement_is_pointed_to_the_path_that_can_handle_it() {
+        // Aufgabe und kampflose Wertung laufen über den Walkover-Weg —
+        // dort hängt die Folgelogik (wer kommt weiter, welche Spiele der
+        // Disziplin fallen mit). Eine halbe Umsetzung hier wäre schlimmer
+        // als eine klare Ansage.
+        let s = snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new());
+        let err = plan_result_action(
+            &s,
+            None,
+            9_000,
+            &relay_proto::TlAction::EnterResult {
+                match_id: 7,
+                sets: vec![relay_proto::SetAb { a: 21, b: 15 }],
+                retired: true,
+                winner: Some(1),
+                overwrite: false,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.error.unwrap_or_default().contains("Aufgabe"),
+            "die Meldung muss den richtigen Weg nennen"
+        );
+    }
+
+    #[test]
+    fn overwriting_an_existing_result_is_not_available_yet() {
+        // Steht bewusst aus, bis am echten BTP geprüft ist, was ein
+        // Überschreiben mit dem Turnierbaum macht (Spec, offener Punkt 1).
+        let mut done = a_match(7);
+        done.status = MatchStatus::Finished;
+        done.winner = Some(1);
+        let s = snap(vec![a_court(1, None)], vec![done], Vec::new());
+        let err = plan_result_action(
+            &s,
+            None,
+            9_000,
+            &relay_proto::TlAction::EnterResult {
+                match_id: 7,
+                sets: vec![
+                    relay_proto::SetAb { a: 21, b: 15 },
+                    relay_proto::SetAb { a: 21, b: 10 },
+                ],
+                retired: false,
+                winner: None,
+                overwrite: true,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::Unsupported));
+    }
+
+    #[test]
+    fn confirming_a_walkover_writes_one_result_per_selected_match() {
+        // Die aufgebende Mannschaft verliert, der Gegner gewinnt — ohne
+        // Sätze, mit dem BTP-Vermerk für „kampflos".
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+        let candidates = vec![
+            crate::tablet::state::WalkoverCandidate {
+                match_id: 11,
+                draw_id: 1,
+                planning_id: 111,
+                round_name: "VF".to_string(),
+                opponent: "Meier".to_string(),
+                retired_is_team1: true,
+            },
+            crate::tablet::state::WalkoverCandidate {
+                match_id: 12,
+                draw_id: 1,
+                planning_id: 112,
+                round_name: "HF".to_string(),
+                opponent: "Kraus".to_string(),
+                retired_is_team1: false,
+            },
+        ];
+        let updates = walkover_updates(&candidates, &[11, 12]);
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].score_status, 1, "1 = kampflos");
+        assert!(updates[0].sets.is_empty(), "kampflos hat keine Sätze");
+        assert!(!updates[0].team1_won, "Team 1 hat aufgegeben");
+        assert!(updates[1].team1_won, "hier war es Team 2");
+        // Ein nicht ausgewähltes Spiel bleibt unangetastet.
+        assert!(walkover_updates(&candidates, &[11]).len() == 1);
+    }
+
+    #[test]
     fn calling_matches_into_preparation_records_them_with_their_hall() {
         // Der Aufruf lebt am Turnier-PC (BTP kennt keinen solchen Zustand).
         // Die Halle entscheidet, welcher Meeting-Point-Monitor ihn zeigt.
@@ -1647,6 +2077,37 @@ mod tests {
     }
 
     #[test]
+    fn open_walkover_proposals_reach_the_page_with_their_matches() {
+        // Ohne die Vorschläge samt betroffener Spiele könnte die Seite
+        // nicht anbieten, was gewertet werden soll — die Turnierleitung
+        // wählt ja aus, welche Folgespiele kampflos gehen.
+        let tablet = TabletState::default();
+        // Ein noch offenes Folgespiel der aufgebenden Mannschaft — ohne
+        // solche Spiele hätte der Vorschlag nichts anzubieten und fiele zu
+        // Recht heraus.
+        let mut folgespiel = a_match(21);
+        folgespiel.entry1_id = 1;
+        folgespiel.round_name = "Halbfinale".to_string();
+        tablet.set_snapshot(snap(Vec::new(), vec![folgespiel], Vec::new()));
+        tablet.add_walkover_proposal(crate::tablet::state::WalkoverProposal {
+            id: "p-1".to_string(),
+            entry_id: 1,
+            retired_team: "Weber / Fischer".to_string(),
+            draw_name: "HD B".to_string(),
+            created_at_ms: 4_000,
+        });
+
+        let s = build_state(&tablet, &AppConfig::default(), 9_000, 1);
+        assert_eq!(s.walkovers.len(), 1);
+        assert_eq!(s.walkovers[0].candidates.len(), 1);
+        assert_eq!(s.walkovers[0].candidates[0].match_id, 21);
+        assert_eq!(s.walkovers[0].id, "p-1");
+        assert_eq!(s.walkovers[0].retired_team, "Weber / Fischer");
+        assert_eq!(s.walkovers[0].draw_name, "HD B");
+        assert_eq!(s.walkovers[0].created_at_ms, 4_000);
+    }
+
+    #[test]
     fn a_court_still_held_by_a_finished_match_is_not_shown_as_free() {
         // Sonst zeigt die Seite ein leeres Feld an, das die Vergabe-Prüfung
         // als belegt ablehnt — der Helfer tippt gegen eine unsichtbare Wand.
@@ -1767,7 +2228,7 @@ mod tests {
             &cfg,
         );
         assert_eq!(s.queue[0].hall, "Halle B", "Schreibweise aus BTP");
-        assert!(s.halls.contains(&s.queue[0].hall));
+        assert!(s.halls.iter().any(|h| h.name == s.queue[0].hall));
     }
 
     #[test]
@@ -1859,6 +2320,13 @@ mod tests {
             "courts",
             "queue",
             "truncated_halls",
+            // Walkover-Vorschläge: Mannschaftsnamen, die auch sonst überall
+            // in der Ansicht stehen, plus Runde und Gegner. Die
+            // Turnierleitung muss sehen, was sie da kampflos wertet.
+            "walkovers",
+            "retired_team",
+            "candidates",
+            "opponent",
             // Feld
             "court_id",
             "court",
