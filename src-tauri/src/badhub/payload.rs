@@ -183,16 +183,13 @@ fn upcoming(snapshot: &BtpSnapshot) -> Vec<TsetMatch> {
         .filter(|m| m.status == MatchStatus::Scheduled)
         .filter(|m| !m.team1.is_empty() || !m.team2.is_empty())
         .collect();
-    // Gerufene Matches („in Vorbereitung") zuerst, damit ein Aufruf nie aus
-    // dem UPCOMING_LIMIT fällt; danach nach Spielnummer (ohne Nummer hinten).
-    // Ist nichts gerufen, ist `is_some()` überall false und die Sortierung
-    // degeneriert exakt zur bisherigen Spielnummern-Reihenfolge.
-    scheduled.sort_by_key(|m| {
-        (
-            m.preparation_call_ts.is_none(),
-            m.match_num.unwrap_or(i64::MAX),
-        )
-    });
+    // **Dieselbe Reihenfolge wie überall sonst** (`assign::sort_key`):
+    // gerufene zuerst, dann die Ansetzung des Turnierplans, erst danach die
+    // Spielnummer. Der Liveticker ist die Ansicht mit den meisten Augen —
+    // zeigte er andere „nächste Spiele" als der Plan der Turnierleitung,
+    // stünden Zuschauer am falschen Feld, und bei nur 15 Einträgen fielen
+    // die tatsächlich nächsten Spiele ganz heraus.
+    scheduled.sort_by_key(|m| crate::tablet::assign::sort_key(m, m.preparation_call_ts.is_some()));
     scheduled.truncate(UPCOMING_LIMIT);
     scheduled.iter().map(|m| to_upcoming_match(m)).collect()
 }
@@ -577,6 +574,49 @@ mod tests {
         assert_eq!(upcoming.len(), 1);
         assert_eq!(upcoming[0].id, "btp_5");
         assert_eq!(upcoming[0].match_num, Some(5));
+    }
+
+    #[test]
+    fn upcoming_follows_the_tournament_plan_not_the_match_number() {
+        // Der Liveticker ist die Ansicht mit den meisten Augen. Zeigt er
+        // andere „nächste Spiele" als der Turnierplan, sucht die
+        // Turnierleitung den Fehler bei sich — und Zuschauer warten am
+        // falschen Feld. Maßgeblich ist die Ansetzung: erst die Zeit, dann
+        // die Reihenfolge innerhalb des Zeitfensters.
+        let mut frueh = sample_match(1, MatchStatus::Scheduled, None);
+        frueh.match_num = Some(90); // hohe Nummer, aber zuerst angesetzt
+        frueh.planned_time = Some(202_702_050_900);
+        frueh.display_order = Some(1);
+        let mut spaet = sample_match(2, MatchStatus::Scheduled, None);
+        spaet.match_num = Some(2); // kleine Nummer, aber später dran
+        spaet.planned_time = Some(202_702_050_900);
+        spaet.display_order = Some(2);
+        let mut viel_spaeter = sample_match(3, MatchStatus::Scheduled, None);
+        viel_spaeter.match_num = Some(1);
+        viel_spaeter.planned_time = Some(202_702_051_100);
+        viel_spaeter.display_order = Some(1);
+
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            matches: vec![viel_spaeter, spaet, frueh],
+        };
+        let ids: Vec<String> = build_tset(&snapshot, 1)
+            .event
+            .upcoming_matches
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["btp_1", "btp_2", "btp_3"],
+            "Ansetzung schlägt Spielnummer"
+        );
     }
 
     #[test]

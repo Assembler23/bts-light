@@ -913,24 +913,25 @@ async fn info_preparation_state(
                 "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "match_num": m.match_num,
                 "planned_time": m.planned_time,
+                "display_order": m.display_order,
                 "call": call,
             })
         })
         .collect();
 
-    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), danach nach
-    // Spielnummer (ohne Zeit/Nummer hinten) – konsistent zur Auto-Feldvergabe.
+    // Gerufene zuerst, dann die Ansetzung des Turnierplans (Zeit, dann
+    // Reihenfolge im Zeitfenster), danach die Spielnummer – dieselbe
+    // Definition wie in `assign::sort_key`, damit Tablet, Monitor,
+    // Turnierleitung und Automatik dieselbe Liste zeigen.
     candidates.sort_by_key(|c| {
-        let has_call = c.get("call").map(|v| !v.is_null()).unwrap_or(false);
-        let planned = c
-            .get("planned_time")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(i64::MAX);
-        let num = c
-            .get("match_num")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(i64::MAX);
-        (!has_call, planned, num)
+        let zahl = |feld: &str| c.get(feld).and_then(|v| v.as_i64());
+        crate::tablet::assign::sort_key_parts(
+            c.get("call").map(|v| !v.is_null()).unwrap_or(false),
+            zahl("planned_time"),
+            zahl("display_order"),
+            zahl("match_num"),
+            zahl("match_id").unwrap_or(0),
+        )
     });
 
     (

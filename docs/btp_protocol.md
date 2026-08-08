@@ -190,6 +190,27 @@ Implementierung: `parse_planned_time` in
 [model.rs](../src-tauri/src/btp/model.rs), `sort_key` in
 [assign.rs](../src-tauri/src/tablet/assign.rs).
 
+**Diese eine Definition gilt überall**, wo Spiele in eine Reihenfolge
+kommen — sonst zeigt jede Ansicht eine andere „nächste Begegnung", und
+niemand weiß mehr, welche stimmt:
+
+| Wo | Über |
+|---|---|
+| Automatische Feldvergabe | `sync.rs` → `assign::sort_key` |
+| Turnierleitungs-Oberfläche (Warteliste) | `tablet/tl.rs` → `assign::sort_key` |
+| Vorbereitungs-Kandidaten (Desktop) | `commands.rs` → `assign::sort_key_parts` |
+| Vorbereitungs-Kandidaten (Tablet/Monitor) | `tablet/server.rs` → `assign::sort_key_parts` |
+| **Liveticker „anstehende Spiele"** | `badhub/payload.rs` → `assign::sort_key` |
+
+Der Liveticker sortierte bis dahin **allein nach Spielnummer** — die
+Ansicht mit den meisten Augen zeigte damit eine Reihenfolge, die im
+Turnierplan nirgends stand. Bei nur 15 Einträgen konnten die tatsächlich
+nächsten Spiele sogar ganz herausfallen.
+
+Nicht betroffen: die Liste der **in Vorbereitung gerufenen** Spiele
+(`build_prepared_list`). Sie folgt der Reihenfolge der Aufrufe — wer
+zuerst gerufen wurde, steht oben, und das ist dort die richtige Ordnung.
+
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
 `NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w),
 `MemberID` (Lizenznummer, Format `08-012002`), `ClubID` (→ `Clubs`),
