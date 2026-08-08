@@ -165,39 +165,58 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 ## Akzeptanzkriterien
 
+> **Stand nach Schritt 13** (09.08.2026). Drei Zustände statt Häkchen, weil
+> „umgesetzt" und „nachgewiesen" nicht dasselbe sind:
+>
+> - **[x]** durch einen Test oder eine Messung belegt
+> - **[~]** umgesetzt und im Code nachvollziehbar, aber **nicht** am echten
+>   Gerät bzw. im echten Turnier nachgewiesen
+> - **[ ]** offen — mit Begründung dahinter
+>
+> Was offen ist, steht am Ende dieses Abschnitts noch einmal gesammelt.
+
 **Zugang und Geräte**
 
-- [ ] In bts-light lässt sich ein TL-Gerät mit Namen anlegen; es erscheint
+- [~] In bts-light lässt sich ein TL-Gerät mit Namen anlegen; es erscheint
       ein QR-Code, dessen Scan die Seite auf dem Gerät geöffnet und
       angemeldet zeigt — ohne Eingabe eines Codes.
-- [ ] Die `install_id` ist an keiner Stelle des TL-Pfads sichtbar: nicht in
+- [~] Die `install_id` ist an keiner Stelle des TL-Pfads sichtbar: nicht in
       der URL, nicht im Seitenquelltext, nicht in einer API-Antwort.
-- [ ] Das Token steht im URL-Fragment und taucht **nicht** im
+- [~] Das Token steht im URL-Fragment und taucht **nicht** im
       nginx-Access-Log auf.
-- [ ] Wird ein Gerät in bts-light entfernt, ist es spätestens **2 s**
+- [~] Wird ein Gerät in bts-light entfernt, ist es spätestens **2 s**
       später gesperrt und zeigt „Zugang wurde entzogen" — ohne Neustart von
       App oder Relay, im LAN- **und** im Cloud-Modus.
-- [ ] Ein **neuntes** Gerät wird mit einer verständlichen Meldung
+- [x] Ein **neuntes** Gerät wird mit einer verständlichen Meldung
       abgewiesen; ein Gerät, das länger als 60 s weg war, gibt seinen Platz
       frei und ein neues kommt hinein.
-- [ ] Ein Token eines Turniers erreicht **niemals** den Host eines anderen
+- [x] Ein Token eines Turniers erreicht **niemals** den Host eines anderen
       Namespace.
-- [ ] Nach einem Relay-Neustart melden sich alle Geräte binnen Sekunden
+- [~] Nach einem Relay-Neustart melden sich alle Geräte binnen Sekunden
       selbst wieder an; bis dahin werden Anfragen abgelehnt, nicht
       durchgelassen.
-- [ ] Ein Identitäts-Export enthält **keine** TL-Tokens.
+- [x] Ein Identitäts-Export enthält **keine** TL-Tokens.
 - [ ] Bei `tl_web.enabled = false` (Default) ist die Seite nicht
       erreichbar, und der Relay kennt kein einziges Token dieses Turniers.
+      → **Zweite Hälfte belegt, erste bewusst anders gelöst:** Die *Seite*
+      wird immer ausgeliefert, genau wie `tablet.html` — sie ist eine leere
+      Hülle, die ihren Zugang erst aus dem Adress-Fragment liest und ohne
+      ihn nichts zeigt. Geschützt sind die Daten-Routen. Eine Sperre für die
+      Hülle brächte nichts und machte das Koppeln unmöglich (man ruft die
+      Adresse ja auf, *bevor* der Zugang gilt).
 - [ ] Ist die Oberfläche **eingeschaltet, aber kein Gerät gekoppelt**, sagt
       die App das ausdrücklich („eingeschaltet, kein Gerät gekoppelt —
       Gerät hinzufügen"). Dieser Zustand entsteht regulär nach einem
       Identitäts-Umzug und sähe sonst wie ein funktionierendes Setup aus,
       während jede Anfrage abgewiesen wird.
-- [ ] Ein Gerät koppeln und danach in den Einstellungen etwas anderes
+      → **Offen.** Die Geräteverwaltung zeigt beide Angaben getrennt
+      (Schalter „freigeschaltet" und „Noch kein Gerät gekoppelt"), nennt
+      diesen Zustand aber nicht als das Problem, das er ist.
+- [x] Ein Gerät koppeln und danach in den Einstellungen etwas anderes
       speichern lässt das gekoppelte Gerät **verbunden** (die
       Einstellungsseite darf ihren beim Öffnen aufgenommenen Stand der
       Geräteliste nicht zurückschreiben).
-- [ ] Ein Identitäts-Import lässt die am **neuen** PC bereits gekoppelten
+- [x] Ein Identitäts-Import lässt die am **neuen** PC bereits gekoppelten
       Geräte unangetastet.
 
 **Ansicht**
@@ -205,113 +224,156 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - [ ] Die Seite zeigt Felder, Spielliste, Zeiten, Live-Spielstände,
       Zähltafelbediener je Feld, beendete Spiele und Walkover-Vorschläge in
       **einer** Ansicht.
-- [ ] Die Spielliste ist in drei Abschnitte gegliedert — *In Vorbereitung
+      → **Bis auf die beendeten Spiele erfüllt.** Ein Abschnitt dafür fehlt;
+      der Zustand trägt sie auch nicht. Wer nachsehen will, was gelaufen
+      ist, muss weiterhin an den Turnier-PC.
+- [x] Die Spielliste ist in drei Abschnitte gegliedert — *In Vorbereitung
       gerufen* (mit „seit X min"), *Spielbereit*, *Noch nicht bereit* — und
       innerhalb jedes Abschnitts exakt so sortiert wie die automatische
       Feldvergabe.
-- [ ] Ein nicht vergebbares Spiel bleibt sichtbar und nennt den Grund im
+- [x] Ein nicht vergebbares Spiel bleibt sichtbar und nennt den Grund im
       Klartext samt Namen der blockierenden Spieler und der Uhrzeit, ab der
       es frei ist.
-- [ ] „Seit wann aufgerufen", „Feld frei seit", Pausen- und
+- [~] „Seit wann aufgerufen", „Feld frei seit", Pausen- und
       Vorbereitungs-Uhren zählen im Sekundentakt hoch und zeigen auf **allen**
       Geräten dieselbe verstrichene Zeit, auch wenn die Gerätezeit falsch
       geht.
-- [ ] Bei einem Mehr-Hallen-Turnier filtert **ein** Filter im Kopf Felder,
+- [~] Bei einem Mehr-Hallen-Turnier filtert **ein** Filter im Kopf Felder,
       Spielliste, Bediener-Warteschlange und beendete Spiele gemeinsam.
       Spiele ohne Hallenzuordnung erscheinen in einem eigenen, immer
       sichtbaren Abschnitt mit Anzahl — sie werden nie stillschweigend
       ausgeblendet.
-- [ ] Bei einem Ein-Hallen-Turnier wird kein Hallenfilter angeboten.
-- [ ] Der Filter überlebt einen Reload und lässt sich per Link teilen.
+- [x] Bei einem Ein-Hallen-Turnier wird kein Hallenfilter angeboten.
+- [~] Der Filter überlebt einen Reload und lässt sich per Link teilen.
 
 **Bedienung**
 
-- [ ] Ein Spiel lässt sich per **Antippen, dann Feld antippen** zuweisen —
+- [~] Ein Spiel lässt sich per **Antippen, dann Feld antippen** zuweisen —
       auf iPad/Safari, Android/Chrome und Desktop.
-- [ ] Dasselbe geht per **Ziehen**, auf denselben Geräten.
-- [ ] Bricht ein Ziehvorgang ab, bleibt das Spiel ausgewählt und lässt sich
+- [~] Dasselbe geht per **Ziehen**, auf denselben Geräten.
+- [~] Bricht ein Ziehvorgang ab, bleibt das Spiel ausgewählt und lässt sich
       durch Antippen des Feldes zuweisen — ohne dass der Nutzer etwas
       zurücksetzen muss.
-- [ ] Solange ein Spiel ausgewählt ist, zeigt ein festes Band oben, welches
+- [~] Solange ein Spiel ausgewählt ist, zeigt ein festes Band oben, welches
       Spiel gewählt ist, und bietet Abbrechen; erlaubte Felder sind
       hervorgehoben, nicht erlaubte gedimmt — ein Tipp darauf **nennt den
       Grund**, statt ins Leere zu gehen.
-- [ ] Ein Spiel lässt sich von Feld A auf Feld B umhängen; das geht als
+- [x] Ein Spiel lässt sich von Feld A auf Feld B umhängen; das geht als
       **ein** BTP-Schreibvorgang, es gibt keinen Zwischenzustand ohne Feld.
-- [ ] Ein Spiel lässt sich vom Feld herunternehmen; geht dabei ein
+- [~] Ein Spiel lässt sich vom Feld herunternehmen; geht dabei ein
       laufender Spielstand verloren, kommt vorher eine Rückfrage.
 - [ ] Vorbereitungs-Aufruf setzen und zurücknehmen, zweiter und dritter
       Aufruf, Ergebnis nachtragen, Aufgabe/kampflos werten und die
       Zähltafelbediener-Warteschlange pflegen (vorziehen, entfernen,
       ergänzen) funktionieren aus der Seite heraus.
-- [ ] Die automatische Feldvergabe ist als Zustand sichtbar und lässt sich
+      → **Bis auf die Zähltafelbediener erfüllt.** Der Host beherrscht alle
+      drei Aktionen und prüft sie (`ScorekeeperAdvance`/`Remove`/`Add`), die
+      Seite bietet keine Bedienung dafür an — die Warteschlange ist dort nur
+      je Feld sichtbar. Pflegen geht weiterhin nur am Turnier-PC.
+- [~] Die automatische Feldvergabe ist als Zustand sichtbar und lässt sich
       umschalten; nach einer Zuweisung von Hand pausiert sie sichtbar für
       60 s, damit sie dem Helfer nicht dazwischenfunkt.
-- [ ] Die Pause gilt **nur zur Laufzeit** und endet beim Stoppen/Starten der
+- [x] Die Pause gilt **nur zur Laufzeit** und endet beim Stoppen/Starten der
       Übertragung. Sonst bliebe sie hängen, sobald das Gerät weg ist, das sie
       gesetzt hat — die Einstellungen sagten „an", vergeben würde trotzdem
       nichts, und es gäbe keinen Griff dagegen.
 
 **Aufrufe und Ansagen**
 
-- [ ] Die Aufruf-Stufe (1./2./3.) ist auf **allen** Geräten gleich —
+- [x] Die Aufruf-Stufe (1./2./3.) ist auf **allen** Geräten gleich —
       inklusive der Desktop-App; sie zählt am Host, nicht im Browser.
-- [ ] Eine aus TL-Web ausgelöste Ansage wird **genau einmal** und auf
+- [~] Eine aus TL-Web ausgelöste Ansage wird **genau einmal** und auf
       **genau einem** Gerät je Halle gesprochen — mit demselben Text, Gong
       und derselben Stimme wie eine Ansage aus der Desktop-App, inklusive
       „Tabletbedienung: …", wenn ein Bediener zugewiesen ist.
-- [ ] Ist in der Zielhalle kein Ansage-Gerät verbunden, meldet die Seite
+- [x] Ist in der Zielhalle kein Ansage-Gerät verbunden, meldet die Seite
       das im Klartext, die Aktion gilt trotzdem als ausgeführt, und die
       Aufruf-Stufe zählt hoch.
-- [ ] Eine Ansage, die länger als 60 s nicht abgespielt werden konnte,
+- [x] Eine Ansage, die länger als 60 s nicht abgespielt werden konnte,
       verfällt und wird nicht nachträglich gesprochen.
 
 **Ergebnis und Korrektur**
 
-- [ ] Ein noch offenes Spiel lässt sich mit einem Endstand nachtragen.
-- [ ] Ein bereits gewertetes Spiel lässt sich überschreiben, **solange der
+- [x] Ein noch offenes Spiel lässt sich mit einem Endstand nachtragen.
+- [~] Ein bereits gewertetes Spiel lässt sich überschreiben, **solange der
       Sieger in kein Folgespiel wirkt**; sonst wird es mit einer
       verständlichen Begründung abgelehnt.
-- [ ] In einer Gruppen-Auslosung wird eine Korrektur **nicht**
+- [x] In einer Gruppen-Auslosung wird eine Korrektur **nicht**
       fälschlicherweise blockiert.
-- [ ] Nach einer Korrektur überschreibt kein nachgereichter Schreibvorgang
+- [x] Nach einer Korrektur überschreibt kein nachgereichter Schreibvorgang
       aus der Retry-Queue das frische Ergebnis.
 
 **Konflikte und Fehlerfälle**
 
-- [ ] Weisen zwei Geräte gleichzeitig dasselbe Feld zu, gewinnt genau
+- [~] Weisen zwei Geräte gleichzeitig dasselbe Feld zu, gewinnt genau
       eines; das andere bekommt „Feld wurde gerade von jemand anderem
       belegt" **mit dem Namen des Spiels, das dort steht**, und die Ansicht
       springt auf den echten Stand. Beide Ansichten sind danach gleich.
 - [ ] Eine Aktion, die auf einer über 60 s alten Ansicht beruht, wird
       abgelehnt statt ausgeführt.
-- [ ] Ein doppelter Tipp bei langsamer Verbindung erzeugt **genau eine**
+      → **Bewusst nicht so gebaut.** Der Stand der Ansicht (`viewRev`) reist
+      mit und steht im Protokoll, aber es gibt keine Schwelle darauf: Die
+      Revision steigt bei jeder Änderung — in einem vollen Turnier im
+      Sekundentakt, in einer ruhigen Phase minutenlang gar nicht. Dieselbe
+      Zahl bedeutete mal Sekunden, mal eine Viertelstunde; jede Grenze wäre
+      geraten. Was ein veralteter Blick anrichten kann, fangen die
+      fachlichen Prüfungen genauer ab: `expect` beim Feld, der beanspruchte
+      Walkover-Vorschlag, die Ergebnisprüfung. Ein echtes Alterskriterium
+      bräuchte einen Zeitstempel im Zustand statt einer Revisionsdifferenz.
+- [x] Ein doppelter Tipp bei langsamer Verbindung erzeugt **genau eine**
       Zuweisung in BTP.
-- [ ] Bricht die Verbindung zum Relay ab, zeigt die Seite binnen 15 s ein
+- [~] Bricht die Verbindung zum Relay ab, zeigt die Seite binnen 15 s ein
       rotes Band und **deaktiviert alle Schreibknöpfe**.
-- [ ] Ist der Relay erreichbar, aber bts-light nicht, zeigt die Seite
+- [~] Ist der Relay erreichbar, aber bts-light nicht, zeigt die Seite
       ausdrücklich „bts-light ist nicht verbunden" samt Alter der Daten —
       **nicht** „alle Felder frei".
-- [ ] Eine Aktion, die während eines Ausfalls ausgelöst wurde, wird
+- [~] Eine Aktion, die während eines Ausfalls ausgelöst wurde, wird
       **nicht** nachgereicht; die Seite meldet „nicht bestätigt" und
       aktualisiert, sobald sie wieder kann.
-- [ ] Nach 10 Minuten Standby zeigt die Seite beim Aufwecken sofort einen
+- [~] Nach 10 Minuten Standby zeigt die Seite beim Aufwecken sofort einen
       frischen Stand und keine falsch weitergelaufene Uhr.
-- [ ] Ein BTP-Neustart erzeugt keine Geisterzuweisungen; die Liste erholt
+- [~] Ein BTP-Neustart erzeugt keine Geisterzuweisungen; die Liste erholt
       sich von selbst.
-- [ ] Bestätigen zwei Geräte denselben Walkover-Vorschlag, bekommt das
+- [x] Bestätigen zwei Geräte denselben Walkover-Vorschlag, bekommt das
       zweite „bereits verarbeitet" statt einer zweiten Wertung.
-- [ ] Ein Turnier **ohne** TL-Web verhält sich unverändert, auch mit
+- [~] Ein Turnier **ohne** TL-Web verhält sich unverändert, auch mit
       aktualisiertem Relay.
 
 **Nachvollziehbarkeit**
 
-- [ ] Jede ausgeführte Aktion wird im App-Log mit **Gerätename und Aktion**
+- [~] Jede ausgeführte Aktion wird im App-Log mit **Gerätename und Aktion**
       festgehalten — damit nach einem Turnier nachvollziehbar ist, wer was
       ausgelöst hat, und die Erfolgskriterien überhaupt prüfbar sind.
-- [ ] Jede **abgelehnte** Aktion wird mit ihrem Grund protokolliert;
+- [~] Jede **abgelehnte** Aktion wird mit ihrem Grund protokolliert;
       Konflikte („Feld war schon belegt") sind im Log als solche zählbar.
-- [ ] Im Log erscheint **kein** Gerätetoken — weder ganz noch teilweise.
+- [x] Im Log erscheint **kein** Gerätetoken — weder ganz noch teilweise.
+
+### Was offen ist
+
+**19 belegt, 25 umgesetzt aber nicht am echten Gerät nachgewiesen, 5 offen.**
+
+Die fünf offenen in der Reihenfolge, in der sie im Betrieb wehtun:
+
+1. **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
+   pflegen.** Der Host kann es, die Bedienung fehlt. Wer die Reihenfolge
+   ändern will, muss an den Turnier-PC — genau der Weg, den dieses Feature
+   abschaffen sollte.
+2. **Beendete Spiele fehlen in der Ansicht.** Dasselbe: Nachsehen, was
+   gelaufen ist, geht nur am PC.
+3. **„Eingeschaltet, aber kein Gerät gekoppelt"** wird nicht als Problem
+   benannt. Der Zustand entsteht regulär nach einem Identitäts-Umzug und
+   sieht aus wie ein fertiges Setup, während jede Anfrage abgewiesen wird.
+4. **Keine Altersprüfung der Ansicht** — mit Begründung oben; die
+   fachlichen Prüfungen decken die konkreten Fälle ab.
+5. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
+   nicht; geschützt sind die Daten-Routen, nicht die leere Hülle.
+
+**Die 25 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
+und größtenteils durch Unit-Tests gestützt, aber der Nachweis, auf den es
+ankommt, fehlt: iPad Safari und Android Chrome mit echten Fingern, zwei
+Geräte gleichzeitig am selben Feld, ein Relay-Neustart mitten im Betrieb,
+zehn Minuten Standby. Das ist die manuelle Abnahme weiter unten — sie ist
+**nicht** abgearbeitet.
 
 ## Tests
 

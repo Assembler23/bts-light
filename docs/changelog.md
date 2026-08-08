@@ -4,6 +4,43 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.176
+
+- **Turnierleitung im Browser.** Felder vergeben, ohne am Turnier-PC zu
+  stehen: Die neue Oberfläche läuft auf Tablet, Telefon oder einem zweiten
+  Rechner — im Hallennetz und, wenn gewünscht, über das Internet. Mehrere
+  Helfer arbeiten gleichzeitig; weist einer ein Feld zu, das ein anderer im
+  selben Moment belegt, gewinnt genau einer und der andere erfährt, was dort
+  jetzt steht. Spiele lassen sich per Antippen oder Ziehen auf Felder legen,
+  umhängen und herunternehmen; Zeiten, Live-Spielstände, Aufrufe,
+  Vorbereitungs-Aufrufe, Ergebnisse und kampflose Wertungen sind von dort
+  bedienbar. Einzurichten unter *Turnierleitung*: freischalten, Namen
+  eintragen, QR-Code scannen. Standardmäßig **aus** — Turniere ohne diese
+  Oberfläche verhalten sich unverändert. Bedienung und Grenzen:
+  [turnierleitung-web.md](turnierleitung-web.md).
+- **Ansagen aus der Oberfläche.** Die Seite spricht nie selbst — sie steht
+  im Zweifel im Büro. Sie beauftragt, gesprochen wird dort, wo die Anlage
+  hängt: mit derselben Stimme, demselben Gong und denselben
+  Aussprache-Korrekturen wie ein Aufruf vom Turnier-PC. Hört in der Zielhalle
+  niemand zu, sagt die Seite das im Klartext.
+- **Die Aufruf-Stufe zählt jetzt der Turnier-PC.** Zweiter und dritter
+  Aufruf zeigen auf allen Geräten dieselbe Zahl — auch in der Desktop-App.
+  Vorher zählte jede Oberfläche für sich.
+- **Die Spielreihenfolge folgt endlich dem Turnierplan.** Zwei Fehler in der
+  Auswertung des BTP-Mitschnitts hatten dafür gesorgt, dass Warteliste,
+  automatische Feldvergabe **und der Liveticker** eine Reihenfolge zeigten,
+  die im gedruckten Plan nirgends stand: Die angesetzte Zeit wurde nie
+  gelesen (BTP liefert sie in einer Form, die der Parser nicht kannte), und
+  die Ansetzungsreihenfolge innerhalb eines Zeitfensters war gar nicht
+  bekannt. An einem echten Turnier gegengeprüft: Die neue Sortierung
+  reproduziert die aus BTP exportierte Spielliste Position für Position. Der
+  Liveticker zeigte die anstehenden Spiele zuvor sogar in umgekehrter
+  Reihenfolge.
+- **Ergebnisse korrigieren**, solange nichts daran hängt (Finale,
+  Gruppenspiel). Sobald der Sieger im nächsten Spiel steht, wird mit
+  Begründung abgelehnt: Was BTP beim Überschreiben mit dem Turnierbaum
+  macht, ist noch nicht abschließend geklärt.
+
 ## v0.9.175
 
 - **Hallen-Check-In, erste Stufe (Datenlieferung).** bts-light liest jetzt die

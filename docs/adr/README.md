@@ -20,5 +20,6 @@ hier eintragen.
 | [0007](0007-zaehltafelbediener.md) | Zähltafelbediener nach Vorbild Original-BTS, in zwei Phasen | akzeptiert |
 | [0008](0008-auto-aussprache-serverseitig-badhub.md) | Automatische Aussprache-Vorschläge entstehen serverseitig bei badhub (opt-in) | akzeptiert |
 | [0009](0009-hallen-checkin-persistenz-und-identitaet.md) | Hallen-Check-In: Persistenz in badhub, Turnier-Identität ist die turnier.de-GUID | accepted |
-| [0010](0010-tl-web-schreibender-cloud-pfad.md) | Schreibender Cloud-Pfad für Turnierleitungs-Geräte: Whitelist fixierter Aktionen, der Host validiert | proposed |
-| [0011](0011-tl-web-geraete-identitaet.md) | Geräte-Identität für Turnierleitungs-Geräte: host-ausgestellte, widerrufbare Tokens | proposed |
+| [0010](0010-tl-web-schreibender-cloud-pfad.md) | Schreibender Cloud-Pfad für Turnierleitungs-Geräte: Whitelist fixierter Aktionen, der Host validiert | accepted |
+| [0011](0011-tl-web-geraete-identitaet.md) | Geräte-Identität für Turnierleitungs-Geräte: host-ausgestellte, widerrufbare Tokens | accepted |
+| [0012](0012-ergebniskorrektur-nur-ohne-folgespiel.md) | Ergebniskorrektur nur, wo nichts daran hängt | accepted (vorläufig) |

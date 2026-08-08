@@ -1,6 +1,6 @@
 # 0011 — Geräte-Identität für Turnierleitungs-Geräte: host-ausgestellte, widerrufbare Tokens
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-08-07
 
 Gehört zur Spezifikation

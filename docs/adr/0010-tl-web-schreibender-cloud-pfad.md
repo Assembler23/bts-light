@@ -1,6 +1,6 @@
 # 0010 — Schreibender Cloud-Pfad für Turnierleitungs-Geräte: Whitelist fixierter Aktionen, der Host validiert
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-08-07
 
 Gehört zur Spezifikation

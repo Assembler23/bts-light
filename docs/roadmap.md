@@ -248,25 +248,34 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   brechen bestehende Installationen beim Auto-Update. Der angezeigte
   `productName` kann separat und mit Bedacht wechseln.
 
+## Umgesetzt, aber noch nicht abgenommen
+
+- **Turnierleitungs-Weboberfläche („TL-Web")** — ausgeliefert mit
+  **v0.9.176** (Schritte 1–13 der Spec). Bedienung und Grenzen:
+  [turnierleitung-web.md](turnierleitung-web.md) · Spec mit ehrlicher Bilanz
+  aller 49 Akzeptanzkriterien:
+  [features/turnierleitung-web.md](features/turnierleitung-web.md) · ADR
+  [0010](adr/0010-tl-web-schreibender-cloud-pfad.md),
+  [0011](adr/0011-tl-web-geraete-identitaet.md),
+  [0012](adr/0012-ergebniskorrektur-nur-ohne-folgespiel.md).
+
+  **Was noch aussteht**, in der Reihenfolge, in der es im Betrieb auffällt:
+
+  1. **Die manuelle Abnahme auf echten Geräten.** 25 der 49 Kriterien sind
+     umgesetzt und im Code nachvollziehbar, aber nicht am Gerät
+     nachgewiesen: iPad Safari und Android Chrome mit echten Fingern, zwei
+     Geräte gleichzeitig am selben Feld, Relay-Neustart mitten im Betrieb,
+     zehn Minuten Standby. Die Checkliste steht in der Spec.
+  2. **Zähltafelbediener-Warteschlange** lässt sich aus der Seite nur
+     ansehen, nicht umsortieren — der Host kann es, die Bedienung fehlt.
+  3. **Beendete Spiele** fehlen in der Ansicht.
+  4. **Der abschließende BTP-Versuch zur Ergebniskorrektur**
+     ([btp_protocol.md](btp_protocol.md)) — er braucht ein Turnier, in dem
+     BTP die nächste Runde nachweislich füllt.
+  5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
+
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Turnierleitungs-Weboberfläche („TL-Web")** — eine Browser-Seite, auf
-  der mehrere Helfer gleichzeitig (im Hallennetz **und** aus dem Internet)
-  Spiele per Ziehen oder Antippen auf Felder legen, umhängen und
-  herunternehmen, aufrufen, Ergebnisse nachtragen und Aufgaben werten.
-  Öffnet den bisher read-only gehaltenen Cloud-Pfad kontrolliert für
-  Schreibzugriff: höchstens 8 Geräte je Turnier, je mit einem vom
-  Turnier-PC ausgestellten, widerrufbaren Token; die `install_id` verlässt
-  den Master nicht. Spec: [features/turnierleitung-web.md](features/turnierleitung-web.md) ·
-  ADR [0010](adr/0010-tl-web-schreibender-cloud-pfad.md) +
-  [0011](adr/0011-tl-web-geraete-identitaet.md).
-  **Überschneidet sich mit Cluster C und E** — 2./3. Aufruf, „Zeit seit
-  Aufruf" in der Felderübersicht, Pausenzeiten und die
-  Slave-Spielübersicht (Plan 7) werden von diesem Feature miterledigt bzw.
-  müssen mit ihm abgestimmt werden. **Vor Umsetzungsbeginn offen:** ein
-  Experiment am echten BTP, ob eine bereits gewertete Begegnung
-  überschrieben werden kann, ohne den Turnierbaum zu beschädigen — davon
-  hängt ab, wie weit „Ergebnis korrigieren" reicht.
 - **Hallen-Check-In** — Spieler bestätigen vor Beginn ihrer Spielklasse über
   eine öffentliche Webseite selbst, dass sie in der Halle sind; die
   Turnierleitung sieht **vor der Auslosung**, wer fehlt, und kann Fehlende
