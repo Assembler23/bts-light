@@ -399,6 +399,36 @@ Nach **jedem** Schritt einen Mitschnitt ziehen und durchnummeriert ablegen:
 Bei jedem Versuch zusätzlich festhalten: Was zeigt die **BTP-Oberfläche**
 danach an — und stimmt sie mit dem überein, was über die Schnittstelle kommt?
 
+### Zwischenstand des Experiments (08.08.2026, „TEST Köpi-Cup")
+
+Ausgeführt über `src-tauri/tests/btp_overwrite_experiment.rs` (schreibt
+per `SENDUPDATE`, wie bts-light selbst). **Gemessen:**
+
+1. **BTP nimmt Überschreib-Requests an** — `Result=1`, keine Ablehnung.
+2. **Wirken tun sie nicht immer.** Bei einem Spiel, das BTP selbst gewertet
+   hatte, wechselte `Winner` von 1 auf 2. Bei einem Spiel, das derselbe
+   Versuch kurz zuvor gewertet hatte, blieb `Winner` auf 1 — **trotz
+   `Result=1`**. Ein Überschreiben kann also stillschweigend wirkungslos
+   sein, und der Erfolgscode sagt darüber nichts.
+3. **Das Folgespiel wurde nie besetzt** — auch nicht, nachdem *beide*
+   Vorgänger gewertet waren: `EntryID` leer, Teilnehmerzahl 0/0. Die
+   Annahme aus der Teilnehmer-Auflösung („eine beendete Paarung bekommt
+   selbst eine `EntryID` und wird zum Feeder-Slot") trifft hier **nicht**
+   zu.
+4. Nebenbei: `ScoreStatus` verschwand nach dem Überschreiben aus der
+   Antwort (`0` → Feld fehlt).
+
+**Damit ist die Kernfrage offen.** Ob BTP den Baum neu rechnet, ließ sich
+nicht messen, weil in diesem Turnier gar nichts umzurechnen war — kein
+Folgespiel war je besetzt. Was noch fehlt: ein Draw, in dem BTP die
+nächste Runde nachweislich füllt (also ein weiter fortgeschrittenes
+Turnier oder ein Draw-Typ, bei dem die Auflösung greift), und darin die
+Versuche 2 bis 4.
+
+Befund (2) ist unabhängig davon wichtig: Eine Korrektur darf sich **nicht**
+auf `Result=1` verlassen. Sie muss nachlesen, ob der Sieger wirklich
+gewechselt hat, und andernfalls sagen, dass nichts geschehen ist.
+
 ### Auswertung
 
 1. Die aussagekräftigsten Mitschnitte als Fixtures nach
