@@ -176,6 +176,109 @@ pub(crate) fn plan_court_action(
     }
 }
 
+/// Führt eine Aktion aus, die **nur den Turnier-PC** betrifft und nichts nach
+/// BTP schreibt: Vorbereitungs-Aufrufe, Zähltafelbediener-Warteschlange,
+/// Walkover-Vorschläge.
+///
+/// Diese Zustände kennt BTP gar nicht — bts-light führt sie selbst, genau wie
+/// bei den Aufrufen aus der Desktop-Oberfläche. Entsprechend gibt es hier
+/// weder Schreibfehler noch Reservierungen; die Aktion gilt sofort.
+///
+/// `Ok(None)` heißt: nicht meine Zuständigkeit (die Aktion berührt Felder und
+/// gehört in die Feld-Planung).
+pub(crate) fn apply_state_action(
+    tablet: &TabletState,
+    _config: &AppConfig,
+    now_ms: u64,
+    action: &relay_proto::TlAction,
+) -> Result<relay_proto::TlResponse, relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+
+    let known_match = |id: i64| -> bool {
+        tablet
+            .snapshot_clone()
+            .is_some_and(|s| s.matches.iter().any(|m| m.id == id))
+    };
+
+    match action {
+        A::CallPreparation {
+            match_ids,
+            location_id,
+        } => {
+            if match_ids.is_empty() {
+                return Err(TlResponse::err(C::NotAllowed, "Kein Spiel ausgewählt."));
+            }
+            // Erst prüfen, dann eintragen: Ein Aufruf für ein Spiel, das es
+            // im aktuellen Stand nicht gibt, erschiene nirgends und ließe
+            // sich auch nicht zurücknehmen.
+            if let Some(unknown) = match_ids.iter().find(|id| !known_match(**id)) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!("Spiel {unknown} gibt es im aktuellen Turnierstand nicht."),
+                ));
+            }
+            for match_id in match_ids {
+                tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+                    match_id: *match_id,
+                    location_id: *location_id,
+                    called_at_ms: now_ms,
+                });
+            }
+            Ok(TlResponse::ok(0))
+        }
+        A::RetractPreparation { match_id } => {
+            tablet.remove_preparation_call(*match_id);
+            Ok(TlResponse::ok(0))
+        }
+        A::ScorekeeperAdd { names } => {
+            let names: Vec<String> = names
+                .iter()
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .collect();
+            if names.is_empty() {
+                return Err(TlResponse::err(C::NotAllowed, "Kein Name eingegeben."));
+            }
+            tablet.add_scorekeeper_manual(names, now_ms);
+            Ok(TlResponse::ok(0))
+        }
+        A::ScorekeeperRemove { key } => {
+            tablet.remove_scorekeeper(key);
+            Ok(TlResponse::ok(0))
+        }
+        A::ScorekeeperAdvance { key } => {
+            tablet.advance_scorekeeper(key);
+            Ok(TlResponse::ok(0))
+        }
+        A::DismissWalkover { proposal_id } => {
+            tablet.remove_walkover_proposal(proposal_id);
+            Ok(TlResponse::ok(0))
+        }
+        A::SetAutoAssign { enabled } => {
+            // Laufzeit-Schalter, nicht die Grundeinstellung: Der Sync-Lauf
+            // liest die Konfiguration nach dem Start nicht neu, eine
+            // Dateiänderung bliebe also wirkungslos. Nach einem Neustart
+            // gilt wieder, was in den Einstellungen steht.
+            tablet.set_auto_assign_paused(!*enabled);
+            Ok(TlResponse::ok(0))
+        }
+        // Alles Weitere berührt Felder oder BTP und läuft woanders.
+        _ => Err(TlResponse::err(
+            C::Unsupported,
+            "Diese Aktion ist noch nicht freigeschaltet.",
+        )),
+    }
+}
+
+/// Berührt diese Aktion eine Feldzuordnung (und damit BTP)?
+fn touches_courts(action: &relay_proto::TlAction) -> bool {
+    use relay_proto::TlAction as A;
+    matches!(
+        action,
+        A::AssignCourt { .. } | A::FreeCourt { .. } | A::MoveMatch { .. }
+    )
+}
+
 /// Führt eine Aktion eines Turnierleitungs-Geräts aus.
 ///
 /// Der **einzige** Weg, auf dem ein solches Gerät etwas verändert — im
@@ -217,6 +320,34 @@ pub(crate) async fn execute(
     let Some(snap) = ctx.tablet.snapshot_clone() else {
         return TlResponse::err(C::NotAllowed, "Es ist noch kein Turnier geladen.");
     };
+    // Aktionen ohne Feldbezug ändern nur den Zustand am Turnier-PC: kein
+    // Schreibvorgang nach BTP, also auch keine Reservierung und kein
+    // Fehlschlag von dort.
+    if !touches_courts(&action) {
+        let response = match apply_state_action(&ctx.tablet, &config, now_ms, &action) {
+            Ok(ok) => {
+                tracing::info!(
+                    "TL-Web [{}]: {} ausgeführt",
+                    device.label,
+                    action_label(&action)
+                );
+                ok
+            }
+            Err(rejected) => {
+                tracing::info!(
+                    "TL-Web [{}]: {} abgelehnt ({})",
+                    device.label,
+                    action_label(&action),
+                    rejected.error.as_deref().unwrap_or("ohne Grund")
+                );
+                return rejected;
+            }
+        };
+        ctx.tablet
+            .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        return response;
+    }
+
     let locked = ctx.tablet.locked_courts();
     // Zuweisungen, die schon geschrieben, aber von BTP noch nicht bestätigt
     // sind — in diesem Fenster sieht der Schnappschuss das Feld noch frei.
@@ -482,7 +613,12 @@ pub struct TlState {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlAutoAssign {
+    /// Läuft die automatische Vergabe gerade? Berücksichtigt sowohl die
+    /// Grundeinstellung als auch das Anhalten aus dieser Oberfläche.
     pub enabled: bool,
+    /// Ist sie in den Einstellungen grundsätzlich eingeschaltet? Nur dann
+    /// lässt sie sich hier überhaupt wieder starten.
+    pub configured: bool,
     pub wait_minutes: f64,
     /// Tages-Halle; leer = alle.
     pub active_hall: String,
@@ -632,7 +768,7 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
             tournament: String::new(),
             multi_hall: false,
             halls: Vec::new(),
-            auto_assign: auto_assign_view(config),
+            auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
             call_timer: call_timer_view(config),
             rest_minutes: None,
             courts: Vec::new(),
@@ -735,7 +871,7 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
         tournament: snap.tournament_name.clone(),
         multi_hall: snap.is_multi_hall(),
         halls,
-        auto_assign: auto_assign_view(config),
+        auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
         call_timer: call_timer_view(config),
         // Genau der Wert, nach dem auch die Blockier-Zeiten in diesem
         // Datensatz gerechnet sind: Konfiguration schlägt BTP-Einstellung.
@@ -775,9 +911,10 @@ fn clearing_match(
     assign::court_occupied_by(snap, court_id)
 }
 
-fn auto_assign_view(config: &AppConfig) -> TlAutoAssign {
+fn auto_assign_view(config: &AppConfig, paused: bool) -> TlAutoAssign {
     TlAutoAssign {
-        enabled: config.auto_assign.enabled,
+        enabled: config.auto_assign.enabled && !paused,
+        configured: config.auto_assign.enabled,
         wait_minutes: config.auto_assign.wait_minutes,
         active_hall: config.auto_assign.active_hall.clone(),
     }
@@ -1333,8 +1470,9 @@ mod tests {
 
     #[test]
     fn actions_that_do_not_touch_courts_are_not_planned_here() {
-        // Die übrigen Aktionen kommen in einem eigenen Schritt. Bis dahin
-        // werden sie ehrlich abgelehnt, statt still ins Leere zu laufen.
+        // Aktionen ohne Feldbezug laufen nicht über die Feld-Planung —
+        // sie ändern nur den Zustand am Turnier-PC und schreiben nichts
+        // nach BTP.
         let s = snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new());
         let err = plan_court_action(
             &s,
@@ -1345,6 +1483,167 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::Unsupported));
+    }
+
+    #[test]
+    fn calling_matches_into_preparation_records_them_with_their_hall() {
+        // Der Aufruf lebt am Turnier-PC (BTP kennt keinen solchen Zustand).
+        // Die Halle entscheidet, welcher Meeting-Point-Monitor ihn zeigt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), vec![a_match(7), a_match(8)], Vec::new()));
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            5_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![7, 8],
+                location_id: Some(2),
+            },
+        )
+        .expect("erlaubt");
+        assert!(done.ok);
+
+        let calls = tablet.preparation_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|c| c.location_id == Some(2)));
+        assert!(calls.iter().all(|c| c.called_at_ms == 5_000));
+    }
+
+    #[test]
+    fn retracting_a_call_removes_exactly_that_one() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), vec![a_match(7), a_match(8)], Vec::new()));
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            5_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![7, 8],
+                location_id: None,
+            },
+        )
+        .unwrap();
+
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            6_000,
+            &relay_proto::TlAction::RetractPreparation { match_id: 7 },
+        )
+        .unwrap();
+        let left: Vec<i64> = tablet
+            .preparation_calls()
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
+        assert_eq!(left, vec![8]);
+    }
+
+    #[test]
+    fn calling_an_unknown_match_is_rejected() {
+        // Sonst hinge ein Aufruf an einem Spiel, das es nicht gibt — er
+        // erschiene nirgends und ließe sich auch nicht zurücknehmen.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), vec![a_match(7)], Vec::new()));
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            5_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![99],
+                location_id: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
+        assert!(tablet.preparation_calls().is_empty());
+    }
+
+    #[test]
+    fn the_scorekeeper_queue_can_be_tended() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+        let cfg = AppConfig::default();
+
+        apply_state_action(
+            &tablet,
+            &cfg,
+            1_000,
+            &relay_proto::TlAction::ScorekeeperAdd {
+                names: vec!["Weber".to_string()],
+            },
+        )
+        .unwrap();
+        apply_state_action(
+            &tablet,
+            &cfg,
+            1_100,
+            &relay_proto::TlAction::ScorekeeperAdd {
+                names: vec!["Fischer".to_string()],
+            },
+        )
+        .unwrap();
+        assert_eq!(tablet.scorekeeper_queue().len(), 2);
+
+        // Vorziehen: der Zweite rückt an den Anfang.
+        let second = tablet.scorekeeper_queue()[1].key.clone();
+        apply_state_action(
+            &tablet,
+            &cfg,
+            1_200,
+            &relay_proto::TlAction::ScorekeeperAdvance {
+                key: second.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(tablet.scorekeeper_queue()[0].key, second);
+
+        apply_state_action(
+            &tablet,
+            &cfg,
+            1_300,
+            &relay_proto::TlAction::ScorekeeperRemove { key: second },
+        )
+        .unwrap();
+        assert_eq!(tablet.scorekeeper_queue().len(), 1);
+    }
+
+    #[test]
+    fn adding_a_scorekeeper_without_a_name_is_rejected() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            1_000,
+            &relay_proto::TlAction::ScorekeeperAdd { names: Vec::new() },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
+    }
+
+    #[test]
+    fn dismissing_a_walkover_proposal_removes_it() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+        tablet.add_walkover_proposal(crate::tablet::state::WalkoverProposal {
+            id: "p-1".to_string(),
+            entry_id: 1,
+            retired_team: "Weber".to_string(),
+            draw_name: "HE".to_string(),
+            created_at_ms: 1_000,
+        });
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            2_000,
+            &relay_proto::TlAction::DismissWalkover {
+                proposal_id: "p-1".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(tablet.walkover_proposals().is_empty());
     }
 
     #[test]
@@ -1549,6 +1848,10 @@ mod tests {
             "auto_assign",
             "call_timer",
             "enabled",
+            // Grundeinstellung der automatischen Vergabe: kein
+            // personenbezogenes Datum, und die Seite braucht sie, um den
+            // Schalter überhaupt anbieten zu dürfen.
+            "configured",
             "wait_minutes",
             "active_hall",
             "second_call_minutes",

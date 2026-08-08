@@ -309,6 +309,15 @@ pub struct TabletState {
     /// Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal.
     /// Ohne dieses Gedächtnis schriebe der zweite Versuch erneut nach BTP.
     recent_ops: RwLock<HashMap<String, (u64, String, relay_proto::TlResponse)>>,
+    /// Automatische Feldvergabe zur Laufzeit angehalten?
+    ///
+    /// Der Sync-Lauf bekommt seine Konfiguration **einmal beim Start** und
+    /// liest sie nie neu — eine Änderung an der Datei bliebe also wirkungslos.
+    /// Dieser Schalter wirkt sofort und ist genau dafür da: Während die
+    /// Turnierleitung von Hand umsortiert, soll die Automatik nicht
+    /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
+    /// die Grundeinstellung aus der Konfiguration.
+    auto_assign_paused: RwLock<bool>,
     /// Freitext-Ansagen (Master legt ab; Master + Slaves pollen + sprechen die
     /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
     freetext: RwLock<Vec<FreetextItem>>,
@@ -976,6 +985,16 @@ impl TabletState {
         }
         pending.insert(court_id, (match_id, now_ms));
         true
+    }
+
+    /// Hält die automatische Feldvergabe an oder gibt sie wieder frei.
+    pub fn set_auto_assign_paused(&self, paused: bool) {
+        *self.auto_assign_paused.write().unwrap() = paused;
+    }
+
+    /// Ist die automatische Feldvergabe gerade angehalten?
+    pub fn auto_assign_paused(&self) -> bool {
+        *self.auto_assign_paused.read().unwrap()
     }
 
     /// Gibt den Anspruch auf ein Feld sofort wieder frei.

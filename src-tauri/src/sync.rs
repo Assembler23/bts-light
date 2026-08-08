@@ -649,7 +649,11 @@ impl SyncEngine {
                 && now.saturating_sub(*ts) < PENDING_AUTO_TTL.as_millis() as u64
         });
 
-        if !config.auto_assign.enabled {
+        // Ausgeschaltet in der Konfiguration ODER zur Laufzeit angehalten
+        // (Turnierleitungs-Oberfläche). Die Vormerkungen oben werden trotzdem
+        // gepflegt, damit ein Wiedereinschalten nicht auf altem Stand
+        // aufsetzt.
+        if !config.auto_assign.enabled || tablet.auto_assign_paused() {
             return (Vec::new(), Vec::new());
         }
         // Wartezeit robust: NaN/Inf/negativ → 0 (sofort).
@@ -1301,6 +1305,25 @@ mod tests {
         assert!(courts.is_empty());
         // Frei-seit wird trotzdem gepflegt (für den Wartezeit-Start).
         assert!(engine.court_free_since.contains_key(&1));
+    }
+
+    #[test]
+    fn the_tournament_desk_can_pause_the_automatic_assignment_at_once() {
+        // Während die Turnierleitung von Hand umsortiert, soll die Automatik
+        // nicht dazwischenfunken. Der Schalter muss SOFORT wirken: Der
+        // Sync-Lauf bekommt seine Konfiguration einmal beim Start und liest
+        // sie nie neu — eine Änderung an der Datei bliebe wirkungslos.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+
+        tablet.set_auto_assign_paused(true);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(courts.is_empty(), "pausiert vergibt die Automatik nichts");
+
+        tablet.set_auto_assign_paused(false);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1, "und danach wieder");
     }
 
     #[test]
