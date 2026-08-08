@@ -41,7 +41,7 @@ tracing-appender = "0.2.5"
 tauri-plugin-single-instance = "2.4.2"
 tauri-plugin-dialog = "2"
 include_dir = "0.7"
-base64 = "0.22"
+base64 = "0.23"
 mdns-sd = "0.20"
 # Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
 # transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
