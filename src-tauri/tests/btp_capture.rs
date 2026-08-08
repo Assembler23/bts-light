@@ -264,3 +264,51 @@ fn real_capture_yields_the_roster_per_event() {
         "mind. ein Spieler sollte in beiden Klassen gemeldet sein"
     );
 }
+
+/// Die Baumkante: Ein KO-Spiel verweist über `From1`/`From2` auf die
+/// Planungspositionen, aus denen seine Teilnehmer kommen. Ohne sie lässt
+/// sich nicht beantworten, ob eine Ergebnis-Korrektur ein Folgespiel
+/// beträfe — und ohne diese Antwort darf die Turnierleitung nicht
+/// überschreiben (siehe docs/btp_protocol.md, „Was macht BTP beim
+/// Überschreiben einer Wertung?").
+#[test]
+fn real_capture_carries_the_bracket_edges() {
+    let nodes = proto::decode_response(TOURNAMENT).expect("dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+
+    // Mindestens ein Spiel im Mitschnitt hat einen Vorgänger — sonst wäre
+    // der Test wertlos.
+    let mit_kante = snapshot
+        .matches
+        .iter()
+        .filter(|m| m.from1.is_some() || m.from2.is_some())
+        .count();
+    assert!(mit_kante > 0, "kein einziges Spiel mit Baumkante");
+
+    // Die Kante zeigt auf eine **Planungsposition**, nicht zwingend auf ein
+    // Spiel: In der ersten Runde ist es ein Setzplatz, und Setzplätze
+    // verwirft der Parser (sie sind keine anzeigbaren Paarungen).
+    //
+    // **Was dieser Mitschnitt NICHT hergibt:** Er stammt aus einer reinen
+    // Round-Robin-Gruppe — alle Kanten zeigen auf Setzplätze (1000…5000),
+    // kein Spiel folgt auf ein anderes. Die Nachfolger-Suche der
+    // Ergebnis-Korrektur lässt sich damit **nicht** gegen echte Daten
+    // belegen. Ein Mitschnitt mit mehrstufigem KO-Draw fehlt und gehört zum
+    // BTP-Experiment (docs/btp_protocol.md). Bis dahin hält dieser Test den
+    // Ist-Zustand fest, statt eine Deckung vorzutäuschen.
+    let mit_nachfolger = snapshot
+        .matches
+        .iter()
+        .filter(|m| {
+            snapshot.matches.iter().any(|o| {
+                o.draw_id == m.draw_id
+                    && (o.from1 == Some(m.planning_id) || o.from2 == Some(m.planning_id))
+            })
+        })
+        .count();
+    assert_eq!(
+        mit_nachfolger, 0,
+        "Der Mitschnitt hat jetzt einen KO-Baum — dann gehört die \
+         Nachfolger-Suche hier gegen echte Daten geprüft."
+    );
+}

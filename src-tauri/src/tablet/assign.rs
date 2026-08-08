@@ -592,6 +592,8 @@ mod tests {
 
     fn a_match(id: i64) -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id,
             draw_id: 1,
             planning_id: id,

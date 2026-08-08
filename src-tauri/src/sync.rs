@@ -1073,6 +1073,8 @@ mod tests {
             events: Vec::new(),
             entries: Vec::new(),
             matches: vec![BtpMatch {
+                from1: None,
+                from2: None,
                 id: 1,
                 draw_id: 1,
                 planning_id: 1001,
@@ -1171,6 +1173,8 @@ mod tests {
     /// Match mit Status/Feld/Halle-unabhängig; Scheduled = spielbereit.
     fn ready_match(id: i64, num: i64) -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id,
             draw_id: 1,
             planning_id: 1000 + id,

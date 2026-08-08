@@ -425,6 +425,8 @@ mod tests {
 
     fn sample_match(id: i64, status: MatchStatus, court: Option<&str>) -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id,
             draw_id: 1,
             planning_id: 1000 + id,

@@ -581,6 +581,53 @@ fn announcement_response(tablet: &TabletState, hall: &str, now_ms: u64) -> relay
     ok.with_warning(format!("{wo} — der Aufruf wurde nicht gesprochen."))
 }
 
+/// Warum eine Ergebnis-Korrektur gerade nicht geht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CorrectionBlocker {
+    /// Der Sieger spielt sein Folgespiel bereits.
+    Running,
+    /// Das Folgespiel ist schon gewertet.
+    Decided,
+    /// Das Folgespiel steht bereit, aber es ist ungeprüft, was BTP beim
+    /// Überschreiben mit dem Baum macht.
+    Untested,
+}
+
+/// Steht der Korrektur eines Ergebnisses etwas im Weg?
+///
+/// `None` heißt: nichts, was der geänderte Sieger durcheinanderbringen
+/// könnte — ein Finale, ein Gruppenspiel, ein Draw ohne weitere Runde.
+///
+/// Die Kante im Turnierbaum liegt in `from1`/`from2`: Ein Folgespiel
+/// verweist über sie auf die Planungsposition seines Vorgängers. Die
+/// Positionen sind **nur je Draw eindeutig** — BTP vergibt in jedem Draw
+/// dieselben —, deshalb zählt nur ein Treffer im selben Draw.
+///
+/// Der Fall `FollowUpUntested` ist der ehrliche Rest: Ein beendetes KO-Spiel
+/// wird selbst zum Feeder-Slot, der Sieger steht also **sofort** im nächsten
+/// Spiel. Ob BTP den Baum beim Überschreiben neu rechnet, weiß bis zum
+/// Experiment niemand (docs/btp_protocol.md) — und wer das nicht weiß, darf
+/// den Turnierbaum nicht anfassen.
+pub(crate) fn correction_blocker(
+    snap: &crate::btp::model::BtpSnapshot,
+    match_id: i64,
+) -> Option<CorrectionBlocker> {
+    use crate::btp::model::MatchStatus;
+    let m = snap.matches.iter().find(|m| m.id == match_id)?;
+    let folge = snap.matches.iter().find(|o| {
+        o.draw_id == m.draw_id
+            && o.id != m.id
+            && (o.from1 == Some(m.planning_id) || o.from2 == Some(m.planning_id))
+    })?;
+    if folge.winner.is_some() || folge.status == MatchStatus::Finished {
+        return Some(CorrectionBlocker::Decided);
+    }
+    if folge.status == MatchStatus::OnCourt {
+        return Some(CorrectionBlocker::Running);
+    }
+    Some(CorrectionBlocker::Untested)
+}
+
 /// Übersetzt eine Ergebnis-Aktion in die BTP-Schreibvorgänge.
 ///
 /// Rein und ohne Netz. Die eigentliche Prüfung (Satz-Vollständigkeit,
@@ -616,12 +663,39 @@ pub(crate) fn plan_result_action(
                 ));
             }
             if *overwrite {
-                // Steht bewusst aus, bis am echten BTP geprüft ist, was ein
-                // Überschreiben mit dem Turnierbaum macht.
-                return Err(TlResponse::err(
-                    C::Unsupported,
-                    "Ein bereits gewertetes Spiel lässt sich hier noch nicht überschreiben.",
-                ));
+                // Überschreiben nur, wo es nichts umzurechnen gibt. Was
+                // dahinter liegt, entscheidet der Turnierbaum.
+                match correction_blocker(snap, *match_id) {
+                    None => {}
+                    Some(CorrectionBlocker::Running) => {
+                        return Err(TlResponse::err(
+                            C::CorrectionBlocked,
+                            "Der Sieger spielt bereits sein nächstes Spiel — eine Korrektur \
+                             hier zöge ein laufendes Feld mit. Bitte in BTP von Hand.",
+                        ))
+                    }
+                    Some(CorrectionBlocker::Decided) => {
+                        return Err(TlResponse::err(
+                            C::CorrectionBlocked,
+                            "Das Folgespiel ist bereits gewertet — eine Korrektur hier machte \
+                             aus einem gültigen Ergebnis ein Rätsel. Bitte in BTP von Hand.",
+                        ))
+                    }
+                    Some(CorrectionBlocker::Untested) => {
+                        // Der offene Punkt aus der Spec: Ein beendetes
+                        // KO-Spiel wird selbst zum Feeder-Slot, der Sieger
+                        // steht also sofort im nächsten Spiel. Ob BTP den
+                        // Baum beim Überschreiben neu rechnet, hat noch
+                        // niemand ausprobiert — und wer das nicht weiß, darf
+                        // ihn nicht anfassen (docs/btp_protocol.md).
+                        return Err(TlResponse::err(
+                            C::CorrectionBlocked,
+                            "Der Sieger steht schon im nächsten Spiel. Ob sich das hier \
+                             gefahrlos ändern lässt, ist noch nicht geprüft — bitte in BTP \
+                             von Hand.",
+                        ));
+                    }
+                }
             }
             let m = snap
                 .matches
@@ -634,9 +708,24 @@ pub(crate) fn plan_result_action(
                     )
                 })?;
             let pairs: Vec<(i64, i64)> = sets.iter().map(|s| (s.a, s.b)).collect();
-            let update =
-                crate::tablet::server::build_manual_result_update(m, pairs, on_court_since, now_ms)
-                    .map_err(|e| TlResponse::err(C::NotAllowed, e))?;
+            let update = crate::tablet::server::build_manual_result_update_opt(
+                m,
+                pairs,
+                on_court_since,
+                now_ms,
+                *overwrite,
+            )
+            .map_err(|e| {
+                // „Bereits gewertet" ohne Überschreib-Wunsch ist kein
+                // Verbot, sondern ein Hinweis: Die Seite kann daraufhin
+                // ausdrücklich fragen.
+                let code = if m.winner.is_some() && !*overwrite {
+                    C::AlreadyScored
+                } else {
+                    C::NotAllowed
+                };
+                TlResponse::err(code, e)
+            })?;
             Ok(vec![update])
         }
         _ => Err(TlResponse::err(
@@ -1756,6 +1845,8 @@ mod tests {
             id,
             draw_id: 1,
             planning_id: id,
+            from1: None,
+            from2: None,
             draw_name: "HE A".to_string(),
             discipline: Discipline::MensSingles,
             class_label: "A".to_string(),
@@ -2311,13 +2402,45 @@ mod tests {
     }
 
     #[test]
-    fn overwriting_an_existing_result_is_not_available_yet() {
-        // Steht bewusst aus, bis am echten BTP geprüft ist, was ein
-        // Überschreiben mit dem Turnierbaum macht (Spec, offener Punkt 1).
+    fn a_result_with_nothing_behind_it_can_be_corrected() {
+        // Ein gewertetes Spiel ohne Folgespiel: Hier gibt es nichts, was der
+        // geänderte Sieger durcheinanderbringen könnte — ein Finale, ein
+        // Gruppenspiel, ein Draw ohne weitere Runde.
         let mut done = a_match(7);
         done.status = MatchStatus::Finished;
         done.winner = Some(1);
         let s = snap(vec![a_court(1, None)], vec![done], Vec::new());
+        let aktion = |overwrite| relay_proto::TlAction::EnterResult {
+            match_id: 7,
+            sets: vec![
+                relay_proto::SetAb { a: 21, b: 15 },
+                relay_proto::SetAb { a: 21, b: 10 },
+            ],
+            retired: false,
+            winner: None,
+            overwrite,
+        };
+
+        // Ohne ausdrücklichen Wunsch bleibt es bei „schon gewertet" — so
+        // ersetzt niemand versehentlich ein Ergebnis.
+        let err = plan_result_action(&s, None, 9_000, &aktion(false)).unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::AlreadyScored));
+
+        // Mit ausdrücklichem Wunsch geht es durch.
+        let updates = plan_result_action(&s, None, 9_000, &aktion(true)).unwrap();
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].team1_won);
+    }
+
+    #[test]
+    fn a_correction_that_would_touch_the_bracket_is_still_refused() {
+        // Sobald ein Folgespiel dranhängt, bleibt es gesperrt — bis am
+        // echten BTP geprüft ist, was ein Überschreiben mit dem Turnierbaum
+        // macht (Spec, offener Punkt 1; docs/btp_protocol.md).
+        let (mut vorher, folge) = ko_paar(7, 8);
+        vorher.status = MatchStatus::Finished;
+        vorher.winner = Some(1);
+        let s = snap(Vec::new(), vec![vorher, folge], Vec::new());
         let err = plan_result_action(
             &s,
             None,
@@ -2334,7 +2457,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert_eq!(err.code, Some(relay_proto::TlErrorCode::Unsupported));
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::CorrectionBlocked));
     }
 
     #[test]
@@ -2407,6 +2530,86 @@ mod tests {
         // Riegel wie im Hallennetz.
         cfg.tl_web.enabled = false;
         assert!(device_by_id(&cfg, "tl-3f2a").is_none());
+    }
+
+    /// Ein KO-Spiel samt Folgespiel: `vorher` speist über seine
+    /// Planungsposition das `folge`-Spiel.
+    fn ko_paar(vorher_id: i64, folge_id: i64) -> (BtpMatch, BtpMatch) {
+        let mut vorher = a_match(vorher_id);
+        vorher.planning_id = 2000;
+        vorher.from1 = Some(1000);
+        vorher.from2 = Some(1001);
+        let mut folge = a_match(folge_id);
+        folge.planning_id = 3000;
+        folge.from1 = Some(2000); // kommt aus dem Vorgänger
+        folge.from2 = Some(2001);
+        (vorher, folge)
+    }
+
+    #[test]
+    fn a_result_without_any_follow_up_match_may_be_corrected() {
+        // Der unstrittige Fall: Es gibt nichts, was der geänderte Sieger
+        // durcheinanderbringen könnte — ein Finale, ein Gruppenspiel, ein
+        // Draw ohne weitere Runde.
+        let mut m = a_match(7);
+        m.planning_id = 2000;
+        let snap = snap(Vec::new(), vec![m], Vec::new());
+        assert_eq!(correction_blocker(&snap, 7), None);
+    }
+
+    #[test]
+    fn a_correction_is_refused_while_the_follow_up_is_being_played() {
+        // Hier ist der Sieger längst weitergerückt und spielt bereits. Ein
+        // Überschreiben zöge einen laufenden Court mit — im schlimmsten Fall
+        // stünden zwei Paare auf dem Feld und keiner wüsste, wer gemeint ist.
+        let (vorher, mut folge) = ko_paar(7, 8);
+        folge.status = crate::btp::model::MatchStatus::OnCourt;
+        folge.court_id = Some(3);
+        let snap = snap(Vec::new(), vec![vorher, folge], Vec::new());
+        assert_eq!(
+            correction_blocker(&snap, 7),
+            Some(CorrectionBlocker::Running)
+        );
+    }
+
+    #[test]
+    fn a_correction_is_refused_once_the_follow_up_is_decided() {
+        // Noch weiter: Das Folgespiel ist gewertet. Wer jetzt den Sieger der
+        // Vorrunde ändert, macht aus einem gültigen Ergebnis ein Rätsel.
+        let (vorher, mut folge) = ko_paar(7, 8);
+        folge.winner = Some(1);
+        folge.status = crate::btp::model::MatchStatus::Finished;
+        let snap = snap(Vec::new(), vec![vorher, folge], Vec::new());
+        assert_eq!(
+            correction_blocker(&snap, 7),
+            Some(CorrectionBlocker::Decided)
+        );
+    }
+
+    #[test]
+    fn a_follow_up_that_has_not_started_is_the_open_question() {
+        // Der Fall, den erst das BTP-Experiment klärt: Das Folgespiel steht
+        // da, der Sieger ist eingesetzt, gespielt wird noch nicht. Ob BTP
+        // den Baum beim Überschreiben neu rechnet, weiß niemand — bis es
+        // jemand ausprobiert hat, bleibt der Fall gesperrt.
+        let (vorher, folge) = ko_paar(7, 8);
+        let snap = snap(Vec::new(), vec![vorher, folge], Vec::new());
+        assert_eq!(
+            correction_blocker(&snap, 7),
+            Some(CorrectionBlocker::Untested)
+        );
+    }
+
+    #[test]
+    fn a_follow_up_in_another_draw_does_not_count() {
+        // Planungspositionen sind nur je Draw eindeutig — BTP vergibt in
+        // jedem Draw dieselben. Ohne die Draw-Prüfung blockierte ein
+        // fremdes Turnierfeld die Korrektur.
+        let (vorher, mut folge) = ko_paar(7, 8);
+        folge.draw_id = 99;
+        folge.status = crate::btp::model::MatchStatus::OnCourt;
+        let snap = snap(Vec::new(), vec![vorher, folge], Vec::new());
+        assert_eq!(correction_blocker(&snap, 7), None);
     }
 
     #[test]

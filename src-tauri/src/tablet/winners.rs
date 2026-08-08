@@ -226,6 +226,8 @@ mod tests {
         t2: Vec<BtpPlayer>,
     ) -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id: 0,
             draw_id,
             planning_id: 0,

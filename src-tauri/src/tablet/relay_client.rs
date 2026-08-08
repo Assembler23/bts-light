@@ -856,6 +856,8 @@ mod tests {
 
     fn match_on_court(id: i64, court_id: i64) -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id,
             draw_id: 7,
             planning_id: 1001,

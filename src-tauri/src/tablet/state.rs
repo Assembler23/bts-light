@@ -2093,6 +2093,8 @@ mod tests {
     /// ist die CourtID des Felds (`None` = kein Feld).
     fn match_on(id: i64, court: Option<i64>, status: MatchStatus) -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id,
             draw_id: 1,
             planning_id: 1000 + id,

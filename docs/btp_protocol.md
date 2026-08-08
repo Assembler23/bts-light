@@ -364,6 +364,14 @@ strenge Auslegung („Nachfolger existiert und ist besetzt → nicht
 korrigierbar") hieße damit praktisch: nur im Finale und in Gruppen. Deshalb
 muss man wissen, ob BTP beim Überschreiben den Baum **selbst neu rechnet**.
 
+**Vorbefund an echten Daten (08.08.2026).** Ein Mitschnitt aus einem
+laufenden Turnier („TEST Köpi-Cup", 878 echte Paarungen) zeigt: Von den
+9 bereits gewerteten Spielen hatten **alle 9** ein Folgespiel im selben
+Draw. Die konservative Regel sperrt die Korrektur dort also in **100 %**
+der Fälle — die Sorge aus der Spec ist damit keine Theorie. Ohne das
+Experiment bleibt die Ergebnis-Korrektur in der Turnierleitungs-Oberfläche
+praktisch wirkungslos, und die Turnierleitung muss weiter in BTP wechseln.
+
 ### Aufbau
 
 Ein Test-Turnier mit einem KO-Draw für vier Teilnehmer (zwei Halbfinals, ein

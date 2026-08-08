@@ -251,6 +251,18 @@ pub struct BtpMatch {
     pub draw_id: i64,
     /// Planungsposition des Matches im Draw (`Match.PlanningID`).
     pub planning_id: i64,
+    /// Die beiden Planungspositionen, aus denen die Teilnehmer kommen
+    /// (`Match.From1`/`From2`) — die **Kante im Turnierbaum**, roh und
+    /// ungedeutet. In einem KO-Draw zeigt sie auf die vorangehenden Spiele
+    /// bzw. Setzplätze; in einer Gruppe fehlt sie.
+    ///
+    /// Gebraucht für die Frage, ob eine Ergebnis-Korrektur ein Folgespiel
+    /// beträfe: Ein beendetes Spiel wird selbst zum Feeder-Slot der nächsten
+    /// Runde, und wer den Sieger ändert, ändert damit die nächste Paarung.
+    /// Wer über dieses Spiel hinausschaut, findet den Nachfolger über
+    /// `from1`/`from2 == planning_id` im selben Draw.
+    pub from1: Option<i64>,
+    pub from2: Option<i64>,
     /// Name der Auslosung, z. B. "HE".
     pub draw_name: String,
     /// Disziplin des Matches (aus dem BTP-Event abgeleitet).
@@ -861,6 +873,10 @@ fn parse_matches(
             id: child_int(m, "ID").unwrap_or_default(),
             draw_id: draw_id.unwrap_or_default(),
             planning_id: child_int(m, "PlanningID").unwrap_or_default(),
+            // Roh übernehmen, nicht deuten: Was die Kante bedeutet,
+            // entscheidet der Aufrufer.
+            from1: child_int(m, "From1"),
+            from2: child_int(m, "From2"),
             draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),

@@ -1196,7 +1196,24 @@ pub(crate) fn build_manual_result_update(
     on_court_since: Option<u64>,
     now: u64,
 ) -> Result<proto::MatchUpdate, String> {
-    if m.winner.is_some() {
+    build_manual_result_update_opt(m, sets, on_court_since, now, false)
+}
+
+/// Wie [`build_manual_result_update`], aber mit ausdrücklicher
+/// Überschreib-Erlaubnis.
+///
+/// Ohne sie bleibt „bereits gewertet" ein Riegel — versehentlich lässt sich
+/// so kein Ergebnis ersetzen. Wer überschreiben will, muss es sagen, und der
+/// Aufrufer muss vorher geprüft haben, dass es folgenlos möglich ist
+/// (`tl::correction_blocker`).
+pub(crate) fn build_manual_result_update_opt(
+    m: &BtpMatch,
+    sets: Vec<(i64, i64)>,
+    on_court_since: Option<u64>,
+    now: u64,
+    overwrite: bool,
+) -> Result<proto::MatchUpdate, String> {
+    if m.winner.is_some() && !overwrite {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
     }
     if m.team1.is_empty() || m.team2.is_empty() {
@@ -1997,6 +2014,8 @@ mod tests {
     /// Match id=42 auf Court 101 (OnCourt), zwei Einzel-Spieler.
     fn match_on_court() -> BtpMatch {
         BtpMatch {
+            from1: None,
+            from2: None,
             id: 42,
             draw_id: 7,
             planning_id: 1001,
