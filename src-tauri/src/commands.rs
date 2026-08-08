@@ -2087,6 +2087,226 @@ pub async fn resolve_pairing_code(code: String) -> Result<String, String> {
     crate::tablet::relay_client::resolve_pairing_code(code.trim()).await
 }
 
+// ───────────────── Turnierleitungs-Geräte (TL-Web) ─────────────────
+
+/// Ein gekoppeltes Turnierleitungs-Gerät, **ohne** seinen Zugang.
+///
+/// Der Zugang verlässt die Konfiguration nur einmal: im QR-Code beim
+/// Koppeln. Danach gibt es keinen Weg mehr, ihn anzuzeigen — auch nicht für
+/// den Turnierleiter. Wer sein Gerät verliert, koppelt neu; das ist der
+/// kürzere Weg als ein Zugang, der in jeder Geräteliste steht.
+#[derive(Serialize)]
+pub struct TlDeviceInfo {
+    pub id: String,
+    pub label: String,
+    pub hall: String,
+    pub created_at_ms: u64,
+}
+
+/// Die Geräteliste für die Oberfläche.
+#[derive(Serialize)]
+pub struct TlWebInfo {
+    pub enabled: bool,
+    pub devices: Vec<TlDeviceInfo>,
+    /// Wie viele Kopplungen die Liste fassen kann.
+    pub max_devices: usize,
+    /// Wie viele Geräte die Seite **gleichzeitig** offen haben können. Die
+    /// spürbare Grenze — und eine ganz andere als die Listenlänge: Alte
+    /// Kopplungen zählen in der Liste mit, blockieren aber keinen Platz.
+    pub max_online: usize,
+}
+
+#[tauri::command]
+pub fn tl_web_info(state: State<'_, AppState>) -> TlWebInfo {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    TlWebInfo {
+        enabled: cfg.tl_web.enabled,
+        devices: cfg
+            .tl_web
+            .devices
+            .iter()
+            .map(|d| TlDeviceInfo {
+                id: d.id.clone(),
+                label: d.label.clone(),
+                hall: d.hall.clone(),
+                created_at_ms: d.created_at_ms,
+            })
+            .collect(),
+        max_devices: relay_proto::MAX_TL_DEVICES_MIRRORED,
+        max_online: relay_proto::MAX_TL_DEVICES_ONLINE,
+    }
+}
+
+/// Ein Weg, auf dem ein Gerät die Oberfläche erreicht.
+#[derive(Serialize)]
+pub struct TlEntrance {
+    /// Was dransteht („Im Hallennetz" / „Über das Internet").
+    pub label: String,
+    /// Die vollständige Adresse **mit Zugang im Fragment**. Das Fragment
+    /// schickt kein Browser an einen Server — der Zugang steht damit weder
+    /// im Zugriffsprotokoll des Relays noch in dem eines Zwischenservers.
+    pub url: String,
+    /// Derselbe Inhalt als QR-Code (SVG). Wird **hier** erzeugt, nicht über
+    /// eine Bild-Route: Ein Zugang, der als Adressbestandteil an einen
+    /// Server ginge, stünde in dessen Protokoll.
+    pub qr_svg: String,
+}
+
+/// Was ein frisch gekoppeltes Gerät zum Anmelden braucht.
+#[derive(Serialize)]
+pub struct TlPairing {
+    pub id: String,
+    /// **Alle** Wege, auf denen dieses Gerät hereinkommt. Im
+    /// LAN-und-Cloud-Betrieb sind es zwei — und beide werden gebraucht: Der
+    /// Sinn dieser Betriebsart ist, dass die Halle weiterläuft, wenn die
+    /// Internetverbindung ausfällt. Stünde nur die Cloud-Adresse im QR,
+    /// stünde das Gerät bei einem Ausfall vor einer Seite, die es nicht mehr
+    /// laden kann — und der Zugang ist nur dieses eine Mal zu sehen.
+    pub entrances: Vec<TlEntrance>,
+}
+
+/// Koppelt ein neues Turnierleitungs-Gerät und liefert Adresse + QR-Code.
+///
+/// `token` und `id` erzeugt die Oberfläche mit `crypto.randomUUID()` —
+/// derselbe Weg wie bei der `install_id`.
+#[tauri::command]
+pub fn tl_device_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    token: String,
+    label: String,
+    hall: String,
+) -> Result<(TlPairing, AppConfig), String> {
+    let device = crate::config::TlDevice {
+        id: id.trim().to_string(),
+        token: token.trim().to_string(),
+        label: label.trim().chars().take(60).collect(),
+        created_at_ms: now_ms(),
+        hall: hall.trim().to_string(),
+    };
+    let neu = device.clone();
+    let cfg = mutate_config(&app, &state, move |cfg| {
+        cfg.tl_web.add_device(neu)?;
+        // Ein Gerät zu koppeln heißt, die Oberfläche zu wollen.
+        cfg.tl_web.enabled = true;
+        Ok(())
+    })?;
+    Ok((
+        TlPairing {
+            id: device.id,
+            entrances: tl_entrances(&cfg, &device.token)?,
+        },
+        cfg,
+    ))
+}
+
+/// Entzieht einem Gerät den Zugang.
+#[tauri::command]
+pub fn tl_device_remove(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        if cfg.tl_web.remove_device(id.trim()) {
+            Ok(())
+        } else {
+            Err("Dieses Gerät ist nicht (mehr) gekoppelt.".to_string())
+        }
+    })
+}
+
+/// Schaltet die Turnierleitungs-Oberfläche an oder ab.
+///
+/// Abschalten **behält** die Geräte: Ein versehentlicher Klick soll nicht
+/// bedeuten, dass alle Tablets neu gescannt werden müssen. Wirksam ist der
+/// Schalter trotzdem sofort — ohne ihn erreicht keine Anfrage etwas, und im
+/// Cloud-Betrieb pusht der Turnier-PC eine leere Liste.
+#[tauri::command]
+pub fn tl_web_set_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.tl_web.enabled = enabled;
+        Ok(())
+    })
+}
+
+/// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und
+/// liefert den neuen Stand.
+///
+/// Lesen, Ändern und Schreiben in einem Zug: Wer zwischendurch loslässt,
+/// überschreibt eine Änderung, die in genau diesem Fenster gespeichert
+/// wurde — bei Zugängen hieße das, eine frische Kopplung verschwindet
+/// wieder.
+///
+/// Den neuen Stand zurückzugeben ist kein Luxus: Die Oberfläche hält eine
+/// eigene Kopie der Konfiguration. Bliebe die veraltet, schickte der nächste
+/// Speichervorgang aus den Einstellungen den alten `tl_web`-Stand zurück —
+/// und `keep_host_managed_fields` löschte alle Kopplungen, deren Zugänge
+/// niemand wiederherstellen kann.
+fn mutate_config<F>(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    aendern: F,
+) -> Result<AppConfig, String>
+where
+    F: FnOnce(&mut AppConfig) -> Result<(), String>,
+{
+    let mut guard = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    let mut cfg = guard.clone();
+    aendern(&mut cfg)?;
+    cfg.save_to(&config_path(app)).map_err(|e| e.to_string())?;
+    *guard = cfg.clone();
+    Ok(cfg)
+}
+
+/// Alle Wege, auf denen ein Gerät die Oberfläche erreicht.
+///
+/// Im Cloud-Betrieb ohne Namespace in der Adresse (der wäre die
+/// `install_id` und damit zugleich der Zugang der Zähltablets); im
+/// Hallennetz der eingebettete Server. Läuft **beides**, gibt es beide
+/// Wege — und das ist wichtig: Der Sinn dieser Betriebsart ist, dass die
+/// Halle weiterläuft, wenn die Internetverbindung ausfällt.
+fn tl_entrances(cfg: &AppConfig, token: &str) -> Result<Vec<TlEntrance>, String> {
+    let mut wege = Vec::new();
+    if cfg.connection_mode.lan_enabled() {
+        wege.push((
+            "Im Hallennetz",
+            format!("http://{}/tl#t={token}", crate::tablet::server::lan_host()),
+        ));
+    }
+    if cfg.connection_mode.cloud_enabled() {
+        wege.push((
+            "Über das Internet",
+            format!("https://badhub.de/bts-relay/tl#t={token}"),
+        ));
+    }
+    wege.into_iter()
+        .map(|(label, url)| {
+            let qr_svg = qr_code_svg(&url)?;
+            Ok(TlEntrance {
+                label: label.to_string(),
+                url,
+                qr_svg,
+            })
+        })
+        .collect()
+}
+
+/// QR-Code als SVG — lokal erzeugt, damit der Zugang den Rechner nicht
+/// verlässt.
+fn qr_code_svg(text: &str) -> Result<String, String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(260, 260)
+        .build())
+}
+
 /// Geräte-Anschluss der fernen Halle (Slave): Relay-Basis des Masters +
 /// die Felder **dieser** Halle, damit die Slave-Oberfläche je Feld den
 /// Tablet-QR (`<relay_base>/qr/<id>`) und den Monitor-Link

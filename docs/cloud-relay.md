@@ -105,11 +105,12 @@ Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 > [tablet.md](tablet.md)) und über den **Relay**. Der Turnier-PC spiegelt
 > seine Zugänge (`TlAuth`) und seinen Anzeige-Zustand (`TlState`) und
 > beantwortet `TlCommand` mit **derselben** Ausführung wie im Hallennetz.
-> Was noch fehlt, ist die Geräteverwaltung in der Desktop-Oberfläche (QR
-> zum Koppeln, Widerruf) — bis dahin lassen sich Geräte nur von Hand in der
-> `config.json` eintragen, und ohne Opt-in (`tl_web.enabled`, Default aus)
-> kennt der Relay kein einziges Token: **Jede** Anfrage endet abgewiesen,
-> bevor sie irgendetwas berührt. Fachliche Grundlage:
+> Gekoppelt und widerrufen wird unter **Turnierleitung** in der
+> Desktop-App: Name eintragen, QR scannen, fertig. Der Zugang ist genau
+> einmal sichtbar — im QR-Code beim Koppeln. Ohne Opt-in
+> (`tl_web.enabled`, Default aus) kennt der Relay kein einziges Token:
+> **Jede** Anfrage endet abgewiesen, bevor sie irgendetwas berührt.
+> Fachliche Grundlage:
 > [features/turnierleitung-web.md](features/turnierleitung-web.md),
 > [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und
 > [ADR 0011](adr/0011-tl-web-geraete-identitaet.md).

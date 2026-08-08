@@ -1814,7 +1814,7 @@ fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
 ///
 /// Ein Turnier hat eine Handvoll Helfer. Die Grenze schützt den Turnier-PC
 /// davor, von Dutzenden offenen Browsern abgefragt zu werden.
-const MAX_TL_DEVICES: usize = 8;
+const MAX_TL_DEVICES: usize = relay_proto::MAX_TL_DEVICES_ONLINE;
 
 /// Nach dieser Stille gilt ein Geräteplatz als frei. Wer nur den Tab
 /// geschlossen hat, soll seinen Platz nicht bis zum Turnierende blockieren.

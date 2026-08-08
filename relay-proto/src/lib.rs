@@ -1244,6 +1244,18 @@ pub enum HostFrame {
 /// bliebe stumm gesperrt.
 pub const MAX_TL_DEVICES_MIRRORED: usize = 64;
 
+/// Höchstzahl **gleichzeitig bedienter** Turnierleitungs-Geräte je Turnier.
+///
+/// Die spürbare Grenze: Das neunte Gerät, das die Seite offen hat, wird
+/// abgewiesen (ein Platz wird nach 60 s Stille wieder frei). Sie ist viel
+/// kleiner als [`MAX_TL_DEVICES_MIRRORED`], das nur die Länge der
+/// gespiegelten Liste begrenzt — alte Kopplungen zählen dort mit, blockieren
+/// aber keinen Platz.
+///
+/// Geteilt, damit die Geräteverwaltung im Desktop dieselbe Zahl nennt, die
+/// der Relay durchsetzt.
+pub const MAX_TL_DEVICES_ONLINE: usize = 8;
+
 /// Höchstgröße des Anzeige-Zustands in Bytes.
 ///
 /// Ebenfalls geteilt: Der Relay legt größere Stände nicht ab, und der Host

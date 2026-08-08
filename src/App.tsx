@@ -30,6 +30,7 @@ import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { MaintenancePage } from "./pages/MaintenancePage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
+import { TlWebPanel } from "./pages/TlWebPanel";
 import { WinnersPage } from "./pages/WinnersPage";
 import type {
   AppConfig,
@@ -370,6 +371,12 @@ function App() {
         return (
           <TabletPanel announce={config.announce} azureTts={config.azure_tts} />
         );
+      case "tlweb":
+        // Die neue Konfiguration muss hier ankommen: Bliebe die Kopie der App
+        // veraltet, schriebe der nächste Speichervorgang aus den
+        // Einstellungen den alten `tl_web`-Stand zurück — und löschte alle
+        // Kopplungen, deren Zugänge niemand wiederherstellen kann.
+        return <TlWebPanel onConfigSaved={(c) => setConfig(c)} />;
       case "announce":
         return (
           <AnnouncePage

@@ -341,6 +341,46 @@ export interface FreetextItem {
   text: string;
 }
 
+/** Ein gekoppeltes Turnierleitungs-Gerät — **ohne** seinen Zugang.
+ *  Der verlässt die Konfiguration nur einmal: im QR-Code beim Koppeln. */
+export interface TlDeviceInfo {
+  id: string;
+  label: string;
+  hall: string;
+  created_at_ms: number;
+}
+
+/** Zustand der Turnierleitungs-Oberfläche für die Geräteverwaltung. */
+export interface TlWebInfo {
+  enabled: boolean;
+  devices: TlDeviceInfo[];
+  /** Wie viele Kopplungen die Liste fasst. */
+  max_devices: number;
+  /** Wie viele Geräte die Seite **gleichzeitig** offen haben können — die
+   *  spürbare Grenze. Alte Kopplungen zählen in der Liste mit, blockieren
+   *  aber keinen Platz. */
+  max_online: number;
+}
+
+/** Ein Weg, auf dem ein Gerät die Oberfläche erreicht. */
+export interface TlEntrance {
+  /** Was dransteht („Im Hallennetz" / „Über das Internet"). */
+  label: string;
+  /** Adresse mit Zugang im Fragment (`#t=…`) — Fragmente gehen nie an einen
+   *  Server, der Zugang steht also in keinem Zugriffsprotokoll. */
+  url: string;
+  /** Derselbe Inhalt als QR-Code (SVG-Quelltext). */
+  qr_svg: string;
+}
+
+/** Was ein frisch gekoppeltes Gerät zum Anmelden braucht. */
+export interface TlPairing {
+  id: string;
+  /** Alle Wege — im LAN-und-Cloud-Betrieb zwei, und beide werden gebraucht:
+   *  Fällt das Internet aus, muss der Weg über das Hallennetz bleiben. */
+  entrances: TlEntrance[];
+}
+
 /** Ein Ansage-Auftrag der Turnierleitungs-Seite (Rust:
  *  `tablet::state::AnnounceJob`).
  *

@@ -559,6 +559,42 @@ pub struct TlWebConfig {
     pub devices: Vec<TlDevice>,
 }
 
+impl TlWebConfig {
+    /// Nimmt ein neu gekoppeltes Gerät auf.
+    ///
+    /// Fehler statt stiller Ablehnung, wenn die Liste voll ist: Der Relay
+    /// verwirft eine zu lange Liste vollständig, und das bliebe sonst
+    /// unbemerkt, bis niemand mehr durchkommt. Die Grenze ist die geteilte
+    /// aus `relay-proto` — beide Seiten müssen dieselbe Zahl meinen.
+    pub fn add_device(&mut self, device: TlDevice) -> Result<(), String> {
+        if device.token.trim().is_empty() || device.id.trim().is_empty() {
+            return Err("Gerät ohne Kennung oder Zugang.".to_string());
+        }
+        if self.devices.iter().any(|d| d.id == device.id) {
+            return Err("Dieses Gerät ist schon gekoppelt.".to_string());
+        }
+        if self.devices.len() >= relay_proto::MAX_TL_DEVICES_MIRRORED {
+            return Err(format!(
+                "Mehr als {} gekoppelte Geräte kann der Relay nicht führen — \
+                 bitte alte Kopplungen entfernen.",
+                relay_proto::MAX_TL_DEVICES_MIRRORED
+            ));
+        }
+        self.devices.push(device);
+        Ok(())
+    }
+
+    /// Entzieht einem Gerät den Zugang. `true`, wenn es eines gab.
+    ///
+    /// Mehr braucht der Widerruf nicht: Der nächste Push nennt das Gerät
+    /// nicht mehr, und der Relay ersetzt seine Liste damit vollständig.
+    pub fn remove_device(&mut self, id: &str) -> bool {
+        let vorher = self.devices.len();
+        self.devices.retain(|d| d.id != id);
+        self.devices.len() != vorher
+    }
+}
+
 impl AppConfig {
     /// Erlaubte Halle (BTP-`Location`-Name) für ein Match anhand seiner
     /// Disziplin (`Discipline::as_str()`) und Auslosung (`draw_name`).
@@ -652,7 +688,15 @@ impl AppConfig {
             std::fs::create_dir_all(dir).map_err(ConfigError::Write)?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, json).map_err(ConfigError::Write)
+        // **Erst daneben schreiben, dann umbenennen.** Ein direktes Schreiben
+        // kürzt die Datei zuerst auf null: Wer sie in diesem Augenblick liest
+        // — und die Turnierleitungs-Zugänge werden bei **jeder** Anfrage
+        // gelesen —, bekommt eine halbe oder leere Datei und daraus die
+        // Standardwerte. Das hieße für einen Wimpernschlag: kein Gerät
+        // zugelassen. Das Umbenennen ist auf beiden Dateisystemen atomar.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).map_err(ConfigError::Write)?;
+        std::fs::rename(&tmp, path).map_err(ConfigError::Write)
     }
 }
 
@@ -1126,5 +1170,60 @@ mod tests {
             AppConfig::load_from(&path),
             Err(ConfigError::Parse(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod tl_device_tests {
+    use super::*;
+
+    fn geraet(id: &str) -> TlDevice {
+        TlDevice {
+            id: id.to_string(),
+            token: format!("tok-{id}"),
+            label: "Tablet".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_paired_device_can_be_revoked_again() {
+        // Entfernen ist der ganze Widerruf: Der nächste Push nennt das Gerät
+        // nicht mehr, und der Relay ersetzt seine Liste damit vollständig.
+        let mut cfg = TlWebConfig::default();
+        cfg.add_device(geraet("a")).unwrap();
+        cfg.add_device(geraet("b")).unwrap();
+        assert!(cfg.remove_device("a"));
+        assert_eq!(cfg.devices.len(), 1);
+        assert!(!cfg.remove_device("a"), "zweimal entziehen ändert nichts");
+    }
+
+    #[test]
+    fn pairing_the_same_device_twice_is_refused() {
+        let mut cfg = TlWebConfig::default();
+        cfg.add_device(geraet("a")).unwrap();
+        assert!(cfg.add_device(geraet("a")).is_err());
+    }
+
+    #[test]
+    fn a_device_without_access_is_no_device() {
+        let mut cfg = TlWebConfig::default();
+        let mut ohne = geraet("a");
+        ohne.token = String::new();
+        assert!(cfg.add_device(ohne).is_err());
+    }
+
+    #[test]
+    fn the_list_stops_where_the_relay_stops() {
+        // Der Relay verwirft eine zu lange Liste **vollständig**. Ohne diese
+        // Grenze hier bliebe das unbemerkt, bis kein Gerät mehr durchkommt —
+        // und auch ein Widerruf käme nicht mehr an.
+        let mut cfg = TlWebConfig::default();
+        for i in 0..relay_proto::MAX_TL_DEVICES_MIRRORED {
+            cfg.add_device(geraet(&format!("g{i}"))).unwrap();
+        }
+        let err = cfg.add_device(geraet("zuviel")).unwrap_err();
+        assert!(err.contains("Relay"), "sagt, woran es liegt: {err}");
     }
 }
