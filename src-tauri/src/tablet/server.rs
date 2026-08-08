@@ -1003,16 +1003,26 @@ async fn tl_state(
     Json(state).into_response()
 }
 
+/// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine
+/// Wiederholung als solche erkannt wird.
+#[derive(serde::Deserialize)]
+struct TlCommandBody {
+    #[serde(rename = "opId")]
+    op_id: String,
+    action: relay_proto::TlAction,
+}
+
 /// Eine Aktion eines Turnierleitungs-Geräts.
 async fn tl_command(
     State(ctx): State<Arc<ServerCtx>>,
     headers: axum::http::HeaderMap,
-    Json(action): Json<relay_proto::TlAction>,
+    Json(body): Json<TlCommandBody>,
 ) -> impl IntoResponse {
     let Some(device) = tl_device(&ctx, &headers) else {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
     };
-    Json(crate::tablet::tl::execute(&ctx, &device, action).await).into_response()
+    Json(crate::tablet::tl::execute(&ctx, &device, &body.op_id, now_ms(), body.action).await)
+        .into_response()
 }
 
 /// Validiert ein Endergebnis vom Tablet und schreibt es per `SENDUPDATE`

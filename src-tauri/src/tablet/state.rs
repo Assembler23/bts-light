@@ -27,6 +27,21 @@ fn now_ms() -> u64 {
 /// Überschreitung wird das am längsten nicht gesehene Gerät verdrängt.
 const MAX_MONITOR_DEVICES: usize = 128;
 
+/// Wie lange eine frisch nach BTP geschriebene Feldzuweisung als belegt gilt,
+/// bevor BTP sie bestätigt hat.
+///
+/// Lang genug, um den Abfragetakt samt einer trägen BTP-Antwort zu
+/// überbrücken; kurz genug, dass ein fehlgeschlagener Schreibvorgang das Feld
+/// nicht spürbar blockiert.
+const RESERVATION_TTL_MS: u64 = 15_000;
+
+/// Wie lange die Antwort auf einen Vorgang der Turnierleitungs-Oberfläche
+/// aufgehoben wird, um Wiederholungen dieselbe Antwort zu geben.
+///
+/// Deckt Netzwackler und Doppeltipps ab. Danach ist der Vorgang vergessen —
+/// die Liste soll über ein Turnier hinweg nicht unbegrenzt wachsen.
+const OP_MEMORY_MS: u64 = 60_000;
+
 /// Flüchtiger Live-Zustand eines Court-Monitor-Geräts (nicht persistiert –
 /// die Feld-Zuweisungen liegen in `monitor-assignments.json`).
 #[derive(Debug, Clone, Default)]
@@ -270,6 +285,21 @@ pub struct TabletState {
     /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
     /// bewusst gesteuert (Leute fotografieren das Podium).
     winners_selection: RwLock<Option<i64>>,
+    /// CourtID → (Match-ID, Zeitpunkt): Zuweisungen, die schon nach BTP
+    /// geschrieben, aber noch nicht zurückgelesen wurden.
+    ///
+    /// Der Schnappschuss hinkt BTP um bis zu einen Abfragetakt hinterher —
+    /// in diesem Fenster sähe eine zweite Prüfung das Feld noch frei und
+    /// ließe eine konkurrierende Zuweisung durch. Die Reservierung schließt
+    /// genau dieses Fenster. Sie verfällt von selbst, damit ein
+    /// fehlgeschlagener Schreibvorgang das Feld nicht dauerhaft blockiert.
+    pending_assign: RwLock<HashMap<i64, (i64, u64)>>,
+    /// Vorgangskennung → (Zeitpunkt, Antwort): schon ausgeführte Aktionen
+    /// der Turnierleitungs-Oberfläche.
+    ///
+    /// Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal.
+    /// Ohne dieses Gedächtnis schriebe der zweite Versuch erneut nach BTP.
+    recent_ops: RwLock<HashMap<String, (u64, relay_proto::TlResponse)>>,
     /// Freitext-Ansagen (Master legt ab; Master + Slaves pollen + sprechen die
     /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
     freetext: RwLock<Vec<FreetextItem>>,
@@ -912,6 +942,65 @@ impl TabletState {
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
+    /// Merkt eine gerade nach BTP geschriebene Zuweisung vor.
+    ///
+    /// Solange BTP sie nicht zurückmeldet, gilt das Feld als belegt — sonst
+    /// ließe die Prüfung im selben Zeitfenster eine zweite Zuweisung durch.
+    pub fn reserve_court(&self, court_id: i64, match_id: i64, now_ms: u64) {
+        self.pending_assign
+            .write()
+            .unwrap()
+            .insert(court_id, (match_id, now_ms));
+    }
+
+    /// Die noch gültigen Reservierungen als `(Feld, Spiel)`.
+    ///
+    /// Abgelaufene fallen dabei heraus: Schlägt ein Schreibvorgang fehl,
+    /// bestätigt BTP nie, und das Feld darf nicht für immer blockiert sein.
+    pub fn reserved_courts(&self, now_ms: u64) -> Vec<(i64, i64)> {
+        let mut pending = self.pending_assign.write().unwrap();
+        pending.retain(|_, (_, ts)| now_ms.saturating_sub(*ts) < RESERVATION_TTL_MS);
+        let mut out: Vec<(i64, i64)> = pending.iter().map(|(c, (m, _))| (*c, *m)).collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// Räumt Reservierungen weg, die der BTP-Stand inzwischen bestätigt hat.
+    ///
+    /// Wird im Abfrage-Takt aufgerufen: Sobald das Spiel wirklich auf dem
+    /// Feld steht, hat die Reservierung ihren Zweck erfüllt.
+    pub fn release_confirmed_reservations(&self) {
+        let guard = self.snapshot.read().unwrap();
+        let Some(snap) = guard.as_ref() else { return };
+        self.pending_assign
+            .write()
+            .unwrap()
+            .retain(|court, (m, _)| {
+                !snap
+                    .matches
+                    .iter()
+                    .any(|x| x.id == *m && x.court_id == Some(*court))
+            });
+    }
+
+    /// Antwort eines schon ausgeführten Vorgangs, falls noch bekannt.
+    pub fn remembered_result(&self, op_id: &str, now_ms: u64) -> Option<relay_proto::TlResponse> {
+        let mut ops = self.recent_ops.write().unwrap();
+        ops.retain(|_, (ts, _)| now_ms.saturating_sub(*ts) < OP_MEMORY_MS);
+        ops.get(op_id).map(|(_, resp)| resp.clone())
+    }
+
+    /// Hält das Ergebnis eines Vorgangs fest, damit eine Wiederholung
+    /// dieselbe Antwort bekommt, statt erneut zu schreiben.
+    pub fn remember_result(&self, op_id: &str, response: relay_proto::TlResponse, now_ms: u64) {
+        if op_id.trim().is_empty() {
+            return;
+        }
+        let mut ops = self.recent_ops.write().unwrap();
+        ops.retain(|_, (ts, _)| now_ms.saturating_sub(*ts) < OP_MEMORY_MS);
+        ops.insert(op_id.to_string(), (now_ms, response));
+    }
+
     /// Zieht den laufenden Spielstand eines Spiels auf ein anderes Feld um.
     ///
     /// Nötig, wenn die Turnierleitung ein **laufendes** Spiel umhängt: Der
@@ -1685,6 +1774,70 @@ mod tests {
         assert_eq!(c1.cap_score, 30);
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!((c2.best_of, c2.target_score, c2.cap_score), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_fresh_assignment_reserves_the_court_until_btp_confirms() {
+        // Zwischen dem Schreiben nach BTP und der Rückmeldung sieht der
+        // Schnappschuss das Feld noch leer. Ohne Reservierung ließe die
+        // Prüfung eine zweite Zuweisung durch, und die Spieler der ersten
+        // stünden vor einem Feld, auf dem ein fremdes Spiel läuft.
+        let st = TabletState::default();
+        st.reserve_court(3, 42, 1_000);
+        assert_eq!(st.reserved_courts(1_000), vec![(3, 42)]);
+        // Kurz danach gilt sie noch …
+        assert_eq!(st.reserved_courts(5_000), vec![(3, 42)]);
+    }
+
+    #[test]
+    fn a_reservation_expires_so_a_failed_write_does_not_block_the_court() {
+        // Schlägt der Schreibvorgang fehl, bestätigt BTP nie — die
+        // Reservierung muss von selbst verfallen, sonst wäre das Feld
+        // dauerhaft blockiert.
+        let st = TabletState::default();
+        st.reserve_court(3, 42, 1_000);
+        let after_ttl = 1_000 + RESERVATION_TTL_MS + 1;
+        assert!(st.reserved_courts(after_ttl).is_empty());
+    }
+
+    #[test]
+    fn a_reservation_is_released_once_btp_reports_the_match_on_the_court() {
+        // Sobald der Schnappschuss die Zuweisung zeigt, ist die Reservierung
+        // überflüssig — sie darf das Feld nicht länger blockieren, als nötig.
+        let st = TabletState::default();
+        st.reserve_court(3, 42, 1_000);
+        st.set_snapshot(snapshot(
+            vec![match_on(42, Some(3), MatchStatus::OnCourt)],
+            vec![(3, "Feld 3")],
+        ));
+        st.release_confirmed_reservations();
+        assert!(st.reserved_courts(1_500).is_empty());
+    }
+
+    #[test]
+    fn repeating_an_operation_returns_the_stored_answer_instead_of_acting_twice() {
+        // Ein Doppeltipp bei träger Verbindung darf nicht zweimal nach BTP
+        // schreiben. Der Vorgangsschlüssel entscheidet: gleiche Kennung =
+        // gleiche Antwort, ohne die Aktion erneut auszuführen.
+        let st = TabletState::default();
+        assert_eq!(st.remembered_result("op-1", 1_000), None);
+        st.remember_result("op-1", relay_proto::TlResponse::ok(7), 1_000);
+        let again = st.remembered_result("op-1", 1_200).expect("gespeichert");
+        assert!(again.ok);
+        assert_eq!(again.state_rev, 7);
+        // Ein anderer Vorgang ist davon unberührt.
+        assert_eq!(st.remembered_result("op-2", 1_200), None);
+    }
+
+    #[test]
+    fn a_remembered_operation_is_forgotten_after_a_while() {
+        // Sonst wüchse die Liste über ein Turnier hinweg unbegrenzt, und ein
+        // zufällig wiederholter Schlüssel bekäme Jahre später eine Antwort.
+        let st = TabletState::default();
+        st.remember_result("op-1", relay_proto::TlResponse::ok(1), 1_000);
+        assert!(st
+            .remembered_result("op-1", 1_000 + OP_MEMORY_MS + 1)
+            .is_none());
     }
 
     #[test]

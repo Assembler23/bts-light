@@ -175,6 +175,80 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 .note { font-size: .82rem; color: var(--ink-soft); margin: 6px 0 0; }
 .note.warn { color: var(--warn); font-weight: 600; }
 
+/* ── Bedienung ─────────────────────────────────────────────────────────
+   Antippen–Antippen ist der Hauptweg: Er funktioniert auf jedem Gerät, ist
+   einhändig bedienbar (die andere Hand hält das Klemmbrett) und lässt sich
+   ansagen. */
+.row.pick { cursor: pointer; }
+.row.pick:hover { border-color: #cbd5e1; }
+.row[aria-selected="true"] {
+  background: var(--ink); color: #fff; border-color: var(--ink);
+}
+.row[aria-selected="true"] .no,
+.row[aria-selected="true"] .draw,
+.row[aria-selected="true"] .vs { color: #cbd5e1; }
+.row:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Das Aktionsband klebt unter der Kopfzeile und verschwindet nicht beim
+   Scrollen — sonst weiß man auf einem Tablet nach zwei Wischern nicht mehr,
+   was gewählt ist. */
+.action-bar {
+  position: sticky; top: 0; z-index: 15;
+  display: none; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--ink); color: #fff;
+}
+.action-bar.show { display: flex; }
+.action-bar .what { font-weight: 650; flex: 1 1 12rem; min-width: 0; }
+.action-bar .hint { color: #cbd5e1; font-size: .9rem; }
+.action-bar button {
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 44px;
+  border-radius: 8px; border: 1px solid #475569;
+  background: transparent; color: #fff; cursor: pointer;
+}
+.action-bar button:hover { background: #1e293b; }
+
+/* Ein Feld, das das gewählte Spiel aufnehmen kann. */
+.card.target { cursor: pointer; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29, 78, 216, .15); }
+.card.target:hover { background: #eff6ff; }
+/* Nicht erlaubt: gedimmt, aber weiterhin antippbar — der Tipp zeigt den
+   Grund. Ins Leere zu tippen erklärt nichts. */
+.card.blocked-target { opacity: .55; cursor: pointer; }
+/* Unterwegs: sichtbar vorläufig, nicht als Tatsache dargestellt. */
+.card.pending { border-style: dashed; border-color: var(--accent); background: #eff6ff; }
+.card.pending .empty-hint { color: var(--accent); font-style: normal; font-weight: 600; }
+
+/* Ziehen: Der Klon folgt dem Finger. Bewusst schlicht — er soll zeigen,
+   was transportiert wird, nicht die Aufmerksamkeit von den Zielfeldern
+   abziehen. */
+.drag-ghost {
+  position: fixed; z-index: 60; pointer-events: none;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--ink); color: #fff; font-weight: 650; font-size: .9rem;
+  box-shadow: 0 8px 20px rgba(15,23,42,.28); opacity: .95;
+  max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Während des Ziehens hebt sich das Feld unter dem Finger zusätzlich ab. */
+.card.hover-target { background: #dbeafe; border-color: var(--accent); }
+/* Nur auf dem Griff selbst das Scrollen unterdrücken — sonst ließe sich die
+   Liste auf dem Tablet nicht mehr bewegen. */
+.row.pick { touch-action: pan-y; }
+
+/* Rückmeldung zur letzten Aktion. Bleibt stehen, bis sie weggetippt wird
+   oder die nächste Aktion beginnt. */
+.toast {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 40; max-width: min(92vw, 40rem);
+  display: none; gap: 12px; align-items: flex-start;
+  padding: 12px 16px; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,.18);
+  background: var(--ink); color: #fff; font-weight: 600;
+}
+.toast.show { display: flex; }
+.toast.bad { background: #7f1d1d; }
+.toast button {
+  font: inherit; background: transparent; border: 0; color: #cbd5e1;
+  cursor: pointer; padding: 0 4px; min-height: 24px; font-size: 1.1rem;
+}
+
 /* Einstieg ohne Zugang: die einzige Stelle, die erklärt statt anzuzeigen. */
 .gate { max-width: 34rem; margin: 12vh auto; padding: 24px; text-align: center; }
 .gate h1 { font-size: 1.3rem; margin: 0 0 10px; }
@@ -199,6 +273,11 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
   </header>
   <div class="banner" id="banner"></div>
+  <div class="action-bar" id="action-bar">
+    <span class="what" id="action-what"></span>
+    <span class="hint">jetzt ein Feld antippen</span>
+    <button type="button" id="action-cancel">Abbrechen</button>
+  </div>
   <main>
     <section>
       <h2>Felder <span class="count" id="courts-count"></span></h2>
@@ -209,6 +288,11 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
       <div id="queue"></div>
     </section>
   </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span id="toast-text"></span>
+  <button type="button" id="toast-close" aria-label="Meldung schließen">×</button>
 </div>
 
 <script type="module">
@@ -281,6 +365,124 @@ function callStage(court, timer) {
   if (min >= timer.third_call_minutes) return 3;
   if (min >= timer.second_call_minutes) return 2;
   return 1;
+}
+
+// ── Bedienzustand ─────────────────────────────────────────────────────
+// Drei Lagen, mehr braucht es nicht: nichts gewählt · ein Spiel gewählt ·
+// eine Zuweisung unterwegs. Der Drag später setzt denselben Automaten, statt
+// einen zweiten Weg zu eröffnen.
+let picked = null;   // gewähltes Spiel aus der Liste
+let pending = null;  // { matchId, courtId } — unterwegs zum Turnier-PC
+
+function pick(match) {
+  // Dasselbe Spiel erneut antippen hebt die Auswahl auf.
+  picked = picked && picked.match_id === match.match_id ? null : match;
+  renderActionBar();
+  renderCourts();
+  renderQueue();
+}
+function cancelPick() {
+  picked = null;
+  renderActionBar();
+  renderCourts();
+  renderQueue();
+}
+
+function renderActionBar() {
+  const bar = $("action-bar");
+  // Während eines Zuges bleibt das Band aus: Es würde beim Erscheinen das
+  // ganze Layout nach unten schieben, und der Finger träfe ein anderes Feld
+  // als das anvisierte. Beim Ziehen sagt ohnehin der Klon am Finger, was
+  // transportiert wird — das Band ist für den Antipp-Weg da, wo man nach
+  // zwei Wischern sonst nicht mehr weiß, was gewählt ist.
+  if (!picked || dragging) { bar.classList.remove("show"); return; }
+  const wer = [(picked.team1 || []).join(" / "), (picked.team2 || []).join(" / ")]
+    .filter(Boolean).join(" gegen ");
+  $("action-what").textContent =
+    `${[picked.draw_name, picked.round_name].filter(Boolean).join(" · ")} — ${wer}`;
+  bar.classList.add("show");
+}
+
+function toast(text, bad) {
+  $("toast-text").textContent = text;
+  $("toast").className = "toast show" + (bad ? " bad" : "");
+}
+function hideToast() { $("toast").className = "toast"; }
+
+/**
+ * Darf das gewählte Spiel auf dieses Feld?
+ *
+ * Nur die Gründe, die das Gerät selbst sicher kennt. Alles Weitere
+ * entscheidet der Turnier-PC — er hat den maßgeblichen Stand, und seine
+ * Ablehnung ist die Wahrheit. Hier geht es darum, offensichtlich Sinnloses
+ * gar nicht erst anzubieten.
+ */
+function targetProblem(court) {
+  if (!picked) return null;
+  if (court.locked) return "Dieses Feld ist gesperrt.";
+  if (court.clearing) return "Dieses Feld wird noch geräumt — BTP hat es noch nicht freigegeben.";
+  if (court.match_id) return "Auf diesem Feld läuft ein Spiel.";
+  if (picked.hall && court.location && picked.hall !== court.location) {
+    return `Dieses Spiel gehört nach ${picked.hall}.`;
+  }
+  return null;
+}
+
+async function assignTo(court) {
+  if (!picked) return;
+  if (connectionLevel() === "offline") {
+    toast("Keine Verbindung zum Turnier-PC — die Zuweisung wurde nicht gesendet.", true);
+    return;
+  }
+  const problem = targetProblem(court);
+  if (problem) { toast(problem, true); return; }
+
+  const match = picked;
+  pending = { matchId: match.match_id, courtId: court.court_id };
+  picked = null;
+  hideToast();
+  renderActionBar();
+  renderCourts();
+  renderQueue();
+
+  try {
+    const res = await fetch(API + "/command", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({
+        // Vorgangskennung: Kommt dieselbe Aktion nach einem Netzwackler ein
+        // zweites Mal an, erkennt der Turnier-PC sie und schreibt nicht doppelt.
+        opId: (crypto.randomUUID?.() || String(Date.now() + Math.random())),
+        action: {
+          action: "assign_court",
+          courtId: court.court_id,
+          matchId: match.match_id,
+          // Was wir vorgefunden haben. Stimmt es nicht mehr, lehnt der
+          // Turnier-PC ab, statt jemandes Zuweisung zu überschreiben.
+          expect: { kind: "free" },
+        },
+      }),
+    });
+    const answer = await res.json();
+    if (answer.ok) {
+      toast(`${court.court} bekommt ${(match.team1 || []).join(" / ")} gegen ${(match.team2 || []).join(" / ")}.`);
+    } else {
+      // Die Ablehnung im Klartext, und die Auswahl kommt zurück — meist
+      // will man das Spiel dann auf ein anderes Feld legen.
+      toast(answer.error || "Die Zuweisung wurde abgelehnt.", true);
+      picked = match;
+      renderActionBar();
+    }
+  } catch (e) {
+    toast("Nicht bestätigt — bitte das Feld prüfen und gegebenenfalls wiederholen.", true);
+    picked = match;
+    renderActionBar();
+  } finally {
+    pending = null;
+    // Sofort nachfragen statt auf den nächsten Takt zu warten: Die Anzeige
+    // soll den echten Stand zeigen, nicht unsere Vermutung.
+    poll();
+  }
 }
 
 // ── Zustand ───────────────────────────────────────────────────────────
@@ -384,6 +586,9 @@ function courtCard(c) {
   if (c.clearing) classes.push("clearing");
   else if (!c.match_id) classes.push("free");
   if (c.locked) classes.push("locked");
+  // Ist ein Spiel gewählt, zeigt jede Kachel, ob sie es aufnehmen kann.
+  if (picked) classes.push(targetProblem(c) ? "blocked-target" : "target");
+  if (pending && pending.courtId === c.court_id) classes.push("pending");
 
   const badges = [];
   if (c.locked) badges.push('<span class="badge">gesperrt</span>');
@@ -393,7 +598,12 @@ function courtCard(c) {
   if (c.match_id && !c.tablet_connected) badges.push('<span class="badge warn">kein Tablet</span>');
 
   let body, foot = "";
-  if (c.match_id) {
+  if (pending && pending.courtId === c.court_id) {
+    // Unterwegs: sichtbar vorläufig. Nichts wird als Tatsache dargestellt,
+    // was der Turnier-PC noch nicht bestätigt hat.
+    body = `<div class="empty-hint">wird zugewiesen …</div>
+            <div class="meta">Warte auf die Bestätigung vom Turnier-PC.</div>`;
+  } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
     body = `<div class="pair">${pairOf(c.team1, c.team2)}</div>
             <div class="meta">${esc([c.class_label, c.round_name].filter(Boolean).join(" · "))}</div>`;
@@ -416,11 +626,26 @@ function courtCard(c) {
   const bediener = c.scorekeeper && c.scorekeeper.length
     ? `<div class="meta">Bedienung: ${esc(c.scorekeeper.join(" / "))}</div>` : "";
 
-  return `<article class="${classes.join(" ")}" tabindex="0">
+  return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
+                   ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${badges.join("")}</div>
     ${body}${bediener}
     <div class="card-foot">${foot}</div>
   </article>`;
+}
+
+/** Verdrahtet die Feld-Kacheln — nur nötig, solange ein Spiel gewählt ist. */
+function wireCourts(box) {
+  if (!picked) return;
+  box.querySelectorAll(".card[data-court]").forEach((el) => {
+    const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
+    if (!court) return;
+    const go = () => assignTo(court);
+    el.addEventListener("click", go);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
+    });
+  });
 }
 
 function renderCourts() {
@@ -447,6 +672,7 @@ function renderCourts() {
   } else {
     box.innerHTML = `<div class="courts">${courts.map(courtCard).join("")}</div>`;
   }
+  wireCourts(box);
 }
 
 function queueRow(m) {
@@ -465,7 +691,134 @@ function queueRow(m) {
       ? `${esc(who)} spielt gerade`
       : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
   }
-  return `<div class="row${m.blocked ? " blocked" : ""}">${parts.join("")}</div>`;
+  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
+  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
+  // Ablehnung.
+  const pickable = !m.blocked;
+  const selected = picked && picked.match_id === m.match_id;
+  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
+               data-match="${m.match_id}"
+               ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
+            ${parts.join("")}</div>`;
+}
+
+/** Verdrahtet die Zeilen der Warteliste. */
+function wireQueue(box) {
+  box.querySelectorAll(".row.pick[data-match]").forEach((el) => {
+    const match = state.queue.find((m) => String(m.match_id) === el.dataset.match);
+    if (!match) return;
+    const go = () => { if (!suppressNextClick) pick(match); };
+    el.addEventListener("click", go);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
+    });
+    enableDrag(el, match);
+  });
+}
+
+// ── Ziehen ────────────────────────────────────────────────────────────
+// Bewusst eine dünne Schicht ÜBER dem Antipp-Automaten, kein zweiter Weg:
+// Der Griff wählt das Spiel (wie ein Tipp), das Loslassen weist zu (wie der
+// zweite Tipp). Bricht der Zug ab — Finger rutscht, Browser-Eigenheit —,
+// bleibt das Spiel gewählt und lässt sich durch Antippen eines Felds
+// zuweisen. Der Rettungsanker greift damit von selbst, ohne dass jemand
+// merken muss, dass etwas schiefging.
+//
+// Selbst gebaut auf Zeigegesten statt mit einer Bibliothek: Der eingebaute
+// Ziehen-Mechanismus der Browser funktioniert auf Touch nicht, und die
+// Seite wird ohne Bau-Schritt ins Programm eingebettet.
+const DRAG_THRESHOLD_PX = 8;
+/** Nach einem Zug folgt ein Klick-Ereignis, das hier geschluckt wird. */
+let suppressNextClick = false;
+/** Läuft gerade ein Zug? Solange bleibt das Aktionsband aus (siehe dort). */
+let dragging = false;
+
+function enableDrag(el, match) {
+  el.addEventListener("pointerdown", (down) => {
+    // Nur die primäre Taste/der erste Finger; Rechtsklick und Zweitfinger
+    // dürfen nichts auslösen.
+    if (down.button !== 0 && down.pointerType === "mouse") return;
+    let ghost = null;
+    let hovered = null;
+
+    const move = (ev) => {
+      const dx = ev.clientX - down.clientX;
+      const dy = ev.clientY - down.clientY;
+      if (!ghost) {
+        // Unter der Schwelle ist es ein Tipp, kein Zug — sonst löste jedes
+        // Wackeln beim Antippen einen Zug aus.
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        // Auswählen, OHNE die Liste neu zu zeichnen: Sonst verschwände die
+        // gegriffene Zeile mitten im Zug unter dem Finger. Nur die Felder
+        // müssen sich ändern (sie zeigen jetzt, wer das Spiel aufnehmen
+        // kann). Ein Zeigegesten-Fang ist nicht nötig — die Ereignisse
+        // hängen ohnehin am Fenster.
+        dragging = true;
+        picked = match;
+        renderActionBar();
+        renderCourts();
+        ghost = document.createElement("div");
+        ghost.className = "drag-ghost";
+        ghost.textContent =
+          `${(match.team1 || []).join(" / ")} gegen ${(match.team2 || []).join(" / ")}`;
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = ev.clientX + 14 + "px";
+      ghost.style.top = ev.clientY - 14 + "px";
+      // Das Feld unter dem Finger hervorheben. `elementFromPoint` ignoriert
+      // den Klon, weil der keine Zeigeereignisse annimmt.
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const card = under && under.closest(".card[data-court]");
+      if (card !== hovered) {
+        hovered?.classList.remove("hover-target");
+        hovered = card;
+        if (hovered && !hovered.classList.contains("blocked-target")) {
+          hovered.classList.add("hover-target");
+        }
+      }
+    };
+
+    const finish = (ev, cancelled) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      hovered?.classList.remove("hover-target");
+      ghost?.remove();
+      if (!ghost) { dragging = false; return; }  // war ein Tipp, der Klick greift
+      // Nach einem Zug folgt noch ein Klick-Ereignis. Ohne diese Sperre
+      // würde es die gerade getroffene Auswahl gleich wieder aufheben.
+      suppressNextClick = true;
+      setTimeout(() => { suppressNextClick = false; }, 0);
+      // Das Ziel bestimmen, SOLANGE das Layout noch unverschoben ist.
+      const card = cancelled
+        ? null
+        : document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".card[data-court]");
+      const court = card && state.courts.find((c) => String(c.court_id) === card.dataset.court);
+      dragging = false;
+      if (cancelled) {
+        // Abgebrochen: Die Auswahl bleibt stehen, und jetzt erscheint das
+        // Band — der Rettungsanker greift von selbst, ohne dass jemand
+        // merken muss, dass etwas schiefging.
+        renderActionBar();
+        renderQueue();
+        return;
+      }
+      if (court) {
+        assignTo(court);
+      } else {
+        // Neben ein Feld losgelassen: Auswahl behalten und das Band zeigen,
+        // statt die Aktion stillschweigend zu verwerfen.
+        renderActionBar();
+        renderQueue();
+      }
+    };
+    const up = (ev) => finish(ev, false);
+    const cancel = (ev) => finish(ev, true);
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  });
 }
 
 function renderQueue() {
@@ -506,13 +859,21 @@ function renderQueue() {
     html += `<p class="note warn">Die Liste ist gekürzt (${esc(names)}) — weitere Spiele stehen weiter hinten an.</p>`;
   }
   box.innerHTML = html;
+  wireQueue(box);
 }
 
 function render() {
   if (!state) return;
+  // Ein gewähltes Spiel, das inzwischen vergeben wurde, verschwindet auch
+  // aus der Auswahl — sonst zeigte das Aktionsband ein Spiel an, das es in
+  // der Liste nicht mehr gibt.
+  if (picked && !state.queue.some((m) => m.match_id === picked.match_id)) {
+    picked = null;
+  }
   $("tournament").textContent = state.tournament || "";
   renderConnection();
   renderHalls();
+  renderActionBar();
   renderCourts();
   renderQueue();
 }
@@ -536,6 +897,12 @@ function tickClocks() {
 }
 
 function start() {
+  $("action-cancel").addEventListener("click", cancelPick);
+  $("toast-close").addEventListener("click", hideToast);
+  // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { cancelPick(); hideToast(); }
+  });
   poll();
   setInterval(tickClocks, 1000);
   // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den

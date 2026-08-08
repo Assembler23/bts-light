@@ -186,9 +186,23 @@ pub(crate) fn plan_court_action(
 pub(crate) async fn execute(
     ctx: &crate::tablet::server::ServerCtx,
     device: &crate::config::TlDevice,
+    op_id: &str,
+    now_ms: u64,
     action: relay_proto::TlAction,
 ) -> relay_proto::TlResponse {
     use relay_proto::{TlErrorCode as C, TlResponse};
+
+    // Wiederholung? Dann die gespeicherte Antwort, ohne erneut zu schreiben.
+    // Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal;
+    // ohne diese Prüfung landete sie zweimal in BTP.
+    if let Some(known) = ctx.tablet.remembered_result(op_id, now_ms) {
+        tracing::info!(
+            "TL-Web [{}]: {} war schon erledigt (Wiederholung)",
+            device.label,
+            action_label(&action)
+        );
+        return known;
+    }
 
     // Frisch von der Platte: So greifen Widerruf und Abschalten sofort.
     let config = ctx.app_config();
@@ -202,11 +216,11 @@ pub(crate) async fn execute(
         return TlResponse::err(C::NotAllowed, "Es ist noch kein Turnier geladen.");
     };
     let locked = ctx.tablet.locked_courts();
+    // Zuweisungen, die schon geschrieben, aber von BTP noch nicht bestätigt
+    // sind — in diesem Fenster sieht der Schnappschuss das Feld noch frei.
+    let reserved = ctx.tablet.reserved_courts(now_ms);
 
-    // Der Schutz gegen „von BTP noch nicht bestätigte Zuweisung" kommt in
-    // einem eigenen Schritt; bis dahin gibt es keine Reservierungen zu
-    // berücksichtigen.
-    let plan = match plan_court_action(&snap, &config, &locked, &[], &action) {
+    let plan = match plan_court_action(&snap, &config, &locked, &reserved, &action) {
         Ok(plan) => plan,
         Err(response) => {
             // Auch Ablehnungen werden festgehalten — nur so lässt sich nach
@@ -239,12 +253,22 @@ pub(crate) async fn execute(
                 ctx.tablet
                     .move_match_score(*from_court_id, *to_court_id, *match_id);
             }
+            // Die frisch belegten Felder vormerken, bis BTP sie zurückmeldet
+            // — sonst ließe der nächste Prüflauf (oder die Automatik) im
+            // selben Zeitfenster eine zweite Zuweisung durch.
+            for c in &plan.courts {
+                if let Some(match_id) = c.match_id {
+                    ctx.tablet.reserve_court(c.court_id, match_id, now_ms);
+                }
+            }
             tracing::info!(
                 "TL-Web [{}]: {} ausgeführt",
                 device.label,
                 action_label(&action)
             );
-            TlResponse::ok(0)
+            let response = TlResponse::ok(0);
+            ctx.tablet.remember_result(op_id, response.clone(), now_ms);
+            response
         }
         Err(e) => {
             tracing::warn!(
@@ -252,6 +276,8 @@ pub(crate) async fn execute(
                 device.label,
                 action_label(&action)
             );
+            // Fehlgeschlagene Schreibvorgänge werden NICHT gemerkt: Ein
+            // erneuter Versuch soll es wirklich noch einmal versuchen.
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
     }

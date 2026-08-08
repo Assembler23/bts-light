@@ -661,8 +661,17 @@ impl SyncEngine {
         };
         let locked: HashSet<i64> = tablet.locked_courts().into_iter().collect();
         // Felder/Matches mit offener (unbestätigter) Auto-Zuweisung sperren.
-        let pending_courts: HashSet<i64> = self.pending_auto.keys().copied().collect();
-        let pending_matches: HashSet<i64> = self.pending_auto.values().map(|(m, _)| *m).collect();
+        let mut pending_courts: HashSet<i64> = self.pending_auto.keys().copied().collect();
+        let mut pending_matches: HashSet<i64> =
+            self.pending_auto.values().map(|(m, _)| *m).collect();
+        // Dasselbe gilt für Zuweisungen, die von HAND geschrieben wurden und
+        // auf die Bestätigung durch BTP warten (Turnierleitungs-Oberfläche).
+        // Ohne das legte die Automatik im selben Takt ein zweites Spiel auf
+        // ein Feld, das gerade jemand belegt hat.
+        for (court_id, match_id) in tablet.reserved_courts(now) {
+            pending_courts.insert(court_id);
+            pending_matches.insert(match_id);
+        }
         let multi_hall = snapshot.is_multi_hall();
         // Aktive Halle (Tages-Halle) aus der Config → LocationID auflösen.
         // Ist sie gesetzt, vergeben wir NUR auf Felder dieser Halle und brauchen
@@ -942,6 +951,10 @@ impl SyncEngine {
             return SyncOutcome::SlaveActive;
         }
         tablet.apply_tablet_scores(&mut snapshot);
+        // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
+        // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
+        // nicht länger blockieren als nötig.
+        tablet.release_confirmed_reservations();
         // „In Vorbereitung" gerufene Spiele in den Snapshot stempeln, damit
         // der Aufruf-Zeitstempel im nächsten Push an badhub.de mitgeht.
         tablet.apply_preparation_calls(&mut snapshot);
@@ -1271,6 +1284,23 @@ mod tests {
         assert!(courts.is_empty());
         // Frei-seit wird trotzdem gepflegt (für den Wartezeit-Start).
         assert!(engine.court_free_since.contains_key(&1));
+    }
+
+    #[test]
+    fn auto_assign_skips_a_court_someone_just_claimed_by_hand() {
+        // Die Turnierleitung hat gerade ein Spiel auf Feld 1 geschrieben,
+        // BTP hat es aber noch nicht zurückgemeldet. Ohne Rücksicht auf die
+        // Reservierung legte die Automatik im selben Takt ein zweites Spiel
+        // auf dasselbe Feld.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.reserve_court(1, 99, now_ms());
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "das von Hand belegte Feld bleibt der Automatik verschlossen"
+        );
     }
 
     #[test]
