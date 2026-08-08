@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnnounceJob,
   AppConfig,
   CloudAnnounce,
   CourtAd,
@@ -186,6 +187,21 @@ export const publishFreetext = (hall: string, text: string): Promise<number> =>
  *  Slave: vom Master geholt). */
 export const pendingFreetext = (since: number): Promise<FreetextItem[]> =>
   invoke("pending_freetext", { since });
+
+/** Neue Ansage-Aufträge der Turnierleitung (id > since) für die eigene Halle.
+ *  Die Seite selbst spricht nie — sie beauftragt, gesprochen wird hier. */
+export const pendingAnnounceJobs = (since: number): Promise<AnnounceJob[]> =>
+  invoke("pending_announce_jobs", { since });
+
+/** Meldet dem Turnier-PC, welche Aufruf-Stufe gerade angesagt wurde — damit
+ *  Desktop und Turnierleitungs-Seite dieselbe Zahl führen. Gemeldet wird die
+ *  **gesprochene** Stufe, nicht „noch einmal": Die Oberfläche weiß genau, was
+ *  sie gesagt hat. */
+export const noteCourtCall = (
+  courtId: number,
+  matchId: number,
+  stage: number,
+): Promise<number> => invoke("note_court_call", { courtId, matchId, stage });
 
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (

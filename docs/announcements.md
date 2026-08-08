@@ -92,6 +92,64 @@ Aufruf"**. Ab Stufe 2 wird ein Label-Segment **vor der Paarung** angesagt:
   eskaliert darüber hinaus. Der Knopf zeigt die **nächste** Stufe als Label.
 - Betrifft nur diese manuelle Feld-Ansage; die automatische Erst-Ansage
   (`MatchAnnouncer`) und die Vorbereitungs-Ansage sind unberührt.
+- **Gezählt wird am Turnier-PC** (`TabletState::call_stages`, Command
+  `note_court_call`). Die `callStages`-Map im Frontend beschriftet nur noch
+  den Knopf. Ohne das zeigte die Turnierleitungs-Seite „1. Aufruf", während
+  hier schon zweimal gerufen wurde — die Stufe muss auf **allen** Geräten
+  dieselbe sein. Die zeitliche Fälligkeit reicht der Knopf als `atLeast`
+  durch; dieselbe Rechnung stellt der Host für die Seite an
+  (`due_call_stage` in `tablet/tl.rs`).
+
+## Ansage-Aufträge der Turnierleitungs-Seite
+
+Die Turnierleitungs-Seite (TL-Web) **spricht nie selbst**: Sie läuft im
+Zweifel im Büro oder auf einem Tablet ohne Verbindung zur Hallenanlage und
+kennt weder die eingestellte Stimme noch die Aussprache-Korrekturen. Sie
+legt stattdessen einen **Auftrag** am Turnier-PC ab; gesprochen wird er auf
+den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
+
+| Baustein | Ort |
+|---|---|
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`) | `tablet/state.rs` |
+| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`) | `tablet/tl.rs` |
+| Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
+| Sprecher | [`AnnounceJobPlayer.tsx`](../src/components/AnnounceJobPlayer.tsx) |
+
+Eigenschaften, die im Turnierbetrieb zählen:
+
+- **Struktur statt Text.** Der Auftrag trägt Feld, Spiel und Stufe — nicht
+  fertige Worte. Ein Freitext von der Seite klänge anders als derselbe
+  Aufruf vom Turnier-PC, und die Namenskorrektur bliebe außen vor.
+- **Hallengenau.** Ein Auftrag für Halle B erklingt nicht in Halle A. Ein
+  Gerät ohne eingestellte Halle (Einzelhallen-Betrieb) hört alles — dieselbe
+  Regel wie beim Freitext.
+- **Verfall nach 60 s.** Ein Gerät, das eine Minute weg war, plärrt beim
+  Wiederkommen nicht die Aufrufe der letzten Minute nach; die Spiele laufen
+  längst.
+- **Ehrliche Rückmeldung.** Wer Aufträge abholt, gilt dem Turnier-PC als
+  Ansage-Gerät seiner Halle (30 s Frist). Hört dort niemand zu, meldet die
+  Seite das im Klartext — die Aktion gilt trotzdem als ausgeführt und die
+  Stufe zählt hoch, sonst stünde sie später auf einem anderen Stand als das,
+  was die Halle gehört hat.
+- **Nichts wird nachträglich falsch gesprochen.** Steht auf dem Feld
+  inzwischen ein anderes Spiel, schweigt der Sprecher lieber.
+- **Sind Ansagen ausgeschaltet, wird gar nicht erst abgefragt.** Sonst
+  meldete sich das Gerät als Ansage-Gerät, ohne je zu sprechen — und die
+  Turnierleitung bekäme ein beruhigendes „Aufruf ausgelöst", während in der
+  Halle nichts passiert.
+
+### Grenzen (Stand Schritt 9)
+
+- **Cloud-Ansage-Slaves bekommen noch keine Aufträge.** Der Relay-Zustand
+  (`cloud_announce_state`) trägt sie bis heute nicht; der Weg dorthin
+  entsteht mit der Cloud-Anbindung der Turnierleitungs-Seite. Bis dahin
+  bleibt eine per Relay angebundene ferne Halle stumm — sichtbar, weil sich
+  dort kein Ansage-Gerät meldet und die Seite das meldet.
+- **Ein Ansage-Gerät ohne eingestellte Halle hört alles.** In einem
+  Mehr-Hallen-Turnier spricht es damit auch Aufrufe fremder Hallen. Das ist
+  dieselbe Regel wie beim Freitext und bewusst nicht geändert; die Abhilfe
+  ist `announce.announce_hall` je Gerät zu setzen.
 
 ## Sprache: Deutsch / Englisch / Automatisch
 
@@ -351,6 +409,13 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
 - `src/io/transliterate.ts` — regelbasierte CN/VN-Umschrift (`detectNameLang`, `pinyinToGerman`, `vietnameseToGerman`).
 - `src/io/azureAnnounce.ts` — baut die `AnnounceOptions.azure`-Option (nur wenn aktiv).
 - `src-tauri/src/azure_tts.rs` + `commands::azure_tts_speak` — Azure-Synthese (Key im Backend) + Datei-Cache.
+- `src-tauri/src/tablet/state.rs` — `AnnounceJob`/`AnnounceJobKind`, `call_stages`
+  (Aufruf-Stufen am Host), `announce_listeners` (wer hört gerade zu).
+- `src-tauri/src/tablet/tl.rs` — `AnnounceCourtCall`/`AnnouncePrepCall`,
+  `due_call_stage` (zeitliche Fälligkeit), `announcement_response` (Warnung
+  ohne Ansage-Gerät).
+- `src/components/AnnounceJobPlayer.tsx` — spricht die Aufträge der
+  Turnierleitungs-Seite.
 
 ## Azure Neural TTS (hochwertige Cloud-Ansage, opt-in)
 

@@ -188,7 +188,7 @@ pub(crate) fn plan_court_action(
 /// gehört in die Feld-Planung).
 pub(crate) fn apply_state_action(
     tablet: &TabletState,
-    _config: &AppConfig,
+    config: &AppConfig,
     now_ms: u64,
     action: &relay_proto::TlAction,
 ) -> Result<relay_proto::TlResponse, relay_proto::TlResponse> {
@@ -228,6 +228,10 @@ pub(crate) fn apply_state_action(
         }
         A::RetractPreparation { match_id } => {
             tablet.remove_preparation_call(*match_id);
+            // Mit dem Aufruf verfallen auch seine Nachrufe: Ein später erneut
+            // gerufenes Spiel beginnt wieder beim zweiten Aufruf, nicht beim
+            // letzten.
+            tablet.forget_prep_calls(*match_id);
             Ok(TlResponse::ok(0))
         }
         A::ScorekeeperAdd { names } => {
@@ -254,6 +258,89 @@ pub(crate) fn apply_state_action(
             tablet.remove_walkover_proposal(proposal_id);
             Ok(TlResponse::ok(0))
         }
+        A::AnnounceCourtCall { court_id, match_id } => {
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Steht das Spiel wirklich auf diesem Feld? Sonst ginge eine
+            // Ansage für eine Begegnung hinaus, die dort gar nicht spielt.
+            // BTP ist die Wahrheit (R2), nicht die Kachel im Browser.
+            let on_court = snap
+                .matches
+                .iter()
+                .any(|m| m.id == *match_id && m.court_id == Some(*court_id));
+            if !on_court {
+                return Err(TlResponse::err(
+                    C::CourtFree,
+                    "Dieses Spiel steht nicht mehr auf dem Feld — bitte neu laden.",
+                ));
+            }
+            let hall = snap
+                .court_infos
+                .iter()
+                .find(|c| c.id == *court_id)
+                .and_then(|c| c.location_id)
+                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            // Die Uhr am Feld darf nicht weiter sein als der Aufruf: Steht
+            // dort schon „Letzter Aufruf", wäre ein zweiter ein Rückschritt.
+            let faellig = due_call_stage(tablet, config, *court_id, *match_id, now_ms);
+            let stage = tablet.note_court_call_at_least(*court_id, *match_id, faellig);
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::CourtCall {
+                    court_id: *court_id,
+                    match_id: *match_id,
+                    stage,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
+        A::AnnouncePrepCall { match_id, side } => {
+            // Nur, was auch gerufen wurde: Ein „erneuter" Aufruf ohne ersten
+            // wäre für die Wartenden nicht nachvollziehbar, und die Halle des
+            // Aufrufs ist die einzige Angabe, wohin er gehört.
+            let Some(call) = tablet
+                .preparation_calls()
+                .into_iter()
+                .find(|c| c.match_id == *match_id)
+            else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Dieses Spiel ist nicht in Vorbereitung gerufen.",
+                ));
+            };
+            let hall = call
+                .location_id
+                .and_then(|id| {
+                    tablet
+                        .snapshot_clone()?
+                        .locations
+                        .iter()
+                        .find(|l| l.id == id)
+                        .map(|l| l.name.clone())
+                })
+                .unwrap_or_default();
+            // Die Staffelung 2 → 3 zählt der Turnier-PC, damit der Nachruf
+            // aus der Seite und der aus der Desktop-Oberfläche dieselbe
+            // Ansage erzeugen.
+            let stage = tablet.note_prep_call(*match_id, side_key(side));
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::PrepCall {
+                    match_id: *match_id,
+                    side: *side,
+                    stage,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
         A::SetAutoAssign { enabled } => {
             // Laufzeit-Schalter, nicht die Grundeinstellung: Der Sync-Lauf
             // liest die Konfiguration nach dem Start nicht neu, eine
@@ -268,6 +355,75 @@ pub(crate) fn apply_state_action(
             "Diese Aktion ist noch nicht freigeschaltet.",
         )),
     }
+}
+
+/// Kurzform einer Partei als Schlüssel der Nachruf-Zählung.
+fn side_key(side: &relay_proto::PrepCallSide) -> &'static str {
+    match side {
+        relay_proto::PrepCallSide::Both => "both",
+        relay_proto::PrepCallSide::Team1 => "team1",
+        relay_proto::PrepCallSide::Team2 => "team2",
+    }
+}
+
+/// Welche Aufruf-Stufe ist nach der **Uhr** fällig?
+///
+/// Dieselbe Rechnung, die das Aufruf-Abzeichen in der Desktop-Übersicht und
+/// die Uhr auf der Turnierleitungs-Seite anstellen. Sie gehört hierher,
+/// damit alle Geräte dieselbe Zahl bekommen — rechnete jede Oberfläche für
+/// sich, hinge die eine bei „2. Aufruf", während die andere längst den
+/// letzten anzeigt.
+///
+/// `0`, wenn es nichts zu sagen gibt: kein Timer, keine Standzeit.
+fn due_call_stage(
+    tablet: &TabletState,
+    config: &AppConfig,
+    court_id: i64,
+    match_id: i64,
+    now_ms: u64,
+) -> u8 {
+    if !config.call_timer.enabled {
+        return 0;
+    }
+    // Sind Punkte gefallen, sind die Spieler da — dann hebt die Uhr nichts
+    // mehr an. Ohne diesen Riegel schallte „Dritter und letzter Aufruf"
+    // durch die Halle, während längst gespielt wird. Beide Oberflächen
+    // halten sich an dieselbe Regel.
+    if tablet.points_scored(court_id, match_id) {
+        return 0;
+    }
+    let Some(since) = tablet.on_court_since_ms(court_id, match_id) else {
+        return 0;
+    };
+    let minuten = now_ms.saturating_sub(since) as f64 / 60_000.0;
+    if minuten >= config.call_timer.third_call_minutes {
+        3
+    } else if minuten >= config.call_timer.second_call_minutes {
+        2
+    } else {
+        0
+    }
+}
+
+/// Die Antwort auf einen Ansage-Auftrag.
+///
+/// Der Auftrag ist abgelegt und die Stufe gezählt — das gilt auch dann, wenn
+/// in der Halle gerade kein Gerät zuhört. Die Turnierleitung soll aber nicht
+/// glauben, es sei etwas erklungen: Sie steht im Zweifel im Büro und hört die
+/// Anlage gar nicht. Die Stufe trotzdem hochzuzählen ist die ehrlichere
+/// Variante — sonst stünde sie später auf einem anderen Stand als das, was
+/// die Halle gehört hat.
+fn announcement_response(tablet: &TabletState, hall: &str, now_ms: u64) -> relay_proto::TlResponse {
+    let ok = relay_proto::TlResponse::ok(0);
+    if tablet.has_announce_listener(hall, now_ms) {
+        return ok;
+    }
+    let wo = if hall.is_empty() {
+        "Es ist kein Ansage-Gerät verbunden".to_string()
+    } else {
+        format!("In {hall} ist kein Ansage-Gerät verbunden")
+    };
+    ok.with_warning(format!("{wo} — der Aufruf wurde nicht gesprochen."))
 }
 
 /// Übersetzt eine Ergebnis-Aktion in die BTP-Schreibvorgänge.
@@ -990,8 +1146,13 @@ pub struct TlCourt {
     /// Seite ein freies Feld, auf das keine Zuweisung möglich ist.
     pub clearing: Option<i64>,
     /// Seit wann das Spiel auf dem Feld steht (= 1. Aufruf). Grundlage der
-    /// hochzählenden Uhr und der Aufruf-Stufe.
+    /// hochzählenden Uhr und der Fälligkeitsanzeige.
     pub on_court_since_ms: Option<u64>,
+    /// Wie oft dieses Spiel schon aufgerufen wurde (1–3), **gezählt am
+    /// Turnier-PC**. Nicht zu verwechseln mit der Fälligkeit aus der Uhr:
+    /// Die sagt, wann der nächste Aufruf dran wäre, diese Zahl, wie viele
+    /// erfolgt sind. Nur so zeigen zwei Turnierleitungen dieselbe Stufe.
+    pub call_stage: u8,
     /// Zählformat, damit die Seite Satz- und Matchball anzeigen kann.
     pub best_of: i64,
     pub target_score: i64,
@@ -1063,6 +1224,10 @@ pub struct TlPrepCall {
     /// Halle, in die gerufen wurde; leer = ohne Hallenangabe.
     pub hall: String,
     pub called_at_ms: u64,
+    /// Höchste bisher gesprochene Nachruf-Stufe (0 = noch keiner). Die Seite
+    /// unterscheidet damit einen Doppeltipp von einem bewussten zweiten
+    /// Nachruf.
+    pub recalls: u8,
 }
 
 /// Warum ein Spiel wartet — mit Namen, denn „gesperrt" ohne Namen ist eine
@@ -1206,7 +1371,11 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
             team2: m.team2.iter().map(|p| p.name.clone()).collect(),
             hall,
             hall_source,
-            prep_call: call.map(|(hall, called_at_ms)| TlPrepCall { hall, called_at_ms }),
+            prep_call: call.map(|(hall, called_at_ms)| TlPrepCall {
+                hall,
+                called_at_ms,
+                recalls: tablet.prep_calls_made(m.id),
+            }),
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
         });
     }
@@ -1319,12 +1488,6 @@ fn call_timer_view(config: &AppConfig) -> TlCallTimer {
 /// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
 /// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
 /// Vergabehilfe).
-/// Beschneidet die Feld-Übersicht auf das, was die Turnierleitung braucht.
-///
-/// Bewusst **weggelassen**: Nationalitäten (nur für die Sprachwahl der
-/// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
-/// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
-/// Vergabehilfe).
 fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die zwei bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
@@ -1338,6 +1501,7 @@ fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> 
     TlCourt {
         clearing,
         pause,
+        call_stage: c.call_stage,
         court_id: c.court_id,
         court: c.court,
         location: c.location,
@@ -1547,7 +1711,8 @@ mod tests {
             m.prep_call,
             Some(TlPrepCall {
                 hall: "Halle B".to_string(),
-                called_at_ms: 900_000
+                called_at_ms: 900_000,
+                recalls: 0,
             })
         );
         assert_eq!(m.hall, "Halle B");
@@ -2013,6 +2178,289 @@ mod tests {
         assert!(updates[1].team1_won, "hier war es Team 2");
         // Ein nicht ausgewähltes Spiel bleibt unangetastet.
         assert!(walkover_updates(&candidates, &[11]).len() == 1);
+    }
+
+    /// Ein Spiel, das auf einem Feld steht — Grundlage der Aufruf-Tests.
+    fn match_on_court(id: i64, court_id: i64) -> BtpMatch {
+        let mut m = a_match(id);
+        m.court_id = Some(court_id);
+        m.court = Some(format!("Feld {court_id}"));
+        m.status = crate::btp::model::MatchStatus::OnCourt;
+        m
+    }
+
+    #[test]
+    fn the_state_carries_the_call_stage_so_every_device_shows_the_same_number() {
+        // Ohne diese Zahl im Zustand rechnete jede Seite selbst — und zwei
+        // Turnierleitungen sähen verschiedene Stufen für dasselbe Spiel.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let cfg = AppConfig::default();
+        let before = build_state(&tablet, &cfg, 1_000_000, 1);
+        let court = before.courts.iter().find(|c| c.court_id == 3).unwrap();
+        assert_eq!(
+            court.call_stage, 0,
+            "auf dem Feld stehen ist noch kein gesprochener Aufruf"
+        );
+
+        tablet.note_court_call(3, 7);
+        let after = build_state(&tablet, &cfg, 1_000_000, 2);
+        let court = after.courts.iter().find(|c| c.court_id == 3).unwrap();
+        assert_eq!(court.call_stage, 2);
+    }
+
+    #[test]
+    fn a_second_call_counts_up_at_the_host_and_orders_the_announcement() {
+        // Der erneute Aufruf tut zweierlei: Er zählt die Stufe hoch (damit
+        // jedes Gerät dieselbe Zahl sieht) und beauftragt die Ansage in der
+        // Halle des Feldes. Sprechen tut die Seite nie selbst — sie steht im
+        // Zweifel in einem Büro und nicht an der Anlage.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, Some(2))],
+            vec![match_on_court(7, 3)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        ));
+        // Ein Gerät in Halle B hört zu — sonst käme eine Warnung dazu.
+        tablet.announce_jobs_since("Halle B", 0, 50_000);
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+        assert!(done.warning.is_none(), "in Halle B hört jemand zu");
+        assert_eq!(tablet.calls_made(3, 7), 2, "der erneute Aufruf ist der 2.");
+
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::CourtCall {
+                court_id: 3,
+                match_id: 7,
+                stage: 2,
+            }
+        );
+        assert!(
+            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            "Halle A geht der Aufruf nichts an"
+        );
+    }
+
+    #[test]
+    fn a_call_never_lags_behind_what_the_clock_already_shows_as_due() {
+        // Am Feld steht „Letzter Aufruf", weil die Uhr abgelaufen ist. Sagte
+        // der Knopf daneben dann den zweiten an, widersprächen sich zwei
+        // Anzeigen auf demselben Bildschirm — und die Halle hörte einen
+        // Aufruf, der eine Stufe zurückliegt. Dieselbe Regel wendet die
+        // Desktop-Übersicht seit jeher an; sie gehört an den Turnier-PC,
+        // damit sie für jedes Gerät gilt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let mut cfg = AppConfig::default();
+        cfg.call_timer.enabled = true;
+        cfg.call_timer.second_call_minutes = 2.0;
+        cfg.call_timer.third_call_minutes = 4.0;
+        // Das Spiel steht seit fünf Minuten auf dem Feld, ohne dass ein Punkt
+        // gefallen ist: Die Uhr ist bei der dritten Stufe.
+        let seit = 1_000_000;
+        tablet.reconcile_on_court(&std::collections::HashMap::from([(3, 7)]), seit);
+
+        let done = apply_state_action(
+            &tablet,
+            &cfg,
+            seit + 5 * 60_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            3,
+            "die Uhr war beim letzten Aufruf, also ist es der letzte"
+        );
+    }
+
+    #[test]
+    fn a_running_match_is_never_escalated_to_the_last_call() {
+        // Der Aufruf-Timer zählt die Zeit, bis die Spieler ans Feld kommen.
+        // Sind Punkte gefallen, sind sie da — dann ist er gegenstandslos.
+        // Beide Oberflächen halten sich daran; der Turnier-PC muss es auch,
+        // sonst schallt „Dritter und letzter Aufruf" durch die Halle,
+        // während längst gespielt wird.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let mut cfg = AppConfig::default();
+        cfg.call_timer.enabled = true;
+        cfg.call_timer.second_call_minutes = 2.0;
+        cfg.call_timer.third_call_minutes = 4.0;
+        let seit = 1_000_000;
+        tablet.reconcile_on_court(&std::collections::HashMap::from([(3, 7)]), seit);
+        // Es wird gespielt: Der erste Punkt ist gefallen.
+        tablet.record_score(3, 7, vec![(1, 0)]);
+
+        apply_state_action(
+            &tablet,
+            &cfg,
+            seit + 6 * 60_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            2,
+            "die Uhr hebt nichts an, solange gespielt wird"
+        );
+    }
+
+    #[test]
+    fn calling_a_match_that_is_not_on_that_court_is_refused() {
+        // Sonst ginge eine Ansage für eine Begegnung hinaus, die dort gar
+        // nicht spielt — und die Stufe zählte für ein fremdes Spiel hoch.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 99,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::CourtFree));
+        assert_eq!(tablet.calls_made(3, 99), 0, "nichts hochgezählt");
+    }
+
+    #[test]
+    fn an_announcement_without_a_device_in_the_hall_still_counts_but_says_so() {
+        // Die Turnierleitung darf nicht glauben, der Aufruf sei erklungen.
+        // Trotzdem gilt er als erfolgt: Sonst stünde die Stufe auf einem
+        // anderen Stand als das, was die Halle gehört hat, sobald das Gerät
+        // zurückkommt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+        assert!(done.ok, "die Aktion gilt als ausgeführt");
+        assert!(
+            done.warning
+                .as_deref()
+                .is_some_and(|w| w.contains("Ansage")),
+            "aber die Seite erfährt es: {:?}",
+            done.warning
+        );
+        assert_eq!(tablet.calls_made(3, 7), 2, "und die Stufe zählt trotzdem");
+    }
+
+    #[test]
+    fn a_repeated_preparation_call_is_announced_in_the_hall_it_was_called_to() {
+        // Der Vorbereitungs-Aufruf hat seine eigene Halle (der Meeting Point
+        // kann in einer anderen Halle stehen als das spätere Feld).
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(7)],
+            vec![crate::btp::model::BtpLocation {
+                id: 2,
+                name: "Halle B".to_string(),
+            }],
+        ));
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id: 7,
+            location_id: Some(2),
+            called_at_ms: 10_000,
+        });
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnouncePrepCall {
+                match_id: 7,
+                side: relay_proto::PrepCallSide::Team1,
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::PrepCall {
+                match_id: 7,
+                side: relay_proto::PrepCallSide::Team1,
+                stage: 2,
+            },
+            "der erste Nachruf ist der zweite Aufruf"
+        );
+    }
+
+    #[test]
+    fn a_preparation_call_that_was_never_made_cannot_be_repeated() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), vec![a_match(7)], Vec::new()));
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnouncePrepCall {
+                match_id: 7,
+                side: relay_proto::PrepCallSide::Both,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
     }
 
     #[test]
@@ -2612,6 +3060,9 @@ mod tests {
             "locked",
             "clearing",
             "on_court_since_ms",
+            // Zahl der gesprochenen Aufrufe (0–3) — keine Angabe zu Personen.
+            "call_stage",
+            "recalls",
             "best_of",
             "target_score",
             "cap_score",

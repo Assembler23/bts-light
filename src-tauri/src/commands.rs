@@ -1797,6 +1797,73 @@ pub async fn pending_freetext(
     }
 }
 
+/// Meldet, welche Aufruf-Stufe die Desktop-Übersicht gerade **angesagt hat**.
+///
+/// Bewusst meldend und nicht hochzählend: Die Oberfläche weiß genau, was sie
+/// gesprochen hat (ihr erster Druck ist der schlichte Aufruf ohne
+/// Stufenwort). Ließe sie stattdessen hochzählen, liefe die gemeinsame
+/// Zählung ihr um eins voraus — die Turnierleitungs-Seite zeigte „2. Aufruf
+/// erfolgt" nach dem ersten und verlöre nach dem zweiten ihren Aufruf-Knopf.
+#[tauri::command]
+pub fn note_court_call(state: State<'_, AppState>, court_id: i64, match_id: i64, stage: u8) -> u8 {
+    state.tablet.reached_court_call(court_id, match_id, stage)
+}
+
+/// Neue Ansage-Aufträge (`id > since`) für die eigene Halle.
+///
+/// Derselbe Weg wie beim Freitext: Im LAN-Slave-Betrieb vom Master geholt,
+/// sonst aus dem lokalen Stand. Wer hier abholt, gilt dem Turnier-PC als
+/// Ansage-Gerät seiner Halle — daran erkennt die Turnierleitung, ob ihr
+/// Aufruf überhaupt irgendwo erklingen kann.
+#[tauri::command]
+pub async fn pending_announce_jobs(
+    state: State<'_, AppState>,
+    since: u64,
+) -> Result<Vec<crate::tablet::state::AnnounceJob>, String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let hall = config.announce.announce_hall.clone();
+    if config.slave_mode {
+        // Cloud-Ansage-Slave: **Noch nicht unterstützt.** Der Relay-Zustand
+        // (`cloud_announce_state`) trägt bis heute keine Ansage-Aufträge; der
+        // Weg dorthin entsteht mit der Cloud-Anbindung der
+        // Turnierleitungs-Seite. Bis dahin bleibt die ferne Halle stumm —
+        // aber ehrlich: Da sich der Slave nie als Ansage-Gerät meldet, sieht
+        // die Turnierleitung die Warnung „kein Ansage-Gerät verbunden" und
+        // weiß, dass sie per Funk rufen muss. Siehe docs/announcements.md.
+        if !config.master_namespace.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut url = reqwest::Url::parse(&format!(
+            "http://{}:8088/info/announce/jobs",
+            config.btp.host
+        ))
+        .map_err(|e| e.to_string())?;
+        url.query_pairs_mut()
+            .append_pair("hall", &hall)
+            .append_pair("since", &since.to_string());
+        // Kurzer Timeout wie beim Freitext-Poll: Der Master antwortet im LAN
+        // sofort oder gar nicht.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap_or_else(|_| push::build_client());
+        let resp = match client.get(url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => return Ok(Vec::new()),
+        };
+        resp.json::<Vec<crate::tablet::state::AnnounceJob>>()
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Ok(state.tablet.announce_jobs_since(&hall, since, now_ms()))
+    }
+}
+
 /// Ein Feld im Cloud-Ansage-Status (frontend-freundlich, wie `CourtOverview`
 /// fürs Ansagen): Feldname + aktuelle Paarung.
 #[derive(serde::Serialize)]

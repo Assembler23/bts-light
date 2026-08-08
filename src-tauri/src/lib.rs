@@ -130,6 +130,8 @@ pub fn run() {
             commands::finished_matches,
             commands::publish_freetext,
             commands::pending_freetext,
+            commands::pending_announce_jobs,
+            commands::note_court_call,
             commands::cloud_announce_state,
             commands::cloud_slaves,
             commands::pairing_code,

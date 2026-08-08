@@ -182,6 +182,30 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row .prep:hover { border-color: var(--accent); color: var(--accent); }
 .row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 
+/* Nachruf: drei kleine Knöpfe an einer Beschriftung. Kleiner als der
+   Vorbereitungs-Aufruf, weil sie die Ausnahme sind — man braucht sie nur,
+   wenn jemand nicht kommt. Trotzdem groß genug für einen Finger. */
+.row .recall { font-size: .78rem; color: var(--ink-faint); display: flex; align-items: center; gap: 4px; }
+.row .recall button {
+  font: inherit; font-weight: 650; padding: 6px 9px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+  max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row .recall button:hover { border-color: var(--warn); color: var(--warn); }
+
+/* Der Aufruf-Knopf am Feld. Er steht in der Fußzeile neben der Uhr — dort,
+   wo die Turnierleitung ohnehin hinschaut, um zu sehen, ob etwas fällig
+   ist. */
+.callbtn {
+  font: inherit; font-size: .8rem; font-weight: 700;
+  padding: 8px 12px; min-height: 42px;
+  border: 1px solid var(--warn); border-radius: 8px;
+  background: var(--card); color: var(--warn); cursor: pointer;
+}
+.callbtn:hover { background: var(--warn); color: #fff; }
+.callbtn:disabled { opacity: .5; cursor: default; }
+
 /* Walkover-Vorschläge: nach einer Aufgabe entscheidet die Turnierleitung,
    welche Folgespiele kampflos gehen. */
 .wo {
@@ -396,7 +420,11 @@ const isPlaying = (court) =>
   court.match_id > 0 && (court.sets || []).some(([a, b]) => a > 0 || b > 0);
 
 /**
- * Welche Aufruf-Stufe ist fällig? Dieselben Schwellen wie am Turnier-PC.
+ * Welche Aufruf-Stufe ist **fällig**? Dieselben Schwellen wie am Turnier-PC.
+ *
+ * Nicht zu verwechseln mit `court.call_stage`: Das ist die Zahl der
+ * **erfolgten** Aufrufe, die der Turnier-PC zählt und die auf jedem Gerät
+ * gleich ist. Hier geht es um die Uhr — wann der nächste dran wäre.
  *
  * `0` heißt: keine Stufe anzeigen. Der Aufruf-Timer zählt die Zeit, bis die
  * Spieler ans Feld kommen — sobald gespielt wird, ist er gegenstandslos.
@@ -550,8 +578,12 @@ async function send(opId, action, onOk) {
     });
     const answer = await res.json();
     if (answer.ok) {
-      toast(onOk);
-      if (answer.warning) toast(answer.warning, true);
+      // Erfolg und Einschränkung in EINER Meldung: Zwei nacheinander
+      // gesetzte Meldungen überschreiben einander sofort — die erste wäre
+      // nur ein Aufblitzen. Gibt es eine Einschränkung, ist sie das
+      // Wichtigere und färbt die Meldung.
+      if (answer.warning) toast(`${onOk} ${answer.warning}`, true);
+      else toast(onOk);
       return true;
     }
     toast(answer.error || "Die Aktion wurde abgelehnt.", true);
@@ -785,6 +817,19 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
 const pairOf = (t1, t2) =>
   `${esc((t1 || []).join(" / ") || "?")} <span class="vs">gegen</span> ${esc((t2 || []).join(" / ") || "?")}`;
 
+/**
+ * Kurzform einer Partei für die Nachruf-Knöpfe.
+ *
+ * Nur der Nachname des ersten Spielers — auf dem Knopf ist kein Platz für
+ * eine ganze Doppelpaarung, und die Turnierleitung erkennt daran, wen sie
+ * ruft. Der volle Name steht in derselben Zeile.
+ */
+function shortSide(team) {
+  const first = (team || [])[0] || "?";
+  const teile = String(first).trim().split(/\s+/);
+  return teile[teile.length - 1] || "?";
+}
+
 function renderHalls() {
   const box = $("halls");
   if (!state || !state.multi_hall) { box.innerHTML = ""; return; }
@@ -842,11 +887,34 @@ function courtCard(c) {
   const bediener = c.scorekeeper && c.scorekeeper.length
     ? `<div class="meta">Bedienung: ${esc(c.scorekeeper.join(" / "))}</div>` : "";
 
+  // Erneut aufrufen: nur bei einem Spiel, das noch nicht angefangen hat, und
+  // nur solange es etwas zu zählen gibt. Nach dem dritten Aufruf entscheidet
+  // die Turnierleitung, nicht noch ein Knopf.
+  // `call_stage` zählt die **gesprochenen** Aufrufe (0 = noch keiner). Auf
+  // dem Feld zu stehen gilt als erster Aufruf — deshalb hier die 1 als
+  // Untergrenze der Anzeige.
+  const gesprochen = c.call_stage || 0;
+  const erfolgt = Math.max(gesprochen, 1);
+  // Der Knopf bleibt nie hinter der Uhr zurück: Stünde daneben „Letzter
+  // Aufruf", während er den zweiten anbietet, widersprächen sich zwei
+  // Anzeigen auf demselben Bildschirm. Der Turnier-PC rechnet genauso.
+  const naechste = Math.min(Math.max(erfolgt + 1, stage), 3);
+  const nachruf = c.match_id && !isPlaying(c) && gesprochen < 3
+    ? `<button type="button" class="callbtn" data-call="${c.court_id}" data-match="${c.match_id}"
+               data-made="${gesprochen}"
+               title="Ansage in der Halle auslösen">${
+                 naechste >= 3 ? "Letzter Aufruf" : `${naechste}. Aufruf`}</button>`
+    : "";
+  // Was schon gerufen wurde, steht als Tatsache da — sonst tippen zwei
+  // Turnierleitungen nacheinander denselben Aufruf.
+  const gerufen = c.match_id && gesprochen > 1
+    ? `<span class="badge warn">${gesprochen}. Aufruf erfolgt</span>` : "";
+
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${picked ? 'role="button"' : ""}>
-    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${badges.join("")}</div>
+    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}</div>
     ${body}${bediener}
-    <div class="card-foot">${foot}</div>
+    <div class="card-foot">${foot}${nachruf}</div>
   </article>`;
 }
 
@@ -858,6 +926,29 @@ function courtCard(c) {
  * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
  */
 function wireCourts(box) {
+  // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
+  // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
+  // Finger in den Umhäng-Zustand.
+  box.querySelectorAll("button[data-call]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.call);
+      const matchId = Number(btn.dataset.match);
+      btn.disabled = true;
+      // Die Vorgangskennung trägt den Stand, den diese Kachel kennt — kein
+      // Zeitfenster. Ein Doppeltipp vor dem nächsten Neuzeichnen ist damit
+      // dieselbe Kennung und wird als Wiederholung erkannt; ein bewusster
+      // zweiter Aufruf danach hat einen neuen Stand und geht durch. Ein
+      // Zeitfenster verschluckte den zweiten Aufruf — und ein Aufruf ist
+      // seinem Wesen nach wiederholbar.
+      send(
+        `call-${courtId}-${matchId}-${btn.dataset.made}`,
+        { action: "announce_court_call", courtId, matchId },
+        "Aufruf ausgelöst.",
+      );
+    });
+  });
+
   box.querySelectorAll(".card[data-court]").forEach((el) => {
     const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
     if (!court) return;
@@ -939,6 +1030,20 @@ function queueRow(m) {
   // frei ist. Deshalb ein eigener Knopf statt einer Geste.
   parts.push(`<button type="button" class="prep" data-prep="${m.match_id}">${
     m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen"}</button>`);
+  // Nachruf, wenn jemand nicht erscheint. Getrennt nach Partei, weil in der
+  // Regel nur eine fehlt — und wer schon da ist, muss sich nicht noch einmal
+  // angesprochen fühlen.
+  if (m.prep_call) {
+    // `data-made` trägt den Stand in die Vorgangskennung: Ein Doppeltipp vor
+    // dem nächsten Neuzeichnen zählt als Wiederholung, ein bewusster zweiter
+    // Nachruf danach geht durch.
+    const stand = m.prep_call.recalls || 0;
+    parts.push(`<span class="recall">Nachruf:
+      <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide</button>
+      <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
+      <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
+    </span>`);
+  }
   // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
   // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
   // Ablehnung.
@@ -962,6 +1067,19 @@ function wireQueue(box) {
       togglePrepCall(match);
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll("button[data-recall]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.recall);
+      const side = btn.dataset.side;
+      send(
+        `recall-${matchId}-${side}-${btn.dataset.made}`,
+        { action: "announce_prep_call", matchId, side },
+        "Nachruf ausgelöst.",
+      );
+    });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   box.querySelectorAll(".row.pick[data-match]").forEach((el) => {

@@ -338,7 +338,10 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - `tablet/tl.rs`: `authorize` akzeptiert/verweigert/widerruft · lehnt alles
   im Slave-Modus ab · lehnt alles bei ausgeschaltetem Flag ab · Revision
   ändert sich nur bei echter Änderung · Ansage-Auftrag ist hallen-gescoped,
-  dedupliziert, gekappt · Warnung ohne Ansage-Gerät · Aufruf-Stufe zählt je
+  verfällt nach 60 s, gekappt · Warnung ohne Ansage-Gerät, Aktion gilt
+  trotzdem · Aufruf für ein Spiel, das nicht auf dem Feld steht, abgelehnt ·
+  Nachruf ohne Vorbereitungs-Aufruf abgelehnt · die Aufruf-Stufe bleibt nie
+  hinter der Uhr zurück · Aufruf-Stufe zählt je
   (Feld, Match) und wird beim Match-Wechsel zurückgesetzt ·
   **Datensparsamkeits-Test** · Sortierung identisch zur automatischen
   Vergabe · `blocked_reason`/`ready_at_ms` inkl. BTP-Setting 1303 und

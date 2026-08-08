@@ -18,6 +18,7 @@ import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
 import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
 import { FreetextAnnouncer } from "./components/FreetextAnnouncer";
+import { AnnounceJobPlayer } from "./components/AnnounceJobPlayer";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import type { NavView, SettingsFocus } from "./components/SideNav";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
@@ -434,6 +435,10 @@ function App() {
           azureTts={config.azure_tts}
         />
         <FreetextAnnouncer
+          announce={config.announce}
+          azureTts={config.azure_tts}
+        />
+        <AnnounceJobPlayer
           announce={config.announce}
           azureTts={config.azure_tts}
         />

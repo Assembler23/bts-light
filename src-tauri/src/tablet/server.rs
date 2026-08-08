@@ -143,6 +143,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/winners/state", get(info_winners_state))
         .route("/info/club-logo", get(info_club_logo))
         .route("/info/announce/freetext", get(info_announce_freetext))
+        .route("/info/announce/jobs", get(info_announce_jobs))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
@@ -742,6 +743,19 @@ async fn info_announce_freetext(
     Query(q): Query<FreetextQuery>,
 ) -> impl IntoResponse {
     let items = ctx.tablet.freetext_since(&q.hall, q.since);
+    ([(header::CACHE_CONTROL, "no-store")], Json(items))
+}
+
+/// Ansage-Aufträge der Turnierleitung für eine Halle (`id > since`).
+///
+/// Derselbe Weg wie beim Freitext, nur mit Struktur statt fertigem Text: Der
+/// Aufruf wird erst am Ansage-Gerät zu Worten — mit dessen Stimme, Gong und
+/// Namenskorrektur, damit er klingt wie jeder andere Aufruf auch.
+async fn info_announce_jobs(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<FreetextQuery>,
+) -> impl IntoResponse {
+    let items = ctx.tablet.announce_jobs_since(&q.hall, q.since, now_ms());
     ([(header::CACHE_CONTROL, "no-store")], Json(items))
 }
 

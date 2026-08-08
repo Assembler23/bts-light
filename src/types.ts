@@ -341,6 +341,36 @@ export interface FreetextItem {
   text: string;
 }
 
+/** Ein Ansage-Auftrag der Turnierleitungs-Seite (Rust:
+ *  `tablet::state::AnnounceJob`).
+ *
+ *  Trägt bewusst **keinen** fertigen Text: Worte, Gong, Stimme und
+ *  Namenskorrektur entstehen hier am Ansage-Gerät, mit demselben Code wie bei
+ *  einem Aufruf aus der Desktop-App. Sonst klänge derselbe Aufruf verschieden,
+ *  je nachdem, wer ihn ausgelöst hat. */
+export type AnnounceJob = {
+  id: number;
+  /** Ziel-Halle (leer = alle Hallen). */
+  hall: string;
+  createdAtMs: number;
+} & (
+  | {
+      kind: "court_call";
+      courtId: number;
+      matchId: number;
+      /** 2 oder 3 — gezählt am Turnier-PC, nicht hier. */
+      stage: number;
+    }
+  | {
+      kind: "prep_call";
+      matchId: number;
+      side: "both" | "team1" | "team2";
+      /** 2 oder 3 — gezählt am Turnier-PC, damit der Nachruf aus der Seite
+       *  und der aus der Desktop-Oberfläche gleich staffeln. */
+      stage: number;
+    }
+);
+
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
@@ -501,6 +531,10 @@ export interface CourtOverview {
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
    *  steht; null = kein Spiel. Grundlage des Aufruf-Timers. */
   on_court_since_ms: number | null;
+  /** Wie oft dieses Spiel schon aufgerufen wurde (1–3), gezählt am
+   *  Turnier-PC. Damit zeigen diese Oberfläche und die Turnierleitungs-Seite
+   *  dieselbe Stufe — auch wenn die andere gerufen hat. */
+  call_stage: number;
   /** Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap) für die
    *  Satz-/Matchball-Anzeige (Plan 16); 0 = kein Match/unbekannt. */
   best_of: number;
