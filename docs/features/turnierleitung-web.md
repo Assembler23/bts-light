@@ -244,6 +244,10 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - [ ] Die automatische Feldvergabe ist als Zustand sichtbar und lässt sich
       umschalten; nach einer Zuweisung von Hand pausiert sie sichtbar für
       60 s, damit sie dem Helfer nicht dazwischenfunkt.
+- [ ] Die Pause gilt **nur zur Laufzeit** und endet beim Stoppen/Starten der
+      Übertragung. Sonst bliebe sie hängen, sobald das Gerät weg ist, das sie
+      gesetzt hat — die Einstellungen sagten „an", vergeben würde trotzdem
+      nichts, und es gäbe keinen Griff dagegen.
 
 **Aufrufe und Ansagen**
 
@@ -339,7 +343,12 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
   **Datensparsamkeits-Test** · Sortierung identisch zur automatischen
   Vergabe · `blocked_reason`/`ready_at_ms` inkl. BTP-Setting 1303 und
   Config-Override · Hallen-Kaskade · Wiederholung derselben `opId` schreibt
-  nicht doppelt.
+  nicht doppelt · **eine Korrektur mit derselben `opId` gilt nicht als
+  Wiederholung** (der Fingerabdruck trägt die ganze Nutzlast, und er hat
+  keinen Sammelzweig — eine neue Aktion bricht den Übersetzer, statt lautlos
+  in der Idempotenz zu landen) · ein Walkover ohne schreibbaren Kandidaten
+  wird abgelehnt und der Vorschlag bleibt stehen · den Vorschlag bekommt nur
+  **ein** Gerät, und er kommt zurück, wenn gar nichts geschrieben wurde.
 - `server.rs`/`btp`: Korrektur blockiert, wenn das Folgespiel läuft oder
   gewertet ist · erlaubt ohne Folgespiel · **erlaubt in der
   Gruppen-Auslosung** · Überschreiben verlangt ein ausdrückliches Flag ·
@@ -368,7 +377,11 @@ Chrome, `elementFromPoint` unter Zoom, Verhalten nach Standby und bei
 echtem Paketverlust. Checkliste: iPad Safari · Android Chrome · Desktop, je
 einmal Tipp-Tipp **und** Ziehen · zwei Geräte auf dasselbe Feld · WLAN
 aus/an · bts-light beenden · 10 min Standby · BTP-Neustart · zwei Geräte
-auf denselben Walkover · Doppeltipp bei gedrosseltem Netz · Ansage genau
+auf denselben Walkover · Doppeltipp bei gedrosseltem Netz · **ein Spiel vom
+Feld wählen und es dort zu Ende gehen lassen** (die Auswahl muss verfallen,
+statt „Ergebnis eintragen" auf die inzwischen aufgerufene Begegnung zu
+richten) · **einen Walkover-Kandidaten abwählen und eine Abfrage abwarten**
+(das Kästchen darf sich nicht selbst wieder anhaken) · Ansage genau
 einmal je Halle · Auto-Vergabe räumt eine Handzuweisung nicht um ·
 Zwei-Hallen-Filter inklusive Gruppe „ohne Hallenzuordnung".
 `npm run build` fehlerfrei.

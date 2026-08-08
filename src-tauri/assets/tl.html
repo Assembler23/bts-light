@@ -437,6 +437,37 @@ function cancelPick() {
   renderQueue();
 }
 
+/** Die Auswahl ist unter der Hand weggelaufen — sagen statt schweigen. */
+function pickVanished() {
+  cancelPick();
+  toast("Das Spiel steht nicht mehr auf diesem Feld — bitte neu auswählen.", true);
+}
+
+/** Gibt es das gewählte Spiel dort, wo es gewählt wurde, überhaupt noch? */
+function pickIsStillValid() {
+  if (!picked) return false;
+  if (!picked.fromCourtId) {
+    return state.queue.some((m) => m.match_id === picked.match.match_id);
+  }
+  return !!pickedCourt();
+}
+
+/**
+ * Das Feld der aktuellen Auswahl — aber nur, solange **dieses** Spiel noch
+ * darauf steht.
+ *
+ * Zwischen zwei Abfragen kann das Spiel geendet haben und die nächste
+ * Begegnung schon aufgerufen sein. Wer dann auf „Ergebnis eintragen" tippt,
+ * meint das eine Spiel und träfe das andere: ein Endstand für eine Partie,
+ * die gerade erst angefangen hat. Darum zählt hier nicht das Feld allein,
+ * sondern Feld **und** Spiel.
+ */
+function pickedCourt() {
+  if (!picked || !picked.fromCourtId) return null;
+  return state.courts.find((c) => c.court_id === picked.fromCourtId
+    && c.match_id === picked.match.match_id) || null;
+}
+
 function renderActionBar() {
   const bar = $("action-bar");
   // Während eines Zuges bleibt das Band aus: Es würde beim Erscheinen das
@@ -1098,23 +1129,45 @@ function renderQueue() {
  * Mannschaft kampflos zu werten. Welche das sein sollen, entscheidet die
  * Turnierleitung — deshalb Kästchen zum Ankreuzen und keine Sammelaktion.
  */
+// Bewusst abgewählte Kandidaten, als "vorschlagId:matchId". Der Zustand lebt
+// hier und nicht im DOM, weil der Abschnitt neu gebaut wird, sobald sich die
+// Kandidatenliste ändert — die Entscheidung der Turnierleitung darf das nicht
+// mitreißen.
+const woUnticked = new Set();
+
 function renderWalkovers() {
   const box = $("walkovers");
   const list = (state.walkovers || []);
-  if (!list.length) { box.innerHTML = ""; return; }
+  if (!list.length) { box.innerHTML = ""; box.dataset.shape = ""; return; }
+  // Der Abschnitt wird nur neu gebaut, wenn er sich wirklich geändert hat.
+  // Sonst setzte jede Abfrage die Kästchen auf „angekreuzt" zurück — wer ein
+  // Spiel bewusst abwählt und zwei Sekunden zögert, wertete es kampflos,
+  // ohne es zu merken. Zurücknehmen geht nicht: Die Wertung steht in BTP.
+  const shape = list.map((w) => w.id + ":" + w.candidates.map((c) => c.match_id).join(",")).join("|");
+  if (box.dataset.shape === shape) return;
+  box.dataset.shape = shape;
   box.innerHTML = `<h2>Aufgaben <span class="count">(${list.length})</span></h2>` +
     list.map((w) => `
       <div class="wo" data-wo="${esc(w.id)}">
         <h4>${esc(w.retired_team)} hat aufgegeben <span class="meta">· ${esc(w.draw_name)}</span></h4>
         <div class="meta">Welche Spiele sollen kampflos gewertet werden?</div>
         ${w.candidates.map((c) => `
-          <label><input type="checkbox" value="${c.match_id}" checked />
+          <label><input type="checkbox" value="${c.match_id}"
+                   ${woUnticked.has(w.id + ":" + c.match_id) ? "" : "checked"} />
             ${esc(c.round_name)} — ${esc(c.opponent)} kommt weiter</label>`).join("")}
         <div class="actions">
           <button type="button" class="primary" data-confirm="${esc(w.id)}">Kampflos werten</button>
           <button type="button" data-dismiss="${esc(w.id)}">Verwerfen</button>
         </div>
       </div>`).join("");
+
+  // Abgewählte Spiele merken, damit sie ein Neuaufbau nicht wieder ankreuzt.
+  box.querySelectorAll(".wo input[type=checkbox]").forEach((cb) => {
+    const key = cb.closest(".wo").dataset.wo + ":" + cb.value;
+    cb.addEventListener("change", () => {
+      if (cb.checked) woUnticked.delete(key); else woUnticked.add(key);
+    });
+  });
 
   box.querySelectorAll("[data-confirm]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -1163,17 +1216,12 @@ async function toggleAuto() {
 
 function render() {
   if (!state) return;
-  // Ein gewähltes Spiel, das inzwischen vergeben wurde, verschwindet auch
-  // aus der Auswahl — sonst zeigte das Aktionsband ein Spiel an, das es in
-  // der Liste nicht mehr gibt.
-  // Eine Auswahl aus der Warteliste, die inzwischen vergeben wurde,
-  // verschwindet auch aus der Auswahl — sonst zeigte das Aktionsband ein
-  // Spiel an, das es in der Liste nicht mehr gibt. Ein vom Feld gewähltes
-  // Spiel steht dagegen nie in der Liste und bleibt.
-  if (picked && !picked.fromCourtId
-      && !state.queue.some((m) => m.match_id === picked.match.match_id)) {
-    picked = null;
-  }
+  // Ein gewähltes Spiel, das es so nicht mehr gibt, verschwindet aus der
+  // Auswahl. Für die Warteliste heißt das „inzwischen vergeben", für ein
+  // Feld „steht dort nicht mehr" — und dieser zweite Fall ist der
+  // gefährliche: Ist auf dem Feld längst die nächste Begegnung, träfen
+  // „Ergebnis eintragen" und „Feld freigeben" das laufende Spiel.
+  if (picked && !pickIsStillValid()) picked = null;
   $("tournament").textContent = state.tournament || "";
   renderConnection();
   renderHalls();
@@ -1204,13 +1252,18 @@ function tickClocks() {
 
 function start() {
   $("action-cancel").addEventListener("click", cancelPick);
+  // Beide Knöpfe arbeiten auf `pickedCourt()`: Steht das gewählte Spiel
+  // nicht mehr auf dem Feld, passiert nichts — statt das inzwischen dort
+  // laufende Spiel zu treffen.
   $("action-free").addEventListener("click", () => {
-    const court = picked && state.courts.find((c) => c.court_id === picked.fromCourtId);
+    const court = pickedCourt();
     if (court) freeCourt(court);
+    else pickVanished();
   });
   $("action-result").addEventListener("click", () => {
-    const court = picked && state.courts.find((c) => c.court_id === picked.fromCourtId);
+    const court = pickedCourt();
     if (court) enterResult(court);
+    else pickVanished();
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
   $("toast-close").addEventListener("click", hideToast);

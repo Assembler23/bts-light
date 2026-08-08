@@ -1321,18 +1321,11 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         m.id,
         update.sets
     );
-    match write_result_to_btp(&ctx.config, &update).await {
+    // Nachschub-Eintrag löschen und Schreibzeit vermerken erledigt
+    // `write_result_settled` — hier bleibt nur, was diesen Weg ausmacht.
+    match write_result_settled(&ctx.config, &ctx.tablet, &update).await {
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
-            // Ein evtl. früher eingereihter Fehlversuch dieses Matches ist
-            // damit erledigt (das Tablet wiederholt selbst — gelingt sein
-            // Retry, darf die Nachschub-Queue nicht später erneut schreiben).
-            ctx.tablet.clear_btp_retry(m.id);
-            // Erfolg vermerken: Überholt ein noch laufender Nachschub-Write
-            // diese (neuere) Korrektur, schreibt der Flush sie danach
-            // selbstheilend erneut. Zeitstempel = SCHREIBzeit (nicht
-            // Spielende) — der Flush vergleicht gegen seinen Startzeitpunkt.
-            ctx.tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("BTP-Schreiben OK: Match {} (Feld freigegeben)", m.id);
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
@@ -1428,6 +1421,28 @@ pub(crate) async fn write_result_to_btp(
         .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
     proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
+}
+
+/// Schreibt eine Wertung nach BTP und führt die Buchführung, die **jedes
+/// Mal** dieselbe ist: den Nachschub-Eintrag dieses Spiels löschen und den
+/// Schreibvorgang für die Selbstheilung vermerken.
+///
+/// Der Zeitstempel wird bewusst **nach** dem Schreiben genommen: Der
+/// Nachschub-Lauf vergleicht ihn gegen seinen eigenen Startzeitpunkt, um zu
+/// erkennen, ob ihn eine neuere Wertung überholt hat. Ein vor dem Schreiben
+/// abgelesener Wert (BTP-Anmeldung + Aktualisierung dauern) kann älter sein
+/// als dieser Start — dann bliebe die frische Wertung überschrieben.
+/// Genau diese Falle ist der Grund, warum es die Funktion gibt und der
+/// Ablauf nicht mehr an vier Stellen abgeschrieben steht.
+pub(crate) async fn write_result_settled(
+    config: &AppConfig,
+    tablet: &TabletState,
+    update: &proto::MatchUpdate,
+) -> Result<(), String> {
+    write_result_to_btp(config, update).await?;
+    tablet.clear_btp_retry(update.btp_match_id);
+    tablet.note_direct_btp_write(update.clone(), now_ms());
+    Ok(())
 }
 
 /// LOGIN → Session-Schlüssel → `SENDUPDATE` mit Courts-Block. Schreibt

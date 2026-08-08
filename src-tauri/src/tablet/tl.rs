@@ -365,6 +365,27 @@ pub(crate) fn walkover_updates(
         .collect()
 }
 
+/// Prüft und baut die kampflosen Wertungen eines Walkover-Vorschlags.
+///
+/// Bleibt nichts zu schreiben übrig — etwa weil der letzte angekreuzte
+/// Kandidat zwischen Anzeige und Antippen aufs Feld gewandert ist —, ist das
+/// ein Fehler und **kein** stiller Erfolg: Sonst verschwände der Vorschlag,
+/// ohne dass je etwas gewertet wurde.
+pub(crate) fn plan_walkover_action(
+    candidates: &[crate::tablet::state::WalkoverCandidate],
+    match_ids: &[i64],
+) -> Result<Vec<crate::btp::proto::MatchUpdate>, relay_proto::TlResponse> {
+    let updates = walkover_updates(candidates, match_ids);
+    if updates.is_empty() {
+        return Err(relay_proto::TlResponse::err(
+            relay_proto::TlErrorCode::AlreadyHandled,
+            "Keines der gewählten Spiele lässt sich noch kampflos werten — bitte die \
+             Aufgabe erneut aufrufen.",
+        ));
+    }
+    Ok(updates)
+}
+
 /// Berührt diese Aktion eine Feldzuordnung (und damit BTP)?
 fn touches_courts(action: &relay_proto::TlAction) -> bool {
     use relay_proto::TlAction as A;
@@ -570,6 +591,9 @@ async fn execute_result_action(
 ) -> Option<relay_proto::TlResponse> {
     use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
 
+    // Der beanspruchte Walkover-Vorschlag — nur gefüllt, wenn er dieser
+    // Anfrage gehört. Ging danach gar nichts nach BTP, kommt er zurück.
+    let mut claimed_walkover: Option<crate::tablet::state::WalkoverProposal> = None;
     let updates = match action {
         A::EnterResult { match_id, .. } => {
             let snap = ctx.tablet.snapshot_clone()?;
@@ -591,22 +615,29 @@ async fn execute_result_action(
             if match_ids.is_empty() {
                 return Some(TlResponse::err(C::NotAllowed, "Kein Spiel ausgewählt."));
             }
-            let Some(proposal) = ctx
-                .tablet
-                .walkover_proposals()
-                .into_iter()
-                .find(|p| p.id == *proposal_id)
-            else {
+            // Beanspruchend herausnehmen: Tippen zwei Geräte im selben
+            // Moment, schriebe sonst jedes dieselben Wertungen nach BTP.
+            let Some(proposal) = ctx.tablet.take_walkover_proposal(proposal_id) else {
                 return Some(TlResponse::err(
                     C::AlreadyHandled,
                     "Der Vorschlag ist nicht mehr offen — vermutlich hat ihn jemand anderes \
                      schon bearbeitet.",
                 ));
             };
-            walkover_updates(
+            let planned = match plan_walkover_action(
                 &ctx.tablet.walkover_candidates(proposal.entry_id),
                 match_ids,
-            )
+            ) {
+                Ok(u) => u,
+                Err(rejected) => {
+                    // Nichts geschrieben → zurücklegen, sonst wäre die
+                    // kampflose Wertung lautlos verschwunden.
+                    ctx.tablet.add_walkover_proposal(proposal);
+                    return Some(rejected);
+                }
+            };
+            claimed_walkover = Some(proposal);
+            planned
         }
         _ => return None,
     };
@@ -614,15 +645,13 @@ async fn execute_result_action(
     let mut written = 0usize;
     let mut errors: Vec<String> = Vec::new();
     for update in updates {
-        match crate::tablet::server::write_result_to_btp(config, &update).await {
+        // Nachschub-Eintrag und Schreibzeit erledigt der gemeinsame Weg —
+        // der Zeitstempel muss von NACH dem Schreiben stammen.
+        match crate::tablet::server::write_result_settled(config, &ctx.tablet, &update).await {
             Ok(()) => {
                 if let Some(cid) = update.free_court_id {
                     ctx.tablet.clear_court(cid);
                 }
-                ctx.tablet.clear_btp_retry(update.btp_match_id);
-                // Für die Selbstheilung: Ein langsamer Nachschub-Write darf
-                // die frische Wertung nicht überschreiben.
-                ctx.tablet.note_direct_btp_write(update.clone(), now_ms);
                 written += 1;
             }
             Err(e) => {
@@ -632,11 +661,14 @@ async fn execute_result_action(
         }
     }
 
-    // Der Vorschlag verschwindet nur, wenn wirklich alles geschrieben wurde
-    // — sonst bleibt er für einen erneuten Versuch stehen.
-    if let A::ConfirmWalkover { proposal_id, .. } = action {
-        if errors.is_empty() {
-            ctx.tablet.remove_walkover_proposal(proposal_id);
+    // Kam gar nichts durch, kommt der beanspruchte Vorschlag zurück: Er ist
+    // dann der einzige Hinweis darauf, dass hier noch etwas offen ist. Ging
+    // ein Teil durch, bleibt er verschwunden — der Rest liegt in der
+    // Nachschub-Queue und wird von dort geschrieben, ein zweiter Anlauf über
+    // den Vorschlag schriebe dieselben Wertungen erneut.
+    if let Some(proposal) = claimed_walkover {
+        if written == 0 {
+            ctx.tablet.add_walkover_proposal(proposal);
         }
     }
 
@@ -646,6 +678,16 @@ async fn execute_result_action(
         action_label(action),
         errors.len()
     );
+    // Der Grund von BTP gehört ins Protokoll: Die Seite bekommt nur den
+    // beruhigenden Satz, aber bei der Fehlersuche nach dem Turnier ist
+    // „Anmeldung abgelehnt" etwas völlig anderes als „nicht erreichbar".
+    if !errors.is_empty() {
+        tracing::warn!(
+            "TL-Web: {} nicht geschrieben ({}) — Nachschub übernimmt",
+            action_label(action),
+            errors.join(" | ")
+        );
+    }
     Some(if errors.is_empty() {
         TlResponse::ok(0)
     } else if written > 0 {
@@ -665,20 +707,78 @@ async fn execute_result_action(
 
 /// Kurzer, stabiler Fingerabdruck einer Aktion — erkennt, ob eine wiederholte
 /// Vorgangskennung wirklich dieselbe Absicht trägt.
+///
+/// **Jede Nutzlast gehört hinein.** Die Vorgangskennung der Seite fasst ein
+/// Zeitfenster zusammen; wer sich vertippt und sofort korrigiert, schickt
+/// dieselbe Kennung mit anderem Inhalt. Fehlt dieser Inhalt im Fingerabdruck,
+/// gilt die Korrektur als Doppeltipp und wird nie geschrieben — bei
+/// gemeldetem Erfolg.
+///
+/// Darum **ohne** Sammelzweig: Eine neue Aktion soll den Übersetzer brechen,
+/// nicht lautlos in der Idempotenz landen. Die Erwartungswerte (`expect…`)
+/// bleiben draußen — sie sind die Absicherung gegen Gleichzeitigkeit, nicht
+/// die Absicht; nach einer Zustands-Aktualisierung trägt derselbe Tipp
+/// andere Erwartungen.
+///
+/// Der Fingerabdruck wird **nie** protokolliert (dafür ist `action_label` da)
+/// — er darf deshalb auch Namen aus einer Zähltafelbediener-Meldung tragen.
 fn action_fingerprint(action: &relay_proto::TlAction) -> String {
     use relay_proto::TlAction as A;
+    let ids = |v: &[i64]| {
+        v.iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    };
     match action {
         A::AssignCourt {
-            court_id, match_id, ..
+            court_id,
+            match_id,
+            expect: _,
         } => format!("assign:{match_id}:{court_id}"),
-        A::FreeCourt { court_id, .. } => format!("free:{court_id}"),
+        A::FreeCourt {
+            court_id,
+            expect: _,
+        } => format!("free:{court_id}"),
         A::MoveMatch {
             from_court_id,
             to_court_id,
             match_id,
-            ..
+            expect_from: _,
+            expect_to: _,
         } => format!("move:{match_id}:{from_court_id}:{to_court_id}"),
-        other => format!("other:{}", action_label(other)),
+        A::CallPreparation {
+            match_ids,
+            location_id,
+        } => format!("prep:{}:{}", ids(match_ids), location_id.unwrap_or(0)),
+        A::RetractPreparation { match_id } => format!("prep-retract:{match_id}"),
+        A::AnnounceCourtCall { court_id, match_id } => {
+            format!("call:{match_id}:{court_id}")
+        }
+        A::AnnouncePrepCall { match_id, side } => format!("prep-call:{match_id}:{side:?}"),
+        A::EnterResult {
+            match_id,
+            sets,
+            retired,
+            winner,
+            overwrite,
+        } => format!(
+            "result:{match_id}:{}:{retired}:{}:{overwrite}",
+            sets.iter()
+                .map(|s| format!("{}-{}", s.a, s.b))
+                .collect::<Vec<_>>()
+                .join(","),
+            winner.unwrap_or(0)
+        ),
+        A::ConfirmWalkover {
+            proposal_id,
+            match_ids,
+        } => format!("wo:{proposal_id}:{}", ids(match_ids)),
+        A::DismissWalkover { proposal_id } => format!("wo-dismiss:{proposal_id}"),
+        A::ScorekeeperAdvance { key } => format!("sk-advance:{key}"),
+        A::ScorekeeperRemove { key } => format!("sk-remove:{key}"),
+        A::ScorekeeperAdd { names } => format!("sk-add:{}", names.join(",")),
+        A::SetAutoAssign { enabled } => format!("auto:{enabled}"),
     }
 }
 
@@ -1913,6 +2013,169 @@ mod tests {
         assert!(updates[1].team1_won, "hier war es Team 2");
         // Ein nicht ausgewähltes Spiel bleibt unangetastet.
         assert!(walkover_updates(&candidates, &[11]).len() == 1);
+    }
+
+    #[test]
+    fn a_corrected_score_is_not_mistaken_for_a_repeat_of_the_first_one() {
+        // Die Vorgangskennung der Seite fasst ein Zeitfenster zusammen. Wer
+        // sich vertippt und sofort korrigiert, schickt darum dieselbe Kennung
+        // mit ANDEREN Sätzen. Trägt der Fingerabdruck die Sätze nicht, gilt
+        // die Korrektur als Wiederholung: Sie wird nie geschrieben, die Seite
+        // meldet trotzdem Erfolg.
+        let first = relay_proto::TlAction::EnterResult {
+            match_id: 7,
+            sets: vec![relay_proto::SetAb { a: 21, b: 15 }],
+            retired: false,
+            winner: None,
+            overwrite: false,
+        };
+        let corrected = relay_proto::TlAction::EnterResult {
+            match_id: 7,
+            sets: vec![relay_proto::SetAb { a: 21, b: 51 }],
+            retired: false,
+            winner: None,
+            overwrite: false,
+        };
+        assert_ne!(
+            action_fingerprint(&first),
+            action_fingerprint(&corrected),
+            "andere Sätze sind eine andere Absicht"
+        );
+        assert_eq!(
+            action_fingerprint(&first),
+            action_fingerprint(&first.clone()),
+            "derselbe Doppeltipp bleibt eine Wiederholung"
+        );
+    }
+
+    #[test]
+    fn every_action_payload_reaches_the_fingerprint() {
+        // Gegen die Klasse von Fehlern, die den Korrektur-Fall verursacht hat:
+        // Aktionen, die sich in ihrer Nutzlast unterscheiden, dürfen nie
+        // denselben Fingerabdruck bekommen.
+        use relay_proto::TlAction as A;
+        let pairs: Vec<(A, A)> = vec![
+            (
+                A::CallPreparation {
+                    match_ids: vec![1],
+                    location_id: None,
+                },
+                A::CallPreparation {
+                    match_ids: vec![2],
+                    location_id: None,
+                },
+            ),
+            (
+                A::CallPreparation {
+                    match_ids: vec![1],
+                    location_id: Some(1),
+                },
+                A::CallPreparation {
+                    match_ids: vec![1],
+                    location_id: Some(2),
+                },
+            ),
+            (
+                A::RetractPreparation { match_id: 1 },
+                A::RetractPreparation { match_id: 2 },
+            ),
+            (
+                A::AnnounceCourtCall {
+                    court_id: 1,
+                    match_id: 7,
+                },
+                A::AnnounceCourtCall {
+                    court_id: 2,
+                    match_id: 7,
+                },
+            ),
+            (
+                A::AnnouncePrepCall {
+                    match_id: 7,
+                    side: relay_proto::PrepCallSide::Team1,
+                },
+                A::AnnouncePrepCall {
+                    match_id: 7,
+                    side: relay_proto::PrepCallSide::Team2,
+                },
+            ),
+            (
+                A::ConfirmWalkover {
+                    proposal_id: "p-1".to_string(),
+                    match_ids: vec![11],
+                },
+                A::ConfirmWalkover {
+                    proposal_id: "p-1".to_string(),
+                    match_ids: vec![11, 12],
+                },
+            ),
+            (
+                A::DismissWalkover {
+                    proposal_id: "p-1".to_string(),
+                },
+                A::DismissWalkover {
+                    proposal_id: "p-2".to_string(),
+                },
+            ),
+            (
+                A::ScorekeeperAdvance {
+                    key: "a".to_string(),
+                },
+                A::ScorekeeperAdvance {
+                    key: "b".to_string(),
+                },
+            ),
+            (
+                A::ScorekeeperRemove {
+                    key: "a".to_string(),
+                },
+                A::ScorekeeperRemove {
+                    key: "b".to_string(),
+                },
+            ),
+            (
+                A::ScorekeeperAdd {
+                    names: vec!["a".to_string()],
+                },
+                A::ScorekeeperAdd {
+                    names: vec!["b".to_string()],
+                },
+            ),
+            (
+                A::SetAutoAssign { enabled: true },
+                A::SetAutoAssign { enabled: false },
+            ),
+        ];
+        for (left, right) in pairs {
+            assert_ne!(
+                action_fingerprint(&left),
+                action_fingerprint(&right),
+                "gleicher Fingerabdruck für {} und {}",
+                action_label(&left),
+                action_label(&right)
+            );
+        }
+    }
+
+    #[test]
+    fn a_walkover_without_a_single_writable_match_is_refused() {
+        // Zwischen Anzeige und Antippen kann der letzte Kandidat aufs Feld
+        // gewandert sein. Dann gibt es nichts zu schreiben — der Vorschlag
+        // darf NICHT als erledigt verschwinden, sonst ist die kampflose
+        // Wertung lautlos weg und niemand kann sie nachholen.
+        let candidates = vec![crate::tablet::state::WalkoverCandidate {
+            match_id: 11,
+            draw_id: 1,
+            planning_id: 111,
+            round_name: "VF".to_string(),
+            opponent: "Meier".to_string(),
+            retired_is_team1: true,
+        }];
+        let err = plan_walkover_action(&candidates, &[99]).unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::AlreadyHandled));
+        assert!(!err.ok);
+        // Mit einem noch vorhandenen Kandidaten geht es weiter wie bisher.
+        assert_eq!(plan_walkover_action(&candidates, &[11]).unwrap().len(), 1);
     }
 
     #[test]

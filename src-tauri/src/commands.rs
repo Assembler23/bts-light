@@ -537,6 +537,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     tablet.set_scores_path(scores_path);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
+    // Laufzeit-Schalter (Pause der automatischen Vergabe) beim Start lösen —
+    // sonst bliebe eine auf der Turnierleitungs-Seite gesetzte Pause auch
+    // dann bestehen, wenn das Gerät gar nicht mehr da ist.
+    tablet.reset_runtime_switches();
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
@@ -1126,11 +1130,8 @@ pub async fn confirm_walkover(
             player_ids: Vec::new(),
             end_ts_ms: None,
         };
-        match crate::tablet::server::write_result_to_btp(&config, &update).await {
+        match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
             Ok(()) => {
-                tablet.clear_btp_retry(cand.match_id);
-                // Für die Race-Erkennung des Nachschubs (Selbstheilung).
-                tablet.note_direct_btp_write(update.clone(), now_ms());
                 written += 1;
             }
             Err(e) => {
@@ -1196,13 +1197,11 @@ pub async fn enter_result(
         crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms)?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
-    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+    match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
-            tablet.clear_btp_retry(mid);
-            tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1251,13 +1250,11 @@ pub async fn disqualify_match(
         crate::tablet::server::build_manual_dq_update(m, loser_team, sets, on_court_since, end_ms)?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
-    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+    match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
-            tablet.clear_btp_retry(mid);
-            tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
             Ok(())
         }

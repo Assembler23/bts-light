@@ -988,6 +988,10 @@ impl TabletState {
     }
 
     /// Hält die automatische Feldvergabe an oder gibt sie wieder frei.
+    ///
+    /// Der Schalter lebt **nur zur Laufzeit** (die Einstellungen bleiben
+    /// unangetastet) und gilt bis zum Stoppen der Übertragung — siehe
+    /// [`Self::reset_runtime_switches`].
     pub fn set_auto_assign_paused(&self, paused: bool) {
         *self.auto_assign_paused.write().unwrap() = paused;
     }
@@ -995,6 +999,18 @@ impl TabletState {
     /// Ist die automatische Feldvergabe gerade angehalten?
     pub fn auto_assign_paused(&self) -> bool {
         *self.auto_assign_paused.read().unwrap()
+    }
+
+    /// Setzt die Schalter zurück, die nur zur Laufzeit gelten — beim Start
+    /// der Übertragung aufgerufen.
+    ///
+    /// Ohne das bliebe eine auf der Turnierleitungs-Seite gesetzte Pause der
+    /// automatischen Vergabe hängen, sobald das Gerät nicht mehr erreichbar
+    /// ist: Die Einstellungen sagen „an", die Vergabe läuft trotzdem nicht,
+    /// und es gibt keinen Griff, das zu ändern. Stoppen und Starten ist
+    /// dieser Griff.
+    pub fn reset_runtime_switches(&self) {
+        self.set_auto_assign_paused(false);
     }
 
     /// Gibt den Anspruch auf ein Feld sofort wieder frei.
@@ -1168,6 +1184,11 @@ impl TabletState {
         // nach Ergebnis-Submit aufgerufen (nicht beim Disconnect), daher bleibt
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
+        // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
+        // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
+        // dieses Feld mit „hat gerade jemand anderes belegt" ab — obwohl es
+        // sichtbar leer ist.
+        self.release_court_claim(court_id);
         // Entfernten Stand auch aus der Datei nehmen.
         self.persist_scores();
     }
@@ -1188,6 +1209,19 @@ impl TabletState {
     /// Entfernt einen Walkover-Vorschlag (umgesetzt oder verworfen).
     pub fn remove_walkover_proposal(&self, id: &str) {
         self.walkovers.write().unwrap().retain(|p| p.id != id);
+    }
+
+    /// Nimmt einen Vorschlag **beanspruchend** heraus: Nur der erste Aufruf
+    /// bekommt ihn, jeder weitere geht leer aus.
+    ///
+    /// Das ist der Anspruch für die kampflose Wertung. Zwei gleichzeitig
+    /// tippende Turnierleitungs-Geräte schrieben sonst beide dieselben
+    /// Wertungen nach BTP. Ging danach gar nichts durch, legt der Aufrufer
+    /// ihn mit `add_walkover_proposal` zurück.
+    pub fn take_walkover_proposal(&self, id: &str) -> Option<WalkoverProposal> {
+        let mut list = self.walkovers.write().unwrap();
+        let pos = list.iter().position(|p| p.id == id)?;
+        Some(list.remove(pos))
     }
 
     /// Noch nicht gespielte Matches einer Mannschaft (per EntryID) – die
@@ -2262,6 +2296,60 @@ mod tests {
             vec![(101, "Court 1")],
         ));
         assert_eq!(st3.monitor_court(101).sets, vec![(5, 3)]); // wieder BTP-Stand
+    }
+
+    #[test]
+    fn restarting_the_transfer_lets_the_automatic_assignment_run_again() {
+        // Die Pause wird auf der Turnierleitungs-Seite gesetzt. Ist das Tablet
+        // weg (leer, verlegt, Zugang widerrufen), gäbe es sonst keinen Weg
+        // zurück — die Automatik bliebe für den Rest des Turniers aus, obwohl
+        // sie in den Einstellungen eingeschaltet ist. Das Stoppen und Starten
+        // der Übertragung ist der Griff, den jede Turnierleitung kennt.
+        let st = TabletState::default();
+        st.set_auto_assign_paused(true);
+        st.reset_runtime_switches();
+        assert!(!st.auto_assign_paused());
+    }
+
+    #[test]
+    fn only_one_device_gets_a_walkover_proposal_to_work_on() {
+        // Zwei Turnierleitungs-Geräte tippen im selben Moment „kampflos
+        // werten". Ohne Anspruch schrieben beide dieselben Wertungen nach
+        // BTP. Wer den Vorschlag nimmt, hat ihn — der andere sieht, dass
+        // schon jemand da war.
+        let st = TabletState::default();
+        st.add_walkover_proposal(WalkoverProposal {
+            id: "p-1".to_string(),
+            entry_id: 10,
+            retired_team: "Weber / Fischer".to_string(),
+            draw_name: "HD B".to_string(),
+            created_at_ms: 1_000,
+        });
+        let first = st.take_walkover_proposal("p-1");
+        assert!(first.is_some(), "der erste bekommt den Vorschlag");
+        assert!(
+            st.take_walkover_proposal("p-1").is_none(),
+            "der zweite geht leer aus"
+        );
+        // Ging gar nichts nach BTP, kommt er zurück und bleibt bearbeitbar.
+        st.add_walkover_proposal(first.unwrap());
+        assert!(st.take_walkover_proposal("p-1").is_some());
+    }
+
+    #[test]
+    fn clearing_a_court_also_drops_its_pending_claim() {
+        // Ein geräumtes Feld darf sofort wieder vergeben werden. Blieb die
+        // Vormerkung des Schreibvorgangs stehen, wies der nächste Versuch mit
+        // „hat gerade jemand anderes belegt" ab — bis zu 15 Sekunden lang,
+        // obwohl das Feld sichtbar leer war.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(101, 7, 1_000));
+        st.clear_court(101);
+        assert!(
+            st.reserved_courts(1_000).is_empty(),
+            "die Vormerkung gehört zum Spiel, das gerade beendet wurde"
+        );
+        assert!(st.try_reserve_court(101, 8, 1_000), "und das Feld ist frei");
     }
 
     #[test]
