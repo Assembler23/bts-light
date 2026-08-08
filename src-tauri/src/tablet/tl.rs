@@ -194,8 +194,10 @@ pub(crate) async fn execute(
 
     // Wiederholung? Dann die gespeicherte Antwort, ohne erneut zu schreiben.
     // Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal;
-    // ohne diese Prüfung landete sie zweimal in BTP.
-    if let Some(known) = ctx.tablet.remembered_result(op_id, now_ms) {
+    // ohne diese Prüfung landete sie zweimal in BTP. Der Fingerabdruck stellt
+    // sicher, dass es wirklich dieselbe Aktion ist.
+    let fingerprint = action_fingerprint(&action);
+    if let Some(known) = ctx.tablet.remembered_result(op_id, &fingerprint, now_ms) {
         tracing::info!(
             "TL-Web [{}]: {} war schon erledigt (Wiederholung)",
             device.label,
@@ -236,6 +238,37 @@ pub(crate) async fn execute(
         }
     };
 
+    // Felder beanspruchen, **bevor** geschrieben wird. Der Schreibvorgang
+    // nach BTP dauert (Anmeldung + Aktualisierung); genau in dieser Zeit
+    // würden zwei gleichzeitig tippende Geräte beide durchlaufen, weil der
+    // Schnappschuss das Feld noch frei zeigt. Wer den Anspruch nicht bekommt,
+    // schreibt gar nicht erst.
+    let mut claimed: Vec<i64> = Vec::new();
+    for c in &plan.courts {
+        if let Some(match_id) = c.match_id {
+            if !ctx.tablet.try_reserve_court(c.court_id, match_id, now_ms) {
+                for done in &claimed {
+                    ctx.tablet.release_court_claim(*done);
+                }
+                tracing::info!(
+                    "TL-Web [{}]: {} abgelehnt (Feld gerade vergeben)",
+                    device.label,
+                    action_label(&action)
+                );
+                return TlResponse::err(
+                    C::CourtTaken,
+                    "Feld wurde im selben Moment von jemand anderem belegt.",
+                );
+            }
+            claimed.push(c.court_id);
+        } else {
+            // Ein Feld, das geräumt wird, braucht keinen Anspruch mehr —
+            // sonst bliebe es nach „belegen, dann doch freigeben" bis zum
+            // Ablauf der Frist gesperrt.
+            ctx.tablet.release_court_claim(c.court_id);
+        }
+    }
+
     match crate::tablet::server::write_courts_to_btp(&config, &plan.courts, &plan.match_courts)
         .await
     {
@@ -253,24 +286,23 @@ pub(crate) async fn execute(
                 ctx.tablet
                     .move_match_score(*from_court_id, *to_court_id, *match_id);
             }
-            // Die frisch belegten Felder vormerken, bis BTP sie zurückmeldet
-            // — sonst ließe der nächste Prüflauf (oder die Automatik) im
-            // selben Zeitfenster eine zweite Zuweisung durch.
-            for c in &plan.courts {
-                if let Some(match_id) = c.match_id {
-                    ctx.tablet.reserve_court(c.court_id, match_id, now_ms);
-                }
-            }
             tracing::info!(
                 "TL-Web [{}]: {} ausgeführt",
                 device.label,
                 action_label(&action)
             );
             let response = TlResponse::ok(0);
-            ctx.tablet.remember_result(op_id, response.clone(), now_ms);
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
             response
         }
         Err(e) => {
+            // Der Schreibvorgang ist gescheitert — die Ansprüche sofort
+            // zurückgeben, damit der nächste Versuch nicht an der eigenen
+            // Vormerkung scheitert.
+            for court_id in &claimed {
+                ctx.tablet.release_court_claim(*court_id);
+            }
             tracing::warn!(
                 "TL-Web [{}]: {} — BTP-Schreibfehler: {e}",
                 device.label,
@@ -280,6 +312,25 @@ pub(crate) async fn execute(
             // erneuter Versuch soll es wirklich noch einmal versuchen.
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
+    }
+}
+
+/// Kurzer, stabiler Fingerabdruck einer Aktion — erkennt, ob eine wiederholte
+/// Vorgangskennung wirklich dieselbe Absicht trägt.
+fn action_fingerprint(action: &relay_proto::TlAction) -> String {
+    use relay_proto::TlAction as A;
+    match action {
+        A::AssignCourt {
+            court_id, match_id, ..
+        } => format!("assign:{match_id}:{court_id}"),
+        A::FreeCourt { court_id, .. } => format!("free:{court_id}"),
+        A::MoveMatch {
+            from_court_id,
+            to_court_id,
+            match_id,
+            ..
+        } => format!("move:{match_id}:{from_court_id}:{to_court_id}"),
+        other => format!("other:{}", action_label(other)),
     }
 }
 

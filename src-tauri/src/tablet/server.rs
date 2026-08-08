@@ -1007,7 +1007,12 @@ async fn tl_state(
 /// Wiederholung als solche erkannt wird.
 #[derive(serde::Deserialize)]
 struct TlCommandBody {
-    #[serde(rename = "opId")]
+    /// Fehlt sie, entfällt nur der Schutz gegen Doppelausführung — die
+    /// Aktion selbst wird ganz normal bearbeitet und beantwortet. Ohne
+    /// `default` liefe ein Rumpf ohne Kennung in eine Verarbeitungsfehler-
+    /// Antwort, die kein reguläres Ergebnis wäre und die die Seite nicht
+    /// auswerten könnte.
+    #[serde(rename = "opId", default)]
     op_id: String,
     action: relay_proto::TlAction,
 }

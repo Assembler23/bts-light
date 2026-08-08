@@ -403,6 +403,20 @@ function renderActionBar() {
   bar.classList.add("show");
 }
 
+/**
+ * Stabile Vorgangskennung für eine Absicht.
+ *
+ * Innerhalb desselben Zeitfensters ergibt derselbe Wunsch dieselbe Kennung —
+ * ein Doppeltipp wird damit als Wiederholung erkannt und schreibt nicht
+ * zweimal nach BTP. Nach dem Fenster entsteht eine neue: Wer dasselbe Spiel
+ * eine Minute später bewusst noch einmal auf dasselbe Feld legt, meint es
+ * auch so.
+ */
+const OP_WINDOW_MS = 20000;
+function opIdFor(matchId, courtId) {
+  return `assign-${matchId}-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`;
+}
+
 function toast(text, bad) {
   $("toast-text").textContent = text;
   $("toast").className = "toast show" + (bad ? " bad" : "");
@@ -450,9 +464,13 @@ async function assignTo(court) {
       method: "POST",
       headers: { "content-type": "application/json", Authorization: "Bearer " + token },
       body: JSON.stringify({
-        // Vorgangskennung: Kommt dieselbe Aktion nach einem Netzwackler ein
-        // zweites Mal an, erkennt der Turnier-PC sie und schreibt nicht doppelt.
-        opId: (crypto.randomUUID?.() || String(Date.now() + Math.random())),
+        // Vorgangskennung: Sie muss für dieselbe Absicht STABIL sein, sonst
+        // wäre der Schutz gegen Doppelausführung wirkungslos. Eine bei jedem
+        // Tipp neu gewürfelte Kennung hätte der Turnier-PC nie als
+        // Wiederholung erkannt. Deshalb aus der Absicht abgeleitet, mit
+        // grobem Zeitfenster: Zwei Tipps kurz hintereinander sind derselbe
+        // Vorgang, ein bewusster neuer Versuch eine Minute später nicht.
+        opId: opIdFor(match.match_id, court.court_id),
         action: {
           action: "assign_court",
           courtId: court.court_id,

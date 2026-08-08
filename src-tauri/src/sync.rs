@@ -668,10 +668,21 @@ impl SyncEngine {
         // auf die Bestätigung durch BTP warten (Turnierleitungs-Oberfläche).
         // Ohne das legte die Automatik im selben Takt ein zweites Spiel auf
         // ein Feld, das gerade jemand belegt hat.
-        for (court_id, match_id) in tablet.reserved_courts(now) {
-            pending_courts.insert(court_id);
-            pending_matches.insert(match_id);
+        let reserved = tablet.reserved_courts(now);
+        for (court_id, match_id) in &reserved {
+            pending_courts.insert(*court_id);
+            pending_matches.insert(*match_id);
         }
+        // Und ihre Spieler gelten als belegt: Sonst ruft die Automatik
+        // jemanden auf ein zweites Feld, den die Turnierleitung gerade
+        // woanders hingestellt hat — im Schnappschuss steht er ja noch
+        // nirgends.
+        let reserved_players: HashSet<String> = reserved
+            .iter()
+            .filter_map(|(_, m)| snapshot.matches.iter().find(|x| x.id == *m))
+            .flat_map(|m| m.team1.iter().chain(m.team2.iter()))
+            .map(player_key)
+            .collect();
         let multi_hall = snapshot.is_multi_hall();
         // Aktive Halle (Tages-Halle) aus der Config → LocationID auflösen.
         // Ist sie gesetzt, vergeben wir NUR auf Felder dieser Halle und brauchen
@@ -773,12 +784,13 @@ impl SyncEngine {
                     return false;
                 }
                 // … und keiner darf in DIESEM Zyklus schon ein Feld bekommen
-                // haben (rein zykluslokal, deshalb hier).
-                if m.team1
-                    .iter()
-                    .chain(m.team2.iter())
-                    .any(|p| used_players.contains(&player_key(p)))
-                {
+                // haben (rein zykluslokal, deshalb hier) oder gerade von Hand
+                // auf ein Feld gestellt worden sein, das BTP noch nicht
+                // zurückmeldet.
+                if m.team1.iter().chain(m.team2.iter()).any(|p| {
+                    let k = player_key(p);
+                    used_players.contains(&k) || reserved_players.contains(&k)
+                }) {
                     return false;
                 }
                 // Disziplin/Klasse→Halle-Regel: Match darf nur in seine erlaubte
@@ -821,6 +833,11 @@ impl SyncEngine {
             // zur BTP-Rückmeldung erneut vergeben werden (keine Doppelvergabe).
             self.court_free_since.remove(&court.id);
             self.pending_auto.insert(court.id, (m.id, now));
+            // Dieselbe Vormerkung auch im geteilten Zustand: Sonst wüsste die
+            // Turnierleitungs-Oberfläche nichts davon und könnte im selben
+            // Zeitfenster ein zweites Spiel auf dasselbe Feld legen. Der
+            // Schutz muss in BEIDE Richtungen wirken, sonst ist er keiner.
+            tablet.try_reserve_court(court.id, m.id, now);
         }
         (courts, match_courts)
     }
@@ -1294,7 +1311,7 @@ mod tests {
         // auf dasselbe Feld.
         let mut engine = SyncEngine::new();
         let tablet = TabletState::default();
-        tablet.reserve_court(1, 99, now_ms());
+        tablet.try_reserve_court(1, 99, now_ms());
         let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert!(

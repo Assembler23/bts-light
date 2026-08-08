@@ -42,6 +42,15 @@ const RESERVATION_TTL_MS: u64 = 15_000;
 /// die Liste soll über ein Turnier hinweg nicht unbegrenzt wachsen.
 const OP_MEMORY_MS: u64 = 60_000;
 
+/// Obergrenze für die Länge einer Vorgangskennung. Sie kommt von außen; eine
+/// Kennung, die länger ist als jede sinnvolle Kennung, wird verworfen.
+const MAX_OP_ID_LEN: usize = 128;
+
+/// Wie viele Vorgänge höchstens erinnert werden. Bei acht Geräten und einer
+/// Minute Gedächtnis reichlich bemessen — die Grenze existiert, damit ein
+/// Gerät mit gültigem Zugang den Arbeitsspeicher nicht füllen kann.
+const MAX_REMEMBERED_OPS: usize = 512;
+
 /// Flüchtiger Live-Zustand eines Court-Monitor-Geräts (nicht persistiert –
 /// die Feld-Zuweisungen liegen in `monitor-assignments.json`).
 #[derive(Debug, Clone, Default)]
@@ -299,7 +308,7 @@ pub struct TabletState {
     ///
     /// Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal.
     /// Ohne dieses Gedächtnis schriebe der zweite Versuch erneut nach BTP.
-    recent_ops: RwLock<HashMap<String, (u64, relay_proto::TlResponse)>>,
+    recent_ops: RwLock<HashMap<String, (u64, String, relay_proto::TlResponse)>>,
     /// Freitext-Ansagen (Master legt ab; Master + Slaves pollen + sprechen die
     /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
     freetext: RwLock<Vec<FreetextItem>>,
@@ -942,27 +951,59 @@ impl TabletState {
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
-    /// Merkt eine gerade nach BTP geschriebene Zuweisung vor.
+    /// Beansprucht ein Feld für ein Spiel — **bevor** nach BTP geschrieben
+    /// wird.
     ///
-    /// Solange BTP sie nicht zurückmeldet, gilt das Feld als belegt — sonst
-    /// ließe die Prüfung im selben Zeitfenster eine zweite Zuweisung durch.
-    pub fn reserve_court(&self, court_id: i64, match_id: i64, now_ms: u64) {
-        self.pending_assign
-            .write()
-            .unwrap()
-            .insert(court_id, (match_id, now_ms));
+    /// Liefert `false`, wenn das Feld oder das Spiel bereits beansprucht ist.
+    /// Genau darin liegt der Zweck: Zwei Geräte, die im selben Moment
+    /// dasselbe Feld antippen, laufen sonst beide durch die Prüfung (der
+    /// Schnappschuss zeigt das Feld ja noch frei) und schreiben nacheinander
+    /// nach BTP — der spätere gewinnt, und die Spieler des ersten stehen vor
+    /// einem fremd belegten Feld. Die Entscheidung muss fallen, bevor der
+    /// Schreibvorgang beginnt, denn der dauert.
+    ///
+    /// Auch die Spiel-Achse zählt: Dasselbe Spiel auf zwei Feldern hinterließe
+    /// eines davon dauerhaft mit einem Geisterspiel belegt.
+    pub fn try_reserve_court(&self, court_id: i64, match_id: i64, now_ms: u64) -> bool {
+        let mut pending = self.pending_assign.write().unwrap();
+        Self::drop_stale_reservations(&mut pending, now_ms);
+        let court_taken = pending.get(&court_id).is_some_and(|(m, _)| *m != match_id);
+        let match_taken = pending
+            .iter()
+            .any(|(c, (m, _))| *m == match_id && *c != court_id);
+        if court_taken || match_taken {
+            return false;
+        }
+        pending.insert(court_id, (match_id, now_ms));
+        true
+    }
+
+    /// Gibt den Anspruch auf ein Feld sofort wieder frei.
+    ///
+    /// Nötig, wenn der Schreibvorgang fehlschlägt oder das Feld gleich wieder
+    /// geräumt wird — sonst bliebe es bis zum Ablauf der Frist blockiert, und
+    /// wer seine eigene Zuweisung zurücknimmt, käme an sein Feld nicht mehr
+    /// heran.
+    pub fn release_court_claim(&self, court_id: i64) {
+        self.pending_assign.write().unwrap().remove(&court_id);
     }
 
     /// Die noch gültigen Reservierungen als `(Feld, Spiel)`.
-    ///
-    /// Abgelaufene fallen dabei heraus: Schlägt ein Schreibvorgang fehl,
-    /// bestätigt BTP nie, und das Feld darf nicht für immer blockiert sein.
     pub fn reserved_courts(&self, now_ms: u64) -> Vec<(i64, i64)> {
         let mut pending = self.pending_assign.write().unwrap();
-        pending.retain(|_, (_, ts)| now_ms.saturating_sub(*ts) < RESERVATION_TTL_MS);
+        Self::drop_stale_reservations(&mut pending, now_ms);
         let mut out: Vec<(i64, i64)> = pending.iter().map(|(c, (m, _))| (*c, *m)).collect();
         out.sort_unstable();
         out
+    }
+
+    /// Wirft abgelaufene Reservierungen weg.
+    ///
+    /// Abgelaufen ist auch, was in der **Zukunft** liegt: Eine rückwärts
+    /// gestellte Uhr (Zeitumstellung, Zeitabgleich) machte sonst aus jeder
+    /// Reservierung eine ewige, weil die Differenz auf null gesättigt würde.
+    fn drop_stale_reservations(pending: &mut HashMap<i64, (i64, u64)>, now_ms: u64) {
+        pending.retain(|_, (_, ts)| *ts <= now_ms && now_ms - *ts < RESERVATION_TTL_MS);
     }
 
     /// Räumt Reservierungen weg, die der BTP-Stand inzwischen bestätigt hat.
@@ -984,21 +1025,68 @@ impl TabletState {
     }
 
     /// Antwort eines schon ausgeführten Vorgangs, falls noch bekannt.
-    pub fn remembered_result(&self, op_id: &str, now_ms: u64) -> Option<relay_proto::TlResponse> {
+    /// `fingerprint` beschreibt die Aktion. Er wird mitgeprüft, damit eine
+    /// zufällig oder böswillig wiederverwendete Kennung nicht die
+    /// Erfolgsmeldung eines ganz anderen Vorgangs bekommt — die zweite
+    /// Aktion würde sonst nie ausgeführt und trotzdem als erledigt gemeldet.
+    pub fn remembered_result(
+        &self,
+        op_id: &str,
+        fingerprint: &str,
+        now_ms: u64,
+    ) -> Option<relay_proto::TlResponse> {
         let mut ops = self.recent_ops.write().unwrap();
-        ops.retain(|_, (ts, _)| now_ms.saturating_sub(*ts) < OP_MEMORY_MS);
-        ops.get(op_id).map(|(_, resp)| resp.clone())
+        Self::drop_stale_ops(&mut ops, now_ms);
+        ops.get(op_id)
+            .filter(|(_, fp, _)| fp == fingerprint)
+            .map(|(_, _, resp)| resp.clone())
     }
 
     /// Hält das Ergebnis eines Vorgangs fest, damit eine Wiederholung
     /// dieselbe Antwort bekommt, statt erneut zu schreiben.
-    pub fn remember_result(&self, op_id: &str, response: relay_proto::TlResponse, now_ms: u64) {
-        if op_id.trim().is_empty() {
+    pub fn remember_result(
+        &self,
+        op_id: &str,
+        fingerprint: &str,
+        response: relay_proto::TlResponse,
+        now_ms: u64,
+    ) {
+        let key = op_id.trim();
+        // Leere und übermäßig lange Kennungen gar nicht erst behalten: Der
+        // Wert kommt von außen, und der Turnier-PC soll sich davon nicht den
+        // Arbeitsspeicher füllen lassen.
+        if key.is_empty() || key.len() > MAX_OP_ID_LEN {
             return;
         }
         let mut ops = self.recent_ops.write().unwrap();
-        ops.retain(|_, (ts, _)| now_ms.saturating_sub(*ts) < OP_MEMORY_MS);
-        ops.insert(op_id.to_string(), (now_ms, response));
+        Self::drop_stale_ops(&mut ops, now_ms);
+        if ops.len() >= MAX_REMEMBERED_OPS && !ops.contains_key(key) {
+            // Voll: den ältesten Eintrag weichen lassen. Die Erinnerung ist
+            // eine Bequemlichkeit gegen Doppeltipps, kein Gedächtnis, für das
+            // es sich zu wachsen lohnte.
+            if let Some(oldest) = ops
+                .iter()
+                .min_by_key(|(_, (ts, _, _))| *ts)
+                .map(|(k, _)| k.clone())
+            {
+                ops.remove(&oldest);
+            }
+        }
+        ops.insert(key.to_string(), (now_ms, fingerprint.to_string(), response));
+    }
+
+    /// Wie viele Vorgänge gerade erinnert werden (Tests und Diagnose).
+    pub fn remembered_op_count(&self) -> usize {
+        self.recent_ops.read().unwrap().len()
+    }
+
+    fn drop_stale_ops(
+        ops: &mut HashMap<String, (u64, String, relay_proto::TlResponse)>,
+        now_ms: u64,
+    ) {
+        // Wie bei den Reservierungen gilt auch ein Zeitstempel aus der
+        // Zukunft als abgelaufen (rückwärts gestellte Uhr).
+        ops.retain(|_, (ts, _, _)| *ts <= now_ms && now_ms - *ts < OP_MEMORY_MS);
     }
 
     /// Zieht den laufenden Spielstand eines Spiels auf ein anderes Feld um.
@@ -1783,10 +1871,63 @@ mod tests {
         // Prüfung eine zweite Zuweisung durch, und die Spieler der ersten
         // stünden vor einem Feld, auf dem ein fremdes Spiel läuft.
         let st = TabletState::default();
-        st.reserve_court(3, 42, 1_000);
+        assert!(st.try_reserve_court(3, 42, 1_000));
         assert_eq!(st.reserved_courts(1_000), vec![(3, 42)]);
         // Kurz danach gilt sie noch …
         assert_eq!(st.reserved_courts(5_000), vec![(3, 42)]);
+    }
+
+    #[test]
+    fn a_second_claim_on_the_same_court_loses() {
+        // Der eigentliche Zweck: Zwei Geräte tippen im selben Moment
+        // dasselbe Feld an. Genau eines darf gewinnen — und die
+        // Entscheidung muss VOR dem Schreiben nach BTP fallen, sonst läuft
+        // sie ins Leere, solange BTP antwortet.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        assert!(
+            !st.try_reserve_court(3, 77, 1_100),
+            "das Feld ist schon vergeben"
+        );
+        // Derselbe Vorgang noch einmal ist dagegen in Ordnung.
+        assert!(st.try_reserve_court(3, 42, 1_200));
+    }
+
+    #[test]
+    fn the_same_match_cannot_be_claimed_for_two_courts() {
+        // Sonst stünde dasselbe Spiel in BTP auf zwei Feldern: Eines davon
+        // bliebe dauerhaft mit einem Geisterspiel belegt.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        assert!(
+            !st.try_reserve_court(5, 42, 1_100),
+            "das Spiel ist schon einem Feld zugesagt"
+        );
+    }
+
+    #[test]
+    fn a_failed_write_releases_its_claim_at_once() {
+        // Schlägt der Schreibvorgang fehl, darf das Feld nicht bis zum
+        // Ablauf der Frist blockiert bleiben — der nächste Versuch soll
+        // sofort möglich sein.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        st.release_court_claim(3);
+        assert!(st.reserved_courts(1_100).is_empty());
+        assert!(st.try_reserve_court(3, 77, 1_200), "Feld ist wieder frei");
+    }
+
+    #[test]
+    fn a_clock_jumping_backwards_does_not_freeze_a_reservation() {
+        // Zeitumstellung oder Zeitabgleich können die Uhr zurückstellen.
+        // Ein Zeitstempel aus der „Zukunft" darf keine ewige Reservierung
+        // ergeben.
+        let st = TabletState::default();
+        st.try_reserve_court(3, 42, 10_000);
+        assert!(
+            st.reserved_courts(1_000).is_empty(),
+            "Zeitstempel aus der Zukunft wird verworfen"
+        );
     }
 
     #[test]
@@ -1795,7 +1936,7 @@ mod tests {
         // Reservierung muss von selbst verfallen, sonst wäre das Feld
         // dauerhaft blockiert.
         let st = TabletState::default();
-        st.reserve_court(3, 42, 1_000);
+        st.try_reserve_court(3, 42, 1_000);
         let after_ttl = 1_000 + RESERVATION_TTL_MS + 1;
         assert!(st.reserved_courts(after_ttl).is_empty());
     }
@@ -1805,7 +1946,7 @@ mod tests {
         // Sobald der Schnappschuss die Zuweisung zeigt, ist die Reservierung
         // überflüssig — sie darf das Feld nicht länger blockieren, als nötig.
         let st = TabletState::default();
-        st.reserve_court(3, 42, 1_000);
+        st.try_reserve_court(3, 42, 1_000);
         st.set_snapshot(snapshot(
             vec![match_on(42, Some(3), MatchStatus::OnCourt)],
             vec![(3, "Feld 3")],
@@ -1820,13 +1961,48 @@ mod tests {
         // schreiben. Der Vorgangsschlüssel entscheidet: gleiche Kennung =
         // gleiche Antwort, ohne die Aktion erneut auszuführen.
         let st = TabletState::default();
-        assert_eq!(st.remembered_result("op-1", 1_000), None);
-        st.remember_result("op-1", relay_proto::TlResponse::ok(7), 1_000);
-        let again = st.remembered_result("op-1", 1_200).expect("gespeichert");
+        assert_eq!(st.remembered_result("op-1", "assign:42:3", 1_000), None);
+        st.remember_result("op-1", "assign:42:3", relay_proto::TlResponse::ok(7), 1_000);
+        let again = st
+            .remembered_result("op-1", "assign:42:3", 1_200)
+            .expect("gespeichert");
         assert!(again.ok);
         assert_eq!(again.state_rev, 7);
         // Ein anderer Vorgang ist davon unberührt.
-        assert_eq!(st.remembered_result("op-2", 1_200), None);
+        assert_eq!(st.remembered_result("op-2", "assign:42:3", 1_200), None);
+    }
+
+    #[test]
+    fn a_reused_key_for_a_different_action_is_not_answered_from_memory() {
+        // Sonst bekäme eine völlig andere Aktion die gespeicherte
+        // Erfolgsmeldung der ersten — und würde nie ausgeführt.
+        let st = TabletState::default();
+        st.remember_result("op-1", "assign:42:3", relay_proto::TlResponse::ok(1), 1_000);
+        assert_eq!(
+            st.remembered_result("op-1", "free:5", 1_100),
+            None,
+            "andere Aktion, also keine gespeicherte Antwort"
+        );
+    }
+
+    #[test]
+    fn the_operation_memory_cannot_be_flooded() {
+        // Ein Gerät mit gültigem Zugang darf den Arbeitsspeicher des
+        // Turnier-PCs nicht mit erfundenen Kennungen füllen.
+        let st = TabletState::default();
+        for i in 0..(MAX_REMEMBERED_OPS * 3) {
+            st.remember_result(
+                &format!("op-{i}"),
+                "a",
+                relay_proto::TlResponse::ok(1),
+                1_000,
+            );
+        }
+        assert!(st.remembered_op_count() <= MAX_REMEMBERED_OPS);
+        // Übermäßig lange Kennungen werden gar nicht erst behalten.
+        let overlong = "x".repeat(500);
+        st.remember_result(&overlong, "a", relay_proto::TlResponse::ok(1), 1_000);
+        assert_eq!(st.remembered_result(&overlong, "a", 1_000), None);
     }
 
     #[test]
@@ -1834,9 +2010,9 @@ mod tests {
         // Sonst wüchse die Liste über ein Turnier hinweg unbegrenzt, und ein
         // zufällig wiederholter Schlüssel bekäme Jahre später eine Antwort.
         let st = TabletState::default();
-        st.remember_result("op-1", relay_proto::TlResponse::ok(1), 1_000);
+        st.remember_result("op-1", "a", relay_proto::TlResponse::ok(1), 1_000);
         assert!(st
-            .remembered_result("op-1", 1_000 + OP_MEMORY_MS + 1)
+            .remembered_result("op-1", "a", 1_000 + OP_MEMORY_MS + 1)
             .is_none());
     }
 
