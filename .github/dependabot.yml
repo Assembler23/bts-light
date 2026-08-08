@@ -1,5 +1,14 @@
-# Automatische Abhaengigkeits-Updates als PULL REQUEST — bewusst ohne Auto-Merge
-# (bvbb-hub ADR 0015). Sicherheits-Updates meldet GitHub zusaetzlich als Alert.
+# Automatische Abhaengigkeits-Updates als PULL REQUEST. Sicherheits-Updates
+# meldet GitHub zusaetzlich als Alert.
+#
+# Minor und Patch laufen seit 2026-08-08 nach gruenen Required-Checks von selbst
+# durch (.github/workflows/dependabot-automerge.yml, docs/adr/0010). Major bleibt
+# von Hand — hier besonders wichtig, weil viele Rust-Crates auf 0.x stehen und
+# dort schon ein Minor-Sprung ein Bruch ist.
+#
+# Die Gruppen unten sind der Grund, warum das ueberhaupt traegt: minor/patch
+# kommen als EIN Sammel-PR je Oekosystem, Major immer einzeln. Wer die Gruppen
+# entfernt, macht aus dem Auto-Merge einen Dauerregen einzelner Windows-Builds.
 version: 2
 
 updates:

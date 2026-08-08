@@ -1,0 +1,72 @@
+# Dependabot-PRs mit Minor-/Patch-Umfang automatisch mergen.
+#
+# ── Warum gerade hier ────────────────────────────────────────────────────────
+# Stand 2026-08-08 lagen 13 Dependabot-PRs offen, die aeltesten seit dem 28.07.
+# In diesem Repo ist das teurer als anderswo: Der CI-Job laeuft auf
+# windows-latest, wo Minuten DOPPELT zaehlen -- rund 22 berechnete Minuten je
+# Lauf. Ein Rueckstau kostet hier also nicht nur Aufmerksamkeit, sondern
+# spuerbar Kontingent, sobald er abgearbeitet wird.
+#
+# ── Was hier NICHT passiert ──────────────────────────────────────────────────
+# Dieser Workflow merged nichts selbst. Er schaltet nur `--auto` ein. Gemerged
+# wird erst, wenn die Required-Checks gruen sind -- `build` und `secret scan`,
+# dieselben wie fuer einen Menschen. Faellt einer aus, bleibt der PR liegen.
+#
+# ── Warum Major NICHT ────────────────────────────────────────────────────────
+# In diesem Repo besonders begruendet: Ein Grossteil der Rust-Abhaengigkeiten
+# steht auf 0.x. Dort ist nach Cargo-Konvention schon ein Minor-Sprung
+# (0.13 -> 0.20) ein Bruch. Dependabot ordnet solche Spruenge ausserhalb der
+# minor/patch-Gruppe ein, sie kommen also als Einzel-PR und bleiben von Hand.
+#
+# ── Warum pull_request_target ────────────────────────────────────────────────
+# `pull_request` vergibt auf Dependabot-PRs nur einen lesenden Token; `gh pr
+# merge` braucht Schreibrecht. Der bekannte Fallstrick dabei ist, PR-Code
+# auszuchecken und auszufuehren -- das passiert hier NICHT: kein checkout, kein
+# Build, kein Skript aus dem PR. Nur GitHub-API-Metadaten und `gh`.
+name: dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    # Doppelt abgesichert: ohne diese Bedingung liefe der Job mit Schreibrecht
+    # auf jedem beliebigen PR.
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest # bewusst Linux: kostet einfach, nicht doppelt
+    timeout-minutes: 5
+    steps:
+      - name: Umfang des Updates ermitteln
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-Merge einschalten (nur minor/patch)
+        if: steps.meta.outputs.update-type == 'version-update:semver-minor' || steps.meta.outputs.update-type == 'version-update:semver-patch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --squash --auto "$PR_URL"
+
+      # Sichtbar machen, warum ein PR liegen bleibt.
+      - name: Major-Update kennzeichnen
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PKG: ${{ steps.meta.outputs.dependency-names }}
+        run: |
+          gh pr comment "$PR_URL" --body \
+            "**Major-Update — kein Auto-Merge.** ($PKG)
+
+          Minor und Patch laufen nach grünen Required-Checks von selbst durch, ein Major nicht: Er kann grün sein und trotzdem Verhalten ändern, das kein Test dieses Repos abdeckt. Änderungsprotokoll lesen, dann von Hand mergen."
