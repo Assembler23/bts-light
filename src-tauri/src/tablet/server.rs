@@ -151,6 +151,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // gültigen Zugang antworten beide Routen abweisend — die Prüfung
         // sitzt in `tl::authorize` und liest die Konfiguration frisch, damit
         // ein Widerruf ohne Neustart greift.
+        .route("/tl", get(tl_page))
         .route("/tl/api/state", get(tl_state))
         .route("/tl/api/command", post(tl_command))
         .route("/result", post(result))
@@ -970,6 +971,17 @@ fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
     crate::tablet::tl::authorize(&ctx.app_config(), token)
+}
+
+/// Die Turnierleitungs-Oberfläche.
+///
+/// Bewusst **ohne** Zugangsprüfung: Die Seite selbst enthält keine
+/// Turnierdaten, sondern holt sie erst über die Schnittstelle — und die
+/// prüft. Wer sie ohne Zugang öffnet, sieht nur den Hinweis, wie er einen
+/// bekommt. Eine Prüfung hier brächte nichts und würde den Kopplungsablauf
+/// (Adresse aufrufen, Zugang aus dem Fragment übernehmen) unmöglich machen.
+async fn tl_page() -> impl IntoResponse {
+    Html(assets::TL_HTML)
 }
 
 /// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche.

@@ -55,17 +55,26 @@ den Relay statt direkt.
 | `GET /ws` | WebSocket (Match-Zuweisung, Live-Score) |
 | `POST /result` | Endergebnis vom Tablet → `SENDUPDATE` nach BTP |
 | `GET /health` | Status-Schnappschuss |
+| `GET /tl` | Turnierleitungs-Oberfläche (Seite) |
 | `GET /tl/api/state` | Anzeige-Zustand der Turnierleitungs-Oberfläche |
 | `POST /tl/api/command` | Aktion eines Turnierleitungs-Geräts |
 
-Die beiden `/tl/`-Routen gehören zur [Turnierleitungs-Oberfläche](features/turnierleitung-web.md).
-Sie verlangen einen **Zugang im `Authorization`-Kopf** (`Bearer …`) — bewusst
-im Kopf und nicht im Pfad, weil Pfade in Zugriffsprotokollen landen. Ohne
-freigeschaltetes Feature (`tl_web.enabled`, Default aus) und ohne bekanntes
-Gerät antworten beide mit `401`; die Prüfung liest die Konfiguration frisch
-von der Platte, damit ein Widerruf ohne Neustart greift. Der Kern
-(`tablet/tl.rs`) ist derselbe, den später auch der Cloud-Weg benutzt — jede
-Mutation wird genau einmal geprüft, wie schon bei den Ergebnissen (R5).
+Die `/tl/`-Routen gehören zur [Turnierleitungs-Oberfläche](features/turnierleitung-web.md).
+Die **Schnittstellen-Routen** verlangen einen Zugang im `Authorization`-Kopf
+(`Bearer …`) — bewusst im Kopf und nicht im Pfad, weil Pfade in
+Zugriffsprotokollen landen. Ohne freigeschaltetes Feature
+(`tl_web.enabled`, Default aus) und ohne bekanntes Gerät antworten sie mit
+`401`; die Prüfung liest die Konfiguration frisch von der Platte, damit ein
+Widerruf ohne Neustart greift. Der Kern (`tablet/tl.rs`) ist derselbe, den
+später auch der Cloud-Weg benutzt — jede Mutation wird genau einmal geprüft,
+wie schon bei den Ergebnissen (R5).
+
+Die **Seite selbst** (`GET /tl`) ist bewusst frei zugänglich: Sie enthält
+keine Turnierdaten, sondern holt sie erst über die geprüfte Schnittstelle.
+Wer sie ohne Zugang öffnet, sieht nur den Hinweis, wie er einen bekommt.
+Der Zugang steht beim Koppeln im **Fragment** der Adresse (`…/tl#t=…`) —
+ein Fragment wird nie an einen Server gesendet und landet daher in keinem
+Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
 
 ## Datenfluss
 

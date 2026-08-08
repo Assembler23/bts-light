@@ -6,6 +6,13 @@ use include_dir::{include_dir, Dir};
 /// `__COURT_LABEL__` wird beim Ausliefern durch den Court-Namen ersetzt.
 pub const TABLET_HTML: &str = include_str!("../../assets/tablet.html");
 
+/// Die Turnierleitungs-Oberfläche – wird unter `/tl` ausgeliefert.
+///
+/// Ohne Platzhalter: Die Seite holt ihren Zugang aus dem Adress-Fragment und
+/// leitet die Adresse ihrer Schnittstelle aus dem eigenen Pfad ab. So läuft
+/// dieselbe Datei im Hallennetz und später hinter dem Cloud-Präfix.
+pub const TL_HTML: &str = include_str!("../../assets/tl.html");
+
 /// Die Court-Monitor-Anzeige (read-only TV am Spielfeld) – wird unter
 /// `/court/{label}/display` ausgeliefert. `__COURT_LABEL__` wird beim
 /// Ausliefern durch den Court-Namen ersetzt.
