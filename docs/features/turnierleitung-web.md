@@ -231,6 +231,13 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
       gerufen* (mit „seit X min"), *Spielbereit*, *Noch nicht bereit* — und
       innerhalb jedes Abschnitts exakt so sortiert wie die automatische
       Feldvergabe.
+- [x] Die **Felder bleiben stehen**, während die Liste scrollt, und jedes
+      Spiel nennt seine Klasse als `HE-C`/`HD-D`. *Beides kam aus der
+      Bedienung am echten Turnier (09.08.): Bei 120 wartenden Spielen war
+      nach zwei Wischern kein Feld mehr zu sehen — ein Spiel von unten ließ
+      sich weder ziehen noch ablegen. Und „Gruppe 6" verrät nicht, worum es
+      geht. Dabei fiel auf, dass auch das Auswahlband hinter der Kopfzeile
+      verschwand: Beide klebten auf derselben Höhe.*
 - [x] Ein nicht vergebbares Spiel bleibt sichtbar und nennt den Grund im
       Klartext samt Namen der blockierenden Spieler und der Uhrzeit, ab der
       es frei ist.

@@ -1390,9 +1390,9 @@ pub struct TlCourt {
     pub round_name: String,
     pub class_label: String,
     /// Disziplin als snake_case-Schlüssel (`mens_singles` …), wie überall
-    /// sonst auf der Wire-Ebene. Die Seite beschriftet selbst — nur so
-    /// erkennt der Helfer Einzel und Doppel, wenn die Auslosung „Gruppe 6"
-    /// heißt.
+    /// sonst auf der Wire-Ebene. Die Seite setzt daraus mit `class_label`
+    /// die gewohnte Klassenbezeichnung zusammen („HE-C") — ohne sie sagt
+    /// eine Auslosung namens „Gruppe 6" nicht, worum es geht.
     pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,

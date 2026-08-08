@@ -102,6 +102,20 @@ main { padding: 16px; display: grid; gap: 20px; }
      (was als Nächstes dran ist). Auf dem Tablet gestapelt — dort scrollt
      man ohnehin. */
   main { grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); align-items: start; }
+  /* Die Felder bleiben stehen, während die Liste läuft. Bei 120 wartenden
+     Spielen scrollt man weit nach unten — ohne das wäre kein einziges Feld
+     mehr zu sehen, und ein Spiel von ganz unten ließe sich weder ziehen
+     noch nach dem Antippen irgendwohin legen. Eigene Bildlaufleiste, falls
+     mehr Felder da sind als auf den Schirm passen. */
+  main > section:first-of-type {
+    position: sticky;
+    top: calc(var(--kopf, 62px) + var(--band, 0px) + 12px);
+    max-height: calc(100vh - var(--kopf, 62px) - var(--band, 0px) - 28px);
+    overflow-y: auto;
+    /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
+    padding: 2px;
+    margin: -2px;
+  }
 }
 h2 {
   margin: 0 0 10px; font-size: .8rem; font-weight: 700;
@@ -263,7 +277,10 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
    Scrollen — sonst weiß man auf einem Tablet nach zwei Wischern nicht mehr,
    was gewählt ist. */
 .action-bar {
-  position: sticky; top: 0; z-index: 15;
+  /* Unter der Kopfzeile, nicht dahinter: Beide auf `top: 0` hieße, dass das
+     Band beim ersten Scrollen hinter dem Kopf verschwindet — ausgerechnet
+     das Band, das sagt, welches Spiel man gerade in der Hand hat. */
+  position: sticky; top: var(--kopf, 62px); z-index: 15;
   display: none; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--ink); color: #fff;
 }
@@ -468,6 +485,20 @@ const DISZIPLIN = {
 };
 const disziplin = (key) => DISZIPLIN[key] || "";
 
+/**
+ * Die Klassenbezeichnung, wie sie im Turnier gesprochen wird: „HE-C",
+ * „HD-D". Beides in einem Wort — die Disziplin steckt ohnehin darin, und
+ * getrennt („HE · C") liest es sich wie zwei Angaben, die nichts
+ * miteinander zu tun haben. Fehlt eine der beiden Hälften, bleibt die
+ * andere für sich stehen.
+ */
+function klasse(discipline, classLabel) {
+  const d = disziplin(discipline);
+  const k = (classLabel || "").trim();
+  if (d && k) return `${d}-${k}`;
+  return d || k;
+}
+
 // Sinnbild für den Vorbereitungs-Aufruf: ein Megafon. Als Inline-SVG, damit
 // es die Schriftfarbe erbt und auf jedem Gerät gleich aussieht — ein Emoji
 // wäre je nach System ein anderes Bild.
@@ -535,6 +566,21 @@ function pickedCourt() {
     && c.match_id === picked.match.match_id) || null;
 }
 
+/**
+ * Misst die klebende Kopfzone und legt sie als CSS-Variablen ab.
+ *
+ * Die Felderspalte hängt sich darunter — sie muss wissen, wie viel oben
+ * belegt ist. Gemessen statt geschätzt, weil die Kopfzeile umbricht, sobald
+ * ein Turnier viele Hallen hat, und das Aktionsband nur zeitweise da ist.
+ */
+function messeKopf() {
+  const kopf = document.querySelector("header");
+  const band = $("action-bar");
+  const s = document.documentElement.style;
+  s.setProperty("--kopf", (kopf?.offsetHeight || 62) + "px");
+  s.setProperty("--band", (band?.classList.contains("show") ? band.offsetHeight : 0) + "px");
+}
+
 function renderActionBar() {
   const bar = $("action-bar");
   // Während eines Zuges bleibt das Band aus: Es würde beim Erscheinen das
@@ -542,7 +588,7 @@ function renderActionBar() {
   // als das anvisierte. Beim Ziehen sagt ohnehin der Klon am Finger, was
   // transportiert wird — das Band ist für den Antipp-Weg da, wo man nach
   // zwei Wischern sonst nicht mehr weiß, was gewählt ist.
-  if (!picked || dragging) { bar.classList.remove("show"); return; }
+  if (!picked || dragging) { bar.classList.remove("show"); messeKopf(); return; }
   const m = picked.match;
   const wer = [(m.team1 || []).join(" / "), (m.team2 || []).join(" / ")]
     .filter(Boolean).join(" vs. ");
@@ -551,7 +597,7 @@ function renderActionBar() {
     : "";
   $("action-what").textContent = woher
     ? `${woher}: ${wer}`
-    : `${[disziplin(m.discipline), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
+    : `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
   // Beim Umhängen ist „vom Feld nehmen" die zweite sinnvolle Handlung —
   // sie steht deshalb direkt neben dem Abbrechen, statt in einem Menü.
   $("action-free").hidden = !picked.fromCourtId;
@@ -560,6 +606,7 @@ function renderActionBar() {
     ? "auf ein anderes Feld tippen"
     : "jetzt ein Feld antippen";
   bar.classList.add("show");
+  messeKopf();
 }
 
 /**
@@ -1003,7 +1050,7 @@ function courtCard(c) {
   } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
     body = `<div class="pair">${pairOf(c.team1, c.team2)}</div>
-            <div class="meta">${esc([disziplin(c.discipline), c.class_label, c.round_name].filter(Boolean).join(" · "))}</div>`;
+            <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
     const clockLabel =
       stage >= 3 ? "Letzter Aufruf" :
       stage >= 2 ? "2. Aufruf fällig" :
@@ -1106,6 +1153,7 @@ function wireCourts(box) {
       draw_name: "",
       round_name: court.round_name,
       discipline: court.discipline,
+      class_label: court.class_label,
       // Ein laufendes Spiel bleibt in seiner Halle — das Zielfeld wird
       // danach beurteilt.
       hall: court.location,
@@ -1150,7 +1198,7 @@ function queueRow(m) {
   const parts = [
     `<span class="no num">${m.match_num ?? "–"}</span>`,
     `<span class="who">${pairOf(m.team1, m.team2)}</span>`,
-    `<span class="draw">${esc([disziplin(m.discipline), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
+    `<span class="draw">${esc([klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
   ];
   if (m.prep_call) {
     parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
@@ -1540,6 +1588,10 @@ function start() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") { cancelPick(); hideToast(); }
   });
+  messeKopf();
+  // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
+  // auch die Höhe nicht mehr, an der die Felderspalte klebt.
+  window.addEventListener("resize", messeKopf);
   poll();
   setInterval(tickClocks, 1000);
   // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den

@@ -45,10 +45,12 @@ dieses eine Mal zu sehen. Die Seite warnt in diesem Fall.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück. Daneben der **Nachruf** (beide Parteien oder nur eine).
-- **Was steht wo:** Jedes Spiel nennt seine **Disziplin** (HE, DE, HD, DD,
-  GD) vor Auslosung und Runde — Turniere benennen ihre Gruppen frei, und
-  „Gruppe 6" allein verrät nicht, ob ein Einzel oder ein Doppel aufs Feld
-  soll.
+- **Was steht wo:** Jedes Spiel nennt seine **Klasse** in der gewohnten
+  Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
+  benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
+  geht. Fehlt eine der beiden Hälften, steht die andere für sich.
+- **Die Felder bleiben stehen**, während die Spielliste läuft: Auch ein
+  Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen.
 - **Ergebnis eintragen** für ein Spiel auf dem Feld.
 - **Automatik** an- und abschalten — der Schalter oben rechts.
 
