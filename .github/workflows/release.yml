@@ -25,9 +25,9 @@ jobs:
     permissions:
       contents: write # nötig, um das GitHub-Release anzulegen
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -58,7 +58,7 @@ jobs:
       # weiterhin das GitHub-Release als Transportmedium (kein Artefakt, Quota).
       - name: Test-Installer als Artefakt hochladen
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bts-light-test-setup
           path: target/release/bundle/nsis/*-setup.exe
@@ -68,7 +68,7 @@ jobs:
       # für den Linux-Publish-Job (kein upload-artifact → keine Quota).
       - name: GitHub-Release anlegen
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: BTS Light ${{ github.ref_name }}
@@ -97,7 +97,7 @@ jobs:
       # gebraucht (scripts/build-release-page.mjs). fetch-depth: 0 +
       # fetch-tags: alle Tags samt Erstell-Datum, damit die Release-Seite
       # je Version das Datum zeigen kann.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
