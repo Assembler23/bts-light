@@ -49,6 +49,127 @@ fn felder(node: &xml::Node) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Zeigt die ersten wartenden Spiele mit **allen** Sortierschlüsseln —
+/// damit sich eine Reihenfolge, die „nicht hinhaut", an Zahlen statt an
+/// Vermutungen klären lässt.
+#[tokio::test]
+#[ignore = "braucht ein laufendes BTP"]
+async fn why_is_the_queue_in_this_order() {
+    use bts_light_lib::btp::model::MatchStatus;
+    use bts_light_lib::tablet::assign;
+
+    let raw = client::send_request(
+        &host(),
+        port(),
+        &proto::tournament_info_request(password().as_deref()),
+    )
+    .await
+    .expect("BTP erreichbar");
+    let nodes = proto::decode_response(&raw).expect("dekodierbar");
+    let snap = bts_light_lib::btp::model::parse_snapshot(&nodes).expect("Snapshot");
+
+    let mut wartend: Vec<_> = snap
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+        })
+        .collect();
+    wartend.sort_by_key(|m| assign::sort_key(m, false));
+
+    println!(
+        "\n=== Die ersten 15 von {} wartenden Spielen ===",
+        wartend.len()
+    );
+    println!(
+        "{:<4} {:<7} {:<14} {:<7} {:<6} {:<8} {}",
+        "#", "MatchID", "PlannedTime", "Display", "Nr", "Ort", "Runde/Auslosung"
+    );
+    for (i, m) in wartend.iter().take(15).enumerate() {
+        println!(
+            "{:<4} {:<7} {:<14} {:<7} {:<6} {:<8} {} / {}",
+            i + 1,
+            m.id,
+            m.planned_time.map(|t| t.to_string()).unwrap_or("-".into()),
+            m.display_order.map(|d| d.to_string()).unwrap_or("-".into()),
+            m.match_num.map(|n| n.to_string()).unwrap_or("-".into()),
+            m.location_id.map(|l| l.to_string()).unwrap_or("-".into()),
+            m.round_name,
+            m.draw_name,
+        );
+    }
+
+    // Woher kommt die Reihenfolge wirklich? Die Referenzliste aus BTP
+    // sortiert nach Auslosung, dann Spielnummer. Also nachsehen, welche
+    // Ordnungszahlen an Draw und Stage hängen.
+    fn finde<'a>(nodes: &'a [xml::Node], gesucht: &str) -> Option<&'a xml::Node> {
+        for n in nodes {
+            if n.id() == gesucht {
+                return Some(n);
+            }
+            if let Some(t) = finde(n.children(), gesucht) {
+                return Some(t);
+            }
+        }
+        None
+    }
+    fn kind_int(n: &xml::Node, id: &str) -> Option<i64> {
+        n.children()
+            .iter()
+            .find(|c| c.id() == id)
+            .and_then(|c| match c.value() {
+                Some(xml::Value::Integer(i)) => Some(*i),
+                _ => None,
+            })
+    }
+    fn kind_str(n: &xml::Node, id: &str) -> String {
+        n.children()
+            .iter()
+            .find(|c| c.id() == id)
+            .and_then(|c| match c.value() {
+                Some(xml::Value::String(s)) => Some(s.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+    if let Some(draws) = finde(&nodes, "Draws") {
+        println!("\n=== Draws: ID, DisplayOrder, Position, StageID, Name ===");
+        let mut liste: Vec<_> = draws
+            .children()
+            .iter()
+            .map(|d| {
+                (
+                    kind_int(d, "ID").unwrap_or(0),
+                    kind_int(d, "DisplayOrder"),
+                    kind_int(d, "Position"),
+                    kind_int(d, "StageID"),
+                    kind_str(d, "Name"),
+                )
+            })
+            .collect();
+        liste.sort_by_key(|(_, d, _, _, _)| d.unwrap_or(i64::MAX));
+        for (id, disp, pos, stage, name) in liste.iter().take(12) {
+            println!(
+                "  ID={id:<5} Display={:<5} Position={:<5} Stage={:<5} {name}",
+                disp.map(|v| v.to_string()).unwrap_or("-".into()),
+                pos.map(|v| v.to_string()).unwrap_or("-".into()),
+                stage.map(|v| v.to_string()).unwrap_or("-".into()),
+            );
+        }
+    }
+
+    // Und die Statusverteilung: Ein Spiel, das schon einmal auf einem Feld
+    // stand, könnte einen anderen Status tragen und dadurch herausfallen.
+    let mut nach_status = std::collections::BTreeMap::new();
+    for m in &snap.matches {
+        *nach_status.entry(format!("{:?}", m.status)).or_insert(0) += 1;
+    }
+    println!("\n=== Status aller Matches ===");
+    for (s, n) in nach_status {
+        println!("  {s:<12} {n}");
+    }
+}
+
 #[tokio::test]
 #[ignore = "braucht ein laufendes BTP"]
 async fn what_does_this_tournament_send_about_locations() {

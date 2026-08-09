@@ -64,7 +64,7 @@ pub fn player_key(p: &BtpPlayer) -> String {
 /// eine andere Reihenfolge, als die Automatik verwendet, verlöre die
 /// Turnierleitung das Vertrauen in beide.
 pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64, i64) {
-    sort_key_parts(called, m.planned_time, m.display_order, m.match_num, m.id)
+    sort_key_parts(called, m.planned_time, Some(m.draw_id), m.match_num, m.id)
 }
 
 /// Wie [`sort_key`], aber aus Einzelwerten — für Aufrufer, die kein
@@ -1252,17 +1252,26 @@ mod tests {
         // Aus der echten Ansetzung (Nr 2, 6, 2, 6 …) wurde bei uns „erst
         // alle Nummer 2, dann alle Nummer 6" — eine Reihenfolge, die im
         // Turnierplan nirgends steht.
-        let plan = |id, nr, order| {
+        // Sortiert wird nach der **Auslosung** (DrawID), dann nach der
+        // Spielnummer — genau so steht es in der aus BTP exportierten Liste:
+        // „Gruppe 3 Nr 2, Gruppe 3 Nr 6, Gruppe 4 Nr 2, …".
+        //
+        // Bis 09.08.2026 stand hier die `DisplayOrder` des Matches. Die haben
+        // aber nur wenige Spiele (im gemessenen Turnier rund jedes zehnte),
+        // und die ohne landeten hinter allen anderen — das erste Spiel des
+        // Tages stand plötzlich an fünfter Stelle.
+        let plan = |id, nr, draw| {
             let mut m = a_match(id);
             m.planned_time = Some(202_702_050_900); // alle 9:00
             m.match_num = Some(nr);
-            m.display_order = Some(order);
+            m.draw_id = draw;
             m
         };
-        // So setzt BTP an: abwechselnd, nach DisplayOrder.
-        let erst = plan(1241, 2, 1);
-        let dann = plan(1236, 6, 2);
-        let drittens = plan(1266, 2, 3);
+        // Gruppe 3 (Draw 24) vor Gruppe 4 (Draw 25); innerhalb der Gruppe
+        // entscheidet die Spielnummer.
+        let erst = plan(1241, 2, 24);
+        let dann = plan(1236, 6, 24);
+        let drittens = plan(1266, 2, 25);
 
         let mut list = [
             sort_key(&drittens, false),

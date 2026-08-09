@@ -583,19 +583,20 @@ mod tests {
         // andere „nächste Spiele" als der Turnierplan, sucht die
         // Turnierleitung den Fehler bei sich — und Zuschauer warten am
         // falschen Feld. Maßgeblich ist die Ansetzung: erst die Zeit, dann
-        // die Reihenfolge innerhalb des Zeitfensters.
+        // die Reihenfolge innerhalb des Zeitfensters — und die ergibt sich aus
+        // der Auslosung (DrawID), nicht aus der Spielnummer.
         let mut frueh = sample_match(1, MatchStatus::Scheduled, None);
         frueh.match_num = Some(90); // hohe Nummer, aber zuerst angesetzt
         frueh.planned_time = Some(202_702_050_900);
-        frueh.display_order = Some(1);
+        frueh.draw_id = 24; // Gruppe 3
         let mut spaet = sample_match(2, MatchStatus::Scheduled, None);
         spaet.match_num = Some(2); // kleine Nummer, aber später dran
         spaet.planned_time = Some(202_702_050_900);
-        spaet.display_order = Some(2);
+        spaet.draw_id = 25; // Gruppe 4 — dieselbe Zeit, spätere Auslosung
         let mut viel_spaeter = sample_match(3, MatchStatus::Scheduled, None);
         viel_spaeter.match_num = Some(1);
         viel_spaeter.planned_time = Some(202_702_051_100);
-        viel_spaeter.display_order = Some(1);
+        viel_spaeter.draw_id = 24;
 
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
