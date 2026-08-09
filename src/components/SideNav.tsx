@@ -12,6 +12,7 @@ import {
   Tablet,
   Trophy,
   Tv,
+  UserCheck,
   Wrench,
 } from "lucide-react";
 import type { AppConfig } from "../types";
@@ -22,6 +23,7 @@ export type NavView =
   | "fields"
   | "tablets"
   | "tlweb"
+  | "checkin"
   | "announce"
   | "monitors"
   | "winners"
@@ -30,7 +32,7 @@ export type NavView =
 
 /** Abschnitts-Anker in den Einstellungen (für den Sprung aus einem
  *  ausgegrauten Menüpunkt). */
-export type SettingsFocus = "ansagen" | "court-monitor";
+export type SettingsFocus = "ansagen" | "court-monitor" | "check-in";
 
 interface NavItem {
   view: NavView;
@@ -55,6 +57,17 @@ function items(config: AppConfig): NavItem[] {
       label: "Turnierleitung",
       icon: ClipboardList,
       enabled: true,
+    },
+    // Ausgegraut, solange kein Häkchen ODER keine Turnier-Kennung gesetzt ist:
+    // ohne Kennung erreicht der Check-In badhub nie, und eine Seite, die nur
+    // „nicht eingerichtet" sagt, führte in die Irre. Der Klick springt dann
+    // genau in den Abschnitt, in dem beides steht.
+    {
+      view: "checkin",
+      label: "Check-In",
+      icon: UserCheck,
+      enabled: config.checkin.enabled && config.checkin.tournament_uuid !== "",
+      focus: "check-in",
     },
     {
       view: "announce",

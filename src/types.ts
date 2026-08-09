@@ -130,6 +130,64 @@ export interface CheckinConfig {
   missing_names_max: number;
 }
 
+/** Ist der Check-In gerade benutzbar (Rust: badhub::checkin_state::Availability)?
+ *
+ *  `unsupported` und `offline` sind **keine Fehler**: das Feature ist additiv,
+ *  das Turnier läuft ohne es unverändert weiter (AK-C3, C4). Nur `rejected`
+ *  verlangt eine Handlung — Passwort oder Turnier-Kennung stimmen nicht. */
+export type CheckinAvailability =
+  | "ready"
+  | "offline"
+  | "unsupported"
+  | "rejected";
+
+/** Ein Spieler in einer Klasse, aus Sicht der Turnierleitung.
+ *
+ *  Trägt mehr als die öffentliche Seite: `query` („bitte zur Turnierleitung")
+ *  und `locked` verlassen badhub nach außen nie. */
+export interface CheckinPlayer {
+  player_id: number;
+  entry_id: number;
+  first: string;
+  last: string;
+  club: string | null;
+  nationality: string | null;
+  /** `open` · `checked_in` · `query` */
+  state: string;
+  /** `self` · `partner` · `official` — wodurch der Check-In zustande kam. */
+  source: string | null;
+  /** Von der Turnierleitung zurückgesetzt: Selbst-Check-In gesperrt. */
+  locked: boolean;
+  checked_in_at: string | null;
+}
+
+/** Eine Spielklasse mit Check-In-Fenster und Meldungen. */
+export interface CheckinClass {
+  event_id: number;
+  name: string;
+  discipline: string;
+  starts_at: string | null;
+  closes_at: string | null;
+  /** Öffnungszeitpunkt des Fensters — **von badhub berechnet**. */
+  opens_at: string | null;
+  /** `unscheduled` · `pending` · `open` · `closed` · `live`. Serverseitig in
+   *  Europe/Berlin bestimmt; die Uhr dieses Rechners geht nicht ein. */
+  state: string;
+  is_live: boolean;
+  gemeldet: number;
+  eingecheckt: number;
+  players: CheckinPlayer[];
+}
+
+/** Was die Check-In-Seite anzeigt (Rust: badhub::checkin_state::CheckinView). */
+export interface CheckinView {
+  availability: CheckinAvailability;
+  tournament_name: string;
+  classes: CheckinClass[];
+  /** Klartext für die Oberfläche, wenn etwas zu sagen ist. */
+  message: string;
+}
+
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
 export interface CourtMonitorConfig {
   /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der

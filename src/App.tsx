@@ -31,6 +31,7 @@ import { MaintenancePage } from "./pages/MaintenancePage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
 import { TlWebPanel } from "./pages/TlWebPanel";
+import { CheckinPanel } from "./pages/CheckinPanel";
 import { WinnersPage } from "./pages/WinnersPage";
 import type {
   AppConfig,
@@ -378,6 +379,10 @@ function App() {
         // Einstellungen den alten `tl_web`-Stand zurück — und löschte alle
         // Kopplungen, deren Zugänge niemand wiederherstellen kann.
         return <TlWebPanel onConfigSaved={(c) => setConfig(c)} />;
+      case "checkin":
+        // Hält keinen eigenen Stand: die Seite pollt badhub und schreibt
+        // direkt dorthin durch (AK-C13). Deshalb auch kein `onConfigSaved`.
+        return <CheckinPanel announce={config.announce} />;
       case "announce":
         return (
           <AnnouncePage
