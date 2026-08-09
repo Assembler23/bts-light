@@ -51,6 +51,39 @@ dieses eine Mal zu sehen. Die Seite warnt in diesem Fall.
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
 - **Die Felder bleiben stehen**, während die Spielliste läuft: Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen.
+
+### Die Farbe eines Feldes
+
+Jede Feldkachel trägt links einen Streifen in der Farbe ihres Zustands. Aus
+zehn Metern erkennbar, ohne dass die Namen an Kontrast verlieren:
+
+| Farbe | Bedeutung |
+|---|---|
+| — (grau, gestrichelt) | frei |
+| Blau | aufgerufen, es geht gleich los |
+| **Rot** (ganze Kachel getönt) | aufgerufen, aber **noch kein einziger Punkt** — und die eingestellte Zeit ist um. Da muss jemand hin. |
+| Grün | es wird gezählt |
+| Violett | beendet, BTP hat das Feld noch nicht freigegeben |
+
+Ab wann „überfällig" gilt, stellst du in bts-light unter **Aufruf-Timer**
+ein („Feld färbt sich rot, wenn nach … Minuten noch kein Punkt gefallen
+ist", Standard 5). Die Einstellung gilt für alle Geräte — sonst leuchtete
+eine Halle rot und die andere nicht. Sie wirkt unabhängig davon, ob der
+Aufruf-Timer selbst eingeschaltet ist.
+
+Die Farbe steht nie allein: Satzstand und Uhrbeschriftung („im Spiel seit"
+gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
+
+### Anzeige (Klappmenü im Kopf)
+
+Zwei Schalter, die **je Gerät** gelten und dort gespeichert bleiben — der
+eine Helfer sucht nach der Spielnummer aus dem Papierplan, der andere kann
+damit nichts anfangen:
+
+- **Spielnummer zeigen** (Standard: an) — die Zahl ganz links in der Liste.
+- **Nationen zeigen** (Standard: **aus**) — das Länderkürzel neben jedem
+  Namen, farbig hinterlegt, damit gleiche Nationen zusammen ins Auge
+  fallen. Hilfreich bei internationalen Turnieren.
 - **Ergebnis eintragen** für ein Spiel auf dem Feld.
 - **Automatik** an- und abschalten — der Schalter oben rechts.
 

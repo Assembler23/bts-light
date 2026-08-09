@@ -84,6 +84,12 @@ export interface CallTimerConfig {
   second_call_minutes: number;
   /** Minuten nach dem 1. Aufruf, ab denen der 3./letzte Aufruf fällig ist. */
   third_call_minutes: number;
+  /**
+   * Minuten nach dem 1. Aufruf, ab denen ein Spiel ohne einen einzigen Punkt
+   * als überfällig gilt — die Turnierleitungs-Seite färbt das Feld dann rot.
+   * Gilt unabhängig von `enabled`.
+   */
+  not_started_minutes: number;
 }
 
 /** Zähltafelbediener-Verwaltung (Rust: config::ScorekeeperConfig, ADR 0007). */

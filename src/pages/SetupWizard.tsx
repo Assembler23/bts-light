@@ -322,6 +322,10 @@ export function SetupWizard({
     String(ct?.second_call_minutes ?? 2),
   );
   const [ctThird, setCtThird] = useState(String(ct?.third_call_minutes ?? 4));
+  // Schwelle für die rote Feldkachel auf der Turnierleitungs-Seite.
+  const [ctNotStarted, setCtNotStarted] = useState(
+    String(ct?.not_started_minutes ?? 5),
+  );
   // Zähltafelbediener-Verwaltung (ADR 0007): Verlierer-Warteschlange führen.
   const [skEnabled, setSkEnabled] = useState(
     initialConfig.scorekeeper?.enabled ?? false,
@@ -475,6 +479,8 @@ export function SetupWizard({
           enabled: ctEnabled,
           second_call_minutes: second,
           third_call_minutes: thirdRaw > second ? thirdRaw : second + 1,
+          not_started_minutes:
+            Number(ctNotStarted) > 0 ? Number(ctNotStarted) : 5,
         };
       })(),
       scorekeeper: {
@@ -1106,6 +1112,24 @@ export function SetupWizard({
             )}
           </div>
         )}
+
+        {/* Bewusst außerhalb des Schalters oben: Die Einfärbung ist eine
+            Anzeige, kein Aufruf-Automatismus — sie hilft auch Turnieren, die
+            ohne Aufruf-Timer arbeiten. */}
+        <div className="mt-2 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+          <Field
+            label="Feld färbt sich rot, wenn nach (Minuten) noch kein Punkt gefallen ist"
+            value={ctNotStarted}
+            onChange={setCtNotStarted}
+            type="number"
+          />
+          <p className="text-xs text-slate-500">
+            Gilt für die <strong>Turnierleitungs-Oberfläche</strong>: Dort ist
+            jedes Feld nach seinem Zustand eingefärbt — aufgerufen, überfällig,
+            im Spiel, beendet. „Überfällig" heißt: aufgerufen, aber nach dieser
+            Zeit ist noch kein einziger Punkt gefallen.
+          </p>
+        </div>
       </section>
 
       {/* Zähltafelbediener-Verwaltung (ADR 0007) */}

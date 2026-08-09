@@ -71,6 +71,31 @@ header {
 }
 .halls button:focus-visible, .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
+/* Anzeige-Vorlieben: ein kleines Klappmenü im Kopf. Was hier steht, ist
+   Geschmackssache je Gerät und darf niemanden stören, der es nicht braucht —
+   deshalb zugeklappt und unauffällig. */
+.anzeige { position: relative; font-size: .85rem; }
+.anzeige summary {
+  list-style: none; cursor: pointer; user-select: none;
+  padding: 7px 12px; min-height: 40px; display: flex; align-items: center;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft);
+}
+.anzeige summary::-webkit-details-marker { display: none; }
+.anzeige[open] summary { border-color: var(--accent); color: var(--accent); }
+/* Die Schalter hängen als Kasten unter dem Knopf, statt die Kopfzeile
+   auseinanderzuschieben. */
+.anzeige .menue {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 4px; min-width: 13rem;
+}
+.anzeige .menue label {
+  display: flex; align-items: center; gap: 9px; padding: 9px 10px;
+  white-space: nowrap; cursor: pointer; border-radius: 7px;
+}
+.anzeige .menue label:hover { background: #f1f5f9; }
+
 /* Schalter für die automatische Vergabe. Sein Zustand muss auf einen Blick
    erkennbar sein: Läuft sie mit, während jemand von Hand umsortiert, räumt
    sie ihm die Felder um, und niemand versteht, warum. */
@@ -136,6 +161,22 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   display: flex; flex-direction: column; gap: 6px;
 }
 .card.free { background: #f8fafc; border-style: dashed; }
+
+/* ── Feldzustand als Farbe ─────────────────────────────────────────────
+   Ein breiter Streifen an der Kante statt einer getönten Fläche: Er ist aus
+   der Entfernung erkennbar, ohne dass die Namen an Kontrast verlieren — und
+   bleibt bei minimaler Display-Helligkeit lesbar. Die Farbe steht nie
+   allein: Daneben stehen Satzstand und Uhrbeschriftung („im Spiel seit",
+   „auf dem Feld seit"), sodass auch ohne Farbunterscheidung klar ist, was
+   los ist. */
+.card { border-left-width: 5px; }
+.card.zustand-gerufen { border-left-color: var(--accent); }
+.card.zustand-ueberfaellig {
+  background: #fef2f2; border-color: #fecaca; border-left-color: var(--alarm);
+}
+.card.zustand-laeuft { border-left-color: var(--ok); }
+.card.zustand-beendet { border-left-color: #a855f7; background: #faf5ff; }
+.card.zustand-frei { border-left-color: transparent; }
 .card.locked { background: #f8fafc; opacity: .65; }
 .card.clearing { border-color: #fed7aa; background: #fffbeb; }
 .card-top { display: flex; align-items: baseline; gap: 8px; }
@@ -147,7 +188,41 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .badge.alarm { background: #fee2e2; color: #991b1b; }
 .badge.warn { background: #ffedd5; color: #9a3412; }
 .pair { font-weight: 600; line-height: 1.25; }
-.pair .vs { color: var(--ink-faint); font-weight: 500; }
+
+/* ── Die Paarung ───────────────────────────────────────────────────────
+   Drei Spalten: eine Partei, das „vs.", die andere Partei. Im Doppel stehen
+   die Partner untereinander — bei vier langen Namen war die alte Zeile mit
+   Schrägstrichen ein Fließtext, in dem man suchen musste, wo die eine Partei
+   endet. Lange Namen brechen innerhalb ihrer Spalte um, statt die Kachel zu
+   sprengen (`minmax(0, 1fr)` erlaubt das Schrumpfen unter die Wortbreite). */
+.paar {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center; gap: 4px 8px;
+}
+.paar .seite { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.paar .seite:last-child { text-align: right; align-items: flex-end; }
+/* Der Name selbst ist die Zeile; das Nationen-Kürzel steht daneben und
+   schrumpft nie mit. Rechts umgekehrt, damit das Kürzel außen bleibt und
+   die Namen an der Mittelachse anliegen. */
+.paar .spieler {
+  display: flex; align-items: baseline; gap: 5px; min-width: 0;
+  overflow-wrap: anywhere; hyphens: auto;
+}
+.paar .seite:last-child .spieler { flex-direction: row-reverse; }
+.vs {
+  color: var(--ink-faint); font-weight: 500; font-size: .85em;
+  justify-self: center;
+}
+
+/* Nation als Kürzel mit eigener Farbe. Der Farbton kommt aus dem Kürzel
+   selbst (`--ton`), damit gleiche Nationen ohne gepflegte Länderliste gleich
+   aussehen. Blass gehalten: Es ist eine Zusatzinfo, kein Alarm. */
+.nat {
+  flex: none; padding: 0 5px;
+  border-radius: 4px; font-size: .68rem; font-weight: 700; letter-spacing: .03em;
+  background: hsl(var(--ton, 210) 70% 92%);
+  color: hsl(var(--ton, 210) 55% 30%);
+}
 .meta { font-size: .85rem; color: var(--ink-soft); }
 .card-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
 /* Satzstand und Uhr stehen nebeneinander und sehen sonst gleich aus —
@@ -374,6 +449,13 @@ body.offline .wo .actions button { opacity: .45; }
     <span class="halls" id="halls"></span>
     <button type="button" class="auto" id="auto-toggle" hidden></button>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
+    <details class="anzeige">
+      <summary>Anzeige</summary>
+      <div class="menue">
+        <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
+        <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
+      </div>
+    </details>
   </header>
   <div class="banner" id="banner"></div>
   <div class="action-bar" id="action-bar">
@@ -509,6 +591,26 @@ const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="tr
   <path d="M14.5 8.5a5 5 0 0 1 0 7"/>
   <path d="M17.5 6a9 9 0 0 1 0 12"/>
 </svg>`;
+
+// ── Anzeige-Vorlieben ─────────────────────────────────────────────────
+// Am Gerät, nicht am Turnier: Der eine Helfer sucht nach der Spielnummer aus
+// dem Papierplan, der andere kann damit nichts anfangen. Beides wäre als
+// turnierweite Einstellung falsch — es hinge davon ab, wer zuletzt gespeichert
+// hat.
+let zeigeNummern = localStorage.getItem("bts-tl-nummern") !== "aus";
+let zeigeNationen = localStorage.getItem("bts-tl-nationen") === "an";
+
+function setzeVorliebe(name, an) {
+  if (name === "nummern") {
+    zeigeNummern = an;
+    localStorage.setItem("bts-tl-nummern", an ? "an" : "aus");
+  } else {
+    zeigeNationen = an;
+    localStorage.setItem("bts-tl-nationen", an ? "an" : "aus");
+  }
+  renderCourts();
+  renderQueue();
+}
 
 // ── Bedienzustand ─────────────────────────────────────────────────────
 // Drei Lagen, mehr braucht es nicht: nichts gewählt · ein Spiel gewählt ·
@@ -997,8 +1099,45 @@ function renderConnection() {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const pairOf = (t1, t2) =>
-  `${esc((t1 || []).join(" / ") || "?")} <span class="vs">vs.</span> ${esc((t2 || []).join(" / ") || "?")}`;
+/**
+ * Eine Paarung: links die eine Partei, rechts die andere, das „vs." in der
+ * Mitte. Im Doppel stehen die Partner **untereinander** — nebeneinander mit
+ * Schrägstrich ergab bei vier langen Namen einen Fließtext, in dem man erst
+ * suchen musste, wo die eine Partei aufhört.
+ *
+ * Die Nation steht als Kürzel vor dem Namen, wenn sie eingeschaltet ist.
+ */
+function pairOf(t1, t2, nat1, nat2) {
+  const seite = (namen, nationen) => {
+    const liste = (namen || []).length ? namen : ["?"];
+    return liste.map((n, i) => {
+      const land = zeigeNationen ? (nationen || [])[i] : "";
+      return `<span class="spieler">${nationBadge(land)}${esc(n)}</span>`;
+    }).join("");
+  };
+  return `<span class="paar">
+    <span class="seite">${seite(t1, nat1)}</span>
+    <span class="vs">vs.</span>
+    <span class="seite">${seite(t2, nat2)}</span>
+  </span>`;
+}
+
+/**
+ * Das Nationen-Kürzel als farbiges Etikett.
+ *
+ * Die Farbe kommt aus dem Kürzel selbst — gleiche Nation, gleicher Farbton,
+ * über alle Geräte und ohne gepflegte Länderliste. Das Kürzel steht immer
+ * dabei: Farbe allein wäre für die vielen Nationen eines offenen Turniers
+ * ohnehin nicht auseinanderzuhalten, und ein farbenblinder Helfer stünde im
+ * Regen.
+ */
+function nationBadge(code) {
+  const c = (code || "").trim().toUpperCase();
+  if (!c) return "";
+  let hash = 0;
+  for (const zeichen of c) hash = (hash * 31 + zeichen.charCodeAt(0)) % 360;
+  return `<span class="nat" style="--ton:${hash}">${esc(c)}</span>`;
+}
 
 /**
  * Kurzform einer Partei für die Nachruf-Knöpfe.
@@ -1024,9 +1163,32 @@ function renderHalls() {
     b.addEventListener("click", () => setHall(b.dataset.hall)));
 }
 
+/**
+ * In welchem Zustand ist dieses Feld? Vier Lagen, die sich im Betrieb
+ * unterscheiden — und die man aus zehn Metern Entfernung auseinanderhalten
+ * können muss:
+ *
+ * - `frei` — nichts drauf
+ * - `gerufen` — aufgerufen, noch kein Punkt gefallen, im Rahmen
+ * - `ueberfaellig` — aufgerufen, kein Punkt, und die eingestellte Zeit ist
+ *   um. Das ist die Kachel, zu der jemand hingehen muss.
+ * - `laeuft` — es wird gezählt
+ * - `beendet` — fertig, BTP hat das Feld nur noch nicht abgeräumt
+ */
+function courtState(c) {
+  if (c.clearing) return "beendet";
+  if (!c.match_id) return "frei";
+  if (isPlaying(c)) return "laeuft";
+  const grenze = (state.call_timer && state.call_timer.not_started_minutes) || 5;
+  if (c.on_court_since_ms && serverNow() - c.on_court_since_ms > grenze * 60000) {
+    return "ueberfaellig";
+  }
+  return "gerufen";
+}
+
 function courtCard(c) {
   const stage = callStage(c, state.call_timer);
-  const classes = ["card"];
+  const classes = ["card", "zustand-" + courtState(c)];
   if (c.clearing) classes.push("clearing");
   else if (!c.match_id) classes.push("free");
   if (c.locked) classes.push("locked");
@@ -1049,7 +1211,7 @@ function courtCard(c) {
             <div class="meta">Warte auf die Bestätigung vom Turnier-PC.</div>`;
   } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
-    body = `<div class="pair">${pairOf(c.team1, c.team2)}</div>
+    body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat)}</div>
             <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
     const clockLabel =
       stage >= 3 ? "Letzter Aufruf" :
@@ -1195,11 +1357,12 @@ function renderCourts() {
 }
 
 function queueRow(m) {
-  const parts = [
-    `<span class="no num">${m.match_num ?? "–"}</span>`,
-    `<span class="who">${pairOf(m.team1, m.team2)}</span>`,
+  const parts = [];
+  if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
+  parts.push(
+    `<span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat)}</span>`,
     `<span class="draw">${esc([klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
-  ];
+  );
   if (m.prep_call) {
     parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
       gerufen seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
@@ -1565,6 +1728,19 @@ function tickClocks() {
     const since = Number(el.dataset.since);
     if (since) el.textContent = "gerufen seit " + elapsed(since);
   });
+  // Der Sprung von „gerufen" auf „überfällig" hängt allein an der Uhr — er
+  // käme sonst erst, wenn sich am Turnier sonst irgendetwas ändert. In einer
+  // ruhigen Phase wäre das ausgerechnet nie.
+  state.courts.forEach((c) => {
+    const el = document.querySelector(`.card[data-court="${c.court_id}"]`);
+    if (!el) return;
+    const soll = "zustand-" + courtState(c);
+    if (!el.classList.contains(soll)) {
+      el.classList.remove("zustand-frei", "zustand-gerufen", "zustand-ueberfaellig",
+        "zustand-laeuft", "zustand-beendet");
+      el.classList.add(soll);
+    }
+  });
 }
 
 function start() {
@@ -1588,6 +1764,13 @@ function start() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") { cancelPick(); hideToast(); }
   });
+  $("opt-nummern").checked = zeigeNummern;
+  $("opt-nationen").checked = zeigeNationen;
+  $("opt-nummern").addEventListener("change", (ev) =>
+    setzeVorliebe("nummern", ev.currentTarget.checked));
+  $("opt-nationen").addEventListener("change", (ev) =>
+    setzeVorliebe("nationen", ev.currentTarget.checked));
+
   messeKopf();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
   // auch die Höhe nicht mehr, an der die Felderspalte klebt.

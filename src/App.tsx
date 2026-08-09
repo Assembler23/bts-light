@@ -92,6 +92,7 @@ function defaultConfig(): AppConfig {
       enabled: false,
       second_call_minutes: 2,
       third_call_minutes: 4,
+      not_started_minutes: 5,
     },
     scorekeeper: {
       enabled: false,

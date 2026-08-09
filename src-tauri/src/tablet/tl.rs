@@ -1375,6 +1375,10 @@ pub struct TlCallTimer {
     pub enabled: bool,
     pub second_call_minutes: f64,
     pub third_call_minutes: f64,
+    /// Ab wann ein aufgerufenes Spiel ohne einen einzigen Punkt als
+    /// überfällig gilt — die Schwelle für die auffällige Feldfarbe. Kommt
+    /// vom Turnier-PC, damit alle Geräte dasselbe Feld rot sehen.
+    pub not_started_minutes: f64,
 }
 
 /// Ein Feld mit dem, was gerade darauf läuft.
@@ -1396,6 +1400,15 @@ pub struct TlCourt {
     pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
+    /// Nationen als ISO-Kürzel („GER"), **parallel** zu `team1`/`team2`;
+    /// leerer String, wo BTP nichts führt.
+    ///
+    /// Standardmäßig blendet die Seite sie aus — eingeschaltet helfen sie
+    /// bei internationalen Turnieren, die richtige Paarung ans Feld zu
+    /// holen. Dieselbe Angabe zeigt der Court-Monitor als Flagge, dort
+    /// sogar öffentlich; hier steht sie hinter dem Gerätezugang.
+    pub team1_nat: Vec<String>,
+    pub team2_nat: Vec<String>,
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
@@ -1444,6 +1457,10 @@ pub struct TlMatch {
     pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
+    /// Nationen als ISO-Kürzel, **parallel** zu den Namen (leerer String =
+    /// keine Angabe). Siehe [`TlCourt::team1_nat`].
+    pub team1_nat: Vec<String>,
+    pub team2_nat: Vec<String>,
     /// In welche Halle das Spiel gehört, und woher wir das wissen.
     pub hall: String,
     pub hall_source: HallSource,
@@ -1657,6 +1674,16 @@ pub(crate) fn build_state_limited(
             discipline: m.discipline.as_str().to_string(),
             team1: m.team1.iter().map(|p| p.name.clone()).collect(),
             team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+            team1_nat: m
+                .team1
+                .iter()
+                .map(|p| p.nationality.clone().unwrap_or_default())
+                .collect(),
+            team2_nat: m
+                .team2
+                .iter()
+                .map(|p| p.nationality.clone().unwrap_or_default())
+                .collect(),
             hall,
             hall_source,
             prep_call: call.map(|(hall, called_at_ms)| TlPrepCall {
@@ -1767,6 +1794,7 @@ fn call_timer_view(config: &AppConfig) -> TlCallTimer {
         enabled: config.call_timer.enabled,
         second_call_minutes: config.call_timer.second_call_minutes,
         third_call_minutes: config.call_timer.third_call_minutes,
+        not_started_minutes: config.call_timer.not_started_minutes,
     }
 }
 
@@ -1800,6 +1828,8 @@ fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> 
         discipline: c.discipline.as_str().to_string(),
         team1: c.team1,
         team2: c.team2,
+        team1_nat: c.team1_nationalities,
+        team2_nat: c.team2_nationalities,
         sets: c.sets,
         tablet_connected: c.tablet_connected,
         injury: c.injury,
@@ -3370,6 +3400,43 @@ mod tests {
     }
 
     #[test]
+    fn the_page_learns_when_a_called_match_counts_as_overdue() {
+        // Die Turnierleitung faerbt ihre Feldkacheln danach ein: aufgerufen,
+        // zu lange nicht angefangen, im Spiel, beendet. Ab wann „zu lange"
+        // gilt, entscheidet das Turnier — und die Schwelle muss auf jedem
+        // Gerät dieselbe sein, sonst leuchtet eine Halle rot und die andere
+        // nicht.
+        let mut cfg = AppConfig::default();
+        cfg.call_timer.not_started_minutes = 7.5;
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+
+        let s = build_state(&tablet, &cfg, 1_000, 1);
+        assert_eq!(s.call_timer.not_started_minutes, 7.5);
+    }
+
+    #[test]
+    fn nationalities_travel_next_to_the_names() {
+        // Für die zuschaltbare Nationen-Anzeige. Parallel zu den Namen statt
+        // verschachtelt: Die Seite geht beide Listen im Gleichschritt durch,
+        // und ein fehlender Eintrag (nicht jeder Spieler hat eine Angabe)
+        // bleibt ein leerer Platz statt einer Lücke, die alles verschiebt.
+        let tablet = TabletState::default();
+        let mut wartend = a_match(2);
+        wartend.team1[0].nationality = Some("GER".to_string());
+        wartend.team2[0].nationality = None;
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![wartend], Vec::new()));
+
+        let s = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        assert_eq!(s.queue[0].team1_nat, vec!["GER"]);
+        assert_eq!(
+            s.queue[0].team2_nat,
+            vec![""],
+            "ohne Angabe ein leerer Platz — die Listen bleiben gleich lang"
+        );
+    }
+
+    #[test]
     fn every_match_carries_its_discipline() {
         // Turniere benennen ihre Auslosungen frei („Gruppe 6"). Steht dort
         // nicht zufällig „HE" drin, ist am Bildschirm nicht zu erkennen, ob
@@ -3637,6 +3704,7 @@ mod tests {
             "active_hall",
             "second_call_minutes",
             "third_call_minutes",
+            "not_started_minutes",
             "courts",
             "queue",
             "truncated_halls",
@@ -3661,6 +3729,12 @@ mod tests {
             "discipline",
             "team1",
             "team2",
+            // Nation als ISO-Kürzel, zuschaltbar und standardmäßig aus.
+            // Dieselbe Angabe zeigt der Court-Monitor öffentlich als Flagge;
+            // hier steht sie hinter dem Gerätezugang. Kein Geburtsjahr, kein
+            // Verein, keine Lizenznummer — die bleiben draußen.
+            "team1_nat",
+            "team2_nat",
             "sets",
             "tablet_connected",
             "injury",
@@ -3728,8 +3802,16 @@ mod tests {
     fn the_state_never_carries_personal_data_beyond_its_purpose() {
         // Diese Daten laufen über eine aus dem Internet erreichbare Seite.
         // Der Test schlägt fehl, sobald jemand ein Feld nachrüstet, das
-        // Lizenznummer, Geburtsjahr oder Nationalität transportiert — er
-        // macht die Datenschutzregel durchsetzbar statt nur dokumentiert.
+        // Lizenznummer, Geburtsjahr oder Verein transportiert — er macht die
+        // Datenschutzregel durchsetzbar statt nur dokumentiert.
+        //
+        // **Die Nation ist seit 09.08.2026 erlaubt** und stand vorher hier
+        // auf der Verbotsliste. Bewusst geändert: Die Turnierleitung braucht
+        // sie bei internationalen Turnieren, um die richtige Paarung ans Feld
+        // zu holen. Es bleibt beim ISO-Kürzel, die Anzeige ist je Gerät
+        // zuschaltbar und standardmäßig aus — und dieselbe Angabe zeigt der
+        // Court-Monitor ohnehin öffentlich als Flagge, während sie hier
+        // hinter dem Gerätezugang steht.
         let mut running = a_match(1);
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
@@ -3746,12 +3828,12 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 
         for verboten in [
-            "08-001234",  // die Lizenznummer aus dem Fixture
-            "member",     // Lizenznummer-Feld
-            "nationalit", // Nationalität (nur für die Sprachwahl der Ansage)
-            "ger",        // deren Wert aus dem Fixture
-            "birth",      // Geburtsjahr — laut Projektregel nirgends
+            "08-001234", // die Lizenznummer aus dem Fixture
+            "member",    // Lizenznummer-Feld
+            "birth",     // Geburtsjahr — laut Projektregel nirgends
             "geburt",
+            "club",    // Verein: für die Vergabe ohne Belang
+            "verein",  //
             "battery", // Akkustand: keine Geräte-Übersicht in diesem Feature
             "serving", // Aufschlag: Zählhilfe, keine Vergabehilfe
         ] {
@@ -3760,6 +3842,12 @@ mod tests {
                 "'{verboten}' darf nicht im Anzeige-Zustand stehen: {json}"
             );
         }
+        // Die Nation darf — aber nur als Kürzel neben dem Namen, nicht als
+        // ganzer Spieler-Datensatz.
+        assert!(
+            json.contains("team1_nat"),
+            "die zuschaltbare Nationen-Anzeige braucht das Kürzel"
+        );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
         assert!(json.contains("müller"));

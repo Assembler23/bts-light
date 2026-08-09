@@ -223,6 +223,14 @@ pub struct CallTimerConfig {
     pub second_call_minutes: f64,
     /// Minuten nach dem 1. Aufruf, ab denen der 3./letzte Aufruf fällig ist.
     pub third_call_minutes: f64,
+    /// Minuten nach dem 1. Aufruf, ab denen ein Spiel, in dem **noch kein
+    /// Punkt gefallen ist**, als überfällig gilt. Die Turnierleitungs-Seite
+    /// färbt solche Felder auffällig ein.
+    ///
+    /// Bewusst unabhängig vom `enabled`-Schalter oben: Die Einfärbung ist
+    /// eine Anzeige, kein Aufruf-Automatismus — sie soll auch in Turnieren
+    /// wirken, die ohne Aufruf-Timer arbeiten.
+    pub not_started_minutes: f64,
 }
 
 impl Default for CallTimerConfig {
@@ -231,6 +239,7 @@ impl Default for CallTimerConfig {
             enabled: false,
             second_call_minutes: 2.0,
             third_call_minutes: 4.0,
+            not_started_minutes: 5.0,
         }
     }
 }
@@ -855,6 +864,7 @@ mod tests {
                 enabled: true,
                 second_call_minutes: 1.5,
                 third_call_minutes: 3.0,
+                not_started_minutes: 6.0,
             },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,
