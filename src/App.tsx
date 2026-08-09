@@ -18,6 +18,7 @@ import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
 import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
 import { FreetextAnnouncer } from "./components/FreetextAnnouncer";
+import { AnnounceJobPlayer } from "./components/AnnounceJobPlayer";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import type { NavView, SettingsFocus } from "./components/SideNav";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
@@ -29,6 +30,7 @@ import { FieldOverviewPage } from "./pages/FieldOverviewPage";
 import { MaintenancePage } from "./pages/MaintenancePage";
 import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
+import { TlWebPanel } from "./pages/TlWebPanel";
 import { WinnersPage } from "./pages/WinnersPage";
 import type {
   AppConfig,
@@ -90,6 +92,7 @@ function defaultConfig(): AppConfig {
       enabled: false,
       second_call_minutes: 2,
       third_call_minutes: 4,
+      not_started_minutes: 5,
     },
     scorekeeper: {
       enabled: false,
@@ -110,6 +113,8 @@ function defaultConfig(): AppConfig {
     locked_courts: [],
     tablet_settings_pin: "0000",
     tournament_logo: { data: "", mime: "", background_color: "" },
+    // Turnierleitungs-Oberfläche: aus, ohne gekoppelte Geräte (ADR 0010).
+    tl_web: { enabled: false, devices: [] },
   };
 }
 
@@ -367,6 +372,12 @@ function App() {
         return (
           <TabletPanel announce={config.announce} azureTts={config.azure_tts} />
         );
+      case "tlweb":
+        // Die neue Konfiguration muss hier ankommen: Bliebe die Kopie der App
+        // veraltet, schriebe der nächste Speichervorgang aus den
+        // Einstellungen den alten `tl_web`-Stand zurück — und löschte alle
+        // Kopplungen, deren Zugänge niemand wiederherstellen kann.
+        return <TlWebPanel onConfigSaved={(c) => setConfig(c)} />;
       case "announce":
         return (
           <AnnouncePage
@@ -432,6 +443,10 @@ function App() {
           azureTts={config.azure_tts}
         />
         <FreetextAnnouncer
+          announce={config.announce}
+          azureTts={config.azure_tts}
+        />
+        <AnnounceJobPlayer
           announce={config.announce}
           azureTts={config.azure_tts}
         />

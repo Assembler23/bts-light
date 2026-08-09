@@ -817,6 +817,314 @@ pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
     halls
 }
 
+// ─────────────────── TL-Web (Turnierleitungs-Oberfläche) ──────────────────
+//
+// Turnierleitungs-Geräte sind eine **dritte Client-Klasse** neben Tablets und
+// Monitoren: viele je Namespace, nicht feldgebunden, ausschließlich schreibend
+// **über den Host**. Sie tauchen nie in der Tablet-Liste auf und übernehmen nie
+// eine Court-Session — R4 („ein aktives Tablet je Court") bleibt unberührt.
+// Grundlage: docs/features/turnierleitung-web.md, ADR 0012 + 0012.
+
+/// Was ein Turnierleitungs-Gerät auf einem Feld **vorgefunden** hat, als es die
+/// Aktion auslöste. Der Host lehnt ab, wenn die Erwartung nicht mehr stimmt —
+/// so überschreiben zwei gleichzeitig arbeitende Geräte einander nicht
+/// stillschweigend.
+///
+/// Bewusst ein Enum statt `Option<i64>`: „Feld war leer" und „Feld hatte Spiel
+/// X" müssen unterscheidbar bleiben. Mit `Option<Option<i64>>` wäre das über
+/// Serde nicht sauber abbildbar (fehlend und `null` fielen zusammen).
+///
+/// **Ohne `#[serde(default)]`, bewusst.** Diese Typen sind neu — es gibt keine
+/// ältere Gegenstelle, die ein Default schonen müsste. Ein fehlendes `expect`
+/// würde den Konfliktschutz stillschweigend abschalten, und genau darauf ruht
+/// die Mehrbenutzer-Fähigkeit. Wer keine Erwartung hat, sendet `any`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CourtExpectation {
+    /// Keine Erwartung — der Host prüft nichts zusätzlich. Muss ausdrücklich
+    /// gesendet werden.
+    Any,
+    /// Das Feld war leer und soll es noch sein.
+    Free,
+    /// Auf dem Feld stand genau dieses Spiel.
+    Match {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+}
+
+/// Welche Partei ein erneuter Aufruf meint. Bewusst ein Enum statt einer Zahl:
+/// Der gezielte Nachruf **einer** fehlenden Partei ist der Zweck der Aktion,
+/// und ein Zahlenfeld ließe Werte zu, die niemand behandelt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrepCallSide {
+    /// Beide Parteien erneut aufrufen.
+    Both,
+    Team1,
+    Team2,
+}
+
+impl PrepCallSide {
+    /// Alle Varianten — Grundlage des Wire-Roundtrip-Tests.
+    pub const ALL: [PrepCallSide; 3] =
+        [PrepCallSide::Both, PrepCallSide::Team1, PrepCallSide::Team2];
+}
+
+/// Die Aktionen, die ein Turnierleitungs-Gerät auslösen darf — ein **bewusst
+/// geschlossener** Satz (ADR 0011). Was hier nicht steht, ist nicht
+/// darstellbar; der Relay leitet nur weiter, entschieden und validiert wird
+/// ausschließlich im Host (R5).
+///
+/// **Kein Feld trägt `#[serde(default)]`.** Anders als bei den Tablet-Typen
+/// gibt es hier keine ältere Gegenstelle zu schonen; ein stillschweigend
+/// ergänzter Wert würde stattdessen die jeweils weitreichendere oder
+/// ungeprüfte Variante auslösen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum TlAction {
+    /// Spiel auf ein freies Feld legen.
+    AssignCourt {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        expect: CourtExpectation,
+    },
+    /// Feld räumen.
+    FreeCourt {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        expect: CourtExpectation,
+    },
+    /// Spiel von einem Feld auf ein anderes umhängen. Bewusst **eine** Aktion
+    /// statt „freigeben + zuweisen": nur so wird das Umhängen in einem
+    /// einzigen BTP-Request geschrieben — sonst wäre dazwischen ein Zustand
+    /// sichtbar, in dem das Spiel auf keinem Feld steht, und die automatische
+    /// Vergabe könnte das Zielfeld wegschnappen.
+    MoveMatch {
+        #[serde(rename = "fromCourtId")]
+        from_court_id: i64,
+        #[serde(rename = "toCourtId")]
+        to_court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        #[serde(rename = "expectFrom")]
+        expect_from: CourtExpectation,
+        #[serde(rename = "expectTo")]
+        expect_to: CourtExpectation,
+    },
+    /// Spiele in die Vorbereitung rufen (optional in eine bestimmte Halle).
+    CallPreparation {
+        #[serde(rename = "matchIds")]
+        match_ids: Vec<i64>,
+        #[serde(
+            rename = "locationId",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        location_id: Option<i64>,
+    },
+    /// Einen Vorbereitungs-Aufruf zurücknehmen.
+    RetractPreparation {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Einem noch nicht vergebenen Spiel eine **Halle** geben, ohne es aufs
+    /// Feld zu legen. Leerer Name nimmt die Zuweisung zurück.
+    ///
+    /// BTP führt an angesetzten Spielen keinen Spielort — dies ist der einzige
+    /// Weg, einem wartenden Spiel überhaupt eine Halle zu geben, wenn keine
+    /// Disziplin-Regel greift.
+    SetHall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        hall: String,
+    },
+    /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
+    /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
+    /// leben, sonst zählt bei mehreren Geräten jedes für sich.
+    AnnounceCourtCall {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels; `side` grenzt
+    /// auf eine Partei ein.
+    AnnouncePrepCall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        side: PrepCallSide,
+    },
+    /// Ergebnis eintragen.
+    ///
+    /// `retired` deckt die **Aufgabe mitten im Spiel** ab — dann sind die
+    /// Sätze unvollständig und `winner` benennt die Partei, die weiterkommt.
+    /// Das ist dieselbe Fähigkeit, die ein Tablet über [`ResultBody`] schon
+    /// hat. Eine **kampflose** Wertung läuft dagegen nicht hierüber, sondern
+    /// über [`TlAction::ConfirmWalkover`].
+    ///
+    /// `overwrite` verlangt ausdrücklich das Überschreiben einer bereits
+    /// gewerteten Begegnung — der Host prüft zusätzlich, ob das folgenlos
+    /// möglich ist.
+    EnterResult {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        sets: Vec<SetAb>,
+        retired: bool,
+        /// 1 oder 2; bei regulärem Ende aus den Sätzen ableitbar und dann
+        /// `None`, bei Aufgabe zwingend. Hier ist ein Default vertretbar:
+        /// „nicht angegeben" heißt „aus den Sätzen ableiten" und ist damit
+        /// die neutrale, nicht die weitreichendere Lesart.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        winner: Option<i64>,
+        overwrite: bool,
+    },
+    /// Einen Walkover-Vorschlag für die gewählten Spiele werten.
+    ConfirmWalkover {
+        #[serde(rename = "proposalId")]
+        proposal_id: String,
+        #[serde(rename = "matchIds")]
+        match_ids: Vec<i64>,
+    },
+    /// Einen Walkover-Vorschlag verwerfen.
+    DismissWalkover {
+        #[serde(rename = "proposalId")]
+        proposal_id: String,
+    },
+    /// Einen Wartenden an den Anfang der Zähltafelbediener-Schlange ziehen.
+    ScorekeeperAdvance { key: String },
+    /// Einen Wartenden aus der Schlange entfernen.
+    ScorekeeperRemove { key: String },
+    /// Manuell einen Zähltafelbediener einreihen.
+    ScorekeeperAdd { names: Vec<String> },
+    /// Automatische Feldvergabe an-/abschalten.
+    SetAutoAssign { enabled: bool },
+}
+
+/// Grund einer Ablehnung — **maschinenlesbar**, damit die Seite gezielt
+/// reagieren kann (Feld hervorheben, Auswahl zurücksetzen, neu laden), statt
+/// einen Fehlertext zu zerlegen. Der Klartext daneben ist für den Menschen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlErrorCode {
+    /// Das Feld ist inzwischen belegt.
+    CourtTaken,
+    /// Das Feld ist inzwischen leer (erwartetes Spiel steht nicht mehr dort).
+    CourtFree,
+    /// Das Feld ist gesperrt.
+    CourtLocked,
+    /// Das Spiel steht bereits auf einem anderen Feld.
+    MatchElsewhere,
+    /// Die Disziplin/Klasse darf in dieser Halle nicht gespielt werden.
+    HallNotAllowed,
+    /// Die Begegnung ist in BTP bereits gewertet (ohne `overwrite`).
+    AlreadyScored,
+    /// Überschreiben abgelehnt, weil der Sieger schon in ein Folgespiel wirkt.
+    CorrectionBlocked,
+    /// Bereits erledigt (z. B. Walkover-Vorschlag von einem anderen Gerät).
+    AlreadyHandled,
+    /// Die Ansicht, auf der die Aktion beruht, war zu alt.
+    StaleView,
+    /// In dieser Rolle oder Betriebsart nicht erlaubt (z. B. Slave-Modus).
+    NotAllowed,
+    /// Diese bts-light-Version kennt die Aktion noch nicht — ein
+    /// Versions-, kein Rechteproblem. Bewusst von `NotAllowed` getrennt:
+    /// Die Seite soll „bitte aktualisieren" sagen können statt den Nutzer
+    /// nach Rollen oder Betriebsart suchen zu lassen.
+    Unsupported,
+    /// In der Zielhalle ist kein Ansage-Gerät verbunden.
+    NoAnnouncer,
+    /// BTP hat den Schreibvorgang abgelehnt oder war nicht erreichbar.
+    BtpError,
+    /// Der Turnier-PC ist nicht mit dem Relay verbunden oder hat nicht
+    /// geantwortet. **Nur der Relay** vergibt diesen Code — er ist die
+    /// Grundlage dafür, dass die Seite „bts-light ist nicht verbunden" sagen
+    /// kann, statt einen leeren Stand als „alle Felder frei" zu zeigen.
+    HostOffline,
+}
+
+impl TlErrorCode {
+    /// Alle Codes — Grundlage des Wire-Roundtrip-Tests. Wächst das Enum,
+    /// muss diese Liste mitwachsen (der Test erzwingt es nicht, aber der
+    /// fehlende Eintrag fiele bei der nächsten Durchsicht auf).
+    pub const ALL: [TlErrorCode; 14] = [
+        TlErrorCode::CourtTaken,
+        TlErrorCode::CourtFree,
+        TlErrorCode::CourtLocked,
+        TlErrorCode::MatchElsewhere,
+        TlErrorCode::HallNotAllowed,
+        TlErrorCode::AlreadyScored,
+        TlErrorCode::CorrectionBlocked,
+        TlErrorCode::AlreadyHandled,
+        TlErrorCode::StaleView,
+        TlErrorCode::NotAllowed,
+        TlErrorCode::Unsupported,
+        TlErrorCode::NoAnnouncer,
+        TlErrorCode::BtpError,
+        TlErrorCode::HostOffline,
+    ];
+}
+
+/// Antwort des Hosts auf eine TL-Aktion. `state_rev` ist die Revision des
+/// Zustands **nach** der Aktion — die Seite erkennt daran, ob ihr nächster
+/// Abruf schon das Ergebnis enthält.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TlResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub code: Option<TlErrorCode>,
+    /// Ausgeführt, aber mit Einschränkung — etwa „in dieser Halle ist kein
+    /// Ansage-Gerät verbunden". Ausdrücklich **kein** Fehler.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub warning: Option<String>,
+    #[serde(rename = "stateRev", default)]
+    pub state_rev: u64,
+}
+
+impl TlResponse {
+    /// Erfolg ohne Einschränkung.
+    pub fn ok(state_rev: u64) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            code: None,
+            warning: None,
+            state_rev,
+        }
+    }
+
+    /// Ablehnung mit Grund im Klartext und als Code.
+    pub fn err(code: TlErrorCode, error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            error: Some(error.into()),
+            code: Some(code),
+            warning: None,
+            state_rev: 0,
+        }
+    }
+
+    /// Hinweis an eine Erfolgsantwort hängen.
+    pub fn with_warning(mut self, warning: impl Into<String>) -> Self {
+        self.warning = Some(warning.into());
+        self
+    }
+
+    /// Die Revision nachtragen, auf die sich die Seite neu ausrichten soll.
+    /// Gerade **Ablehnungen** brauchen sie: Nach „Feld wurde gerade von
+    /// jemand anderem belegt" soll die Ansicht auf den echten Stand springen
+    /// — ohne Revision wüsste sie nicht, ob ihr nächster Abruf den Stand nach
+    /// dem fremden Zugriff schon enthält.
+    pub fn with_state_rev(mut self, state_rev: u64) -> Self {
+        self.state_rev = state_rev;
+        self
+    }
+}
+
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
 // `MatchAssigned` trägt ein volles `MatchBrief` und ist damit deutlich
 // größer als die schlanken Varianten (`MatchCleared` etc.) — bewusst
@@ -899,6 +1207,84 @@ pub enum HostFrame {
         #[serde(rename = "azureTts", skip_serializing_if = "Option::is_none", default)]
         azure_tts: Option<AzureTtsShare>,
     },
+    /// Die aktuell zugelassenen Turnierleitungs-Geräte. Der Host stellt sie
+    /// aus, der Relay spiegelt sie nur (ADR 0012) — die `install_id`
+    /// verlässt den Master nicht. Die Liste **ersetzt** die bisherige: ein
+    /// entferntes Gerät ist damit sofort ausgesperrt, und das ist der
+    /// gesamte Widerrufsmechanismus.
+    ///
+    /// Bewusst **ohne Gerätenamen** (Datensparsamkeit): Der Relay bekommt die
+    /// zufällige Kennung, nicht das Etikett „Tablet Meeting Point". Die
+    /// Kennung braucht er, um sie mit dem Kommando zurückzuschicken — sonst
+    /// stünde im Protokoll des Turnier-PCs nicht, welches Gerät gehandelt
+    /// hat, oder er müsste sie aus dem Zugang ableiten, und der hat in
+    /// Protokollen nichts verloren.
+    ///
+    /// **Ohne `#[serde(default)]`:** Weil die Liste die bisherige ersetzt,
+    /// hieße ein fehlendes Feld „alle Geräte aussperren". Ein verstümmeltes
+    /// Frame darf nicht mitten im Turnier die gesamte Turnierleitung
+    /// abmelden — es wird verworfen, der bisherige Stand bleibt stehen. Die
+    /// **leere** Liste ist dagegen zulässig und heißt ausdrücklich „kein
+    /// Gerät mehr zugelassen".
+    TlAuth { devices: Vec<TlAuthDevice> },
+    /// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche, **opak**: Der
+    /// Relay legt ihn nur ab und liefert ihn unverändert aus, wie schon beim
+    /// Court-Zustand. So bleibt die Turnierlogik vollständig im Host (R5).
+    /// `rev` steigt nur bei echter Änderung — daran erkennt ein abrufendes
+    /// Gerät, ob sich etwas getan hat.
+    TlState {
+        #[serde(default)]
+        rev: u64,
+        #[serde(default)]
+        json: String,
+    },
+    /// Antwort auf ein zuvor weitergeleitetes TL-Kommando.
+    TlAck {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        response: TlResponse,
+    },
+}
+
+/// Höchstzahl der Turnierleitungs-Geräte, die der Relay spiegelt.
+///
+/// **Geteilt, weil beide Seiten dieselbe Zahl meinen müssen:** Der Relay
+/// verwirft eine längere Liste vollständig (ein halbierter Widerruf wäre
+/// schlimmer als keiner), und der Host muss das vorher wissen — sonst hielte
+/// er ein nie angekommenes Frame für zugestellt und die Cloud-Oberfläche
+/// bliebe stumm gesperrt.
+pub const MAX_TL_DEVICES_MIRRORED: usize = 64;
+
+/// Höchstzahl **gleichzeitig bedienter** Turnierleitungs-Geräte je Turnier.
+///
+/// Die spürbare Grenze: Das neunte Gerät, das die Seite offen hat, wird
+/// abgewiesen (ein Platz wird nach 60 s Stille wieder frei). Sie ist viel
+/// kleiner als [`MAX_TL_DEVICES_MIRRORED`], das nur die Länge der
+/// gespiegelten Liste begrenzt — alte Kopplungen zählen dort mit, blockieren
+/// aber keinen Platz.
+///
+/// Geteilt, damit die Geräteverwaltung im Desktop dieselbe Zahl nennt, die
+/// der Relay durchsetzt.
+pub const MAX_TL_DEVICES_ONLINE: usize = 8;
+
+/// Höchstgröße des Anzeige-Zustands in Bytes.
+///
+/// Ebenfalls geteilt: Der Relay legt größere Stände nicht ab, und der Host
+/// muss seinen Zustand vorher kürzen. Ohne dieses gemeinsame Maß liefe ein
+/// großes Turnier in eine dauerhaft tote Cloud-Oberfläche — je größer das
+/// Turnier, desto sicherer.
+pub const MAX_TL_STATE_LEN: usize = 64 * 1024;
+
+/// Ein zugelassenes Turnierleitungs-Gerät, wie der Host es dem Relay
+/// spiegelt: zufällige Kennung + Zugang, **kein** Name.
+///
+/// Die Kennung reist mit jedem Kommando zurück zum Host, damit sein
+/// Protokoll benennen kann, wer gehandelt hat. Der Zugang bleibt beim Relay
+/// und taucht nirgends sonst auf.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TlAuthDevice {
+    pub id: String,
+    pub token: String,
 }
 
 /// Vom Master an Cloud-Slaves vererbte Azure-TTS-Konfiguration (ADR 0003).
@@ -1117,6 +1503,35 @@ pub enum RelayFrame {
         court_label: String,
         injury: bool,
         official: bool,
+    },
+    /// Ein Kommando eines Turnierleitungs-Geräts. `req_id` korreliert die
+    /// [`HostFrame::TlAck`] — der Absender bekommt eine echte Quittung nach
+    /// dem BTP-Schreiben, kein Fire-and-forget.
+    ///
+    /// `op_id` ist der **Idempotenzschlüssel**: Dieselbe Aktion nach einem
+    /// Netzwackler erneut geschickt darf nur einmal nach BTP schreiben; der
+    /// Host antwortet auf eine Wiederholung mit dem gespeicherten Ergebnis.
+    ///
+    /// `view_rev` ist die Revision des Zustands, auf dem die Aktion beruhte.
+    /// Sie ist die Grundlage der Altersprüfung: Ohne sie wäre
+    /// [`TlErrorCode::StaleView`] für alles außer Feldaktionen unerreichbar —
+    /// ein Gerät, das lange im Ruhezustand lag, könnte beim Aufwachen einen
+    /// längst überholten Vorschlag bestätigen.
+    ///
+    /// Keines dieser Felder hat einen Default: Ohne Geräte- und
+    /// Vorgangskennung sind weder Zuordnung noch Doppelschutz möglich, und
+    /// ein stillschweigend leerer Schlüssel würde alle Vorgänge eines Geräts
+    /// auf denselben Wert werfen.
+    TlCommand {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(rename = "deviceId")]
+        device_id: String,
+        #[serde(rename = "opId")]
+        op_id: String,
+        #[serde(rename = "viewRev")]
+        view_rev: u64,
+        action: TlAction,
     },
 }
 
@@ -1812,5 +2227,346 @@ mod tests {
     #[test]
     fn html_escape_neutralizes_markup_and_quotes() {
         assert_eq!(html_escape("a<b>&\"'c"), "a&lt;b&gt;&amp;&quot;&#39;c");
+    }
+
+    // ─────────────────── TL-Web (Turnierleitungs-Oberfläche) ───────────────
+
+    #[test]
+    fn court_expectation_roundtrips_all_variants() {
+        roundtrip(&CourtExpectation::Any);
+        roundtrip(&CourtExpectation::Free);
+        roundtrip(&CourtExpectation::Match { match_id: 4711 });
+    }
+
+    #[test]
+    fn missing_expectation_is_rejected_rather_than_assumed() {
+        // Kein Default: Diese Typen sind neu, es gibt keine alte
+        // Gegenstelle, die geschont werden müsste. Ein fehlendes `expect`
+        // würde den Konfliktschutz stillschweigend abschalten – genau die
+        // Invariante, auf der die Mehrbenutzer-Fähigkeit ruht. Wer keine
+        // Erwartung hat, muss `any` ausdrücklich senden.
+        let missing: Result<TlAction, _> =
+            serde_json::from_str(r#"{"action":"free_court","courtId":5}"#);
+        assert!(missing.is_err());
+
+        let explicit: TlAction =
+            serde_json::from_str(r#"{"action":"free_court","courtId":5,"expect":{"kind":"any"}}"#)
+                .unwrap();
+        assert_eq!(
+            explicit,
+            TlAction::FreeCourt {
+                court_id: 5,
+                expect: CourtExpectation::Any,
+            }
+        );
+    }
+
+    #[test]
+    fn court_expectation_distinguishes_free_from_a_named_match() {
+        // „Feld war leer" und „Feld hatte Spiel X" müssen unterscheidbar
+        // bleiben – mit Option<i64> wären beide `None` gewesen.
+        let free: CourtExpectation = serde_json::from_str(r#"{"kind":"free"}"#).unwrap();
+        let named: CourtExpectation =
+            serde_json::from_str(r#"{"kind":"match","matchId":42}"#).unwrap();
+        assert_eq!(free, CourtExpectation::Free);
+        assert_eq!(named, CourtExpectation::Match { match_id: 42 });
+        assert_ne!(free, named);
+    }
+
+    /// Ein Vertreter je `TlAction`-Variante. Wächst der Aktionssatz, muss
+    /// diese Liste mitwachsen – das ist beabsichtigt: der Satz ist bewusst
+    /// geschlossen (ADR 0011) und jede Erweiterung eine Entscheidung.
+    fn every_tl_action() -> Vec<TlAction> {
+        vec![
+            TlAction::AssignCourt {
+                court_id: 5,
+                match_id: 4711,
+                expect: CourtExpectation::Free,
+            },
+            TlAction::FreeCourt {
+                court_id: 5,
+                expect: CourtExpectation::Match { match_id: 4711 },
+            },
+            TlAction::MoveMatch {
+                from_court_id: 5,
+                to_court_id: 6,
+                match_id: 4711,
+                expect_from: CourtExpectation::Match { match_id: 4711 },
+                expect_to: CourtExpectation::Free,
+            },
+            TlAction::CallPreparation {
+                match_ids: vec![1, 2, 3],
+                location_id: Some(7),
+            },
+            TlAction::RetractPreparation { match_id: 1 },
+            TlAction::SetHall {
+                match_id: 4711,
+                hall: "Halle B".to_string(),
+            },
+            TlAction::AnnounceCourtCall {
+                court_id: 5,
+                match_id: 4711,
+            },
+            TlAction::AnnouncePrepCall {
+                match_id: 4711,
+                side: PrepCallSide::Team2,
+            },
+            TlAction::EnterResult {
+                match_id: 4711,
+                sets: vec![SetAb { a: 21, b: 15 }, SetAb { a: 21, b: 19 }],
+                retired: false,
+                winner: None,
+                overwrite: false,
+            },
+            TlAction::ConfirmWalkover {
+                proposal_id: "p-1".to_string(),
+                match_ids: vec![9],
+            },
+            TlAction::DismissWalkover {
+                proposal_id: "p-1".to_string(),
+            },
+            TlAction::ScorekeeperAdvance {
+                key: "k-1".to_string(),
+            },
+            TlAction::ScorekeeperRemove {
+                key: "k-1".to_string(),
+            },
+            TlAction::ScorekeeperAdd {
+                names: vec!["Müller".to_string(), "Schmidt".to_string()],
+            },
+            TlAction::SetAutoAssign { enabled: true },
+        ]
+    }
+
+    #[test]
+    fn every_tl_action_variant_roundtrips() {
+        for action in every_tl_action() {
+            roundtrip(&action);
+        }
+    }
+
+    #[test]
+    fn tl_action_assign_court_wire_form() {
+        // Die Wire-Form ist der Vertrag mit `tl.html` – sie wird hier
+        // festgenagelt, damit ein Umbenennen nicht unbemerkt durchgeht.
+        let json = serde_json::to_string(&TlAction::AssignCourt {
+            court_id: 5,
+            match_id: 4711,
+            expect: CourtExpectation::Free,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"assign_court","courtId":5,"matchId":4711,"expect":{"kind":"free"}}"#
+        );
+    }
+
+    #[test]
+    fn unknown_tl_action_is_rejected() {
+        // Der Aktionssatz ist geschlossen (ADR 0011): Was nicht in der
+        // Whitelist steht, ist nicht darstellbar und wird abgewiesen.
+        let parsed: Result<TlAction, _> = serde_json::from_str(r#"{"action":"delete_tournament"}"#);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn tl_command_frame_roundtrips_and_carries_device_and_op_id() {
+        // op_id ist der Idempotenzschlüssel: dieselbe Aktion zweimal
+        // geschickt (Netzwackler) darf nur einmal nach BTP schreiben.
+        let frame = RelayFrame::TlCommand {
+            req_id: 17,
+            device_id: "dev-tl-1".to_string(),
+            op_id: "op-abc".to_string(),
+            view_rev: 12,
+            action: TlAction::FreeCourt {
+                court_id: 3,
+                expect: CourtExpectation::Any,
+            },
+        };
+        roundtrip(&frame);
+    }
+
+    #[test]
+    fn tl_command_requires_identity_and_idempotency_key() {
+        // Ohne Geräte- und Vorgangskennung ist weder Zuordnung noch
+        // Doppelschutz möglich. Beides muss der Absender liefern – ein
+        // stillschweigend leerer Wert würde alle Vorgänge eines Geräts
+        // auf denselben Schlüssel werfen.
+        let without_op: Result<RelayFrame, _> = serde_json::from_str(
+            r#"{"type":"tl_command","reqId":1,"deviceId":"d","viewRev":1,
+                "action":{"action":"set_auto_assign","enabled":true}}"#,
+        );
+        assert!(without_op.is_err());
+
+        let without_device: Result<RelayFrame, _> = serde_json::from_str(
+            r#"{"type":"tl_command","reqId":1,"opId":"o","viewRev":1,
+                "action":{"action":"set_auto_assign","enabled":true}}"#,
+        );
+        assert!(without_device.is_err());
+    }
+
+    #[test]
+    fn tl_command_carries_the_revision_it_was_based_on() {
+        // Grundlage der Altersprüfung: Der Host lehnt Aktionen ab, die auf
+        // einer veralteten Ansicht beruhen. Ohne diese Angabe wäre
+        // `StaleView` für alles außer Feldaktionen unerreichbar.
+        let frame: RelayFrame = serde_json::from_str(
+            r#"{"type":"tl_command","reqId":1,"deviceId":"d","opId":"o","viewRev":77,
+                "action":{"action":"scorekeeper_advance","key":"k"}}"#,
+        )
+        .unwrap();
+        match frame {
+            RelayFrame::TlCommand { view_rev, .. } => assert_eq!(view_rev, 77),
+            other => panic!("falsche Variante: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tl_auth_frame_roundtrips() {
+        // Der Host pusht die vollständige Token-Menge; sie ersetzt die
+        // bisherige im Relay – das ist der Widerrufsmechanismus (ADR 0012).
+        roundtrip(&HostFrame::TlAuth {
+            devices: vec![
+                TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "tok-a".to_string(),
+                },
+                TlAuthDevice {
+                    id: "tl-2".to_string(),
+                    token: "tok-b".to_string(),
+                },
+            ],
+        });
+        // Die leere Menge ist zulässig und bedeutet ausdrücklich „kein
+        // Gerät zugelassen" – etwa nach dem Entfernen des letzten.
+        roundtrip(&HostFrame::TlAuth {
+            devices: Vec::new(),
+        });
+    }
+
+    #[test]
+    fn tl_auth_without_token_field_is_rejected() {
+        // Weil die Liste die bisherige ersetzt, hieße ein fehlendes Feld
+        // „alle Geräte aussperren". Ein verstümmeltes Frame darf niemals
+        // mitten im Turnier die gesamte Turnierleitung abmelden – es wird
+        // verworfen, der bisherige Stand bleibt.
+        let parsed: Result<HostFrame, _> = serde_json::from_str(r#"{"type":"tl_auth"}"#);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn prep_call_side_must_be_explicit() {
+        // Der gezielte Nachruf EINER fehlenden Partei ist der Zweck dieser
+        // Aktion. Ein fehlendes Feld dürfte nicht stillschweigend die
+        // weitreichendere Variante („beide") auslösen und die bereits
+        // wartende Partei erneut ausrufen.
+        let missing: Result<TlAction, _> =
+            serde_json::from_str(r#"{"action":"announce_prep_call","matchId":7}"#);
+        assert!(missing.is_err());
+
+        for side in PrepCallSide::ALL {
+            roundtrip(&side);
+        }
+    }
+
+    #[test]
+    fn enter_result_can_express_a_retirement() {
+        // Gibt jemand mitten im Spiel auf und niemand zählte am Tablet,
+        // muss die Turnierleitung das eintragen können – sonst bleibt nur
+        // der Weg zum Turnier-PC (genau der Engpass) oder ein erfundener
+        // Endstand in BTP und im Liveticker.
+        let action = TlAction::EnterResult {
+            match_id: 4711,
+            sets: vec![
+                SetAb { a: 21, b: 15 },
+                SetAb { a: 11, b: 21 },
+                SetAb { a: 5, b: 3 },
+            ],
+            retired: true,
+            winner: Some(1),
+            overwrite: false,
+        };
+        roundtrip(&action);
+    }
+
+    #[test]
+    fn tl_state_frame_carries_opaque_json() {
+        // Der Relay versteht den Inhalt nicht und soll es auch nicht –
+        // er reicht ihn unverändert durch (wie court_state heute).
+        let frame = HostFrame::TlState {
+            rev: 42,
+            json: r#"{"courts":[],"queue":[]}"#.to_string(),
+        };
+        roundtrip(&frame);
+    }
+
+    #[test]
+    fn tl_ack_frame_roundtrips_with_and_without_error() {
+        roundtrip(&HostFrame::TlAck {
+            req_id: 17,
+            response: TlResponse::ok(9),
+        });
+        roundtrip(&HostFrame::TlAck {
+            req_id: 18,
+            response: TlResponse::err(
+                TlErrorCode::CourtTaken,
+                "Feld 5 wurde gerade von jemand anderem belegt.",
+            ),
+        });
+    }
+
+    #[test]
+    fn tl_response_omits_empty_fields_on_success() {
+        // Erfolgsantworten sind der Normalfall und sollen schlank bleiben.
+        let json = serde_json::to_string(&TlResponse::ok(9)).unwrap();
+        assert_eq!(json, r#"{"ok":true,"stateRev":9}"#);
+    }
+
+    #[test]
+    fn tl_response_error_carries_machine_readable_code() {
+        // Der Code ist wichtiger als der Text: nur damit kann `tl.html`
+        // gezielt reagieren, statt einen Fehlerstring zu zerlegen.
+        let resp = TlResponse::err(TlErrorCode::MatchElsewhere, "Spiel steht auf Feld 3.");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""code":"match_elsewhere""#));
+        assert!(!json.contains(r#""warning""#));
+        roundtrip(&resp);
+    }
+
+    #[test]
+    fn tl_response_error_can_name_the_revision_to_resync_to() {
+        // Nach einer Ablehnung soll die Seite „auf den echten Stand
+        // springen". Ohne Revision wüsste sie nicht, ob ihr nächster
+        // Abruf den Stand nach dem fremden Zugriff schon enthält.
+        let resp = TlResponse::err(TlErrorCode::CourtTaken, "Feld belegt.").with_state_rev(12);
+        assert_eq!(resp.state_rev, 12);
+        assert!(!resp.ok);
+        roundtrip(&resp);
+    }
+
+    #[test]
+    fn tl_response_can_warn_while_succeeding() {
+        // „Ausgeführt, aber niemand konnte die Ansage sprechen" ist
+        // ausdrücklich ein Erfolg mit Hinweis – kein Fehler.
+        let resp = TlResponse::ok(3).with_warning("In Halle 2 ist kein Ansage-Gerät verbunden.");
+        assert!(resp.ok);
+        assert_eq!(resp.code, None);
+        roundtrip(&resp);
+    }
+
+    #[test]
+    fn every_tl_error_code_roundtrips() {
+        for code in TlErrorCode::ALL {
+            roundtrip(&code);
+        }
+    }
+
+    #[test]
+    fn unknown_host_frame_variant_yields_error_not_panic() {
+        // Ein alter Relay bekommt von einem neuen Host unbekannte Frames.
+        // Er verwirft sie still (`if let Ok(..)`) – das setzt voraus, dass
+        // das Parsen einen Fehler liefert statt zu panicken.
+        let parsed: Result<HostFrame, _> = serde_json::from_str(r#"{"type":"tl_auth_v99"}"#);
+        assert!(parsed.is_err());
     }
 }

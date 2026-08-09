@@ -84,6 +84,12 @@ async fn serve(
     // Zuletzt an den Relay gepushte Freitext-ID (B1a: Cloud-Ansage der fernen
     // Halle). Nur neue Items (id > last) werden geschickt.
     let mut last_freetext: u64 = 0;
+    // Turnierleitungs-Zugänge und -Zustand. Beide beginnen bei „noch nichts
+    // gesendet", damit der Relay nach einem Reconnect sofort wieder weiß, wer
+    // zugelassen ist und was anzuzeigen wäre — er vergisst beides, sobald die
+    // Host-Verbindung abreißt.
+    let mut tl_auth_fp: Option<String> = None;
+    let mut tl_state_rev: u64 = 0;
     let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Court-Monitor-Upload: erster Tick feuert sofort → Werbung/Konfig
@@ -125,6 +131,10 @@ async fn serve(
             _ = ticker.tick() => {
                 push_all_courts(ctx, &tx, &mut last_match);
                 push_freetext(ctx, &tx, &mut last_freetext);
+                // Zugänge zuerst: Der Zustand nützt nichts, solange der Relay
+                // niemanden kennt, dem er ihn zeigen dürfte.
+                push_tl_auth(ctx, &tx, &mut tl_auth_fp);
+                push_tl_state(ctx, &tx, &mut tl_state_rev);
             }
             _ = monitor_ticker.tick() => {
                 maybe_upload_monitor(ctx, install_id, &mut monitor_fp).await;
@@ -344,6 +354,51 @@ async fn handle_frame(
                 ok: resp.ok,
                 error: resp.error,
             }));
+        }
+        // TL-Web über die Cloud: **derselbe** Ausführungsweg wie im
+        // Hallennetz (`tl::execute`) — so wird jede Mutation genau einmal
+        // geprüft, ganz wie bei den Ergebnissen der Tablets (R5).
+        RelayFrame::TlCommand {
+            req_id,
+            device_id,
+            op_id,
+            view_rev,
+            action,
+        } => {
+            // **In einem eigenen Task**, nicht hier abgewartet: Diese
+            // Schleife bedient *eine* Verbindung für alle Tablets und
+            // Monitore der Halle. Ein Kommando schreibt nach BTP (Anmeldung
+            // + Aktualisierung); hängt BTP, käme aus dieser Schleife nichts
+            // mehr heraus — nicht einmal das Pong. Der Relay hielte den Host
+            // für tot und träfe die ganze Halle. Der Zeitablauf am Relay (20 s)
+            // deckt den Fall ab, dass die Antwort ausbleibt.
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                // Der Relay hat den Zugang geprüft und schickt nur die
+                // Kennung. Hier wird sie gegen die eigene Geräteliste
+                // gehalten: Sonst hinge die Nachvollziehbarkeit allein am
+                // Relay.
+                let config = ctx.app_config();
+                let response = match crate::tablet::tl::device_by_id(&config, &device_id) {
+                    Some(device) => {
+                        crate::tablet::tl::execute(
+                            &ctx,
+                            &device,
+                            &op_id,
+                            monitor::now_ms(),
+                            view_rev,
+                            action,
+                        )
+                        .await
+                    }
+                    None => relay_proto::TlResponse::err(
+                        relay_proto::TlErrorCode::NotAllowed,
+                        "Dieses Gerät ist auf dem Turnier-PC nicht (mehr) freigegeben.",
+                    ),
+                };
+                let _ = tx.send(text(&HostFrame::TlAck { req_id, response }));
+            });
         }
     }
 }
@@ -688,6 +743,74 @@ fn push_prepared(
     let _ = tx.send(text(&HostFrame::Prepared { prepared }));
 }
 
+/// Spiegelt die zugelassenen Turnierleitungs-Geräte an den Relay.
+///
+/// Nur bei Änderung — aber **immer** einmal nach dem Verbinden (`last_fp`
+/// ist dann `None`): Der Relay vergisst die Zugänge, sobald der Turnier-PC
+/// abreißt, und ohne diesen ersten Push bliebe die Oberfläche nach jedem
+/// Reconnect ausgesperrt.
+///
+/// Auch die **leere** Liste wird geschickt: Sie ist der Widerruf des letzten
+/// Geräts und die Wirkung des Ausschalters.
+fn push_tl_auth(
+    ctx: &ServerCtx,
+    tx: &mpsc::UnboundedSender<WsMessage>,
+    last_fp: &mut Option<String>,
+) {
+    // **Nur mit gelesener Konfiguration.** Beim Speichern schreibt die App
+    // die Datei neu; trifft dieser Takt genau dieses Fenster, ergäbe die
+    // Standard-Konfiguration eine leere Liste — und die ist beim Relay der
+    // Widerruf **aller** Geräte. Ein Speichervorgang in den Einstellungen
+    // würde reihenweise Turnierleitungs-Geräte aussperren.
+    let Ok(config) = ctx.app_config_result() else {
+        return;
+    };
+    let devices = crate::tablet::tl::auth_devices(&config);
+    // Mehr Geräte, als der Relay annimmt? Dann verwirft er das **ganze**
+    // Frame — und zwar stillschweigend. Hier zu kappen wäre falsch (ein
+    // halbierter Widerruf ist schlimmer als keiner), also lieber laut sein:
+    // Ohne diese Meldung suchte man den Fehler auf der falschen Seite.
+    if devices.len() > relay_proto::MAX_TL_DEVICES_MIRRORED {
+        tracing::warn!(
+            "Turnierleitungs-Geräte: {} eingetragen, der Relay nimmt höchstens {} — \
+             die Cloud-Oberfläche bleibt gesperrt, bis alte Kopplungen entfernt sind",
+            devices.len(),
+            relay_proto::MAX_TL_DEVICES_MIRRORED
+        );
+        return;
+    }
+    let fp = crate::tablet::tl::auth_fingerprint(&devices);
+    if last_fp.as_deref() == Some(fp.as_str()) {
+        return;
+    }
+    *last_fp = Some(fp);
+    let _ = tx.send(text(&HostFrame::TlAuth { devices }));
+}
+
+/// Schiebt den Anzeige-Zustand der Turnierleitung an den Relay.
+///
+/// Nur bei echter Änderung: Die Revision steigt genau dann, und der Relay
+/// beantwortet unveränderte Stände mit „nichts Neues". Ohne diese Schranke
+/// liefe alle zwei Sekunden ein voller Turnierstand durchs Netz — auf
+/// Mobilfunkgeräten der Turnierleitung.
+///
+/// Ist die Oberfläche abgeschaltet, wird nichts gepusht: Ohne Zugänge kann
+/// der Relay den Stand ohnehin niemandem zeigen.
+fn push_tl_state(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_rev: &mut u64) {
+    let config = ctx.app_config();
+    if !config.tl_web.enabled {
+        return;
+    }
+    // Gekürzt auf das, was der Relay ablegt — er verwirft Größeres, ohne es
+    // zu melden.
+    let (json, rev) = crate::tablet::tl::state_for_relay(&ctx.tablet, &config, monitor::now_ms());
+    if rev == *last_rev {
+        return;
+    }
+    *last_rev = rev;
+    let _ = tx.send(text(&HostFrame::TlState { rev, json }));
+}
+
 /// Azure-TTS-Konfiguration für die Vererbung an Cloud-Slaves (ADR 0003).
 /// Frisch von Platte gelesen, damit Einstellungs-Änderungen ohne Neustart
 /// greifen. `None`, wenn Azure aus oder unvollständig ist — der Relay
@@ -733,6 +856,9 @@ mod tests {
 
     fn match_on_court(id: i64, court_id: i64) -> BtpMatch {
         BtpMatch {
+            display_order: None,
+            from1: None,
+            from2: None,
             id,
             draw_id: 7,
             planning_id: 1001,
@@ -748,6 +874,7 @@ mod tests {
             entry2_id: 0,
             court: Some("1".into()),
             court_id: Some(court_id),
+            location_id: None,
             sets: vec![],
             winner: None,
             result: MatchResult::Normal,

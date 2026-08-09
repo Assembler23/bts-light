@@ -251,6 +251,29 @@ pub struct BtpMatch {
     pub draw_id: i64,
     /// Planungsposition des Matches im Draw (`Match.PlanningID`).
     pub planning_id: i64,
+    /// Die Ansetzungsreihenfolge innerhalb des Zeitfensters (BTP
+    /// `DisplayOrder`).
+    ///
+    /// In BTP tragen alle Spiele eines Zeitfensters **dieselbe** angesetzte
+    /// Zeit — der ganze Vormittag steht auf 9:00. Welches zuerst drankommt,
+    /// sagt allein dieses Feld: Es ist die Reihenfolge der Spielliste, die
+    /// die Turnierleitung ausdruckt und abarbeitet.
+    ///
+    /// `None`, wenn das Turnier sie nicht pflegt — dann bleibt es bei der
+    /// Spielnummer.
+    pub display_order: Option<i64>,
+    /// Die beiden Planungspositionen, aus denen die Teilnehmer kommen
+    /// (`Match.From1`/`From2`) — die **Kante im Turnierbaum**, roh und
+    /// ungedeutet. In einem KO-Draw zeigt sie auf die vorangehenden Spiele
+    /// bzw. Setzplätze; in einer Gruppe fehlt sie.
+    ///
+    /// Gebraucht für die Frage, ob eine Ergebnis-Korrektur ein Folgespiel
+    /// beträfe: Ein beendetes Spiel wird selbst zum Feeder-Slot der nächsten
+    /// Runde, und wer den Sieger ändert, ändert damit die nächste Paarung.
+    /// Wer über dieses Spiel hinausschaut, findet den Nachfolger über
+    /// `from1`/`from2 == planning_id` im selben Draw.
+    pub from1: Option<i64>,
+    pub from2: Option<i64>,
     /// Name der Auslosung, z. B. "HE".
     pub draw_name: String,
     /// Disziplin des Matches (aus dem BTP-Event abgeleitet).
@@ -283,6 +306,15 @@ pub struct BtpMatch {
     /// CourtID (stabile Feld-Identität) des zugewiesenen Felds; `None`,
     /// wenn das Match keinem Feld zugewiesen ist.
     pub court_id: Option<i64>,
+    /// **Geplanter Spielort** (`Match.LocationID`) — die Halle, in der das
+    /// Spiel stattfinden soll, schon **bevor** es auf ein Feld kommt.
+    ///
+    /// Nur gefüllt, wenn das Turnier die Spalte „Spielort" pflegt: In zwei
+    /// älteren Mitschnitten fehlte sie durchgehend, weshalb sie hier lange
+    /// gar nicht gelesen wurde. Am 09.08.2026 an einem echten Turnier
+    /// gemessen, das sie pflegt — dort trugen 48 Matches eine `LocationID`,
+    /// die meisten davon ohne jede Feldzuweisung.
+    pub location_id: Option<i64>,
     /// Satz-Ergebnisse als (Team1, Team2)-Punkte.
     pub sets: Vec<(i64, i64)>,
     /// Sieger: 1 oder 2, falls entschieden.
@@ -861,6 +893,13 @@ fn parse_matches(
             id: child_int(m, "ID").unwrap_or_default(),
             draw_id: draw_id.unwrap_or_default(),
             planning_id: child_int(m, "PlanningID").unwrap_or_default(),
+            // Roh übernehmen, nicht deuten: Was die Kante bedeutet,
+            // entscheidet der Aufrufer.
+            from1: child_int(m, "From1"),
+            from2: child_int(m, "From2"),
+            // 0 heißt „nicht gepflegt" — als fehlend behandeln, sonst
+            // sortierte sich ein ungepflegtes Turnier nach lauter Nullen.
+            display_order: child_int(m, "DisplayOrder").filter(|d| *d > 0),
             draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
@@ -879,6 +918,8 @@ fn parse_matches(
             entry2_id,
             court,
             court_id,
+            // Geplanter Spielort; 0 gilt als „nicht gesetzt".
+            location_id: child_int(m, "LocationID").filter(|&id| id > 0),
             sets: parse_sets(m),
             winner,
             result: MatchResult::from_score_status(child_int(m, "ScoreStatus").unwrap_or(0)),
@@ -943,14 +984,20 @@ fn parse_sets(m: &Node) -> Vec<(i64, i64)> {
 /// `None`, wenn kein PlannedTime-Knoten existiert oder das Jahr fehlt/0 ist.
 fn parse_planned_time(m: &Node) -> Option<i64> {
     let pt = xml::find(m.children(), "PlannedTime")?;
-    let part = |a: &str, b: &str| child_int(pt, a).or_else(|| child_int(pt, b));
+    let dt = match pt.value() {
+        Some(xml::Value::DateTime(dt)) => dt,
+        _ => return None,
+    };
     // Jahr begrenzen – schützt den YYYYMMDDHHMM-Schlüssel vor i64-Overflow bei
     // korruptem XML (reale BTP-Jahre liegen weit innerhalb 1..9999).
-    let year = part("Year", "year").filter(|&y| (1..10_000).contains(&y))?;
-    let month = part("Month", "month").unwrap_or(0).clamp(0, 12);
-    let day = part("Day", "day").unwrap_or(0).clamp(0, 31);
-    let hour = part("Hour", "hour").unwrap_or(0).clamp(0, 23);
-    let minute = part("Minute", "minute").unwrap_or(0).clamp(0, 59);
+    let year = i64::from(dt.year);
+    if !(1..10_000).contains(&year) {
+        return None;
+    }
+    let month = i64::from(dt.month).clamp(0, 12);
+    let day = i64::from(dt.day).clamp(0, 31);
+    let hour = i64::from(dt.hour).clamp(0, 23);
+    let minute = i64::from(dt.minute).clamp(0, 59);
     Some(year * 100_000_000 + month * 1_000_000 + day * 10_000 + hour * 100 + minute)
 }
 
@@ -1844,17 +1891,26 @@ mod tests {
 
     #[test]
     fn parse_planned_time_builds_sortable_key() {
+        // **So liefert BTP wirklich**: ein `ITEM` vom Typ DateTime, dessen
+        // Wert der `<DATETIME Y MM D H M .../>`-Knoten ist. Der frühere Test
+        // baute stattdessen Kind-Knoten „Year"/„Month" — eine Form, die in
+        // keinem Mitschnitt vorkommt. Er war grün, während die Ansetzung in
+        // jedem echten Turnier ungelesen blieb: `planned_time` war immer
+        // `None`, und die Warteliste sortierte sich nach der Spielnummer
+        // statt nach dem Turnierplan.
         let m = Node::group(
             "Match",
-            vec![Node::group(
+            vec![Node::datetime(
                 "PlannedTime",
-                vec![
-                    Node::integer("Year", 2025),
-                    Node::integer("Month", 6),
-                    Node::integer("Day", 14),
-                    Node::integer("Hour", 13),
-                    Node::integer("Minute", 30),
-                ],
+                crate::btp::xml::DateTime {
+                    year: 2025,
+                    month: 6,
+                    day: 14,
+                    hour: 13,
+                    minute: 30,
+                    second: 0,
+                    millis: 0,
+                },
             )],
         );
         assert_eq!(parse_planned_time(&m), Some(202_506_141_330));

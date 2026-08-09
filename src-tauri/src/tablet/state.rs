@@ -27,6 +27,30 @@ fn now_ms() -> u64 {
 /// Überschreitung wird das am längsten nicht gesehene Gerät verdrängt.
 const MAX_MONITOR_DEVICES: usize = 128;
 
+/// Wie lange eine frisch nach BTP geschriebene Feldzuweisung als belegt gilt,
+/// bevor BTP sie bestätigt hat.
+///
+/// Lang genug, um den Abfragetakt samt einer trägen BTP-Antwort zu
+/// überbrücken; kurz genug, dass ein fehlgeschlagener Schreibvorgang das Feld
+/// nicht spürbar blockiert.
+const RESERVATION_TTL_MS: u64 = 15_000;
+
+/// Wie lange die Antwort auf einen Vorgang der Turnierleitungs-Oberfläche
+/// aufgehoben wird, um Wiederholungen dieselbe Antwort zu geben.
+///
+/// Deckt Netzwackler und Doppeltipps ab. Danach ist der Vorgang vergessen —
+/// die Liste soll über ein Turnier hinweg nicht unbegrenzt wachsen.
+const OP_MEMORY_MS: u64 = 60_000;
+
+/// Obergrenze für die Länge einer Vorgangskennung. Sie kommt von außen; eine
+/// Kennung, die länger ist als jede sinnvolle Kennung, wird verworfen.
+const MAX_OP_ID_LEN: usize = 128;
+
+/// Wie viele Vorgänge höchstens erinnert werden. Bei acht Geräten und einer
+/// Minute Gedächtnis reichlich bemessen — die Grenze existiert, damit ein
+/// Gerät mit gültigem Zugang den Arbeitsspeicher nicht füllen kann.
+const MAX_REMEMBERED_OPS: usize = 512;
+
 /// Flüchtiger Live-Zustand eines Court-Monitor-Geräts (nicht persistiert –
 /// die Feld-Zuweisungen liegen in `monitor-assignments.json`).
 #[derive(Debug, Clone, Default)]
@@ -131,6 +155,10 @@ pub struct CourtOverview {
     /// steht. `None`, wenn kein Spiel auf dem Feld ist. Grundlage des
     /// Aufruf-Timers (hochzählende Uhr + 2./3. Aufruf).
     pub on_court_since_ms: Option<u64>,
+    /// Wie oft dieses Spiel schon aufgerufen wurde (1–3), gezählt am
+    /// Turnier-PC. Damit zeigen Desktop-Übersicht und Turnierleitungs-Seite
+    /// dieselbe Stufe — auch wenn die eine gerufen hat und die andere nicht.
+    pub call_stage: u8,
     /// Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap), damit die
     /// Felderübersicht Satz-/Matchball berechnen kann (Plan 16). 0 = kein
     /// Match / unbekannt (dann keine Satzball-Anzeige).
@@ -270,10 +298,71 @@ pub struct TabletState {
     /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
     /// bewusst gesteuert (Leute fotografieren das Podium).
     winners_selection: RwLock<Option<i64>>,
+    /// CourtID → (Match-ID, Zeitpunkt): Zuweisungen, die schon nach BTP
+    /// geschrieben, aber noch nicht zurückgelesen wurden.
+    ///
+    /// Der Schnappschuss hinkt BTP um bis zu einen Abfragetakt hinterher —
+    /// in diesem Fenster sähe eine zweite Prüfung das Feld noch frei und
+    /// ließe eine konkurrierende Zuweisung durch. Die Reservierung schließt
+    /// genau dieses Fenster. Sie verfällt von selbst, damit ein
+    /// fehlgeschlagener Schreibvorgang das Feld nicht dauerhaft blockiert.
+    pending_assign: RwLock<HashMap<i64, (i64, u64)>>,
+    /// Vorgangskennung → (Zeitpunkt, Antwort): schon ausgeführte Aktionen
+    /// der Turnierleitungs-Oberfläche.
+    ///
+    /// Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal.
+    /// Ohne dieses Gedächtnis schriebe der zweite Versuch erneut nach BTP.
+    recent_ops: RwLock<HashMap<String, (u64, String, relay_proto::TlResponse)>>,
+    /// Automatische Feldvergabe zur Laufzeit angehalten?
+    ///
+    /// Der Sync-Lauf bekommt seine Konfiguration **einmal beim Start** und
+    /// liest sie nie neu — eine Änderung an der Datei bliebe also wirkungslos.
+    /// Dieser Schalter wirkt sofort und ist genau dafür da: Während die
+    /// Turnierleitung von Hand umsortiert, soll die Automatik nicht
+    /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
+    /// die Grundeinstellung aus der Konfiguration.
+    auto_assign_paused: RwLock<bool>,
+    /// Erfolgte Aufrufe je Feld: `court_id → (match_id, Stufe)`.
+    ///
+    /// Gehört an den Turnier-PC und nicht in die Geräte: Zählte jede Seite
+    /// für sich, riefe ein Helfer zum zweiten Mal, während der nächste schon
+    /// beim dritten ist — und niemand wüsste, ob das Spiel gleich gestrichen
+    /// wird. Die Zahl ist die Zahl der **Aufrufe**, nicht der Zeitablauf; die
+    /// Fälligkeitsanzeige bleibt davon unberührt.
+    call_stages: RwLock<HashMap<i64, (i64, u8)>>,
+    /// Nachrufe am Meeting Point: `(match_id, Partei) → Stufe`. Getrennt nach
+    /// Partei, weil in der Regel nur eine fehlt.
+    prep_call_stages: RwLock<HashMap<(i64, String), u8>>,
+    /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
+    /// gegeben hat.
+    ///
+    /// BTP führt an angesetzten Spielen keinen Spielort (nachgewiesen an zwei
+    /// echten Mitschnitten, siehe `assign::hall_for_match`) — ohne diese
+    /// Ablage gäbe es für ein Spiel ohne Disziplin-Regel keine Möglichkeit,
+    /// überhaupt zu sagen, in welche Halle es gehört, bevor es aufgerufen
+    /// wird.
+    ///
+    /// Nur zur Laufzeit, wie die Vorbereitungs-Aufrufe: Match-IDs gelten je
+    /// Turnier, und ein Neustart der Übertragung ist der Moment, in dem man
+    /// ohnehin neu ordnet.
+    manual_halls: RwLock<HashMap<i64, String>>,
+    /// Datei, in der die Spielorte liegen. `OnceLock`, weil `TabletState`
+    /// `derive(Default)` benutzt und den Pfad erst beim Start erfährt.
+    manual_halls_path: std::sync::OnceLock<std::path::PathBuf>,
+    /// Revision des Anzeige-Zustands: `(Nummer, Fingerabdruck)`. Steigt nur
+    /// bei echter Änderung — **die eine** Quelle für LAN und Cloud. Zwei
+    /// getrennte Zähler wären schlimmer als keiner: Dieselbe Zahl meinte
+    /// dann verschiedene Stände.
+    tl_state_rev: RwLock<(u64, String)>,
     /// Freitext-Ansagen (Master legt ab; Master + Slaves pollen + sprechen die
     /// für ihre Halle bestimmten). Dedup über die fortlaufende `id`.
     freetext: RwLock<Vec<FreetextItem>>,
     freetext_seq: AtomicU64,
+    /// Ansage-Aufträge der Turnierleitung, von den Ansage-Geräten abgeholt.
+    announce_jobs: RwLock<Vec<AnnounceJob>>,
+    announce_seq: AtomicU64,
+    /// Zuletzt gesehene Ansage-Geräte: Halle (klein) → Zeitpunkt des Abrufs.
+    announce_listeners: RwLock<HashMap<String, u64>>,
     /// Fehlgeschlagene BTP-Ergebnis-Writes, die der Sync-Loop nachschiebt
     /// (Nachschub-Queue, Cluster A5 — needsync-Prinzip aus Tilos BTS,
     /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
@@ -310,6 +399,71 @@ pub struct FreetextItem {
     pub hall: String,
     pub text: String,
 }
+
+/// Worum es bei einem Ansage-Auftrag geht.
+///
+/// Bewusst **keine** fertigen Worte: Text, Gong, Stimme und die Aussprache
+/// der Namen entstehen am Ansage-Gerät — mit demselben Code wie bei einer
+/// Ansage aus der Desktop-App. Ein Freitext von der Turnierleitungs-Seite
+/// klänge anders als derselbe Aufruf vom Turnier-PC, und die Namenskorrektur
+/// bliebe außen vor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AnnounceJobKind {
+    /// Erneuter Aufruf eines Spiels, das schon auf dem Feld steht.
+    CourtCall {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        /// Die Stufe, die der Turnier-PC gezählt hat (2 oder 3).
+        stage: u8,
+    },
+    /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels.
+    PrepCall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        side: relay_proto::PrepCallSide,
+        /// Die Stufe, die der Turnier-PC gezählt hat (2 oder 3). Ohne sie
+        /// bliebe jeder Nachruf ein „Zweiter Aufruf", und die Wartenden
+        /// erführen nie, dass es der letzte vor der kampflosen Wertung war.
+        stage: u8,
+    },
+}
+
+/// Ein Ansage-Auftrag für die Geräte einer Halle.
+///
+/// `hall` leer = alle Hallen. `id` ist fortlaufend, damit ein Gerät nur
+/// spricht, was es noch nicht gehört hat — dieselbe Buchführung wie beim
+/// Freitext.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnnounceJob {
+    pub id: u64,
+    pub hall: String,
+    /// Zeitpunkt der Erteilung — Grundlage des Verfalls.
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: u64,
+    #[serde(flatten)]
+    pub kind: AnnounceJobKind,
+}
+
+/// Nach dieser Zeit wird ein Auftrag nicht mehr gesprochen.
+///
+/// Ein Gerät, das eine Minute weg war, soll beim Wiederkommen nicht die
+/// Aufrufe der letzten Minute nachplärren — die Spiele laufen längst.
+const ANNOUNCE_JOB_TTL_MS: u64 = 60_000;
+
+/// So lange gilt ein Ansage-Gerät nach seinem letzten Abruf als anwesend.
+///
+/// Großzügig gegenüber dem Abfragetakt der Geräte: Ein einzelner
+/// ausgefallener Abruf soll die Turnierleitung nicht mit „hier hört niemand
+/// zu" beunruhigen.
+const ANNOUNCE_LISTENER_TTL_MS: u64 = 30_000;
+
+/// Obergrenze der Zuhörer-Liste. Ein Turnier hat eine Handvoll Hallen; alles
+/// darüber ist ein Fehler oder ein Angriff, und beides darf den Turnier-PC
+/// nicht zum Absturz bringen.
+const MAX_ANNOUNCE_LISTENERS: usize = 64;
 
 /// Auf Platte gesicherter Live-Stand eines Felds (für den App-Neustart).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -585,6 +739,14 @@ impl TabletState {
         for (&court_id, &mid) in oncourt {
             map.entry(court_id).or_insert((mid, now));
         }
+        // Die Aufrufe gehören zur Standzeit: Verlässt ein Spiel das Feld,
+        // müssen auch seine Aufrufe vergessen werden. Sonst zeigte dasselbe
+        // Spiel nach einer erneuten Zuweisung sofort „3. Aufruf erfolgt" —
+        // und der Aufruf-Knopf verschwände dauerhaft.
+        self.call_stages
+            .write()
+            .unwrap()
+            .retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
     }
 
     /// Zeitpunkt (Unix-ms) des 1. Aufrufs für ein Feld, sofern dort das
@@ -912,6 +1074,433 @@ impl TabletState {
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
+    /// Beansprucht ein Feld für ein Spiel — **bevor** nach BTP geschrieben
+    /// wird.
+    ///
+    /// Liefert `false`, wenn das Feld oder das Spiel bereits beansprucht ist.
+    /// Genau darin liegt der Zweck: Zwei Geräte, die im selben Moment
+    /// dasselbe Feld antippen, laufen sonst beide durch die Prüfung (der
+    /// Schnappschuss zeigt das Feld ja noch frei) und schreiben nacheinander
+    /// nach BTP — der spätere gewinnt, und die Spieler des ersten stehen vor
+    /// einem fremd belegten Feld. Die Entscheidung muss fallen, bevor der
+    /// Schreibvorgang beginnt, denn der dauert.
+    ///
+    /// Auch die Spiel-Achse zählt: Dasselbe Spiel auf zwei Feldern hinterließe
+    /// eines davon dauerhaft mit einem Geisterspiel belegt.
+    pub fn try_reserve_court(&self, court_id: i64, match_id: i64, now_ms: u64) -> bool {
+        let mut pending = self.pending_assign.write().unwrap();
+        Self::drop_stale_reservations(&mut pending, now_ms);
+        let court_taken = pending.get(&court_id).is_some_and(|(m, _)| *m != match_id);
+        let match_taken = pending
+            .iter()
+            .any(|(c, (m, _))| *m == match_id && *c != court_id);
+        if court_taken || match_taken {
+            return false;
+        }
+        pending.insert(court_id, (match_id, now_ms));
+        true
+    }
+
+    /// Hält die automatische Feldvergabe an oder gibt sie wieder frei.
+    ///
+    /// Der Schalter lebt **nur zur Laufzeit** (die Einstellungen bleiben
+    /// unangetastet) und gilt bis zum Stoppen der Übertragung — siehe
+    /// [`Self::reset_runtime_switches`].
+    pub fn set_auto_assign_paused(&self, paused: bool) {
+        *self.auto_assign_paused.write().unwrap() = paused;
+    }
+
+    /// Ist die automatische Feldvergabe gerade angehalten?
+    pub fn auto_assign_paused(&self) -> bool {
+        *self.auto_assign_paused.read().unwrap()
+    }
+
+    /// Hält einen Nachruf am Meeting Point fest und liefert seine Stufe.
+    ///
+    /// Je Spiel **und Partei**: Die eine kann längst da sein, während die
+    /// andere fehlt. Der erste Nachruf ist der zweite Aufruf, jeder weitere
+    /// der dritte und letzte — dieselbe Staffelung wie in der
+    /// Desktop-Oberfläche, aber an einer Stelle gezählt, damit beide Wege
+    /// dieselbe Ansage erzeugen.
+    pub fn note_prep_call(&self, match_id: i64, side: &str) -> u8 {
+        let mut g = self.prep_call_stages.write().unwrap();
+        // Beschränken: Vorbereitungs-Aufrufe werden zwar aufgeräumt, wenn der
+        // Aufruf zurückgenommen wird, aber ein langes Turnier soll die Liste
+        // auch dann nicht unbegrenzt wachsen lassen.
+        if g.len() > 500 {
+            g.clear();
+        }
+        let entry = g.entry((match_id, side.to_string())).or_insert(1);
+        *entry = (*entry + 1).min(3);
+        *entry
+    }
+
+    /// Höchste bisher gesprochene Nachruf-Stufe eines Spiels (0 = keiner).
+    ///
+    /// Die Turnierleitungs-Seite braucht sie, um einen Doppeltipp von einem
+    /// bewussten zweiten Nachruf zu unterscheiden.
+    pub fn prep_calls_made(&self, match_id: i64) -> u8 {
+        self.prep_call_stages
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|((mid, _), _)| *mid == match_id)
+            .map(|(_, stage)| *stage)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Legt die Datei fest, in der die von Hand gesetzten Spielorte liegen,
+    /// und liest sie ein.
+    ///
+    /// Getrennt vom Konstruktor, weil `TabletState` sein Datenverzeichnis
+    /// nicht kennt — es kommt beim Start der Übertragung vom Tauri-Handle.
+    /// Fehlt die Datei oder ist sie unlesbar, bleibt es leer (kein Fehler);
+    /// beim ersten Setzen entsteht sie neu.
+    pub fn use_manual_hall_file(&self, path: &std::path::Path) {
+        let geladen: HashMap<i64, String> = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        *self.manual_halls.write().unwrap() = geladen;
+        let _ = self.manual_halls_path.set(path.to_path_buf());
+    }
+
+    /// Schreibt die Spielorte, falls eine Datei dafür bekannt ist.
+    fn save_manual_halls(&self, halls: &HashMap<i64, String>) {
+        let Some(path) = self.manual_halls_path.get() else {
+            return;
+        };
+        if let Ok(text) = serde_json::to_string(halls) {
+            // Ein Schreibfehler darf die Aktion nicht scheitern lassen: Der
+            // Ort gilt zur Laufzeit, nur der Neustart verlöre ihn.
+            let _ = std::fs::write(path, text);
+        }
+    }
+
+    /// Gibt einem Spiel von Hand eine Halle; leerer Name nimmt sie zurück.
+    ///
+    /// Gibt zurück, ob sich etwas geändert hat — der Anzeige-Zustand soll nur
+    /// dann eine neue Revision bekommen, wenn wirklich etwas anders ist.
+    pub fn set_manual_hall(&self, match_id: i64, hall: &str) -> bool {
+        let hall = hall.trim();
+        let mut g = self.manual_halls.write().unwrap();
+        let geaendert = if hall.is_empty() {
+            g.remove(&match_id).is_some()
+        } else {
+            // Deckel gegen unbegrenztes Wachsen über ein langes Turnier. 2000
+            // Einträge sind mehr als jedes Turnier an Spielen hat.
+            if g.len() > 2000 {
+                g.clear();
+            }
+            g.insert(match_id, hall.to_string()).as_deref() != Some(hall)
+        };
+        if geaendert {
+            self.save_manual_halls(&g);
+        }
+        geaendert
+    }
+
+    /// Die von Hand gesetzte Halle eines Spiels, falls es eine gibt.
+    pub fn manual_hall(&self, match_id: i64) -> Option<String> {
+        self.manual_halls.read().unwrap().get(&match_id).cloned()
+    }
+
+    /// Alle Handzuweisungen — für den Aufbau des Anzeige-Zustands, damit
+    /// nicht je Spiel einzeln gesperrt werden muss.
+    pub fn manual_halls(&self) -> HashMap<i64, String> {
+        self.manual_halls.read().unwrap().clone()
+    }
+
+    /// Vergisst die Nachruf-Stufen eines Spiels — beim Zurücknehmen des
+    /// Vorbereitungs-Aufrufs, damit ein erneuter Aufruf wieder von vorn
+    /// beginnt.
+    pub fn forget_prep_calls(&self, match_id: i64) {
+        self.prep_call_stages
+            .write()
+            .unwrap()
+            .retain(|(mid, _), _| *mid != match_id);
+    }
+
+    /// Kennung **dieses Programmlaufs** — Teil der Fassungs-Marke des
+    /// Anzeige-Zustands.
+    ///
+    /// Die Revision beginnt nach einem Neustart der App wieder bei 1. Ein
+    /// Gerät mit gemerkter Fassung „1" bekäme sonst „unverändert" auf einen
+    /// völlig anderen Turnierstand und arbeitete auf einem Plan von vorhin.
+    ///
+    /// Bewusst **kein Feld**: `TabletState` wird über `Default` erzeugt, und
+    /// eine dort genullte Kennung wäre über Neustarts hinweg dieselbe —
+    /// genau das, was sie verhindern soll.
+    pub fn process_tag(&self) -> u64 {
+        static TAG: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        *TAG.get_or_init(now_ms)
+    }
+
+    /// Die Revision des Anzeige-Zustands zu diesem Fingerabdruck.
+    ///
+    /// Zählt **nur** hoch, wenn sich der Fingerabdruck geändert hat. Damit
+    /// erkennt ein abrufendes Gerät „nichts Neues" und der Turnier-PC einen
+    /// Tipp, der auf einem überholten Stand beruht. Die Zählung lebt hier,
+    /// weil LAN-Server und Relay-Weg dieselbe Zahl meinen müssen.
+    pub fn tl_revision(&self, fingerprint: &str) -> u64 {
+        let mut g = self.tl_state_rev.write().unwrap();
+        if g.1 != fingerprint {
+            g.0 += 1;
+            g.1 = fingerprint.to_string();
+        }
+        g.0
+    }
+
+    /// Sind auf diesem Feld schon Punkte gefallen?
+    ///
+    /// Antwort auf die Frage „sind die Spieler da?" — und damit der Riegel
+    /// vor dem Aufruf-Timer: Wird gespielt, ist er gegenstandslos. Der Stand
+    /// des Zähltabletts zählt, weil er dem BTP-Stand voraus ist.
+    pub fn points_scored(&self, court_id: i64, match_id: i64) -> bool {
+        self.courts
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .filter(|s| s.match_id == match_id)
+            .is_some_and(|s| s.sets.iter().any(|(a, b)| *a > 0 || *b > 0))
+    }
+
+    /// Wie viele Aufrufe für dieses Spiel schon **gesprochen** wurden (0–3).
+    ///
+    /// `0` heißt: noch keiner. Das ist nicht dasselbe wie „Stufe 1" — auf dem
+    /// Feld zu stehen ist noch kein gesprochener Aufruf, und der erste Druck
+    /// auf „Aufrufen" in der Desktop-Übersicht ist genau dieser schlichte
+    /// erste. Diese Unterscheidung ist der Grund, warum hier Aufrufe gezählt
+    /// werden und keine Stufen: Sonst liefe die gemeinsame Zählung der
+    /// Desktop-Oberfläche dauerhaft um eins voraus.
+    ///
+    /// Steht auf dem Feld inzwischen ein anderes Spiel, gilt die alte Zählung
+    /// nicht mehr.
+    pub fn calls_made(&self, court_id: i64, match_id: i64) -> u8 {
+        match self.call_stages.read().unwrap().get(&court_id) {
+            Some((known, made)) if *known == match_id => *made,
+            _ => 0,
+        }
+    }
+
+    /// Hält einen **erneuten** Aufruf fest und liefert die gesprochene Stufe.
+    ///
+    /// Für die Turnierleitungs-Seite, die nur „noch einmal" weiß. Sie zeigt
+    /// als erfolgte Stufe `max(1, calls_made)` und bietet die nächste an —
+    /// die Rechnung hier muss dazu passen. `at_least` hebt auf die zeitlich
+    /// fällige Stufe an; über den dritten Aufruf hinaus wird nicht gezählt.
+    pub fn note_court_call_at_least(&self, court_id: i64, match_id: i64, at_least: u8) -> u8 {
+        let mut g = self.call_stages.write().unwrap();
+        let entry = g.entry(court_id).or_insert((match_id, 0));
+        // Anderes Spiel auf dem Feld: von vorn, sonst erbte es die Aufrufe
+        // seines Vorgängers und stünde sofort als dritter Aufruf da.
+        if entry.0 != match_id {
+            *entry = (match_id, 0);
+        }
+        entry.1 = (entry.1.max(1) + 1).max(at_least).min(3);
+        entry.1
+    }
+
+    /// Wie [`Self::note_court_call_at_least`] ohne zeitliche Untergrenze.
+    pub fn note_court_call(&self, court_id: i64, match_id: i64) -> u8 {
+        self.note_court_call_at_least(court_id, match_id, 0)
+    }
+
+    /// Hält fest, dass eine bestimmte Stufe **gesprochen wurde**.
+    ///
+    /// Der Gegenpart zu [`Self::note_court_call_at_least`]: Dort weiß der
+    /// Aufrufer nur „noch einmal", hier weiß er genau, was in der Halle
+    /// erklang. Die Desktop-Übersicht rechnet ihre Stufe selbst aus — würde
+    /// sie stattdessen hochzählen lassen, liefe die gemeinsame Zählung ihr
+    /// dauerhaft um eins voraus.
+    ///
+    /// Zurückgedreht wird nie: Zwei Geräte können sich überholen.
+    pub fn reached_court_call(&self, court_id: i64, match_id: i64, stage: u8) -> u8 {
+        let mut g = self.call_stages.write().unwrap();
+        let entry = g.entry(court_id).or_insert((match_id, 0));
+        if entry.0 != match_id {
+            *entry = (match_id, 0);
+        }
+        entry.1 = entry.1.max(stage).min(3);
+        entry.1
+    }
+
+    /// Setzt die Schalter zurück, die nur zur Laufzeit gelten — beim Start
+    /// der Übertragung aufgerufen.
+    ///
+    /// Ohne das bliebe eine auf der Turnierleitungs-Seite gesetzte Pause der
+    /// automatischen Vergabe hängen, sobald das Gerät nicht mehr erreichbar
+    /// ist: Die Einstellungen sagen „an", die Vergabe läuft trotzdem nicht,
+    /// und es gibt keinen Griff, das zu ändern. Stoppen und Starten ist
+    /// dieser Griff.
+    pub fn reset_runtime_switches(&self) {
+        self.set_auto_assign_paused(false);
+    }
+
+    /// Gibt den Anspruch auf ein Feld sofort wieder frei.
+    ///
+    /// Nötig, wenn der Schreibvorgang fehlschlägt oder das Feld gleich wieder
+    /// geräumt wird — sonst bliebe es bis zum Ablauf der Frist blockiert, und
+    /// wer seine eigene Zuweisung zurücknimmt, käme an sein Feld nicht mehr
+    /// heran.
+    pub fn release_court_claim(&self, court_id: i64) {
+        self.pending_assign.write().unwrap().remove(&court_id);
+    }
+
+    /// Die noch gültigen Reservierungen als `(Feld, Spiel)`.
+    pub fn reserved_courts(&self, now_ms: u64) -> Vec<(i64, i64)> {
+        let mut pending = self.pending_assign.write().unwrap();
+        Self::drop_stale_reservations(&mut pending, now_ms);
+        let mut out: Vec<(i64, i64)> = pending.iter().map(|(c, (m, _))| (*c, *m)).collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// Wirft abgelaufene Reservierungen weg.
+    ///
+    /// Abgelaufen ist auch, was in der **Zukunft** liegt: Eine rückwärts
+    /// gestellte Uhr (Zeitumstellung, Zeitabgleich) machte sonst aus jeder
+    /// Reservierung eine ewige, weil die Differenz auf null gesättigt würde.
+    fn drop_stale_reservations(pending: &mut HashMap<i64, (i64, u64)>, now_ms: u64) {
+        pending.retain(|_, (_, ts)| *ts <= now_ms && now_ms - *ts < RESERVATION_TTL_MS);
+    }
+
+    /// Räumt Reservierungen weg, die der BTP-Stand inzwischen bestätigt hat.
+    ///
+    /// Wird im Abfrage-Takt aufgerufen: Sobald das Spiel wirklich auf dem
+    /// Feld steht, hat die Reservierung ihren Zweck erfüllt.
+    pub fn release_confirmed_reservations(&self) {
+        let guard = self.snapshot.read().unwrap();
+        let Some(snap) = guard.as_ref() else { return };
+        self.pending_assign
+            .write()
+            .unwrap()
+            .retain(|court, (m, _)| {
+                !snap
+                    .matches
+                    .iter()
+                    .any(|x| x.id == *m && x.court_id == Some(*court))
+            });
+    }
+
+    /// Antwort eines schon ausgeführten Vorgangs, falls noch bekannt.
+    /// `fingerprint` beschreibt die Aktion. Er wird mitgeprüft, damit eine
+    /// zufällig oder böswillig wiederverwendete Kennung nicht die
+    /// Erfolgsmeldung eines ganz anderen Vorgangs bekommt — die zweite
+    /// Aktion würde sonst nie ausgeführt und trotzdem als erledigt gemeldet.
+    pub fn remembered_result(
+        &self,
+        op_id: &str,
+        fingerprint: &str,
+        now_ms: u64,
+    ) -> Option<relay_proto::TlResponse> {
+        let mut ops = self.recent_ops.write().unwrap();
+        Self::drop_stale_ops(&mut ops, now_ms);
+        ops.get(op_id)
+            .filter(|(_, fp, _)| fp == fingerprint)
+            .map(|(_, _, resp)| resp.clone())
+    }
+
+    /// Hält das Ergebnis eines Vorgangs fest, damit eine Wiederholung
+    /// dieselbe Antwort bekommt, statt erneut zu schreiben.
+    pub fn remember_result(
+        &self,
+        op_id: &str,
+        fingerprint: &str,
+        response: relay_proto::TlResponse,
+        now_ms: u64,
+    ) {
+        let key = op_id.trim();
+        // Leere und übermäßig lange Kennungen gar nicht erst behalten: Der
+        // Wert kommt von außen, und der Turnier-PC soll sich davon nicht den
+        // Arbeitsspeicher füllen lassen.
+        if key.is_empty() || key.len() > MAX_OP_ID_LEN {
+            return;
+        }
+        let mut ops = self.recent_ops.write().unwrap();
+        Self::drop_stale_ops(&mut ops, now_ms);
+        if ops.len() >= MAX_REMEMBERED_OPS && !ops.contains_key(key) {
+            // Voll: den ältesten Eintrag weichen lassen. Die Erinnerung ist
+            // eine Bequemlichkeit gegen Doppeltipps, kein Gedächtnis, für das
+            // es sich zu wachsen lohnte.
+            if let Some(oldest) = ops
+                .iter()
+                .min_by_key(|(_, (ts, _, _))| *ts)
+                .map(|(k, _)| k.clone())
+            {
+                ops.remove(&oldest);
+            }
+        }
+        ops.insert(key.to_string(), (now_ms, fingerprint.to_string(), response));
+    }
+
+    /// Wie viele Vorgänge gerade erinnert werden (Tests und Diagnose).
+    pub fn remembered_op_count(&self) -> usize {
+        self.recent_ops.read().unwrap().len()
+    }
+
+    fn drop_stale_ops(
+        ops: &mut HashMap<String, (u64, String, relay_proto::TlResponse)>,
+        now_ms: u64,
+    ) {
+        // Wie bei den Reservierungen gilt auch ein Zeitstempel aus der
+        // Zukunft als abgelaufen (rückwärts gestellte Uhr).
+        ops.retain(|_, (ts, _, _)| *ts <= now_ms && now_ms - *ts < OP_MEMORY_MS);
+    }
+
+    /// Zieht den laufenden Spielstand eines Spiels auf ein anderes Feld um.
+    ///
+    /// Nötig, wenn die Turnierleitung ein **laufendes** Spiel umhängt: Der
+    /// Stand hängt am Feld, nicht am Spiel. Ohne den Umzug zeigte das neue
+    /// Feld 0:0 und das alte den stehengebliebenen Stand — auf dem
+    /// Court-Monitor wie im Liveticker, und ein neu verbundenes Zähltablett
+    /// finge bei null an.
+    ///
+    /// Das Tablet selbst wandert **nicht** mit: Es bleibt an seinem Feld.
+    /// Übertragen wird nur, was zum Spiel gehört (Satzstand und gespiegelter
+    /// Spielzustand), nicht der Gerätezustand (Verbindung, Akku, Meldungen).
+    pub fn move_match_score(&self, from_court_id: i64, to_court_id: i64, match_id: i64) {
+        {
+            let mut courts = self.courts.write().unwrap();
+            // Nur umziehen, wenn das Quellfeld wirklich dieses Spiel zählt —
+            // sonst überschriebe ein verspäteter Aufruf einen fremden Stand.
+            let Some(sets) = courts
+                .get(&from_court_id)
+                .filter(|s| s.match_id == match_id)
+                .map(|s| s.sets.clone())
+            else {
+                return;
+            };
+            let target = courts.entry(to_court_id).or_insert(CourtSession {
+                match_id,
+                sets: Vec::new(),
+                connected: false,
+                battery: None,
+                injury: false,
+                official: false,
+            });
+            target.match_id = match_id;
+            target.sets = sets;
+            // Das Quellfeld verliert Spiel und Stand, behält aber sein
+            // Tablet (Verbindung, Akku) — dort steht ja weiterhin ein Gerät.
+            if let Some(src) = courts.get_mut(&from_court_id) {
+                src.match_id = 0;
+                src.sets = Vec::new();
+                src.injury = false;
+                src.official = false;
+            }
+        }
+        // Den gespiegelten Spielzustand (Aufschlag, Pause) mitnehmen, damit
+        // ein Tablett am neuen Feld dort weiterzählen kann, wo aufgehört
+        // wurde.
+        let mirrored = self.court_state.write().unwrap().remove(&from_court_id);
+        if let Some(state) = mirrored {
+            self.court_state.write().unwrap().insert(to_court_id, state);
+        }
+        self.persist_scores();
+    }
+
     pub fn clear_court(&self, court_id: i64) {
         self.courts.write().unwrap().remove(&court_id);
         // Gespiegelten Spielstand löschen, sonst bekäme ein nach dem Ergebnis
@@ -920,6 +1509,11 @@ impl TabletState {
         // nach Ergebnis-Submit aufgerufen (nicht beim Disconnect), daher bleibt
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
+        // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
+        // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
+        // dieses Feld mit „hat gerade jemand anderes belegt" ab — obwohl es
+        // sichtbar leer ist.
+        self.release_court_claim(court_id);
         // Entfernten Stand auch aus der Datei nehmen.
         self.persist_scores();
     }
@@ -940,6 +1534,19 @@ impl TabletState {
     /// Entfernt einen Walkover-Vorschlag (umgesetzt oder verworfen).
     pub fn remove_walkover_proposal(&self, id: &str) {
         self.walkovers.write().unwrap().retain(|p| p.id != id);
+    }
+
+    /// Nimmt einen Vorschlag **beanspruchend** heraus: Nur der erste Aufruf
+    /// bekommt ihn, jeder weitere geht leer aus.
+    ///
+    /// Das ist der Anspruch für die kampflose Wertung. Zwei gleichzeitig
+    /// tippende Turnierleitungs-Geräte schrieben sonst beide dieselben
+    /// Wertungen nach BTP. Ging danach gar nichts durch, legt der Aufrufer
+    /// ihn mit `add_walkover_proposal` zurück.
+    pub fn take_walkover_proposal(&self, id: &str) -> Option<WalkoverProposal> {
+        let mut list = self.walkovers.write().unwrap();
+        let pos = list.iter().position(|p| p.id == id)?;
+        Some(list.remove(pos))
     }
 
     /// Noch nicht gespielte Matches einer Mannschaft (per EntryID) – die
@@ -1040,6 +1647,34 @@ impl TabletState {
                 m.preparation_hall = hall;
             }
         }
+        drop(calls);
+
+        // Von Hand gesetzte Spielorte genauso einstempeln — **ohne**
+        // Aufruf-Zeitstempel: Einen Ort festzulegen ist kein Aufruf, sonst
+        // meldete der Liveticker „vor X Min gerufen" für ein Spiel, nach dem
+        // niemand gerufen hat. Ein echter Aufruf für dieselbe Partie hat
+        // Vorrang; er hat die Halle oben schon gesetzt.
+        //
+        // Damit erreicht die Angabe den Hallenfilter des Livetickers
+        // (`display=next&halle=…`) — bis hierher blieb er leer, sobald ein
+        // Turnier seine Aufrufe über BTP statt über bts-light machte.
+        let manual = self.manual_halls.read().unwrap();
+        for (match_id, hall) in manual.iter() {
+            let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == *match_id) else {
+                continue;
+            };
+            if m.preparation_hall.is_some() || m.status != MatchStatus::Scheduled {
+                continue;
+            }
+            // In BTPs Schreibweise, damit der Filter greift.
+            let name = snapshot
+                .locations
+                .iter()
+                .find(|l| l.name.trim().eq_ignore_ascii_case(hall.trim()))
+                .map(|l| l.name.trim().to_string())
+                .unwrap_or_else(|| hall.trim().to_string());
+            m.preparation_hall = Some(name);
+        }
     }
 
     /// Felder (CourtIDs) mit verbundenem Tablet – diese treiben ihren
@@ -1139,11 +1774,124 @@ impl TabletState {
             .collect()
     }
 
+    /// Legt einen Ansage-Auftrag ab und liefert seine laufende Nummer.
+    ///
+    /// Die Nummer wird — wie beim Freitext — mindestens auf die aktuelle
+    /// Uhrzeit gehoben. Sonst begänne sie nach einem Neustart des Turnier-PCs
+    /// wieder klein, und ein Gerät mit gemerkter Nummer verstummte, bis sie
+    /// seinen Stand wieder überholt.
+    pub fn publish_announce_job(&self, hall: String, kind: AnnounceJobKind, now_ms: u64) -> u64 {
+        let hall: String = hall.chars().take(128).collect();
+        self.announce_seq.fetch_max(now_ms, Ordering::Relaxed);
+        let id = self.announce_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut g = self.announce_jobs.write().unwrap();
+        g.push(AnnounceJob {
+            id,
+            hall,
+            created_at_ms: now_ms,
+            kind,
+        });
+        // Verfallene und überzählige Aufträge gleich hier wegräumen — sie
+        // werden nie wieder gesprochen und müssen nicht mitwachsen.
+        g.retain(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms);
+        let len = g.len();
+        if len > 50 {
+            g.drain(0..len - 50);
+        }
+        id
+    }
+
+    /// Aufträge mit `id > since` für `hall`, die noch nicht verfallen sind.
+    ///
+    /// Eine leere Geräte-Halle bekommt ALLE (Einzelhallen-Betrieb); sonst die
+    /// an „alle" oder an genau diese Halle gerichteten — dieselbe Regel wie
+    /// beim Freitext.
+    ///
+    /// Nebenbei zählt der Abruf als Lebenszeichen der Halle: Wer abholt, ist
+    /// ein Ansage-Gerät. Nur so kann die Turnierleitung erfahren, dass ihr
+    /// Aufruf nirgends erklingt.
+    pub fn announce_jobs_since(&self, hall: &str, since: u64, now_ms: u64) -> Vec<AnnounceJob> {
+        let h = hall.trim();
+        {
+            // Die Abhol-Route steht im Hallennetz offen und der Hallenname
+            // kommt ungeprüft aus der Anfrage. Deshalb hier kappen, Abgelaufenes
+            // wegräumen und die Liste beschränken: Ein fehlkonfiguriertes
+            // Gerät soll den Turnier-PC nicht mit erfundenen Hallennamen
+            // volllaufen lassen — mit ihm stürbe auch die BTP-Übertragung.
+            let key: String = h.to_lowercase().chars().take(128).collect();
+            let mut g = self.announce_listeners.write().unwrap();
+            g.retain(|_, seen| *seen + ANNOUNCE_LISTENER_TTL_MS > now_ms);
+            if g.len() < MAX_ANNOUNCE_LISTENERS || g.contains_key(&key) {
+                g.insert(key, now_ms);
+            }
+        }
+        self.announce_jobs
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|j| j.id > since)
+            .filter(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms)
+            .filter(|j| {
+                let target = j.hall.trim();
+                h.is_empty() || target.is_empty() || target.eq_ignore_ascii_case(h)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Hört in dieser Halle gerade ein Ansage-Gerät zu?
+    ///
+    /// **Spiegelbild der Zustellung** in [`Self::announce_jobs_since`]: Ein
+    /// Gerät ohne eingestellte Halle bekommt alles, und ein Auftrag ohne
+    /// Halle geht an alle. Beides muss hier gelten — sonst meldete die Seite
+    /// „kein Ansage-Gerät verbunden", während der Aufruf gerade erklingt.
+    ///
+    /// Die Frist ist großzügig gegenüber dem Abfragetakt: Ein einzelner
+    /// ausgefallener Abruf soll nicht als „niemand da" gelten.
+    pub fn has_announce_listener(&self, hall: &str, now_ms: u64) -> bool {
+        let h = hall.trim().to_lowercase();
+        self.announce_listeners
+            .read()
+            .unwrap()
+            .iter()
+            .any(|(known, seen)| {
+                (h.is_empty() || known.is_empty() || *known == h)
+                    && seen + ANNOUNCE_LISTENER_TTL_MS > now_ms
+            })
+    }
+
+    /// Wie viele Ansage-Geräte die Liste gerade führt (nur für Tests).
+    #[cfg(test)]
+    pub fn announce_listener_count(&self) -> usize {
+        self.announce_listeners.read().unwrap().len()
+    }
+
+    /// Längster Hallen-Schlüssel in der Zuhörer-Liste (nur für Tests).
+    #[cfg(test)]
+    pub fn longest_announce_listener_key(&self) -> usize {
+        self.announce_listeners
+            .read()
+            .unwrap()
+            .keys()
+            .map(|k| k.chars().count())
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn overview(&self) -> Vec<CourtOverview> {
         let guard = self.snapshot.read().unwrap();
         let Some(snap) = guard.as_ref() else {
             return Vec::new();
         };
+        self.overview_from(snap)
+    }
+
+    /// Wie [`Self::overview`], aber auf einem **übergebenen** Schnappschuss.
+    ///
+    /// Für Aufrufer, die mehrere Sichten aus demselben BTP-Stand bauen: Zwei
+    /// getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen, und
+    /// die Teilsichten beschrieben dann verschiedene Turnierstände.
+    pub fn overview_from(&self, snap: &BtpSnapshot) -> Vec<CourtOverview> {
         let courts = self.courts.read().unwrap();
         snap.court_infos
             .iter()
@@ -1237,6 +1985,10 @@ impl TabletState {
                     team2_nationalities: m.map(|mm| nationalities(&mm.team2)).unwrap_or_default(),
                     sets,
                     tablet_connected,
+                    // Aufruf-Stufe aus der gemeinsamen Zählung: Beide
+                    // Oberflächen sollen dieselbe Zahl anzeigen und beim
+                    // nächsten Aufruf dieselbe Stufe ansagen.
+                    call_stage: self.calls_made(court.id, m.map(|mm| mm.id).unwrap_or(0)),
                     battery: session.and_then(|s| s.battery),
                     injury: session.map(|s| s.injury).unwrap_or(false),
                     official_call: session.map(|s| s.official).unwrap_or(false),
@@ -1447,6 +2199,9 @@ mod tests {
     /// ist die CourtID des Felds (`None` = kein Feld).
     fn match_on(id: i64, court: Option<i64>, status: MatchStatus) -> BtpMatch {
         BtpMatch {
+            display_order: None,
+            from1: None,
+            from2: None,
             id,
             draw_id: 1,
             planning_id: 1000 + id,
@@ -1464,6 +2219,7 @@ mod tests {
             // CourtID ist maßgeblich. Wir setzen einen Platzhalter-Namen.
             court: court.map(|cid| format!("C{cid}")),
             court_id: court,
+            location_id: None,
             sets: vec![(5, 3)],
             winner: None,
             result: MatchResult::Normal,
@@ -1624,6 +2380,216 @@ mod tests {
         assert_eq!(c1.cap_score, 30);
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!((c2.best_of, c2.target_score, c2.cap_score), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_fresh_assignment_reserves_the_court_until_btp_confirms() {
+        // Zwischen dem Schreiben nach BTP und der Rückmeldung sieht der
+        // Schnappschuss das Feld noch leer. Ohne Reservierung ließe die
+        // Prüfung eine zweite Zuweisung durch, und die Spieler der ersten
+        // stünden vor einem Feld, auf dem ein fremdes Spiel läuft.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        assert_eq!(st.reserved_courts(1_000), vec![(3, 42)]);
+        // Kurz danach gilt sie noch …
+        assert_eq!(st.reserved_courts(5_000), vec![(3, 42)]);
+    }
+
+    #[test]
+    fn a_second_claim_on_the_same_court_loses() {
+        // Der eigentliche Zweck: Zwei Geräte tippen im selben Moment
+        // dasselbe Feld an. Genau eines darf gewinnen — und die
+        // Entscheidung muss VOR dem Schreiben nach BTP fallen, sonst läuft
+        // sie ins Leere, solange BTP antwortet.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        assert!(
+            !st.try_reserve_court(3, 77, 1_100),
+            "das Feld ist schon vergeben"
+        );
+        // Derselbe Vorgang noch einmal ist dagegen in Ordnung.
+        assert!(st.try_reserve_court(3, 42, 1_200));
+    }
+
+    #[test]
+    fn the_same_match_cannot_be_claimed_for_two_courts() {
+        // Sonst stünde dasselbe Spiel in BTP auf zwei Feldern: Eines davon
+        // bliebe dauerhaft mit einem Geisterspiel belegt.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        assert!(
+            !st.try_reserve_court(5, 42, 1_100),
+            "das Spiel ist schon einem Feld zugesagt"
+        );
+    }
+
+    #[test]
+    fn a_failed_write_releases_its_claim_at_once() {
+        // Schlägt der Schreibvorgang fehl, darf das Feld nicht bis zum
+        // Ablauf der Frist blockiert bleiben — der nächste Versuch soll
+        // sofort möglich sein.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(3, 42, 1_000));
+        st.release_court_claim(3);
+        assert!(st.reserved_courts(1_100).is_empty());
+        assert!(st.try_reserve_court(3, 77, 1_200), "Feld ist wieder frei");
+    }
+
+    #[test]
+    fn a_clock_jumping_backwards_does_not_freeze_a_reservation() {
+        // Zeitumstellung oder Zeitabgleich können die Uhr zurückstellen.
+        // Ein Zeitstempel aus der „Zukunft" darf keine ewige Reservierung
+        // ergeben.
+        let st = TabletState::default();
+        st.try_reserve_court(3, 42, 10_000);
+        assert!(
+            st.reserved_courts(1_000).is_empty(),
+            "Zeitstempel aus der Zukunft wird verworfen"
+        );
+    }
+
+    #[test]
+    fn a_reservation_expires_so_a_failed_write_does_not_block_the_court() {
+        // Schlägt der Schreibvorgang fehl, bestätigt BTP nie — die
+        // Reservierung muss von selbst verfallen, sonst wäre das Feld
+        // dauerhaft blockiert.
+        let st = TabletState::default();
+        st.try_reserve_court(3, 42, 1_000);
+        let after_ttl = 1_000 + RESERVATION_TTL_MS + 1;
+        assert!(st.reserved_courts(after_ttl).is_empty());
+    }
+
+    #[test]
+    fn a_reservation_is_released_once_btp_reports_the_match_on_the_court() {
+        // Sobald der Schnappschuss die Zuweisung zeigt, ist die Reservierung
+        // überflüssig — sie darf das Feld nicht länger blockieren, als nötig.
+        let st = TabletState::default();
+        st.try_reserve_court(3, 42, 1_000);
+        st.set_snapshot(snapshot(
+            vec![match_on(42, Some(3), MatchStatus::OnCourt)],
+            vec![(3, "Feld 3")],
+        ));
+        st.release_confirmed_reservations();
+        assert!(st.reserved_courts(1_500).is_empty());
+    }
+
+    #[test]
+    fn repeating_an_operation_returns_the_stored_answer_instead_of_acting_twice() {
+        // Ein Doppeltipp bei träger Verbindung darf nicht zweimal nach BTP
+        // schreiben. Der Vorgangsschlüssel entscheidet: gleiche Kennung =
+        // gleiche Antwort, ohne die Aktion erneut auszuführen.
+        let st = TabletState::default();
+        assert_eq!(st.remembered_result("op-1", "assign:42:3", 1_000), None);
+        st.remember_result("op-1", "assign:42:3", relay_proto::TlResponse::ok(7), 1_000);
+        let again = st
+            .remembered_result("op-1", "assign:42:3", 1_200)
+            .expect("gespeichert");
+        assert!(again.ok);
+        assert_eq!(again.state_rev, 7);
+        // Ein anderer Vorgang ist davon unberührt.
+        assert_eq!(st.remembered_result("op-2", "assign:42:3", 1_200), None);
+    }
+
+    #[test]
+    fn a_reused_key_for_a_different_action_is_not_answered_from_memory() {
+        // Sonst bekäme eine völlig andere Aktion die gespeicherte
+        // Erfolgsmeldung der ersten — und würde nie ausgeführt.
+        let st = TabletState::default();
+        st.remember_result("op-1", "assign:42:3", relay_proto::TlResponse::ok(1), 1_000);
+        assert_eq!(
+            st.remembered_result("op-1", "free:5", 1_100),
+            None,
+            "andere Aktion, also keine gespeicherte Antwort"
+        );
+    }
+
+    #[test]
+    fn the_operation_memory_cannot_be_flooded() {
+        // Ein Gerät mit gültigem Zugang darf den Arbeitsspeicher des
+        // Turnier-PCs nicht mit erfundenen Kennungen füllen.
+        let st = TabletState::default();
+        for i in 0..(MAX_REMEMBERED_OPS * 3) {
+            st.remember_result(
+                &format!("op-{i}"),
+                "a",
+                relay_proto::TlResponse::ok(1),
+                1_000,
+            );
+        }
+        assert!(st.remembered_op_count() <= MAX_REMEMBERED_OPS);
+        // Übermäßig lange Kennungen werden gar nicht erst behalten.
+        let overlong = "x".repeat(500);
+        st.remember_result(&overlong, "a", relay_proto::TlResponse::ok(1), 1_000);
+        assert_eq!(st.remembered_result(&overlong, "a", 1_000), None);
+    }
+
+    #[test]
+    fn a_remembered_operation_is_forgotten_after_a_while() {
+        // Sonst wüchse die Liste über ein Turnier hinweg unbegrenzt, und ein
+        // zufällig wiederholter Schlüssel bekäme Jahre später eine Antwort.
+        let st = TabletState::default();
+        st.remember_result("op-1", "a", relay_proto::TlResponse::ok(1), 1_000);
+        assert!(st
+            .remembered_result("op-1", "a", 1_000 + OP_MEMORY_MS + 1)
+            .is_none());
+    }
+
+    #[test]
+    fn moving_a_match_takes_its_score_along() {
+        // Der Spielstand hängt am Feld, nicht am Spiel. Hängt die
+        // Turnierleitung ein laufendes Spiel um, muss er mitwandern — sonst
+        // zeigt das neue Feld 0:0 und das alte den stehengebliebenen Stand,
+        // auf dem Court-Monitor wie im Liveticker.
+        let st = TabletState::default();
+        st.attach_tablet(1);
+        st.record_score(1, 42, vec![(21, 15), (11, 8)]);
+        st.set_court_state(1, r#"{"serving":{"team":"a"}}"#.to_string());
+
+        st.move_match_score(1, 2, 42);
+
+        // Nach dem Umzug steht das Spiel auf Feld 2 — so, wie BTP es nach
+        // dem Schreibvorgang meldet.
+        st.set_snapshot(snapshot(
+            vec![match_on(42, Some(2), MatchStatus::OnCourt)],
+            vec![(1, "Feld 1"), (2, "Feld 2")],
+        ));
+        let ov = st.overview();
+        let neu = ov.iter().find(|c| c.court_id == 2).unwrap();
+        let alt = ov.iter().find(|c| c.court_id == 1).unwrap();
+        assert_eq!(
+            neu.sets,
+            vec![(21, 15), (11, 8)],
+            "der Stand ist mitgewandert"
+        );
+        assert_eq!(alt.match_id, 0, "das alte Feld ist leer");
+        assert_eq!(
+            st.court_state(2).as_deref(),
+            Some(r#"{"serving":{"team":"a"}}"#),
+            "auch Aufschlag und Pause ziehen mit um"
+        );
+        assert_eq!(st.court_state(1), None);
+    }
+
+    #[test]
+    fn moving_does_not_touch_a_court_that_counts_another_match() {
+        // Ein verspäteter Umhänge-Auftrag darf keinen fremden Stand
+        // überschreiben.
+        let st = TabletState::default();
+        st.attach_tablet(1);
+        st.record_score(1, 99, vec![(5, 3)]); // ein ANDERES Spiel
+        st.move_match_score(1, 2, 42);
+
+        st.set_snapshot(snapshot(
+            vec![match_on(99, Some(1), MatchStatus::OnCourt)],
+            vec![(1, "Feld 1"), (2, "Feld 2")],
+        ));
+        let ov = st.overview();
+        assert_eq!(
+            ov.iter().find(|c| c.court_id == 1).unwrap().sets,
+            vec![(5, 3)],
+            "der fremde Stand bleibt, wo er ist"
+        );
+        assert_eq!(ov.iter().find(|c| c.court_id == 2).unwrap().match_id, 0);
     }
 
     #[test]
@@ -1798,6 +2764,317 @@ mod tests {
     }
 
     #[test]
+    fn a_second_recall_at_the_meeting_point_becomes_the_last_one() {
+        // Wer dreimal „Nachruf" drückt und dreimal „Zweiter Aufruf" hört,
+        // erfährt nie, dass es der letzte vor der kampflosen Wertung war.
+        // Die Desktop-Oberfläche eskaliert seit jeher 2 → 3; die
+        // Turnierleitungs-Seite muss dasselbe tun, und gezählt wird an einer
+        // Stelle: hier.
+        let st = TabletState::default();
+        assert_eq!(st.note_prep_call(42, "team1"), 2, "der erste Nachruf");
+        assert_eq!(st.note_prep_call(42, "team1"), 3);
+        assert_eq!(
+            st.note_prep_call(42, "team1"),
+            3,
+            "mehr als drei gibt es nicht"
+        );
+        // Die andere Partei zählt für sich — sie war ja vielleicht längst da.
+        assert_eq!(st.note_prep_call(42, "team2"), 2);
+    }
+
+    #[test]
+    fn a_match_returning_to_a_court_starts_its_calls_from_the_beginning() {
+        // Die Standzeit wird beim Verlassen des Feldes vergessen — die
+        // Aufrufe müssen es auch. Sonst zeigte ein gerade erst aufgerufenes
+        // Spiel „3. Aufruf erfolgt", und der Aufruf-Knopf verschwände
+        // dauerhaft: Die Turnierleitung könnte es nicht mehr rufen.
+        let st = TabletState::default();
+        st.note_court_call(101, 42);
+        st.note_court_call(101, 42);
+        assert_eq!(st.calls_made(101, 42), 3);
+
+        // Feld geräumt (Spiel 42 steht nirgends mehr).
+        st.reconcile_on_court(&HashMap::new(), 5_000);
+        // Und später wieder aufgerufen.
+        st.reconcile_on_court(&HashMap::from([(101, 42)]), 9_000);
+        assert_eq!(
+            st.calls_made(101, 42),
+            0,
+            "frisch auf dem Feld heißt: noch kein Aufruf gesprochen"
+        );
+    }
+
+    #[test]
+    fn an_announcement_device_without_a_hall_answers_for_a_job_without_one() {
+        // Ein Auftrag ohne Halle geht an JEDES Gerät. Dann muss auch jedes
+        // Gerät als Zuhörer dafür zählen — sonst meldete die Seite „kein
+        // Ansage-Gerät verbunden", während der Aufruf gerade erklingt, und
+        // jemand ruft zur Sicherheit per Funk ein zweites Mal.
+        let st = TabletState::default();
+        st.announce_jobs_since("Halle A", 0, 10_000);
+        assert!(
+            st.has_announce_listener("", 10_000),
+            "das Gerät in Halle A hört auch den Aufruf ohne Halle"
+        );
+    }
+
+    #[test]
+    fn made_up_hall_names_cannot_grow_the_listener_list_without_end() {
+        // Die Abhol-Route ist im Hallennetz offen. Ohne Grenze könnte ein
+        // fehlkonfiguriertes (oder böswilliges) Gerät mit wechselnden
+        // Hallennamen den Speicher des Turnier-PCs volllaufen lassen —
+        // mitsamt Tablet-Server und BTP-Übertragung.
+        let st = TabletState::default();
+        for i in 0..500 {
+            st.announce_jobs_since(&format!("Halle {i}"), 0, 10_000);
+        }
+        assert!(
+            st.announce_listener_count() <= 64,
+            "die Liste bleibt beschränkt, war aber {}",
+            st.announce_listener_count()
+        );
+        // Ein überlanger Name wird gekappt statt in voller Länge behalten.
+        st.announce_jobs_since(&"A".repeat(4096), 0, 10_000);
+        assert!(st.longest_announce_listener_key() <= 128);
+    }
+
+    #[test]
+    fn a_hall_counts_as_covered_while_a_device_is_picking_up_announcements() {
+        // Die Turnierleitung muss erfahren, wenn ihr Aufruf nirgends
+        // erklingt. Wer Aufträge abholt, ist ein Ansage-Gerät — einen
+        // anderen Nachweis gibt es nicht, und einen zweiten Meldeweg
+        // bräuchte es dafür auch nicht.
+        let st = TabletState::default();
+        assert!(!st.has_announce_listener("Halle A", 10_000));
+
+        st.announce_jobs_since("Halle A", 0, 10_000);
+        assert!(st.has_announce_listener("Halle A", 10_000));
+        assert!(
+            !st.has_announce_listener("Halle B", 10_000),
+            "nur die eigene Halle"
+        );
+
+        // Ein Gerät ohne eingestellte Halle spricht für alle (Einzelhalle).
+        st.announce_jobs_since("", 0, 10_000);
+        assert!(st.has_announce_listener("Halle B", 10_000));
+
+        // Und wer lange nicht mehr abgeholt hat, zählt nicht mehr.
+        assert!(!st.has_announce_listener("Halle A", 10_000 + 60_000));
+    }
+
+    #[test]
+    fn an_announcement_job_reaches_only_its_own_hall() {
+        // In einer Zwei-Hallen-Veranstaltung darf der Aufruf für Halle B
+        // nicht aus den Lautsprechern von Halle A kommen. Ein Gerät ohne
+        // eingestellte Halle (Einzelhallen-Betrieb) hört alles.
+        let st = TabletState::default();
+        let now = 100_000;
+        st.publish_announce_job(
+            "Halle B".to_string(),
+            AnnounceJobKind::CourtCall {
+                court_id: 7,
+                match_id: 42,
+                stage: 2,
+            },
+            now,
+        );
+        assert!(st.announce_jobs_since("Halle A", 0, now).is_empty());
+        assert_eq!(st.announce_jobs_since("Halle B", 0, now).len(), 1);
+        assert_eq!(
+            st.announce_jobs_since("", 0, now).len(),
+            1,
+            "ohne Halle: alles"
+        );
+    }
+
+    #[test]
+    fn an_announcement_nobody_could_play_expires_instead_of_arriving_late() {
+        // Ein Ansage-Gerät, das eine Minute weg war, darf beim Wiederkommen
+        // nicht die Aufrufe der letzten Minute nachplärren — die Spiele
+        // laufen längst.
+        let st = TabletState::default();
+        let job = AnnounceJobKind::PrepCall {
+            match_id: 42,
+            side: relay_proto::PrepCallSide::Both,
+            stage: 2,
+        };
+        st.publish_announce_job(String::new(), job, 100_000);
+        assert_eq!(
+            st.announce_jobs_since("", 0, 155_000).len(),
+            1,
+            "55 s: noch gültig"
+        );
+        assert!(
+            st.announce_jobs_since("", 0, 161_000).is_empty(),
+            "nach 60 s verfällt der Auftrag"
+        );
+    }
+
+    #[test]
+    fn each_announcement_device_picks_up_only_what_it_has_not_heard() {
+        // Dieselbe Buchführung wie beim Freitext: fortlaufende Nummer, das
+        // Gerät merkt sich die letzte. Sonst spräche es bei jeder Abfrage
+        // alles noch einmal.
+        let st = TabletState::default();
+        let kind = AnnounceJobKind::CourtCall {
+            court_id: 1,
+            match_id: 7,
+            stage: 2,
+        };
+        let first = st.publish_announce_job(String::new(), kind.clone(), 1_000);
+        let second = st.publish_announce_job(String::new(), kind, 1_000);
+        assert!(second > first, "die Nummer läuft weiter");
+        let neu = st.announce_jobs_since("", first, 1_000);
+        assert_eq!(neu.len(), 1);
+        assert_eq!(neu[0].id, second);
+        assert!(st.announce_jobs_since("", second, 1_000).is_empty());
+    }
+
+    #[test]
+    fn the_call_stage_is_counted_at_the_host_not_on_the_device() {
+        // Zweiter und dritter Aufruf müssen auf jedem Gerät dieselbe Zahl
+        // zeigen. Zählte jeder Browser für sich, riefe die eine Turnierleitung
+        // zum zweiten Mal, während die andere schon beim dritten ist — und
+        // niemand wüsste, ob das Spiel gleich gestrichen wird.
+        let st = TabletState::default();
+        assert_eq!(st.calls_made(101, 7), 0, "noch kein Aufruf gesprochen");
+        assert_eq!(
+            st.note_court_call(101, 7),
+            2,
+            "der erneute Aufruf ist der 2."
+        );
+        assert_eq!(st.note_court_call(101, 7), 3);
+        assert_eq!(
+            st.note_court_call(101, 7),
+            3,
+            "über den dritten hinaus wird nicht gezählt"
+        );
+        assert_eq!(st.calls_made(101, 7), 3, "und jedes Gerät liest dieselbe 3");
+    }
+
+    #[test]
+    fn the_court_overview_carries_the_call_stage_for_every_ui() {
+        // Nur wenn die Feld-Übersicht die Stufe mitliefert, kann auch die
+        // Desktop-Oberfläche sehen, dass die Turnierleitungs-Seite gerufen
+        // hat — sonst bliebe sie zurück und böte erneut den zweiten Aufruf
+        // an, während die Halle den dritten gehört hat.
+        let st = TabletState::default();
+        let snap = snapshot(
+            vec![match_on(7, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        );
+        st.set_snapshot(snap.clone());
+        assert_eq!(st.overview()[0].call_stage, 0, "noch nichts gesprochen");
+        st.note_court_call(101, 7);
+        assert_eq!(st.overview()[0].call_stage, 2);
+    }
+
+    #[test]
+    fn the_desktop_reports_the_stage_it_actually_spoke() {
+        // Die Desktop-Übersicht sagt beim ersten Druck den schlichten Aufruf
+        // an (ohne Stufenwort) — das ist Stufe 1. Zählte der Turnier-PC das
+        // als „einen weiteren Aufruf", stünde er sofort auf 2: Die
+        // Turnierleitungs-Seite zeigte „2. Aufruf erfolgt", obwohl die Halle
+        // erst einen gehört hat, und nach dem zweiten Druck verschwände dort
+        // der Aufruf-Knopf ganz. Deshalb meldet der Desktop, was er
+        // gesprochen hat, statt hochzählen zu lassen.
+        let st = TabletState::default();
+        assert_eq!(st.reached_court_call(101, 7, 1), 1, "schlichter Aufruf");
+        assert_eq!(st.calls_made(101, 7), 1);
+        assert_eq!(st.reached_court_call(101, 7, 2), 2, "„Zweiter Aufruf\"");
+        assert_eq!(st.calls_made(101, 7), 2);
+        // Eine niedrigere Meldung dreht nicht zurück (zwei Geräte gleichzeitig).
+        assert_eq!(st.reached_court_call(101, 7, 1), 2);
+        // Und ein anderes Spiel auf dem Feld beginnt von vorn.
+        assert_eq!(st.reached_court_call(101, 8, 1), 1);
+    }
+
+    #[test]
+    fn the_clock_can_lift_the_call_stage_without_skipping_a_step() {
+        // Die Desktop-Übersicht sagt mindestens die Stufe an, die ihre Uhr
+        // schon als fällig zeigt — sonst stünde am Feld „3. Aufruf fällig",
+        // während der Knopf den zweiten ansagt. Diese Vorgabe darf die
+        // gemeinsame Zählung anheben, aber nie zurückdrehen.
+        let st = TabletState::default();
+        assert_eq!(
+            st.note_court_call_at_least(101, 7, 3),
+            3,
+            "die Uhr war weiter"
+        );
+        assert_eq!(
+            st.note_court_call_at_least(101, 7, 2),
+            3,
+            "und eine niedrigere Vorgabe dreht nicht zurück"
+        );
+    }
+
+    #[test]
+    fn a_new_match_on_the_court_starts_counting_calls_from_the_beginning() {
+        // Sonst erbte das nächste Spiel die Stufe seines Vorgängers und
+        // stünde sofort als „dritter Aufruf" da.
+        let st = TabletState::default();
+        st.note_court_call(101, 7);
+        st.note_court_call(101, 7);
+        assert_eq!(st.calls_made(101, 8), 0, "anderes Spiel, neue Zählung");
+        assert_eq!(st.note_court_call(101, 8), 2);
+        assert_eq!(st.calls_made(101, 7), 0, "und der Vorgänger ist vergessen");
+    }
+
+    #[test]
+    fn restarting_the_transfer_lets_the_automatic_assignment_run_again() {
+        // Die Pause wird auf der Turnierleitungs-Seite gesetzt. Ist das Tablet
+        // weg (leer, verlegt, Zugang widerrufen), gäbe es sonst keinen Weg
+        // zurück — die Automatik bliebe für den Rest des Turniers aus, obwohl
+        // sie in den Einstellungen eingeschaltet ist. Das Stoppen und Starten
+        // der Übertragung ist der Griff, den jede Turnierleitung kennt.
+        let st = TabletState::default();
+        st.set_auto_assign_paused(true);
+        st.reset_runtime_switches();
+        assert!(!st.auto_assign_paused());
+    }
+
+    #[test]
+    fn only_one_device_gets_a_walkover_proposal_to_work_on() {
+        // Zwei Turnierleitungs-Geräte tippen im selben Moment „kampflos
+        // werten". Ohne Anspruch schrieben beide dieselben Wertungen nach
+        // BTP. Wer den Vorschlag nimmt, hat ihn — der andere sieht, dass
+        // schon jemand da war.
+        let st = TabletState::default();
+        st.add_walkover_proposal(WalkoverProposal {
+            id: "p-1".to_string(),
+            entry_id: 10,
+            retired_team: "Weber / Fischer".to_string(),
+            draw_name: "HD B".to_string(),
+            created_at_ms: 1_000,
+        });
+        let first = st.take_walkover_proposal("p-1");
+        assert!(first.is_some(), "der erste bekommt den Vorschlag");
+        assert!(
+            st.take_walkover_proposal("p-1").is_none(),
+            "der zweite geht leer aus"
+        );
+        // Ging gar nichts nach BTP, kommt er zurück und bleibt bearbeitbar.
+        st.add_walkover_proposal(first.unwrap());
+        assert!(st.take_walkover_proposal("p-1").is_some());
+    }
+
+    #[test]
+    fn clearing_a_court_also_drops_its_pending_claim() {
+        // Ein geräumtes Feld darf sofort wieder vergeben werden. Blieb die
+        // Vormerkung des Schreibvorgangs stehen, wies der nächste Versuch mit
+        // „hat gerade jemand anderes belegt" ab — bis zu 15 Sekunden lang,
+        // obwohl das Feld sichtbar leer war.
+        let st = TabletState::default();
+        assert!(st.try_reserve_court(101, 7, 1_000));
+        st.clear_court(101);
+        assert!(
+            st.reserved_courts(1_000).is_empty(),
+            "die Vormerkung gehört zum Spiel, das gerade beendet wurde"
+        );
+        assert!(st.try_reserve_court(101, 8, 1_000), "und das Feld ist frei");
+    }
+
+    #[test]
     fn walkover_candidates_lists_scheduled_matches_of_the_entry() {
         let st = TabletState::default();
         // match_on setzt entry1_id = 10, entry2_id = 20.
@@ -1926,6 +3203,76 @@ mod tests {
         assert_eq!(m1.preparation_call_ts, None);
         assert_eq!(m2.preparation_call_ts, Some(2000));
         assert_eq!(m2.preparation_hall.as_deref(), Some("Halle A"));
+    }
+
+    #[test]
+    fn halls_set_by_hand_survive_a_restart() {
+        // Aus dem Test am Gerät (09.08.): Nach einem Neustart des Turnier-PCs
+        // waren alle von Hand gesetzten Spielorte weg — 0 von 120 Spielen
+        // hatten noch eine Halle. Für Vorbereitungs-Aufrufe ist das richtig
+        // (die sind Minuten alt), für den Spielort nicht: Den setzt die
+        // Turnierleitung einmal für den Tag, und ein Absturz mitten im
+        // Turnier darf diese Arbeit nicht vernichten.
+        let dir = tempfile::tempdir().unwrap();
+        let datei = dir.path().join("spielorte.json");
+
+        let st = TabletState::default();
+        st.use_manual_hall_file(&datei);
+        st.set_manual_hall(4711, "Halle B");
+        st.set_manual_hall(4712, "Halle A");
+        st.set_manual_hall(4712, ""); // wieder zurückgenommen
+
+        // Neuer Zustand, dieselbe Datei — wie nach einem Neustart.
+        let neu = TabletState::default();
+        neu.use_manual_hall_file(&datei);
+        assert_eq!(neu.manual_hall(4711).as_deref(), Some("Halle B"));
+        assert_eq!(neu.manual_hall(4712), None, "zurückgenommen bleibt weg");
+    }
+
+    #[test]
+    fn a_missing_hall_file_is_not_an_error() {
+        // Erster Start, noch nichts gesetzt: leer statt Fehler.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.use_manual_hall_file(&dir.path().join("gibt-es-nicht.json"));
+        assert_eq!(st.manual_hall(1), None);
+        // Und danach lässt sich trotzdem setzen.
+        st.set_manual_hall(1, "Halle A");
+        assert_eq!(st.manual_hall(1).as_deref(), Some("Halle A"));
+    }
+
+    #[test]
+    fn a_hall_set_by_hand_reaches_the_liveticker() {
+        // Der Hallenfilter des Livetickers (`display=next&halle=…`) liest die
+        // Halle am anstehenden Spiel. Bisher füllte sie nur ein
+        // Vorbereitungs-Aufruf — lief das Turnier über BTP, blieb sie leer und
+        // der Monitor einer Halle zeigte gar nichts. Eine von Hand gesetzte
+        // Halle muss deshalb genauso durchschlagen, **ohne** dass das Spiel
+        // dadurch als „aufgerufen" gilt.
+        use crate::btp::model::BtpLocation;
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![match_on(4, None, MatchStatus::Scheduled)],
+            vec![(101, "Court 1")],
+        );
+        snap.locations = vec![BtpLocation {
+            id: 7,
+            name: "Halle A".to_string(),
+        }];
+        st.set_manual_hall(4, "halle a");
+
+        st.apply_preparation_calls(&mut snap);
+
+        let m = &snap.matches[0];
+        assert_eq!(
+            m.preparation_hall.as_deref(),
+            Some("Halle A"),
+            "in BTPs Schreibweise"
+        );
+        assert_eq!(
+            m.preparation_call_ts, None,
+            "einen Ort zu setzen ist kein Aufruf - sonst meldete der Monitor einen Aufruf, den es nie gab"
+        );
     }
 
     #[test]

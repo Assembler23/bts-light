@@ -4,6 +4,90 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.176
+
+- **Turnierleitung im Browser.** Felder vergeben, ohne am Turnier-PC zu
+  stehen: Die neue Oberfläche läuft auf Tablet, Telefon oder einem zweiten
+  Rechner — im Hallennetz und, wenn gewünscht, über das Internet. Mehrere
+  Helfer arbeiten gleichzeitig; weist einer ein Feld zu, das ein anderer im
+  selben Moment belegt, gewinnt genau einer und der andere erfährt, was dort
+  jetzt steht. Spiele lassen sich per Antippen oder Ziehen auf Felder legen,
+  umhängen und herunternehmen; Zeiten, Live-Spielstände, Aufrufe,
+  Vorbereitungs-Aufrufe, Ergebnisse und kampflose Wertungen sind von dort
+  bedienbar. Einzurichten unter *Turnierleitung*: freischalten, Namen
+  eintragen, QR-Code scannen. Standardmäßig **aus** — Turniere ohne diese
+  Oberfläche verhalten sich unverändert. Bedienung und Grenzen:
+  [turnierleitung-web.md](turnierleitung-web.md).
+- **Ansagen aus der Oberfläche.** Die Seite spricht nie selbst — sie steht
+  im Zweifel im Büro. Sie beauftragt, gesprochen wird dort, wo die Anlage
+  hängt: mit derselben Stimme, demselben Gong und denselben
+  Aussprache-Korrekturen wie ein Aufruf vom Turnier-PC. Hört in der Zielhalle
+  niemand zu, sagt die Seite das im Klartext.
+- **Die Aufruf-Stufe zählt jetzt der Turnier-PC.** Zweiter und dritter
+  Aufruf zeigen auf allen Geräten dieselbe Zahl — auch in der Desktop-App.
+  Vorher zählte jede Oberfläche für sich.
+- **Die Spielreihenfolge folgt endlich dem Turnierplan.** Zwei Fehler in der
+  Auswertung des BTP-Mitschnitts hatten dafür gesorgt, dass Warteliste,
+  automatische Feldvergabe **und der Liveticker** eine Reihenfolge zeigten,
+  die im gedruckten Plan nirgends stand: Die angesetzte Zeit wurde nie
+  gelesen (BTP liefert sie in einer Form, die der Parser nicht kannte), und
+  die Ansetzungsreihenfolge innerhalb eines Zeitfensters war gar nicht
+  bekannt. An einem echten Turnier gegengeprüft: Die neue Sortierung
+  reproduziert die aus BTP exportierte Spielliste Position für Position. Der
+  Liveticker zeigte die anstehenden Spiele zuvor sogar in umgekehrter
+  Reihenfolge.
+- **Ergebnisse korrigieren**, solange nichts daran hängt (Finale,
+  Gruppenspiel). Sobald der Sieger im nächsten Spiel steht, wird mit
+  Begründung abgelehnt: Was BTP beim Überschreiben mit dem Turnierbaum
+  macht, ist noch nicht abschließend geklärt.
+- **Ein Feld war nach dem ersten Ergebnis für immer blockiert.** Sobald auf
+  einem Feld ein Spiel fertig wurde, stand es dauerhaft auf „wird geräumt"
+  und nahm kein neues Spiel mehr an — weder von Hand noch über die
+  Automatik. Ursache: Das beendete Spiel **behält** in BTP seine
+  Feldangabe (Turnier-Doku „wo wurde gespielt", bewusst so seit Juli), und
+  die Belegungsprüfung las das als „Feld besetzt". Sie fragt jetzt nach
+  einem *laufenden* Spiel. Vor Doppelvergabe schützt weiterhin die
+  Wartezeit der automatischen Vergabe.
+- **Punkte zählen ohne Bremse.** Nach jedem Punkt waren die +1-Flächen drei
+  Sekunden gesperrt; das war als Schutz gegen versehentliche Doppel-Taps
+  gedacht und fühlte sich am Gerät zäh an. Jetzt 0,7 Sekunden — genug gegen
+  den zitternden Finger, kurz genug für schnelle Ballwechsel.
+- **Kein unmögliches Ergebnis mehr am Tablet.** In einem Turnier bis 15 mit
+  Deckel 21 ließ sich über „Ergebnis eintragen" ein **27:25** speichern — und
+  von dort ging es ungebremst nach BTP und in den Liveticker. Getippte
+  Endstände werden jetzt gegen die Zählweise des Spiels geprüft, in der
+  Oberfläche **und** am Turnier-PC. Bei Aufgabe, Kampflos und
+  Disqualifikation bleibt der unfertige Satz erlaubt — dort bricht das Spiel
+  ja mitten drin ab.
+- **Der Spielort aus BTP wird gelesen.** Pflegst du im Turnierplan die
+  Spalte „Spielort", steht die Halle jetzt an jedem wartenden Spiel — ohne
+  dass jemand etwas eintragen muss. Damit greift auch der Hallenfilter des
+  Livetickers (`display=next&halle=…`), der bislang leer blieb, sobald ein
+  Turnier seine Aufrufe über BTP statt über bts-light machte.
+- **Und wo BTP nichts liefert, setzt die Turnierleitung den Ort selbst.**
+  Ein kleiner Hallen-Wähler an jeder Zeile der Warteliste, ohne das Spiel
+  auf ein Feld zu legen; die Festlegung überlebt einen Neustart des
+  Turnier-PCs. Einen Ort zu setzen gilt dabei nicht als Aufruf.
+- **Flaggen in der Turnierleitung.** Ist die Nationen-Anzeige eingeschaltet,
+  steht jetzt die Flagge neben dem Namen statt eines Kürzels — dieselben
+  Bilder wie auf dem Court-Monitor.
+- **Jedes Feld zeigt seinen Zustand als Farbe:** aufgerufen, überfällig (kein
+  einziger Punkt nach der eingestellten Zeit — da muss jemand hin), im
+  Spiel, beendet. Die Schwelle steht unter *Aufruf-Timer*, Standard fünf
+  Minuten, und gilt für alle Geräte.
+- **Besser lesbar in der Turnierleitung:** Jedes Spiel nennt seine Klasse als
+  `HE-C`/`HD-D`, die Paarung steht mit dem „vs." in der Mitte und im Doppel
+  die Partner untereinander, und die Felder bleiben stehen, während die
+  Spielliste läuft — bei 120 wartenden Spielen war sonst kein Feld mehr zu
+  sehen, auf das man etwas hätte ziehen können. Zwei Schalter je Gerät im
+  Kopf: Spielnummer und Nationen ein- oder ausblenden.
+- **Uhren gehen auch in ruhigen Phasen richtig.** Ändert sich am Turnier
+  minutenlang nichts, antwortet der Turnier-PC nur noch mit „unverändert" —
+  und dabei wurde die Zeit nicht mehr nachgezogen. Ein Tablet, dessen Uhr
+  sich zwischendurch stellt (Funkzeit nach dem Aufwachen, Zeitumstellung),
+  zeigte dann überall falsche Dauern, ausgerechnet dort, wo man auf „seit
+  wann aufgerufen" schaut.
+
 ## v0.9.175
 
 - **Hallen-Check-In, erste Stufe (Datenlieferung).** bts-light liest jetzt die

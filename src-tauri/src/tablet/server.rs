@@ -105,6 +105,19 @@ impl ServerCtx {
         AppConfig::load_from(&self.config_path).unwrap_or_default()
     }
 
+    /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
+    ///
+    /// Für Entscheidungen, bei denen „Datei gerade nicht lesbar" etwas ganz
+    /// anderes bedeutet als „so ist es eingestellt": Der Widerruf der
+    /// Turnierleitungs-Zugänge etwa. Die Datei wird beim Speichern
+    /// abgeschnitten und neu geschrieben — trifft der Abgleich genau dieses
+    /// Fenster, ergäbe die Standard-Konfiguration „keine Geräte
+    /// zugelassen", und alle Turnierleitungs-Geräte flögen für einen Takt
+    /// hinaus.
+    pub fn app_config_result(&self) -> Result<AppConfig, String> {
+        AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())
+    }
+
     /// Lädt die Geräte→Target-Zuweisungen frisch von der Platte. Ein
     /// Target ist entweder eine CourtID (klassischer Court-Monitor) oder
     /// ein Info-Display (`InfoOverview` / `InfoPreparation`).
@@ -143,10 +156,18 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/winners/state", get(info_winners_state))
         .route("/info/club-logo", get(info_club_logo))
         .route("/info/announce/freetext", get(info_announce_freetext))
+        .route("/info/announce/jobs", get(info_announce_jobs))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
         .route("/combo/state", get(combo_state))
+        // Turnierleitungs-Oberfläche. Ohne freigeschaltetes Feature und
+        // gültigen Zugang antworten beide Routen abweisend — die Prüfung
+        // sitzt in `tl::authorize` und liest die Konfiguration frisch, damit
+        // ein Widerruf ohne Neustart greift.
+        .route("/tl", get(tl_page))
+        .route("/tl/api/state", get(tl_state))
+        .route("/tl/api/command", post(tl_command))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -738,6 +759,19 @@ async fn info_announce_freetext(
     ([(header::CACHE_CONTROL, "no-store")], Json(items))
 }
 
+/// Ansage-Aufträge der Turnierleitung für eine Halle (`id > since`).
+///
+/// Derselbe Weg wie beim Freitext, nur mit Struktur statt fertigem Text: Der
+/// Aufruf wird erst am Ansage-Gerät zu Worten — mit dessen Stimme, Gong und
+/// Namenskorrektur, damit er klingt wie jeder andere Aufruf auch.
+async fn info_announce_jobs(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<FreetextQuery>,
+) -> impl IntoResponse {
+    let items = ctx.tablet.announce_jobs_since(&q.hall, q.since, now_ms());
+    ([(header::CACHE_CONTROL, "no-store")], Json(items))
+}
+
 /// Liefert die HTML der Werbe-Anzeige. Pollt `/info/ad/state` für die
 /// Bilder-Liste; mode/file/device kommen über den Query-String.
 async fn info_ad_page() -> impl IntoResponse {
@@ -879,24 +913,25 @@ async fn info_preparation_state(
                 "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "match_num": m.match_num,
                 "planned_time": m.planned_time,
+                "draw_id": m.draw_id,
                 "call": call,
             })
         })
         .collect();
 
-    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), danach nach
-    // Spielnummer (ohne Zeit/Nummer hinten) – konsistent zur Auto-Feldvergabe.
+    // Gerufene zuerst, dann die Ansetzung des Turnierplans (Zeit, dann
+    // Reihenfolge im Zeitfenster), danach die Spielnummer – dieselbe
+    // Definition wie in `assign::sort_key`, damit Tablet, Monitor,
+    // Turnierleitung und Automatik dieselbe Liste zeigen.
     candidates.sort_by_key(|c| {
-        let has_call = c.get("call").map(|v| !v.is_null()).unwrap_or(false);
-        let planned = c
-            .get("planned_time")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(i64::MAX);
-        let num = c
-            .get("match_num")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(i64::MAX);
-        (!has_call, planned, num)
+        let zahl = |feld: &str| c.get(feld).and_then(|v| v.as_i64());
+        crate::tablet::assign::sort_key_parts(
+            c.get("call").map(|v| !v.is_null()).unwrap_or(false),
+            zahl("planned_time"),
+            zahl("draw_id"),
+            zahl("match_num"),
+            zahl("match_id").unwrap_or(0),
+        )
     });
 
     (
@@ -952,6 +987,102 @@ async fn result(
     Json(process_result(&ctx, &body).await)
 }
 
+/// Liest den Zugang eines Turnierleitungs-Geräts aus dem `Authorization`-
+/// Kopf und schlägt das Gerät nach.
+///
+/// Der Zugang steht bewusst **nur** im Kopf und nie im Pfad: Pfade landen in
+/// Zugriffsprotokollen, Kopfzeilen nicht.
+fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::config::TlDevice> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    crate::tablet::tl::authorize(&ctx.app_config(), token)
+}
+
+/// Die Turnierleitungs-Oberfläche.
+///
+/// Bewusst **ohne** Zugangsprüfung: Die Seite selbst enthält keine
+/// Turnierdaten, sondern holt sie erst über die Schnittstelle — und die
+/// prüft. Wer sie ohne Zugang öffnet, sieht nur den Hinweis, wie er einen
+/// bekommt. Eine Prüfung hier brächte nichts und würde den Kopplungsablauf
+/// (Adresse aufrufen, Zugang aus dem Fragment übernehmen) unmöglich machen.
+async fn tl_page() -> impl IntoResponse {
+    Html(assets::TL_HTML)
+}
+
+/// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche.
+async fn tl_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz und eines
+    // aus dem Internet müssen mit derselben Zahl denselben Stand meinen,
+    // sonst träfe die Altersprüfung am Turnier-PC zufällige Entscheidungen.
+    let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &ctx.app_config(), now_ms());
+    // Die Seite fragt alle zwei Sekunden und schickt ihre letzte Fassung mit.
+    // Hat sich nichts geändert, spart „unverändert" den ganzen Stand — auf
+    // demselben Rechner, der nebenher BTP und die Tablets bedient.
+    //
+    // Die Prozess-Kennung gehört mit hinein: Nach einem Neustart der App
+    // beginnt die Revision wieder bei 1, und ein Gerät mit gemerkter Fassung
+    // „1" bekäme sonst „unverändert" auf einen völlig anderen Turnierstand.
+    let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+    let unveraendert = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag);
+    if unveraendert {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response();
+    }
+    (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
+}
+
+/// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine
+/// Wiederholung als solche erkannt wird.
+#[derive(serde::Deserialize)]
+struct TlCommandBody {
+    /// Fehlt sie, entfällt nur der Schutz gegen Doppelausführung — die
+    /// Aktion selbst wird ganz normal bearbeitet und beantwortet. Ohne
+    /// `default` liefe ein Rumpf ohne Kennung in eine Verarbeitungsfehler-
+    /// Antwort, die kein reguläres Ergebnis wäre und die die Seite nicht
+    /// auswerten könnte.
+    #[serde(rename = "opId", default)]
+    op_id: String,
+    /// Der Stand, auf dem die Entscheidung beruhte. Ohne Angabe 0 — dann
+    /// fehlt nur die Angabe im Protokoll, geprüft wird ohnehin fachlich.
+    #[serde(rename = "viewRev", default)]
+    view_rev: u64,
+    action: relay_proto::TlAction,
+}
+
+/// Eine Aktion eines Turnierleitungs-Geräts.
+async fn tl_command(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<TlCommandBody>,
+) -> impl IntoResponse {
+    let Some(device) = tl_device(&ctx, &headers) else {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    };
+    Json(
+        crate::tablet::tl::execute(
+            &ctx,
+            &device,
+            &body.op_id,
+            now_ms(),
+            body.view_rev,
+            body.action,
+        )
+        .await,
+    )
+    .into_response()
+}
+
 /// Validiert ein Endergebnis vom Tablet und schreibt es per `SENDUPDATE`
 /// nach BTP. Von beiden Modi genutzt: vom LAN-`/result`-Handler und vom
 /// Cloud-Relay-Client. Die Validierung ist zugleich die Sicherheits-
@@ -977,6 +1108,32 @@ pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
         return false; // Ziel nicht erreicht oder über dem Deckel
     }
     hi >= cap || hi - lo >= 2 // am Deckel reicht 1 Punkt, sonst 2 Vorsprung
+}
+
+/// Prüft eine ganze Satzliste gegen die Zählweise des Matches.
+///
+/// **Eine** Quelle für beide Wege, auf denen ein Ergebnis hereinkommt: das
+/// Zähltablett (`process_result`) und die Turnierleitung
+/// (`build_manual_result_update`). Vorher hing sie nur am zweiten, weil der
+/// Tablet-Weg „ohnehin clientseitig zählt" — für ein von Hand **getipptes**
+/// Ergebnis gilt das aber nicht, und aus dem Betrieb kam ein 27:25 in einem
+/// Turnier, das bis 15 mit Deckel 21 spielt (R5: geprüft wird am Host).
+///
+/// Nur für **regulär ausgespielte** Ergebnisse. Bei Aufgabe, Kampflos oder
+/// Disqualifikation bricht das Spiel mitten im Satz ab; dann ist genau der
+/// unfertige Stand das, was nach BTP gehört.
+pub(crate) fn sets_fit_format(sets: &[(i64, i64)], target: i64, cap: i64) -> Result<(), String> {
+    if let Some(&(a, b)) = sets
+        .iter()
+        .find(|&&(a, b)| !set_is_complete(a, b, target, cap))
+    {
+        return Err(format!(
+            "Satz {a}:{b} ist nicht regulär zu Ende gespielt (bis {}, Deckel {}).",
+            if target > 0 { target } else { 21 },
+            if cap >= target { cap } else { 30 },
+        ));
+    }
+    Ok(())
 }
 
 /// Prüft die Satzliste und die Sonderfälle (Kampflos/Aufgabe) und leitet
@@ -1066,24 +1223,31 @@ pub(crate) fn build_manual_result_update(
     on_court_since: Option<u64>,
     now: u64,
 ) -> Result<proto::MatchUpdate, String> {
-    if m.winner.is_some() {
+    build_manual_result_update_opt(m, sets, on_court_since, now, false)
+}
+
+/// Wie [`build_manual_result_update`], aber mit ausdrücklicher
+/// Überschreib-Erlaubnis.
+///
+/// Ohne sie bleibt „bereits gewertet" ein Riegel — versehentlich lässt sich
+/// so kein Ergebnis ersetzen. Wer überschreiben will, muss es sagen, und der
+/// Aufrufer muss vorher geprüft haben, dass es folgenlos möglich ist
+/// (`tl::correction_blocker`).
+pub(crate) fn build_manual_result_update_opt(
+    m: &BtpMatch,
+    sets: Vec<(i64, i64)>,
+    on_court_since: Option<u64>,
+    now: u64,
+    overwrite: bool,
+) -> Result<proto::MatchUpdate, String> {
+    if m.winner.is_some() && !overwrite {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
     }
     if m.team1.is_empty() || m.team2.is_empty() {
         return Err("Die Paarung steht noch nicht fest.".to_string());
     }
     let (sets, team1_won, score_status) = derive_result(sets, false, false, false, None)?;
-    let (target, cap) = (m.scoring.target_score, m.scoring.cap_score);
-    if let Some(&(a, b)) = sets
-        .iter()
-        .find(|&&(a, b)| !set_is_complete(a, b, target, cap))
-    {
-        return Err(format!(
-            "Satz {a}:{b} ist nicht regulär zu Ende gespielt (bis {}, Deckel {}).",
-            if target > 0 { target } else { 21 },
-            if cap >= target { cap } else { 30 },
-        ));
-    }
+    sets_fit_format(&sets, m.scoring.target_score, m.scoring.cap_score)?;
     let (free_court_id, player_ids, duration_mins, end_ts_ms) =
         manual_finish_fields(m, on_court_since, now);
     Ok(proto::MatchUpdate {
@@ -1189,6 +1353,17 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             Ok(v) => v,
             Err(e) => return ResultResponse::err(e),
         };
+    // Gegen die Zählweise des Matches prüfen — auch hier, nicht nur auf dem
+    // Weg der Turnierleitung. Das Tablett zählt zwar selbst korrekt, aber es
+    // hat auch eine Eingabe für getippte Endstände, und die kam bisher
+    // ungeprüft durch: In einem Turnier bis 15 mit Deckel 21 ließ sich ein
+    // 27:25 speichern. Nur bei regulär ausgespielten Ergebnissen — eine
+    // Aufgabe bricht den Satz mitten drin ab.
+    if score_status == 0 {
+        if let Err(e) = sets_fit_format(&sets, m.scoring.target_score, m.scoring.cap_score) {
+            return ResultResponse::err(e);
+        }
+    }
     // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
     // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
     // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
@@ -1243,18 +1418,11 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         m.id,
         update.sets
     );
-    match write_result_to_btp(&ctx.config, &update).await {
+    // Nachschub-Eintrag löschen und Schreibzeit vermerken erledigt
+    // `write_result_settled` — hier bleibt nur, was diesen Weg ausmacht.
+    match write_result_settled(&ctx.config, &ctx.tablet, &update).await {
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
-            // Ein evtl. früher eingereihter Fehlversuch dieses Matches ist
-            // damit erledigt (das Tablet wiederholt selbst — gelingt sein
-            // Retry, darf die Nachschub-Queue nicht später erneut schreiben).
-            ctx.tablet.clear_btp_retry(m.id);
-            // Erfolg vermerken: Überholt ein noch laufender Nachschub-Write
-            // diese (neuere) Korrektur, schreibt der Flush sie danach
-            // selbstheilend erneut. Zeitstempel = SCHREIBzeit (nicht
-            // Spielende) — der Flush vergleicht gegen seinen Startzeitpunkt.
-            ctx.tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("BTP-Schreiben OK: Match {} (Feld freigegeben)", m.id);
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
@@ -1350,6 +1518,28 @@ pub(crate) async fn write_result_to_btp(
         .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
     proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
+}
+
+/// Schreibt eine Wertung nach BTP und führt die Buchführung, die **jedes
+/// Mal** dieselbe ist: den Nachschub-Eintrag dieses Spiels löschen und den
+/// Schreibvorgang für die Selbstheilung vermerken.
+///
+/// Der Zeitstempel wird bewusst **nach** dem Schreiben genommen: Der
+/// Nachschub-Lauf vergleicht ihn gegen seinen eigenen Startzeitpunkt, um zu
+/// erkennen, ob ihn eine neuere Wertung überholt hat. Ein vor dem Schreiben
+/// abgelesener Wert (BTP-Anmeldung + Aktualisierung dauern) kann älter sein
+/// als dieser Start — dann bliebe die frische Wertung überschrieben.
+/// Genau diese Falle ist der Grund, warum es die Funktion gibt und der
+/// Ablauf nicht mehr an vier Stellen abgeschrieben steht.
+pub(crate) async fn write_result_settled(
+    config: &AppConfig,
+    tablet: &TabletState,
+    update: &proto::MatchUpdate,
+) -> Result<(), String> {
+    write_result_to_btp(config, update).await?;
+    tablet.clear_btp_retry(update.btp_match_id);
+    tablet.note_direct_btp_write(update.clone(), now_ms());
+    Ok(())
 }
 
 /// LOGIN → Session-Schlüssel → `SENDUPDATE` mit Courts-Block. Schreibt
@@ -1852,6 +2042,9 @@ mod tests {
     /// Match id=42 auf Court 101 (OnCourt), zwei Einzel-Spieler.
     fn match_on_court() -> BtpMatch {
         BtpMatch {
+            display_order: None,
+            from1: None,
+            from2: None,
             id: 42,
             draw_id: 7,
             planning_id: 1001,
@@ -1867,6 +2060,7 @@ mod tests {
             entry2_id: 0,
             court: Some("1".into()),
             court_id: Some(101),
+            location_id: None,
             sets: vec![],
             winner: None,
             result: MatchResult::Normal,
@@ -1880,12 +2074,24 @@ mod tests {
 
     /// ServerCtx mit Match 42 auf Court 101; BTP zeigt auf 127.0.0.1:`port`.
     /// Für Ablehnungs-Tests genügt ein toter Port (es kommt nie zum Schreiben).
+    /// Wie [`make_ctx`], aber mit einer bestimmten Zählweise am Match — für
+    /// die Prüfung getippter Ergebnisse gegen Ziel und Deckel.
+    fn make_ctx_scoring(port: u16, scoring: ScoringFormat) -> ServerCtx {
+        let mut m = match_on_court();
+        m.scoring = scoring;
+        make_ctx_with(port, m)
+    }
+
     fn make_ctx(port: u16) -> ServerCtx {
+        make_ctx_with(port, match_on_court())
+    }
+
+    fn make_ctx_with(port: u16, m: BtpMatch) -> ServerCtx {
         let tablet = Arc::new(TabletState::default());
         tablet.set_snapshot(BtpSnapshot {
             tournament_name: "T".into(),
             rest_minutes: None,
-            matches: vec![match_on_court()],
+            matches: vec![m],
             courts: vec!["1".into()],
             locations: vec![],
             court_infos: vec![],
@@ -2273,6 +2479,85 @@ mod tests {
         assert_eq!(int(&m, "ScoreStatus"), Some(0), "regulär ausgespielt");
         let sets = xml::find(&m, "Sets").expect("Sets");
         assert_eq!(sets.children().len(), 2, "beide Sätze übertragen");
+    }
+
+    /// Ein Satz über dem Deckel wird abgelehnt — auch vom Tablet.
+    ///
+    /// Aus dem Betrieb gemeldet: In einem Turnier, das bis 15 mit Deckel 21
+    /// spielt, ließ sich am Tablet über „Ergebnis eintragen" ein 27:25
+    /// speichern. Die Prüfung gab es längst, sie hing aber nur am Weg der
+    /// Turnierleitung; der Tablet-Weg verließ sich darauf, dass die Seite
+    /// selbst nichts Ungültiges zählen lässt. Für getippte Ergebnisse gilt
+    /// das nicht — und ein falscher Satz wandert von hier direkt nach BTP
+    /// und in den Liveticker.
+    #[tokio::test]
+    async fn a_set_beyond_the_cap_is_rejected_from_the_tablet_too() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx_scoring(
+            port,
+            ScoringFormat {
+                best_of: 3,
+                target_score: 15,
+                cap_score: 21,
+                interval_at: Some(8),
+            },
+        );
+
+        let resp = process_result(&ctx, &body_with(&[(27, 25), (15, 9)])).await;
+
+        assert!(!resp.ok, "27:25 darf bei Deckel 21 nicht durchgehen");
+        let text = resp.error.unwrap_or_default();
+        assert!(text.contains("27:25"), "der Grund nennt den Satz: {text}");
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "nichts darf nach BTP gegangen sein"
+        );
+    }
+
+    /// Ein regulärer Satz nach demselben Format geht durch — sonst prüfte der
+    /// Test oben nur, dass überhaupt etwas abgelehnt wird.
+    #[tokio::test]
+    async fn a_valid_set_for_the_format_still_passes() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx_scoring(
+            port,
+            ScoringFormat {
+                best_of: 3,
+                target_score: 15,
+                cap_score: 21,
+                interval_at: Some(8),
+            },
+        );
+
+        // 21:20 ist am Deckel erlaubt (dort genügt ein Punkt Vorsprung).
+        let resp = process_result(&ctx, &body_with(&[(15, 9), (21, 20)])).await;
+
+        assert!(resp.ok, "{:?}", resp.error);
+        assert_eq!(recorded.lock().unwrap().len(), 1);
+    }
+
+    /// Bei einer **Aufgabe** darf der Satz unfertig sein — jemand hört mitten
+    /// im Spiel auf, und genau dieser Stand gehört nach BTP.
+    #[tokio::test]
+    async fn a_retirement_may_carry_an_unfinished_set() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx_scoring(
+            port,
+            ScoringFormat {
+                best_of: 3,
+                target_score: 15,
+                cap_score: 21,
+                interval_at: Some(8),
+            },
+        );
+        let mut body = body_with(&[(15, 9), (3, 5)]);
+        body.retired = true;
+        body.winner = Some(2);
+
+        let resp = process_result(&ctx, &body).await;
+
+        assert!(resp.ok, "{:?}", resp.error);
+        assert_eq!(recorded.lock().unwrap().len(), 1);
     }
 
     /// Aufgabe (Retired): Sieger explizit, `ScoreStatus=2`.

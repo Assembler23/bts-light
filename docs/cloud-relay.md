@@ -73,6 +73,7 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `POST /{ns}/result` | Endergebnis vom Tablet → an den Host weitergereicht |
 | `POST /{ns}/pairing-code` | Telefon-Kopplungscode ausstellen (ADR 0004, nur bei verbundenem Host) |
 | `GET /pair/{code}` | Telefon-Code → Namespace auflösen (1 h TTL, Fehlversuchs-Limit) |
+| `GET /tl`, `GET /tl/api/state`, `POST /tl/api/command` | Turnierleitungs-Oberfläche — **ohne Namespace in der Adresse**, siehe unten |
 | `GET /health` | Status-Schnappschuss |
 
 ### Datenfluss
@@ -97,6 +98,140 @@ hält sie je Namespace (`Namespace.prepared`) und gibt sie in
 „Aufgerufene Spiele" und sagt den **Zweit-/Drittaufruf** einer fehlenden
 Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 [announcements.md](announcements.md).
+
+### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
+
+> **Stand:** Der Weg steht in beiden Richtungen — im **LAN** (siehe
+> [tablet.md](tablet.md)) und über den **Relay**. Der Turnier-PC spiegelt
+> seine Zugänge (`TlAuth`) und seinen Anzeige-Zustand (`TlState`) und
+> beantwortet `TlCommand` mit **derselben** Ausführung wie im Hallennetz.
+> Gekoppelt und widerrufen wird unter **Turnierleitung** in der
+> Desktop-App: Name eintragen, QR scannen, fertig. Der Zugang ist genau
+> einmal sichtbar — im QR-Code beim Koppeln. Ohne Opt-in
+> (`tl_web.enabled`, Default aus) kennt der Relay kein einziges Token:
+> **Jede** Anfrage endet abgewiesen, bevor sie irgendetwas berührt.
+> Fachliche Grundlage:
+> [features/turnierleitung-web.md](features/turnierleitung-web.md),
+> [ADR 0011](adr/0011-tl-web-schreibender-cloud-pfad.md) und
+> [ADR 0012](adr/0012-tl-web-geraete-identitaet.md).
+
+Turnierleitungs-Geräte sind eine **dritte Client-Klasse** neben Tablets und
+Monitoren: mehrere je Namespace (höchstens 8), **nicht** feldgebunden, und
+sie schreiben ausschließlich **über den Host**. Sie landen nie in der
+Tablet-Liste eines Namespace und übernehmen nie eine Court-Session — R4
+(„ein aktives Tablet je Court") bleibt unberührt.
+
+Die geteilten Typen in `relay-proto`:
+
+| Typ | Zweck |
+|---|---|
+| `TlAction` | Der **geschlossene** Satz erlaubter Aktionen (Feld belegen/räumen/umhängen, Vorbereitungs-Aufruf, erneuter Aufruf, Ergebnis, Walkover, Zähltafelbediener, Auto-Vergabe). Was hier nicht steht, ist nicht darstellbar. |
+| `CourtExpectation` | Was das Gerät auf dem Feld **vorgefunden** hat (`any` / `free` / `match`). Stimmt es nicht mehr, lehnt der Host ab — so überschreiben zwei Geräte einander nicht stillschweigend. |
+| `TlResponse` + `TlErrorCode` | Antwort mit **maschinenlesbarem** Grund, damit die Seite gezielt reagieren kann, plus der Revision, auf die sie sich neu ausrichten soll. Kennt auch „ausgeführt, aber mit Hinweis" (etwa: in dieser Halle ist kein Ansage-Gerät verbunden) — ausdrücklich kein Fehler. |
+| `RelayFrame::TlCommand` | Kommando an den Host; `reqId` korreliert die Antwort, `opId` ist der Idempotenzschlüssel gegen doppelte Schreibvorgänge nach einem Netzwackler, `viewRev` die Revision der Ansicht, auf der die Aktion beruhte (Grundlage der Altersprüfung). |
+| `HostFrame::TlAck` | Die Quittung — der Absender erfährt das Ergebnis **nach** dem BTP-Schreiben, kein Fire-and-forget. |
+| `HostFrame::TlAuth` | Die zugelassenen Geräte als Paare aus **Kennung und Zugang** — ohne Namen (Datensparsamkeit). Der Host stellt sie aus, der Relay spiegelt sie nur; die Liste **ersetzt** die bisherige, und genau das ist der Widerruf. Die Kennung reist mit jedem Kommando zurück, damit das Protokoll des Turnier-PCs benennen kann, wer gehandelt hat, ohne dass ein Zugang in Protokollen auftaucht. |
+| `HostFrame::TlState` | Der Anzeige-Zustand als **opakes** JSON plus Revision. Der Relay legt ihn nur ab und liefert ihn unverändert aus — wie beim Court-Zustand bleibt die Turnierlogik vollständig im Host. |
+
+**Die `install_id` verlässt den Master dabei nicht.** Anders als bei
+Tablets und Monitoren ist der Namespace kein Bestandteil der
+TL-Adressen; der Relay schlägt ihn über das Gerätetoken nach (ADR 0012).
+Der Grund ist handfest: Die `install_id` **ist** der Zugang der Zähltablets
+(`/{ns}/ws`). Stünde sie in der Adresse, die jeder Helfer den ganzen Tag auf
+dem Bildschirm hat, könnte sich damit jeder als Tablet ausgeben.
+
+**Routen im Relay** (seit Schritt 10, alle ohne Namespace):
+
+| Route | Zweck |
+|---|---|
+| `GET /tl` | Die Seite selbst — **ohne** Zugangsprüfung, wie die Tablet-Seite. Ausgeliefert wird eine leere Hülle, die ihren Zugang erst aus dem Adress-Fragment (`#t=…`) liest; alles Verwertbare kommt über die geschützten API-Routen. |
+| `GET /tl/api/state` | Der zuletzt gepushte Anzeige-Zustand, **unverändert** durchgereicht. Mit `ETag` aus **Host-Generation und Revision**: Ein Gerät, das denselben Stand schon hat, bekommt `304` — bei einer Seite, die alle zwei Sekunden fragt, ist das über Mobilfunk der Unterschied zwischen sparsam und lästig. Die Generation muss hinein, weil die Revision beim Neustart des Turnier-PCs wieder klein beginnt; ohne sie bekäme ein Gerät „unverändert" auf einen völlig anderen Turnierstand. Fehlt der Stand, ist die Antwort `503` und **nicht** ein leeres Turnier: Leer sähe aus wie „alle Felder frei". |
+| `POST /tl/api/command` | Kommando an den Turnier-PC, Antwort synchron über `reqId`/`TlAck` — dasselbe erprobte Muster wie die Ergebnismeldung vom Tablet, mit 20 s Zeitablauf. |
+
+Der Relay ist dabei **Briefträger, nicht Schiedsrichter**: Er kennt weder
+Spiele noch Felder, prüft den Zugang und reicht durch. Ob eine Aktion
+zulässig ist, entscheidet allein der Turnier-PC (R5) — er ist der Einzige mit
+dem Turnierstand. Ein Fehler im Relay kann deshalb keine Wertung erfinden.
+
+**Was der Turnier-PC dazu tut** (`relay_client.rs`, 2-s-Takt):
+
+- `TlAuth` — die Zugänge, **nur bei Änderung**, aber immer einmal nach dem
+  Verbinden: Der Relay vergisst sie beim Abriss, und ohne diesen ersten Push
+  bliebe die Oberfläche nach jedem Reconnect ausgesperrt. Auch die leere
+  Liste wird geschickt; sie ist der Widerruf des letzten Geräts und die
+  Wirkung des Ausschalters.
+- `TlState` — der Anzeige-Zustand, **nur wenn die Revision steigt**. Sonst
+  liefe alle zwei Sekunden ein voller Turnierstand durchs Netz, auf
+  Mobilfunkgeräten der Turnierleitung.
+- `TlCommand` → `tl::execute` → `TlAck`: derselbe Ausführungsweg wie im
+  Hallennetz. Die Kennung aus dem Kommando wird gegen die **eigene**
+  Geräteliste gehalten, bevor irgendetwas geschieht — sonst hinge die
+  Nachvollziehbarkeit („wer hat was ausgelöst") allein am Relay.
+
+**Die Revision zählt der Turnier-PC, für beide Wege dieselbe**
+(`tl::build_state_with_rev`). Zwei getrennte Zähler wären schlimmer als
+keiner: Ein Gerät im Hallennetz und eines aus dem Internet meinten mit
+derselben Zahl verschiedene Stände. Der Fingerabdruck lässt Uhrzeit und
+Revision selbst außen vor — sonst zählte sie im Sekundentakt hoch, obwohl
+sich nichts geändert hat.
+
+**`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
+Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
+Turnier im Sekundentakt, in einer ruhigen Phase minutenlang gar nicht —
+dieselbe Zahl bedeutete mal Sekunden, mal eine Viertelstunde. Was ein
+veralteter Blick anrichten kann, fangen die fachlichen Prüfungen genauer ab:
+`expect` beim Feld, der beanspruchte Walkover-Vorschlag, die
+Ergebnisprüfung. Die Zahl dient der Nachvollziehbarkeit.
+
+Zwei Hürden vor dem Schreibweg: Der Zugang muss (1) im **Wegweiser** ein
+Turnier finden und (2) in genau diesem Turnier eingetragen sein. Ein Zugang
+aus dem Turnier nebenan scheitert an der zweiten. Ein Zugang, den ein
+anderes Turnier bereits belegt, wird **nicht** übernommen (der bestehende
+Eintrag gewinnt, mit Warnung im Log) — sonst könnte ein zweiter Namespace
+ein fremdes Gerät zu sich umleiten.
+
+**`401` heißt „entzogen", `503` heißt „Turnier-PC weg" — und die
+Unterscheidung ist keine Kosmetik.** Ohne verbundenen Turnier-PC weiß der
+Relay über einen Zugang gar nichts (mit dem Host verfallen seine Zugänge),
+also antwortet er `503`. Antwortete er dort `401`, würde jeder Netzwackler
+des Turnier-PCs wie ein Widerruf aussehen; die Seite verlöre reihenweise
+ihre Kopplungen und jedes Gerät müsste mitten im Turnier neu gescannt
+werden. Aus demselben Grund wirft die Seite ihren Zugang bei `401` **nicht**
+weg, sondern zeigt die Meldung und versucht es weiter. Nebeneffekt: Wer
+Zugänge durchprobiert, lernt aus der Antwort nichts über ihre Existenz.
+
+Weitere Grenzen: höchstens **8 gleichzeitige Geräte** je Turnier (ein Platz
+wird nach 60 s Stille wieder frei, damit ein geschlossener Tab niemanden
+aussperrt), höchstens 64 gespiegelte Zugänge, höchstens 16 offene Anfragen,
+Zustand auf 64 KB begrenzt. Reißt eine Grenze, wird das **ganze Frame**
+verworfen statt gekappt: Eine halbierte Zugangsliste hieße ein halbierter
+Widerruf. Ein verworfener Zustand nimmt auch den vorherigen mit — sonst
+bekäme jedes Gerät weiter „unverändert" auf einen eingefrorenen Feldplan und
+läse dazu „aktuell".
+
+**Not-Aus:** `BTS_RELAY_TL=off` lässt die drei Routen gar nicht erst
+entstehen — ohne Rebuild und ohne die übrigen Dienste anzufassen. Der Relay
+ist ein globales Binary für alle Installationen; ein Fehler im neuen
+Schreibweg muss sich abschalten lassen, während anderswo Turniere laufen.
+Genau **ein** Wort schaltet ab (`off`), damit ein Tippfehler in der Umgebung
+nicht stillschweigend die halbe Turnierleitung lahmlegt.
+
+Am Turnier-PC stehen die gekoppelten Geräte unter `tl_web` in der
+`config.json` (`enabled` plus je Gerät Kennung, Token, Anzeigename,
+Kopplungszeit und optionale Halle). Sie überleben damit einen App-Neustart.
+Ein **Identitäts-Umzug** (ADR 0006) nimmt sie **nicht** mit: Sonst bliebe
+der alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
+wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am neuen
+PC neu — ein Scan je Gerät. Der Schalter selbst wandert mit.
+
+**Kein `#[serde(default)]` auf den TL-Feldern — anders als bei den
+Tablet-Typen.** Dort schützt der Default ältere Geräte, die im Feld sind.
+Hier gibt es keine ältere Gegenstelle: Die Typen sind neu, und ein
+stillschweigend ergänzter Wert würde jeweils die *weitreichendere* oder
+*ungeprüfte* Variante auslösen — ein fehlendes `expect` schaltete den
+Konfliktschutz ab, ein fehlendes `tokens` sperrte alle Geräte aus, ein
+fehlendes `side` riefe beide Parteien statt der einen fehlenden. Solche
+Frames werden verworfen, statt geraten zu werden.
 
 Reconnect: bts-light verbindet bei Abriss mit Backoff (1 s → 30 s) neu,
 Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
@@ -141,6 +276,14 @@ den Relay-Cache mit den offline weitergezählten Punkten. Details:
 - bts-light validiert jedes eingehende Ergebnis (`process_result`):
   Match-ID muss zum aktuellen Court-Match passen, Satzstand plausibel.
   Diese Prüfung ist dieselbe wie im LAN-Modus.
+- **Turnierleitungs-Zugänge** sind ein **eigener** Satz Tokens, unabhängig
+  von der `install_id`: Sie stehen in keiner Adresse, gelten nur solange der
+  Turnier-PC sie nennt, und ein Widerruf greift mit dem nächsten Push. Der
+  Relay stellt selbst keine aus und behält keinen über das Turnier hinaus —
+  verschwindet der Turnier-PC, verfallen sie samt Wegweiser und
+  Anzeige-Zustand. Ohne Opt-in am Turnier-PC (`tl_web.enabled`, Default aus)
+  kennt der Relay **kein** Token, und jede Anfrage endet abgewiesen, bevor
+  sie Zustand berührt.
 - **Stale-Filter (Cluster A4):** `score_update`/`state_sync` tragen die
   Match-ID des gezählten Spiels; Relay UND Host verwerfen Frames, deren
   Match nicht (mehr) zum Feld passt — ein nach Doze/Reconnect im alten

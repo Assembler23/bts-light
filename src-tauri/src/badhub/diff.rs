@@ -116,6 +116,9 @@ mod tests {
 
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
+            display_order: None,
+            from1: None,
+            from2: None,
             id,
             draw_id: 1,
             planning_id: 1000 + id,
@@ -147,6 +150,7 @@ mod tests {
             entry2_id: 0,
             court: Some(court.to_string()),
             court_id: None,
+            location_id: None,
             sets,
             winner: None,
             result: MatchResult::Normal,

@@ -4,6 +4,7 @@
 // ein Klick darauf springt in die Einstellungen zum passenden Abschnitt.
 import {
   Activity,
+  ClipboardList,
   LayoutGrid,
   type LucideIcon,
   Megaphone,
@@ -20,6 +21,7 @@ export type NavView =
   | "dashboard"
   | "fields"
   | "tablets"
+  | "tlweb"
   | "announce"
   | "monitors"
   | "winners"
@@ -45,6 +47,15 @@ function items(config: AppConfig): NavItem[] {
     { view: "dashboard", label: "Status", icon: Activity, enabled: true },
     { view: "fields", label: "Spielübersicht", icon: LayoutGrid, enabled: true },
     { view: "tablets", label: "Tablets", icon: Tablet, enabled: true },
+    // Immer erreichbar, auch wenn die Oberfläche noch aus ist: Genau hier
+    // schaltet man sie ein. Ein ausgegrauter Punkt, der in die Einstellungen
+    // springt, führte im Kreis.
+    {
+      view: "tlweb",
+      label: "Turnierleitung",
+      icon: ClipboardList,
+      enabled: true,
+    },
     {
       view: "announce",
       label: "Ansagen",

@@ -20,6 +20,7 @@ import {
   enterResult,
   finishedMatches,
   freeCourt,
+  noteCourtCall,
   preparationCandidates,
   removeScorekeeper,
   scorekeeperQueue,
@@ -92,10 +93,10 @@ export function FieldOverviewPage({
   const [error, setError] = useState<string>("");
   // Feld, dessen Freigabe gerade bestätigt werden soll (Sicherheitsabfrage).
   const [confirmFree, setConfirmFree] = useState<CourtOverview | null>(null);
-  // Aufruf-Stufe je Feld+Match (`${court_id}:${match_id}`): jeder „Aufrufen"-
-  // Druck zählt hoch (1 → 2 → 3). Neues Match auf dem Feld = neuer Key =
-  // beginnt wieder bei 1. Grundlage für „2./3. Aufruf" als gesprochene Ansage.
-  const [callStages, setCallStages] = useState<Map<string, number>>(new Map());
+  // Die Aufruf-Stufe hat hier bewusst **keinen** eigenen Zustand mehr: Sie
+  // kommt mit der Feld-Übersicht vom Turnier-PC (`call_stage` = gesprochene
+  // Aufrufe). Eine zweite Zählung in dieser Oberfläche liefe der
+  // Turnierleitungs-Seite davon oder hinterher, sobald von dort gerufen wird.
   // Backend-Finalisierung (Plan 12): Feld, für dessen Spiel die
   // Turnierleitung gerade ein Ergebnis eintippt, plus die editierbaren Sätze.
   const [enterFor, setEnterFor] = useState<CourtOverview | null>(null);
@@ -412,13 +413,16 @@ export function FieldOverviewPage({
                 // mindestens die Stufe an, die der Timer bereits als fällig
                 // zeigt (sonst würden Badge „2. Aufruf fällig" und Knopf
                 // divergieren). Manuelles Drücken eskaliert darüber hinaus.
-                const callKey = `${c.court_id}:${c.match_id}`;
                 const timeStage =
                   callTimer.enabled && c.on_court_since_ms != null && !playing
                     ? callInfo(c.on_court_since_ms, now, callTimer).stage
                     : 1;
+                // Die erfolgten Aufrufe kommen vom Turnier-PC, nicht aus
+                // einer Karte in dieser Oberfläche: Sonst böte sie erneut den
+                // zweiten Aufruf an, während die Halle über die
+                // Turnierleitungs-Seite längst den dritten gehört hat.
                 const nextCallStage = Math.min(
-                  Math.max((callStages.get(callKey) ?? 0) + 1, timeStage),
+                  Math.max((c.call_stage || 1) + 1, timeStage),
                   3,
                 ) as 1 | 2 | 3;
                 const clickable = !c.locked && !occupied && !busy;
@@ -568,15 +572,23 @@ export function FieldOverviewPage({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  // Sofort ansagen und dem Turnier-PC melden,
+                                  // **was gesprochen wurde** — nicht „noch
+                                  // einmal". Nur so führt er dieselbe Zahl
+                                  // wie diese Oberfläche, und die
+                                  // Turnierleitungs-Seite zeigt sie auch.
+                                  // Der nächste Poll bringt sie zurück.
                                   announceCourt(
                                     c,
                                     announce,
                                     azureTts,
                                     nextCallStage,
                                   );
-                                  setCallStages((m) =>
-                                    new Map(m).set(callKey, nextCallStage),
-                                  );
+                                  void noteCourtCall(
+                                    c.court_id,
+                                    c.match_id,
+                                    nextCallStage,
+                                  ).catch(() => {});
                                 }}
                                 disabled={busy}
                                 aria-label={`Feld ${c.court} ${

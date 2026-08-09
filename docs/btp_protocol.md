@@ -166,6 +166,99 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
+### Wo gespielt wird: `Match.LocationID` — wenn das Turnier sie pflegt
+
+**Ein angesetztes Spiel kann den Spielort tragen.** Das Feld heißt
+`Match.LocationID` und verweist auf einen `Locations > Location`-Eintrag.
+Am 09.08.2026 an einem laufenden Turnier gemessen: **48 Matches** trugen
+eine `LocationID`, die meisten davon **ohne** jede Feldzuweisung — also
+genau die Information, wo ein wartendes Spiel stattfinden soll.
+
+bts-light liest sie seither (`BtpMatch::location_id`,
+`assign::hall_for_match` mit `HallSource::Btp`).
+
+#### Warum hier zuvor das Gegenteil stand
+
+Der erste Befund (08.08.) lautete: „Es gibt keinen Spielort an der
+Ansetzung." Er stützte sich auf zwei Mitschnitte, in denen **kein einziges**
+Match eine `LocationID` trug — beide Turniere pflegten die Spalte schlicht
+nicht. Der Schluss von „liegt in diesen Daten nicht vor" auf „gibt es nicht"
+war zu weit. Die damals notierte Einschränkung („was ein Turnier liefert,
+das die Spalte pflegt, ist unbeantwortet") war der Kern der Sache — und ist
+jetzt beantwortet.
+
+Für Turniere **ohne** gepflegten Spielort bleibt alles beim Alten; die
+folgende Messung beschreibt genau diesen Fall:
+
+- `Match` trägt **keine** `LocationID`. `CourtID` erscheint erst, wenn das
+  Spiel auf dem Feld steht (im Zwei-Hallen-Mitschnitt bei 5 von 36
+  Paarungen, je zusammen mit `StartTime`).
+- `Draw`, `Event` und `Stage` tragen ebenfalls keinen Ortsbezug — ihre
+  Felder sind Größe, Typ, Reihenfolge und Namen, sonst nichts.
+- Die einzige Ortsangabe im ganzen Protokoll ist **`Court.LocationID`**: Ein
+  *Feld* gehört zu einer Halle.
+
+Der Spielplan-Export („Spiele von …") dieser Turniere hat die Spalten
+**Feld** und **Spielort** — in allen 540 Zeilen leer. Genau das ist der
+Unterschied zum Turnier oben: Wird die Spalte gepflegt, steht sie als
+`Match.LocationID` im Mitschnitt; wird sie es nicht, fehlt sie ganz.
+
+Für solche Turniere muss die Halle eines wartenden Spiels abgeleitet werden
+— aus der Disziplin/Klasse→Halle-Regel, einer Handzuweisung der
+Turnierleitung oder dem Vorbereitungs-Aufruf (`assign::hall_for_match`).
+Ein Test in `btp_capture.rs` hält fest, dass es solche Turniere gibt, damit
+die abgeleitete Kaskade nicht als überflüssig verschwindet.
+
+**Das Messwerkzeug** dafür liegt in `tests/btp_location_probe.rs`: Es zählt
+gegen ein laufendes BTP, welche Felder an Matches vorkommen, und zeigt
+alles Ortsverdächtige. So lässt sich für jedes neue Turnier in Sekunden
+klären, womit man es zu tun hat.
+
+### Die Reihenfolge der angesetzten Spiele
+
+**`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**
+Beides ist nötig, und beides war lange falsch bzw. gar nicht ausgewertet:
+
+- **`PlannedTime` ist ein `ITEM` vom Typ `DateTime`**, dessen Wert der
+  Knoten `<DATETIME Y="2027" MM="2" D="5" H="9" M="0" …/>` ist — Attribute,
+  keine Kind-Knoten, und die Kurznamen `D`/`H`/`M` statt `Day`/`Hour`/
+  `Minute`. Wer nach Kind-Knoten sucht, findet **nie** etwas und hält jedes
+  Turnier für unangesetzt.
+- **Alle Spiele eines Zeitfensters tragen dieselbe Zeit** — ein ganzer
+  Vormittag steht auf 9:00. Die Reihenfolge *innerhalb* des Fensters gibt
+  `DisplayOrder` vor (je Draw ab 1). Ohne dieses Feld entscheidet die
+  Spielnummer, und die läuft quer: Aus der gedruckten Liste (Nr 2, 6, 2, 6 …)
+  wird „erst alle Nummer 2, dann alle Nummer 6".
+
+Belegt an einem echten Turnier (878 Paarungen, 759 davon angesetzt): Die
+Sortierung `PlannedTime → DisplayOrder → MatchNr → ID` reproduziert die aus
+BTP exportierte Spielliste **Position für Position**.
+
+Implementierung: `parse_planned_time` in
+[model.rs](../src-tauri/src/btp/model.rs), `sort_key` in
+[assign.rs](../src-tauri/src/tablet/assign.rs).
+
+**Diese eine Definition gilt überall**, wo Spiele in eine Reihenfolge
+kommen — sonst zeigt jede Ansicht eine andere „nächste Begegnung", und
+niemand weiß mehr, welche stimmt:
+
+| Wo | Über |
+|---|---|
+| Automatische Feldvergabe | `sync.rs` → `assign::sort_key` |
+| Turnierleitungs-Oberfläche (Warteliste) | `tablet/tl.rs` → `assign::sort_key` |
+| Vorbereitungs-Kandidaten (Desktop) | `commands.rs` → `assign::sort_key_parts` |
+| Vorbereitungs-Kandidaten (Tablet/Monitor) | `tablet/server.rs` → `assign::sort_key_parts` |
+| **Liveticker „anstehende Spiele"** | `badhub/payload.rs` → `assign::sort_key` |
+
+Der Liveticker sortierte bis dahin **allein nach Spielnummer** — die
+Ansicht mit den meisten Augen zeigte damit eine Reihenfolge, die im
+Turnierplan nirgends stand. Bei nur 15 Einträgen konnten die tatsächlich
+nächsten Spiele sogar ganz herausfallen.
+
+Nicht betroffen: die Liste der **in Vorbereitung gerufenen** Spiele
+(`build_prepared_list`). Sie folgt der Reihenfolge der Aufrufe — wer
+zuerst gerufen wurde, steht oben, und das ist dort die richtige Ordnung.
+
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
 `NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w),
 `MemberID` (Lizenznummer, Format `08-012002`), `ClubID` (→ `Clubs`),
@@ -349,6 +442,97 @@ echten BTP gegenzuprüfen.
   `MatchTypeID`, `Team1Player1ID` usw.
 - Implementierung: [src-tauri/src/btp/proto.rs](../src-tauri/src/btp/proto.rs)
   (`update_request`, `parse_update_response`, `MatchUpdate`).
+
+## Offen: Was macht BTP beim Überschreiben einer Wertung?
+
+**Muss an einem Test-BTP beantwortet werden, bevor die Ergebnis-Korrektur in
+der Turnierleitungs-Oberfläche freigeschaltet wird** (Schritt 12 der
+[TL-Web-Spec](features/turnierleitung-web.md), offener Punkt 1). Bis dahin
+lehnt der Host jedes `overwrite` mit „noch nicht freigeschaltet" ab.
+
+**Warum die Frage zählt.** Eine beendete KO-Paarung bekommt selbst eine
+`EntryID` — den Sieger — und wirkt damit als Feeder-Slot der nächsten Runde
+(siehe oben). Der Sieger steht also **sofort** im nächsten Spiel. Eine
+strenge Auslegung („Nachfolger existiert und ist besetzt → nicht
+korrigierbar") hieße damit praktisch: nur im Finale und in Gruppen. Deshalb
+muss man wissen, ob BTP beim Überschreiben den Baum **selbst neu rechnet**.
+
+**Vorbefund an echten Daten (08.08.2026).** Ein Mitschnitt aus einem
+laufenden Turnier („TEST Köpi-Cup", 878 echte Paarungen) zeigt: Von den
+9 bereits gewerteten Spielen hatten **alle 9** ein Folgespiel im selben
+Draw. Die konservative Regel sperrt die Korrektur dort also in **100 %**
+der Fälle — die Sorge aus der Spec ist damit keine Theorie. Ohne das
+Experiment bleibt die Ergebnis-Korrektur in der Turnierleitungs-Oberfläche
+praktisch wirkungslos, und die Turnierleitung muss weiter in BTP wechseln.
+
+### Aufbau
+
+Ein Test-Turnier mit einem KO-Draw für vier Teilnehmer (zwei Halbfinals, ein
+Finale) und einer Gruppe mit drei Teilnehmern. Namen frei erfunden — das
+Turnier wird nicht veröffentlicht.
+
+Nach **jedem** Schritt einen Mitschnitt ziehen und durchnummeriert ablegen:
+
+```powershell
+.\tools\capture-btp.ps1 -Password "<TP-Network-Passwort>"
+# btp-tournament.bin wegkopieren, z. B. nach ov-1-hf1-gewertet.bin
+```
+
+### Die Versuche
+
+| # | Handlung | Zu beobachten |
+|---|---|---|
+| 1 | HF1 werten (A gewinnt) | Bekommt die HF1-Paarung eine `EntryID`? Welche? Steht A im Finale? |
+| 2 | HF1 **überschreiben** (B gewinnt), Finale noch **nicht** aufgerufen | Ändert sich die `EntryID` der HF1-Paarung auf B? Steht jetzt B im Finale — oder bleibt A stehen? Antwortet `SENDUPDATE` überhaupt mit `Result=1`? |
+| 3 | Finale auf ein Feld legen (läuft), dann HF1 überschreiben | Wird der Baum trotzdem umgerechnet, während das Folgespiel läuft? Bleibt das Finale auf dem Feld? |
+| 4 | Finale werten, dann HF1 überschreiben | Was passiert mit der Wertung des Finales? Bleibt sie stehen, wird sie verworfen, wird sie widersprüchlich? |
+| 5 | In der **Gruppe** ein bereits gewertetes Spiel überschreiben | Werden `Rank`, `SetRatio`, `GameRatio` der Tabelle neu gerechnet? |
+| 6 | Ein Spiel überschreiben, das in BTP von Hand geändert wurde | Bestätigt „last write wins" auch beim Überschreiben? |
+
+Bei jedem Versuch zusätzlich festhalten: Was zeigt die **BTP-Oberfläche**
+danach an — und stimmt sie mit dem überein, was über die Schnittstelle kommt?
+
+### Zwischenstand des Experiments (08.08.2026, „TEST Köpi-Cup")
+
+Ausgeführt über `src-tauri/tests/btp_overwrite_experiment.rs` (schreibt
+per `SENDUPDATE`, wie bts-light selbst). **Gemessen:**
+
+1. **BTP nimmt Überschreib-Requests an** — `Result=1`, keine Ablehnung.
+2. **Wirken tun sie nicht immer.** Bei einem Spiel, das BTP selbst gewertet
+   hatte, wechselte `Winner` von 1 auf 2. Bei einem Spiel, das derselbe
+   Versuch kurz zuvor gewertet hatte, blieb `Winner` auf 1 — **trotz
+   `Result=1`**. Ein Überschreiben kann also stillschweigend wirkungslos
+   sein, und der Erfolgscode sagt darüber nichts.
+3. **Das Folgespiel wurde nie besetzt** — auch nicht, nachdem *beide*
+   Vorgänger gewertet waren: `EntryID` leer, Teilnehmerzahl 0/0. Die
+   Annahme aus der Teilnehmer-Auflösung („eine beendete Paarung bekommt
+   selbst eine `EntryID` und wird zum Feeder-Slot") trifft hier **nicht**
+   zu.
+4. Nebenbei: `ScoreStatus` verschwand nach dem Überschreiben aus der
+   Antwort (`0` → Feld fehlt).
+
+**Damit ist die Kernfrage offen.** Ob BTP den Baum neu rechnet, ließ sich
+nicht messen, weil in diesem Turnier gar nichts umzurechnen war — kein
+Folgespiel war je besetzt. Was noch fehlt: ein Draw, in dem BTP die
+nächste Runde nachweislich füllt (also ein weiter fortgeschrittenes
+Turnier oder ein Draw-Typ, bei dem die Auflösung greift), und darin die
+Versuche 2 bis 4.
+
+Befund (2) ist unabhängig davon wichtig: Eine Korrektur darf sich **nicht**
+auf `Result=1` verlassen. Sie muss nachlesen, ob der Sieger wirklich
+gewechselt hat, und andernfalls sagen, dass nichts geschehen ist.
+
+### Auswertung
+
+1. Die aussagekräftigsten Mitschnitte als Fixtures nach
+   `src-tauri/tests/fixtures/` legen und mit einem Test in
+   `btp_capture.rs` einfrieren — so ist das Verhalten dokumentiert, auch
+   wenn kein BTP zur Hand ist.
+2. Ergebnis in ein **eigenes ADR** gießen (welche Fälle die Oberfläche
+   freigibt und warum), dann `plan_result_action` entsprechend öffnen.
+3. Zeigt sich, dass BTP den Baum **nicht** neu rechnet, bleibt die
+   Korrektur auf die Fälle beschränkt, in denen es nichts umzurechnen gibt:
+   kein Nachfolger, oder Gruppen-Auslosung.
 
 ## Fehlerfälle
 

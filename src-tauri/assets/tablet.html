@@ -1998,9 +1998,16 @@ function restoreSnapshot(snap) {
 }
 
 // Doppel-Eingabe-Schutz: nach einem Punkt sind die +1-Flächen kurz gesperrt
-// (gedimmt) – Punkte fallen nicht im Sekundentakt, das verhindert versehentliche
-// Doppel-Taps. Undo hebt die Sperre sofort auf (Korrektur soll nicht warten).
-var SCORE_COOLDOWN_MS = 3000;
+// (gedimmt), damit ein zitternder Finger nicht zwei Punkte zählt. Undo hebt
+// die Sperre sofort auf (Korrektur soll nicht warten).
+//
+// **0,7 s statt 3 s** (09.08.2026, aus dem Test am Gerät): Drei Sekunden
+// waren aus der Annahme heraus gewählt, Punkte fielen ohnehin nicht im
+// Sekundentakt. Am Tablett fühlte sich das zäh an — nach einem Aufschlagfehler
+// folgt der nächste Ballwechsel schnell, und der Bediener tippt ins Leere,
+// ohne zu wissen warum. Ein versehentlicher Doppel-Tap liegt bei etwa
+// 0,3 s; 0,7 s fängt ihn ab, ohne im Weg zu stehen.
+var SCORE_COOLDOWN_MS = 700;
 var scoreCooldownUntil = 0;
 var scoreCooldownTimer = null;
 function clearScoreCooldown() {
@@ -2354,6 +2361,23 @@ function validateCompletedSets(sets, target, requireDecided) {
       ? `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist unentschieden.`
       : `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist nicht regulär zu Ende gespielt.`);
     return null;
+  }
+  // Über dem Deckel kann kein Satz enden. `setWinnerSide` fragt nur, ob
+  // jemand den Deckel **erreicht** hat — beim Live-Zählen genügt das, weil
+  // dort beim Deckel Schluss ist. Ein von Hand getippter Endstand kennt
+  // diese Grenze nicht: In einem Turnier bis 15 (Deckel 21) ging ein 27:25
+  // glatt durch, samt Weg nach BTP und in den Liveticker.
+  if (!timeFormat) {
+    const cap = (STATE.match && STATE.match.capScore >= target)
+      ? STATE.match.capScore : capForTarget(target);
+    const zuHoch = sets.findIndex(s => Math.max(s.left, s.right) > cap);
+    if (zuHoch >= 0) {
+      const s = sets[zuHoch];
+      enterScoreError(
+        `Satz ${zuHoch + 1} (${s.left}:${s.right}) geht über den Deckel — `
+        + `bis ${target}, höchstens ${cap}.`);
+      return null;
+    }
   }
   const need = requiredSetsToWin(STATE.match.bestOfSets);
   const l = sets.filter(s => s.left > s.right).length;

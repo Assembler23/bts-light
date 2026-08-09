@@ -2,6 +2,7 @@
 //! HTTP+WebSocket-Server (LAN-Modus) und der Relay-Client (Cloud-Modus).
 
 pub mod assets;
+pub mod assign;
 pub mod club_logos;
 pub mod mdns;
 pub mod monitor;
@@ -9,4 +10,5 @@ pub mod relay_client;
 pub mod server;
 pub mod slave_bridge;
 pub mod state;
+pub mod tl;
 pub mod winners;

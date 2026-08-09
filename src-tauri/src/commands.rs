@@ -166,6 +166,28 @@ pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConf
     Ok(config)
 }
 
+/// Übernimmt Felder, die der **Host** verwaltet, aus dem aktuellen Stand —
+/// statt sie aus dem Fenster-Stand zu übernehmen.
+///
+/// Die Einstellungsseite schickt beim Speichern die **ganze** Konfiguration
+/// zurück, so wie sie beim Öffnen der Seite aussah. Für Einstellungen, die
+/// dort auch bearbeitet werden, ist das richtig. Die Liste der gekoppelten
+/// Turnierleitungs-Geräte wächst aber am Host (Kopplung) und wäre sonst auf
+/// den Stand von vor dem Öffnen zurückgesetzt — ein gerade gekoppeltes Gerät
+/// verlöre seinen Zugang, sobald jemand irgendeine Einstellung speichert.
+///
+/// Bewusst **nur** die Geräteliste, nicht der Schalter: Wird die Oberfläche
+/// abgeschaltet, sollen die Zugänge auch wirklich verschwinden. Rein &
+/// testbar.
+fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> AppConfig {
+    if incoming.tl_web.enabled {
+        incoming.tl_web.devices = current.tl_web.devices.clone();
+    } else {
+        incoming.tl_web.devices.clear();
+    }
+    incoming
+}
+
 /// Speichert die Konfiguration dauerhaft.
 #[tauri::command]
 pub fn save_config(
@@ -173,6 +195,12 @@ pub fn save_config(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<(), String> {
+    let current = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let config = keep_host_managed_fields(config, &current);
     config
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
@@ -196,6 +224,11 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     cfg.badhub.password = String::new();
     // Azure-Key ist ein echtes Secret (Speech-Ressource) — NIE mitexportieren.
     cfg.azure_tts.key = String::new();
+    // Turnierleitungs-Geräte wandern NICHT mit (ADR 0012): Sonst bliebe der
+    // alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
+    // wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am
+    // neuen PC neu — ein QR-Scan je Gerät. Der Schalter bleibt erhalten.
+    cfg.tl_web.devices.clear();
     cfg
 }
 
@@ -211,6 +244,14 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     }
     if imported.azure_tts.key.is_empty() {
         imported.azure_tts.key = current.azure_tts.key.clone();
+    }
+    // Turnierleitungs-Geräte kommen nie im Bündel (identity_bundle löscht
+    // sie) — die am DIESEM PC gekoppelten müssen deshalb erhalten bleiben.
+    // Der übliche Ablauf ist: neuen PC einrichten, Tablets koppeln, dann die
+    // Identität des alten holen. Ohne das würde genau dieser Schritt die
+    // frisch gekoppelten Geräte wieder aussperren.
+    if imported.tl_web.devices.is_empty() {
+        imported.tl_web.devices = current.tl_web.devices.clone();
     }
     imported
 }
@@ -258,8 +299,12 @@ pub fn import_identity(
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = imported.clone();
+    // Der Hinweis gilt für Tablets, Monitore und ferne Hallen — die hängen
+    // an der install_id. Turnierleitungs-Geräte hängen dagegen an eigenen
+    // Tokens, die das Bündel bewusst nicht enthält (ADR 0012); am neuen PC
+    // gekoppelte bleiben, vom alten PC übernommene gibt es nicht.
     tracing::info!(
-        "Master-Identität importiert (install_id übernommen) — gekoppelte Geräte bleiben verbunden"
+        "Master-Identität importiert (install_id übernommen) — Tablets, Monitore und ferne Hallen bleiben verbunden; Turnierleitungs-Geräte des alten PCs müssen neu gekoppelt werden"
     );
     Ok(imported)
 }
@@ -468,6 +513,16 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         }
     }
 
+    // Die von Hand gesetzten Spielorte liegen neben der Konfiguration und
+    // überleben so einen Neustart des Turnier-PCs. Ohne das wäre die Arbeit
+    // eines ganzen Vormittags nach einem Absturz verloren — für
+    // Vorbereitungs-Aufrufe wäre das verschmerzbar, für den Spielort nicht.
+    if let Ok(dir) = app.path().app_config_dir() {
+        state
+            .tablet
+            .use_manual_hall_file(&dir.join("spielorte.json"));
+    }
+
     // Vor dem Move von `config` in den Tablet-Kontext merken.
     let upload_logs = config.upload_logs;
     let install_id = config.install_id.clone();
@@ -492,6 +547,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     tablet.set_scores_path(scores_path);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
+    // Laufzeit-Schalter (Pause der automatischen Vergabe) beim Start lösen —
+    // sonst bliebe eine auf der Turnierleitungs-Seite gesetzte Pause auch
+    // dann bestehen, wenn das Gerät gar nicht mehr da ist.
+    tablet.reset_runtime_switches();
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
@@ -1081,11 +1140,8 @@ pub async fn confirm_walkover(
             player_ids: Vec::new(),
             end_ts_ms: None,
         };
-        match crate::tablet::server::write_result_to_btp(&config, &update).await {
+        match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
             Ok(()) => {
-                tablet.clear_btp_retry(cand.match_id);
-                // Für die Race-Erkennung des Nachschubs (Selbstheilung).
-                tablet.note_direct_btp_write(update.clone(), now_ms());
                 written += 1;
             }
             Err(e) => {
@@ -1151,13 +1207,11 @@ pub async fn enter_result(
         crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms)?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
-    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+    match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
-            tablet.clear_btp_retry(mid);
-            tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1206,13 +1260,11 @@ pub async fn disqualify_match(
         crate::tablet::server::build_manual_dq_update(m, loser_team, sets, on_court_since, end_ms)?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
-    match crate::tablet::server::write_result_to_btp(&config, &update).await {
+    match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
-            tablet.clear_btp_retry(mid);
-            tablet.note_direct_btp_write(update.clone(), now_ms());
             tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1480,18 +1532,21 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
             }
         })
         .collect();
-    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), danach nach
-    // Spielnummer (ohne Nummer/Zeit zuletzt) – konsistent zur Auto-Feldvergabe.
-    let planned: std::collections::HashMap<i64, i64> = snapshot
+    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), dann nach der
+    // Ansetzungsreihenfolge des Turnierplans (DisplayOrder), danach nach
+    // Spielnummer – konsistent zur Auto-Feldvergabe.
+    let plan: std::collections::HashMap<i64, (Option<i64>, Option<i64>)> = snapshot
         .matches
         .iter()
-        .filter_map(|m| m.planned_time.map(|t| (m.id, t)))
+        .map(|m| (m.id, (m.planned_time, Some(m.draw_id))))
         .collect();
     candidates.sort_by_key(|c| {
-        (
-            c.call.is_none(),
-            planned.get(&c.match_id).copied().unwrap_or(i64::MAX),
-            c.match_num.unwrap_or(i64::MAX),
+        let (zeit, reihenfolge) = plan.get(&c.match_id).copied().unwrap_or((None, None));
+        crate::tablet::assign::sort_key_parts(
+            c.call.is_some(),
+            zeit,
+            reihenfolge,
+            c.match_num,
             c.match_id,
         )
     });
@@ -1755,6 +1810,73 @@ pub async fn pending_freetext(
     }
 }
 
+/// Meldet, welche Aufruf-Stufe die Desktop-Übersicht gerade **angesagt hat**.
+///
+/// Bewusst meldend und nicht hochzählend: Die Oberfläche weiß genau, was sie
+/// gesprochen hat (ihr erster Druck ist der schlichte Aufruf ohne
+/// Stufenwort). Ließe sie stattdessen hochzählen, liefe die gemeinsame
+/// Zählung ihr um eins voraus — die Turnierleitungs-Seite zeigte „2. Aufruf
+/// erfolgt" nach dem ersten und verlöre nach dem zweiten ihren Aufruf-Knopf.
+#[tauri::command]
+pub fn note_court_call(state: State<'_, AppState>, court_id: i64, match_id: i64, stage: u8) -> u8 {
+    state.tablet.reached_court_call(court_id, match_id, stage)
+}
+
+/// Neue Ansage-Aufträge (`id > since`) für die eigene Halle.
+///
+/// Derselbe Weg wie beim Freitext: Im LAN-Slave-Betrieb vom Master geholt,
+/// sonst aus dem lokalen Stand. Wer hier abholt, gilt dem Turnier-PC als
+/// Ansage-Gerät seiner Halle — daran erkennt die Turnierleitung, ob ihr
+/// Aufruf überhaupt irgendwo erklingen kann.
+#[tauri::command]
+pub async fn pending_announce_jobs(
+    state: State<'_, AppState>,
+    since: u64,
+) -> Result<Vec<crate::tablet::state::AnnounceJob>, String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let hall = config.announce.announce_hall.clone();
+    if config.slave_mode {
+        // Cloud-Ansage-Slave: **Noch nicht unterstützt.** Der Relay-Zustand
+        // (`cloud_announce_state`) trägt bis heute keine Ansage-Aufträge; der
+        // Weg dorthin entsteht mit der Cloud-Anbindung der
+        // Turnierleitungs-Seite. Bis dahin bleibt die ferne Halle stumm —
+        // aber ehrlich: Da sich der Slave nie als Ansage-Gerät meldet, sieht
+        // die Turnierleitung die Warnung „kein Ansage-Gerät verbunden" und
+        // weiß, dass sie per Funk rufen muss. Siehe docs/announcements.md.
+        if !config.master_namespace.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut url = reqwest::Url::parse(&format!(
+            "http://{}:8088/info/announce/jobs",
+            config.btp.host
+        ))
+        .map_err(|e| e.to_string())?;
+        url.query_pairs_mut()
+            .append_pair("hall", &hall)
+            .append_pair("since", &since.to_string());
+        // Kurzer Timeout wie beim Freitext-Poll: Der Master antwortet im LAN
+        // sofort oder gar nicht.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap_or_else(|_| push::build_client());
+        let resp = match client.get(url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => return Ok(Vec::new()),
+        };
+        resp.json::<Vec<crate::tablet::state::AnnounceJob>>()
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Ok(state.tablet.announce_jobs_since(&hall, since, now_ms()))
+    }
+}
+
 /// Ein Feld im Cloud-Ansage-Status (frontend-freundlich, wie `CourtOverview`
 /// fürs Ansagen): Feldname + aktuelle Paarung.
 #[derive(serde::Serialize)]
@@ -1973,6 +2095,226 @@ pub async fn pairing_code(state: State<'_, AppState>) -> Result<relay_proto::Pai
 #[tauri::command]
 pub async fn resolve_pairing_code(code: String) -> Result<String, String> {
     crate::tablet::relay_client::resolve_pairing_code(code.trim()).await
+}
+
+// ───────────────── Turnierleitungs-Geräte (TL-Web) ─────────────────
+
+/// Ein gekoppeltes Turnierleitungs-Gerät, **ohne** seinen Zugang.
+///
+/// Der Zugang verlässt die Konfiguration nur einmal: im QR-Code beim
+/// Koppeln. Danach gibt es keinen Weg mehr, ihn anzuzeigen — auch nicht für
+/// den Turnierleiter. Wer sein Gerät verliert, koppelt neu; das ist der
+/// kürzere Weg als ein Zugang, der in jeder Geräteliste steht.
+#[derive(Serialize)]
+pub struct TlDeviceInfo {
+    pub id: String,
+    pub label: String,
+    pub hall: String,
+    pub created_at_ms: u64,
+}
+
+/// Die Geräteliste für die Oberfläche.
+#[derive(Serialize)]
+pub struct TlWebInfo {
+    pub enabled: bool,
+    pub devices: Vec<TlDeviceInfo>,
+    /// Wie viele Kopplungen die Liste fassen kann.
+    pub max_devices: usize,
+    /// Wie viele Geräte die Seite **gleichzeitig** offen haben können. Die
+    /// spürbare Grenze — und eine ganz andere als die Listenlänge: Alte
+    /// Kopplungen zählen in der Liste mit, blockieren aber keinen Platz.
+    pub max_online: usize,
+}
+
+#[tauri::command]
+pub fn tl_web_info(state: State<'_, AppState>) -> TlWebInfo {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    TlWebInfo {
+        enabled: cfg.tl_web.enabled,
+        devices: cfg
+            .tl_web
+            .devices
+            .iter()
+            .map(|d| TlDeviceInfo {
+                id: d.id.clone(),
+                label: d.label.clone(),
+                hall: d.hall.clone(),
+                created_at_ms: d.created_at_ms,
+            })
+            .collect(),
+        max_devices: relay_proto::MAX_TL_DEVICES_MIRRORED,
+        max_online: relay_proto::MAX_TL_DEVICES_ONLINE,
+    }
+}
+
+/// Ein Weg, auf dem ein Gerät die Oberfläche erreicht.
+#[derive(Serialize)]
+pub struct TlEntrance {
+    /// Was dransteht („Im Hallennetz" / „Über das Internet").
+    pub label: String,
+    /// Die vollständige Adresse **mit Zugang im Fragment**. Das Fragment
+    /// schickt kein Browser an einen Server — der Zugang steht damit weder
+    /// im Zugriffsprotokoll des Relays noch in dem eines Zwischenservers.
+    pub url: String,
+    /// Derselbe Inhalt als QR-Code (SVG). Wird **hier** erzeugt, nicht über
+    /// eine Bild-Route: Ein Zugang, der als Adressbestandteil an einen
+    /// Server ginge, stünde in dessen Protokoll.
+    pub qr_svg: String,
+}
+
+/// Was ein frisch gekoppeltes Gerät zum Anmelden braucht.
+#[derive(Serialize)]
+pub struct TlPairing {
+    pub id: String,
+    /// **Alle** Wege, auf denen dieses Gerät hereinkommt. Im
+    /// LAN-und-Cloud-Betrieb sind es zwei — und beide werden gebraucht: Der
+    /// Sinn dieser Betriebsart ist, dass die Halle weiterläuft, wenn die
+    /// Internetverbindung ausfällt. Stünde nur die Cloud-Adresse im QR,
+    /// stünde das Gerät bei einem Ausfall vor einer Seite, die es nicht mehr
+    /// laden kann — und der Zugang ist nur dieses eine Mal zu sehen.
+    pub entrances: Vec<TlEntrance>,
+}
+
+/// Koppelt ein neues Turnierleitungs-Gerät und liefert Adresse + QR-Code.
+///
+/// `token` und `id` erzeugt die Oberfläche mit `crypto.randomUUID()` —
+/// derselbe Weg wie bei der `install_id`.
+#[tauri::command]
+pub fn tl_device_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    token: String,
+    label: String,
+    hall: String,
+) -> Result<(TlPairing, AppConfig), String> {
+    let device = crate::config::TlDevice {
+        id: id.trim().to_string(),
+        token: token.trim().to_string(),
+        label: label.trim().chars().take(60).collect(),
+        created_at_ms: now_ms(),
+        hall: hall.trim().to_string(),
+    };
+    let neu = device.clone();
+    let cfg = mutate_config(&app, &state, move |cfg| {
+        cfg.tl_web.add_device(neu)?;
+        // Ein Gerät zu koppeln heißt, die Oberfläche zu wollen.
+        cfg.tl_web.enabled = true;
+        Ok(())
+    })?;
+    Ok((
+        TlPairing {
+            id: device.id,
+            entrances: tl_entrances(&cfg, &device.token)?,
+        },
+        cfg,
+    ))
+}
+
+/// Entzieht einem Gerät den Zugang.
+#[tauri::command]
+pub fn tl_device_remove(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        if cfg.tl_web.remove_device(id.trim()) {
+            Ok(())
+        } else {
+            Err("Dieses Gerät ist nicht (mehr) gekoppelt.".to_string())
+        }
+    })
+}
+
+/// Schaltet die Turnierleitungs-Oberfläche an oder ab.
+///
+/// Abschalten **behält** die Geräte: Ein versehentlicher Klick soll nicht
+/// bedeuten, dass alle Tablets neu gescannt werden müssen. Wirksam ist der
+/// Schalter trotzdem sofort — ohne ihn erreicht keine Anfrage etwas, und im
+/// Cloud-Betrieb pusht der Turnier-PC eine leere Liste.
+#[tauri::command]
+pub fn tl_web_set_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.tl_web.enabled = enabled;
+        Ok(())
+    })
+}
+
+/// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und
+/// liefert den neuen Stand.
+///
+/// Lesen, Ändern und Schreiben in einem Zug: Wer zwischendurch loslässt,
+/// überschreibt eine Änderung, die in genau diesem Fenster gespeichert
+/// wurde — bei Zugängen hieße das, eine frische Kopplung verschwindet
+/// wieder.
+///
+/// Den neuen Stand zurückzugeben ist kein Luxus: Die Oberfläche hält eine
+/// eigene Kopie der Konfiguration. Bliebe die veraltet, schickte der nächste
+/// Speichervorgang aus den Einstellungen den alten `tl_web`-Stand zurück —
+/// und `keep_host_managed_fields` löschte alle Kopplungen, deren Zugänge
+/// niemand wiederherstellen kann.
+fn mutate_config<F>(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    aendern: F,
+) -> Result<AppConfig, String>
+where
+    F: FnOnce(&mut AppConfig) -> Result<(), String>,
+{
+    let mut guard = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    let mut cfg = guard.clone();
+    aendern(&mut cfg)?;
+    cfg.save_to(&config_path(app)).map_err(|e| e.to_string())?;
+    *guard = cfg.clone();
+    Ok(cfg)
+}
+
+/// Alle Wege, auf denen ein Gerät die Oberfläche erreicht.
+///
+/// Im Cloud-Betrieb ohne Namespace in der Adresse (der wäre die
+/// `install_id` und damit zugleich der Zugang der Zähltablets); im
+/// Hallennetz der eingebettete Server. Läuft **beides**, gibt es beide
+/// Wege — und das ist wichtig: Der Sinn dieser Betriebsart ist, dass die
+/// Halle weiterläuft, wenn die Internetverbindung ausfällt.
+fn tl_entrances(cfg: &AppConfig, token: &str) -> Result<Vec<TlEntrance>, String> {
+    let mut wege = Vec::new();
+    if cfg.connection_mode.lan_enabled() {
+        wege.push((
+            "Im Hallennetz",
+            format!("http://{}/tl#t={token}", crate::tablet::server::lan_host()),
+        ));
+    }
+    if cfg.connection_mode.cloud_enabled() {
+        wege.push((
+            "Über das Internet",
+            format!("https://badhub.de/bts-relay/tl#t={token}"),
+        ));
+    }
+    wege.into_iter()
+        .map(|(label, url)| {
+            let qr_svg = qr_code_svg(&url)?;
+            Ok(TlEntrance {
+                label: label.to_string(),
+                url,
+                qr_svg,
+            })
+        })
+        .collect()
+}
+
+/// QR-Code als SVG — lokal erzeugt, damit der Zugang den Rechner nicht
+/// verlässt.
+fn qr_code_svg(text: &str) -> Result<String, String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(260, 260)
+        .build())
 }
 
 /// Geräte-Anschluss der fernen Halle (Slave): Relay-Basis des Masters +
@@ -2467,6 +2809,120 @@ mod tests {
         assert_eq!(bundle.btp.password, None);
         assert!(bundle.badhub.password.is_empty());
         assert!(bundle.azure_tts.key.is_empty(), "Azure-Key darf nie raus");
+    }
+
+    #[test]
+    fn saving_settings_does_not_revert_the_paired_device_list() {
+        // Die Einstellungsseite schickt IHREN Stand der ganzen Config
+        // zurück — aufgenommen, als die Seite geöffnet wurde. Die
+        // Geräteliste wächst aber am Host (Kopplung). Ohne Schutz würde
+        // folgender Ablauf das frisch gekoppelte Gerät wieder aussperren:
+        // Einstellungen öffnen → Tablet koppeln → in den Einstellungen
+        // irgendetwas speichern.
+        let mut current = AppConfig::default();
+        current.tl_web.enabled = true;
+        current.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-frisch".to_string(),
+            token: "tok-frisch".to_string(),
+            label: "gerade gekoppelt".to_string(),
+            created_at_ms: 2,
+            hall: String::new(),
+        });
+
+        // Der Stand aus dem Fenster kennt das Gerät noch nicht.
+        let mut from_ui = AppConfig::default();
+        from_ui.tl_web.enabled = true;
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert_eq!(
+            merged.tl_web.devices.len(),
+            1,
+            "das inzwischen gekoppelte Gerät bleibt"
+        );
+        assert_eq!(merged.tl_web.devices[0].token, "tok-frisch");
+    }
+
+    #[test]
+    fn turning_the_feature_off_still_clears_the_devices() {
+        // Gegenprobe: Der Schutz darf keine Einbahnstraße sein. Schaltet
+        // die Turnierleitung die Oberfläche aus, sollen die Zugänge auch
+        // wirklich verschwinden.
+        let mut current = AppConfig::default();
+        current.tl_web.enabled = true;
+        current.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev".to_string(),
+            token: "tok".to_string(),
+            label: "l".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+
+        let from_ui = AppConfig::default(); // tl_web aus
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert!(!merged.tl_web.enabled);
+        assert!(
+            merged.tl_web.devices.is_empty(),
+            "Ausschalten entzieht die Zugänge"
+        );
+    }
+
+    #[test]
+    fn identity_bundle_strips_tl_device_tokens() {
+        // ADR 0012: Ein Identitäts-Umzug nimmt die Turnierleitungs-Geräte
+        // NICHT mit. Sonst bliebe der alte PC über die exportierten Tokens
+        // schreibberechtigt, und ein weitergegebenes Bündel wäre zugleich
+        // ein Satz gültiger Zugänge. Die Geräte koppeln sich am neuen PC
+        // neu — ein QR-Scan je Gerät.
+        let mut cfg = cfg_id("inst-xyz", None, "", "");
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-1".to_string(),
+            token: "tok-geheim".to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+
+        let bundle = identity_bundle(cfg);
+        assert!(
+            bundle.tl_web.devices.is_empty(),
+            "TL-Gerätetokens dürfen nie exportiert werden"
+        );
+        // Der Schalter selbst darf mitwandern — er ist kein Geheimnis, und
+        // der neue PC soll die Oberfläche nicht erst wieder suchen müssen.
+        assert!(bundle.tl_web.enabled);
+        // Und die Identität bleibt, das ist der Zweck des Umzugs.
+        assert_eq!(bundle.install_id, "inst-xyz");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_locally_paired_tl_devices() {
+        // Das Bündel trägt nie Geräte (identity_bundle löscht sie). Ohne
+        // Rückgabe des lokalen Stands würde ein Import die am NEUEN PC
+        // bereits gekoppelten Geräte löschen — der typische Ablauf ist ja:
+        // neuen PC einrichten, Tablets koppeln, dann die Identität holen.
+        // Dieselbe Regel wie bei den Passwörtern.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.tl_web.enabled = true;
+        current.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-lokal".to_string(),
+            token: "tok-lokal".to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+        });
+        let imported = cfg_id("inst-neu", None, "", "");
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu", "Identität wird übernommen");
+        assert_eq!(
+            merged.tl_web.devices.len(),
+            1,
+            "lokal gekoppelte Geräte bleiben"
+        );
+        assert_eq!(merged.tl_web.devices[0].token, "tok-lokal");
     }
 
     #[test]

@@ -1,0 +1,1923 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Turnierleitung</title>
+<style>
+/* ── Grundlagen ────────────────────────────────────────────────────────
+   Bewusst HELL, anders als die TV-Anzeigen (monitor/overview): Das hier
+   ist ein Arbeitswerkzeug, das stundenlang auf Tablets offen liegt. Ein
+   dunkles Design zwingt zu hoher Display-Helligkeit und leert die Akkus —
+   genau der Turnier-Befund aus der Roadmap. Farben und Abstände folgen der
+   Desktop-Oberfläche (slate-Töne), damit beide wie ein Werkzeug wirken. */
+:root {
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --line: #e2e8f0;
+  --ink: #0f172a;
+  --ink-soft: #475569;
+  --ink-faint: #94a3b8;
+  --accent: #1d4ed8;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --alarm: #dc2626;
+  --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .1);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; min-height: 100%; background: var(--bg); color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px; line-height: 1.4;
+  -webkit-text-size-adjust: 100%;
+}
+/* Zahlen, die sich im Sekundentakt ändern, dürfen nicht zappeln. */
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── Kopfzeile ─────────────────────────────────────────────────────────
+   Klebt oben: Der Verbindungszustand muss immer sichtbar sein, nicht nur
+   wenn man zufällig oben steht. */
+header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 750; letter-spacing: -.01em; }
+.tournament {
+  color: var(--ink-soft); font-size: .95rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 8rem; min-width: 0;
+}
+/* Verbindungszustand: Punkt + Text. Drei Stufen, nicht zwei — „läuft",
+   „hängt hinterher" und „ist weg" sind für die Turnierleitung drei
+   verschiedene Lagen. */
+.conn { display: flex; align-items: center; gap: 7px; font-size: .9rem; font-weight: 600; }
+.conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+.conn.delayed { color: var(--warn); } .conn.delayed .dot { background: var(--warn); }
+.conn.offline { color: var(--alarm); } .conn.offline .dot { background: var(--alarm); }
+
+/* Hallenfilter: Schaltflächen statt Auswahlliste — im Stehen mit dem
+   Daumen zu treffen, und man sieht alle Hallen auf einen Blick. */
+.halls { display: flex; gap: 6px; flex-wrap: wrap; }
+.halls button {
+  font: inherit; font-size: .9rem; font-weight: 600;
+  padding: 7px 13px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+}
+.halls button[aria-pressed="true"] {
+  background: var(--ink); color: #fff; border-color: var(--ink);
+}
+.halls button:focus-visible, .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Anzeige-Vorlieben: ein kleines Klappmenü im Kopf. Was hier steht, ist
+   Geschmackssache je Gerät und darf niemanden stören, der es nicht braucht —
+   deshalb zugeklappt und unauffällig. */
+.anzeige { position: relative; font-size: .85rem; }
+.anzeige summary {
+  list-style: none; cursor: pointer; user-select: none;
+  padding: 7px 12px; min-height: 40px; display: flex; align-items: center;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft);
+}
+.anzeige summary::-webkit-details-marker { display: none; }
+.anzeige[open] summary { border-color: var(--accent); color: var(--accent); }
+/* Die Schalter hängen als Kasten unter dem Knopf, statt die Kopfzeile
+   auseinanderzuschieben. */
+.anzeige .menue {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 4px; min-width: 13rem;
+}
+.anzeige .menue label {
+  display: flex; align-items: center; gap: 9px; padding: 9px 10px;
+  white-space: nowrap; cursor: pointer; border-radius: 7px;
+}
+.anzeige .menue label:hover { background: #f1f5f9; }
+
+/* Schalter für die automatische Vergabe. Sein Zustand muss auf einen Blick
+   erkennbar sein: Läuft sie mit, während jemand von Hand umsortiert, räumt
+   sie ihm die Felder um, und niemand versteht, warum. */
+.auto {
+  font: inherit; font-size: .85rem; font-weight: 650;
+  padding: 7px 13px; min-height: 40px;
+  border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+  display: flex; align-items: center; gap: 7px;
+}
+.auto::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint);
+}
+.auto.on { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.auto.on::before { background: var(--ok); }
+.auto.off { border-color: #fed7aa; background: #fffbeb; color: #9a3412; }
+.auto.off::before { background: var(--warn); }
+
+/* Störungsband: nimmt die volle Breite, damit es niemand übersieht. */
+.banner {
+  display: none; padding: 10px 16px; font-weight: 650;
+  background: #fef2f2; color: #7f1d1d; border-bottom: 1px solid #fecaca;
+}
+.banner.show { display: block; }
+
+main { padding: 16px; display: grid; gap: 20px; }
+@media (min-width: 1100px) {
+  /* Auf dem Desktop nebeneinander: Felder links (was läuft), Liste rechts
+     (was als Nächstes dran ist). Auf dem Tablet gestapelt — dort scrollt
+     man ohnehin. */
+  main { grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); align-items: start; }
+  /* Die Felder bleiben stehen, während die Liste läuft. Bei 120 wartenden
+     Spielen scrollt man weit nach unten — ohne das wäre kein einziges Feld
+     mehr zu sehen, und ein Spiel von ganz unten ließe sich weder ziehen
+     noch nach dem Antippen irgendwohin legen. Eigene Bildlaufleiste, falls
+     mehr Felder da sind als auf den Schirm passen. */
+  main > section:first-of-type {
+    position: sticky;
+    top: calc(var(--kopf, 62px) + var(--band, 0px) + 12px);
+    max-height: calc(100vh - var(--kopf, 62px) - var(--band, 0px) - 28px);
+    overflow-y: auto;
+    /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
+    padding: 2px;
+    margin: -2px;
+  }
+}
+h2 {
+  margin: 0 0 10px; font-size: .8rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint);
+}
+h2 .count { color: var(--ink-faint); font-weight: 600; }
+
+/* ── Felder ────────────────────────────────────────────────────────────
+   Kacheln statt Tabelle: Ein Feld ist ein Ort, kein Datensatz. */
+.courts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.hall-group + .hall-group { margin-top: 18px; }
+.hall-group h3 {
+  margin: 0 0 8px; font-size: .95rem; font-weight: 700; color: var(--ink-soft);
+}
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px; box-shadow: var(--shadow); min-height: 116px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.card.free { background: #f8fafc; border-style: dashed; }
+
+/* ── Feldzustand als Farbe ─────────────────────────────────────────────
+   Ein breiter Streifen an der Kante statt einer getönten Fläche: Er ist aus
+   der Entfernung erkennbar, ohne dass die Namen an Kontrast verlieren — und
+   bleibt bei minimaler Display-Helligkeit lesbar. Die Farbe steht nie
+   allein: Daneben stehen Satzstand und Uhrbeschriftung („im Spiel seit",
+   „auf dem Feld seit"), sodass auch ohne Farbunterscheidung klar ist, was
+   los ist. */
+.card { border-left-width: 5px; }
+.card.zustand-gerufen { border-left-color: var(--accent); }
+.card.zustand-ueberfaellig {
+  background: #fef2f2; border-color: #fecaca; border-left-color: var(--alarm);
+}
+.card.zustand-laeuft { border-left-color: var(--ok); }
+.card.zustand-beendet { border-left-color: #a855f7; background: #faf5ff; }
+.card.zustand-frei { border-left-color: transparent; }
+.card.locked { background: #f8fafc; opacity: .65; }
+.card.clearing { border-color: #fed7aa; background: #fffbeb; }
+.card-top { display: flex; align-items: baseline; gap: 8px; }
+.court-name { font-size: 1.15rem; font-weight: 750; letter-spacing: -.01em; }
+.badge {
+  font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 2px 7px; border-radius: 999px; background: #f1f5f9; color: var(--ink-soft);
+}
+.badge.alarm { background: #fee2e2; color: #991b1b; }
+.badge.warn { background: #ffedd5; color: #9a3412; }
+.pair { font-weight: 600; line-height: 1.25; }
+
+/* ── Die Paarung ───────────────────────────────────────────────────────
+   Drei Spalten: eine Partei, das „vs.", die andere Partei. Im Doppel stehen
+   die Partner untereinander — bei vier langen Namen war die alte Zeile mit
+   Schrägstrichen ein Fließtext, in dem man suchen musste, wo die eine Partei
+   endet. Lange Namen brechen innerhalb ihrer Spalte um, statt die Kachel zu
+   sprengen (`minmax(0, 1fr)` erlaubt das Schrumpfen unter die Wortbreite). */
+.paar {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center; gap: 4px 8px;
+}
+.paar .seite { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.paar .seite:last-child { text-align: right; align-items: flex-end; }
+/* Der Name selbst ist die Zeile; das Nationen-Kürzel steht daneben und
+   schrumpft nie mit. Rechts umgekehrt, damit das Kürzel außen bleibt und
+   die Namen an der Mittelachse anliegen. */
+.paar .spieler {
+  display: flex; align-items: baseline; gap: 5px; min-width: 0;
+  overflow-wrap: break-word; hyphens: auto;
+}
+.paar .seite:last-child .spieler { flex-direction: row-reverse; }
+
+/* Auf der Feldkachel **untereinander**. Eine Kachel ist rund 230 px breit;
+   dreispaltig blieben je Partei keine 90 px, und Namen wie „Kushal Renuka
+   Prashanth" zerbrachen mitten im Wort. Untereinander steht jeder Name in
+   voller Kachelbreite — und die Kachel ist ohnehin die Ansicht, in der man
+   *ein* Spiel liest, nicht eine Liste überfliegt. */
+.card .paar { grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.card .paar .seite:last-child { text-align: left; align-items: flex-start; }
+.card .paar .seite:last-child .spieler { flex-direction: row; }
+.card .paar .vs { justify-self: start; }
+.vs {
+  color: var(--ink-faint); font-weight: 500; font-size: .85em;
+  justify-self: center;
+}
+
+/* Nation als Kürzel mit eigener Farbe. Der Farbton kommt aus dem Kürzel
+   selbst (`--ton`), damit gleiche Nationen ohne gepflegte Länderliste gleich
+   aussehen. Blass gehalten: Es ist eine Zusatzinfo, kein Alarm. */
+/* Die Flagge: klein, mit feiner Kante (weiße Flaggenteile brauchen sie,
+   sonst schwimmt das Bild im Weiß der Kachel). */
+.flagge {
+  flex: none; width: 20px; height: 14px; object-fit: cover;
+  border: 1px solid var(--line); border-radius: 2px;
+  vertical-align: -2px;
+}
+/* Ersatz, wenn es zu einem Kürzel keine Flagge gibt. */
+.nat {
+  flex: none; padding: 0 5px;
+  border-radius: 4px; font-size: .68rem; font-weight: 700; letter-spacing: .03em;
+  background: #f1f5f9; color: var(--ink-soft);
+}
+.meta { font-size: .85rem; color: var(--ink-soft); }
+.card-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+/* Satzstand und Uhr stehen nebeneinander und sehen sonst gleich aus —
+   „8:11" (Satzstand) und „5:32" (Minuten) sind im Turnierstress nicht zu
+   unterscheiden. Beide tragen deshalb ein Wort darunter, das sagt, was
+   die Zahl bedeutet. */
+.score { font-size: 1.05rem; font-weight: 700; }
+.score small { font-size: .7rem; font-weight: 600; color: var(--ink-faint); display: block; }
+.empty-hint { color: var(--ink-faint); font-style: italic; }
+
+/* ── Die Aufruf-Uhr ────────────────────────────────────────────────────
+   Das Herzstück dieser Seite. Sie beantwortet die Frage, wegen der man
+   überhaupt hinschaut: Wie lange steht das Spiel schon auf dem Feld, ohne
+   dass etwas passiert? Die Farbe kippt an genau den Schwellen, die auch
+   den 2. und 3. Aufruf auslösen — die Uhr sagt damit nicht nur „wie
+   lange", sondern „was jetzt dran ist". */
+.clock { font-size: 1.05rem; font-weight: 700; color: var(--ink-soft); }
+.clock.stage2 { color: var(--warn); }
+.clock.stage3 { color: var(--alarm); }
+.clock small { font-size: .7rem; font-weight: 600; color: var(--ink-faint); display: block; }
+.clock.stage2 small { color: var(--warn); }
+.clock.stage3 small { color: var(--alarm); }
+
+/* ── Spielliste ────────────────────────────────────────────────────────
+   Drei Abschnitte, in der Reihenfolge des Arbeitsablaufs: gerufen (warten
+   am Meeting Point), spielbereit (die Vergabemasse), noch nicht bereit
+   (sichtbar, aber eingeklappt). */
+.queue { display: flex; flex-direction: column; gap: 8px; }
+.row {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; min-height: 56px;
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+}
+.row .no { font-weight: 700; color: var(--ink-faint); min-width: 2.2rem; }
+.row .who { font-weight: 600; flex: 1 1 10rem; min-width: 0; }
+.row .draw { font-size: .85rem; color: var(--ink-soft); }
+.row.blocked { background: #f8fafc; }
+.row .why { font-size: .82rem; color: var(--warn); flex-basis: 100%; }
+.row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
+/* Der Vorbereitungs-Aufruf als Umschalter mit Sinnbild: quadratisch, so
+   groß wie ein Finger, ohne Text. Gedrückt = ist gerufen. */
+.row .prep {
+  display: grid; place-items: center;
+  width: 40px; height: 40px; padding: 0;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+}
+.row .prep:hover { border-color: var(--accent); color: var(--accent); }
+.row .prep[aria-pressed="true"] {
+  border-color: var(--accent); background: #eff6ff; color: var(--accent);
+}
+.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+
+/* Nachruf: drei kleine Knöpfe an einer Beschriftung. Kleiner als der
+   Vorbereitungs-Aufruf, weil sie die Ausnahme sind — man braucht sie nur,
+   wenn jemand nicht kommt. Trotzdem groß genug für einen Finger. */
+.row .recall { font-size: .78rem; color: var(--ink-faint); display: flex; align-items: center; gap: 4px; }
+.row .recall button {
+  font: inherit; font-weight: 650; padding: 6px 9px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+  max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row .recall button:hover { border-color: var(--warn); color: var(--warn); }
+
+/* Spielort ohne Feld. Unauffällig, solange nichts gesetzt ist — es ist eine
+   Ausnahme-Handlung, kein Pflichtfeld. Steht ein Ort von Hand fest, sagt der
+   Wähler das durch seine Farbe, damit man abgeleitete und gesetzte Hallen
+   auseinanderhält. */
+.row .hallwahl {
+  font: inherit; font-size: .8rem; font-weight: 650;
+  min-height: 40px; width: 3.6rem; padding: 6px 2px 6px 6px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+  text-align: center;
+}
+.row .hallwahl.gesetzt { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+.row[aria-selected="true"] .hallwahl { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+
+/* Der Aufruf-Knopf am Feld. Er steht in der Fußzeile neben der Uhr — dort,
+   wo die Turnierleitung ohnehin hinschaut, um zu sehen, ob etwas fällig
+   ist. */
+.callbtn {
+  font: inherit; font-size: .8rem; font-weight: 700;
+  padding: 8px 12px; min-height: 42px;
+  border: 1px solid var(--warn); border-radius: 8px;
+  background: var(--card); color: var(--warn); cursor: pointer;
+}
+.callbtn:hover { background: var(--warn); color: #fff; }
+.callbtn:disabled { opacity: .5; cursor: default; }
+
+/* Walkover-Vorschläge: nach einer Aufgabe entscheidet die Turnierleitung,
+   welche Folgespiele kampflos gehen. */
+.wo {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.wo h4 { margin: 0; font-size: .95rem; }
+.wo label { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: .9rem; }
+.wo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.wo button {
+  font: inherit; font-size: .85rem; font-weight: 650; padding: 8px 14px; min-height: 44px;
+  border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
+}
+.wo button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+/* Aufklappbare Abschnitte müssen als solche erkennbar sein — ohne Zeichen
+   wirken sie wie eine leere Sektion, und die Turnierleitung glaubt, es
+   gäbe dort nichts. */
+details > summary {
+  cursor: pointer; font-size: .8rem; font-weight: 700; color: var(--ink-faint);
+  text-transform: uppercase; letter-spacing: .06em; padding: 6px 0; min-height: 44px;
+  display: flex; align-items: center; gap: 8px; list-style: none;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: "›"; font-size: 1.2rem; line-height: 1; color: var(--ink-faint);
+  transition: transform .15s ease; display: inline-block;
+}
+details[open] > summary::before { transform: rotate(90deg); }
+details > summary:hover { color: var(--ink-soft); }
+details > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.section + .section { margin-top: 16px; }
+.note { font-size: .82rem; color: var(--ink-soft); margin: 6px 0 0; }
+.note.warn { color: var(--warn); font-weight: 600; }
+
+/* ── Bedienung ─────────────────────────────────────────────────────────
+   Antippen–Antippen ist der Hauptweg: Er funktioniert auf jedem Gerät, ist
+   einhändig bedienbar (die andere Hand hält das Klemmbrett) und lässt sich
+   ansagen. */
+.row.pick { cursor: pointer; }
+.row.pick:hover { border-color: #cbd5e1; }
+.row[aria-selected="true"] {
+  background: var(--ink); color: #fff; border-color: var(--ink);
+}
+.row[aria-selected="true"] .no,
+.row[aria-selected="true"] .draw,
+.row[aria-selected="true"] .vs { color: #cbd5e1; }
+.row:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Das Aktionsband klebt unter der Kopfzeile und verschwindet nicht beim
+   Scrollen — sonst weiß man auf einem Tablet nach zwei Wischern nicht mehr,
+   was gewählt ist. */
+.action-bar {
+  /* **Über** der Kopfzeile, nicht darunter und nicht im Fluss. Als Element
+     im Fluss schob es beim Erscheinen die ganze Seite nach unten — man
+     tippt ein Spiel an, zielt auf ein Feld, und unter dem Finger ist
+     plötzlich ein anderes. Es legt sich deshalb über die Kopfzeile: Deren
+     Inhalt (Turniername, Hallenfilter, Anzeige-Menü) braucht man während
+     einer laufenden Auswahl ohnehin nicht, und so verschiebt sich nichts.
+     `min-height` hält es genau so hoch wie den Kopf, den es verdeckt. */
+  position: fixed; top: 0; left: 0; right: 0; z-index: 25;
+  min-height: var(--kopf, 62px);
+  display: none; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--ink); color: #fff;
+}
+.action-bar.show { display: flex; }
+.action-bar .what { font-weight: 650; flex: 1 1 12rem; min-width: 0; }
+.action-bar .hint { color: #cbd5e1; font-size: .9rem; }
+.action-bar button {
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 44px;
+  border-radius: 8px; border: 1px solid #475569;
+  background: transparent; color: #fff; cursor: pointer;
+}
+.action-bar button:hover { background: #1e293b; }
+
+/* Ein Feld, das das gewählte Spiel aufnehmen kann. */
+.card.target { cursor: pointer; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29, 78, 216, .15); }
+.card.target:hover { background: #eff6ff; }
+/* Nicht erlaubt: gedimmt, aber weiterhin antippbar — der Tipp zeigt den
+   Grund. Ins Leere zu tippen erklärt nichts. */
+.card.blocked-target { opacity: .55; cursor: pointer; }
+/* Unterwegs: sichtbar vorläufig, nicht als Tatsache dargestellt. */
+.card.pending { border-style: dashed; border-color: var(--accent); background: #eff6ff; }
+.card.pending .empty-hint { color: var(--accent); font-style: normal; font-weight: 600; }
+
+/* Ziehen: Der Klon folgt dem Finger. Bewusst schlicht — er soll zeigen,
+   was transportiert wird, nicht die Aufmerksamkeit von den Zielfeldern
+   abziehen. */
+.drag-ghost {
+  position: fixed; z-index: 60; pointer-events: none;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--ink); color: #fff; font-weight: 650; font-size: .9rem;
+  box-shadow: 0 8px 20px rgba(15,23,42,.28); opacity: .95;
+  max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Während des Ziehens hebt sich das Feld unter dem Finger zusätzlich ab. */
+.card.hover-target { background: #dbeafe; border-color: var(--accent); }
+/* Nur auf dem Griff selbst das Scrollen unterdrücken — sonst ließe sich die
+   Liste auf dem Tablet nicht mehr bewegen. */
+.row.pick { touch-action: pan-y; }
+
+/* Was man zieht oder antippt, markiert man nicht: Ohne das hinterlässt jeder
+   Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
+   Tablet springt zusätzlich die Lupe auf. Während eines laufenden Zugs gilt
+   es für die ganze Seite — der Zeiger wandert ja über alles. */
+.row.pick, .card, .action-bar, .halls, h2, .callbtn, .prep, .recall {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+
+/* Ohne Verbindung: Alles, was schreiben würde, sichtbar zurücknehmen. */
+body.offline .prep,
+body.offline .recall button,
+body.offline .callbtn,
+body.offline .wo .actions button { opacity: .45; }
+
+/* Rückmeldung zur letzten Aktion. Bleibt stehen, bis sie weggetippt wird
+   oder die nächste Aktion beginnt. */
+.toast {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 40; max-width: min(92vw, 40rem);
+  display: none; gap: 12px; align-items: flex-start;
+  padding: 12px 16px; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,.18);
+  background: var(--ink); color: #fff; font-weight: 600;
+}
+.toast.show { display: flex; }
+.toast.bad { background: #7f1d1d; }
+.toast button {
+  font: inherit; background: transparent; border: 0; color: #cbd5e1;
+  cursor: pointer; padding: 0 4px; min-height: 24px; font-size: 1.1rem;
+}
+
+/* Einstieg ohne Zugang: die einzige Stelle, die erklärt statt anzuzeigen. */
+.gate { max-width: 34rem; margin: 12vh auto; padding: 24px; text-align: center; }
+.gate h1 { font-size: 1.3rem; margin: 0 0 10px; }
+.gate p { color: var(--ink-soft); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate" hidden>
+  <h1>Diese Seite braucht einen Zugang</h1>
+  <p>Öffne sie über den QR-Code in bts-light unter <b>Turnierleitung → Geräte</b>.
+     Der Zugang wird dabei einmalig auf diesem Gerät hinterlegt.</p>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <span class="brand">Turnierleitung</span>
+    <span class="tournament" id="tournament"></span>
+    <span class="halls" id="halls"></span>
+    <button type="button" class="auto" id="auto-toggle" hidden></button>
+    <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
+    <details class="anzeige">
+      <summary>Anzeige</summary>
+      <div class="menue">
+        <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
+        <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
+      </div>
+    </details>
+  </header>
+  <div class="banner" id="banner"></div>
+  <div class="action-bar" id="action-bar">
+    <span class="what" id="action-what"></span>
+    <span class="hint" id="action-hint">jetzt ein Feld antippen</span>
+    <button type="button" id="action-result" hidden>Ergebnis eintragen</button>
+    <button type="button" id="action-free" hidden>Vom Feld nehmen</button>
+    <button type="button" id="action-cancel">Abbrechen</button>
+  </div>
+  <main>
+    <section>
+      <h2>Felder <span class="count" id="courts-count"></span></h2>
+      <div id="courts"></div>
+    </section>
+    <section>
+      <div id="walkovers"></div>
+      <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
+      <div id="queue"></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span id="toast-text"></span>
+  <button type="button" id="toast-close" aria-label="Meldung schließen">×</button>
+</div>
+
+<script type="module">
+// ── Zugang ────────────────────────────────────────────────────────────
+// Der Zugang steht im Fragment der Adresse (`…/tl#t=…`). Ein Fragment wird
+// NIE an den Server gesendet — es landet also in keinem Zugriffsprotokoll.
+// Von dort wandert es einmalig in den lokalen Speicher des Geräts, und die
+// Adresszeile wird sofort bereinigt.
+const STORE_KEY = "bts-tl-token";
+function readToken() {
+  const m = location.hash.match(/(?:^|[#&])t=([^&]+)/);
+  if (m) {
+    localStorage.setItem(STORE_KEY, decodeURIComponent(m[1]));
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  return localStorage.getItem(STORE_KEY) || "";
+}
+const token = readToken();
+
+// Basis der Schnittstelle aus dem eigenen Pfad ableiten, damit dieselbe
+// Seite im Hallennetz (`/tl`) und hinter dem Cloud-Präfix
+// (`/bts-relay/tl`) ohne Anpassung läuft.
+const API = location.pathname.replace(/\/+$/, "") + "/api";
+// Die Flaggen liegen neben der Seite (`/flags/GER.svg`), im Hallennetz wie
+// hinter dem Cloud-Präfix.
+const FLAGGEN_BASIS = location.pathname.replace(/\/tl\/?$/, "") + "/flags/";
+
+const $ = (id) => document.getElementById(id);
+
+// ── Zeit ──────────────────────────────────────────────────────────────
+// Alle Zeitstempel kommen vom Turnier-PC. Die Geräte rechnen den Versatz
+// zur eigenen Uhr aus und zählen lokal hoch — so zeigen alle dieselbe
+// verstrichene Zeit, egal wie falsch ein Tablet gestellt ist.
+let clockOffset = 0;
+function syncClock(serverNowMs) {
+  const fresh = serverNowMs - Date.now();
+  // Kleine Schwankungen ignorieren, sonst zappelt die Anzeige bei jedem
+  // Abruf um Zehntelsekunden.
+  if (Math.abs(fresh - clockOffset) > 2000) clockOffset = fresh;
+}
+const serverNow = () => Date.now() + clockOffset;
+
+/** Verstrichene Zeit als „3:07" bzw. „1:02:11". Nie negativ. */
+function elapsed(sinceMs) {
+  const s = Math.max(0, Math.floor((serverNow() - sinceMs) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const two = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${two(m)}:${two(sec)}` : `${m}:${two(sec)}`;
+}
+
+/** Sind auf diesem Feld schon Punkte gefallen? Dann läuft das Spiel. */
+const isPlaying = (court) =>
+  court.match_id > 0 && (court.sets || []).some(([a, b]) => a > 0 || b > 0);
+
+/**
+ * Welche Aufruf-Stufe ist **fällig**? Dieselben Schwellen wie am Turnier-PC.
+ *
+ * Nicht zu verwechseln mit `court.call_stage`: Das ist die Zahl der
+ * **erfolgten** Aufrufe, die der Turnier-PC zählt und die auf jedem Gerät
+ * gleich ist. Hier geht es um die Uhr — wann der nächste dran wäre.
+ *
+ * `0` heißt: keine Stufe anzeigen. Der Aufruf-Timer zählt die Zeit, bis die
+ * Spieler ans Feld kommen — sobald gespielt wird, ist er gegenstandslos.
+ * Ohne diese Regel stünde an einem Spiel, das seit 47 Minuten läuft,
+ * „3. Aufruf fällig". (Dieselbe Regel wie in der Desktop-Übersicht.)
+ */
+function callStage(court, timer) {
+  const since = court.on_court_since_ms;
+  if (!timer || !timer.enabled || !since || isPlaying(court)) return 0;
+  const min = (serverNow() - since) / 60000;
+  if (min >= timer.third_call_minutes) return 3;
+  if (min >= timer.second_call_minutes) return 2;
+  return 1;
+}
+
+// ── Disziplin ─────────────────────────────────────────────────────────
+// Die Kurzform, wie sie auf jedem Aushang und in jedem Papierplan steht.
+// Turniere benennen ihre Auslosungen frei („Gruppe 6"); ohne dieses Kürzel
+// ist am Bildschirm nicht zu sehen, ob ein Einzel oder ein Doppel aufs Feld
+// soll.
+const DISZIPLIN = {
+  mens_singles: "HE",
+  womens_singles: "DE",
+  mens_doubles: "HD",
+  womens_doubles: "DD",
+  mixed: "GD",
+};
+const disziplin = (key) => DISZIPLIN[key] || "";
+
+/**
+ * Die Klassenbezeichnung, wie sie im Turnier gesprochen wird: „HE-C",
+ * „HD-D". Beides in einem Wort — die Disziplin steckt ohnehin darin, und
+ * getrennt („HE · C") liest es sich wie zwei Angaben, die nichts
+ * miteinander zu tun haben. Fehlt eine der beiden Hälften, bleibt die
+ * andere für sich stehen.
+ */
+function klasse(discipline, classLabel) {
+  const d = disziplin(discipline);
+  const k = (classLabel || "").trim();
+  if (d && k) return `${d}-${k}`;
+  return d || k;
+}
+
+// Sinnbild für die Zeit auf dem Feld. Es ersetzt die Beschriftung „auf dem
+// Feld seit", die auf dem Tablet je Kachel eine ganze Zeile kostete — ohne
+// irgendein Zeichen sähen Satzstand („0:0") und Uhr („3:35") gleich aus,
+// und genau diese Verwechslung soll die Beschriftung ja verhindern.
+const UHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2.2"
+  stroke-linecap="round" stroke-linejoin="round"
+  style="vertical-align:-1px;margin-right:3px;opacity:.75">
+  <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+</svg>`;
+
+// Sinnbild für den Vorbereitungs-Aufruf: ein Megafon. Als Inline-SVG, damit
+// es die Schriftfarbe erbt und auf jedem Gerät gleich aussieht — ein Emoji
+// wäre je nach System ein anderes Bild.
+const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="1.8"
+  stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 10v4a1 1 0 0 0 1 1h2l4 3.5V5.5L6 9H4a1 1 0 0 0-1 1Z"/>
+  <path d="M14.5 8.5a5 5 0 0 1 0 7"/>
+  <path d="M17.5 6a9 9 0 0 1 0 12"/>
+</svg>`;
+
+// ── Anzeige-Vorlieben ─────────────────────────────────────────────────
+// Am Gerät, nicht am Turnier: Der eine Helfer sucht nach der Spielnummer aus
+// dem Papierplan, der andere kann damit nichts anfangen. Beides wäre als
+// turnierweite Einstellung falsch — es hinge davon ab, wer zuletzt gespeichert
+// hat.
+let zeigeNummern = localStorage.getItem("bts-tl-nummern") !== "aus";
+let zeigeNationen = localStorage.getItem("bts-tl-nationen") === "an";
+
+function setzeVorliebe(name, an) {
+  if (name === "nummern") {
+    zeigeNummern = an;
+    localStorage.setItem("bts-tl-nummern", an ? "an" : "aus");
+  } else {
+    zeigeNationen = an;
+    localStorage.setItem("bts-tl-nationen", an ? "an" : "aus");
+  }
+  renderCourts();
+  renderQueue();
+}
+
+// ── Bedienzustand ─────────────────────────────────────────────────────
+// Drei Lagen, mehr braucht es nicht: nichts gewählt · ein Spiel gewählt ·
+// eine Zuweisung unterwegs. Der Drag später setzt denselben Automaten, statt
+// einen zweiten Weg zu eröffnen.
+// `picked` trägt seine Herkunft mit: aus der Warteliste (dann ist es eine
+// Zuweisung) oder von einem Feld (dann ein Umhängen). Damit deckt EIN
+// Automat und EINE Geste beide Fälle ab, statt zwei getrennte Wege zu
+// eröffnen, die man auseinanderhalten müsste.
+let picked = null;   // { match, fromCourtId }
+let pending = null;  // { matchId, courtId } — unterwegs zum Turnier-PC
+
+function pick(match, fromCourtId) {
+  const same = picked && picked.match.match_id === match.match_id;
+  picked = same ? null : { match, fromCourtId: fromCourtId ?? null };
+  renderActionBar();
+  renderCourts();
+  renderQueue();
+}
+function cancelPick() {
+  picked = null;
+  renderActionBar();
+  renderCourts();
+  renderQueue();
+}
+
+/** Die Auswahl ist unter der Hand weggelaufen — sagen statt schweigen. */
+function pickVanished() {
+  cancelPick();
+  toast("Das Spiel steht nicht mehr auf diesem Feld — bitte neu auswählen.", true);
+}
+
+/** Gibt es das gewählte Spiel dort, wo es gewählt wurde, überhaupt noch? */
+function pickIsStillValid() {
+  if (!picked) return false;
+  if (!picked.fromCourtId) {
+    return state.queue.some((m) => m.match_id === picked.match.match_id);
+  }
+  return !!pickedCourt();
+}
+
+/**
+ * Das Feld der aktuellen Auswahl — aber nur, solange **dieses** Spiel noch
+ * darauf steht.
+ *
+ * Zwischen zwei Abfragen kann das Spiel geendet haben und die nächste
+ * Begegnung schon aufgerufen sein. Wer dann auf „Ergebnis eintragen" tippt,
+ * meint das eine Spiel und träfe das andere: ein Endstand für eine Partie,
+ * die gerade erst angefangen hat. Darum zählt hier nicht das Feld allein,
+ * sondern Feld **und** Spiel.
+ */
+function pickedCourt() {
+  if (!picked || !picked.fromCourtId) return null;
+  return state.courts.find((c) => c.court_id === picked.fromCourtId
+    && c.match_id === picked.match.match_id) || null;
+}
+
+/**
+ * Misst die klebende Kopfzone und legt sie als CSS-Variablen ab.
+ *
+ * Die Felderspalte hängt sich darunter — sie muss wissen, wie viel oben
+ * belegt ist. Gemessen statt geschätzt, weil die Kopfzeile umbricht, sobald
+ * ein Turnier viele Hallen hat, und das Aktionsband nur zeitweise da ist.
+ */
+function messeKopf() {
+  const kopf = document.querySelector("header");
+  const band = $("action-bar");
+  const s = document.documentElement.style;
+  s.setProperty("--kopf", (kopf?.offsetHeight || 62) + "px");
+  // Wie weit das Band über die Kopfzeile hinausragt — meist gar nicht. Nur
+  // wenn es auf schmalen Geräten umbricht, rückt die Felderspalte nach, statt
+  // dass ihre oberste Reihe unter dem Band verschwindet.
+  const ueberstand = band?.classList.contains("show")
+    ? Math.max(0, band.offsetHeight - (kopf?.offsetHeight || 62))
+    : 0;
+  s.setProperty("--band", ueberstand + "px");
+}
+
+function renderActionBar() {
+  const bar = $("action-bar");
+  // Während eines Zuges bleibt das Band aus: Es würde beim Erscheinen das
+  // ganze Layout nach unten schieben, und der Finger träfe ein anderes Feld
+  // als das anvisierte. Beim Ziehen sagt ohnehin der Klon am Finger, was
+  // transportiert wird — das Band ist für den Antipp-Weg da, wo man nach
+  // zwei Wischern sonst nicht mehr weiß, was gewählt ist.
+  if (!picked || dragging) { bar.classList.remove("show"); messeKopf(); return; }
+  const m = picked.match;
+  const wer = [(m.team1 || []).join(" / "), (m.team2 || []).join(" / ")]
+    .filter(Boolean).join(" vs. ");
+  const woher = picked.fromCourtId
+    ? (state.courts.find((c) => c.court_id === picked.fromCourtId)?.court || "")
+    : "";
+  $("action-what").textContent = woher
+    ? `${woher}: ${wer}`
+    : `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
+  // Beim Umhängen ist „vom Feld nehmen" die zweite sinnvolle Handlung —
+  // sie steht deshalb direkt neben dem Abbrechen, statt in einem Menü.
+  $("action-free").hidden = !picked.fromCourtId;
+  $("action-result").hidden = !picked.fromCourtId;
+  $("action-hint").textContent = picked.fromCourtId
+    ? "auf ein anderes Feld tippen"
+    : "jetzt ein Feld antippen";
+  bar.classList.add("show");
+  messeKopf();
+}
+
+/**
+ * Stabile Vorgangskennung für eine Absicht.
+ *
+ * Innerhalb desselben Zeitfensters ergibt derselbe Wunsch dieselbe Kennung —
+ * ein Doppeltipp wird damit als Wiederholung erkannt und schreibt nicht
+ * zweimal nach BTP. Nach dem Fenster entsteht eine neue: Wer dasselbe Spiel
+ * eine Minute später bewusst noch einmal auf dasselbe Feld legt, meint es
+ * auch so.
+ */
+const OP_WINDOW_MS = 20000;
+function opIdFor(matchId, courtId) {
+  return `assign-${matchId}-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`;
+}
+
+function toast(text, bad) {
+  $("toast-text").textContent = text;
+  $("toast").className = "toast show" + (bad ? " bad" : "");
+}
+function hideToast() { $("toast").className = "toast"; }
+
+/**
+ * Darf das gewählte Spiel auf dieses Feld?
+ *
+ * Nur die Gründe, die das Gerät selbst sicher kennt. Alles Weitere
+ * entscheidet der Turnier-PC — er hat den maßgeblichen Stand, und seine
+ * Ablehnung ist die Wahrheit. Hier geht es darum, offensichtlich Sinnloses
+ * gar nicht erst anzubieten.
+ */
+function targetProblem(court) {
+  if (!picked) return null;
+  if (picked.fromCourtId === court.court_id) return "Das Spiel steht schon auf diesem Feld.";
+  if (court.locked) return "Dieses Feld ist gesperrt.";
+  if (court.clearing) return "Dieses Feld wird noch geräumt — BTP hat es noch nicht freigegeben.";
+  if (court.match_id) return "Auf diesem Feld läuft ein Spiel.";
+  const hall = picked.match.hall;
+  if (hall && court.location && hall !== court.location) {
+    return `Dieses Spiel gehört nach ${hall}.`;
+  }
+  return null;
+}
+
+/** Ein Kommando senden und die Antwort verständlich anzeigen. */
+async function send(opId, action, onOk) {
+  if (connectionLevel() === "offline") {
+    toast("Keine Verbindung zum Turnier-PC — nichts wurde gesendet.", true);
+    return false;
+  }
+  try {
+    const res = await fetch(API + "/command", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: "Bearer " + token },
+      // `viewRev` ist der Stand, auf dem diese Entscheidung beruht. Ohne ihn
+      // könnte der Turnier-PC nicht erkennen, dass jemand nach zehn Minuten
+      // Standby auf einen überholten Plan getippt hat.
+      body: JSON.stringify({ opId, action, viewRev: (state && state.rev) || 0 }),
+    });
+    // Nicht jede Antwort ist eine Antwort: Abgewiesene Anfragen kommen als
+    // Klartext, und `res.json()` darauf wirft. Der Fehlerzweig sagt dann
+    // „nicht bestätigt — bitte wiederholen", und der Helfer hämmert auf einen
+    // Knopf, der nie durchkommt.
+    if (res.status === 429) {
+      toast("Zu viele Turnierleitungs-Geräte — bitte eines schließen und erneut versuchen.", true);
+      return false;
+    }
+    if (res.status === 401) {
+      toast("Dieses Gerät ist nicht mehr freigegeben.", true);
+      return false;
+    }
+    if (!res.ok) {
+      toast("Der Turnier-PC hat die Anfrage abgewiesen (" + res.status + ").", true);
+      return false;
+    }
+    const answer = await res.json();
+    if (answer.ok) {
+      // Erfolg und Einschränkung in EINER Meldung: Zwei nacheinander
+      // gesetzte Meldungen überschreiben einander sofort — die erste wäre
+      // nur ein Aufblitzen. Gibt es eine Einschränkung, ist sie das
+      // Wichtigere und färbt die Meldung.
+      if (answer.warning) toast(`${onOk} ${answer.warning}`, true);
+      else toast(onOk);
+      return true;
+    }
+    toast(answer.error || "Die Aktion wurde abgelehnt.", true);
+    return false;
+  } catch (e) {
+    toast("Nicht bestätigt — bitte den Stand prüfen und gegebenenfalls wiederholen.", true);
+    return false;
+  } finally {
+    // Sofort nachfragen statt auf den nächsten Takt zu warten: Die Anzeige
+    // soll den echten Stand zeigen, nicht unsere Vermutung.
+    poll();
+  }
+}
+
+/** Ein Spiel in die Vorbereitung rufen (oder den Aufruf zurücknehmen). */
+async function togglePrepCall(match) {
+  const called = !!match.prep_call;
+  // In welche Halle? Bei einem Hallenfilter ist die Antwort klar, sonst
+  // nimmt der Aufruf die Halle des Spiels — und ohne beides bleibt er
+  // ohne Hallenangabe (Ein-Hallen-Turnier).
+  const hall = hallFilter || match.hall || "";
+  const locationId = hall ? hallIdFor(hall) : null;
+  await send(
+    `prep-${match.match_id}-${called}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    called
+      ? { action: "retract_preparation", matchId: match.match_id }
+      : { action: "call_preparation", matchIds: [match.match_id], locationId },
+    called ? "Aufruf zurückgenommen." : `In Vorbereitung gerufen${hall ? ` (${hall})` : ""}.`,
+  );
+}
+
+/**
+ * Kurzform eines Hallennamens für den engen Wähler in der Liste.
+ *
+ * So kurz wie möglich, aber eindeutig: „Kyritzer"/„Luckenwalder" werden zu
+ * „Ky"/„Lu", zwei Hallen mit gleichem Anfang bekommen so viele Buchstaben,
+ * wie sie zum Unterscheiden brauchen. Eine Abkürzung, unter der zwei Hallen
+ * gleich aussehen, wäre schlimmer als ein langer Name.
+ */
+function hallenKuerzel(name) {
+  const alle = (state.halls || []).map((h) => h.name);
+  for (let n = 2; n <= 12; n++) {
+    const kurz = (s) => s.trim().slice(0, n);
+    const menge = new Set(alle.map(kurz));
+    if (menge.size === alle.length) return kurz(name);
+  }
+  return name;
+}
+
+/** Die BTP-Kennung zu einem Hallennamen; `null`, wenn unbekannt. */
+function hallIdFor(hall) {
+  return state.halls.find((h) => h.name === hall)?.id ?? null;
+}
+
+/**
+ * Endstand nachtragen, wenn niemand gezählt hat.
+ *
+ * Bewusst über eine einfache Eingabe („21:15, 21:19") statt über ein
+ * Formular mit Satzfeldern: Die Turnierleitung hat den Zettel in der Hand
+ * und tippt ab, was daraufsteht. Die Prüfung macht ohnehin der Turnier-PC —
+ * dieselbe wie am Zähltablett.
+ */
+async function enterResult(court) {
+  const wer = `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`;
+  const eingabe = prompt(
+    `Endstand für ${court.court} — ${wer}\n\n`
+    + `Sätze mit Komma trennen, zum Beispiel:  21:15, 19:21, 21:17`,
+    (court.sets || []).map(([a, b]) => `${a}:${b}`).join(", "),
+  );
+  if (eingabe === null) return;
+  const sets = eingabe.split(",").map((s) => {
+    const m = s.trim().match(/^(\d+)\s*[:\-]\s*(\d+)$/);
+    return m ? { a: Number(m[1]), b: Number(m[2]) } : null;
+  });
+  if (!sets.length || sets.some((s) => s === null)) {
+    toast("Der Endstand ließ sich nicht lesen. Beispiel: 21:15, 21:19", true);
+    return;
+  }
+  picked = null;
+  renderActionBar();
+  await send(
+    `result-${court.match_id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "enter_result", matchId: court.match_id, sets, retired: false, overwrite: false },
+    `Ergebnis für ${wer} eingetragen.`,
+  );
+}
+
+/** Ein Feld räumen — das Spiel geht zurück in die Warteliste. */
+async function freeCourt(court) {
+  const running = court.match_id
+    ? `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`
+    : "";
+  // Ein laufender Spielstand geht dabei verloren — dafür lohnt die Rückfrage.
+  const hasScore = (court.sets || []).some(([a, b]) => a > 0 || b > 0);
+  if (hasScore && !confirm(
+    `${court.court}: ${running}\n\nDas Spiel läuft bereits. Beim Freigeben geht der `
+    + `Spielstand verloren. Wirklich vom Feld nehmen?`)) {
+    return;
+  }
+  picked = null;
+  renderActionBar();
+  await send(
+    `free-${court.court_id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    {
+      action: "free_court",
+      courtId: court.court_id,
+      expect: court.match_id
+        ? { kind: "match", matchId: court.match_id }
+        : { kind: "any" },
+    },
+    `${court.court} ist frei.`,
+  );
+}
+
+async function assignTo(court) {
+  if (!picked) return;
+  const problem = targetProblem(court);
+  if (problem) { toast(problem, true); return; }
+
+  const { match, fromCourtId } = picked;
+  const wer = `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
+  pending = { matchId: match.match_id, courtId: court.court_id };
+  picked = null;
+  hideToast();
+  renderActionBar();
+  renderCourts();
+  renderQueue();
+
+  // Umhängen ist eine eigene Handlung, kein Freigeben mit anschließendem
+  // Zuweisen: Nur so wird es ein einziger Schreibvorgang, und dazwischen ist
+  // kein Zustand sichtbar, in dem das Spiel auf keinem Feld steht.
+  const action = fromCourtId
+    ? {
+        action: "move_match",
+        fromCourtId,
+        toCourtId: court.court_id,
+        matchId: match.match_id,
+        expectFrom: { kind: "match", matchId: match.match_id },
+        expectTo: { kind: "free" },
+      }
+    : {
+        action: "assign_court",
+        courtId: court.court_id,
+        matchId: match.match_id,
+        // Was wir vorgefunden haben. Stimmt es nicht mehr, lehnt der
+        // Turnier-PC ab, statt jemandes Zuweisung zu überschreiben.
+        expect: { kind: "free" },
+      };
+
+  const ok = await send(
+    // Die Vorgangskennung muss für dieselbe Absicht STABIL sein, sonst wäre
+    // der Schutz gegen Doppelausführung wirkungslos.
+    opIdFor(match.match_id, court.court_id),
+    action,
+    fromCourtId ? `${wer} steht jetzt auf ${court.court}.` : `${court.court} bekommt ${wer}.`,
+  );
+  pending = null;
+  if (!ok) {
+    // Die Auswahl kommt zurück — meist will man das Spiel dann auf ein
+    // anderes Feld legen.
+    picked = { match, fromCourtId };
+    renderActionBar();
+    renderCourts();
+    renderQueue();
+  }
+}
+
+// ── Zustand ───────────────────────────────────────────────────────────
+let state = null;
+let hallFilter = new URLSearchParams(location.search).get("halle")
+  || localStorage.getItem("bts-tl-halle") || "";
+let failures = 0;
+let lastOkMs = 0;
+/// Mitschnitt der zuletzt erhaltenen Fassung — leer, solange keiner kam.
+let etag = "";
+
+function setHall(hall) {
+  hallFilter = hall;
+  localStorage.setItem("bts-tl-halle", hall);
+  const url = new URL(location.href);
+  if (hall) url.searchParams.set("halle", hall); else url.searchParams.delete("halle");
+  history.replaceState(null, "", url);
+  render();
+}
+
+async function poll() {
+  try {
+    // Der Mitschnitt der letzten Fassung spart die Übertragung, solange sich
+    // nichts geändert hat: Bei einer Seite, die alle zwei Sekunden fragt, ist
+    // das über ein Turnier hinweg der Unterschied zwischen sparsam und
+    // lästig — besonders über Mobilfunk. Der Turnier-PC im Hallennetz
+    // beantwortet das nicht und schickt einfach den vollen Stand.
+    const kopf = { Authorization: "Bearer " + token };
+    if (etag) kopf["If-None-Match"] = etag;
+    const res = await fetch(API + "/state", { headers: kopf, cache: "no-store" });
+    if (res.status === 304) {
+      // Unverändert: Die Verbindung ist gesund, es gibt nur nichts Neues.
+      // Die Uhr trotzdem nachziehen: In einer ruhigen Phase ist **jede**
+      // Antwort ein 304, und ein Gerät, dessen Uhr inzwischen gestellt
+      // wurde (Zeitumstellung, Funkzeit nach dem Aufwachen), zeigte sonst
+      // bis zur nächsten Änderung überall die falsche Dauer — ausgerechnet
+      // in der Phase, in der man auf „seit wann aufgerufen" schaut.
+      const serverzeit = headerNow(res);
+      if (serverzeit) syncClock(serverzeit);
+      failures = 0;
+      lastOkMs = Date.now();
+      renderConnection();
+      return;
+    }
+    if (res.status === 429) {
+      // Mehr Geräte als das Turnier bedient. Ehrlich benennen — sonst
+      // erschiene es als Netzproblem und jemand lädt endlos neu. Die Sperre
+      // löst sich von selbst, sobald ein Platz frei wird.
+      showGate("Zu viele Geräte",
+        "In diesem Turnier sind bereits acht Turnierleitungs-Geräte aktiv. "
+        + "Ein nicht mehr benutztes Gerät schließen — der Platz wird nach "
+        + "einer Minute frei. Diese Seite versucht es weiter.");
+      return;
+    }
+    if (res.status === 401) {
+      // Der Zugang gilt nicht mehr. **Ohne ihn zu löschen**: Ein
+      // weggeworfener Zugang lässt sich nur am Turnier-PC neu vergeben —
+      // quer durch die Halle, mitten im Turnier. Und der Grund kann auch
+      // ein Missverständnis sein. Wer wirklich entzogen wurde, sieht die
+      // Meldung dauerhaft; alle anderen kommen von selbst zurück.
+      showGate("Zugang gilt nicht mehr",
+        "Dieses Gerät ist in bts-light nicht mehr freigegeben. "
+        + "Falls das ein Irrtum ist: Die Seite versucht es weiter. "
+        + "Sonst neu koppeln über Turnierleitung → Geräte.");
+      return;
+    }
+    if (res.status === 503) {
+      // Der Turnier-PC ist (gerade) nicht verbunden. Das ist ein
+      // Verbindungs-, kein Zugangsproblem — die Seite bleibt stehen und
+      // zeigt es an, statt einen leeren Stand als „alle Felder frei" zu
+      // deuten.
+      throw new Error("Turnier-PC nicht verbunden");
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    etag = res.headers.get("etag") || "";
+    state = await res.json();
+    // Die Serverzeit bevorzugt aus dem Kopf der Antwort: Über den Relay ist
+    // der Stand zwischengespeichert, sein `server_now_ms` also der Zeitpunkt
+    // des letzten Pushs. Nach einer ruhigen Viertelstunde gingen alle Uhren
+    // eine Viertelstunde nach — und die Seite meldete keinen einzigen
+    // fälligen Aufruf mehr.
+    syncClock(headerNow(res) || state.server_now_ms);
+    failures = 0;
+    lastOkMs = Date.now();
+    hideGate();
+    render();
+  } catch (e) {
+    failures++;
+    // Der Mitschnitt gilt nur zu einem lebenden Gegenüber: Startet der
+    // Turnier-PC neu, beginnt seine Revision wieder klein, und ein alter
+    // Mitschnitt bekäme „unverändert" auf einen völlig anderen Stand.
+    etag = "";
+    renderConnection();
+  }
+}
+
+/** Serverzeit aus dem Antwortkopf (ms), 0 wenn keiner mitkam. */
+function headerNow(res) {
+  const d = res.headers.get("date");
+  if (!d) return 0;
+  const t = Date.parse(d);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Die Seite gegen eine Erklärung tauschen. */
+function showGate(titel, text) {
+  $("app").hidden = true;
+  $("gate").hidden = false;
+  $("gate").querySelector("h1").textContent = titel;
+  $("gate").querySelector("p").textContent = text;
+}
+
+/** Und wieder zurück, sobald es weitergeht. */
+function hideGate() {
+  if (!$("gate").hidden) {
+    $("gate").hidden = true;
+    $("app").hidden = false;
+  }
+}
+
+/** Live / verzögert / offline — drei Lagen, nicht zwei. */
+function connectionLevel() {
+  if (failures === 0) return "live";
+  if (failures === 1) return "delayed";
+  return "offline";
+}
+
+function renderConnection() {
+  const level = connectionLevel();
+  const conn = $("conn");
+  conn.className = "conn " + (level === "live" ? "" : level);
+  const age = lastOkMs ? Math.floor((Date.now() - lastOkMs) / 1000) : 0;
+  $("conn-text").textContent =
+    level === "live" ? "aktuell"
+    : level === "delayed" ? `Daten sind ${age} s alt`
+    : "keine Verbindung";
+
+  // Ohne Verbindung sendet `send()` ohnehin nichts. Das muss man aber auch
+  // sehen können, bevor man tippt: Die Schreibknöpfe werden gedämpft, der
+  // Griff bleibt trotzdem anklickbar — wer doch tippt, bekommt die
+  // Begründung statt eines toten Knopfes.
+  document.body.classList.toggle("offline", level === "offline");
+
+  const banner = $("banner");
+  if (level === "offline") {
+    // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
+    // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
+    // eingefroren" wäre falsch und würde beim Blick auf die laufende Uhr
+    // sofort unglaubwürdig.
+    banner.textContent =
+      "Keine Verbindung zum Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten bekannten Stand.";
+    banner.classList.add("show");
+  } else {
+    banner.classList.remove("show");
+  }
+}
+
+// ── Zeichnen ──────────────────────────────────────────────────────────
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/**
+ * Eine Paarung: links die eine Partei, rechts die andere, das „vs." in der
+ * Mitte. Im Doppel stehen die Partner **untereinander** — nebeneinander mit
+ * Schrägstrich ergab bei vier langen Namen einen Fließtext, in dem man erst
+ * suchen musste, wo die eine Partei aufhört.
+ *
+ * Die Nation steht als Kürzel vor dem Namen, wenn sie eingeschaltet ist.
+ */
+function pairOf(t1, t2, nat1, nat2) {
+  const seite = (namen, nationen) => {
+    const liste = (namen || []).length ? namen : ["?"];
+    return liste.map((n, i) => {
+      const land = zeigeNationen ? (nationen || [])[i] : "";
+      return `<span class="spieler">${nationBadge(land)}${esc(n)}</span>`;
+    }).join("");
+  };
+  return `<span class="paar">
+    <span class="seite">${seite(t1, nat1)}</span>
+    <span class="vs">vs.</span>
+    <span class="seite">${seite(t2, nat2)}</span>
+  </span>`;
+}
+
+/**
+ * Die Nation als **Flagge** — dieselben 205 SVGs, die auch der Court-Monitor
+ * zeigt (`/flags/GER.svg`).
+ *
+ * Eine Flagge erkennt man schneller als drei Buchstaben, und bei einem
+ * internationalen Turnier ist genau das der Zweck. Das Kürzel bleibt als
+ * `title` und als Ersatz, wenn es die Datei nicht gibt: Zu einer unbekannten
+ * Nation lädt der Browser sonst ein kaputtes Bild, und die Zeile verrutscht.
+ */
+function nationBadge(code) {
+  const c = (code || "").trim().toUpperCase();
+  if (!c) return "";
+  // Nur was wie ein ISO-Kürzel aussieht — der Wert kommt aus BTP und landet
+  // hier in einer URL.
+  if (!/^[A-Z]{2,3}$/.test(c)) return "";
+  return `<img class="flagge" src="${FLAGGEN_BASIS}${c}.svg" alt="${esc(c)}"
+    title="${esc(c)}" loading="lazy" width="20" height="14"
+    onerror="this.replaceWith(Object.assign(document.createElement('span'),
+      {className:'nat', textContent:'${esc(c)}'}))">`;
+}
+
+/**
+ * Kurzform einer Partei für die Nachruf-Knöpfe.
+ *
+ * Nur der Nachname des ersten Spielers — auf dem Knopf ist kein Platz für
+ * eine ganze Doppelpaarung, und die Turnierleitung erkennt daran, wen sie
+ * ruft. Der volle Name steht in derselben Zeile.
+ */
+function shortSide(team) {
+  const first = (team || [])[0] || "?";
+  const teile = String(first).trim().split(/\s+/);
+  return teile[teile.length - 1] || "?";
+}
+
+function renderHalls() {
+  const box = $("halls");
+  if (!state || !state.multi_hall) { box.innerHTML = ""; return; }
+  const options = ["", ...state.halls.map((h) => h.name)];
+  box.innerHTML = options.map((h) =>
+    `<button type="button" data-hall="${esc(h)}" aria-pressed="${h === hallFilter}">${h ? esc(h) : "Alle Hallen"}</button>`
+  ).join("");
+  box.querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => setHall(b.dataset.hall)));
+}
+
+/**
+ * In welchem Zustand ist dieses Feld? Vier Lagen, die sich im Betrieb
+ * unterscheiden — und die man aus zehn Metern Entfernung auseinanderhalten
+ * können muss:
+ *
+ * - `frei` — nichts drauf
+ * - `gerufen` — aufgerufen, noch kein Punkt gefallen, im Rahmen
+ * - `ueberfaellig` — aufgerufen, kein Punkt, und die eingestellte Zeit ist
+ *   um. Das ist die Kachel, zu der jemand hingehen muss.
+ * - `laeuft` — es wird gezählt
+ * - `beendet` — fertig, BTP hat das Feld nur noch nicht abgeräumt
+ */
+function courtState(c) {
+  if (c.clearing) return "beendet";
+  if (!c.match_id) return "frei";
+  if (isPlaying(c)) return "laeuft";
+  const grenze = (state.call_timer && state.call_timer.not_started_minutes) || 5;
+  if (c.on_court_since_ms && serverNow() - c.on_court_since_ms > grenze * 60000) {
+    return "ueberfaellig";
+  }
+  return "gerufen";
+}
+
+function courtCard(c) {
+  const stage = callStage(c, state.call_timer);
+  const classes = ["card", "zustand-" + courtState(c)];
+  if (c.clearing) classes.push("clearing");
+  else if (!c.match_id) classes.push("free");
+  if (c.locked) classes.push("locked");
+  // Ist ein Spiel gewählt, zeigt jede Kachel, ob sie es aufnehmen kann.
+  if (picked) classes.push(targetProblem(c) ? "blocked-target" : "target");
+  if (pending && pending.courtId === c.court_id) classes.push("pending");
+
+  const badges = [];
+  if (c.locked) badges.push('<span class="badge">gesperrt</span>');
+  if (c.injury) badges.push('<span class="badge alarm">Verletzung</span>');
+  if (c.official_call) badges.push('<span class="badge alarm">TL gerufen</span>');
+  if (c.pause) badges.push('<span class="badge warn">Pause</span>');
+  if (c.match_id && !c.tablet_connected) badges.push('<span class="badge warn">kein Tablet</span>');
+
+  let body, foot = "";
+  if (pending && pending.courtId === c.court_id) {
+    // Unterwegs: sichtbar vorläufig. Nichts wird als Tatsache dargestellt,
+    // was der Turnier-PC noch nicht bestätigt hat.
+    body = `<div class="empty-hint">wird zugewiesen …</div>
+            <div class="meta">Warte auf die Bestätigung vom Turnier-PC.</div>`;
+  } else if (c.match_id) {
+    const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
+    body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat)}</div>
+            <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
+    // Beschriftung nur noch, wenn sie etwas sagt, das man sonst nicht sieht.
+    // „auf dem Feld seit" und „im Spiel seit" stehen inzwischen als Farbe an
+    // der Kachel — das Wort wiederholte nur, was der Streifen schon zeigt,
+    // und kostete auf dem Tablet eine ganze Zeile je Feld. Ein fälliger
+    // Aufruf ist dagegen eine Aufforderung und bleibt ausgeschrieben.
+    const clockLabel =
+      stage >= 3 ? "Letzter Aufruf" :
+      stage >= 2 ? "2. Aufruf fällig" : "";
+    foot = `<span class="score num" title="Satzstand">${esc(sets)}</span>
+            <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
+                  title="${isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit"}">
+              ${UHR}<span class="zeit">${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}</span>
+              ${clockLabel ? `<small>${esc(clockLabel)}</small>` : ""}
+            </span>`;
+  } else if (c.clearing) {
+    body = `<div class="empty-hint">wird noch geräumt</div>
+            <div class="meta">Das Spiel ist beendet, BTP hat das Feld noch nicht freigegeben.</div>`;
+  } else {
+    body = `<div class="empty-hint">frei</div>`;
+  }
+
+  const bediener = c.scorekeeper && c.scorekeeper.length
+    ? `<div class="meta">Bedienung: ${esc(c.scorekeeper.join(" / "))}</div>` : "";
+
+  // Erneut aufrufen: nur bei einem Spiel, das noch nicht angefangen hat, und
+  // nur solange es etwas zu zählen gibt. Nach dem dritten Aufruf entscheidet
+  // die Turnierleitung, nicht noch ein Knopf.
+  // `call_stage` zählt die **gesprochenen** Aufrufe (0 = noch keiner). Auf
+  // dem Feld zu stehen gilt als erster Aufruf — deshalb hier die 1 als
+  // Untergrenze der Anzeige.
+  const gesprochen = c.call_stage || 0;
+  const erfolgt = Math.max(gesprochen, 1);
+  // Der Knopf bleibt nie hinter der Uhr zurück: Stünde daneben „Letzter
+  // Aufruf", während er den zweiten anbietet, widersprächen sich zwei
+  // Anzeigen auf demselben Bildschirm. Der Turnier-PC rechnet genauso.
+  const naechste = Math.min(Math.max(erfolgt + 1, stage), 3);
+  const nachruf = c.match_id && !isPlaying(c) && gesprochen < 3
+    ? `<button type="button" class="callbtn" data-call="${c.court_id}" data-match="${c.match_id}"
+               data-made="${gesprochen}"
+               title="Ansage in der Halle auslösen">${
+                 naechste >= 3 ? "Letzter Aufruf" : `${naechste}. Aufruf`}</button>`
+    : "";
+  // Was schon gerufen wurde, steht als Tatsache da — sonst tippen zwei
+  // Turnierleitungen nacheinander denselben Aufruf.
+  const gerufen = c.match_id && gesprochen > 1
+    ? `<span class="badge warn">${gesprochen}. Aufruf erfolgt</span>` : "";
+
+  return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
+                   ${picked ? 'role="button"' : ""}>
+    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}</div>
+    ${body}${bediener}
+    <div class="card-foot">${foot}${nachruf}</div>
+  </article>`;
+}
+
+/**
+ * Verdrahtet die Feld-Kacheln.
+ *
+ * Zwei Rollen, je nachdem, ob gerade ein Spiel gewählt ist: Ohne Auswahl ist
+ * ein belegtes Feld der **Griff** (antippen wählt das Spiel zum Umhängen,
+ * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
+ */
+function wireCourts(box) {
+  // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
+  // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
+  // Finger in den Umhäng-Zustand.
+  box.querySelectorAll("button[data-call]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.call);
+      const matchId = Number(btn.dataset.match);
+      btn.disabled = true;
+      // Die Vorgangskennung trägt den Stand, den diese Kachel kennt — kein
+      // Zeitfenster. Ein Doppeltipp vor dem nächsten Neuzeichnen ist damit
+      // dieselbe Kennung und wird als Wiederholung erkannt; ein bewusster
+      // zweiter Aufruf danach hat einen neuen Stand und geht durch. Ein
+      // Zeitfenster verschluckte den zweiten Aufruf — und ein Aufruf ist
+      // seinem Wesen nach wiederholbar.
+      send(
+        `call-${courtId}-${matchId}-${btn.dataset.made}`,
+        { action: "announce_court_call", courtId, matchId },
+        "Aufruf ausgelöst.",
+      );
+    });
+  });
+
+  box.querySelectorAll(".card[data-court]").forEach((el) => {
+    const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
+    if (!court) return;
+
+    if (picked) {
+      const go = () => { if (!suppressNextClick) assignTo(court); };
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
+      });
+      return;
+    }
+    // Ohne Auswahl: ein laufendes Spiel lässt sich von hier aufnehmen.
+    if (!court.match_id) return;
+    const asMatch = {
+      match_id: court.match_id,
+      team1: court.team1,
+      team2: court.team2,
+      draw_name: "",
+      round_name: court.round_name,
+      discipline: court.discipline,
+      class_label: court.class_label,
+      // Ein laufendes Spiel bleibt in seiner Halle — das Zielfeld wird
+      // danach beurteilt.
+      hall: court.location,
+    };
+    const go = () => { if (!suppressNextClick) pick(asMatch, court.court_id); };
+    el.addEventListener("click", go);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
+    });
+    enableDrag(el, asMatch, court.court_id);
+  });
+}
+
+function renderCourts() {
+  const box = $("courts");
+  if (!state) return;
+  const courts = state.courts.filter((c) => !hallFilter || c.location === hallFilter);
+  $("courts-count").textContent = `(${courts.length})`;
+  if (!courts.length) {
+    box.innerHTML = `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`;
+    return;
+  }
+  // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
+  // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
+  if (state.multi_hall && !hallFilter) {
+    const groups = new Map();
+    for (const c of courts) {
+      const key = c.location || "";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(c);
+    }
+    box.innerHTML = [...groups.entries()].map(([hall, list]) =>
+      `<div class="hall-group"><h3>${hall ? esc(hall) : "Ohne Halle"}</h3>
+       <div class="courts">${list.map(courtCard).join("")}</div></div>`).join("");
+  } else {
+    box.innerHTML = `<div class="courts">${courts.map(courtCard).join("")}</div>`;
+  }
+  wireCourts(box);
+}
+
+function queueRow(m) {
+  const parts = [];
+  if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
+  parts.push(
+    `<span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat)}</span>`,
+    `<span class="draw">${esc([klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
+  );
+  if (m.prep_call) {
+    parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
+      gerufen seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
+  }
+  if (m.blocked) {
+    const who = (m.blocked.players || []).join(" und ");
+    parts.push(`<span class="why">${m.blocked.reason === "playing"
+      ? `${esc(who)} spielt gerade`
+      : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
+  }
+  // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
+  // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
+  // frei ist. Deshalb ein eigener Knopf statt einer Geste.
+  //
+  // Als Sinnbild statt als Satz: In einer Liste mit 120 Zeilen frisst der
+  // ausgeschriebene Knopf die halbe Zeile. Ein Umschalter mit zwei Zuständen
+  // reicht — gedrückt heißt „ist gerufen". Beschriftung bleibt für
+  // Vorlesehilfen und als Tooltip erhalten, damit niemand raten muss.
+  const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
+  parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
+    aria-pressed="${m.prep_call ? "true" : "false"}"
+    title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
+
+  // Spielort setzen, ohne ein Feld zu belegen. BTP führt an angesetzten
+  // Spielen keinen Ort — ohne diesen Wähler bliebe ein Spiel ohne
+  // Disziplin-Regel bis zum Aufruf hallenlos, und der Hallenfilter zeigte es
+  // in keiner der beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange
+  // eine Regel es nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
+  if (state.multi_hall && m.hall_source !== "rule") {
+    // Kürzel statt voller Hallennamen: In einer Liste mit 120 Zeilen frisst
+    // „Luckenwalder" mehr Platz als die Paarung daneben. Der volle Name
+    // steht im Tooltip und in der aufgeklappten Liste.
+    const optionen = ['<option value="" title="kein fester Spielort">–</option>']
+      .concat(state.halls.map((h) =>
+        `<option value="${esc(h.name)}" title="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(hallenKuerzel(h.name))}</option>`));
+    const titel = m.hall ? `Spielort: ${m.hall}` : "Spielort ohne Feld festlegen";
+    parts.push(`<select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
+      data-hall-for="${m.match_id}" title="${esc(titel)}"
+      aria-label="Spielort">${optionen.join("")}</select>`);
+  }
+  // Nachruf, wenn jemand nicht erscheint. Getrennt nach Partei, weil in der
+  // Regel nur eine fehlt — und wer schon da ist, muss sich nicht noch einmal
+  // angesprochen fühlen.
+  if (m.prep_call) {
+    // `data-made` trägt den Stand in die Vorgangskennung: Ein Doppeltipp vor
+    // dem nächsten Neuzeichnen zählt als Wiederholung, ein bewusster zweiter
+    // Nachruf danach geht durch.
+    const stand = m.prep_call.recalls || 0;
+    parts.push(`<span class="recall">Nachruf:
+      <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide</button>
+      <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
+      <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
+    </span>`);
+  }
+  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
+  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
+  // Ablehnung.
+  const pickable = !m.blocked;
+  const selected = picked && picked.match.match_id === m.match_id;
+  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
+               data-match="${m.match_id}"
+               ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
+            ${parts.join("")}</div>`;
+}
+
+/** Verdrahtet die Zeilen der Warteliste. */
+function wireQueue(box) {
+  box.querySelectorAll("button[data-prep]").forEach((btn) => {
+    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
+    if (!match) return;
+    btn.addEventListener("click", (ev) => {
+      // Nicht bis zur Zeile durchreichen — sonst wählte der Klick zusätzlich
+      // das Spiel aus, und die Auswahl bliebe unbeabsichtigt stehen.
+      ev.stopPropagation();
+      togglePrepCall(match);
+    });
+    // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll("select[data-hall-for]").forEach((sel) => {
+    // Der Wähler darf weder das Spiel auswählen noch einen Zug starten.
+    sel.addEventListener("click", (ev) => ev.stopPropagation());
+    sel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    sel.addEventListener("change", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(sel.dataset.hallFor);
+      const hall = sel.value;
+      send(
+        `hall-${matchId}-${hall}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "set_hall", matchId, hall },
+        hall ? `Spielort: ${hall}.` : "Spielort zurückgenommen.",
+      );
+    });
+  });
+  box.querySelectorAll("button[data-recall]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.recall);
+      const side = btn.dataset.side;
+      send(
+        `recall-${matchId}-${side}-${btn.dataset.made}`,
+        { action: "announce_prep_call", matchId, side },
+        "Nachruf ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll(".row.pick[data-match]").forEach((el) => {
+    const match = state.queue.find((m) => String(m.match_id) === el.dataset.match);
+    if (!match) return;
+    const go = () => { if (!suppressNextClick) pick(match, null); };
+    el.addEventListener("click", go);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
+    });
+    enableDrag(el, match, null);
+  });
+}
+
+// ── Ziehen ────────────────────────────────────────────────────────────
+// Bewusst eine dünne Schicht ÜBER dem Antipp-Automaten, kein zweiter Weg:
+// Der Griff wählt das Spiel (wie ein Tipp), das Loslassen weist zu (wie der
+// zweite Tipp). Bricht der Zug ab — Finger rutscht, Browser-Eigenheit —,
+// bleibt das Spiel gewählt und lässt sich durch Antippen eines Felds
+// zuweisen. Der Rettungsanker greift damit von selbst, ohne dass jemand
+// merken muss, dass etwas schiefging.
+//
+// Selbst gebaut auf Zeigegesten statt mit einer Bibliothek: Der eingebaute
+// Ziehen-Mechanismus der Browser funktioniert auf Touch nicht, und die
+// Seite wird ohne Bau-Schritt ins Programm eingebettet.
+const DRAG_THRESHOLD_PX = 8;
+/** Nach einem Zug folgt ein Klick-Ereignis, das hier geschluckt wird. */
+let suppressNextClick = false;
+/** Läuft gerade ein Zug? Solange bleibt das Aktionsband aus (siehe dort). */
+let dragging = false;
+
+function enableDrag(el, match, fromCourtId) {
+  el.addEventListener("pointerdown", (down) => {
+    // Nur die primäre Taste/der erste Finger; Rechtsklick und Zweitfinger
+    // dürfen nichts auslösen.
+    if (down.button !== 0 && down.pointerType === "mouse") return;
+    let ghost = null;
+    let hovered = null;
+
+    const move = (ev) => {
+      const dx = ev.clientX - down.clientX;
+      const dy = ev.clientY - down.clientY;
+      if (!ghost) {
+        // Unter der Schwelle ist es ein Tipp, kein Zug — sonst löste jedes
+        // Wackeln beim Antippen einen Zug aus.
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        // Auswählen, OHNE die Liste neu zu zeichnen: Sonst verschwände die
+        // gegriffene Zeile mitten im Zug unter dem Finger. Nur die Felder
+        // müssen sich ändern (sie zeigen jetzt, wer das Spiel aufnehmen
+        // kann). Ein Zeigegesten-Fang ist nicht nötig — die Ereignisse
+        // hängen ohnehin am Fenster.
+        dragging = true;
+        // Während des Zugs nirgends Text markieren: Der Zeiger wandert über
+        // Überschriften und Namen, und der Browser markiert alles auf dem
+        // Weg — die halbe Seite steht dann blau hinterlegt da.
+        document.body.classList.add("dragging");
+        document.getSelection()?.removeAllRanges();
+        picked = { match, fromCourtId: fromCourtId ?? null };
+        renderActionBar();
+        renderCourts();
+        ghost = document.createElement("div");
+        ghost.className = "drag-ghost";
+        ghost.textContent =
+          `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = ev.clientX + 14 + "px";
+      ghost.style.top = ev.clientY - 14 + "px";
+      // Das Feld unter dem Finger hervorheben. `elementFromPoint` ignoriert
+      // den Klon, weil der keine Zeigeereignisse annimmt.
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const card = under && under.closest(".card[data-court]");
+      if (card !== hovered) {
+        hovered?.classList.remove("hover-target");
+        hovered = card;
+        if (hovered && !hovered.classList.contains("blocked-target")) {
+          hovered.classList.add("hover-target");
+        }
+      }
+    };
+
+    const finish = (ev, cancelled) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      document.body.classList.remove("dragging");
+      document.getSelection()?.removeAllRanges();
+      hovered?.classList.remove("hover-target");
+      ghost?.remove();
+      if (!ghost) { dragging = false; return; }  // war ein Tipp, der Klick greift
+      // Nach einem Zug folgt noch ein Klick-Ereignis. Ohne diese Sperre
+      // würde es die gerade getroffene Auswahl gleich wieder aufheben.
+      suppressNextClick = true;
+      setTimeout(() => { suppressNextClick = false; }, 0);
+      // Das Ziel bestimmen, SOLANGE das Layout noch unverschoben ist.
+      const card = cancelled
+        ? null
+        : document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".card[data-court]");
+      const court = card && state.courts.find((c) => String(c.court_id) === card.dataset.court);
+      dragging = false;
+      if (cancelled) {
+        // Abgebrochen: Die Auswahl bleibt stehen, und jetzt erscheint das
+        // Band — der Rettungsanker greift von selbst, ohne dass jemand
+        // merken muss, dass etwas schiefging.
+        renderActionBar();
+        renderQueue();
+        return;
+      }
+      if (court) {
+        assignTo(court);
+      } else {
+        // Neben ein Feld losgelassen: Auswahl behalten und das Band zeigen,
+        // statt die Aktion stillschweigend zu verwerfen.
+        renderActionBar();
+        renderQueue();
+      }
+    };
+    const up = (ev) => finish(ev, false);
+    const cancel = (ev) => finish(ev, true);
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  });
+}
+
+function renderQueue() {
+  const box = $("queue");
+  if (!state) return;
+  // Bei aktivem Hallenfilter bleiben Spiele ohne Hallenzuordnung sichtbar —
+  // ein weggefiltertes Spiel wird nicht vergeben und blockiert am Ende den
+  // Zeitplan.
+  const inHall = (m) => !hallFilter || m.hall === hallFilter;
+  const noHall = state.queue.filter((m) => hallFilter && !m.hall);
+  const mine = state.queue.filter(inHall);
+
+  const called = mine.filter((m) => m.prep_call);
+  const ready = mine.filter((m) => !m.prep_call && !m.blocked);
+  const waiting = mine.filter((m) => !m.prep_call && m.blocked);
+  $("queue-count").textContent = `(${mine.length + noHall.length})`;
+
+  const section = (title, list, open) =>
+    !list.length ? "" :
+    `<div class="section"><h2>${esc(title)} <span class="count">(${list.length})</span></h2>
+     <div class="queue">${list.map(queueRow).join("")}</div></div>`;
+
+  let html = section("In Vorbereitung gerufen", called);
+  html += section("Spielbereit", ready);
+  if (waiting.length) {
+    html += `<div class="section"><details><summary>Noch nicht bereit (${waiting.length})</summary>
+      <div class="queue">${waiting.map(queueRow).join("")}</div></details></div>`;
+  }
+  if (noHall.length) {
+    html += `<div class="section"><details open><summary>Ohne Hallenzuordnung (${noHall.length})</summary>
+      <div class="queue">${noHall.map(queueRow).join("")}</div></details></div>`;
+  }
+  if (!mine.length && !noHall.length) {
+    html = `<p class="note">Kein Spiel wartet${hallFilter ? " in dieser Halle" : ""}.</p>`;
+  }
+  if (state.truncated_halls && state.truncated_halls.length) {
+    const names = state.truncated_halls.map((h) => h || "ohne Hallenzuordnung").join(", ");
+    html += `<p class="note warn">Die Liste ist gekürzt (${esc(names)}) — weitere Spiele stehen weiter hinten an.</p>`;
+  }
+  box.innerHTML = html;
+  wireQueue(box);
+}
+
+/**
+ * Walkover-Vorschläge.
+ *
+ * Nach einer Aufgabe schlägt der Turnier-PC vor, die Folgespiele derselben
+ * Mannschaft kampflos zu werten. Welche das sein sollen, entscheidet die
+ * Turnierleitung — deshalb Kästchen zum Ankreuzen und keine Sammelaktion.
+ */
+// Bewusst abgewählte Kandidaten, als "vorschlagId:matchId". Der Zustand lebt
+// hier und nicht im DOM, weil der Abschnitt neu gebaut wird, sobald sich die
+// Kandidatenliste ändert — die Entscheidung der Turnierleitung darf das nicht
+// mitreißen.
+const woUnticked = new Set();
+
+function renderWalkovers() {
+  const box = $("walkovers");
+  const list = (state.walkovers || []);
+  if (!list.length) { box.innerHTML = ""; box.dataset.shape = ""; return; }
+  // Der Abschnitt wird nur neu gebaut, wenn er sich wirklich geändert hat.
+  // Sonst setzte jede Abfrage die Kästchen auf „angekreuzt" zurück — wer ein
+  // Spiel bewusst abwählt und zwei Sekunden zögert, wertete es kampflos,
+  // ohne es zu merken. Zurücknehmen geht nicht: Die Wertung steht in BTP.
+  const shape = list.map((w) => w.id + ":" + w.candidates.map((c) => c.match_id).join(",")).join("|");
+  if (box.dataset.shape === shape) return;
+  box.dataset.shape = shape;
+  box.innerHTML = `<h2>Aufgaben <span class="count">(${list.length})</span></h2>` +
+    list.map((w) => `
+      <div class="wo" data-wo="${esc(w.id)}">
+        <h4>${esc(w.retired_team)} hat aufgegeben <span class="meta">· ${esc(w.draw_name)}</span></h4>
+        <div class="meta">Welche Spiele sollen kampflos gewertet werden?</div>
+        ${w.candidates.map((c) => `
+          <label><input type="checkbox" value="${c.match_id}"
+                   ${woUnticked.has(w.id + ":" + c.match_id) ? "" : "checked"} />
+            ${esc(c.round_name)} — ${esc(c.opponent)} kommt weiter</label>`).join("")}
+        <div class="actions">
+          <button type="button" class="primary" data-confirm="${esc(w.id)}">Kampflos werten</button>
+          <button type="button" data-dismiss="${esc(w.id)}">Verwerfen</button>
+        </div>
+      </div>`).join("");
+
+  // Abgewählte Spiele merken, damit sie ein Neuaufbau nicht wieder ankreuzt.
+  box.querySelectorAll(".wo input[type=checkbox]").forEach((cb) => {
+    const key = cb.closest(".wo").dataset.wo + ":" + cb.value;
+    cb.addEventListener("change", () => {
+      if (cb.checked) woUnticked.delete(key); else woUnticked.add(key);
+    });
+  });
+
+  box.querySelectorAll("[data-confirm]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".wo");
+      const ids = [...card.querySelectorAll("input:checked")].map((i) => Number(i.value));
+      if (!ids.length) { toast("Kein Spiel angekreuzt.", true); return; }
+      await send(
+        `wo-${btn.dataset.confirm}-${ids.join("_")}`,
+        { action: "confirm_walkover", proposalId: btn.dataset.confirm, matchIds: ids },
+        `${ids.length} Spiel(e) kampflos gewertet.`,
+      );
+    });
+  });
+  box.querySelectorAll("[data-dismiss]").forEach((btn) => {
+    btn.addEventListener("click", () => send(
+      `wo-dismiss-${btn.dataset.dismiss}`,
+      { action: "dismiss_walkover", proposalId: btn.dataset.dismiss },
+      "Vorschlag verworfen.",
+    ));
+  });
+}
+
+function renderAutoToggle() {
+  const btn = $("auto-toggle");
+  const aa = state.auto_assign || {};
+  // Nur anbieten, wo er etwas bewirkt: Ist die automatische Vergabe in den
+  // Einstellungen gar nicht eingeschaltet, gäbe es hier nichts anzuhalten.
+  if (!aa.configured) { btn.hidden = true; return; }
+  btn.hidden = false;
+  btn.className = "auto " + (aa.enabled ? "on" : "off");
+  btn.textContent = aa.enabled ? "Automatik läuft" : "Automatik pausiert";
+  btn.setAttribute("aria-pressed", String(!!aa.enabled));
+  btn.title = aa.enabled
+    ? "Automatische Feldvergabe anhalten, solange von Hand umsortiert wird"
+    : "Automatische Feldvergabe wieder laufen lassen";
+}
+
+async function toggleAuto() {
+  const on = !(state.auto_assign && state.auto_assign.enabled);
+  await send(
+    `auto-${on}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "set_auto_assign", enabled: on },
+    on ? "Automatische Vergabe läuft wieder." : "Automatische Vergabe ist angehalten.",
+  );
+}
+
+function render() {
+  if (!state) return;
+  // Ein gewähltes Spiel, das es so nicht mehr gibt, verschwindet aus der
+  // Auswahl. Für die Warteliste heißt das „inzwischen vergeben", für ein
+  // Feld „steht dort nicht mehr" — und dieser zweite Fall ist der
+  // gefährliche: Ist auf dem Feld längst die nächste Begegnung, träfen
+  // „Ergebnis eintragen" und „Feld freigeben" das laufende Spiel.
+  if (picked && !pickIsStillValid()) picked = null;
+  $("tournament").textContent = state.tournament || "";
+  renderConnection();
+  renderHalls();
+  renderAutoToggle();
+  renderActionBar();
+  renderCourts();
+  renderWalkovers();
+  renderQueue();
+}
+
+/** Nur die Uhren neu setzen — nicht die ganze Seite, sonst flackert sie
+    jede Sekunde und man verliert die Scroll-Position. */
+function tickClocks() {
+  if (!state) return;
+  document.querySelectorAll(".clock[data-since]").forEach((el) => {
+    const since = Number(el.dataset.since);
+    if (!since) return;
+    const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
+    const stage = court ? callStage(court, state.call_timer) : 0;
+    // Gezielt in das Zeit-Feld schreiben, nicht in „das erste Kind": Seit
+    // das Uhr-Sinnbild davorsteht, war das erste Kind der Leerraum vor dem
+    // Symbol — die Kachel zeigte zwei Zeiten nebeneinander.
+    const zeit = el.querySelector(".zeit");
+    if (zeit) zeit.textContent = elapsed(since);
+    el.className = `clock num stage${stage}`;
+  });
+  document.querySelectorAll(".called[data-since]").forEach((el) => {
+    const since = Number(el.dataset.since);
+    if (since) el.textContent = "gerufen seit " + elapsed(since);
+  });
+  // Der Sprung von „gerufen" auf „überfällig" hängt allein an der Uhr — er
+  // käme sonst erst, wenn sich am Turnier sonst irgendetwas ändert. In einer
+  // ruhigen Phase wäre das ausgerechnet nie.
+  state.courts.forEach((c) => {
+    const el = document.querySelector(`.card[data-court="${c.court_id}"]`);
+    if (!el) return;
+    const soll = "zustand-" + courtState(c);
+    if (!el.classList.contains(soll)) {
+      el.classList.remove("zustand-frei", "zustand-gerufen", "zustand-ueberfaellig",
+        "zustand-laeuft", "zustand-beendet");
+      el.classList.add(soll);
+    }
+  });
+}
+
+function start() {
+  $("action-cancel").addEventListener("click", cancelPick);
+  // Beide Knöpfe arbeiten auf `pickedCourt()`: Steht das gewählte Spiel
+  // nicht mehr auf dem Feld, passiert nichts — statt das inzwischen dort
+  // laufende Spiel zu treffen.
+  $("action-free").addEventListener("click", () => {
+    const court = pickedCourt();
+    if (court) freeCourt(court);
+    else pickVanished();
+  });
+  $("action-result").addEventListener("click", () => {
+    const court = pickedCourt();
+    if (court) enterResult(court);
+    else pickVanished();
+  });
+  $("auto-toggle").addEventListener("click", toggleAuto);
+  $("toast-close").addEventListener("click", hideToast);
+  // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { cancelPick(); hideToast(); }
+  });
+  $("opt-nummern").checked = zeigeNummern;
+  $("opt-nationen").checked = zeigeNationen;
+  $("opt-nummern").addEventListener("change", (ev) =>
+    setzeVorliebe("nummern", ev.currentTarget.checked));
+  $("opt-nationen").addEventListener("change", (ev) =>
+    setzeVorliebe("nationen", ev.currentTarget.checked));
+
+  messeKopf();
+  // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
+  // auch die Höhe nicht mehr, an der die Felderspalte klebt.
+  window.addEventListener("resize", messeKopf);
+  poll();
+  setInterval(tickClocks, 1000);
+  // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den
+  // Turnier-PC nicht alle zwei Sekunden fragen.
+  let timer = setInterval(poll, 2000);
+  document.addEventListener("visibilitychange", () => {
+    clearInterval(timer);
+    timer = setInterval(poll, document.hidden ? 10000 : 2000);
+    // Beim Aufwecken sofort nachfragen, statt bis zum nächsten Takt einen
+    // veralteten Stand zu zeigen.
+    if (!document.hidden) poll();
+  });
+}
+
+// Erst hier loslegen — **nach** allen Deklarationen. Weiter oben griff der
+// erste Abruf auf noch nicht angelegte Variablen zu und starb; sichtbar
+// wurde nur eine Verzögerung, bis der Takt zwei Sekunden später nachlegte.
+if (!token) {
+  $("gate").hidden = false;
+} else {
+  $("app").hidden = false;
+  start();
+}
+</script>
+</body>
+</html>

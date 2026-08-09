@@ -169,10 +169,13 @@ export function MaintenancePage() {
         </h2>
         <p className="text-xs text-slate-500">
           Beim Wechsel auf einen neuen Turnier-PC die Identität mitnehmen — dann
-          bleiben alle gekoppelten Geräte (Tablets, Monitore, ferne Hallen) ohne
-          Neu-Koppeln verbunden. Am alten PC exportieren, am neuen importieren.
-          Die Datei enthält den Kopplungs-Token — wie ein Passwort behandeln,
-          und es darf immer nur <b>ein</b> Master gleichzeitig laufen.
+          bleiben Tablets, Monitore und ferne Hallen ohne Neu-Koppeln
+          verbunden. Am alten PC exportieren, am neuen importieren. Die Datei
+          enthält den Kopplungs-Token — wie ein Passwort behandeln, und es darf
+          immer nur <b>ein</b> Master gleichzeitig laufen.{" "}
+          <b>Ausnahme:</b> Geräte der Turnierleitungs-Oberfläche wandern
+          bewusst <i>nicht</i> mit (sonst bliebe der alte PC berechtigt) — sie
+          werden am neuen PC einmal neu gekoppelt.
         </p>
         <div className="flex flex-wrap gap-2.5">
           <ActionButton

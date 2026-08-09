@@ -16,6 +16,10 @@ on:
       - "relay-proto/**"
       - "src-tauri/assets/tablet.html"
       - "src-tauri/assets/monitor.html"
+      # Die Turnierleitungs-Seite ist im Relay-Binary eingebettet
+      # (include_str!). Ohne diesen Pfad bliebe eine Änderung an ihr im
+      # Cloud-Betrieb unsichtbar, während sie im LAN längst wirkt.
+      - "src-tauri/assets/tl.html"
       - ".github/workflows/relay-deploy.yml"
 
 jobs:

@@ -226,6 +226,9 @@ mod tests {
         t2: Vec<BtpPlayer>,
     ) -> BtpMatch {
         BtpMatch {
+            display_order: None,
+            from1: None,
+            from2: None,
             id: 0,
             draw_id,
             planning_id: 0,
@@ -241,6 +244,7 @@ mod tests {
             entry2_id: 0,
             court: None,
             court_id: None,
+            location_id: None,
             sets: vec![],
             winner,
             result: MatchResult::Normal,

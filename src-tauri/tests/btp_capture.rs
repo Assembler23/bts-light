@@ -264,3 +264,104 @@ fn real_capture_yields_the_roster_per_event() {
         "mind. ein Spieler sollte in beiden Klassen gemeldet sein"
     );
 }
+
+/// Die Baumkante: Ein KO-Spiel verweist über `From1`/`From2` auf die
+/// Planungspositionen, aus denen seine Teilnehmer kommen. Ohne sie lässt
+/// sich nicht beantworten, ob eine Ergebnis-Korrektur ein Folgespiel
+/// beträfe — und ohne diese Antwort darf die Turnierleitung nicht
+/// überschreiben (siehe docs/btp_protocol.md, „Was macht BTP beim
+/// Überschreiben einer Wertung?").
+#[test]
+fn real_capture_carries_the_bracket_edges() {
+    let nodes = proto::decode_response(TOURNAMENT).expect("dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+
+    // Mindestens ein Spiel im Mitschnitt hat einen Vorgänger — sonst wäre
+    // der Test wertlos.
+    let mit_kante = snapshot
+        .matches
+        .iter()
+        .filter(|m| m.from1.is_some() || m.from2.is_some())
+        .count();
+    assert!(mit_kante > 0, "kein einziges Spiel mit Baumkante");
+
+    // Die Kante zeigt auf eine **Planungsposition**, nicht zwingend auf ein
+    // Spiel: In der ersten Runde ist es ein Setzplatz, und Setzplätze
+    // verwirft der Parser (sie sind keine anzeigbaren Paarungen).
+    //
+    // **Was dieser Mitschnitt NICHT hergibt:** Er stammt aus einer reinen
+    // Round-Robin-Gruppe — alle Kanten zeigen auf Setzplätze (1000…5000),
+    // kein Spiel folgt auf ein anderes. Die Nachfolger-Suche der
+    // Ergebnis-Korrektur lässt sich damit **nicht** gegen echte Daten
+    // belegen. Ein Mitschnitt mit mehrstufigem KO-Draw fehlt und gehört zum
+    // BTP-Experiment (docs/btp_protocol.md). Bis dahin hält dieser Test den
+    // Ist-Zustand fest, statt eine Deckung vorzutäuschen.
+    let mit_nachfolger = snapshot
+        .matches
+        .iter()
+        .filter(|m| {
+            snapshot.matches.iter().any(|o| {
+                o.draw_id == m.draw_id
+                    && (o.from1 == Some(m.planning_id) || o.from2 == Some(m.planning_id))
+            })
+        })
+        .count();
+    assert_eq!(
+        mit_nachfolger, 0,
+        "Der Mitschnitt hat jetzt einen KO-Baum — dann gehört die \
+         Nachfolger-Suche hier gegen echte Daten geprüft."
+    );
+}
+
+/// **Ein Turnier muss den Spielort nicht pflegen — dann kommt keiner an.**
+///
+/// Diese beiden Mitschnitte sind genau solche Turniere: kein einziges Match
+/// trägt eine `LocationID`, die Halle hängt allein am Feld. Deshalb war hier
+/// zunächst notiert, es *gebe* keinen Spielort an der Ansetzung.
+///
+/// **Das war zu weit geschlossen.** Am 09.08.2026 an einem Turnier gemessen,
+/// das die Spalte pflegt: 48 Matches mit `Match.LocationID`, die meisten
+/// ohne jede Feldzuweisung. bts-light liest das Feld seither
+/// (`assign::hall_for_match`, Quelle `HallSource::Btp`).
+///
+/// Der Test hält deshalb nur noch fest, was diese Fixtures zeigen: Es gibt
+/// Turniere ohne gepflegten Spielort, und für die muss die abgeleitete
+/// Kaskade (Regel → Hand → Aufruf) bestehen bleiben.
+#[test]
+fn a_tournament_may_carry_no_planned_venue_at_all() {
+    for (name, raw) in [
+        ("Ein-Hallen-Mitschnitt", TOURNAMENT),
+        ("Zwei-Hallen-Mitschnitt", TOURNAMENT_2HALLS),
+    ] {
+        let nodes = proto::decode_response(raw).expect("dekodierbar");
+        let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+        // Ein Spiel ohne Feld hat auch keine Halle — es gibt schlicht kein
+        // Feld, über das sie sich ableiten ließe.
+        let ohne_feld = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.court_id.is_none())
+            .count();
+        assert!(
+            ohne_feld > 0,
+            "{name}: kein einziges Spiel ohne Feld — Fixture prüfen"
+        );
+        // In genau diesen Turnieren ist die Spalte ungepflegt.
+        assert_eq!(
+            snapshot
+                .matches
+                .iter()
+                .filter(|m| m.location_id.is_some())
+                .count(),
+            0,
+            "{name}: dieses Fixture soll ein Turnier OHNE gepflegten Spielort zeigen"
+        );
+        // Und die Felder tragen ihre Halle, nicht die Spiele.
+        if !snapshot.locations.is_empty() {
+            assert!(
+                snapshot.court_infos.iter().any(|c| c.location_id.is_some()),
+                "{name}: Hallen vorhanden, aber kein Feld hat eine"
+            );
+        }
+    }
+}

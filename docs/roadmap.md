@@ -57,14 +57,29 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   (Ansage z. B. „Zweiter Aufruf für …"). Gewünscht auf dem **Master und
   vom Slave aus** — hängt am selben Relay-Rückkanal wie der
   Vorbereitungs-Aufruf vom Slave (siehe oben, R4/R5 beachten).
-- **„Nächste Spiele pro Halle"** (Idee von Nik, Turnierleitung): BTP führt
-  den **Spielort bereits an der Ansetzung** (Spalte „Spielort"/Feld, z. B.
-  `WR-6`, `HM-05`) — diese Info kommt schon per `SENDTOURNAMENTINFO`.
-  Daraus eine Aufruf-/Nächste-Spiele-Liste **je Halle** bauen.
-  *Recherche 19.07.:* Der Hallen-Filter `&halle=…` existiert auf
-  `badhub.de/live?display=next` **bereits** — es fehlt nur die
-  senderseitige Hallen-Info an den angesetzten Spielen (bts-light,
-  `planned_court_id` parsen). Details: [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **„Nächste Spiele pro Halle"** (Idee von Nik, Turnierleitung): Eine
+  Aufruf-/Nächste-Spiele-Liste **je Halle**. Der Hallen-Filter `&halle=…`
+  existiert auf `badhub.de/live?display=next` bereits — es fehlt die
+  senderseitige Hallen-Info an den **angesetzten** Spielen.
+  ⚠️ *Nachgemessen 08.08.:* Die ursprüngliche Annahme („BTP führt den
+  Spielort bereits an der Ansetzung, das kommt per `SENDTOURNAMENTINFO`")
+  **trägt nicht**. In zwei echten Mitschnitten (914 Paarungen) hat ein noch
+  nicht aufgerufenes `Match` **keine** `LocationID`; `CourtID` erscheint
+  erst beim Aufruf, und `Draw`/`Event`/`Stage` tragen gar keinen Ortsbezug.
+  Die Spalten „Feld"/„Spielort" **gibt es** im BTP-Spielplan-Export, im
+  geprüften Turnier sind sie aber in allen 540 Zeilen leer. **Offen bleibt
+  daher nur:** ob ein Turnier, das diese Spalten *pflegt*, sie auch über
+  die Schnittstelle liefert — das lässt sich erst mit einem Mitschnitt
+  eines solchen Turniers beantworten. Befund:
+  [btp_protocol.md](btp_protocol.md), Regressionstest in `btp_capture.rs`.
+  **✅ Auf anderem Weg gelöst (09.08.):** Die Turnierleitungs-Seite gibt
+  einem wartenden Spiel den Spielort **von Hand** (Hallen-Wähler an der
+  Zeile, `TlAction::SetHall`). Er wirkt auf Hallenfilter, Vergabe **und**
+  `upcoming_matches[].hall` — damit greift `display=next&halle=…` auch in
+  Turnieren, die ihre Aufrufe über BTP machen. Die Kaskade lautet jetzt
+  Disziplin-Regel → Hand → Vorbereitungs-Aufruf (`assign::hall_for_match`).
+  Siehe [turnierleitung-web.md](turnierleitung-web.md). Details:
+  [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 - **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
   schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei
@@ -79,8 +94,10 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   live weiterzählen, wenn ein Zähler verspätet einsteigt (nur Aufschläger,
   im Doppel Rückschläger, plus Satz nötig — Positionen folgen der
   BWF-Paritätsregel). Button offen sichtbar.
-- **Klick-Delay am Tablet verkürzen.** Punkt soll bei Berührung zählen
-  (`pointerdown` statt `click`), Persist/Sync raus aus dem Tap-Pfad.
+- ~~**Klick-Delay am Tablet verkürzen.**~~ **Erledigt.** `pointerdown` und
+  der verschobene Persist/Sync kamen mit Plan 13; die eigentliche Bremse war
+  die 3-Sekunden-Sperre nach jedem Punkt (Schutz gegen Doppel-Taps) — seit
+  09.08.2026 sind es 0,7 s.
 - **Zähltafelbediener-Verwaltung** (wie Tilos BTS): Verlierer-Warteschlange,
   Zuweisung beim Feld-Aufruf, Mit-Ansage „Tabletbedienung: …",
   BTP-Auscheck, Mindestpause.
@@ -92,8 +109,10 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   beim Turnier liefen die Aufrufe aber über BTP/mündlich → Hallen-Feld
   überall leer → der (funktionierende) badhub-Filter fand nichts, und
   die leere Liste ohne Fallback ist dort gewollt. **Dreiteiliger Fix:**
-  (a) Plan 2 — `planned_court_id` aus BTP parsen → Halle für ALLE
-  angesetzten Spiele; (b) P1 erweitern — BTP-`Highlight` nicht nur
+  (a) ~~Plan 2 — `planned_court_id` aus BTP parsen~~ → **nicht möglich**,
+  BTP liefert an ungespielten Matches keinen Ort; **stattdessen erledigt**
+  über den Hallen-Wähler der Turnierleitungs-Seite (siehe Punkt „Nächste
+  Spiele pro Halle" oben); (b) P1 erweitern — BTP-`Highlight` nicht nur
   schreiben, sondern auch **lesen**, damit in BTP gemachte Aufrufe bei
   uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
   Original-BTS seine „upcoming"-Ticker-Anzeige speist
@@ -248,6 +267,32 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   brechen bestehende Installationen beim Auto-Update. Der angezeigte
   `productName` kann separat und mit Bedacht wechseln.
 
+## Umgesetzt, aber noch nicht abgenommen
+
+- **Turnierleitungs-Weboberfläche („TL-Web")** — ausgeliefert mit
+  **v0.9.176** (Schritte 1–13 der Spec). Bedienung und Grenzen:
+  [turnierleitung-web.md](turnierleitung-web.md) · Spec mit ehrlicher Bilanz
+  aller 49 Akzeptanzkriterien:
+  [features/turnierleitung-web.md](features/turnierleitung-web.md) · ADR
+  [0010](adr/0011-tl-web-schreibender-cloud-pfad.md),
+  [0011](adr/0012-tl-web-geraete-identitaet.md),
+  [0012](adr/0013-ergebniskorrektur-nur-ohne-folgespiel.md).
+
+  **Was noch aussteht**, in der Reihenfolge, in der es im Betrieb auffällt:
+
+  1. **Die manuelle Abnahme auf echten Geräten.** 25 der 49 Kriterien sind
+     umgesetzt und im Code nachvollziehbar, aber nicht am Gerät
+     nachgewiesen: iPad Safari und Android Chrome mit echten Fingern, zwei
+     Geräte gleichzeitig am selben Feld, Relay-Neustart mitten im Betrieb,
+     zehn Minuten Standby. Die Checkliste steht in der Spec.
+  2. **Zähltafelbediener-Warteschlange** lässt sich aus der Seite nur
+     ansehen, nicht umsortieren — der Host kann es, die Bedienung fehlt.
+  3. **Beendete Spiele** fehlen in der Ansicht.
+  4. **Der abschließende BTP-Versuch zur Ergebniskorrektur**
+     ([btp_protocol.md](btp_protocol.md)) — er braucht ein Turnier, in dem
+     BTP die nächste Runde nachweislich füllt.
+  5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
+
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
 - **Hallen-Check-In** — Spieler bestätigen vor Beginn ihrer Spielklasse über
@@ -283,6 +328,36 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+
+## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
+
+Zwei **bestehende** Fehler, aufgefallen beim Review der TL-Web-Umsetzung.
+Beide betreffen den erprobten Stand und sind bewusst **nicht** nebenbei
+mitgeändert worden:
+
+- **Beschädigte `config.json` → Assistent überschreibt sie.** `load_config`
+  liefert bei jedem Parse-Fehler ein `Err`; das Frontend fängt das ab und
+  zeigt den Einrichtungs-Assistenten mit der **Default**-Konfiguration
+  (`App.tsx`, `defaultConfig()`). Der erste „Speichern & Starten"-Klick
+  schreibt diese Defaults über die noch vorhandene, nur unlesbare Datei —
+  inklusive **leerer `install_id`**, womit alle gekoppelten Geräte
+  wegfallen (genau das Chaos aus dem Turniertag-Bericht). Begünstigt wird
+  das durch `save_to`, das die Datei **nicht atomar** schreibt: ein Absturz
+  oder Stromausfall mitten im Speichern hinterlässt eine abgeschnittene
+  Datei. **Vorschlag:** atomar schreiben (temporäre Datei + `rename`),
+  beschädigte Datei beiseitelegen statt überschreiben, und dem Nutzer
+  ehrlich sagen, dass die alte Konfiguration nicht gelesen werden konnte —
+  statt ihm einen harmlos aussehenden Ersteinrichtungs-Assistenten zu
+  zeigen.
+- **`locked_courts` geht beim Speichern von Einstellungen verloren.**
+  `set_court_locked` schreibt die Sperrliste host-seitig in die
+  `config.json`; der Einrichtungs-Assistent schickt beim nächsten Speichern
+  seinen beim Öffnen aufgenommenen Stand zurück (`buildConfig`:
+  `locked_courts: initialConfig.locked_courts ?? []`) und setzt sie damit
+  zurück. Ablauf: Feld in der Übersicht sperren → in den Einstellungen
+  irgendetwas speichern → Sperre weg. Für die TL-Geräteliste ist dieser
+  Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
+  `locked_courts` gehört auf demselben Weg dazu.
 
 ## Feature-Wünsche
 

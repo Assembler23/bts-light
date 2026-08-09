@@ -55,6 +55,26 @@ den Relay statt direkt.
 | `GET /ws` | WebSocket (Match-Zuweisung, Live-Score) |
 | `POST /result` | Endergebnis vom Tablet → `SENDUPDATE` nach BTP |
 | `GET /health` | Status-Schnappschuss |
+| `GET /tl` | Turnierleitungs-Oberfläche (Seite) |
+| `GET /tl/api/state` | Anzeige-Zustand der Turnierleitungs-Oberfläche |
+| `POST /tl/api/command` | Aktion eines Turnierleitungs-Geräts |
+
+Die `/tl/`-Routen gehören zur [Turnierleitungs-Oberfläche](features/turnierleitung-web.md).
+Die **Schnittstellen-Routen** verlangen einen Zugang im `Authorization`-Kopf
+(`Bearer …`) — bewusst im Kopf und nicht im Pfad, weil Pfade in
+Zugriffsprotokollen landen. Ohne freigeschaltetes Feature
+(`tl_web.enabled`, Default aus) und ohne bekanntes Gerät antworten sie mit
+`401`; die Prüfung liest die Konfiguration frisch von der Platte, damit ein
+Widerruf ohne Neustart greift. Der Kern (`tablet/tl.rs`) ist derselbe, den
+später auch der Cloud-Weg benutzt — jede Mutation wird genau einmal geprüft,
+wie schon bei den Ergebnissen (R5).
+
+Die **Seite selbst** (`GET /tl`) ist bewusst frei zugänglich: Sie enthält
+keine Turnierdaten, sondern holt sie erst über die geprüfte Schnittstelle.
+Wer sie ohne Zugang öffnet, sieht nur den Hinweis, wie er einen bekommt.
+Der Zugang steht beim Koppeln im **Fragment** der Adresse (`…/tl#t=…`) —
+ein Fragment wird nie an einen Server gesendet und landet daher in keinem
+Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
 
 ## Datenfluss
 
@@ -181,12 +201,22 @@ Ergebnis soll trotzdem übermittelt werden.
   wurde.
 - **Plausibilität clientseitig:** Jeder Satz muss regulär zu Ende gespielt
   sein (`setWinnerSide` gegen Ziel/Cap der BTP-Zählweise; im **Zeitformat**
-  `target ≥ 99` genügt ein Satz, sobald er **nicht unentschieden** ist), es
-  muss ein **eindeutiger Match-Sieger** herauskommen und es dürfen **keine
-  überzähligen Sätze** dabei sein (der Sieg muss erst mit dem letzten Satz
-  feststehen) — sonst erscheint eine Meldung im Dialog. Die Satzregel ist
-  dieselbe wie serverseitig (`server::set_is_complete`, siehe
-  [walkover.md](walkover.md)).
+  `target ≥ 99` genügt ein Satz, sobald er **nicht unentschieden** ist),
+  kein Satz darf **über dem Deckel** enden, es muss ein **eindeutiger
+  Match-Sieger** herauskommen und es dürfen **keine überzähligen Sätze**
+  dabei sein (der Sieg muss erst mit dem letzten Satz feststehen) — sonst
+  erscheint eine Meldung im Dialog. Die Satzregel ist dieselbe wie
+  serverseitig (`server::sets_fit_format`, siehe [walkover.md](walkover.md)).
+- **Und serverseitig noch einmal** (R5): `process_result` prüft getippte
+  Endstände seit 09.08.2026 gegen dieselbe Zählweise. Vorher hing die
+  Prüfung nur am Weg der Turnierleitung — der Tablet-Weg verließ sich
+  darauf, dass die Seite nichts Ungültiges zählen lässt. Für *getippte*
+  Ergebnisse gilt das nicht: In einem Turnier bis 15 mit Deckel 21 ging ein
+  **27:25** durch, direkt nach BTP und in den Liveticker. `setWinnerSide`
+  fragt nämlich nur, ob jemand den Deckel *erreicht* hat — beim Live-Zählen
+  genügt das, weil dort beim Deckel Schluss ist. Bei **Aufgabe, Kampflos
+  und Disqualifikation** entfällt die Prüfung: Dort bricht das Spiel mitten
+  im Satz ab, und genau dieser Stand gehört nach BTP.
 - „Übernehmen" füllt die Sätze, markiert das Match als beendet und öffnet
   das **normale Match-Ende-Overlay** (Sieger + „Ergebnis übermitteln") —
   ab da läuft alles über den bewährten, gegen Netzausfälle abgesicherten

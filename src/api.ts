@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnnounceJob,
   AppConfig,
   CloudAnnounce,
   CourtAd,
@@ -19,6 +20,8 @@ import type {
   SlaveDeviceInfo,
   SyncStatus,
   TabletInfo,
+  TlPairing,
+  TlWebInfo,
   TournamentStats,
   WalkoverProposal,
   WalkoverResult,
@@ -186,6 +189,51 @@ export const publishFreetext = (hall: string, text: string): Promise<number> =>
  *  Slave: vom Master geholt). */
 export const pendingFreetext = (since: number): Promise<FreetextItem[]> =>
   invoke("pending_freetext", { since });
+
+/** Neue Ansage-Aufträge der Turnierleitung (id > since) für die eigene Halle.
+ *  Die Seite selbst spricht nie — sie beauftragt, gesprochen wird hier. */
+export const pendingAnnounceJobs = (since: number): Promise<AnnounceJob[]> =>
+  invoke("pending_announce_jobs", { since });
+
+/** Meldet dem Turnier-PC, welche Aufruf-Stufe gerade angesagt wurde — damit
+ *  Desktop und Turnierleitungs-Seite dieselbe Zahl führen. Gemeldet wird die
+ *  **gesprochene** Stufe, nicht „noch einmal": Die Oberfläche weiß genau, was
+ *  sie gesagt hat. */
+export const noteCourtCall = (
+  courtId: number,
+  matchId: number,
+  stage: number,
+): Promise<number> => invoke("note_court_call", { courtId, matchId, stage });
+
+/** Zustand der Turnierleitungs-Oberfläche samt gekoppelter Geräte. */
+export const tlWebInfo = (): Promise<TlWebInfo> => invoke("tl_web_info");
+
+/** Koppelt ein Gerät und liefert die Zugänge **plus die neue
+ *  Konfiguration**. Letztere muss die App übernehmen: Bliebe ihre Kopie
+ *  veraltet, schickte der nächste Speichervorgang aus den Einstellungen den
+ *  alten `tl_web`-Stand zurück — und löschte alle Kopplungen.
+ *
+ *  Kennung und Zugang erzeugt die Oberfläche selbst — derselbe Weg wie bei
+ *  der `install_id`. */
+export const tlDeviceAdd = (
+  label: string,
+  hall: string,
+): Promise<[TlPairing, AppConfig]> =>
+  invoke("tl_device_add", {
+    id: `tl-${crypto.randomUUID().slice(0, 8)}`,
+    token: crypto.randomUUID(),
+    label,
+    hall,
+  });
+
+/** Entzieht einem Gerät den Zugang; liefert die neue Konfiguration. */
+export const tlDeviceRemove = (id: string): Promise<AppConfig> =>
+  invoke("tl_device_remove", { id });
+
+/** Schaltet die Oberfläche an oder ab (Geräte bleiben); liefert die neue
+ *  Konfiguration. */
+export const tlWebSetEnabled = (enabled: boolean): Promise<AppConfig> =>
+  invoke("tl_web_set_enabled", { enabled });
 
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (
