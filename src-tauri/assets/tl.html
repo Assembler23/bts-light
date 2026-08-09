@@ -206,9 +206,19 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    die Namen an der Mittelachse anliegen. */
 .paar .spieler {
   display: flex; align-items: baseline; gap: 5px; min-width: 0;
-  overflow-wrap: anywhere; hyphens: auto;
+  overflow-wrap: break-word; hyphens: auto;
 }
 .paar .seite:last-child .spieler { flex-direction: row-reverse; }
+
+/* Auf der Feldkachel **untereinander**. Eine Kachel ist rund 230 px breit;
+   dreispaltig blieben je Partei keine 90 px, und Namen wie „Kushal Renuka
+   Prashanth" zerbrachen mitten im Wort. Untereinander steht jeder Name in
+   voller Kachelbreite — und die Kachel ist ohnehin die Ansicht, in der man
+   *ein* Spiel liest, nicht eine Liste überfliegt. */
+.card .paar { grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.card .paar .seite:last-child { text-align: left; align-items: flex-start; }
+.card .paar .seite:last-child .spieler { flex-direction: row; }
+.card .paar .vs { justify-self: start; }
 .vs {
   color: var(--ink-faint); font-weight: 500; font-size: .85em;
   justify-self: center;
@@ -364,10 +374,15 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
    Scrollen — sonst weiß man auf einem Tablet nach zwei Wischern nicht mehr,
    was gewählt ist. */
 .action-bar {
-  /* Unter der Kopfzeile, nicht dahinter: Beide auf `top: 0` hieße, dass das
-     Band beim ersten Scrollen hinter dem Kopf verschwindet — ausgerechnet
-     das Band, das sagt, welches Spiel man gerade in der Hand hat. */
-  position: sticky; top: var(--kopf, 62px); z-index: 15;
+  /* **Über** der Kopfzeile, nicht darunter und nicht im Fluss. Als Element
+     im Fluss schob es beim Erscheinen die ganze Seite nach unten — man
+     tippt ein Spiel an, zielt auf ein Feld, und unter dem Finger ist
+     plötzlich ein anderes. Es legt sich deshalb über die Kopfzeile: Deren
+     Inhalt (Turniername, Hallenfilter, Anzeige-Menü) braucht man während
+     einer laufenden Auswahl ohnehin nicht, und so verschiebt sich nichts.
+     `min-height` hält es genau so hoch wie den Kopf, den es verdeckt. */
+  position: fixed; top: 0; left: 0; right: 0; z-index: 25;
+  min-height: var(--kopf, 62px);
   display: none; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--ink); color: #fff;
 }
@@ -692,7 +707,13 @@ function messeKopf() {
   const band = $("action-bar");
   const s = document.documentElement.style;
   s.setProperty("--kopf", (kopf?.offsetHeight || 62) + "px");
-  s.setProperty("--band", (band?.classList.contains("show") ? band.offsetHeight : 0) + "px");
+  // Wie weit das Band über die Kopfzeile hinausragt — meist gar nicht. Nur
+  // wenn es auf schmalen Geräten umbricht, rückt die Felderspalte nach, statt
+  // dass ihre oberste Reihe unter dem Band verschwindet.
+  const ueberstand = band?.classList.contains("show")
+    ? Math.max(0, band.offsetHeight - (kopf?.offsetHeight || 62))
+    : 0;
+  s.setProperty("--band", ueberstand + "px");
 }
 
 function renderActionBar() {
