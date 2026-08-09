@@ -1838,9 +1838,25 @@ function renderWalkovers() {
  *
  * Sichtbar nur, wenn dieser Turnier-PC Zähltafelbediener verwaltet
  * (`scorekeeper_managed`) — sonst gäbe es hier nichts zu bedienen. Die
- * Aktionen laufen über dieselben Vorgangskennungen wie am Turnier-PC:
- * `key` ist stabil je Eintrag — ein Doppeltipp ist damit dieselbe Kennung
- * und wird als Wiederholung erkannt (kein doppeltes Vorziehen).
+ * Aktionen laufen über dieselben Vorgangskennungen wie am Turnier-PC.
+ *
+ * **Entfernen** braucht kein Zeitfenster: `key` existiert nur, solange der
+ * Eintrag in der Schlange steht, ein entfernter Schlüssel taucht nie wieder
+ * auf — ein Doppeltipp trifft also immer dieselbe, längst erledigte
+ * Absicht.
+ *
+ * **Vorziehen** dagegen braucht eines, obwohl `key` genauso stabil ist: Der
+ * Host merkt sich das Ergebnis eines Vorgangs 60 Sekunden lang
+ * (`OP_MEMORY_MS`). Ohne Zeitfenster träfe ein zweites, **bewusst neues**
+ * Vorziehen desselben Wartenden — er ist inzwischen wieder zurückgerutscht,
+ * weil ein anderes Gerät jemand anderen vorgezogen hat — innerhalb dieser
+ * Minute dieselbe Kennung wie das erste: Der Host antwortet aus dem
+ * Zwischenspeicher mit „erledigt", ohne den Wartenden wirklich zu bewegen,
+ * und die Seite zeigt trotzdem eine Erfolgsmeldung. Das Zeitfenster
+ * (`OP_WINDOW_MS`, dasselbe Muster wie bei Aufruf/Freigeben) lässt einen
+ * Doppeltipp **innerhalb** des Fensters weiter als Wiederholung durchgehen,
+ * öffnet aber nach zwanzig Sekunden wieder für eine neue, ernst gemeinte
+ * Absicht.
  *
  * Nur `#sk-list` wird neu gezeichnet, nicht das umgebende `<details>` samt
  * Formular — sonst würde ein Name, an dem gerade getippt wird, beim
@@ -1855,12 +1871,18 @@ function renderScorekeepers() {
   $("sk-list").innerHTML = list.map((e, i) => `<li>
       <span class="sk-names">${esc(e.names.join(" / "))}</span>
       <span class="sk-wait num" data-since="${e.enqueued_ms}" title="wartet seit">${e.enqueued_ms ? elapsed(e.enqueued_ms) : ""}</span>
-      ${i > 0 ? `<button type="button" data-sk-adv="${esc(e.key)}" title="an den Anfang der Warteschlange">▲</button>` : ""}
-      <button type="button" data-sk-del="${esc(e.key)}" title="aus der Warteschlange nehmen">×</button>
+      ${i > 0 ? `<button type="button" data-sk-adv="${esc(e.key)}"
+          title="an den Anfang der Warteschlange" aria-label="vorziehen">▲</button>` : ""}
+      <button type="button" data-sk-del="${esc(e.key)}"
+        title="aus der Warteschlange nehmen" aria-label="aus der Warteschlange nehmen">×</button>
     </li>`).join("");
   $("sk-list").querySelectorAll("[data-sk-adv]").forEach((b) =>
     b.addEventListener("click", () =>
-      send(`sk-adv-${b.dataset.skAdv}`, { action: "scorekeeper_advance", key: b.dataset.skAdv }, "Vorgezogen.")));
+      send(
+        `sk-adv-${b.dataset.skAdv}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "scorekeeper_advance", key: b.dataset.skAdv },
+        "Vorgezogen.",
+      )));
   $("sk-list").querySelectorAll("[data-sk-del]").forEach((b) =>
     b.addEventListener("click", () =>
       send(`sk-del-${b.dataset.skDel}`, { action: "scorekeeper_remove", key: b.dataset.skDel }, "Aus der Warteschlange entfernt.")));
