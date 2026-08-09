@@ -410,7 +410,7 @@ wehtun:
 4. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
    nicht; geschützt sind die Daten-Routen, nicht die leere Hülle.
 
-**Die 25 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
+**Die 26 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
 und größtenteils durch Unit-Tests gestützt, aber der Nachweis, auf den es
 ankommt, fehlt: iPad Safari und Android Chrome mit echten Fingern, zwei
 Geräte gleichzeitig am selben Feld, ein Relay-Neustart mitten im Betrieb,

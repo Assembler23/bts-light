@@ -1867,7 +1867,7 @@ function renderScorekeepers() {
 }
 
 /** Manuell einen Zähltafelbediener in die Warteschlange eintragen. */
-function addScorekeeper(ev) {
+async function addScorekeeper(ev) {
   ev.preventDefault();
   const roh = $("sk-name").value.trim();
   if (!roh) return;
@@ -1879,12 +1879,16 @@ function addScorekeeper(ev) {
   // gibt es hier keinen `key` — derselbe Name könnte auch bewusst zweimal
   // eingetragen werden (zwei Personen mit gleichem Namen). Ein Doppeltipp
   // innerhalb des Fensters gilt als Wiederholung, danach als neue Absicht.
-  send(
+  const ok = await send(
     `sk-add-${roh}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
     { action: "scorekeeper_add", names },
     "Eingetragen.",
   );
-  $("sk-name").value = "";
+  // Nur bei Erfolg leeren: Schlägt das Eintragen fehl (offline, abgelehnt),
+  // bleibt der getippte Name stehen — sonst wäre er nach einem Fehlversuch
+  // ohne weiteres Zutun verloren, und die Meldung allein reicht als Hinweis
+  // nicht.
+  if (ok) $("sk-name").value = "";
 }
 
 function renderAutoToggle() {
