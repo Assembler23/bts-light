@@ -129,9 +129,7 @@ async fn what_would_the_checkin_receive() {
     println!("\n=== Meldeliste für den Hallen-Check-In ===");
     println!("Turnier:        {}", roster.tournament_name);
     println!("Turnier-GUID:   {}", roster.tournament_uuid);
-    println!(
-        "BTP liefert:    {roh_events} Klassen, {roh_entries} Meldungen (roh)"
-    );
+    println!("BTP liefert:    {roh_events} Klassen, {roh_entries} Meldungen (roh)");
     println!(
         "aufgelöst:      {} Klassen, {} Meldungen",
         snapshot.events.len(),
@@ -259,7 +257,12 @@ async fn what_would_the_checkin_receive() {
                     )
                 })
                 .collect();
-            println!("  Entry {} (Event {}): {}", e.entry_id, e.event_id, namen.join(" / "));
+            println!(
+                "  Entry {} (Event {}): {}",
+                e.entry_id,
+                e.event_id,
+                namen.join(" / ")
+            );
         }
     } else {
         println!("(Namen ausgeblendet — mit SHOW_NAMES=1 mit ausgeben)");
