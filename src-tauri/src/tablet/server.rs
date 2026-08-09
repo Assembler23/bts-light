@@ -1110,6 +1110,32 @@ pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
     hi >= cap || hi - lo >= 2 // am Deckel reicht 1 Punkt, sonst 2 Vorsprung
 }
 
+/// Prüft eine ganze Satzliste gegen die Zählweise des Matches.
+///
+/// **Eine** Quelle für beide Wege, auf denen ein Ergebnis hereinkommt: das
+/// Zähltablett (`process_result`) und die Turnierleitung
+/// (`build_manual_result_update`). Vorher hing sie nur am zweiten, weil der
+/// Tablet-Weg „ohnehin clientseitig zählt" — für ein von Hand **getipptes**
+/// Ergebnis gilt das aber nicht, und aus dem Betrieb kam ein 27:25 in einem
+/// Turnier, das bis 15 mit Deckel 21 spielt (R5: geprüft wird am Host).
+///
+/// Nur für **regulär ausgespielte** Ergebnisse. Bei Aufgabe, Kampflos oder
+/// Disqualifikation bricht das Spiel mitten im Satz ab; dann ist genau der
+/// unfertige Stand das, was nach BTP gehört.
+pub(crate) fn sets_fit_format(sets: &[(i64, i64)], target: i64, cap: i64) -> Result<(), String> {
+    if let Some(&(a, b)) = sets
+        .iter()
+        .find(|&&(a, b)| !set_is_complete(a, b, target, cap))
+    {
+        return Err(format!(
+            "Satz {a}:{b} ist nicht regulär zu Ende gespielt (bis {}, Deckel {}).",
+            if target > 0 { target } else { 21 },
+            if cap >= target { cap } else { 30 },
+        ));
+    }
+    Ok(())
+}
+
 /// Prüft die Satzliste und die Sonderfälle (Kampflos/Aufgabe) und leitet
 /// daraus Sieger (`team1_won`) und BTP-`ScoreStatus` ab. **Eine** Quelle
 /// der Wahrheit für den Tablet-Ergebnisweg (`process_result`) UND die
@@ -1221,17 +1247,7 @@ pub(crate) fn build_manual_result_update_opt(
         return Err("Die Paarung steht noch nicht fest.".to_string());
     }
     let (sets, team1_won, score_status) = derive_result(sets, false, false, false, None)?;
-    let (target, cap) = (m.scoring.target_score, m.scoring.cap_score);
-    if let Some(&(a, b)) = sets
-        .iter()
-        .find(|&&(a, b)| !set_is_complete(a, b, target, cap))
-    {
-        return Err(format!(
-            "Satz {a}:{b} ist nicht regulär zu Ende gespielt (bis {}, Deckel {}).",
-            if target > 0 { target } else { 21 },
-            if cap >= target { cap } else { 30 },
-        ));
-    }
+    sets_fit_format(&sets, m.scoring.target_score, m.scoring.cap_score)?;
     let (free_court_id, player_ids, duration_mins, end_ts_ms) =
         manual_finish_fields(m, on_court_since, now);
     Ok(proto::MatchUpdate {
@@ -1337,6 +1353,17 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             Ok(v) => v,
             Err(e) => return ResultResponse::err(e),
         };
+    // Gegen die Zählweise des Matches prüfen — auch hier, nicht nur auf dem
+    // Weg der Turnierleitung. Das Tablett zählt zwar selbst korrekt, aber es
+    // hat auch eine Eingabe für getippte Endstände, und die kam bisher
+    // ungeprüft durch: In einem Turnier bis 15 mit Deckel 21 ließ sich ein
+    // 27:25 speichern. Nur bei regulär ausgespielten Ergebnissen — eine
+    // Aufgabe bricht den Satz mitten drin ab.
+    if score_status == 0 {
+        if let Err(e) = sets_fit_format(&sets, m.scoring.target_score, m.scoring.cap_score) {
+            return ResultResponse::err(e);
+        }
+    }
     // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
     // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
     // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
@@ -2046,12 +2073,24 @@ mod tests {
 
     /// ServerCtx mit Match 42 auf Court 101; BTP zeigt auf 127.0.0.1:`port`.
     /// Für Ablehnungs-Tests genügt ein toter Port (es kommt nie zum Schreiben).
+    /// Wie [`make_ctx`], aber mit einer bestimmten Zählweise am Match — für
+    /// die Prüfung getippter Ergebnisse gegen Ziel und Deckel.
+    fn make_ctx_scoring(port: u16, scoring: ScoringFormat) -> ServerCtx {
+        let mut m = match_on_court();
+        m.scoring = scoring;
+        make_ctx_with(port, m)
+    }
+
     fn make_ctx(port: u16) -> ServerCtx {
+        make_ctx_with(port, match_on_court())
+    }
+
+    fn make_ctx_with(port: u16, m: BtpMatch) -> ServerCtx {
         let tablet = Arc::new(TabletState::default());
         tablet.set_snapshot(BtpSnapshot {
             tournament_name: "T".into(),
             rest_minutes: None,
-            matches: vec![match_on_court()],
+            matches: vec![m],
             courts: vec!["1".into()],
             locations: vec![],
             court_infos: vec![],
@@ -2439,6 +2478,85 @@ mod tests {
         assert_eq!(int(&m, "ScoreStatus"), Some(0), "regulär ausgespielt");
         let sets = xml::find(&m, "Sets").expect("Sets");
         assert_eq!(sets.children().len(), 2, "beide Sätze übertragen");
+    }
+
+    /// Ein Satz über dem Deckel wird abgelehnt — auch vom Tablet.
+    ///
+    /// Aus dem Betrieb gemeldet: In einem Turnier, das bis 15 mit Deckel 21
+    /// spielt, ließ sich am Tablet über „Ergebnis eintragen" ein 27:25
+    /// speichern. Die Prüfung gab es längst, sie hing aber nur am Weg der
+    /// Turnierleitung; der Tablet-Weg verließ sich darauf, dass die Seite
+    /// selbst nichts Ungültiges zählen lässt. Für getippte Ergebnisse gilt
+    /// das nicht — und ein falscher Satz wandert von hier direkt nach BTP
+    /// und in den Liveticker.
+    #[tokio::test]
+    async fn a_set_beyond_the_cap_is_rejected_from_the_tablet_too() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx_scoring(
+            port,
+            ScoringFormat {
+                best_of: 3,
+                target_score: 15,
+                cap_score: 21,
+                interval_at: Some(8),
+            },
+        );
+
+        let resp = process_result(&ctx, &body_with(&[(27, 25), (15, 9)])).await;
+
+        assert!(!resp.ok, "27:25 darf bei Deckel 21 nicht durchgehen");
+        let text = resp.error.unwrap_or_default();
+        assert!(text.contains("27:25"), "der Grund nennt den Satz: {text}");
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "nichts darf nach BTP gegangen sein"
+        );
+    }
+
+    /// Ein regulärer Satz nach demselben Format geht durch — sonst prüfte der
+    /// Test oben nur, dass überhaupt etwas abgelehnt wird.
+    #[tokio::test]
+    async fn a_valid_set_for_the_format_still_passes() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx_scoring(
+            port,
+            ScoringFormat {
+                best_of: 3,
+                target_score: 15,
+                cap_score: 21,
+                interval_at: Some(8),
+            },
+        );
+
+        // 21:20 ist am Deckel erlaubt (dort genügt ein Punkt Vorsprung).
+        let resp = process_result(&ctx, &body_with(&[(15, 9), (21, 20)])).await;
+
+        assert!(resp.ok, "{:?}", resp.error);
+        assert_eq!(recorded.lock().unwrap().len(), 1);
+    }
+
+    /// Bei einer **Aufgabe** darf der Satz unfertig sein — jemand hört mitten
+    /// im Spiel auf, und genau dieser Stand gehört nach BTP.
+    #[tokio::test]
+    async fn a_retirement_may_carry_an_unfinished_set() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx_scoring(
+            port,
+            ScoringFormat {
+                best_of: 3,
+                target_score: 15,
+                cap_score: 21,
+                interval_at: Some(8),
+            },
+        );
+        let mut body = body_with(&[(15, 9), (3, 5)]);
+        body.retired = true;
+        body.winner = Some(2);
+
+        let resp = process_result(&ctx, &body).await;
+
+        assert!(resp.ok, "{:?}", resp.error);
+        assert_eq!(recorded.lock().unwrap().len(), 1);
     }
 
     /// Aufgabe (Retired): Sieger explizit, `ScoreStatus=2`.
