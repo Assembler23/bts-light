@@ -27,12 +27,12 @@ serde_json = "1"
 flate2 = "1.1.9"
 thiserror = "2.0.18"
 tracing = "0.1.44"
-quick-xml = "0.40.1"
+quick-xml = "0.41.0"
 tokio = { version = "1.52.3", features = ["net", "io-util", "time", "rt", "macros", "sync"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset"] }
 axum = { version = "0.8.9", features = ["ws"] }
 relay-proto = { path = "../relay-proto" }
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 local-ip-address = "0.6.13"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
@@ -41,8 +41,8 @@ tracing-appender = "0.2.5"
 tauri-plugin-single-instance = "2.4.2"
 tauri-plugin-dialog = "2"
 include_dir = "0.7"
-base64 = "0.22"
-mdns-sd = "0.13"
+base64 = "0.23"
+mdns-sd = "0.20"
 # Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
 # transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
