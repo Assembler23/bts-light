@@ -74,14 +74,14 @@ pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64, i64) {
 pub fn sort_key_parts(
     called: bool,
     planned_time: Option<i64>,
-    display_order: Option<i64>,
+    draw_id: Option<i64>,
     match_num: Option<i64>,
     id: i64,
 ) -> (bool, i64, i64, i64, i64) {
     (
         !called,
         planned_time.unwrap_or(i64::MAX),
-        display_order.unwrap_or(i64::MAX),
+        draw_id.unwrap_or(i64::MAX),
         match_num.unwrap_or(i64::MAX),
         id,
     )

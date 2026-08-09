@@ -1538,7 +1538,7 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
     let plan: std::collections::HashMap<i64, (Option<i64>, Option<i64>)> = snapshot
         .matches
         .iter()
-        .map(|m| (m.id, (m.planned_time, m.display_order)))
+        .map(|m| (m.id, (m.planned_time, Some(m.draw_id))))
         .collect();
     candidates.sort_by_key(|c| {
         let (zeit, reihenfolge) = plan.get(&c.match_id).copied().unwrap_or((None, None));

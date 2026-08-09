@@ -81,10 +81,7 @@ async fn why_is_the_queue_in_this_order() {
         "\n=== Die ersten 15 von {} wartenden Spielen ===",
         wartend.len()
     );
-    println!(
-        "{:<4} {:<7} {:<14} {:<7} {:<6} {:<8} {}",
-        "#", "MatchID", "PlannedTime", "Display", "Nr", "Ort", "Runde/Auslosung"
-    );
+    println!("#    MatchID PlannedTime    Display Nr     Ort      Runde/Auslosung");
     for (i, m) in wartend.iter().take(15).enumerate() {
         println!(
             "{:<4} {:<7} {:<14} {:<7} {:<6} {:<8} {} / {}",
@@ -149,12 +146,10 @@ async fn why_is_the_queue_in_this_order() {
             .collect();
         liste.sort_by_key(|(_, d, _, _, _)| d.unwrap_or(i64::MAX));
         for (id, disp, pos, stage, name) in liste.iter().take(12) {
-            println!(
-                "  ID={id:<5} Display={:<5} Position={:<5} Stage={:<5} {name}",
-                disp.map(|v| v.to_string()).unwrap_or("-".into()),
-                pos.map(|v| v.to_string()).unwrap_or("-".into()),
-                stage.map(|v| v.to_string()).unwrap_or("-".into()),
-            );
+            let d = disp.map(|v| v.to_string()).unwrap_or_else(|| "-".into());
+            let p = pos.map(|v| v.to_string()).unwrap_or_else(|| "-".into());
+            let s = stage.map(|v| v.to_string()).unwrap_or_else(|| "-".into());
+            println!("  ID={id:<5} Display={d:<5} Position={p:<5} Stage={s:<5} {name}");
         }
     }
 

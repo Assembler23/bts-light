@@ -913,7 +913,7 @@ async fn info_preparation_state(
                 "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "match_num": m.match_num,
                 "planned_time": m.planned_time,
-                "display_order": m.display_order,
+                "draw_id": m.draw_id,
                 "call": call,
             })
         })
@@ -928,7 +928,7 @@ async fn info_preparation_state(
         crate::tablet::assign::sort_key_parts(
             c.get("call").map(|v| !v.is_null()).unwrap_or(false),
             zahl("planned_time"),
-            zahl("display_order"),
+            zahl("draw_id"),
             zahl("match_num"),
             zahl("match_id").unwrap_or(0),
         )
