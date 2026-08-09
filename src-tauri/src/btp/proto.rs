@@ -84,6 +84,13 @@ pub struct MatchUpdate {
     pub duration_mins: i64,
     /// BTP `ScoreStatus`: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
     pub score_status: i64,
+    /// BTP-Feld, das mit dem Ergebnis freigegeben wird: schreibt im selben
+    /// Request einen `Courts`-Block (Court ohne MatchID = frei) und
+    /// `Match.CourtID = 0`. `None` = keine Feldfreigabe (z. B. Walkover aus
+    /// der Turnierleitung für nie aufgerufene Spiele). Ein EINZIGER Request
+    /// statt Ergebnis + separatem Freigabe-Update — der frühere zweite,
+    /// „nackte" Match-Knoten konnte das Ergebnis in BTP wieder entwerten.
+    pub free_court_id: Option<i64>,
 }
 
 /// Fertige Wire-Bytes für einen `SENDUPDATE`-Request – schreibt ein
@@ -101,31 +108,47 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
         })
         .collect();
 
-    let match_node = Node::group(
-        "Match",
-        vec![
-            Node::integer("ID", update.btp_match_id),
-            Node::group("Sets", sets),
-            Node::integer("Winner", if update.team1_won { 1 } else { 2 }),
-            // ScoreStatus: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
-            Node::integer("ScoreStatus", update.score_status),
-            Node::integer("Duration", update.duration_mins),
-            // KEIN `Status` schreiben: das ist in BTP ein Bitfeld mit den
-            // Check-in-Bits der Spieler. Hart auf 0 zu setzen würde sie als
-            // „nicht eingecheckt" markieren (rot→gelb in BTP). Wir lassen das
-            // Feld weg, dann behält BTP seinen Stand (so macht es auch BTS).
-            Node::integer("DrawID", update.draw_id),
-            Node::integer("PlanningID", update.planning_id),
-        ],
-    );
+    let mut match_children = vec![
+        Node::integer("ID", update.btp_match_id),
+        Node::group("Sets", sets),
+        Node::integer("Winner", if update.team1_won { 1 } else { 2 }),
+        // ScoreStatus: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
+        Node::integer("ScoreStatus", update.score_status),
+        Node::integer("Duration", update.duration_mins),
+        // `Status` MUSS im Ergebnis-Request stehen, sonst schließt BTP das
+        // Match nicht ab (Sieger bleibt unbestätigt, Turnierleitung muss
+        // jedes Spiel manuell speichern — Live-Befund Turnier 17.07.2026).
+        // Das Original-BTS schreibt es in jedem Ergebnis-Update mit
+        // (letilo-bts btp_proto.js:90). ACHTUNG Regressionsgeschichte:
+        // v0.9.103 hat `Status` wegen der Check-in-Bits aus der
+        // FELDZUWEISUNG entfernt (dort korrekt, siehe
+        // `court_assign_request`) — und versehentlich auch hier. Nie wieder
+        // aus dem Ergebnis-Pfad entfernen!
+        Node::integer("Status", 0),
+    ];
+    if update.free_court_id.is_some() {
+        // Feldfreigabe im selben Request: Halle+Feld am Match entfernen.
+        match_children.push(Node::integer("CourtID", 0));
+    }
+    match_children.push(Node::integer("DrawID", update.draw_id));
+    match_children.push(Node::integer("PlanningID", update.planning_id));
+    let match_node = Node::group("Match", match_children);
+
+    let mut tournament_children = Vec::new();
+    if let Some(court_id) = update.free_court_id {
+        // Court ohne MatchID = Feld frei (gleiche Semantik wie in
+        // `court_assign_request`).
+        tournament_children.push(Node::group(
+            "Courts",
+            vec![Node::group("Court", vec![Node::integer("ID", court_id)])],
+        ));
+    }
+    tournament_children.push(Node::group("Matches", vec![match_node]));
 
     let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
     nodes.push(Node::group(
         "Update",
-        vec![Node::group(
-            "Tournament",
-            vec![Node::group("Matches", vec![match_node])],
-        )],
+        vec![Node::group("Tournament", tournament_children)],
     ));
     wire::encode_message(&xml::encode(&nodes))
 }
@@ -383,6 +406,7 @@ mod tests {
             team1_won: true,
             duration_mins: 28,
             score_status: 0,
+            free_court_id: None,
         }
     }
 
@@ -421,8 +445,44 @@ mod tests {
         assert_eq!(child_int(&m, "Winner"), Some(1));
         assert_eq!(child_int(&m, "Duration"), Some(28));
         assert_eq!(child_int(&m, "ScoreStatus"), Some(0));
-        // `Status` wird bewusst NICHT mehr geschrieben (Check-in-Bitfeld in BTP).
-        assert_eq!(child_int(&m, "Status"), None);
+        // `Status` MUSS im Ergebnis stehen, sonst schließt BTP das Match
+        // nicht ab (Regression v0.9.103, Live-Befund Turnier 17.07.2026).
+        assert_eq!(child_int(&m, "Status"), Some(0));
+    }
+
+    #[test]
+    fn update_request_without_court_release_has_no_court_nodes() {
+        // Walkover aus der Turnierleitung: kein Feld → kein Courts-Block,
+        // kein CourtID am Match.
+        let wire = update_request(&sample_update(), "S", None);
+        let m = match_node(&wire);
+        assert_eq!(child_int(&m, "CourtID"), None);
+        let nodes = decode_response(&wire).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        assert!(xml::find(tournament.children(), "Courts").is_none());
+    }
+
+    #[test]
+    fn update_request_with_court_release_frees_court_in_same_request() {
+        // Tablet-Ergebnis: EIN Request trägt Ergebnis + Feldfreigabe
+        // (Court ohne MatchID + Match.CourtID=0) — kein zweiter, „nackter"
+        // Match-Knoten mehr, der das Ergebnis entwerten könnte.
+        let mut u = sample_update();
+        u.free_court_id = Some(311);
+        let wire = update_request(&u, "S", None);
+        let m = match_node(&wire);
+        assert_eq!(child_int(&m, "CourtID"), Some(0));
+        assert_eq!(child_int(&m, "Winner"), Some(1));
+        assert_eq!(child_int(&m, "Status"), Some(0));
+        let nodes = decode_response(&wire).unwrap();
+        let update = xml::find(&nodes, "Update").unwrap();
+        let tournament = xml::find(update.children(), "Tournament").unwrap();
+        let courts = xml::find(tournament.children(), "Courts").unwrap();
+        let court = xml::find(courts.children(), "Court").unwrap();
+        assert_eq!(child_int(court.children(), "ID"), Some(311));
+        // Court ohne MatchID = frei.
+        assert!(xml::find(court.children(), "MatchID").is_none());
     }
 
     #[test]
