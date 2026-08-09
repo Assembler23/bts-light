@@ -70,10 +70,15 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   geprüften Turnier sind sie aber in allen 540 Zeilen leer. **Offen bleibt
   daher nur:** ob ein Turnier, das diese Spalten *pflegt*, sie auch über
   die Schnittstelle liefert — das lässt sich erst mit einem Mitschnitt
-  eines solchen Turniers beantworten. Bis dahin ist die Halle abzuleiten
-  (Disziplin/Klasse→Halle-Regel + Vorbereitungs-Aufruf, siehe
-  `assign::hall_for_match`). Befund: [btp_protocol.md](btp_protocol.md),
-  Regressionstest in `btp_capture.rs`. Details:
+  eines solchen Turniers beantworten. Befund:
+  [btp_protocol.md](btp_protocol.md), Regressionstest in `btp_capture.rs`.
+  **✅ Auf anderem Weg gelöst (09.08.):** Die Turnierleitungs-Seite gibt
+  einem wartenden Spiel den Spielort **von Hand** (Hallen-Wähler an der
+  Zeile, `TlAction::SetHall`). Er wirkt auf Hallenfilter, Vergabe **und**
+  `upcoming_matches[].hall` — damit greift `display=next&halle=…` auch in
+  Turnieren, die ihre Aufrufe über BTP machen. Die Kaskade lautet jetzt
+  Disziplin-Regel → Hand → Vorbereitungs-Aufruf (`assign::hall_for_match`).
+  Siehe [turnierleitung-web.md](turnierleitung-web.md). Details:
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
 - **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
@@ -103,8 +108,9 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   überall leer → der (funktionierende) badhub-Filter fand nichts, und
   die leere Liste ohne Fallback ist dort gewollt. **Dreiteiliger Fix:**
   (a) ~~Plan 2 — `planned_court_id` aus BTP parsen~~ → **nicht möglich**,
-  BTP liefert an ungespielten Matches keinen Ort (siehe Punkt „Nächste
-  Spiele pro Halle" oben); die Halle muss abgeleitet werden; (b) P1 erweitern — BTP-`Highlight` nicht nur
+  BTP liefert an ungespielten Matches keinen Ort; **stattdessen erledigt**
+  über den Hallen-Wähler der Turnierleitungs-Seite (siehe Punkt „Nächste
+  Spiele pro Halle" oben); (b) P1 erweitern — BTP-`Highlight` nicht nur
   schreiben, sondern auch **lesen**, damit in BTP gemachte Aufrufe bei
   uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
   Original-BTS seine „upcoming"-Ticker-Anzeige speist

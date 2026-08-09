@@ -333,6 +333,19 @@ pub struct TabletState {
     /// Nachrufe am Meeting Point: `(match_id, Partei) → Stufe`. Getrennt nach
     /// Partei, weil in der Regel nur eine fehlt.
     prep_call_stages: RwLock<HashMap<(i64, String), u8>>,
+    /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
+    /// gegeben hat.
+    ///
+    /// BTP führt an angesetzten Spielen keinen Spielort (nachgewiesen an zwei
+    /// echten Mitschnitten, siehe `assign::hall_for_match`) — ohne diese
+    /// Ablage gäbe es für ein Spiel ohne Disziplin-Regel keine Möglichkeit,
+    /// überhaupt zu sagen, in welche Halle es gehört, bevor es aufgerufen
+    /// wird.
+    ///
+    /// Nur zur Laufzeit, wie die Vorbereitungs-Aufrufe: Match-IDs gelten je
+    /// Turnier, und ein Neustart der Übertragung ist der Moment, in dem man
+    /// ohnehin neu ordnet.
+    manual_halls: RwLock<HashMap<i64, String>>,
     /// Revision des Anzeige-Zustands: `(Nummer, Fingerabdruck)`. Steigt nur
     /// bei echter Änderung — **die eine** Quelle für LAN und Cloud. Zwei
     /// getrennte Zähler wären schlimmer als keiner: Dieselbe Zahl meinte
@@ -1134,6 +1147,35 @@ impl TabletState {
             .unwrap_or(0)
     }
 
+    /// Gibt einem Spiel von Hand eine Halle; leerer Name nimmt sie zurück.
+    ///
+    /// Gibt zurück, ob sich etwas geändert hat — der Anzeige-Zustand soll nur
+    /// dann eine neue Revision bekommen, wenn wirklich etwas anders ist.
+    pub fn set_manual_hall(&self, match_id: i64, hall: &str) -> bool {
+        let hall = hall.trim();
+        let mut g = self.manual_halls.write().unwrap();
+        if hall.is_empty() {
+            return g.remove(&match_id).is_some();
+        }
+        // Deckel gegen unbegrenztes Wachsen über ein langes Turnier. 2000
+        // Einträge sind mehr als jedes Turnier an Spielen hat.
+        if g.len() > 2000 {
+            g.clear();
+        }
+        g.insert(match_id, hall.to_string()).as_deref() != Some(hall)
+    }
+
+    /// Die von Hand gesetzte Halle eines Spiels, falls es eine gibt.
+    pub fn manual_hall(&self, match_id: i64) -> Option<String> {
+        self.manual_halls.read().unwrap().get(&match_id).cloned()
+    }
+
+    /// Alle Handzuweisungen — für den Aufbau des Anzeige-Zustands, damit
+    /// nicht je Spiel einzeln gesperrt werden muss.
+    pub fn manual_halls(&self) -> HashMap<i64, String> {
+        self.manual_halls.read().unwrap().clone()
+    }
+
     /// Vergisst die Nachruf-Stufen eines Spiels — beim Zurücknehmen des
     /// Vorbereitungs-Aufrufs, damit ein erneuter Aufruf wieder von vorn
     /// beginnt.
@@ -1568,6 +1610,34 @@ impl TabletState {
                 m.preparation_call_ts = Some(call.called_at_ms);
                 m.preparation_hall = hall;
             }
+        }
+        drop(calls);
+
+        // Von Hand gesetzte Spielorte genauso einstempeln — **ohne**
+        // Aufruf-Zeitstempel: Einen Ort festzulegen ist kein Aufruf, sonst
+        // meldete der Liveticker „vor X Min gerufen" für ein Spiel, nach dem
+        // niemand gerufen hat. Ein echter Aufruf für dieselbe Partie hat
+        // Vorrang; er hat die Halle oben schon gesetzt.
+        //
+        // Damit erreicht die Angabe den Hallenfilter des Livetickers
+        // (`display=next&halle=…`) — bis hierher blieb er leer, sobald ein
+        // Turnier seine Aufrufe über BTP statt über bts-light machte.
+        let manual = self.manual_halls.read().unwrap();
+        for (match_id, hall) in manual.iter() {
+            let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == *match_id) else {
+                continue;
+            };
+            if m.preparation_hall.is_some() || m.status != MatchStatus::Scheduled {
+                continue;
+            }
+            // In BTPs Schreibweise, damit der Filter greift.
+            let name = snapshot
+                .locations
+                .iter()
+                .find(|l| l.name.trim().eq_ignore_ascii_case(hall.trim()))
+                .map(|l| l.name.trim().to_string())
+                .unwrap_or_else(|| hall.trim().to_string());
+            m.preparation_hall = Some(name);
         }
     }
 
@@ -3096,6 +3166,40 @@ mod tests {
         assert_eq!(m1.preparation_call_ts, None);
         assert_eq!(m2.preparation_call_ts, Some(2000));
         assert_eq!(m2.preparation_hall.as_deref(), Some("Halle A"));
+    }
+
+    #[test]
+    fn a_hall_set_by_hand_reaches_the_liveticker() {
+        // Der Hallenfilter des Livetickers (`display=next&halle=…`) liest die
+        // Halle am anstehenden Spiel. Bisher füllte sie nur ein
+        // Vorbereitungs-Aufruf — lief das Turnier über BTP, blieb sie leer und
+        // der Monitor einer Halle zeigte gar nichts. Eine von Hand gesetzte
+        // Halle muss deshalb genauso durchschlagen, **ohne** dass das Spiel
+        // dadurch als „aufgerufen" gilt.
+        use crate::btp::model::BtpLocation;
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![match_on(4, None, MatchStatus::Scheduled)],
+            vec![(101, "Court 1")],
+        );
+        snap.locations = vec![BtpLocation {
+            id: 7,
+            name: "Halle A".to_string(),
+        }];
+        st.set_manual_hall(4, "halle a");
+
+        st.apply_preparation_calls(&mut snap);
+
+        let m = &snap.matches[0];
+        assert_eq!(
+            m.preparation_hall.as_deref(),
+            Some("Halle A"),
+            "in BTPs Schreibweise"
+        );
+        assert_eq!(
+            m.preparation_call_ts, None,
+            "einen Ort zu setzen ist kein Aufruf - sonst meldete der Monitor einen Aufruf, den es nie gab"
+        );
     }
 
     #[test]

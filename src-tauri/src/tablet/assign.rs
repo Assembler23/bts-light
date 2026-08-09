@@ -97,6 +97,8 @@ pub fn sort_key_parts(
 pub enum HallSource {
     /// Aus der Disziplin/Klasse→Halle-Regel (Turnier-Festlegung).
     Rule,
+    /// Von der Turnierleitung für dieses eine Spiel gesetzt.
+    Manual,
     /// Aus dem Vorbereitungs-Aufruf (Tagesentscheidung).
     Call,
     /// Nicht bekannt.
@@ -106,10 +108,12 @@ pub enum HallSource {
 /// In welche Halle gehört ein noch nicht vergebenes Spiel — und woher wissen
 /// wir das?
 ///
-/// Kaskade: Disziplin-Regel → Vorbereitungs-Aufruf → unbekannt. Die Regel
-/// gewinnt, weil sie eine Turnier-Festlegung ist und auch die Vergabe selbst
-/// bindet (`hall_allows_match`); ein widersprechender Aufruf könnte gar nicht
-/// ausgeführt werden.
+/// Kaskade: Disziplin-Regel → **von Hand gesetzt** → Vorbereitungs-Aufruf →
+/// unbekannt. Die Regel gewinnt, weil sie eine Turnier-Festlegung ist und
+/// auch die Vergabe selbst bindet (`hall_allows_match`); eine widersprechende
+/// Handzuweisung stellte das Spiel in eine Halle, in der es nie aufs Feld
+/// dürfte. Die Hand schlägt den Aufruf: Wer den Ort eigens setzt, meint es
+/// ernster als ein Aufruf, der die Halle nur nebenbei mitnimmt.
 ///
 /// **Eine bessere Quelle ist nicht in Sicht.** Die Spec hoffte auf einen von
 /// BTP an der Ansetzung geführten Spielort — in echten Daten kommt er nicht
@@ -126,12 +130,19 @@ pub fn hall_for_match(
     config: &AppConfig,
     snap: &BtpSnapshot,
     m: &BtpMatch,
+    manual_hall: Option<&str>,
     called_hall: Option<&str>,
 ) -> (String, HallSource) {
     if let Some(hall) = config.allowed_hall_for(m.discipline.as_str(), &m.draw_name) {
         return (canonical_hall(snap, hall), HallSource::Rule);
     }
-    match called_hall.map(str::trim).filter(|s| !s.is_empty()) {
+    fn gesetzt(v: Option<&str>) -> Option<&str> {
+        v.map(str::trim).filter(|s| !s.is_empty())
+    }
+    if let Some(hall) = gesetzt(manual_hall) {
+        return (canonical_hall(snap, hall), HallSource::Manual);
+    }
+    match gesetzt(called_hall) {
         Some(hall) => (canonical_hall(snap, hall), HallSource::Call),
         None => (String::new(), HallSource::None),
     }
@@ -1009,7 +1020,7 @@ mod tests {
         });
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&cfg, &empty_snap(), &m, None),
+            hall_for_match(&cfg, &empty_snap(), &m, None, None),
             ("Halle A".to_string(), HallSource::Rule)
         );
     }
@@ -1019,7 +1030,13 @@ mod tests {
         // Ohne Regel weiß nur der Aufruf, wohin das Spiel soll.
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&AppConfig::default(), &empty_snap(), &m, Some("Halle B")),
+            hall_for_match(
+                &AppConfig::default(),
+                &empty_snap(),
+                &m,
+                None,
+                Some("Halle B")
+            ),
             ("Halle B".to_string(), HallSource::Call)
         );
     }
@@ -1037,7 +1054,43 @@ mod tests {
         });
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&cfg, &empty_snap(), &m, Some("Halle B")),
+            hall_for_match(&cfg, &empty_snap(), &m, None, Some("Halle B")),
+            ("Halle A".to_string(), HallSource::Rule)
+        );
+    }
+
+    #[test]
+    fn a_hall_set_by_hand_beats_the_preparation_call() {
+        // BTP führt an angesetzten Spielen keinen Spielort (siehe Doku oben).
+        // Die Turnierleitung kann ihn deshalb selbst setzen — und dann meint
+        // sie es ernster als ein Aufruf, der die Halle nur nebenbei mitnimmt.
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(
+                &AppConfig::default(),
+                &empty_snap(),
+                &m,
+                Some("Halle C"),
+                Some("Halle B"),
+            ),
+            ("Halle C".to_string(), HallSource::Manual)
+        );
+    }
+
+    #[test]
+    fn the_rule_still_wins_over_a_hall_set_by_hand() {
+        // Sonst könnte jemand ein Spiel in eine Halle stellen, in der es die
+        // Vergabe-Prüfung nie aufs Feld ließe (`hall_allows_match`) — es
+        // stünde dort und ginge nie los.
+        let mut cfg = AppConfig::default();
+        cfg.discipline_hall_rules.push(DisciplineHallRule {
+            discipline: "mens_singles".to_string(),
+            draw_name: String::new(),
+            hall: "Halle A".to_string(),
+        });
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(&cfg, &empty_snap(), &m, Some("Halle C"), None),
             ("Halle A".to_string(), HallSource::Rule)
         );
     }
@@ -1049,7 +1102,7 @@ mod tests {
         // aus dem gefilterten Bild fallen — es würde sonst nie vergeben.
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&AppConfig::default(), &empty_snap(), &m, None),
+            hall_for_match(&AppConfig::default(), &empty_snap(), &m, None, None),
             (String::new(), HallSource::None)
         );
     }

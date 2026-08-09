@@ -520,7 +520,10 @@ Aktivierung unerreichbar ist, ist „aus" jederzeit ein gültiger Zustand.
    einem Test-BTP in Schritt 12, Ergebnis als Fixture einfrieren, danach
    eigenes ADR. **Bis dahin blockiert dieser Fall.**
 2. ~~**Halle am noch nicht gerufenen Spiel.**~~ **Beantwortet (Schritt 15,
-   09.08.2026): In echten Daten kommt kein solcher Spielort an.** Geprüft an
+   09.08.2026) — und danach gelöst:** Weil BTP den Ort nicht liefert, setzt
+   ihn jetzt die Turnierleitung selbst (Hallen-Wähler an der Zeile,
+   `TlAction::SetHall`, Kaskade Regel → Hand → Aufruf). Der Befund, der
+   dazu geführt hat: **In echten Daten kommt kein Spielort an.** Geprüft an
    zwei Mitschnitten (Ein- und Zwei-Hallen-Turnier, zusammen 914 echte
    Paarungen): Weder `Match` noch `Draw`, `Event` oder `Stage` tragen eine
    `LocationID`. Die einzige Ortsangabe ist `Court.LocationID` — ein **Feld**
@@ -535,10 +538,17 @@ Aktivierung unerreichbar ist, ist „aus" jederzeit ein gültiger Zustand.
    **nicht** beantwortet; dafür braucht es einen Mitschnitt eines solchen
    Turniers.
 
-   **Folge für dieses Feature:** Die Kaskade bleibt, wie sie ist —
-   Disziplin/Klasse-Regel → Vorbereitungs-Aufruf → unbekannt. Ein Test in
-   `btp_capture.rs` hält den Befund fest und schlägt an, falls ein künftiger
-   Mitschnitt doch eine Ansetzungs-Halle enthält.
+   **Folge für dieses Feature:** Die Kaskade lautet jetzt
+   Disziplin/Klasse-Regel → **von Hand gesetzt** → Vorbereitungs-Aufruf →
+   unbekannt. Die Regel bleibt vorn (sie bindet auch die Vergabe), die Hand
+   schlägt den Aufruf. Ein Test in `btp_capture.rs` hält den Befund fest und
+   schlägt an, falls ein künftiger Mitschnitt doch eine Ansetzungs-Halle
+   enthält — dann wäre die Handzuweisung nur noch der Notnagel.
+
+   Der Ort wirkt auch auf `upcoming_matches[].hall` und damit auf den
+   Liveticker-Filter `display=next&halle=…`, der bislang leer blieb, sobald
+   ein Turnier seine Aufrufe über BTP machte (offener Roadmap-Punkt seit
+   19.07.). Einen Ort zu setzen gilt dabei **nicht** als Aufruf.
 3. **Annahme:** Ein Gerät je Halle mit eingeschalteter Ansage genügt als
    „Ansage-Gerät". Das entspricht dem heutigen Betriebsmodell (ein Master,
    ein Slave je Halle). Wird in einer Halle künftig mehr als ein

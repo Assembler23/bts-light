@@ -930,6 +930,17 @@ pub enum TlAction {
         #[serde(rename = "matchId")]
         match_id: i64,
     },
+    /// Einem noch nicht vergebenen Spiel eine **Halle** geben, ohne es aufs
+    /// Feld zu legen. Leerer Name nimmt die Zuweisung zurück.
+    ///
+    /// BTP führt an angesetzten Spielen keinen Spielort — dies ist der einzige
+    /// Weg, einem wartenden Spiel überhaupt eine Halle zu geben, wenn keine
+    /// Disziplin-Regel greift.
+    SetHall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        hall: String,
+    },
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -2288,6 +2299,10 @@ mod tests {
                 location_id: Some(7),
             },
             TlAction::RetractPreparation { match_id: 1 },
+            TlAction::SetHall {
+                match_id: 4711,
+                hall: "Halle B".to_string(),
+            },
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,

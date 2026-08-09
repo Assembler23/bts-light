@@ -74,6 +74,33 @@ Aufruf-Timer selbst eingeschaltet ist.
 Die Farbe steht nie allein: Satzstand und Uhrbeschriftung („im Spiel seit"
 gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
 
+### Spielort ohne Feld
+
+Bei Mehr-Hallen-Turnieren steht an jeder Zeile der Warteliste ein kleiner
+Hallen-Wähler. Damit legst du fest, **wo** ein Spiel stattfinden soll,
+ohne es schon auf ein Feld zu legen. „Halle offen" nimmt die Festlegung
+zurück.
+
+Das ist nötig, weil **BTP an einem angesetzten Spiel keinen Spielort
+führt** (nachgemessen an zwei Turnier-Mitschnitten). Ohne diese Angabe
+weiß bts-light die Halle eines wartenden Spiels erst, wenn es aufgerufen
+wird — und bis dahin taucht es in keinem Hallenfilter auf.
+
+Ein von Hand gesetzter Ort wirkt an drei Stellen:
+
+- **Hallenfilter** dieser Seite — das Spiel erscheint in seiner Halle
+  statt unter „ohne Hallenzuordnung".
+- **Vergabe** — das Spiel gehört dann in diese Halle.
+- **Liveticker**: `badhub.de/live?display=next&halle=…` zeigt es. Bisher
+  blieb dieser Filter leer, sobald ein Turnier seine Aufrufe über BTP
+  statt über bts-light machte. Das Spiel gilt dadurch **nicht** als
+  aufgerufen — es steht kein „vor X Min gerufen" daran.
+
+Legt eine Disziplin/Klasse→Halle-Regel den Ort schon fest, erscheint kein
+Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
+käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
+endet mit dem Stoppen der Übertragung.
+
 ### Anzeige (Klappmenü im Kopf)
 
 Zwei Schalter, die **je Gerät** gelten und dort gespeichert bleiben — der

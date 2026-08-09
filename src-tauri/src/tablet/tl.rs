@@ -300,6 +300,28 @@ pub(crate) fn apply_state_action(
             tablet.forget_prep_calls(*match_id);
             Ok(TlResponse::ok(0))
         }
+        A::SetHall { match_id, hall } => {
+            // Nur Hallen, die das Turnier wirklich hat — sonst stünde das
+            // Spiel in einem Ort, den kein Filter zeigt und kein Feld
+            // bedient. Leerer Name nimmt die Zuweisung zurück.
+            let hall = hall.trim();
+            if !hall.is_empty() {
+                let snap = tablet.snapshot_clone();
+                let bekannt = snap.as_ref().is_some_and(|s| {
+                    s.locations
+                        .iter()
+                        .any(|l| l.name.trim().eq_ignore_ascii_case(hall))
+                });
+                if !bekannt {
+                    return Err(TlResponse::err(
+                        relay_proto::TlErrorCode::HallNotAllowed,
+                        format!("Die Halle {hall} gibt es in diesem Turnier nicht."),
+                    ));
+                }
+            }
+            tablet.set_manual_hall(*match_id, hall);
+            Ok(TlResponse::ok(0))
+        }
         A::ScorekeeperAdd { names } => {
             let names: Vec<String> = names
                 .iter()
@@ -1173,6 +1195,7 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             location_id,
         } => format!("prep:{}:{}", ids(match_ids), location_id.unwrap_or(0)),
         A::RetractPreparation { match_id } => format!("prep-retract:{match_id}"),
+        A::SetHall { match_id, hall } => format!("hall:{match_id}:{hall}"),
         A::AnnounceCourtCall { court_id, match_id } => {
             format!("call:{match_id}:{court_id}")
         }
@@ -1223,6 +1246,13 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         // Fehlersuche hochgeladen. Die Art der Aktion genügt.
         A::CallPreparation { .. } => "Vorbereitungs-Aufruf".to_string(),
         A::RetractPreparation { .. } => "Vorbereitungs-Aufruf zurücknehmen".to_string(),
+        A::SetHall { match_id, hall } => {
+            if hall.trim().is_empty() {
+                format!("Halle von Spiel {match_id} zurückgenommen")
+            } else {
+                format!("Spiel {match_id} nach {hall}")
+            }
+        }
         A::AnnounceCourtCall { court_id, .. } => format!("Erneuter Aufruf Feld {court_id}"),
         A::AnnouncePrepCall { .. } => "Erneuter Vorbereitungs-Aufruf".to_string(),
         A::EnterResult { match_id, .. } => format!("Ergebnis für Spiel {match_id}"),
@@ -1626,6 +1656,10 @@ pub(crate) fn build_state_limited(
         })
     };
 
+    // Die von Hand gesetzten Hallen einmal holen, nicht je Spiel — sonst
+    // sperrte der Aufbau der Liste hundertfach.
+    let manual = tablet.manual_halls();
+
     let availability = PlayerAvailability::from_snapshot(&snap, config);
 
     // Spielbereite Spiele — dieselbe Bedingung wie bei der automatischen
@@ -1643,8 +1677,13 @@ pub(crate) fn build_state_limited(
         })
         .map(|m| {
             let call = called_hall(m.id);
-            let (hall, _) =
-                assign::hall_for_match(config, &snap, m, call.as_ref().map(|(h, _)| h.as_str()));
+            let (hall, _) = assign::hall_for_match(
+                config,
+                &snap,
+                m,
+                manual.get(&m.id).map(String::as_str),
+                call.as_ref().map(|(h, _)| h.as_str()),
+            );
             (assign::sort_key(m, call.is_some()), m, hall)
         })
         .collect();
@@ -1662,8 +1701,13 @@ pub(crate) fn build_state_limited(
         }
         *count += 1;
         let call = called_hall(m.id);
-        let (_, hall_source) =
-            assign::hall_for_match(config, &snap, m, call.as_ref().map(|(h, _)| h.as_str()));
+        let (_, hall_source) = assign::hall_for_match(
+            config,
+            &snap,
+            m,
+            manual.get(&m.id).map(String::as_str),
+            call.as_ref().map(|(h, _)| h.as_str()),
+        );
         queue.push(TlMatch {
             match_id: m.id,
             match_num: m.match_num,

@@ -288,6 +288,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .row .recall button:hover { border-color: var(--warn); color: var(--warn); }
 
+/* Spielort ohne Feld. Unauffällig, solange nichts gesetzt ist — es ist eine
+   Ausnahme-Handlung, kein Pflichtfeld. Steht ein Ort von Hand fest, sagt der
+   Wähler das durch seine Farbe, damit man abgeleitete und gesetzte Hallen
+   auseinanderhält. */
+.row .hallwahl {
+  font: inherit; font-size: .8rem; min-height: 40px; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer; max-width: 9rem;
+}
+.row .hallwahl.gesetzt { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+.row[aria-selected="true"] .hallwahl { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+
 /* Der Aufruf-Knopf am Feld. Er steht in der Fußzeile neben der Uhr — dort,
    wo die Turnierleitung ohnehin hinschaut, um zu sehen, ob etwas fällig
    ist. */
@@ -1385,6 +1397,20 @@ function queueRow(m) {
   parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
+
+  // Spielort setzen, ohne ein Feld zu belegen. BTP führt an angesetzten
+  // Spielen keinen Ort — ohne diesen Wähler bliebe ein Spiel ohne
+  // Disziplin-Regel bis zum Aufruf hallenlos, und der Hallenfilter zeigte es
+  // in keiner der beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange
+  // eine Regel es nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
+  if (state.multi_hall && m.hall_source !== "rule") {
+    const optionen = ['<option value="">Halle offen</option>']
+      .concat(state.halls.map((h) =>
+        `<option value="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(h.name)}</option>`));
+    parts.push(`<select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
+      data-hall-for="${m.match_id}" title="Spielort ohne Feld festlegen"
+      aria-label="Spielort">${optionen.join("")}</select>`);
+  }
   // Nachruf, wenn jemand nicht erscheint. Getrennt nach Partei, weil in der
   // Regel nur eine fehlt — und wer schon da ist, muss sich nicht noch einmal
   // angesprochen fühlen.
@@ -1423,6 +1449,21 @@ function wireQueue(box) {
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll("select[data-hall-for]").forEach((sel) => {
+    // Der Wähler darf weder das Spiel auswählen noch einen Zug starten.
+    sel.addEventListener("click", (ev) => ev.stopPropagation());
+    sel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    sel.addEventListener("change", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(sel.dataset.hallFor);
+      const hall = sel.value;
+      send(
+        `hall-${matchId}-${hall}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "set_hall", matchId, hall },
+        hall ? `Spielort: ${hall}.` : "Spielort zurückgenommen.",
+      );
+    });
   });
   box.querySelectorAll("button[data-recall]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
