@@ -1385,6 +1385,12 @@ pub struct TlState {
     /// gekappt könnte die Sortierung eine komplette Halle verdrängen, und
     /// das Gerät dort sähe eine leere Liste, obwohl hundert Spiele warten.
     pub truncated_halls: Vec<String>,
+    /// Verwaltet dieser Turnier-PC Zähltafelbediener? Nur dann zeigt die
+    /// Seite den Warteschlangen-Abschnitt.
+    pub scorekeeper_managed: bool,
+    /// Die Warteschlange, in Reihenfolge. Der `key` ist die stabile
+    /// Kennung für Vorziehen/Entfernen — dieselbe wie am Turnier-PC.
+    pub scorekeepers: Vec<TlScorekeeper>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1508,6 +1514,17 @@ pub struct TlHall {
     pub name: String,
 }
 
+/// Ein Wartender in der Zähltafelbediener-Warteschlange, wie er auf der
+/// Turnierleitungs-Seite erscheint. Siehe [`crate::tablet::state::ScorekeeperEntry`]
+/// für die Quelle — hier fehlt bewusst `from_court_id`, die Seite braucht
+/// nur, wer wartet und seit wann.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlScorekeeper {
+    pub key: String,
+    pub names: Vec<String>,
+    pub enqueued_ms: u64,
+}
+
 /// Ein offener Walkover-Vorschlag samt der Spiele, die er beträfe.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlWalkover {
@@ -1628,6 +1645,8 @@ pub(crate) fn build_state_limited(
             queue: Vec::new(),
             walkovers: Vec::new(),
             truncated_halls: Vec::new(),
+            scorekeeper_managed: config.scorekeeper.enabled,
+            scorekeepers: Vec::new(),
         };
     };
 
@@ -1751,6 +1770,24 @@ pub(crate) fn build_state_limited(
     halls.sort_by_key(|h| h.name.to_lowercase());
     halls.dedup_by(|a, b| a.name == b.name);
 
+    // Nur wenn diese Installation Zähltafelbediener verwaltet, geht die
+    // Warteschlange überhaupt raus — sonst zeigte ein Gerät einen
+    // Abschnitt, für den es gar keine Bedienhandlung gibt.
+    let scorekeeper_managed = config.scorekeeper.enabled;
+    let scorekeepers = if scorekeeper_managed {
+        tablet
+            .scorekeeper_queue()
+            .into_iter()
+            .map(|e| TlScorekeeper {
+                key: e.key,
+                names: e.names,
+                enqueued_ms: e.enqueued_ms,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     TlState {
         rev,
         server_now_ms: now_ms,
@@ -1794,6 +1831,8 @@ pub(crate) fn build_state_limited(
             })
             .collect(),
         truncated_halls: truncated.into_iter().collect(),
+        scorekeeper_managed,
+        scorekeepers,
     }
 }
 
@@ -3402,6 +3441,30 @@ mod tests {
     }
 
     #[test]
+    fn the_state_shows_the_scorekeeper_queue_only_when_managed() {
+        // Aufbau wie in `the_scorekeeper_queue_can_be_tended`: TabletState mit
+        // Snapshot, ein manueller Eintrag in der Warteschlange.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+        let state = build_state(&tablet, &cfg, 1_000, 1);
+        assert!(state.scorekeeper_managed);
+        assert_eq!(state.scorekeepers.len(), 1);
+        assert_eq!(state.scorekeepers[0].names, vec!["Anna Alt".to_string()]);
+        assert!(!state.scorekeepers[0].key.is_empty());
+
+        // Verwaltung aus: Die Liste bleibt leer, das Gerät blendet den
+        // Abschnitt aus — niemand bedient eine Warteschlange, die es nicht gibt.
+        cfg.scorekeeper.enabled = false;
+        let state = build_state(&tablet, &cfg, 1_000, 2);
+        assert!(!state.scorekeeper_managed);
+        assert!(state.scorekeepers.is_empty());
+    }
+
+    #[test]
     fn adding_a_scorekeeper_without_a_name_is_rejected() {
         let tablet = TabletState::default();
         tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
@@ -3801,6 +3864,14 @@ mod tests {
             "reason",
             "players",
             "until_ms",
+            // Warteschlange der Zähltafelbediener: Namen stehen ohnehin je Feld im
+            // Zustand (`scorekeeper`); der `key` ist eine zufällige Kennung ohne
+            // Personenbezug, `enqueued_ms` eine Uhrzeit.
+            "scorekeeper_managed",
+            "scorekeepers",
+            "key",
+            "names",
+            "enqueued_ms",
         ];
 
         let tablet = TabletState::default();
