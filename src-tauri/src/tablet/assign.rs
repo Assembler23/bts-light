@@ -337,15 +337,33 @@ pub enum AssignError {
 
 /// Welches Spiel belegt dieses Feld?
 ///
-/// „Belegt" heißt: irgendein Spiel referenziert das Feld — auch ein bereits
-/// **beendetes**, das in BTP noch nicht abgeräumt ist. Genau diese Lesart
-/// benutzt die automatische Vergabe seit jeher; ein frisch beendetes Spiel
-/// hält sein Feld, bis BTP es freigibt.
+/// „Belegt" heißt: ein **noch nicht beendetes** Spiel referenziert das Feld.
+///
+/// Der Status muss mit hinein, und zwar aus einem Grund, der beim Lesen von
+/// BTP nicht auffällt: Ein beendetes Match **behält** seine `CourtID` für
+/// immer — als Turnier-Doku „wo wurde gespielt" (Tilo 19.07.2026, Vorbild
+/// Original-BTS; `proto.rs` setzt sie beim Ergebnis ausdrücklich **nicht**
+/// auf 0). Wer nur fragt „referenziert irgendein Spiel dieses Feld?", hält
+/// es deshalb ab dem ersten beendeten Spiel bis zum Turnierende für besetzt.
+/// Genau das ist am 09.08.2026 im Test aufgeschlagen: Feld 03 stand nach
+/// einem Ergebnis dauerhaft auf „wird geräumt" und nahm nichts mehr an.
+///
+/// Die **Feld-Seite** gibt derselbe Schreibvorgang frei (Court ohne
+/// MatchID) — physisch ist das Feld also frei, sobald das Ergebnis
+/// geschrieben ist. Solange BTP das Match noch als laufend führt (Ergebnis
+/// unterwegs), bleibt es hier zu Recht belegt.
 pub fn court_occupied_by(snap: &BtpSnapshot, court_id: i64) -> Option<i64> {
     snap.matches
         .iter()
-        .find(|m| m.court_id == Some(court_id))
+        .find(|m| m.court_id == Some(court_id) && !match_is_over(m))
         .map(|m| m.id)
+}
+
+/// Ist dieses Spiel durch? Beides zählt: der Status aus BTP und ein
+/// eingetragener Sieger — ein kampflos gewertetes Spiel steht nie „auf dem
+/// Feld", trägt aber einen Sieger.
+fn match_is_over(m: &BtpMatch) -> bool {
+    m.status == MatchStatus::Finished || m.winner.is_some()
 }
 
 /// Alle belegten Felder auf einmal — dieselbe Lesart wie
@@ -355,7 +373,11 @@ pub fn court_occupied_by(snap: &BtpSnapshot, court_id: i64) -> Option<i64> {
 /// Beide Wege teilen sich diese Definition bewusst: Liefen sie auseinander,
 /// vergäbe der eine Pfad ein Feld, das der andere für besetzt hält.
 pub fn occupied_courts(snap: &BtpSnapshot) -> std::collections::HashSet<i64> {
-    snap.matches.iter().filter_map(|m| m.court_id).collect()
+    snap.matches
+        .iter()
+        .filter(|m| !match_is_over(m))
+        .filter_map(|m| m.court_id)
+        .collect()
 }
 
 /// Auf welchem Feld steht dieses Spiel?
@@ -684,15 +706,16 @@ mod tests {
     }
 
     #[test]
-    fn a_finished_match_still_holds_its_court() {
-        // Diese Lesart nutzt die automatische Vergabe seit jeher: Ein
-        // beendetes Spiel hält sein Feld, bis BTP es abräumt. Würde man hier
-        // nur laufende Spiele zählen, vergäbe man das Feld doppelt.
+    fn a_finished_match_releases_its_court() {
+        // Bis 09.08.2026 hielt ein beendetes Spiel sein Feld — „bis BTP es
+        // abräumt". BTP räumt aber nie ab: Die CourtID bleibt als Doku am
+        // Match stehen (siehe `court_occupied_by`). Aus „kurz warten" wurde
+        // so „für immer besetzt".
         let mut done = a_match(7);
         done.status = MatchStatus::Finished;
         done.court_id = Some(1);
         let s = snap(vec![a_court(1, None)], vec![done], Vec::new());
-        assert_eq!(court_occupied_by(&s, 1), Some(7));
+        assert_eq!(court_occupied_by(&s, 1), None);
         assert!(!is_on_court(&s, 7), "beendet zählt nicht als spielend");
     }
 
@@ -714,8 +737,10 @@ mod tests {
             Vec::new(),
         );
 
+        // Feld 2 hält ein **beendetes** Spiel — das belegt seit 09.08.2026
+        // nicht mehr (die CourtID bleibt dort für immer stehen).
         let set = occupied_courts(&s);
-        assert_eq!(set, std::collections::HashSet::from([1, 2]));
+        assert_eq!(set, std::collections::HashSet::from([1]));
         for court_id in [1, 2, 3] {
             assert_eq!(
                 set.contains(&court_id),
@@ -777,23 +802,18 @@ mod tests {
     }
 
     #[test]
-    fn a_court_still_held_by_a_finished_match_reports_that_it_is_being_cleared() {
-        // Wichtiger Unterschied für die Meldung: Das Spiel ist vorbei, BTP
-        // hat das Feld nur noch nicht abgeräumt. Auf dem Monitor sieht die
-        // Turnierleitung ein leeres Feld (die Anzeige zählt nur laufende
-        // Spiele) — „Feld ist von Spiel 9 belegt" wäre da unverständlich.
-        // `finished` erlaubt der Oberfläche, das richtig zu formulieren.
+    fn a_court_whose_match_is_finished_takes_the_next_game() {
+        // Umgekehrt seit 09.08.2026: Früher wurde hier abgelehnt („wird
+        // geräumt"), weil das beendete Spiel seine CourtID behält. Da BTP
+        // sie nie entfernt, blockierte das jedes Feld dauerhaft, sobald
+        // darauf einmal ein Spiel fertig geworden war.
         let mut done = a_match(9);
         done.court_id = Some(1);
         done.status = MatchStatus::Finished;
         let s = snap(vec![a_court(1, None)], vec![a_match(7), done], Vec::new());
-        let err = check(&s, &AppConfig::default(), 7, 1, CourtExpectation::Free).unwrap_err();
-        assert_eq!(
-            err,
-            AssignError::CourtTaken {
-                by_match: 9,
-                finished: true
-            }
+        assert!(
+            check(&s, &AppConfig::default(), 7, 1, CourtExpectation::Free).is_ok(),
+            "das Feld ist wieder vergebbar"
         );
     }
 
@@ -1057,6 +1077,41 @@ mod tests {
             hall_for_match(&cfg, &empty_snap(), &m, None, Some("Halle B")),
             ("Halle A".to_string(), HallSource::Rule)
         );
+    }
+
+    #[test]
+    fn a_finished_match_does_not_hold_its_court_forever() {
+        // Aus dem Betrieb gemeldet (09.08.): Nach dem ersten beendeten Spiel
+        // blieb das Feld dauerhaft auf „wird geräumt" stehen und nahm kein
+        // neues Spiel mehr an.
+        //
+        // Grund: Das beendete Match **behält** seine `CourtID` — bewusst so,
+        // als Turnier-Doku „wo wurde gespielt" (Tilo 19.07., Vorbild
+        // Original-BTS), und BTP entfernt sie nie wieder. Wer nur fragt „hat
+        // irgendein Spiel diese CourtID?", hält das Feld deshalb bis zum
+        // Turnierende für besetzt. Frei ist ein Feld, sobald das Spiel darauf
+        // **beendet** ist — die Feld-Seite gibt derselbe Schreibvorgang frei.
+        let mut fertig = a_match(9);
+        fertig.status = MatchStatus::Finished;
+        fertig.court_id = Some(1);
+        fertig.winner = Some(1);
+        let snap = snap(vec![a_court(1, None)], vec![fertig], Vec::new());
+
+        assert_eq!(court_occupied_by(&snap, 1), None);
+        assert!(!occupied_courts(&snap).contains(&1));
+    }
+
+    #[test]
+    fn a_running_match_still_holds_its_court() {
+        // Gegenprobe: Solange gespielt wird, ist das Feld belegt. Sonst legte
+        // die Automatik ein zweites Spiel auf ein laufendes.
+        let mut laeuft = a_match(9);
+        laeuft.status = MatchStatus::OnCourt;
+        laeuft.court_id = Some(1);
+        let snap = snap(vec![a_court(1, None)], vec![laeuft], Vec::new());
+
+        assert_eq!(court_occupied_by(&snap, 1), Some(9));
+        assert!(occupied_courts(&snap).contains(&1));
     }
 
     #[test]

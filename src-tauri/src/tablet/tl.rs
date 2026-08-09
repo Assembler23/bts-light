@@ -2305,17 +2305,18 @@ mod tests {
     }
 
     #[test]
-    fn freeing_a_court_held_by_a_finished_match_keeps_its_court_in_btp() {
-        // BTP hält am beendeten Spiel fest, wo es gespielt wurde — das ist
-        // Turnier-Dokumentation. Der Ergebnispfad bewahrt sie ausdrücklich,
-        // und die Desktop-Schaltfläche auch. Der Web-Weg darf sie nicht als
-        // Nebenwirkung löschen, sonst hinge das Turnierprotokoll davon ab,
-        // welche Oberfläche jemand benutzt hat.
+    fn a_finished_match_needs_no_freeing_anymore() {
+        // Seit ein beendetes Spiel sein Feld nicht mehr hält, gibt es hier
+        // nichts freizugeben: Wer trotzdem „vom Feld nehmen" schickt (etwa
+        // von einer Ansicht, die noch den alten Stand zeigt), bekommt eine
+        // Ablehnung statt eines Schreibvorgangs, der die Feldangabe des
+        // beendeten Spiels löschen könnte — die ist Turnier-Dokumentation
+        // („wo wurde gespielt") und bleibt unangetastet.
         let mut done = a_match(7);
         done.status = MatchStatus::Finished;
         done.court_id = Some(1);
         let s = snap(vec![a_court(1, None)], vec![done], Vec::new());
-        let write = plan_court_action(
+        let err = plan_court_action(
             &s,
             &AppConfig::default(),
             &[],
@@ -2325,12 +2326,8 @@ mod tests {
                 expect: relay_proto::CourtExpectation::Match { match_id: 7 },
             },
         )
-        .expect("erlaubt");
-        assert_eq!(write.courts[0].match_id, None, "das Feld wird frei");
-        assert!(
-            write.match_courts.is_empty(),
-            "aber das beendete Spiel behält seine Feldangabe"
-        );
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::CourtFree));
     }
 
     #[test]
@@ -2361,15 +2358,16 @@ mod tests {
     }
 
     #[test]
-    fn a_court_being_cleared_is_rejected_with_its_own_wording() {
-        // „Feld ist belegt" wäre hier verwirrend: Auf dem Monitor ist das
-        // Feld leer, das Spiel nur noch nicht abgeräumt. Der Text muss das
-        // erklären, sonst sucht die Turnierleitung den Fehler bei sich.
+    fn a_court_whose_last_match_is_finished_accepts_the_next_one() {
+        // Früher wurde das mit einem eigenen Wortlaut abgelehnt („wird noch
+        // geräumt"). Da BTP die Feldangabe am beendeten Spiel nie entfernt,
+        // war diese Ablehnung endgültig statt vorübergehend — das Feld war
+        // für den Rest des Turniers verloren.
         let mut done = a_match(9);
         done.status = MatchStatus::Finished;
         done.court_id = Some(1);
         let s = snap(vec![a_court(1, None)], vec![a_match(7), done], Vec::new());
-        let err = plan_court_action(
+        let write = plan_court_action(
             &s,
             &AppConfig::default(),
             &[],
@@ -2380,12 +2378,8 @@ mod tests {
                 expect: relay_proto::CourtExpectation::Free,
             },
         )
-        .unwrap_err();
-        let text = err.error.unwrap_or_default();
-        assert!(
-            text.contains("geräumt") || text.contains("beendet"),
-            "erwartet ein Hinweis aufs Abräumen, war: {text}"
-        );
+        .expect("das Feld ist wieder vergebbar");
+        assert_eq!(write.courts[0].match_id, Some(7));
     }
 
     #[test]
@@ -3539,11 +3533,12 @@ mod tests {
     }
 
     #[test]
-    fn a_court_still_held_by_a_finished_match_is_not_shown_as_free() {
-        // Sonst zeigt die Seite ein leeres Feld an, das die Vergabe-Prüfung
-        // als belegt ablehnt — der Helfer tippt gegen eine unsichtbare Wand.
-        // Der Zustand ist normal: BTP räumt das Feld erst nach einigen
-        // Abfragen ab.
+    fn a_court_of_a_finished_match_is_shown_as_free() {
+        // Bis 09.08.2026 zeigte die Seite hier „wird geräumt" — in der
+        // Annahme, BTP räume das Feld gleich ab. Es räumt nie ab: Die
+        // CourtID bleibt als Doku am beendeten Match stehen. Damit stand
+        // jedes Feld nach seinem ersten Ergebnis dauerhaft auf „wird
+        // geräumt" und nahm nichts mehr an (im Turniertest aufgetreten).
         let mut done = a_match(9);
         done.status = MatchStatus::Finished;
         done.court_id = Some(1);
@@ -3551,12 +3546,8 @@ mod tests {
             snap(vec![a_court(1, None)], vec![done, a_match(2)], Vec::new()),
             &AppConfig::default(),
         );
-        assert_eq!(s.courts[0].match_id, 0, "kein LAUFENDES Spiel");
-        assert_eq!(
-            s.courts[0].clearing,
-            Some(9),
-            "aber das Feld ist noch nicht frei"
-        );
+        assert_eq!(s.courts[0].match_id, 0, "kein laufendes Spiel");
+        assert_eq!(s.courts[0].clearing, None, "und das Feld ist wieder frei");
     }
 
     #[test]

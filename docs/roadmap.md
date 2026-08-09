@@ -94,8 +94,10 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   live weiterzählen, wenn ein Zähler verspätet einsteigt (nur Aufschläger,
   im Doppel Rückschläger, plus Satz nötig — Positionen folgen der
   BWF-Paritätsregel). Button offen sichtbar.
-- **Klick-Delay am Tablet verkürzen.** Punkt soll bei Berührung zählen
-  (`pointerdown` statt `click`), Persist/Sync raus aus dem Tap-Pfad.
+- ~~**Klick-Delay am Tablet verkürzen.**~~ **Erledigt.** `pointerdown` und
+  der verschobene Persist/Sync kamen mit Plan 13; die eigentliche Bremse war
+  die 3-Sekunden-Sperre nach jedem Punkt (Schutz gegen Doppel-Taps) — seit
+  09.08.2026 sind es 0,7 s.
 - **Zähltafelbediener-Verwaltung** (wie Tilos BTS): Verlierer-Warteschlange,
   Zuweisung beim Feld-Aufruf, Mit-Ansage „Tabletbedienung: …",
   BTP-Auscheck, Mindestpause.

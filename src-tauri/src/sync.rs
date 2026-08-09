@@ -1636,9 +1636,21 @@ mod tests {
     }
 
     #[test]
-    fn auto_assign_court_with_finished_match_stays_busy() {
-        // Sicherheitsnetz (Kontext v0.9.113): Trägt ein beendetes Spiel in BTP
-        // noch seine CourtID, gilt das Feld als belegt — keine Doppelvergabe.
+    fn auto_assign_reuses_a_court_whose_match_is_over() {
+        // **Umgekehrt seit 09.08.2026.** Bis dahin galt: Trägt ein beendetes
+        // Spiel noch seine CourtID, bleibt das Feld belegt — ein
+        // Sicherheitsnetz gegen Doppelvergabe (v0.9.113).
+        //
+        // Dieses Netz wurde zur Falle, als der Ergebnis-Pfad im Juli anfing,
+        // die CourtID am beendeten Match **absichtlich** stehen zu lassen
+        // (Turnier-Doku „wo wurde gespielt", `proto.rs`). Seither räumt sie
+        // niemand mehr ab — und das Feld blieb bis zum Turnierende besetzt.
+        // Im Test am 09.08. genau so aufgetreten: Feld 03 nahm nach dem
+        // ersten Ergebnis kein Spiel mehr an.
+        //
+        // Vor Doppelvergabe schützt weiterhin die Wartezeit der Automatik
+        // (`wait_minutes` auf `court_free_since`) — hier bewusst 0.0, damit
+        // der Test die Belegung prüft und nicht die Uhr.
         let mut engine = SyncEngine::new();
         let tablet = TabletState::default();
         let mut fin = ready_match(5, 1);
@@ -1649,8 +1661,8 @@ mod tests {
         let snap = snap_with(vec![court(1, None)], vec![fin, ready], Vec::new());
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert!(
-            courts.is_empty(),
-            "Feld mit noch nicht abgeräumtem beendeten Spiel bleibt belegt"
+            !courts.is_empty(),
+            "das Feld des beendeten Spiels steht wieder zur Verfügung"
         );
     }
 

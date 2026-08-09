@@ -40,6 +40,48 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Gruppenspiel). Sobald der Sieger im nächsten Spiel steht, wird mit
   Begründung abgelehnt: Was BTP beim Überschreiben mit dem Turnierbaum
   macht, ist noch nicht abschließend geklärt.
+- **Ein Feld war nach dem ersten Ergebnis für immer blockiert.** Sobald auf
+  einem Feld ein Spiel fertig wurde, stand es dauerhaft auf „wird geräumt"
+  und nahm kein neues Spiel mehr an — weder von Hand noch über die
+  Automatik. Ursache: Das beendete Spiel **behält** in BTP seine
+  Feldangabe (Turnier-Doku „wo wurde gespielt", bewusst so seit Juli), und
+  die Belegungsprüfung las das als „Feld besetzt". Sie fragt jetzt nach
+  einem *laufenden* Spiel. Vor Doppelvergabe schützt weiterhin die
+  Wartezeit der automatischen Vergabe.
+- **Punkte zählen ohne Bremse.** Nach jedem Punkt waren die +1-Flächen drei
+  Sekunden gesperrt; das war als Schutz gegen versehentliche Doppel-Taps
+  gedacht und fühlte sich am Gerät zäh an. Jetzt 0,7 Sekunden — genug gegen
+  den zitternden Finger, kurz genug für schnelle Ballwechsel.
+- **Kein unmögliches Ergebnis mehr am Tablet.** In einem Turnier bis 15 mit
+  Deckel 21 ließ sich über „Ergebnis eintragen" ein **27:25** speichern — und
+  von dort ging es ungebremst nach BTP und in den Liveticker. Getippte
+  Endstände werden jetzt gegen die Zählweise des Spiels geprüft, in der
+  Oberfläche **und** am Turnier-PC. Bei Aufgabe, Kampflos und
+  Disqualifikation bleibt der unfertige Satz erlaubt — dort bricht das Spiel
+  ja mitten drin ab.
+- **Spielort ohne Feld.** Bei Mehr-Hallen-Turnieren lässt sich einem
+  wartenden Spiel jetzt die Halle geben, ohne es schon auf ein Feld zu
+  legen. Nötig, weil BTP an einem angesetzten Spiel **keinen** Spielort
+  führt (an zwei Turnier-Mitschnitten nachgemessen). Damit greift auch der
+  Hallenfilter des Livetickers (`display=next&halle=…`), der bislang leer
+  blieb, sobald ein Turnier seine Aufrufe über BTP statt über bts-light
+  machte. Einen Ort zu setzen gilt dabei nicht als Aufruf.
+- **Jedes Feld zeigt seinen Zustand als Farbe:** aufgerufen, überfällig (kein
+  einziger Punkt nach der eingestellten Zeit — da muss jemand hin), im
+  Spiel, beendet. Die Schwelle steht unter *Aufruf-Timer*, Standard fünf
+  Minuten, und gilt für alle Geräte.
+- **Besser lesbar in der Turnierleitung:** Jedes Spiel nennt seine Klasse als
+  `HE-C`/`HD-D`, die Paarung steht mit dem „vs." in der Mitte und im Doppel
+  die Partner untereinander, und die Felder bleiben stehen, während die
+  Spielliste läuft — bei 120 wartenden Spielen war sonst kein Feld mehr zu
+  sehen, auf das man etwas hätte ziehen können. Zwei Schalter je Gerät im
+  Kopf: Spielnummer und Nationen ein- oder ausblenden.
+- **Uhren gehen auch in ruhigen Phasen richtig.** Ändert sich am Turnier
+  minutenlang nichts, antwortet der Turnier-PC nur noch mit „unverändert" —
+  und dabei wurde die Zeit nicht mehr nachgezogen. Ein Tablet, dessen Uhr
+  sich zwischendurch stellt (Funkzeit nach dem Aufwachen, Zeitumstellung),
+  zeigte dann überall falsche Dauern, ausgerechnet dort, wo man auf „seit
+  wann aufgerufen" schaut.
 
 ## v0.9.175
 

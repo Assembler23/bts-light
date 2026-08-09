@@ -1998,9 +1998,16 @@ function restoreSnapshot(snap) {
 }
 
 // Doppel-Eingabe-Schutz: nach einem Punkt sind die +1-Flächen kurz gesperrt
-// (gedimmt) – Punkte fallen nicht im Sekundentakt, das verhindert versehentliche
-// Doppel-Taps. Undo hebt die Sperre sofort auf (Korrektur soll nicht warten).
-var SCORE_COOLDOWN_MS = 3000;
+// (gedimmt), damit ein zitternder Finger nicht zwei Punkte zählt. Undo hebt
+// die Sperre sofort auf (Korrektur soll nicht warten).
+//
+// **0,7 s statt 3 s** (09.08.2026, aus dem Test am Gerät): Drei Sekunden
+// waren aus der Annahme heraus gewählt, Punkte fielen ohnehin nicht im
+// Sekundentakt. Am Tablett fühlte sich das zäh an — nach einem Aufschlagfehler
+// folgt der nächste Ballwechsel schnell, und der Bediener tippt ins Leere,
+// ohne zu wissen warum. Ein versehentlicher Doppel-Tap liegt bei etwa
+// 0,3 s; 0,7 s fängt ihn ab, ohne im Weg zu stehen.
+var SCORE_COOLDOWN_MS = 700;
 var scoreCooldownUntil = 0;
 var scoreCooldownTimer = null;
 function clearScoreCooldown() {

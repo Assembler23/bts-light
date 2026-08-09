@@ -1246,14 +1246,19 @@ function courtCard(c) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
     body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat)}</div>
             <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
+    // Beschriftung nur noch, wenn sie etwas sagt, das man sonst nicht sieht.
+    // „auf dem Feld seit" und „im Spiel seit" stehen inzwischen als Farbe an
+    // der Kachel — das Wort wiederholte nur, was der Streifen schon zeigt,
+    // und kostete auf dem Tablet eine ganze Zeile je Feld. Ein fälliger
+    // Aufruf ist dagegen eine Aufforderung und bleibt ausgeschrieben.
     const clockLabel =
       stage >= 3 ? "Letzter Aufruf" :
-      stage >= 2 ? "2. Aufruf fällig" :
-      isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit";
-    foot = `<span class="score num">${esc(sets)}<small>Satzstand</small></span>
-            <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}">
-              ${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}
-              <small>${esc(clockLabel)}</small>
+      stage >= 2 ? "2. Aufruf fällig" : "";
+    foot = `<span class="score num" title="Satzstand">${esc(sets)}</span>
+            <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
+                  title="${isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit"}">
+              ${UHR}${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}
+              ${clockLabel ? `<small>${esc(clockLabel)}</small>` : ""}
             </span>`;
   } else if (c.clearing) {
     body = `<div class="empty-hint">wird noch geräumt</div>
