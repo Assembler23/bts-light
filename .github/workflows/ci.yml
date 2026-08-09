@@ -3,7 +3,35 @@ name: CI
 on:
   push:
     branches: [main]
+    # Nur auf main-Pushes gefiltert, NICHT auf pull_request -- siehe Kommentar
+    # bei `concurrency`. Ein Merge, der nur Markdown anfasst, muss den
+    # Windows-Build nicht wiederholen; die PR-Pruefung lief da schon.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'LICENSE'
+
   pull_request:
+    # Hier BEWUSST kein paths-ignore: `build` ist Required-Check auf main.
+    # Ein uebersprungener Lauf erzeugt keinen Status, und der PR haengt dann
+    # dauerhaft auf "ausstehend" statt gemergt zu werden. Lieber ein
+    # ueberfluessiger Build als ein blockierter Doku-PR.
+
+# Dieser Job laeuft auf windows-latest, und Windows-Minuten zaehlen bei GitHub
+# DOPPELT. Gemessen 2026-08-08: ein Lauf ~626 s = 11 min, also 22 berechnete
+# Minuten -- so viel wie zwei komplette badhub-PRs mit acht Jobs.
+#
+# Am 2026-07-28 liefen 15 Laeufe an einem Tag (~330 Minuten, gut 11 % des
+# Monatskontingents von 3000). Ohne Abbruch laufen bei fuenf schnellen Pushes
+# alle fuenf Builds zu Ende, auch die vier laengst ueberholten.
+#
+# Auf main wird NICHT abgebrochen: Dort ist jeder Commit ein eigener Stand, der
+# gruen sein soll -- ein abgebrochener main-Build hinterliesse eine Luecke in
+# der Historie. Auf PRs zaehlt nur der letzte Stand.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:

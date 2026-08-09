@@ -274,9 +274,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   [turnierleitung-web.md](turnierleitung-web.md) · Spec mit ehrlicher Bilanz
   aller 49 Akzeptanzkriterien:
   [features/turnierleitung-web.md](features/turnierleitung-web.md) · ADR
-  [0010](adr/0010-tl-web-schreibender-cloud-pfad.md),
-  [0011](adr/0011-tl-web-geraete-identitaet.md),
-  [0012](adr/0012-ergebniskorrektur-nur-ohne-folgespiel.md).
+  [0010](adr/0011-tl-web-schreibender-cloud-pfad.md),
+  [0011](adr/0012-tl-web-geraete-identitaet.md),
+  [0012](adr/0013-ergebniskorrektur-nur-ohne-folgespiel.md).
 
   **Was noch aussteht**, in der Reihenfolge, in der es im Betrieb auffällt:
 

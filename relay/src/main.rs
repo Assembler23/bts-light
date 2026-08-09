@@ -174,7 +174,7 @@ struct Namespace {
     /// Zugänge der Turnierleitungs-Geräte, vom Turnier-PC gespiegelt
     /// (`HostFrame::TlAuth`): Zugang → Kennung des Geräts. Der Relay stellt
     /// **keine** aus und merkt sich nichts über das Turnier hinaus: Was der
-    /// Host nicht mehr nennt, gilt nicht mehr. Das ist der Widerruf (ADR 0011).
+    /// Host nicht mehr nennt, gilt nicht mehr. Das ist der Widerruf (ADR 0012).
     /// Die Kennung reist mit jedem Kommando zurück, damit das Protokoll des
     /// Turnier-PCs benennen kann, wer gehandelt hat.
     tl_tokens: HashMap<String, String>,
@@ -248,7 +248,7 @@ struct Broker {
     /// Nötig, weil die TL-Adressen **keinen** Namespace tragen: Der ist die
     /// `install_id` und damit zugleich der Zugang der Zähltablets
     /// (`/{ns}/ws`). Stünde sie in der Adresse, die jeder Helfer auf dem
-    /// Bildschirm hat, könnte sich damit jeder als Tablet ausgeben (ADR 0011).
+    /// Bildschirm hat, könnte sich damit jeder als Tablet ausgeben (ADR 0012).
     /// Der Zugang findet sein Turnier deshalb selbst.
     tl_index: Arc<Mutex<HashMap<String, String>>>,
     /// Öffentliche Basis-URL für QR-Codes, z. B. `https://badhub.de/bts-relay`.
@@ -410,7 +410,7 @@ async fn main() {
     let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
     // **Ohne Namespace in der Adresse**: Der wäre die `install_id` und damit
     // zugleich der Zugang der Zähltablets. Der Zugang des Geräts findet sein
-    // Turnier über den Wegweiser selbst (ADR 0011).
+    // Turnier über den Wegweiser selbst (ADR 0012).
     let app = if tl_an {
         app.route("/tl", get(tl_page))
             .route("/tl/api/state", get(tl_state_route))
@@ -2348,7 +2348,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
         // TL-Web (Turnierleitungs-Oberfläche): Die Wire-Typen stehen, der
         // Relay wertet sie aber noch nicht aus — Token-Map, Routen und
         // Weiterleitung kommen in einem eigenen Schritt
-        // (docs/features/turnierleitung-web.md, ADR 0010/0011). Bis dahin
+        // (docs/features/turnierleitung-web.md, ADR 0012/0012). Bis dahin
         // bewusst folgenlos verworfen, damit ein Host, der schon pusht, die
         // Verbindung nicht verliert. Absichtlich einzeln aufgeführt statt
         // per Auffang-Arm: So zwingt der Compiler beim Ausbau dazu, jede

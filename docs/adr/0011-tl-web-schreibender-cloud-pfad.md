@@ -6,7 +6,7 @@
 Gehört zur Spezifikation
 [docs/features/turnierleitung-web.md](../features/turnierleitung-web.md).
 Die Geräte-Identität ist Gegenstand von
-[ADR 0011](0011-tl-web-geraete-identitaet.md) — beide Entscheidungen
+[ADR 0012](0012-tl-web-geraete-identitaet.md) — beide Entscheidungen
 bedingen einander.
 
 ## Kontext

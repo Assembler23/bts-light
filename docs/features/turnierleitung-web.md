@@ -3,8 +3,8 @@
 > Status: **Entwurf 2026-08-07** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Feature-Wunsch der Turnierleitung vom 2026-08-07.
 > Betroffene Crates: `src-tauri/`, `relay/`, `relay-proto/`, `src/`.
-> ADR: [0010 — Schreibender Cloud-Pfad für Turnierleitungs-Geräte](../adr/0010-tl-web-schreibender-cloud-pfad.md) ·
-> [0011 — Geräte-Identität für Turnierleitungs-Geräte](../adr/0011-tl-web-geraete-identitaet.md) ·
+> ADR: [0011 — Schreibender Cloud-Pfad für Turnierleitungs-Geräte](../adr/0011-tl-web-schreibender-cloud-pfad.md) ·
+> [0012 — Geräte-Identität für Turnierleitungs-Geräte](../adr/0012-tl-web-geraete-identitaet.md) ·
 > ADR zur Ergebniskorrektur folgt nach dem BTP-Experiment (Schritt 12).
 
 ## Kontext / Problem

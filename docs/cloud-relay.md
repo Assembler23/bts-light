@@ -112,8 +112,8 @@ Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 > **Jede** Anfrage endet abgewiesen, bevor sie irgendetwas berührt.
 > Fachliche Grundlage:
 > [features/turnierleitung-web.md](features/turnierleitung-web.md),
-> [ADR 0010](adr/0010-tl-web-schreibender-cloud-pfad.md) und
-> [ADR 0011](adr/0011-tl-web-geraete-identitaet.md).
+> [ADR 0011](adr/0011-tl-web-schreibender-cloud-pfad.md) und
+> [ADR 0012](adr/0012-tl-web-geraete-identitaet.md).
 
 Turnierleitungs-Geräte sind eine **dritte Client-Klasse** neben Tablets und
 Monitoren: mehrere je Namespace (höchstens 8), **nicht** feldgebunden, und
@@ -135,7 +135,7 @@ Die geteilten Typen in `relay-proto`:
 
 **Die `install_id` verlässt den Master dabei nicht.** Anders als bei
 Tablets und Monitoren ist der Namespace kein Bestandteil der
-TL-Adressen; der Relay schlägt ihn über das Gerätetoken nach (ADR 0011).
+TL-Adressen; der Relay schlägt ihn über das Gerätetoken nach (ADR 0012).
 Der Grund ist handfest: Die `install_id` **ist** der Zugang der Zähltablets
 (`/{ns}/ws`). Stünde sie in der Adresse, die jeder Helfer den ganzen Tag auf
 dem Bildschirm hat, könnte sich damit jeder als Tablet ausgeben.

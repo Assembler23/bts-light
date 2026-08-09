@@ -224,7 +224,7 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     cfg.badhub.password = String::new();
     // Azure-Key ist ein echtes Secret (Speech-Ressource) — NIE mitexportieren.
     cfg.azure_tts.key = String::new();
-    // Turnierleitungs-Geräte wandern NICHT mit (ADR 0011): Sonst bliebe der
+    // Turnierleitungs-Geräte wandern NICHT mit (ADR 0012): Sonst bliebe der
     // alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
     // wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am
     // neuen PC neu — ein QR-Scan je Gerät. Der Schalter bleibt erhalten.
@@ -301,7 +301,7 @@ pub fn import_identity(
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = imported.clone();
     // Der Hinweis gilt für Tablets, Monitore und ferne Hallen — die hängen
     // an der install_id. Turnierleitungs-Geräte hängen dagegen an eigenen
-    // Tokens, die das Bündel bewusst nicht enthält (ADR 0011); am neuen PC
+    // Tokens, die das Bündel bewusst nicht enthält (ADR 0012); am neuen PC
     // gekoppelte bleiben, vom alten PC übernommene gibt es nicht.
     tracing::info!(
         "Master-Identität importiert (install_id übernommen) — Tablets, Monitore und ferne Hallen bleiben verbunden; Turnierleitungs-Geräte des alten PCs müssen neu gekoppelt werden"
@@ -2870,7 +2870,7 @@ mod tests {
 
     #[test]
     fn identity_bundle_strips_tl_device_tokens() {
-        // ADR 0011: Ein Identitäts-Umzug nimmt die Turnierleitungs-Geräte
+        // ADR 0012: Ein Identitäts-Umzug nimmt die Turnierleitungs-Geräte
         // NICHT mit. Sonst bliebe der alte PC über die exportierten Tokens
         // schreibberechtigt, und ein weitergegebenes Bündel wäre zugleich
         // ein Satz gültiger Zugänge. Die Geräte koppeln sich am neuen PC

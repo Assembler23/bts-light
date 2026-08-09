@@ -513,7 +513,7 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default = "default_tablet_settings_pin")]
     pub tablet_settings_pin: String,
-    /// Turnierleitungs-Oberfläche im Browser (ADR 0010/0011). `#[serde(default)]`
+    /// Turnierleitungs-Oberfläche im Browser (ADR 0012/0012). `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar; der Default ist **aus**.
     #[serde(default)]
     pub tl_web: TlWebConfig,
@@ -524,7 +524,7 @@ fn default_tablet_settings_pin() -> String {
     "0000".to_string()
 }
 
-/// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011).
+/// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0012).
 ///
 /// Das `token` ist der Zugang — **vom Turnier-PC ausgestellt**, damit die
 /// `install_id` (Relay-Namespace, Log-Kennung, Host-Slot, Azure-Erbe) den
@@ -549,7 +549,7 @@ pub struct TlDevice {
     pub hall: String,
 }
 
-/// Turnierleitungs-Oberfläche im Browser (ADR 0010/0011). Opt-in —
+/// Turnierleitungs-Oberfläche im Browser (ADR 0012/0012). Opt-in —
 /// standardmäßig **aus** (`enabled: false`, keine Geräte), damit Turniere
 /// ohne sie unverändert laufen.
 ///
@@ -981,7 +981,7 @@ mod tests {
         // darf die Turnierleitungs-Oberfläche NICHT stillschweigend
         // mitbringen: ohne Schalter ist der schreibende Cloud-Pfad
         // unerreichbar, weil der Relay ohne gepushte Tokens niemanden
-        // hereinlässt (ADR 0010).
+        // hereinlässt (ADR 0011).
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         std::fs::write(
@@ -1000,7 +1000,7 @@ mod tests {
     fn tl_web_devices_survive_save_and_load() {
         // Die Gerätetokens liegen am Host und müssen einen App-Neustart
         // überleben — sonst müsste die Turnierleitung nach jedem Start alle
-        // Geräte neu koppeln (ADR 0011).
+        // Geräte neu koppeln (ADR 0012).
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         let mut cfg = AppConfig::default();
@@ -1028,7 +1028,7 @@ mod tests {
         // die Autorisierung eingehende Tokens in dieser Liste nachschlägt,
         // passte eine Anfrage *ohne* Token auf einen leeren Eintrag und
         // käme als vollwertiges Turnierleitungs-Gerät durch — genau der
-        // Zugang, den ADR 0010 absichern soll. Solche Einträge entstehen
+        // Zugang, den ADR 0011 absichern soll. Solche Einträge entstehen
         // durch handgeschriebene oder halb geschriebene Dateien.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");

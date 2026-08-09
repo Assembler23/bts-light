@@ -6,7 +6,7 @@
 Gehört zur Spezifikation
 [docs/features/turnierleitung-web.md](../features/turnierleitung-web.md).
 Der Schreibkanal selbst ist Gegenstand von
-[ADR 0010](0010-tl-web-schreibender-cloud-pfad.md).
+[ADR 0011](0011-tl-web-schreibender-cloud-pfad.md).
 
 ## Kontext
 

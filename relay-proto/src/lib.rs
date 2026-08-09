@@ -823,7 +823,7 @@ pub fn distinct_halls(courts: &[CourtBrief]) -> Vec<String> {
 // Monitoren: viele je Namespace, nicht feldgebunden, ausschließlich schreibend
 // **über den Host**. Sie tauchen nie in der Tablet-Liste auf und übernehmen nie
 // eine Court-Session — R4 („ein aktives Tablet je Court") bleibt unberührt.
-// Grundlage: docs/features/turnierleitung-web.md, ADR 0010 + 0011.
+// Grundlage: docs/features/turnierleitung-web.md, ADR 0012 + 0012.
 
 /// Was ein Turnierleitungs-Gerät auf einem Feld **vorgefunden** hat, als es die
 /// Aktion auslöste. Der Host lehnt ab, wenn die Erwartung nicht mehr stimmt —
@@ -872,7 +872,7 @@ impl PrepCallSide {
 }
 
 /// Die Aktionen, die ein Turnierleitungs-Gerät auslösen darf — ein **bewusst
-/// geschlossener** Satz (ADR 0010). Was hier nicht steht, ist nicht
+/// geschlossener** Satz (ADR 0011). Was hier nicht steht, ist nicht
 /// darstellbar; der Relay leitet nur weiter, entschieden und validiert wird
 /// ausschließlich im Host (R5).
 ///
@@ -1208,7 +1208,7 @@ pub enum HostFrame {
         azure_tts: Option<AzureTtsShare>,
     },
     /// Die aktuell zugelassenen Turnierleitungs-Geräte. Der Host stellt sie
-    /// aus, der Relay spiegelt sie nur (ADR 0011) — die `install_id`
+    /// aus, der Relay spiegelt sie nur (ADR 0012) — die `install_id`
     /// verlässt den Master nicht. Die Liste **ersetzt** die bisherige: ein
     /// entferntes Gerät ist damit sofort ausgesperrt, und das ist der
     /// gesamte Widerrufsmechanismus.
@@ -2275,7 +2275,7 @@ mod tests {
 
     /// Ein Vertreter je `TlAction`-Variante. Wächst der Aktionssatz, muss
     /// diese Liste mitwachsen – das ist beabsichtigt: der Satz ist bewusst
-    /// geschlossen (ADR 0010) und jede Erweiterung eine Entscheidung.
+    /// geschlossen (ADR 0011) und jede Erweiterung eine Entscheidung.
     fn every_tl_action() -> Vec<TlAction> {
         vec![
             TlAction::AssignCourt {
@@ -2363,7 +2363,7 @@ mod tests {
 
     #[test]
     fn unknown_tl_action_is_rejected() {
-        // Der Aktionssatz ist geschlossen (ADR 0010): Was nicht in der
+        // Der Aktionssatz ist geschlossen (ADR 0011): Was nicht in der
         // Whitelist steht, ist nicht darstellbar und wird abgewiesen.
         let parsed: Result<TlAction, _> = serde_json::from_str(r#"{"action":"delete_tournament"}"#);
         assert!(parsed.is_err());
@@ -2424,7 +2424,7 @@ mod tests {
     #[test]
     fn tl_auth_frame_roundtrips() {
         // Der Host pusht die vollständige Token-Menge; sie ersetzt die
-        // bisherige im Relay – das ist der Widerrufsmechanismus (ADR 0011).
+        // bisherige im Relay – das ist der Widerrufsmechanismus (ADR 0012).
         roundtrip(&HostFrame::TlAuth {
             devices: vec![
                 TlAuthDevice {
