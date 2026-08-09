@@ -38,7 +38,7 @@ jobs:
     # windows-latest = Zielplattform; WebView2 ist vorinstalliert, keine extra system-deps.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
