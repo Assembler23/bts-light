@@ -938,6 +938,8 @@ pub async fn confirm_walkover(
             team1_won: !cand.retired_is_team1,
             duration_mins: 0,
             score_status: 1, // 1 = Walkover
+            // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben.
+            free_court_id: None,
         };
         match crate::tablet::server::write_result_to_btp(&config, &update).await {
             Ok(()) => written += 1,
@@ -1612,6 +1614,26 @@ pub async fn cloud_slaves(
         cfg.install_id.clone()
     };
     Ok(crate::tablet::relay_client::fetch_slaves(&ns).await)
+}
+
+/// Master: kurzlebigen 8-stelligen Telefon-Kopplungscode beim Relay
+/// anfordern (ADR 0004) — zum Durchsagen an die ferne Halle. 15 Minuten
+/// gültig; ein neuer Code ersetzt den alten.
+#[tauri::command]
+pub async fn pairing_code(state: State<'_, AppState>) -> Result<relay_proto::PairingCode, String> {
+    let ns = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.install_id.clone()
+    };
+    crate::tablet::relay_client::request_pairing_code(&ns).await
+}
+
+/// Slave: 8-stelligen Telefon-Kopplungscode gegen den vollen
+/// Master-Kopplungs-Code einlösen (ADR 0004). Liefert den Namespace, den
+/// das Frontend als `master_namespace` speichert.
+#[tauri::command]
+pub async fn resolve_pairing_code(code: String) -> Result<String, String> {
+    crate::tablet::relay_client::resolve_pairing_code(code.trim()).await
 }
 
 /// Geräte-Anschluss der fernen Halle (Slave): Relay-Basis des Masters +

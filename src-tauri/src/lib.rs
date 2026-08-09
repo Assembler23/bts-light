@@ -124,6 +124,8 @@ pub fn run() {
             commands::pending_freetext,
             commands::cloud_announce_state,
             commands::cloud_slaves,
+            commands::pairing_code,
+            commands::resolve_pairing_code,
             commands::slave_devices,
             commands::call_preparation,
             commands::retract_preparation,

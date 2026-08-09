@@ -178,17 +178,51 @@ impl Namespace {
 #[derive(Clone)]
 struct Broker {
     namespaces: Arc<Mutex<HashMap<String, Namespace>>>,
+    /// Telefon-Kopplungscodes (ADR 0004): Code → (Namespace, Ablauf Unix-ms).
+    /// Nur im RAM; ein Relay-Neustart macht offene Codes ungültig.
+    pairings: Arc<Mutex<HashMap<String, PairingEntry>>>,
+    /// Fehlversuchs-Zähler fürs Einlösen (globales Sliding Window gegen
+    /// Durchprobieren): (Fensterbeginn Unix-ms, Fehlversuche im Fenster).
+    pair_fails: Arc<Mutex<(u64, u32)>>,
     /// Öffentliche Basis-URL für QR-Codes, z. B. `https://badhub.de/bts-relay`.
     public_base: String,
 }
+
+/// Ein ausgestellter Telefon-Kopplungscode (ADR 0004).
+struct PairingEntry {
+    namespace: String,
+    expires_ms: u64,
+}
+
+/// Gültigkeit eines Telefon-Kopplungscodes.
+const PAIRING_TTL_MS: u64 = 15 * 60 * 1000;
+/// Fehlversuchs-Fenster + -Limit fürs Einlösen (danach 429). Großzügig für
+/// vertippte Menschen, viel zu knapp für 10⁸ Kombinationen.
+const PAIR_FAIL_WINDOW_MS: u64 = 60_000;
+const PAIR_FAIL_LIMIT: u32 = 100;
 
 impl Broker {
     fn new(public_base: String) -> Self {
         Self {
             namespaces: Arc::new(Mutex::new(HashMap::new())),
+            pairings: Arc::new(Mutex::new(HashMap::new())),
+            pair_fails: Arc::new(Mutex::new((0, 0))),
             public_base,
         }
     }
+}
+
+/// Erzeugt einen 8-stelligen Zahlen-Code (führende Nullen möglich) aus
+/// OS-Zufall. Modulo-Bias bei u64 → 10⁸ ist vernachlässigbar (~10⁻¹¹).
+fn gen_pairing_code() -> Result<String, String> {
+    let mut buf = [0u8; 8];
+    getrandom::fill(&mut buf).map_err(|e| e.to_string())?;
+    Ok(format!("{:08}", u64::from_le_bytes(buf) % 100_000_000))
+}
+
+/// Sieht `code` wie ein Telefon-Kopplungscode aus (genau 8 Ziffern)?
+fn valid_pairing_code(code: &str) -> bool {
+    code.len() == 8 && code.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Serialisiert einen Wert zu einem WebSocket-Text-Frame.
@@ -285,6 +319,8 @@ async fn main() {
         .route("/{ns}/monitor/control", post(monitor_control_upload))
         .route("/{ns}/monitor-devices", get(monitor_devices_list))
         .route("/{ns}/info/announce/state", get(announce_state))
+        .route("/{ns}/pairing-code", post(pairing_code_create))
+        .route("/pair/{code}", get(pairing_resolve))
         .route("/{ns}/slaves", get(slaves_list))
         .route("/{ns}/qr/{id}", get(qr_svg))
         .route("/{ns}/flags/{file}", get(flag_route))
@@ -667,6 +703,102 @@ async fn announce_state(
         None => relay_proto::AnnounceState::default(),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+}
+
+/// Stellt einen kurzlebigen Telefon-Kopplungscode für den Namespace aus
+/// (ADR 0004). Nur für Namespaces mit **verbundenem Host** — sonst könnte
+/// jeder beliebige (noch unbenutzte) Namespaces mit Codes belegen. Genau
+/// ein aktiver Code je Namespace: ein neuer ersetzt den alten.
+async fn pairing_code_create(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let host_connected = broker
+        .namespaces
+        .lock()
+        .await
+        .get(&ns)
+        .is_some_and(|n| n.host.is_some());
+    if !host_connected {
+        return (
+            StatusCode::CONFLICT,
+            "Kein verbundener Host für diesen Namespace",
+        )
+            .into_response();
+    }
+    let now = now_ms();
+    let mut pairings = broker.pairings.lock().await;
+    // Abgelaufene Codes und den bisherigen Code dieses Namespace räumen.
+    pairings.retain(|_, e| e.expires_ms > now && e.namespace != ns);
+    let code = loop {
+        match gen_pairing_code() {
+            Ok(c) if !pairings.contains_key(&c) => break c,
+            Ok(_) => continue, // Kollision (praktisch nie) → neu würfeln
+            Err(e) => {
+                tracing::warn!("Pairing-Code-Erzeugung fehlgeschlagen: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Zufall nicht verfügbar")
+                    .into_response();
+            }
+        }
+    };
+    pairings.insert(
+        code.clone(),
+        PairingEntry {
+            namespace: ns,
+            expires_ms: now + PAIRING_TTL_MS,
+        },
+    );
+    Json(relay_proto::PairingCode {
+        code,
+        expires_in_s: PAIRING_TTL_MS / 1000,
+    })
+    .into_response()
+}
+
+/// Löst einen Telefon-Kopplungscode zum vollen Namespace auf (ADR 0004).
+/// Fehlversuchs-Limit VOR dem Lookup: Ist das Fenster ausgeschöpft, wird
+/// auch ein zufällig richtiger Code nicht mehr beantwortet (429) — sonst
+/// wäre das Limit fürs Durchprobieren wirkungslos.
+async fn pairing_resolve(
+    State(broker): State<Broker>,
+    Path(code): Path<String>,
+) -> impl IntoResponse {
+    if !valid_pairing_code(&code) {
+        return (StatusCode::NOT_FOUND, "Ungültiger Code").into_response();
+    }
+    let now = now_ms();
+    {
+        // JEDEN Versuch atomar in EINEM Lock zählen (auch erfolgreiche):
+        // Prüfen und Erhöhen getrennt wäre ein TOCTOU-Fenster, in dem
+        // parallele Requests das Limit überschießen (Review-Befund).
+        // Legitime Kopplungen liegen um Größenordnungen unter dem Limit.
+        let mut fails = broker.pair_fails.lock().await;
+        if now.saturating_sub(fails.0) > PAIR_FAIL_WINDOW_MS {
+            *fails = (now, 0);
+        }
+        fails.1 += 1;
+        if fails.1 > PAIR_FAIL_LIMIT {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Fehlversuche – kurz warten",
+            )
+                .into_response();
+        }
+    }
+    {
+        let mut pairings = broker.pairings.lock().await;
+        pairings.retain(|_, e| e.expires_ms > now);
+        if let Some(e) = pairings.get(&code) {
+            return Json(relay_proto::PairingResolved {
+                namespace: e.namespace.clone(),
+            })
+            .into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, "Code unbekannt oder abgelaufen").into_response()
 }
 
 /// Slaves gelten als online, wenn ihr letzter Poll < 12 s her ist (4 verpasste
@@ -1477,6 +1609,32 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame) {
 mod tests {
     use super::*;
     use relay_proto::{MatchBrief, PlayerBrief};
+
+    #[test]
+    fn pairing_code_is_eight_digits_and_random() {
+        // Format: genau 8 Ziffern, führende Nullen erlaubt.
+        let a = gen_pairing_code().unwrap();
+        assert!(
+            valid_pairing_code(&a),
+            "Code nicht 8-stellig numerisch: {a}"
+        );
+        // Zwei Züge kollidieren praktisch nie – schützt vor einem
+        // versehentlich konstanten Generator (z. B. vergessener Zufall).
+        let b = gen_pairing_code().unwrap();
+        let c = gen_pairing_code().unwrap();
+        assert!(a != b || b != c, "Generator liefert konstant {a}");
+    }
+
+    #[test]
+    fn valid_pairing_code_rejects_non_digits_and_wrong_length() {
+        assert!(valid_pairing_code("00000000"));
+        assert!(valid_pairing_code("12345678"));
+        assert!(!valid_pairing_code("1234567"));
+        assert!(!valid_pairing_code("123456789"));
+        assert!(!valid_pairing_code("12a45678"));
+        assert!(!valid_pairing_code("a1b2c3d4-e5f6-7890-abcd-ef1234567890"));
+        assert!(!valid_pairing_code(""));
+    }
 
     #[test]
     fn valid_namespace_accepts_uuid_rejects_garbage() {

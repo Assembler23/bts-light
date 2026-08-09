@@ -219,6 +219,13 @@ export interface SlaveInfo {
   lastSeenMs: number;
 }
 
+/** Kurzlebiger 8-stelliger Telefon-Kopplungscode des Masters
+ *  (Rust: relay_proto::PairingCode, ADR 0004). */
+export interface PairingCode {
+  code: string;
+  expiresInS: number;
+}
+
 /** Ein Feld der Cloud-Feldliste (Rust: relay_proto::CourtBrief). */
 export interface CourtBrief {
   id: number;

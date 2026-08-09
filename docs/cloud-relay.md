@@ -71,6 +71,8 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /{ns}/ws` | Tablet-WebSocket |
 | `GET /{ns}/host-ws` | bts-light-Host-WebSocket (ausgehend) |
 | `POST /{ns}/result` | Endergebnis vom Tablet → an den Host weitergereicht |
+| `POST /{ns}/pairing-code` | Telefon-Kopplungscode ausstellen (ADR 0004, nur bei verbundenem Host) |
+| `GET /pair/{code}` | Telefon-Code → Namespace auflösen (15 Min TTL, Fehlversuchs-Limit) |
 | `GET /health` | Status-Schnappschuss |
 
 ### Datenfluss
@@ -101,6 +103,12 @@ Tablets ebenso. Der 2-s-Ticker re-synct danach den Stand.
   Diese Prüfung ist dieselbe wie im LAN-Modus.
 - Broker-Limits gegen Überlast: maximale Anzahl Namespaces, Tablets je
   Namespace und gleichzeitig offener Ergebnis-Übermittlungen.
+- **Telefon-Kopplungscode** ([ADR 0004](adr/0004-telefon-kopplungscode.md),
+  v0.9.145): 8-stelliger Zahlen-Code als kurzlebiger Alias auf den
+  Namespace — nur im RAM, 15 Min TTL, ein aktiver Code je Namespace,
+  Ausstellung nur bei verbundenem Host, globales Fehlversuchs-Limit beim
+  Einlösen (429). Die dauerhafte Bearer-Capability bleibt die
+  `install_id`-UUID.
 - **Azure-TTS-Vererbung** ([ADR 0003](adr/0003-azure-tts-vererbung-relay.md),
   v0.9.145): Der Host schickt seine Azure-Speech-Config als optionales
   `azureTts`-Feld im `HostFrame::Courts`-Push; der Relay hält sie je

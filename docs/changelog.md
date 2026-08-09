@@ -6,6 +6,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
 ## v0.9.145
 
+- **BTP beendet Spiele wieder automatisch (Regression seit v0.9.103).** Tablet-Ergebnisse
+  kamen zwar in BTP an, aber das Spiel blieb dort offen — Sieger musste je Match manuell
+  gewählt und gespeichert werden (Live-Befund Zwei-Hallen-Turnier 17.07.2026). Ursache:
+  v0.9.103 hatte das `Status`-Feld nicht nur aus der Feldzuweisung (dort richtig), sondern
+  versehentlich auch aus dem **Ergebnis**-`SENDUPDATE` entfernt. `Status` steht wieder im
+  Ergebnis (wie im Original-BTS); zusätzlich werden Ergebnis und Feldfreigabe jetzt in
+  **einem** Request geschrieben — der frühere zweite „nackte" Freigabe-Request konnte das
+  Ergebnis wieder entwerten. *(Vor dem Release am echten BTP gegenprüfen: Spiel schließt
+  automatisch, Feld wird frei, Spieler-Check-in bleibt bei Feldzuweisungen unangetastet.)*
+
 - **Hochwertige Azure-Ansage: Slave erbt den Zugang vom Master.** Beim ersten
   Zwei-Hallen-Praxistest sprach der Slave nur die Standardstimme — der Azure-Key war dort nicht
   eingetragen und der Rückfall passierte **stumm**. Jetzt schickt der Master seine
@@ -18,6 +28,14 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   übernimmt weiterhin nahtlos die Standardstimme — aber ein **quittierbarer Banner** zeigt den
   Fehler jetzt app-weit an, und die Ansage-Einstellungen **warnen sichtbar**, wenn der
   Azure-Schalter an ist, aber Schlüssel/Region fehlen.
+- **Kopplung per 8-stelligem Telefon-Code.** Der Master erzeugt in den Einstellungen einen
+  **8-stelligen Zahlen-Code** (15 Minuten gültig), den man der fernen Halle **telefonisch
+  durchsagen** kann — dort eintippen, fertig: Die App löst ihn automatisch gegen den vollen
+  Kopplungs-Code ein. Der lange Code funktioniert weiterhin. Sicherheits-Abwägung:
+  [ADR 0004](adr/0004-telefon-kopplungscode.md). *(Voraussetzung: aktualisierter Relay.)*
+- **„Ferne Halle hat sich verbunden ✓".** Verbindet sich ein Ansage-Slave neu (oder nach einem
+  Ausfall wieder), zeigt der Master kurz einen grünen Banner — die Kopplung ist damit auf einen
+  Blick bestätigt, zusätzlich zum Punkt in der Kopfzeile.
 
 ## v0.9.144
 
