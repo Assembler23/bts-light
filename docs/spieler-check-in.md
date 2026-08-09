@@ -313,3 +313,25 @@ ausgerufen: er soll gerade nicht zur Turnierleitung.
 - [`scripts/test-checkin-pairs.mjs`](../scripts/test-checkin-pairs.mjs)
   (Node, im CI) — Doppel-Gruppierung der Anzeige: Paar nur bei `entry_id > 0`
   und genau zwei Trägern, `entry_id` 0 klumpt nie, Reihenfolge bleibt.
+
+### Probe am laufenden BTP
+
+Diese Probe entstand, als die badhub-Gegenstelle noch fehlte und sich der
+Check-In nicht Ende-zu-Ende testen ließ. Sie bleibt auch danach nützlich, weil
+sie etwas misst, was kein Mock zeigt: was ein **echtes** BTP an einem echten
+Turniertag liefert.
+[`tests/checkin_roster_probe.rs`](../src-tauri/tests/checkin_roster_probe.rs)
+zieht den Snapshot aus einem **laufenden** BTP und zeigt die Meldeliste, die
+gesendet würde: Klassen mit Disziplin, Meldungen und Spielern je Klasse,
+Abdeckung von Lizenznummer und Verein, Spieler in mehreren Klassen,
+Payload-Größe.
+
+```text
+cargo test -p bts-light --test checkin_roster_probe -- --ignored --nocapture
+```
+
+`BTP_HOST`/`BTP_PORT`/`BTP_PASSWORD` steuern die Verbindung, `SHOW_NAMES=1`
+gibt zusätzlich Namen aus (standardmäßig **keine**). Meldungen mit nur einem
+Spieler in einer Doppel- oder Mixed-Klasse werden getrennt ausgewiesen: in BTP
+ohne Partner gemeldet (normal) gegenüber unauflösbarem Partner (Datenfehler in
+BTP) — im Roster sehen beide gleich aus.
