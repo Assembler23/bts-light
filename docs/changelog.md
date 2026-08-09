@@ -4,6 +4,26 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.177
+
+- **Check-In-Sicht für die Turnierleitung.** Der neue Punkt *Check-In* zeigt
+  je Spielklasse, wer da ist und wer fehlt — schon vor der Auslosung, ohne
+  jemanden am Anmeldetisch zu fragen. Spieler lassen sich von Hand auf
+  anwesend setzen und wieder zurücknehmen; wer zurückgesetzt wurde, kann sich
+  nicht selbst erneut eintragen, bis die Turnierleitung ihn wieder freigibt.
+  Anfangszeit und Anmeldeschluss sind am Turniertag direkt hier änderbar, wenn
+  ein Turnier in Verzug gerät.
+- **Zwei Ansagen je Klasse, immer auf Knopfdruck.** „Noch N Minuten bis
+  Anmeldeschluss" und die Namen der Fehlenden — bei vielen Fehlenden nur noch
+  deren Anzahl, damit die Ansage nicht minutenlang läuft. Der Text entsteht
+  aus dem aktuellen Stand, nicht aus dem, was zuletzt auf dem Bildschirm
+  stand; niemand wird ausgerufen, der inzwischen eingecheckt hat.
+- **Ohne Internet passiert nichts Schlimmes.** Ist badhub nicht erreichbar
+  oder kennt es den Check-In noch nicht, steht dort ein ruhiger Hinweis statt
+  einer Fehlermeldung — das Turnier läuft unverändert weiter. Der Punkt bleibt
+  ausgegraut, solange der Check-In nicht eingerichtet ist. Details:
+  [spieler-check-in.md](spieler-check-in.md).
+
 ## v0.9.176
 
 - **Turnierleitung im Browser.** Felder vergeben, ohne am Turnier-PC zu

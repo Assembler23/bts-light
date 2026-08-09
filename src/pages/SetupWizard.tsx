@@ -54,7 +54,7 @@ interface Props {
   mode?: "wizard" | "settings";
   /** Abschnitt, zu dem beim Öffnen gescrollt wird (Sprung aus einem
    *  ausgegrauten Menüpunkt der Seitenleiste). */
-  focus?: "ansagen" | "court-monitor";
+  focus?: "ansagen" | "court-monitor" | "check-in";
 }
 
 type TestState =
@@ -1132,8 +1132,9 @@ export function SetupWizard({
         </div>
       </section>
 
-      {/* Zähltafelbediener-Verwaltung (ADR 0007) */}
-      <section className="flex flex-col gap-2">
+      {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem
+          ausgegrauten Menüpunkt „Check-In" in der Seitenleiste. */}
+      <section id="section-check-in" className="flex flex-col gap-2">
         <SectionHeader icon={Users}>Hallen-Check-In</SectionHeader>
         <p className="text-xs text-slate-500">
           Spieler bestätigen vor Beginn ihrer Spielklasse über eine Webseite

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AnnounceJob,
   AppConfig,
+  CheckinView,
   CloudAnnounce,
   CourtAd,
   DrawInfo,
@@ -180,6 +181,39 @@ export const fetchPronunciations = (): Promise<NameOverride[]> =>
 /** Eigene Aussprache-Korrekturen mit der Community-DB teilen (opt-in). */
 export const sharePronunciations = (entries: NameOverride[]): Promise<number> =>
   invoke("share_pronunciations", { entries });
+
+/** Check-In-Stand aus badhub holen (Hallen-Check-In, Schnitt C).
+ *
+ *  Wirft **nie**: fehlendes Internet und ein badhub ohne den Check-In-Kanal
+ *  kommen als `availability` zurück, damit die Seite einen Hinweis zeigen kann
+ *  statt einer Fehlermeldung (AK-C3, C4). */
+export const checkinState = (): Promise<CheckinView> => invoke("checkin_state");
+
+/** Einen Spieler von Hand setzen (`check_in`), zurücksetzen (`reset`, sperrt
+ *  den Selbst-Check-In) oder entsperren (`unlock`). */
+export const checkinSetPlayer = (
+  eventId: number,
+  playerId: number,
+  action: "check_in" | "reset" | "unlock",
+): Promise<void> =>
+  invoke("checkin_set_player", { eventId, playerId, action });
+
+/** Anfangszeit und Anmeldeschluss einer Klasse ändern. `null` löscht den Wert.
+ *  Der Wert landet sofort in badhub — bts-light hält keine eigene Kopie. */
+export const checkinSetTimes = (
+  eventId: number,
+  startsAt: string | null,
+  closesAt: string | null,
+): Promise<void> => invoke("checkin_set_times", { eventId, startsAt, closesAt });
+
+/** Ansagetext für eine Klasse bauen: `deadline` („Noch N Minuten bis
+ *  Anmeldeschluss …") oder `missing` (die Fehlenden). `null` heißt: es gibt
+ *  nichts anzusagen. Der Stand wird dafür frisch geholt. */
+export const checkinAnnouncement = (
+  eventId: number,
+  kind: "deadline" | "missing",
+): Promise<string | null> =>
+  invoke("checkin_announcement", { eventId, kind });
 
 /** Master: eine Freitext-Ansage ablegen (Halle leer = alle). Liefert die ID. */
 export const publishFreetext = (hall: string, text: string): Promise<number> =>

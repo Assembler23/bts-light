@@ -434,6 +434,180 @@ pub async fn share_pronunciations(
     Ok(entries.len())
 }
 
+// ── Hallen-Check-In: Sicht der Turnierleitung (Schnitt C) ────────────────────
+//
+// Der Abruf läuft über diese Commands und **nicht** per `fetch()` aus React
+// gegen badhub (Architekturregel R1). Das ist hier keine Formalie: das
+// Liveticker-Passwort bleibt damit im Backend und taucht in keinem
+// WebView-Request auf.
+
+/// Zieht die Zugangsdaten des Check-Ins aus der Config.
+///
+/// `None` heißt „nicht eingerichtet" — kein Häkchen, keine Turnier-GUID oder
+/// eine unbrauchbare badhub-URL. Der Aufrufer liefert dann `Unsupported`, und
+/// die Oberfläche blendet den Bereich aus (AK-A6, C4).
+fn checkin_zugang(cfg: &AppConfig) -> Option<(String, String, String)> {
+    if !cfg.checkin.is_ready() {
+        return None;
+    }
+    let base = badhub_origin(&cfg.badhub.url)?;
+    Some((
+        base,
+        cfg.badhub.password.clone(),
+        cfg.checkin.tournament_uuid.trim().to_string(),
+    ))
+}
+
+/// Der Check-In-Stand für die Turnierleitungs-Sicht (AK-C1, C5).
+///
+/// **Liefert nie `Err`** — auch nicht ohne Internet und nicht gegen ein
+/// badhub, das den Kanal noch nicht kennt. Beides kommt als
+/// [`Availability`](crate::badhub::checkin_state::Availability) zurück, damit
+/// die Seite einen verständlichen Hinweis zeigen kann statt einer
+/// Fehlermeldung (AK-C3, C4).
+///
+/// Bewusst **ohne** lokalen Zwischenspeicher: badhub speichert, bts-light
+/// zeigt an (AK-C13).
+#[tauri::command]
+pub async fn checkin_state(
+    state: State<'_, AppState>,
+) -> Result<crate::badhub::checkin_state::CheckinView, String> {
+    use crate::badhub::checkin_state::{fetch_state, Availability, CheckinView};
+
+    let zugang = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        checkin_zugang(&cfg)
+    };
+
+    let Some((base, password, uuid)) = zugang else {
+        return Ok(CheckinView::unavailable(
+            Availability::Unsupported,
+            "Der Hallen-Check-In ist für dieses Turnier nicht eingerichtet.",
+        ));
+    };
+
+    Ok(fetch_state(&checkin_client(), &base, &password, &uuid).await)
+}
+
+/// Einen Spieler von Hand setzen, zurücksetzen oder entsperren (AK-C2).
+///
+/// `action`: `check_in` · `reset` · `unlock`. Das Zurücksetzen sperrt den
+/// Selbst-Check-In — entschieden wird das in badhub, nicht hier.
+#[tauri::command]
+pub async fn checkin_set_player(
+    state: State<'_, AppState>,
+    event_id: i64,
+    player_id: i64,
+    action: String,
+) -> Result<(), String> {
+    let zugang = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        if cfg.slave_mode {
+            // Genau ein Master schreibt (Mehr-Hallen-Regel D7). Ein Slave
+            // zeigt den Stand an, greift aber nicht ein.
+            return Err("Diese Instanz läuft als Slave und kann den Check-In nur anzeigen.".into());
+        }
+        checkin_zugang(&cfg)
+    };
+    let Some((base, password, uuid)) = zugang else {
+        return Err("Der Hallen-Check-In ist für dieses Turnier nicht eingerichtet.".into());
+    };
+
+    crate::badhub::checkin_state::set_player(
+        &checkin_client(),
+        &base,
+        &password,
+        &uuid,
+        event_id,
+        player_id,
+        &action,
+    )
+    .await
+}
+
+/// Anfangszeit und Anmeldeschluss einer Klasse ändern (AK-C12).
+///
+/// Der Wert landet sofort in badhub; bts-light hält **keine** eigene Kopie
+/// (AK-C13). Ohne Verbindung wird der Versuch abgelehnt statt
+/// zwischengespeichert (AK-C14).
+#[tauri::command]
+pub async fn checkin_set_times(
+    state: State<'_, AppState>,
+    event_id: i64,
+    starts_at: Option<String>,
+    closes_at: Option<String>,
+) -> Result<(), String> {
+    let zugang = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        if cfg.slave_mode {
+            return Err("Diese Instanz läuft als Slave und kann den Check-In nur anzeigen.".into());
+        }
+        checkin_zugang(&cfg)
+    };
+    let Some((base, password, uuid)) = zugang else {
+        return Err("Der Hallen-Check-In ist für dieses Turnier nicht eingerichtet.".into());
+    };
+
+    crate::badhub::checkin_state::set_times(
+        &checkin_client(),
+        &base,
+        &password,
+        &uuid,
+        event_id,
+        starts_at.as_deref(),
+        closes_at.as_deref(),
+    )
+    .await
+}
+
+/// Baut den Ansagetext für eine Klasse (AK-C6 bis C8).
+///
+/// `kind`: `deadline` („Noch N Minuten bis Anmeldeschluss …") oder `missing`
+/// (die fehlenden Spieler). `Ok(None)` heißt „es gibt nichts anzusagen" —
+/// niemand fehlt oder der Anmeldeschluss ist vorbei.
+///
+/// **Der Stand wird dafür frisch geholt**, nicht aus der Anzeige übernommen:
+/// zwischen dem letzten Poll und dem Klick können 15 Sekunden liegen, und eine
+/// Ansage, die einen bereits Eingecheckten ausruft, schickt jemanden umsonst
+/// zur Turnierleitung.
+///
+/// Gesprochen wird ausschließlich nach diesem Aufruf, also nach einem Klick
+/// (AK-C10) — die App sagt nie von selbst etwas an.
+#[tauri::command]
+pub async fn checkin_announcement(
+    state: State<'_, AppState>,
+    event_id: i64,
+    kind: String,
+) -> Result<Option<String>, String> {
+    use crate::badhub::checkin_state::{deadline_text, fetch_state, missing_text};
+
+    let (zugang, max_names) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (checkin_zugang(&cfg), cfg.checkin.missing_names_max)
+    };
+    let Some((base, password, uuid)) = zugang else {
+        return Err("Der Hallen-Check-In ist für dieses Turnier nicht eingerichtet.".into());
+    };
+
+    let view = fetch_state(&checkin_client(), &base, &password, &uuid).await;
+    let Some(klasse) = view.classes.iter().find(|k| k.event_id == event_id) else {
+        return Err("Diese Spielklasse steht nicht mehr in der Meldeliste.".into());
+    };
+
+    match kind.as_str() {
+        "deadline" => Ok(deadline_text(klasse, chrono::Local::now().naive_local())),
+        "missing" => Ok(missing_text(klasse, max_names)),
+        _ => Err("Unbekannte Ansage.".into()),
+    }
+}
+
+/// Frischer Client je Aufruf — wie bei [`fetch_pronunciations`]. Der Poll-Takt
+/// der Check-In-Sicht liegt bei Sekunden, nicht Millisekunden; ein
+/// vorgehaltener Client im `AppState` wäre hier Zustand ohne Gegenwert.
+fn checkin_client() -> reqwest::Client {
+    crate::badhub::checkin_state::build_client()
+}
+
 /// Testet die Verbindung zu BTP und liefert bei Erfolg den Turniernamen.
 #[tauri::command]
 pub async fn test_btp(host: String, port: u16, password: Option<String>) -> Result<String, String> {

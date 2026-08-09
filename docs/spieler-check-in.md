@@ -23,7 +23,7 @@ Das Feature ist in drei nacheinander lieferbare Schnitte geteilt.
 |---|---|---|
 | **A** | Meldelisten-Push (bts-light) + Persistenz und Verwaltung (badhub) | bts-light-Teil steht |
 | **B** | Öffentliche Check-In-Seite + QR-Aushang (badhub) | offen |
-| **C** | Turnierleitungs-Sicht, Zeiten-Pflege + Ansagen (bts-light) | offen |
+| **C** | Turnierleitungs-Sicht, Zeiten-Pflege + Ansagen (bts-light) | Sicht und Zeiten stehen, Ansagen offen |
 
 **Solange der badhub-Teil von Schnitt A nicht ausgerollt ist**, antwortet der
 Endpunkt mit 404 — bts-light legt den Meldelisten-Push dann für die laufende
@@ -121,7 +121,95 @@ deshalb nur lesbar.
 Der **Rückfrage-Status** bleibt bewusst nur in badhub: er entsteht beim
 Zahlungsabgleich Tage vor dem Turnier.
 
-*(Die bts-light-Seite kommt mit Schnitt C.)*
+## Die Sicht der Turnierleitung
+
+Seitenleisten-Punkt **Check-In**
+([`pages/CheckinPanel.tsx`](../src/pages/CheckinPanel.tsx)). Je Klasse stehen
+dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
+ihrem Zustand.
+
+Der Punkt ist ausgegraut, solange kein Häkchen **oder** keine Turnier-Kennung
+gesetzt ist — ohne Kennung erreicht der Check-In badhub nie, und eine Seite,
+die nur „nicht eingerichtet" sagt, führte in die Irre. Der Klick springt dann
+in den passenden Abschnitt der Einstellungen.
+
+### Woher die Daten kommen
+
+Über den **Turnierleitungs-Kanal** von badhub — drei Bearer-authentifizierte
+Endpunkte unter `/checkin/<GUID>/tl/`, bedient von
+[`badhub/checkin_state.rs`](../src-tauri/src/badhub/checkin_state.rs) und
+freigegeben über die Commands `checkin_state`, `checkin_set_player` und
+`checkin_set_times`. Der Browser spricht badhub **nie** direkt an (R1); das
+Liveticker-Passwort bleibt dadurch im Backend.
+
+Der Kanal liefert mehr als die öffentliche Seite: Rückfrage-Status, Sperre und
+Herkunft des Check-Ins (`selbst` · `durch Partner` · `Turnierleitung`). Nach
+außen verlassen diese Felder badhub nie.
+
+### Vier Zustände statt eines Fehlers
+
+`checkin_state` liefert **nie** `Err`. Stattdessen trägt jede Antwort, ob der
+Check-In gerade benutzbar ist:
+
+| | Bedeutung | Was die Seite zeigt |
+|---|---|---|
+| `ready` | badhub hat geantwortet | den Stand |
+| `offline` | keine Verbindung | „Der Check-In braucht Internet" — plus den Hinweis, dass das Turnier unverändert weiterläuft |
+| `unsupported` | badhub kennt den Kanal noch nicht (404/400) oder der Check-In ist nicht eingerichtet | denselben ruhigen Hinweis |
+| `rejected` | Passwort oder Kennung passen nicht (401/403) | die Aufforderung, beides zu prüfen |
+
+`rejected` ist der einzige Fall, den die Turnierleitung selbst beheben kann —
+deshalb ist er als einziger von „offline" unterschieden. Ein 5xx wird wie
+offline behandelt: der nächste Abruf versucht es erneut.
+
+### Eingreifen und Zeiten pflegen
+
+- **Setzen** trägt den Spieler mit Herkunft `Turnierleitung` ein.
+- **Zurücksetzen** räumt den Check-In ab **und sperrt den Selbst-Check-In**.
+  Ohne die Sperre klickt der Spieler auf seinem Handy einfach erneut und die
+  Korrektur wäre folgenlos. **Entsperren** hebt nur die Sperre auf.
+- **Zeiten** gehen direkt an badhub; die Plausibilität (Anmeldeschluss nicht
+  vor der Anfangszeit) prüft **badhub**. Eine zweite Regel hier wäre eine
+  zweite Wahrheit, die auseinanderlaufen kann.
+
+Nach jeder Änderung wird neu abgerufen, statt den Stand lokal fortzuschreiben —
+sonst stünde nach einer abgelehnten Änderung etwas anderes auf dem Bildschirm
+als in der Datenbank. Ohne Verbindung wird der Versuch **gemeldet**, nicht
+zwischengespeichert.
+
+**Ein Slave greift nicht ein.** `slave_mode` lehnt beide Schreib-Commands ab;
+die Sicht bleibt lesbar (Mehr-Hallen-Regel: genau ein Master schreibt).
+
+Gepollt wird alle **15 Sekunden** — träger als die 4 s der
+Vorbereitungs-Seite. badhub läuft auf Shared Hosting und bedient zur
+Fensteröffnung gleichzeitig die halbe Halle; der Check-In-Stand ändert sich in
+Minuten, nicht in Sekunden.
+
+### Ansagen
+
+Zwei Knöpfe je Klasse, beide **nur auf Klick** — die App sagt nie von selbst
+etwas an:
+
+- **Anmeldeschluss** → „Noch 25 Minuten bis Anmeldeschluss Herrendoppel B."
+  Fehlt der eigene Anmeldeschluss, gilt die Anfangszeit. Ist er vorbei,
+  entfällt die Ansage.
+- **Fehlende** → bis `missing_names_max` Namen werden genannt, **darüber nur
+  die Anzahl** („In Herrendoppel B fehlen noch 23 Anmeldungen"). Sonst liefe
+  die Ansage kurz nach Fensteröffnung minutenlang. Fehlt niemand, erscheint
+  der Knopf nicht.
+
+Der Text entsteht in `checkin_announcement` aus einem **frisch geholten**
+Stand, nicht aus dem, was gerade auf dem Bildschirm steht: zwischen Poll und
+Klick können 15 Sekunden liegen, und eine Ansage, die einen bereits
+Eingecheckten ausruft, schickt jemanden umsonst zur Turnierleitung.
+
+Gerufen wird **ohne Hallen-Filter** — eine Klasse startet zwar in einer Halle,
+der Check-In gilt aber turnierweit. Abgespielt wird über den bestehenden
+Freitext-Weg (`publish_freetext`); ohne eingerichtete Ansagen erscheinen die
+Knöpfe nicht, weil dann niemand spräche.
+
+Wer eine **Rückfrage** hat, zählt als fehlend: er soll ohnehin zur
+Turnierleitung.
 
 ## Grenzen und Randfälle
 
@@ -182,3 +270,11 @@ Zahlungsabgleich Tage vor dem Turnier.
   still, 500 wird wiederholt.
 - [`config.rs`](../src-tauri/src/config.rs) — alte `config.json` lädt mit
   Defaults (Auto-Update-Pfad), Kennungs-Format.
+- [`badhub/checkin_state.rs`](../src-tauri/src/badhub/checkin_state.rs) — gegen
+  einen HTTP-Mock: Stand mit Sperre und Herkunft, fehlende Spieler (inklusive
+  `query`), 404 → `unsupported`, 403 → `rejected`, 5xx und kein Netz →
+  `offline`, Turnier ohne Push → leer aber `ready`, abgelehnter Schreibvorgang
+  meldet den Text von badhub statt ihn zu verschlucken.
+- Ansagetexte als **reine** Funktionen (ebenda): Einzahl/Mehrzahl der Minuten,
+  Ansage entfällt nach Anmeldeschluss, Anfangszeit als Rückfall, unter/über
+  `missing_names_max`, leere Fehlt-Liste, `query` zählt als fehlend.
