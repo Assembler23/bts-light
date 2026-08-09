@@ -33,3 +33,8 @@ spike-out/
 # Spec-Pipeline (/idee): Roh-Transkripte und Zwischenstände – können Namen
 # enthalten, committet wird nur die fertige Spec unter docs/features/
 docs/features/_intake/
+
+# BTP-Mitschnitte, die die Experiment-Werkzeuge im Repo-Root ablegen. Nur die
+# Wurzel-Ebene: die echten Testdaten liegen bewusst unter
+# src-tauri/tests/fixtures/ und werden per include_bytes! gebraucht.
+/*.bin
