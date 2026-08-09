@@ -29,6 +29,9 @@ Browser an einen Server geschickt und taucht deshalb in keinem Protokoll auf.
 Adresse ins Leere, das Gerät übernimmt den Zugang nie — und der war nur
 dieses eine Mal zu sehen. Die Seite warnt in diesem Fall.
 
+Der Internet-Weg (zweiter QR-Code) setzt den Verbindungsmodus Cloud oder
+LAN+Cloud voraus.
+
 ## Im Betrieb
 
 - **Zuweisen:** Spiel antippen, dann Feld antippen. Oder ziehen. Beides
@@ -51,6 +54,12 @@ dieses eine Mal zu sehen. Die Seite warnt in diesem Fall.
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
 - **Die Felder bleiben stehen**, während die Spielliste läuft: Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen.
+- **Zähltafel-Warteschlange:** Ist die Zähltafel-Verwaltung in bts-light
+  eingeschaltet, erscheint rechts ein eigener aufklappbarer Abschnitt mit
+  den wartenden Zähltafelbedienern. Von dort lässt sich jemand **vorziehen**
+  (an den Anfang der Schlange), aus der Schlange **entfernen** oder von Hand
+  neu **hinzufügen** — dieselben Aktionen wie am Turnier-PC. Ist die
+  Verwaltung ausgeschaltet, bleibt der Abschnitt unsichtbar.
 
 ### Die Farbe eines Feldes
 
@@ -134,8 +143,6 @@ kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
   steht, wird abgelehnt — was BTP beim Überschreiben mit dem Turnierbaum
   macht, ist noch nicht abschließend geklärt
   ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
-- **Zähltafelbediener-Warteschlange** lässt sich hier nur ansehen, nicht
-  umsortieren.
 - **Beendete Spiele** zeigt die Seite nicht.
 - Über den **Cloud-Weg** ist die Warteliste auf 40 Spiele je Halle gekürzt
   (im Hallennetz sind es 120). Der Zustand geht bei jedem Ballwechsel neu

@@ -345,6 +345,43 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
 }
 .wo button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* Zähltafel-Warteschlange: nur sichtbar, wenn diese Installation
+   Zähltafelbediener verwaltet. Als aufklappbarer Abschnitt (der Rahmen
+   „details > summary" weiter unten liefert Pfeil und Beschriftung), im
+   Zeilenstil der Spielliste, aber kompakter — hier geht es um Namen und
+   Wartezeit, nicht um eine ganze Paarung. */
+.sk { margin-bottom: 16px; }
+.sk .count { color: var(--ink-faint); font-weight: 600; }
+.sk #sk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sk #sk-list li {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px; min-height: 44px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.sk .sk-names { font-weight: 600; flex: 1 1 8rem; min-width: 0; }
+.sk .sk-wait { font-size: .82rem; color: var(--ink-soft); }
+.sk #sk-list button {
+  font: inherit; font-weight: 700; min-width: 40px; min-height: 40px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+}
+.sk #sk-list button:hover { border-color: var(--accent); color: var(--accent); }
+/* Das Formular bleibt beim Neuzeichnen unangetastet (nur `#sk-list` wird
+   ersetzt) — sonst würde ein Name, an dem gerade getippt wird, alle zwei
+   Sekunden vom nächsten Abruf gelöscht. */
+#sk-add { display: flex; gap: 8px; margin-top: 8px; }
+#sk-name {
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
+}
+#sk-add button {
+  font: inherit; font-weight: 650; padding: 0 14px; min-height: 40px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--card);
+  color: var(--ink-soft); cursor: pointer;
+}
+#sk-add button:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Aufklappbare Abschnitte müssen als solche erkennbar sein — ohne Zeichen
    wirken sie wie eine leere Sektion, und die Turnierleitung glaubt, es
    gäbe dort nichts. */
@@ -444,7 +481,9 @@ body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; 
 body.offline .prep,
 body.offline .recall button,
 body.offline .callbtn,
-body.offline .wo .actions button { opacity: .45; }
+body.offline .wo .actions button,
+body.offline .sk #sk-list button,
+body.offline #sk-add button { opacity: .45; }
 
 /* Rückmeldung zur letzten Aktion. Bleibt stehen, bis sie weggetippt wird
    oder die nächste Aktion beginnt. */
@@ -508,6 +547,14 @@ body.offline .wo .actions button { opacity: .45; }
     </section>
     <section>
       <div id="walkovers"></div>
+      <details class="sk" id="sk-box" hidden>
+        <summary>Zähltafel-Warteschlange <span class="count" id="sk-count"></span></summary>
+        <ol id="sk-list"></ol>
+        <form id="sk-add">
+          <input type="text" id="sk-name" placeholder="Name (Doppel: A / B)" maxlength="80" />
+          <button type="submit">Hinzufügen</button>
+        </form>
+      </details>
       <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
       <div id="queue"></div>
     </section>
@@ -1786,6 +1833,60 @@ function renderWalkovers() {
   });
 }
 
+/**
+ * Zähltafel-Warteschlange.
+ *
+ * Sichtbar nur, wenn dieser Turnier-PC Zähltafelbediener verwaltet
+ * (`scorekeeper_managed`) — sonst gäbe es hier nichts zu bedienen. Die
+ * Aktionen laufen über dieselben Vorgangskennungen wie am Turnier-PC:
+ * `key` ist stabil je Eintrag — ein Doppeltipp ist damit dieselbe Kennung
+ * und wird als Wiederholung erkannt (kein doppeltes Vorziehen).
+ *
+ * Nur `#sk-list` wird neu gezeichnet, nicht das umgebende `<details>` samt
+ * Formular — sonst würde ein Name, an dem gerade getippt wird, beim
+ * nächsten Abruf (alle zwei Sekunden) mitten im Tippen gelöscht.
+ */
+function renderScorekeepers() {
+  const box = $("sk-box");
+  box.hidden = !state.scorekeeper_managed;
+  if (box.hidden) return;
+  const list = state.scorekeepers || [];
+  $("sk-count").textContent = list.length ? `(${list.length})` : "";
+  $("sk-list").innerHTML = list.map((e, i) => `<li>
+      <span class="sk-names">${esc(e.names.join(" / "))}</span>
+      <span class="sk-wait num" data-since="${e.enqueued_ms}" title="wartet seit">${e.enqueued_ms ? elapsed(e.enqueued_ms) : ""}</span>
+      ${i > 0 ? `<button type="button" data-sk-adv="${esc(e.key)}" title="an den Anfang der Warteschlange">▲</button>` : ""}
+      <button type="button" data-sk-del="${esc(e.key)}" title="aus der Warteschlange nehmen">×</button>
+    </li>`).join("");
+  $("sk-list").querySelectorAll("[data-sk-adv]").forEach((b) =>
+    b.addEventListener("click", () =>
+      send(`sk-adv-${b.dataset.skAdv}`, { action: "scorekeeper_advance", key: b.dataset.skAdv }, "Vorgezogen.")));
+  $("sk-list").querySelectorAll("[data-sk-del]").forEach((b) =>
+    b.addEventListener("click", () =>
+      send(`sk-del-${b.dataset.skDel}`, { action: "scorekeeper_remove", key: b.dataset.skDel }, "Aus der Warteschlange entfernt.")));
+}
+
+/** Manuell einen Zähltafelbediener in die Warteschlange eintragen. */
+function addScorekeeper(ev) {
+  ev.preventDefault();
+  const roh = $("sk-name").value.trim();
+  if (!roh) return;
+  // Doppel: „A / B" — die Turnierleitung trennt die Namen selbst per
+  // Schrägstrich, wie an anderer Stelle auf dieser Seite auch (Paarungen).
+  const names = roh.split("/").map((s) => s.trim()).filter(Boolean);
+  if (!names.length) return;
+  // Zeitfenster statt fester Kennung: Anders als bei Vorziehen/Entfernen
+  // gibt es hier keinen `key` — derselbe Name könnte auch bewusst zweimal
+  // eingetragen werden (zwei Personen mit gleichem Namen). Ein Doppeltipp
+  // innerhalb des Fensters gilt als Wiederholung, danach als neue Absicht.
+  send(
+    `sk-add-${roh}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "scorekeeper_add", names },
+    "Eingetragen.",
+  );
+  $("sk-name").value = "";
+}
+
 function renderAutoToggle() {
   const btn = $("auto-toggle");
   const aa = state.auto_assign || {};
@@ -1825,6 +1926,7 @@ function render() {
   renderActionBar();
   renderCourts();
   renderWalkovers();
+  renderScorekeepers();
   renderQueue();
 }
 
@@ -1847,6 +1949,10 @@ function tickClocks() {
   document.querySelectorAll(".called[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
     if (since) el.textContent = "gerufen seit " + elapsed(since);
+  });
+  document.querySelectorAll(".sk-wait[data-since]").forEach((el) => {
+    const since = Number(el.dataset.since);
+    if (since) el.textContent = elapsed(since);
   });
   // Der Sprung von „gerufen" auf „überfällig" hängt allein an der Uhr — er
   // käme sonst erst, wenn sich am Turnier sonst irgendetwas ändert. In einer
@@ -1879,6 +1985,11 @@ function start() {
     else pickVanished();
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
+  // Das Formular steht fest im Markup (siehe `renderScorekeepers`) und
+  // wird nie neu gezeichnet — die Verdrahtung gehört deshalb hierher, nicht
+  // in eine Render-Funktion, sonst hätte jeder Abruf einen weiteren
+  // `submit`-Zuhörer angehängt.
+  $("sk-add").addEventListener("submit", addScorekeeper);
   $("toast-close").addEventListener("click", hideToast);
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
