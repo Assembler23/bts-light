@@ -306,6 +306,15 @@ pub struct BtpMatch {
     /// CourtID (stabile Feld-Identität) des zugewiesenen Felds; `None`,
     /// wenn das Match keinem Feld zugewiesen ist.
     pub court_id: Option<i64>,
+    /// **Geplanter Spielort** (`Match.LocationID`) — die Halle, in der das
+    /// Spiel stattfinden soll, schon **bevor** es auf ein Feld kommt.
+    ///
+    /// Nur gefüllt, wenn das Turnier die Spalte „Spielort" pflegt: In zwei
+    /// älteren Mitschnitten fehlte sie durchgehend, weshalb sie hier lange
+    /// gar nicht gelesen wurde. Am 09.08.2026 an einem echten Turnier
+    /// gemessen, das sie pflegt — dort trugen 48 Matches eine `LocationID`,
+    /// die meisten davon ohne jede Feldzuweisung.
+    pub location_id: Option<i64>,
     /// Satz-Ergebnisse als (Team1, Team2)-Punkte.
     pub sets: Vec<(i64, i64)>,
     /// Sieger: 1 oder 2, falls entschieden.
@@ -909,6 +918,8 @@ fn parse_matches(
             entry2_id,
             court,
             court_id,
+            // Geplanter Spielort; 0 gilt als „nicht gesetzt".
+            location_id: child_int(m, "LocationID").filter(|&id| id > 0),
             sets: parse_sets(m),
             winner,
             result: MatchResult::from_score_status(child_int(m, "ScoreStatus").unwrap_or(0)),

@@ -166,11 +166,29 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
-### Wo gespielt wird, steht in keinem der vorliegenden Mitschnitte
+### Wo gespielt wird: `Match.LocationID` — wenn das Turnier sie pflegt
 
-**Ein noch nicht aufgerufenes Spiel trägt keine Halle** — jedenfalls in
-allem, was hier an echten Daten vorliegt. Geprüft an zwei Mitschnitten
-(Ein- und Zwei-Hallen-Turnier, zusammen 914 echte Paarungen):
+**Ein angesetztes Spiel kann den Spielort tragen.** Das Feld heißt
+`Match.LocationID` und verweist auf einen `Locations > Location`-Eintrag.
+Am 09.08.2026 an einem laufenden Turnier gemessen: **48 Matches** trugen
+eine `LocationID`, die meisten davon **ohne** jede Feldzuweisung — also
+genau die Information, wo ein wartendes Spiel stattfinden soll.
+
+bts-light liest sie seither (`BtpMatch::location_id`,
+`assign::hall_for_match` mit `HallSource::Btp`).
+
+#### Warum hier zuvor das Gegenteil stand
+
+Der erste Befund (08.08.) lautete: „Es gibt keinen Spielort an der
+Ansetzung." Er stützte sich auf zwei Mitschnitte, in denen **kein einziges**
+Match eine `LocationID` trug — beide Turniere pflegten die Spalte schlicht
+nicht. Der Schluss von „liegt in diesen Daten nicht vor" auf „gibt es nicht"
+war zu weit. Die damals notierte Einschränkung („was ein Turnier liefert,
+das die Spalte pflegt, ist unbeantwortet") war der Kern der Sache — und ist
+jetzt beantwortet.
+
+Für Turniere **ohne** gepflegten Spielort bleibt alles beim Alten; die
+folgende Messung beschreibt genau diesen Fall:
 
 - `Match` trägt **keine** `LocationID`. `CourtID` erscheint erst, wenn das
   Spiel auf dem Feld steht (im Zwei-Hallen-Mitschnitt bei 5 von 36
@@ -180,20 +198,21 @@ allem, was hier an echten Daten vorliegt. Geprüft an zwei Mitschnitten
 - Die einzige Ortsangabe im ganzen Protokoll ist **`Court.LocationID`**: Ein
   *Feld* gehört zu einer Halle.
 
-**Aber: Das Konzept existiert in BTP.** Der Spielplan-Export („Spiele
-von …") hat die Spalten **Feld** und **Spielort**. In einem geprüften
-Turnier (540 angesetzte Spiele) sind sie in **jeder** Zeile leer — dieses
-Turnier pflegt sie schlicht nicht.
+Der Spielplan-Export („Spiele von …") dieser Turniere hat die Spalten
+**Feld** und **Spielort** — in allen 540 Zeilen leer. Genau das ist der
+Unterschied zum Turnier oben: Wird die Spalte gepflegt, steht sie als
+`Match.LocationID` im Mitschnitt; wird sie es nicht, fehlt sie ganz.
 
-Damit ist offen, was ein Turnier liefert, das sie **pflegt**: ob die Angabe
-dann auch über `SENDTOURNAMENTINFO` kommt und in welchem Feld. Das lässt
-sich nur mit einem Mitschnitt eines solchen Turniers beantworten.
+Für solche Turniere muss die Halle eines wartenden Spiels abgeleitet werden
+— aus der Disziplin/Klasse→Halle-Regel, einer Handzuweisung der
+Turnierleitung oder dem Vorbereitungs-Aufruf (`assign::hall_for_match`).
+Ein Test in `btp_capture.rs` hält fest, dass es solche Turniere gibt, damit
+die abgeleitete Kaskade nicht als überflüssig verschwindet.
 
-Bis dahin muss die Halle eines wartenden Spiels aus etwas anderem
-abgeleitet werden — in bts-light aus der Disziplin/Klasse→Halle-Regel und
-dem Vorbereitungs-Aufruf (`assign::hall_for_match`). Ein Test in
-`btp_capture.rs` hält den Befund fest und schlägt an, falls ein künftiger
-Mitschnitt doch eine Ansetzungs-Halle enthält.
+**Das Messwerkzeug** dafür liegt in `tests/btp_location_probe.rs`: Es zählt
+gegen ein laufendes BTP, welche Felder an Matches vorkommen, und zeigt
+alles Ortsverdächtige. So lässt sich für jedes neue Turnier in Sekunden
+klären, womit man es zu tun hat.
 
 ### Die Reihenfolge der angesetzten Spiele
 

@@ -150,6 +150,7 @@ mod tests {
             entry2_id: 0,
             court: Some(court.to_string()),
             court_id: None,
+            location_id: None,
             sets,
             winner: None,
             result: MatchResult::Normal,

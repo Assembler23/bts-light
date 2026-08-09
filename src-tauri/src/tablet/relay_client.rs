@@ -874,6 +874,7 @@ mod tests {
             entry2_id: 0,
             court: Some("1".into()),
             court_id: Some(court_id),
+            location_id: None,
             sets: vec![],
             winner: None,
             result: MatchResult::Normal,

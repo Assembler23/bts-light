@@ -313,22 +313,22 @@ fn real_capture_carries_the_bracket_edges() {
     );
 }
 
-/// **Ein noch nicht aufgerufenes Spiel bringt keine Halle mit.**
+/// **Ein Turnier muss den Spielort nicht pflegen — dann kommt keiner an.**
 ///
-/// Die Spec hoffte auf einen „von BTP an der Ansetzung geführten Spielort"
-/// als beste Quelle für die Hallen-Zuordnung (offener Punkt 2). In echten
-/// Daten kommt er nicht an: Weder `Match` noch `Draw`, `Event` oder `Stage`
-/// tragen eine `LocationID`. Die einzige Ortsangabe ist `Court.LocationID` —
-/// das Feld gehört zu einer Halle —, und `Match.CourtID` erscheint erst,
-/// wenn das Spiel dort steht. Also bleibt die Kaskade aus Disziplin-Regel
-/// und Vorbereitungs-Aufruf.
+/// Diese beiden Mitschnitte sind genau solche Turniere: kein einziges Match
+/// trägt eine `LocationID`, die Halle hängt allein am Feld. Deshalb war hier
+/// zunächst notiert, es *gebe* keinen Spielort an der Ansetzung.
 ///
-/// Der Test prüft, was wir *senden* bekommen — nicht, was BTP intern kann:
-/// Der Spielplan-Export kennt Spalten „Feld"/„Spielort", im geprüften
-/// Turnier durchgehend leer. Schlägt der Test eines Tages an, hat ein
-/// Turnier sie gepflegt und die Kaskade lohnt eine Neubewertung.
+/// **Das war zu weit geschlossen.** Am 09.08.2026 an einem Turnier gemessen,
+/// das die Spalte pflegt: 48 Matches mit `Match.LocationID`, die meisten
+/// ohne jede Feldzuweisung. bts-light liest das Feld seither
+/// (`assign::hall_for_match`, Quelle `HallSource::Btp`).
+///
+/// Der Test hält deshalb nur noch fest, was diese Fixtures zeigen: Es gibt
+/// Turniere ohne gepflegten Spielort, und für die muss die abgeleitete
+/// Kaskade (Regel → Hand → Aufruf) bestehen bleiben.
 #[test]
-fn btp_gives_no_hall_to_a_match_before_it_is_called() {
+fn a_tournament_may_carry_no_planned_venue_at_all() {
     for (name, raw) in [
         ("Ein-Hallen-Mitschnitt", TOURNAMENT),
         ("Zwei-Hallen-Mitschnitt", TOURNAMENT_2HALLS),
@@ -345,6 +345,16 @@ fn btp_gives_no_hall_to_a_match_before_it_is_called() {
         assert!(
             ohne_feld > 0,
             "{name}: kein einziges Spiel ohne Feld — Fixture prüfen"
+        );
+        // In genau diesen Turnieren ist die Spalte ungepflegt.
+        assert_eq!(
+            snapshot
+                .matches
+                .iter()
+                .filter(|m| m.location_id.is_some())
+                .count(),
+            0,
+            "{name}: dieses Fixture soll ein Turnier OHNE gepflegten Spielort zeigen"
         );
         // Und die Felder tragen ihre Halle, nicht die Spiele.
         if !snapshot.locations.is_empty() {

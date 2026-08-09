@@ -99,6 +99,9 @@ pub enum HallSource {
     Rule,
     /// Von der Turnierleitung für dieses eine Spiel gesetzt.
     Manual,
+    /// **Aus BTP** (`Match.LocationID`) — der im Turnierplan hinterlegte
+    /// Spielort. Nur vorhanden, wenn das Turnier ihn pflegt.
+    Btp,
     /// Aus dem Vorbereitungs-Aufruf (Tagesentscheidung).
     Call,
     /// Nicht bekannt.
@@ -108,24 +111,25 @@ pub enum HallSource {
 /// In welche Halle gehört ein noch nicht vergebenes Spiel — und woher wissen
 /// wir das?
 ///
-/// Kaskade: Disziplin-Regel → **von Hand gesetzt** → Vorbereitungs-Aufruf →
-/// unbekannt. Die Regel gewinnt, weil sie eine Turnier-Festlegung ist und
-/// auch die Vergabe selbst bindet (`hall_allows_match`); eine widersprechende
-/// Handzuweisung stellte das Spiel in eine Halle, in der es nie aufs Feld
-/// dürfte. Die Hand schlägt den Aufruf: Wer den Ort eigens setzt, meint es
-/// ernster als ein Aufruf, der die Halle nur nebenbei mitnimmt.
+/// Kaskade: Disziplin-Regel → **von Hand gesetzt** → **BTP** →
+/// Vorbereitungs-Aufruf → unbekannt.
 ///
-/// **Eine bessere Quelle ist nicht in Sicht.** Die Spec hoffte auf einen von
-/// BTP an der Ansetzung geführten Spielort — in echten Daten kommt er nicht
-/// an: Weder `Match` noch `Draw`, `Event` oder `Stage` tragen eine
-/// `LocationID`. Die einzige Ortsangabe ist `Court.LocationID`, und ein Feld
-/// bekommt ein Spiel erst beim Aufruf. Nachgewiesen an zwei echten
-/// Mitschnitten (Ein- und Zwei-Hallen-Turnier, 914 Paarungen); ein Test in
-/// `btp_capture.rs` schlägt an, falls sich das je ändert.
+/// - Die **Regel** gewinnt, weil sie eine Turnier-Festlegung ist und auch die
+///   Vergabe bindet (`hall_allows_match`); ein widersprechender Ort stellte
+///   das Spiel in eine Halle, in der es nie aufs Feld dürfte.
+/// - Die **Hand** schlägt BTP: Wer den Ort während des Turniers eigens
+///   umsetzt, disponiert um — das ist frischer als der Plan von heute früh.
+/// - **BTP** schlägt den Aufruf: Der Turnierplan meint es ernster als ein
+///   Aufruf, der die Halle nur nebenbei mitnimmt.
 ///
-/// Einschränkung: Der BTP-Spielplan-Export kennt Spalten „Feld"/„Spielort" —
-/// im geprüften Turnier durchgehend leer. Ob ein Turnier, das sie pflegt, den
-/// Ort auch über die Schnittstelle sendet, ist unbelegt.
+/// **Zur Geschichte dieser Kaskade** (damit niemand denselben Weg noch einmal
+/// geht): Schritt 15 hatte an zwei Mitschnitten gemessen, dass ein
+/// angesetztes Spiel *keinen* Spielort trägt, und daraus geschlossen, es
+/// gebe ihn nicht. Beide Turniere pflegten die Spalte nur nicht. Am
+/// 09.08.2026 an einem Turnier gemessen, das sie pflegt: **48 Matches mit
+/// `Match.LocationID`**, die meisten ohne jede Feldzuweisung. Der Ort wird
+/// jetzt gelesen — die abgeleiteten Quellen bleiben für Turniere, die ihn
+/// nicht pflegen.
 pub fn hall_for_match(
     config: &AppConfig,
     snap: &BtpSnapshot,
@@ -141,6 +145,17 @@ pub fn hall_for_match(
     }
     if let Some(hall) = gesetzt(manual_hall) {
         return (canonical_hall(snap, hall), HallSource::Manual);
+    }
+    // Der in BTP hinterlegte Spielort — sofern das Turnier ihn pflegt.
+    if let Some(name) = m.location_id.and_then(|id| {
+        snap.locations
+            .iter()
+            .find(|l| l.id == id)
+            .map(|l| l.name.trim().to_string())
+    }) {
+        if !name.is_empty() {
+            return (name, HallSource::Btp);
+        }
     }
     match gesetzt(called_hall) {
         Some(hall) => (canonical_hall(snap, hall), HallSource::Call),
@@ -660,6 +675,7 @@ mod tests {
             entry2_id: 0,
             court: None,
             court_id: None,
+            location_id: None,
             sets: Vec::new(),
             winner: None,
             result: MatchResult::Normal,
@@ -1112,6 +1128,61 @@ mod tests {
 
         assert_eq!(court_occupied_by(&snap, 1), Some(9));
         assert!(occupied_courts(&snap).contains(&1));
+    }
+
+    #[test]
+    fn btp_can_carry_the_planned_venue_after_all() {
+        // **Korrektur des Befunds aus Schritt 15.** Dort war an zwei
+        // Mitschnitten gemessen worden, dass ein angesetztes Spiel keinen
+        // Spielort trägt — beide Turniere pflegten die Spalte schlicht nicht.
+        // Am 09.08.2026 an einem Turnier gemessen, das sie pflegt: 48 Matches
+        // mit `LocationID`, die meisten ohne jede Feldzuweisung.
+        let mut m = a_match(7);
+        m.location_id = Some(2);
+        let s = snap(
+            Vec::new(),
+            vec![m.clone()],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Kyritzer".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Luckenwalder".to_string(),
+                },
+            ],
+        );
+        assert_eq!(
+            hall_for_match(&AppConfig::default(), &s, &m, None, None),
+            ("Luckenwalder".to_string(), HallSource::Btp)
+        );
+    }
+
+    #[test]
+    fn a_hall_set_by_hand_beats_the_one_from_btp() {
+        // Wer den Ort während des Turniers eigens umsetzt, disponiert um —
+        // das ist frischer als der Plan, der morgens in BTP stand.
+        let mut m = a_match(7);
+        m.location_id = Some(1);
+        let s = snap(
+            Vec::new(),
+            vec![m.clone()],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Kyritzer".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Luckenwalder".to_string(),
+                },
+            ],
+        );
+        assert_eq!(
+            hall_for_match(&AppConfig::default(), &s, &m, Some("Luckenwalder"), None),
+            ("Luckenwalder".to_string(), HallSource::Manual)
+        );
     }
 
     #[test]

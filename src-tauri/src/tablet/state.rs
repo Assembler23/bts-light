@@ -346,6 +346,9 @@ pub struct TabletState {
     /// Turnier, und ein Neustart der Übertragung ist der Moment, in dem man
     /// ohnehin neu ordnet.
     manual_halls: RwLock<HashMap<i64, String>>,
+    /// Datei, in der die Spielorte liegen. `OnceLock`, weil `TabletState`
+    /// `derive(Default)` benutzt und den Pfad erst beim Start erfährt.
+    manual_halls_path: std::sync::OnceLock<std::path::PathBuf>,
     /// Revision des Anzeige-Zustands: `(Nummer, Fingerabdruck)`. Steigt nur
     /// bei echter Änderung — **die eine** Quelle für LAN und Cloud. Zwei
     /// getrennte Zähler wären schlimmer als keiner: Dieselbe Zahl meinte
@@ -1147,6 +1150,34 @@ impl TabletState {
             .unwrap_or(0)
     }
 
+    /// Legt die Datei fest, in der die von Hand gesetzten Spielorte liegen,
+    /// und liest sie ein.
+    ///
+    /// Getrennt vom Konstruktor, weil `TabletState` sein Datenverzeichnis
+    /// nicht kennt — es kommt beim Start der Übertragung vom Tauri-Handle.
+    /// Fehlt die Datei oder ist sie unlesbar, bleibt es leer (kein Fehler);
+    /// beim ersten Setzen entsteht sie neu.
+    pub fn use_manual_hall_file(&self, path: &std::path::Path) {
+        let geladen: HashMap<i64, String> = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        *self.manual_halls.write().unwrap() = geladen;
+        let _ = self.manual_halls_path.set(path.to_path_buf());
+    }
+
+    /// Schreibt die Spielorte, falls eine Datei dafür bekannt ist.
+    fn save_manual_halls(&self, halls: &HashMap<i64, String>) {
+        let Some(path) = self.manual_halls_path.get() else {
+            return;
+        };
+        if let Ok(text) = serde_json::to_string(halls) {
+            // Ein Schreibfehler darf die Aktion nicht scheitern lassen: Der
+            // Ort gilt zur Laufzeit, nur der Neustart verlöre ihn.
+            let _ = std::fs::write(path, text);
+        }
+    }
+
     /// Gibt einem Spiel von Hand eine Halle; leerer Name nimmt sie zurück.
     ///
     /// Gibt zurück, ob sich etwas geändert hat — der Anzeige-Zustand soll nur
@@ -1154,15 +1185,20 @@ impl TabletState {
     pub fn set_manual_hall(&self, match_id: i64, hall: &str) -> bool {
         let hall = hall.trim();
         let mut g = self.manual_halls.write().unwrap();
-        if hall.is_empty() {
-            return g.remove(&match_id).is_some();
+        let geaendert = if hall.is_empty() {
+            g.remove(&match_id).is_some()
+        } else {
+            // Deckel gegen unbegrenztes Wachsen über ein langes Turnier. 2000
+            // Einträge sind mehr als jedes Turnier an Spielen hat.
+            if g.len() > 2000 {
+                g.clear();
+            }
+            g.insert(match_id, hall.to_string()).as_deref() != Some(hall)
+        };
+        if geaendert {
+            self.save_manual_halls(&g);
         }
-        // Deckel gegen unbegrenztes Wachsen über ein langes Turnier. 2000
-        // Einträge sind mehr als jedes Turnier an Spielen hat.
-        if g.len() > 2000 {
-            g.clear();
-        }
-        g.insert(match_id, hall.to_string()).as_deref() != Some(hall)
+        geaendert
     }
 
     /// Die von Hand gesetzte Halle eines Spiels, falls es eine gibt.
@@ -2183,6 +2219,7 @@ mod tests {
             // CourtID ist maßgeblich. Wir setzen einen Platzhalter-Namen.
             court: court.map(|cid| format!("C{cid}")),
             court_id: court,
+            location_id: None,
             sets: vec![(5, 3)],
             winner: None,
             result: MatchResult::Normal,
@@ -3166,6 +3203,42 @@ mod tests {
         assert_eq!(m1.preparation_call_ts, None);
         assert_eq!(m2.preparation_call_ts, Some(2000));
         assert_eq!(m2.preparation_hall.as_deref(), Some("Halle A"));
+    }
+
+    #[test]
+    fn halls_set_by_hand_survive_a_restart() {
+        // Aus dem Test am Gerät (09.08.): Nach einem Neustart des Turnier-PCs
+        // waren alle von Hand gesetzten Spielorte weg — 0 von 120 Spielen
+        // hatten noch eine Halle. Für Vorbereitungs-Aufrufe ist das richtig
+        // (die sind Minuten alt), für den Spielort nicht: Den setzt die
+        // Turnierleitung einmal für den Tag, und ein Absturz mitten im
+        // Turnier darf diese Arbeit nicht vernichten.
+        let dir = tempfile::tempdir().unwrap();
+        let datei = dir.path().join("spielorte.json");
+
+        let st = TabletState::default();
+        st.use_manual_hall_file(&datei);
+        st.set_manual_hall(4711, "Halle B");
+        st.set_manual_hall(4712, "Halle A");
+        st.set_manual_hall(4712, ""); // wieder zurückgenommen
+
+        // Neuer Zustand, dieselbe Datei — wie nach einem Neustart.
+        let neu = TabletState::default();
+        neu.use_manual_hall_file(&datei);
+        assert_eq!(neu.manual_hall(4711).as_deref(), Some("Halle B"));
+        assert_eq!(neu.manual_hall(4712), None, "zurückgenommen bleibt weg");
+    }
+
+    #[test]
+    fn a_missing_hall_file_is_not_an_error() {
+        // Erster Start, noch nichts gesetzt: leer statt Fehler.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.use_manual_hall_file(&dir.path().join("gibt-es-nicht.json"));
+        assert_eq!(st.manual_hall(1), None);
+        // Und danach lässt sich trotzdem setzen.
+        st.set_manual_hall(1, "Halle A");
+        assert_eq!(st.manual_hall(1).as_deref(), Some("Halle A"));
     }
 
     #[test]

@@ -513,6 +513,16 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         }
     }
 
+    // Die von Hand gesetzten Spielorte liegen neben der Konfiguration und
+    // überleben so einen Neustart des Turnier-PCs. Ohne das wäre die Arbeit
+    // eines ganzen Vormittags nach einem Absturz verloren — für
+    // Vorbereitungs-Aufrufe wäre das verschmerzbar, für den Spielort nicht.
+    if let Ok(dir) = app.path().app_config_dir() {
+        state
+            .tablet
+            .use_manual_hall_file(&dir.join("spielorte.json"));
+    }
+
     // Vor dem Move von `config` in den Tablet-Kontext merken.
     let upload_logs = config.upload_logs;
     let install_id = config.install_id.clone();

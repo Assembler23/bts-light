@@ -59,13 +59,18 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Oberfläche **und** am Turnier-PC. Bei Aufgabe, Kampflos und
   Disqualifikation bleibt der unfertige Satz erlaubt — dort bricht das Spiel
   ja mitten drin ab.
-- **Spielort ohne Feld.** Bei Mehr-Hallen-Turnieren lässt sich einem
-  wartenden Spiel jetzt die Halle geben, ohne es schon auf ein Feld zu
-  legen. Nötig, weil BTP an einem angesetzten Spiel **keinen** Spielort
-  führt (an zwei Turnier-Mitschnitten nachgemessen). Damit greift auch der
-  Hallenfilter des Livetickers (`display=next&halle=…`), der bislang leer
-  blieb, sobald ein Turnier seine Aufrufe über BTP statt über bts-light
-  machte. Einen Ort zu setzen gilt dabei nicht als Aufruf.
+- **Der Spielort aus BTP wird gelesen.** Pflegst du im Turnierplan die
+  Spalte „Spielort", steht die Halle jetzt an jedem wartenden Spiel — ohne
+  dass jemand etwas eintragen muss. Damit greift auch der Hallenfilter des
+  Livetickers (`display=next&halle=…`), der bislang leer blieb, sobald ein
+  Turnier seine Aufrufe über BTP statt über bts-light machte.
+- **Und wo BTP nichts liefert, setzt die Turnierleitung den Ort selbst.**
+  Ein kleiner Hallen-Wähler an jeder Zeile der Warteliste, ohne das Spiel
+  auf ein Feld zu legen; die Festlegung überlebt einen Neustart des
+  Turnier-PCs. Einen Ort zu setzen gilt dabei nicht als Aufruf.
+- **Flaggen in der Turnierleitung.** Ist die Nationen-Anzeige eingeschaltet,
+  steht jetzt die Flagge neben dem Namen statt eines Kürzels — dieselben
+  Bilder wie auf dem Court-Monitor.
 - **Jedes Feld zeigt seinen Zustand als Farbe:** aufgerufen, überfällig (kein
   einziger Punkt nach der eingestellten Zeit — da muss jemand hin), im
   Spiel, beendet. Die Schwelle steht unter *Aufruf-Timer*, Standard fünf

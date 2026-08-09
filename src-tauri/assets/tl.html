@@ -227,11 +227,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 /* Nation als Kürzel mit eigener Farbe. Der Farbton kommt aus dem Kürzel
    selbst (`--ton`), damit gleiche Nationen ohne gepflegte Länderliste gleich
    aussehen. Blass gehalten: Es ist eine Zusatzinfo, kein Alarm. */
+/* Die Flagge: klein, mit feiner Kante (weiße Flaggenteile brauchen sie,
+   sonst schwimmt das Bild im Weiß der Kachel). */
+.flagge {
+  flex: none; width: 20px; height: 14px; object-fit: cover;
+  border: 1px solid var(--line); border-radius: 2px;
+  vertical-align: -2px;
+}
+/* Ersatz, wenn es zu einem Kürzel keine Flagge gibt. */
 .nat {
   flex: none; padding: 0 5px;
   border-radius: 4px; font-size: .68rem; font-weight: 700; letter-spacing: .03em;
-  background: hsl(var(--ton, 210) 70% 92%);
-  color: hsl(var(--ton, 210) 55% 30%);
+  background: #f1f5f9; color: var(--ink-soft);
 }
 .meta { font-size: .85rem; color: var(--ink-soft); }
 .card-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
@@ -303,9 +310,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Wähler das durch seine Farbe, damit man abgeleitete und gesetzte Hallen
    auseinanderhält. */
 .row .hallwahl {
-  font: inherit; font-size: .8rem; min-height: 40px; padding: 6px 8px;
+  font: inherit; font-size: .8rem; font-weight: 650;
+  min-height: 40px; width: 3.6rem; padding: 6px 2px 6px 6px;
   border: 1px solid var(--line); border-radius: 8px;
-  background: var(--card); color: var(--ink-soft); cursor: pointer; max-width: 9rem;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+  text-align: center;
 }
 .row .hallwahl.gesetzt { border-color: var(--accent); color: var(--accent); font-weight: 650; }
 .row[aria-selected="true"] .hallwahl { background: #1e293b; color: #e2e8f0; border-color: #475569; }
@@ -531,6 +540,9 @@ const token = readToken();
 // Seite im Hallennetz (`/tl`) und hinter dem Cloud-Präfix
 // (`/bts-relay/tl`) ohne Anpassung läuft.
 const API = location.pathname.replace(/\/+$/, "") + "/api";
+// Die Flaggen liegen neben der Seite (`/flags/GER.svg`), im Hallennetz wie
+// hinter dem Cloud-Präfix.
+const FLAGGEN_BASIS = location.pathname.replace(/\/tl\/?$/, "") + "/flags/";
 
 const $ = (id) => document.getElementById(id);
 
@@ -607,6 +619,17 @@ function klasse(discipline, classLabel) {
   if (d && k) return `${d}-${k}`;
   return d || k;
 }
+
+// Sinnbild für die Zeit auf dem Feld. Es ersetzt die Beschriftung „auf dem
+// Feld seit", die auf dem Tablet je Kachel eine ganze Zeile kostete — ohne
+// irgendein Zeichen sähen Satzstand („0:0") und Uhr („3:35") gleich aus,
+// und genau diese Verwechslung soll die Beschriftung ja verhindern.
+const UHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2.2"
+  stroke-linecap="round" stroke-linejoin="round"
+  style="vertical-align:-1px;margin-right:3px;opacity:.75">
+  <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+</svg>`;
 
 // Sinnbild für den Vorbereitungs-Aufruf: ein Megafon. Als Inline-SVG, damit
 // es die Schriftfarbe erbt und auf jedem Gerät gleich aussieht — ein Emoji
@@ -853,6 +876,24 @@ async function togglePrepCall(match) {
       : { action: "call_preparation", matchIds: [match.match_id], locationId },
     called ? "Aufruf zurückgenommen." : `In Vorbereitung gerufen${hall ? ` (${hall})` : ""}.`,
   );
+}
+
+/**
+ * Kurzform eines Hallennamens für den engen Wähler in der Liste.
+ *
+ * So kurz wie möglich, aber eindeutig: „Kyritzer"/„Luckenwalder" werden zu
+ * „Ky"/„Lu", zwei Hallen mit gleichem Anfang bekommen so viele Buchstaben,
+ * wie sie zum Unterscheiden brauchen. Eine Abkürzung, unter der zwei Hallen
+ * gleich aussehen, wäre schlimmer als ein langer Name.
+ */
+function hallenKuerzel(name) {
+  const alle = (state.halls || []).map((h) => h.name);
+  for (let n = 2; n <= 12; n++) {
+    const kurz = (s) => s.trim().slice(0, n);
+    const menge = new Set(alle.map(kurz));
+    if (menge.size === alle.length) return kurz(name);
+  }
+  return name;
 }
 
 /** Die BTP-Kennung zu einem Hallennamen; `null`, wenn unbekannt. */
@@ -1156,20 +1197,24 @@ function pairOf(t1, t2, nat1, nat2) {
 }
 
 /**
- * Das Nationen-Kürzel als farbiges Etikett.
+ * Die Nation als **Flagge** — dieselben 205 SVGs, die auch der Court-Monitor
+ * zeigt (`/flags/GER.svg`).
  *
- * Die Farbe kommt aus dem Kürzel selbst — gleiche Nation, gleicher Farbton,
- * über alle Geräte und ohne gepflegte Länderliste. Das Kürzel steht immer
- * dabei: Farbe allein wäre für die vielen Nationen eines offenen Turniers
- * ohnehin nicht auseinanderzuhalten, und ein farbenblinder Helfer stünde im
- * Regen.
+ * Eine Flagge erkennt man schneller als drei Buchstaben, und bei einem
+ * internationalen Turnier ist genau das der Zweck. Das Kürzel bleibt als
+ * `title` und als Ersatz, wenn es die Datei nicht gibt: Zu einer unbekannten
+ * Nation lädt der Browser sonst ein kaputtes Bild, und die Zeile verrutscht.
  */
 function nationBadge(code) {
   const c = (code || "").trim().toUpperCase();
   if (!c) return "";
-  let hash = 0;
-  for (const zeichen of c) hash = (hash * 31 + zeichen.charCodeAt(0)) % 360;
-  return `<span class="nat" style="--ton:${hash}">${esc(c)}</span>`;
+  // Nur was wie ein ISO-Kürzel aussieht — der Wert kommt aus BTP und landet
+  // hier in einer URL.
+  if (!/^[A-Z]{2,3}$/.test(c)) return "";
+  return `<img class="flagge" src="${FLAGGEN_BASIS}${c}.svg" alt="${esc(c)}"
+    title="${esc(c)}" loading="lazy" width="20" height="14"
+    onerror="this.replaceWith(Object.assign(document.createElement('span'),
+      {className:'nat', textContent:'${esc(c)}'}))">`;
 }
 
 /**
@@ -1257,7 +1302,7 @@ function courtCard(c) {
     foot = `<span class="score num" title="Satzstand">${esc(sets)}</span>
             <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
                   title="${isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit"}">
-              ${UHR}${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}
+              ${UHR}<span class="zeit">${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}</span>
               ${clockLabel ? `<small>${esc(clockLabel)}</small>` : ""}
             </span>`;
   } else if (c.clearing) {
@@ -1430,11 +1475,15 @@ function queueRow(m) {
   // in keiner der beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange
   // eine Regel es nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
   if (state.multi_hall && m.hall_source !== "rule") {
-    const optionen = ['<option value="">Halle offen</option>']
+    // Kürzel statt voller Hallennamen: In einer Liste mit 120 Zeilen frisst
+    // „Luckenwalder" mehr Platz als die Paarung daneben. Der volle Name
+    // steht im Tooltip und in der aufgeklappten Liste.
+    const optionen = ['<option value="" title="kein fester Spielort">–</option>']
       .concat(state.halls.map((h) =>
-        `<option value="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(h.name)}</option>`));
+        `<option value="${esc(h.name)}" title="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(hallenKuerzel(h.name))}</option>`));
+    const titel = m.hall ? `Spielort: ${m.hall}` : "Spielort ohne Feld festlegen";
     parts.push(`<select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
-      data-hall-for="${m.match_id}" title="Spielort ohne Feld festlegen"
+      data-hall-for="${m.match_id}" title="${esc(titel)}"
       aria-label="Spielort">${optionen.join("")}</select>`);
   }
   // Nachruf, wenn jemand nicht erscheint. Getrennt nach Partei, weil in der
@@ -1788,7 +1837,11 @@ function tickClocks() {
     if (!since) return;
     const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
     const stage = court ? callStage(court, state.call_timer) : 0;
-    el.firstChild.textContent = " " + elapsed(since) + " ";
+    // Gezielt in das Zeit-Feld schreiben, nicht in „das erste Kind": Seit
+    // das Uhr-Sinnbild davorsteht, war das erste Kind der Leerraum vor dem
+    // Symbol — die Kachel zeigte zwei Zeiten nebeneinander.
+    const zeit = el.querySelector(".zeit");
+    if (zeit) zeit.textContent = elapsed(since);
     el.className = `clock num stage${stage}`;
   });
   document.querySelectorAll(".called[data-since]").forEach((el) => {

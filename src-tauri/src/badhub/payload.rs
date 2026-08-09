@@ -440,6 +440,7 @@ mod tests {
             entry2_id: 0,
             court: court.map(String::from),
             court_id: None,
+            location_id: None,
             sets: vec![(21, 19), (21, 15)],
             winner: None,
             result: MatchResult::Normal,

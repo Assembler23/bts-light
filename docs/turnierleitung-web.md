@@ -74,17 +74,20 @@ Aufruf-Timer selbst eingeschaltet ist.
 Die Farbe steht nie allein: Satzstand und Uhrbeschriftung („im Spiel seit"
 gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
 
-### Spielort ohne Feld
+### Spielort
 
-Bei Mehr-Hallen-Turnieren steht an jeder Zeile der Warteliste ein kleiner
-Hallen-Wähler. Damit legst du fest, **wo** ein Spiel stattfinden soll,
-ohne es schon auf ein Feld zu legen. „Halle offen" nimmt die Festlegung
-zurück.
+**Pflegst du in BTP die Spalte „Spielort", übernimmt bts-light sie.** Die
+Halle steht dann schon an jedem wartenden Spiel, ohne dass jemand etwas
+eintragen muss (BTP-Feld `Match.LocationID`).
 
-Das ist nötig, weil **BTP an einem angesetzten Spiel keinen Spielort
-führt** (nachgemessen an zwei Turnier-Mitschnitten). Ohne diese Angabe
-weiß bts-light die Halle eines wartenden Spiels erst, wenn es aufgerufen
-wird — und bis dahin taucht es in keinem Hallenfilter auf.
+Für Turniere, die das nicht tun, steht an jeder Zeile der Warteliste ein
+kleiner Hallen-Wähler („Ky", „Lu" — die Kürzel deiner Hallen, voller Name
+im Tooltip). Damit legst du fest, **wo** ein Spiel stattfinden soll, ohne
+es schon auf ein Feld zu legen; „–" nimmt die Festlegung zurück. Was du
+von Hand setzt, gilt vor dem, was in BTP steht — du disponierst ja um.
+
+Eine von Hand gesetzte Halle **überlebt einen Neustart** des Turnier-PCs
+(`spielorte.json` neben der Konfiguration).
 
 Ein von Hand gesetzter Ort wirkt an drei Stellen:
 
@@ -108,9 +111,10 @@ eine Helfer sucht nach der Spielnummer aus dem Papierplan, der andere kann
 damit nichts anfangen:
 
 - **Spielnummer zeigen** (Standard: an) — die Zahl ganz links in der Liste.
-- **Nationen zeigen** (Standard: **aus**) — das Länderkürzel neben jedem
-  Namen, farbig hinterlegt, damit gleiche Nationen zusammen ins Auge
-  fallen. Hilfreich bei internationalen Turnieren.
+- **Nationen zeigen** (Standard: **aus**) — die **Flagge** neben jedem
+  Namen, dieselben Bilder wie auf dem Court-Monitor. Zu einer Nation ohne
+  Flaggendatei erscheint das Kürzel. Hilfreich bei internationalen
+  Turnieren.
 - **Ergebnis eintragen** für ein Spiel auf dem Feld.
 - **Automatik** an- und abschalten — der Schalter oben rechts.
 

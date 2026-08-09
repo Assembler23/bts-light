@@ -244,6 +244,7 @@ mod tests {
             entry2_id: 0,
             court: None,
             court_id: None,
+            location_id: None,
             sets: vec![],
             winner,
             result: MatchResult::Normal,
