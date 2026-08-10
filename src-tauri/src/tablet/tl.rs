@@ -1391,6 +1391,11 @@ pub struct TlState {
     /// Die Warteschlange, in Reihenfolge. Der `key` ist die stabile
     /// Kennung für Vorziehen/Entfernen — dieselbe wie am Turnier-PC.
     pub scorekeepers: Vec<TlScorekeeper>,
+    /// Zuletzt beendete Spiele, neueste zuerst — für die
+    /// Ergebnis-Übersicht der Turnierleitung. Dieselbe Filterung, Sortierung
+    /// und `result`-Abbildung wie `finished_matches` in commands.rs (die
+    /// Desktop-Tabelle), damit beide Ansichten dasselbe erzählen.
+    pub finished: Vec<TlFinished>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1599,6 +1604,39 @@ impl From<Blocked> for TlBlocked {
 /// wegfällt, meldet `truncated_halls` ehrlich.
 const QUEUE_LIMIT_PER_HALL: usize = 120;
 
+/// Höchstzahl beendeter Spiele im Zustand. Die Seite ist ein
+/// Arbeits-Werkzeug, kein Archiv — wer mehr braucht, schaut in BTP.
+const FINISHED_LIMIT: usize = 30;
+
+/// Ein beendetes Spiel, wie es die Ergebnis-Übersicht braucht. Felder und
+/// `result`-Werte spiegeln [`crate::commands::FinishedMatchRow`] (die
+/// Desktop-Tabelle) — bewusst dieselbe Bedeutung, damit Turnierleitung am
+/// Tablet und am Turnier-PC dasselbe Ergebnis lesen.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlFinished {
+    pub match_id: i64,
+    pub match_num: i64,
+    pub draw_name: String,
+    pub round_name: String,
+    pub class_label: String,
+    /// Siehe [`TlCourt::discipline`].
+    pub discipline: String,
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    /// 1 oder 2 — wer gewonnen hat.
+    pub winner: u8,
+    pub sets: Vec<(i64, i64)>,
+    /// `normal` | `walkover` | `retired` | `disqualified` — die Seite
+    /// kennzeichnet alles außer `normal` mit einem Abzeichen, sonst sähe
+    /// ein Teil-Spielstand (14:16, 15:10) wie ein Fehler aus.
+    pub result: String,
+    /// Feld, auf dem es lief; leer, wenn direkt in BTP gewertet.
+    pub court: String,
+    /// Nur zur Laufzeit gestempelt — Spiele, die vor dem App-Start
+    /// beendet waren, haben keinen Zeitstempel und stehen am Ende.
+    pub finished_at_ms: Option<u64>,
+}
+
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
@@ -1647,6 +1685,7 @@ pub(crate) fn build_state_limited(
             truncated_halls: Vec::new(),
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
+            finished: Vec::new(),
         };
     };
 
@@ -1788,6 +1827,57 @@ pub(crate) fn build_state_limited(
         Vec::new()
     };
 
+    // Beendete Spiele: Filter, Sortierung und `result`-Abbildung wie
+    // `finished_matches` in commands.rs (Desktop-Tabelle) — dort erprobt,
+    // hier übernommen statt neu erfunden.
+    //
+    // Das Limit folgt dem Warteschlangen-Limit nach unten (Relay-Stufen
+    // 40/20/10/5): Ein kleines `queue_limit` heißt, der Zustand muss sowieso
+    // klein bleiben — dann darf die Ergebnisliste nicht der größte Brocken
+    // sein. `max(5)` verhindert, dass die unterste Stufe die Liste ganz
+    // leerräumt.
+    let finished_limit = FINISHED_LIMIT.min(queue_limit.max(5));
+    let mut finished_matches: Vec<&crate::btp::model::BtpMatch> = snap
+        .matches
+        .iter()
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Finished && m.winner.is_some())
+        .collect();
+    // Neueste zuerst. `unwrap_or(0)` zieht Spiele ohne Zeitstempel (vor
+    // App-Start beendet) explizit ans Ende statt an den Anfang — wie in
+    // `finished_matches`.
+    finished_matches.sort_by(|a, b| {
+        b.finished_at
+            .unwrap_or(0)
+            .cmp(&a.finished_at.unwrap_or(0))
+            .then(b.match_num.unwrap_or(0).cmp(&a.match_num.unwrap_or(0)))
+            .then(b.id.cmp(&a.id))
+    });
+    let finished: Vec<TlFinished> = finished_matches
+        .into_iter()
+        .take(finished_limit)
+        .map(|m| TlFinished {
+            match_id: m.id,
+            match_num: m.match_num.unwrap_or(0),
+            draw_name: m.draw_name.clone(),
+            round_name: m.round_name.clone(),
+            class_label: m.class_label.clone(),
+            discipline: m.discipline.as_str().to_string(),
+            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+            winner: m.winner.unwrap_or(0),
+            sets: m.sets.clone(),
+            result: match m.result {
+                crate::btp::model::MatchResult::Normal => "normal",
+                crate::btp::model::MatchResult::Walkover => "walkover",
+                crate::btp::model::MatchResult::Retired => "retired",
+                crate::btp::model::MatchResult::Disqualified => "disqualified",
+            }
+            .to_string(),
+            court: m.court.clone().unwrap_or_default(),
+            finished_at_ms: m.finished_at,
+        })
+        .collect();
+
     TlState {
         rev,
         server_now_ms: now_ms,
@@ -1833,6 +1923,7 @@ pub(crate) fn build_state_limited(
         truncated_halls: truncated.into_iter().collect(),
         scorekeeper_managed,
         scorekeepers,
+        finished,
     }
 }
 
@@ -2084,6 +2175,54 @@ mod tests {
         let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
         let ids: Vec<i64> = s.queue.iter().map(|m| m.match_id).collect();
         assert_eq!(ids, vec![3, 1, 2], "gerufen zuerst, dann nach Ansetzung");
+    }
+
+    #[test]
+    fn finished_matches_appear_newest_first_and_are_capped() {
+        // Zwei beendete Spiele mit Zeitstempel (200 und 100), eines ohne —
+        // beendet, bevor bts-light lief. Wie bei der Desktop-Liste
+        // (`finished_matches` in commands.rs) sollen die mit Zeitstempel
+        // neueste zuerst kommen und das ohne ans Ende rutschen.
+        let mut m_200 = a_match(1);
+        m_200.status = MatchStatus::Finished;
+        m_200.winner = Some(1);
+        m_200.sets = vec![(21, 15), (21, 18)];
+        m_200.finished_at = Some(200);
+
+        let mut m_100 = a_match(2);
+        m_100.status = MatchStatus::Finished;
+        m_100.winner = Some(2);
+        m_100.finished_at = Some(100);
+
+        let mut m_ohne = a_match(3);
+        m_ohne.status = MatchStatus::Finished;
+        m_ohne.winner = Some(1);
+        m_ohne.result = MatchResult::Retired;
+        m_ohne.finished_at = None;
+
+        // Ein nicht beendetes Spiel darf nicht auftauchen.
+        let offen = a_match(4);
+
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![m_200, m_100, m_ohne, offen],
+            Vec::new(),
+        ));
+        let config = AppConfig::default();
+
+        let state = build_state_limited(&tablet, &config, 1_000, 1, 40);
+        let ids: Vec<i64> = state.finished.iter().map(|f| f.match_id).collect();
+        assert_eq!(
+            ids,
+            vec![1, 2, 3],
+            "neueste zuerst, ohne Zeitstempel ans Ende"
+        );
+        assert_eq!(state.finished[2].result, "retired");
+
+        // Der Relay-Weg kürzt: Limit 5 heißt höchstens 5 Beendete.
+        let eng = build_state_limited(&tablet, &config, 1_000, 2, 5);
+        assert!(eng.finished.len() <= 5);
     }
 
     #[test]
@@ -3872,6 +4011,14 @@ mod tests {
             "key",
             "names",
             "enqueued_ms",
+            // Ergebnis-Übersicht: keine Personendaten über die ohnehin
+            // gezeigten Namen hinaus (`team1`/`team2`, `draw_name`,
+            // `round_name`, `class_label`, `discipline`, `sets`, `court`,
+            // `match_num` sind bereits durch Warteliste/Feld erlaubt).
+            "finished",
+            "winner",
+            "result",
+            "finished_at_ms",
         ];
 
         let tablet = TabletState::default();
