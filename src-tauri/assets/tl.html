@@ -141,6 +141,14 @@ main { padding: 16px; display: grid; gap: 20px; }
     padding: 2px;
     margin: -2px;
   }
+  /* Listen-Position je Gerät (Task 12, Anzeige-Menü „Spielliste darunter").
+     Gestapelt statt Spalten — und die Felder dürfen dann nicht mehr kleben:
+     Sonst schöbe sich die Liste unter eine fixierte erste Spalte statt
+     normal darunter zu folgen. */
+  body.liste-unten main { grid-template-columns: 1fr; }
+  body.liste-unten main > section:first-of-type {
+    position: static; max-height: none; overflow-y: visible;
+  }
 }
 h2 {
   margin: 0 0 10px; font-size: .8rem; font-weight: 700;
@@ -614,6 +622,8 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <div class="menue">
         <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
         <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
+        <label><input type="radio" name="opt-liste" id="opt-liste-rechts" value="rechts" checked /> Spielliste rechts</label>
+        <label><input type="radio" name="opt-liste" id="opt-liste-unten" value="unten" /> Spielliste darunter</label>
       </div>
     </details>
   </header>
@@ -823,6 +833,13 @@ function setzeVorliebe(name, an) {
   }
   renderCourts();
   renderQueue();
+}
+
+// Listen-Position: ebenfalls je Gerät, kein Wire-Feld (Task 12) — nur eine
+// Körperklasse, die die vorhandene Zweispalten-Regel für `main` umschaltet.
+function setzeListenPosition(unten) {
+  localStorage.setItem("bts-tl-liste", unten ? "unten" : "rechts");
+  document.body.classList.toggle("liste-unten", unten);
 }
 
 // ── Bedienzustand ─────────────────────────────────────────────────────
@@ -1561,7 +1578,41 @@ function gamePointKind(c) {
   return leaderWins === need - 1 ? "match" : "set";
 }
 
-function courtCard(c) {
+// ── Hallen-Raster ─────────────────────────────────────────────────────
+// INLINE-KOPIE von src/io/hallGrid.mjs (tl.html kann keine Module laden).
+// Die kanonische Fassung samt Test (scripts/test-hallgrid.mjs) liegt dort —
+// Änderungen IMMER zuerst dort machen und hierher spiegeln.
+
+// Bildet die Feld-Reihenfolge einer Halle auf Raster-Zellen ab.
+// Bildschirm-Koordinaten: row 0 = oben, col 0 = links. Die Start-Ecke
+// beschreibt, wo Feld 1 aus Sicht der Turnierleitung liegt.
+function gridPositions(count, { columns, origin, serpentine }) {
+  const cols = Math.max(1, columns | 0);
+  const rows = Math.max(1, Math.ceil(count / cols));
+  const fromBottom = origin === "bottom_left" || origin === "bottom_right";
+  const fromRight = origin === "bottom_right" || origin === "top_right";
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const r = Math.floor(i / cols);
+    let c = i % cols;
+    // Schlange: jede zweite Reihe läuft rückwärts — gezählt in
+    // Nummerierungs-Reihen, nicht in Bildschirm-Reihen.
+    if (serpentine && r % 2 === 1) c = cols - 1 - c;
+    if (fromRight) c = cols - 1 - c;
+    out.push({ col: c, row: fromBottom ? rows - 1 - r : r });
+  }
+  return out;
+}
+
+// Bestehende Anordnung einer Halle finden — Vergleich getrimmt +
+// groß-/kleinschreibungsunabhängig, spiegelt die Host-Normalisierung
+// (dieselbe Regel wie FieldOverviewPage.tsx `findHallLayout`).
+function findHallLayout(hall) {
+  const key = (hall || "").trim().toLowerCase();
+  return (state.layouts || []).find((l) => l.hall.trim().toLowerCase() === key) || null;
+}
+
+function courtCard(c, cellStyle) {
   const stage = callStage(c, state.call_timer);
   const classes = ["card", "zustand-" + courtState(c)];
   if (c.clearing) classes.push("clearing");
@@ -1643,7 +1694,7 @@ function courtCard(c) {
     ? `<span class="badge warn">${gesprochen}. Aufruf erfolgt</span>` : "";
 
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
-                   ${picked ? 'role="button"' : ""}>
+                   ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}</div>
     ${body}${bediener}
     <div class="card-foot">${foot}${nachruf}</div>
@@ -1716,6 +1767,20 @@ function wireCourts(box) {
   });
 }
 
+// Eine Feldgruppe (eine Halle) rendern — mit Raster, wenn der Host eines
+// hinterlegt hat (Task 9/12), sonst wie bisher als Fließ-Darstellung.
+function courtsGridHtml(hall, list) {
+  const layout = findHallLayout(hall);
+  const pos = layout ? gridPositions(list.length, layout) : null;
+  const style = pos
+    ? ` style="grid-template-columns:repeat(${layout.columns}, minmax(0, 1fr))"`
+    : "";
+  const cards = list
+    .map((c, i) => courtCard(c, pos ? `grid-column:${pos[i].col + 1};grid-row:${pos[i].row + 1}` : ""))
+    .join("");
+  return `<div class="courts"${style}>${cards}</div>`;
+}
+
 function renderCourts() {
   const box = $("courts");
   if (!state) return;
@@ -1736,9 +1801,9 @@ function renderCourts() {
     }
     box.innerHTML = [...groups.entries()].map(([hall, list]) =>
       `<div class="hall-group"><h3>${hall ? esc(hall) : "Ohne Halle"}</h3>
-       <div class="courts">${list.map(courtCard).join("")}</div></div>`).join("");
+       ${courtsGridHtml(hall, list)}</div>`).join("");
   } else {
-    box.innerHTML = `<div class="courts">${courts.map(courtCard).join("")}</div>`;
+    box.innerHTML = courtsGridHtml(hallFilter || "", courts);
   }
   wireCourts(box);
 }
@@ -2398,6 +2463,14 @@ function start() {
     setzeVorliebe("nummern", ev.currentTarget.checked));
   $("opt-nationen").addEventListener("change", (ev) =>
     setzeVorliebe("nationen", ev.currentTarget.checked));
+  const listeUnten = localStorage.getItem("bts-tl-liste") === "unten";
+  $("opt-liste-unten").checked = listeUnten;
+  $("opt-liste-rechts").checked = !listeUnten;
+  setzeListenPosition(listeUnten);
+  $("opt-liste-rechts").addEventListener("change", (ev) =>
+    ev.currentTarget.checked && setzeListenPosition(false));
+  $("opt-liste-unten").addEventListener("change", (ev) =>
+    ev.currentTarget.checked && setzeListenPosition(true));
 
   messeKopf();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
