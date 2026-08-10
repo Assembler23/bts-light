@@ -511,11 +511,52 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 /* Nur auf dem Griff selbst das Scrollen unterdrücken — sonst ließe sich die
    Liste auf dem Tablet nicht mehr bewegen. */
 .row.pick { touch-action: pan-y; }
-/* Touch-Ziehen (Long-Press, siehe JS `startTouchDrag`): `touch-action` wird
-   NUR bewaffnet/während eines laufenden Zugs auf „none" gesetzt, per Klasse
-   statt global — global „none" hier würde jedes Wischen in der ganzen Liste
-   lahmlegen, auch an Zeilen, die gerade niemand zieht. */
+/* Bewaffnet/während eines laufenden Zugs zusätzlich visuell markiert — rein
+   kosmetisch (Bauklotz-auf-Bauklotz neben dem `.drag-ghost`), NICHT mehr die
+   tragende Scroll-Sperre: Die übernimmt seit dem Umbau auf den Zieh-Griff
+   (`.drag-griff` unten) das `touch-action: none` DORT, statisch gesetzt statt
+   per Klasse mitten in der Geste umgeschaltet. */
 .touch-drag-armed { touch-action: none !important; }
+/* Zieh-Griff (⠿) statt Long-Press: eigenes kleines Element auf jeder
+   ziehbaren Zeile/Kachel, an dem eine Touch-Geste GEZIELT beginnt. Chrome
+   legt das erlaubte `touch-action` schon beim allerersten `touchstart` für
+   die GESAMTE Geste fest, unabhängig davon, worüber der Finger später
+   wandert — deshalb reicht ein einziges, STATISCH gesetztes
+   `touch-action: none` GENAU HIER, um natives Scrollen für eine am Griff
+   begonnene Geste von Anfang an zuverlässig zu verhindern. Der frühere
+   Versuch (Long-Press, `touch-action` per Klasse mitten in der Geste auf
+   die ganze Zeile umgeschaltet) verlor auf einem echten Android-Tablet in
+   etwa 9 von 10 Versuchen gegen die native Scroll-Erkennung — die reagiert
+   schon auf ein Zittern von wenigen Pixeln, oft innerhalb der
+   300-ms-Wartezeit, und eine Klassenänderung NACH `touchstart` kommt für
+   diese Geste immer zu spät. Der Rest der Zeile/Kachel bleibt normal
+   wischbar (`touch-action: pan-y` bzw. Standard) — nur der kleine Griff
+   opfert bewusst das Wischen, exakt an der Stelle, an der gezogen wird. */
+.drag-griff {
+  touch-action: none;
+  cursor: grab;
+  color: var(--ink-faint);
+  font-size: 1rem;
+  line-height: 1;
+  user-select: none;
+  flex: none;
+}
+.row .drag-griff {
+  /* Trefffläche über Padding auf ~40px vergrößern, per Minus-Rand aus dem
+     Fluss zurückrechnen — die übrigen Spalten (Nummer, Namen, Meta) rutschen
+     dadurch nicht sichtbar nach rechts. */
+  align-self: center;
+  padding: 13px 10px;
+  margin: -13px -2px -13px -6px;
+}
+.card-top .drag-griff {
+  /* An den rechten Rand der Kopfzeile der Kachel drücken (neben Name/
+     Abzeichen) statt frei zu positionieren — so weicht er variabel vielen
+     Abzeichen von selbst aus, statt sie an einer festen Ecke zu verdecken. */
+  margin-left: auto;
+  padding: 8px;
+  margin-top: -8px; margin-right: -8px; margin-bottom: -8px;
+}
 
 /* Was man zieht oder antippt, markiert man nicht: Ohne das hinterlässt jeder
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
@@ -1744,10 +1785,15 @@ function courtCard(c, cellStyle) {
   // Turnierleitungen nacheinander denselben Aufruf.
   const gerufen = c.match_id && gesprochen > 1
     ? `<span class="badge warn">${gesprochen}. Aufruf erfolgt</span>` : "";
+  // Zieh-Griff: nur an belegten Feldern — ein freies Feld ist ein Ziel,
+  // keine Ziehquelle. `aria-hidden` wie bei der Warteliste: rein visuelle
+  // Zusatz-Affordanz, Antippen der Kachel bleibt der barrierefreie Weg.
+  const griff = c.match_id
+    ? `<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>` : "";
 
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
-    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}</div>
+    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}</div>
     ${body}${bediener}
     <div class="card-foot">${foot}${nachruf}</div>
   </article>`;
@@ -1862,6 +1908,20 @@ function renderCourts() {
 
 function queueRow(m) {
   const parts = [];
+  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
+  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
+  // Ablehnung. Vorgezogen (war weiter unten), weil der Zieh-Griff dieselbe
+  // Bedingung braucht: Eine blockierte Zeile ist so wenig ziehbar wie
+  // antippbar.
+  const pickable = !m.blocked;
+  if (pickable) {
+    // Zieh-Griff: eigenes Element statt der ganzen Zeile als Ziehfläche
+    // (siehe CSS-Erklärung bei `.drag-griff` und `enableDrag` im Skript).
+    // `aria-hidden`, weil er eine rein visuelle Zusatz-Affordanz ist — der
+    // barrierefreie Weg bleibt Antippen-dann-Antippen, unverändert über die
+    // ganze Zeile erreichbar.
+    parts.push(`<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>`);
+  }
   if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
   // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
   // entfernt danach sowohl fehlende Werte (BTP liefert keine Runde) als auch
@@ -1928,10 +1988,6 @@ function queueRow(m) {
       <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
     </span>`);
   }
-  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
-  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
-  // Ablehnung.
-  const pickable = !m.blocked;
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
                data-match="${m.match_id}"
@@ -2009,56 +2065,77 @@ function wireQueue(box) {
 // Auf Android-Chrome-Tablets zog das trotzdem nicht zuverlässig: Die Zeile
 // trägt `touch-action: pan-y`, damit sich die Liste normal wischen lässt —
 // und genau deshalb beansprucht der Browser jede Wischbewegung sofort als
-// Scrollen, noch bevor unsere 8-px-Schwelle für Maus/Stift überhaupt
-// greifen könnte. Der Zeiger bekommt dann höchstens ein `pointercancel`,
-// nie genug `pointermove`, um einen Zug zu erkennen. Bei Maus/Stift
-// passiert das nicht (kein `touch-action` dafür), weshalb der Fehler nur
-// auf Touch-Geräten auffiel. Der Maus-/Stift-Weg unten bleibt deshalb
-// unangetastet; Touch bekommt einen eigenen Weg über Long-Press
-// (`startTouchDrag`): Erst nach kurzem, ruhigem Halten „bewaffnet" sich der
-// Zug — vorher gehört jede Bewegung dem Scrollen, damit Wischen in der
-// Liste ganz normal weiterfunktioniert.
+// Scrollen. Bei Maus/Stift passiert das nicht (kein `touch-action` dafür),
+// weshalb der Fehler nur auf Touch-Geräten auffiel.
 //
-// Eine Klasse allein reicht danach NICHT: Chrome legt das erlaubte
-// `touch-action` schon beim ersten `touchstart` für die gesamte Geste fest,
-// eine Klassenänderung mitten in der Geste wirkt auf den schon aktiven
-// Zeiger nicht mehr — und `preventDefault()` auf einem `pointermove`
-// unterdrückt das native Scrollen ebenfalls nicht zuverlässig. Was
-// tatsächlich zieht: ein `touchmove`-Listener auf `window` mit
-// `{passive:false}`, der selbst `preventDefault` ruft (siehe `blockScroll`
-// in `arm()`). Die Klasse bleibt als Bauklotz-auf-Bauklotz-Absicherung
-// stehen. Der Fenster-Listener hat noch einen zweiten Vorteil: Er ist immun
-// gegen den 2-Sekunden-Redraw der Liste — eine Klasse an `el` wäre nach
-// einem Neuzeichnen wirkungslos (neuer DOM-Knoten), der Fenster-Listener
-// hängt an keinem Zeilen-Element und bleibt bestehen, bis `teardown` ihn
-// entfernt.
+// ERSTER Anlauf war ein Long-Press auf der ganzen Zeile: 300 ms ruhig
+// halten „bewaffnet" den Zug, danach eine Klasse mit `touch-action: none`.
+// Auf dem echten Android-Tablet klappte das nur in etwa 1 von 10 Versuchen
+// („zu schnell will er scrollen und verliert den Touch"). Grund: Chrome
+// legt das erlaubte `touch-action` schon beim ALLERERSTEN `touchstart` für
+// die GESAMTE Geste fest, nicht neu bei jeder Bewegung — ein natürliches
+// Fingerzittern von oft weniger als unseren 10 px reichte, damit der
+// Browser die Geste noch WÄHREND der 300-ms-Wartezeit als Scrollen
+// einstufte. Ab dann war sie für uns verloren (`pointercancel`), und keine
+// später gesetzte Klasse konnte das rückgängig machen — ein Wettrennen, das
+// ein Long-Press auf einer scrollbaren Liste strukturell nicht gewinnen
+// kann. Frühe `touchmove`-Ereignisse präventiv abzufangen war auch keine
+// Lösung: Genau das hätte das Scrollen kaputt gemacht, das der Long-Press
+// ja erst ermöglichen sollte.
+//
+// ZWEITER, jetziger Anlauf: ein eigenes Griff-Element (`.drag-griff`, ⠿) an
+// jeder ziehbaren Zeile/Kachel. Die Touch-Geste beginnt GEZIELT auf diesem
+// Griff, der STATISCH `touch-action: none` trägt (CSS) — kein Wettrennen
+// mehr, weil die Entscheidung schon beim `touchstart` auf dem Griff fällt,
+// bevor überhaupt Bewegung stattfindet. Bewaffnet wird deshalb sofort, ohne
+// Wartezeit und ohne Bewegungsschwelle (siehe `startTouchDrag`) — ein Tipp
+// irgendwo sonst auf der Zeile/Kachel (nicht auf dem Griff) löst dagegen
+// GAR KEINE Zug-Logik mehr aus und verhält sich wie vor der gesamten
+// Touch-Drag-Arbeit: scrollen und Antippen-dann-Antippen. Ein
+// `touchmove`-Listener auf `window` mit `{passive:false}` (`blockScroll`)
+// unterdrückt zusätzlich das Scrollen für die Dauer des Zugs, auch wenn der
+// Finger den Griff längst verlassen hat — er ist zugleich immun gegen den
+// 2-Sekunden-Redraw der Liste, anders als eine Klasse an einem
+// Zeilen-Element, die nach einem Neuzeichnen (frischer DOM-Knoten)
+// wirkungslos wäre.
 const DRAG_THRESHOLD_PX = 8;
 /** Nach einem Zug folgt ein Klick-Ereignis, das hier geschluckt wird. */
 let suppressNextClick = false;
 /** Läuft gerade ein Zug? Solange bleibt das Aktionsband aus (siehe dort). */
 let dragging = false;
-/** Ein Touch-Long-Press wartet gerade auf seine 300 ms (siehe unten) — noch
- *  nicht `dragging`, aber schon belegt. Getrennt von `dragging` gehalten,
- *  weil genau dieses Zeitfenster sonst ungeschützt wäre: Ein zweiter Finger
- *  (Handballen beim Halten) könnte in dieser Wartezeit einen ZWEITEN
- *  Automaten starten. */
+/** Ein Touch-Zug ist zwischen dem Bewaffnen und seinem `teardown` unterwegs
+ *  — knapp vor `dragging=true` gesetzt und exakt bis zum Aufräumen belegt.
+ *  Getrennt von `dragging` gehalten, weil ein zweiter Finger (Handballen)
+ *  sonst in genau dieser kurzen Lücke einen ZWEITEN Automaten starten
+ *  könnte, der das globale `picked` überschreibt. */
 let touchDragPending = false;
 
 function enableDrag(el, match, fromCourtId) {
+  // Zieh-Griff: eigener, separat verdrahteter Zeigegesten-Start NUR für
+  // Touch (siehe Erklärung oben) — für Maus/Stift bleibt die ganze
+  // Zeile/Kachel ziehbar wie bisher, der Griff braucht dafür keine eigene
+  // Logik und fällt unten einfach mit durch (kein `stopPropagation`, sonst
+  // bräche „Griff funktioniert auch für Maus").
+  const griff = el.querySelector(".drag-griff");
+  griff?.addEventListener("pointerdown", (down) => {
+    if (down.pointerType !== "touch") return;
+    // Weiterreichen stoppen: Die Zeile/Kachel bekommt diesen Tipp nicht
+    // mehr — sonst sähe ihr eigener (Maus-orientierter) Zeigegesten-Start
+    // unten denselben Tipp zusätzlich (auch wenn der inzwischen Touch
+    // ignoriert, siehe dort — doppelte Absicherung ist hier billiger als
+    // ein Doppel-Bewaffnen zu riskieren), UND ein bloßes Antippen des
+    // Griffs dürfte über das nachfolgende `click` nicht als Auswahl
+    // durchschlagen (siehe `suppressNextClick` unten in `startTouchDrag`).
+    down.stopPropagation();
+    // Derselbe Nebenläufigkeits-Wächter wie zuvor.
+    if (dragging || touchDragPending) return;
+    startTouchDrag(el, match, fromCourtId, down);
+  });
+
   el.addEventListener("pointerdown", (down) => {
-    // Touch nimmt einen eigenen, per Long-Press bewaffneten Weg (siehe
-    // Erklärung oben) — der Maus-/Stift-Weg unten feuert für Finger gar
-    // nicht erst los.
-    if (down.pointerType === "touch") {
-      // Nebenläufigkeits-Wächter: Läuft schon ein Zug (Maus oder ein
-      // anderer Finger) oder wartet bereits ein Long-Press auf denselben
-      // Moment, startet KEIN zweiter Automat. Ohne diese Sperre würde der
-      // zweite Automat das globale `picked` überschreiben, und beim
-      // Loslassen des ERSTEN Fingers würde das FALSCHE Spiel zugewiesen.
-      if (dragging || touchDragPending) return;
-      startTouchDrag(el, match, fromCourtId, down);
-      return;
-    }
+    // Touch startet AUSSCHLIESSLICH am Griff oben — ein Tipp/Wisch irgendwo
+    // sonst auf der Zeile/Kachel bleibt hier komplett unbeteiligt.
+    if (down.pointerType === "touch") return;
     // Nur die primäre Maustaste bzw. der Stift dürfen einen Zug starten.
     if (down.button !== 0) return;
     let ghost = null;
@@ -2151,37 +2228,52 @@ function enableDrag(el, match, fromCourtId) {
   });
 }
 
-// ── Ziehen auf Touch-Geräten (Long-Press) ────────────────────────────────
+// ── Ziehen auf Touch-Geräten (Zieh-Griff) ────────────────────────────────
 // Eigener Automat statt eines Zweigs im Maus-Code oben: Die Zustände
-// unterscheiden sich zu sehr (Wartezeit vor dem Bewaffnen, dynamisches
-// `touch-action`, Zeigegesten-Einfangen), um sie ohne Verrenkungen zu
-// teilen. Was gleich bleibt, wird bewusst wiederverwendet: dieselbe
+// unterscheiden sich zu sehr (sofortiges statt schwellenwertbasiertes
+// Bewaffnen, Zeigegesten-Einfangen), um sie ohne Verrenkungen zu teilen.
+// Was gleich bleibt, wird bewusst wiederverwendet: dieselbe
 // `picked`-Zuweisung, derselbe Geist (`.drag-ghost`), dasselbe `assignTo`
-// beim Loslassen über einem Feld — ein Doppel der Zuweisungslogik wäre
-// die eigentliche Fehlerquelle.
-const LONGPRESS_MS = 300;
-/** Wischen statt Halten: Bewegung über diese Schwelle bricht das Bewaffnen
- *  ab, BEVOR irgendetwas an der Wischgeste gehindert wird. */
-const TOUCH_CANCEL_PX = 10;
+// beim Loslassen über einem Feld — ein Doppel der Zuweisungslogik wäre die
+// eigentliche Fehlerquelle.
+//
+// KEIN Long-Press mehr, KEINE Bewegungsschwelle vorm Bewaffnen: Die Geste
+// beginnt schon gezielt auf dem Griff (siehe `enableDrag` und die
+// CSS-Erklärung bei `.drag-griff`) — dort ist jeder Zeigegesten-Start
+// automatisch ein gewollter Zug, eine Wartezeit zum Unterscheiden „Wischen
+// oder Ziehen" wird nicht mehr gebraucht.
+/** Ab dieser Bewegung gilt der Griff als GEZOGEN statt nur angetippt —
+ *  entscheidet NICHT, ob bewaffnet wird (das passiert immer sofort),
+ *  sondern nur, was beim Loslassen passiert (siehe `teardown`). */
+const TOUCH_TAP_PX = 6;
 
 function startTouchDrag(el, match, fromCourtId, down) {
   // Belegt den Wächter oben für die gesamte Lebensdauer dieses Automaten —
   // vom ersten Antippen bis zum letzten `teardown`. Ein zweiter Finger, der
-  // in der Zwischenzeit auf irgendeiner Zeile/Kachel `pointerdown` auslöst,
-  // wird dort abgewiesen, bevor ein zweiter Automat entstehen kann.
+  // in der Zwischenzeit auf irgendeinem Griff `pointerdown` auslöst, wird
+  // dort abgewiesen, bevor ein zweiter Automat entstehen kann.
   touchDragPending = true;
+  // Der 2-Sekunden-Poll könnte `el` zwischen zwei Ereignissen ersetzt haben
+  // (die Liste wird per `innerHTML` neu gezeichnet) — bei einem SOFORT
+  // bewaffneten Zug bleibt dafür praktisch kein Zeitfenster mehr (anders als
+  // beim verworfenen Long-Press-Anlauf mit seiner 300-ms-Lücke), die Prüfung
+  // bleibt trotzdem als billige Absicherung stehen: Ohne sie bliebe der
+  // Automat auf „bewaffnet"/„zieht" stehen, ohne `picked` und ohne Geist zu
+  // setzen, und der nächste Tipp würde verschluckt (`suppressNextClick`),
+  // ohne dass je etwas zugewiesen wurde.
+  if (!el.isConnected) { touchDragPending = false; return; }
+
   const pointerId = down.pointerId;
-  let armed = false;
   let ghost = null;
   let hovered = null;
-  let timer = setTimeout(arm, LONGPRESS_MS);
+  let moved = false;
 
   function updateGhost(x, y) {
     ghost.style.left = x + 14 + "px";
     ghost.style.top = y - 14 + "px";
     // Das Feld unter dem Finger hervorheben. `elementFromPoint` ignoriert
     // den Klon von sich aus (`.drag-ghost` trägt `pointer-events: none`,
-    // siehe CSS) — wie beim Maus-Weg, kein Aus-/Einblenden nötig.
+    // siehe CSS) — wie beim Maus-Weg.
     const under = document.elementFromPoint(x, y);
     const card = under && under.closest(".card[data-court]");
     if (card !== hovered) {
@@ -2193,84 +2285,56 @@ function startTouchDrag(el, match, fromCourtId, down) {
     }
   }
 
-  function arm() {
-    timer = null;
-    // Der 2-Sekunden-Poll kann `el` in der Wartezeit ersetzt haben (die
-    // Liste wird per `innerHTML` neu gezeichnet) — dann hängt es an keinem
-    // Elternknoten mehr. Sauber abbrechen statt halb bewaffnet
-    // weiterzumachen: Ohne diese Prüfung bliebe der Automat auf
-    // „bewaffnet"/„zieht" stehen, ohne `picked` und ohne Geist zu setzen,
-    // und der nächste Tipp würde verschluckt (`suppressNextClick`), ohne
-    // dass je etwas zugewiesen wurde.
-    if (!el.isConnected) { teardown(null, true); return; }
-    armed = true;
-    dragging = true;
-    // Klasse als Bauklotz-auf-Bauklotz-Absicherung: Chrome legt das
-    // erlaubte `touch-action` schon beim ersten `touchstart` für die GANZE
-    // Geste fest — eine Klassenänderung MITTEN in der Geste wirkt auf den
-    // schon aktiven Zeiger nicht mehr, egal wie früh sie kommt. Die
-    // eigentliche Scroll-Unterdrückung übernimmt deshalb gleich der
-    // `touchmove`-Listener unten.
-    el.classList.add("touch-drag-armed");
-    // Nativer `touchmove`-Listener mit `{passive:false}`, NICHT der
-    // Pointer-Event: Nur ein `preventDefault` auf dem zugrunde liegenden
-    // Touch-Ereignis unterdrückt das Scrollen zuverlässig — auf einem
-    // `pointermove` verhindert `preventDefault` das Scrollen NICHT. Als
-    // Fenster-Listener zusätzlich immun gegen den 2-Sekunden-Redraw: Die
-    // Klasse hinge an `el` und wäre nach einem Neuzeichnen wirkungslos
-    // (neuer Knoten, alte Klasse weg), der Fenster-Listener nicht.
-    window.addEventListener("touchmove", blockScroll, { passive: false });
-    // `setPointerCapture` ist für Touch eigentlich redundant (der Browser
-    // fängt die Zeigegesten eines Fingers ohnehin implizit ein) — bleibt
-    // trotzdem als zusätzliche Absicherung, damit Ereignisse sicher
-    // weiterkommen, falls der Finger über andere Elemente wandert. Im
-    // try/catch wie die Freigabe unten: `el` könnte inzwischen doch
-    // verschwunden sein.
-    try { el.setPointerCapture(pointerId); } catch { /* el bereits weg */ }
-    document.body.classList.add("dragging");
-    document.getSelection()?.removeAllRanges();
-    picked = { match, fromCourtId: fromCourtId ?? null };
-    renderActionBar();
-    renderCourts();
-    ghost = document.createElement("div");
-    ghost.className = "drag-ghost";
-    ghost.textContent =
-      `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
-    document.body.appendChild(ghost);
-    updateGhost(down.clientX, down.clientY);
-  }
+  dragging = true;
+  // Klasse rein kosmetisch (siehe CSS) — die tragende Scroll-Sperre ist das
+  // statische `touch-action: none` auf dem Griff selbst, schon von Anfang
+  // an gültig, nicht erst ab hier.
+  el.classList.add("touch-drag-armed");
+  // Nativer `touchmove`-Listener mit `{passive:false}`, NICHT der
+  // Pointer-Event: Nur ein `preventDefault` auf dem zugrunde liegenden
+  // Touch-Ereignis unterdrückt das Scrollen zuverlässig, auch für den
+  // Rest der Geste, sobald der Finger den Griff längst verlassen hat. Als
+  // Fenster-Listener zusätzlich immun gegen den 2-Sekunden-Redraw.
+  window.addEventListener("touchmove", blockScroll, { passive: false });
+  // `setPointerCapture` ist für Touch eigentlich redundant (der Browser
+  // fängt die Zeigegesten eines Fingers ohnehin implizit ein) — bleibt
+  // trotzdem als zusätzliche Absicherung, damit Ereignisse sicher
+  // weiterkommen, falls der Finger über andere Elemente wandert. Im
+  // try/catch wie die Freigabe unten: `el` könnte inzwischen doch
+  // verschwunden sein.
+  try { el.setPointerCapture(pointerId); } catch { /* el bereits weg */ }
+  document.body.classList.add("dragging");
+  document.getSelection()?.removeAllRanges();
+  picked = { match, fromCourtId: fromCourtId ?? null };
+  renderActionBar();
+  renderCourts();
+  ghost = document.createElement("div");
+  ghost.className = "drag-ghost";
+  ghost.textContent =
+    `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
+  document.body.appendChild(ghost);
+  updateGhost(down.clientX, down.clientY);
 
-  /** Unterdrückt das native Scrollen, solange bewaffnet — siehe `arm()`. */
+  /** Unterdrückt das native Scrollen, solange gezogen wird — siehe oben. */
   function blockScroll(ev) { ev.preventDefault(); }
 
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
-    if (!armed) {
-      const dx = ev.clientX - down.clientX;
-      const dy = ev.clientY - down.clientY;
-      // Wischen erkannt, bevor der Long-Press auslöste: sauber abbrechen
-      // und AUF KEINEN FALL `preventDefault` rufen — sonst bliebe die Liste
-      // unter dem Finger stehen, obwohl doch gescrollt werden sollte.
-      if (Math.hypot(dx, dy) > TOUCH_CANCEL_PX) teardown(ev, true);
-      return;
+    if (!moved && Math.hypot(ev.clientX - down.clientX, ev.clientY - down.clientY) > TOUCH_TAP_PX) {
+      moved = true;
     }
-    // Bewaffnet: Ab hier gehört die Bewegung dem Zug, nicht mehr dem
-    // Scrollen (das eigentliche Unterdrücken macht `blockScroll` oben).
     updateGhost(ev.clientX, ev.clientY);
   }
 
   function teardown(ev, cancelled) {
-    if (timer) { clearTimeout(timer); timer = null; }
     touchDragPending = false;
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", cancel);
-    // Auf JEDEM Ausstiegspfad entfernen, auch wenn nie bewaffnet wurde —
-    // `removeEventListener` auf einen nie hinzugefügten Listener ist ein
-    // No-op, aber vergessen wäre hier der teuerste Fehler: ein liegen
-    // gebliebener `touchmove`-Blocker legt jedes künftige Scrollen lahm.
+    // Auf JEDEM Ausstiegspfad entfernen — ein liegen gebliebener
+    // `touchmove`-Blocker wäre der teuerste denkbare Folgefehler: totes
+    // Scrollen für die ganze Liste.
     window.removeEventListener("touchmove", blockScroll, { passive: false });
-    if (!armed) return;  // war nur ein Tipp oder ein Wischen vor dem Bewaffnen
     document.body.classList.remove("dragging");
     document.getSelection()?.removeAllRanges();
     hovered?.classList.remove("hover-target");
@@ -2283,14 +2347,27 @@ function startTouchDrag(el, match, fromCourtId, down) {
     suppressNextClick = true;
     setTimeout(() => { suppressNextClick = false; }, 0);
     if (cancelled) {
-      // Abgebrochen (Finger weg, Browser übernimmt die Geste, `el`
-      // verschwunden): Die Auswahl bleibt stehen, das Band erscheint —
-      // derselbe Rettungsanker wie beim Maus-Weg.
+      // Abgebrochen (Finger weg, Browser übernimmt die Geste): Die Auswahl
+      // bleibt stehen, das Band erscheint — derselbe Rettungsanker wie beim
+      // Maus-Weg.
       renderActionBar();
       renderQueue();
       return;
     }
-    const card = ev && document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".card[data-court]");
+    if (!moved) {
+      // Reiner Tipp auf den Griff, ohne zu ziehen: bewusst KEINE Auswahl.
+      // Der Griff ist eine Ziehfläche, kein zweiter Antipp-Weg — anders als
+      // beim abgebrochenen Zug oben bleibt hier nichts „gewählt" stehen,
+      // damit ein versehentliches Antippen des Griffs nicht wie ein Tipp
+      // auf die Zeile wirkt (die bleibt dafür über `suppressNextClick`
+      // ohnehin stumm, siehe `enableDrag`).
+      picked = null;
+      renderActionBar();
+      renderCourts();
+      renderQueue();
+      return;
+    }
+    const card = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".card[data-court]");
     const court = card && state.courts.find((c) => String(c.court_id) === card.dataset.court);
     if (court) {
       assignTo(court);
