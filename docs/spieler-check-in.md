@@ -128,6 +128,12 @@ Seitenleisten-Punkt **Check-In**
 dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
 ihrem Zustand.
 
+Ein in badhub **abgemeldeter** Spieler (`state = withdrawn`, dort über die
+Verwaltung gesetzt) erscheint grau und durchgestrichen als „abgemeldet" —
+weder als da noch als fehlend. Die Zählungen „x von y da" rechnen Abgemeldete
+heraus, sowohl je Klasse als auch in der Gesamtsumme oben; sie tauchen nur in
+einer eigenen, gesonderten Zahl auf.
+
 Der Punkt ist ausgegraut, solange kein Häkchen **oder** keine Turnier-Kennung
 gesetzt ist — ohne Kennung erreicht der Check-In badhub nie, und eine Seite,
 die nur „nicht eingerichtet" sagt, führte in die Irre. Der Klick springt dann
@@ -171,6 +177,12 @@ offline behandelt: der nächste Abruf versucht es erneut.
 - **Zeiten** gehen direkt an badhub; die Plausibilität (Anmeldeschluss nicht
   vor der Anfangszeit) prüft **badhub**. Eine zweite Regel hier wäre eine
   zweite Wahrheit, die auseinanderlaufen kann.
+- **Abgemeldete lassen sich trotzdem einchecken.** Der „da"-Knopf bleibt für
+  sie verfügbar, sein Tooltip weist eigens darauf hin („Trotz Abmeldung als
+  anwesend eintragen") — falls jemand entgegen der Abmeldung doch antritt.
+  Ein reines **Wieder-Anmelden** ohne gleichzeitiges Einchecken gibt es in
+  der TL-Sicht bewusst nicht: die Abmeldung selbst kommt aus badhubs
+  Verwaltung und wird nur dort rückgängig gemacht.
 
 Nach jeder Änderung wird neu abgerufen, statt den Stand lokal fortzuschreiben —
 sonst stünde nach einer abgelehnten Änderung etwas anderes auf dem Bildschirm
@@ -210,6 +222,9 @@ Knöpfe nicht, weil dann niemand spräche.
 
 Wer eine **Rückfrage** hat, zählt als fehlend: er soll ohnehin zur
 Turnierleitung.
+
+Wer **abgemeldet** ist, zählt umgekehrt nicht als fehlend und wird nie
+ausgerufen: er soll gerade nicht zur Turnierleitung.
 
 ## Grenzen und Randfälle
 

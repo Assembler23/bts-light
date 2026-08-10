@@ -60,6 +60,12 @@ function fuerEingabe(wert: string | null): string {
   return wert ? wert.slice(0, 16).replace(" ", "T") : "";
 }
 
+/** Zählt Abgemeldete in einer Klasse. Gemeinsam für die Kopfzeile und die
+ *  Gesamtsumme, damit beide Stellen bei einer Änderung nicht auseinanderlaufen. */
+function abgemeldeteZaehlen(players: CheckinPlayer[]): number {
+  return players.filter((p) => p.state === "withdrawn").length;
+}
+
 /** Zustand eines Spielers in Worten. */
 function spielerZustand(p: CheckinPlayer): { text: string; klasse: string } {
   if (p.state === "checked_in") {
@@ -138,11 +144,12 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
     () =>
       klassen.reduce(
         (acc, k) => {
-          const abgemeldet = k.players.filter(
-            (p) => p.state === "withdrawn",
-          ).length;
+          const abgemeldet = abgemeldeteZaehlen(k.players);
           return {
-            gemeldet: acc.gemeldet + k.gemeldet - abgemeldet,
+            // Annahme: badhubs `gemeldet` schließt Abgemeldete ein — ungeprüft
+            // über die Repo-Grenze hinweg, deshalb hier gegen negative Werte
+            // geklammert statt blind zu vertrauen.
+            gemeldet: Math.max(0, acc.gemeldet + k.gemeldet - abgemeldet),
             eingecheckt: acc.eingecheckt + k.eingecheckt,
             abgemeldet: acc.abgemeldet + abgemeldet,
           };
@@ -276,12 +283,11 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
         const aufgeklappt = offen.has(k.event_id);
         // badhubs TL-Zaehlung schliesst Abgemeldete bewusst ein (dortige
         // Entscheidung) — hier werden sie herausgerechnet, denn fuer die
-        // Turnierleitung sind sie weder da noch fehlend.
-        const abgemeldet = k.players.filter(
-          (p) => p.state === "withdrawn",
-        ).length;
-        const gemeldet = k.gemeldet - abgemeldet;
-        const fehlend = gemeldet - k.eingecheckt;
+        // Turnierleitung sind sie weder da noch fehlend. Ungeprüfte Annahme
+        // über die Repo-Grenze hinweg, deshalb gegen negative Werte geklammert.
+        const abgemeldet = abgemeldeteZaehlen(k.players);
+        const gemeldet = Math.max(0, k.gemeldet - abgemeldet);
+        const fehlend = Math.max(0, gemeldet - k.eingecheckt);
         return (
           <section
             key={k.event_id}
