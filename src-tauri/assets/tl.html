@@ -395,9 +395,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 #sk-add button:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Beendet: reine Rückschau, keine Bedienung mehr nötig — deshalb zugeklappt
-   und ohne die Kachel-Optik der Warteliste, nur schmale Zeilen mit Sieger
-   zuerst, Score und ggf. Aufgabe-/kampflos-Kennzeichnung. */
+/* Beendet: fast reine Rückschau — deshalb zugeklappt und ohne die
+   Kachel-Optik der Warteliste, nur schmale Zeilen mit Sieger zuerst, Score
+   und ggf. Aufgabe-/kampflos-Kennzeichnung. Der Korrektur-Stift ist die
+   einzige Bedienung hier. */
 .fin { margin-top: 16px; }
 .fin .count { color: var(--ink-faint); font-weight: 600; }
 .fin #fin-list { display: flex; flex-direction: column; gap: 6px; }
@@ -410,6 +411,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .fin-pair { font-weight: 600; flex: 1 1 12rem; min-width: 0; }
 .fin-meta { color: var(--ink-soft); }
 .fin-score { color: var(--ink-soft); flex: 0 0 auto; }
+.fin-row button {
+  font: inherit; font-weight: 700; min-width: 40px; min-height: 40px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+}
+.fin-row button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Aufklappbare Abschnitte müssen als solche erkennbar sein — ohne Zeichen
    wirken sie wie eine leere Sektion, und die Turnierleitung glaubt, es
@@ -512,7 +519,8 @@ body.offline .recall button,
 body.offline .callbtn,
 body.offline .wo .actions button,
 body.offline .sk #sk-list button,
-body.offline #sk-add button { opacity: .45; }
+body.offline #sk-add button,
+body.offline .fin-row button { opacity: .45; }
 
 /* Rückmeldung zur letzten Aktion. Bleibt stehen, bis sie weggetippt wird
    oder die nächste Aktion beginnt. */
@@ -2105,10 +2113,18 @@ function renderScorekeepers() {
  * Beendete Spiele.
  *
  * Reine Rückschau, neueste zuerst (die Reihenfolge liefert bereits der
- * Turnier-PC in `state.finished`) — hier wird nichts mehr vergeben, deshalb
- * zugeklappt und ohne Bedienelemente. Der Sieger steht zuerst, wie man ein
- * Ergebnis vorliest; die Kennzeichnung Aufgabe/kampflos/disqualifiziert
- * sitzt neben dem Satzstand.
+ * Turnier-PC in `state.finished`) — deshalb zugeklappt, ohne die Kachel-
+ * Optik der Warteliste. Der Sieger steht zuerst, wie man ein Ergebnis
+ * vorliest; die Kennzeichnung Aufgabe/kampflos/disqualifiziert sitzt neben
+ * dem Satzstand.
+ *
+ * Der Stift öffnet denselben Dialog wie „Ergebnis eintragen" (`overwrite:
+ * true`) — die Grenze liegt beim Turnier-PC (`correction_blocker`, R5):
+ * Steht der Sieger schon im nächsten Spiel, lehnt er ab und die Meldung
+ * erscheint im Dialog, nicht als Toast. Für den Dialog bleiben die Sätze in
+ * Team1:Team2-Reihenfolge — die Drehung auf „Sieger zuerst" ist reine
+ * Anzeigesache dieser Zeile und würde als Draht-Format falsch beim
+ * Turnier-PC ankommen.
  */
 const ERGEBNIS_BADGE = { walkover: "kampflos", retired: "Aufgabe", disqualified: "disqualifiziert" };
 function renderFinished() {
@@ -2131,8 +2147,30 @@ function renderFinished() {
       <span class="fin-pair">${esc(paar)}</span>
       <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
+      <button type="button" data-fin-fix="${f.match_id}"
+        title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
     </div>`;
   }).join("");
+  // Bei jedem Abruf neu verdrahten, wie bei der Zähltafel-Warteschlange:
+  // `#fin-list` wird alle zwei Sekunden per innerHTML ersetzt, alte
+  // Zuhörer hängen sonst an längst entfernten Knoten.
+  $("fin-list").querySelectorAll("[data-fin-fix]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const f = list.find((x) => String(x.match_id) === b.dataset.finFix);
+      if (!f) return;
+      // Dieselbe Sieger-zuerst-Regel wie in der Zeile (siehe `paar` oben) —
+      // aber nur für das Label. Die Sätze bleiben unangetastet in
+      // Team1:Team2, das erwartet der Turnier-PC.
+      const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
+      const label = f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
+      openResultDialog({
+        matchId: f.match_id,
+        label,
+        sets: f.sets || [],
+        bestOf: 3,
+        overwrite: true,
+      });
+    }));
 }
 
 /** Manuell einen Zähltafelbediener in die Warteschlange eintragen. */

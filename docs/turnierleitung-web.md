@@ -159,12 +159,14 @@ kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
   geschlossener Tab gibt seinen Platz nach einer Minute selbst frei. Die
   Liste der Kopplungen darf länger sein — alte Kopplungen blockieren keinen
   Platz.
-- **Ergebnisse korrigieren geht nur, solange nichts daran hängt.** Ein
-  bereits gewertetes Spiel lässt sich überschreiben, wenn kein Folgespiel
-  existiert (Finale, Gruppenspiel). Sobald der Sieger im nächsten Spiel
-  steht, wird abgelehnt — was BTP beim Überschreiben mit dem Turnierbaum
-  macht, ist noch nicht abschließend geklärt
-  ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
+- **Ergebnisse korrigieren geht nur, solange nichts daran hängt.** Der Stift
+  an einer Zeile in **Beendet** öffnet denselben Dialog wie „Ergebnis
+  eintragen", mit dem zuletzt gemeldeten Stand vorbelegt. Ein bereits
+  gewertetes Spiel lässt sich überschreiben, wenn kein Folgespiel existiert
+  (Finale, Gruppenspiel). Sobald der Sieger im nächsten Spiel steht, wird
+  abgelehnt — die Ablehnung erscheint im Dialog, nicht als Toast — was BTP
+  beim Überschreiben mit dem Turnierbaum macht, ist noch nicht abschließend
+  geklärt ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
 - Über den **Cloud-Weg** ist die Warteliste auf 40 Spiele je Halle gekürzt
   (im Hallennetz sind es 120). Der Zustand geht bei jedem Ballwechsel neu
   über die Leitung; die volle Liste wäre ein Dauerstrom über Mobilfunk. Was
