@@ -70,7 +70,8 @@ pub struct CheckinPlayer {
     pub club: Option<String>,
     #[serde(default)]
     pub nationality: Option<String>,
-    /// `open` · `checked_in` · `query`
+    /// `open` · `checked_in` · `query` · `withdrawn` (seit badhub-Migration
+    /// 157; gesetzt wird `withdrawn` nur ueber die badhub-Verwaltung).
     #[serde(default = "state_open")]
     pub state: String,
     /// `self` · `partner` · `official` — wodurch der Check-In zustande kam.
@@ -91,8 +92,19 @@ impl CheckinPlayer {
     ///
     /// `query` zählt als fehlend: die betreffende Person soll zur
     /// Turnierleitung kommen, ist also gerade nicht abgehakt.
+    ///
+    /// `withdrawn` zählt NICHT als fehlend (AK-C17): ein Abgemeldeter kommt
+    /// nicht wieder — ihn über die Hallen-Lautsprecher zu suchen wäre nur
+    /// Verwirrung. Er ist auch nicht „da": beides trifft nicht zu, deshalb
+    /// führen Anzeige und Zähler ihn gesondert.
     pub fn is_missing(&self) -> bool {
-        self.state != "checked_in"
+        self.state != "checked_in" && self.state != "withdrawn"
+    }
+
+    /// In badhub abgemeldet (AK-C16). Als Helfer, damit UI-nahe Stellen
+    /// nicht gegen String-Literale vergleichen.
+    pub fn is_withdrawn(&self) -> bool {
+        self.state == "withdrawn"
     }
 
     /// Anzeigename „Vorname Nachname", ohne doppelte Leerzeichen bei
@@ -786,6 +798,40 @@ mod tests {
             missing_text(&k, 8).unwrap(),
             "In Herrendoppel B fehlt noch Vor1 Nach1."
         );
+    }
+
+    #[test]
+    fn abgemeldete_zaehlen_nicht_als_fehlend() {
+        // AK-C16/C17: ein in badhub Abgemeldeter wird nicht gesucht — er
+        // kommt nicht wieder, und ein Ausruf ueber die Hallen-Lautsprecher
+        // waere nur Verwirrung.
+        let mut k = klasse_mit(3, 1);
+        k.players[1].state = "withdrawn".into();
+        assert_eq!(
+            missing_text(&k, 8).unwrap(),
+            "In Herrendoppel B fehlt noch Vor2 Nach2."
+        );
+    }
+
+    #[test]
+    fn nur_abgemeldete_uebrig_gibt_keine_ansage() {
+        // AK-C8 greift auch dann, wenn der letzte Offene abgemeldet ist.
+        let mut k = klasse_mit(2, 1);
+        k.players[1].state = "withdrawn".into();
+        assert!(missing_text(&k, 8).is_none());
+    }
+
+    #[test]
+    fn withdrawn_wird_geparst_und_erkannt() {
+        let mut k = klasse_mit(2, 1);
+        k.players[1].state = "withdrawn".into();
+        assert!(!k.players[1].is_missing());
+        assert!(k.players[1].is_withdrawn());
+        assert!(!k.players[0].is_withdrawn());
+        // Die drei Altzustaende verhalten sich unveraendert:
+        assert!(!k.players[0].is_missing()); // checked_in
+        k.players[1].state = "query".into();
+        assert!(k.players[1].is_missing());
     }
 
     #[test]
