@@ -23,6 +23,13 @@
   --warn: #d97706;
   --alarm: #dc2626;
   --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .1);
+  /* Mindesthöhe der Spielliste im gestapelten Layout (Telefon, „Spielliste
+     darunter") — der EINZIGE Ort, an dem diese Zahl steht: `fitCourts()`
+     im Skript liest den aufgelösten Pixelwert über `getComputedStyle`
+     zurück, statt sie ein zweites Mal im Skript zu duplizieren. Genug für
+     ein, zwei Zeilen der Warteliste plus Rand — mehr braucht die Garantie
+     nicht, den Rest holt sich die Liste ohnehin über `flex: 1 1 0`. */
+  --liste-min: 10rem;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -161,26 +168,33 @@ main {
    erst Abstände/Schrift (Klassen `kacheln-kompakt`/`kacheln-mini` weiter
    unten) und macht die Kachelbox erst als letzten Ausweg selbst rollbar
    (`.courts-scroll`) — alle Felder auf einen Blick, die Liste läuft, die
-   Felder nicht. Gestapelt (Telefon-Breite und „Spielliste darunter")
-   bekommen sie höchstens knapp zwei Drittel der Höhe, den Rest die Liste. */
+   Felder nicht. Gestapelt (Telefon-Breite und „Spielliste darunter") setzt
+   `fitCourts()` zusätzlich einen INLINE `max-height` — bedarfsgerecht,
+   nicht mehr ein starrer Anteil (siehe Kommentar dort): Kein CSS-Deckel
+   hier in der Grundregel, weil Inline-Style ihn ohnehin überstimmen würde,
+   sobald das Skript einmal gelaufen ist. */
 main > section:first-of-type {
-  flex: 0 0 auto; overflow: hidden; max-height: 64%;
+  flex: 0 0 auto; overflow: hidden;
   /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
   padding: 2px; margin: -2px;
 }
 main > section:first-of-type.courts-scroll { overflow-y: auto; }
 /* Spielliste: bekommt den kompletten Rest und rollt eigenständig — die
-   Felder darüber (oder daneben) bleiben davon unberührt. */
+   Felder darüber (oder daneben) bleiben davon unberührt. `min-height` ist
+   die harte Untergrenze aus `--liste-min` (CSS-Var, oben bei `:root`):
+   Selbst wenn `fitCourts()` den Feldern bedarfsgerecht viel Platz gibt,
+   behält die Liste IMMER mindestens dieses Maß — durchgesetzt vom Browser
+   selbst, nicht nur von der JS-Rechnung. */
 main > section:last-of-type {
-  flex: 1 1 0; min-height: 0; overflow-y: auto;
+  flex: 1 1 0; min-height: var(--liste-min, 10rem); overflow-y: auto;
 }
 @media (min-width: 1100px) {
   /* Auf dem Desktop nebeneinander: Felder links (was läuft), Liste rechts
      (was als Nächstes dran ist). Beide Spalten sind hier genauso hoch wie
      `main` selbst (`align-items: stretch`) — die Felder bekommen dadurch
-     die GANZE Höhe statt nur zwei Dritteln wie gestapelt. Auf dem Telefon
-     bleibt es bei der gestapelten Regel von oben — dort reicht ohnehin nur
-     eine Spalte nebeneinander nicht. */
+     die GANZE Höhe, kein Deckel nötig. Auf dem Telefon bleibt es bei der
+     gestapelten Regel von oben — dort reicht ohnehin nur eine Spalte
+     nebeneinander nicht. */
   main { flex-direction: row; align-items: stretch; }
   main > section:first-of-type { flex: 3 1 0; min-width: 0; max-height: none; }
   /* `min-width` zusätzlich zur `flex-basis`: Ein `flex-shrink` von 1 (Teil
@@ -189,10 +203,11 @@ main > section:last-of-type {
      320px-Untergrenze, die vorher `minmax(320px, 2fr)` im Grid gab. */
   main > section:last-of-type { flex: 2 1 320px; min-width: 320px; }
   /* Listen-Position je Gerät (Anzeige-Menü „Spielliste darunter"): wieder
-     gestapelt statt nebeneinander — die Felder bekommen dann erneut nur die
-     64-%-Obergrenze von oben, die Liste den Rest. */
+     gestapelt statt nebeneinander — dieselbe bedarfsgerechte Aufteilung wie
+     unter 1100px, nur bei größerer Fensterbreite (`fitCourts()` erkennt
+     „gestapelt" an `flex-direction: column`, nicht an der Fensterbreite). */
   body.liste-unten main { flex-direction: column; align-items: stretch; }
-  body.liste-unten main > section:first-of-type { flex: 0 0 auto; max-height: 64%; }
+  body.liste-unten main > section:first-of-type { flex: 0 0 auto; }
   body.liste-unten main > section:last-of-type { flex: 1 1 0; }
 }
 h2 {
@@ -2052,21 +2067,73 @@ function renderCourts() {
  * Stufe nicht (winziges Telefon, sehr viele Felder), wird die Felderbox
  * als letzter Ausweg selbst rollbar (`.courts-scroll`) — besser als
  * Kacheln unsichtbar abzuschneiden.
+ *
+ * Gestapelt (Telefon, „Spielliste darunter"): Statt eines festen Anteils
+ * (früherer Stand: starre 64 %) bekommen die Felder BEDARFSGERECHT genau so
+ * viel Höhe, wie sie bei der gewählten Kompaktstufe tatsächlich brauchen —
+ * die Liste darunter bekommt den ganzen Rest, mindestens aber `--liste-min`
+ * (CSS-Variable, `main > section:last-of-type` erzwingt das über
+ * `min-height`). Ein starrer Anteil verschenkte bei wenigen Feldern Platz an
+ * die Liste; schlimmer noch: Er zwang die Felder bei VIELEN Feldern in die
+ * `.courts-scroll`-Notlösung, obwohl der Bildschirm (z. B. Desktop-Fenster
+ * im Unten-Modus) reichlich Höhe für alle Kacheln ohne Kompromiss geboten
+ * hätte. Die Obergrenze während der Stufenwahl ist deshalb NICHT die volle
+ * `main`-Höhe, sondern schon `main`-Höhe minus dem Listen-Mindestmaß — erst
+ * wenn selbst „mini" darüber hinausragt, greift die eigene Bildlaufleiste.
+ * Nebeneinander (Zeilen-Layout, ≥1100px, „Spielliste rechts") bleibt es bei
+ * der vollen `main`-Höhe (CSS `align-items: stretch`, kein JS-Deckel nötig).
  */
 function fitCourts() {
+  const main = document.querySelector("main");
   const section = document.querySelector("main > section:first-of-type");
+  const listSection = document.querySelector("main > section:last-of-type");
   const box = $("courts");
-  if (!section || !box) return;
+  if (!main || !section || !listSection || !box) return;
   box.classList.remove("kacheln-kompakt", "kacheln-mini");
   section.classList.remove("courts-scroll");
+  // Immer zuerst zurücksetzen: Ein von einem früheren Durchlauf (z. B. im
+  // Zeilen-Layout) übrig gebliebener Inline-Deckel würde sonst eine eigene
+  // CSS-Regel (`max-height: none` im ≥1100px-Zeilen-Layout) überstimmen —
+  // Inline-Style gewinnt immer gegen eine Klassenregel, unabhängig vom
+  // Media-Query.
+  section.style.maxHeight = "";
+  const gestapelt = getComputedStyle(main).flexDirection === "column";
+  if (gestapelt) {
+    // Bedarfsgerechte Obergrenze: verfügbare `main`-Höhe (Innenmaß, ohne
+    // Polster/Lücke) minus dem, was die Liste mindestens behält.
+    // `getComputedStyle(listSection).minHeight` liest den AUFGELÖSTEN
+    // Pixelwert von `min-height: var(--liste-min)` — die Rem-Zahl steht
+    // deshalb nur EINMAL im CSS, nicht zusätzlich noch einmal im Skript.
+    const listenMin = parseFloat(getComputedStyle(listSection).minHeight) || 0;
+    const mainStil = getComputedStyle(main);
+    const luecke = parseFloat(mainStil.rowGap) || 16;
+    const innenhoehe = main.clientHeight
+      - (parseFloat(mainStil.paddingTop) || 0)
+      - (parseFloat(mainStil.paddingBottom) || 0);
+    const deckel = Math.max(0, innenhoehe - luecke - listenMin);
+    section.style.maxHeight = deckel + "px";
+  }
   // +1 Px Toleranz gegen Rundungsfehler bei gebrochenen Pixelwerten.
   const passt = () => section.scrollHeight <= section.clientHeight + 1;
-  if (passt()) return;
+  // NACH der Stufenwahl auf das tatsächlich benötigte Maß einkürzen (nur
+  // gestapelt) — EINE weitere Messung desselben, bereits gewählten
+  // Zustands, KEIN erneuter Eintritt in die Stufenschleife oben:
+  // `scrollHeight` hängt an der aktiven Kompaktklasse, nicht an dieser
+  // Kappung selbst (die kappt nur `clientHeight`, nie den gemessenen
+  // Inhalt) — deshalb keine Rückkopplung, keine Oszillationsgefahr.
+  const uebernehmeBedarf = () => {
+    if (gestapelt) section.style.maxHeight = Math.min(section.scrollHeight, section.clientHeight) + "px";
+  };
+  if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
-  if (passt()) return;
+  if (passt()) { uebernehmeBedarf(); return; }
   box.classList.remove("kacheln-kompakt");
   box.classList.add("kacheln-mini");
-  if (passt()) return;
+  if (passt()) { uebernehmeBedarf(); return; }
+  // Selbst „mini" ragt über den Deckel hinaus: Die Felder rollen jetzt
+  // selbst — der Deckel (`main`-Höhe minus Listen-Mindestmaß) bleibt dabei
+  // stehen, `uebernehmeBedarf()` wird bewusst NICHT aufgerufen (sie würde
+  // auf das — hier zu große — `scrollHeight` einkürzen wollen).
   section.classList.add("courts-scroll");
 }
 
