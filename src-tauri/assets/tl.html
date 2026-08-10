@@ -535,6 +535,45 @@ body.offline #sk-add button { opacity: .45; }
 .gate h1 { font-size: 1.3rem; margin: 0 0 10px; }
 .gate p { color: var(--ink-soft); }
 
+/* Ergebnis-Dialog: natives <dialog>, bewusst ohne Polyfill — Escape und
+   der Klick auf den Hintergrund kommen dadurch vom Browser mit, auf jedem
+   Gerät gleich. Hell und in denselben Formen wie der Rest der Seite, damit
+   er nicht wie ein Fremdkörper wirkt. */
+dialog#res-dlg {
+  border: 0; border-radius: 12px; padding: 0;
+  width: min(92vw, 26rem);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .28);
+  background: var(--card); color: var(--ink);
+}
+dialog#res-dlg::backdrop { background: rgba(15, 23, 42, .45); }
+dialog#res-dlg form { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+dialog#res-dlg h3 { margin: 0; font-size: 1.05rem; }
+dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
+#res-sets { display: flex; flex-direction: column; gap: 8px; }
+.res-row { display: flex; align-items: center; gap: 10px; }
+.res-row label { flex: 0 0 4.2rem; font-weight: 600; font-size: .9rem; color: var(--ink-soft); }
+.res-row input {
+  width: 4.4rem; font: inherit; font-variant-numeric: tabular-nums; text-align: center;
+  padding: 8px 6px; min-height: 44px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
+}
+.res-row span { color: var(--ink-faint); }
+#res-add-set {
+  align-self: flex-start; font: inherit; font-weight: 650; padding: 8px 14px; min-height: 40px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+  cursor: pointer;
+}
+#res-add-set:hover { border-color: var(--accent); color: var(--accent); }
+.fehler { margin: 0; color: var(--alarm); font-weight: 600; font-size: .88rem; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dlg-foot button {
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 44px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+  cursor: pointer;
+}
+#res-save { background: var(--ink); color: #fff; border-color: var(--ink); }
+#res-save:disabled { opacity: .6; cursor: default; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -593,6 +632,23 @@ body.offline #sk-add button { opacity: .45; }
     </section>
   </main>
 </div>
+
+<!-- Außerhalb von #app, wie der Toast: Weder #courts noch #queue noch
+     #fin-list dürfen den offenen Dialog beim nächsten Abruf aus dem DOM
+     reißen — sie werden alle zwei Sekunden per innerHTML neu gezeichnet. -->
+<dialog id="res-dlg">
+  <form method="dialog" id="res-form">
+    <h3 id="res-title">Ergebnis eintragen</h3>
+    <p class="meta" id="res-pair"></p>
+    <div id="res-sets"></div>
+    <button type="button" id="res-add-set">+ Satz</button>
+    <p class="fehler" id="res-error" hidden></p>
+    <div class="dlg-foot">
+      <button type="button" id="res-cancel">Abbrechen</button>
+      <button type="submit" id="res-save">Speichern</button>
+    </div>
+  </form>
+</dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite">
   <span id="toast-text"></span>
@@ -838,8 +894,11 @@ function renderActionBar() {
     : `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`;
   // Beim Umhängen ist „vom Feld nehmen" die zweite sinnvolle Handlung —
   // sie steht deshalb direkt neben dem Abbrechen, statt in einem Menü.
+  // „Vom Feld nehmen" ergibt nur für ein Feld-Spiel einen Sinn; ein Ergebnis
+  // lässt sich dagegen für JEDES gewählte Spiel eintragen — auch für eines,
+  // das noch in der Warteliste steht und nie auf einem Feld war.
   $("action-free").hidden = !picked.fromCourtId;
-  $("action-result").hidden = !picked.fromCourtId;
+  $("action-result").hidden = false;
   $("action-hint").textContent = picked.fromCourtId
     ? "auf ein anderes Feld tippen"
     : "jetzt ein Feld antippen";
@@ -888,11 +947,26 @@ function targetProblem(court) {
   return null;
 }
 
-/** Ein Kommando senden und die Antwort verständlich anzeigen. */
-async function send(opId, action, onOk) {
-  if (connectionLevel() === "offline") {
-    toast("Keine Verbindung zum Turnier-PC — nichts wurde gesendet.", true);
+/**
+ * Ein Kommando senden und die Antwort verständlich anzeigen.
+ *
+ * Fehler laufen normalerweise als Toast — flüchtig, das reicht für „Feld
+ * wurde gerade belegt" & Co. Der Ergebnis-Dialog braucht seine Fehlermeldung
+ * aber STEHEND, direkt neben den Feldern, in denen die Turnierleitung gerade
+ * tippt: Ein Toast wäre nach ein paar Sekunden wieder weg, während der
+ * Dialog noch offen ist. `opts.onError` ersetzt dafür nur den Fehlerpfad,
+ * ohne den Erfolgs-Toast anzutasten — bestehende Aufrufer ohne `opts`
+ * verhalten sich unverändert.
+ */
+async function send(opId, action, onOk, opts) {
+  const onError = opts && opts.onError;
+  const fail = (text) => {
+    if (onError) onError(text);
+    else toast(text, true);
     return false;
+  };
+  if (connectionLevel() === "offline") {
+    return fail("Keine Verbindung zum Turnier-PC — nichts wurde gesendet.");
   }
   try {
     const res = await fetch(API + "/command", {
@@ -908,16 +982,13 @@ async function send(opId, action, onOk) {
     // „nicht bestätigt — bitte wiederholen", und der Helfer hämmert auf einen
     // Knopf, der nie durchkommt.
     if (res.status === 429) {
-      toast("Zu viele Turnierleitungs-Geräte — bitte eines schließen und erneut versuchen.", true);
-      return false;
+      return fail("Zu viele Turnierleitungs-Geräte — bitte eines schließen und erneut versuchen.");
     }
     if (res.status === 401) {
-      toast("Dieses Gerät ist nicht mehr freigegeben.", true);
-      return false;
+      return fail("Dieses Gerät ist nicht mehr freigegeben.");
     }
     if (!res.ok) {
-      toast("Der Turnier-PC hat die Anfrage abgewiesen (" + res.status + ").", true);
-      return false;
+      return fail("Der Turnier-PC hat die Anfrage abgewiesen (" + res.status + ").");
     }
     const answer = await res.json();
     if (answer.ok) {
@@ -929,11 +1000,9 @@ async function send(opId, action, onOk) {
       else toast(onOk);
       return true;
     }
-    toast(answer.error || "Die Aktion wurde abgelehnt.", true);
-    return false;
+    return fail(answer.error || "Die Aktion wurde abgelehnt.");
   } catch (e) {
-    toast("Nicht bestätigt — bitte den Stand prüfen und gegebenenfalls wiederholen.", true);
-    return false;
+    return fail("Nicht bestätigt — bitte den Stand prüfen und gegebenenfalls wiederholen.");
   } finally {
     // Sofort nachfragen statt auf den nächsten Takt zu warten: Die Anzeige
     // soll den echten Stand zeigen, nicht unsere Vermutung.
@@ -982,36 +1051,83 @@ function hallIdFor(hall) {
 }
 
 /**
- * Endstand nachtragen, wenn niemand gezählt hat.
+ * Endstand nachtragen, wenn niemand gezählt hat — als Formular mit
+ * Satzfeldern statt Freitext, und auch für Spiele, die nie auf einem Feld
+ * standen (Warteliste): Die Zähltafel ist nicht die einzige Quelle für
+ * einen Endstand, ein Zettel oder eine mündliche Ansage sind es genauso.
  *
- * Bewusst über eine einfache Eingabe („21:15, 21:19") statt über ein
- * Formular mit Satzfeldern: Die Turnierleitung hat den Zettel in der Hand
- * und tippt ab, was daraufsteht. Die Prüfung macht ohnehin der Turnier-PC —
- * dieselbe wie am Zähltablett.
+ * Geprüft wird hier nur, was das Gerät sicher weiß (Zahlen, mindestens ein
+ * Satz) — die verbindliche Satzplausibilität hat der Turnier-PC (R5), und
+ * seine Ablehnung erscheint IM Dialog statt als Toast: Ein Toast wäre nach
+ * ein paar Sekunden wieder weg, während die Turnierleitung noch am
+ * Formular sitzt und die Meldung sonst verpasst.
+ *
+ * `openResultDialog` ist die Schnittstelle für Schritt 8 (Korrektur aus der
+ * Beendet-Liste) — dieselbe Funktion, nur mit `overwrite: true` und dem
+ * bereits eingetragenen Stand vorbelegt.
  */
-async function enterResult(court) {
-  const wer = `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`;
-  const eingabe = prompt(
-    `Endstand für ${court.court} — ${wer}\n\n`
-    + `Sätze mit Komma trennen, zum Beispiel:  21:15, 19:21, 21:17`,
-    (court.sets || []).map(([a, b]) => `${a}:${b}`).join(", "),
-  );
-  if (eingabe === null) return;
-  const sets = eingabe.split(",").map((s) => {
-    const m = s.trim().match(/^(\d+)\s*[:\-]\s*(\d+)$/);
-    return m ? { a: Number(m[1]), b: Number(m[2]) } : null;
-  });
-  if (!sets.length || sets.some((s) => s === null)) {
-    toast("Der Endstand ließ sich nicht lesen. Beispiel: 21:15, 21:19", true);
-    return;
+let resCtx = null;   // { matchId, label, sets, bestOf, overwrite }
+let resBusy = false; // ein Schreibvorgang ist unterwegs — kein zweiter, solange er läuft
+
+function openResultDialog(ctx) {
+  resCtx = ctx;
+  resBusy = false;
+  $("res-title").textContent = ctx.overwrite ? "Ergebnis korrigieren" : "Ergebnis eintragen";
+  $("res-pair").textContent = ctx.label;
+  $("res-error").hidden = true;
+  $("res-save").disabled = false;
+  // Mindestens zwei Zeilen, auch bei einem noch leeren Spiel — ein Satz
+  // allein wäre der Regelfall selten. Steht schon mehr auf dem Zettel (ein
+  // laufendes Best-of-5 zum Beispiel), zeigt der Dialog genau so viele.
+  const rows = Math.max(ctx.sets.length, Math.min(ctx.bestOf || 3, 2));
+  $("res-sets").innerHTML = Array.from({ length: rows }, (_, i) => resSetRow(i, ctx.sets[i])).join("");
+  $("res-dlg").showModal();
+}
+
+/** Eine Satzzeile: zwei Zahlenfelder, leer oder mit dem Live-Stand vorbelegt. */
+function resSetRow(i, satz) {
+  const [a, b] = satz || ["", ""];
+  return `<div class="res-row">
+    <label>Satz ${i + 1}</label>
+    <input type="number" min="0" max="99" inputmode="numeric" value="${a}" data-res-a="${i}" />
+    <span>:</span>
+    <input type="number" min="0" max="99" inputmode="numeric" value="${b}" data-res-b="${i}" />
+  </div>`;
+}
+
+function showResError(text) {
+  $("res-error").textContent = text;
+  $("res-error").hidden = false;
+}
+
+/** Aus dem Formular die Sätze bauen und an den Turnier-PC schicken. */
+async function sendResult() {
+  const sets = [];
+  for (const row of $("res-sets").children) {
+    const a = row.querySelector("[data-res-a]").value;
+    const b = row.querySelector("[data-res-b]").value;
+    if (a === "" && b === "") continue; // leere Zeile = weggelassener Satz
+    sets.push({ a: Number(a || 0), b: Number(b || 0) });
   }
-  picked = null;
-  renderActionBar();
-  await send(
-    `result-${court.match_id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-    { action: "enter_result", matchId: court.match_id, sets, retired: false, overwrite: false },
-    `Ergebnis für ${wer} eingetragen.`,
+  if (!sets.length) { showResError("Mindestens ein Satz."); return; }
+  resBusy = true;
+  $("res-save").disabled = true;
+  const ok = await send(
+    // Innerhalb desselben Zeitfensters bleibt die Kennung stabil — ein
+    // Doppeltipp auf „Speichern" (oder zweimal Enter) schreibt nicht
+    // zweimal nach BTP.
+    `res-${resCtx.matchId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "enter_result", matchId: resCtx.matchId, sets, retired: false, overwrite: resCtx.overwrite },
+    `Ergebnis für ${resCtx.label} eingetragen.`,
+    { onError: showResError },
   );
+  resBusy = false;
+  $("res-save").disabled = false;
+  if (ok) {
+    picked = null;
+    renderActionBar();
+    $("res-dlg").close();
+  }
 }
 
 /** Ein Feld räumen — das Spiel geht zurück in die Warteliste. */
@@ -2138,9 +2254,47 @@ function start() {
     else pickVanished();
   });
   $("action-result").addEventListener("click", () => {
-    const court = pickedCourt();
-    if (court) enterResult(court);
-    else pickVanished();
+    if (!picked) return;
+    if (picked.fromCourtId) {
+      const court = pickedCourt();
+      if (!court) { pickVanished(); return; }
+      const wer = `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`;
+      openResultDialog({
+        matchId: court.match_id,
+        label: `${court.court}: ${wer}`,
+        sets: court.sets || [],
+        bestOf: court.best_of,
+        overwrite: false,
+      });
+      return;
+    }
+    // Warteliste: kein Feld, also auch keine „steht dort nicht mehr"-Prüfung
+    // über pickedCourt() — hier zählt nur, ob das Spiel noch ansteht.
+    if (!pickIsStillValid()) { pickVanished(); return; }
+    const m = picked.match;
+    const wer = `${(m.team1 || []).join(" / ")} vs. ${(m.team2 || []).join(" / ")}`;
+    openResultDialog({
+      matchId: m.match_id,
+      label: `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`,
+      sets: [],
+      bestOf: 3,
+      overwrite: false,
+    });
+  });
+  // Das Dialog-Formular steht fest im Markup und wird nie neu gezeichnet
+  // (siehe die Anmerkung über dem `<dialog>`) — die Verdrahtung gehört
+  // deshalb hierher, wie beim Zähltafel-Formular auch.
+  $("res-add-set").addEventListener("click", () => {
+    const n = $("res-sets").children.length;
+    if (n < (resCtx.bestOf || 3)) $("res-sets").insertAdjacentHTML("beforeend", resSetRow(n));
+  });
+  $("res-cancel").addEventListener("click", () => $("res-dlg").close());
+  $("res-form").addEventListener("submit", (ev) => {
+    // `method="dialog"` würde sonst sofort schließen, noch bevor der
+    // Turnier-PC geantwortet hat — und ein Fehler hätte keinen Dialog mehr,
+    // in dem er erscheinen könnte.
+    ev.preventDefault();
+    if (!resBusy) sendResult();
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
   // Das Formular steht fest im Markup (siehe `renderScorekeepers`) und

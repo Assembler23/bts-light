@@ -42,6 +42,13 @@ LAN+Cloud voraus.
   auf keinem Feld steht.
 - **Vom Feld nehmen:** über das Band oben. Läuft schon ein Spielstand, wird
   vorher gefragt.
+- **Ergebnis eintragen:** über das Band oben, für **jedes** gewählte Spiel —
+  auch eines, das noch in der Warteliste steht und nie auf einem Feld war
+  (jemand hat mündlich oder auf einem Zettel abgerechnet). Ein Dialog mit
+  Satzfeldern öffnet sich, bei einem Feld-Spiel mit dem Live-Stand vorbelegt,
+  sonst leer. Lehnt der Turnier-PC den Stand ab (unplausible Sätze, ein
+  Folgespiel hängt bereits daran), steht die Meldung **im Dialog** — nicht
+  als flüchtiger Toast, der weg wäre, während noch getippt wird.
 - **Aufrufen:** Der Knopf am Feld löst den zweiten bzw. dritten Aufruf aus.
   Die Stufe zählt der Turnier-PC — alle Geräte, auch die Desktop-App, zeigen
   dieselbe Zahl.
@@ -138,8 +145,9 @@ damit nichts anfangen:
   Namen, dieselben Bilder wie auf dem Court-Monitor. Zu einer Nation ohne
   Flaggendatei erscheint das Kürzel. Hilfreich bei internationalen
   Turnieren.
-- **Ergebnis eintragen** für ein Spiel auf dem Feld.
-- **Automatik** an- und abschalten — der Schalter oben rechts.
+
+Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
+an- und abschalten — der Schalter oben rechts.
 
 Gesprochen wird nie auf diesem Gerät: Die Seite beauftragt die Ansage, und
 gesprochen wird sie dort, wo die Anlage hängt. Hört in der Zielhalle gerade
