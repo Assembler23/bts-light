@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clock,
+  Copy,
+  ExternalLink,
   Lock,
   Megaphone,
+  QrCode,
   RotateCcw,
   Unlock,
 } from "lucide-react";
@@ -12,6 +15,7 @@ import {
   checkinSetPlayer,
   checkinSetTimes,
   checkinState,
+  openExternal,
   publishFreetext,
 } from "../api";
 import type {
@@ -114,6 +118,9 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
   /** Letzte Ansage als Rückmeldung — gesprochen wird woanders, hier soll
    *  sichtbar sein, dass der Klick angekommen ist. */
   const [gesagt, setGesagt] = useState<string>("");
+  /** Kurze Rückmeldung nach „Link kopieren" — ohne sie wüsste niemand, ob
+   *  der Klick etwas getan hat. */
+  const [kopiert, setKopiert] = useState(false);
 
   const laden = () =>
     checkinState()
@@ -219,6 +226,17 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
     }
   }
 
+  /** Öffentlichen Link in die Zwischenablage legen. */
+  async function linkKopieren(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setKopiert(true);
+      setTimeout(() => setKopiert(false), 2000);
+    } catch {
+      setFehler("Der Link ließ sich nicht in die Zwischenablage legen.");
+    }
+  }
+
   // ── Zustände ohne Inhalt ──────────────────────────────────────────────
   if (!view) {
     return <p className="p-4 text-sm text-slate-500">Check-In wird geladen …</p>;
@@ -257,6 +275,42 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
           </span>
         )}
       </div>
+
+      {/* Links zur öffentlichen badhub-Seite: öffnen für den schnellen
+          Blick, kopieren fürs Weitergeben (Messenger, Vereins-Chat), der
+          Aushang zum Ausdrucken für die Halle. Die Adressen baut das
+          Backend — hier wird nichts zusammengesetzt. */}
+      {view.public_url && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void openExternal(view.public_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Die öffentliche Check-In-Seite im Browser öffnen"
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            Check-In-Seite öffnen
+          </button>
+          <button
+            onClick={() => void linkKopieren(view.public_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Adresse der Check-In-Seite in die Zwischenablage kopieren"
+          >
+            <Copy className="h-3.5 w-3.5" aria-hidden />
+            {kopiert ? "kopiert!" : "Link kopieren"}
+          </button>
+          <button
+            onClick={() => void openExternal(view.poster_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Druckbaren QR-Aushang für die Halle öffnen"
+          >
+            <QrCode className="h-3.5 w-3.5" aria-hidden />
+            Aushang (QR)
+          </button>
+        </div>
+      )}
 
       {fehler && (
         <p className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">

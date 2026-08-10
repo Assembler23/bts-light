@@ -496,7 +496,13 @@ pub async fn checkin_state(
         ));
     };
 
-    Ok(fetch_state(&checkin_client(), &base, &password, &uuid).await)
+    let mut view = fetch_state(&checkin_client(), &base, &password, &uuid).await;
+    // Links zur öffentlichen Seite und zum QR-Aushang: aus der Config
+    // gebaut, sobald der Check-In eingerichtet ist — auch bei „offline",
+    // denn die Adresse selbst gilt unabhängig von der Erreichbarkeit.
+    view.public_url = crate::badhub::checkin_state::public_url(&base, &uuid);
+    view.poster_url = crate::badhub::checkin_state::poster_url(&base, &uuid);
+    Ok(view)
 }
 
 /// Einen Spieler von Hand setzen, zurücksetzen oder entsperren (AK-C2).

@@ -186,6 +186,11 @@ export interface CheckinView {
   classes: CheckinClass[];
   /** Klartext für die Oberfläche, wenn etwas zu sagen ist. */
   message: string;
+  /** Öffentliche Check-In-Seite (`<basis>/checkin/<GUID>`) — vom Backend
+   *  gebaut (eine Wahrheit); leer, wenn nicht eingerichtet. */
+  public_url: string;
+  /** Druckbarer QR-Aushang (`…/aushang`) zum selben Turnier. */
+  poster_url: string;
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */

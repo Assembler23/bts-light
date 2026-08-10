@@ -128,6 +128,14 @@ Seitenleisten-Punkt **Check-In**
 dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
 ihrem Zustand.
 
+Im Kopf der Seite stehen drei Knöpfe zur **öffentlichen badhub-Seite**:
+„Check-In-Seite öffnen" (Standard-Browser), „Link kopieren" (Zwischenablage,
+fürs Weitergeben per Messenger) und „Aushang (QR)" (die druckbare
+Aushang-Seite für die Halle). Die Adressen baut das **Backend**
+(`public_url`/`poster_url` in der `checkin_state`-Antwort, Helfer in
+[`badhub/checkin_state.rs`](../src-tauri/src/badhub/checkin_state.rs)) —
+das Frontend setzt keine URLs zusammen, Basis und GUID kennt nur die Config.
+
 Ein in badhub **abgemeldeter** Spieler (`state = withdrawn`, dort über die
 Verwaltung gesetzt) erscheint grau und durchgestrichen als „abgemeldet" —
 weder als da noch als fehlend. Die Zählungen „x von y da" rechnen Abgemeldete
