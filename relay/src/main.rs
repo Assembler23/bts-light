@@ -415,6 +415,10 @@ async fn main() {
         app.route("/tl", get(tl_page))
             .route("/tl/api/state", get(tl_state_route))
             .route("/tl/api/command", post(tl_command_route))
+            // Flaggen für die TL-Seite: Sie hängt ohne Namespace unter
+            // `/tl` und findet ihre Flaggen deshalb unter `/flags/…` —
+            // Begründung am Handler.
+            .route("/flags/{file}", get(flag_route_global))
     } else {
         tracing::warn!("Turnierleitungs-Oberfläche per BTS_RELAY_TL=off abgeschaltet");
         app
@@ -1015,25 +1019,53 @@ fn monitor_player(p: &PlayerBrief) -> MonitorPlayer {
     }
 }
 
+/// Schlägt eine gebündelte Flaggen-Datei nach.
+///
+/// Pure Funktion, von **beiden** Flaggen-Routen genutzt (mit und ohne
+/// Namespace). Der Dateiname kommt aus dem Anfrage-Pfad und darf das
+/// Bündel nie verlassen — deshalb die Traversal-Abwehr hier, nicht in den
+/// Routen.
+fn flag_lookup(file: &str) -> Option<&'static [u8]> {
+    if file.is_empty() || file.contains(['/', '\\']) || file.contains("..") {
+        return None;
+    }
+    FLAGS.get_file(file).map(|f| f.contents())
+}
+
+/// Antwortform der Flaggen-Routen aus dem Nachschlage-Ergebnis.
+fn flag_response(inhalt: Option<&'static [u8]>) -> axum::response::Response {
+    match inhalt {
+        Some(svg) => (
+            [
+                (header::CONTENT_TYPE, "image/svg+xml"),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            svg,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "Flagge nicht gefunden").into_response(),
+    }
+}
+
 /// Liefert eine gebündelte SVG-Länderflagge (`/{ns}/flags/GER.svg`).
 async fn flag_route(Path((ns, file)): Path<(String, String)>) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    if file.is_empty() || file.contains(['/', '\\']) || file.contains("..") {
-        return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
-    }
-    match FLAGS.get_file(&file) {
-        Some(f) => (
-            [
-                (header::CONTENT_TYPE, "image/svg+xml"),
-                (header::CACHE_CONTROL, "public, max-age=86400"),
-            ],
-            f.contents(),
-        )
-            .into_response(),
-        None => (StatusCode::NOT_FOUND, "Flagge nicht gefunden").into_response(),
-    }
+    flag_response(flag_lookup(&file))
+}
+
+/// Liefert eine Länderflagge **ohne** Namespace (`/flags/GER.svg`).
+///
+/// Für die Turnierleitungs-Seite: Sie läuft bewusst ohne Namespace in der
+/// Adresse (ADR 0012) und leitet die Flaggen-Basis aus ihrem eigenen Pfad
+/// ab — `/bts-relay/tl` → `/bts-relay/flags/`. Ohne diese Route lief dort
+/// jede Flagge in ein 404, die Seite zeigte nur Kürzel, und der
+/// `onerror`-Tausch ließ die Listen bei jedem Poll-Neuaufbau sichtbar
+/// springen. Die Flaggen sind statische Länder-SVGs ohne Turnierbezug —
+/// ein Namespace hätte hier nichts abzusichern.
+async fn flag_route_global(Path(file): Path<String>) -> impl IntoResponse {
+    flag_response(flag_lookup(&file))
 }
 
 /// Liefert ein hochgeladenes Werbebild eines Namespace (per Index).
@@ -2468,6 +2500,20 @@ mod tests {
         assert!(!valid_pairing_code("12a45678"));
         assert!(!valid_pairing_code("a1b2c3d4-e5f6-7890-abcd-ef1234567890"));
         assert!(!valid_pairing_code(""));
+    }
+
+    #[test]
+    fn flag_lookup_liefert_svg_und_wehrt_traversal_ab() {
+        // Regulärer Abruf: die gebündelten Länder-SVGs sind auffindbar.
+        assert!(flag_lookup("GER.svg").is_some());
+        // Unbekanntes Kürzel: kein Treffer, kein Fehler.
+        assert!(flag_lookup("XXX.svg").is_none());
+        assert!(flag_lookup("").is_none());
+        // Pfad-Spielereien laufen ins Leere — die Datei kommt aus dem
+        // Anfrage-Pfad und darf das Bündel nie verlassen.
+        assert!(flag_lookup("../Cargo.toml").is_none());
+        assert!(flag_lookup("a/GER.svg").is_none());
+        assert!(flag_lookup("a\\GER.svg").is_none());
     }
 
     #[test]

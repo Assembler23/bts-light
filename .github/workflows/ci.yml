@@ -89,6 +89,11 @@ jobs:
       - name: Stimme je Disziplin (JS)
         run: node scripts/test-discipline-voice.mjs
 
+      # Doppel-Gruppierung der Check-In-Liste: gleiche entry_id (genau zwei
+      # Träger) wird eine Zeile; entry_id 0 (altes badhub) klumpt nie.
+      - name: Check-In-Doppel (JS)
+        run: node scripts/test-checkin-pairs.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

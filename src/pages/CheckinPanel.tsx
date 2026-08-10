@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clock,
+  Copy,
+  ExternalLink,
   Lock,
   Megaphone,
+  QrCode,
   RotateCcw,
   Unlock,
 } from "lucide-react";
@@ -12,8 +15,10 @@ import {
   checkinSetPlayer,
   checkinSetTimes,
   checkinState,
+  openExternal,
   publishFreetext,
 } from "../api";
+import { pairEntries } from "../io/checkinPairs.mjs";
 import type {
   AnnounceConfig,
   CheckinClass,
@@ -114,6 +119,9 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
   /** Letzte Ansage als Rückmeldung — gesprochen wird woanders, hier soll
    *  sichtbar sein, dass der Klick angekommen ist. */
   const [gesagt, setGesagt] = useState<string>("");
+  /** Kurze Rückmeldung nach „Link kopieren" — ohne sie wüsste niemand, ob
+   *  der Klick etwas getan hat. */
+  const [kopiert, setKopiert] = useState(false);
 
   const laden = () =>
     checkinState()
@@ -219,6 +227,87 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
     }
   }
 
+  /** Öffentlichen Link in die Zwischenablage legen. */
+  async function linkKopieren(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setKopiert(true);
+      setTimeout(() => setKopiert(false), 2000);
+    } catch {
+      setFehler("Der Link ließ sich nicht in die Zwischenablage legen.");
+    }
+  }
+
+  /** Eine Spieler-Zelle: Name, Verein, Zustand und die eigenen Knöpfe.
+   *
+   *  Im Doppel stehen zwei davon in EINER Zeile („A / B") — die Knöpfe
+   *  bleiben je Spieler. Einzeln gerendert füllt die Zelle die Zeile und
+   *  schiebt ihre Knöpfe wie bisher an den rechten Rand. */
+  function spielerZelle(k: CheckinClass, p: CheckinPlayer, imDoppel: boolean) {
+    const zust = spielerZustand(p);
+    const da = p.state === "checked_in";
+    return (
+      <span
+        className={`flex items-center gap-2 ${imDoppel ? "" : "w-full gap-3"}`}
+      >
+        <span className={`${imDoppel ? "" : "min-w-48 "}text-slate-800`}>
+          {p.first} {p.last}
+        </span>
+        {p.club && <span className="text-xs text-slate-400">{p.club}</span>}
+        <span className={`text-xs ${zust.klasse}`}>{zust.text}</span>
+
+        <span className={`flex gap-1 ${imDoppel ? "" : "ml-auto"}`}>
+          {!da && (
+            <button
+              disabled={busy}
+              onClick={() => eingriff(k.event_id, p.player_id, "check_in")}
+              className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
+                         text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title={
+                p.state === "withdrawn"
+                  ? "Trotz Abmeldung als anwesend eintragen"
+                  : "Als anwesend eintragen"
+              }
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+              da
+            </button>
+          )}
+          {da && (
+            <button
+              disabled={busy}
+              onClick={() => eingriff(k.event_id, p.player_id, "reset")}
+              className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
+                         text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              /* Zurücksetzen sperrt den Selbst-Check-In (B11) — das steht im
+                 Titel, damit niemand überrascht ist, wenn der Spieler danach
+                 nicht mehr klicken kann. */
+              title="Zurücksetzen — der Spieler kann sich danach nicht selbst wieder einchecken"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+              zurücksetzen
+            </button>
+          )}
+          {p.locked && (
+            <button
+              disabled={busy}
+              onClick={() => eingriff(k.event_id, p.player_id, "unlock")}
+              className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
+                         text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title="Sperre aufheben — der Spieler kann sich wieder selbst einchecken"
+            >
+              <Unlock className="h-3.5 w-3.5" aria-hidden />
+              entsperren
+            </button>
+          )}
+          {p.locked && (
+            <Lock className="h-3.5 w-3.5 text-rose-400" aria-label="gesperrt" />
+          )}
+        </span>
+      </span>
+    );
+  }
+
   // ── Zustände ohne Inhalt ──────────────────────────────────────────────
   if (!view) {
     return <p className="p-4 text-sm text-slate-500">Check-In wird geladen …</p>;
@@ -257,6 +346,42 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
           </span>
         )}
       </div>
+
+      {/* Links zur öffentlichen badhub-Seite: öffnen für den schnellen
+          Blick, kopieren fürs Weitergeben (Messenger, Vereins-Chat), der
+          Aushang zum Ausdrucken für die Halle. Die Adressen baut das
+          Backend — hier wird nichts zusammengesetzt. */}
+      {view.public_url && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void openExternal(view.public_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Die öffentliche Check-In-Seite im Browser öffnen"
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            Check-In-Seite öffnen
+          </button>
+          <button
+            onClick={() => void linkKopieren(view.public_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Adresse der Check-In-Seite in die Zwischenablage kopieren"
+          >
+            <Copy className="h-3.5 w-3.5" aria-hidden />
+            {kopiert ? "kopiert!" : "Link kopieren"}
+          </button>
+          <button
+            onClick={() => void openExternal(view.poster_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Druckbaren QR-Aushang für die Halle öffnen"
+          >
+            <QrCode className="h-3.5 w-3.5" aria-hidden />
+            Aushang (QR)
+          </button>
+        </div>
+      )}
 
       {fehler && (
         <p className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
@@ -389,84 +514,29 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
 
             {aufgeklappt && (
               <ul className="divide-y divide-slate-100 border-t border-slate-100">
-                {k.players.map((p) => {
-                  const zust = spielerZustand(p);
-                  const da = p.state === "checked_in";
-                  return (
-                    <li
-                      key={p.player_id}
-                      className="flex items-center gap-3 px-3 py-1.5 text-sm"
-                    >
-                      <span className="min-w-48 text-slate-800">
-                        {p.first} {p.last}
-                      </span>
-                      {p.club && (
-                        <span className="text-xs text-slate-400">{p.club}</span>
-                      )}
-                      <span className={`text-xs ${zust.klasse}`}>
-                        {zust.text}
-                      </span>
-
-                      <div className="ml-auto flex gap-1">
-                        {!da && (
-                          <button
-                            disabled={busy}
-                            onClick={() =>
-                              eingriff(k.event_id, p.player_id, "check_in")
-                            }
-                            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
-                                       text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                            title={
-                              p.state === "withdrawn"
-                                ? "Trotz Abmeldung als anwesend eintragen"
-                                : "Als anwesend eintragen"
-                            }
+                {/* Eine Zeile je MELDUNG: Doppel-Partner (gleiche entry_id)
+                    stehen zusammen, durch „/" getrennt — jede Zelle behält
+                    Zustand und Knöpfe, ein-/ausgecheckt wird weiter einzeln. */}
+                {pairEntries(k.players).map((zeile) => (
+                  <li
+                    key={zeile.map((p) => p.player_id).join("/")}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-sm"
+                  >
+                    {zeile.map((p, i) => (
+                      <Fragment key={p.player_id}>
+                        {i > 0 && (
+                          <span
+                            aria-hidden
+                            className="font-semibold text-slate-300"
                           >
-                            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-                            da
-                          </button>
+                            /
+                          </span>
                         )}
-                        {da && (
-                          <button
-                            disabled={busy}
-                            onClick={() =>
-                              eingriff(k.event_id, p.player_id, "reset")
-                            }
-                            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
-                                       text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                            /* Zurücksetzen sperrt den Selbst-Check-In (B11) —
-                               das steht im Titel, damit niemand überrascht ist,
-                               wenn der Spieler danach nicht mehr klicken kann. */
-                            title="Zurücksetzen — der Spieler kann sich danach nicht selbst wieder einchecken"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-                            zurücksetzen
-                          </button>
-                        )}
-                        {p.locked && (
-                          <button
-                            disabled={busy}
-                            onClick={() =>
-                              eingriff(k.event_id, p.player_id, "unlock")
-                            }
-                            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
-                                       text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                            title="Sperre aufheben — der Spieler kann sich wieder selbst einchecken"
-                          >
-                            <Unlock className="h-3.5 w-3.5" aria-hidden />
-                            entsperren
-                          </button>
-                        )}
-                        {p.locked && (
-                          <Lock
-                            className="h-3.5 w-3.5 text-rose-400"
-                            aria-label="gesperrt"
-                          />
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
+                        {spielerZelle(k, p, zeile.length > 1)}
+                      </Fragment>
+                    ))}
+                  </li>
+                ))}
                 {k.players.length === 0 && (
                   <li className="px-3 py-2 text-xs text-slate-500">
                     Für diese Klasse liegt noch keine Meldung vor.

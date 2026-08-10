@@ -185,6 +185,20 @@ kann damit nichts anfangen:
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
 
+### Aufteilung Felder/Spielliste ziehen
+
+Zwischen Feldern und Spielliste sitzt ein **Trennsteg** (kleine Pille in
+der Lücke). Ziehen verschiebt die Grenze: nebeneinander die **Breite** der
+Liste, gestapelt („Spielliste darunter") ihre **Höhe**. Das Maß gilt
+**je Gerät** und je Anordnung getrennt und bleibt gespeichert
+(`localStorage`, wie die übrigen Anzeige-Einstellungen).
+
+**Doppeltipp/Doppelklick auf den Steg** stellt die automatische,
+bedarfsgerechte Aufteilung der aktuellen Anordnung wieder her. Grenzen
+werden geklammert: Die Liste fällt nie unter ihr Mindestmaß (320 px Breite
+bzw. `--liste-min` Höhe), die Felder behalten mindestens eine Kachel —
+auch nach einem Fenster-Resize.
+
 Gesprochen wird nie auf diesem Gerät: Die Seite beauftragt die Ansage, und
 gesprochen wird sie dort, wo die Anlage hängt. Hört in der Zielhalle gerade
 kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.

@@ -240,6 +240,15 @@ pub struct CheckinView {
     /// Klartext für die Oberfläche, wenn etwas zu sagen ist.
     #[serde(default)]
     pub message: String,
+    /// Öffentliche Check-In-Seite (`<basis>/checkin/<GUID>`) — zum Öffnen
+    /// und Weitergeben durch die Turnierleitung. Gefüllt vom Command aus
+    /// der Config, **nicht** vom Abruf: Die Adresse gilt unabhängig davon,
+    /// ob badhub gerade erreichbar ist. Leer = nicht eingerichtet.
+    #[serde(default)]
+    pub public_url: String,
+    /// Druckbarer QR-Aushang (`…/aushang`) zum selben Turnier.
+    #[serde(default)]
+    pub poster_url: String,
 }
 
 impl CheckinView {
@@ -250,6 +259,8 @@ impl CheckinView {
             tournament_name: String::new(),
             classes: Vec::new(),
             message: message.into(),
+            public_url: String::new(),
+            poster_url: String::new(),
         }
     }
 }
@@ -294,6 +305,20 @@ fn tl_url(base: &str, uuid: &str, pfad: &str) -> String {
         uuid,
         pfad
     )
+}
+
+/// Adresse der **öffentlichen** Check-In-Seite (`<basis>/checkin/<GUID>`).
+///
+/// Gebaut im Backend, nicht im Frontend: Basis und GUID kennt nur die
+/// Config — eine zweite URL-Bau-Logik in TypeScript wäre eine zweite
+/// Wahrheit, die beim nächsten Pfad-Umbau stillschweigend auseinanderliefe.
+pub fn public_url(base: &str, uuid: &str) -> String {
+    format!("{}/checkin/{}", base.trim_end_matches('/'), uuid)
+}
+
+/// Druckbare Aushang-Seite (QR + Kurz-URL) zum selben Turnier.
+pub fn poster_url(base: &str, uuid: &str) -> String {
+    format!("{}/aushang", public_url(base, uuid))
 }
 
 /// Den vollständigen Check-In-Stand abrufen (AK-C1, C5).
@@ -361,6 +386,10 @@ pub async fn fetch_state(
         tournament_name: body.tournament.map(|t| t.name).unwrap_or_default(),
         classes: body.classes,
         message: body.message,
+        // Die Links füllt der Command aus der Config nach — hier ist nur
+        // bekannt, was badhub geantwortet hat.
+        public_url: String::new(),
+        poster_url: String::new(),
     }
 }
 
@@ -502,6 +531,23 @@ mod tests {
         assert_eq!(
             tl_url("https://badhub.de/", UUID, "stand"),
             format!("https://badhub.de/checkin/{UUID}/tl/stand")
+        );
+    }
+
+    #[test]
+    fn oeffentliche_adressen_werden_unter_der_basis_gebaut() {
+        assert_eq!(
+            public_url("https://badhub.de", UUID),
+            format!("https://badhub.de/checkin/{UUID}")
+        );
+        // Auch hier: Schrägstrich am Basis-Ende darf nicht doppeln.
+        assert_eq!(
+            public_url("https://badhub.de/", UUID),
+            format!("https://badhub.de/checkin/{UUID}")
+        );
+        assert_eq!(
+            poster_url("https://badhub.de", UUID),
+            format!("https://badhub.de/checkin/{UUID}/aushang")
         );
     }
 

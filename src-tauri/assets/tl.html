@@ -161,9 +161,26 @@ header {
 main {
   flex: 1 1 auto; min-height: 0;
   padding: calc(16px + var(--band, 0px)) 16px 16px;
-  display: flex; flex-direction: column; gap: 16px;
+  /* Kein `gap` mehr: Den Abstand zwischen Feldern und Liste stellt der
+     Trennsteg (#steg, 16px dick) — dieselbe Optik wie vorher, aber die
+     Lücke ist jetzt zugleich die Greiffläche zum Ziehen. */
+  display: flex; flex-direction: column;
   overflow: hidden;
 }
+/* Trennsteg: gestapelt ein waagerechter Griff (zieht die Listen-HÖHE).
+   `touch-action: none` GENAU HIER, wie beim Zieh-Griff der Kacheln: Eine
+   am Steg beginnende Geste gehört dem Steg, nicht dem Scrollen. */
+#steg {
+  flex: none; touch-action: none; user-select: none; -webkit-user-select: none;
+  display: flex; align-items: center; justify-content: center;
+  height: 16px; cursor: row-resize;
+}
+/* Sichtbar ist nur eine kleine Pille — die Greiffläche ist der ganze Steg. */
+#steg::after {
+  content: ""; border-radius: 999px; background: var(--line);
+  width: 44px; height: 4px;
+}
+#steg:hover::after, #steg.zieht::after { background: var(--ink-faint); }
 /* Felder: nie höher als ihr Platz. `fitCourts()` im Skript schrumpft dafür
    erst Abstände/Schrift (Klassen `kacheln-kompakt`/`kacheln-mini` weiter
    unten) und macht die Kachelbox erst als letzten Ausweg selbst rollbar
@@ -209,6 +226,10 @@ main > section:last-of-type {
   body.liste-unten main { flex-direction: column; align-items: stretch; }
   body.liste-unten main > section:first-of-type { flex: 0 0 auto; }
   body.liste-unten main > section:last-of-type { flex: 1 1 0; }
+  /* Nebeneinander wird der Steg zum senkrechten Griff (zieht die
+     Listen-BREITE). Gestapelt („Spielliste darunter") gilt die Grundregel. */
+  body:not(.liste-unten) #steg { height: auto; width: 16px; cursor: col-resize; }
+  body:not(.liste-unten) #steg::after { width: 4px; height: 44px; }
 }
 h2 {
   margin: 0 0 10px; font-size: .8rem; font-weight: 700;
@@ -795,6 +816,13 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <h2>Felder <span class="count" id="courts-count"></span></h2>
       <div id="courts"></div>
     </section>
+    <!-- Trennsteg: Aufteilung Felder/Spielliste per Ziehen — nebeneinander
+         die Breite, gestapelt die Höhe. Doppeltipp stellt die Automatik
+         wieder her. Ein DIV zwischen den Sections stört die
+         :first-of-type/:last-of-type-Selektoren nicht (die zählen je
+         Element-Typ). -->
+    <div id="steg" role="separator" aria-label="Aufteilung zwischen Feldern und Spielliste ziehen"
+         title="Ziehen: Aufteilung ändern · Doppeltipp: automatische Aufteilung"></div>
     <section>
       <div id="walkovers"></div>
       <details class="sk" id="sk-box" hidden>
@@ -1677,16 +1705,30 @@ function pairOf(t1, t2, nat1, nat2) {
  * `title` und als Ersatz, wenn es die Datei nicht gibt: Zu einer unbekannten
  * Nation lädt der Browser sonst ein kaputtes Bild, und die Zeile verrutscht.
  */
+// Kürzel, deren Flaggen-Datei fehlt (404): einmal gemerkt, rendert jeder
+// weitere Zyklus sofort den Text-Ersatz. Ohne den Merker setzte jeder
+// Poll-Neuaufbau erneut ein scheiterndes `<img>` ein, dessen
+// nachträglicher `onerror`-Tausch die Zeilen alle zwei Sekunden sichtbar
+// springen ließ. Bewusster Tradeoff: `onerror` unterscheidet 404 nicht
+// von einem kurzen Netz-Aussetzer — ein dabei gemerktes Kürzel bleibt bis
+// zum Neuladen der Seite Text. Ruhige Zeilen wiegen schwerer als eine
+// einzelne Flagge, die erst nach einem Reload zurückkehrt.
+const flaggenFehlt = new Set();
+window.flaggeFehlgeschlagen = (img, code) => {
+  flaggenFehlt.add(code);
+  img.replaceWith(Object.assign(document.createElement("span"),
+    { className: "nat", textContent: code }));
+};
 function nationBadge(code) {
   const c = (code || "").trim().toUpperCase();
   if (!c) return "";
   // Nur was wie ein ISO-Kürzel aussieht — der Wert kommt aus BTP und landet
-  // hier in einer URL.
+  // hier in einer URL (und unten uneingepackt im Inline-`onerror`).
   if (!/^[A-Z]{2,3}$/.test(c)) return "";
+  if (flaggenFehlt.has(c)) return `<span class="nat">${esc(c)}</span>`;
   return `<img class="flagge" src="${FLAGGEN_BASIS}${c}.svg" alt="${esc(c)}"
     title="${esc(c)}" loading="lazy" width="20" height="14"
-    onerror="this.replaceWith(Object.assign(document.createElement('span'),
-      {className:'nat', textContent:'${esc(c)}'}))">`;
+    onerror="window.flaggeFehlgeschlagen(this, '${c}')">`;
 }
 
 /**
@@ -2097,7 +2139,37 @@ function fitCourts() {
   // Inline-Style gewinnt immer gegen eine Klassenregel, unabhängig vom
   // Media-Query.
   section.style.maxHeight = "";
+  section.style.minHeight = "";
   const gestapelt = getComputedStyle(main).flexDirection === "column";
+  // Dicke des Trennstegs — die Lücke zwischen den beiden Bereichen.
+  const steg = $("steg");
+  const luecke = (gestapelt ? steg?.offsetHeight : steg?.offsetWidth) || 16;
+  // Handgezogene Listen-BREITE (nur nebeneinander): als feste Basis an die
+  // Liste, die Felder nehmen den Rest. Geklammert, damit nach einem
+  // Fenster-Resize weder die Liste unter ihre 320px noch die Felderspalte
+  // unter eine Kachelbreite rutscht.
+  if (!gestapelt) {
+    const breite = gespeicherteAufteilung(LISTE_BREITE_KEY);
+    if (breite) {
+      const mainStil = getComputedStyle(main);
+      const innenbreite = main.clientWidth
+        - (parseFloat(mainStil.paddingLeft) || 0)
+        - (parseFloat(mainStil.paddingRight) || 0);
+      const max = Math.max(LISTE_MIN_BREITE, innenbreite - luecke - FELDER_MIN);
+      listSection.style.flexBasis =
+        Math.min(Math.max(breite, LISTE_MIN_BREITE), max) + "px";
+      listSection.style.flexGrow = "0";
+    } else {
+      listSection.style.flexBasis = "";
+      listSection.style.flexGrow = "";
+    }
+  } else {
+    // Gestapelt gilt wieder das CSS (`flex: 1 1 0`) — ein Breiten-Rest aus
+    // dem Zeilen-Layout darf hier nicht nachwirken.
+    listSection.style.flexBasis = "";
+    listSection.style.flexGrow = "";
+  }
+  const manuelleHoehe = gestapelt ? gespeicherteAufteilung(LISTE_HOEHE_KEY) : 0;
   if (gestapelt) {
     // Bedarfsgerechte Obergrenze: verfügbare `main`-Höhe (Innenmaß, ohne
     // Polster/Lücke) minus dem, was die Liste mindestens behält.
@@ -2106,23 +2178,37 @@ function fitCourts() {
     // deshalb nur EINMAL im CSS, nicht zusätzlich noch einmal im Skript.
     const listenMin = parseFloat(getComputedStyle(listSection).minHeight) || 0;
     const mainStil = getComputedStyle(main);
-    const luecke = parseFloat(mainStil.rowGap) || 16;
     const innenhoehe = main.clientHeight
       - (parseFloat(mainStil.paddingTop) || 0)
       - (parseFloat(mainStil.paddingBottom) || 0);
-    const deckel = Math.max(0, innenhoehe - luecke - listenMin);
-    section.style.maxHeight = deckel + "px";
+    if (manuelleHoehe) {
+      // Handgezogene Listen-HÖHE: Die Grenze steht fest, wo sie gezogen
+      // wurde — Felderbox exakt bis zum Steg (`min` = `max`), die Liste
+      // füllt den Rest über ihr `flex: 1 1 0`. Geklammert: Liste nie
+      // unter ihr Mindestmaß, Felder nie unter eine Kachelreihe.
+      const liste = Math.min(
+        Math.max(manuelleHoehe, listenMin),
+        Math.max(listenMin, innenhoehe - luecke - FELDER_MIN),
+      );
+      const deckel = Math.max(0, innenhoehe - luecke - liste);
+      section.style.maxHeight = deckel + "px";
+      section.style.minHeight = deckel + "px";
+    } else {
+      const deckel = Math.max(0, innenhoehe - luecke - listenMin);
+      section.style.maxHeight = deckel + "px";
+    }
   }
   // +1 Px Toleranz gegen Rundungsfehler bei gebrochenen Pixelwerten.
   const passt = () => section.scrollHeight <= section.clientHeight + 1;
   // NACH der Stufenwahl auf das tatsächlich benötigte Maß einkürzen (nur
-  // gestapelt) — EINE weitere Messung desselben, bereits gewählten
+  // gestapelt, nur Automatik — eine von Hand gezogene Grenze bleibt exakt
+  // stehen) — EINE weitere Messung desselben, bereits gewählten
   // Zustands, KEIN erneuter Eintritt in die Stufenschleife oben:
   // `scrollHeight` hängt an der aktiven Kompaktklasse, nicht an dieser
   // Kappung selbst (die kappt nur `clientHeight`, nie den gemessenen
   // Inhalt) — deshalb keine Rückkopplung, keine Oszillationsgefahr.
   const uebernehmeBedarf = () => {
-    if (gestapelt) section.style.maxHeight = Math.min(section.scrollHeight, section.clientHeight) + "px";
+    if (gestapelt && !manuelleHoehe) section.style.maxHeight = Math.min(section.scrollHeight, section.clientHeight) + "px";
   };
   if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
@@ -2147,6 +2233,94 @@ function scheduleFitCourts() {
   if (fitScheduled) return;
   fitScheduled = true;
   requestAnimationFrame(() => { fitScheduled = false; fitCourts(); });
+}
+
+// ── Trennsteg: Aufteilung Felder/Spielliste von Hand ziehen ───────────
+// Je Gerät gespeichert (localStorage, `bts-tl-*`-Muster wie die übrigen
+// Anzeige-Einstellungen), getrennt je Anordnung: nebeneinander die BREITE
+// der Liste, gestapelt ihre HÖHE. Ohne Wert gilt die Automatik
+// (`fitCourts()` bedarfsgerecht); angewendet und geklammert wird in
+// `fitCourts()` selbst — ein Ort, an dem alle Maße zusammenlaufen.
+const LISTE_BREITE_KEY = "bts-tl-liste-breite";
+const LISTE_HOEHE_KEY = "bts-tl-liste-hoehe";
+/** Untergrenze der Liste im Zeilen-Layout — dieselben 320px wie im CSS. */
+const LISTE_MIN_BREITE = 320;
+/** Untergrenze der Felder: eine Kachel (230px-Raster) bzw. eine Reihe. */
+const FELDER_MIN = 240;
+
+/** Gespeichertes Maß einer Richtung; 0 = Automatik. */
+function gespeicherteAufteilung(key) {
+  const wert = parseFloat(localStorage.getItem(key));
+  return Number.isFinite(wert) && wert > 0 ? wert : 0;
+}
+
+/** Verdrahtet den Trennsteg (#steg): Ziehen ändert die Aufteilung,
+ *  Doppeltipp/-klick stellt die Automatik der aktuellen Anordnung wieder
+ *  her. Pointer-Capture statt Fenster-Listener: Die Geste beginnt GEZIELT
+ *  am Steg (`touch-action: none` dort im CSS), damit kein natives
+ *  Scrollen dazwischenfunkt — dieselbe Technik wie beim Zieh-Griff. */
+function enableSteg() {
+  const steg = $("steg");
+  const main = document.querySelector("main");
+  const list = document.querySelector("main > section:last-of-type");
+  if (!steg || !main || !list) return;
+  steg.addEventListener("pointerdown", (down) => {
+    // Nur der Hauptzeiger zieht — ein zweiter Finger mitten im Zug bleibt
+    // folgenlos, statt die Grenze springen zu lassen.
+    if (!down.isPrimary) return;
+    down.preventDefault();
+    steg.setPointerCapture(down.pointerId);
+    steg.classList.add("zieht");
+    document.body.classList.add("dragging");
+    const gestapelt = getComputedStyle(main).flexDirection === "column";
+    const start = gestapelt ? down.clientY : down.clientX;
+    const rect = list.getBoundingClientRect();
+    const startMass = gestapelt ? rect.height : rect.width;
+    const key = gestapelt ? LISTE_HOEHE_KEY : LISTE_BREITE_KEY;
+    // Erst ab einer echten Bewegung zählt die Geste als Zug: Ein bloßer
+    // Tipp auf den Steg darf die Automatik NICHT auf „manuell" umstellen —
+    // und der Doppeltipp-Reset unten braucht die Unterscheidung ebenso.
+    let bewegt = false;
+    const move = (ev) => {
+      // Steg Richtung Felder geschoben = Liste wächst. Geklammert wird
+      // beim Anwenden in fitCourts(), nicht hier — eine Regel, ein Ort.
+      const delta = start - (gestapelt ? ev.clientY : ev.clientX);
+      if (!bewegt && Math.abs(delta) < 3) return;
+      bewegt = true;
+      localStorage.setItem(key, String(Math.round(startMass + delta)));
+      scheduleFitCourts();
+    };
+    const done = () => {
+      steg.removeEventListener("pointermove", move);
+      steg.removeEventListener("pointerup", done);
+      steg.removeEventListener("pointercancel", done);
+      steg.classList.remove("zieht");
+      document.body.classList.remove("dragging");
+      if (!bewegt) return;
+      // Den tatsächlich angewendeten (geklammerten) Stand zurückschreiben,
+      // damit kein Wert jenseits der Grenzen gespeichert bleibt und der
+      // nächste Zug vom sichtbaren Maß ausgeht.
+      requestAnimationFrame(() => {
+        // Ein Doppeltipp kann inzwischen auf Automatik zurückgestellt
+        // haben — dann darf dieser Nachzügler den Wert nicht wiederbeleben.
+        if (localStorage.getItem(key) === null) return;
+        const r = list.getBoundingClientRect();
+        localStorage.setItem(key, String(Math.round(gestapelt ? r.height : r.width)));
+      });
+    };
+    // Dank Pointer-Capture kommen move/up am Steg an, auch wenn der Finger
+    // längst über der Liste oder den Kacheln steht.
+    steg.addEventListener("pointermove", move);
+    steg.addEventListener("pointerup", done);
+    steg.addEventListener("pointercancel", done);
+  });
+  steg.addEventListener("dblclick", () => {
+    // Zurück zur Automatik — nur die Richtung der AKTUELLEN Anordnung:
+    // Ein in der anderen Anordnung gezogenes Maß bleibt dort gültig.
+    const gestapelt = getComputedStyle(main).flexDirection === "column";
+    localStorage.removeItem(gestapelt ? LISTE_HOEHE_KEY : LISTE_BREITE_KEY);
+    scheduleFitCourts();
+  });
 }
 
 function queueRow(m) {
@@ -3076,6 +3250,7 @@ function start() {
   $("opt-liste-unten").addEventListener("change", (ev) =>
     ev.currentTarget.checked && setzeListenPosition(true));
 
+  enableSteg();
   messeKopf();
   scheduleFitCourts();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
