@@ -117,8 +117,9 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
   Original-BTS seine „upcoming"-Ticker-Anzeige speist
   (ticker_manager/highlight) — ggf. weitere Mechanik übernehmen.
-- **Matchball-Einfärbung in der Felderübersicht** (Tilo-Idee, nur
-  Turnierleitung) — Plan 16.
+- ~~**Matchball-Einfärbung in der Felderübersicht** (Tilo-Idee, nur
+  Turnierleitung) — Plan 16.~~ → umgesetzt 2026-08-10 (App-Felderübersicht
+  bereits zuvor; TL-Web-Abzeichen mit diesem Commit).
 - **Altes Ergebnis bei Neu-Zuweisung** (Tilo + Log-Review HM-03):
   Match-ID in Score-Frames + Server-Filter gegen veraltete
   Tablet-Stände — Plan 17 (ersetzt den Log-Review-Punkt
