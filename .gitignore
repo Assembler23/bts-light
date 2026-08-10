@@ -38,3 +38,6 @@ docs/features/_intake/
 # Wurzel-Ebene: die echten Testdaten liegen bewusst unter
 # src-tauri/tests/fixtures/ und werden per include_bytes! gebraucht.
 /*.bin
+
+# Session-Arbeitsdateien der Claude-Skills (nie committen)
+.superpowers/
