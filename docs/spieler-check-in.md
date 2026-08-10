@@ -128,6 +128,15 @@ Seitenleisten-Punkt **Check-In**
 dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
 ihrem Zustand.
 
+**Doppel stehen als eine Zeile je Meldung** („A / B"): Zwei Spieler mit
+derselben `entry_id` werden zusammengefasst
+([`io/checkinPairs.mjs`](../src/io/checkinPairs.mjs)), jede Hälfte behält
+Zustand und Knöpfe — ein- und ausgecheckt wird weiterhin **einzeln**, alle
+Zählungen bleiben spielerbasiert. Ein Paar entsteht nur bei `entry_id > 0`
+und **genau zwei** Trägern: Ein badhub vor der `entry_id`-Auslieferung
+schickt überall 0 (nichts klumpt), unvollständige Doppel und Datenfehler
+(3+ Träger) bleiben ehrliche Einzelzeilen.
+
 Im Kopf der Seite stehen drei Knöpfe zur **öffentlichen badhub-Seite**:
 „Check-In-Seite öffnen" (Standard-Browser), „Link kopieren" (Zwischenablage,
 fürs Weitergeben per Messenger) und „Aushang (QR)" (die druckbare
@@ -301,3 +310,6 @@ ausgerufen: er soll gerade nicht zur Turnierleitung.
 - Ansagetexte als **reine** Funktionen (ebenda): Einzahl/Mehrzahl der Minuten,
   Ansage entfällt nach Anmeldeschluss, Anfangszeit als Rückfall, unter/über
   `missing_names_max`, leere Fehlt-Liste, `query` zählt als fehlend.
+- [`scripts/test-checkin-pairs.mjs`](../scripts/test-checkin-pairs.mjs)
+  (Node, im CI) — Doppel-Gruppierung der Anzeige: Paar nur bei `entry_id > 0`
+  und genau zwei Trägern, `entry_id` 0 klumpt nie, Reihenfolge bleibt.
