@@ -735,6 +735,15 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     }
     tablet.load_scores(&scores_path);
     tablet.set_scores_path(scores_path);
+    // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
+    // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
+    // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
+    if let Ok(dir) = app.path().app_data_dir() {
+        tablet.timeline_store().set_dir(dir.join("punktverlauf"));
+    }
+    tablet
+        .timeline_store()
+        .set_guid(&config.checkin.tournament_uuid);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
     // Laufzeit-Schalter (Pause der automatischen Vergabe) beim Start lösen —
