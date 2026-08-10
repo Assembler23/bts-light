@@ -67,6 +67,11 @@ eine `LocationID`. Hat das Turnier **≥ 2 Hallen**, gilt:
   Meeting-Point-TV je Halle zeigt nur die Vorbereitungs-Spiele *seiner*
   Halle. Quelle: bts-light setzt `upcoming_matches[].hall` je gerufenem
   Spiel. Details: [preparation.md](preparation.md).
+- **Feld-Raster (Felderübersicht + TL-Web):** Innerhalb einer
+  Hallen-Gruppe lassen sich die Felder zusätzlich als **Raster** anordnen
+  — dieselbe Anordnung wie in der Halle, statt Formularreihenfolge.
+  Host-Einstellung je Halle, wirkt in beiden Oberflächen gleich. Details:
+  [features/feld-raster.md](features/feld-raster.md).
 
 Bei **Ein-Hallen-Turnieren** ist die Halle leer und nichts gruppiert —
 alle Ansichten bleiben byte-für-byte wie vorher.
@@ -372,4 +377,5 @@ bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst sagt er beide an).
 | Liveticker-Hallen-Monitor | badhub: `public/assets/js/live.js` (`groupCourtsByHall`, `?halle=`) | badhub: `docs/features/liveticker_bts.md` |
 | `LanAndCloud`-Modus | `src-tauri/src/config.rs`, `commands.rs` (`start_sync`, `monitor_devices`) | [cloud-relay.md](cloud-relay.md), [tablet.md](tablet.md) |
 | Geräte-Liste vereinen | `relay-proto/src/lib.rs` (`merge_device_lists`) | [cloud-relay.md](cloud-relay.md) |
+| Feld-Raster je Halle | `config.rs` (`hall_layouts`), `src/io/hallGrid.mjs`, `FieldOverviewPage.tsx`, `tablet/tl.rs` (`TlHallLayout`), `assets/tl.html` | [features/feld-raster.md](features/feld-raster.md), [turnierleitung-web.md](turnierleitung-web.md) |
 | Vorbereitungs-Aufrufe je Halle | `src-tauri/src/tablet/state.rs`, `src/pages/PreparationPanel.tsx` | [preparation.md](preparation.md) |

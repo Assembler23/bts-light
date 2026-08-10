@@ -140,6 +140,8 @@ pub fn run() {
             commands::tl_device_add,
             commands::tl_device_remove,
             commands::tl_web_set_enabled,
+            commands::set_hall_layout,
+            commands::remove_hall_layout,
             commands::cloud_announce_state,
             commands::cloud_slaves,
             commands::pairing_code,

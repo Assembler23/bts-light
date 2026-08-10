@@ -73,6 +73,11 @@ jobs:
       - name: Satz-/Matchball (JS)
         run: node scripts/test-gamepoint.mjs
 
+      # Hallen-Raster-Zellen-Abbildung (Task 10, Turnierleitung-Web): bildet
+      # BTP-Feldnummern auf Bildschirm-Koordinaten ab für die Hallen-Übersicht.
+      - name: Hallen-Raster (JS)
+        run: node scripts/test-hallgrid.mjs
+
       # Aussprache-Korrektur-Rangfolge auf dem Azure-Pfad (IPA > say-Respelling)
       # — sorgt dafür, dass die phonetische Ersatzschreibweise auch bei Azure
       # greift und IPA nicht verdrängt.

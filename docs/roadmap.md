@@ -329,6 +329,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **Feld-Raster per Drag & Drop anordnen.** Das Feld-Raster
+  (Spaltenzahl + Start-Ecke + Schlange, [features/feld-raster.md](features/feld-raster.md))
+  deckt rechteckige Hallen ab; für unregelmäßige Hallen wäre eine frei
+  ziehbare Anordnung je Feld komfortabler. Bewusst verschoben beim
+  Erstwurf — Persistenz je Feld statt je Halle, eigene Speicher-UI,
+  Zusammenspiel mit wechselnden Feldzahlen.
 
 ## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
 

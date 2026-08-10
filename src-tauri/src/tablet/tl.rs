@@ -1396,6 +1396,10 @@ pub struct TlState {
     /// und `result`-Abbildung wie `finished_matches` in commands.rs (die
     /// Desktop-Tabelle), damit beide Ansichten dasselbe erzählen.
     pub finished: Vec<TlFinished>,
+    /// Raster-Anordnung je Halle (Host-Einstellung, `AppConfig.hall_layouts`).
+    /// Hallen ohne Eintrag bekommen kein Element hier — die Seite zeigt sie
+    /// dann in der bisherigen Fließ-Darstellung.
+    pub layouts: Vec<TlHallLayout>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1517,6 +1521,19 @@ pub struct TlHall {
     /// BTP-Kennung des Standorts — nötig für den Vorbereitungs-Aufruf.
     pub id: i64,
     pub name: String,
+}
+
+/// Raster-Anordnung der Felder einer Halle, wie sie am Turnier-PC hinterlegt
+/// ist ([`crate::config::HallLayoutConfig`]). Reiner Datentransport — keine
+/// Personendaten, deshalb ohne weitere Prüfung erlaubt.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlHallLayout {
+    pub hall: String,
+    pub columns: u8,
+    /// snake_case-String derselben vier Werte wie
+    /// [`crate::config::LayoutOrigin`] — die Seite kennt keine Rust-Enums.
+    pub origin: String,
+    pub serpentine: bool,
 }
 
 /// Ein Wartender in der Zähltafelbediener-Warteschlange, wie er auf der
@@ -1686,6 +1703,10 @@ pub(crate) fn build_state_limited(
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
             finished: Vec::new(),
+            // Die Raster-Einstellung ist Host-Konfiguration, kein
+            // Turnierstand — sie gilt auch, solange BTP noch nichts
+            // geliefert hat.
+            layouts: layouts_view(config),
         };
     };
 
@@ -1924,7 +1945,30 @@ pub(crate) fn build_state_limited(
         scorekeeper_managed,
         scorekeepers,
         finished,
+        layouts: layouts_view(config),
     }
+}
+
+/// Übersetzt die Host-Konfiguration je Halle in die Wire-Form — `origin` als
+/// snake_case-String statt Rust-Enum, damit tl.html es ohne Zusatzwissen
+/// lesen kann.
+fn layouts_view(config: &AppConfig) -> Vec<TlHallLayout> {
+    config
+        .hall_layouts
+        .iter()
+        .map(|l| TlHallLayout {
+            hall: l.hall.clone(),
+            columns: l.columns,
+            origin: match l.origin {
+                crate::config::LayoutOrigin::BottomLeft => "bottom_left",
+                crate::config::LayoutOrigin::BottomRight => "bottom_right",
+                crate::config::LayoutOrigin::TopLeft => "top_left",
+                crate::config::LayoutOrigin::TopRight => "top_right",
+            }
+            .to_string(),
+            serpentine: l.serpentine,
+        })
+        .collect()
 }
 
 /// Die tatsächlich geltende Pflichtpause in Minuten — dieselbe Regel, nach
@@ -2125,6 +2169,26 @@ mod tests {
         assert!(s.courts.is_empty());
         assert!(s.queue.is_empty());
         assert!(!s.multi_hall);
+    }
+
+    #[test]
+    fn the_state_carries_the_hall_layouts() {
+        // Host-Einstellung je Halle (Task 9) muss unverändert in den
+        // Anzeige-Zustand durchgereicht werden — sonst könnte die Seite kein
+        // Raster zeigen, obwohl eines konfiguriert ist.
+        let mut config = AppConfig::default();
+        config.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle 1".into(),
+            columns: 3,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+        let s = state_with(snap(Vec::new(), Vec::new(), Vec::new()), &config);
+        assert_eq!(s.layouts.len(), 1);
+        assert_eq!(s.layouts[0].hall, "Halle 1");
+        assert_eq!(s.layouts[0].columns, 3);
+        assert_eq!(s.layouts[0].origin, "bottom_left");
+        assert!(!s.layouts[0].serpentine);
     }
 
     #[test]
@@ -4094,6 +4158,12 @@ mod tests {
             "winner",
             "result",
             "finished_at_ms",
+            // Raster-Anordnung je Halle: reine Geometrie-Konfiguration vom
+            // Turnier-PC, keine Personendaten.
+            "layouts",
+            "columns",
+            "origin",
+            "serpentine",
         ];
 
         let tablet = TabletState::default();
@@ -4126,11 +4196,24 @@ mod tests {
         tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
         let mut config = AppConfig::default();
         config.scorekeeper.enabled = true;
+        // Ebenso ein Raster-Eintrag: Ohne ihn bliebe `layouts` leer und der
+        // Wächter sähe `columns`/`origin`/`serpentine` nie.
+        config.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle 1".into(),
+            columns: 3,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
         let s = build_state(&tablet, &config, 1_000_000, 1);
         assert!(
             !s.finished.is_empty(),
             "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten, \
              sonst prüft dieser Test die `TlFinished`-Felder gar nicht"
+        );
+        assert!(
+            !s.layouts.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein Raster enthalten, \
+             sonst prüft dieser Test die `TlHallLayout`-Felder gar nicht"
         );
         assert!(
             !s.scorekeepers.is_empty(),
@@ -4198,6 +4281,14 @@ mod tests {
         tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
         let mut config = AppConfig::default();
         config.scorekeeper.enabled = true;
+        // Auch hier ein Raster-Eintrag, damit `layouts` nicht leer bleibt —
+        // Halle als reines Geometrie-Datum, kein Personenbezug.
+        config.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle 1".into(),
+            columns: 3,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
         let s = build_state(&tablet, &config, 1_000_000, 7);
         assert!(
             !s.finished.is_empty(),

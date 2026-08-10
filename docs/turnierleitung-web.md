@@ -136,17 +136,36 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Anordnung wie in der Halle
+
+Statt Feldern in Formularreihenfolge lässt sich für jede Halle ein
+**Raster** hinterlegen — dieselbe Anordnung, in der die Felder tatsächlich
+stehen. Eingestellt wird das je Halle über das **Zahnrad** an der
+Hallenüberschrift in der Felderübersicht der App (Spalten, Start-Ecke, Zick-
+Zack-/Schlangen-Nummerierung). Es ist eine **Host-Einstellung**: Alle
+Geräte — App wie Turnierleitungs-Oberfläche — zeigen dasselbe Raster, sonst
+meinte „das Feld links unten" auf jedem Tablet etwas anderes. Eine Halle
+ohne hinterlegtes Raster erscheint weiterhin in der bisherigen
+Fließ-Darstellung.
+
+Details zum Datenmodell und zur Vergleichsregel für Hallennamen:
+[features/feld-raster.md](features/feld-raster.md).
+
 ### Anzeige (Klappmenü im Kopf)
 
-Zwei Schalter, die **je Gerät** gelten und dort gespeichert bleiben — der
-eine Helfer sucht nach der Spielnummer aus dem Papierplan, der andere kann
-damit nichts anfangen:
+Drei Einstellungen, die **je Gerät** gelten und dort gespeichert bleiben —
+der eine Helfer sucht nach der Spielnummer aus dem Papierplan, der andere
+kann damit nichts anfangen:
 
 - **Spielnummer zeigen** (Standard: an) — die Zahl ganz links in der Liste.
 - **Nationen zeigen** (Standard: **aus**) — die **Flagge** neben jedem
   Namen, dieselben Bilder wie auf dem Court-Monitor. Zu einer Nation ohne
   Flaggendatei erscheint das Kürzel. Hilfreich bei internationalen
   Turnieren.
+- **Spielliste rechts / darunter** (Standard: rechts) — auf einem
+  schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
+  Reine Anzeigefrage, keine Turniereinstellung: Gerät A kann „rechts"
+  zeigen, Gerät B gleichzeitig „darunter".
 
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.

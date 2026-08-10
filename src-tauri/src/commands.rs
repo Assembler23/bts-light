@@ -185,6 +185,9 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     } else {
         incoming.tl_web.devices.clear();
     }
+    // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht im
+    // Assistenten — dessen Speichern darf sie nicht zurücksetzen.
+    incoming.hall_layouts = current.hall_layouts.clone();
     incoming
 }
 
@@ -252,6 +255,13 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     // frisch gekoppelten Geräte wieder aussperren.
     if imported.tl_web.devices.is_empty() {
         imported.tl_web.devices = current.tl_web.devices.clone();
+    }
+    // Raster-Anordnungen (Task 9/11) fehlen in Bündeln aus einer Version vor
+    // deren Einführung — ein leeres Feld heißt dann „unbekannt", nicht „am
+    // neuen PC absichtlich gelöscht". Sonst würde ein Identitäts-Import mit
+    // altem Bündel die hier schon eingerichteten Raster stillschweigend wegwischen.
+    if imported.hall_layouts.is_empty() {
+        imported.hall_layouts = current.hall_layouts.clone();
     }
     imported
 }
@@ -2419,6 +2429,33 @@ pub fn tl_web_set_enabled(
     })
 }
 
+/// Legt die Raster-Anordnung einer Halle fest (oder ersetzt sie).
+///
+/// Validierung + Normalisierung (Trimmen, Groß-/Kleinschreibung-unabhängiger
+/// Ersatz) steckt testbar in `AppConfig::upsert_hall_layout` — der Command
+/// ist nur der dünne `mutate_config`-Wrapper.
+#[tauri::command]
+pub fn set_hall_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    layout: crate::config::HallLayoutConfig,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| cfg.upsert_hall_layout(layout))
+}
+
+/// Entfernt die Anordnung einer Halle — zurück zur Fließ-Darstellung.
+#[tauri::command]
+pub fn remove_hall_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.remove_hall_layout(&hall);
+        Ok(())
+    })
+}
+
 /// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und
 /// liefert den neuen Stand.
 ///
@@ -3019,6 +3056,23 @@ mod tests {
     }
 
     #[test]
+    fn the_wizard_cannot_wipe_the_hall_layouts() {
+        // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht
+        // im Assistenten — dessen Speichern darf sie nicht zurücksetzen
+        // (dieselbe Falle wie bei der Geräteliste oben).
+        let mut current = AppConfig::default();
+        current.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "H1".into(),
+            columns: 2,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+        let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert_eq!(ergebnis.hall_layouts, current.hall_layouts);
+    }
+
+    #[test]
     fn turning_the_feature_off_still_clears_the_devices() {
         // Gegenprobe: Der Schutz darf keine Einbahnstraße sein. Schaltet
         // die Turnierleitung die Oberfläche aus, sollen die Zugänge auch
@@ -3115,6 +3169,59 @@ mod tests {
         assert_eq!(merged.btp.password.as_deref(), Some("aktuell-btp"));
         assert_eq!(merged.badhub.password, "aktuell-badhub");
         assert_eq!(merged.azure_tts.key, "aktuell-azure");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_hall_layouts_when_bundle_has_none() {
+        // Bündel aus einer Version vor Task 9/11 (oder eins ohne Raster
+        // eingerichtet) trägt ein leeres `hall_layouts` — das darf die am
+        // aktuellen PC eingerichteten Raster NICHT stillschweigend löschen.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle A".to_string(),
+            columns: 3,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+        let imported = cfg_id("inst-neu", None, "", "");
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu", "Identität wird übernommen");
+        assert_eq!(
+            merged.hall_layouts.len(),
+            1,
+            "lokal eingerichtete Raster bleiben, wenn das Bündel keine trägt"
+        );
+        assert_eq!(merged.hall_layouts[0].hall, "Halle A");
+    }
+
+    #[test]
+    fn apply_imported_identity_takes_bundle_hall_layouts_when_present() {
+        // Trägt das Bündel eigene Raster, gelten die (echter Umzug einer
+        // Installation, die das Raster schon eingerichtet hatte) — nicht die
+        // am neuen PC ggf. schon vorhandenen.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle Alt".to_string(),
+            columns: 2,
+            origin: crate::config::LayoutOrigin::TopRight,
+            serpentine: true,
+        });
+        let mut imported = cfg_id("inst-neu", None, "", "");
+        imported.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle Neu".to_string(),
+            columns: 4,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(
+            merged.hall_layouts.len(),
+            1,
+            "das importierte Raster gilt, nicht das lokale"
+        );
+        assert_eq!(merged.hall_layouts[0].hall, "Halle Neu");
     }
 
     #[test]

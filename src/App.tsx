@@ -116,6 +116,8 @@ function defaultConfig(): AppConfig {
     tournament_logo: { data: "", mime: "", background_color: "" },
     // Turnierleitungs-Oberfläche: aus, ohne gekoppelte Geräte (ADR 0010).
     tl_web: { enabled: false, devices: [] },
+    // Hallen-Raster: leer = Fließ-Darstellung, wird auf der Felderübersicht gepflegt.
+    hall_layouts: [],
   };
 }
 
@@ -367,6 +369,8 @@ function App() {
             azureTts={config.azure_tts}
             disciplineHallRules={config.discipline_hall_rules}
             manageScorekeepers={config.scorekeeper?.enabled ?? false}
+            hallLayouts={config.hall_layouts}
+            onConfigSaved={(c) => setConfig(c)}
           />
         );
       case "tablets":

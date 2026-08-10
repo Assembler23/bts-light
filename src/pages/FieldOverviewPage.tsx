@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Ban, Lock, Megaphone, Trash2, Unlock } from "lucide-react";
+import { Ban, Lock, Megaphone, Settings, Trash2, Unlock } from "lucide-react";
 import {
   addScorekeeper,
   advanceScorekeeper,
@@ -22,23 +22,29 @@ import {
   freeCourt,
   noteCourtCall,
   preparationCandidates,
+  removeHallLayout,
   removeScorekeeper,
   scorekeeperQueue,
   setCourtLocked,
+  setHallLayout,
   tabletOverview,
 } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
 import { announceCourt } from "../io/announceCourt";
 import { gamePointKind } from "../io/gamePoint.mjs";
+import { gridPositions } from "../io/hallGrid.mjs";
 import { callInfo, useNow } from "../state/callTimer";
 import type {
   AnnounceConfig,
+  AppConfig,
   AzureTtsConfig,
   CallTimerConfig,
   CourtOverview,
   DisciplineHallRule,
   FinishedMatchRow,
+  HallLayoutConfig,
+  LayoutOrigin,
   PreparationCandidate,
   ScorekeeperEntry,
 } from "../types";
@@ -75,6 +81,8 @@ export function FieldOverviewPage({
   azureTts,
   disciplineHallRules,
   manageScorekeepers,
+  hallLayouts,
+  onConfigSaved,
 }: {
   callTimer: CallTimerConfig;
   announce: AnnounceConfig;
@@ -84,6 +92,11 @@ export function FieldOverviewPage({
   disciplineHallRules: DisciplineHallRule[];
   /** Zähltafelbediener-Warteschlange führen (ADR 0007, Config-Schalter). */
   manageScorekeepers: boolean;
+  /** Raster-Anordnung je Halle (leer = Fließ-Darstellung), Host-Einstellung. */
+  hallLayouts: HallLayoutConfig[];
+  /** Neue Konfiguration nach `setHallLayout`/`removeHallLayout` zurückspielen
+   *  (gleicher Weg wie z. B. `Dashboard`/`TlWebPanel`). */
+  onConfigSaved: (c: AppConfig) => void;
 }) {
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
@@ -109,8 +122,72 @@ export function FieldOverviewPage({
   const [skAdd, setSkAdd] = useState("");
   // Hallen-Filter (null = alle Hallen).
   const [hallFilter, setHallFilter] = useState<string | null>(null);
+  // Raster-Editor (Task 11): welche Halle gerade bearbeitet wird (null = kein
+  // Popover offen) + die Formularwerte. `""` ist ein gültiger Schlüssel
+  // (Einzel-Halle-Turniere gruppieren unter dem leeren Hallennamen).
+  const [editingHall, setEditingHall] = useState<string | null>(null);
+  const [layoutColumns, setLayoutColumns] = useState(4);
+  const [layoutOrigin, setLayoutOrigin] = useState<LayoutOrigin>(
+    "bottom_left",
+  );
+  const [layoutSerpentine, setLayoutSerpentine] = useState(false);
   const timer = useRef<number | null>(null);
   const now = useNow();
+
+  // Bestehende Anordnung einer Halle finden — Vergleich getrimmt +
+  // groß-/kleinschreibungsunabhängig, spiegelt die Host-Normalisierung.
+  function findHallLayout(hall: string): HallLayoutConfig | null {
+    const key = hall.trim().toLowerCase();
+    return hallLayouts.find((l) => l.hall.trim().toLowerCase() === key) ?? null;
+  }
+
+  // Popover öffnen/schließen; beim Öffnen mit der bestehenden Anordnung (oder
+  // Standardwerten) vorbelegen.
+  function openHallEditor(hall: string) {
+    if (editingHall === hall) {
+      setEditingHall(null);
+      return;
+    }
+    const existing = findHallLayout(hall);
+    setLayoutColumns(existing?.columns ?? 4);
+    setLayoutOrigin(existing?.origin ?? "bottom_left");
+    setLayoutSerpentine(existing?.serpentine ?? false);
+    setError("");
+    setEditingHall(hall);
+  }
+
+  async function submitHallLayout(hall: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const cfg = await setHallLayout({
+        hall,
+        columns: layoutColumns,
+        origin: layoutOrigin,
+        serpentine: layoutSerpentine,
+      });
+      onConfigSaved(cfg);
+      setEditingHall(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeHallLayoutFor(hall: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const cfg = await removeHallLayout(hall);
+      onConfigSaved(cfg);
+      setEditingHall(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -389,15 +466,123 @@ export function FieldOverviewPage({
           Keine Felder — läuft der Sync und ist ein Turnier in BTP geladen?
         </p>
       ) : (
-        visibleGroups.map((g) => (
+        visibleGroups.map((g) => {
+          // Raster-Anordnung dieser Halle (Task 9/10): ohne Eintrag bleibt es
+          // bei der bisherigen Fließ-Darstellung (BTP-Reihenfolge).
+          const layout = findHallLayout(g.hall);
+          const pos = layout ? gridPositions(g.courts.length, layout) : null;
+          return (
           <section key={g.hall || "_"} className="flex flex-col gap-2">
-            {multiHall && (
-              <h2 className="text-sm font-semibold text-slate-600">
-                {g.hall || "Ohne Halle"}
-              </h2>
-            )}
-            <div className="flex flex-wrap gap-2.5">
-              {g.courts.map((c) => {
+            <div className="relative flex items-center gap-1">
+              {multiHall && (
+                <h2 className="text-sm font-semibold text-slate-600">
+                  {g.hall || "Ohne Halle"}
+                </h2>
+              )}
+              {/* Zahnrad: Raster-Editor dieser Halle (auch bei Einzel-Halle-
+                  Turnieren nutzbar — dort ist g.hall meist ""). */}
+              <button
+                type="button"
+                onClick={() => openHallEditor(g.hall)}
+                title="Feld-Raster dieser Halle einstellen"
+                aria-label={`Feld-Raster ${g.hall || "Ohne Halle"} einstellen`}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <Settings size={14} />
+              </button>
+              {editingHall === g.hall && (
+                <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                  <p className="text-xs font-semibold text-slate-700">
+                    Feld-Raster{g.hall ? ` — ${g.hall}` : ""}
+                  </p>
+                  <div className="mt-2 flex flex-col gap-2 text-sm">
+                    <label className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Spalten</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={12}
+                        inputMode="numeric"
+                        value={layoutColumns}
+                        onChange={(e) =>
+                          setLayoutColumns(
+                            Math.max(
+                              1,
+                              Math.min(
+                                12,
+                                Math.floor(Number(e.target.value) || 1),
+                              ),
+                            ),
+                          )
+                        }
+                        className="w-16 rounded-md border border-slate-300 px-2 py-1 text-center tabular-nums"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Start-Ecke</span>
+                      <select
+                        value={layoutOrigin}
+                        onChange={(e) =>
+                          setLayoutOrigin(e.target.value as LayoutOrigin)
+                        }
+                        className="rounded-md border border-slate-300 px-2 py-1"
+                      >
+                        <option value="bottom_left">unten links</option>
+                        <option value="bottom_right">unten rechts</option>
+                        <option value="top_left">oben links</option>
+                        <option value="top_right">oben rechts</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={layoutSerpentine}
+                        onChange={(e) => setLayoutSerpentine(e.target.checked)}
+                      />
+                      <span className="text-slate-600">
+                        Schlangen-Nummerierung (Richtungswechsel je Reihe)
+                      </span>
+                    </label>
+                  </div>
+                  <div className="mt-3 flex justify-end gap-2">
+                    {layout && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void removeHallLayoutFor(g.hall)}
+                        className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600
+                                   hover:bg-slate-200 disabled:opacity-50"
+                      >
+                        Anordnung entfernen
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void submitHallLayout(g.hall)}
+                      className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-medium text-white
+                                 hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Übernehmen
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div
+              className={pos ? "grid gap-2.5" : "flex flex-wrap gap-2.5"}
+              style={
+                pos
+                  ? {
+                      gridTemplateColumns: `repeat(${layout!.columns}, minmax(0, 1fr))`,
+                    }
+                  : undefined
+              }
+            >
+              {g.courts.map((c, i) => {
+                const cellStyle = pos
+                  ? { gridColumn: pos[i].col + 1, gridRow: pos[i].row + 1 }
+                  : undefined;
                 const occupied = c.match_id > 0;
                 // Satz-/Matchball (Plan 16): nur als Planungshinweis für die
                 // Turnierleitung – „Matchball" = Feld wird gleich frei. Nicht
@@ -440,6 +625,7 @@ export function FieldOverviewPage({
                 return (
                   <div
                     key={c.court_id}
+                    style={cellStyle}
                     onClick={() => onCourtClick(c)}
                     onDragOver={(e) => {
                       if (clickable && !blockedByHall) e.preventDefault();
@@ -452,7 +638,12 @@ export function FieldOverviewPage({
                         ? `Für „${selCand?.draw_name || selCand?.label}" nicht erlaubt (andere Halle)`
                         : undefined
                     }
-                    className={`flex w-44 flex-col overflow-hidden rounded-xl border bg-white ${
+                    className={`flex flex-col overflow-hidden rounded-xl border bg-white ${
+                      // Im Raster füllt die Karte ihre Zelle (Track-Breite
+                      // variiert mit der Spaltenzahl, wie tl.html's `.card`);
+                      // in der Fließ-Liste bleibt die feste Kartenbreite.
+                      pos ? "min-w-0" : "w-44"
+                    } ${
                       ball === "match"
                         ? "border-rose-400 ring-2 ring-rose-300"
                         : ball === "set"
@@ -641,7 +832,8 @@ export function FieldOverviewPage({
               })}
             </div>
           </section>
-        ))
+          );
+        })
       )}
       {/* Hallen-Filter aktiv, aber keine Felder in dieser Halle. */}
       {courts.length > 0 && visibleGroups.length === 0 && (
