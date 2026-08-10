@@ -4056,9 +4056,19 @@ mod tests {
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
         running.team1 = vec![licensed_player("Müller", "08-001234")];
+        // Ein beendetes Spiel gehört in dieses Fixture: Sonst serialisiert
+        // `finished` als leeres Array, und der Wächter unten sähe nie eines
+        // der 13 `TlFinished`-Felder — ein künftiges Feld dort könnte am
+        // Test vorbeirutschen.
+        let mut finished = a_match(3);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![player("Winter")];
+        finished.team2 = vec![player("Sommer")];
         tablet.set_snapshot(snap(
             vec![a_court(1, None)],
-            vec![running, a_match(2)],
+            vec![running, a_match(2), finished],
             Vec::new(),
         ));
         tablet.attach_tablet(1);
@@ -4066,7 +4076,22 @@ mod tests {
             1,
             r#"{"pause":{"kind":"game","endsAt":1700000000000}}"#.to_string(),
         );
-        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        // Ebenso die Zähltafelbediener-Warteschlange: Ohne Eintrag bliebe
+        // `scorekeepers` leer und der Wächter sähe auch deren Felder nie.
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        let mut config = AppConfig::default();
+        config.scorekeeper.enabled = true;
+        let s = build_state(&tablet, &config, 1_000_000, 1);
+        assert!(
+            !s.finished.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten, \
+             sonst prüft dieser Test die `TlFinished`-Felder gar nicht"
+        );
+        assert!(
+            !s.scorekeepers.is_empty(),
+            "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten, \
+             sonst prüft dieser Test die `TlScorekeeper`-Felder gar nicht"
+        );
 
         let value = serde_json::to_value(&s).unwrap();
         let mut names = std::collections::BTreeSet::new();
@@ -4104,15 +4129,45 @@ mod tests {
         let mut waiting = a_match(2);
         waiting.team1 = vec![licensed_player("Weber", "08-009999")];
         waiting.team2 = vec![licensed_player("Fischer", "08-004321")];
+        // Ein beendetes Spiel gehört auch hier ins Fixture — sonst prüft der
+        // Test die Personendaten in `TlFinished` (Team-Namen, Satzstände)
+        // nie, obwohl genau die über eine aus dem Internet erreichbare Seite
+        // laufen.
+        let mut finished = a_match(3);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![licensed_player("Winter", "08-003333")];
+        finished.team2 = vec![licensed_player("Sommer", "08-004444")];
 
-        let s = state_with(
-            snap(vec![a_court(1, None)], vec![running, waiting], Vec::new()),
-            &AppConfig::default(),
+        // Wie im Allowlist-Wächter: Warteschlange der Zähltafelbediener nicht
+        // leer lassen, sonst prüft dieser Test auch deren Felder nie.
+        // `state_with` reicht dafür nicht (der Tablet-Zustand bleibt darin
+        // gekapselt) — deshalb hier wie dort von Hand aufgebaut.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![running, waiting, finished],
+            Vec::new(),
+        ));
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        let mut config = AppConfig::default();
+        config.scorekeeper.enabled = true;
+        let s = build_state(&tablet, &config, 1_000_000, 7);
+        assert!(
+            !s.finished.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten"
+        );
+        assert!(
+            !s.scorekeepers.is_empty(),
+            "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten"
         );
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 
         for verboten in [
             "08-001234", // die Lizenznummer aus dem Fixture
+            "08-003333", // Lizenznummer des beendeten Spiels
+            "08-004444", // Lizenznummer des beendeten Spiels (Gegenseite)
             "member",    // Lizenznummer-Feld
             "birth",     // Geburtsjahr — laut Projektregel nirgends
             "geburt",

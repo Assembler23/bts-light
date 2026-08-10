@@ -1923,7 +1923,12 @@ function renderFinished() {
   $("fin-box").hidden = list.length === 0;
   $("fin-count").textContent = list.length ? `(${list.length})` : "";
   $("fin-list").innerHTML = list.map((f) => {
-    const sets = (f.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ");
+    // Sieger zuerst gilt auch für die Satzstände: Sonst läse man bei einem
+    // Sieger-2-Spiel "Meier – Müller 15:21 · 18:21" — als hätte der zuerst
+    // genannte (der Sieger!) jeden Satz verloren.
+    const sets = (f.sets || [])
+      .map(([a, b]) => (f.winner === 2 ? `${b}:${a}` : `${a}:${b}`))
+      .join(" · ");
     const badge = ERGEBNIS_BADGE[f.result]
       ? `<span class="badge warn">${ERGEBNIS_BADGE[f.result]}</span>` : "";
     // Der Sieger zuerst genannt — so liest man ein Ergebnis vor.
