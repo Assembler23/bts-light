@@ -400,6 +400,17 @@ async fn handle_frame(
                 let _ = tx.send(text(&HostFrame::TlAck { req_id, response }));
             });
         }
+        // Punktverlauf (ADR 0014): Ingest und Abruf werden im nächsten
+        // Schritt dieses Features verdrahtet (TimelineStore) — bis dahin
+        // nehmen die Arme die Frames nur entgegen.
+        RelayFrame::Rally { .. } | RelayFrame::RallySync { .. } => {}
+        RelayFrame::TimelineRequest { req_id, .. } => {
+            let _ = tx.send(text(&HostFrame::TimelineData {
+                req_id,
+                found: false,
+                json: String::new(),
+            }));
+        }
     }
 }
 

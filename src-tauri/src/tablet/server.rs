@@ -1805,6 +1805,9 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                 // Tablet eine tote Verbindung erkennen kann.
                                 send_msg(&mut socket, &ServerMsg::Pong).await;
                             }
+                            // Punktverlauf (ADR 0014): Ingest wird im nächsten
+                            // Schritt dieses Features verdrahtet (TimelineStore).
+                            Ok(TabletMsg::Rally { .. }) | Ok(TabletMsg::RallySync { .. }) => {}
                             Err(_) => {}
                         }
                     }

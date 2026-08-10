@@ -375,8 +375,10 @@ mitgeändert worden:
 - **Punktverlauf-Graph pro Satz** — Spec freigegeben und in Umsetzung:
   [features/punktverlauf-graph.md](features/punktverlauf-graph.md)
   (ADR [0014](adr/0014-punktverlauf-expliziter-rally-frame.md),
-  [0015](adr/0015-punktverlauf-datei-je-turnier.md)). Folge-Feature
-  (eigene Spec, offen): badhub-Push + Anzeige auf badhub.de.
+  [0015](adr/0015-punktverlauf-datei-je-turnier.md)). Folge-Features
+  (je eigene Spec, offen): badhub-Push + Anzeige auf badhub.de ·
+  **ausgefüllte Schiedsrichterzettel als PDF drucken** (Hinweis vom
+  11.08.2026; Datenbasis ist der Punktverlauf).
 
 ## Wünsche vom 10.08.2026 (nach dem v0.9.178-Test)
 

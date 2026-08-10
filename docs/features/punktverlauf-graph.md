@@ -37,6 +37,11 @@ Erfolgskriterien:
 
 - **Kein badhub-Push und keine Anzeige auf badhub.de** — eigenes
   Folge-Feature mit eigener Spec; hier wird nur das Format vorbereitet.
+- **Kein Schiedsrichterzettel-Druck (PDF)** — vom Nutzer am 2026-08-11
+  als weiteres Folge-Feature angekündigt: ausgefüllte Zettel aus dem
+  Verlauf drucken. Das Verlaufsformat ist die Datenbasis dafür und per
+  `serde(default)` additiv erweiterbar (z. B. um den ersten Aufschläger
+  je Satz); mehr wird hier bewusst nicht vorgebaut.
 - **Kein Verlauf für Papier-/Dialog-Ergebnisse** — es gibt dort keine
   Ballwechsel-Daten; rückwirkend (vor Einführung) existiert nichts.
 - **Keine Statistik-Auswertung** (längster Lauf, Punkte-Serien o. ä.) —
