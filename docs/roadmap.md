@@ -412,6 +412,17 @@ mitgeändert worden:
   `kacheln-mini` (deutlich kleiner, Abzeichen/Meta einzeilig) zu — die erste
   Stufe, die passt. Passt selbst die kleinste Stufe nicht (sehr viele Felder
   auf einem Telefon), wird die Felderbox als letzter Ausweg selbst rollbar.
+- ~~**Spielliste per Ziehen vergrößern/verkleinern, je Gerät gespeichert.**~~
+  → umgesetzt 2026-08-10. Trennsteg zwischen Feldern und Liste: zieht
+  nebeneinander die Breite, gestapelt die Höhe (`localStorage`,
+  `bts-tl-liste-breite`/`-hoehe`); Doppeltipp stellt die Automatik wieder
+  her. Details: [turnierleitung-web.md](turnierleitung-web.md).
+- ~~**Nationalflaggen fehlen in der TL-Sicht (nur Kürzel), und die Sicht
+  „hüpft" sekündlich.**~~ → behoben 2026-08-10, eine Ursache für beides:
+  Die ns-lose TL-Seite fand im Cloud-Betrieb keine Flaggen-Route
+  (`/bts-relay/flags/…` gab 404), der `onerror`-Tausch der Platzhalter
+  ließ die Listen bei jedem Poll springen. Relay liefert Flaggen jetzt
+  auch ohne Namespace; tl.html merkt sich fehlgeschlagene Kürzel.
 
 
 **Hallen-Check-In (überwiegend badhub-Repo; ändert die Spec
