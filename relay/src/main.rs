@@ -184,6 +184,10 @@ struct Namespace {
     tl_state: Option<(u64, String)>,
     /// Offene TL-Kommandos: `req_id` → wartender HTTP-Handler.
     tl_pending: HashMap<u64, oneshot::Sender<TlResponse>>,
+    /// Offene Punktverlauf-Abrufe: `req_id` → wartender HTTP-Handler,
+    /// Antwort `(found, json)` — der Relay hält keine Verläufe vor (AK-5),
+    /// er reicht nur durch.
+    timeline_pending: HashMap<u64, oneshot::Sender<(bool, String)>>,
     /// Belegte Geräteplätze: Zugang → letzter Zugriff (Unix-ms). Begrenzt,
     /// damit nicht Dutzende Browser denselben Turnier-PC abfragen.
     tl_devices: HashMap<String, u64>,
@@ -218,6 +222,7 @@ impl Namespace {
             tl_tokens: HashMap::new(),
             tl_state: None,
             tl_pending: HashMap::new(),
+            timeline_pending: HashMap::new(),
             tl_devices: HashMap::new(),
             tl_gen: 0,
         }
@@ -1289,6 +1294,19 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     forward_score(&broker, &ns, c, score_a, score_b, sets_history, match_id, &tx).await;
                                 }
                             }
+                            // Punktverlauf (ADR 0014): 1:1 an den Host
+                            // durchreichen — Briefträger, nur Halter-,
+                            // Stale- und Größen-Prüfung, keine Deutung.
+                            Ok(TabletMsg::Rally { match_id, set, n, winner, score_a, score_b }) => {
+                                if let (Some(c), true) = (court, active) {
+                                    forward_rally(&broker, &ns, c, match_id, set, n, winner, score_a, score_b, &tx).await;
+                                }
+                            }
+                            Ok(TabletMsg::RallySync { match_id, timeline }) => {
+                                if let (Some(c), true) = (court, active) {
+                                    forward_rally_sync(&broker, &ns, c, match_id, timeline, &tx).await;
+                                }
+                            }
                             Ok(TabletMsg::Battery { percent, charging }) => {
                                 if let (Some(c), true) = (court, active) {
                                     forward_battery(&broker, &ns, c, percent, charging).await;
@@ -1609,6 +1627,88 @@ async fn forward_battery(broker: &Broker, ns: &str, court_id: i64, percent: i64,
 }
 
 /// Leitet den Meldungs-Zustand eines Felds an den Host weiter.
+/// Einen Ballwechsel an den Host durchreichen (Punktverlauf, ADR 0014).
+/// Halter- und Stale-Prüfung wie beim Score; interpretiert wird beim Host.
+#[allow(clippy::too_many_arguments)]
+async fn forward_rally(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    match_id: i64,
+    set: i64,
+    n: i64,
+    winner: String,
+    score_a: i64,
+    score_b: i64,
+    tx: &Tx,
+) {
+    // Der Gewinner ist ein einzelnes 'A'/'B' — alles Längere ist kein
+    // legitimes Tablet und wird gar nicht erst transportiert.
+    if winner.len() > 1 {
+        return;
+    }
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        return;
+    }
+    if let Some(host) = namespace.host.as_ref() {
+        let _ = host.send(text(&RelayFrame::Rally {
+            court_id,
+            match_id,
+            set,
+            n,
+            winner,
+            score_a,
+            score_b,
+        }));
+    }
+}
+
+/// Einen Verlaufs-Resync an den Host durchreichen. Der Relay prüft nur die
+/// geteilten Deckel (`MatchTimeline::is_valid`, `MAX_TIMELINE_LEN`) — ein
+/// überlanger Sync wird verworfen statt gespeichert (Cloud-DoS-Riegel).
+async fn forward_rally_sync(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    match_id: i64,
+    timeline: relay_proto::MatchTimeline,
+    tx: &Tx,
+) {
+    if !timeline.is_valid() {
+        return;
+    }
+    if serde_json::to_string(&timeline)
+        .map(|json| json.len() > relay_proto::MAX_TIMELINE_LEN)
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        return;
+    }
+    if let Some(host) = namespace.host.as_ref() {
+        let _ = host.send(text(&RelayFrame::RallySync {
+            court_id,
+            match_id,
+            timeline,
+        }));
+    }
+}
+
 async fn forward_alert(
     broker: &Broker,
     ns: &str,
@@ -1973,6 +2073,11 @@ fn forget_tl_access(namespace: &mut Namespace) {
             TlErrorCode::HostOffline,
             "Die Verbindung zum Turnier-PC ist abgerissen.",
         ));
+    }
+    // Wartende Punktverlauf-Abrufe ebenso auflösen — sonst hingen ihre
+    // HTTP-Handler bis zum Timeout an einem toten Host.
+    for (_, pending) in namespace.timeline_pending.drain() {
+        let _ = pending.send((false, String::new()));
     }
 }
 
@@ -2465,6 +2570,23 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
         HostFrame::TlAck { req_id, response } => {
             if let Some(pending) = namespace.tl_pending.remove(&req_id) {
                 let _ = pending.send(response);
+            }
+        }
+        // Punktverlauf-Antwort des Hosts → an den wartenden Abruf. Der
+        // Größen-Deckel gilt auch hier: ein überlanger Verlauf wird zur
+        // ehrlichen Fehlanzeige statt zum Speicherfresser.
+        HostFrame::TimelineData {
+            req_id,
+            found,
+            json,
+        } => {
+            if let Some(pending) = namespace.timeline_pending.remove(&req_id) {
+                let zu_gross = json.len() > relay_proto::MAX_TIMELINE_LEN;
+                let _ = pending.send(if zu_gross {
+                    (false, String::new())
+                } else {
+                    (found, json)
+                });
             }
         }
     }
@@ -3311,6 +3433,69 @@ mod tests {
                 match_id: 0,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn rally_is_forwarded_verbatim_and_oversized_sync_dropped() {
+        // Punktverlauf (ADR 0014): Der Relay ist Briefträger — ein Rally
+        // des aktiven Halters mit passender matchId geht 1:1 an den Host;
+        // ein Sync jenseits der geteilten Deckel wird verworfen.
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(9));
+        }
+        forward_rally(&broker, "ns1", 101, 9, 1, 1, "A".into(), 1, 0, &tablet_tx).await;
+        let Message::Text(t) = host_rx.try_recv().expect("Rally erreicht den Host") else {
+            panic!("Text-Frame erwartet")
+        };
+        let parsed: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        assert_eq!(
+            parsed,
+            RelayFrame::Rally {
+                court_id: 101,
+                match_id: 9,
+                set: 1,
+                n: 1,
+                winner: "A".into(),
+                score_a: 1,
+                score_b: 0,
+            }
+        );
+        // Fremdes Match (Stale, HM-03) → verworfen.
+        forward_rally(&broker, "ns1", 101, 7, 1, 2, "A".into(), 2, 0, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "Stale-Rally verworfen");
+        // Gültiger Sync fließt …
+        let timeline = relay_proto::MatchTimeline {
+            sets: vec![relay_proto::TimelineSet {
+                start_a: 0,
+                start_b: 0,
+                points: "AB".into(),
+            }],
+            ..Default::default()
+        };
+        forward_rally_sync(&broker, "ns1", 101, 9, timeline, &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_ok(),
+            "gültiger Sync erreicht den Host"
+        );
+        // … ein überlanger nicht (Deckel MAX_RALLIES_PER_SET greift über
+        // is_valid, bevor irgendetwas transportiert wird).
+        let zu_lang = relay_proto::MatchTimeline {
+            sets: vec![relay_proto::TimelineSet {
+                start_a: 0,
+                start_b: 0,
+                points: "A".repeat(relay_proto::MAX_RALLIES_PER_SET + 1),
+            }],
+            ..Default::default()
+        };
+        forward_rally_sync(&broker, "ns1", 101, 9, zu_lang, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "überlanger Sync verworfen");
     }
 
     #[tokio::test]

@@ -1433,6 +1433,10 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             if body.retired && body.cascade_walkover {
                 register_walkover_proposal(ctx, &m, team1_won);
             }
+            // Punktverlauf abschließen (AK-13): keine weiteren Rallies,
+            // Aufgabe gekennzeichnet. Ohne aufgezeichneten Verlauf
+            // (Papier, Walkover) entsteht bewusst kein Eintrag.
+            ctx.tablet.timeline_store().finalize(m.id, body.retired);
             ResultResponse::ok()
         }
         Err(e) => {
@@ -1805,9 +1809,30 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                 // Tablet eine tote Verbindung erkennen kann.
                                 send_msg(&mut socket, &ServerMsg::Pong).await;
                             }
-                            // Punktverlauf (ADR 0014): Ingest wird im nächsten
-                            // Schritt dieses Features verdrahtet (TimelineStore).
-                            Ok(TabletMsg::Rally { .. }) | Ok(TabletMsg::RallySync { .. }) => {}
+                            // Punktverlauf (ADR 0014): nur vom aktiven Halter
+                            // und nur fürs aktuelle Court-Match (HM-03-Filter,
+                            // AK-3/AK-11) — sonst könnte ein nach Doze im alten
+                            // Spiel hängendes Tablet fremde Verläufe beschreiben.
+                            Ok(TabletMsg::Rally { match_id, set, n, winner, score_a, score_b }) => {
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t)
+                                        && ctx.tablet.match_for_court(c).is_some_and(|m| m.id == match_id)
+                                    {
+                                        ctx.tablet.timeline_store().apply_rally(
+                                            match_id, set, n, &winner, score_a, score_b,
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(TabletMsg::RallySync { match_id, timeline }) => {
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t)
+                                        && ctx.tablet.match_for_court(c).is_some_and(|m| m.id == match_id)
+                                    {
+                                        ctx.tablet.timeline_store().apply_sync(match_id, timeline);
+                                    }
+                                }
+                            }
                             Err(_) => {}
                         }
                     }
@@ -2436,6 +2461,33 @@ mod tests {
                 Some(false)
             );
         }
+    }
+
+    /// Punktverlauf (AK-13): Ein erfolgreiches Ergebnis finalisiert den
+    /// aufgezeichneten Verlauf — bei Aufgabe mit Kennzeichnung; danach
+    /// nimmt der Store keine Rallies mehr an. Ohne Aufzeichnung (Papier)
+    /// entsteht kein Geister-Eintrag.
+    #[tokio::test]
+    async fn process_result_finalizes_timeline() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Verlauf wie vom Tablet gezählt (Match 42 aus body_with).
+        assert!(ctx.tablet.timeline_store().apply_rally(42, 1, 1, "A", 1, 0));
+
+        let mut body = body_with(&[(21, 10), (5, 2)]);
+        body.retired = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+
+        let tl = ctx.tablet.timeline_store().timeline(42).expect("Verlauf");
+        assert!(tl.finished && tl.retired, "finalisiert + Aufgabe markiert");
+        assert!(
+            !ctx.tablet.timeline_store().apply_rally(42, 1, 2, "B", 1, 1),
+            "nach Abschluss keine Rallies mehr"
+        );
+        // Papier-Spiel ohne Aufzeichnung: finalize legt nichts an.
+        assert!(ctx.tablet.timeline_store().timeline(999).is_none());
     }
 
     /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt
