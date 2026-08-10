@@ -4,6 +4,38 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.178
+
+Fünf Ausbauten der Turnierleitungs-Oberfläche im Browser (TL-Web), alle am
+Testturnier live geprüft. Cloud-Geräte sehen die neue Seite erst nach dem
+Relay-Deploy.
+
+- **Zähltafel-Warteschlange bedienen.** Die Warteschlange der
+  Zähltafelbediener lässt sich jetzt auch aus dem Browser pflegen: vorziehen,
+  entfernen, von Hand hinzufügen — dieselben Aktionen wie am Turnier-PC.
+  Sichtbar nur, wenn die Zähltafel-Verwaltung eingeschaltet ist.
+- **Beendete Spiele in der Ansicht.** Ein zugeklappter Abschnitt zeigt die
+  letzten Ergebnisse, neueste zuerst; Aufgabe, kampflos und Disqualifikation
+  tragen eine eigene Kennzeichnung — ein in BTP gewertetes 14:16, 15:10 sieht
+  nicht mehr wie ein Fehler aus.
+- **Satz- und Matchball an der Feldkachel.** Steht auf einem Feld der letzte
+  Punkt eines Satzes oder des Matches an, bekommt die Kachel ein Abzeichen
+  („Satzball" gelb, „Matchball" rot und pulsierend — das Feld wird gleich
+  frei). Nur für die Turnierleitung, nie auf den Hallen-TVs.
+- **Ergebnis-Dialog statt Freitext.** Ergebnisse werden in Satzfelder
+  getippt — auch für Spiele, die nie auf einem Feld standen (jemand hat auf
+  Papier abgerechnet), und als Korrektur direkt aus der Beendet-Liste, solange
+  kein Folgespiel daran hängt. Die Eingabespalten sind mit den Teamnamen
+  beschriftet, damit eine plausible, aber seitenvertauschte Korrektur nicht
+  still den Sieger dreht; Ablehnungen des Turnier-PCs erscheinen im Dialog.
+  Die Zugangs-Adresse der Seite hat jetzt einen Kopier-Knopf.
+- **Felder wie in der Halle anordnen.** Je Halle lässt sich ein Raster
+  hinterlegen (Spalten, Start-Ecke, Schlangen-Nummerierung) — Felderübersicht
+  der App und TL-Web zeigen die Felder dann in der echten Hallen-Anordnung.
+  In TL-Web zusätzlich je Gerät wählbar, ob die Spielliste rechts neben oder
+  unter den Feldern steht. Details: [feld-raster](features/feld-raster.md),
+  [turnierleitung-web.md](turnierleitung-web.md).
+
 ## v0.9.177
 
 - **Check-In-Sicht für die Turnierleitung.** Der neue Punkt *Check-In* zeigt
