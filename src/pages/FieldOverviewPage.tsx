@@ -131,6 +131,11 @@ export function FieldOverviewPage({
     "bottom_left",
   );
   const [layoutSerpentine, setLayoutSerpentine] = useState(false);
+  // Nummerierungsrichtung: reihenweise (Default, bisheriges Verhalten) oder
+  // spaltenweise. Eigener Zustand statt Checkbox-Boolean direkt, weil das
+  // Auswahlfeld unten zwei sprechende Optionen statt eines abstrakten
+  // "vertikal an/aus" zeigt.
+  const [layoutVertical, setLayoutVertical] = useState(false);
   const timer = useRef<number | null>(null);
   const now = useNow();
 
@@ -152,6 +157,7 @@ export function FieldOverviewPage({
     setLayoutColumns(existing?.columns ?? 4);
     setLayoutOrigin(existing?.origin ?? "bottom_left");
     setLayoutSerpentine(existing?.serpentine ?? false);
+    setLayoutVertical(existing?.vertical ?? false);
     setError("");
     setEditingHall(hall);
   }
@@ -165,6 +171,7 @@ export function FieldOverviewPage({
         columns: layoutColumns,
         origin: layoutOrigin,
         serpentine: layoutSerpentine,
+        vertical: layoutVertical,
       });
       onConfigSaved(cfg);
       setEditingHall(null);
@@ -533,6 +540,23 @@ export function FieldOverviewPage({
                         <option value="top_right">oben rechts</option>
                       </select>
                     </label>
+                    <label className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Nummerierung</span>
+                      <select
+                        value={layoutVertical ? "vertical" : "horizontal"}
+                        onChange={(e) =>
+                          setLayoutVertical(e.target.value === "vertical")
+                        }
+                        className="rounded-md border border-slate-300 px-2 py-1"
+                      >
+                        <option value="horizontal">
+                          reihenweise (horizontal)
+                        </option>
+                        <option value="vertical">
+                          spaltenweise (vertikal)
+                        </option>
+                      </select>
+                    </label>
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -540,7 +564,9 @@ export function FieldOverviewPage({
                         onChange={(e) => setLayoutSerpentine(e.target.checked)}
                       />
                       <span className="text-slate-600">
-                        Schlangen-Nummerierung (Richtungswechsel je Reihe)
+                        {layoutVertical
+                          ? "Schlangen-Nummerierung (Richtungswechsel je Spalte)"
+                          : "Schlangen-Nummerierung (Richtungswechsel je Reihe)"}
                       </span>
                     </label>
                   </div>

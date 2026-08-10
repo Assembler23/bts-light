@@ -1534,6 +1534,8 @@ pub struct TlHallLayout {
     /// [`crate::config::LayoutOrigin`] — die Seite kennt keine Rust-Enums.
     pub origin: String,
     pub serpentine: bool,
+    /// Spaltenweise statt reihenweise nummerieren.
+    pub vertical: bool,
 }
 
 /// Ein Wartender in der Zähltafelbediener-Warteschlange, wie er auf der
@@ -1967,6 +1969,7 @@ fn layouts_view(config: &AppConfig) -> Vec<TlHallLayout> {
             }
             .to_string(),
             serpentine: l.serpentine,
+            vertical: l.vertical,
         })
         .collect()
 }
@@ -2182,6 +2185,7 @@ mod tests {
             columns: 3,
             origin: crate::config::LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: true,
         });
         let s = state_with(snap(Vec::new(), Vec::new(), Vec::new()), &config);
         assert_eq!(s.layouts.len(), 1);
@@ -2189,6 +2193,8 @@ mod tests {
         assert_eq!(s.layouts[0].columns, 3);
         assert_eq!(s.layouts[0].origin, "bottom_left");
         assert!(!s.layouts[0].serpentine);
+        // Nummerierungsrichtung (vertikal) muss ebenso durchgereicht werden.
+        assert!(s.layouts[0].vertical);
     }
 
     #[test]
@@ -4164,6 +4170,9 @@ mod tests {
             "columns",
             "origin",
             "serpentine",
+            // Nummerierungsrichtung (spaltenweise statt reihenweise) — ebenso
+            // reine Geometrie.
+            "vertical",
         ];
 
         let tablet = TabletState::default();
@@ -4203,6 +4212,7 @@ mod tests {
             columns: 3,
             origin: crate::config::LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: false,
         });
         let s = build_state(&tablet, &config, 1_000_000, 1);
         assert!(
@@ -4288,6 +4298,7 @@ mod tests {
             columns: 3,
             origin: crate::config::LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: false,
         });
         let s = build_state(&tablet, &config, 1_000_000, 7);
         assert!(

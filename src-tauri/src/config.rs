@@ -549,8 +549,15 @@ pub struct HallLayoutConfig {
     pub columns: u8,
     pub origin: LayoutOrigin,
     /// Richtungswechsel je Reihe (Schlangen-Nummerierung), wie Hallen
-    /// mit 1-2-3 / 6-5-4 zählen.
+    /// mit 1-2-3 / 6-5-4 zählen. Bei `vertical` gilt sie je Spalte.
     pub serpentine: bool,
+    /// Spaltenweise statt reihenweise nummerieren (Feld 1 an der Start-Ecke,
+    /// Feld 2 in derselben Spalte weiter weg von der Start-Reihe, bis die
+    /// Spalte voll ist, dann die nächste Spalte). `#[serde(default)]` hält
+    /// Konfigurationen aus v0.9.178 (vor dieser Option) lesbar — dort galt
+    /// ausschließlich die reihenweise Zählung, also `false`.
+    #[serde(default)]
+    pub vertical: bool,
 }
 
 /// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0012).
@@ -796,10 +803,29 @@ mod tests {
             columns: 3,
             origin: LayoutOrigin::BottomRight,
             serpentine: true,
+            vertical: true,
         });
         let json = serde_json::to_string(&cfg).expect("serialisiert");
         let zurueck: AppConfig = serde_json::from_str(&json).expect("lädt");
         assert_eq!(zurueck.hall_layouts, cfg.hall_layouts);
+    }
+
+    #[test]
+    fn hall_layout_without_vertical_key_loads_as_horizontal() {
+        // Upgrade-Pfad v0.9.178 → danach: Ein Raster-Eintrag ohne das neue
+        // `vertical`-Feld (ältere config.json) muss weiter laden — mit dem
+        // bisherigen (einzigen) Verhalten, reihenweiser Nummerierung.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "hall_layouts":[{"hall":"Halle 1","columns":3,"origin":"bottom_left","serpentine":false}]}"#,
+        )
+        .expect("Config mit altem Raster-Eintrag lädt");
+        assert_eq!(cfg.hall_layouts.len(), 1);
+        assert!(
+            !cfg.hall_layouts[0].vertical,
+            "fehlendes vertical muss false sein (Bestandsverhalten reihenweise)"
+        );
     }
 
     fn rule(disc: &str, draw: &str, hall: &str) -> DisciplineHallRule {
@@ -990,6 +1016,7 @@ mod tests {
                 columns: 4,
                 origin: LayoutOrigin::TopLeft,
                 serpentine: true,
+                vertical: true,
             }],
         };
         config.save_to(&path).unwrap();
@@ -1336,6 +1363,7 @@ mod hall_layout_tests {
             columns,
             origin: LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: false,
         }
     }
 

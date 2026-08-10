@@ -141,8 +141,9 @@ endet mit dem Stoppen der Übertragung.
 Statt Feldern in Formularreihenfolge lässt sich für jede Halle ein
 **Raster** hinterlegen — dieselbe Anordnung, in der die Felder tatsächlich
 stehen. Eingestellt wird das je Halle über das **Zahnrad** an der
-Hallenüberschrift in der Felderübersicht der App (Spalten, Start-Ecke, Zick-
-Zack-/Schlangen-Nummerierung). Es ist eine **Host-Einstellung**: Alle
+Hallenüberschrift in der Felderübersicht der App (Spalten, Start-Ecke,
+Nummerierungsrichtung reihenweise/horizontal oder spaltenweise/vertikal,
+Zick-Zack-/Schlangen-Nummerierung). Es ist eine **Host-Einstellung**: Alle
 Geräte — App wie Turnierleitungs-Oberfläche — zeigen dasselbe Raster, sonst
 meinte „das Feld links unten" auf jedem Tablet etwas anderes. Eine Halle
 ohne hinterlegtes Raster erscheint weiterhin in der bisherigen

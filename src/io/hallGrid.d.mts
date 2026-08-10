@@ -4,6 +4,8 @@ export interface GridOptions {
   columns: number;
   origin: "top_left" | "top_right" | "bottom_left" | "bottom_right";
   serpentine: boolean;
+  /** Spaltenweise statt reihenweise zählen. Default (fehlend) = false. */
+  vertical?: boolean;
 }
 
 export interface GridPosition {
