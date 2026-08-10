@@ -74,6 +74,11 @@ function spielerZustand(p: CheckinPlayer): { text: string; klasse: string } {
   if (p.state === "query") {
     return { text: "Rückfrage an Turnierleitung", klasse: "text-amber-700" };
   }
+  if (p.state === "withdrawn") {
+    // In badhub abgemeldet: weder da noch gesucht. Durchgestrichen, damit
+    // der Blick beim Durchgehen der Liste nicht an der Zeile hängen bleibt.
+    return { text: "abgemeldet", klasse: "text-slate-400 line-through" };
+  }
   if (p.locked) {
     return { text: "zurückgesetzt, gesperrt", klasse: "text-rose-700" };
   }
@@ -132,11 +137,17 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
   const gesamt = useMemo(
     () =>
       klassen.reduce(
-        (acc, k) => ({
-          gemeldet: acc.gemeldet + k.gemeldet,
-          eingecheckt: acc.eingecheckt + k.eingecheckt,
-        }),
-        { gemeldet: 0, eingecheckt: 0 },
+        (acc, k) => {
+          const abgemeldet = k.players.filter(
+            (p) => p.state === "withdrawn",
+          ).length;
+          return {
+            gemeldet: acc.gemeldet + k.gemeldet - abgemeldet,
+            eingecheckt: acc.eingecheckt + k.eingecheckt,
+            abgemeldet: acc.abgemeldet + abgemeldet,
+          };
+        },
+        { gemeldet: 0, eingecheckt: 0, abgemeldet: 0 },
       ),
     [klassen],
   );
@@ -235,6 +246,7 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
         {gesamt.gemeldet > 0 && (
           <span className="text-sm text-slate-500">
             {gesamt.eingecheckt} von {gesamt.gemeldet} da
+            {gesamt.abgemeldet > 0 ? ` · ${gesamt.abgemeldet} abgemeldet` : ""}
           </span>
         )}
       </div>
@@ -262,7 +274,14 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
       {klassen.map((k) => {
         const zustand = klassenZustand(k);
         const aufgeklappt = offen.has(k.event_id);
-        const fehlend = k.gemeldet - k.eingecheckt;
+        // badhubs TL-Zaehlung schliesst Abgemeldete bewusst ein (dortige
+        // Entscheidung) — hier werden sie herausgerechnet, denn fuer die
+        // Turnierleitung sind sie weder da noch fehlend.
+        const abgemeldet = k.players.filter(
+          (p) => p.state === "withdrawn",
+        ).length;
+        const gemeldet = k.gemeldet - abgemeldet;
+        const fehlend = gemeldet - k.eingecheckt;
         return (
           <section
             key={k.event_id}
@@ -288,8 +307,9 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
                 {zustand.text}
               </span>
               <span className="text-xs text-slate-500">
-                {k.eingecheckt} von {k.gemeldet} da
+                {k.eingecheckt} von {gemeldet} da
                 {fehlend > 0 ? ` · ${fehlend} fehlen` : ""}
+                {abgemeldet > 0 ? ` · ${abgemeldet} abgemeldet` : ""}
               </span>
 
               {/* Ansagen nur, wenn Ansagen überhaupt eingerichtet sind — ohne
@@ -390,7 +410,11 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
                             }
                             className="flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs
                                        text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                            title="Als anwesend eintragen"
+                            title={
+                              p.state === "withdrawn"
+                                ? "Trotz Abmeldung als anwesend eintragen"
+                                : "Als anwesend eintragen"
+                            }
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
                             da
