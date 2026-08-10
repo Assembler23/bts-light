@@ -34,11 +34,27 @@ html, body {
 /* Zahlen, die sich im Sekundentakt ändern, dürfen nicht zappeln. */
 .num { font-variant-numeric: tabular-nums; }
 
+/* ── Fester Rahmen ─────────────────────────────────────────────────────
+   Wunsch vom 10.08.2026 nach dem Turniertest: „alle Spielfeldkacheln immer
+   sichtbar, nur die Spielliste läuft". Dafür rollt die Seite selbst nicht
+   mehr — `#app` spannt sich über die ganze sichtbare Höhe und reicht den
+   Rest unter Kopf/Störungsband an `main` weiter, das intern in zwei
+   eigenständig rollende Bereiche aufteilt (siehe dort). `100dvh` zieht auf
+   Mobilgeräten die ein-/ausblendende Adressleiste ab; wo nicht unterstützt,
+   bleibt die vorher deklarierte `100vh` gültig (Kaskade, keine Prüfung
+   nötig). */
+#app {
+  display: flex; flex-direction: column;
+  height: 100vh; height: 100dvh;
+  overflow: hidden;
+}
+
 /* ── Kopfzeile ─────────────────────────────────────────────────────────
-   Klebt oben: Der Verbindungszustand muss immer sichtbar sein, nicht nur
-   wenn man zufällig oben steht. */
+   Kein `position: sticky` mehr nötig: Seit dem festen Rahmen oben rollt die
+   Seite nicht mehr selbst, die Kopfzeile steht als erstes Flex-Kind von
+   `#app` ohnehin immer oben. */
 header {
-  position: sticky; top: 0; z-index: 20;
+  flex: none;
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--card);
   border-bottom: 1px solid var(--line);
@@ -116,39 +132,58 @@ header {
 
 /* Störungsband: nimmt die volle Breite, damit es niemand übersieht. */
 .banner {
-  display: none; padding: 10px 16px; font-weight: 650;
+  display: none; flex: none; padding: 10px 16px; font-weight: 650;
   background: #fef2f2; color: #7f1d1d; border-bottom: 1px solid #fecaca;
 }
 .banner.show { display: block; }
 
-main { padding: 16px; display: grid; gap: 20px; }
+/* ── Hauptbereich: Felder immer vollständig sichtbar, Liste rollt für sich
+   ─────────────────────────────────────────────────────────────────────
+   `main` nimmt den kompletten Rest der Höhe unter Kopf/Störungsband
+   (`flex: 1 1 auto`) und rollt selbst nicht mehr — seine beiden Abschnitte
+   tun das je für sich, siehe unten. `padding-top` bekommt den Überstand des
+   Aktionsbands dazu (`--band`, von `messeKopf()` gesetzt): Das Band liegt
+   FEST über der Kopfzeile — ist es breiter als der Kopf (viele Hallen,
+   Umbruch), verdeckte es sonst die oberste Feldreihe. */
+main {
+  flex: 1 1 auto; min-height: 0;
+  padding: calc(16px + var(--band, 0px)) 16px 16px;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow: hidden;
+}
+/* Felder: nie höher als ihr Platz. `fitCourts()` im Skript schrumpft dafür
+   erst Abstände/Schrift (Klassen `kacheln-kompakt`/`kacheln-mini` weiter
+   unten) und macht die Kachelbox erst als letzten Ausweg selbst rollbar
+   (`.courts-scroll`) — alle Felder auf einen Blick, die Liste läuft, die
+   Felder nicht. Gestapelt (Telefon-Breite und „Spielliste darunter")
+   bekommen sie höchstens knapp zwei Drittel der Höhe, den Rest die Liste. */
+main > section:first-of-type {
+  flex: 0 0 auto; overflow: hidden; max-height: 64%;
+  /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
+  padding: 2px; margin: -2px;
+}
+main > section:first-of-type.courts-scroll { overflow-y: auto; }
+/* Spielliste: bekommt den kompletten Rest und rollt eigenständig — die
+   Felder darüber (oder daneben) bleiben davon unberührt. */
+main > section:last-of-type {
+  flex: 1 1 0; min-height: 0; overflow-y: auto;
+}
 @media (min-width: 1100px) {
   /* Auf dem Desktop nebeneinander: Felder links (was läuft), Liste rechts
-     (was als Nächstes dran ist). Auf dem Tablet gestapelt — dort scrollt
-     man ohnehin. */
-  main { grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); align-items: start; }
-  /* Die Felder bleiben stehen, während die Liste läuft. Bei 120 wartenden
-     Spielen scrollt man weit nach unten — ohne das wäre kein einziges Feld
-     mehr zu sehen, und ein Spiel von ganz unten ließe sich weder ziehen
-     noch nach dem Antippen irgendwohin legen. Eigene Bildlaufleiste, falls
-     mehr Felder da sind als auf den Schirm passen. */
-  main > section:first-of-type {
-    position: sticky;
-    top: calc(var(--kopf, 62px) + var(--band, 0px) + 12px);
-    max-height: calc(100vh - var(--kopf, 62px) - var(--band, 0px) - 28px);
-    overflow-y: auto;
-    /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
-    padding: 2px;
-    margin: -2px;
-  }
-  /* Listen-Position je Gerät (Task 12, Anzeige-Menü „Spielliste darunter").
-     Gestapelt statt Spalten — und die Felder dürfen dann nicht mehr kleben:
-     Sonst schöbe sich die Liste unter eine fixierte erste Spalte statt
-     normal darunter zu folgen. */
-  body.liste-unten main { grid-template-columns: 1fr; }
-  body.liste-unten main > section:first-of-type {
-    position: static; max-height: none; overflow-y: visible;
-  }
+     (was als Nächstes dran ist). Beide Spalten sind hier genauso hoch wie
+     `main` selbst (`align-items: stretch`) — die Felder bekommen dadurch
+     die GANZE Höhe statt nur zwei Dritteln wie gestapelt. Auf dem Telefon
+     bleibt es bei der gestapelten Regel von oben — dort reicht ohnehin nur
+     eine Spalte nebeneinander nicht. */
+  main { flex-direction: row; align-items: stretch; }
+  main > section:first-of-type { flex: 3 1 0; min-width: 0; max-height: none; }
+  main > section:last-of-type { flex: 2 1 320px; }
+  /* Listen-Position je Gerät (Anzeige-Menü „Spielliste darunter"): wieder
+     gestapelt statt nebeneinander — die Felder bekommen dann erneut nur die
+     64-%-Obergrenze von oben, die Liste den Rest. */
+  body.liste-unten main { flex-direction: column; align-items: stretch; }
+  body.liste-unten main > section:first-of-type { flex: 0 0 auto; max-height: 64%; }
+  body.liste-unten main > section:last-of-type { flex: 1 1 0; }
 }
 h2 {
   margin: 0 0 10px; font-size: .8rem; font-weight: 700;
@@ -283,6 +318,50 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .clock small { font-size: .7rem; font-weight: 600; color: var(--ink-faint); display: block; }
 .clock.stage2 small { color: var(--warn); }
 .clock.stage3 small { color: var(--alarm); }
+
+/* ── Kompaktstufen der Feld-Kacheln ───────────────────────────────────
+   Damit IMMER alle Felder auf einen Blick passen (Wunsch vom 10.08.2026):
+   „alle Felder auf einen Blick — die Liste läuft, die Felder nicht".
+   `fitCourts()` im Skript misst nach jedem Neuzeichnen und bei jeder
+   Größenänderung, ob die Felderbox überläuft, und schaltet dafür erst
+   `kacheln-kompakt`, dann `kacheln-mini` auf `#courts` — die erste Stufe,
+   die passt. Beide wirken über Abkömmlinge, auch innerhalb gruppierter
+   Hallen (`.hall-group`) und eines von Hand hinterlegten Rasters (dessen
+   `grid-template-columns` bleibt unangetastet — das ist eine Host-
+   Einstellung, keine Anzeigefrage). */
+#courts.kacheln-kompakt .courts { gap: 7px; }
+#courts.kacheln-kompakt .card { padding: 8px; gap: 4px; min-height: 90px; }
+#courts.kacheln-kompakt .court-name { font-size: 1rem; }
+#courts.kacheln-kompakt .badge { font-size: .62rem; padding: 1px 5px; }
+#courts.kacheln-kompakt .meta, #courts.kacheln-kompakt .pair { font-size: .8rem; }
+#courts.kacheln-kompakt .score, #courts.kacheln-kompakt .clock { font-size: .92rem; }
+#courts.kacheln-kompakt .callbtn { padding: 5px 9px; min-height: 34px; font-size: .74rem; }
+#courts.kacheln-kompakt .hall-group h3 { font-size: .82rem; margin-bottom: 5px; }
+#courts.kacheln-kompakt .hall-group + .hall-group { margin-top: 10px; }
+
+/* Deutlich kleiner: Abzeichen und die Metazeile (Klasse/Runde) einzeilig
+   mit Ellipse statt Umbruch — bei 26 Feldern auf einem Telefon zählt jede
+   Zeile. Auto-fill-Raster bekommt zusätzlich eine engere Mindestbreite, ein
+   von Hand hinterlegtes Hallenraster (feste Spaltenzahl) nicht — dessen
+   Zellen sind über Zeilen-/Spaltenindex platziert, eine andere Spaltenzahl
+   würfelte die Anordnung durcheinander. */
+#courts.kacheln-mini .courts { gap: 5px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+#courts.kacheln-mini .card { padding: 6px; gap: 2px; min-height: 70px; border-left-width: 4px; }
+#courts.kacheln-mini .court-name { font-size: .8rem; }
+#courts.kacheln-mini .badge { font-size: .56rem; padding: 1px 4px; white-space: nowrap; }
+#courts.kacheln-mini .meta {
+  font-size: .66rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#courts.kacheln-mini .pair { font-size: .68rem; }
+#courts.kacheln-mini .score, #courts.kacheln-mini .clock { font-size: .78rem; }
+#courts.kacheln-mini .score small, #courts.kacheln-mini .clock small { font-size: .56rem; }
+#courts.kacheln-mini .callbtn { padding: 4px 7px; min-height: 32px; font-size: .66rem; }
+/* Kleinerer Griff (Vorgabe: „kleinere Grips") — die Trefffläche bleibt über
+   die Polsterung im Skript-Markup erhalten, nur das Sinnbild selbst schrumpft. */
+#courts.kacheln-mini .drag-griff { font-size: .82rem; }
+#courts.kacheln-mini .card-top .drag-griff { padding: 5px; margin-top: -5px; margin-right: -5px; margin-bottom: -5px; }
+#courts.kacheln-mini .hall-group h3 { font-size: .74rem; margin-bottom: 3px; }
+#courts.kacheln-mini .hall-group + .hall-group { margin-top: 8px; }
 
 /* ── Spielliste ────────────────────────────────────────────────────────
    Drei Abschnitte, in der Reihenfolge des Arbeitsablaufs: gerufen (warten
@@ -915,6 +994,10 @@ function setzeListenMeta(name, an) {
 function setzeListenPosition(unten) {
   localStorage.setItem("bts-tl-liste", unten ? "unten" : "rechts");
   document.body.classList.toggle("liste-unten", unten);
+  // Nebeneinander (volle Höhe) und gestapelt (64-%-Obergrenze) messen die
+  // Felderbox unterschiedlich — eine unter der alten Anordnung gewählte
+  // Kompaktstufe muss beim Umschalten neu beurteilt werden.
+  scheduleFitCourts();
 }
 
 // ── Bedienzustand ─────────────────────────────────────────────────────
@@ -974,11 +1057,14 @@ function pickedCourt() {
 }
 
 /**
- * Misst die klebende Kopfzone und legt sie als CSS-Variablen ab.
+ * Misst Kopfzeile und Aktionsband und legt sie als CSS-Variablen ab.
  *
- * Die Felderspalte hängt sich darunter — sie muss wissen, wie viel oben
- * belegt ist. Gemessen statt geschätzt, weil die Kopfzeile umbricht, sobald
- * ein Turnier viele Hallen hat, und das Aktionsband nur zeitweise da ist.
+ * `--kopf` bemisst die Höhe des über der Kopfzeile liegenden Aktionsbands
+ * (`min-height`). `--band` ist der Überstand des Bands über den Kopf hinaus
+ * (meist 0) — `main` schlägt ihn oben als zusätzliches Polster auf, sonst
+ * verdeckte ein umgebrochenes, höheres Band die oberste Feldreihe. Gemessen
+ * statt geschätzt, weil die Kopfzeile umbricht, sobald ein Turnier viele
+ * Hallen hat, und das Aktionsband nur zeitweise da ist.
  */
 function messeKopf() {
   const kopf = document.querySelector("header");
@@ -1886,11 +1972,9 @@ function renderCourts() {
   $("courts-count").textContent = `(${courts.length})`;
   if (!courts.length) {
     box.innerHTML = `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`;
-    return;
-  }
-  // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
-  // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
-  if (state.multi_hall && !hallFilter) {
+  } else if (state.multi_hall && !hallFilter) {
+    // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
+    // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
     const groups = new Map();
     for (const c of courts) {
       const key = c.location || "";
@@ -1903,7 +1987,60 @@ function renderCourts() {
   } else {
     box.innerHTML = courtsGridHtml(hallFilter || "", courts);
   }
-  wireCourts(box);
+  // Kein früher `return` mehr oben: Auch die leere Halle und der spätere
+  // Zweig müssen `fitCourts()` erreichen — sonst bliebe nach einem
+  // Hallenwechsel z. B. eine Mini-Kompaktstufe von vorher hängen, obwohl die
+  // neue, leere Auswahl das gar nicht mehr braucht.
+  if (courts.length) wireCourts(box);
+  scheduleFitCourts();
+}
+
+/**
+ * Passt die Größe der Feld-Kacheln an den verfügbaren Platz an — Ziel:
+ * IMMER alle Felder auf einen Blick, nie ein abgeschnittenes Feld
+ * (Wunsch vom 10.08.2026 nach dem Turniertest: „alle Felder auf einen
+ * Blick — die Liste läuft, die Felder nicht"). Läuft gebündelt über
+ * `requestAnimationFrame` nach jedem Neuzeichnen der Felder und bei jeder
+ * Größenänderung (`scheduleFitCourts`, unten).
+ *
+ * Stufenweise, aber OHNE Rückkopplung: Vor jedem Durchlauf geht es zurück
+ * auf die Ausgangsstufe — sonst bliebe eine einmal gewählte Kompaktstufe
+ * hängen, auch wenn inzwischen (Hallenfilter, weniger Felder, mehr Platz)
+ * wieder alles ohne sie hineinpasst. Von dort aus je EINE Messung pro
+ * Stufe (normal → `kacheln-kompakt` → `kacheln-mini`) — kein Nachjustieren
+ * in einer Schleife, kein `ResizeObserver`, der sich durch die eigene
+ * Klassenänderung selbst erneut auslösen könnte. Passt selbst die kleinste
+ * Stufe nicht (winziges Telefon, sehr viele Felder), wird die Felderbox
+ * als letzter Ausweg selbst rollbar (`.courts-scroll`) — besser als
+ * Kacheln unsichtbar abzuschneiden.
+ */
+function fitCourts() {
+  const section = document.querySelector("main > section:first-of-type");
+  const box = $("courts");
+  if (!section || !box) return;
+  box.classList.remove("kacheln-kompakt", "kacheln-mini");
+  section.classList.remove("courts-scroll");
+  // +1 Px Toleranz gegen Rundungsfehler bei gebrochenen Pixelwerten.
+  const passt = () => section.scrollHeight <= section.clientHeight + 1;
+  if (passt()) return;
+  box.classList.add("kacheln-kompakt");
+  if (passt()) return;
+  box.classList.remove("kacheln-kompakt");
+  box.classList.add("kacheln-mini");
+  if (passt()) return;
+  section.classList.add("courts-scroll");
+}
+
+// Mehrfach angestoßen (z. B. mehrere Render-Aufrufe im selben Zug, dazu
+// `resize`) sammelt sich in EINEM `requestAnimationFrame` statt mehrfach
+// hintereinander zu messen — die eigentliche Entlastung gegen Layout-
+// Flackern kommt aber schon aus `fitCourts()` selbst (feste Stufenzahl,
+// keine Schleife).
+let fitScheduled = false;
+function scheduleFitCourts() {
+  if (fitScheduled) return;
+  fitScheduled = true;
+  requestAnimationFrame(() => { fitScheduled = false; fitCourts(); });
 }
 
 function queueRow(m) {
@@ -2826,9 +2963,17 @@ function start() {
     ev.currentTarget.checked && setzeListenPosition(true));
 
   messeKopf();
+  scheduleFitCourts();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
-  // auch die Höhe nicht mehr, an der die Felderspalte klebt.
+  // auch das Polster nicht mehr, das das Aktionsband oben braucht. Dieselbe
+  // Größenänderung kann außerdem die Kompaktstufe der Felder betreffen
+  // (mehr/weniger Platz, oder ein Wechsel über die 1100-px-Schwelle) —
+  // deshalb hier derselbe Anlass für beides. `orientationchange` zusätzlich,
+  // weil manche Tablets beim Drehen kein `resize` feuern, bevor die neue
+  // Höhe steht.
   window.addEventListener("resize", messeKopf);
+  window.addEventListener("resize", scheduleFitCourts);
+  window.addEventListener("orientationchange", scheduleFitCourts);
   poll();
   setInterval(tickClocks, 1000);
   // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den

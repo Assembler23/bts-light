@@ -64,8 +64,11 @@ LAN+Cloud voraus.
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
-- **Die Felder bleiben stehen**, während die Spielliste läuft: Auch ein
-  Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen.
+- **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
+  scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
+  Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
+  sehr vielen Feldern verkleinern sich die Kacheln dafür stufenweise
+  (kleinere Abstände, dann kleinere Schrift), bevor überhaupt gerollt wird.
 - **Zähltafel-Warteschlange:** Ist die Zähltafel-Verwaltung in bts-light
   eingeschaltet, erscheint rechts ein eigener aufklappbarer Abschnitt mit
   den wartenden Zähltafelbedienern. Von dort lässt sich jemand **vorziehen**
