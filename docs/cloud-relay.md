@@ -85,6 +85,15 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 3. Der Host pusht alle 2 s die Court→Match-Zuweisung; der Relay leitet sie
    an das jeweilige Tablet.
 4. Jeder Punkt am Tablet → `score_update` → Relay → Host → Liveticker.
+   Zusätzlich seit dem Punktverlauf-Graph
+   ([Spec](features/punktverlauf-graph.md), ADR 0014): je Ballwechsel ein
+   `rally`-Frame und nach Undo/Reconnect/Übernahme ein `rally_sync`
+   (Komplett-Resync, ersetzt den Host-Stand des Matches). Der Relay
+   reicht beide 1:1 durch und prüft nur die Deckel
+   (`MAX_RALLIES_PER_SET`, `MAX_TIMELINE_SETS`, `MAX_TIMELINE_LEN`);
+   interpretiert wird allein beim Host. Der Abruf für die TL-Oberfläche
+   läuft als Request/Response `timeline_request`/`timeline_data` über die
+   host-ws (Muster TL-Kommando) — der Relay hält keine Verläufe vor.
 5. „Ergebnis übermitteln" → `POST …/result` → Relay reicht es per
    WebSocket-Frame an den Host → bts-light schreibt per `SENDUPDATE` nach
    BTP und antwortet mit `ResultAck`.

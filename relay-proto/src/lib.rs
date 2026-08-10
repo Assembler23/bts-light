@@ -688,6 +688,116 @@ pub enum TabletMsg {
     /// Browser kein `onclose` liefert (Router weg → nur Stille).
     #[serde(rename = "ping")]
     Ping,
+    /// Ein gezählter Ballwechsel (Punktverlauf-Graph, ADR 0014). Der Host
+    /// hängt ihn an den Verlauf des Matches an; passt die laufende Nummer
+    /// nicht (Lücke), wartet er auf den nächsten [`TabletMsg::RallySync`].
+    #[serde(rename = "rally")]
+    Rally {
+        /// Match, zu dem der Ballwechsel gehört — gefiltert wie beim
+        /// `ScoreUpdate` (HM-03): passt es nicht zum Court-Match, wird
+        /// der Frame verworfen. 0 (Default) wird immer verworfen.
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        /// Satz-Nummer, 1-basiert.
+        #[serde(default)]
+        set: i64,
+        /// Laufende Nummer des Ballwechsels im Satz, 1-basiert.
+        #[serde(default)]
+        n: i64,
+        /// Wer den Ballwechsel gewann: `"A"` oder `"B"`.
+        #[serde(default)]
+        winner: String,
+        /// Stand NACH dem Ballwechsel — Plausibilitätsanker für den Host.
+        #[serde(rename = "scoreA", default)]
+        score_a: i64,
+        #[serde(rename = "scoreB", default)]
+        score_b: i64,
+    },
+    /// Kompletter Verlaufs-Resync (ADR 0014): **ersetzt** den Host-Stand
+    /// des Matches vollständig. Gesendet nach Undo, Satz-Wiedereröffnung,
+    /// Reconnect, Seiten-Reload und Geräte-Übernahme — damit heilt sich
+    /// der Verlauf selbst, wo einzelne `rally`-Frames verloren gingen.
+    #[serde(rename = "rally_sync")]
+    RallySync {
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        #[serde(default)]
+        timeline: MatchTimeline,
+    },
+}
+
+// ─────────────────────────── Punktverlauf ──────────────────────────────
+
+/// Höchstzahl Ballwechsel je Satz, die Host/Relay annehmen.
+///
+/// Ein 21-Punkte-Satz endet spätestens bei 30:29 (59 Ballwechsel); der
+/// Deckel lässt Luft für alte Zählweisen und Zwischenstands-Korrekturen,
+/// bleibt aber ein harter Cloud-DoS-Riegel: mehr wird verworfen, nie
+/// gespeichert.
+pub const MAX_RALLIES_PER_SET: usize = 120;
+
+/// Höchstzahl Sätze je Verlauf (Badminton spielt höchstens best-of-5).
+pub const MAX_TIMELINE_SETS: usize = 5;
+
+/// Höchstgröße eines serialisierten Verlaufs in Bytes (Sync + Abruf).
+/// Geteilt, damit Host und Relay dieselbe Grenze durchsetzen.
+pub const MAX_TIMELINE_LEN: usize = 8 * 1024;
+
+/// Punktverlauf eines Matches: je Satz die Ballwechsel-Folge.
+///
+/// **Bewusst ohne Namen** (Datenschutz, ADR 0015): nur Kennungen und
+/// Punktfolgen — die Anzeige holt Namen zur Laufzeit aus dem Turnierstand,
+/// und genau in dieser Form wandert die Datei später zu badhub.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MatchTimeline {
+    #[serde(default)]
+    pub sets: Vec<TimelineSet>,
+    /// Aufzeichnung begann mit eingetipptem Zwischenstand (`midGameSetup`)
+    /// — der Graph startet dann nicht bei 0:0 und sagt das dazu.
+    #[serde(rename = "midGame", default)]
+    pub mid_game: bool,
+    /// Match endete mit Aufgabe/Disqualifikation — der letzte Satz ist
+    /// dann bewusst unvollständig.
+    #[serde(default)]
+    pub retired: bool,
+    /// Match ist abgeschlossen (Ergebnis abgegeben) — es kommen keine
+    /// Ballwechsel mehr.
+    #[serde(default)]
+    pub finished: bool,
+}
+
+/// Ein Satz im Punktverlauf.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TimelineSet {
+    /// Startstand des Satzes — 0:0, außer bei Zwischenstand-Einstieg.
+    #[serde(rename = "startA", default)]
+    pub start_a: i64,
+    #[serde(rename = "startB", default)]
+    pub start_b: i64,
+    /// Ballwechsel-Gewinner in gespielter Reihenfolge, nur `'A'`/`'B'`.
+    /// Als String statt Liste: kompakt auf dem Draht und in der Datei,
+    /// trivial zu kürzen (Undo) und zu verlängern.
+    #[serde(default)]
+    pub points: String,
+}
+
+impl TimelineSet {
+    /// Nur `'A'`/`'B'`, gedeckelt, Startstand nicht negativ — die Folge
+    /// kommt übers Netz und landet in Persistenz und SVG-Renderern.
+    pub fn is_valid(&self) -> bool {
+        self.start_a >= 0
+            && self.start_b >= 0
+            && self.points.len() <= MAX_RALLIES_PER_SET
+            && self.points.bytes().all(|b| b == b'A' || b == b'B')
+    }
+}
+
+impl MatchTimeline {
+    /// Gesamt-Gültigkeit — Host UND Relay verwerfen Ungültiges komplett,
+    /// statt es zu kürzen (ein halber Verlauf wäre eine stille Lüge).
+    pub fn is_valid(&self) -> bool {
+        self.sets.len() <= MAX_TIMELINE_SETS && self.sets.iter().all(TimelineSet::is_valid)
+    }
 }
 
 /// Nachrichten vom Server an das Tablet.
@@ -1250,6 +1360,18 @@ pub enum HostFrame {
         req_id: u64,
         response: TlResponse,
     },
+    /// Antwort auf einen [`RelayFrame::TimelineRequest`]: der Verlauf als
+    /// **opaker** JSON-String (Muster `TlState`) — der Relay liefert ihn
+    /// unverändert aus, die Form bestimmt allein der Host. `found: false`
+    /// = zu diesem Match liegt kein Verlauf vor (Papier-Ergebnis).
+    TimelineData {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(default)]
+        found: bool,
+        #[serde(default)]
+        json: String,
+    },
 }
 
 /// Höchstzahl der Turnierleitungs-Geräte, die der Relay spiegelt.
@@ -1538,6 +1660,44 @@ pub enum RelayFrame {
         #[serde(rename = "viewRev")]
         view_rev: u64,
         action: TlAction,
+    },
+    /// Ein Ballwechsel von einem Tablet (Punktverlauf, ADR 0014) — vom
+    /// Relay 1:1 durchgereicht, Interpretation allein beim Host.
+    Rally {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        #[serde(default)]
+        set: i64,
+        #[serde(default)]
+        n: i64,
+        #[serde(default)]
+        winner: String,
+        #[serde(rename = "scoreA", default)]
+        score_a: i64,
+        #[serde(rename = "scoreB", default)]
+        score_b: i64,
+    },
+    /// Kompletter Verlaufs-Resync eines Tablets (siehe
+    /// [`TabletMsg::RallySync`]) — der Relay prüft nur die Größe.
+    RallySync {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        #[serde(default)]
+        timeline: MatchTimeline,
+    },
+    /// Ein TL-Gerät möchte den Punktverlauf eines Matches sehen —
+    /// Request/Response wie beim TL-Kommando (`req_id` korreliert die
+    /// [`HostFrame::TimelineData`]). Der Relay bleibt Briefträger: er
+    /// hält keine Verläufe vor (Mobilfunk-Budget, Spec AK-5).
+    TimelineRequest {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
     },
 }
 
@@ -2574,5 +2734,125 @@ mod tests {
         // das Parsen einen Fehler liefert statt zu panicken.
         let parsed: Result<HostFrame, _> = serde_json::from_str(r#"{"type":"tl_auth_v99"}"#);
         assert!(parsed.is_err());
+    }
+
+    // ── Punktverlauf (ADR 0014) ────────────────────────────────────────
+
+    fn beispiel_timeline() -> MatchTimeline {
+        MatchTimeline {
+            sets: vec![
+                TimelineSet {
+                    start_a: 0,
+                    start_b: 0,
+                    points: "AABBA".to_string(),
+                },
+                TimelineSet {
+                    start_a: 7,
+                    start_b: 5,
+                    points: "BA".to_string(),
+                },
+            ],
+            mid_game: true,
+            retired: false,
+            finished: false,
+        }
+    }
+
+    #[test]
+    fn rally_frames_roundtrip() {
+        roundtrip(&TabletMsg::Rally {
+            match_id: 42,
+            set: 1,
+            n: 3,
+            winner: "A".to_string(),
+            score_a: 2,
+            score_b: 1,
+        });
+        roundtrip(&TabletMsg::RallySync {
+            match_id: 42,
+            timeline: beispiel_timeline(),
+        });
+        roundtrip(&RelayFrame::Rally {
+            court_id: 7,
+            match_id: 42,
+            set: 2,
+            n: 10,
+            winner: "B".to_string(),
+            score_a: 4,
+            score_b: 6,
+        });
+        roundtrip(&RelayFrame::RallySync {
+            court_id: 7,
+            match_id: 42,
+            timeline: beispiel_timeline(),
+        });
+        roundtrip(&RelayFrame::TimelineRequest {
+            req_id: 9,
+            match_id: 42,
+        });
+        roundtrip(&HostFrame::TimelineData {
+            req_id: 9,
+            found: true,
+            json: "{}".to_string(),
+        });
+    }
+
+    #[test]
+    fn rally_without_new_fields_parses_with_defaults() {
+        // Verstümmelte/ältere Frames dürfen das Parsen nicht brechen —
+        // sie werden dann inhaltlich verworfen (match_id 0), nie panicken.
+        let msg: TabletMsg = serde_json::from_str(r#"{"type":"rally"}"#).unwrap();
+        assert_eq!(
+            msg,
+            TabletMsg::Rally {
+                match_id: 0,
+                set: 0,
+                n: 0,
+                winner: String::new(),
+                score_a: 0,
+                score_b: 0,
+            }
+        );
+        let sync: TabletMsg = serde_json::from_str(r#"{"type":"rally_sync"}"#).unwrap();
+        assert_eq!(
+            sync,
+            TabletMsg::RallySync {
+                match_id: 0,
+                timeline: MatchTimeline::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn old_score_update_still_parses_next_to_rally_frames() {
+        // Bestehende Frames bleiben unangetastet lesbar (Auto-Update ist
+        // nicht atomar über Tablet-Cache/Relay/Host).
+        let json = r#"{"type":"score_update","scoreA":11,"scoreB":9}"#;
+        let msg: TabletMsg = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, TabletMsg::ScoreUpdate { .. }));
+    }
+
+    #[test]
+    fn timeline_validation_accepts_only_ab_and_caps() {
+        assert!(beispiel_timeline().is_valid());
+        // Fremdzeichen in der Punktfolge: ungültig (die Folge kommt übers
+        // Netz und landet in Persistenz + SVG-Renderern).
+        let mut kaputt = beispiel_timeline();
+        kaputt.sets[0].points = "AXB".to_string();
+        assert!(!kaputt.is_valid());
+        // Überlange Punktfolge: ungültig (Cloud-DoS-Deckel).
+        let mut lang = beispiel_timeline();
+        lang.sets[0].points = "A".repeat(MAX_RALLIES_PER_SET + 1);
+        assert!(!lang.is_valid());
+        // Zu viele Sätze: ungültig.
+        let mut viele = beispiel_timeline();
+        viele.sets = vec![TimelineSet::default(); MAX_TIMELINE_SETS + 1];
+        assert!(!viele.is_valid());
+        // Negativer Startstand: ungültig.
+        let mut negativ = beispiel_timeline();
+        negativ.sets[0].start_a = -1;
+        assert!(!negativ.is_valid());
+        // Leere Timeline ist gültig (Match ohne gezählten Ballwechsel).
+        assert!(MatchTimeline::default().is_valid());
     }
 }
