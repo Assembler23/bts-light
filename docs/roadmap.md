@@ -370,6 +370,14 @@ mitgeändert worden:
   Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
   `locked_courts` gehört auf demselben Weg dazu.
 
+## Wünsche vom 11.08.2026
+
+- **Punktverlauf-Graph pro Satz** — Spec freigegeben und in Umsetzung:
+  [features/punktverlauf-graph.md](features/punktverlauf-graph.md)
+  (ADR [0014](adr/0014-punktverlauf-expliziter-rally-frame.md),
+  [0015](adr/0015-punktverlauf-datei-je-turnier.md)). Folge-Feature
+  (eigene Spec, offen): badhub-Push + Anzeige auf badhub.de.
+
 ## Wünsche vom 10.08.2026 (nach dem v0.9.178-Test)
 
 **TL-Web (bts-light, klein):**
