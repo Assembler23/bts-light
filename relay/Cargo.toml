@@ -18,4 +18,4 @@ include_dir = "0.7"
 base64 = "0.23"
 # OS-Zufall für Telefon-Kopplungscodes (ADR 0004); ohnehin schon transitiv
 # im Workspace-Dependency-Baum.
-getrandom = "0.3"
+getrandom = "0.4"
