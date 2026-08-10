@@ -366,6 +366,34 @@ mitgeändert worden:
   Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
   `locked_courts` gehört auf demselben Weg dazu.
 
+## Wünsche vom 10.08.2026 (nach dem v0.9.178-Test)
+
+**TL-Web (bts-light, klein):**
+
+- **Spielliste: Disziplin, Runde und Gruppe einzeln ein-/ausblendbar** —
+  drei weitere Schalter im Anzeige-Menü, je Gerät gespeichert (wie
+  Spielnummer/Nationen). *(in Arbeit)*
+- **Bug: Drag & Drop auf Android-Tablets (Chrome) funktioniert nicht.**
+  tl.html nutzt HTML5-Drag-Events, die auf Touch-Geräten nicht feuern;
+  Antippen-dann-Feld-Antippen geht als gleichwertiger Weg. Fix: Drag auf
+  Pointer-Events umstellen (oder Touch-Fallback). *(in Arbeit)*
+
+**Hallen-Check-In (überwiegend badhub-Repo; ändert die Spec
+[features/spieler-check-in.md](features/spieler-check-in.md) — vor
+Umsetzung kurz grillen, besonders die Doppel-Semantik):**
+
+- **Doppel als Doppel kennzeichnen** auf der öffentlichen Check-In-Seite —
+  Partner sichtbar zusammengehörig, auch wenn jede Person einzeln abhakt.
+- **Zählung: ein Doppel zählt erst als anwesend, wenn beide da sind**
+  (betrifft badhub-Anzeige UND die TL-Sicht/Ansagen in bts-light).
+- **Suche zeigt Eingecheckte sofort grün hinterlegt** (öffentliche Seite).
+- **Rückgängig bei Verklicken:** Undo-Symbol für Zeit x nach dem eigenen
+  Check-In (öffentliche Seite + API).
+- **Admin-Variante der Check-In-Seite:** Status generell änderbar,
+  Spieler auf „abgemeldet" setzen usw. — neuer Status „abgemeldet" spannt
+  über beide Repos; die TL-Sicht in bts-light kann heute schon
+  Hand-Einchecken/Zurücknehmen.
+
 ## Feature-Wünsche
 
 Von der Turnierleitung gewünscht, noch nicht eingeplant:
