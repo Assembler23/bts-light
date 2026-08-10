@@ -147,6 +147,7 @@ dem Bildschirm hat, könnte sich damit jeder als Tablet ausgeben.
 | `GET /tl` | Die Seite selbst — **ohne** Zugangsprüfung, wie die Tablet-Seite. Ausgeliefert wird eine leere Hülle, die ihren Zugang erst aus dem Adress-Fragment (`#t=…`) liest; alles Verwertbare kommt über die geschützten API-Routen. |
 | `GET /tl/api/state` | Der zuletzt gepushte Anzeige-Zustand, **unverändert** durchgereicht. Mit `ETag` aus **Host-Generation und Revision**: Ein Gerät, das denselben Stand schon hat, bekommt `304` — bei einer Seite, die alle zwei Sekunden fragt, ist das über Mobilfunk der Unterschied zwischen sparsam und lästig. Die Generation muss hinein, weil die Revision beim Neustart des Turnier-PCs wieder klein beginnt; ohne sie bekäme ein Gerät „unverändert" auf einen völlig anderen Turnierstand. Fehlt der Stand, ist die Antwort `503` und **nicht** ein leeres Turnier: Leer sähe aus wie „alle Felder frei". |
 | `POST /tl/api/command` | Kommando an den Turnier-PC, Antwort synchron über `reqId`/`TlAck` — dasselbe erprobte Muster wie die Ergebnismeldung vom Tablet, mit 20 s Zeitablauf. |
+| `GET /flags/{code}.svg` | Länderflaggen für die TL-Seite. Sie leitet die Flaggen-Basis aus ihrem eigenen Pfad ab (`/bts-relay/tl` → `/bts-relay/flags/`) — und hängt ohne Namespace in der Adresse, deshalb braucht sie diese ns-lose Route neben `/{ns}/flags/…` (Court-Monitor). Statische SVGs ohne Turnierbezug; ein Namespace hätte nichts abzusichern. |
 
 Der Relay ist dabei **Briefträger, nicht Schiedsrichter**: Er kennt weder
 Spiele noch Felder, prüft den Zugang und reicht durch. Ob eine Aktion
@@ -209,7 +210,7 @@ Widerruf. Ein verworfener Zustand nimmt auch den vorherigen mit — sonst
 bekäme jedes Gerät weiter „unverändert" auf einen eingefrorenen Feldplan und
 läse dazu „aktuell".
 
-**Not-Aus:** `BTS_RELAY_TL=off` lässt die drei Routen gar nicht erst
+**Not-Aus:** `BTS_RELAY_TL=off` lässt die vier Routen gar nicht erst
 entstehen — ohne Rebuild und ohne die übrigen Dienste anzufassen. Der Relay
 ist ein globales Binary für alle Installationen; ein Fehler im neuen
 Schreibweg muss sich abschalten lassen, während anderswo Turniere laufen.

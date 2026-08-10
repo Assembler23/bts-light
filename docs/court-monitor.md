@@ -124,6 +124,7 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | **In Vorbereitung**    | `/info/preparation`            | (LAN-only erstmal)             |
 | Vorbereitungs-Daten    | `/info/preparation/state`      | (LAN-only erstmal)             |
 | Flaggen                | `/flags/{code}.svg`            | `/{ns}/flags/{code}.svg`       |
+| Flaggen (TL-Seite)     | `/flags/{code}.svg`            | `/flags/{code}.svg` (ns-los)   |
 | Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |

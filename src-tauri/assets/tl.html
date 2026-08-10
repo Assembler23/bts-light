@@ -1677,16 +1677,27 @@ function pairOf(t1, t2, nat1, nat2) {
  * `title` und als Ersatz, wenn es die Datei nicht gibt: Zu einer unbekannten
  * Nation lädt der Browser sonst ein kaputtes Bild, und die Zeile verrutscht.
  */
+// Kürzel, deren Flaggen-Datei fehlt (404): einmal gemerkt, rendert jeder
+// weitere Zyklus sofort den Text-Ersatz. Ohne den Merker setzte jeder
+// Poll-Neuaufbau erneut ein scheiterndes `<img>` ein, dessen
+// nachträglicher `onerror`-Tausch die Zeilen alle zwei Sekunden sichtbar
+// springen ließ.
+const flaggenFehlt = new Set();
+window.flaggeFehlgeschlagen = (img, code) => {
+  flaggenFehlt.add(code);
+  img.replaceWith(Object.assign(document.createElement("span"),
+    { className: "nat", textContent: code }));
+};
 function nationBadge(code) {
   const c = (code || "").trim().toUpperCase();
   if (!c) return "";
   // Nur was wie ein ISO-Kürzel aussieht — der Wert kommt aus BTP und landet
-  // hier in einer URL.
+  // hier in einer URL (und unten uneingepackt im Inline-`onerror`).
   if (!/^[A-Z]{2,3}$/.test(c)) return "";
+  if (flaggenFehlt.has(c)) return `<span class="nat">${esc(c)}</span>`;
   return `<img class="flagge" src="${FLAGGEN_BASIS}${c}.svg" alt="${esc(c)}"
     title="${esc(c)}" loading="lazy" width="20" height="14"
-    onerror="this.replaceWith(Object.assign(document.createElement('span'),
-      {className:'nat', textContent:'${esc(c)}'}))">`;
+    onerror="window.flaggeFehlgeschlagen(this, '${c}')">`;
 }
 
 /**
