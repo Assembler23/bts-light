@@ -4,6 +4,38 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.179
+
+Nachmittags-Runde des 10.08.: Feinschliff der Turnierleitungs-Seite aus dem
+Live-Test, dazu der Abgemeldet-Zustand im Check-In. Cloud-TL-Geräte hatten
+alle Seiten-Änderungen bereits über den Relay-Deploy; dieses Release bringt
+sie in die App (LAN-Weg) und liefert die App-seitigen Anteile.
+
+- **Felder immer vollständig sichtbar.** Die Turnierleitungs-Seite rollt
+  nicht mehr als Ganzes: Die Feldkacheln passen sich stufenweise an
+  (kleinere Abstände, dann kleinere Schrift), nur die Spielliste rollt in
+  ihrem eigenen Bereich — rechts wie im „Spielliste darunter"-Modus, der
+  den Feldern jetzt bedarfsgerecht Platz gibt statt fester Prozente.
+- **Ziehen funktioniert auf Tablets.** Statt Halten-und-Hoffen gibt es an
+  jeder ziehbaren Zeile und Kachel einen Zieh-Griff (⠿) — dort startet das
+  Ziehen sofort, Wischen daneben rollt normal. Am echten Android-Tablet
+  bestätigt; der erste Anlauf über langes Drücken verlor das Wettrennen
+  gegen die Scroll-Erkennung des Browsers und ist wieder ausgebaut.
+- **Spielliste aufgeräumt:** Disziplin, Runde und Gruppe lassen sich im
+  Anzeige-Menü einzeln ausblenden (je Gerät gespeichert).
+- **Feld-Raster: Nummerierung wahlweise spaltenweise** (vertikal) — für
+  Hallen, die ihre Felder spaltenweise zählen; Schlangen-Nummerierung
+  wechselt dann je Spalte die Richtung.
+- **Spielort: Klarheit statt stiller Grenze.** Gemessen am echten BTP:
+  Die Schnittstelle verwirft Spielort-Änderungen (antwortet dabei sogar
+  mit „Erfolg") — eine Rückschreibung des Hallen-Wählers ist unmöglich.
+  Der Wähler sagt das jetzt selbst; der Messbefund steht im
+  Protokoll-Dossier, das Messwerkzeug bleibt im Repo.
+- **Check-In: Abgemeldete sichtbar.** Wer in badhub abgemeldet ist,
+  erscheint in der Turnierleitungs-Sicht grau und durchgestrichen, zählt
+  nicht mehr als fehlend und wird nicht mehr ausgerufen; Einchecken von
+  Hand bleibt möglich und überschreibt die Abmeldung.
+
 ## v0.9.178
 
 Fünf Ausbauten der Turnierleitungs-Oberfläche im Browser (TL-Web), alle am
