@@ -2016,21 +2016,49 @@ function wireQueue(box) {
 // auf Touch-Geräten auffiel. Der Maus-/Stift-Weg unten bleibt deshalb
 // unangetastet; Touch bekommt einen eigenen Weg über Long-Press
 // (`startTouchDrag`): Erst nach kurzem, ruhigem Halten „bewaffnet" sich der
-// Zug und schaltet `touch-action` erst dann auf `none` — vorher gehört
-// jede Bewegung dem Scrollen, damit Wischen in der Liste ganz normal
-// weiterfunktioniert.
+// Zug — vorher gehört jede Bewegung dem Scrollen, damit Wischen in der
+// Liste ganz normal weiterfunktioniert.
+//
+// Eine Klasse allein reicht danach NICHT: Chrome legt das erlaubte
+// `touch-action` schon beim ersten `touchstart` für die gesamte Geste fest,
+// eine Klassenänderung mitten in der Geste wirkt auf den schon aktiven
+// Zeiger nicht mehr — und `preventDefault()` auf einem `pointermove`
+// unterdrückt das native Scrollen ebenfalls nicht zuverlässig. Was
+// tatsächlich zieht: ein `touchmove`-Listener auf `window` mit
+// `{passive:false}`, der selbst `preventDefault` ruft (siehe `blockScroll`
+// in `arm()`). Die Klasse bleibt als Bauklotz-auf-Bauklotz-Absicherung
+// stehen. Der Fenster-Listener hat noch einen zweiten Vorteil: Er ist immun
+// gegen den 2-Sekunden-Redraw der Liste — eine Klasse an `el` wäre nach
+// einem Neuzeichnen wirkungslos (neuer DOM-Knoten), der Fenster-Listener
+// hängt an keinem Zeilen-Element und bleibt bestehen, bis `teardown` ihn
+// entfernt.
 const DRAG_THRESHOLD_PX = 8;
 /** Nach einem Zug folgt ein Klick-Ereignis, das hier geschluckt wird. */
 let suppressNextClick = false;
 /** Läuft gerade ein Zug? Solange bleibt das Aktionsband aus (siehe dort). */
 let dragging = false;
+/** Ein Touch-Long-Press wartet gerade auf seine 300 ms (siehe unten) — noch
+ *  nicht `dragging`, aber schon belegt. Getrennt von `dragging` gehalten,
+ *  weil genau dieses Zeitfenster sonst ungeschützt wäre: Ein zweiter Finger
+ *  (Handballen beim Halten) könnte in dieser Wartezeit einen ZWEITEN
+ *  Automaten starten. */
+let touchDragPending = false;
 
 function enableDrag(el, match, fromCourtId) {
   el.addEventListener("pointerdown", (down) => {
     // Touch nimmt einen eigenen, per Long-Press bewaffneten Weg (siehe
     // Erklärung oben) — der Maus-/Stift-Weg unten feuert für Finger gar
     // nicht erst los.
-    if (down.pointerType === "touch") { startTouchDrag(el, match, fromCourtId, down); return; }
+    if (down.pointerType === "touch") {
+      // Nebenläufigkeits-Wächter: Läuft schon ein Zug (Maus oder ein
+      // anderer Finger) oder wartet bereits ein Long-Press auf denselben
+      // Moment, startet KEIN zweiter Automat. Ohne diese Sperre würde der
+      // zweite Automat das globale `picked` überschreiben, und beim
+      // Loslassen des ERSTEN Fingers würde das FALSCHE Spiel zugewiesen.
+      if (dragging || touchDragPending) return;
+      startTouchDrag(el, match, fromCourtId, down);
+      return;
+    }
     // Nur die primäre Maustaste bzw. der Stift dürfen einen Zug starten.
     if (down.button !== 0) return;
     let ghost = null;
@@ -2137,6 +2165,11 @@ const LONGPRESS_MS = 300;
 const TOUCH_CANCEL_PX = 10;
 
 function startTouchDrag(el, match, fromCourtId, down) {
+  // Belegt den Wächter oben für die gesamte Lebensdauer dieses Automaten —
+  // vom ersten Antippen bis zum letzten `teardown`. Ein zweiter Finger, der
+  // in der Zwischenzeit auf irgendeiner Zeile/Kachel `pointerdown` auslöst,
+  // wird dort abgewiesen, bevor ein zweiter Automat entstehen kann.
+  touchDragPending = true;
   const pointerId = down.pointerId;
   let armed = false;
   let ghost = null;
@@ -2146,12 +2179,10 @@ function startTouchDrag(el, match, fromCourtId, down) {
   function updateGhost(x, y) {
     ghost.style.left = x + 14 + "px";
     ghost.style.top = y - 14 + "px";
-    // Für den Treffertest kurz ausblenden: `elementFromPoint` träfe sonst
-    // den Geist selbst, weil der (anders als beim Maus-Weg) direkt unter
-    // dem Finger liegt.
-    ghost.style.display = "none";
+    // Das Feld unter dem Finger hervorheben. `elementFromPoint` ignoriert
+    // den Klon von sich aus (`.drag-ghost` trägt `pointer-events: none`,
+    // siehe CSS) — wie beim Maus-Weg, kein Aus-/Einblenden nötig.
     const under = document.elementFromPoint(x, y);
-    ghost.style.display = "";
     const card = under && under.closest(".card[data-court]");
     if (card !== hovered) {
       hovered?.classList.remove("hover-target");
@@ -2164,16 +2195,38 @@ function startTouchDrag(el, match, fromCourtId, down) {
 
   function arm() {
     timer = null;
+    // Der 2-Sekunden-Poll kann `el` in der Wartezeit ersetzt haben (die
+    // Liste wird per `innerHTML` neu gezeichnet) — dann hängt es an keinem
+    // Elternknoten mehr. Sauber abbrechen statt halb bewaffnet
+    // weiterzumachen: Ohne diese Prüfung bliebe der Automat auf
+    // „bewaffnet"/„zieht" stehen, ohne `picked` und ohne Geist zu setzen,
+    // und der nächste Tipp würde verschluckt (`suppressNextClick`), ohne
+    // dass je etwas zugewiesen wurde.
+    if (!el.isConnected) { teardown(null, true); return; }
     armed = true;
     dragging = true;
-    // Erst JETZT `touch-action: none` setzen — bis hierher gehörte jede
-    // Bewegung dem Scrollen. Da das Halten ruhig war (siehe `move` unten),
-    // hat der Browser noch keine Wischgeste begonnen; die Umschaltung
-    // greift deshalb rechtzeitig für die folgenden Zeigerbewegungen.
+    // Klasse als Bauklotz-auf-Bauklotz-Absicherung: Chrome legt das
+    // erlaubte `touch-action` schon beim ersten `touchstart` für die GANZE
+    // Geste fest — eine Klassenänderung MITTEN in der Geste wirkt auf den
+    // schon aktiven Zeiger nicht mehr, egal wie früh sie kommt. Die
+    // eigentliche Scroll-Unterdrückung übernimmt deshalb gleich der
+    // `touchmove`-Listener unten.
     el.classList.add("touch-drag-armed");
-    // Zeigegesten-Fang: Weitere Ereignisse dieses Fingers kommen sicher
-    // hierher, auch wenn der Finger über andere Elemente wandert.
-    el.setPointerCapture(pointerId);
+    // Nativer `touchmove`-Listener mit `{passive:false}`, NICHT der
+    // Pointer-Event: Nur ein `preventDefault` auf dem zugrunde liegenden
+    // Touch-Ereignis unterdrückt das Scrollen zuverlässig — auf einem
+    // `pointermove` verhindert `preventDefault` das Scrollen NICHT. Als
+    // Fenster-Listener zusätzlich immun gegen den 2-Sekunden-Redraw: Die
+    // Klasse hinge an `el` und wäre nach einem Neuzeichnen wirkungslos
+    // (neuer Knoten, alte Klasse weg), der Fenster-Listener nicht.
+    window.addEventListener("touchmove", blockScroll, { passive: false });
+    // `setPointerCapture` ist für Touch eigentlich redundant (der Browser
+    // fängt die Zeigegesten eines Fingers ohnehin implizit ein) — bleibt
+    // trotzdem als zusätzliche Absicherung, damit Ereignisse sicher
+    // weiterkommen, falls der Finger über andere Elemente wandert. Im
+    // try/catch wie die Freigabe unten: `el` könnte inzwischen doch
+    // verschwunden sein.
+    try { el.setPointerCapture(pointerId); } catch { /* el bereits weg */ }
     document.body.classList.add("dragging");
     document.getSelection()?.removeAllRanges();
     picked = { match, fromCourtId: fromCourtId ?? null };
@@ -2187,6 +2240,9 @@ function startTouchDrag(el, match, fromCourtId, down) {
     updateGhost(down.clientX, down.clientY);
   }
 
+  /** Unterdrückt das native Scrollen, solange bewaffnet — siehe `arm()`. */
+  function blockScroll(ev) { ev.preventDefault(); }
+
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
     if (!armed) {
@@ -2199,16 +2255,21 @@ function startTouchDrag(el, match, fromCourtId, down) {
       return;
     }
     // Bewaffnet: Ab hier gehört die Bewegung dem Zug, nicht mehr dem
-    // Scrollen.
-    ev.preventDefault();
+    // Scrollen (das eigentliche Unterdrücken macht `blockScroll` oben).
     updateGhost(ev.clientX, ev.clientY);
   }
 
   function teardown(ev, cancelled) {
     if (timer) { clearTimeout(timer); timer = null; }
+    touchDragPending = false;
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", cancel);
+    // Auf JEDEM Ausstiegspfad entfernen, auch wenn nie bewaffnet wurde —
+    // `removeEventListener` auf einen nie hinzugefügten Listener ist ein
+    // No-op, aber vergessen wäre hier der teuerste Fehler: ein liegen
+    // gebliebener `touchmove`-Blocker legt jedes künftige Scrollen lahm.
+    window.removeEventListener("touchmove", blockScroll, { passive: false });
     if (!armed) return;  // war nur ein Tipp oder ein Wischen vor dem Bewaffnen
     document.body.classList.remove("dragging");
     document.getSelection()?.removeAllRanges();
@@ -2222,9 +2283,9 @@ function startTouchDrag(el, match, fromCourtId, down) {
     suppressNextClick = true;
     setTimeout(() => { suppressNextClick = false; }, 0);
     if (cancelled) {
-      // Abgebrochen (Finger weg, Browser übernimmt die Geste): Die Auswahl
-      // bleibt stehen, das Band erscheint — derselbe Rettungsanker wie beim
-      // Maus-Weg.
+      // Abgebrochen (Finger weg, Browser übernimmt die Geste, `el`
+      // verschwunden): Die Auswahl bleibt stehen, das Band erscheint —
+      // derselbe Rettungsanker wie beim Maus-Weg.
       renderActionBar();
       renderQueue();
       return;
@@ -2239,9 +2300,11 @@ function startTouchDrag(el, match, fromCourtId, down) {
     }
   }
 
-  // Denselben Finger filtern wie in `move` — ein zweiter, versehentlicher
-  // Finger (z. B. der Handballen beim Halten) darf den Zug des ersten weder
-  // beenden noch abbrechen.
+  // Denselben Finger filtern — ein zweiter, versehentlicher Finger (z. B.
+  // der Handballen beim Halten) darf den Zug des ersten weder beenden noch
+  // abbrechen. Der Wächter oben (`touchDragPending`/`dragging`) verhindert
+  // schon, dass ein zweiter Finger einen EIGENEN Automaten startet — dieser
+  // Filter verhindert zusätzlich, dass er den LAUFENDEN stört.
   const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
   const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
 
