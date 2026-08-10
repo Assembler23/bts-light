@@ -369,6 +369,8 @@ function App() {
             azureTts={config.azure_tts}
             disciplineHallRules={config.discipline_hall_rules}
             manageScorekeepers={config.scorekeeper?.enabled ?? false}
+            hallLayouts={config.hall_layouts}
+            onConfigSaved={(c) => setConfig(c)}
           />
         );
       case "tablets":
