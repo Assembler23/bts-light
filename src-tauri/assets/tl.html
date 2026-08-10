@@ -1709,7 +1709,10 @@ function pairOf(t1, t2, nat1, nat2) {
 // weitere Zyklus sofort den Text-Ersatz. Ohne den Merker setzte jeder
 // Poll-Neuaufbau erneut ein scheiterndes `<img>` ein, dessen
 // nachträglicher `onerror`-Tausch die Zeilen alle zwei Sekunden sichtbar
-// springen ließ.
+// springen ließ. Bewusster Tradeoff: `onerror` unterscheidet 404 nicht
+// von einem kurzen Netz-Aussetzer — ein dabei gemerktes Kürzel bleibt bis
+// zum Neuladen der Seite Text. Ruhige Zeilen wiegen schwerer als eine
+// einzelne Flagge, die erst nach einem Reload zurückkehrt.
 const flaggenFehlt = new Set();
 window.flaggeFehlgeschlagen = (img, code) => {
   flaggenFehlt.add(code);
@@ -2274,10 +2277,16 @@ function enableSteg() {
     const rect = list.getBoundingClientRect();
     const startMass = gestapelt ? rect.height : rect.width;
     const key = gestapelt ? LISTE_HOEHE_KEY : LISTE_BREITE_KEY;
+    // Erst ab einer echten Bewegung zählt die Geste als Zug: Ein bloßer
+    // Tipp auf den Steg darf die Automatik NICHT auf „manuell" umstellen —
+    // und der Doppeltipp-Reset unten braucht die Unterscheidung ebenso.
+    let bewegt = false;
     const move = (ev) => {
       // Steg Richtung Felder geschoben = Liste wächst. Geklammert wird
       // beim Anwenden in fitCourts(), nicht hier — eine Regel, ein Ort.
       const delta = start - (gestapelt ? ev.clientY : ev.clientX);
+      if (!bewegt && Math.abs(delta) < 3) return;
+      bewegt = true;
       localStorage.setItem(key, String(Math.round(startMass + delta)));
       scheduleFitCourts();
     };
@@ -2287,10 +2296,14 @@ function enableSteg() {
       steg.removeEventListener("pointercancel", done);
       steg.classList.remove("zieht");
       document.body.classList.remove("dragging");
+      if (!bewegt) return;
       // Den tatsächlich angewendeten (geklammerten) Stand zurückschreiben,
       // damit kein Wert jenseits der Grenzen gespeichert bleibt und der
       // nächste Zug vom sichtbaren Maß ausgeht.
       requestAnimationFrame(() => {
+        // Ein Doppeltipp kann inzwischen auf Automatik zurückgestellt
+        // haben — dann darf dieser Nachzügler den Wert nicht wiederbeleben.
+        if (localStorage.getItem(key) === null) return;
         const r = list.getBoundingClientRect();
         localStorage.setItem(key, String(Math.round(gestapelt ? r.height : r.width)));
       });
