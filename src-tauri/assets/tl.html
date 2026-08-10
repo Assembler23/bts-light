@@ -511,6 +511,11 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 /* Nur auf dem Griff selbst das Scrollen unterdrücken — sonst ließe sich die
    Liste auf dem Tablet nicht mehr bewegen. */
 .row.pick { touch-action: pan-y; }
+/* Touch-Ziehen (Long-Press, siehe JS `startTouchDrag`): `touch-action` wird
+   NUR bewaffnet/während eines laufenden Zugs auf „none" gesetzt, per Klasse
+   statt global — global „none" hier würde jedes Wischen in der ganzen Liste
+   lahmlegen, auch an Zeilen, die gerade niemand zieht. */
+.touch-drag-armed { touch-action: none !important; }
 
 /* Was man zieht oder antippt, markiert man nicht: Ohne das hinterlässt jeder
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
@@ -1997,8 +2002,23 @@ function wireQueue(box) {
 // merken muss, dass etwas schiefging.
 //
 // Selbst gebaut auf Zeigegesten statt mit einer Bibliothek: Der eingebaute
-// Ziehen-Mechanismus der Browser funktioniert auf Touch nicht, und die
-// Seite wird ohne Bau-Schritt ins Programm eingebettet.
+// Ziehen-Mechanismus der Browser funktioniert auf Touch nicht (HTML5-DnD
+// feuert für Finger-Eingaben schlicht keine Ereignisse), und die Seite wird
+// ohne Bau-Schritt ins Programm eingebettet.
+//
+// Auf Android-Chrome-Tablets zog das trotzdem nicht zuverlässig: Die Zeile
+// trägt `touch-action: pan-y`, damit sich die Liste normal wischen lässt —
+// und genau deshalb beansprucht der Browser jede Wischbewegung sofort als
+// Scrollen, noch bevor unsere 8-px-Schwelle für Maus/Stift überhaupt
+// greifen könnte. Der Zeiger bekommt dann höchstens ein `pointercancel`,
+// nie genug `pointermove`, um einen Zug zu erkennen. Bei Maus/Stift
+// passiert das nicht (kein `touch-action` dafür), weshalb der Fehler nur
+// auf Touch-Geräten auffiel. Der Maus-/Stift-Weg unten bleibt deshalb
+// unangetastet; Touch bekommt einen eigenen Weg über Long-Press
+// (`startTouchDrag`): Erst nach kurzem, ruhigem Halten „bewaffnet" sich der
+// Zug und schaltet `touch-action` erst dann auf `none` — vorher gehört
+// jede Bewegung dem Scrollen, damit Wischen in der Liste ganz normal
+// weiterfunktioniert.
 const DRAG_THRESHOLD_PX = 8;
 /** Nach einem Zug folgt ein Klick-Ereignis, das hier geschluckt wird. */
 let suppressNextClick = false;
@@ -2007,9 +2027,12 @@ let dragging = false;
 
 function enableDrag(el, match, fromCourtId) {
   el.addEventListener("pointerdown", (down) => {
-    // Nur die primäre Taste/der erste Finger; Rechtsklick und Zweitfinger
-    // dürfen nichts auslösen.
-    if (down.button !== 0 && down.pointerType === "mouse") return;
+    // Touch nimmt einen eigenen, per Long-Press bewaffneten Weg (siehe
+    // Erklärung oben) — der Maus-/Stift-Weg unten feuert für Finger gar
+    // nicht erst los.
+    if (down.pointerType === "touch") { startTouchDrag(el, match, fromCourtId, down); return; }
+    // Nur die primäre Maustaste bzw. der Stift dürfen einen Zug starten.
+    if (down.button !== 0) return;
     let ghost = null;
     let hovered = null;
 
@@ -2098,6 +2121,133 @@ function enableDrag(el, match, fromCourtId) {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
   });
+}
+
+// ── Ziehen auf Touch-Geräten (Long-Press) ────────────────────────────────
+// Eigener Automat statt eines Zweigs im Maus-Code oben: Die Zustände
+// unterscheiden sich zu sehr (Wartezeit vor dem Bewaffnen, dynamisches
+// `touch-action`, Zeigegesten-Einfangen), um sie ohne Verrenkungen zu
+// teilen. Was gleich bleibt, wird bewusst wiederverwendet: dieselbe
+// `picked`-Zuweisung, derselbe Geist (`.drag-ghost`), dasselbe `assignTo`
+// beim Loslassen über einem Feld — ein Doppel der Zuweisungslogik wäre
+// die eigentliche Fehlerquelle.
+const LONGPRESS_MS = 300;
+/** Wischen statt Halten: Bewegung über diese Schwelle bricht das Bewaffnen
+ *  ab, BEVOR irgendetwas an der Wischgeste gehindert wird. */
+const TOUCH_CANCEL_PX = 10;
+
+function startTouchDrag(el, match, fromCourtId, down) {
+  const pointerId = down.pointerId;
+  let armed = false;
+  let ghost = null;
+  let hovered = null;
+  let timer = setTimeout(arm, LONGPRESS_MS);
+
+  function updateGhost(x, y) {
+    ghost.style.left = x + 14 + "px";
+    ghost.style.top = y - 14 + "px";
+    // Für den Treffertest kurz ausblenden: `elementFromPoint` träfe sonst
+    // den Geist selbst, weil der (anders als beim Maus-Weg) direkt unter
+    // dem Finger liegt.
+    ghost.style.display = "none";
+    const under = document.elementFromPoint(x, y);
+    ghost.style.display = "";
+    const card = under && under.closest(".card[data-court]");
+    if (card !== hovered) {
+      hovered?.classList.remove("hover-target");
+      hovered = card;
+      if (hovered && !hovered.classList.contains("blocked-target")) {
+        hovered.classList.add("hover-target");
+      }
+    }
+  }
+
+  function arm() {
+    timer = null;
+    armed = true;
+    dragging = true;
+    // Erst JETZT `touch-action: none` setzen — bis hierher gehörte jede
+    // Bewegung dem Scrollen. Da das Halten ruhig war (siehe `move` unten),
+    // hat der Browser noch keine Wischgeste begonnen; die Umschaltung
+    // greift deshalb rechtzeitig für die folgenden Zeigerbewegungen.
+    el.classList.add("touch-drag-armed");
+    // Zeigegesten-Fang: Weitere Ereignisse dieses Fingers kommen sicher
+    // hierher, auch wenn der Finger über andere Elemente wandert.
+    el.setPointerCapture(pointerId);
+    document.body.classList.add("dragging");
+    document.getSelection()?.removeAllRanges();
+    picked = { match, fromCourtId: fromCourtId ?? null };
+    renderActionBar();
+    renderCourts();
+    ghost = document.createElement("div");
+    ghost.className = "drag-ghost";
+    ghost.textContent =
+      `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
+    document.body.appendChild(ghost);
+    updateGhost(down.clientX, down.clientY);
+  }
+
+  function move(ev) {
+    if (ev.pointerId !== pointerId) return;
+    if (!armed) {
+      const dx = ev.clientX - down.clientX;
+      const dy = ev.clientY - down.clientY;
+      // Wischen erkannt, bevor der Long-Press auslöste: sauber abbrechen
+      // und AUF KEINEN FALL `preventDefault` rufen — sonst bliebe die Liste
+      // unter dem Finger stehen, obwohl doch gescrollt werden sollte.
+      if (Math.hypot(dx, dy) > TOUCH_CANCEL_PX) teardown(ev, true);
+      return;
+    }
+    // Bewaffnet: Ab hier gehört die Bewegung dem Zug, nicht mehr dem
+    // Scrollen.
+    ev.preventDefault();
+    updateGhost(ev.clientX, ev.clientY);
+  }
+
+  function teardown(ev, cancelled) {
+    if (timer) { clearTimeout(timer); timer = null; }
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    if (!armed) return;  // war nur ein Tipp oder ein Wischen vor dem Bewaffnen
+    document.body.classList.remove("dragging");
+    document.getSelection()?.removeAllRanges();
+    hovered?.classList.remove("hover-target");
+    ghost?.remove();
+    el.classList.remove("touch-drag-armed");
+    try { el.releasePointerCapture(pointerId); } catch { /* Finger schon weg */ }
+    dragging = false;
+    // Nach einem Zug folgt noch ein Klick-Ereignis. Ohne diese Sperre würde
+    // es die gerade getroffene Auswahl gleich wieder aufheben.
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 0);
+    if (cancelled) {
+      // Abgebrochen (Finger weg, Browser übernimmt die Geste): Die Auswahl
+      // bleibt stehen, das Band erscheint — derselbe Rettungsanker wie beim
+      // Maus-Weg.
+      renderActionBar();
+      renderQueue();
+      return;
+    }
+    const card = ev && document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".card[data-court]");
+    const court = card && state.courts.find((c) => String(c.court_id) === card.dataset.court);
+    if (court) {
+      assignTo(court);
+    } else {
+      renderActionBar();
+      renderQueue();
+    }
+  }
+
+  // Denselben Finger filtern wie in `move` — ein zweiter, versehentlicher
+  // Finger (z. B. der Handballen beim Halten) darf den Zug des ersten weder
+  // beenden noch abbrechen.
+  const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
+  const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
+
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
 }
 
 function renderQueue() {

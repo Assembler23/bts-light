@@ -38,7 +38,9 @@ LAN+Cloud voraus.
 
 - **Zuweisen:** Spiel antippen, dann Feld antippen. Oder ziehen. Beides
   führt zum selben Ergebnis; bei abgebrochenem Ziehen bleibt die Auswahl
-  stehen.
+  stehen. Auf Touch-Geräten startet das Ziehen mit kurzem Halten
+  (Long-Press) statt sofort — sonst ließe sich die Liste nicht mehr
+  wischen. Antippen-dann-Antippen funktioniert dort unverändert.
 - **Umhängen:** Spiel auf dem Feld antippen, dann das Zielfeld. Das ist
   **ein** Schreibvorgang nach BTP — es gibt keinen Moment, in dem das Spiel
   auf keinem Feld steht.
