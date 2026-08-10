@@ -557,6 +557,15 @@ dialog#res-dlg::backdrop { background: rgba(15, 23, 42, .45); }
 dialog#res-dlg form { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
 dialog#res-dlg h3 { margin: 0; font-size: 1.05rem; }
 dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
+/* Spalten-Beschriftung, ausgerichtet auf dieselben Maße wie `.res-row`
+   darunter (Label-Breite, Eingabe-Breite, „:"-Trenner) — sonst stünde die
+   Beschriftung nicht über der Spalte, die sie erklären soll. */
+.res-cols { display: flex; align-items: center; gap: 10px; font-size: .78rem; font-weight: 700; color: var(--ink-faint); }
+.res-cols .res-cols-spacer { flex: 0 0 4.2rem; }
+.res-cols .res-cols-sep { color: var(--ink-faint); }
+.res-cols span:not(.res-cols-spacer):not(.res-cols-sep) {
+  width: 4.4rem; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 #res-sets { display: flex; flex-direction: column; gap: 8px; }
 .res-row { display: flex; align-items: center; gap: 10px; }
 .res-row label { flex: 0 0 4.2rem; font-weight: 600; font-size: .9rem; color: var(--ink-soft); }
@@ -648,6 +657,16 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
   <form method="dialog" id="res-form">
     <h3 id="res-title">Ergebnis eintragen</h3>
     <p class="meta" id="res-pair"></p>
+    <!-- Nur sichtbar, wenn der Aufrufer Namen mitgibt (Task 7 bleibt ohne
+         sie funktionsfähig) — linke Spalte = Team1, rechte = Team2, exakt
+         wie die Satzfelder darunter. Verhindert, dass eine plausible, aber
+         seitenvertauschte Eingabe unbemerkt den Sieger dreht. -->
+    <div class="res-cols" id="res-cols" hidden>
+      <span class="res-cols-spacer" aria-hidden="true"></span>
+      <span id="res-col-1"></span>
+      <span class="res-cols-sep" aria-hidden="true">:</span>
+      <span id="res-col-2"></span>
+    </div>
     <div id="res-sets"></div>
     <button type="button" id="res-add-set">+ Satz</button>
     <p class="fehler" id="res-error" hidden></p>
@@ -1073,8 +1092,19 @@ function hallIdFor(hall) {
  * `openResultDialog` ist die Schnittstelle für Schritt 8 (Korrektur aus der
  * Beendet-Liste) — dieselbe Funktion, nur mit `overwrite: true` und dem
  * bereits eingetragenen Stand vorbelegt.
+ *
+ * Bei der Korrektur steht im Titel „Sieger zuerst" (wie in der
+ * Beendet-Zeile), die Satzfelder darunter aber bleiben roh in
+ * Team1:Team2 — das ist das Draht-Format. Ohne weiteren Hinweis wüsste
+ * niemand, welche Spalte welches Team ist: Eine plausible, aber
+ * seitenvertauschte Eingabe (z. B. 21:15/21:18 mit getauschten Spalten)
+ * validiert der Turnier-PC anstandslos durch — er prüft Satzplausibilität,
+ * nicht Zuordnung — und dreht den Sieger unbemerkt um. `ctx.team1`/
+ * `ctx.team2` (optional, roh, nicht Sieger-gedreht) blenden deshalb eine
+ * Spalten-Beschriftung über den Feldern ein; ohne die beiden Angaben
+ * verhält sich der Dialog wie zuvor (Task 7 bleibt kompatibel).
  */
-let resCtx = null;   // { matchId, label, sets, bestOf, overwrite }
+let resCtx = null;   // { matchId, label, sets, bestOf, overwrite, team1?, team2? }
 let resBusy = false; // ein Schreibvorgang ist unterwegs — kein zweiter, solange er läuft
 
 function openResultDialog(ctx) {
@@ -1082,6 +1112,12 @@ function openResultDialog(ctx) {
   resBusy = false;
   $("res-title").textContent = ctx.overwrite ? "Ergebnis korrigieren" : "Ergebnis eintragen";
   $("res-pair").textContent = ctx.label;
+  const zeigeSpalten = ctx.team1 != null && ctx.team2 != null;
+  $("res-cols").hidden = !zeigeSpalten;
+  if (zeigeSpalten) {
+    $("res-col-1").textContent = ctx.team1;
+    $("res-col-2").textContent = ctx.team2;
+  }
   $("res-error").hidden = true;
   $("res-save").disabled = false;
   // Mindestens zwei Zeilen, auch bei einem noch leeren Spiel — ein Satz
@@ -2110,6 +2146,17 @@ function renderScorekeepers() {
 }
 
 /**
+ * Sieger-zuerst-Paarung für die Beendet-Liste — so liest man ein Ergebnis
+ * vor. Gilt für die Zeilenanzeige UND den Dialog-Titel bei einer Korrektur,
+ * NIE für das Draht-Format an den Turnier-PC (das bleibt roh Team1:Team2,
+ * siehe `openResultDialog`-Kommentar).
+ */
+function siegerZuerst(f) {
+  const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
+  return f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
+}
+
+/**
  * Beendete Spiele.
  *
  * Reine Rückschau, neueste zuerst (die Reihenfolge liefert bereits der
@@ -2140,11 +2187,8 @@ function renderFinished() {
       .join(" · ");
     const badge = ERGEBNIS_BADGE[f.result]
       ? `<span class="badge warn">${ERGEBNIS_BADGE[f.result]}</span>` : "";
-    // Der Sieger zuerst genannt — so liest man ein Ergebnis vor.
-    const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
-    const paar = f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
     return `<div class="fin-row" data-fin="${f.match_id}">
-      <span class="fin-pair">${esc(paar)}</span>
+      <span class="fin-pair">${esc(siegerZuerst(f))}</span>
       <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       <button type="button" data-fin-fix="${f.match_id}"
@@ -2158,17 +2202,18 @@ function renderFinished() {
     b.addEventListener("click", () => {
       const f = list.find((x) => String(x.match_id) === b.dataset.finFix);
       if (!f) return;
-      // Dieselbe Sieger-zuerst-Regel wie in der Zeile (siehe `paar` oben) —
-      // aber nur für das Label. Die Sätze bleiben unangetastet in
-      // Team1:Team2, das erwartet der Turnier-PC.
-      const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
-      const label = f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
       openResultDialog({
         matchId: f.match_id,
-        label,
+        label: siegerZuerst(f), // Titel: Sieger zuerst, wie die Zeile.
         sets: f.sets || [],
         bestOf: 3,
         overwrite: true,
+        // Spalten-Beschriftung: bewusst ROH in Team1:Team2, nicht die
+        // Sieger-Reihenfolge von `label` — sie muss zu den Satzfeldern
+        // passen, die ebenfalls roh sind. Sonst wäre die Vertauschungs-
+        // Falle nur verschoben, nicht behoben.
+        team1: (f.team1 || []).join(" / "),
+        team2: (f.team2 || []).join(" / "),
       });
     }));
 }
@@ -2296,13 +2341,14 @@ function start() {
     if (picked.fromCourtId) {
       const court = pickedCourt();
       if (!court) { pickVanished(); return; }
-      const wer = `${(court.team1 || []).join(" / ")} vs. ${(court.team2 || []).join(" / ")}`;
+      const t1 = (court.team1 || []).join(" / "), t2 = (court.team2 || []).join(" / ");
       openResultDialog({
         matchId: court.match_id,
-        label: `${court.court}: ${wer}`,
+        label: `${court.court}: ${t1} vs. ${t2}`,
         sets: court.sets || [],
         bestOf: court.best_of,
         overwrite: false,
+        team1: t1, team2: t2,
       });
       return;
     }
@@ -2310,13 +2356,14 @@ function start() {
     // über pickedCourt() — hier zählt nur, ob das Spiel noch ansteht.
     if (!pickIsStillValid()) { pickVanished(); return; }
     const m = picked.match;
-    const wer = `${(m.team1 || []).join(" / ")} vs. ${(m.team2 || []).join(" / ")}`;
+    const t1 = (m.team1 || []).join(" / "), t2 = (m.team2 || []).join(" / ");
     openResultDialog({
       matchId: m.match_id,
-      label: `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${wer}`,
+      label: `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${t1} vs. ${t2}`,
       sets: [],
       bestOf: 3,
       overwrite: false,
+      team1: t1, team2: t2,
     });
   });
   // Das Dialog-Formular steht fest im Markup und wird nie neu gezeichnet
