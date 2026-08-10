@@ -3066,6 +3066,7 @@ mod tests {
             columns: 2,
             origin: crate::config::LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: true,
         });
         let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
         let ergebnis = keep_host_managed_fields(incoming, &current);
@@ -3182,6 +3183,7 @@ mod tests {
             columns: 3,
             origin: crate::config::LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: false,
         });
         let imported = cfg_id("inst-neu", None, "", "");
 
@@ -3206,6 +3208,7 @@ mod tests {
             columns: 2,
             origin: crate::config::LayoutOrigin::TopRight,
             serpentine: true,
+            vertical: true,
         });
         let mut imported = cfg_id("inst-neu", None, "", "");
         imported.hall_layouts.push(crate::config::HallLayoutConfig {
@@ -3213,6 +3216,7 @@ mod tests {
             columns: 4,
             origin: crate::config::LayoutOrigin::BottomLeft,
             serpentine: false,
+            vertical: false,
         });
 
         let merged = apply_imported_identity(imported, &current);

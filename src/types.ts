@@ -534,9 +534,12 @@ export interface HallLayoutConfig {
   hall: string;
   columns: number;
   origin: LayoutOrigin;
-  /** Richtungswechsel je Reihe (Schlangen-Nummerierung), wie Hallen mit
-   *  1-2-3 / 6-5-4 zählen. */
+  /** Richtungswechsel je Reihe (bzw. je Spalte bei `vertical`) — Schlangen-
+   *  Nummerierung, wie Hallen mit 1-2-3 / 6-5-4 zählen. */
   serpentine: boolean;
+  /** Spaltenweise statt reihenweise nummerieren (Feld 1 an der Start-Ecke,
+   *  Feld 2 in derselben Spalte weiter weg von der Start-Reihe). */
+  vertical: boolean;
 }
 
 /** Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011). */

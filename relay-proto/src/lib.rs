@@ -933,8 +933,14 @@ pub enum TlAction {
     /// Einem noch nicht vergebenen Spiel eine **Halle** geben, ohne es aufs
     /// Feld zu legen. Leerer Name nimmt die Zuweisung zurück.
     ///
-    /// BTP führt an angesetzten Spielen keinen Spielort — dies ist der einzige
-    /// Weg, einem wartenden Spiel überhaupt eine Halle zu geben, wenn keine
+    /// Bewusst host-lokal (bts-light + Liveticker, nie zurück nach BTP): BTP
+    /// kann an angesetzten Spielen durchaus einen Spielort tragen, wenn das
+    /// Turnier die Spalte pflegt (gemessen 09.08.2026) — aber ein
+    /// `SENDUPDATE` mit `LocationID` beantwortet BTP zwar mit `Result=1`,
+    /// verwirft den Wert dabei jedoch (gemessen 10.08.2026, siehe
+    /// `btp_location_probe.rs`). Rückschreiben ist also nicht möglich; für
+    /// Turniere ohne gepflegte Spalte bleibt dies der einzige Weg, einem
+    /// wartenden Spiel überhaupt eine Halle zu geben, wenn keine
     /// Disziplin-Regel greift.
     SetHall {
         #[serde(rename = "matchId")]

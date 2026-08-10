@@ -23,6 +23,13 @@
   --warn: #d97706;
   --alarm: #dc2626;
   --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .1);
+  /* Mindesthöhe der Spielliste im gestapelten Layout (Telefon, „Spielliste
+     darunter") — der EINZIGE Ort, an dem diese Zahl steht: `fitCourts()`
+     im Skript liest den aufgelösten Pixelwert über `getComputedStyle`
+     zurück, statt sie ein zweites Mal im Skript zu duplizieren. Genug für
+     ein, zwei Zeilen der Warteliste plus Rand — mehr braucht die Garantie
+     nicht, den Rest holt sich die Liste ohnehin über `flex: 1 1 0`. */
+  --liste-min: 10rem;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -34,11 +41,33 @@ html, body {
 /* Zahlen, die sich im Sekundentakt ändern, dürfen nicht zappeln. */
 .num { font-variant-numeric: tabular-nums; }
 
+/* ── Fester Rahmen ─────────────────────────────────────────────────────
+   Wunsch vom 10.08.2026 nach dem Turniertest: „alle Spielfeldkacheln immer
+   sichtbar, nur die Spielliste läuft". Dafür rollt die Seite selbst nicht
+   mehr — `#app` spannt sich über die ganze sichtbare Höhe und reicht den
+   Rest unter Kopf/Störungsband an `main` weiter, das intern in zwei
+   eigenständig rollende Bereiche aufteilt (siehe dort). `100dvh` zieht auf
+   Mobilgeräten die ein-/ausblendende Adressleiste ab; wo nicht unterstützt,
+   bleibt die vorher deklarierte `100vh` gültig (Kaskade, keine Prüfung
+   nötig). */
+#app {
+  display: flex; flex-direction: column;
+  height: 100vh; height: 100dvh;
+  overflow: hidden;
+}
+/* Kaskaden-Falle: Ein eigener `display`-Wert schlägt IMMER die
+   UA-Regel `[hidden] { display: none; }` — ohne diese Zeile bliebe der
+   leere App-Rahmen neben der Sperrseite (`#gate`) sichtbar, sobald
+   `$("app").hidden` gesetzt wird (Zugang fehlt, `showGate()` bei 401/429).
+   Das `hidden`-Attribut muss also ausdrücklich zurückgewinnen. */
+#app[hidden] { display: none; }
+
 /* ── Kopfzeile ─────────────────────────────────────────────────────────
-   Klebt oben: Der Verbindungszustand muss immer sichtbar sein, nicht nur
-   wenn man zufällig oben steht. */
+   Kein `position: sticky` mehr nötig: Seit dem festen Rahmen oben rollt die
+   Seite nicht mehr selbst, die Kopfzeile steht als erstes Flex-Kind von
+   `#app` ohnehin immer oben. */
 header {
-  position: sticky; top: 0; z-index: 20;
+  flex: none;
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--card);
   border-bottom: 1px solid var(--line);
@@ -116,39 +145,70 @@ header {
 
 /* Störungsband: nimmt die volle Breite, damit es niemand übersieht. */
 .banner {
-  display: none; padding: 10px 16px; font-weight: 650;
+  display: none; flex: none; padding: 10px 16px; font-weight: 650;
   background: #fef2f2; color: #7f1d1d; border-bottom: 1px solid #fecaca;
 }
 .banner.show { display: block; }
 
-main { padding: 16px; display: grid; gap: 20px; }
+/* ── Hauptbereich: Felder immer vollständig sichtbar, Liste rollt für sich
+   ─────────────────────────────────────────────────────────────────────
+   `main` nimmt den kompletten Rest der Höhe unter Kopf/Störungsband
+   (`flex: 1 1 auto`) und rollt selbst nicht mehr — seine beiden Abschnitte
+   tun das je für sich, siehe unten. `padding-top` bekommt den Überstand des
+   Aktionsbands dazu (`--band`, von `messeKopf()` gesetzt): Das Band liegt
+   FEST über der Kopfzeile — ist es breiter als der Kopf (viele Hallen,
+   Umbruch), verdeckte es sonst die oberste Feldreihe. */
+main {
+  flex: 1 1 auto; min-height: 0;
+  padding: calc(16px + var(--band, 0px)) 16px 16px;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow: hidden;
+}
+/* Felder: nie höher als ihr Platz. `fitCourts()` im Skript schrumpft dafür
+   erst Abstände/Schrift (Klassen `kacheln-kompakt`/`kacheln-mini` weiter
+   unten) und macht die Kachelbox erst als letzten Ausweg selbst rollbar
+   (`.courts-scroll`) — alle Felder auf einen Blick, die Liste läuft, die
+   Felder nicht. Gestapelt (Telefon-Breite und „Spielliste darunter") setzt
+   `fitCourts()` zusätzlich einen INLINE `max-height` — bedarfsgerecht,
+   nicht mehr ein starrer Anteil (siehe Kommentar dort): Kein CSS-Deckel
+   hier in der Grundregel, weil Inline-Style ihn ohnehin überstimmen würde,
+   sobald das Skript einmal gelaufen ist. */
+main > section:first-of-type {
+  flex: 0 0 auto; overflow: hidden;
+  /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
+  padding: 2px; margin: -2px;
+}
+main > section:first-of-type.courts-scroll { overflow-y: auto; }
+/* Spielliste: bekommt den kompletten Rest und rollt eigenständig — die
+   Felder darüber (oder daneben) bleiben davon unberührt. `min-height` ist
+   die harte Untergrenze aus `--liste-min` (CSS-Var, oben bei `:root`):
+   Selbst wenn `fitCourts()` den Feldern bedarfsgerecht viel Platz gibt,
+   behält die Liste IMMER mindestens dieses Maß — durchgesetzt vom Browser
+   selbst, nicht nur von der JS-Rechnung. */
+main > section:last-of-type {
+  flex: 1 1 0; min-height: var(--liste-min, 10rem); overflow-y: auto;
+}
 @media (min-width: 1100px) {
   /* Auf dem Desktop nebeneinander: Felder links (was läuft), Liste rechts
-     (was als Nächstes dran ist). Auf dem Tablet gestapelt — dort scrollt
-     man ohnehin. */
-  main { grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); align-items: start; }
-  /* Die Felder bleiben stehen, während die Liste läuft. Bei 120 wartenden
-     Spielen scrollt man weit nach unten — ohne das wäre kein einziges Feld
-     mehr zu sehen, und ein Spiel von ganz unten ließe sich weder ziehen
-     noch nach dem Antippen irgendwohin legen. Eigene Bildlaufleiste, falls
-     mehr Felder da sind als auf den Schirm passen. */
-  main > section:first-of-type {
-    position: sticky;
-    top: calc(var(--kopf, 62px) + var(--band, 0px) + 12px);
-    max-height: calc(100vh - var(--kopf, 62px) - var(--band, 0px) - 28px);
-    overflow-y: auto;
-    /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
-    padding: 2px;
-    margin: -2px;
-  }
-  /* Listen-Position je Gerät (Task 12, Anzeige-Menü „Spielliste darunter").
-     Gestapelt statt Spalten — und die Felder dürfen dann nicht mehr kleben:
-     Sonst schöbe sich die Liste unter eine fixierte erste Spalte statt
-     normal darunter zu folgen. */
-  body.liste-unten main { grid-template-columns: 1fr; }
-  body.liste-unten main > section:first-of-type {
-    position: static; max-height: none; overflow-y: visible;
-  }
+     (was als Nächstes dran ist). Beide Spalten sind hier genauso hoch wie
+     `main` selbst (`align-items: stretch`) — die Felder bekommen dadurch
+     die GANZE Höhe, kein Deckel nötig. Auf dem Telefon bleibt es bei der
+     gestapelten Regel von oben — dort reicht ohnehin nur eine Spalte
+     nebeneinander nicht. */
+  main { flex-direction: row; align-items: stretch; }
+  main > section:first-of-type { flex: 3 1 0; min-width: 0; max-height: none; }
+  /* `min-width` zusätzlich zur `flex-basis`: Ein `flex-shrink` von 1 (Teil
+     der Kurzschreibweise) ließe die Spalte sonst unter 320px schrumpfen,
+     sobald die Felder-Spalte daneben mehr Platz beansprucht — genau die
+     320px-Untergrenze, die vorher `minmax(320px, 2fr)` im Grid gab. */
+  main > section:last-of-type { flex: 2 1 320px; min-width: 320px; }
+  /* Listen-Position je Gerät (Anzeige-Menü „Spielliste darunter"): wieder
+     gestapelt statt nebeneinander — dieselbe bedarfsgerechte Aufteilung wie
+     unter 1100px, nur bei größerer Fensterbreite (`fitCourts()` erkennt
+     „gestapelt" an `flex-direction: column`, nicht an der Fensterbreite). */
+  body.liste-unten main { flex-direction: column; align-items: stretch; }
+  body.liste-unten main > section:first-of-type { flex: 0 0 auto; }
+  body.liste-unten main > section:last-of-type { flex: 1 1 0; }
 }
 h2 {
   margin: 0 0 10px; font-size: .8rem; font-weight: 700;
@@ -283,6 +343,52 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .clock small { font-size: .7rem; font-weight: 600; color: var(--ink-faint); display: block; }
 .clock.stage2 small { color: var(--warn); }
 .clock.stage3 small { color: var(--alarm); }
+
+/* ── Kompaktstufen der Feld-Kacheln ───────────────────────────────────
+   Damit IMMER alle Felder auf einen Blick passen (Wunsch vom 10.08.2026):
+   „alle Felder auf einen Blick — die Liste läuft, die Felder nicht".
+   `fitCourts()` im Skript misst nach jedem Neuzeichnen und bei jeder
+   Größenänderung, ob die Felderbox überläuft, und schaltet dafür erst
+   `kacheln-kompakt`, dann `kacheln-mini` auf `#courts` — die erste Stufe,
+   die passt. Beide wirken über Abkömmlinge, auch innerhalb gruppierter
+   Hallen (`.hall-group`) und eines von Hand hinterlegten Rasters (dessen
+   `grid-template-columns` bleibt unangetastet — das ist eine Host-
+   Einstellung, keine Anzeigefrage). */
+#courts.kacheln-kompakt .courts { gap: 7px; }
+#courts.kacheln-kompakt .card { padding: 8px; gap: 4px; min-height: 90px; }
+#courts.kacheln-kompakt .court-name { font-size: 1rem; }
+#courts.kacheln-kompakt .badge { font-size: .62rem; padding: 1px 5px; }
+#courts.kacheln-kompakt .meta, #courts.kacheln-kompakt .pair { font-size: .8rem; }
+#courts.kacheln-kompakt .score, #courts.kacheln-kompakt .clock { font-size: .92rem; }
+#courts.kacheln-kompakt .callbtn { padding: 5px 9px; min-height: 34px; font-size: .74rem; }
+#courts.kacheln-kompakt .hall-group h3 { font-size: .82rem; margin-bottom: 5px; }
+#courts.kacheln-kompakt .hall-group + .hall-group { margin-top: 10px; }
+
+/* Deutlich kleiner: Abzeichen und die Metazeile (Klasse/Runde) einzeilig
+   mit Ellipse statt Umbruch — bei 26 Feldern auf einem Telefon zählt jede
+   Zeile. Auto-fill-Raster bekommt zusätzlich eine engere Mindestbreite, ein
+   von Hand hinterlegtes Hallenraster (feste Spaltenzahl) nicht — dessen
+   Zellen sind über Zeilen-/Spaltenindex platziert, eine andere Spaltenzahl
+   würfelte die Anordnung durcheinander. */
+#courts.kacheln-mini .courts { gap: 5px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+#courts.kacheln-mini .card { padding: 6px; gap: 2px; min-height: 70px; border-left-width: 4px; }
+#courts.kacheln-mini .court-name { font-size: .8rem; }
+#courts.kacheln-mini .badge { font-size: .56rem; padding: 1px 4px; white-space: nowrap; }
+#courts.kacheln-mini .meta {
+  font-size: .66rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#courts.kacheln-mini .pair { font-size: .68rem; }
+#courts.kacheln-mini .score, #courts.kacheln-mini .clock { font-size: .78rem; }
+#courts.kacheln-mini .score small, #courts.kacheln-mini .clock small { font-size: .56rem; }
+#courts.kacheln-mini .callbtn { padding: 4px 7px; min-height: 32px; font-size: .66rem; }
+/* Kleinerer Griff (Vorgabe: „kleinere Grips") — NUR das Sinnbild schrumpft.
+   Polsterung/Trefffläche bleiben bei den 8px der Grundregel
+   (`.card-top .drag-griff` weiter unten; die negativen Ränder gleichen sie
+   im Layout ohnehin aus) — ausgerechnet die kleinste Stufe darf die
+   Ziehfläche nicht am stärksten verkleinern. */
+#courts.kacheln-mini .drag-griff { font-size: .82rem; }
+#courts.kacheln-mini .hall-group h3 { font-size: .74rem; margin-bottom: 3px; }
+#courts.kacheln-mini .hall-group + .hall-group { margin-top: 8px; }
 
 /* ── Spielliste ────────────────────────────────────────────────────────
    Drei Abschnitte, in der Reihenfolge des Arbeitsablaufs: gerufen (warten
@@ -511,6 +617,52 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 /* Nur auf dem Griff selbst das Scrollen unterdrücken — sonst ließe sich die
    Liste auf dem Tablet nicht mehr bewegen. */
 .row.pick { touch-action: pan-y; }
+/* Bewaffnet/während eines laufenden Zugs zusätzlich visuell markiert — rein
+   kosmetisch (Bauklotz-auf-Bauklotz neben dem `.drag-ghost`), NICHT mehr die
+   tragende Scroll-Sperre: Die übernimmt seit dem Umbau auf den Zieh-Griff
+   (`.drag-griff` unten) das `touch-action: none` DORT, statisch gesetzt statt
+   per Klasse mitten in der Geste umgeschaltet. */
+.touch-drag-armed { touch-action: none !important; }
+/* Zieh-Griff (⠿) statt Long-Press: eigenes kleines Element auf jeder
+   ziehbaren Zeile/Kachel, an dem eine Touch-Geste GEZIELT beginnt. Chrome
+   legt das erlaubte `touch-action` schon beim allerersten `touchstart` für
+   die GESAMTE Geste fest, unabhängig davon, worüber der Finger später
+   wandert — deshalb reicht ein einziges, STATISCH gesetztes
+   `touch-action: none` GENAU HIER, um natives Scrollen für eine am Griff
+   begonnene Geste von Anfang an zuverlässig zu verhindern. Der frühere
+   Versuch (Long-Press, `touch-action` per Klasse mitten in der Geste auf
+   die ganze Zeile umgeschaltet) verlor auf einem echten Android-Tablet in
+   etwa 9 von 10 Versuchen gegen die native Scroll-Erkennung — die reagiert
+   schon auf ein Zittern von wenigen Pixeln, oft innerhalb der
+   300-ms-Wartezeit, und eine Klassenänderung NACH `touchstart` kommt für
+   diese Geste immer zu spät. Der Rest der Zeile/Kachel bleibt normal
+   wischbar (`touch-action: pan-y` bzw. Standard) — nur der kleine Griff
+   opfert bewusst das Wischen, exakt an der Stelle, an der gezogen wird. */
+.drag-griff {
+  touch-action: none;
+  cursor: grab;
+  color: var(--ink-faint);
+  font-size: 1rem;
+  line-height: 1;
+  user-select: none;
+  flex: none;
+}
+.row .drag-griff {
+  /* Trefffläche über Padding auf ~40px vergrößern, per Minus-Rand aus dem
+     Fluss zurückrechnen — die übrigen Spalten (Nummer, Namen, Meta) rutschen
+     dadurch nicht sichtbar nach rechts. */
+  align-self: center;
+  padding: 13px 10px;
+  margin: -13px -2px -13px -6px;
+}
+.card-top .drag-griff {
+  /* An den rechten Rand der Kopfzeile der Kachel drücken (neben Name/
+     Abzeichen) statt frei zu positionieren — so weicht er variabel vielen
+     Abzeichen von selbst aus, statt sie an einer festen Ecke zu verdecken. */
+  margin-left: auto;
+  padding: 8px;
+  margin-top: -8px; margin-right: -8px; margin-bottom: -8px;
+}
 
 /* Was man zieht oder antippt, markiert man nicht: Ohne das hinterlässt jeder
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
@@ -622,6 +774,9 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <div class="menue">
         <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
         <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
+        <label><input type="checkbox" id="opt-disziplin" /> Disziplin/Klasse zeigen</label>
+        <label><input type="checkbox" id="opt-runde" /> Runde zeigen</label>
+        <label><input type="checkbox" id="opt-gruppe" /> Gruppe zeigen</label>
         <label><input type="radio" name="opt-liste" id="opt-liste-rechts" value="rechts" checked /> Spielliste rechts</label>
         <label><input type="radio" name="opt-liste" id="opt-liste-unten" value="unten" /> Spielliste darunter</label>
       </div>
@@ -835,11 +990,41 @@ function setzeVorliebe(name, an) {
   renderQueue();
 }
 
+// Disziplin/Klasse, Runde und Gruppe einzeln aus der Meta-Zeile der
+// Spielliste ausblendbar — je Gerät, Standard AN (Wunsch vom 10.08.2026
+// nach dem Turniertest: bei manchen Turnieren sagt „Gruppe 6" nichts, bei
+// anderen ist die Runde uninteressant, und die Zeile wird mit 120 wartenden
+// Spielen schnell unruhig). Wirkt NUR auf die Warteliste („Als Nächstes") —
+// an einer einzelnen Feldkachel und in „Beendet" ist dieselbe Angabe
+// Kontext zu genau einem Spiel, keine Liste, die man überfliegt, und bleibt
+// deshalb dort vollständig.
+let zeigeDisziplin = localStorage.getItem("bts-tl-zeige-disziplin") !== "aus";
+let zeigeRunde = localStorage.getItem("bts-tl-zeige-runde") !== "aus";
+let zeigeGruppe = localStorage.getItem("bts-tl-zeige-gruppe") !== "aus";
+
+function setzeListenMeta(name, an) {
+  if (name === "disziplin") {
+    zeigeDisziplin = an;
+    localStorage.setItem("bts-tl-zeige-disziplin", an ? "an" : "aus");
+  } else if (name === "runde") {
+    zeigeRunde = an;
+    localStorage.setItem("bts-tl-zeige-runde", an ? "an" : "aus");
+  } else {
+    zeigeGruppe = an;
+    localStorage.setItem("bts-tl-zeige-gruppe", an ? "an" : "aus");
+  }
+  renderQueue();
+}
+
 // Listen-Position: ebenfalls je Gerät, kein Wire-Feld (Task 12) — nur eine
 // Körperklasse, die die vorhandene Zweispalten-Regel für `main` umschaltet.
 function setzeListenPosition(unten) {
   localStorage.setItem("bts-tl-liste", unten ? "unten" : "rechts");
   document.body.classList.toggle("liste-unten", unten);
+  // Nebeneinander (volle Höhe) und gestapelt (64-%-Obergrenze) messen die
+  // Felderbox unterschiedlich — eine unter der alten Anordnung gewählte
+  // Kompaktstufe muss beim Umschalten neu beurteilt werden.
+  scheduleFitCourts();
 }
 
 // ── Bedienzustand ─────────────────────────────────────────────────────
@@ -899,11 +1084,14 @@ function pickedCourt() {
 }
 
 /**
- * Misst die klebende Kopfzone und legt sie als CSS-Variablen ab.
+ * Misst Kopfzeile und Aktionsband und legt sie als CSS-Variablen ab.
  *
- * Die Felderspalte hängt sich darunter — sie muss wissen, wie viel oben
- * belegt ist. Gemessen statt geschätzt, weil die Kopfzeile umbricht, sobald
- * ein Turnier viele Hallen hat, und das Aktionsband nur zeitweise da ist.
+ * `--kopf` bemisst die Höhe des über der Kopfzeile liegenden Aktionsbands
+ * (`min-height`). `--band` ist der Überstand des Bands über den Kopf hinaus
+ * (meist 0) — `main` schlägt ihn oben als zusätzliches Polster auf, sonst
+ * verdeckte ein umgebrochenes, höheres Band die oberste Feldreihe. Gemessen
+ * statt geschätzt, weil die Kopfzeile umbricht, sobald ein Turnier viele
+ * Hallen hat, und das Aktionsband nur zeitweise da ist.
  */
 function messeKopf() {
   const kopf = document.querySelector("header");
@@ -921,12 +1109,25 @@ function messeKopf() {
 
 function renderActionBar() {
   const bar = $("action-bar");
+  // Vorher/nachher vergleichen: Nur ein tatsächlicher Wechsel des Bands
+  // ändert `--band` und damit den Platz, den die Felder-Sektion oben
+  // abgeben muss — ein `scheduleFitCourts()` bei jedem Aufruf (die Aktions-
+  // leiste wird oft neu gezeichnet, ohne dass sich ihre Sichtbarkeit
+  // ändert) wäre ein sinnloses zusätzliches `requestAnimationFrame`.
+  const warSichtbar = bar.classList.contains("show");
   // Während eines Zuges bleibt das Band aus: Es würde beim Erscheinen das
   // ganze Layout nach unten schieben, und der Finger träfe ein anderes Feld
   // als das anvisierte. Beim Ziehen sagt ohnehin der Klon am Finger, was
   // transportiert wird — das Band ist für den Antipp-Weg da, wo man nach
   // zwei Wischern sonst nicht mehr weiß, was gewählt ist.
-  if (!picked || dragging) { bar.classList.remove("show"); messeKopf(); return; }
+  if (!picked || dragging) {
+    bar.classList.remove("show");
+    messeKopf();
+    // Band weg → `--band` zurück auf 0 → die Felder haben wieder mehr
+    // Höhe zur Verfügung und könnten eine Kompaktstufe zurückschalten.
+    if (warSichtbar) scheduleFitCourts();
+    return;
+  }
   const m = picked.match;
   const wer = [(m.team1 || []).join(" / "), (m.team2 || []).join(" / ")]
     .filter(Boolean).join(" vs. ");
@@ -948,6 +1149,10 @@ function renderActionBar() {
     : "jetzt ein Feld antippen";
   bar.classList.add("show");
   messeKopf();
+  // Band neu da → könnte (bei Umbruch, viele Hallen) die oberste Feldreihe
+  // verdecken (siehe `--band`-Erklärung bei `messeKopf()`) — die Felderbox
+  // muss den neuen, kleineren Platz neu beurteilen.
+  if (!warSichtbar) scheduleFitCourts();
 }
 
 /**
@@ -1413,6 +1618,15 @@ function renderConnection() {
   document.body.classList.toggle("offline", level === "offline");
 
   const banner = $("banner");
+  // Vorher/nachher vergleichen: Das Störungsband nimmt als Flex-Kind von
+  // `#app` selbst Höhe weg von `main` — erscheint oder verschwindet es,
+  // ändert sich der Platz, den die Felderbox zur Verfügung hat, und eine
+  // vorher passende (oder gerade noch überlaufende) Kompaktstufe kann
+  // falsch geworden sein. Nur beim tatsächlichen Wechsel neu einpassen,
+  // nicht bei jedem `renderConnection()` (das läuft bei jedem Abruf, auch
+  // wenn sich am Banner gar nichts ändert — inklusive der reinen
+  // 304-„unverändert"-Antwort, die sonst ohne Neupassung bliebe).
+  const warSichtbar = banner.classList.contains("show");
   if (level === "offline") {
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
     // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
@@ -1424,6 +1638,7 @@ function renderConnection() {
   } else {
     banner.classList.remove("show");
   }
+  if (banner.classList.contains("show") !== warSichtbar) scheduleFitCourts();
 }
 
 // ── Zeichnen ──────────────────────────────────────────────────────────
@@ -1586,12 +1801,30 @@ function gamePointKind(c) {
 // Bildet die Feld-Reihenfolge einer Halle auf Raster-Zellen ab.
 // Bildschirm-Koordinaten: row 0 = oben, col 0 = links. Die Start-Ecke
 // beschreibt, wo Feld 1 aus Sicht der Turnierleitung liegt.
-function gridPositions(count, { columns, origin, serpentine }) {
+//
+// `vertical` (Default aus) wählt spaltenweise statt reihenweise Zählung:
+// Feld 1 an der Start-Ecke, Feld 2 in derselben Spalte eine Zelle weiter
+// weg von der Start-Reihe, bis die Spalte voll ist, dann die nächste
+// Spalte. Die Spaltenzahl (`columns`) bleibt in beiden Modi die
+// Breitenvorgabe des Rasters — nur die Zählrichtung dreht sich.
+function gridPositions(count, { columns, origin, serpentine, vertical = false }) {
   const cols = Math.max(1, columns | 0);
   const rows = Math.max(1, Math.ceil(count / cols));
   const fromBottom = origin === "bottom_left" || origin === "bottom_right";
   const fromRight = origin === "bottom_right" || origin === "top_right";
   const out = [];
+  if (vertical) {
+    for (let i = 0; i < count; i++) {
+      let c = Math.floor(i / rows);
+      let r = i % rows;
+      // Schlange: jede zweite Nummerierungs-SPALTE läuft rückwärts —
+      // das vertikale Gegenstück zur reihenweisen Schlange unten.
+      if (serpentine && c % 2 === 1) r = rows - 1 - r;
+      if (fromRight) c = cols - 1 - c;
+      out.push({ col: c, row: fromBottom ? rows - 1 - r : r });
+    }
+    return out;
+  }
   for (let i = 0; i < count; i++) {
     const r = Math.floor(i / cols);
     let c = i % cols;
@@ -1692,10 +1925,15 @@ function courtCard(c, cellStyle) {
   // Turnierleitungen nacheinander denselben Aufruf.
   const gerufen = c.match_id && gesprochen > 1
     ? `<span class="badge warn">${gesprochen}. Aufruf erfolgt</span>` : "";
+  // Zieh-Griff: nur an belegten Feldern — ein freies Feld ist ein Ziel,
+  // keine Ziehquelle. `aria-hidden` wie bei der Warteliste: rein visuelle
+  // Zusatz-Affordanz, Antippen der Kachel bleibt der barrierefreie Weg.
+  const griff = c.match_id
+    ? `<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>` : "";
 
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
-    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}</div>
+    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}</div>
     ${body}${bediener}
     <div class="card-foot">${foot}${nachruf}</div>
   </article>`;
@@ -1788,11 +2026,9 @@ function renderCourts() {
   $("courts-count").textContent = `(${courts.length})`;
   if (!courts.length) {
     box.innerHTML = `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`;
-    return;
-  }
-  // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
-  // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
-  if (state.multi_hall && !hallFilter) {
+  } else if (state.multi_hall && !hallFilter) {
+    // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
+    // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
     const groups = new Map();
     for (const c of courts) {
       const key = c.location || "";
@@ -1805,15 +2041,141 @@ function renderCourts() {
   } else {
     box.innerHTML = courtsGridHtml(hallFilter || "", courts);
   }
-  wireCourts(box);
+  // Kein früher `return` mehr oben: Auch die leere Halle und der spätere
+  // Zweig müssen `fitCourts()` erreichen — sonst bliebe nach einem
+  // Hallenwechsel z. B. eine Mini-Kompaktstufe von vorher hängen, obwohl die
+  // neue, leere Auswahl das gar nicht mehr braucht.
+  if (courts.length) wireCourts(box);
+  scheduleFitCourts();
+}
+
+/**
+ * Passt die Größe der Feld-Kacheln an den verfügbaren Platz an — Ziel:
+ * IMMER alle Felder auf einen Blick, nie ein abgeschnittenes Feld
+ * (Wunsch vom 10.08.2026 nach dem Turniertest: „alle Felder auf einen
+ * Blick — die Liste läuft, die Felder nicht"). Läuft gebündelt über
+ * `requestAnimationFrame` nach jedem Neuzeichnen der Felder und bei jeder
+ * Größenänderung (`scheduleFitCourts`, unten).
+ *
+ * Stufenweise, aber OHNE Rückkopplung: Vor jedem Durchlauf geht es zurück
+ * auf die Ausgangsstufe — sonst bliebe eine einmal gewählte Kompaktstufe
+ * hängen, auch wenn inzwischen (Hallenfilter, weniger Felder, mehr Platz)
+ * wieder alles ohne sie hineinpasst. Von dort aus je EINE Messung pro
+ * Stufe (normal → `kacheln-kompakt` → `kacheln-mini`) — kein Nachjustieren
+ * in einer Schleife, kein `ResizeObserver`, der sich durch die eigene
+ * Klassenänderung selbst erneut auslösen könnte. Passt selbst die kleinste
+ * Stufe nicht (winziges Telefon, sehr viele Felder), wird die Felderbox
+ * als letzter Ausweg selbst rollbar (`.courts-scroll`) — besser als
+ * Kacheln unsichtbar abzuschneiden.
+ *
+ * Gestapelt (Telefon, „Spielliste darunter"): Statt eines festen Anteils
+ * (früherer Stand: starre 64 %) bekommen die Felder BEDARFSGERECHT genau so
+ * viel Höhe, wie sie bei der gewählten Kompaktstufe tatsächlich brauchen —
+ * die Liste darunter bekommt den ganzen Rest, mindestens aber `--liste-min`
+ * (CSS-Variable, `main > section:last-of-type` erzwingt das über
+ * `min-height`). Ein starrer Anteil verschenkte bei wenigen Feldern Platz an
+ * die Liste; schlimmer noch: Er zwang die Felder bei VIELEN Feldern in die
+ * `.courts-scroll`-Notlösung, obwohl der Bildschirm (z. B. Desktop-Fenster
+ * im Unten-Modus) reichlich Höhe für alle Kacheln ohne Kompromiss geboten
+ * hätte. Die Obergrenze während der Stufenwahl ist deshalb NICHT die volle
+ * `main`-Höhe, sondern schon `main`-Höhe minus dem Listen-Mindestmaß — erst
+ * wenn selbst „mini" darüber hinausragt, greift die eigene Bildlaufleiste.
+ * Nebeneinander (Zeilen-Layout, ≥1100px, „Spielliste rechts") bleibt es bei
+ * der vollen `main`-Höhe (CSS `align-items: stretch`, kein JS-Deckel nötig).
+ */
+function fitCourts() {
+  const main = document.querySelector("main");
+  const section = document.querySelector("main > section:first-of-type");
+  const listSection = document.querySelector("main > section:last-of-type");
+  const box = $("courts");
+  if (!main || !section || !listSection || !box) return;
+  box.classList.remove("kacheln-kompakt", "kacheln-mini");
+  section.classList.remove("courts-scroll");
+  // Immer zuerst zurücksetzen: Ein von einem früheren Durchlauf (z. B. im
+  // Zeilen-Layout) übrig gebliebener Inline-Deckel würde sonst eine eigene
+  // CSS-Regel (`max-height: none` im ≥1100px-Zeilen-Layout) überstimmen —
+  // Inline-Style gewinnt immer gegen eine Klassenregel, unabhängig vom
+  // Media-Query.
+  section.style.maxHeight = "";
+  const gestapelt = getComputedStyle(main).flexDirection === "column";
+  if (gestapelt) {
+    // Bedarfsgerechte Obergrenze: verfügbare `main`-Höhe (Innenmaß, ohne
+    // Polster/Lücke) minus dem, was die Liste mindestens behält.
+    // `getComputedStyle(listSection).minHeight` liest den AUFGELÖSTEN
+    // Pixelwert von `min-height: var(--liste-min)` — die Rem-Zahl steht
+    // deshalb nur EINMAL im CSS, nicht zusätzlich noch einmal im Skript.
+    const listenMin = parseFloat(getComputedStyle(listSection).minHeight) || 0;
+    const mainStil = getComputedStyle(main);
+    const luecke = parseFloat(mainStil.rowGap) || 16;
+    const innenhoehe = main.clientHeight
+      - (parseFloat(mainStil.paddingTop) || 0)
+      - (parseFloat(mainStil.paddingBottom) || 0);
+    const deckel = Math.max(0, innenhoehe - luecke - listenMin);
+    section.style.maxHeight = deckel + "px";
+  }
+  // +1 Px Toleranz gegen Rundungsfehler bei gebrochenen Pixelwerten.
+  const passt = () => section.scrollHeight <= section.clientHeight + 1;
+  // NACH der Stufenwahl auf das tatsächlich benötigte Maß einkürzen (nur
+  // gestapelt) — EINE weitere Messung desselben, bereits gewählten
+  // Zustands, KEIN erneuter Eintritt in die Stufenschleife oben:
+  // `scrollHeight` hängt an der aktiven Kompaktklasse, nicht an dieser
+  // Kappung selbst (die kappt nur `clientHeight`, nie den gemessenen
+  // Inhalt) — deshalb keine Rückkopplung, keine Oszillationsgefahr.
+  const uebernehmeBedarf = () => {
+    if (gestapelt) section.style.maxHeight = Math.min(section.scrollHeight, section.clientHeight) + "px";
+  };
+  if (passt()) { uebernehmeBedarf(); return; }
+  box.classList.add("kacheln-kompakt");
+  if (passt()) { uebernehmeBedarf(); return; }
+  box.classList.remove("kacheln-kompakt");
+  box.classList.add("kacheln-mini");
+  if (passt()) { uebernehmeBedarf(); return; }
+  // Selbst „mini" ragt über den Deckel hinaus: Die Felder rollen jetzt
+  // selbst — der Deckel (`main`-Höhe minus Listen-Mindestmaß) bleibt dabei
+  // stehen, `uebernehmeBedarf()` wird bewusst NICHT aufgerufen (sie würde
+  // auf das — hier zu große — `scrollHeight` einkürzen wollen).
+  section.classList.add("courts-scroll");
+}
+
+// Mehrfach angestoßen (z. B. mehrere Render-Aufrufe im selben Zug, dazu
+// `resize`) sammelt sich in EINEM `requestAnimationFrame` statt mehrfach
+// hintereinander zu messen — die eigentliche Entlastung gegen Layout-
+// Flackern kommt aber schon aus `fitCourts()` selbst (feste Stufenzahl,
+// keine Schleife).
+let fitScheduled = false;
+function scheduleFitCourts() {
+  if (fitScheduled) return;
+  fitScheduled = true;
+  requestAnimationFrame(() => { fitScheduled = false; fitCourts(); });
 }
 
 function queueRow(m) {
   const parts = [];
+  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
+  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
+  // Ablehnung. Vorgezogen (war weiter unten), weil der Zieh-Griff dieselbe
+  // Bedingung braucht: Eine blockierte Zeile ist so wenig ziehbar wie
+  // antippbar.
+  const pickable = !m.blocked;
+  if (pickable) {
+    // Zieh-Griff: eigenes Element statt der ganzen Zeile als Ziehfläche
+    // (siehe CSS-Erklärung bei `.drag-griff` und `enableDrag` im Skript).
+    // `aria-hidden`, weil er eine rein visuelle Zusatz-Affordanz ist — der
+    // barrierefreie Weg bleibt Antippen-dann-Antippen, unverändert über die
+    // ganze Zeile erreichbar.
+    parts.push(`<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>`);
+  }
   if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
+  // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
+  // entfernt danach sowohl fehlende Werte (BTP liefert keine Runde) als auch
+  // ausgeschaltete zugleich, ohne dass ein Trenner „·" ins Leere zeigt.
+  const metaHaeppchen = [];
+  if (zeigeDisziplin) metaHaeppchen.push(klasse(m.discipline, m.class_label));
+  if (zeigeGruppe) metaHaeppchen.push(m.draw_name);
+  if (zeigeRunde) metaHaeppchen.push(m.round_name);
   parts.push(
     `<span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat)}</span>`,
-    `<span class="draw">${esc([klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
+    `<span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>`,
   );
   if (m.prep_call) {
     parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
@@ -1838,11 +2200,13 @@ function queueRow(m) {
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
 
-  // Spielort setzen, ohne ein Feld zu belegen. BTP führt an angesetzten
-  // Spielen keinen Ort — ohne diesen Wähler bliebe ein Spiel ohne
-  // Disziplin-Regel bis zum Aufruf hallenlos, und der Hallenfilter zeigte es
-  // in keiner der beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange
-  // eine Regel es nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
+  // Spielort setzen, ohne ein Feld zu belegen. BTP liefert `LocationID` nur,
+  // wenn das Turnier die Spalte selbst pflegt, und nimmt Rückschreibungen
+  // nicht an (SENDUPDATE mit LocationID: Result=1, Wert verworfen, gemessen
+  // 10.08.2026) — ohne diesen Wähler bliebe ein Spiel ohne Disziplin-Regel
+  // bis zum Aufruf hallenlos, und der Hallenfilter zeigte es in keiner der
+  // beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange eine Regel es
+  // nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
   if (state.multi_hall && m.hall_source !== "rule") {
     // Kürzel statt voller Hallennamen: In einer Liste mit 120 Zeilen frisst
     // „Luckenwalder" mehr Platz als die Paarung daneben. Der volle Name
@@ -1850,7 +2214,13 @@ function queueRow(m) {
     const optionen = ['<option value="" title="kein fester Spielort">–</option>']
       .concat(state.halls.map((h) =>
         `<option value="${esc(h.name)}" title="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(hallenKuerzel(h.name))}</option>`));
-    const titel = m.hall ? `Spielort: ${m.hall}` : "Spielort ohne Feld festlegen";
+    // Grenze ehrlich im Tooltip: Der Wähler wirkt in bts-light, Vergabe und
+    // Liveticker, aber BTP verwirft den Spielort still (gemessen 10.08.2026)
+    // — ohne diesen Hinweis wirkt die Auswahl wie eine echte BTP-Ansetzung.
+    const grenze = "BTP übernimmt ihn nicht (Schnittstelle verwirft Spielort-Änderungen; gemessen 10.08.2026)";
+    const titel = m.hall
+      ? `Spielort: ${m.hall} — ${grenze}`
+      : `Spielort für Vergabe, Hallenfilter und Liveticker — ${grenze}`;
     parts.push(`<select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
       data-hall-for="${m.match_id}" title="${esc(titel)}"
       aria-label="Spielort">${optionen.join("")}</select>`);
@@ -1869,10 +2239,6 @@ function queueRow(m) {
       <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
     </span>`);
   }
-  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
-  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
-  // Ablehnung.
-  const pickable = !m.blocked;
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
                data-match="${m.match_id}"
@@ -1943,19 +2309,86 @@ function wireQueue(box) {
 // merken muss, dass etwas schiefging.
 //
 // Selbst gebaut auf Zeigegesten statt mit einer Bibliothek: Der eingebaute
-// Ziehen-Mechanismus der Browser funktioniert auf Touch nicht, und die
-// Seite wird ohne Bau-Schritt ins Programm eingebettet.
+// Ziehen-Mechanismus der Browser funktioniert auf Touch nicht (HTML5-DnD
+// feuert für Finger-Eingaben schlicht keine Ereignisse), und die Seite wird
+// ohne Bau-Schritt ins Programm eingebettet.
+//
+// Auf Android-Chrome-Tablets zog das trotzdem nicht zuverlässig: Die Zeile
+// trägt `touch-action: pan-y`, damit sich die Liste normal wischen lässt —
+// und genau deshalb beansprucht der Browser jede Wischbewegung sofort als
+// Scrollen. Bei Maus/Stift passiert das nicht (kein `touch-action` dafür),
+// weshalb der Fehler nur auf Touch-Geräten auffiel.
+//
+// ERSTER Anlauf war ein Long-Press auf der ganzen Zeile: 300 ms ruhig
+// halten „bewaffnet" den Zug, danach eine Klasse mit `touch-action: none`.
+// Auf dem echten Android-Tablet klappte das nur in etwa 1 von 10 Versuchen
+// („zu schnell will er scrollen und verliert den Touch"). Grund: Chrome
+// legt das erlaubte `touch-action` schon beim ALLERERSTEN `touchstart` für
+// die GESAMTE Geste fest, nicht neu bei jeder Bewegung — ein natürliches
+// Fingerzittern von oft weniger als unseren 10 px reichte, damit der
+// Browser die Geste noch WÄHREND der 300-ms-Wartezeit als Scrollen
+// einstufte. Ab dann war sie für uns verloren (`pointercancel`), und keine
+// später gesetzte Klasse konnte das rückgängig machen — ein Wettrennen, das
+// ein Long-Press auf einer scrollbaren Liste strukturell nicht gewinnen
+// kann. Frühe `touchmove`-Ereignisse präventiv abzufangen war auch keine
+// Lösung: Genau das hätte das Scrollen kaputt gemacht, das der Long-Press
+// ja erst ermöglichen sollte.
+//
+// ZWEITER, jetziger Anlauf: ein eigenes Griff-Element (`.drag-griff`, ⠿) an
+// jeder ziehbaren Zeile/Kachel. Die Touch-Geste beginnt GEZIELT auf diesem
+// Griff, der STATISCH `touch-action: none` trägt (CSS) — kein Wettrennen
+// mehr, weil die Entscheidung schon beim `touchstart` auf dem Griff fällt,
+// bevor überhaupt Bewegung stattfindet. Bewaffnet wird deshalb sofort, ohne
+// Wartezeit und ohne Bewegungsschwelle (siehe `startTouchDrag`) — ein Tipp
+// irgendwo sonst auf der Zeile/Kachel (nicht auf dem Griff) löst dagegen
+// GAR KEINE Zug-Logik mehr aus und verhält sich wie vor der gesamten
+// Touch-Drag-Arbeit: scrollen und Antippen-dann-Antippen. Ein
+// `touchmove`-Listener auf `window` mit `{passive:false}` (`blockScroll`)
+// unterdrückt zusätzlich das Scrollen für die Dauer des Zugs, auch wenn der
+// Finger den Griff längst verlassen hat — er ist zugleich immun gegen den
+// 2-Sekunden-Redraw der Liste, anders als eine Klasse an einem
+// Zeilen-Element, die nach einem Neuzeichnen (frischer DOM-Knoten)
+// wirkungslos wäre.
 const DRAG_THRESHOLD_PX = 8;
 /** Nach einem Zug folgt ein Klick-Ereignis, das hier geschluckt wird. */
 let suppressNextClick = false;
 /** Läuft gerade ein Zug? Solange bleibt das Aktionsband aus (siehe dort). */
 let dragging = false;
+/** Ein Touch-Zug ist zwischen dem Bewaffnen und seinem `teardown` unterwegs
+ *  — knapp vor `dragging=true` gesetzt und exakt bis zum Aufräumen belegt.
+ *  Getrennt von `dragging` gehalten, weil ein zweiter Finger (Handballen)
+ *  sonst in genau dieser kurzen Lücke einen ZWEITEN Automaten starten
+ *  könnte, der das globale `picked` überschreibt. */
+let touchDragPending = false;
 
 function enableDrag(el, match, fromCourtId) {
+  // Zieh-Griff: eigener, separat verdrahteter Zeigegesten-Start NUR für
+  // Touch (siehe Erklärung oben) — für Maus/Stift bleibt die ganze
+  // Zeile/Kachel ziehbar wie bisher, der Griff braucht dafür keine eigene
+  // Logik und fällt unten einfach mit durch (kein `stopPropagation`, sonst
+  // bräche „Griff funktioniert auch für Maus").
+  const griff = el.querySelector(".drag-griff");
+  griff?.addEventListener("pointerdown", (down) => {
+    if (down.pointerType !== "touch") return;
+    // Weiterreichen stoppen: Die Zeile/Kachel bekommt diesen Tipp nicht
+    // mehr — sonst sähe ihr eigener (Maus-orientierter) Zeigegesten-Start
+    // unten denselben Tipp zusätzlich (auch wenn der inzwischen Touch
+    // ignoriert, siehe dort — doppelte Absicherung ist hier billiger als
+    // ein Doppel-Bewaffnen zu riskieren), UND ein bloßes Antippen des
+    // Griffs dürfte über das nachfolgende `click` nicht als Auswahl
+    // durchschlagen (siehe `suppressNextClick` unten in `startTouchDrag`).
+    down.stopPropagation();
+    // Derselbe Nebenläufigkeits-Wächter wie zuvor.
+    if (dragging || touchDragPending) return;
+    startTouchDrag(el, match, fromCourtId, down);
+  });
+
   el.addEventListener("pointerdown", (down) => {
-    // Nur die primäre Taste/der erste Finger; Rechtsklick und Zweitfinger
-    // dürfen nichts auslösen.
-    if (down.button !== 0 && down.pointerType === "mouse") return;
+    // Touch startet AUSSCHLIESSLICH am Griff oben — ein Tipp/Wisch irgendwo
+    // sonst auf der Zeile/Kachel bleibt hier komplett unbeteiligt.
+    if (down.pointerType === "touch") return;
+    // Nur die primäre Maustaste bzw. der Stift dürfen einen Zug starten.
+    if (down.button !== 0) return;
     let ghost = null;
     let hovered = null;
 
@@ -2044,6 +2477,168 @@ function enableDrag(el, match, fromCourtId) {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
   });
+}
+
+// ── Ziehen auf Touch-Geräten (Zieh-Griff) ────────────────────────────────
+// Eigener Automat statt eines Zweigs im Maus-Code oben: Die Zustände
+// unterscheiden sich zu sehr (sofortiges statt schwellenwertbasiertes
+// Bewaffnen, Zeigegesten-Einfangen), um sie ohne Verrenkungen zu teilen.
+// Was gleich bleibt, wird bewusst wiederverwendet: dieselbe
+// `picked`-Zuweisung, derselbe Geist (`.drag-ghost`), dasselbe `assignTo`
+// beim Loslassen über einem Feld — ein Doppel der Zuweisungslogik wäre die
+// eigentliche Fehlerquelle.
+//
+// KEIN Long-Press mehr, KEINE Bewegungsschwelle vorm Bewaffnen: Die Geste
+// beginnt schon gezielt auf dem Griff (siehe `enableDrag` und die
+// CSS-Erklärung bei `.drag-griff`) — dort ist jeder Zeigegesten-Start
+// automatisch ein gewollter Zug, eine Wartezeit zum Unterscheiden „Wischen
+// oder Ziehen" wird nicht mehr gebraucht.
+/** Ab dieser Bewegung gilt der Griff als GEZOGEN statt nur angetippt —
+ *  entscheidet NICHT, ob bewaffnet wird (das passiert immer sofort),
+ *  sondern nur, was beim Loslassen passiert (siehe `teardown`). */
+const TOUCH_TAP_PX = 6;
+
+function startTouchDrag(el, match, fromCourtId, down) {
+  // Belegt den Wächter oben für die gesamte Lebensdauer dieses Automaten —
+  // vom ersten Antippen bis zum letzten `teardown`. Ein zweiter Finger, der
+  // in der Zwischenzeit auf irgendeinem Griff `pointerdown` auslöst, wird
+  // dort abgewiesen, bevor ein zweiter Automat entstehen kann.
+  touchDragPending = true;
+  // Der 2-Sekunden-Poll könnte `el` zwischen zwei Ereignissen ersetzt haben
+  // (die Liste wird per `innerHTML` neu gezeichnet) — bei einem SOFORT
+  // bewaffneten Zug bleibt dafür praktisch kein Zeitfenster mehr (anders als
+  // beim verworfenen Long-Press-Anlauf mit seiner 300-ms-Lücke), die Prüfung
+  // bleibt trotzdem als billige Absicherung stehen: Ohne sie bliebe der
+  // Automat auf „bewaffnet"/„zieht" stehen, ohne `picked` und ohne Geist zu
+  // setzen, und der nächste Tipp würde verschluckt (`suppressNextClick`),
+  // ohne dass je etwas zugewiesen wurde.
+  if (!el.isConnected) { touchDragPending = false; return; }
+
+  const pointerId = down.pointerId;
+  let ghost = null;
+  let hovered = null;
+  let moved = false;
+
+  function updateGhost(x, y) {
+    ghost.style.left = x + 14 + "px";
+    ghost.style.top = y - 14 + "px";
+    // Das Feld unter dem Finger hervorheben. `elementFromPoint` ignoriert
+    // den Klon von sich aus (`.drag-ghost` trägt `pointer-events: none`,
+    // siehe CSS) — wie beim Maus-Weg.
+    const under = document.elementFromPoint(x, y);
+    const card = under && under.closest(".card[data-court]");
+    if (card !== hovered) {
+      hovered?.classList.remove("hover-target");
+      hovered = card;
+      if (hovered && !hovered.classList.contains("blocked-target")) {
+        hovered.classList.add("hover-target");
+      }
+    }
+  }
+
+  dragging = true;
+  // Klasse rein kosmetisch (siehe CSS) — die tragende Scroll-Sperre ist das
+  // statische `touch-action: none` auf dem Griff selbst, schon von Anfang
+  // an gültig, nicht erst ab hier.
+  el.classList.add("touch-drag-armed");
+  // Nativer `touchmove`-Listener mit `{passive:false}`, NICHT der
+  // Pointer-Event: Nur ein `preventDefault` auf dem zugrunde liegenden
+  // Touch-Ereignis unterdrückt das Scrollen zuverlässig, auch für den
+  // Rest der Geste, sobald der Finger den Griff längst verlassen hat. Als
+  // Fenster-Listener zusätzlich immun gegen den 2-Sekunden-Redraw.
+  window.addEventListener("touchmove", blockScroll, { passive: false });
+  // `setPointerCapture` ist für Touch eigentlich redundant (der Browser
+  // fängt die Zeigegesten eines Fingers ohnehin implizit ein) — bleibt
+  // trotzdem als zusätzliche Absicherung, damit Ereignisse sicher
+  // weiterkommen, falls der Finger über andere Elemente wandert. Im
+  // try/catch wie die Freigabe unten: `el` könnte inzwischen doch
+  // verschwunden sein.
+  try { el.setPointerCapture(pointerId); } catch { /* el bereits weg */ }
+  document.body.classList.add("dragging");
+  document.getSelection()?.removeAllRanges();
+  picked = { match, fromCourtId: fromCourtId ?? null };
+  renderActionBar();
+  renderCourts();
+  ghost = document.createElement("div");
+  ghost.className = "drag-ghost";
+  ghost.textContent =
+    `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
+  document.body.appendChild(ghost);
+  updateGhost(down.clientX, down.clientY);
+
+  /** Unterdrückt das native Scrollen, solange gezogen wird — siehe oben. */
+  function blockScroll(ev) { ev.preventDefault(); }
+
+  function move(ev) {
+    if (ev.pointerId !== pointerId) return;
+    if (!moved && Math.hypot(ev.clientX - down.clientX, ev.clientY - down.clientY) > TOUCH_TAP_PX) {
+      moved = true;
+    }
+    updateGhost(ev.clientX, ev.clientY);
+  }
+
+  function teardown(ev, cancelled) {
+    touchDragPending = false;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    // Auf JEDEM Ausstiegspfad entfernen — ein liegen gebliebener
+    // `touchmove`-Blocker wäre der teuerste denkbare Folgefehler: totes
+    // Scrollen für die ganze Liste.
+    window.removeEventListener("touchmove", blockScroll, { passive: false });
+    document.body.classList.remove("dragging");
+    document.getSelection()?.removeAllRanges();
+    hovered?.classList.remove("hover-target");
+    ghost?.remove();
+    el.classList.remove("touch-drag-armed");
+    try { el.releasePointerCapture(pointerId); } catch { /* Finger schon weg */ }
+    dragging = false;
+    // Nach einem Zug folgt noch ein Klick-Ereignis. Ohne diese Sperre würde
+    // es die gerade getroffene Auswahl gleich wieder aufheben.
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 0);
+    if (cancelled) {
+      // Abgebrochen (Finger weg, Browser übernimmt die Geste): Die Auswahl
+      // bleibt stehen, das Band erscheint — derselbe Rettungsanker wie beim
+      // Maus-Weg.
+      renderActionBar();
+      renderQueue();
+      return;
+    }
+    if (!moved) {
+      // Reiner Tipp auf den Griff, ohne zu ziehen: bewusst KEINE Auswahl.
+      // Der Griff ist eine Ziehfläche, kein zweiter Antipp-Weg — anders als
+      // beim abgebrochenen Zug oben bleibt hier nichts „gewählt" stehen,
+      // damit ein versehentliches Antippen des Griffs nicht wie ein Tipp
+      // auf die Zeile wirkt (die bleibt dafür über `suppressNextClick`
+      // ohnehin stumm, siehe `enableDrag`).
+      picked = null;
+      renderActionBar();
+      renderCourts();
+      renderQueue();
+      return;
+    }
+    const card = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".card[data-court]");
+    const court = card && state.courts.find((c) => String(c.court_id) === card.dataset.court);
+    if (court) {
+      assignTo(court);
+    } else {
+      renderActionBar();
+      renderQueue();
+    }
+  }
+
+  // Denselben Finger filtern — ein zweiter, versehentlicher Finger (z. B.
+  // der Handballen beim Halten) darf den Zug des ersten weder beenden noch
+  // abbrechen. Der Wächter oben (`touchDragPending`/`dragging`) verhindert
+  // schon, dass ein zweiter Finger einen EIGENEN Automaten startet — dieser
+  // Filter verhindert zusätzlich, dass er den LAUFENDEN stört.
+  const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
+  const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
+
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
 }
 
 function renderQueue() {
@@ -2463,6 +3058,15 @@ function start() {
     setzeVorliebe("nummern", ev.currentTarget.checked));
   $("opt-nationen").addEventListener("change", (ev) =>
     setzeVorliebe("nationen", ev.currentTarget.checked));
+  $("opt-disziplin").checked = zeigeDisziplin;
+  $("opt-runde").checked = zeigeRunde;
+  $("opt-gruppe").checked = zeigeGruppe;
+  $("opt-disziplin").addEventListener("change", (ev) =>
+    setzeListenMeta("disziplin", ev.currentTarget.checked));
+  $("opt-runde").addEventListener("change", (ev) =>
+    setzeListenMeta("runde", ev.currentTarget.checked));
+  $("opt-gruppe").addEventListener("change", (ev) =>
+    setzeListenMeta("gruppe", ev.currentTarget.checked));
   const listeUnten = localStorage.getItem("bts-tl-liste") === "unten";
   $("opt-liste-unten").checked = listeUnten;
   $("opt-liste-rechts").checked = !listeUnten;
@@ -2473,9 +3077,17 @@ function start() {
     ev.currentTarget.checked && setzeListenPosition(true));
 
   messeKopf();
+  scheduleFitCourts();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
-  // auch die Höhe nicht mehr, an der die Felderspalte klebt.
+  // auch das Polster nicht mehr, das das Aktionsband oben braucht. Dieselbe
+  // Größenänderung kann außerdem die Kompaktstufe der Felder betreffen
+  // (mehr/weniger Platz, oder ein Wechsel über die 1100-px-Schwelle) —
+  // deshalb hier derselbe Anlass für beides. `orientationchange` zusätzlich,
+  // weil manche Tablets beim Drehen kein `resize` feuern, bevor die neue
+  // Höhe steht.
   window.addEventListener("resize", messeKopf);
+  window.addEventListener("resize", scheduleFitCourts);
+  window.addEventListener("orientationchange", scheduleFitCourts);
   poll();
   setInterval(tickClocks, 1000);
   // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den

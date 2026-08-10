@@ -38,7 +38,10 @@ LAN+Cloud voraus.
 
 - **Zuweisen:** Spiel antippen, dann Feld antippen. Oder ziehen. Beides
   führt zum selben Ergebnis; bei abgebrochenem Ziehen bleibt die Auswahl
-  stehen.
+  stehen. Auf Touch-Geräten zieht man am **Griff** (⠿) an der Zeile bzw.
+  Feldkachel — ein Tipp irgendwo sonst auf der Zeile bleibt ein normaler
+  Tipp, und die Liste lässt sich weiter ganz normal wischen. Antippen-dann-
+  Antippen funktioniert dort unverändert und ohne den Griff.
 - **Umhängen:** Spiel auf dem Feld antippen, dann das Zielfeld. Das ist
   **ein** Schreibvorgang nach BTP — es gibt keinen Moment, in dem das Spiel
   auf keinem Feld steht.
@@ -61,8 +64,11 @@ LAN+Cloud voraus.
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
-- **Die Felder bleiben stehen**, während die Spielliste läuft: Auch ein
-  Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen.
+- **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
+  scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
+  Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
+  sehr vielen Feldern verkleinern sich die Kacheln dafür stufenweise
+  (kleinere Abstände, dann kleinere Schrift), bevor überhaupt gerollt wird.
 - **Zähltafel-Warteschlange:** Ist die Zähltafel-Verwaltung in bts-light
   eingeschaltet, erscheint rechts ein eigener aufklappbarer Abschnitt mit
   den wartenden Zähltafelbedienern. Von dort lässt sich jemand **vorziehen**
@@ -121,6 +127,11 @@ von Hand setzt, gilt vor dem, was in BTP steht — du disponierst ja um.
 Eine von Hand gesetzte Halle **überlebt einen Neustart** des Turnier-PCs
 (`spielorte.json` neben der Konfiguration).
 
+BTP übernimmt diese Hand-Festlegung nicht: Ein Schreibversuch per
+`SENDUPDATE` wird von BTP zwar mit `Result=1` beantwortet, der Wert aber
+verworfen (gemessen 10.08.2026) — die Festlegung wirkt deshalb bewusst
+nur in bts-light selbst und im Liveticker.
+
 Ein von Hand gesetzter Ort wirkt an drei Stellen:
 
 - **Hallenfilter** dieser Seite — das Spiel erscheint in seiner Halle
@@ -141,8 +152,9 @@ endet mit dem Stoppen der Übertragung.
 Statt Feldern in Formularreihenfolge lässt sich für jede Halle ein
 **Raster** hinterlegen — dieselbe Anordnung, in der die Felder tatsächlich
 stehen. Eingestellt wird das je Halle über das **Zahnrad** an der
-Hallenüberschrift in der Felderübersicht der App (Spalten, Start-Ecke, Zick-
-Zack-/Schlangen-Nummerierung). Es ist eine **Host-Einstellung**: Alle
+Hallenüberschrift in der Felderübersicht der App (Spalten, Start-Ecke,
+Nummerierungsrichtung reihenweise/horizontal oder spaltenweise/vertikal,
+Zick-Zack-/Schlangen-Nummerierung). Es ist eine **Host-Einstellung**: Alle
 Geräte — App wie Turnierleitungs-Oberfläche — zeigen dasselbe Raster, sonst
 meinte „das Feld links unten" auf jedem Tablet etwas anderes. Eine Halle
 ohne hinterlegtes Raster erscheint weiterhin in der bisherigen
@@ -166,6 +178,9 @@ kann damit nichts anfangen:
   schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
   Reine Anzeigefrage, keine Turniereinstellung: Gerät A kann „rechts"
   zeigen, Gerät B gleichzeitig „darunter".
+- **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
+  einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
+  „Beendet" zeigen sie unverändert weiter.
 
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.

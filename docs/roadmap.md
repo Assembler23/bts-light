@@ -80,6 +80,10 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   Disziplin-Regel → Hand → Vorbereitungs-Aufruf (`assign::hall_for_match`).
   Siehe [turnierleitung-web.md](turnierleitung-web.md). Details:
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+  **Schreibversuch gemessen (10.08.2026):** Ein `SENDUPDATE` mit
+  `LocationID` wird von BTP mit `Result=1` beantwortet, der Wert aber
+  verworfen — Rückschreibung nach BTP ist damit unmöglich, `SetHall`
+  bleibt bewusst host-lokal. Befund: [btp_protocol.md](btp_protocol.md).
 - **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
   schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei
@@ -365,6 +369,66 @@ mitgeändert worden:
   irgendetwas speichern → Sperre weg. Für die TL-Geräteliste ist dieser
   Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
   `locked_courts` gehört auf demselben Weg dazu.
+
+## Wünsche vom 10.08.2026 (nach dem v0.9.178-Test)
+
+**TL-Web (bts-light, klein):**
+
+- ~~**Spielliste: Disziplin, Runde und Gruppe einzeln ein-/ausblendbar** —
+  drei weitere Schalter im Anzeige-Menü, je Gerät gespeichert (wie
+  Spielnummer/Nationen).~~ → umgesetzt 2026-08-10.
+- ~~**Bug: Drag & Drop auf Android-Tablets (Chrome) funktioniert nicht.**
+  tl.html nutzt HTML5-Drag-Events, die auf Touch-Geräten nicht feuern;
+  Antippen-dann-Feld-Antippen geht als gleichwertiger Weg. Fix: Drag auf
+  Pointer-Events umstellen (oder Touch-Fallback).~~ → umgesetzt 2026-08-10
+  *(am echten Android-Tablet bestätigt, siehe unten)*. Befund beim
+  Umsetzen korrigiert: tl.html nutzte bereits
+  Pointer-Events statt HTML5-DnD; der eigentliche Fehler war
+  `touch-action: pan-y` auf der Zeile, das jede Wischbewegung sofort als
+  Scrollen beanspruchte, bevor die 8-px-Schwelle greifen konnte.
+  **Zwischenstand Long-Press (verworfen):** Erster Fix bewaffnete den
+  Touch-Zug nach ~300 ms ruhigem Halten, mit einem `touchmove`-Listener zur
+  Scroll-Unterdrückung. **Rückmeldung vom echten Android-Tablet: klappte nur
+  in ca. 1 von 10 Versuchen** („zu schnell will er scrollen und verliert den
+  Touch") — Chrome legt das erlaubte `touch-action` schon beim allerersten
+  `touchstart` für die ganze Geste fest, ein natürliches Fingerzittern von
+  wenigen Pixeln reichte, damit der Browser die Geste noch WÄHREND der
+  300-ms-Wartezeit als Scrollen einstufte. Ein Long-Press auf einer
+  scrollbaren Liste verliert dieses Wettrennen strukturell.
+  **Umbau auf Zieh-Griff (Standard-Muster für mobiles Drag):** ein eigenes
+  Griff-Element (⠿) an jeder ziehbaren Zeile/Kachel, `touch-action: none`
+  STATISCH nur auf dem Griff selbst — die Geste beginnt gezielt dort, kein
+  Wettrennen mehr, kein Long-Press, sofortiges Bewaffnen. Ein Tipp irgendwo
+  sonst auf der Zeile bleibt unverändert scrollen + Antippen-dann-Antippen.
+  **Gerätetest bestanden (10.08.2026, Android-Tablet/Chrome): „Zieh-Griff
+  funktioniert jetzt super."**
+- ~~**Alle Spielfeldkacheln sollen immer sichtbar sein, die Spielliste
+  scrollt dafür separat** (rechts wie in „Spielliste darunter").~~ →
+  umgesetzt 2026-08-10. Die Seite rollt seit dem festen Rahmen (`#app`
+  spannt sich über `100dvh`/`100vh`) nicht mehr selbst; `main` teilt sich in
+  zwei eigenständig rollende Bereiche. Die Felderbox misst nach jedem
+  Neuzeichnen und bei jeder Größenänderung, ob sie überläuft, und schaltet
+  dafür stufenweise `kacheln-kompakt` (kleinere Abstände/Schrift) dann
+  `kacheln-mini` (deutlich kleiner, Abzeichen/Meta einzeilig) zu — die erste
+  Stufe, die passt. Passt selbst die kleinste Stufe nicht (sehr viele Felder
+  auf einem Telefon), wird die Felderbox als letzter Ausweg selbst rollbar.
+
+
+**Hallen-Check-In (überwiegend badhub-Repo; ändert die Spec
+[features/spieler-check-in.md](features/spieler-check-in.md) — vor
+Umsetzung kurz grillen, besonders die Doppel-Semantik):**
+
+- **Doppel als Doppel kennzeichnen** auf der öffentlichen Check-In-Seite —
+  Partner sichtbar zusammengehörig, auch wenn jede Person einzeln abhakt.
+- **Zählung: ein Doppel zählt erst als anwesend, wenn beide da sind**
+  (betrifft badhub-Anzeige UND die TL-Sicht/Ansagen in bts-light).
+- **Suche zeigt Eingecheckte sofort grün hinterlegt** (öffentliche Seite).
+- **Rückgängig bei Verklicken:** Undo-Symbol für Zeit x nach dem eigenen
+  Check-In (öffentliche Seite + API).
+- **Admin-Variante der Check-In-Seite:** Status generell änderbar,
+  Spieler auf „abgemeldet" setzen usw. — neuer Status „abgemeldet" spannt
+  über beide Repos; die TL-Sicht in bts-light kann heute schon
+  Hand-Einchecken/Zurücknehmen.
 
 ## Feature-Wünsche
 
