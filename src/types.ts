@@ -152,7 +152,7 @@ export interface CheckinPlayer {
   last: string;
   club: string | null;
   nationality: string | null;
-  /** `open` · `checked_in` · `query` */
+  /** `open` · `checked_in` · `query` · `withdrawn` (abgemeldet, seit badhub-Migration 157) */
   state: string;
   /** `self` · `partner` · `official` — wodurch der Check-In zustande kam. */
   source: string | null;
