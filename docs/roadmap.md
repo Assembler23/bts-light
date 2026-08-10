@@ -370,13 +370,24 @@ mitgeändert worden:
 
 **TL-Web (bts-light, klein):**
 
-- **Spielliste: Disziplin, Runde und Gruppe einzeln ein-/ausblendbar** —
+- ~~**Spielliste: Disziplin, Runde und Gruppe einzeln ein-/ausblendbar** —
   drei weitere Schalter im Anzeige-Menü, je Gerät gespeichert (wie
-  Spielnummer/Nationen). *(in Arbeit)*
-- **Bug: Drag & Drop auf Android-Tablets (Chrome) funktioniert nicht.**
+  Spielnummer/Nationen).~~ → umgesetzt 2026-08-10.
+- ~~**Bug: Drag & Drop auf Android-Tablets (Chrome) funktioniert nicht.**
   tl.html nutzt HTML5-Drag-Events, die auf Touch-Geräten nicht feuern;
   Antippen-dann-Feld-Antippen geht als gleichwertiger Weg. Fix: Drag auf
-  Pointer-Events umstellen (oder Touch-Fallback). *(in Arbeit)*
+  Pointer-Events umstellen (oder Touch-Fallback).~~ → umgesetzt 2026-08-10
+  *(Fix implementiert, **Gerätetest auf echtem Android-Tablet steht noch
+  aus**)*. Befund beim Umsetzen korrigiert: tl.html nutzte bereits
+  Pointer-Events statt HTML5-DnD; der eigentliche Fehler war
+  `touch-action: pan-y` auf der Zeile, das jede Wischbewegung sofort als
+  Scrollen beanspruchte, bevor die 8-px-Schwelle greifen konnte — und, nach
+  Review-Befund, ändert eine Klasse mitten in der Geste an `touch-action`
+  ohnehin nichts mehr (Chrome legt es bei `touchstart` für die ganze Geste
+  fest). Fix: Long-Press bewaffnet den Touch-Zug erst nach ~300 ms ruhigem
+  Halten; die eigentliche Scroll-Unterdrückung übernimmt ein
+  `touchmove`-Listener mit `{passive:false}`, die Klasse bleibt nur als
+  Bauklotz-auf-Bauklotz-Absicherung.
 
 **Hallen-Check-In (überwiegend badhub-Repo; ändert die Spec
 [features/spieler-check-in.md](features/spieler-check-in.md) — vor

@@ -38,7 +38,9 @@ LAN+Cloud voraus.
 
 - **Zuweisen:** Spiel antippen, dann Feld antippen. Oder ziehen. Beides
   führt zum selben Ergebnis; bei abgebrochenem Ziehen bleibt die Auswahl
-  stehen.
+  stehen. Auf Touch-Geräten startet das Ziehen mit kurzem Halten
+  (Long-Press) statt sofort — sonst ließe sich die Liste nicht mehr
+  wischen. Antippen-dann-Antippen funktioniert dort unverändert.
 - **Umhängen:** Spiel auf dem Feld antippen, dann das Zielfeld. Das ist
   **ein** Schreibvorgang nach BTP — es gibt keinen Moment, in dem das Spiel
   auf keinem Feld steht.
@@ -167,6 +169,9 @@ kann damit nichts anfangen:
   schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
   Reine Anzeigefrage, keine Turniereinstellung: Gerät A kann „rechts"
   zeigen, Gerät B gleichzeitig „darunter".
+- **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
+  einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
+  „Beendet" zeigen sie unverändert weiter.
 
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
