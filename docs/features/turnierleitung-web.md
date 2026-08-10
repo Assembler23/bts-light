@@ -389,21 +389,24 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 ### Was offen ist
 
-**19 belegt, 27 umgesetzt aber nicht am echten Gerät nachgewiesen, 3 offen.**
+**28 belegt, 19 umgesetzt aber nicht am echten Gerät nachgewiesen, 3 offen**
+(Auszählung der Kriterien oben, „Zugang und Geräte" bis „Nachvollziehbarkeit";
+die beiden folgenden Wiederholungs-Bullets zählen nicht mit — sie verweisen
+nur auf Kriterien, die dort schon erfasst sind).
 
-- [x] **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
+- [~] **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
       pflegen.** **Erledigt (2026-08-10):** Vorziehen, Entfernen und
       manuelles Hinzufügen sind jetzt in `tl.html` bedienbar — siehe
       [turnierleitung-web.md](../turnierleitung-web.md), Abschnitt „Im
       Betrieb". Am echten Gerät noch nicht nachgewiesen (zählt daher zu den
-      27, nicht zu den 19 belegten).
+      19, nicht zu den 28 belegten).
 - [~] **Beendete Spiele fehlen in der Ansicht.** **Erledigt (2026-08-10):**
       Der zugeklappte Abschnitt „Beendet" zeigt die zuletzt beendeten
       Spiele, neueste zuerst, mit Aufgabe-/kampflos-/
       disqualifiziert-Kennzeichnung — siehe
       [turnierleitung-web.md](../turnierleitung-web.md), Abschnitt „Im
       Betrieb". Am echten Gerät noch nicht nachgewiesen (zählt daher zu den
-      27, nicht zu den 19 belegten).
+      19, nicht zu den 28 belegten).
 
 Die drei verbleibenden offenen in der Reihenfolge, in der sie im Betrieb
 wehtun:
@@ -416,7 +419,7 @@ wehtun:
 3. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
    nicht; geschützt sind die Daten-Routen, nicht die leere Hülle.
 
-**Die 27 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
+**Die 19 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
 und größtenteils durch Unit-Tests gestützt, aber der Nachweis, auf den es
 ankommt, fehlt: iPad Safari und Android Chrome mit echten Fingern, zwei
 Geräte gleichzeitig am selben Feld, ein Relay-Neustart mitten im Betrieb,
