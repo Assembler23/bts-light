@@ -2179,50 +2179,80 @@ mod tests {
 
     #[test]
     fn finished_matches_appear_newest_first_and_are_capped() {
-        // Zwei beendete Spiele mit Zeitstempel (200 und 100), eines ohne —
-        // beendet, bevor bts-light lief. Wie bei der Desktop-Liste
-        // (`finished_matches` in commands.rs) sollen die mit Zeitstempel
-        // neueste zuerst kommen und das ohne ans Ende rutschen.
-        let mut m_200 = a_match(1);
-        m_200.status = MatchStatus::Finished;
-        m_200.winner = Some(1);
-        m_200.sets = vec![(21, 15), (21, 18)];
-        m_200.finished_at = Some(200);
+        // Sechs beendete Spiele mit fallendem Zeitstempel (600 .. 100), eines
+        // ganz ohne — beendet, bevor bts-light lief. Wie bei der
+        // Desktop-Liste (`finished_matches` in commands.rs) sollen die mit
+        // Zeitstempel neueste zuerst kommen und das ohne ans Ende rutschen.
+        let mut m1 = a_match(1);
+        m1.status = MatchStatus::Finished;
+        m1.winner = Some(1);
+        m1.sets = vec![(21, 15), (21, 18)];
+        m1.finished_at = Some(600);
 
-        let mut m_100 = a_match(2);
-        m_100.status = MatchStatus::Finished;
-        m_100.winner = Some(2);
-        m_100.finished_at = Some(100);
+        let mut m2 = a_match(2);
+        m2.status = MatchStatus::Finished;
+        m2.winner = Some(2);
+        m2.finished_at = Some(500);
 
-        let mut m_ohne = a_match(3);
+        let mut m3 = a_match(3);
+        m3.status = MatchStatus::Finished;
+        m3.winner = Some(1);
+        m3.finished_at = Some(400);
+
+        let mut m4 = a_match(4);
+        m4.status = MatchStatus::Finished;
+        m4.winner = Some(2);
+        m4.finished_at = Some(300);
+
+        let mut m5 = a_match(5);
+        m5.status = MatchStatus::Finished;
+        m5.winner = Some(1);
+        m5.finished_at = Some(200);
+
+        let mut m6 = a_match(6);
+        m6.status = MatchStatus::Finished;
+        m6.winner = Some(2);
+        m6.finished_at = Some(100);
+
+        let mut m_ohne = a_match(7);
         m_ohne.status = MatchStatus::Finished;
         m_ohne.winner = Some(1);
         m_ohne.result = MatchResult::Retired;
         m_ohne.finished_at = None;
 
         // Ein nicht beendetes Spiel darf nicht auftauchen.
-        let offen = a_match(4);
+        let offen = a_match(8);
 
         let tablet = TabletState::default();
         tablet.set_snapshot(snap(
             Vec::new(),
-            vec![m_200, m_100, m_ohne, offen],
+            vec![m1, m2, m3, m4, m5, m6, m_ohne, offen],
             Vec::new(),
         ));
         let config = AppConfig::default();
 
+        // Limit 40 (Hallennetz): alle sieben beendeten Spiele kommen durch,
+        // sortiert wie oben beschrieben.
         let state = build_state_limited(&tablet, &config, 1_000, 1, 40);
         let ids: Vec<i64> = state.finished.iter().map(|f| f.match_id).collect();
         assert_eq!(
             ids,
-            vec![1, 2, 3],
+            vec![1, 2, 3, 4, 5, 6, 7],
             "neueste zuerst, ohne Zeitstempel ans Ende"
         );
-        assert_eq!(state.finished[2].result, "retired");
+        assert_eq!(state.finished[6].result, "retired");
 
-        // Der Relay-Weg kürzt: Limit 5 heißt höchstens 5 Beendete.
+        // Der Relay-Weg kürzt wirklich: Limit 5 heißt genau die fünf
+        // jüngsten Spiele — die beiden ältesten (6, ohne Zeitstempel: 7)
+        // fallen weg, nicht nur irgendwelche.
         let eng = build_state_limited(&tablet, &config, 1_000, 2, 5);
-        assert!(eng.finished.len() <= 5);
+        let capped_ids: Vec<i64> = eng.finished.iter().map(|f| f.match_id).collect();
+        assert_eq!(eng.finished.len(), 5, "Limit 5 kappt auf genau fünf");
+        assert_eq!(
+            capped_ids,
+            vec![1, 2, 3, 4, 5],
+            "gekappt wird am Ende der sortierten Liste, nicht wahllos"
+        );
     }
 
     #[test]
