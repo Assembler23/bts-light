@@ -15,7 +15,7 @@
 //!
 //! Ausgabe enthält **keine Spielernamen**, nur Feldnamen und Strukturdaten.
 
-use bts_light_lib::btp::{client, proto, xml};
+use bts_light_lib::btp::{client, proto, wire, xml};
 
 fn host() -> String {
     std::env::var("BTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
@@ -258,4 +258,275 @@ async fn what_does_this_tournament_send_about_locations() {
             n.into_iter().collect::<Vec<_>>().join(", ")
         );
     }
+}
+
+/// Baut einen `SENDUPDATE`, der **ausschließlich** `Match.LocationID`
+/// schreibt (`ID, DrawID, PlanningID, LocationID` — sonst nichts, insb. kein
+/// `Status`). Bewusst NICHT in `proto.rs`: reine Mess-Hilfe für diese
+/// Schreib-Probe, kein Produktionscode. Baustruktur (Header/Action/Client +
+/// Update/Tournament/Matches/Match) folgt exakt dem privaten `base_request`
+/// aus `proto.rs`, nachgebaut aus den öffentlichen `xml::Node`-Bausteinen,
+/// da `base_request` selbst nicht `pub` ist.
+fn location_only_request(
+    match_id: i64,
+    draw_id: i64,
+    planning_id: i64,
+    location_id: i64,
+    session_key: &str,
+    password: Option<&str>,
+) -> Vec<u8> {
+    let mut action_children = vec![xml::Node::string("ID", "SENDUPDATE")];
+    action_children.push(xml::Node::string("Unicode", session_key));
+    if let Some(pw) = password {
+        action_children.push(xml::Node::string("Password", pw));
+    }
+    let nodes = vec![
+        xml::Node::group(
+            "Header",
+            vec![xml::Node::group(
+                "Version",
+                vec![xml::Node::integer("Hi", 1), xml::Node::integer("Lo", 1)],
+            )],
+        ),
+        xml::Node::group("Action", action_children),
+        xml::Node::group("Client", vec![xml::Node::string("IP", "bts-light")]),
+        xml::Node::group(
+            "Update",
+            vec![xml::Node::group(
+                "Tournament",
+                vec![xml::Node::group(
+                    "Matches",
+                    vec![xml::Node::group(
+                        "Match",
+                        vec![
+                            xml::Node::integer("ID", match_id),
+                            xml::Node::integer("DrawID", draw_id),
+                            xml::Node::integer("PlanningID", planning_id),
+                            xml::Node::integer("LocationID", location_id),
+                        ],
+                    )],
+                )],
+            )],
+        ),
+    ];
+    wire::encode_message(&xml::encode(&nodes))
+}
+
+/// Roh-XML einer Wire-Antwort für die Ausgabe – dekodiert, aber sonst
+/// unangetastet (keine Spielernamen werden extra herausgefiltert; die
+/// SENDUPDATE-Antwort enthält ohnehin nur `Action`, keine Spielerdaten).
+fn raw_preview(bytes: &[u8]) -> String {
+    match wire::decode_message(bytes) {
+        Ok(xml) => xml,
+        Err(e) => format!("(nicht als Wire-XML dekodierbar: {e}; {} Rohbytes)", bytes.len()),
+    }
+}
+
+/// Frisches LOGIN gegen BTP, liefert den Session-Schlüssel für den
+/// nachfolgenden SENDUPDATE. Eigene Funktion, weil die Messung zweimal
+/// einloggt (Schreiben + Restore) – eine wiederverwendete Session könnte
+/// durch serverseitige Regeln zwischenzeitlich ungültig geworden sein.
+async fn login(pw: Option<&str>) -> String {
+    let raw = client::send_request(&host(), port(), &proto::login_request(pw))
+        .await
+        .expect("BTP erreichbar (LOGIN)");
+    proto::parse_login_response(&proto::decode_response(&raw).expect("LOGIN-Antwort dekodierbar"))
+        .expect("LOGIN akzeptiert (Passwort korrekt?)")
+}
+
+/// **Messung, kein Regressionstest — SCHREIBT probeweise nach BTP und
+/// stellt danach den Originalzustand wieder her.**
+///
+/// Frage: Nimmt BTP einen `SENDUPDATE` an, der an einem angesetzten Match
+/// **ausschließlich** `Match.LocationID` setzt (Kandidat für „Spielort vor
+/// der Feldvergabe ändern")? Oder ignoriert/lehnt BTP das ab, weil
+/// `LocationID` serverseitig als reines Auslosungs-/Anzeige-Datum gilt?
+///
+/// Ablauf: VORHER-Snapshot → Kandidat wählen (Scheduled, beide Teams,
+/// kein Court) → minimaler SENDUPDATE nur mit LocationID → NACHHER-Snapshot
+/// (LocationID sowie CourtID/Sets/Winner/Status auf Nebenwirkungen prüfen)
+/// → Originalwert zurückschreiben → Restore verifizieren. Bricht das Match
+/// NICHT im veränderten Zustand zurück, wenn der Restore fehlschlägt
+/// (`assert!` am Ende) – das Turnier muss unverändert bleiben.
+///
+/// ```text
+/// cargo test -p bts-light --test btp_location_probe -- --ignored --nocapture does_btp_accept_a_location_write_for_a_scheduled_match
+/// ```
+#[tokio::test]
+#[ignore = "braucht ein laufendes BTP; SCHREIBT probeweise und stellt zurück"]
+async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
+    use bts_light_lib::btp::model::MatchStatus;
+
+    let pw = password();
+    let pw_ref = pw.as_deref();
+
+    // --- VORHER lesen -------------------------------------------------
+    let before = client::fetch_snapshot(&host(), port(), pw_ref)
+        .await
+        .expect("BTP erreichbar (VORHER-Snapshot)");
+
+    println!("\n=== Turnier: {} ===", before.tournament_name);
+    println!("Locations ({}): {:?}", before.locations.len(), before.locations);
+
+    if before.locations.is_empty() {
+        println!("\nABBRUCH: Turnier pflegt KEINE Locations — Messung nicht möglich.");
+        return;
+    }
+
+    // Kandidat: angesetzt, beide Teams gesetzt, KEIN Feld zugewiesen —
+    // damit die Messung nicht mit einer laufenden Feldzuweisung
+    // interferiert. Deterministische Reihenfolge nach MatchID.
+    let mut kandidaten: Vec<&bts_light_lib::btp::model::BtpMatch> = before
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty() && m.court_id.is_none()
+        })
+        .collect();
+    kandidaten.sort_by_key(|m| m.id);
+    println!("Kandidaten (Scheduled, beide Teams, ohne Court): {}", kandidaten.len());
+
+    // Erstes Kandidat/Location-Paar, bei dem sich die LocationID vom
+    // aktuellen Wert unterscheidet (auch None ≠ jede echte ID zählt als
+    // Unterschied).
+    let Some((ziel_match, ziel_location)) = kandidaten.iter().find_map(|&m| {
+        before
+            .locations
+            .iter()
+            .find(|l| Some(l.id) != m.location_id)
+            .map(|l| (m, l.id))
+    }) else {
+        println!(
+            "\nABBRUCH: kein angesetztes Match ohne Feld gefunden, dem eine \
+             abweichende LocationID zugewiesen werden könnte."
+        );
+        return;
+    };
+
+    let match_id = ziel_match.id;
+    let draw_id = ziel_match.draw_id;
+    let planning_id = ziel_match.planning_id;
+    let original_location_id = ziel_match.location_id;
+    let original_court_id = ziel_match.court_id;
+    let original_sets = ziel_match.sets.clone();
+    let original_winner = ziel_match.winner;
+    let original_status = ziel_match.status.clone();
+
+    println!("\n=== Ziel-Match ===");
+    println!("  MatchID={match_id} DrawID={draw_id} PlanningID={planning_id}");
+    println!(
+        "  LocationID VORHER: {}",
+        original_location_id.map(|l| l.to_string()).unwrap_or_else(|| "-".into())
+    );
+    println!("  LocationID NEU (Ziel): {ziel_location}");
+    println!("  CourtID VORHER: {original_court_id:?}");
+    println!("  Sets VORHER:    {original_sets:?}");
+    println!("  Winner VORHER:  {original_winner:?}");
+    println!("  Status VORHER:  {original_status:?}");
+
+    // --- SCHREIBEN: NUR LocationID -------------------------------------
+    let session = login(pw_ref).await;
+    let write_raw = client::send_request(
+        &host(),
+        port(),
+        &location_only_request(match_id, draw_id, planning_id, ziel_location, &session, pw_ref),
+    )
+    .await
+    .expect("BTP erreichbar (SENDUPDATE LocationID)");
+
+    println!("\n=== Rohantwort SENDUPDATE (nur LocationID) ===\n{}", raw_preview(&write_raw));
+
+    let write_nodes = proto::decode_response(&write_raw).expect("SENDUPDATE-Antwort dekodierbar");
+    let write_result = proto::parse_update_response(&write_nodes);
+    println!("\nparse_update_response: {write_result:?}");
+
+    // --- NACHHER lesen (vor Restore) -----------------------------------
+    let after = client::fetch_snapshot(&host(), port(), pw_ref)
+        .await
+        .expect("BTP erreichbar (NACHHER-Snapshot)");
+    let nach_match = after
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .expect("Ziel-Match nach dem Schreiben noch im Turnier vorhanden");
+
+    println!("\n=== Ziel-Match NACHHER (vor Restore) ===");
+    println!("  LocationID NACHHER: {:?}  (VORHER: {:?}, Ziel war: {ziel_location})", nach_match.location_id, original_location_id);
+    println!("  CourtID NACHHER:    {:?}  (VORHER: {original_court_id:?})", nach_match.court_id);
+    println!("  Sets NACHHER:       {:?}  (VORHER: {original_sets:?})", nach_match.sets);
+    println!("  Winner NACHHER:     {:?}  (VORHER: {original_winner:?})", nach_match.winner);
+    println!("  Status NACHHER:     {:?}  (VORHER: {original_status:?})", nach_match.status);
+    println!(
+        "  (BTP liefert keinen sichtbaren Check-in-Bitfeld-Wert am Match — die \
+         Probe schreibt bewusst KEIN `Status`, siehe `court_assign_request`-Kommentar \
+         in proto.rs, damit dieses Bitfeld unangetastet bleibt.)"
+    );
+
+    let sonst_unveraendert = nach_match.court_id == original_court_id
+        && nach_match.sets == original_sets
+        && nach_match.winner == original_winner
+        && nach_match.status == original_status;
+    println!("\nAndere Felder unverändert (CourtID/Sets/Winner/Status): {sonst_unveraendert}");
+    assert!(
+        sonst_unveraendert,
+        "Der LocationID-Write hat NEBENWIRKUNGEN an anderen Feldern erzeugt — \
+         MatchID={match_id}. VORHER: Court={original_court_id:?} Sets={original_sets:?} \
+         Winner={original_winner:?} Status={original_status:?}; NACHHER: \
+         Court={:?} Sets={:?} Winner={:?} Status={:?}",
+        nach_match.court_id, nach_match.sets, nach_match.winner, nach_match.status
+    );
+
+    // --- VERDIKT --------------------------------------------------------
+    let verdikt = if let Err(e) = &write_result {
+        format!("ABGELEHNT ({e:?})")
+    } else if nach_match.location_id == Some(ziel_location) {
+        "ANGENOMMEN".to_string()
+    } else {
+        "IGNORIERT (stiller No-Op)".to_string()
+    };
+    println!("\n########################################");
+    println!("LOCATION-WRITE: {verdikt}");
+    println!("########################################");
+
+    // --- RESTORE: Originalwert zurückschreiben --------------------------
+    // 0 = LocationID löschen (BTP-Konvention, siehe `location_id`-Parsing:
+    // "0 gilt als nicht gesetzt").
+    let restore_target = original_location_id.unwrap_or(0);
+    println!("\n=== RESTORE: LocationID zurück auf {restore_target} (Original) ===");
+
+    let session2 = login(pw_ref).await;
+    let restore_raw = client::send_request(
+        &host(),
+        port(),
+        &location_only_request(match_id, draw_id, planning_id, restore_target, &session2, pw_ref),
+    )
+    .await
+    .expect("BTP erreichbar (RESTORE)");
+    println!("\n=== Rohantwort RESTORE ===\n{}", raw_preview(&restore_raw));
+    let restore_result =
+        proto::parse_update_response(&proto::decode_response(&restore_raw).expect("Restore-Antwort dekodierbar"));
+    println!("Restore parse_update_response: {restore_result:?}");
+
+    let after_restore = client::fetch_snapshot(&host(), port(), pw_ref)
+        .await
+        .expect("BTP erreichbar (Restore-Kontrolle)");
+    let restored_match = after_restore
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .expect("Ziel-Match nach Restore noch im Turnier vorhanden");
+
+    println!(
+        "\nLocationID nach Restore: {:?}  (Original: {:?})",
+        restored_match.location_id, original_location_id
+    );
+    let restore_ok = restored_match.location_id == original_location_id;
+    println!("Restore erfolgreich (Original wiederhergestellt): {restore_ok}");
+
+    assert!(
+        restore_ok,
+        "RESTORE FEHLGESCHLAGEN — Turnier NICHT im Originalzustand! MatchID={match_id}, \
+         Original-LocationID={original_location_id:?}, jetzt {:?}. MANUELL IN BTP PRÜFEN!",
+        restored_match.location_id
+    );
 }
