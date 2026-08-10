@@ -370,9 +370,9 @@ mitgeändert worden:
 
 **TL-Web (bts-light, klein):**
 
-- **Spielliste: Disziplin, Runde und Gruppe einzeln ein-/ausblendbar** —
+- ~~**Spielliste: Disziplin, Runde und Gruppe einzeln ein-/ausblendbar** —
   drei weitere Schalter im Anzeige-Menü, je Gerät gespeichert (wie
-  Spielnummer/Nationen). *(in Arbeit)*
+  Spielnummer/Nationen).~~ → umgesetzt 2026-08-10.
 - **Bug: Drag & Drop auf Android-Tablets (Chrome) funktioniert nicht.**
   tl.html nutzt HTML5-Drag-Events, die auf Touch-Geräten nicht feuern;
   Antippen-dann-Feld-Antippen geht als gleichwertiger Weg. Fix: Drag auf

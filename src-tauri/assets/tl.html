@@ -622,6 +622,9 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <div class="menue">
         <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
         <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
+        <label><input type="checkbox" id="opt-disziplin" /> Disziplin/Klasse zeigen</label>
+        <label><input type="checkbox" id="opt-runde" /> Runde zeigen</label>
+        <label><input type="checkbox" id="opt-gruppe" /> Gruppe zeigen</label>
         <label><input type="radio" name="opt-liste" id="opt-liste-rechts" value="rechts" checked /> Spielliste rechts</label>
         <label><input type="radio" name="opt-liste" id="opt-liste-unten" value="unten" /> Spielliste darunter</label>
       </div>
@@ -832,6 +835,32 @@ function setzeVorliebe(name, an) {
     localStorage.setItem("bts-tl-nationen", an ? "an" : "aus");
   }
   renderCourts();
+  renderQueue();
+}
+
+// Disziplin/Klasse, Runde und Gruppe einzeln aus der Meta-Zeile der
+// Spielliste ausblendbar — je Gerät, Standard AN (Wunsch vom 10.08.2026
+// nach dem Turniertest: bei manchen Turnieren sagt „Gruppe 6" nichts, bei
+// anderen ist die Runde uninteressant, und die Zeile wird mit 120 wartenden
+// Spielen schnell unruhig). Wirkt NUR auf die Warteliste („Als Nächstes") —
+// an einer einzelnen Feldkachel und in „Beendet" ist dieselbe Angabe
+// Kontext zu genau einem Spiel, keine Liste, die man überfliegt, und bleibt
+// deshalb dort vollständig.
+let zeigeDisziplin = localStorage.getItem("bts-tl-zeige-disziplin") !== "aus";
+let zeigeRunde = localStorage.getItem("bts-tl-zeige-runde") !== "aus";
+let zeigeGruppe = localStorage.getItem("bts-tl-zeige-gruppe") !== "aus";
+
+function setzeListenMeta(name, an) {
+  if (name === "disziplin") {
+    zeigeDisziplin = an;
+    localStorage.setItem("bts-tl-zeige-disziplin", an ? "an" : "aus");
+  } else if (name === "runde") {
+    zeigeRunde = an;
+    localStorage.setItem("bts-tl-zeige-runde", an ? "an" : "aus");
+  } else {
+    zeigeGruppe = an;
+    localStorage.setItem("bts-tl-zeige-gruppe", an ? "an" : "aus");
+  }
   renderQueue();
 }
 
@@ -1829,9 +1858,16 @@ function renderCourts() {
 function queueRow(m) {
   const parts = [];
   if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
+  // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
+  // entfernt danach sowohl fehlende Werte (BTP liefert keine Runde) als auch
+  // ausgeschaltete zugleich, ohne dass ein Trenner „·" ins Leere zeigt.
+  const metaHaeppchen = [];
+  if (zeigeDisziplin) metaHaeppchen.push(klasse(m.discipline, m.class_label));
+  if (zeigeGruppe) metaHaeppchen.push(m.draw_name);
+  if (zeigeRunde) metaHaeppchen.push(m.round_name);
   parts.push(
     `<span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat)}</span>`,
-    `<span class="draw">${esc([klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · "))}</span>`,
+    `<span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>`,
   );
   if (m.prep_call) {
     parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
@@ -2481,6 +2517,15 @@ function start() {
     setzeVorliebe("nummern", ev.currentTarget.checked));
   $("opt-nationen").addEventListener("change", (ev) =>
     setzeVorliebe("nationen", ev.currentTarget.checked));
+  $("opt-disziplin").checked = zeigeDisziplin;
+  $("opt-runde").checked = zeigeRunde;
+  $("opt-gruppe").checked = zeigeGruppe;
+  $("opt-disziplin").addEventListener("change", (ev) =>
+    setzeListenMeta("disziplin", ev.currentTarget.checked));
+  $("opt-runde").addEventListener("change", (ev) =>
+    setzeListenMeta("runde", ev.currentTarget.checked));
+  $("opt-gruppe").addEventListener("change", (ev) =>
+    setzeListenMeta("gruppe", ev.currentTarget.checked));
   const listeUnten = localStorage.getItem("bts-tl-liste") === "unten";
   $("opt-liste-unten").checked = listeUnten;
   $("opt-liste-rechts").checked = !listeUnten;

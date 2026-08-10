@@ -167,6 +167,9 @@ kann damit nichts anfangen:
   schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
   Reine Anzeigefrage, keine Turniereinstellung: Gerät A kann „rechts"
   zeigen, Gerät B gleichzeitig „darunter".
+- **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
+  einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
+  „Beendet" zeigen sie unverändert weiter.
 
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
