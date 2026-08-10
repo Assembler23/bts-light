@@ -310,6 +310,18 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
       entsteht kein lokaler Zwischenspeicher.
 - [ ] **C15** Ein Anmeldeschluss vor der Anfangszeit wird auch in bts-light
       abgelehnt (gleiche Regel wie in badhub).
+- [x] **C16** Ein in badhub abgemeldeter Spieler (`state = withdrawn`, dort
+      über die Verwaltung gesetzt, badhub-Migration 157) erscheint in der
+      TL-Sicht als „abgemeldet" (grau, durchgestrichen) und zählt weder als
+      eingecheckt noch als fehlend; die Zähler rechnen ihn heraus.
+- [x] **C17** Die Fehlt-Ansage nennt Abgemeldete nicht — weder namentlich
+      noch in der Anzahl. Sind alle übrigen eingecheckt, gibt es keine
+      Ansage (C8 greift).
+- [x] **C18** Die Turnierleitung kann einen Abgemeldeten über den
+      bestehenden `check_in`-Eingriff trotzdem einchecken; der Knopf benennt
+      das Überschreiben („Trotz Abmeldung als anwesend eintragen").
+      Abmelden und Wiederanmelden selbst gibt es nur in der
+      badhub-Verwaltung.
 
 ## Tests
 
@@ -327,6 +339,11 @@ Nacheinander lieferbar, jeder einzeln testbar und commitbar.
   Muster `config_without_announce_key_loads_with_defaults`.
 - `sync.rs` — im `slave_mode` wird keine Meldeliste gepusht (A5); ohne
   konfigurierte GUID wird nichts gepusht (A6).
+- `checkin_state.rs` — Parsing des `withdrawn`-Status und Behandlung in den
+  Zählern und Ansagen (`withdrawn_wird_geparst_und_erkannt`); Abgemeldete
+  zählen nicht als fehlend (`abgemeldete_zaehlen_nicht_als_fehlend`); sind
+  nur Abgemeldete übrig, gibt es keine Fehlt-Ansage
+  (`nur_abgemeldete_uebrig_gibt_keine_ansage`).
 - Fenster- und Textlogik als **reine** Funktionen: Ansage unter/über
   `missing_names_max`, leere Liste (C7, C8).
 
