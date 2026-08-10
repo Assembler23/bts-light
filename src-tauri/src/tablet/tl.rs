@@ -2643,6 +2643,51 @@ mod tests {
     }
 
     #[test]
+    fn a_result_can_be_entered_for_a_match_that_never_saw_a_court() {
+        // Spiel im Status Scheduled, keinem Feld zugewiesen — die
+        // Turnierleitung trägt den Endstand ein (niemand hat gezählt).
+        // Erwartung: gleiche Schreib-Nutzlast wie am Desktop-Pfad
+        // (enter_result, commands.rs:1349), Status-Feld gesetzt (ScoreStatus
+        // 0 = regulär), KEINE Feldfreigabe (es gibt kein Feld freizugeben).
+        let m = a_match(7); // Status::Scheduled, court_id: None (siehe a_match)
+        let s = snap(Vec::new(), vec![m], Vec::new());
+
+        let updates = plan_result_action(
+            &s,
+            None, // kein Aufruf-Stempel — das Spiel stand nie auf einem Feld
+            9_000,
+            &relay_proto::TlAction::EnterResult {
+                match_id: 7,
+                sets: vec![
+                    relay_proto::SetAb { a: 21, b: 15 },
+                    relay_proto::SetAb { a: 21, b: 19 },
+                ],
+                retired: false,
+                winner: None,
+                overwrite: false,
+            },
+        )
+        .expect("erlaubt — auch ohne Feld muss sich ein Endstand eintragen lassen");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].btp_match_id, 7);
+        assert_eq!(updates[0].sets, vec![(21, 15), (21, 19)]);
+        assert!(updates[0].team1_won);
+        // Status-Feld (ScoreStatus): 0 = regulär ausgespielt, wie am Desktop.
+        assert_eq!(updates[0].score_status, 0);
+        // Kein Feld zum Freigeben — der Nachbar-Test mit Feld erwartet hier
+        // Some(1), dieser hier None.
+        assert_eq!(
+            updates[0].free_court_id, None,
+            "kein Feld zugewiesen → nichts freizugeben"
+        );
+        assert!(
+            updates[0].player_ids.is_empty(),
+            "kein Aufruf → kein Checkout"
+        );
+        assert_eq!(updates[0].end_ts_ms, None);
+    }
+
+    #[test]
     fn an_incomplete_set_is_rejected_like_everywhere_else() {
         // Ein noch laufender Satz darf nicht als gewonnener gewertet werden.
         let s = snap(vec![a_court(1, None)], vec![a_match(7)], Vec::new());
