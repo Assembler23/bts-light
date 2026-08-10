@@ -398,6 +398,17 @@ mitgeändert worden:
   sonst auf der Zeile bleibt unverändert scrollen + Antippen-dann-Antippen.
   **Gerätetest bestanden (10.08.2026, Android-Tablet/Chrome): „Zieh-Griff
   funktioniert jetzt super."**
+- ~~**Alle Spielfeldkacheln sollen immer sichtbar sein, die Spielliste
+  scrollt dafür separat** (rechts wie in „Spielliste darunter").~~ →
+  umgesetzt 2026-08-10. Die Seite rollt seit dem festen Rahmen (`#app`
+  spannt sich über `100dvh`/`100vh`) nicht mehr selbst; `main` teilt sich in
+  zwei eigenständig rollende Bereiche. Die Felderbox misst nach jedem
+  Neuzeichnen und bei jeder Größenänderung, ob sie überläuft, und schaltet
+  dafür stufenweise `kacheln-kompakt` (kleinere Abstände/Schrift) dann
+  `kacheln-mini` (deutlich kleiner, Abzeichen/Meta einzeilig) zu — die erste
+  Stufe, die passt. Passt selbst die kleinste Stufe nicht (sehr viele Felder
+  auf einem Telefon), wird die Felderbox als letzter Ausweg selbst rollbar.
+
 
 **Hallen-Check-In (überwiegend badhub-Repo; ändert die Spec
 [features/spieler-check-in.md](features/spieler-check-in.md) — vor
