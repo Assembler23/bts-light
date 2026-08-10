@@ -2200,11 +2200,13 @@ function queueRow(m) {
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
 
-  // Spielort setzen, ohne ein Feld zu belegen. BTP führt an angesetzten
-  // Spielen keinen Ort — ohne diesen Wähler bliebe ein Spiel ohne
-  // Disziplin-Regel bis zum Aufruf hallenlos, und der Hallenfilter zeigte es
-  // in keiner der beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange
-  // eine Regel es nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
+  // Spielort setzen, ohne ein Feld zu belegen. BTP liefert `LocationID` nur,
+  // wenn das Turnier die Spalte selbst pflegt, und nimmt Rückschreibungen
+  // nicht an (SENDUPDATE mit LocationID: Result=1, Wert verworfen, gemessen
+  // 10.08.2026) — ohne diesen Wähler bliebe ein Spiel ohne Disziplin-Regel
+  // bis zum Aufruf hallenlos, und der Hallenfilter zeigte es in keiner der
+  // beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange eine Regel es
+  // nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
   if (state.multi_hall && m.hall_source !== "rule") {
     // Kürzel statt voller Hallennamen: In einer Liste mit 120 Zeilen frisst
     // „Luckenwalder" mehr Platz als die Paarung daneben. Der volle Name
@@ -2212,7 +2214,13 @@ function queueRow(m) {
     const optionen = ['<option value="" title="kein fester Spielort">–</option>']
       .concat(state.halls.map((h) =>
         `<option value="${esc(h.name)}" title="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(hallenKuerzel(h.name))}</option>`));
-    const titel = m.hall ? `Spielort: ${m.hall}` : "Spielort ohne Feld festlegen";
+    // Grenze ehrlich im Tooltip: Der Wähler wirkt in bts-light, Vergabe und
+    // Liveticker, aber BTP verwirft den Spielort still (gemessen 10.08.2026)
+    // — ohne diesen Hinweis wirkt die Auswahl wie eine echte BTP-Ansetzung.
+    const grenze = "BTP übernimmt ihn nicht (Schnittstelle verwirft Spielort-Änderungen; gemessen 10.08.2026)";
+    const titel = m.hall
+      ? `Spielort: ${m.hall} — ${grenze}`
+      : `Spielort für Vergabe, Hallenfilter und Liveticker — ${grenze}`;
     parts.push(`<select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
       data-hall-for="${m.match_id}" title="${esc(titel)}"
       aria-label="Spielort">${optionen.join("")}</select>`);

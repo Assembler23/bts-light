@@ -127,6 +127,11 @@ von Hand setzt, gilt vor dem, was in BTP steht — du disponierst ja um.
 Eine von Hand gesetzte Halle **überlebt einen Neustart** des Turnier-PCs
 (`spielorte.json` neben der Konfiguration).
 
+BTP übernimmt diese Hand-Festlegung nicht: Ein Schreibversuch per
+`SENDUPDATE` wird von BTP zwar mit `Result=1` beantwortet, der Wert aber
+verworfen (gemessen 10.08.2026) — die Festlegung wirkt deshalb bewusst
+nur in bts-light selbst und im Liveticker.
+
 Ein von Hand gesetzter Ort wirkt an drei Stellen:
 
 - **Hallenfilter** dieser Seite — das Spiel erscheint in seiner Halle
