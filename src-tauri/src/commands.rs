@@ -2423,20 +2423,17 @@ pub fn tl_web_set_enabled(
 }
 
 /// Legt die Raster-Anordnung einer Halle fest (oder ersetzt sie).
+///
+/// Validierung + Normalisierung (Trimmen, Groß-/Kleinschreibung-unabhängiger
+/// Ersatz) steckt testbar in `AppConfig::upsert_hall_layout` — der Command
+/// ist nur der dünne `mutate_config`-Wrapper.
 #[tauri::command]
 pub fn set_hall_layout(
     app: AppHandle,
     state: State<'_, AppState>,
     layout: crate::config::HallLayoutConfig,
 ) -> Result<AppConfig, String> {
-    if layout.columns == 0 || layout.columns > 12 {
-        return Err("Spaltenzahl muss zwischen 1 und 12 liegen.".into());
-    }
-    mutate_config(&app, &state, move |cfg| {
-        cfg.hall_layouts.retain(|l| l.hall != layout.hall);
-        cfg.hall_layouts.push(layout);
-        Ok(())
-    })
+    mutate_config(&app, &state, move |cfg| cfg.upsert_hall_layout(layout))
 }
 
 /// Entfernt die Anordnung einer Halle — zurück zur Fließ-Darstellung.
@@ -2447,7 +2444,7 @@ pub fn remove_hall_layout(
     hall: String,
 ) -> Result<AppConfig, String> {
     mutate_config(&app, &state, move |cfg| {
-        cfg.hall_layouts.retain(|l| l.hall != hall);
+        cfg.remove_hall_layout(&hall);
         Ok(())
     })
 }
