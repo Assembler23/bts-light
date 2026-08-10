@@ -60,6 +60,10 @@ LAN+Cloud voraus.
   (an den Anfang der Schlange), aus der Schlange **entfernen** oder von Hand
   neu **hinzufügen** — dieselben Aktionen wie am Turnier-PC. Ist die
   Verwaltung ausgeschaltet, bleibt der Abschnitt unsichtbar.
+- **Beendet:** ein zugeklappter Abschnitt unter der Spielliste, neueste
+  zuerst. Aufgabe, kampflos gewertete und disqualifizierte Spiele tragen
+  eine eigene Kennzeichnung neben dem Satzstand. Über den Cloud-Weg ist auch
+  diese Liste ggf. gekürzt.
 
 ### Die Farbe eines Feldes
 
@@ -143,7 +147,6 @@ kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
   steht, wird abgelehnt — was BTP beim Überschreiben mit dem Turnierbaum
   macht, ist noch nicht abschließend geklärt
   ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
-- **Beendete Spiele** zeigt die Seite nicht.
 - Über den **Cloud-Weg** ist die Warteliste auf 40 Spiele je Halle gekürzt
   (im Hallennetz sind es 120). Der Zustand geht bei jedem Ballwechsel neu
   über die Leitung; die volle Liste wäre ein Dauerstrom über Mobilfunk. Was
