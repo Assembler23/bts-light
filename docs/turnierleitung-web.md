@@ -21,7 +21,9 @@ anzeigen — auch nicht für Sie. Geht ein Gerät verloren, entziehen Sie ihm
 den Zugang und koppeln neu. Das ist der kürzere Weg als ein Zugang, der
 dauerhaft in einer Liste steht und irgendwann jemand anderes liest.
 
-Klappt das Scannen nicht, steht die Adresse unter dem QR-Code auch als Text.
+Klappt das Scannen nicht, steht die Adresse unter dem QR-Code auch als Text —
+mit einem Kopier-Knopf daneben, etwa um sie am selben Rechner in einem
+Browser-Tab zu öffnen oder per Messenger auf das Gerät zu bringen.
 Sie enthält den Zugang hinter einem `#` — dieser Teil wird von keinem
 Browser an einen Server geschickt und taucht deshalb in keinem Protokoll auf.
 
@@ -42,6 +44,13 @@ LAN+Cloud voraus.
   auf keinem Feld steht.
 - **Vom Feld nehmen:** über das Band oben. Läuft schon ein Spielstand, wird
   vorher gefragt.
+- **Ergebnis eintragen:** über das Band oben, für **jedes** gewählte Spiel —
+  auch eines, das noch in der Warteliste steht und nie auf einem Feld war
+  (jemand hat mündlich oder auf einem Zettel abgerechnet). Ein Dialog mit
+  Satzfeldern öffnet sich, bei einem Feld-Spiel mit dem Live-Stand vorbelegt,
+  sonst leer. Lehnt der Turnier-PC den Stand ab (unplausible Sätze, ein
+  Folgespiel hängt bereits daran), steht die Meldung **im Dialog** — nicht
+  als flüchtiger Toast, der weg wäre, während noch getippt wird.
 - **Aufrufen:** Der Knopf am Feld löst den zweiten bzw. dritten Aufruf aus.
   Die Stufe zählt der Turnier-PC — alle Geräte, auch die Desktop-App, zeigen
   dieselbe Zahl.
@@ -138,8 +147,9 @@ damit nichts anfangen:
   Namen, dieselben Bilder wie auf dem Court-Monitor. Zu einer Nation ohne
   Flaggendatei erscheint das Kürzel. Hilfreich bei internationalen
   Turnieren.
-- **Ergebnis eintragen** für ein Spiel auf dem Feld.
-- **Automatik** an- und abschalten — der Schalter oben rechts.
+
+Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
+an- und abschalten — der Schalter oben rechts.
 
 Gesprochen wird nie auf diesem Gerät: Die Seite beauftragt die Ansage, und
 gesprochen wird sie dort, wo die Anlage hängt. Hört in der Zielhalle gerade
@@ -151,12 +161,14 @@ kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
   geschlossener Tab gibt seinen Platz nach einer Minute selbst frei. Die
   Liste der Kopplungen darf länger sein — alte Kopplungen blockieren keinen
   Platz.
-- **Ergebnisse korrigieren geht nur, solange nichts daran hängt.** Ein
-  bereits gewertetes Spiel lässt sich überschreiben, wenn kein Folgespiel
-  existiert (Finale, Gruppenspiel). Sobald der Sieger im nächsten Spiel
-  steht, wird abgelehnt — was BTP beim Überschreiben mit dem Turnierbaum
-  macht, ist noch nicht abschließend geklärt
-  ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
+- **Ergebnisse korrigieren geht nur, solange nichts daran hängt.** Der Stift
+  an einer Zeile in **Beendet** öffnet denselben Dialog wie „Ergebnis
+  eintragen", mit dem zuletzt gemeldeten Stand vorbelegt. Ein bereits
+  gewertetes Spiel lässt sich überschreiben, wenn kein Folgespiel existiert
+  (Finale, Gruppenspiel). Sobald der Sieger im nächsten Spiel steht, wird
+  abgelehnt — die Ablehnung erscheint im Dialog, nicht als Toast — was BTP
+  beim Überschreiben mit dem Turnierbaum macht, ist noch nicht abschließend
+  geklärt ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
 - Über den **Cloud-Weg** ist die Warteliste auf 40 Spiele je Halle gekürzt
   (im Hallennetz sind es 120). Der Zustand geht bei jedem Ballwechsel neu
   über die Leitung; die volle Liste wäre ein Dauerstrom über Mobilfunk. Was
