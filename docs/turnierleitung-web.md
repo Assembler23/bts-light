@@ -87,6 +87,16 @@ Aufruf-Timer selbst eingeschaltet ist.
 Die Farbe steht nie allein: Satzstand und Uhrbeschriftung („im Spiel seit"
 gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
 
+Zusätzlich zum Zustands-Streifen bekommt eine laufende Kachel bei Satz- oder
+Matchball einen zweiten, umlaufenden Rahmen plus Abzeichen: **„Satzball"**
+(gelb) für den letzten Punkt eines Satzes, **„Matchball"** (rot, pulsierend
+— das Feld wird gleich frei) für den letzten Punkt des Matches. Das ist nur
+eine Planungshilfe für die Turnierleitung, keine Wertungslogik, und
+erscheint **ausschließlich hier**, nie auf den Hallen-TVs (Court-Monitor/
+Overview) — bewusste Scope-Entscheidung vom 20.07.2026, Plan 16. Die
+Streifenfarbe bleibt davon unberührt: Rot heißt am Streifen weiterhin
+„überfällig", nicht „Matchball".
+
 ### Spielort
 
 **Pflegst du in BTP die Spalte „Spielort", übernimmt bts-light sie.** Die

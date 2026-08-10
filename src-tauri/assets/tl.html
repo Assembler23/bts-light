@@ -179,6 +179,14 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .card.zustand-frei { border-left-color: transparent; }
 .card.locked { background: #f8fafc; opacity: .65; }
 .card.clearing { border-color: #fed7aa; background: #fffbeb; }
+
+/* ── Satz-/Matchball ───────────────────────────────────────────────────
+   Zusätzlicher Rahmen (nicht der linke Zustands-Streifen — der bleibt für
+   „überfällig" reserviert), Farben an FieldOverviewPage.tsx angeglichen:
+   rose für Matchball, amber für Satzball. Nur die Turnierleitung sieht
+   das, nie die Hallen-TVs (Scope-Entscheidung 20.07.2026, Plan 16). */
+.card.gp-match { box-shadow: 0 0 0 2px #fb7185 inset; }
+.card.gp-set   { box-shadow: 0 0 0 2px #fcd34d inset; }
 .card-top { display: flex; align-items: baseline; gap: 8px; }
 .court-name { font-size: 1.15rem; font-weight: 750; letter-spacing: -.01em; }
 .badge {
@@ -187,6 +195,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .badge.alarm { background: #fee2e2; color: #991b1b; }
 .badge.warn { background: #ffedd5; color: #9a3412; }
+/* Matchball pulsiert (das Feld wird gleich frei), Satzball bleibt ruhig —
+   wie die entsprechenden Badges in der Felderübersicht der App. */
+.badge.gp   { background: #fecdd3; color: #881337; animation: gpPuls 1.2s ease-in-out infinite; }
+.badge.gp-s { background: #fde68a; color: #78350f; }
+@keyframes gpPuls { 50% { opacity: .55; } }
 .pair { font-weight: 600; line-height: 1.25; }
 
 /* ── Die Paarung ───────────────────────────────────────────────────────
@@ -1331,6 +1344,63 @@ function courtState(c) {
   return "gerufen";
 }
 
+// ── Satz-/Matchball ───────────────────────────────────────────────────
+// INLINE-KOPIE von src/io/gamePoint.mjs (tl.html kann keine Module laden).
+// Die kanonische Fassung samt Test (scripts/test-gamepoint.mjs) liegt dort —
+// Änderungen IMMER zuerst dort machen und hierher spiegeln.
+
+/** Ist der laufende Satz bereits entschieden (Zielpunkt mit 2 Vorsprung oder
+ *  Cap erreicht)? Dann ist es kein „Ball" mehr. */
+function setDecided(a, b, target, cap) {
+  const hi = Math.max(a, b),
+    lo = Math.min(a, b);
+  if (cap > 0 && hi >= cap) return true;
+  return hi >= target && hi - lo >= 2;
+}
+
+/** Wie viele Gewinnsätze bis zum Matchsieg (Best-of → Mehrheit). */
+function setsToWin(bestOf) {
+  const bo = bestOf && bestOf > 0 ? bestOf : 3;
+  return Math.floor(bo / 2) + 1;
+}
+
+/**
+ * Liefert `"match"`, `"set"` oder `null` für ein Feld.
+ * @param {{sets:[number,number][], best_of:number, target_score:number, cap_score:number, match_id:number}} c
+ */
+function gamePointKind(c) {
+  const target = c && c.target_score;
+  if (!c || c.match_id <= 0 || !target || target >= 99) return null;
+  const sets = Array.isArray(c.sets) ? c.sets : [];
+  if (sets.length === 0) return null;
+  const last = sets[sets.length - 1] || [0, 0];
+  const l = last[0] || 0,
+    r = last[1] || 0;
+  const cap = c.cap_score || 0;
+  // Aktueller Satz schon entschieden → kein Ball (verhindert „Matchball" auf
+  // einem gerade gewonnenen/beendeten Satz).
+  if (setDecided(l, r, target, cap)) return null;
+  const lead = Math.max(l, r),
+    trail = Math.min(l, r);
+  // Ball, wenn der Führende einen Punkt vom Satzgewinn entfernt ist ODER der
+  // Stand direkt vor dem Cap steht (dann entscheidet der nächste Punkt den
+  // Satz für den Punktgewinner — auch bei Gleichstand, z. B. 29:29 bei Cap 30).
+  const capBall = cap > 0 && lead === cap - 1;
+  const normalBall = lead - trail >= 1 && lead >= target - 1;
+  if (!capBall && !normalBall) return null;
+  const need = setsToWin(c.best_of);
+  const completed = sets.slice(0, -1);
+  const leftWins = completed.filter((s) => (s[0] || 0) > (s[1] || 0)).length;
+  const rightWins = completed.filter((s) => (s[1] || 0) > (s[0] || 0)).length;
+  // Bei Gleichstand (Cap-Patt) können BEIDE Seiten den Satz mit dem nächsten
+  // Punkt gewinnen → Matchball, sobald EINE Seite damit das Match gewinnt.
+  if (l === r) {
+    return leftWins === need - 1 || rightWins === need - 1 ? "match" : "set";
+  }
+  const leaderWins = l > r ? leftWins : rightWins;
+  return leaderWins === need - 1 ? "match" : "set";
+}
+
 function courtCard(c) {
   const stage = callStage(c, state.call_timer);
   const classes = ["card", "zustand-" + courtState(c)];
@@ -1347,6 +1417,13 @@ function courtCard(c) {
   if (c.official_call) badges.push('<span class="badge alarm">TL gerufen</span>');
   if (c.pause) badges.push('<span class="badge warn">Pause</span>');
   if (c.match_id && !c.tablet_connected) badges.push('<span class="badge warn">kein Tablet</span>');
+
+  // Satz-/Matchball: nur für die Turnierleitung, nie auf den Hallen-TVs
+  // (Scope-Entscheidung 20.07.2026, Plan 16). Die Streifenfarben bleiben
+  // unangetastet — Rot heißt dort weiterhin „überfällig".
+  const ball = c.match_id && !c.locked ? gamePointKind(c) : null;
+  if (ball === "match") { classes.push("gp-match"); badges.push('<span class="badge gp">Matchball</span>'); }
+  else if (ball === "set") { classes.push("gp-set"); badges.push('<span class="badge gp-s">Satzball</span>'); }
 
   let body, foot = "";
   if (pending && pending.courtId === c.court_id) {
