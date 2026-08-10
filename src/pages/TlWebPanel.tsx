@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ClipboardList, Plus, Trash2, X } from "lucide-react";
+import { Check, ClipboardList, Copy, Plus, Trash2, X } from "lucide-react";
 import {
   getStatus,
   tlDeviceAdd,
@@ -224,12 +224,16 @@ export function TlWebPanel({ onConfigSaved }: Props) {
                   // diesem Rechner, damit der Zugang ihn nicht verlässt.
                   dangerouslySetInnerHTML={{ __html: e.qr_svg }}
                 />
-                {/* Die Adresse zusätzlich als Text: Ohne sie stünde man bei
-                    einer nicht scannbaren Kamera vor einem verbrannten
-                    Zugang. */}
-                <code className="max-w-xs break-all text-center text-[11px] text-emerald-800">
-                  {e.url}
-                </code>
+                {/* Die Adresse zusätzlich als Text und zum Kopieren: Ohne sie
+                    stünde man bei einer nicht scannbaren Kamera vor einem
+                    verbrannten Zugang — und wer am selben Rechner testet,
+                    scannt gar nicht, sondern kopiert. */}
+                <div className="flex max-w-xs items-start gap-1">
+                  <code className="break-all text-center text-[11px] text-emerald-800">
+                    {e.url}
+                  </code>
+                  <CopyUrlButton url={e.url} />
+                </div>
               </figure>
             ))}
           </div>
@@ -325,5 +329,30 @@ function DeviceRow({
         </button>
       )}
     </div>
+  );
+}
+
+/** Kleiner Button, der die Zugangs-Adresse in die Zwischenablage kopiert —
+ *  für den Test am selben Rechner, wo niemand einen QR-Code scannt.
+ *  Gleiche Mechanik wie in TabletPanel/CourtMonitorPanel. */
+function CopyUrlButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* Zwischenablage nicht verfügbar – ignorieren */
+    }
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Adresse kopieren"
+      className="shrink-0 rounded-md p-1 text-emerald-700 transition-colors hover:bg-emerald-100"
+    >
+      {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+    </button>
   );
 }

@@ -21,7 +21,9 @@ anzeigen — auch nicht für Sie. Geht ein Gerät verloren, entziehen Sie ihm
 den Zugang und koppeln neu. Das ist der kürzere Weg als ein Zugang, der
 dauerhaft in einer Liste steht und irgendwann jemand anderes liest.
 
-Klappt das Scannen nicht, steht die Adresse unter dem QR-Code auch als Text.
+Klappt das Scannen nicht, steht die Adresse unter dem QR-Code auch als Text —
+mit einem Kopier-Knopf daneben, etwa um sie am selben Rechner in einem
+Browser-Tab zu öffnen oder per Messenger auf das Gerät zu bringen.
 Sie enthält den Zugang hinter einem `#` — dieser Teil wird von keinem
 Browser an einen Server geschickt und taucht deshalb in keinem Protokoll auf.
 
