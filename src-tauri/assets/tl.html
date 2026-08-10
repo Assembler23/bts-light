@@ -48,6 +48,12 @@ html, body {
   height: 100vh; height: 100dvh;
   overflow: hidden;
 }
+/* Kaskaden-Falle: Ein eigener `display`-Wert schlägt IMMER die
+   UA-Regel `[hidden] { display: none; }` — ohne diese Zeile bliebe der
+   leere App-Rahmen neben der Sperrseite (`#gate`) sichtbar, sobald
+   `$("app").hidden` gesetzt wird (Zugang fehlt, `showGate()` bei 401/429).
+   Das `hidden`-Attribut muss also ausdrücklich zurückgewinnen. */
+#app[hidden] { display: none; }
 
 /* ── Kopfzeile ─────────────────────────────────────────────────────────
    Kein `position: sticky` mehr nötig: Seit dem festen Rahmen oben rollt die
@@ -177,7 +183,11 @@ main > section:last-of-type {
      eine Spalte nebeneinander nicht. */
   main { flex-direction: row; align-items: stretch; }
   main > section:first-of-type { flex: 3 1 0; min-width: 0; max-height: none; }
-  main > section:last-of-type { flex: 2 1 320px; }
+  /* `min-width` zusätzlich zur `flex-basis`: Ein `flex-shrink` von 1 (Teil
+     der Kurzschreibweise) ließe die Spalte sonst unter 320px schrumpfen,
+     sobald die Felder-Spalte daneben mehr Platz beansprucht — genau die
+     320px-Untergrenze, die vorher `minmax(320px, 2fr)` im Grid gab. */
+  main > section:last-of-type { flex: 2 1 320px; min-width: 320px; }
   /* Listen-Position je Gerät (Anzeige-Menü „Spielliste darunter"): wieder
      gestapelt statt nebeneinander — die Felder bekommen dann erneut nur die
      64-%-Obergrenze von oben, die Liste den Rest. */
@@ -356,10 +366,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-mini .score, #courts.kacheln-mini .clock { font-size: .78rem; }
 #courts.kacheln-mini .score small, #courts.kacheln-mini .clock small { font-size: .56rem; }
 #courts.kacheln-mini .callbtn { padding: 4px 7px; min-height: 32px; font-size: .66rem; }
-/* Kleinerer Griff (Vorgabe: „kleinere Grips") — die Trefffläche bleibt über
-   die Polsterung im Skript-Markup erhalten, nur das Sinnbild selbst schrumpft. */
+/* Kleinerer Griff (Vorgabe: „kleinere Grips") — NUR das Sinnbild schrumpft.
+   Polsterung/Trefffläche bleiben bei den 8px der Grundregel
+   (`.card-top .drag-griff` weiter unten; die negativen Ränder gleichen sie
+   im Layout ohnehin aus) — ausgerechnet die kleinste Stufe darf die
+   Ziehfläche nicht am stärksten verkleinern. */
 #courts.kacheln-mini .drag-griff { font-size: .82rem; }
-#courts.kacheln-mini .card-top .drag-griff { padding: 5px; margin-top: -5px; margin-right: -5px; margin-bottom: -5px; }
 #courts.kacheln-mini .hall-group h3 { font-size: .74rem; margin-bottom: 3px; }
 #courts.kacheln-mini .hall-group + .hall-group { margin-top: 8px; }
 
@@ -1082,12 +1094,25 @@ function messeKopf() {
 
 function renderActionBar() {
   const bar = $("action-bar");
+  // Vorher/nachher vergleichen: Nur ein tatsächlicher Wechsel des Bands
+  // ändert `--band` und damit den Platz, den die Felder-Sektion oben
+  // abgeben muss — ein `scheduleFitCourts()` bei jedem Aufruf (die Aktions-
+  // leiste wird oft neu gezeichnet, ohne dass sich ihre Sichtbarkeit
+  // ändert) wäre ein sinnloses zusätzliches `requestAnimationFrame`.
+  const warSichtbar = bar.classList.contains("show");
   // Während eines Zuges bleibt das Band aus: Es würde beim Erscheinen das
   // ganze Layout nach unten schieben, und der Finger träfe ein anderes Feld
   // als das anvisierte. Beim Ziehen sagt ohnehin der Klon am Finger, was
   // transportiert wird — das Band ist für den Antipp-Weg da, wo man nach
   // zwei Wischern sonst nicht mehr weiß, was gewählt ist.
-  if (!picked || dragging) { bar.classList.remove("show"); messeKopf(); return; }
+  if (!picked || dragging) {
+    bar.classList.remove("show");
+    messeKopf();
+    // Band weg → `--band` zurück auf 0 → die Felder haben wieder mehr
+    // Höhe zur Verfügung und könnten eine Kompaktstufe zurückschalten.
+    if (warSichtbar) scheduleFitCourts();
+    return;
+  }
   const m = picked.match;
   const wer = [(m.team1 || []).join(" / "), (m.team2 || []).join(" / ")]
     .filter(Boolean).join(" vs. ");
@@ -1109,6 +1134,10 @@ function renderActionBar() {
     : "jetzt ein Feld antippen";
   bar.classList.add("show");
   messeKopf();
+  // Band neu da → könnte (bei Umbruch, viele Hallen) die oberste Feldreihe
+  // verdecken (siehe `--band`-Erklärung bei `messeKopf()`) — die Felderbox
+  // muss den neuen, kleineren Platz neu beurteilen.
+  if (!warSichtbar) scheduleFitCourts();
 }
 
 /**
@@ -1574,6 +1603,15 @@ function renderConnection() {
   document.body.classList.toggle("offline", level === "offline");
 
   const banner = $("banner");
+  // Vorher/nachher vergleichen: Das Störungsband nimmt als Flex-Kind von
+  // `#app` selbst Höhe weg von `main` — erscheint oder verschwindet es,
+  // ändert sich der Platz, den die Felderbox zur Verfügung hat, und eine
+  // vorher passende (oder gerade noch überlaufende) Kompaktstufe kann
+  // falsch geworden sein. Nur beim tatsächlichen Wechsel neu einpassen,
+  // nicht bei jedem `renderConnection()` (das läuft bei jedem Abruf, auch
+  // wenn sich am Banner gar nichts ändert — inklusive der reinen
+  // 304-„unverändert"-Antwort, die sonst ohne Neupassung bliebe).
+  const warSichtbar = banner.classList.contains("show");
   if (level === "offline") {
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
     // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
@@ -1585,6 +1623,7 @@ function renderConnection() {
   } else {
     banner.classList.remove("show");
   }
+  if (banner.classList.contains("show") !== warSichtbar) scheduleFitCourts();
 }
 
 // ── Zeichnen ──────────────────────────────────────────────────────────
