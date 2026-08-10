@@ -4,6 +4,34 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.180
+
+Nacharbeit aus dem lokalen Test des 10.08.: zwei Wünsche und zwei Befunde
+der Turnierleitungs-Seite, dazu Komfort im Check-In. Der Flaggen-Fix
+braucht diesen Release ausdrücklich — er liegt im Relay, das hierbei
+automatisch mit deployt wird.
+
+- **Flaggen zurück in der Cloud-TL-Sicht — und das Sekundenzucken ist weg.**
+  Beides hatte dieselbe Ursache: Die Turnierleitungs-Seite hängt in der
+  Cloud bewusst ohne Namespace in der Adresse und fand dort keine
+  Flaggen-Route — jede Flagge lief in ein 404, der Rückfall auf das Kürzel
+  ließ die Listen bei jedem Abruf sichtbar springen. Das Relay liefert die
+  Länderflaggen jetzt auch namespace-los; zusätzlich merkt sich die Seite
+  fehlgeschlagene Kürzel, sodass auch eine wirklich fehlende Flaggendatei
+  nichts mehr springen lässt.
+- **Spielliste per Trennsteg ziehbar.** Zwischen Feldern und Spielliste
+  sitzt ein Griff: nebeneinander verschiebt er die Breite der Liste,
+  gestapelt ihre Höhe — je Gerät und Anordnung gespeichert. Doppeltipp auf
+  den Steg stellt die automatische, bedarfsgerechte Aufteilung wieder her;
+  ein bloßer Tipp verstellt nichts.
+- **Check-In: Links zur öffentlichen Seite.** Im Kopf des Check-In-Panels:
+  „Check-In-Seite öffnen", „Link kopieren" (fürs Weitergeben per
+  Messenger) und „Aushang (QR)" für den druckbaren Hallen-Aushang.
+- **Check-In: Doppel stehen als Paar in einer Zeile** („Müller / Schmidt"),
+  jede Hälfte mit eigenem Zustand und eigenen Knöpfen — ein- und
+  ausgecheckt wird weiterhin einzeln. Meldet badhub noch keine
+  Meldungs-Kennungen, bleiben die Zeilen wie bisher einzeln.
+
 ## v0.9.179
 
 Nachmittags-Runde des 10.08.: Feinschliff der Turnierleitungs-Seite aus dem
