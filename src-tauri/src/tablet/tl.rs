@@ -1391,6 +1391,11 @@ pub struct TlState {
     /// Die Warteschlange, in Reihenfolge. Der `key` ist die stabile
     /// Kennung für Vorziehen/Entfernen — dieselbe wie am Turnier-PC.
     pub scorekeepers: Vec<TlScorekeeper>,
+    /// Zuletzt beendete Spiele, neueste zuerst — für die
+    /// Ergebnis-Übersicht der Turnierleitung. Dieselbe Filterung, Sortierung
+    /// und `result`-Abbildung wie `finished_matches` in commands.rs (die
+    /// Desktop-Tabelle), damit beide Ansichten dasselbe erzählen.
+    pub finished: Vec<TlFinished>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1599,6 +1604,39 @@ impl From<Blocked> for TlBlocked {
 /// wegfällt, meldet `truncated_halls` ehrlich.
 const QUEUE_LIMIT_PER_HALL: usize = 120;
 
+/// Höchstzahl beendeter Spiele im Zustand. Die Seite ist ein
+/// Arbeits-Werkzeug, kein Archiv — wer mehr braucht, schaut in BTP.
+const FINISHED_LIMIT: usize = 30;
+
+/// Ein beendetes Spiel, wie es die Ergebnis-Übersicht braucht. Felder und
+/// `result`-Werte spiegeln [`crate::commands::FinishedMatchRow`] (die
+/// Desktop-Tabelle) — bewusst dieselbe Bedeutung, damit Turnierleitung am
+/// Tablet und am Turnier-PC dasselbe Ergebnis lesen.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlFinished {
+    pub match_id: i64,
+    pub match_num: i64,
+    pub draw_name: String,
+    pub round_name: String,
+    pub class_label: String,
+    /// Siehe [`TlCourt::discipline`].
+    pub discipline: String,
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    /// 1 oder 2 — wer gewonnen hat.
+    pub winner: u8,
+    pub sets: Vec<(i64, i64)>,
+    /// `normal` | `walkover` | `retired` | `disqualified` — die Seite
+    /// kennzeichnet alles außer `normal` mit einem Abzeichen, sonst sähe
+    /// ein Teil-Spielstand (14:16, 15:10) wie ein Fehler aus.
+    pub result: String,
+    /// Feld, auf dem es lief; leer, wenn direkt in BTP gewertet.
+    pub court: String,
+    /// Nur zur Laufzeit gestempelt — Spiele, die vor dem App-Start
+    /// beendet waren, haben keinen Zeitstempel und stehen am Ende.
+    pub finished_at_ms: Option<u64>,
+}
+
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
@@ -1647,6 +1685,7 @@ pub(crate) fn build_state_limited(
             truncated_halls: Vec::new(),
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
+            finished: Vec::new(),
         };
     };
 
@@ -1788,6 +1827,57 @@ pub(crate) fn build_state_limited(
         Vec::new()
     };
 
+    // Beendete Spiele: Filter, Sortierung und `result`-Abbildung wie
+    // `finished_matches` in commands.rs (Desktop-Tabelle) — dort erprobt,
+    // hier übernommen statt neu erfunden.
+    //
+    // Das Limit folgt dem Warteschlangen-Limit nach unten (Relay-Stufen
+    // 40/20/10/5): Ein kleines `queue_limit` heißt, der Zustand muss sowieso
+    // klein bleiben — dann darf die Ergebnisliste nicht der größte Brocken
+    // sein. `max(5)` verhindert, dass die unterste Stufe die Liste ganz
+    // leerräumt.
+    let finished_limit = FINISHED_LIMIT.min(queue_limit.max(5));
+    let mut finished_matches: Vec<&crate::btp::model::BtpMatch> = snap
+        .matches
+        .iter()
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Finished && m.winner.is_some())
+        .collect();
+    // Neueste zuerst. `unwrap_or(0)` zieht Spiele ohne Zeitstempel (vor
+    // App-Start beendet) explizit ans Ende statt an den Anfang — wie in
+    // `finished_matches`.
+    finished_matches.sort_by(|a, b| {
+        b.finished_at
+            .unwrap_or(0)
+            .cmp(&a.finished_at.unwrap_or(0))
+            .then(b.match_num.unwrap_or(0).cmp(&a.match_num.unwrap_or(0)))
+            .then(b.id.cmp(&a.id))
+    });
+    let finished: Vec<TlFinished> = finished_matches
+        .into_iter()
+        .take(finished_limit)
+        .map(|m| TlFinished {
+            match_id: m.id,
+            match_num: m.match_num.unwrap_or(0),
+            draw_name: m.draw_name.clone(),
+            round_name: m.round_name.clone(),
+            class_label: m.class_label.clone(),
+            discipline: m.discipline.as_str().to_string(),
+            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+            winner: m.winner.unwrap_or(0),
+            sets: m.sets.clone(),
+            result: match m.result {
+                crate::btp::model::MatchResult::Normal => "normal",
+                crate::btp::model::MatchResult::Walkover => "walkover",
+                crate::btp::model::MatchResult::Retired => "retired",
+                crate::btp::model::MatchResult::Disqualified => "disqualified",
+            }
+            .to_string(),
+            court: m.court.clone().unwrap_or_default(),
+            finished_at_ms: m.finished_at,
+        })
+        .collect();
+
     TlState {
         rev,
         server_now_ms: now_ms,
@@ -1833,6 +1923,7 @@ pub(crate) fn build_state_limited(
         truncated_halls: truncated.into_iter().collect(),
         scorekeeper_managed,
         scorekeepers,
+        finished,
     }
 }
 
@@ -2084,6 +2175,84 @@ mod tests {
         let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
         let ids: Vec<i64> = s.queue.iter().map(|m| m.match_id).collect();
         assert_eq!(ids, vec![3, 1, 2], "gerufen zuerst, dann nach Ansetzung");
+    }
+
+    #[test]
+    fn finished_matches_appear_newest_first_and_are_capped() {
+        // Sechs beendete Spiele mit fallendem Zeitstempel (600 .. 100), eines
+        // ganz ohne — beendet, bevor bts-light lief. Wie bei der
+        // Desktop-Liste (`finished_matches` in commands.rs) sollen die mit
+        // Zeitstempel neueste zuerst kommen und das ohne ans Ende rutschen.
+        let mut m1 = a_match(1);
+        m1.status = MatchStatus::Finished;
+        m1.winner = Some(1);
+        m1.sets = vec![(21, 15), (21, 18)];
+        m1.finished_at = Some(600);
+
+        let mut m2 = a_match(2);
+        m2.status = MatchStatus::Finished;
+        m2.winner = Some(2);
+        m2.finished_at = Some(500);
+
+        let mut m3 = a_match(3);
+        m3.status = MatchStatus::Finished;
+        m3.winner = Some(1);
+        m3.finished_at = Some(400);
+
+        let mut m4 = a_match(4);
+        m4.status = MatchStatus::Finished;
+        m4.winner = Some(2);
+        m4.finished_at = Some(300);
+
+        let mut m5 = a_match(5);
+        m5.status = MatchStatus::Finished;
+        m5.winner = Some(1);
+        m5.finished_at = Some(200);
+
+        let mut m6 = a_match(6);
+        m6.status = MatchStatus::Finished;
+        m6.winner = Some(2);
+        m6.finished_at = Some(100);
+
+        let mut m_ohne = a_match(7);
+        m_ohne.status = MatchStatus::Finished;
+        m_ohne.winner = Some(1);
+        m_ohne.result = MatchResult::Retired;
+        m_ohne.finished_at = None;
+
+        // Ein nicht beendetes Spiel darf nicht auftauchen.
+        let offen = a_match(8);
+
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![m1, m2, m3, m4, m5, m6, m_ohne, offen],
+            Vec::new(),
+        ));
+        let config = AppConfig::default();
+
+        // Limit 40 (Hallennetz): alle sieben beendeten Spiele kommen durch,
+        // sortiert wie oben beschrieben.
+        let state = build_state_limited(&tablet, &config, 1_000, 1, 40);
+        let ids: Vec<i64> = state.finished.iter().map(|f| f.match_id).collect();
+        assert_eq!(
+            ids,
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "neueste zuerst, ohne Zeitstempel ans Ende"
+        );
+        assert_eq!(state.finished[6].result, "retired");
+
+        // Der Relay-Weg kürzt wirklich: Limit 5 heißt genau die fünf
+        // jüngsten Spiele — die beiden ältesten (6, ohne Zeitstempel: 7)
+        // fallen weg, nicht nur irgendwelche.
+        let eng = build_state_limited(&tablet, &config, 1_000, 2, 5);
+        let capped_ids: Vec<i64> = eng.finished.iter().map(|f| f.match_id).collect();
+        assert_eq!(eng.finished.len(), 5, "Limit 5 kappt auf genau fünf");
+        assert_eq!(
+            capped_ids,
+            vec![1, 2, 3, 4, 5],
+            "gekappt wird am Ende der sortierten Liste, nicht wahllos"
+        );
     }
 
     #[test]
@@ -3872,6 +4041,14 @@ mod tests {
             "key",
             "names",
             "enqueued_ms",
+            // Ergebnis-Übersicht: keine Personendaten über die ohnehin
+            // gezeigten Namen hinaus (`team1`/`team2`, `draw_name`,
+            // `round_name`, `class_label`, `discipline`, `sets`, `court`,
+            // `match_num` sind bereits durch Warteliste/Feld erlaubt).
+            "finished",
+            "winner",
+            "result",
+            "finished_at_ms",
         ];
 
         let tablet = TabletState::default();
@@ -3879,9 +4056,19 @@ mod tests {
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
         running.team1 = vec![licensed_player("Müller", "08-001234")];
+        // Ein beendetes Spiel gehört in dieses Fixture: Sonst serialisiert
+        // `finished` als leeres Array, und der Wächter unten sähe nie eines
+        // der 13 `TlFinished`-Felder — ein künftiges Feld dort könnte am
+        // Test vorbeirutschen.
+        let mut finished = a_match(3);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![player("Winter")];
+        finished.team2 = vec![player("Sommer")];
         tablet.set_snapshot(snap(
             vec![a_court(1, None)],
-            vec![running, a_match(2)],
+            vec![running, a_match(2), finished],
             Vec::new(),
         ));
         tablet.attach_tablet(1);
@@ -3889,7 +4076,22 @@ mod tests {
             1,
             r#"{"pause":{"kind":"game","endsAt":1700000000000}}"#.to_string(),
         );
-        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        // Ebenso die Zähltafelbediener-Warteschlange: Ohne Eintrag bliebe
+        // `scorekeepers` leer und der Wächter sähe auch deren Felder nie.
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        let mut config = AppConfig::default();
+        config.scorekeeper.enabled = true;
+        let s = build_state(&tablet, &config, 1_000_000, 1);
+        assert!(
+            !s.finished.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten, \
+             sonst prüft dieser Test die `TlFinished`-Felder gar nicht"
+        );
+        assert!(
+            !s.scorekeepers.is_empty(),
+            "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten, \
+             sonst prüft dieser Test die `TlScorekeeper`-Felder gar nicht"
+        );
 
         let value = serde_json::to_value(&s).unwrap();
         let mut names = std::collections::BTreeSet::new();
@@ -3927,15 +4129,45 @@ mod tests {
         let mut waiting = a_match(2);
         waiting.team1 = vec![licensed_player("Weber", "08-009999")];
         waiting.team2 = vec![licensed_player("Fischer", "08-004321")];
+        // Ein beendetes Spiel gehört auch hier ins Fixture — sonst prüft der
+        // Test die Personendaten in `TlFinished` (Team-Namen, Satzstände)
+        // nie, obwohl genau die über eine aus dem Internet erreichbare Seite
+        // laufen.
+        let mut finished = a_match(3);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![licensed_player("Winter", "08-003333")];
+        finished.team2 = vec![licensed_player("Sommer", "08-004444")];
 
-        let s = state_with(
-            snap(vec![a_court(1, None)], vec![running, waiting], Vec::new()),
-            &AppConfig::default(),
+        // Wie im Allowlist-Wächter: Warteschlange der Zähltafelbediener nicht
+        // leer lassen, sonst prüft dieser Test auch deren Felder nie.
+        // `state_with` reicht dafür nicht (der Tablet-Zustand bleibt darin
+        // gekapselt) — deshalb hier wie dort von Hand aufgebaut.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![running, waiting, finished],
+            Vec::new(),
+        ));
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        let mut config = AppConfig::default();
+        config.scorekeeper.enabled = true;
+        let s = build_state(&tablet, &config, 1_000_000, 7);
+        assert!(
+            !s.finished.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten"
+        );
+        assert!(
+            !s.scorekeepers.is_empty(),
+            "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten"
         );
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 
         for verboten in [
             "08-001234", // die Lizenznummer aus dem Fixture
+            "08-003333", // Lizenznummer des beendeten Spiels
+            "08-004444", // Lizenznummer des beendeten Spiels (Gegenseite)
             "member",    // Lizenznummer-Feld
             "birth",     // Geburtsjahr — laut Projektregel nirgends
             "geburt",

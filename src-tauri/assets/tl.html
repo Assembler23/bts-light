@@ -382,6 +382,22 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 #sk-add button:hover { border-color: var(--accent); color: var(--accent); }
 
+/* Beendet: reine Rückschau, keine Bedienung mehr nötig — deshalb zugeklappt
+   und ohne die Kachel-Optik der Warteliste, nur schmale Zeilen mit Sieger
+   zuerst, Score und ggf. Aufgabe-/kampflos-Kennzeichnung. */
+.fin { margin-top: 16px; }
+.fin .count { color: var(--ink-faint); font-weight: 600; }
+.fin #fin-list { display: flex; flex-direction: column; gap: 6px; }
+.fin-row {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px; min-height: 44px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: .85rem;
+}
+.fin-pair { font-weight: 600; flex: 1 1 12rem; min-width: 0; }
+.fin-meta { color: var(--ink-soft); }
+.fin-score { color: var(--ink-soft); flex: 0 0 auto; }
+
 /* Aufklappbare Abschnitte müssen als solche erkennbar sein — ohne Zeichen
    wirken sie wie eine leere Sektion, und die Turnierleitung glaubt, es
    gäbe dort nichts. */
@@ -557,6 +573,10 @@ body.offline #sk-add button { opacity: .45; }
       </details>
       <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
       <div id="queue"></div>
+      <details class="fin" id="fin-box" hidden>
+        <summary>Beendet <span class="count" id="fin-count"></span></summary>
+        <div id="fin-list"></div>
+      </details>
     </section>
   </main>
 </div>
@@ -1888,6 +1908,40 @@ function renderScorekeepers() {
       send(`sk-del-${b.dataset.skDel}`, { action: "scorekeeper_remove", key: b.dataset.skDel }, "Aus der Warteschlange entfernt.")));
 }
 
+/**
+ * Beendete Spiele.
+ *
+ * Reine Rückschau, neueste zuerst (die Reihenfolge liefert bereits der
+ * Turnier-PC in `state.finished`) — hier wird nichts mehr vergeben, deshalb
+ * zugeklappt und ohne Bedienelemente. Der Sieger steht zuerst, wie man ein
+ * Ergebnis vorliest; die Kennzeichnung Aufgabe/kampflos/disqualifiziert
+ * sitzt neben dem Satzstand.
+ */
+const ERGEBNIS_BADGE = { walkover: "kampflos", retired: "Aufgabe", disqualified: "disqualifiziert" };
+function renderFinished() {
+  const list = state.finished || [];
+  $("fin-box").hidden = list.length === 0;
+  $("fin-count").textContent = list.length ? `(${list.length})` : "";
+  $("fin-list").innerHTML = list.map((f) => {
+    // Sieger zuerst gilt auch für die Satzstände: Sonst läse man bei einem
+    // Sieger-2-Spiel "Meier – Müller 15:21 · 18:21" — als hätte der zuerst
+    // genannte (der Sieger!) jeden Satz verloren.
+    const sets = (f.sets || [])
+      .map(([a, b]) => (f.winner === 2 ? `${b}:${a}` : `${a}:${b}`))
+      .join(" · ");
+    const badge = ERGEBNIS_BADGE[f.result]
+      ? `<span class="badge warn">${ERGEBNIS_BADGE[f.result]}</span>` : "";
+    // Der Sieger zuerst genannt — so liest man ein Ergebnis vor.
+    const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
+    const paar = f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
+    return `<div class="fin-row" data-fin="${f.match_id}">
+      <span class="fin-pair">${esc(paar)}</span>
+      <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court].filter(Boolean).join(" · "))}</span>
+      <span class="fin-score num">${esc(sets)}${badge}</span>
+    </div>`;
+  }).join("");
+}
+
 /** Manuell einen Zähltafelbediener in die Warteschlange eintragen. */
 async function addScorekeeper(ev) {
   ev.preventDefault();
@@ -1954,6 +2008,7 @@ function render() {
   renderWalkovers();
   renderScorekeepers();
   renderQueue();
+  renderFinished();
 }
 
 /** Nur die Uhren neu setzen — nicht die ganze Seite, sonst flackert sie

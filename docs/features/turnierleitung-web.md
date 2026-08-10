@@ -221,12 +221,13 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 **Ansicht**
 
-- [ ] Die Seite zeigt Felder, Spielliste, Zeiten, Live-Spielstände,
+- [~] Die Seite zeigt Felder, Spielliste, Zeiten, Live-Spielstände,
       Zähltafelbediener je Feld, beendete Spiele und Walkover-Vorschläge in
       **einer** Ansicht.
-      → **Bis auf die beendeten Spiele erfüllt.** Ein Abschnitt dafür fehlt;
-      der Zustand trägt sie auch nicht. Wer nachsehen will, was gelaufen
-      ist, muss weiterhin an den Turnier-PC.
+      → **Erfüllt (2026-08-10).** Der zugeklappte Abschnitt „Beendet"
+      (`tl.html`) zeigt die zuletzt beendeten Spiele, neueste zuerst, mit
+      Aufgabe-/kampflos-/disqualifiziert-Kennzeichnung. Am echten Gerät
+      noch nicht nachgewiesen — deshalb `[~]` statt `[x]`.
 - [x] Die Spielliste ist in drei Abschnitte gegliedert — *In Vorbereitung
       gerufen* (mit „seit X min"), *Spielbereit*, *Noch nicht bereit* — und
       innerhalb jedes Abschnitts exakt so sortiert wie die automatische
@@ -388,29 +389,37 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 ### Was offen ist
 
-**19 belegt, 26 umgesetzt aber nicht am echten Gerät nachgewiesen, 4 offen.**
+**28 belegt, 19 umgesetzt aber nicht am echten Gerät nachgewiesen, 3 offen**
+(Auszählung der Kriterien oben, „Zugang und Geräte" bis „Nachvollziehbarkeit";
+die beiden folgenden Wiederholungs-Bullets zählen nicht mit — sie verweisen
+nur auf Kriterien, die dort schon erfasst sind).
 
-- [x] **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
+- [~] **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
       pflegen.** **Erledigt (2026-08-10):** Vorziehen, Entfernen und
       manuelles Hinzufügen sind jetzt in `tl.html` bedienbar — siehe
       [turnierleitung-web.md](../turnierleitung-web.md), Abschnitt „Im
       Betrieb". Am echten Gerät noch nicht nachgewiesen (zählt daher zu den
-      26, nicht zu den 19 belegten).
+      19, nicht zu den 28 belegten).
+- [~] **Beendete Spiele fehlen in der Ansicht.** **Erledigt (2026-08-10):**
+      Der zugeklappte Abschnitt „Beendet" zeigt die zuletzt beendeten
+      Spiele, neueste zuerst, mit Aufgabe-/kampflos-/
+      disqualifiziert-Kennzeichnung — siehe
+      [turnierleitung-web.md](../turnierleitung-web.md), Abschnitt „Im
+      Betrieb". Am echten Gerät noch nicht nachgewiesen (zählt daher zu den
+      19, nicht zu den 28 belegten).
 
-Die vier verbleibenden offenen in der Reihenfolge, in der sie im Betrieb
+Die drei verbleibenden offenen in der Reihenfolge, in der sie im Betrieb
 wehtun:
 
-1. **Beendete Spiele fehlen in der Ansicht.** Nachsehen, was gelaufen ist,
-   geht nur am PC.
-2. **„Eingeschaltet, aber kein Gerät gekoppelt"** wird nicht als Problem
+1. **„Eingeschaltet, aber kein Gerät gekoppelt"** wird nicht als Problem
    benannt. Der Zustand entsteht regulär nach einem Identitäts-Umzug und
    sieht aus wie ein fertiges Setup, während jede Anfrage abgewiesen wird.
-3. **Keine Altersprüfung der Ansicht** — mit Begründung oben; die
+2. **Keine Altersprüfung der Ansicht** — mit Begründung oben; die
    fachlichen Prüfungen decken die konkreten Fälle ab.
-4. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
+3. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
    nicht; geschützt sind die Daten-Routen, nicht die leere Hülle.
 
-**Die 26 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
+**Die 19 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
 und größtenteils durch Unit-Tests gestützt, aber der Nachweis, auf den es
 ankommt, fehlt: iPad Safari und Android Chrome mit echten Fingern, zwei
 Geräte gleichzeitig am selben Feld, ein Relay-Neustart mitten im Betrieb,
