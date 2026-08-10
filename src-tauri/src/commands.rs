@@ -256,6 +256,13 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     if imported.tl_web.devices.is_empty() {
         imported.tl_web.devices = current.tl_web.devices.clone();
     }
+    // Raster-Anordnungen (Task 9/11) fehlen in Bündeln aus einer Version vor
+    // deren Einführung — ein leeres Feld heißt dann „unbekannt", nicht „am
+    // neuen PC absichtlich gelöscht". Sonst würde ein Identitäts-Import mit
+    // altem Bündel die hier schon eingerichteten Raster stillschweigend wegwischen.
+    if imported.hall_layouts.is_empty() {
+        imported.hall_layouts = current.hall_layouts.clone();
+    }
     imported
 }
 
@@ -3162,6 +3169,59 @@ mod tests {
         assert_eq!(merged.btp.password.as_deref(), Some("aktuell-btp"));
         assert_eq!(merged.badhub.password, "aktuell-badhub");
         assert_eq!(merged.azure_tts.key, "aktuell-azure");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_hall_layouts_when_bundle_has_none() {
+        // Bündel aus einer Version vor Task 9/11 (oder eins ohne Raster
+        // eingerichtet) trägt ein leeres `hall_layouts` — das darf die am
+        // aktuellen PC eingerichteten Raster NICHT stillschweigend löschen.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle A".to_string(),
+            columns: 3,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+        let imported = cfg_id("inst-neu", None, "", "");
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu", "Identität wird übernommen");
+        assert_eq!(
+            merged.hall_layouts.len(),
+            1,
+            "lokal eingerichtete Raster bleiben, wenn das Bündel keine trägt"
+        );
+        assert_eq!(merged.hall_layouts[0].hall, "Halle A");
+    }
+
+    #[test]
+    fn apply_imported_identity_takes_bundle_hall_layouts_when_present() {
+        // Trägt das Bündel eigene Raster, gelten die (echter Umzug einer
+        // Installation, die das Raster schon eingerichtet hatte) — nicht die
+        // am neuen PC ggf. schon vorhandenen.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle Alt".to_string(),
+            columns: 2,
+            origin: crate::config::LayoutOrigin::TopRight,
+            serpentine: true,
+        });
+        let mut imported = cfg_id("inst-neu", None, "", "");
+        imported.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "Halle Neu".to_string(),
+            columns: 4,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(
+            merged.hall_layouts.len(),
+            1,
+            "das importierte Raster gilt, nicht das lokale"
+        );
+        assert_eq!(merged.hall_layouts[0].hall, "Halle Neu");
     }
 
     #[test]

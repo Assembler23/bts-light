@@ -638,7 +638,12 @@ export function FieldOverviewPage({
                         ? `Für „${selCand?.draw_name || selCand?.label}" nicht erlaubt (andere Halle)`
                         : undefined
                     }
-                    className={`flex w-44 flex-col overflow-hidden rounded-xl border bg-white ${
+                    className={`flex flex-col overflow-hidden rounded-xl border bg-white ${
+                      // Im Raster füllt die Karte ihre Zelle (Track-Breite
+                      // variiert mit der Spaltenzahl, wie tl.html's `.card`);
+                      // in der Fließ-Liste bleibt die feste Kartenbreite.
+                      pos ? "min-w-0" : "w-44"
+                    } ${
                       ball === "match"
                         ? "border-rose-400 ring-2 ring-rose-300"
                         : ball === "set"
