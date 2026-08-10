@@ -283,14 +283,15 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
       **ein** BTP-Schreibvorgang, es gibt keinen Zwischenzustand ohne Feld.
 - [~] Ein Spiel lässt sich vom Feld herunternehmen; geht dabei ein
       laufender Spielstand verloren, kommt vorher eine Rückfrage.
-- [ ] Vorbereitungs-Aufruf setzen und zurücknehmen, zweiter und dritter
+- [~] Vorbereitungs-Aufruf setzen und zurücknehmen, zweiter und dritter
       Aufruf, Ergebnis nachtragen, Aufgabe/kampflos werten und die
       Zähltafelbediener-Warteschlange pflegen (vorziehen, entfernen,
       ergänzen) funktionieren aus der Seite heraus.
-      → **Bis auf die Zähltafelbediener erfüllt.** Der Host beherrscht alle
-      drei Aktionen und prüft sie (`ScorekeeperAdvance`/`Remove`/`Add`), die
-      Seite bietet keine Bedienung dafür an — die Warteschlange ist dort nur
-      je Feld sichtbar. Pflegen geht weiterhin nur am Turnier-PC.
+      → **Erfüllt (2026-08-10).** Der Host beherrscht alle drei
+      Zähltafelbediener-Aktionen und prüft sie (`ScorekeeperAdvance`/
+      `Remove`/`Add`); die Seite bietet jetzt auch die Bedienung dafür an
+      (`tl.html`, Abschnitt „Zähltafel-Warteschlange"). Am echten Gerät noch
+      nicht nachgewiesen — deshalb `[~]` statt `[x]`.
 - [~] Die automatische Feldvergabe ist als Zustand sichtbar und lässt sich
       umschalten; nach einer Zuweisung von Hand pausiert sie sichtbar für
       60 s, damit sie dem Helfer nicht dazwischenfunkt.
@@ -387,25 +388,29 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 ### Was offen ist
 
-**19 belegt, 25 umgesetzt aber nicht am echten Gerät nachgewiesen, 5 offen.**
+**19 belegt, 26 umgesetzt aber nicht am echten Gerät nachgewiesen, 4 offen.**
 
-Die fünf offenen in der Reihenfolge, in der sie im Betrieb wehtun:
+- [x] **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
+      pflegen.** **Erledigt (2026-08-10):** Vorziehen, Entfernen und
+      manuelles Hinzufügen sind jetzt in `tl.html` bedienbar — siehe
+      [turnierleitung-web.md](../turnierleitung-web.md), Abschnitt „Im
+      Betrieb". Am echten Gerät noch nicht nachgewiesen (zählt daher zu den
+      26, nicht zu den 19 belegten).
 
-1. **Zähltafelbediener-Warteschlange lässt sich aus der Seite nicht
-   pflegen.** Der Host kann es, die Bedienung fehlt. Wer die Reihenfolge
-   ändern will, muss an den Turnier-PC — genau der Weg, den dieses Feature
-   abschaffen sollte.
-2. **Beendete Spiele fehlen in der Ansicht.** Dasselbe: Nachsehen, was
-   gelaufen ist, geht nur am PC.
-3. **„Eingeschaltet, aber kein Gerät gekoppelt"** wird nicht als Problem
+Die vier verbleibenden offenen in der Reihenfolge, in der sie im Betrieb
+wehtun:
+
+1. **Beendete Spiele fehlen in der Ansicht.** Nachsehen, was gelaufen ist,
+   geht nur am PC.
+2. **„Eingeschaltet, aber kein Gerät gekoppelt"** wird nicht als Problem
    benannt. Der Zustand entsteht regulär nach einem Identitäts-Umzug und
    sieht aus wie ein fertiges Setup, während jede Anfrage abgewiesen wird.
-4. **Keine Altersprüfung der Ansicht** — mit Begründung oben; die
+3. **Keine Altersprüfung der Ansicht** — mit Begründung oben; die
    fachlichen Prüfungen decken die konkreten Fälle ab.
-5. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
+4. **Die Formulierung „Seite nicht erreichbar"** trifft die Umsetzung
    nicht; geschützt sind die Daten-Routen, nicht die leere Hülle.
 
-**Die 25 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
+**Die 26 mit [~] sind kein Formfehler.** Sie sind im Code nachvollziehbar
 und größtenteils durch Unit-Tests gestützt, aber der Nachweis, auf den es
 ankommt, fehlt: iPad Safari und Android Chrome mit echten Fingern, zwei
 Geräte gleichzeitig am selben Feld, ein Relay-Neustart mitten im Betrieb,

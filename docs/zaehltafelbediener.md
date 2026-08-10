@@ -72,6 +72,19 @@ den Relay mit: `MatchBrief` trägt `scorekeeper` + `scorekeeper_assigned`
 **nur bei `scorekeeper_assigned`** an. Reicht die Cloud (relay-deploy für
 MatchBrief) + die App.
 
+## Bedienung aus der Turnierleitungs-Seite (TL-Web)
+
+Die Warteschlange ist auch in der browserbasierten [Turnierleitungs-Seite
+(TL-Web)](turnierleitung-web.md) sichtbar und bedienbar — nicht nur in der
+Spielübersicht am Turnier-PC. Ein eigener aufklappbarer Abschnitt zeigt die
+Wartenden samt Wartezeit; von dort lässt sich **vorziehen**, **entfernen**
+und **manuell hinzufügen** — dieselben host-seitigen Commands wie am
+Turnier-PC (`advance_scorekeeper`, `remove_scorekeeper`, `add_scorekeeper`,
+auf die Leitung als `TlAction::ScorekeeperAdvance`/`ScorekeeperRemove`/
+`ScorekeeperAdd`). Der Abschnitt erscheint nur bei eingeschalteter
+Verwaltung (`config.scorekeeper.enabled`) — sonst gäbe es dort nichts zu
+bedienen. Umgesetzt in `src-tauri/assets/tl.html`.
+
 ## Noch offen
 
 - **Mindestpause** (`break_seconds`): in Phase 1 **ohne Wirkung** — ein
