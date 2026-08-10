@@ -381,13 +381,22 @@ mitgeändert worden:
   aus**)*. Befund beim Umsetzen korrigiert: tl.html nutzte bereits
   Pointer-Events statt HTML5-DnD; der eigentliche Fehler war
   `touch-action: pan-y` auf der Zeile, das jede Wischbewegung sofort als
-  Scrollen beanspruchte, bevor die 8-px-Schwelle greifen konnte — und, nach
-  Review-Befund, ändert eine Klasse mitten in der Geste an `touch-action`
-  ohnehin nichts mehr (Chrome legt es bei `touchstart` für die ganze Geste
-  fest). Fix: Long-Press bewaffnet den Touch-Zug erst nach ~300 ms ruhigem
-  Halten; die eigentliche Scroll-Unterdrückung übernimmt ein
-  `touchmove`-Listener mit `{passive:false}`, die Klasse bleibt nur als
-  Bauklotz-auf-Bauklotz-Absicherung.
+  Scrollen beanspruchte, bevor die 8-px-Schwelle greifen konnte.
+  **Zwischenstand Long-Press (verworfen):** Erster Fix bewaffnete den
+  Touch-Zug nach ~300 ms ruhigem Halten, mit einem `touchmove`-Listener zur
+  Scroll-Unterdrückung. **Rückmeldung vom echten Android-Tablet: klappte nur
+  in ca. 1 von 10 Versuchen** („zu schnell will er scrollen und verliert den
+  Touch") — Chrome legt das erlaubte `touch-action` schon beim allerersten
+  `touchstart` für die ganze Geste fest, ein natürliches Fingerzittern von
+  wenigen Pixeln reichte, damit der Browser die Geste noch WÄHREND der
+  300-ms-Wartezeit als Scrollen einstufte. Ein Long-Press auf einer
+  scrollbaren Liste verliert dieses Wettrennen strukturell.
+  **Umbau auf Zieh-Griff (Standard-Muster für mobiles Drag):** ein eigenes
+  Griff-Element (⠿) an jeder ziehbaren Zeile/Kachel, `touch-action: none`
+  STATISCH nur auf dem Griff selbst — die Geste beginnt gezielt dort, kein
+  Wettrennen mehr, kein Long-Press, sofortiges Bewaffnen. Ein Tipp irgendwo
+  sonst auf der Zeile bleibt unverändert scrollen + Antippen-dann-Antippen.
+  **Gerätetest auf echtem Android-Tablet erneut ausstehend.**
 
 **Hallen-Check-In (überwiegend badhub-Repo; ändert die Spec
 [features/spieler-check-in.md](features/spieler-check-in.md) — vor
