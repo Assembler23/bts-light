@@ -214,6 +214,29 @@ gegen ein laufendes BTP, welche Felder an Matches vorkommen, und zeigt
 alles Ortsverdächtige. So lässt sich für jedes neue Turnier in Sekunden
 klären, womit man es zu tun hat.
 
+#### Schreibversuch gemessen (10.08.2026)
+
+Der Lesebefund oben klärt nur, ob BTP eine `LocationID` **liefert** — nicht,
+ob sie sich auch **setzen** lässt. Probe dazu: `tests/btp_location_probe.rs`,
+Test `does_btp_accept_a_location_write_for_a_scheduled_match`. Sie schickt
+gegen ein laufendes Test-BTP einen minimalen `SENDUPDATE`, der an einem
+angesetzten Match ausschließlich `ID, DrawID, PlanningID, LocationID`
+setzt.
+
+**Befund:** BTP beantwortet den Schreibversuch mit `Result=1` (Erfolg) —
+übernimmt den Wert aber nicht. Beleg: `LocationID` VORHER `None`, Ziel `1`
+gesendet, NACHHER weiterhin `None`. Alle anderen Felder (`CourtID`, `Sets`,
+`Winner`, `Status`) blieben dabei unverändert; der Restore-Schritt lief
+ebenfalls erfolgreich und wurde verifiziert.
+
+**Folgerung:** Eine Spielort-Rückschreibung nach BTP ist über `SENDUPDATE`
+nicht möglich — `Match.LocationID` verhält sich wie ein serverseitig
+abgeleitetes, nur lesbares Feld. Allgemeiner gilt: `Result=1` ist bei einem
+unbekannten Feld kein verlässliches Erfolgssignal — jeder künftige
+Schreibpfad muss den Wert zur Kontrolle zurücklesen. Deshalb bleibt die
+Hallen-Festlegung in TL-Web (`TlAction::SetHall`) bewusst host-lokal
+(bts-light + Liveticker) statt nach BTP zurückzuschreiben.
+
 ### Die Reihenfolge der angesetzten Spiele
 
 **`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**

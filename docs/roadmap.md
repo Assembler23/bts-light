@@ -80,6 +80,10 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   Disziplin-Regel → Hand → Vorbereitungs-Aufruf (`assign::hall_for_match`).
   Siehe [turnierleitung-web.md](turnierleitung-web.md). Details:
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+  **Schreibversuch gemessen (10.08.2026):** Ein `SENDUPDATE` mit
+  `LocationID` wird von BTP mit `Result=1` beantwortet, der Wert aber
+  verworfen — Rückschreibung nach BTP ist damit unmöglich, `SetHall`
+  bleibt bewusst host-lokal. Befund: [btp_protocol.md](btp_protocol.md).
 - **Tablet: helles, akkuschonendes Styling.** Das dunkle Design zwingt die
   Schiedsrichter, die Display-Helligkeit hochzudrehen → Akkus leeren sich
   schneller. Ziel: helles Theme bzw. ein Kontrast-Styling, das auch bei

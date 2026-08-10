@@ -318,7 +318,10 @@ fn location_only_request(
 fn raw_preview(bytes: &[u8]) -> String {
     match wire::decode_message(bytes) {
         Ok(xml) => xml,
-        Err(e) => format!("(nicht als Wire-XML dekodierbar: {e}; {} Rohbytes)", bytes.len()),
+        Err(e) => format!(
+            "(nicht als Wire-XML dekodierbar: {e}; {} Rohbytes)",
+            bytes.len()
+        ),
     }
 }
 
@@ -366,7 +369,11 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
         .expect("BTP erreichbar (VORHER-Snapshot)");
 
     println!("\n=== Turnier: {} ===", before.tournament_name);
-    println!("Locations ({}): {:?}", before.locations.len(), before.locations);
+    println!(
+        "Locations ({}): {:?}",
+        before.locations.len(),
+        before.locations
+    );
 
     if before.locations.is_empty() {
         println!("\nABBRUCH: Turnier pflegt KEINE Locations — Messung nicht möglich.");
@@ -380,11 +387,17 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
         .matches
         .iter()
         .filter(|m| {
-            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty() && m.court_id.is_none()
+            m.status == MatchStatus::Scheduled
+                && !m.team1.is_empty()
+                && !m.team2.is_empty()
+                && m.court_id.is_none()
         })
         .collect();
     kandidaten.sort_by_key(|m| m.id);
-    println!("Kandidaten (Scheduled, beide Teams, ohne Court): {}", kandidaten.len());
+    println!(
+        "Kandidaten (Scheduled, beide Teams, ohne Court): {}",
+        kandidaten.len()
+    );
 
     // Erstes Kandidat/Location-Paar, bei dem sich die LocationID vom
     // aktuellen Wert unterscheidet (auch None ≠ jede echte ID zählt als
@@ -416,7 +429,9 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
     println!("  MatchID={match_id} DrawID={draw_id} PlanningID={planning_id}");
     println!(
         "  LocationID VORHER: {}",
-        original_location_id.map(|l| l.to_string()).unwrap_or_else(|| "-".into())
+        original_location_id
+            .map(|l| l.to_string())
+            .unwrap_or_else(|| "-".into())
     );
     println!("  LocationID NEU (Ziel): {ziel_location}");
     println!("  CourtID VORHER: {original_court_id:?}");
@@ -429,12 +444,22 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
     let write_raw = client::send_request(
         &host(),
         port(),
-        &location_only_request(match_id, draw_id, planning_id, ziel_location, &session, pw_ref),
+        &location_only_request(
+            match_id,
+            draw_id,
+            planning_id,
+            ziel_location,
+            &session,
+            pw_ref,
+        ),
     )
     .await
     .expect("BTP erreichbar (SENDUPDATE LocationID)");
 
-    println!("\n=== Rohantwort SENDUPDATE (nur LocationID) ===\n{}", raw_preview(&write_raw));
+    println!(
+        "\n=== Rohantwort SENDUPDATE (nur LocationID) ===\n{}",
+        raw_preview(&write_raw)
+    );
 
     let write_nodes = proto::decode_response(&write_raw).expect("SENDUPDATE-Antwort dekodierbar");
     let write_result = proto::parse_update_response(&write_nodes);
@@ -451,11 +476,26 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
         .expect("Ziel-Match nach dem Schreiben noch im Turnier vorhanden");
 
     println!("\n=== Ziel-Match NACHHER (vor Restore) ===");
-    println!("  LocationID NACHHER: {:?}  (VORHER: {:?}, Ziel war: {ziel_location})", nach_match.location_id, original_location_id);
-    println!("  CourtID NACHHER:    {:?}  (VORHER: {original_court_id:?})", nach_match.court_id);
-    println!("  Sets NACHHER:       {:?}  (VORHER: {original_sets:?})", nach_match.sets);
-    println!("  Winner NACHHER:     {:?}  (VORHER: {original_winner:?})", nach_match.winner);
-    println!("  Status NACHHER:     {:?}  (VORHER: {original_status:?})", nach_match.status);
+    println!(
+        "  LocationID NACHHER: {:?}  (VORHER: {:?}, Ziel war: {ziel_location})",
+        nach_match.location_id, original_location_id
+    );
+    println!(
+        "  CourtID NACHHER:    {:?}  (VORHER: {original_court_id:?})",
+        nach_match.court_id
+    );
+    println!(
+        "  Sets NACHHER:       {:?}  (VORHER: {original_sets:?})",
+        nach_match.sets
+    );
+    println!(
+        "  Winner NACHHER:     {:?}  (VORHER: {original_winner:?})",
+        nach_match.winner
+    );
+    println!(
+        "  Status NACHHER:     {:?}  (VORHER: {original_status:?})",
+        nach_match.status
+    );
     println!(
         "  (BTP liefert keinen sichtbaren Check-in-Bitfeld-Wert am Match — die \
          Probe schreibt bewusst KEIN `Status`, siehe `court_assign_request`-Kommentar \
@@ -498,13 +538,24 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
     let restore_raw = client::send_request(
         &host(),
         port(),
-        &location_only_request(match_id, draw_id, planning_id, restore_target, &session2, pw_ref),
+        &location_only_request(
+            match_id,
+            draw_id,
+            planning_id,
+            restore_target,
+            &session2,
+            pw_ref,
+        ),
     )
     .await
     .expect("BTP erreichbar (RESTORE)");
-    println!("\n=== Rohantwort RESTORE ===\n{}", raw_preview(&restore_raw));
-    let restore_result =
-        proto::parse_update_response(&proto::decode_response(&restore_raw).expect("Restore-Antwort dekodierbar"));
+    println!(
+        "\n=== Rohantwort RESTORE ===\n{}",
+        raw_preview(&restore_raw)
+    );
+    let restore_result = proto::parse_update_response(
+        &proto::decode_response(&restore_raw).expect("Restore-Antwort dekodierbar"),
+    );
     println!("Restore parse_update_response: {restore_result:?}");
 
     let after_restore = client::fetch_snapshot(&host(), port(), pw_ref)
