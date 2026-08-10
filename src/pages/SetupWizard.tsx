@@ -525,6 +525,11 @@ export function SetupWizard({
       // JSON, und der Rust-Default greift – hier hieße das: alle gekoppelten
       // Geräte verlieren beim nächsten Speichern ihren Zugang.
       tl_web: initialConfig.tl_web ?? { enabled: false, devices: [] },
+      // Hallen-Raster unverändert durchreichen – wird auf der Felderübersicht
+      // gepflegt, nicht hier. Der Host schützt das Feld ohnehin beim Speichern
+      // (`keep_host_managed_fields`), aber ein leeres Array wäre trotzdem
+      // falsch beim allerersten Speichern vor dem ersten Laden.
+      hall_layouts: initialConfig.hall_layouts ?? [],
     };
   }
 

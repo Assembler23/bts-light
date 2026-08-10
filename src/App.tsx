@@ -116,6 +116,8 @@ function defaultConfig(): AppConfig {
     tournament_logo: { data: "", mime: "", background_color: "" },
     // Turnierleitungs-Oberfläche: aus, ohne gekoppelte Geräte (ADR 0010).
     tl_web: { enabled: false, devices: [] },
+    // Hallen-Raster: leer = Fließ-Darstellung, wird auf der Felderübersicht gepflegt.
+    hall_layouts: [],
   };
 }
 

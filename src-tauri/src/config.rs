@@ -517,11 +517,40 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien lesbar; der Default ist **aus**.
     #[serde(default)]
     pub tl_web: TlWebConfig,
+    /// Raster-Anordnung der Felder je Halle (Felderübersicht + TL-Web).
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar; Default
+    /// leer = Fließ-Darstellung ohne festes Raster.
+    #[serde(default)]
+    pub hall_layouts: Vec<HallLayoutConfig>,
 }
 
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
 fn default_tablet_settings_pin() -> String {
     "0000".to_string()
+}
+
+/// Ecke, in der die Feld-Nummerierung beginnt — aus Sicht der
+/// Turnierleitung auf die Halle geschaut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutOrigin {
+    BottomLeft,
+    BottomRight,
+    TopLeft,
+    TopRight,
+}
+
+/// Anordnung der Felder einer Halle als Raster. Host-Einstellung: Alle
+/// Geräte zeigen dasselbe Raster — sonst meinte „das Feld links unten"
+/// auf jedem Tablet ein anderes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HallLayoutConfig {
+    pub hall: String,
+    pub columns: u8,
+    pub origin: LayoutOrigin,
+    /// Richtungswechsel je Reihe (Schlangen-Nummerierung), wie Hallen
+    /// mit 1-2-3 / 6-5-4 zählen.
+    pub serpentine: bool,
 }
 
 /// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0012).
@@ -720,6 +749,30 @@ mod tests {
         assert_eq!(AppConfig::load_from(&path).unwrap(), AppConfig::default());
     }
 
+    #[test]
+    fn hall_layouts_survive_a_config_roundtrip_and_default_empty() {
+        // Alte Configs ohne das Feld laden weiter (serde default) — `btp` und
+        // `badhub` sind Pflichtfelder ohne Default, deshalb minimal statt "{}"
+        // (Muster aus `config_without_announce_key_loads_with_defaults`).
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert!(cfg.hall_layouts.is_empty());
+        // … und ein gesetztes Layout überlebt Speichern + Laden.
+        let mut cfg = cfg;
+        cfg.hall_layouts.push(HallLayoutConfig {
+            hall: "Halle 1".into(),
+            columns: 3,
+            origin: LayoutOrigin::BottomRight,
+            serpentine: true,
+        });
+        let json = serde_json::to_string(&cfg).expect("serialisiert");
+        let zurueck: AppConfig = serde_json::from_str(&json).expect("lädt");
+        assert_eq!(zurueck.hall_layouts, cfg.hall_layouts);
+    }
+
     fn rule(disc: &str, draw: &str, hall: &str) -> DisciplineHallRule {
         DisciplineHallRule {
             discipline: disc.to_string(),
@@ -903,6 +956,12 @@ mod tests {
                     hall: "Halle A".to_string(),
                 }],
             },
+            hall_layouts: vec![HallLayoutConfig {
+                hall: "Halle A".to_string(),
+                columns: 4,
+                origin: LayoutOrigin::TopLeft,
+                serpentine: true,
+            }],
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

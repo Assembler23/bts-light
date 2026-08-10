@@ -185,6 +185,9 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     } else {
         incoming.tl_web.devices.clear();
     }
+    // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht im
+    // Assistenten — dessen Speichern darf sie nicht zurücksetzen.
+    incoming.hall_layouts = current.hall_layouts.clone();
     incoming
 }
 
@@ -2419,6 +2422,36 @@ pub fn tl_web_set_enabled(
     })
 }
 
+/// Legt die Raster-Anordnung einer Halle fest (oder ersetzt sie).
+#[tauri::command]
+pub fn set_hall_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    layout: crate::config::HallLayoutConfig,
+) -> Result<AppConfig, String> {
+    if layout.columns == 0 || layout.columns > 12 {
+        return Err("Spaltenzahl muss zwischen 1 und 12 liegen.".into());
+    }
+    mutate_config(&app, &state, move |cfg| {
+        cfg.hall_layouts.retain(|l| l.hall != layout.hall);
+        cfg.hall_layouts.push(layout);
+        Ok(())
+    })
+}
+
+/// Entfernt die Anordnung einer Halle — zurück zur Fließ-Darstellung.
+#[tauri::command]
+pub fn remove_hall_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.hall_layouts.retain(|l| l.hall != hall);
+        Ok(())
+    })
+}
+
 /// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und
 /// liefert den neuen Stand.
 ///
@@ -3016,6 +3049,23 @@ mod tests {
             "das inzwischen gekoppelte Gerät bleibt"
         );
         assert_eq!(merged.tl_web.devices[0].token, "tok-frisch");
+    }
+
+    #[test]
+    fn the_wizard_cannot_wipe_the_hall_layouts() {
+        // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht
+        // im Assistenten — dessen Speichern darf sie nicht zurücksetzen
+        // (dieselbe Falle wie bei der Geräteliste oben).
+        let mut current = AppConfig::default();
+        current.hall_layouts.push(crate::config::HallLayoutConfig {
+            hall: "H1".into(),
+            columns: 2,
+            origin: crate::config::LayoutOrigin::BottomLeft,
+            serpentine: false,
+        });
+        let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert_eq!(ergebnis.hall_layouts, current.hall_layouts);
     }
 
     #[test]

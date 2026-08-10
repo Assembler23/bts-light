@@ -10,6 +10,7 @@ import type {
   DrawInfo,
   FinishedMatchRow,
   FreetextItem,
+  HallLayoutConfig,
   MonitorDeviceInfo,
   MonitorTarget,
   NameOverride,
@@ -268,6 +269,16 @@ export const tlDeviceRemove = (id: string): Promise<AppConfig> =>
  *  Konfiguration. */
 export const tlWebSetEnabled = (enabled: boolean): Promise<AppConfig> =>
   invoke("tl_web_set_enabled", { enabled });
+
+/** Legt die Raster-Anordnung einer Halle fest (oder ersetzt sie); liefert
+ *  die neue Konfiguration. */
+export const setHallLayout = (layout: HallLayoutConfig): Promise<AppConfig> =>
+  invoke("set_hall_layout", { layout });
+
+/** Entfernt die Anordnung einer Halle — zurück zur Fließ-Darstellung;
+ *  liefert die neue Konfiguration. */
+export const removeHallLayout = (hall: string): Promise<AppConfig> =>
+  invoke("remove_hall_layout", { hall });
 
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (

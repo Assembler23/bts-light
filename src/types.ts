@@ -519,6 +519,24 @@ export interface AppConfig {
   tournament_logo: LogoConfig;
   /** Turnierleitungs-Oberfläche im Browser (ADR 0010/0011). Opt-in, Default aus. */
   tl_web: TlWebConfig;
+  /** Raster-Anordnung der Felder je Halle (Felderübersicht + TL-Web). Leer =
+   *  Fließ-Darstellung ohne festes Raster. */
+  hall_layouts: HallLayoutConfig[];
+}
+
+/** Ecke, in der die Feld-Nummerierung beginnt — aus Sicht der Turnierleitung
+ *  auf die Halle geschaut (Rust: `config::LayoutOrigin`). */
+export type LayoutOrigin = "bottom_left" | "bottom_right" | "top_left" | "top_right";
+
+/** Anordnung der Felder einer Halle als Raster (Rust: `config::HallLayoutConfig`).
+ *  Host-Einstellung: Alle Geräte zeigen dasselbe Raster. */
+export interface HallLayoutConfig {
+  hall: string;
+  columns: number;
+  origin: LayoutOrigin;
+  /** Richtungswechsel je Reihe (Schlangen-Nummerierung), wie Hallen mit
+   *  1-2-3 / 6-5-4 zählen. */
+  serpentine: boolean;
 }
 
 /** Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011). */
