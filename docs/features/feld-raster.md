@@ -1,6 +1,7 @@
 # Feld-Raster je Halle — Mini-Spezifikation
 
-> Status: Umgesetzt 2026-08-10 (Teil des Pakets „TL-Web-Ausbau").
+> Status: Umgesetzt 2026-08-10 (Teil des Pakets „TL-Web-Ausbau"), erweitert
+> um die Nummerierungsrichtung (`vertical`, wählbar horizontal/vertikal).
 > Betroffene Crates: `src-tauri/`, `src/`.
 
 ## Problem
@@ -15,7 +16,8 @@ bestimmtes Feld zu finden, muss erst die Nummer suchen.
 
 - **Konfiguration je Halle**, am Turnier-PC gesetzt: Spaltenzahl, Start-Ecke
   (welche Ecke Feld 1 ist, aus Sicht der Turnierleitung auf die Halle
-  geschaut), Schlangen-/Zick-Zack-Nummerierung an/aus.
+  geschaut), Nummerierungsrichtung (reihenweise/horizontal — Default — oder
+  spaltenweise/vertikal), Schlangen-/Zick-Zack-Nummerierung an/aus.
 - **Mapping** von Feld-Index → Bildschirm-Zelle (Spalte/Reihe), rein
   geometrisch, ohne Turnierlogik.
 - Anwendung in **beiden** Oberflächen: App (`FieldOverviewPage.tsx`) und
@@ -41,8 +43,14 @@ pub struct HallLayoutConfig {
     pub columns: u8,
     pub origin: LayoutOrigin,   // BottomLeft | BottomRight | TopLeft | TopRight
     pub serpentine: bool,
+    pub vertical: bool,        // false = reihenweise (Default), true = spaltenweise
 }
 ```
+
+`vertical` ist ein `#[serde(default)]`-Feld: Konfigurationen aus der Zeit vor
+dieser Erweiterung (v0.9.178) kennen den Schlüssel nicht und laden mit
+`false` — genau dem bisherigen, einzigen Verhalten. Getestet in
+`config::tests::hall_layout_without_vertical_key_loads_as_horizontal`.
 
 `AppConfig.hall_layouts: Vec<HallLayoutConfig>` — eine Halle ohne Eintrag
 bleibt in der bisherigen Fließ-Darstellung. Verwaltet über die
@@ -59,9 +67,39 @@ Personendaten — auf der Allowlist ohne weitere Diskussion.
 ## Mapping
 
 Kanonische Implementierung: `src/io/hallGrid.mjs`, Funktion
-`gridPositions(count, { columns, origin, serpentine })` → Liste von
+`gridPositions(count, { columns, origin, serpentine, vertical })` → Liste von
 `{ col, row }` (Bildschirm-Koordinaten, `row 0` = oben, `col 0` = links).
-Getestet in `scripts/test-hallgrid.mjs`.
+Getestet in `scripts/test-hallgrid.mjs`. `vertical` fehlt/`false` = bisheriges
+Verhalten (reihenweise); Aufrufer, die das Feld gar nicht mitgeben, verhalten
+sich unverändert wie vor dieser Erweiterung.
+
+### Nummerierungsrichtung: horizontal (Default) vs. vertikal
+
+**Horizontal (reihenweise):** Feld 1 an der Start-Ecke, Feld 2 daneben in
+derselben Reihe, bis die Reihe (`columns` Felder) voll ist, dann die
+nächste Reihe. So bisher implementiert (unverändert).
+
+**Vertikal (spaltenweise):** Feld 1 an der Start-Ecke, Feld 2 **in
+derselben Spalte**, eine Zelle weiter weg von der Start-Reihe, bis die
+Spalte voll ist (`rows = ceil(count / columns)` Felder), dann die nächste
+Spalte. `columns` bleibt in beiden Modi die Breitenvorgabe des Rasters —
+nur die Zählrichtung dreht sich. Rechnerisch das Spiegelbild des
+horizontalen Pfads: Index `i` → `c = floor(i / rows)`, `r = i % rows`,
+danach dieselbe Start-Ecken-Transformation (`fromBottom` spiegelt die
+Reihe, `fromRight` die Spalte) wie im horizontalen Fall.
+
+**Schlange (`serpentine`)** kehrt bei `vertical` jede zweite
+**Nummerierungs-Spalte** um (statt jede zweite Nummerierungs-Reihe) — eine
+Halle, die spaltenweise in Schlangenlinien zählt (Spalte 1 von unten nach
+oben, Spalte 2 von oben nach unten, …).
+
+**Angebrochene Spalte:** Ist `count` kein Vielfaches von `columns`, bleibt
+die letzte (von der Start-Ecke aus am weitesten entfernte) Spalte
+unvollständig — dieselbe Regel wie bei der angebrochenen Reihe im
+horizontalen Fall, nur um 90° gedreht. Beispiel: 5 Felder, 2 Spalten,
+Start oben-links, ohne Schlange → `rows = 3`; Spalte 0 wird voll (3
+Felder), Spalte 1 bekommt nur 2, die fehlende Zelle liegt unten rechts
+(fernstes Eck von der Start-Ecke). Getestet in `scripts/test-hallgrid.mjs`.
 
 `tl.html` kann keine ES-Module laden (statische Datei ohne Bundler) — dort
 liegt eine **Inline-Kopie** derselben Funktion, mit Herkunfts-Kommentar,
