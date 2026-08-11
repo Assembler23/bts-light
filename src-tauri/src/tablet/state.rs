@@ -165,6 +165,10 @@ pub struct CourtOverview {
     pub best_of: i64,
     pub target_score: i64,
     pub cap_score: i64,
+    /// Gibt es zum laufenden Match einen Punktverlauf (Spec
+    /// punktverlauf-graph)? Felderübersicht und TL-Web bieten den
+    /// Graph-Klick nur dann an.
+    pub has_timeline: bool,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -333,6 +337,11 @@ pub struct TabletState {
     /// Nachrufe am Meeting Point: `(match_id, Partei) → Stufe`. Getrennt nach
     /// Partei, weil in der Regel nur eine fehlt.
     prep_call_stages: RwLock<HashMap<(i64, String), u8>>,
+    /// Punktverlauf-Speicher (Spec `punktverlauf-graph`, ADR 0014/0015):
+    /// Ballwechsel-Verläufe je Match, dauerhaft je Turnier persistiert.
+    /// Er hängt hier, weil LAN-Server, Relay-Client und Tauri-Commands
+    /// denselben Stand sehen müssen — wie beim übrigen Tablet-Zustand.
+    timeline: crate::tablet::timeline::TimelineStore,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -475,7 +484,16 @@ struct PersistedScore {
 impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
+        // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
+        // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
+        self.timeline.set_tournament(&snapshot.tournament_name);
         *self.snapshot.write().unwrap() = Some(snapshot);
+    }
+
+    /// Der Punktverlauf-Speicher (geteilt von LAN-Server, Relay-Client
+    /// und Tauri-Commands).
+    pub fn timeline_store(&self) -> &crate::tablet::timeline::TimelineStore {
+        &self.timeline
     }
 
     /// Reiht einen fehlgeschlagenen BTP-Ergebnis-Write in die
@@ -1964,6 +1982,7 @@ impl TabletState {
                     court: court.name.clone(),
                     // Hallenname nur bei Mehr-Hallen-Turnieren; sonst leer.
                     location: snap.court_location_name(court.id),
+                    has_timeline: m.is_some_and(|mm| self.timeline.has_timeline(mm.id)),
                     match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m
                         .map(|mm| {

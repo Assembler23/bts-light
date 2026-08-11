@@ -184,6 +184,10 @@ struct Namespace {
     tl_state: Option<(u64, String)>,
     /// Offene TL-Kommandos: `req_id` → wartender HTTP-Handler.
     tl_pending: HashMap<u64, oneshot::Sender<TlResponse>>,
+    /// Offene Punktverlauf-Abrufe: `req_id` → wartender HTTP-Handler,
+    /// Antwort `(found, json)` — der Relay hält keine Verläufe vor (AK-5),
+    /// er reicht nur durch.
+    timeline_pending: HashMap<u64, oneshot::Sender<(bool, String)>>,
     /// Belegte Geräteplätze: Zugang → letzter Zugriff (Unix-ms). Begrenzt,
     /// damit nicht Dutzende Browser denselben Turnier-PC abfragen.
     tl_devices: HashMap<String, u64>,
@@ -218,6 +222,7 @@ impl Namespace {
             tl_tokens: HashMap::new(),
             tl_state: None,
             tl_pending: HashMap::new(),
+            timeline_pending: HashMap::new(),
             tl_devices: HashMap::new(),
             tl_gen: 0,
         }
@@ -415,6 +420,10 @@ async fn main() {
         app.route("/tl", get(tl_page))
             .route("/tl/api/state", get(tl_state_route))
             .route("/tl/api/command", post(tl_command_route))
+            // Punktverlauf on-demand (Spec punktverlauf-graph, AK-5) —
+            // gleicher Pfad wie am LAN-Server, damit tl.html in beiden
+            // Modi identisch abruft.
+            .route("/tl/api/timeline/{match_id}", get(tl_timeline_route))
             // Flaggen für die TL-Seite: Sie hängt ohne Namespace unter
             // `/tl` und findet ihre Flaggen deshalb unter `/flags/…` —
             // Begründung am Handler.
@@ -1289,6 +1298,19 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                     forward_score(&broker, &ns, c, score_a, score_b, sets_history, match_id, &tx).await;
                                 }
                             }
+                            // Punktverlauf (ADR 0014): 1:1 an den Host
+                            // durchreichen — Briefträger, nur Halter-,
+                            // Stale- und Größen-Prüfung, keine Deutung.
+                            Ok(TabletMsg::Rally { match_id, set, n, winner, score_a, score_b }) => {
+                                if let (Some(c), true) = (court, active) {
+                                    forward_rally(&broker, &ns, c, match_id, set, n, winner, score_a, score_b, &tx).await;
+                                }
+                            }
+                            Ok(TabletMsg::RallySync { match_id, timeline }) => {
+                                if let (Some(c), true) = (court, active) {
+                                    forward_rally_sync(&broker, &ns, c, match_id, timeline, &tx).await;
+                                }
+                            }
                             Ok(TabletMsg::Battery { percent, charging }) => {
                                 if let (Some(c), true) = (court, active) {
                                     forward_battery(&broker, &ns, c, percent, charging).await;
@@ -1609,6 +1631,88 @@ async fn forward_battery(broker: &Broker, ns: &str, court_id: i64, percent: i64,
 }
 
 /// Leitet den Meldungs-Zustand eines Felds an den Host weiter.
+/// Einen Ballwechsel an den Host durchreichen (Punktverlauf, ADR 0014).
+/// Halter- und Stale-Prüfung wie beim Score; interpretiert wird beim Host.
+#[allow(clippy::too_many_arguments)]
+async fn forward_rally(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    match_id: i64,
+    set: i64,
+    n: i64,
+    winner: String,
+    score_a: i64,
+    score_b: i64,
+    tx: &Tx,
+) {
+    // Der Gewinner ist ein einzelnes 'A'/'B' — alles Längere ist kein
+    // legitimes Tablet und wird gar nicht erst transportiert.
+    if winner.len() > 1 {
+        return;
+    }
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        return;
+    }
+    if let Some(host) = namespace.host.as_ref() {
+        let _ = host.send(text(&RelayFrame::Rally {
+            court_id,
+            match_id,
+            set,
+            n,
+            winner,
+            score_a,
+            score_b,
+        }));
+    }
+}
+
+/// Einen Verlaufs-Resync an den Host durchreichen. Der Relay prüft nur die
+/// geteilten Deckel (`MatchTimeline::is_valid`, `MAX_TIMELINE_LEN`) — ein
+/// überlanger Sync wird verworfen statt gespeichert (Cloud-DoS-Riegel).
+async fn forward_rally_sync(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    match_id: i64,
+    timeline: relay_proto::MatchTimeline,
+    tx: &Tx,
+) {
+    if !timeline.is_valid() {
+        return;
+    }
+    if serde_json::to_string(&timeline)
+        .map(|json| json.len() > relay_proto::MAX_TIMELINE_LEN)
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        return;
+    }
+    if let Some(host) = namespace.host.as_ref() {
+        let _ = host.send(text(&RelayFrame::RallySync {
+            court_id,
+            match_id,
+            timeline,
+        }));
+    }
+}
+
 async fn forward_alert(
     broker: &Broker,
     ns: &str,
@@ -1974,6 +2078,13 @@ fn forget_tl_access(namespace: &mut Namespace) {
             "Die Verbindung zum Turnier-PC ist abgerissen.",
         ));
     }
+    // Wartende Punktverlauf-Abrufe ebenso auflösen — sonst hingen ihre
+    // HTTP-Handler bis zum Timeout an einem toten Host. Die Sender werden
+    // FALLENGELASSEN statt mit `found:false` beantwortet: `false` hieße
+    // in der Route „kein Verlauf" (404) — ein Host-Abriss ist aber ein
+    // 503, sonst kippte ein offenes Overlay beim Reconnect kurz auf
+    // „Zu diesem Spiel liegt kein Punktverlauf vor" (Review 2026-08-11).
+    namespace.timeline_pending.clear();
 }
 
 /// Der abgelegte Anzeige-Zustand (Revision + JSON), falls einer da ist.
@@ -2178,6 +2289,114 @@ async fn tl_state_route(
         json,
     )
         .into_response()
+}
+
+/// Punktverlauf eines Matches für ein Turnierleitungs-Gerät — **on-demand**
+/// durchgereicht (Spec punktverlauf-graph, AK-5): Anfrage per
+/// `TimelineRequest` an den Turnier-PC, Antwort (`TimelineData`) zurück an
+/// den wartenden Abruf. Der Relay hält keine Verläufe vor — Briefträger,
+/// nicht Speicher; genau deshalb bleibt das Mobilfunk-Budget unberührt.
+/// Ohne Namespace in der Adresse, wie alle TL-Routen (ADR 0012).
+async fn tl_timeline_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+    Path(match_id): Path<i64>,
+) -> axum::response::Response {
+    let token = bearer(&headers);
+    let now = now_ms();
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        // Nicht 401 (siehe tl_state_route): ohne Turnier-PC weiß der Relay
+        // nichts über den Zugang.
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    let (ack_rx, req_id) = {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
+        let Some(host) = namespace.host.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        // Platz-Limit wie bei den Kommandos: Ein einzelnes Gerät darf den
+        // Namespace nicht mit wartenden Anfragen füllen.
+        if namespace.timeline_pending.len() >= MAX_PENDING_PER_NS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele offene Anfragen — bitte kurz warten.",
+            )
+                .into_response();
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.timeline_pending.insert(req_id, ack_tx);
+        if host
+            .send(text(&RelayFrame::TimelineRequest { req_id, match_id }))
+            .is_err()
+        {
+            namespace.timeline_pending.remove(&req_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht erreichbar.",
+            )
+                .into_response();
+        }
+        (ack_rx, req_id)
+    };
+    match tokio::time::timeout(TL_TIMEOUT, ack_rx).await {
+        Ok(Ok((true, json))) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            json,
+        )
+            .into_response(),
+        Ok(Ok((false, _))) => (
+            StatusCode::NOT_FOUND,
+            "Zu diesem Spiel liegt kein Punktverlauf vor.",
+        )
+            .into_response(),
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(&ns) {
+                namespace.timeline_pending.remove(&req_id);
+            }
+            // Auch der Versions-Schiefstand landet hier: Ein älterer
+            // Turnier-PC kennt den Frame nicht und antwortet nie.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC hat nicht geantwortet — seine Version kennt \
+                 den Punktverlauf möglicherweise noch nicht.",
+            )
+                .into_response()
+        }
+    }
 }
 
 /// Rumpf eines TL-Kommandos, wie ihn die Seite schickt.
@@ -2465,6 +2684,23 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
         HostFrame::TlAck { req_id, response } => {
             if let Some(pending) = namespace.tl_pending.remove(&req_id) {
                 let _ = pending.send(response);
+            }
+        }
+        // Punktverlauf-Antwort des Hosts → an den wartenden Abruf. Der
+        // Größen-Deckel gilt auch hier: ein überlanger Verlauf wird zur
+        // ehrlichen Fehlanzeige statt zum Speicherfresser.
+        HostFrame::TimelineData {
+            req_id,
+            found,
+            json,
+        } => {
+            if let Some(pending) = namespace.timeline_pending.remove(&req_id) {
+                let zu_gross = json.len() > relay_proto::MAX_TIMELINE_LEN;
+                let _ = pending.send(if zu_gross {
+                    (false, String::new())
+                } else {
+                    (found, json)
+                });
             }
         }
     }
@@ -3072,6 +3308,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn timeline_request_reaches_host_and_answer_reaches_caller() {
+        // Punktverlauf on-demand (AK-5): gleiche Mechanik wie das
+        // TL-Kommando — Anfrage zum Host, Antwort zurück, nichts im Relay.
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten =
+            tokio::spawn(async move { tl_timeline_route(State(broker2), headers, Path(42)).await });
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        let RelayFrame::TimelineRequest { req_id, match_id } = frame else {
+            panic!("TimelineRequest erwartet, war: {frame:?}")
+        };
+        assert_eq!(match_id, 42);
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TimelineData {
+                req_id,
+                found: true,
+                json: r#"{"sets":[]}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], br#"{"sets":[]}"#);
+    }
+
+    #[tokio::test]
+    async fn timeline_without_recording_yields_404_and_foreign_token_is_rejected() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+
+        // Fremder Zugang → zurückhaltende 503 (wie tl_state_route: ein
+        // unbekannter Zugang ist vom kurz abwesenden Turnier-PC nicht zu
+        // unterscheiden und darf nie wie „entzogen" aussehen), und der
+        // Host wird gar nicht erst behelligt.
+        let mut falsch = axum::http::HeaderMap::new();
+        falsch.insert(header::AUTHORIZATION, "Bearer falsch".parse().unwrap());
+        let antwort = tl_timeline_route(State(broker.clone()), falsch, Path(42)).await;
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+
+        // Papier-Spiel: der Host meldet found:false → ehrliches 404.
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten =
+            tokio::spawn(async move { tl_timeline_route(State(broker2), headers, Path(43)).await });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::TimelineRequest { req_id, .. } =
+            serde_json::from_str::<RelayFrame>(t.as_str()).unwrap()
+        else {
+            panic!("TimelineRequest erwartet")
+        };
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TimelineData {
+                req_id,
+                found: false,
+                json: String::new(),
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(warten.await.unwrap().status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn without_a_tournament_pc_the_page_gets_a_clear_answer() {
         // Kein Warten ins Leere: Die Seite soll sagen können, woran es liegt.
         let broker = Broker::new("https://example.test/bts-relay".into());
@@ -3311,6 +3637,69 @@ mod tests {
                 match_id: 0,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn rally_is_forwarded_verbatim_and_oversized_sync_dropped() {
+        // Punktverlauf (ADR 0014): Der Relay ist Briefträger — ein Rally
+        // des aktiven Halters mit passender matchId geht 1:1 an den Host;
+        // ein Sync jenseits der geteilten Deckel wird verworfen.
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(9));
+        }
+        forward_rally(&broker, "ns1", 101, 9, 1, 1, "A".into(), 1, 0, &tablet_tx).await;
+        let Message::Text(t) = host_rx.try_recv().expect("Rally erreicht den Host") else {
+            panic!("Text-Frame erwartet")
+        };
+        let parsed: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        assert_eq!(
+            parsed,
+            RelayFrame::Rally {
+                court_id: 101,
+                match_id: 9,
+                set: 1,
+                n: 1,
+                winner: "A".into(),
+                score_a: 1,
+                score_b: 0,
+            }
+        );
+        // Fremdes Match (Stale, HM-03) → verworfen.
+        forward_rally(&broker, "ns1", 101, 7, 1, 2, "A".into(), 2, 0, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "Stale-Rally verworfen");
+        // Gültiger Sync fließt …
+        let timeline = relay_proto::MatchTimeline {
+            sets: vec![relay_proto::TimelineSet {
+                start_a: 0,
+                start_b: 0,
+                points: "AB".into(),
+            }],
+            ..Default::default()
+        };
+        forward_rally_sync(&broker, "ns1", 101, 9, timeline, &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_ok(),
+            "gültiger Sync erreicht den Host"
+        );
+        // … ein überlanger nicht (Deckel MAX_RALLIES_PER_SET greift über
+        // is_valid, bevor irgendetwas transportiert wird).
+        let zu_lang = relay_proto::MatchTimeline {
+            sets: vec![relay_proto::TimelineSet {
+                start_a: 0,
+                start_b: 0,
+                points: "A".repeat(relay_proto::MAX_RALLIES_PER_SET + 1),
+            }],
+            ..Default::default()
+        };
+        forward_rally_sync(&broker, "ns1", 101, 9, zu_lang, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "überlanger Sync verworfen");
     }
 
     #[tokio::test]

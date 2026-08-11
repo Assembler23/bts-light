@@ -400,6 +400,54 @@ async fn handle_frame(
                 let _ = tx.send(text(&HostFrame::TlAck { req_id, response }));
             });
         }
+        // Punktverlauf (ADR 0014): gleicher Filter wie im LAN — der Frame
+        // muss zum aktuellen Court-Match passen (HM-03, AK-3/AK-11). Die
+        // Halter-Prüfung übernimmt im Cloud-Modus der Relay (eine aktive
+        // Tablet-Session je Court, R4; Frames verdrängter Sessions
+        // verwirft er) — wie beim ScoreUpdate-Weg.
+        RelayFrame::Rally {
+            court_id,
+            match_id,
+            set,
+            n,
+            winner,
+            score_a,
+            score_b,
+        } => {
+            if ctx
+                .tablet
+                .match_for_court(court_id)
+                .is_some_and(|m| m.id == match_id)
+            {
+                ctx.tablet
+                    .timeline_store()
+                    .apply_rally(match_id, set, n, &winner, score_a, score_b);
+            }
+        }
+        RelayFrame::RallySync {
+            court_id,
+            match_id,
+            timeline,
+        } => {
+            if ctx
+                .tablet
+                .match_for_court(court_id)
+                .is_some_and(|m| m.id == match_id)
+            {
+                ctx.tablet.timeline_store().apply_sync(match_id, timeline);
+            }
+        }
+        // On-Demand-Abruf der TL-Oberfläche (AK-5): Antwort direkt aus dem
+        // Store — winzige Payload, kein BTP-Zugriff, deshalb anders als
+        // TlCommand ohne eigenen Task.
+        RelayFrame::TimelineRequest { req_id, match_id } => {
+            let json = ctx.tablet.timeline_store().timeline_json(match_id);
+            let _ = tx.send(text(&HostFrame::TimelineData {
+                req_id,
+                found: json.is_some(),
+                json: json.unwrap_or_default(),
+            }));
+        }
     }
 }
 

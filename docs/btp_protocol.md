@@ -146,7 +146,16 @@ einen `Update`-Container.
 Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 `Tournament` (jeder ist eine `GROUP`, jeder optional – fehlt wenn leer):
 
-- `Settings` → `Setting{ID,Value}` – Turniername = Setting mit `ID == 1001`
+- `Settings` → `Setting{ID,Value}` – Turniername = Setting mit `ID == 1001`.
+  **Kein verlässliches Turnier-Startdatum:** Der echte Mitschnitt (Probe
+  2026-08-11, Punktverlauf-Feature) enthält als einzigen Datums-Kandidaten
+  Setting `1094`, einen OLE-Automation-Zeitstempel (Tage seit 1899-12-30,
+  mit Uhrzeit-Bruchteil), der exakt der **Aufnahmezeit** des Mitschnitts
+  entspricht — also „zuletzt gespeichert", nicht „Turnierbeginn".
+  Setting `1005` trägt nur das Jahr (Integer). Wer ein Turnierdatum
+  braucht (z. B. der Dateischlüssel des Punktverlaufs), stempelt deshalb
+  das **Erstsichtungs-Datum** selbst (Fallback laut
+  [Spec](features/punktverlauf-graph.md)).
 - `Events` → `Event`
 - `Draws` → `Draw`
 - `Matches` → `Match`

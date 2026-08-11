@@ -624,6 +624,9 @@ export interface CourtOverview {
   location: string;
   /** BTP-Match-ID des aktuellen Spiels (0 = kein Match). */
   match_id: number;
+  /** Gibt es zum laufenden Spiel einen Punktverlauf? Nur dann erscheint
+   *  der Graph-Knopf an der Kachel (Spec punktverlauf-graph). */
+  has_timeline: boolean;
   /** Anzeigename des Matches, z. B. "HE G1"; leer wenn kein Match. */
   match_name: string;
   /** Reine BTP-Runde (z. B. "VF", "HF", "Finale", "Spiel um Platz 3"); leer
@@ -805,4 +808,27 @@ export interface FinishedMatchRow {
   /** Halle (leer bei Ein-Hallen-Turnieren). */
   location: string;
   finished_at: number | null;
+  /** Gibt es einen Punktverlauf (Spec punktverlauf-graph)? Papier-
+   *  Ergebnisse haben keinen — dann erscheint kein Graph-Knopf. */
+  has_timeline: boolean;
+}
+
+/** Ein Satz im Punktverlauf (Rust: relay_proto::TimelineSet). */
+export interface TimelineSet {
+  /** Startstand — 0:0, außer bei Zwischenstand-Einstieg. */
+  startA: number;
+  startB: number;
+  /** Ballwechsel-Gewinner in gespielter Reihenfolge, nur 'A'/'B'. */
+  points: string;
+}
+
+/** Punktverlauf eines Matches (Rust: relay_proto::MatchTimeline). */
+export interface MatchTimeline {
+  sets: TimelineSet[];
+  /** Aufzeichnung begann mit eingetipptem Zwischenstand. */
+  midGame: boolean;
+  /** Vorzeitiges Ende (Aufgabe/Disqualifikation). */
+  retired: boolean;
+  /** Ergebnis abgegeben — es kommen keine Ballwechsel mehr. */
+  finished: boolean;
 }

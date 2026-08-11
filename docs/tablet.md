@@ -131,6 +131,12 @@ Aufstellung:
   dessen Korken in Flugrichtung zum diagonal gegenüberliegenden
   Aufschlagfeld zeigt) und Annehmer auf
   dem Spielfeld – im Einzel ein Name je Hälfte, im Doppel zwei.
+- **Punktverlauf** ([punktverlauf.md](punktverlauf.md)): Das Tablet
+  protokolliert jeden Ballwechsel (`rallyLog`, überlebt Reload und
+  Geräte-Übernahme) und meldet ihn dem Turnier-PC (`rally`-Frame; nach
+  Undo/Reconnect/Übernahme ein kompletter `rally_sync`). Der „📈
+  Verlauf"-Knopf am Score-Board zeigt je Satz ein Liniendiagramm — aus
+  den lokalen Daten, funktioniert also auch offline.
 - **Akkustand**: Android-Tablets (Chrome) melden ihren Akkustand an die
   Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus

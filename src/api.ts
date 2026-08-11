@@ -9,6 +9,7 @@ import type {
   CourtAd,
   DrawInfo,
   FinishedMatchRow,
+  MatchTimeline,
   FreetextItem,
   HallLayoutConfig,
   MonitorDeviceInfo,
@@ -146,6 +147,10 @@ export const preparationCandidates = (): Promise<PreparationView> =>
 /** Abgeschlossene Spiele (mit Sieger) für die Spielübersicht-Tabelle. */
 export const finishedMatches = (): Promise<FinishedMatchRow[]> =>
   invoke("finished_matches");
+
+/** Punktverlauf eines Matches (null = kein Verlauf aufgezeichnet). */
+export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
+  invoke("match_timeline", { matchId });
 
 /** Auslosungen (Disziplin + draw_name) des Turniers — für die Disziplin→Halle-Einstellung. */
 export const tournamentDraws = (): Promise<DrawInfo[]> =>

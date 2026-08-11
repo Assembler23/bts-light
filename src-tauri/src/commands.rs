@@ -735,6 +735,15 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     }
     tablet.load_scores(&scores_path);
     tablet.set_scores_path(scores_path);
+    // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
+    // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
+    // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
+    if let Ok(dir) = app.path().app_data_dir() {
+        tablet.timeline_store().set_dir(dir.join("punktverlauf"));
+    }
+    tablet
+        .timeline_store()
+        .set_guid(&config.checkin.tournament_uuid);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
     // Laufzeit-Schalter (Pause der automatischen Vergabe) beim Start lösen —
@@ -1402,6 +1411,11 @@ pub async fn enter_result(
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
+            // Punktverlauf abschließen (Spec punktverlauf-graph): auch die
+            // TL-Wertung beendet ein evtl. tablet-gezähltes Spiel — sonst
+            // bliebe `finished=false` und der Abweichungs-Hinweis (AK-8)
+            // könnte nie erscheinen. Ohne Aufzeichnung ein No-op.
+            tablet.timeline_store().finalize(mid, false);
             tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1455,6 +1469,9 @@ pub async fn disqualify_match(
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
+            // Punktverlauf abschließen — DQ ist ein Sonderausgang mitten
+            // im Satz (AK-13); ohne Aufzeichnung ein No-op.
+            tablet.timeline_store().finalize(mid, true);
             tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1888,6 +1905,21 @@ pub struct FinishedMatchRow {
     pub location: String,
     /// Zeitpunkt der Beendigung (Unix-ms) – für die Sortierung (neueste zuerst).
     pub finished_at: Option<u64>,
+    /// Gibt es einen Punktverlauf zum Anzeigen (Spec punktverlauf-graph)?
+    /// Papier-Ergebnisse haben keinen — die Tabelle bietet den Graph-Klick
+    /// dann gar nicht erst an.
+    pub has_timeline: bool,
+}
+
+/// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser
+/// spricht nie selbst mit dem Store). `None` = kein Verlauf aufgezeichnet
+/// (Papier-Ergebnis oder Spiel vor Einführung).
+#[tauri::command]
+pub fn match_timeline(
+    state: State<'_, AppState>,
+    match_id: i64,
+) -> Option<relay_proto::MatchTimeline> {
+    state.tablet.timeline_store().timeline(match_id)
 }
 
 /// Abgeschlossene Spiele (mit Sieger) für die Spielübersicht-Tabelle, neueste
@@ -1925,6 +1957,7 @@ pub fn finished_matches(state: State<'_, AppState>) -> Vec<FinishedMatchRow> {
                 .map(|cid| snapshot.court_location_name(cid))
                 .unwrap_or_default(),
             finished_at: m.finished_at,
+            has_timeline: state.tablet.timeline_store().has_timeline(m.id),
         })
         .collect();
     // Neueste zuerst. `Option::cmp` würde `None` bei absteigender Sortierung

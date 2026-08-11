@@ -11,7 +11,16 @@ import {
   useRef,
   useState,
 } from "react";
-import { Ban, Lock, Megaphone, Settings, Trash2, Unlock } from "lucide-react";
+import {
+  Ban,
+  ChartLine,
+  Lock,
+  Megaphone,
+  Settings,
+  Trash2,
+  Unlock,
+  X,
+} from "lucide-react";
 import {
   addScorekeeper,
   advanceScorekeeper,
@@ -20,6 +29,7 @@ import {
   enterResult,
   finishedMatches,
   freeCourt,
+  matchTimeline,
   noteCourtCall,
   preparationCandidates,
   removeHallLayout,
@@ -31,6 +41,7 @@ import {
 } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
+import { TimelineChart } from "../components/TimelineChart";
 import { announceCourt } from "../io/announceCourt";
 import { gamePointKind } from "../io/gamePoint.mjs";
 import { gridPositions } from "../io/hallGrid.mjs";
@@ -43,6 +54,7 @@ import type {
   CourtOverview,
   DisciplineHallRule,
   FinishedMatchRow,
+  MatchTimeline,
   HallLayoutConfig,
   LayoutOrigin,
   PreparationCandidate,
@@ -101,6 +113,38 @@ export function FieldOverviewPage({
   const [courts, setCourts] = useState<CourtOverview[]>([]);
   const [candidates, setCandidates] = useState<PreparationCandidate[]>([]);
   const [finished, setFinished] = useState<FinishedMatchRow[]>([]);
+  /** Offenes Punktverlauf-Overlay (Spec punktverlauf-graph): wer, und —
+   *  aus der Beendet-Tabelle — die gewerteten Sätze für den
+   *  Abweichungs-Hinweis. null = zu. */
+  const [graph, setGraph] = useState<{
+    matchId: number;
+    nameA: string;
+    nameB: string;
+    finishedSets?: [number, number][];
+  } | null>(null);
+  const [graphData, setGraphData] = useState<MatchTimeline | null>(null);
+
+  // Verlauf laden, solange das Overlay offen ist — laufende Spiele wachsen
+  // im Poll-Takt mit; die Payload ist winzig (Command, kein Netz).
+  useEffect(() => {
+    if (!graph) {
+      setGraphData(null);
+      return;
+    }
+    let alive = true;
+    const laden = () =>
+      matchTimeline(graph.matchId)
+        .then((t) => {
+          if (alive) setGraphData(t);
+        })
+        .catch(() => {});
+    laden();
+    const id = setInterval(laden, 2000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [graph]);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
@@ -698,6 +742,25 @@ export function FieldOverviewPage({
                         Feld {c.court}
                       </span>
                       <span className="flex items-center gap-0.5">
+                        {/* Punktverlauf-Graph (Spec punktverlauf-graph):
+                            nur wenn das Tablet einen Verlauf gemeldet hat. */}
+                        {occupied && c.has_timeline && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGraph({
+                                matchId: c.match_id,
+                                nameA: c.team1.join(" / "),
+                                nameB: c.team2.join(" / "),
+                              });
+                            }}
+                            title="Punktverlauf anzeigen"
+                            aria-label="Punktverlauf anzeigen"
+                            className="rounded p-0.5 hover:bg-white/50"
+                          >
+                            <ChartLine size={14} />
+                          </button>
+                        )}
                         {/* Feld freigeben — immer griffbereit neben dem Schloss
                             (auch wenn das Feld gesperrt ist), nur wenn belegt.
                             Öffnet den Sicherheits-Dialog (Freigabe schreibt nach
@@ -1118,6 +1181,25 @@ export function FieldOverviewPage({
                             {resultLabel[m.result]}
                           </span>
                         )}
+                        {/* Punktverlauf nur, wo einer aufgezeichnet wurde —
+                            Papier-Ergebnisse bieten den Klick nicht an. */}
+                        {m.has_timeline && (
+                          <button
+                            onClick={() =>
+                              setGraph({
+                                matchId: m.match_id,
+                                nameA: m.team1.join(" / "),
+                                nameB: m.team2.join(" / "),
+                                finishedSets: m.sets,
+                              })
+                            }
+                            title="Punktverlauf anzeigen"
+                            aria-label="Punktverlauf anzeigen"
+                            className="ml-1.5 rounded p-0.5 align-middle text-slate-500 hover:bg-slate-100"
+                          >
+                            <ChartLine size={14} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1180,6 +1262,49 @@ export function FieldOverviewPage({
               >
                 Freigeben
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Punktverlauf-Overlay (Spec punktverlauf-graph): je Satz ein
+          Liniendiagramm; laufende Spiele wachsen im Poll-Takt mit. */}
+      {graph && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="graph-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setGraph(null);
+          }}
+        >
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <h2 id="graph-title" className="font-semibold text-slate-800">
+                Punktverlauf — {graph.nameA} vs. {graph.nameB}
+              </h2>
+              <button
+                onClick={() => setGraph(null)}
+                aria-label="Punktverlauf schließen"
+                className="rounded p-1 text-slate-400 hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4">
+              {graphData ? (
+                <TimelineChart
+                  timeline={graphData}
+                  nameA={graph.nameA}
+                  nameB={graph.nameB}
+                  finishedSets={graph.finishedSets}
+                />
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Punktverlauf wird geladen …
+                </p>
+              )}
             </div>
           </div>
         </div>
