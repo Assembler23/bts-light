@@ -21,7 +21,7 @@ export const PRESETS: Preset[] = [
     label: "BVBB – Badminton-Verband Berlin-Brandenburg",
     badhub: {
       url: PUSH_URL,
-      password: "b09bc3e4334732191a999c8e",
+      password: "d6dfe4f285dcdf53409e1876",
       live_url: "https://badhub.de/live?t=bvbb",
     },
   },

@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.182
+
+- **BVBB-Zugang aktualisiert.** Das Liveticker-Passwort des BVBB-Presets
+  wurde badhub-seitig geändert; dieses Update bringt den neuen Zugang
+  mit. **Wichtig für BVBB-Installationen:** Nach dem Update einmal die
+  Einstellungen öffnen, „BVBB" erneut auswählen und speichern — die
+  gespeicherte Konfiguration behält sonst das alte Passwort, und der
+  Liveticker-Push bliebe abgelehnt.
+
 ## v0.9.181
 
 Das große Stück dieses Releases ist der **Punktverlauf-Graph**; dazu der
