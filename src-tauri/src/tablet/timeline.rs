@@ -18,7 +18,7 @@
 //!   die Anzeige, nie umgekehrt.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
@@ -335,6 +335,7 @@ fn today() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use relay_proto::TimelineSet;
 
     fn store_mit_dir(dir: &Path) -> TimelineStore {
