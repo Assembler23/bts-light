@@ -861,3 +861,224 @@ async fn which_location_write_variant_sticks() {
          eine neuere BTP-Version messen oder eine Anfrage an Visual Reality."
     );
 }
+
+/// **Messung, kein Regressionstest — SCHREIBT probeweise und stellt
+/// zurück.** Der „Feld-Trick" (Nutzer-Idee 11.08.2026): Ein direkter
+/// LocationID-Write wird ignoriert, aber die Feldzuweisung kommt an —
+/// und am Feld hängt die Halle. Bleibt die abgeleitete `Match.LocationID`
+/// stehen, wenn das Feld danach wieder entfernt wird?
+///
+/// Gemessen werden zwei Freigabe-Formen:
+/// - **T1 volle Freigabe** (wie `free_court`: Court ohne MatchID +
+///   `Match.CourtID = 0`) — bleibt die LocationID übrig?
+/// - **T2 halbe Freigabe** (nur der Courts-Block wird geräumt, das Match
+///   behält seine `CourtID` — das Muster der Ergebnis-Schreibung „wo
+///   wurde gespielt") — bleibt dann Location UND CourtID am Match?
+///
+/// Ablauf je Form: zuweisen → lesen → freigeben → lesen → Verdikt;
+/// am Ende voller Restore (Feld frei, Match.CourtID 0) + Verifikation.
+///
+/// ```text
+/// cargo test -p bts-light --test btp_location_probe -- --ignored --nocapture does_assign_then_free_leave_the_location_behind
+/// ```
+#[tokio::test]
+#[ignore = "braucht ein laufendes BTP; SCHREIBT probeweise und stellt zurück"]
+async fn does_assign_then_free_leave_the_location_behind() {
+    use bts_light_lib::btp::model::MatchStatus;
+    use bts_light_lib::btp::proto::{CourtAssignment, MatchCourt};
+
+    let pw = password();
+    let pw_ref = pw.as_deref();
+
+    let before = client::fetch_snapshot(&host(), port(), pw_ref)
+        .await
+        .expect("BTP erreichbar (VORHER)");
+    println!("\n=== Turnier: {} ===", before.tournament_name);
+    if before.locations.is_empty() {
+        println!("ABBRUCH: Turnier pflegt KEINE Locations.");
+        return;
+    }
+
+    // Kandidat: angesetzt, beide Teams, kein Feld.
+    let mut kandidaten: Vec<&bts_light_lib::btp::model::BtpMatch> = before
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled
+                && !m.team1.is_empty()
+                && !m.team2.is_empty()
+                && m.court_id.is_none()
+        })
+        .collect();
+    kandidaten.sort_by_key(|m| m.id);
+
+    // Freies Feld MIT Halle: von keinem nicht-fertigen Match belegt.
+    let belegt: std::collections::HashSet<i64> = before
+        .matches
+        .iter()
+        .filter(|m| m.status != MatchStatus::Finished)
+        .filter_map(|m| m.court_id)
+        .collect();
+    let Some(ziel_match) = kandidaten.first().copied() else {
+        println!("ABBRUCH: kein geeignetes Match.");
+        return;
+    };
+    let Some(feld) = before
+        .court_infos
+        .iter()
+        .find(|c| !belegt.contains(&c.id) && c.location_id.is_some())
+    else {
+        println!("ABBRUCH: kein freies Feld mit Halle gefunden.");
+        return;
+    };
+    let feld_location = feld.location_id.expect("Feld hat Halle (gefiltert)");
+
+    let match_id = ziel_match.id;
+    let draw_id = ziel_match.draw_id;
+    let planning_id = ziel_match.planning_id;
+    let original_location_id = ziel_match.location_id;
+    let original_status = ziel_match.status.clone();
+    println!(
+        "Ziel: MatchID={match_id} (LocationID {original_location_id:?}, Status \
+         {original_status:?}) ↔ Feld {} (CourtID={}, Halle {feld_location})\n",
+        feld.name, feld.id
+    );
+
+    // Gemeinsame Schreib-Helfer über die ERPROBTEN Formen.
+    let schreibe = |courts: Vec<CourtAssignment>, match_courts: Vec<MatchCourt>| {
+        let pw2 = pw.clone();
+        async move {
+            let session = login(pw2.as_deref()).await;
+            let raw = client::send_request(
+                &host(),
+                port(),
+                &proto::court_assign_request(&courts, &match_courts, &session, pw2.as_deref()),
+            )
+            .await
+            .expect("BTP erreichbar (Court-Write)");
+            proto::parse_update_response(
+                &proto::decode_response(&raw).expect("Antwort dekodierbar"),
+            )
+        }
+    };
+    let zuweisung = || {
+        (
+            vec![CourtAssignment {
+                court_id: feld.id,
+                match_id: Some(match_id),
+            }],
+            vec![MatchCourt {
+                match_id,
+                draw_id,
+                planning_id,
+                court_id: feld.id,
+            }],
+        )
+    };
+    let volle_freigabe = || {
+        (
+            vec![CourtAssignment {
+                court_id: feld.id,
+                match_id: None,
+            }],
+            vec![MatchCourt {
+                match_id,
+                draw_id,
+                planning_id,
+                court_id: 0,
+            }],
+        )
+    };
+    let lese = || async {
+        let snap = client::fetch_snapshot(&host(), port(), pw_ref)
+            .await
+            .expect("BTP erreichbar (Lesen)");
+        let m = snap
+            .matches
+            .iter()
+            .find(|m| m.id == match_id)
+            .expect("Match vorhanden")
+            .clone();
+        m
+    };
+
+    // ── T1: zuweisen → volle Freigabe ─────────────────────────────────
+    println!("──── T1: zuweisen, dann VOLLE Freigabe ────");
+    let (c, mc) = zuweisung();
+    println!("  Zuweisung: {:?}", schreibe(c, mc).await);
+    let nach_zuweisung = lese().await;
+    println!(
+        "  nach Zuweisung: CourtID={:?} LocationID={:?} Status={:?}",
+        nach_zuweisung.court_id, nach_zuweisung.location_id, nach_zuweisung.status
+    );
+    let (c, mc) = volle_freigabe();
+    println!("  Freigabe:  {:?}", schreibe(c, mc).await);
+    let nach_freigabe = lese().await;
+    println!(
+        "  nach Freigabe:  CourtID={:?} LocationID={:?} Status={:?}",
+        nach_freigabe.court_id, nach_freigabe.location_id, nach_freigabe.status
+    );
+    let t1 = if nach_zuweisung.location_id != Some(feld_location) {
+        "WIRKUNGSLOS: schon die Zuweisung setzte keine LocationID".to_string()
+    } else if nach_freigabe.location_id == Some(feld_location) {
+        "✔ TRICK FUNKTIONIERT: LocationID überlebt die volle Freigabe".to_string()
+    } else {
+        "✘ LocationID verschwindet mit der vollen Freigabe".to_string()
+    };
+    println!("  T1-Verdikt: {t1}\n");
+
+    // ── T2: zuweisen → HALBE Freigabe (nur Courts-Block) ──────────────
+    println!("──── T2: zuweisen, dann HALBE Freigabe (Match behält CourtID) ────");
+    let (c, mc) = zuweisung();
+    println!("  Zuweisung: {:?}", schreibe(c, mc).await);
+    let (c, _) = volle_freigabe();
+    println!(
+        "  Halbe Freigabe (nur Courts-Block): {:?}",
+        schreibe(c, Vec::new()).await
+    );
+    let nach_halb = lese().await;
+    println!(
+        "  nach halber Freigabe: CourtID={:?} LocationID={:?} Status={:?}",
+        nach_halb.court_id, nach_halb.location_id, nach_halb.status
+    );
+    let t2 = if nach_halb.location_id == Some(feld_location) {
+        format!(
+            "LocationID bleibt — aber Match.CourtID={:?} bleibt eben auch \
+             (BTP zeigt weiter ein Feld am wartenden Spiel)",
+            nach_halb.court_id
+        )
+    } else {
+        "✘ auch halb freigegeben verschwindet die LocationID".to_string()
+    };
+    println!("  T2-Verdikt: {t2}\n");
+
+    // ── RESTORE: alles zurück ─────────────────────────────────────────
+    println!("──── RESTORE: Feld frei, Match ohne CourtID ────");
+    let (c, mc) = volle_freigabe();
+    println!("  Restore: {:?}", schreibe(c, mc).await);
+    let wieder = lese().await;
+    println!(
+        "  Endzustand: CourtID={:?} LocationID={:?} Status={:?} \
+         (Original: CourtID=None, LocationID={original_location_id:?}, {original_status:?})",
+        wieder.court_id, wieder.location_id, wieder.status
+    );
+    assert!(
+        wieder.court_id.is_none(),
+        "RESTORE UNVOLLSTÄNDIG: Match {match_id} trägt noch CourtID {:?} — MANUELL IN BTP PRÜFEN!",
+        wieder.court_id
+    );
+    if wieder.location_id != original_location_id {
+        println!(
+            "  ⚠ HINWEIS: LocationID ist jetzt {:?} statt {original_location_id:?} — \
+             genau der gemessene Trick-Effekt; direktes Zurücksetzen per Wire ist \
+             nicht möglich (LocationID-Writes werden ignoriert). Bei Bedarf in BTP \
+             von Hand leeren.",
+            wieder.location_id
+        );
+    }
+
+    println!("\n########################################");
+    println!("FELD-TRICK: T1 (volle Freigabe): {t1}");
+    println!("FELD-TRICK: T2 (halbe Freigabe): {t2}");
+    println!("########################################");
+}
