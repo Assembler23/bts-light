@@ -271,13 +271,28 @@ also **nicht** vom Feld abgeleitet, sondern kommt ausschließlich aus
 BTPs eigener Spielort-Planung (die „Spielort"-Spalte). Es gibt auf dem
 Draht nichts, das kleben bleiben könnte.
 
-Der Wire-Weg ist ausgereizt: `Match.LocationID` ist über den Connector
-**nur lesbar**. Was bleibt: Spielort-Pflege in BTP selbst (bts-light
-liest sie bereits automatisch), eine Messung gegen eine neuere
-BTP-Version (Proben wiederverwendbar) oder eine Anfrage an Visual
-Reality, das Feld im Connector schreibbar zu machen. Deshalb bleibt die
-Hallen-Festlegung in TL-Web (`TlAction::SetHall`) bewusst host-lokal
-(bts-light + Liveticker) statt nach BTP zurückzuschreiben.
+**Selbst die letilo/bts-Schreibform scheitert (gemessen 11.08.2026).**
+Der Vorgänger `letilo/bts` (Branch `feat/multilocation`,
+`btp_proto.js` `update_request`) schreibt `Match.LocationID` **zusammen
+mit `Status`, `Highlight` und `DisplayOrder`** — der vollen
+Planungsraster-Identität, die alle vier Proben oben wegließen. Diese
+fünfte Form 1:1 nachgebaut
+(`location_write_full_planning_node_like_letilo`): `Result=1`, aber
+`LocationID` bleibt `None` — still ignoriert, Status verifiziert
+zurückgestellt. **Wichtig:** letilo verlässt sich dort auf `Result=1`
+als Erfolg und markiert das Match als synchronisiert — bemerkt also gar
+nicht, dass BTP den Ort verwirft. Der Vorgänger „konnte" den
+Spielort-Rücksync also nur scheinbar; tatsächlich ist er nie angekommen.
+
+Der Wire-Weg ist damit **vollständig ausgereizt** (fünf Schreibformen +
+Feld-Trick, alle still verworfen, während `CourtID` im selben Knoten
+ankommt): `Match.LocationID` ist über den Connector **nur lesbar**. Was
+bleibt: Spielort-Pflege in BTP selbst (bts-light liest sie bereits
+automatisch), eine Messung gegen eine neuere BTP-Version (Proben
+wiederverwendbar) oder eine Anfrage an Visual Reality, das Feld im
+Connector schreibbar zu machen. Deshalb bleibt die Hallen-Festlegung in
+TL-Web (`TlAction::SetHall`) bewusst host-lokal (bts-light + Liveticker)
+statt nach BTP zurückzuschreiben.
 
 ### Die Reihenfolge der angesetzten Spiele
 
