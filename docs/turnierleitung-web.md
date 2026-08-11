@@ -136,7 +136,11 @@ Ein von Hand gesetzter Ort wirkt an drei Stellen:
 
 - **Hallenfilter** dieser Seite — das Spiel erscheint in seiner Halle
   statt unter „ohne Hallenzuordnung".
-- **Vergabe** — das Spiel gehört dann in diese Halle.
+- **Vergabe** — das Spiel gehört dann in diese Halle. Ein Feld der
+  **anderen** Halle ist trotzdem wählbar (seit 11.08.2026): Vor dem
+  Schreiben kommt eine Sicherheitsabfrage („… gehört nach X — wirklich
+  auf Feld Y in Z legen?") — manchmal muss ein Spiel bewusst in die
+  andere Halle geholt werden, meist ist es aber ein Tipp daneben.
 - **Liveticker**: `badhub.de/live?display=next&halle=…` zeigt es. Bisher
   blieb dieser Filter leer, sobald ein Turnier seine Aufrufe über BTP
   statt über bts-light machte. Das Spiel gilt dadurch **nicht** als

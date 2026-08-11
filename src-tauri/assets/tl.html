@@ -1265,10 +1265,11 @@ function targetProblem(court) {
   if (court.locked) return "Dieses Feld ist gesperrt.";
   if (court.clearing) return "Dieses Feld wird noch geräumt — BTP hat es noch nicht freigegeben.";
   if (court.match_id) return "Auf diesem Feld läuft ein Spiel.";
-  const hall = picked.match.hall;
-  if (hall && court.location && hall !== court.location) {
-    return `Dieses Spiel gehört nach ${hall}.`;
-  }
+  // Die andere Halle ist seit dem 11.08.2026 KEIN Blocker mehr: Manchmal
+  // muss ein Spiel bewusst in die andere Halle geholt werden (eine Halle
+  // läuft voll). Ein Tipp daneben bleibt aber wahrscheinlicher als die
+  // Absicht — deshalb fragt assignTo() vor dem Schreiben ausdrücklich
+  // nach, statt hier hart zu verbieten.
   return null;
 }
 
@@ -1503,6 +1504,20 @@ async function assignTo(court) {
   if (!picked) return;
   const problem = targetProblem(court);
   if (problem) { toast(problem, true); return; }
+
+  // Andere Halle: erlaubt, aber nur mit ausdrücklicher Bestätigung
+  // (Muster wie beim Feld-Freigeben mit laufendem Spielstand). Bricht die
+  // Turnierleitung ab, bleibt die Auswahl bestehen — vermutlich war nur
+  // das Zielfeld daneben.
+  const zielHalle = picked.match.hall;
+  if (zielHalle && court.location && zielHalle !== court.location) {
+    const paarung = `${(picked.match.team1 || []).join(" / ")} vs. ${(picked.match.team2 || []).join(" / ")}`;
+    if (!confirm(
+      `${paarung} gehört nach ${zielHalle}.\n\nWirklich auf Feld ${court.court} `
+      + `in ${court.location} legen?`)) {
+      return;
+    }
+  }
 
   const { match, fromCourtId } = picked;
   const wer = `${(match.team1 || []).join(" / ")} vs. ${(match.team2 || []).join(" / ")}`;
