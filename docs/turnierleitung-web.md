@@ -185,6 +185,15 @@ kann damit nichts anfangen:
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
 
+### Punktverlauf ansehen
+
+Der **📈-Knopf** an einer belegten Feldkachel und an Zeilen der
+Beendet-Liste öffnet den **Punktverlauf** des Spiels: je Satz ein
+Liniendiagramm (x = Ballwechsel, y = Punkte, eine Linie je Partei).
+Bei laufenden Spielen wächst die Kurve mit. Der Knopf erscheint nur,
+wenn ein Tablet das Spiel gezählt hat — Papier-Ergebnisse haben keinen
+Verlauf. Details: [punktverlauf.md](punktverlauf.md).
+
 ### Aufteilung Felder/Spielliste ziehen
 
 Zwischen Feldern und Spielliste sitzt ein **Trennsteg** (kleine Pille in
