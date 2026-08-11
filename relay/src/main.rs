@@ -420,6 +420,10 @@ async fn main() {
         app.route("/tl", get(tl_page))
             .route("/tl/api/state", get(tl_state_route))
             .route("/tl/api/command", post(tl_command_route))
+            // Punktverlauf on-demand (Spec punktverlauf-graph, AK-5) —
+            // gleicher Pfad wie am LAN-Server, damit tl.html in beiden
+            // Modi identisch abruft.
+            .route("/tl/api/timeline/{match_id}", get(tl_timeline_route))
             // Flaggen für die TL-Seite: Sie hängt ohne Namespace unter
             // `/tl` und findet ihre Flaggen deshalb unter `/flags/…` —
             // Begründung am Handler.
@@ -2285,6 +2289,114 @@ async fn tl_state_route(
         .into_response()
 }
 
+/// Punktverlauf eines Matches für ein Turnierleitungs-Gerät — **on-demand**
+/// durchgereicht (Spec punktverlauf-graph, AK-5): Anfrage per
+/// `TimelineRequest` an den Turnier-PC, Antwort (`TimelineData`) zurück an
+/// den wartenden Abruf. Der Relay hält keine Verläufe vor — Briefträger,
+/// nicht Speicher; genau deshalb bleibt das Mobilfunk-Budget unberührt.
+/// Ohne Namespace in der Adresse, wie alle TL-Routen (ADR 0012).
+async fn tl_timeline_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+    Path(match_id): Path<i64>,
+) -> axum::response::Response {
+    let token = bearer(&headers);
+    let now = now_ms();
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        // Nicht 401 (siehe tl_state_route): ohne Turnier-PC weiß der Relay
+        // nichts über den Zugang.
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    let (ack_rx, req_id) = {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
+        let Some(host) = namespace.host.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        // Platz-Limit wie bei den Kommandos: Ein einzelnes Gerät darf den
+        // Namespace nicht mit wartenden Anfragen füllen.
+        if namespace.timeline_pending.len() >= MAX_PENDING_PER_NS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele offene Anfragen — bitte kurz warten.",
+            )
+                .into_response();
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.timeline_pending.insert(req_id, ack_tx);
+        if host
+            .send(text(&RelayFrame::TimelineRequest { req_id, match_id }))
+            .is_err()
+        {
+            namespace.timeline_pending.remove(&req_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht erreichbar.",
+            )
+                .into_response();
+        }
+        (ack_rx, req_id)
+    };
+    match tokio::time::timeout(TL_TIMEOUT, ack_rx).await {
+        Ok(Ok((true, json))) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            json,
+        )
+            .into_response(),
+        Ok(Ok((false, _))) => (
+            StatusCode::NOT_FOUND,
+            "Zu diesem Spiel liegt kein Punktverlauf vor.",
+        )
+            .into_response(),
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(&ns) {
+                namespace.timeline_pending.remove(&req_id);
+            }
+            // Auch der Versions-Schiefstand landet hier: Ein älterer
+            // Turnier-PC kennt den Frame nicht und antwortet nie.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC hat nicht geantwortet — seine Version kennt \
+                 den Punktverlauf möglicherweise noch nicht.",
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Rumpf eines TL-Kommandos, wie ihn die Seite schickt.
 #[derive(serde::Deserialize)]
 struct TlCommandBody {
@@ -3191,6 +3303,96 @@ mod tests {
         let antwort = warten.await.unwrap();
         assert!(antwort.ok);
         assert_eq!(antwort.state_rev, 13);
+    }
+
+    #[tokio::test]
+    async fn timeline_request_reaches_host_and_answer_reaches_caller() {
+        // Punktverlauf on-demand (AK-5): gleiche Mechanik wie das
+        // TL-Kommando — Anfrage zum Host, Antwort zurück, nichts im Relay.
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten =
+            tokio::spawn(async move { tl_timeline_route(State(broker2), headers, Path(42)).await });
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        let RelayFrame::TimelineRequest { req_id, match_id } = frame else {
+            panic!("TimelineRequest erwartet, war: {frame:?}")
+        };
+        assert_eq!(match_id, 42);
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TimelineData {
+                req_id,
+                found: true,
+                json: r#"{"sets":[]}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], br#"{"sets":[]}"#);
+    }
+
+    #[tokio::test]
+    async fn timeline_without_recording_yields_404_and_foreign_token_is_rejected() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+
+        // Fremder Zugang → zurückhaltende 503 (wie tl_state_route: ein
+        // unbekannter Zugang ist vom kurz abwesenden Turnier-PC nicht zu
+        // unterscheiden und darf nie wie „entzogen" aussehen), und der
+        // Host wird gar nicht erst behelligt.
+        let mut falsch = axum::http::HeaderMap::new();
+        falsch.insert(header::AUTHORIZATION, "Bearer falsch".parse().unwrap());
+        let antwort = tl_timeline_route(State(broker.clone()), falsch, Path(42)).await;
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+
+        // Papier-Spiel: der Host meldet found:false → ehrliches 404.
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten =
+            tokio::spawn(async move { tl_timeline_route(State(broker2), headers, Path(43)).await });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::TimelineRequest { req_id, .. } =
+            serde_json::from_str::<RelayFrame>(t.as_str()).unwrap()
+        else {
+            panic!("TimelineRequest erwartet")
+        };
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TimelineData {
+                req_id,
+                found: false,
+                json: String::new(),
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(warten.await.unwrap().status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
