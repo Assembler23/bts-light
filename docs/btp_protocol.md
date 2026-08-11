@@ -238,11 +238,31 @@ gesendet, NACHHER weiterhin `None`. Alle anderen Felder (`CourtID`, `Sets`,
 `Winner`, `Status`) blieben dabei unverändert; der Restore-Schritt lief
 ebenfalls erfolgreich und wurde verifiziert.
 
-**Folgerung:** Eine Spielort-Rückschreibung nach BTP ist über `SENDUPDATE`
-nicht möglich — `Match.LocationID` verhält sich wie ein serverseitig
-abgeleitetes, nur lesbares Feld. Allgemeiner gilt: `Result=1` ist bei einem
-unbekannten Feld kein verlässliches Erfolgssignal — jeder künftige
-Schreibpfad muss den Wert zur Kontrolle zurücklesen. Deshalb bleibt die
+**Folgerung:** Eine Spielort-Rückschreibung nach BTP ist über diese
+`SENDUPDATE`-Form nicht möglich — `Match.LocationID` verhält sich wie ein
+serverseitig abgeleitetes, nur lesbares Feld. Allgemeiner gilt: `Result=1`
+ist bei einem unbekannten Feld kein verlässliches Erfolgssignal — jeder
+künftige Schreibpfad muss den Wert zur Kontrolle zurücklesen.
+
+**Varianten-Matrix gemessen (11.08.2026, Test-BTP „TEST Köpi-Cup"):**
+Die Messung oben deckte nur die minimale Form ab; drei weitere Formen
+wurden daraufhin geprüft (`which_location_write_variant_sticks` in
+`tests/btp_location_probe.rs`, wiederholbar gegen jedes Test-BTP):
+
+| Variante | Ergebnis |
+|---|---|
+| LocationID **mit gespiegelter `PlannedTime`** (BTPs Ansetzungs-Dialog pflegt Zeit + Ort zusammen) | `Result=1`, still ignoriert |
+| **Voller Match-Knoten gespiegelt** (ohne `Status`), nur LocationID ersetzt | `Result=1`, still ignoriert |
+| LocationID **als String** (BTP typisiert gemischt) | `Result=1`, still ignoriert |
+
+Alle Restores verifiziert, keine Nebenwirkungen. Zusammen mit der
+Minimal-Form sind damit **vier** Schreibformen ausgeschlossen — und das,
+obwohl `CourtID` in exakt derselben Knotenform nachweislich ankommt. Der
+Wire-Weg ist ausgereizt: `Match.LocationID` ist über den Connector
+**nur lesbar**. Was bleibt: Spielort-Pflege in BTP selbst (bts-light
+liest sie bereits automatisch), eine Messung gegen eine neuere
+BTP-Version (Probe wiederverwendbar) oder eine Anfrage an Visual
+Reality, das Feld im Connector schreibbar zu machen. Deshalb bleibt die
 Hallen-Festlegung in TL-Web (`TlAction::SetHall`) bewusst host-lokal
 (bts-light + Liveticker) statt nach BTP zurückzuschreiben.
 
