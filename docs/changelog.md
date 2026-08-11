@@ -4,7 +4,9 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.182
+## v0.9.183
+
+Fasst den nie einzeln veröffentlichten Stand v0.9.182 mit zusammen.
 
 - **BVBB-Zugang aktualisiert.** Das Liveticker-Passwort des BVBB-Presets
   wurde badhub-seitig geändert; dieses Update bringt den neuen Zugang
@@ -12,6 +14,10 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Einstellungen öffnen, „BVBB" erneut auswählen und speichern — die
   gespeicherte Konfiguration behält sonst das alte Passwort, und der
   Liveticker-Push bliebe abgelehnt.
+- **Federball-Marker größer und realistischer.** Der Aufschlag-Marker
+  auf der Tablet-Court-Grafik skaliert jetzt mit dem Bildschirm (bis
+  doppelt so groß) und ist als echter Federball gezeichnet — fünf
+  Federn, Bund, gewölbter Korken; aus Armlänge klar erkennbar.
 
 ## v0.9.181
 
