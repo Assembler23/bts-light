@@ -257,11 +257,24 @@ wurden daraufhin geprüft (`which_location_write_variant_sticks` in
 
 Alle Restores verifiziert, keine Nebenwirkungen. Zusammen mit der
 Minimal-Form sind damit **vier** Schreibformen ausgeschlossen — und das,
-obwohl `CourtID` in exakt derselben Knotenform nachweislich ankommt. Der
-Wire-Weg ist ausgereizt: `Match.LocationID` ist über den Connector
+obwohl `CourtID` in exakt derselben Knotenform nachweislich ankommt.
+
+**Auch der „Feld-Trick" scheitert (gemessen 11.08.2026):** Die Idee war,
+ein Feld zuzuweisen (das kommt an, und am Feld hängt die Halle) und es
+danach wieder zu entfernen — in der Hoffnung, die abgeleitete
+`Match.LocationID` bliebe stehen. Messung
+(`does_assign_then_free_leave_the_location_behind`, ebenda): Die
+Zuweisung setzt **gar keine** `Match.LocationID` — selbst während das
+Spiel mit `CourtID` und Status `OnCourt` auf dem Feld steht, bleibt sie
+leer; nach voller wie halber Freigabe ebenso. `Match.LocationID` wird
+also **nicht** vom Feld abgeleitet, sondern kommt ausschließlich aus
+BTPs eigener Spielort-Planung (die „Spielort"-Spalte). Es gibt auf dem
+Draht nichts, das kleben bleiben könnte.
+
+Der Wire-Weg ist ausgereizt: `Match.LocationID` ist über den Connector
 **nur lesbar**. Was bleibt: Spielort-Pflege in BTP selbst (bts-light
 liest sie bereits automatisch), eine Messung gegen eine neuere
-BTP-Version (Probe wiederverwendbar) oder eine Anfrage an Visual
+BTP-Version (Proben wiederverwendbar) oder eine Anfrage an Visual
 Reality, das Feld im Connector schreibbar zu machen. Deshalb bleibt die
 Hallen-Festlegung in TL-Web (`TlAction::SetHall`) bewusst host-lokal
 (bts-light + Liveticker) statt nach BTP zurückzuschreiben.
