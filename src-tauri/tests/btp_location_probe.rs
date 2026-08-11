@@ -337,6 +337,84 @@ async fn login(pw: Option<&str>) -> String {
         .expect("LOGIN akzeptiert (Passwort korrekt?)")
 }
 
+/// Verpackt beliebige Match-Kinder in einen vollständigen `SENDUPDATE`.
+/// Gemeinsames Gerüst der Schreib-Varianten unten.
+fn match_update_request(
+    match_children: Vec<xml::Node>,
+    session_key: &str,
+    password: Option<&str>,
+) -> Vec<u8> {
+    let mut action_children = vec![xml::Node::string("ID", "SENDUPDATE")];
+    action_children.push(xml::Node::string("Unicode", session_key));
+    if let Some(pw) = password {
+        action_children.push(xml::Node::string("Password", pw));
+    }
+    let nodes = vec![
+        xml::Node::group(
+            "Header",
+            vec![xml::Node::group(
+                "Version",
+                vec![xml::Node::integer("Hi", 1), xml::Node::integer("Lo", 1)],
+            )],
+        ),
+        xml::Node::group("Action", action_children),
+        xml::Node::group("Client", vec![xml::Node::string("IP", "bts-light")]),
+        xml::Node::group(
+            "Update",
+            vec![xml::Node::group(
+                "Tournament",
+                vec![xml::Node::group(
+                    "Matches",
+                    vec![xml::Node::group("Match", match_children)],
+                )],
+            )],
+        ),
+    ];
+    wire::encode_message(&xml::encode(&nodes))
+}
+
+/// Sucht den ROHEN Match-Knoten (unparsed) einer Match-ID im Snapshot.
+fn raw_match_node(nodes: &[xml::Node], match_id: i64) -> Option<xml::Node> {
+    fn suche<'a>(nodes: &'a [xml::Node], gesucht: &str) -> Option<&'a xml::Node> {
+        for n in nodes {
+            if n.id() == gesucht {
+                return Some(n);
+            }
+            if let Some(t) = suche(n.children(), gesucht) {
+                return Some(t);
+            }
+        }
+        None
+    }
+    let matches = suche(nodes, "Matches")?;
+    matches
+        .children()
+        .iter()
+        .find(|m| {
+            m.children()
+                .iter()
+                .find(|c| c.id() == "ID")
+                .and_then(|c| c.value())
+                .and_then(|v| v.as_int())
+                == Some(match_id)
+        })
+        .cloned()
+}
+
+/// Kinder eines rohen Match-Knotens: `LocationID` ersetzt/ergänzt,
+/// `Status` entfernt (Check-in-Bitfeld — schreiben markiert Spieler als
+/// nicht eingecheckt, siehe `court_assign_request` in proto.rs).
+fn mirrored_children(raw: &xml::Node, location_id: i64) -> Vec<xml::Node> {
+    let mut children: Vec<xml::Node> = raw
+        .children()
+        .iter()
+        .filter(|c| c.id() != "LocationID" && c.id() != "Status")
+        .cloned()
+        .collect();
+    children.push(xml::Node::integer("LocationID", location_id));
+    children
+}
+
 /// **Messung, kein Regressionstest — SCHREIBT probeweise nach BTP und
 /// stellt danach den Originalzustand wieder her.**
 ///
@@ -579,5 +657,207 @@ async fn does_btp_accept_a_location_write_for_a_scheduled_match() {
         "RESTORE FEHLGESCHLAGEN — Turnier NICHT im Originalzustand! MatchID={match_id}, \
          Original-LocationID={original_location_id:?}, jetzt {:?}. MANUELL IN BTP PRÜFEN!",
         restored_match.location_id
+    );
+}
+
+/// **Messung, kein Regressionstest — SCHREIBT probeweise und stellt
+/// zurück.** Varianten-Matrix zum LocationID-Write (Nutzer-Wunsch
+/// 11.08.2026: „Spielort nach BTP zurück wäre mir sehr wichtig").
+///
+/// Die erste Probe oben hat nur EINE Schreibform gemessen (minimaler
+/// Update: `ID, DrawID, PlanningID, LocationID` → Result=1, still
+/// ignoriert). Diese Matrix testet die noch offenen Hypothesen:
+///
+/// - **V2 `mit-plannedtime`** — BTPs Ansetzungs-Dialog pflegt Zeit und
+///   Spielort zusammen; vielleicht übernimmt BTP die LocationID nur im
+///   Verbund mit der (unverändert gespiegelten) `PlannedTime`.
+/// - **V3 `voller-spiegel`** — der komplette rohe Match-Knoten wird
+///   gespiegelt (ohne `Status`, s. o.), nur die LocationID ersetzt;
+///   vielleicht verwirft BTP unvollständige Knoten still.
+/// - **V4 `als-string`** — BTP typisiert Felder unterschiedlich;
+///   vielleicht erwartet der Parser die LocationID als String.
+///
+/// Je Variante: schreiben → zurücklesen → Verdikt → Original
+/// zurückschreiben → Restore verifizieren → Nebenwirkungen prüfen.
+///
+/// ```text
+/// cargo test -p bts-light --test btp_location_probe -- --ignored --nocapture which_location_write_variant_sticks
+/// ```
+#[tokio::test]
+#[ignore = "braucht ein laufendes BTP; SCHREIBT probeweise und stellt zurück"]
+async fn which_location_write_variant_sticks() {
+    use bts_light_lib::btp::model::MatchStatus;
+
+    let pw = password();
+    let pw_ref = pw.as_deref();
+
+    let raw_before = client::send_request(&host(), port(), &proto::tournament_info_request(pw_ref))
+        .await
+        .expect("BTP erreichbar (VORHER)");
+    let nodes_before = proto::decode_response(&raw_before).expect("dekodierbar");
+    let before = bts_light_lib::btp::model::parse_snapshot(&nodes_before).expect("Snapshot");
+
+    println!("\n=== Turnier: {} ===", before.tournament_name);
+    if before.locations.is_empty() {
+        println!("ABBRUCH: Turnier pflegt KEINE Locations — Messung nicht möglich.");
+        return;
+    }
+
+    let mut kandidaten: Vec<&bts_light_lib::btp::model::BtpMatch> = before
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled
+                && !m.team1.is_empty()
+                && !m.team2.is_empty()
+                && m.court_id.is_none()
+        })
+        .collect();
+    kandidaten.sort_by_key(|m| m.id);
+    let Some((ziel_match, ziel_location)) = kandidaten.iter().find_map(|&m| {
+        before
+            .locations
+            .iter()
+            .find(|l| Some(l.id) != m.location_id)
+            .map(|l| (m, l.id))
+    }) else {
+        println!("ABBRUCH: kein geeignetes Match gefunden.");
+        return;
+    };
+
+    let match_id = ziel_match.id;
+    let draw_id = ziel_match.draw_id;
+    let planning_id = ziel_match.planning_id;
+    let original_location_id = ziel_match.location_id;
+    let original_court_id = ziel_match.court_id;
+    let original_sets = ziel_match.sets.clone();
+    let original_winner = ziel_match.winner;
+    let original_status = ziel_match.status.clone();
+    let raw_match = raw_match_node(&nodes_before, match_id).expect("roher Match-Knoten");
+    let raw_planned = raw_match
+        .children()
+        .iter()
+        .find(|c| c.id() == "PlannedTime")
+        .cloned();
+
+    println!("Ziel: MatchID={match_id}, LocationID {original_location_id:?} → {ziel_location}\n");
+
+    // Die Basis-Kinder je Variante — Ziel- und Restore-Wert entstehen
+    // unten aus demselben Bauplan.
+    let bauplan = |location_id: i64, variante: &str| -> Vec<xml::Node> {
+        match variante {
+            "mit-plannedtime" => {
+                let mut kinder = vec![
+                    xml::Node::integer("ID", match_id),
+                    xml::Node::integer("DrawID", draw_id),
+                    xml::Node::integer("PlanningID", planning_id),
+                    xml::Node::integer("LocationID", location_id),
+                ];
+                if let Some(pt) = &raw_planned {
+                    kinder.push(pt.clone());
+                }
+                kinder
+            }
+            "voller-spiegel" => mirrored_children(&raw_match, location_id),
+            "als-string" => vec![
+                xml::Node::integer("ID", match_id),
+                xml::Node::integer("DrawID", draw_id),
+                xml::Node::integer("PlanningID", planning_id),
+                xml::Node::string("LocationID", location_id.to_string()),
+            ],
+            _ => unreachable!(),
+        }
+    };
+
+    let mut ergebnisse: Vec<(String, String)> = Vec::new();
+    for variante in ["mit-plannedtime", "voller-spiegel", "als-string"] {
+        println!("──── Variante {variante} ────");
+        let session = login(pw_ref).await;
+        let write_raw = client::send_request(
+            &host(),
+            port(),
+            &match_update_request(bauplan(ziel_location, variante), &session, pw_ref),
+        )
+        .await
+        .expect("BTP erreichbar (Variante schreiben)");
+        let write_result = proto::parse_update_response(
+            &proto::decode_response(&write_raw).expect("Antwort dekodierbar"),
+        );
+        println!("  Antwort: {write_result:?}");
+
+        let after = client::fetch_snapshot(&host(), port(), pw_ref)
+            .await
+            .expect("BTP erreichbar (NACHHER)");
+        let nach = after
+            .matches
+            .iter()
+            .find(|m| m.id == match_id)
+            .expect("Match noch vorhanden");
+
+        let verdikt = if write_result.is_err() {
+            format!("ABGELEHNT ({write_result:?})")
+        } else if nach.location_id == Some(ziel_location) {
+            "ANGENOMMEN ✔".to_string()
+        } else {
+            "IGNORIERT (stiller No-Op)".to_string()
+        };
+        println!("  LocationID NACHHER: {:?} → {verdikt}", nach.location_id);
+
+        // Nebenwirkungen sofort prüfen — eine Variante mit Kollateralschaden
+        // bricht die Messung ab, bevor sie weiteres anfasst.
+        assert!(
+            nach.court_id == original_court_id
+                && nach.sets == original_sets
+                && nach.winner == original_winner
+                && nach.status == original_status,
+            "Variante {variante} hat NEBENWIRKUNGEN erzeugt — MANUELL IN BTP PRÜFEN! \
+             (Court {:?}, Sets {:?}, Winner {:?}, Status {:?})",
+            nach.court_id,
+            nach.sets,
+            nach.winner,
+            nach.status
+        );
+
+        // Restore mit demselben Bauplan (0 = löschen, BTP-Konvention).
+        let session2 = login(pw_ref).await;
+        let _ = client::send_request(
+            &host(),
+            port(),
+            &match_update_request(
+                bauplan(original_location_id.unwrap_or(0), variante),
+                &session2,
+                pw_ref,
+            ),
+        )
+        .await
+        .expect("BTP erreichbar (Restore)");
+        let restored = client::fetch_snapshot(&host(), port(), pw_ref)
+            .await
+            .expect("BTP erreichbar (Restore-Kontrolle)");
+        let restored_match = restored
+            .matches
+            .iter()
+            .find(|m| m.id == match_id)
+            .expect("Match noch vorhanden");
+        assert!(
+            restored_match.location_id == original_location_id,
+            "RESTORE nach Variante {variante} FEHLGESCHLAGEN — MatchID={match_id}, \
+             Original {original_location_id:?}, jetzt {:?}. MANUELL IN BTP PRÜFEN!",
+            restored_match.location_id
+        );
+        println!("  Restore ok.\n");
+        ergebnisse.push((variante.to_string(), verdikt));
+    }
+
+    println!("########################################");
+    println!("ERGEBNIS DER VARIANTEN-MATRIX:");
+    for (variante, verdikt) in &ergebnisse {
+        println!("  {variante:<18} {verdikt}");
+    }
+    println!("########################################");
+    println!(
+        "Steht überall IGNORIERT/ABGELEHNT, ist der Wire-Weg ausgereizt — \
+         dann bleiben: Spielort in BTP pflegen (bts-light liest ihn bereits), \
+         eine neuere BTP-Version messen oder eine Anfrage an Visual Reality."
     );
 }

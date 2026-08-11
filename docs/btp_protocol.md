@@ -238,11 +238,30 @@ gesendet, NACHHER weiterhin `None`. Alle anderen Felder (`CourtID`, `Sets`,
 `Winner`, `Status`) blieben dabei unverändert; der Restore-Schritt lief
 ebenfalls erfolgreich und wurde verifiziert.
 
-**Folgerung:** Eine Spielort-Rückschreibung nach BTP ist über `SENDUPDATE`
-nicht möglich — `Match.LocationID` verhält sich wie ein serverseitig
-abgeleitetes, nur lesbares Feld. Allgemeiner gilt: `Result=1` ist bei einem
-unbekannten Feld kein verlässliches Erfolgssignal — jeder künftige
-Schreibpfad muss den Wert zur Kontrolle zurücklesen. Deshalb bleibt die
+**Folgerung:** Eine Spielort-Rückschreibung nach BTP ist über diese
+`SENDUPDATE`-Form nicht möglich — `Match.LocationID` verhält sich wie ein
+serverseitig abgeleitetes, nur lesbares Feld. Allgemeiner gilt: `Result=1`
+ist bei einem unbekannten Feld kein verlässliches Erfolgssignal — jeder
+künftige Schreibpfad muss den Wert zur Kontrolle zurücklesen.
+
+**Noch offene Schreib-Hypothesen (Varianten-Matrix, 11.08.2026):** Die
+Messung oben deckte nur die minimale Form ab. Drei weitere Formen stehen
+als Messung bereit (`which_location_write_variant_sticks` in
+`tests/btp_location_probe.rs`, läuft nur gegen ein Test-BTP):
+LocationID **zusammen mit gespiegelter `PlannedTime`** (BTPs
+Ansetzungs-Dialog pflegt Zeit und Ort zusammen), der **volle
+Match-Knoten gespiegelt** (ohne `Status`; vielleicht verwirft BTP
+unvollständige Knoten still) und LocationID **als String** (BTP typisiert
+Settings gemischt). Aufruf:
+
+```text
+cargo test -p bts-light --test btp_location_probe -- --ignored --nocapture which_location_write_variant_sticks
+```
+
+Steht überall IGNORIERT/ABGELEHNT, ist der Wire-Weg ausgereizt; dann
+bleiben Spielort-Pflege in BTP (bts-light liest sie bereits), eine
+Messung gegen eine neuere BTP-Version oder eine Anfrage an Visual
+Reality. Deshalb bleibt die
 Hallen-Festlegung in TL-Web (`TlAction::SetHall`) bewusst host-lokal
 (bts-light + Liveticker) statt nach BTP zurückzuschreiben.
 
