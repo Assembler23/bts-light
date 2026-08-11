@@ -127,7 +127,9 @@ Aufstellung:
   je mit Countdown. „Weiterspielen" beendet die Pause früher; bei 0 geht
   es automatisch weiter. Während der Pause ist die Zähltafel gesperrt.
 - **Spieldauer**: läuft als MM:SS in der Kopfzeile ab Matchstart.
-- **Court-Grafik**: zeigt Aufschläger (gelb markiert) und Annehmer auf
+- **Court-Grafik**: zeigt Aufschläger (markiert mit einem **Federball**,
+  dessen Korken in Flugrichtung zum diagonal gegenüberliegenden
+  Aufschlagfeld zeigt) und Annehmer auf
   dem Spielfeld – im Einzel ein Name je Hälfte, im Doppel zwei.
 - **Punktverlauf** ([punktverlauf.md](punktverlauf.md)): Das Tablet
   protokolliert jeden Ballwechsel (`rallyLog`, überlebt Reload und
