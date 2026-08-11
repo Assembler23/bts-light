@@ -1897,6 +1897,21 @@ pub struct FinishedMatchRow {
     pub location: String,
     /// Zeitpunkt der Beendigung (Unix-ms) – für die Sortierung (neueste zuerst).
     pub finished_at: Option<u64>,
+    /// Gibt es einen Punktverlauf zum Anzeigen (Spec punktverlauf-graph)?
+    /// Papier-Ergebnisse haben keinen — die Tabelle bietet den Graph-Klick
+    /// dann gar nicht erst an.
+    pub has_timeline: bool,
+}
+
+/// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser
+/// spricht nie selbst mit dem Store). `None` = kein Verlauf aufgezeichnet
+/// (Papier-Ergebnis oder Spiel vor Einführung).
+#[tauri::command]
+pub fn match_timeline(
+    state: State<'_, AppState>,
+    match_id: i64,
+) -> Option<relay_proto::MatchTimeline> {
+    state.tablet.timeline_store().timeline(match_id)
 }
 
 /// Abgeschlossene Spiele (mit Sieger) für die Spielübersicht-Tabelle, neueste
@@ -1934,6 +1949,7 @@ pub fn finished_matches(state: State<'_, AppState>) -> Vec<FinishedMatchRow> {
                 .map(|cid| snapshot.court_location_name(cid))
                 .unwrap_or_default(),
             finished_at: m.finished_at,
+            has_timeline: state.tablet.timeline_store().has_timeline(m.id),
         })
         .collect();
     // Neueste zuerst. `Option::cmp` würde `None` bei absteigender Sortierung

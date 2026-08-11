@@ -1485,6 +1485,12 @@ pub struct TlCourt {
     pub best_of: i64,
     pub target_score: i64,
     pub cap_score: i64,
+    /// Gibt es zu diesem Spiel einen Punktverlauf zum Anzeigen? Nur dann
+    /// bietet die Seite den Graph-Klick an — kein „Klick ins Leere" bei
+    /// Spielen ohne Tablet-Zählung. `default` hält ältere Gegenstellen
+    /// kompatibel.
+    #[serde(default)]
+    pub has_timeline: bool,
 }
 
 /// Ein Spiel in der Warteliste.
@@ -1654,6 +1660,10 @@ pub struct TlFinished {
     /// Nur zur Laufzeit gestempelt — Spiele, die vor dem App-Start
     /// beendet waren, haben keinen Zeitstempel und stehen am Ende.
     pub finished_at_ms: Option<u64>,
+    /// Siehe [`TlCourt::has_timeline`] — Papier-Ergebnisse haben keinen
+    /// Verlauf, die Beendet-Zeile bietet den Klick dann nicht an.
+    #[serde(default)]
+    pub has_timeline: bool,
 }
 
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
@@ -1720,7 +1730,8 @@ pub(crate) fn build_state_limited(
         .into_iter()
         .map(|c| {
             let clearing = clearing_match(&snap, c.court_id, c.match_id);
-            court_view(c, clearing)
+            let has_timeline = c.match_id != 0 && tablet.timeline_store().has_timeline(c.match_id);
+            court_view(c, clearing, has_timeline)
         })
         .collect();
 
@@ -1898,6 +1909,7 @@ pub(crate) fn build_state_limited(
             .to_string(),
             court: m.court.clone().unwrap_or_default(),
             finished_at_ms: m.finished_at,
+            has_timeline: tablet.timeline_store().has_timeline(m.id),
         })
         .collect();
 
@@ -2025,7 +2037,11 @@ fn call_timer_view(config: &AppConfig) -> TlCallTimer {
 /// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
 /// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
 /// Vergabehilfe).
-fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> TlCourt {
+fn court_view(
+    c: crate::tablet::state::CourtOverview,
+    clearing: Option<i64>,
+    has_timeline: bool,
+) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die zwei bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
     // erreichbaren Seite.
@@ -2062,6 +2078,7 @@ fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> 
         best_of: c.best_of,
         target_score: c.target_score,
         cap_score: c.cap_score,
+        has_timeline,
     }
 }
 
@@ -3850,6 +3867,37 @@ mod tests {
     }
 
     #[test]
+    fn has_timeline_only_for_recorded_matches() {
+        // Punktverlauf (AK-4): Der Graph-Klick erscheint nur, wo es
+        // wirklich einen Verlauf gibt — Papier-Spiele bieten ihn nicht an.
+        let tablet = TabletState::default();
+        let mut auf_dem_feld = a_match(1);
+        auf_dem_feld.status = MatchStatus::OnCourt;
+        auf_dem_feld.court_id = Some(1);
+        let mut fertig_mit_verlauf = a_match(2);
+        fertig_mit_verlauf.status = MatchStatus::Finished;
+        fertig_mit_verlauf.winner = Some(1);
+        let mut fertig_papier = a_match(3);
+        fertig_papier.status = MatchStatus::Finished;
+        fertig_papier.winner = Some(2);
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![auf_dem_feld, fertig_mit_verlauf, fertig_papier],
+            Vec::new(),
+        ));
+        // Verläufe: fürs Feld-Spiel und EIN beendetes; das Papier-Spiel
+        // bekommt keinen.
+        assert!(tablet.timeline_store().apply_rally(1, 1, 1, "A", 1, 0));
+        assert!(tablet.timeline_store().apply_rally(2, 1, 1, "B", 0, 1));
+
+        let s = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        assert!(s.courts[0].has_timeline);
+        let by_id = |id: i64| s.finished.iter().find(|f| f.match_id == id).unwrap();
+        assert!(by_id(2).has_timeline);
+        assert!(!by_id(3).has_timeline, "Papier-Spiel ohne Verlauf");
+    }
+
+    #[test]
     fn open_walkover_proposals_reach_the_page_with_their_matches() {
         // Ohne die Vorschläge samt betroffener Spiele könnte die Seite
         // nicht anbieten, was gewertet werden soll — die Turnierleitung
@@ -4079,6 +4127,10 @@ mod tests {
             "auto_assign",
             "call_timer",
             "enabled",
+            // Punktverlauf (Spec punktverlauf-graph): reines Bool-Flag „es
+            // gibt einen Graphen" — der Verlauf selbst geht NIE über den
+            // Zustands-Push, sondern nur on-demand über die eigene Route.
+            "has_timeline",
             // Grundeinstellung der automatischen Vergabe: kein
             // personenbezogenes Datum, und die Seite braucht sie, um den
             // Schalter überhaupt anbieten zu dürfen.

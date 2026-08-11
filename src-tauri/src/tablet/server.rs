@@ -168,6 +168,9 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/tl", get(tl_page))
         .route("/tl/api/state", get(tl_state))
         .route("/tl/api/command", post(tl_command))
+        // Punktverlauf on-demand (AK-5): gleicher Pfad wie über den Relay,
+        // damit tl.html in beiden Modi identisch abruft.
+        .route("/tl/api/timeline/{match_id}", get(tl_timeline))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -1040,6 +1043,32 @@ async fn tl_state(
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response();
     }
     (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
+}
+
+/// Punktverlauf eines Matches für die TL-Oberfläche (AK-5) — on-demand,
+/// nie Teil des Zustands-Pushes (Mobilfunk-Budget). Gleicher Zugang wie
+/// `tl_state`; 404 heißt ehrlich „kein Verlauf" (Papier-Ergebnis).
+async fn tl_timeline(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(match_id): axum::extract::Path<i64>,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    match ctx.tablet.timeline_store().timeline_json(match_id) {
+        Some(json) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            json,
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "Zu diesem Spiel liegt kein Punktverlauf vor.",
+        )
+            .into_response(),
+    }
 }
 
 /// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine

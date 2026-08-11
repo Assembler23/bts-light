@@ -132,6 +132,7 @@ pub fn run() {
             commands::checkin_set_times,
             commands::checkin_announcement,
             commands::finished_matches,
+            commands::match_timeline,
             commands::publish_freetext,
             commands::pending_freetext,
             commands::pending_announce_jobs,
