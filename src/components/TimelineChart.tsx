@@ -37,7 +37,10 @@ function SetChart({ set }: { set: TimelineSet }) {
     curveB.push([i + 1, b]);
   }
   const n = seq.length;
-  const maxY = Math.max(a, b, 5);
+  // Deckel gegen kaputte Daten: ohne ihn liefe die Gitter-Schleife bei
+  // einem absurden Stand endlos (die Wire-Ebene deckelt bereits über
+  // MAX_START_SCORE — hier ist Defense in Depth).
+  const maxY = Math.min(Math.max(a, b, 5), 300);
   const W = 420;
   const H = 190;
   const L = 30;

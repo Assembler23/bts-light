@@ -3095,7 +3095,10 @@ function timelineSetSvg(set, opts) {
     ptsB.push([i + 1, b]);
   }
   const n = seq.length;
-  const maxY = Math.max(a, b, 5);
+  // Deckel gegen kaputte/bösartige Daten: ohne ihn liefe die
+  // Gitter-Schleife bei einem absurden Stand endlos (Defense in Depth —
+  // die Wire-Ebene deckelt bereits über MAX_START_SCORE).
+  const maxY = Math.min(Math.max(a, b, 5), 300);
   const W = 420, H = 190, L = 30, R = 12, T = 10, B = 22;
   const sx = (x) => L + (W - L - R) * (n ? x / n : 0);
   const sy = (y) => H - B - (H - B - T) * (y / maxY);
@@ -3139,22 +3142,33 @@ let graphTimer = null;
 
 async function fetchTimeline() {
   if (!graphCtx) return;
+  // Kontext festhalten: Kommt die Antwort erst an, nachdem das Overlay
+  // gewechselt/geschlossen wurde, darf sie nicht ins falsche Fenster
+  // malen (In-Flight-Race, Review-Befund 2026-08-11).
+  const ctx = graphCtx;
   const body = $("graph-body");
   try {
-    const res = await fetch(`${API}/timeline/${graphCtx.matchId}`, {
+    const res = await fetch(`${API}/timeline/${ctx.matchId}`, {
       headers: { Authorization: "Bearer " + token },
       cache: "no-store",
     });
+    if (graphCtx !== ctx) return;
     if (res.status === 404) {
-      body.innerHTML = `<p class="graph-note">Zu diesem Spiel liegt kein Punktverlauf vor.</p>`;
+      // Nur beim ersten Laden: Ein transientes 404 (z. B. Host-Reconnect
+      // am Relay) darf einen bereits gezeichneten Graphen nicht ersetzen.
+      if (!body.dataset.geladen) {
+        body.innerHTML = `<p class="graph-note">Zu diesem Spiel liegt kein Punktverlauf vor.</p>`;
+      }
       return;
     }
     if (!res.ok) throw new Error("HTTP " + res.status);
-    renderTimeline(await res.json());
+    const tl = await res.json();
+    if (graphCtx !== ctx) return;
+    renderTimeline(tl);
   } catch {
     // Nur beim ERSTEN Laden eine Meldung — ein einzelner Fehl-Poll bei
     // offenem Overlay soll den bereits gezeichneten Graphen nicht ersetzen.
-    if (!body.dataset.geladen) {
+    if (graphCtx === ctx && !body.dataset.geladen) {
       body.innerHTML = `<p class="graph-note">Der Punktverlauf ist gerade nicht
         abrufbar — die Version des Turnier-PCs kennt ihn möglicherweise noch
         nicht, oder die Verbindung fehlt.</p>`;

@@ -188,17 +188,48 @@ impl TimelineStore {
         true
     }
 
-    /// Kompletter Resync: ersetzt den Verlauf des Matches. `false` =
-    /// verworfen (ungültig, oder ein bereits finalisierter Stand würde
-    /// von einem nicht-finalen Nachzügler überschrieben, AK-14).
-    pub fn apply_sync(&self, match_id: i64, timeline: MatchTimeline) -> bool {
+    /// Kompletter Resync: ersetzt den Verlauf des Matches.
+    ///
+    /// Auch ein **finalisierter** Stand wird ersetzt: Der Aufrufer (LAN-
+    /// Server/Relay-Client) lässt nur Frames des aktiven Halters fürs
+    /// aktuelle Court-Match durch — und der ist autoritativ, gerade beim
+    /// „Wiedereröffnen" nach einem schon abgegebenen Ergebnis (AK-2).
+    /// AK-14 (Nachzügler eines abgeschlossenen, neu besetzten Matches)
+    /// erledigt derselbe Ingest-Filter: solche Frames erreichen den Store
+    /// gar nicht erst.
+    ///
+    /// **Verlagerungs-/Übernahme-Schutz (AK-12):** Ein frisch
+    /// übernehmendes Tablet kennt vollendete Sätze nur als Endstand
+    /// (leere Punktfolge). Bestätigt so ein Platzhalter exakt den
+    /// Endstand eines detailliert aufgezeichneten Satzes, bleibt das
+    /// Detail erhalten — Ersetzen hieße, echte Ballwechsel gegen
+    /// Platzhalter zu tauschen. Der letzte (laufende) Satz wird nie
+    /// gemischt, sonst risse die Rally-Nummerierung des Tablets ab.
+    pub fn apply_sync(&self, match_id: i64, mut timeline: MatchTimeline) -> bool {
         if match_id <= 0 || !timeline.is_valid() {
             return false;
         }
         let mut inner = self.inner.lock().unwrap();
         if let Some(alt) = inner.file.matches.get(&match_id) {
-            if alt.finished && !timeline.finished {
-                return false;
+            let letzter = timeline.sets.len().saturating_sub(1);
+            for i in 0..letzter {
+                let neu = &timeline.sets[i];
+                if !neu.points.is_empty() {
+                    continue;
+                }
+                let Some(alt_set) = alt.sets.get(i) else {
+                    continue;
+                };
+                if alt_set.points.is_empty() {
+                    continue;
+                }
+                let final_a =
+                    alt_set.start_a + alt_set.points.chars().filter(|&c| c == 'A').count() as i64;
+                let final_b =
+                    alt_set.start_b + alt_set.points.chars().filter(|&c| c == 'B').count() as i64;
+                if final_a == neu.start_a && final_b == neu.start_b {
+                    timeline.sets[i] = alt_set.clone();
+                }
             }
         }
         inner.file.matches.insert(match_id, timeline);
@@ -264,21 +295,37 @@ impl TimelineStore {
         }
     }
 
-    /// Schreiben, wenn fällig (`force` = sofort). Best effort: Fehler
-    /// stören das Zählen nie.
+    /// Schreiben, wenn fällig (`force` = zügig, s. u.). Best effort:
+    /// Fehler stören das Zählen nie.
     fn persist(&self, force: bool) {
         let Some(dir) = self.dir.read().unwrap().clone() else {
             return;
         };
+        // Der Schreib-Guard kommt VOR den Schnappschuss (Muster
+        // `persist_scores`): Sonst könnten zwei parallele Schreiber ihre
+        // Klone in vertauschter Reihenfolge auf die Platte bringen, und
+        // die Datei trüge bei dirty=false den älteren Stand
+        // (Review-Befund 2026-08-11).
+        let _guard = self.persist_lock.lock().unwrap();
         let data = {
             let mut inner = self.inner.lock().unwrap();
             if inner.slug.is_empty() || !inner.dirty {
                 return;
             }
-            if !force
-                && inner
-                    .last_write
-                    .is_some_and(|t| t.elapsed() < PERSIST_DEBOUNCE)
+            // `force` (Resync/Finalisierung) schreibt zügig, aber nicht
+            // ungebremst: Ein Tablet, das rally_sync im Dauerfeuer schickt,
+            // soll den Host nicht zu unbegrenzten Voll-Datei-Schreibvorgängen
+            // zwingen (Security-Review 2026-08-11). Bleibt ein Stand deshalb
+            // kurz ungeschrieben (dirty), nimmt ihn der nächste Schreiber
+            // mit — und die letzte Lücke heilt ohnehin der Resync (ADR 0015).
+            let mindestabstand = if force {
+                std::time::Duration::from_millis(500)
+            } else {
+                PERSIST_DEBOUNCE
+            };
+            if inner
+                .last_write
+                .is_some_and(|t| t.elapsed() < mindestabstand)
             {
                 return;
             }
@@ -286,7 +333,6 @@ impl TimelineStore {
             inner.last_write = Some(Instant::now());
             (inner.slug.clone(), inner.file.clone())
         };
-        let _guard = self.persist_lock.lock().unwrap();
         let path = dir.join(format!("{}.json", data.0));
         if let Ok(json) = serde_json::to_string(&data.1) {
             // Atomar wie `persist_scores`: erst Temp-Datei, dann Umbenennen —
@@ -324,6 +370,37 @@ fn slugify(name: &str) -> String {
     if out.is_empty() {
         out = "turnier".to_string();
     }
+    // Reservierte Windows-Gerätenamen (CON, NUL, COM1 …): `con.json`
+    // adressiert das Gerät statt einer Datei, und die Best-Effort-
+    // Persistenz verlöre still das ganze Turnier. Präfix statt Ablehnung.
+    let reserviert = matches!(
+        out.as_str(),
+        "con"
+            | "prn"
+            | "aux"
+            | "nul"
+            | "com1"
+            | "com2"
+            | "com3"
+            | "com4"
+            | "com5"
+            | "com6"
+            | "com7"
+            | "com8"
+            | "com9"
+            | "lpt1"
+            | "lpt2"
+            | "lpt3"
+            | "lpt4"
+            | "lpt5"
+            | "lpt6"
+            | "lpt7"
+            | "lpt8"
+            | "lpt9"
+    );
+    if reserviert {
+        out = format!("t-{out}");
+    }
     out
 }
 
@@ -335,8 +412,8 @@ fn today() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use relay_proto::TimelineSet;
+    use std::path::Path;
 
     fn store_mit_dir(dir: &Path) -> TimelineStore {
         let store = TimelineStore::default();
@@ -420,20 +497,79 @@ mod tests {
     }
 
     #[test]
-    fn late_sync_cannot_unfinalize_a_finished_match() {
-        // AK-14: Offline-Nachzügler eines längst abgeschlossenen Spiels
-        // darf den finalisierten Stand nicht wiederbeleben.
+    fn reopen_sync_replaces_a_finalized_match() {
+        // AK-2: Nach „Wiedereröffnen" am Tablet (Ergebnis war schon
+        // abgegeben und finalisiert) ersetzt der Resync des aktiven
+        // Halters den Stand — inklusive finished=false, sonst fröre der
+        // Verlauf dauerhaft ein. AK-14 (Nachzügler fremder/abgelöster
+        // Matches) schützt der Ingest-Filter der Aufrufer, nicht der
+        // Store (Review-Befund 2026-08-11).
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_dir(dir.path());
         assert!(store.apply_sync(5, sync_beispiel()));
         store.finalize(5, false);
-        let spaet = sync_beispiel();
-        assert!(!store.apply_sync(5, spaet));
         assert!(store.timeline(5).unwrap().finished);
-        // Ein finaler Nachzügler (z. B. korrigierter Endstand) darf.
-        let mut fertig = sync_beispiel();
-        fertig.finished = true;
-        assert!(store.apply_sync(5, fertig));
+        let mut wieder_offen = sync_beispiel();
+        wieder_offen.sets[0].points = "AA".to_string(); // ein Punkt zurück
+        assert!(store.apply_sync(5, wieder_offen));
+        let tl = store.timeline(5).unwrap();
+        assert!(!tl.finished, "Wiedereröffnung hebt die Finalisierung auf");
+        assert_eq!(tl.sets[0].points, "AA");
+        // Und es zählt lückenlos weiter.
+        assert!(store.apply_rally(5, 1, 3, "B", 2, 1));
+    }
+
+    #[test]
+    fn sync_with_placeholder_sets_keeps_recorded_detail() {
+        // AK-12/Übernahme: Ein frisch übernehmendes Tablet kennt fertige
+        // Sätze nur als Endstand. Bestätigt sein Platzhalter exakt den
+        // detailliert aufgezeichneten Endstand, bleibt das Detail —
+        // der laufende (letzte) Satz kommt dagegen immer vom Tablet.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_dir(dir.path());
+        assert!(store.apply_sync(5, sync_beispiel())); // Satz 1: "AAB" → 2:1
+        let uebernahme = MatchTimeline {
+            sets: vec![
+                TimelineSet {
+                    start_a: 2,
+                    start_b: 1,
+                    points: String::new(), // Platzhalter mit passendem Endstand
+                },
+                TimelineSet {
+                    start_a: 3,
+                    start_b: 4,
+                    points: "B".to_string(), // laufender Satz des neuen Tablets
+                },
+            ],
+            mid_game: true,
+            retired: false,
+            finished: false,
+        };
+        assert!(store.apply_sync(5, uebernahme));
+        let tl = store.timeline(5).unwrap();
+        assert_eq!(tl.sets[0].points, "AAB", "Detail bleibt erhalten");
+        assert_eq!(tl.sets[1].points, "B", "laufender Satz kommt vom Tablet");
+        // Widerspricht der Platzhalter dem Detail (anderer Endstand),
+        // gewinnt das Tablet — es ist autoritativ.
+        let korrektur = MatchTimeline {
+            sets: vec![
+                TimelineSet {
+                    start_a: 5,
+                    start_b: 0,
+                    points: String::new(),
+                },
+                TimelineSet {
+                    start_a: 0,
+                    start_b: 0,
+                    points: "A".to_string(),
+                },
+            ],
+            mid_game: true,
+            retired: false,
+            finished: false,
+        };
+        assert!(store.apply_sync(5, korrektur));
+        assert_eq!(store.timeline(5).unwrap().sets[0].points, "");
     }
 
     #[test]
@@ -536,6 +672,13 @@ mod tests {
         );
         assert_eq!(slugify("///"), "turnier");
         assert_eq!(slugify(""), "turnier");
+        // Reservierte Windows-Gerätenamen: `con.json` wäre das Gerät,
+        // keine Datei — Präfix rettet die Persistenz.
+        assert_eq!(slugify("CON"), "t-con");
+        assert_eq!(slugify("NUL"), "t-nul");
+        assert_eq!(slugify("COM1"), "t-com1");
+        // Nur der EXAKTE Name ist reserviert — „Concordia-Cup" bleibt.
+        assert_eq!(slugify("Concordia"), "concordia");
         let lang = "x".repeat(200);
         assert!(slugify(&lang).len() <= 60);
     }

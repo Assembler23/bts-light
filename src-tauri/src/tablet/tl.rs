@@ -1095,6 +1095,15 @@ async fn execute_result_action(
                 if let Some(cid) = update.free_court_id {
                     ctx.tablet.clear_court(cid);
                 }
+                // Punktverlauf abschließen — auch der TL-Wertungsweg
+                // beendet ein evtl. tablet-gezähltes Spiel; ohne das
+                // bliebe `finished=false` und der Abweichungs-Hinweis
+                // (AK-8) könnte gerade dort nie erscheinen, wo Verlauf
+                // und Wertung auseinanderliegen (Review 2026-08-11).
+                // ScoreStatus 2 = Aufgabe; ohne Aufzeichnung No-op.
+                ctx.tablet
+                    .timeline_store()
+                    .finalize(update.btp_match_id, update.score_status == 2);
                 written += 1;
             }
             Err(e) => {

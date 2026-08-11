@@ -1411,6 +1411,11 @@ pub async fn enter_result(
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
+            // Punktverlauf abschließen (Spec punktverlauf-graph): auch die
+            // TL-Wertung beendet ein evtl. tablet-gezähltes Spiel — sonst
+            // bliebe `finished=false` und der Abweichungs-Hinweis (AK-8)
+            // könnte nie erscheinen. Ohne Aufzeichnung ein No-op.
+            tablet.timeline_store().finalize(mid, false);
             tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1464,6 +1469,9 @@ pub async fn disqualify_match(
             if let Some(cid) = free_court_id {
                 tablet.clear_court(cid);
             }
+            // Punktverlauf abschließen — DQ ist ein Sonderausgang mitten
+            // im Satz (AK-13); ohne Aufzeichnung ein No-op.
+            tablet.timeline_store().finalize(mid, true);
             tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
             Ok(())
         }

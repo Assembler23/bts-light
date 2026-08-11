@@ -2079,10 +2079,12 @@ fn forget_tl_access(namespace: &mut Namespace) {
         ));
     }
     // Wartende Punktverlauf-Abrufe ebenso auflösen — sonst hingen ihre
-    // HTTP-Handler bis zum Timeout an einem toten Host.
-    for (_, pending) in namespace.timeline_pending.drain() {
-        let _ = pending.send((false, String::new()));
-    }
+    // HTTP-Handler bis zum Timeout an einem toten Host. Die Sender werden
+    // FALLENGELASSEN statt mit `found:false` beantwortet: `false` hieße
+    // in der Route „kein Verlauf" (404) — ein Host-Abriss ist aber ein
+    // 503, sonst kippte ein offenes Overlay beim Reconnect kurz auf
+    // „Zu diesem Spiel liegt kein Punktverlauf vor" (Review 2026-08-11).
+    namespace.timeline_pending.clear();
 }
 
 /// Der abgelegte Anzeige-Zustand (Revision + JSON), falls einer da ist.

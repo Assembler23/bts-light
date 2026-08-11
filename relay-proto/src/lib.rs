@@ -739,6 +739,14 @@ pub const MAX_RALLIES_PER_SET: usize = 120;
 /// Höchstzahl Sätze je Verlauf (Badminton spielt höchstens best-of-5).
 pub const MAX_TIMELINE_SETS: usize = 5;
 
+/// Obergrenze des Startstands eines Satzes (Zwischenstand-Einstieg).
+///
+/// Legitime Zwischenstände liegen bei ≤ ~30 — der Deckel ist großzügig,
+/// aber hart: Ohne ihn könnte ein bösartiges Tablet `startA` auf i64-Max
+/// setzen, und die Gitter-Schleifen der SVG-Renderer liefen sich auf
+/// jedem anzeigenden Gerät tot (Security-Review 2026-08-11, Medium).
+pub const MAX_START_SCORE: i64 = 120;
+
 /// Höchstgröße eines serialisierten Verlaufs in Bytes (Sync + Abruf).
 /// Geteilt, damit Host und Relay dieselbe Grenze durchsetzen.
 pub const MAX_TIMELINE_LEN: usize = 8 * 1024;
@@ -782,11 +790,12 @@ pub struct TimelineSet {
 }
 
 impl TimelineSet {
-    /// Nur `'A'`/`'B'`, gedeckelt, Startstand nicht negativ — die Folge
-    /// kommt übers Netz und landet in Persistenz und SVG-Renderern.
+    /// Nur `'A'`/`'B'`, gedeckelt, Startstand in `0..=MAX_START_SCORE` —
+    /// die Folge kommt übers Netz und landet in Persistenz und
+    /// SVG-Renderern.
     pub fn is_valid(&self) -> bool {
-        self.start_a >= 0
-            && self.start_b >= 0
+        (0..=MAX_START_SCORE).contains(&self.start_a)
+            && (0..=MAX_START_SCORE).contains(&self.start_b)
             && self.points.len() <= MAX_RALLIES_PER_SET
             && self.points.bytes().all(|b| b == b'A' || b == b'B')
     }
@@ -2852,6 +2861,12 @@ mod tests {
         let mut negativ = beispiel_timeline();
         negativ.sets[0].start_a = -1;
         assert!(!negativ.is_valid());
+        // Absurder Startstand: ungültig — ohne den Deckel liefen sich die
+        // Gitter-Schleifen der Renderer auf jedem anzeigenden Gerät tot.
+        let mut riesig = beispiel_timeline();
+        riesig.sets[0].start_b = i64::MAX - 1;
+        assert!(!riesig.is_valid());
+        assert!(MatchTimeline::default().is_valid());
         // Leere Timeline ist gültig (Match ohne gezählten Ballwechsel).
         assert!(MatchTimeline::default().is_valid());
     }
