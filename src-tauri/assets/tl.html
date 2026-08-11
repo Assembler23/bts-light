@@ -773,6 +773,42 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 #res-save:disabled { opacity: .6; cursor: default; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+/* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────────
+   Kleiner 📈-Knopf an Feldkachel/Beendet-Zeile, Overlay mit je Satz
+   einem SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
+.graphbtn, .fin-row [data-fin-graph] {
+  border: 1px solid var(--line); background: var(--card);
+  border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: .85rem;
+}
+.graph-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 23, 42, .45); padding: 16px;
+}
+.graph-overlay[hidden] { display: none; }
+.graph-box {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow);
+  max-width: 540px; width: 100%; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.graph-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line);
+  font-weight: 700; font-size: .95rem;
+}
+.graph-head button {
+  border: none; background: none; font-size: 1.4rem; line-height: 1;
+  color: var(--ink-faint); cursor: pointer; padding: 2px 6px;
+}
+.graph-body { padding: 12px 14px; overflow-y: auto; color: var(--ink); }
+.graph-body .graph-set-cap {
+  font-size: .8rem; font-weight: 700; color: var(--ink-soft);
+  margin: 8px 0 2px;
+}
+.graph-body svg { width: 100%; height: auto; display: block; }
+.graph-note { font-size: .78rem; color: var(--ink-faint); margin-top: 8px; }
+.graph-note.abweichung { color: var(--warn); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -869,6 +905,18 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     </div>
   </form>
 </dialog>
+
+<!-- Punktverlauf-Overlay: Inhalt kommt on-demand von /tl/api/timeline/…
+     und wächst bei laufenden Spielen im Poll-Takt mit. -->
+<div class="graph-overlay" id="graph-overlay" hidden>
+  <div class="graph-box">
+    <div class="graph-head">
+      <span id="graph-title">Punktverlauf</span>
+      <button type="button" id="graph-close" aria-label="Punktverlauf schließen">×</button>
+    </div>
+    <div class="graph-body" id="graph-body"></div>
+  </div>
+</div>
 
 <div class="toast" id="toast" role="status" aria-live="polite">
   <span id="toast-text"></span>
@@ -1972,12 +2020,17 @@ function courtCard(c, cellStyle) {
   // Zusatz-Affordanz, Antippen der Kachel bleibt der barrierefreie Weg.
   const griff = c.match_id
     ? `<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>` : "";
+  // Punktverlauf-Graph (Spec punktverlauf-graph): nur wenn es wirklich
+  // einen Verlauf gibt (has_timeline) — kein Klick ins Leere.
+  const graph = c.match_id && c.has_timeline
+    ? `<button type="button" class="graphbtn" data-graph="${c.match_id}"
+               title="Punktverlauf anzeigen">📈</button>` : "";
 
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}</div>
     ${body}${bediener}
-    <div class="card-foot">${foot}${nachruf}</div>
+    <div class="card-foot">${foot}${graph}${nachruf}</div>
   </article>`;
 }
 
@@ -2010,6 +2063,18 @@ function wireCourts(box) {
         "Aufruf ausgelöst.",
       );
     });
+  });
+
+  // Graph-Knopf wie der Aufruf-Knopf: gestopptes Weiterreichen, sonst
+  // wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
+  box.querySelectorAll("button[data-graph]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const c = state.courts.find((x) => String(x.match_id) === btn.dataset.graph);
+      if (!c) return;
+      openTimeline(c.match_id, `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`, null);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
 
   box.querySelectorAll(".card[data-court]").forEach((el) => {
@@ -3008,6 +3073,155 @@ function siegerZuerst(f) {
  * Turnier-PC ankommen.
  */
 const ERGEBNIS_BADGE = { walkover: "kampflos", retired: "Aufgabe", disqualified: "disqualifiziert" };
+// ── Punktverlauf-Overlay (Spec punktverlauf-graph) ────────────────────
+
+// INLINE-KOPIE von timelineSetSvg aus tablet.html (tl.html kann keine
+// Module laden, etabliertes Duplikationsmuster wie bei gamePoint/
+// hallGrid). Die kanonische Fassung liegt DORT — Änderungen dort auch
+// hier nachziehen.
+function timelineSetSvg(set, opts) {
+  const o = opts || {};
+  const colorA = o.colorA || '#3b82f6';
+  const colorB = o.colorB || '#ef4444';
+  let a = set.startA || 0;
+  let b = set.startB || 0;
+  const ptsA = [[0, a]];
+  const ptsB = [[0, b]];
+  const seq = String(set.points || '');
+  for (let i = 0; i < seq.length; i++) {
+    if (seq[i] === 'A') a++;
+    else if (seq[i] === 'B') b++;
+    ptsA.push([i + 1, a]);
+    ptsB.push([i + 1, b]);
+  }
+  const n = seq.length;
+  const maxY = Math.max(a, b, 5);
+  const W = 420, H = 190, L = 30, R = 12, T = 10, B = 22;
+  const sx = (x) => L + (W - L - R) * (n ? x / n : 0);
+  const sy = (y) => H - B - (H - B - T) * (y / maxY);
+  const line = (pts) => pts.map((p) => `${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join(' ');
+  let grid = '';
+  for (let y = 0; y <= maxY; y += 5) {
+    grid += `<line x1="${L}" y1="${sy(y).toFixed(1)}" x2="${W - R}" y2="${sy(y).toFixed(1)}"`
+      + ` stroke="currentColor" stroke-opacity=".14" stroke-width="1"/>`
+      + `<text x="${L - 4}" y="${(sy(y) + 3).toFixed(1)}" text-anchor="end"`
+      + ` font-size="9" fill="currentColor" fill-opacity=".55">${y}</text>`;
+  }
+  const dots = n === 0
+    ? `<circle cx="${sx(0).toFixed(1)}" cy="${sy(set.startA || 0).toFixed(1)}" r="3.5" fill="${colorA}"/>`
+      + `<circle cx="${sx(0).toFixed(1)}" cy="${sy(set.startB || 0).toFixed(1)}" r="3.5" fill="${colorB}"/>`
+    : '';
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">${grid}`
+    + `<text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="9"`
+    + ` fill="currentColor" fill-opacity=".55">${n} Ballwechsel</text>`
+    + `<polyline points="${line(ptsA)}" fill="none" stroke="${colorA}" stroke-width="2"/>`
+    + `<polyline points="${line(ptsB)}" fill="none" stroke="${colorB}" stroke-width="2"/>`
+    + dots
+    + `</svg>`;
+}
+
+/** Endstand eines Verlaufs-Satzes (A, B) aus Startstand + Punktfolge. */
+function timelineSetFinal(set) {
+  let a = set.startA || 0;
+  let b = set.startB || 0;
+  for (const c of String(set.points || '')) {
+    if (c === 'A') a++;
+    else if (c === 'B') b++;
+  }
+  return { a, b };
+}
+
+// Zustand des offenen Overlays: welches Match, welches Etikett, die
+// gewerteten Sätze (nur aus der Beendet-Liste, für den Abweichungs-
+// Hinweis) und der Poll-Timer fürs Mitwachsen laufender Spiele.
+let graphCtx = null;
+let graphTimer = null;
+
+async function fetchTimeline() {
+  if (!graphCtx) return;
+  const body = $("graph-body");
+  try {
+    const res = await fetch(`${API}/timeline/${graphCtx.matchId}`, {
+      headers: { Authorization: "Bearer " + token },
+      cache: "no-store",
+    });
+    if (res.status === 404) {
+      body.innerHTML = `<p class="graph-note">Zu diesem Spiel liegt kein Punktverlauf vor.</p>`;
+      return;
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    renderTimeline(await res.json());
+  } catch {
+    // Nur beim ERSTEN Laden eine Meldung — ein einzelner Fehl-Poll bei
+    // offenem Overlay soll den bereits gezeichneten Graphen nicht ersetzen.
+    if (!body.dataset.geladen) {
+      body.innerHTML = `<p class="graph-note">Der Punktverlauf ist gerade nicht
+        abrufbar — die Version des Turnier-PCs kennt ihn möglicherweise noch
+        nicht, oder die Verbindung fehlt.</p>`;
+    }
+  }
+}
+
+function renderTimeline(tl) {
+  const body = $("graph-body");
+  const sets = tl.sets || [];
+  let html = "";
+  sets.forEach((s, i) => {
+    const f = timelineSetFinal(s);
+    const zwischenstand = (s.startA || s.startB)
+      ? " · ab Zwischenstand aufgezeichnet" : "";
+    html += `<div class="graph-set-cap">Satz ${i + 1} — ${f.a}:${f.b}${zwischenstand}</div>`
+      + timelineSetSvg(s);
+  });
+  if (!sets.length) {
+    html = `<p class="graph-note">Noch kein Ballwechsel aufgezeichnet.</p>`;
+  }
+  if (tl.midGame) {
+    html += `<p class="graph-note">Teilverlauf: Die Zähltafel übernahm mit
+      eingetipptem Zwischenstand — frühere Ballwechsel liegen nicht vor.</p>`;
+  }
+  if (tl.retired) {
+    html += `<p class="graph-note">Das Spiel endete vorzeitig (Aufgabe/
+      Disqualifikation) — der letzte Satz ist bewusst unvollständig.</p>`;
+  }
+  // Abweichungs-Hinweis (AK-8): Nur gegen ein GEWERTETES Ergebnis aus der
+  // Beendet-Liste prüfbar; BTP bleibt die Wahrheit (R2).
+  if (graphCtx && Array.isArray(graphCtx.finishedSets) && tl.finished && !tl.retired) {
+    const passt = graphCtx.finishedSets.length === sets.length
+      && graphCtx.finishedSets.every(([a, b], i) => {
+        const f = timelineSetFinal(sets[i]);
+        return f.a === a && f.b === b;
+      });
+    if (!passt) {
+      html += `<p class="graph-note abweichung">Der aufgezeichnete Verlauf
+        weicht vom gewerteten Ergebnis ab (nachträgliche Korrektur in BTP) —
+        es gilt das gewertete Ergebnis.</p>`;
+    }
+  }
+  body.innerHTML = html;
+  body.dataset.geladen = "1";
+}
+
+function openTimeline(matchId, label, finishedSets) {
+  graphCtx = { matchId, finishedSets };
+  $("graph-title").textContent = `Punktverlauf — ${label}`;
+  const body = $("graph-body");
+  delete body.dataset.geladen;
+  body.innerHTML = `<p class="graph-note">Punktverlauf wird geladen …</p>`;
+  $("graph-overlay").hidden = false;
+  fetchTimeline();
+  // Laufende Spiele wachsen mit — derselbe 2-s-Takt wie der Zustand.
+  // Nur solange das Overlay offen ist; die Payload ist winzig (AK-5).
+  if (graphTimer) clearInterval(graphTimer);
+  graphTimer = setInterval(fetchTimeline, 2000);
+}
+
+function closeTimeline() {
+  $("graph-overlay").hidden = true;
+  graphCtx = null;
+  if (graphTimer) { clearInterval(graphTimer); graphTimer = null; }
+}
+
 function renderFinished() {
   const list = state.finished || [];
   $("fin-box").hidden = list.length === 0;
@@ -3021,14 +3235,30 @@ function renderFinished() {
       .join(" · ");
     const badge = ERGEBNIS_BADGE[f.result]
       ? `<span class="badge warn">${ERGEBNIS_BADGE[f.result]}</span>` : "";
+    // Punktverlauf nur anbieten, wo einer aufgezeichnet wurde — Papier-
+    // Ergebnisse haben keinen (has_timeline, Spec punktverlauf-graph).
+    const graph = f.has_timeline
+      ? `<button type="button" data-fin-graph="${f.match_id}"
+           title="Punktverlauf anzeigen" aria-label="Punktverlauf anzeigen">📈</button>`
+      : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
       <span class="fin-pair">${esc(siegerZuerst(f))}</span>
       <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
-      <button type="button" data-fin-fix="${f.match_id}"
+      ${graph}<button type="button" data-fin-fix="${f.match_id}"
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
     </div>`;
   }).join("");
+  $("fin-list").querySelectorAll("[data-fin-graph]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const f = list.find((x) => String(x.match_id) === b.dataset.finGraph);
+      if (!f) return;
+      openTimeline(
+        f.match_id,
+        `${(f.team1 || []).join(" / ")} vs. ${(f.team2 || []).join(" / ")}`,
+        f.sets || [],
+      );
+    }));
   // Bei jedem Abruf neu verdrahten, wie bei der Zähltafel-Warteschlange:
   // `#fin-list` wird alle zwei Sekunden per innerHTML ersetzt, alte
   // Zuhörer hängen sonst an längst entfernten Knoten.
@@ -3222,9 +3452,15 @@ function start() {
   // `submit`-Zuhörer angehängt.
   $("sk-add").addEventListener("submit", addScorekeeper);
   $("toast-close").addEventListener("click", hideToast);
+  // Punktverlauf-Overlay: schließen per ×, Klick auf den Hintergrund
+  // oder Escape (unten mit den übrigen Escape-Wegen).
+  $("graph-close").addEventListener("click", closeTimeline);
+  $("graph-overlay").addEventListener("click", (ev) => {
+    if (ev.target === ev.currentTarget) closeTimeline();
+  });
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { cancelPick(); hideToast(); }
+    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); }
   });
   $("opt-nummern").checked = zeigeNummern;
   $("opt-nationen").checked = zeigeNationen;
