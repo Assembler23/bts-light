@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.181
+
+Das große Stück dieses Releases ist der **Punktverlauf-Graph**; dazu der
+Federball als Aufschlag-Marker am Tablet. Cloud-Geräte (TL-Web, Tablets
+über den Relay) haben beides schon über den Relay-Deploy — dieses Release
+bringt es in die App und ins Hallennetz.
+
+- **Punktverlauf-Graph pro Satz.** Zu jedem tablet-gezählten Spiel gibt es
+  jetzt je Satz ein Liniendiagramm des Punktverlaufs (eine Linie je
+  Partei, x = Ballwechsel, y = Punkte) — per Fingertipp/Klick als Overlay:
+  am Tablet (auch offline), im TL-Web an Feldkachel und Beendet-Liste, im
+  Desktop an Felderübersicht und Beendet-Tabelle. Bei laufenden Spielen
+  wächst die Kurve live mit. Verläufe werden dauerhaft je Turnier
+  gespeichert (ohne Spielernamen) und überstehen Neustarts, Undo,
+  Tablet-Wechsel und Offline-Phasen; Zwischenstand-Einstiege, Aufgaben
+  und nachträgliche Ergebnis-Korrekturen sind gekennzeichnet. Spiele ohne
+  Tablet-Zählung (Papier) haben keinen Graphen — dort erscheint der
+  Knopf gar nicht erst.
+- **Federball statt gelbem Punkt.** Der Aufschlag-Marker auf der
+  Court-Grafik des Tablets ist jetzt ein Federball, dessen Korken in
+  Flugrichtung zum diagonal gegenüberliegenden Aufschlagfeld zeigt —
+  der gelbe Kreis las sich wie ein Tennisball.
+
 ## v0.9.180
 
 Nacharbeit aus dem lokalen Test des 10.08.: zwei Wünsche und zwei Befunde
