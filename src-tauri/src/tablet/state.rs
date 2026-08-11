@@ -165,6 +165,10 @@ pub struct CourtOverview {
     pub best_of: i64,
     pub target_score: i64,
     pub cap_score: i64,
+    /// Gibt es zum laufenden Match einen Punktverlauf (Spec
+    /// punktverlauf-graph)? Felderübersicht und TL-Web bieten den
+    /// Graph-Klick nur dann an.
+    pub has_timeline: bool,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -1978,6 +1982,7 @@ impl TabletState {
                     court: court.name.clone(),
                     // Hallenname nur bei Mehr-Hallen-Turnieren; sonst leer.
                     location: snap.court_location_name(court.id),
+                    has_timeline: m.is_some_and(|mm| self.timeline.has_timeline(mm.id)),
                     match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m
                         .map(|mm| {

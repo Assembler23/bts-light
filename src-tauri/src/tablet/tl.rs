@@ -1730,8 +1730,7 @@ pub(crate) fn build_state_limited(
         .into_iter()
         .map(|c| {
             let clearing = clearing_match(&snap, c.court_id, c.match_id);
-            let has_timeline = c.match_id != 0 && tablet.timeline_store().has_timeline(c.match_id);
-            court_view(c, clearing, has_timeline)
+            court_view(c, clearing)
         })
         .collect();
 
@@ -2037,11 +2036,7 @@ fn call_timer_view(config: &AppConfig) -> TlCallTimer {
 /// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
 /// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
 /// Vergabehilfe).
-fn court_view(
-    c: crate::tablet::state::CourtOverview,
-    clearing: Option<i64>,
-    has_timeline: bool,
-) -> TlCourt {
+fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die zwei bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
     // erreichbaren Seite.
@@ -2078,7 +2073,7 @@ fn court_view(
         best_of: c.best_of,
         target_score: c.target_score,
         cap_score: c.cap_score,
-        has_timeline,
+        has_timeline: c.has_timeline,
     }
 }
 
