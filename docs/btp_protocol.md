@@ -244,24 +244,25 @@ serverseitig abgeleitetes, nur lesbares Feld. Allgemeiner gilt: `Result=1`
 ist bei einem unbekannten Feld kein verlässliches Erfolgssignal — jeder
 künftige Schreibpfad muss den Wert zur Kontrolle zurücklesen.
 
-**Noch offene Schreib-Hypothesen (Varianten-Matrix, 11.08.2026):** Die
-Messung oben deckte nur die minimale Form ab. Drei weitere Formen stehen
-als Messung bereit (`which_location_write_variant_sticks` in
-`tests/btp_location_probe.rs`, läuft nur gegen ein Test-BTP):
-LocationID **zusammen mit gespiegelter `PlannedTime`** (BTPs
-Ansetzungs-Dialog pflegt Zeit und Ort zusammen), der **volle
-Match-Knoten gespiegelt** (ohne `Status`; vielleicht verwirft BTP
-unvollständige Knoten still) und LocationID **als String** (BTP typisiert
-Settings gemischt). Aufruf:
+**Varianten-Matrix gemessen (11.08.2026, Test-BTP „TEST Köpi-Cup"):**
+Die Messung oben deckte nur die minimale Form ab; drei weitere Formen
+wurden daraufhin geprüft (`which_location_write_variant_sticks` in
+`tests/btp_location_probe.rs`, wiederholbar gegen jedes Test-BTP):
 
-```text
-cargo test -p bts-light --test btp_location_probe -- --ignored --nocapture which_location_write_variant_sticks
-```
+| Variante | Ergebnis |
+|---|---|
+| LocationID **mit gespiegelter `PlannedTime`** (BTPs Ansetzungs-Dialog pflegt Zeit + Ort zusammen) | `Result=1`, still ignoriert |
+| **Voller Match-Knoten gespiegelt** (ohne `Status`), nur LocationID ersetzt | `Result=1`, still ignoriert |
+| LocationID **als String** (BTP typisiert gemischt) | `Result=1`, still ignoriert |
 
-Steht überall IGNORIERT/ABGELEHNT, ist der Wire-Weg ausgereizt; dann
-bleiben Spielort-Pflege in BTP (bts-light liest sie bereits), eine
-Messung gegen eine neuere BTP-Version oder eine Anfrage an Visual
-Reality. Deshalb bleibt die
+Alle Restores verifiziert, keine Nebenwirkungen. Zusammen mit der
+Minimal-Form sind damit **vier** Schreibformen ausgeschlossen — und das,
+obwohl `CourtID` in exakt derselben Knotenform nachweislich ankommt. Der
+Wire-Weg ist ausgereizt: `Match.LocationID` ist über den Connector
+**nur lesbar**. Was bleibt: Spielort-Pflege in BTP selbst (bts-light
+liest sie bereits automatisch), eine Messung gegen eine neuere
+BTP-Version (Probe wiederverwendbar) oder eine Anfrage an Visual
+Reality, das Feld im Connector schreibbar zu machen. Deshalb bleibt die
 Hallen-Festlegung in TL-Web (`TlAction::SetHall`) bewusst host-lokal
 (bts-light + Liveticker) statt nach BTP zurückzuschreiben.
 
