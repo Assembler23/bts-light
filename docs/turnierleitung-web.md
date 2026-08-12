@@ -191,16 +191,18 @@ an- und abschalten — der Schalter oben rechts.
 
 #### Vereine (Vereinsname/-logo)
 
-Anders als die obigen Schalter ist die **Vereins-Anzeige turnierweit
-zentral**, nicht je Gerät: Sie wird einmal im Setup unter **„Vereine
-anzeigen"** gesetzt und gilt dann für die Turnierleitungssicht **und** die
-Tablet-Spielzettel gleichermaßen. Zwei getrennte Optionen:
+Im Anzeige-Menü stehen **„Vereinsnamen zeigen"** und **„Vereinslogos zeigen"**
+— wie die übrigen Schalter **je Gerät** und dort gespeichert. Die
+**Voreinstellung** kommt aus dem Setup unter **„Vereine anzeigen"** (die
+turnierweite Wahl, die zugleich die Tablet-Spielzettel steuert); jedes Gerät
+darf sie für sich überstimmen. Standard turnierweit: **aus**.
 
-- **Vereinsnamen anzeigen** (Standard: **aus**) — der Vereinsname klein
-  hinter jedem Spielernamen.
-- **Vereinslogos anzeigen** (Standard: **aus**) — das Vereinswappen davor,
-  aus dem badhub-Bestand (dieselbe Quelle wie die Siegerliste). Zu einem
-  Verein ohne hinterlegtes Logo bleibt es beim Namen.
+- **Vereinsnamen zeigen** — der Vereinsname in einer eigenen kleinen Zeile
+  **unter** dem Spielernamen (mit Wappen davor, wenn Logos an sind).
+- **Vereinslogos zeigen** — das Vereinswappen aus dem badhub-Bestand (dieselbe
+  Quelle wie die Siegerliste). Ist **nur das Logo** an (ohne Name), steht das
+  Wappen kompakt **vor** dem Namen, direkt hinter der Nation. Zu einem Verein
+  ohne hinterlegtes Logo bleibt es beim Namen.
 
 Im Hallennetz (LAN) holt der Turnier-PC die Logos (funktioniert ohne Internet
 am Anzeigegerät und matcht Vereinsnamen unscharf). Im Cloud-Modus lädt die

@@ -740,7 +740,15 @@ async fn info_club_logo(
             bytes,
         )
             .into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+        // Auch den Fehltreffer cachen: Ohne Cache-Header fragt der Browser bei
+        // jedem Neuaufbau (Poll alle ~2 s, viele Vereine ohne Logo) erneut an.
+        // Kürzer als der Treffer, damit ein später in badhub ergänztes Logo
+        // binnen einer Stunde erscheint.
+        None => (
+            [(header::CACHE_CONTROL, "public, max-age=3600".to_string())],
+            StatusCode::NOT_FOUND,
+        )
+            .into_response(),
     }
 }
 
