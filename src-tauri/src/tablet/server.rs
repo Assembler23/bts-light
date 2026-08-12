@@ -155,6 +155,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/winners", get(info_winners_page))
         .route("/info/winners/state", get(info_winners_state))
         .route("/info/club-logo", get(info_club_logo))
+        .route("/info/logo", get(info_tournament_logo))
         .route("/info/announce/freetext", get(info_announce_freetext))
         .route("/info/announce/jobs", get(info_announce_jobs))
         .route("/info/ad", get(info_ad_page))
@@ -799,12 +800,63 @@ async fn info_ad_state(
 ) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
     let ads = monitor::list_ads(&ctx.monitor_dir);
-    let config = ctx.monitor_config();
+    // Die als „Leisten-Sponsor" markierten Bilder gesondert ausweisen — die
+    // obere Leiste zeigt genau diese (neben dem Turnierlogo), ohne die
+    // Vollbild-Rotation (`ads`) anzufassen. Nur existierende Dateien.
+    let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
+    let bar_ads: Vec<&String> = ads.iter().filter(|f| bar.contains(*f)).collect();
+    // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag daraus,
+    // sonst würde bei jedem Poll (~5 s je Anzeige) das base64-Logo doppelt
+    // geparst.
+    let config = ctx.app_config();
     let payload = serde_json::json!({
         "ads": ads,
-        "intervalS": config.ad_interval_s.max(1),
+        "barAds": bar_ads,
+        "hasLogo": !config.tournament_logo.data.is_empty(),
+        "intervalS": config.court_monitor.ad_interval_s.max(1),
     });
     ([(header::CACHE_CONTROL, "no-store")], Json(payload))
+}
+
+/// Liefert das **Turnierlogo** als Bild (für die obere Leiste der
+/// Anzeigeseiten). Quelle ist die Host-Konfiguration (`tournament_logo`,
+/// base64). Leeres Logo → 404, damit ein `onerror` in der Seite sauber
+/// degradiert.
+///
+/// Caching bewusst asymmetrisch: Ein vorhandenes Logo ist stabil und darf lange
+/// gecacht werden (datensparsam auf TVs, die es sonst dauernd neu laden). Der
+/// **404** (noch kein Logo) wird nur kurz gecacht, damit ein frisch gesetztes
+/// Logo binnen ~1 Min erscheint. Ein *Wechsel* eines bestehenden Logos schlägt
+/// entsprechend erst nach dem 200-Cache-Fenster durch — akzeptabel, weil das
+/// Logo praktisch einmal je Turnier gesetzt wird.
+async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    use base64::Engine;
+    let logo = ctx.app_config().tournament_logo;
+    if logo.data.is_empty() {
+        return (
+            [(header::CACHE_CONTROL, "public, max-age=60")],
+            StatusCode::NOT_FOUND,
+        )
+            .into_response();
+    }
+    match base64::engine::general_purpose::STANDARD.decode(logo.data.as_bytes()) {
+        Ok(bytes) => {
+            let mime = if logo.mime.is_empty() {
+                "image/png".to_string()
+            } else {
+                logo.mime.clone()
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, mime),
+                    (header::CACHE_CONTROL, "public, max-age=300".to_string()),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// Liefert die HTML der Kombi-Anzeige (mehrere Felder als Bänder). Die

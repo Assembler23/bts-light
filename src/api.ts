@@ -336,6 +336,11 @@ export const listCourtAds = (): Promise<CourtAd[]> => invoke("list_court_ads");
 export const setCourtAdLabel = (file: string, label: string): Promise<void> =>
   invoke("set_court_ad_label", { file, label });
 
+/** Markiert ein Werbebild als „auch klein in der Leiste zeigen" (oder entfernt
+ *  die Markierung). Die Leiste zeigt genau die markierten Bilder. */
+export const setCourtAdBar = (file: string, inBar: boolean): Promise<void> =>
+  invoke("set_court_ad_bar", { file, inBar });
+
 /** Liest eine gewählte Logo-Datei und liefert sie Base64-kodiert + MIME zurück
  *  (zum Ablegen in config.tournament_logo). */
 export const readTournamentLogo = (

@@ -124,6 +124,38 @@ pub fn write_ad_labels(path: &Path, labels: &HashMap<String, String>) -> std::io
     write_atomic(path, &json)
 }
 
+/// Datei mit den Werbebildern, die **zusätzlich klein in der oberen Leiste**
+/// diverser Anzeigeseiten erscheinen sollen (neben dem Turnierlogo). Bewusst
+/// getrennt von den Labels und ein reines String-Array — so bleibt der
+/// Labels-Store unberührt und die Datei ist abwärtskompatibel (fehlt sie,
+/// steht kein Bild in der Leiste). Liegt im `court-ads/`-Verzeichnis; ihre
+/// `.json`-Endung fällt bei [`list_ads`] durchs Bild-Filter, stört den
+/// Bildpool also nicht.
+pub const AD_BAR_FILE: &str = "court-ad-bar.json";
+
+/// Liest die Menge der als „Leisten-Sponsor" markierten Dateinamen. Fehlende
+/// oder kaputte Datei → leere Menge (kein Fehler — die Markierung ist optional).
+pub fn read_ad_bar(path: &Path) -> std::collections::HashSet<String> {
+    let Ok(j) = std::fs::read_to_string(path) else {
+        return std::collections::HashSet::new();
+    };
+    serde_json::from_str::<Vec<String>>(&j)
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Schreibt die „Leisten-Sponsor"-Markierungen (atomar, sortiert für stabile
+/// Diffs).
+pub fn write_ad_bar(
+    path: &Path,
+    marked: &std::collections::HashSet<String>,
+) -> std::io::Result<()> {
+    let mut list: Vec<&String> = marked.iter().collect();
+    list.sort();
+    let json = serde_json::to_string_pretty(&list).unwrap_or_else(|_| "[]".to_string());
+    write_atomic(path, &json)
+}
+
 /// Übersetzt die persistierte [`CourtMonitorConfig`] in die Wire-Form.
 pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
     MonitorConfig {
@@ -382,6 +414,25 @@ mod tests {
         );
         write_assignments(&path, &map).unwrap();
         assert_eq!(read_assignments(&path), map);
+    }
+
+    #[test]
+    fn read_write_ad_bar_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AD_BAR_FILE);
+        // Fehlende Datei → leere Menge.
+        assert!(read_ad_bar(&path).is_empty());
+        let mut set = std::collections::HashSet::new();
+        set.insert("ad-1.png".to_string());
+        set.insert("ad-2.jpg".to_string());
+        write_ad_bar(&path, &set).unwrap();
+        assert_eq!(read_ad_bar(&path), set);
+        // Kaputte Datei → leere Menge (kein Fehler, Markierung ist optional).
+        std::fs::write(&path, "{ kaputt").unwrap();
+        assert!(read_ad_bar(&path).is_empty());
+        // Leere Menge schreibt ein leeres Array, das wieder leer liest.
+        write_ad_bar(&path, &std::collections::HashSet::new()).unwrap();
+        assert!(read_ad_bar(&path).is_empty());
     }
 
     #[test]

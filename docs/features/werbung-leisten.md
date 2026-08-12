@@ -1,0 +1,146 @@
+# Sponsor-Leiste — kleine Werbung neben dem Turnierlogo
+
+**Status:** Freigegeben (Entscheidungen unten). Umsetzung phasenweise, Phase 1
+zuerst.
+
+**Entscheidungen (2026-08-12):**
+- **Reihenfolge:** Phase 1 zuerst (eigener PR/Release), dann 2, dann 3.
+- **Tablet:** einbeziehen — im LAN-Teil von Phase 1 (tablet.html spricht den
+  Host direkt an), Cloud-Tablet folgt in Phase 2.
+- **badhub-Auslöser (Phase 3):** automatisch **beim Speichern** der
+  Einstellungen (einmalig, nicht laufend).
+
+## Ziel
+
+Die vorhandenen **Werbebilder** sollen **alternativ klein in der oberen
+Leiste** diverser Anzeigeseiten erscheinen — **neben dem Turnierlogo**. Pro
+Bild einstellbar. Umfang über beide Repos (bts-light-Bildschirme **und**
+badhub-Seiten Check-in/Zeitplan).
+
+## Geklärte Anforderungen (aus dem Grill)
+
+- **Pro-Bild-Schalter**: jedes hochgeladene Werbebild bekommt einen Haken
+  „auch klein in der Leiste zeigen" (kein globaler Ein/Aus-Schalter).
+- **Darstellung**: Sponsorbild(er) **neben** dem Turnierlogo, **kein
+  Rotieren**; in der Regel **1–2** Bilder.
+- **Monitor-Leerlauf** (freies Feld): bleibt **Vollbild**-Werbung; die kleine
+  Leisten-Werbung kommt **nur während eines laufenden Spiels** dazu.
+- **Turnierlogo sparsamer übertragen**: heute reist es base64 in jedem vollen
+  `tset`-Heartbeat mit — künftig möglichst **einmalig beim Speichern**.
+- **Seiten**: Tablet, Monitor, Spielanzeigen (Feldübersicht/Vorbereitung),
+  badhub Check-in, badhub Zeitplan.
+
+## Ist-Zustand (gemessen)
+
+**bts-light — Werbebilder:** Dateien in `court-ads/` (nicht in der Config),
+Labels in `court-ad-labels.json`. `CourtMonitorConfig` hat nur `show_ads` /
+`ad_interval_s`. Draht: `AdUpload{content_type,data}` → Relay; `MonitorState.ads`
+= Dateinamen (LAN) bzw. Indizes (Cloud). Auslieferung LAN `/ads/{file}`, Cloud
+`/{ns}/ads/{idx}`. Genutzt heute nur von `monitor.html` (Vollbild-Rotation im
+Leerlauf) und `ad.html`. **Keine Rollen-/Größentrennung** — flache Liste.
+
+**bts-light — Turnierlogo:** `AppConfig.tournament_logo` (`LogoConfig{data,
+mime,background_color}`). Transport **nur** an den badhub-Liveticker, **nur** im
+vollen `tset` (`sync.rs`, `Update::Full`) als `event.tournament_logo*`. Volle
+`tset` bei Erstlauf, struktureller Änderung oder Heartbeat > 60 s. Deltas tragen
+es bewusst nicht. **Kein Transport zum Relay, zu keiner bts-light-Anzeigeseite.**
+`monitor.html`/`overview.html`/`preparation.html`/`tablet.html` kennen es nicht.
+
+**bts-light — Kopfleisten:** `overview.html` und `preparation.html` haben je
+`<header class="bar">` (Flex, Statuspunkt + Titel + Halle/Turnier, **kein
+Bild**) — ideal für ein kleines `<img>`. `monitor.html` Match-Ansicht hat eine
+`bar` (Court/Uhr/Timer/Disziplin, kein Logo). `tablet.html` `<header>` ist eng
+(Undo/Injury-Buttons links/rechts).
+
+**Cloud-Grenze:** Info-Targets (Übersicht/Vorbereitung) sind laut
+`relay_client.rs` heute **LAN-only** (Cloud-Wire kennt nur Court-Targets, TODO
+im Code). Im Cloud-Modus sind diese beiden Seiten also vorerst nicht erreichbar.
+
+**badhub — Check-in/Zeitplan:** `/checkin/{uuid}`, `/checkin/{uuid}/zeitplan`,
+Logo via `/checkin/{uuid}/logo`. Kopf `<header class="ci-head">` (Logo +
+Titel), Kiosk zusätzlich obere Tab-Leiste. Turnierlogo kommt schon an (tset-
+Snapshot base64 **oder** manueller Upload nach `public/assets/logos/
+checkin_{uuid}.{ext}`). **Sponsor-Bilder existieren nicht** — Neuentwicklung.
+Empfehlung: **eigener Datei-/Upload-Weg** statt das 5-MB-Snapshot aufzublähen.
+Regelkonform (R1): bts-light → badhub-API (Bearer) → DB/Datei → Blade liest nur
+lokale DB. „Zeitplan" = Check-in-Anfangszeiten je Klasse (kein Match-Spielplan).
+
+## Datenmodell-Erweiterung
+
+- **Pro-Ad-Flag `in_bar: bool`.** Ablage: `court-ad-labels.json` von
+  `{datei: label}` zu `{datei: {label, in_bar}}` erweitern (abwärtskompatibel:
+  alter String = Label, `in_bar=false`). Neuer Command `set_court_ad_bar`.
+- **Turnierlogo als Anzeige-Ressource.** Neue LAN-Route `/info/logo` (liefert
+  `config.tournament_logo` mit `Cache-Control`, analog `/info/club-logo`).
+- **Bar-Ads-Auswahl** in `MonitorState`/`/info/*/state`: die als `in_bar`
+  markierten Dateien/Indizes gesondert ausweisen (`bar_ads`), damit die Leiste
+  nicht die Vollbild-Rotation anfasst.
+
+## Umsetzung — Phasen (klein, überprüfbar)
+
+### Phase 1 — bts-light Monitor + Spielanzeigen + Tablet (LAN) — **UMGESETZT (v0.9.189)**
+
+1. ✅ `in_bar`-Flag: Store `court-ad-bar.json` (`monitor.rs` `read/write_ad_bar`),
+   Command `set_court_ad_bar` (`commands.rs`), SetupWizard-Häkchen „Leiste" je
+   Bild, `list_court_ads` liefert `in_bar`, Aufräumen beim Löschen.
+2. ✅ `/info/logo`-Route (`server.rs`, aus `config.tournament_logo`) + `barAds`
+   + `hasLogo` in `/info/ad/state`.
+3. ✅ Leiste rendern: `overview.html` + `preparation.html` + `monitor.html`
+   Match-`bar` + `tablet.html`-Kopf — Turnierlogo + 1–2 `in_bar`-Ads
+   (`<img>`, `onerror`-Rückfall). Monitor-Leerlauf unverändert (Vollbild),
+   Tablet auf schmalen Geräten ausgeblendet.
+4. ✅ Rust-Test `read_write_ad_bar_roundtrip`. `docs`: `court-monitor.md`,
+   `changelog`.
+
+### Phase 2 — Cloud + Tablet
+
+1. Logo + `bar_ads` in `MonitorUpload` (`relay-proto`) + Ablage im Relay
+   (`MonitorBundle`) + Route `/{ns}/logo` (analog `ad_image`); Cloud-
+   `MonitorState` trägt Logo-Verweis + `bar_ads`-Indizes. Sparsam: der Monitor-
+   Upload ist bereits änderungs-gegated (`monitor_fingerprint` um Logo +
+   `in_bar` erweitern).
+2. `tablet.html`-Kopf: kompaktes Logo + Sponsor (enger Platz → klein, evtl.
+   nur bei Breite X).
+3. Übersicht/Vorbereitung im Cloud: **nur** falls das Info-Target-Protokoll
+   ausgebaut wird — sonst als Nicht-Ziel dieser Phase markiert.
+4. `relay-proto`-Serde-Roundtrips (Logo-Feld default-kompatibel),
+   Relay-Routing-Test.
+
+### Phase 3 — badhub Check-in + Zeitplan (Cross-Repo)
+
+1. **Sparsame Übertragung**: Turnierlogo aus dem Heartbeat-`tset` herausnehmen;
+   stattdessen bts-light lädt Logo **und** 1–2 Sponsor-Bilder **einmalig beim
+   Speichern** (bzw. per Knopf) an einen **neuen badhub-Endpoint** hoch
+   (Bearer, wie `live_update.php`). Ablage `public/assets/logos/
+   sponsor_{uuid}_{n}.{ext}` (Datei = Wahrheit, wie der manuelle Logo-Upload).
+2. badhub-Auslieferung: Endpunkt(e) analog `/checkin/{uuid}/logo`
+   (Inhalts-Validierung, kein SVG, `nosniff`, Cache). nginx-Block „kein PHP in
+   `public/assets/logos/`" muss vor Rollout stehen.
+3. Anzeige in `ci-head` (Handy) und Kiosk-Tab-Leiste + `checkin_zeitplan`-Kopf.
+4. badhub-Tests (`tests/integration/*_db_test.php` + CI-Wiring), Doku
+   `features/hallen_checkin.md`; bts-light-Payload-Schema in
+   `docs/features/spieler-check-in.md` nachziehen.
+
+## Nicht-Ziele
+
+- Keine Sponsor-Werbung auf der Vollbild-Liveticker-Seite (`public/live.php`)
+  in dieser Iteration.
+- Kein Rotieren in der Leiste (bewusst statisch, 1–2 Bilder).
+- Kein Ausbau des Cloud-Info-Target-Protokolls für Übersicht/Vorbereitung,
+  solange nicht ausdrücklich gewünscht (Phase 2, optional).
+
+## Offene Design-Entscheidungen (für die Freigabe)
+
+1. **Reihenfolge/Schnitt**: Empfehlung — Phase 1 zuerst ausliefern (sichtbarer
+   Nutzen im Hallennetz), dann 2, dann 3. Alternativ alles bündeln.
+2. **Tablet**: kleines Logo+Sponsor trotz engem Kopf aufnehmen, oder Tablet
+   vorerst weglassen?
+3. **badhub-Upload-Zeitpunkt**: „beim Speichern der Einstellungen" automatisch,
+   oder ein expliziter Knopf „Logo/Sponsoren an badhub senden"?
+
+## Risiken
+
+- Payload/Datenmenge: der Datei-Upload-Weg (Phase 3) vermeidet das Aufblähen
+  des Liveticker-Snapshots; Logo-Minimierung reduziert die laufende Last.
+- Cloud-Übersicht/Vorbereitung: ohne Protokoll-Ausbau nicht erreichbar — sauber
+  als Nicht-Ziel markiert, kein stiller Teil-Zustand.

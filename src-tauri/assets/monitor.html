@@ -59,6 +59,14 @@
       background: linear-gradient(180deg, #1c2942, #141f33);
       border-bottom: .3vh solid #fbbf24;
     }
+    /* Sponsor-Leiste im Match-Header (nur im laufenden Spiel sichtbar; der
+       Werbe-Leerlauf bleibt Vollbild): Turnierlogo + markierte Werbebilder,
+       rechts außen, weißer Grund. */
+    header.bar .sponsor-bar { margin-left: auto; display: flex; align-items: center; gap: 1.2vw; }
+    header.bar .sponsor-bar img {
+      height: 5vh; width: auto; max-width: 16vw; object-fit: contain;
+      background: #fff; border-radius: .6vh; padding: .4vh;
+    }
     /* Pulsierender „live"-Punkt vor der Feldnummer. */
     header.bar .live-dot {
       flex: 0 0 auto; width: 1.5vmin; height: 1.5vmin; border-radius: 50%;
@@ -327,6 +335,7 @@
         <span class="match-clock" id="match-clock"></span>
         <span class="call-timer" id="call-timer"></span>
         <span class="discipline" id="discipline"></span>
+        <span class="sponsor-bar" id="sponsor-bar"></span>
       </header>
       <section class="half" id="half1"></section>
       <div class="divider"></div>
@@ -1015,6 +1024,31 @@
 
   poll();
   setInterval(poll, 1000);
+
+  // Sponsor-Leiste im Match-Header (Turnierlogo + markierte Werbebilder).
+  // Nur im laufenden Spiel sichtbar (der Werbe-Leerlauf bleibt Vollbild, weil
+  // die Leiste im match-view liegt). BASE-relativ wie adUrl → im Cloud-Modus
+  // (Relay kennt /info nicht) greift der onerror-Rückfall, die Leiste bleibt
+  // leer. Selten gepollt, Bilder ändern sich kaum.
+  (function sponsorBar() {
+    var box = document.getElementById('sponsor-bar');
+    if (!box) return;
+    function paint(st) {
+      var h = '';
+      if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
+      ((st && st.barAds) || []).forEach(function (f) {
+        h += '<img src="' + adUrl(f) + '" alt="" onerror="this.remove()">';
+      });
+      box.innerHTML = h;
+    }
+    function pollBar() {
+      fetch(BASE + 'info/ad/state', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(paint).catch(function () {});
+    }
+    pollBar();
+    setInterval(pollBar, 60000);
+  })();
   </script>
 </body>
 </html>

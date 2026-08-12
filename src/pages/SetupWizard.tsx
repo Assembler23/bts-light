@@ -24,6 +24,7 @@ import {
   listCourtAds,
   readTournamentLogo,
   removeCourtAd,
+  setCourtAdBar,
   setCourtAdLabel,
   saveConfig,
   startSync,
@@ -1535,6 +1536,25 @@ export function SetupWizard({
                                    px-1.5 py-0.5 text-sm text-slate-700 placeholder:text-slate-400
                                    focus:border-slate-300 focus:bg-white focus:outline-none"
                       />
+                      <label
+                        className="flex flex-shrink-0 items-center gap-1 text-xs text-slate-500"
+                        title="Auch klein in der oberen Leiste der Anzeigeseiten zeigen (neben dem Turnierlogo)"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={ad.in_bar}
+                          onChange={(e) => {
+                            const on = e.currentTarget.checked;
+                            setAds((prev) =>
+                              prev.map((a) =>
+                                a.file === ad.file ? { ...a, in_bar: on } : a,
+                              ),
+                            );
+                            void setCourtAdBar(ad.file, on);
+                          }}
+                        />
+                        Leiste
+                      </label>
                       <button
                         onClick={() => void deleteAd(ad.file)}
                         title="Werbebild entfernen"

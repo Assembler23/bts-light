@@ -224,6 +224,9 @@ export interface CourtMonitorConfig {
 export interface CourtAd {
   file: string;
   label: string;
+  /** true, wenn das Bild zusätzlich klein in der oberen Leiste der
+   *  Anzeigeseiten (neben dem Turnierlogo) erscheinen soll. */
+  in_bar: boolean;
 }
 
 /** Was ein Court-Monitor-Gerät anzeigen soll – Feld, Info-Anzeige oder

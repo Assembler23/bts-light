@@ -114,6 +114,21 @@ roher `court_state` + Konfiguration + Werbebild-Liste.
 | Aufschlag       | angezeigt           | nicht angezeigt          |
 | Pausen-Timer    | angezeigt           | nicht angezeigt          |
 
+## Sponsor-Leiste (kleine Werbung neben dem Turnierlogo)
+
+Jedes Werbebild lässt sich im Setup mit dem Haken **„Leiste"**
+(`set_court_ad_bar`) als Leisten-Sponsor markieren. Die Markierungen liegen in
+`court-ads/court-ad-bar.json` (getrennt von den Labels, abwärtskompatibel).
+`/info/ad/state` weist sie als `barAds` aus, dazu `hasLogo`; das Turnierlogo
+kommt über den neuen Endpunkt **`/info/logo`** (aus `config.tournament_logo`).
+
+Die markierten Bilder erscheinen — neben dem Turnierlogo — klein in der oberen
+Leiste von **Feldübersicht**, **Vorbereitung**, **Court-Monitor** (nur im
+laufenden Spiel, der Werbe-Leerlauf bleibt Vollbild) und **Tablet** (breite
+Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
+`onerror` es. Spec + Phasen (Cloud, badhub-Seiten):
+[features/werbung-leisten.md](features/werbung-leisten.md).
+
 ## Endpunkte
 
 Alle Routen gibt es doppelt — vom LAN-Server **und** vom Relay, damit der
@@ -133,6 +148,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Flaggen                | `/flags/{code}.svg`            | `/{ns}/flags/{code}.svg`       |
 | Flaggen (TL-Seite)     | `/flags/{code}.svg`            | `/flags/{code}.svg` (ns-los)   |
 | Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |
+| Werbe-/Leisten-Zustand | `/info/ad/state`               | (LAN-only erstmal)             |
+| **Turnierlogo**        | `/info/logo`                   | (LAN-only erstmal)             |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
 | Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |

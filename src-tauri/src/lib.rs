@@ -156,6 +156,7 @@ pub fn run() {
             commands::remove_court_ad,
             commands::list_court_ads,
             commands::set_court_ad_label,
+            commands::set_court_ad_bar,
             commands::read_tournament_logo,
             commands::monitor_devices,
             commands::assign_monitor,
