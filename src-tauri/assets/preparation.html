@@ -22,6 +22,12 @@ header.bar {
   background: linear-gradient(180deg, #141f33, #1c2942);
   border-bottom: .3vh solid #334155;
 }
+/* Sponsor-Leiste: Turnierlogo + markierte Werbebilder, rechts außen. */
+header.bar .sponsor-bar { margin-left: auto; display: flex; align-items: center; gap: 1.2vw; }
+header.bar .sponsor-bar img {
+  height: 6vh; width: auto; max-width: 20vw; object-fit: contain;
+  background: #fff; border-radius: .6vh; padding: .5vh;
+}
 header.bar .live-dot {
   width: 1.4vmin; height: 1.4vmin; border-radius: 50%;
   background: #f43f5e; box-shadow: 0 0 1.5vmin #f43f5e;
@@ -119,6 +125,7 @@ main {
   <span class="live-dot" aria-hidden="true"></span>
   <span class="title">In Vorbereitung</span>
   <span class="hall-name" id="hall-name"></span>
+  <span class="sponsor-bar" id="sponsor-bar"></span>
 </header>
 <main id="board"></main>
 <div id="offline">Keine Verbindung zum Turnier-PC</div>
@@ -311,6 +318,27 @@ main {
       });
   }
   tick();
+
+  // Sponsor-Leiste (Turnierlogo + markierte Werbebilder), selten aktualisiert.
+  (function sponsorBar() {
+    var box = document.getElementById('sponsor-bar');
+    if (!box) return;
+    function paint(st) {
+      var h = '';
+      if (st && st.hasLogo) h += '<img src="/info/logo" alt="" onerror="this.remove()">';
+      ((st && st.barAds) || []).forEach(function (f) {
+        h += '<img src="/ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
+      });
+      box.innerHTML = h;
+    }
+    function poll() {
+      fetch('/info/ad/state', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(paint).catch(function () {});
+    }
+    poll();
+    setInterval(poll, 60000);
+  })();
 
   // „vor X Min."-Anzeige sekündlich aktualisieren, ohne Poll zu warten.
   setInterval(function () {

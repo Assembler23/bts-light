@@ -48,6 +48,15 @@
       font-size: 1rem; flex-shrink: 0;
     }
     .header-info { flex: 1; min-width: 0; }
+    /* Sponsor-Leiste im Tablet-Kopf: kompakt, weißer Grund. Auf schmalen
+       Geräten (Handy) ausgeblendet, damit sie die Zähl-Bedienung nie
+       verdrängt — nur auf breiteren Tablets sichtbar. */
+    .sponsor-bar { flex: 0 0 auto; display: flex; align-items: center; gap: .4rem; }
+    .sponsor-bar img {
+      height: 2.2rem; width: auto; max-width: 6rem; object-fit: contain;
+      background: #fff; border-radius: .3rem; padding: .15rem;
+    }
+    @media (max-width: 640px) { .sponsor-bar { display: none; } }
     .header-undo {
       flex: 0 0 auto;
       width: 2.8rem; height: 2.8rem;
@@ -563,6 +572,7 @@
       <div class="event-label" id="event-label">— kein Match —</div>
     </div>
     <div class="match-clock" id="match-clock"></div>
+    <div class="sponsor-bar" id="sponsor-bar"></div>
     <button
       type="button"
       id="injury-btn"
@@ -3858,6 +3868,29 @@ startConnectionWatchdog();
 setupBattery();
 // Hing beim letzten Mal noch ein Ergebnis in der Übermittlung? Weiter damit.
 if (STATE.pendingResult) trySubmitPending();
+
+// Sponsor-Leiste im Kopf (Turnierlogo + als „in Leiste" markierte Werbebilder).
+// BASE_PATH-relativ: LAN vom Host, im Cloud-Modus greift der onerror-Rückfall
+// (Relay kennt /info nicht). Selten gepollt; auf Handys per CSS ausgeblendet.
+(function sponsorBar() {
+  var box = document.getElementById('sponsor-bar');
+  if (!box) return;
+  function paint(st) {
+    var h = '';
+    if (st && st.hasLogo) h += '<img src="' + BASE_PATH + '/info/logo" alt="" onerror="this.remove()">';
+    ((st && st.barAds) || []).forEach(function (f) {
+      h += '<img src="' + BASE_PATH + '/ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
+    });
+    box.innerHTML = h;
+  }
+  function pollBar() {
+    fetch(BASE_PATH + '/info/ad/state', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(paint).catch(function () {});
+  }
+  pollBar();
+  setInterval(pollBar, 60000);
+})();
 </script>
 </body>
 </html>

@@ -132,6 +132,13 @@ fn monitor_ad_labels_path(app: &AppHandle) -> std::path::PathBuf {
         .join(crate::tablet::monitor::AD_LABELS_FILE)
 }
 
+/// Pfad zur Datei mit den „Leisten-Sponsor"-Markierungen. Liegt im
+/// `court-ads/`-Verzeichnis (wie die Bilder), damit der Tablet-/Monitor-Server
+/// sie über sein `monitor_dir` erreicht.
+fn monitor_ad_bar_path(app: &AppHandle) -> std::path::PathBuf {
+    monitor_ad_dir(app).join(crate::tablet::monitor::AD_BAR_FILE)
+}
+
 /// Pfad zur Datei mit den Monitor-Feld-Zuweisungen (Gerät → Feld).
 fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
@@ -950,6 +957,9 @@ pub fn stop_sync(state: State<'_, AppState>) {
 pub struct CourtAd {
     pub file: String,
     pub label: String,
+    /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste der
+    /// Anzeigeseiten (neben dem Turnierlogo) erscheinen soll.
+    pub in_bar: bool,
 }
 
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
@@ -2799,6 +2809,13 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
     if labels.remove(&file).is_some() {
         let _ = crate::tablet::monitor::write_ad_labels(&labels_path, &labels);
     }
+    // Auch die „Leisten-Sponsor"-Markierung mit aufräumen — sonst zeigte die
+    // Leiste ein 404-Bild für eine gelöschte Datei.
+    let bar_path = monitor_ad_bar_path(&app);
+    let mut bar = crate::tablet::monitor::read_ad_bar(&bar_path);
+    if bar.remove(&file) {
+        let _ = crate::tablet::monitor::write_ad_bar(&bar_path, &bar);
+    }
     tracing::info!("Court-Monitor: Werbebild '{file}' entfernt");
     Ok(())
 }
@@ -2810,13 +2827,34 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
 pub fn list_court_ads(app: AppHandle) -> Vec<CourtAd> {
     let files = crate::tablet::monitor::list_ads(&monitor_ad_dir(&app));
     let labels = crate::tablet::monitor::read_ad_labels(&monitor_ad_labels_path(&app));
+    let bar = crate::tablet::monitor::read_ad_bar(&monitor_ad_bar_path(&app));
     files
         .into_iter()
         .map(|file| CourtAd {
             label: labels.get(&file).cloned().unwrap_or_default(),
+            in_bar: bar.contains(&file),
             file,
         })
         .collect()
+}
+
+/// Markiert ein Werbebild als „auch klein in der Leiste zeigen" (`in_bar=true`)
+/// oder entfernt die Markierung. Die Leiste (neben dem Turnierlogo) zeigt genau
+/// die markierten Bilder — in der Regel 1–2 Sponsoren.
+#[tauri::command]
+pub fn set_court_ad_bar(app: AppHandle, file: String, in_bar: bool) -> Result<(), String> {
+    if !crate::tablet::monitor::is_safe_image_name(&file) {
+        return Err("Ungültiger Dateiname.".to_string());
+    }
+    let bar_path = monitor_ad_bar_path(&app);
+    let mut bar = crate::tablet::monitor::read_ad_bar(&bar_path);
+    if in_bar {
+        bar.insert(file);
+    } else {
+        bar.remove(&file);
+    }
+    crate::tablet::monitor::write_ad_bar(&bar_path, &bar)
+        .map_err(|e| format!("Leisten-Markierung speichern fehlgeschlagen: {e}"))
 }
 
 /// Setzt oder löscht das Anzeige-Label eines Werbebilds. Ein leerer

@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.189
+
+- **Sponsor-Leiste (Phase 1): kleine Werbung neben dem Turnierlogo.** Jedes
+  Werbebild kann im Setup („Court-Monitor" → Werbebild-Liste) mit dem Haken
+  **„Leiste"** markiert werden. Die markierten Bilder erscheinen dann — neben
+  dem **Turnierlogo** — klein in der **oberen Leiste** von **Feldübersicht**,
+  **Vorbereitung**, **Court-Monitor** (nur im laufenden Spiel; der Werbe-
+  Leerlauf bleibt Vollbild) und **Tablet-Spielzettel** (auf breiten Geräten).
+  In der Regel 1–2 Sponsorbilder, kein Rotieren. Neuer Endpunkt `/info/logo`
+  liefert das Turnierlogo an die Anzeigeseiten (bisher kannte es keine davon).
+  Fehlt ein Bild/Logo, bleibt die Leiste ohne dieses Motiv (kurz cachebar,
+  auch der Fehltreffer). *Cloud-Modus (Relay) und die badhub-Seiten
+  (Check-in/Zeitplan) folgen in den nächsten Phasen.*
+
 ## v0.9.188
 
 - **Turnierleitungssicht: Vereinsname/-logo je Gerät ein-/ausblendbar.** Im

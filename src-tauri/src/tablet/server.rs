@@ -155,6 +155,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/info/winners", get(info_winners_page))
         .route("/info/winners/state", get(info_winners_state))
         .route("/info/club-logo", get(info_club_logo))
+        .route("/info/logo", get(info_tournament_logo))
         .route("/info/announce/freetext", get(info_announce_freetext))
         .route("/info/announce/jobs", get(info_announce_jobs))
         .route("/info/ad", get(info_ad_page))
@@ -799,12 +800,54 @@ async fn info_ad_state(
 ) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
     let ads = monitor::list_ads(&ctx.monitor_dir);
+    // Die als „Leisten-Sponsor" markierten Bilder gesondert ausweisen — die
+    // obere Leiste zeigt genau diese (neben dem Turnierlogo), ohne die
+    // Vollbild-Rotation (`ads`) anzufassen. Nur existierende Dateien.
+    let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
+    let bar_ads: Vec<&String> = ads.iter().filter(|f| bar.contains(*f)).collect();
     let config = ctx.monitor_config();
     let payload = serde_json::json!({
         "ads": ads,
+        "barAds": bar_ads,
+        "hasLogo": !ctx.app_config().tournament_logo.data.is_empty(),
         "intervalS": config.ad_interval_s.max(1),
     });
     ([(header::CACHE_CONTROL, "no-store")], Json(payload))
+}
+
+/// Liefert das **Turnierlogo** als Bild (für die obere Leiste der
+/// Anzeigeseiten). Quelle ist die Host-Konfiguration (`tournament_logo`,
+/// base64). Leeres Logo → 404, damit ein `onerror` in der Seite sauber
+/// degradiert. Kurz cachebar — das Logo ändert sich selten, aber ein Wechsel
+/// soll zügig durchschlagen.
+async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    use base64::Engine;
+    let logo = ctx.app_config().tournament_logo;
+    if logo.data.is_empty() {
+        return (
+            [(header::CACHE_CONTROL, "public, max-age=300")],
+            StatusCode::NOT_FOUND,
+        )
+            .into_response();
+    }
+    match base64::engine::general_purpose::STANDARD.decode(logo.data.as_bytes()) {
+        Ok(bytes) => {
+            let mime = if logo.mime.is_empty() {
+                "image/png".to_string()
+            } else {
+                logo.mime.clone()
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, mime),
+                    (header::CACHE_CONTROL, "public, max-age=300".to_string()),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// Liefert die HTML der Kombi-Anzeige (mehrere Felder als Bänder). Die
