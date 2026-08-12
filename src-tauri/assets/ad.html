@@ -198,6 +198,9 @@
     try {
       var here = new URL(location.href);
       here.searchParams.delete('device');
+      // Auch den Pivot ignorieren — sonst zählt ?rotate=90 als Unterschied und
+      // löste eine Endlos-Umleitung auf die schon aktive Seite aus.
+      here.searchParams.delete('rotate');
       var there = new URL(redirectTo, location.origin);
       return here.pathname === there.pathname &&
              here.searchParams.toString() === there.searchParams.toString();
@@ -222,9 +225,13 @@
       .then(function (s) {
         if (!s) return;
         if (s.redirectTo) {
-          if (!currentUrlMatches(s.redirectTo)) {
-            var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
-            navigateWithRotate(BASE + String(s.redirectTo).replace(/^\//, '') + sep + 'device=' + encodeURIComponent(deviceId));
+          // Ziel zuerst BASE-relativ auflösen und DAMIT vergleichen — sonst
+          // stünde im Cloud `here.pathname` (…/bts-relay/{ns}/info/ad) nie
+          // gleich dem rohen `/info/ad`, und die Seite lüde jede Sekunde neu.
+          var dest = BASE + String(s.redirectTo).replace(/^\//, '');
+          if (!currentUrlMatches(dest)) {
+            var sep = dest.indexOf('?') >= 0 ? '&' : '?';
+            navigateWithRotate(dest + sep + 'device=' + encodeURIComponent(deviceId));
           }
         } else {
           // Kein Info/Ad-Target mehr → zurück zur Feld-/Pairing-Seite.
