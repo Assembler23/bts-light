@@ -2151,7 +2151,12 @@ mod tests {
         assert_eq!(brief.team_a[0].club.as_deref(), Some("SC Musterstadt"));
         // Standard (aus) → Flags aus, Verein reist trotzdem mit (Tablet blendet
         // ihn dann nur nicht ein).
-        let brief_off = match_brief(&m, Vec::new(), false, &crate::config::DisplayConfig::default());
+        let brief_off = match_brief(
+            &m,
+            Vec::new(),
+            false,
+            &crate::config::DisplayConfig::default(),
+        );
         assert!(!brief_off.show_club_names);
         assert!(!brief_off.show_club_logos);
         assert_eq!(brief_off.team_a[0].club.as_deref(), Some("SC Musterstadt"));
