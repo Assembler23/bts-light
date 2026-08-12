@@ -218,7 +218,8 @@
     .court-lines .line { stroke: #f8fafc; stroke-width: .4; fill: none; vector-effect: non-scaling-stroke; }
     .court-lines .net  { stroke: #0f172a; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
     .court .cell {
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: .1rem;
       padding: .25rem; text-align: center;
       position: relative;
       font-weight: 600; color: #f8fafc;
@@ -260,6 +261,23 @@
       text-shadow: 0 1px 2px rgba(0,0,0,.6);
       line-height: 1.15; word-break: keep-all; hyphens: none;
       max-width: 100%;
+    }
+    /* Verein unter dem Namen — klein und gedämpft, damit er den Namen nicht
+       überstrahlt. Nur sichtbar, wenn die turnierweite Anzeige es zulässt und
+       ein Verein bekannt ist (JS setzt/leert). */
+    .court .cell .player-club {
+      display: none; align-items: center; justify-content: center; gap: .3rem;
+      font-size: clamp(.62rem, 1.4vw, .95rem); font-weight: 500;
+      color: #cbd5e1; opacity: .85; max-width: 100%;
+      text-shadow: 0 1px 2px rgba(0,0,0,.6);
+    }
+    .court .cell .player-club.show { display: inline-flex; }
+    .court .cell .player-club .club-name {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14ch;
+    }
+    .court .cell .player-club img {
+      height: 1.2em; width: 1.2em; object-fit: contain; flex: none;
+      background: #fff; border-radius: .2em; padding: .05em;
     }
     .court .team-label-left, .court .team-label-right {
       position: absolute; top: .25rem; font-size: .7rem; opacity: .9;
@@ -643,10 +661,10 @@
             <div class="team-label-left" id="team-label-left"></div>
             <div class="team-label-right" id="team-label-right"></div>
             <!-- 4 Service-Courts: leftTop, rightTop, leftBottom, rightBottom -->
-            <div class="cell" id="cell-leftTop"><span class="player-name"></span></div>
-            <div class="cell" id="cell-rightTop"><span class="player-name"></span></div>
-            <div class="cell" id="cell-leftBottom"><span class="player-name"></span></div>
-            <div class="cell" id="cell-rightBottom"><span class="player-name"></span></div>
+            <div class="cell" id="cell-leftTop"><span class="player-name"></span><span class="player-club"></span></div>
+            <div class="cell" id="cell-rightTop"><span class="player-name"></span><span class="player-club"></span></div>
+            <div class="cell" id="cell-leftBottom"><span class="player-name"></span><span class="player-club"></span></div>
+            <div class="cell" id="cell-rightBottom"><span class="player-name"></span><span class="player-club"></span></div>
           </div>
         </div>
       </div>
@@ -948,6 +966,12 @@ const SETTINGS_PIN = (function () {
 //   Cloud → "/bts-relay/<install_id>"  (der Relay leitet weiter)
 // So funktioniert dieselbe Datei für beide Verbindungsarten.
 const BASE_PATH = location.pathname.replace(/\/court\/[^/]*\/?$/, '');
+
+// Vereinslogo-Endpunkt, relativ zum Basis-Pfad (wie die übrigen Endpunkte).
+// LAN → "/info/club-logo" (Host), Cloud → "/bts-relay/<id>/info/club-logo".
+// Im Cloud-Modus liefert der Relay diesen Pfad (noch) nicht; dann greift der
+// onerror-Rückfall und es bleibt beim Vereinsnamen.
+const LOGO_BASE = BASE_PATH + '/info/club-logo?name=';
 
 // ─────────────────────────── Diagnose-Log ──────────────────────────────
 // Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,
@@ -3053,6 +3077,8 @@ function renderCourt() {
   for (const cell of [els.cellLeftTop, els.cellRightTop, els.cellLeftBottom, els.cellRightBottom]) {
     cell.classList.remove('server');
     cell.querySelector('.player-name').textContent = '';
+    const club = cell.querySelector('.player-club');
+    if (club) { club.classList.remove('show'); club.textContent = ''; }
   }
   if (!STATE.positions || !STATE.teamOnSide || !STATE.match) {
     els.teamLabelLeft.textContent = '';
@@ -3119,6 +3145,35 @@ function renderCourt() {
 function setPlayer(cell, playerId) {
   const p = playerById(playerId);
   cell.querySelector('.player-name').textContent = p ? p.name : '';
+  setPlayerClub(cell, p);
+}
+
+// Verein unter dem Namen — nur wenn die turnierweite Anzeige (im MatchBrief
+// mitgeliefert) es zulässt und der Verein bekannt ist. Logo optional davor,
+// mit onerror-Rückfall (fehlt es, bleibt der Name). Beides aus → Zelle bleibt
+// wie bisher nur der Name.
+function setPlayerClub(cell, p) {
+  const box = cell.querySelector('.player-club');
+  if (!box) return;
+  box.classList.remove('show');
+  box.textContent = '';
+  const m = STATE.match;
+  const club = (p && p.club) ? String(p.club).trim() : '';
+  if (!m || !club || (!m.showClubNames && !m.showClubLogos)) return;
+  if (m.showClubLogos) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = LOGO_BASE + encodeURIComponent(club);
+    img.onerror = function () { if (img.parentNode) img.parentNode.removeChild(img); };
+    box.appendChild(img);
+  }
+  if (m.showClubNames) {
+    const name = document.createElement('span');
+    name.className = 'club-name';
+    name.textContent = club;
+    box.appendChild(name);
+  }
+  box.classList.add('show');
 }
 
 function render() {

@@ -132,6 +132,12 @@ kann keine Geheimnisse zur Laufzeit beziehen. Nicht als Leak behandeln.
 Kein Geburtsjahr speichern/anzeigen/loggen. Spielernamen nur im Rahmen des
 Liveticker-Zwecks. Im Zweifel Feld weglassen.
 
+**Nationalität** (seit 09.08.2026) und **Verein** (seit 12.08.2026) sind
+bewusst zuschaltbare, **standardmäßig ausgeschaltete** Anzeige-Felder — beide
+stehen ohnehin auf Aushang/Meldeliste. Der Wächter-Test in `tablet/tl.rs`
+(`the_state_never_carries_personal_data_beyond_its_purpose`) hält Lizenznummer
+und Geburtsjahr weiterhin komplett draußen.
+
 ---
 
 *Details immer in `docs/`. Diese Datei nur für übergreifende Regeln.*

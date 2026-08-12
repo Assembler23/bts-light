@@ -189,6 +189,25 @@ kann damit nichts anfangen:
 Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
 
+#### Vereine (Vereinsname/-logo)
+
+Anders als die obigen Schalter ist die **Vereins-Anzeige turnierweit
+zentral**, nicht je Gerät: Sie wird einmal im Setup unter **„Vereine
+anzeigen"** gesetzt und gilt dann für die Turnierleitungssicht **und** die
+Tablet-Spielzettel gleichermaßen. Zwei getrennte Optionen:
+
+- **Vereinsnamen anzeigen** (Standard: **aus**) — der Vereinsname klein
+  hinter jedem Spielernamen.
+- **Vereinslogos anzeigen** (Standard: **aus**) — das Vereinswappen davor,
+  aus dem badhub-Bestand (dieselbe Quelle wie die Siegerliste). Zu einem
+  Verein ohne hinterlegtes Logo bleibt es beim Namen.
+
+Im Hallennetz (LAN) laden die Logos direkt vom Turnier-PC. Im Cloud-Modus
+liefert das Relay den Logo-Pfad (noch) nicht aus — dort erscheint vorerst
+nur der Name; die Logos folgen mit dem geplanten, turnierweiten
+badhub-Logo-Resolver. Der **Verein** ist wie die Nationalität ein bewusst
+zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
+
 ### Punktverlauf ansehen
 
 Der **📈-Knopf** an einer belegten Feldkachel und an Zeilen der

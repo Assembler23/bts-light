@@ -160,6 +160,26 @@ impl Default for AnnounceConfig {
     }
 }
 
+/// Turnierweite Anzeige-Optionen für Spielernamen (TL-Web + Tablet).
+///
+/// **Zentral, nicht je Gerät** (Nutzer-Entscheidung 12.08.2026): einmal im
+/// Tool gesetzt, gilt für alle Turnierleitungs-Bildschirme und Tablets. Die
+/// TL-Web-Seite bekommt die Werte live über den Zustand; das Tablet erhält
+/// sie beim Ausliefern getemplatet (greift dort nach dem nächsten Neuladen).
+///
+/// Datenschutz: Der **Verein** ist wie die Nationalität ein bewusst
+/// zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Entscheidung
+/// analog zur Nation vom 09.08.2026 — der Sieger-Monitor zeigt ihn ohnehin
+/// öffentlich). Kein Geburtsjahr, keine Lizenznummer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct DisplayConfig {
+    /// Vereinsnamen an den Spielernamen anzeigen?
+    pub show_club_names: bool,
+    /// Vereinslogos anzeigen (über den badhub-Logo-Weg `/info/club-logo`)?
+    pub show_club_logos: bool,
+}
+
 /// Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld, Raspberry Pi).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -476,6 +496,10 @@ pub struct AppConfig {
     /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub court_monitor: CourtMonitorConfig,
+    /// Turnierweite Anzeige-Optionen (Vereinsnamen/-logos). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub display: DisplayConfig,
     /// Einstellungen des Aufruf-Timers (1./2./3. Aufruf). `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -1018,6 +1042,10 @@ mod tests {
                 serpentine: true,
                 vertical: true,
             }],
+            display: DisplayConfig {
+                show_club_names: true,
+                show_club_logos: true,
+            },
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

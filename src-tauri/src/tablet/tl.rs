@@ -1409,6 +1409,11 @@ pub struct TlState {
     /// Hallen ohne Eintrag bekommen kein Element hier — die Seite zeigt sie
     /// dann in der bisherigen Fließ-Darstellung.
     pub layouts: Vec<TlHallLayout>,
+    /// Turnierweite Anzeige-Optionen (`config.display`): Vereinsnamen
+    /// und/oder -logos an den Spielernamen zeigen. Zentral gesetzt, damit
+    /// alle TL-Bildschirme dasselbe Bild zeigen.
+    pub show_club_names: bool,
+    pub show_club_logos: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1463,6 +1468,13 @@ pub struct TlCourt {
     /// sogar öffentlich; hier steht sie hinter dem Gerätezugang.
     pub team1_nat: Vec<String>,
     pub team2_nat: Vec<String>,
+    /// Vereinsnamen, **parallel** zu `team1`/`team2`; leerer String, wo BTP
+    /// keinen führt. Zuschaltbares Anzeige-Feld (turnierweit,
+    /// `config.display`); dient zugleich als Schlüssel fürs Vereinslogo
+    /// (`/info/club-logo?name=`). Datenschutz: bewusst freigegeben wie die
+    /// Nation (Entscheidung 12.08.2026), Default aus.
+    pub team1_club: Vec<String>,
+    pub team2_club: Vec<String>,
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
@@ -1521,6 +1533,9 @@ pub struct TlMatch {
     /// keine Angabe). Siehe [`TlCourt::team1_nat`].
     pub team1_nat: Vec<String>,
     pub team2_nat: Vec<String>,
+    /// Vereinsnamen, **parallel** zu den Namen. Siehe [`TlCourt::team1_club`].
+    pub team1_club: Vec<String>,
+    pub team2_club: Vec<String>,
     /// In welche Halle das Spiel gehört, und woher wir das wissen.
     pub hall: String,
     pub hall_source: HallSource,
@@ -1728,6 +1743,8 @@ pub(crate) fn build_state_limited(
             // Turnierstand — sie gilt auch, solange BTP noch nichts
             // geliefert hat.
             layouts: layouts_view(config),
+            show_club_names: config.display.show_club_names,
+            show_club_logos: config.display.show_club_logos,
         };
     };
 
@@ -1827,6 +1844,16 @@ pub(crate) fn build_state_limited(
                 .team2
                 .iter()
                 .map(|p| p.nationality.clone().unwrap_or_default())
+                .collect(),
+            team1_club: m
+                .team1
+                .iter()
+                .map(|p| p.club.clone().unwrap_or_default())
+                .collect(),
+            team2_club: m
+                .team2
+                .iter()
+                .map(|p| p.club.clone().unwrap_or_default())
                 .collect(),
             hall,
             hall_source,
@@ -1968,6 +1995,8 @@ pub(crate) fn build_state_limited(
         scorekeepers,
         finished,
         layouts: layouts_view(config),
+        show_club_names: config.display.show_club_names,
+        show_club_logos: config.display.show_club_logos,
     }
 }
 
@@ -2071,6 +2100,8 @@ fn court_view(c: crate::tablet::state::CourtOverview, clearing: Option<i64>) -> 
         team2: c.team2,
         team1_nat: c.team1_nationalities,
         team2_nat: c.team2_nationalities,
+        team1_club: c.team1_clubs,
+        team2_club: c.team2_clubs,
         sets: c.sets,
         tablet_connected: c.tablet_connected,
         injury: c.injury,
@@ -4170,10 +4201,16 @@ mod tests {
             "team2",
             // Nation als ISO-Kürzel, zuschaltbar und standardmäßig aus.
             // Dieselbe Angabe zeigt der Court-Monitor öffentlich als Flagge;
-            // hier steht sie hinter dem Gerätezugang. Kein Geburtsjahr, kein
-            // Verein, keine Lizenznummer — die bleiben draußen.
+            // hier steht sie hinter dem Gerätezugang. Kein Geburtsjahr, keine
+            // Lizenznummer — die bleiben draußen.
             "team1_nat",
             "team2_nat",
+            // Vereinsname, ebenso zuschaltbar und standardmäßig aus (Nutzer-
+            // Entscheidung 12.08.2026 — bewusste Datenschutz-Freigabe wie bei
+            // der Nationalität). Dieselbe Angabe steht auf jeder Meldeliste und
+            // jedem Aushang; hier hinter dem Gerätezugang.
+            "team1_club",
+            "team2_club",
             "sets",
             "tablet_connected",
             "injury",
@@ -4229,6 +4266,10 @@ mod tests {
             // Nummerierungsrichtung (spaltenweise statt reihenweise) — ebenso
             // reine Geometrie.
             "vertical",
+            // Turnierweite Anzeige-Schalter (nur boolesche Flags, keine
+            // Personendaten): ob tl.html Vereinsname/-logo einblenden darf.
+            "show_club_names",
+            "show_club_logos",
         ];
 
         let tablet = TabletState::default();
@@ -4305,20 +4346,24 @@ mod tests {
     fn the_state_never_carries_personal_data_beyond_its_purpose() {
         // Diese Daten laufen über eine aus dem Internet erreichbare Seite.
         // Der Test schlägt fehl, sobald jemand ein Feld nachrüstet, das
-        // Lizenznummer, Geburtsjahr oder Verein transportiert — er macht die
+        // Lizenznummer oder Geburtsjahr transportiert — er macht die
         // Datenschutzregel durchsetzbar statt nur dokumentiert.
         //
-        // **Die Nation ist seit 09.08.2026 erlaubt** und stand vorher hier
-        // auf der Verbotsliste. Bewusst geändert: Die Turnierleitung braucht
-        // sie bei internationalen Turnieren, um die richtige Paarung ans Feld
-        // zu holen. Es bleibt beim ISO-Kürzel, die Anzeige ist je Gerät
-        // zuschaltbar und standardmäßig aus — und dieselbe Angabe zeigt der
-        // Court-Monitor ohnehin öffentlich als Flagge, während sie hier
-        // hinter dem Gerätezugang steht.
+        // **Die Nation ist seit 09.08.2026 erlaubt**, **der Verein seit
+        // 12.08.2026** — beide standen vorher hier auf der Verbotsliste.
+        // Bewusst geändert: Die Turnierleitung braucht sie, um die richtige
+        // Paarung ans Feld zu holen und Vereinskollegen auseinanderzuhalten.
+        // Es bleibt beim ISO-Kürzel bzw. Vereinsnamen, die Anzeige ist
+        // turnierweit zuschaltbar und standardmäßig aus — und dieselbe Angabe
+        // steht ohnehin auf jeder Meldeliste und jedem Aushang, während sie
+        // hier hinter dem Gerätezugang steht.
         let mut running = a_match(1);
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
         running.team1 = vec![licensed_player("Müller", "08-001234")];
+        // Ein Verein am Fixture-Spieler, damit die Gegenprobe unten belegt,
+        // dass der zuschaltbare Vereinsname tatsächlich transportiert wird.
+        running.team1[0].club = Some("SC Musterstadt".to_string());
         running.team2 = vec![licensed_player("Gegner", "08-005678")];
         let mut waiting = a_match(2);
         waiting.team1 = vec![licensed_player("Weber", "08-009999")];
@@ -4374,8 +4419,6 @@ mod tests {
             "member",    // Lizenznummer-Feld
             "birth",     // Geburtsjahr — laut Projektregel nirgends
             "geburt",
-            "club",    // Verein: für die Vergabe ohne Belang
-            "verein",  //
             "battery", // Akkustand: keine Geräte-Übersicht in diesem Feature
             "serving", // Aufschlag: Zählhilfe, keine Vergabehilfe
         ] {
@@ -4389,6 +4432,11 @@ mod tests {
         assert!(
             json.contains("team1_nat"),
             "die zuschaltbare Nationen-Anzeige braucht das Kürzel"
+        );
+        // Der Verein darf ebenso — als Name neben dem Namen, zuschaltbar.
+        assert!(
+            json.contains("sc musterstadt"),
+            "der zuschaltbare Vereinsname muss transportiert werden"
         );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
