@@ -1082,3 +1082,192 @@ async fn does_assign_then_free_leave_the_location_behind() {
     println!("FELD-TRICK: T2 (halbe Freigabe): {t2}");
     println!("########################################");
 }
+
+/// **Messung, kein Regressionstest — SCHREIBT probeweise und stellt
+/// zurück.** Nachbau der letilo/bts-Schreibform (Branch
+/// `feat/multilocation`, `btp_proto.js` `update_request`, gelesen
+/// 11.08.2026): Der Referenz-Connector schreibt `Match.LocationID`
+/// **immer zusammen mit `Status`, `Highlight` und `DisplayOrder`** — der
+/// vollen Planungsraster-Identität. Unsere bisherigen vier Proben ließen
+/// genau diese drei Felder weg (Status bewusst, um das Check-in-Bitfeld
+/// nicht zu berühren). Das ist die letzte ungetestete Schreibform.
+///
+/// **Achtung:** Diese Probe schreibt `Status` — bei einem angesetzten,
+/// spielerlos-gecheckten Match unkritisch, aber sie stellt den
+/// Originalwert (roh aus dem Snapshot) hinterher wieder her und prüft das.
+///
+/// ```text
+/// cargo test -p bts-light --test btp_location_probe -- --ignored --nocapture location_write_full_planning_node_like_letilo
+/// ```
+#[tokio::test]
+#[ignore = "braucht ein laufendes BTP; SCHREIBT Status+LocationID probeweise und stellt zurück"]
+async fn location_write_full_planning_node_like_letilo() {
+    use bts_light_lib::btp::model::MatchStatus;
+
+    let pw = password();
+    let pw_ref = pw.as_deref();
+
+    let raw_before = client::send_request(&host(), port(), &proto::tournament_info_request(pw_ref))
+        .await
+        .expect("BTP erreichbar (VORHER)");
+    let nodes_before = proto::decode_response(&raw_before).expect("dekodierbar");
+    let before = bts_light_lib::btp::model::parse_snapshot(&nodes_before).expect("Snapshot");
+
+    println!("\n=== Turnier: {} ===", before.tournament_name);
+    if before.locations.is_empty() {
+        println!("ABBRUCH: Turnier pflegt KEINE Locations.");
+        return;
+    }
+
+    let mut kandidaten: Vec<&bts_light_lib::btp::model::BtpMatch> = before
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled
+                && !m.team1.is_empty()
+                && !m.team2.is_empty()
+                && m.court_id.is_none()
+        })
+        .collect();
+    kandidaten.sort_by_key(|m| m.id);
+    let Some((ziel_match, ziel_location)) = kandidaten.iter().find_map(|&m| {
+        before
+            .locations
+            .iter()
+            .find(|l| Some(l.id) != m.location_id)
+            .map(|l| (m, l.id))
+    }) else {
+        println!("ABBRUCH: kein geeignetes Match.");
+        return;
+    };
+
+    let match_id = ziel_match.id;
+    let draw_id = ziel_match.draw_id;
+    let planning_id = ziel_match.planning_id;
+    let display_order = ziel_match.display_order.unwrap_or(0);
+    let original_location_id = ziel_match.location_id;
+    let original_court_id = ziel_match.court_id;
+    let original_sets = ziel_match.sets.clone();
+    let original_winner = ziel_match.winner;
+    let original_status = ziel_match.status.clone();
+
+    // Rohen Status-Wert (Integer) sichern — fürs originalgetreue Restore.
+    let raw_match = raw_match_node(&nodes_before, match_id).expect("roher Match-Knoten");
+    let raw_status = raw_match
+        .children()
+        .iter()
+        .find(|c| c.id() == "Status")
+        .and_then(|c| c.value())
+        .and_then(|v| v.as_int());
+    println!(
+        "Ziel: MatchID={match_id} (LocationID {original_location_id:?} → {ziel_location}, \
+         DisplayOrder={display_order}, roher Status={raw_status:?})\n"
+    );
+
+    // Bauplan wie letilo: ID/DrawID/PlanningID + Status + Highlight +
+    // DisplayOrder + LocationID. `status_val` erlaubt das Restore auf den
+    // Originalwert.
+    let bauplan = |location_id: i64, status_val: i64| -> Vec<xml::Node> {
+        vec![
+            xml::Node::integer("ID", match_id),
+            xml::Node::integer("DrawID", draw_id),
+            xml::Node::integer("PlanningID", planning_id),
+            xml::Node::integer("Status", status_val),
+            xml::Node::integer("Highlight", 0),
+            xml::Node::integer("DisplayOrder", display_order),
+            xml::Node::integer("LocationID", location_id),
+        ]
+    };
+
+    println!(
+        "──── Schreibe volle Planungs-Node (Status:0 + Highlight + DisplayOrder + LocationID) ────"
+    );
+    let session = login(pw_ref).await;
+    let write_raw = client::send_request(
+        &host(),
+        port(),
+        &match_update_request(bauplan(ziel_location, 0), &session, pw_ref),
+    )
+    .await
+    .expect("BTP erreichbar (Schreiben)");
+    println!("  Rohantwort:\n{}", raw_preview(&write_raw));
+    let write_result =
+        proto::parse_update_response(&proto::decode_response(&write_raw).expect("dekodierbar"));
+    println!("  parse_update_response: {write_result:?}");
+
+    let after = client::fetch_snapshot(&host(), port(), pw_ref)
+        .await
+        .expect("BTP erreichbar (NACHHER)");
+    let nach = after
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .expect("Match vorhanden");
+    println!(
+        "  NACHHER: LocationID={:?} (Ziel {ziel_location}), CourtID={:?}, Status={:?}",
+        nach.location_id, nach.court_id, nach.status
+    );
+
+    let verdikt = if write_result.is_err() {
+        format!("ABGELEHNT ({write_result:?})")
+    } else if nach.location_id == Some(ziel_location) {
+        "✔✔✔ ANGENOMMEN — die letilo-Schreibform setzt die LocationID!".to_string()
+    } else {
+        "IGNORIERT (stiller No-Op, wie die vier vorherigen Formen)".to_string()
+    };
+
+    // Nebenwirkungen (außer Status, den wir bewusst setzen) prüfen.
+    assert!(
+        nach.court_id == original_court_id
+            && nach.sets == original_sets
+            && nach.winner == original_winner,
+        "NEBENWIRKUNG an Court/Sets/Winner — MANUELL IN BTP PRÜFEN! Court {:?}, Sets {:?}, Winner {:?}",
+        nach.court_id,
+        nach.sets,
+        nach.winner
+    );
+
+    // ── RESTORE: LocationID + Status zurück ───────────────────────────
+    let restore_status = raw_status.unwrap_or(0);
+    println!(
+        "\n──── RESTORE: LocationID→{:?}, Status→{restore_status} ────",
+        original_location_id
+    );
+    let session2 = login(pw_ref).await;
+    let _ = client::send_request(
+        &host(),
+        port(),
+        &match_update_request(
+            bauplan(original_location_id.unwrap_or(0), restore_status),
+            &session2,
+            pw_ref,
+        ),
+    )
+    .await
+    .expect("BTP erreichbar (Restore)");
+    let restored = client::fetch_snapshot(&host(), port(), pw_ref)
+        .await
+        .expect("BTP erreichbar (Restore-Kontrolle)");
+    let restored_match = restored
+        .matches
+        .iter()
+        .find(|m| m.id == match_id)
+        .expect("Match vorhanden");
+    println!(
+        "  Endzustand: LocationID={:?} (Original {original_location_id:?}), Status={:?} \
+         (Original {original_status:?})",
+        restored_match.location_id, restored_match.status
+    );
+    assert!(
+        restored_match.location_id == original_location_id
+            && restored_match.status == original_status,
+        "RESTORE FEHLGESCHLAGEN — MatchID={match_id}: LocationID {:?} (soll {original_location_id:?}), \
+         Status {:?} (soll {original_status:?}). MANUELL IN BTP PRÜFEN!",
+        restored_match.location_id,
+        restored_match.status
+    );
+
+    println!("\n########################################");
+    println!("LETILO-SCHREIBFORM: {verdikt}");
+    println!("########################################");
+}
