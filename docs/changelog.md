@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.188
+
+- **Turnierleitungssicht: Vereinsname/-logo je Gerät ein-/ausblendbar.** Im
+  Anzeige-Menü (Kopfzeile) gibt es jetzt „Vereinsnamen zeigen" und
+  „Vereinslogos zeigen" — wie bei den Nationen je Gerät und gespeichert.
+  Voreinstellung ist die zentrale Setup-Wahl („Vereine anzeigen"); jedes Gerät
+  darf sie für sich überstimmen. Darstellung überarbeitet: Der **Vereinsname**
+  steht jetzt in einer eigenen Zeile **unter** dem Spielernamen (mit Wappen
+  davor). Ist **nur das Logo** eingeschaltet (ohne Name), steht das Wappen
+  kompakt **vor** dem Namen, direkt hinter der Nation.
+- **Datensparsam: Logos werden gecacht.** Der Vereinslogo-Endpoint des
+  Turnier-PCs (`/info/club-logo`) beantwortet jetzt auch den **Fehltreffer**
+  (kein Logo) cachebar (1 h) — vorher fragte der Browser bei jedem Neuaufbau
+  (Poll alle ~2 s) für jeden Verein ohne Logo erneut an. Treffer werden wie
+  bisher lange gecacht (1 Tag); der Cloud-Resolver cacht ebenfalls. Zusätzlich
+  merkt sich die Seite fehlende Wappen je Sitzung und lädt sie nicht neu.
+
 ## v0.9.187
 
 - **Vereine anzeigen (optional, turnierweit).** In der Turnierleitungssicht

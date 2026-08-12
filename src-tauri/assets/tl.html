@@ -303,14 +303,27 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .paar .seite { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .paar .seite:last-child { text-align: right; align-items: flex-end; }
-/* Der Name selbst ist die Zeile; das Nationen-Kürzel steht daneben und
-   schrumpft nie mit. Rechts umgekehrt, damit das Kürzel außen bleibt und
-   die Namen an der Mittelachse anliegen. */
+/* Ein Spieler ist eine Spalte: oben die Namenszeile, darunter optional die
+   Vereinszeile. Die Namenszeile selbst ist eine Reihe — Nation und (nur bei
+   reinem Logo) das Wappen stehen neben dem Namen und schrumpfen nie mit.
+   Rechts umgekehrt, damit die Zusatzzeichen außen bleiben und die Namen an
+   der Mittelachse anliegen. */
 .paar .spieler {
-  display: flex; align-items: baseline; gap: 5px; min-width: 0;
+  display: flex; flex-direction: column; min-width: 0;
   overflow-wrap: break-word; hyphens: auto;
 }
-.paar .seite:last-child .spieler { flex-direction: row-reverse; }
+.paar .spieler-haupt {
+  display: flex; align-items: baseline; gap: 5px; min-width: 0;
+}
+.paar .seite:last-child .spieler { align-items: flex-end; }
+.paar .seite:last-child .spieler-haupt { flex-direction: row-reverse; }
+/* Vereinsname unter dem Namen — klein und gedämpft, damit er den Namen nicht
+   überstrahlt; das Wappen steht davor. */
+.paar .verein-unter {
+  display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+  color: var(--ink-faint); font-size: .72rem; line-height: 1.1;
+}
+.paar .seite:last-child .verein-unter { flex-direction: row-reverse; }
 
 /* Auf der Feldkachel **untereinander**. Eine Kachel ist rund 230 px breit;
    dreispaltig blieben je Partei keine 90 px, und Namen wie „Kushal Renuka
@@ -319,7 +332,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    *ein* Spiel liest, nicht eine Liste überfliegt. */
 .card .paar { grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .card .paar .seite:last-child { text-align: left; align-items: flex-start; }
-.card .paar .seite:last-child .spieler { flex-direction: row; }
+.card .paar .seite:last-child .spieler { align-items: flex-start; }
+.card .paar .seite:last-child .spieler-haupt { flex-direction: row; }
+.card .paar .seite:last-child .verein-unter { flex-direction: row; }
 .card .paar .vs { justify-self: start; }
 .vs {
   color: var(--ink-faint); font-weight: 500; font-size: .85em;
@@ -342,20 +357,15 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   border-radius: 4px; font-size: .68rem; font-weight: 700; letter-spacing: .03em;
   background: #f1f5f9; color: var(--ink-soft);
 }
-/* Verein: Wappen und/oder Name, dahinter am Spieler. Blass wie die Nation —
-   eine Zusatzinfo, die die Zeile nicht dominieren darf. Das Wappen ist klein
-   und quadratisch; der Name schrumpft mit und wird bei Enge gekürzt, damit
-   er die Namenszeile nicht auseinanderdrückt. */
-.verein {
-  flex: none; display: inline-flex; align-items: center; gap: 4px;
-  min-width: 0; color: var(--ink-faint); font-size: .7rem;
-}
+/* Verein: Wappen und/oder Name. Blass wie die Nation — eine Zusatzinfo, die
+   die Zeile nicht dominieren darf. Das Wappen ist klein und quadratisch; der
+   Name wird bei Enge gekürzt, damit er die Zeile nicht auseinanderdrückt. */
 .verein-logo {
   flex: none; width: 16px; height: 16px; object-fit: contain;
   vertical-align: -3px;
 }
 .verein-name {
-  min-width: 0; max-width: 12ch; overflow: hidden;
+  min-width: 0; max-width: 18ch; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
 /* Auf der Feldkachel ist mehr Platz — dort darf der Vereinsname länger sein. */
@@ -849,6 +859,8 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <div class="menue">
         <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
         <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
+        <label><input type="checkbox" id="opt-vereinsnamen" /> Vereinsnamen zeigen</label>
+        <label><input type="checkbox" id="opt-vereinslogos" /> Vereinslogos zeigen</label>
         <label><input type="checkbox" id="opt-disziplin" /> Disziplin/Klasse zeigen</label>
         <label><input type="checkbox" id="opt-runde" /> Runde zeigen</label>
         <label><input type="checkbox" id="opt-gruppe" /> Gruppe zeigen</label>
@@ -1082,10 +1094,35 @@ const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="tr
 let zeigeNummern = localStorage.getItem("bts-tl-nummern") !== "aus";
 let zeigeNationen = localStorage.getItem("bts-tl-nationen") === "an";
 
+// Verein je Gerät ein-/ausblendbar. Anders als die Nation gibt es dafür eine
+// turnierweite Voreinstellung (Setup „Vereine anzeigen", im Zustand als
+// `show_club_*`). Deshalb dreistufig: ist lokal nichts gewählt (`null`), gilt
+// die zentrale Vorgabe; sobald das Gerät den Schalter anfasst, gewinnt seine
+// Wahl. So sieht ein frisch geöffnetes Gerät das, was die Turnierleitung
+// zentral gesetzt hat, kann es aber für sich überstimmen.
+let vereinsnamenVorliebe = localStorage.getItem("bts-tl-vereinsnamen"); // "an"|"aus"|null
+let vereinslogosVorliebe = localStorage.getItem("bts-tl-vereinslogos");
+function zeigeVereinsnamenAktiv() {
+  return vereinsnamenVorliebe === null
+    ? !!(state && state.show_club_names)
+    : vereinsnamenVorliebe === "an";
+}
+function zeigeVereinslogosAktiv() {
+  return vereinslogosVorliebe === null
+    ? !!(state && state.show_club_logos)
+    : vereinslogosVorliebe === "an";
+}
+
 function setzeVorliebe(name, an) {
   if (name === "nummern") {
     zeigeNummern = an;
     localStorage.setItem("bts-tl-nummern", an ? "an" : "aus");
+  } else if (name === "vereinsnamen") {
+    vereinsnamenVorliebe = an ? "an" : "aus";
+    localStorage.setItem("bts-tl-vereinsnamen", vereinsnamenVorliebe);
+  } else if (name === "vereinslogos") {
+    vereinslogosVorliebe = an ? "an" : "aus";
+    localStorage.setItem("bts-tl-vereinslogos", vereinslogosVorliebe);
   } else {
     zeigeNationen = an;
     localStorage.setItem("bts-tl-nationen", an ? "an" : "aus");
@@ -1771,26 +1808,29 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
  * suchen musste, wo die eine Partei aufhört.
  *
  * Die Nation steht als Kürzel vor dem Namen, wenn sie eingeschaltet ist.
- * Verein (Logo und/oder Name) steht dahinter, wenn die **turnierweite**
- * Einstellung (`state.show_club_*`) es freigibt — nicht je Gerät, damit alle
- * Sichten dasselbe zeigen.
+ * Verein (Logo und/oder Name) ist je Gerät zuschaltbar (Default = zentrale
+ * Einstellung). Wird der **Vereinsname** gezeigt, steht er (mit Logo davor)
+ * in einer Zeile **unter** dem Spielernamen. Ist **nur das Logo** an (ohne
+ * Name), steht es kompakt **vor** dem Namen, direkt hinter der Nation.
  */
 function pairOf(t1, t2, nat1, nat2, club1, club2) {
-  const zeigeVereinsnamen = !!(state && state.show_club_names);
-  const zeigeVereinslogos = !!(state && state.show_club_logos);
+  const zeigeVereinsnamen = zeigeVereinsnamenAktiv();
+  const zeigeVereinslogos = zeigeVereinslogosAktiv();
   const seite = (namen, nationen, vereine) => {
     const liste = (namen || []).length ? namen : ["?"];
     return liste.map((n, i) => {
       const land = zeigeNationen ? (nationen || [])[i] : "";
       const verein = (vereine || [])[i] || "";
-      let tag = "";
-      if (verein && (zeigeVereinsnamen || zeigeVereinslogos)) {
-        const logo = zeigeVereinslogos ? vereinsLogo(verein) : "";
-        const name = zeigeVereinsnamen
-          ? `<span class="verein-name">${esc(verein)}</span>` : "";
-        tag = `<span class="verein" title="${esc(verein)}">${logo}${name}</span>`;
-      }
-      return `<span class="spieler">${nationBadge(land)}${esc(n)}${tag}</span>`;
+      const willName = zeigeVereinsnamen && verein;
+      const willLogo = zeigeVereinslogos && verein;
+      // Nur-Logo (ohne Name) → inline vor den Namen, hinter die Nation.
+      const inlineLogo = (willLogo && !willName) ? vereinsLogo(verein) : "";
+      const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${esc(n)}</span>`;
+      // Vereinsname → eigene Zeile unter dem Namen (Logo davor, falls an).
+      const unter = willName
+        ? `<span class="verein-unter" title="${esc(verein)}">${willLogo ? vereinsLogo(verein) : ""}<span class="verein-name">${esc(verein)}</span></span>`
+        : "";
+      return `<span class="spieler">${haupt}${unter}</span>`;
     }).join("");
   };
   return `<span class="paar">
@@ -3556,6 +3596,20 @@ function start() {
     setzeVorliebe("nummern", ev.currentTarget.checked));
   $("opt-nationen").addEventListener("change", (ev) =>
     setzeVorliebe("nationen", ev.currentTarget.checked));
+  $("opt-vereinsnamen").addEventListener("change", (ev) =>
+    setzeVorliebe("vereinsnamen", ev.currentTarget.checked));
+  $("opt-vereinslogos").addEventListener("change", (ev) =>
+    setzeVorliebe("vereinslogos", ev.currentTarget.checked));
+  // Die beiden Vereins-Häkchen spiegeln den *wirksamen* Wert (zentrale Vorgabe
+  // oder lokale Überstimmung). Beim Öffnen des Menüs neu setzen, weil die
+  // zentrale Vorgabe erst mit dem ersten Zustand vom Server eintrifft.
+  const anzeigeMenu = document.querySelector("details.anzeige");
+  const syncVereinHaken = () => {
+    $("opt-vereinsnamen").checked = zeigeVereinsnamenAktiv();
+    $("opt-vereinslogos").checked = zeigeVereinslogosAktiv();
+  };
+  if (anzeigeMenu) anzeigeMenu.addEventListener("toggle", syncVereinHaken);
+  syncVereinHaken();
   $("opt-disziplin").checked = zeigeDisziplin;
   $("opt-runde").checked = zeigeRunde;
   $("opt-gruppe").checked = zeigeGruppe;
