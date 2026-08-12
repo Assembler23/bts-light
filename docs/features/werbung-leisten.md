@@ -114,6 +114,19 @@ lokale DB. „Zeitplan" = Check-in-Anfangszeiten je Klasse (kein Match-Spielplan
    Speichern** (bzw. per Knopf) an einen **neuen badhub-Endpoint** hoch
    (Bearer, wie `live_update.php`). Ablage `public/assets/logos/
    sponsor_{uuid}_{n}.{ext}` (Datei = Wahrheit, wie der manuelle Logo-Upload).
+
+   ✅ **Sponsor-Push umgesetzt (v0.9.194):** Beim Umschalten des „Leiste"-Häkchens
+   (`set_court_ad_bar`) schiebt bts-light die markierten Bilder als roh-Base64
+   (max 4, alphabetisch, `checkin_sponsor_max()`-konform) an
+   **`POST /api/checkin-branding`** — Bearer = Liveticker-Passwort, Body
+   `{"sponsors":[…]}`, **keine GUID** (badhub löst das Turnier über das Passwort
+   auf). Additiv/feuer-und-vergiss: ohne badhub-Passwort passiert nichts, und
+   HTTP 404/400 bedeutet „badhub kennt den Endpunkt noch nicht" (nur Log). Die
+   URL wird aus `config.badhub.url` abgeleitet (letztes Pfadsegment ersetzt).
+   Code: `commands.rs collect_bar_sponsors_b64`/`push_bar_sponsors_to_badhub`,
+   `badhub/push.rs checkin_branding_url`/`push_checkin_branding`,
+   `badhub/payload.rs CheckinBrandingMessage`. **Noch offen:** Logo über denselben
+   Weg (statt Heartbeat-`tset`) übertragen + aus dem `tset` nehmen (Minimierung).
 2. badhub-Auslieferung: Endpunkt(e) analog `/checkin/{uuid}/logo`
    (Inhalts-Validierung, kein SVG, `nosniff`, Cache). nginx-Block „kein PHP in
    `public/assets/logos/`" muss vor Rollout stehen.

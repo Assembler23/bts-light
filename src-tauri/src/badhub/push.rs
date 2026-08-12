@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use crate::badhub::diff::Update;
-use crate::badhub::payload::CheckinRosterMessage;
+use crate::badhub::payload::{CheckinBrandingMessage, CheckinRosterMessage};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -93,6 +93,51 @@ pub async fn push_checkin_roster(
     }
 }
 
+/// Leitet die Branding-Endpunkt-URL aus der konfigurierten Liveticker-URL ab.
+///
+/// Der Sponsor-Endpunkt `POST /api/checkin-branding` ist — anders als die
+/// Meldeliste — **keine** per `kind` dispatchte `live_update.php`-Nachricht,
+/// sondern eine eigene badhub-Route direkt **neben** `live_update.php` (beide
+/// unter `/api/`). Wir ersetzen deshalb nur das letzte Pfadsegment der
+/// konfigurierten URL. So folgt der Push automatisch einer abweichenden
+/// Basis-URL (Test-Host), statt einen fest verdrahteten Host zu erzwingen.
+pub fn checkin_branding_url(live_url: &str) -> String {
+    match live_url.rfind('/') {
+        Some(i) => format!("{}/checkin-branding", &live_url[..i]),
+        None => "https://badhub.de/api/checkin-branding".to_string(),
+    }
+}
+
+/// Lädt die Sponsor-Bilder der Leiste an den badhub-Check-In (Phase 3).
+///
+/// Gleiche Bearer-Authentifizierung wie Liveticker/Meldeliste. Wie beim
+/// Roster-Push bedeuten **HTTP 404/400 „badhub kennt den Endpunkt noch
+/// nicht"** (bts-light kommt per Auto-Update, badhub deployt unabhängig) — der
+/// Aufrufer behandelt das additiv (nur Log, kein Nutzerfehler).
+pub async fn push_checkin_branding(
+    client: &reqwest::Client,
+    url: &str,
+    password: &str,
+    branding: &CheckinBrandingMessage,
+) -> Result<(), PushError> {
+    let body = serde_json::to_vec(branding)
+        .expect("checkin-branding-Serialisierung kann nicht fehlschlagen");
+
+    let response = client
+        .post(url)
+        .bearer_auth(password)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await?;
+
+    match response.status().as_u16() {
+        200 => Ok(()),
+        401 | 403 => Err(PushError::Unauthorized),
+        other => Err(PushError::Status(other)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +200,43 @@ mod tests {
         )
         .await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn branding_url_replaces_last_segment_of_live_url() {
+        // Der Sponsor-Endpunkt sitzt NEBEN live_update.php unter /api/.
+        assert_eq!(
+            checkin_branding_url("https://badhub.de/api/live_update.php"),
+            "https://badhub.de/api/checkin-branding"
+        );
+        // Abweichender Test-Host wird respektiert (kein fester Host).
+        assert_eq!(
+            checkin_branding_url("http://localhost:8080/api/live_update.php"),
+            "http://localhost:8080/api/checkin-branding"
+        );
+        // Entartete URL ohne „/" → sicherer Default.
+        assert_eq!(
+            checkin_branding_url("live_update.php"),
+            "https://badhub.de/api/checkin-branding"
+        );
+    }
+
+    #[tokio::test]
+    async fn branding_push_succeeds_on_http_200() {
+        let url = spawn_http_mock("200 OK").await;
+        let msg = CheckinBrandingMessage {
+            sponsors: vec!["QUJD".to_string()],
+        };
+        let result = push_checkin_branding(&build_client(), &url, "pw", &msg).await;
+        assert!(result.is_ok(), "erwartet Ok, war {result:?}");
+    }
+
+    #[tokio::test]
+    async fn branding_push_maps_404_to_status_for_additive_handling() {
+        // 404 = badhub kennt den Endpunkt noch nicht → der Aufrufer schluckt es.
+        let url = spawn_http_mock("404 Not Found").await;
+        let msg = CheckinBrandingMessage { sponsors: vec![] };
+        let result = push_checkin_branding(&build_client(), &url, "pw", &msg).await;
+        assert!(matches!(result, Err(PushError::Status(404))));
     }
 }

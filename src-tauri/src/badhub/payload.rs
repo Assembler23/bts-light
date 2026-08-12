@@ -290,6 +290,17 @@ pub struct CheckinRosterMessage {
     pub rid: u64,
 }
 
+/// Sponsor-Werbebilder der „Leiste" für den badhub-Check-In (Phase 3 der
+/// Sponsor-Leiste). `sponsors` sind roh-Base64-kodierte Rasterbilder
+/// (jpg/png/gif, max. 4); badhub legt sie als `sponsor_{uuid}_{n}.{ext}` ab.
+/// **Keine GUID im Body**: anders als die Meldeliste adressiert dieser
+/// Endpunkt das Turnier allein über das Bearer-Liveticker-Passwort (badhub
+/// löst darüber `tournament_key` → Check-In-UUID auf).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct CheckinBrandingMessage {
+    pub sponsors: Vec<String>,
+}
+
 /// Eine Spielklasse in der Meldeliste.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct RosterClass {
