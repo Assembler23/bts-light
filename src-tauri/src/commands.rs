@@ -214,10 +214,13 @@ pub fn save_config(
     config
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
-    // Hat sich das Turnierlogo geändert, es einmalig an den badhub-Check-In
-    // schieben (Phase 3 der Sponsor-Leiste) — statt es alle 60 s im Liveticker-
-    // `tset` mitzusenden. Vor dem Verschieben von `config` in den State prüfen.
-    let logo_changed = config.tournament_logo != current.tournament_logo;
+    // Haben sich die Logo-BILDDATEN geändert, sie einmalig an den badhub-Check-In
+    // schieben (Phase 3 der Sponsor-Leiste) — statt sie alle 60 s im Liveticker-
+    // `tset` mitzusenden. Nur `.data` vergleichen: `mime`/`background_color`
+    // reisen ohnehin nicht zum Endpunkt, eine reine Farb-Änderung soll die (bis
+    // 2 MB) Bilddaten nicht erneut über die Leitung schicken. Vor dem Verschieben
+    // von `config` in den State prüfen.
+    let logo_changed = config.tournament_logo.data != current.tournament_logo.data;
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
     if logo_changed {
         push_logo_to_badhub(&state);
