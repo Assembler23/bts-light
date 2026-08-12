@@ -8,6 +8,14 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
 ## Prio 1 — Lehren aus dem Zwei-Hallen-Turnier (17.07.2026)
 
+- **Turnier-Robustheit & Echtzeit-Latenz (Cluster)** *(Spec abgestimmt
+  2026-08-13)*: Übersicht [features/turnier-robustheit-cluster.md](features/turnier-robustheit-cluster.md).
+  Vier Hebel — **A** Echtzeit-Robustheit der Score-Strecke (niedrig-latente
+  Anzeige per Push + Reconnect-Wahrheit „Slot-Halter gewinnt";
+  [features/turnier-robustheit.md](features/turnier-robustheit.md), ADR 0016/0017),
+  **B** lokaler Ergebnis-Puffer (Cloud), **C** Last-/Soak-Test (36 Geräte),
+  **D** Tote-Verbindungs-Erkennung schärfen. Paket A ist spezifiziert und
+  freigabebereit; B–D bekommen eigene Specs.
 - **BTP-Ergebnis-Regression** *(Fix implementiert, wartet auf Release
   v0.9.145)*: Spiele wurden in BTP nicht automatisch beendet — `Status`
   fehlte seit v0.9.103 im Ergebnis-`SENDUPDATE`; zudem Ergebnis +
