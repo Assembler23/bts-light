@@ -52,6 +52,10 @@ const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
 /// Templating.
 const PREPARATION_HTML: &str = include_str!("../../src-tauri/assets/preparation.html");
 
+/// Die Vollbild-Werbe-Anzeige (Rotation) – dieselbe Datei wie im LAN. Leitet
+/// ihren Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/info/ad`.
+const AD_HTML: &str = include_str!("../../src-tauri/assets/ad.html");
+
 /// Gebündelte SVG-Länderflaggen (IOC-Code → `<code>.svg`), ausgeliefert
 /// unter `/{ns}/flags/{file}`.
 static FLAGS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../src-tauri/assets/flags");
@@ -415,6 +419,7 @@ async fn main() {
         .route("/{ns}/info/logo", get(tournament_logo))
         .route("/{ns}/info/preparation", get(preparation_page))
         .route("/{ns}/info/preparation/state", get(preparation_state))
+        .route("/{ns}/info/ad", get(ad_page))
         .route("/{ns}/pairing-code", post(pairing_code_create))
         .route("/pair/{code}", get(pairing_resolve))
         .route("/{ns}/slaves", get(slaves_list))
@@ -707,13 +712,16 @@ async fn monitor_device_state(
             build_monitor_state(namespace, court_id)
         }
         // Nur auf Ziele umleiten, die der Relay auch WIRKLICH ausliefert —
-        // heute allein „In Vorbereitung". Würden wir pauschal `redirect_path()`
-        // nehmen, landete ein Übersicht-/Werbe-/Sieger-/Kombi-Monitor im Cloud
-        // auf einer 404-Seite ohne JS und damit ohne Selbstheilung (schlimmer
-        // als die Kopplungs-Seite, die weiterpollt). Übersicht/Werbung folgen,
-        // sobald der Relay ihre Seiten serviert; bis dahin bleiben sie
-        // „unzugewiesen".
-        Some(t @ relay_proto::MonitorTarget::InfoPreparation) => {
+        // heute „In Vorbereitung" und „Werbung" (Rotation). Würden wir pauschal
+        // `redirect_path()` nehmen, landete ein Übersicht-/Sieger-/Kombi-Monitor
+        // (oder Werbe-Einzelbild, das dateinamenbasiert ist und der Relay per
+        // Index nicht auflöst) im Cloud auf einer 404-Seite ohne JS und damit
+        // ohne Selbstheilung (schlimmer als die Kopplungs-Seite, die
+        // weiterpollt). Übersicht folgt, sobald der Relay ihre Seite serviert.
+        Some(
+            t @ (relay_proto::MonitorTarget::InfoPreparation
+            | relay_proto::MonitorTarget::AdRotation),
+        ) => {
             let mut s = unassigned_state(&q.device);
             s.unassigned = false;
             s.redirect_to = t.redirect_path();
@@ -1202,10 +1210,14 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let (bar_ads, has_logo, interval_s) = {
+    let (ads, bar_ads, has_logo, interval_s) = {
         let map = broker.namespaces.lock().await;
         match map.get(&ns).and_then(|n| n.monitor.as_ref()) {
             Some(m) => {
+                // Cloud adressiert die Werbebilder per Index (`/{ns}/ads/0`);
+                // `ads` ist die volle Rotationsliste (für ad.html), `barAds`
+                // nur die als „in Leiste" markierten (für die Sponsor-Leiste).
+                let all: Vec<String> = (0..m.ads.len()).map(|i| i.to_string()).collect();
                 let bar: Vec<String> = m
                     .ads
                     .iter()
@@ -1213,20 +1225,31 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
                     .filter(|(_, a)| a.in_bar)
                     .map(|(i, _)| i.to_string())
                     .collect();
-                (bar, m.logo.is_some(), m.config.ad_interval_s.max(1))
+                (all, bar, m.logo.is_some(), m.config.ad_interval_s.max(1))
             }
-            None => (Vec::new(), false, 1),
+            None => (Vec::new(), Vec::new(), false, 1),
         }
     };
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::json!({
+            "ads": ads,
             "barAds": bar_ads,
             "hasLogo": has_logo,
             "intervalS": interval_s,
         })),
     )
         .into_response()
+}
+
+/// Die Vollbild-Werbe-Anzeige (Rotation) im Cloud-Modus (HTML). Dieselbe Datei
+/// wie im LAN; sie leitet ihren Basis-Pfad aus der eigenen URL ab, läuft also
+/// unter `/{ns}/info/ad`.
+async fn ad_page(Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Html(AD_HTML)).into_response()
 }
 
 /// Der „In Vorbereitung"-Info-Monitor im Cloud-Modus (HTML). Dieselbe Datei wie
@@ -3594,6 +3617,8 @@ mod tests {
         let bytes = axum::body::to_bytes(state.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["barAds"], serde_json::json!(["0"]));
+        // `ads` = volle Rotationsliste (beide Indizes), für ad.html im Cloud.
+        assert_eq!(json["ads"], serde_json::json!(["0", "1"]));
         assert_eq!(json["hasLogo"], serde_json::json!(true));
 
         // /{ns}/info/logo: liefert die Logo-Bytes.
@@ -3626,6 +3651,8 @@ mod tests {
             relay_proto::MonitorTarget::InfoPreparation,
         );
         targets.insert("pi-court".to_string(), relay_proto::MonitorTarget::court(5));
+        // Werbung (Rotation) wird ebenfalls serviert → leitet um.
+        targets.insert("pi-ad".to_string(), relay_proto::MonitorTarget::AdRotation);
         // Noch nicht vom Relay servierte Sicht: darf NICHT umleiten (sonst
         // 404-Sackgasse) → bleibt „unzugewiesen", pollt weiter, heilt sich.
         targets.insert(
@@ -3662,6 +3689,14 @@ mod tests {
         let prep = read_state("pi-prep").await;
         assert_eq!(prep["redirectTo"], serde_json::json!("/info/preparation"));
         assert_eq!(prep["unassigned"], serde_json::json!(false));
+
+        // Werbe-Rotation → Redirect auf die Werbe-Seite.
+        let ad = read_state("pi-ad").await;
+        assert_eq!(
+            ad["redirectTo"],
+            serde_json::json!("/info/ad?mode=rotation")
+        );
+        assert_eq!(ad["unassigned"], serde_json::json!(false));
 
         // Court-Ziel → kein Redirect, courtId gesetzt.
         let court = read_state("pi-court").await;
