@@ -706,18 +706,20 @@ async fn monitor_device_state(
         Some(relay_proto::MonitorTarget::Court { court_id }) => {
             build_monitor_state(namespace, court_id)
         }
-        // Nicht-Court → Umleitung auf die passende Info-/Werbe-Seite, genau wie
-        // der LAN-Server. monitor.html folgt `redirectTo`.
-        Some(t) => match t.redirect_path() {
-            Some(path) => {
-                let mut s = unassigned_state(&q.device);
-                s.unassigned = false;
-                s.redirect_to = Some(path);
-                s
-            }
-            None => unassigned_state(&q.device),
-        },
-        None => unassigned_state(&q.device),
+        // Nur auf Ziele umleiten, die der Relay auch WIRKLICH ausliefert —
+        // heute allein „In Vorbereitung". Würden wir pauschal `redirect_path()`
+        // nehmen, landete ein Übersicht-/Werbe-/Sieger-/Kombi-Monitor im Cloud
+        // auf einer 404-Seite ohne JS und damit ohne Selbstheilung (schlimmer
+        // als die Kopplungs-Seite, die weiterpollt). Übersicht/Werbung folgen,
+        // sobald der Relay ihre Seiten serviert; bis dahin bleiben sie
+        // „unzugewiesen".
+        Some(t @ relay_proto::MonitorTarget::InfoPreparation) => {
+            let mut s = unassigned_state(&q.device);
+            s.unassigned = false;
+            s.redirect_to = t.redirect_path();
+            s
+        }
+        Some(_) | None => unassigned_state(&q.device),
     };
     state.command = command;
     state.device_code = device_code(&q.device);
@@ -3624,6 +3626,12 @@ mod tests {
             relay_proto::MonitorTarget::InfoPreparation,
         );
         targets.insert("pi-court".to_string(), relay_proto::MonitorTarget::court(5));
+        // Noch nicht vom Relay servierte Sicht: darf NICHT umleiten (sonst
+        // 404-Sackgasse) → bleibt „unzugewiesen", pollt weiter, heilt sich.
+        targets.insert(
+            "pi-overview".to_string(),
+            relay_proto::MonitorTarget::InfoOverview { hall: None },
+        );
         let control = relay_proto::MonitorControl {
             assignments: std::collections::HashMap::new(),
             targets,
@@ -3659,6 +3667,12 @@ mod tests {
         let court = read_state("pi-court").await;
         assert_eq!(court["courtId"], serde_json::json!(5));
         assert!(court["redirectTo"].is_null());
+
+        // Noch nicht serviertes Ziel (Übersicht) → KEIN Redirect, unassigned
+        // (Selbstheilung), statt 404-Sackgasse.
+        let ov = read_state("pi-overview").await;
+        assert!(ov["redirectTo"].is_null());
+        assert_eq!(ov["unassigned"], serde_json::json!(true));
     }
 
     #[tokio::test]

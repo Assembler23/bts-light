@@ -11,12 +11,13 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Nicht-Court-Sicht zu, blieb er auf dem bts-light-Logo hängen — der Relay
   transportierte nur die Feld-Zuweisung (CourtID) und verwarf alle anderen
   Ziele; die Info-Seiten waren zudem LAN-gebaut (absolute Pfade). Neu: das
-  **vollständige Ziel** reist zum Relay (`MonitorControl.targets`), der Relay
-  leitet den Monitor auf die passende Seite um, und die Seiten lösen ihren
-  Basis-Pfad selbst auf (LAN wie Cloud). **„In Vorbereitung"** liefert der
-  Relay jetzt komplett aus (Seite + Daten). **Werbung** und **Court-Übersicht**
-  folgen als nächste Schritte; **Siegerehrung** bleibt vorerst LAN-only (dem
-  Relay fehlen die Ergebnisdaten). Details:
+  **vollständige Ziel** reist zum Relay (`MonitorControl.targets`), und die
+  Seiten lösen ihren Basis-Pfad selbst auf (LAN wie Cloud). **„In Vorbereitung"**
+  liefert der Relay jetzt komplett aus (Seite + Daten) und leitet dorthin um.
+  **Werbung**, **Court-Übersicht** und **Siegerehrung** zeigen im Cloud vorerst
+  weiter die Kopplungs-Seite (**nicht** 404) — der Relay leitet bewusst nur auf
+  Sichten um, die er auch ausliefert. Werbung/Übersicht folgen; Siegerehrung
+  bleibt LAN-only (dem Relay fehlen die Ergebnisdaten). Details:
   [features/cloud-info-monitor.md](features/cloud-info-monitor.md).
 
 ## v0.9.190
