@@ -214,7 +214,14 @@ pub fn save_config(
     config
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
+    // Hat sich das Turnierlogo geändert, es einmalig an den badhub-Check-In
+    // schieben (Phase 3 der Sponsor-Leiste) — statt es alle 60 s im Liveticker-
+    // `tset` mitzusenden. Vor dem Verschieben von `config` in den State prüfen.
+    let logo_changed = config.tournament_logo != current.tournament_logo;
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
+    if logo_changed {
+        push_logo_to_badhub(&state);
+    }
     Ok(())
 }
 
@@ -2859,11 +2866,36 @@ fn collect_bar_sponsors_b64(ad_dir: &std::path::Path, bar_path: &std::path::Path
         .collect()
 }
 
-/// Schiebt die aktuellen Leisten-Sponsoren an den badhub-Check-In (Phase 3 der
-/// Sponsor-Leiste). **Additiv und feuer-und-vergiss**: ohne konfiguriertes
-/// Badhub-Passwort passiert nichts; Fehler (inkl. „badhub kennt den Endpunkt
-/// noch nicht" = 404/400) werden nur geloggt und stören das Speichern nicht.
-/// Läuft asynchron, damit das synchrone Command sofort zurückkehrt.
+/// Feuer-und-vergiss-Push einer Branding-Nachricht (Sponsoren und/oder Logo) an
+/// den badhub-Check-In (Phase 3 der Sponsor-Leiste). `label` erscheint nur im
+/// Log. **Additiv**: Fehler (inkl. „badhub kennt den Endpunkt noch nicht" =
+/// 404/400) werden nur geloggt und stören das Speichern nicht. Läuft
+/// asynchron, damit das synchrone Command sofort zurückkehrt. Der Aufrufer hat
+/// bereits geprüft, dass ein Badhub-Passwort gesetzt ist.
+fn spawn_branding_push(
+    live_url: String,
+    password: String,
+    msg: crate::badhub::payload::CheckinBrandingMessage,
+    label: &'static str,
+) {
+    let url = crate::badhub::push::checkin_branding_url(&live_url);
+    tauri::async_runtime::spawn(async move {
+        let client = crate::badhub::push::build_client();
+        match crate::badhub::push::push_checkin_branding(&client, &url, &password, &msg).await {
+            Ok(()) => tracing::debug!("{label} an badhub-Check-In gesendet"),
+            // badhub kennt den Endpunkt noch nicht (ältere Version) — kein Fehler.
+            Err(crate::badhub::push::PushError::Status(404))
+            | Err(crate::badhub::push::PushError::Status(400)) => tracing::info!(
+                "badhub kennt den Check-In-Branding-Endpunkt noch nicht — {label} nicht gesendet"
+            ),
+            Err(e) => tracing::warn!("{label} konnte nicht an badhub gesendet werden: {e}"),
+        }
+    });
+}
+
+/// Schiebt die aktuellen Leisten-Sponsoren an den badhub-Check-In. Ohne
+/// konfiguriertes Badhub-Passwort passiert nichts. Sendet **nur** das
+/// `sponsors`-Feld — das Logo bleibt badhub-seitig unberührt.
 fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
     let (live_url, password) = {
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
@@ -2874,25 +2906,43 @@ fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
         return;
     }
     let sponsors = collect_bar_sponsors_b64(&monitor_ad_dir(app), &monitor_ad_bar_path(app));
-    let anzahl = sponsors.len();
-    let url = crate::badhub::push::checkin_branding_url(&live_url);
-    tauri::async_runtime::spawn(async move {
-        let client = crate::badhub::push::build_client();
-        let msg = crate::badhub::payload::CheckinBrandingMessage { sponsors };
-        match crate::badhub::push::push_checkin_branding(&client, &url, &password, &msg).await {
-            Ok(()) => tracing::debug!(anzahl, "Leisten-Sponsoren an badhub gesendet"),
-            // badhub kennt den Endpunkt noch nicht (ältere Version) — kein Fehler.
-            Err(crate::badhub::push::PushError::Status(404))
-            | Err(crate::badhub::push::PushError::Status(400)) => {
-                tracing::info!(
-                    "badhub kennt den Sponsor-Endpunkt noch nicht — Leiste nicht gesendet"
-                )
-            }
-            Err(e) => {
-                tracing::warn!("Leisten-Sponsoren konnten nicht an badhub gesendet werden: {e}")
-            }
-        }
-    });
+    spawn_branding_push(
+        live_url,
+        password,
+        crate::badhub::payload::CheckinBrandingMessage {
+            sponsors: Some(sponsors),
+            logo: None,
+        },
+        "Leisten-Sponsoren",
+    );
+}
+
+/// Schiebt das Turnierlogo an den badhub-Check-In (Phase 3): einmalig beim
+/// Speichern, wenn sich das Logo geändert hat — statt es alle 60 s im
+/// Liveticker-`tset` mitzuschicken. Sendet **nur** das `logo`-Feld (leerer
+/// String = badhub löscht das Logo); die Sponsoren bleiben unberührt. Ohne
+/// Badhub-Passwort ein No-op.
+fn push_logo_to_badhub(state: &State<'_, AppState>) {
+    let (live_url, password, logo) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (
+            cfg.badhub.url.clone(),
+            cfg.badhub.password.clone(),
+            cfg.tournament_logo.data.clone(),
+        )
+    };
+    if password.is_empty() {
+        return;
+    }
+    spawn_branding_push(
+        live_url,
+        password,
+        crate::badhub::payload::CheckinBrandingMessage {
+            sponsors: None,
+            logo: Some(logo),
+        },
+        "Turnierlogo",
+    );
 }
 
 /// Markiert ein Werbebild als „auch klein in der Leiste zeigen" (`in_bar=true`)

@@ -147,7 +147,7 @@ zusätzlich klein auf den badhub-Check-In-/Zeitplan-Seiten. Beim Umschalten des
 |---|---|
 | Endpunkt | `POST /api/checkin-branding` (abgeleitet aus `config.badhub.url`, letztes Pfadsegment ersetzt) |
 | Auth | Liveticker-Passwort als Bearer — **derselbe** Kanal, keine GUID im Body |
-| Body | `{"sponsors": ["<roh-Base64>", …]}` (jpg/png/gif, max 4, `checkin_sponsor_max()`-konform) |
+| Body | `{"sponsors": ["<roh-Base64>", …], "logo": "<roh-Base64>"}` — beide Felder optional |
 | Nachrichtentyp | `CheckinBrandingMessage` ([`badhub/payload.rs`](../src-tauri/src/badhub/payload.rs)) |
 
 Die Turnier-Zuordnung passiert **allein über das Bearer-Passwort** (badhub:
@@ -157,7 +157,17 @@ konfiguriertes badhub-Passwort passiert nichts; HTTP 404/400 bedeutet „badhub
 kennt den Endpunkt noch nicht" (ältere Version) und wird — wie beim
 Roster-Push — nur geloggt, nicht als Fehler gezeigt. Datenschutzlich
 unkritisch: übertragen werden nur die vom Operator selbst hochgeladenen
-Werbebilder, keine Personendaten.
+Werbebilder und das Turnierlogo, keine Personendaten.
+
+**Feld-unabhängig (seit v0.9.195):** Sponsoren (jpg/png/gif, max 4) und
+Turnierlogo (png/jpg/webp) reisen über **dieselbe** Nachricht, aber getrennt
+auslösbar: das „Leiste"-Häkchen sendet nur `sponsors`, das Speichern der
+Einstellungen nur das **geänderte** `logo`. Ein weggelassenes Feld lässt badhub
+den jeweils anderen Bestand unberührt; ein leeres `logo` löscht es. Damit reist
+das (bis 2 MB große) Logo **einmalig beim Speichern** statt wie bisher alle 60 s
+im Liveticker-`tset`. badhub legt es als `checkin_{uuid}.{ext}` ab und bevorzugt
+diese Datei vor dem tset-Snapshot; die tatsächliche Entfernung aus dem `tset`
+folgt in einem separaten Schritt nach dem badhub-Deploy.
 
 ## Einrichtung durch die Turnierleitung
 

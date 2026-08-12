@@ -225,7 +225,8 @@ mod tests {
     async fn branding_push_succeeds_on_http_200() {
         let url = spawn_http_mock("200 OK").await;
         let msg = CheckinBrandingMessage {
-            sponsors: vec!["QUJD".to_string()],
+            sponsors: Some(vec!["QUJD".to_string()]),
+            logo: None,
         };
         let result = push_checkin_branding(&build_client(), &url, "pw", &msg).await;
         assert!(result.is_ok(), "erwartet Ok, war {result:?}");
@@ -235,8 +236,39 @@ mod tests {
     async fn branding_push_maps_404_to_status_for_additive_handling() {
         // 404 = badhub kennt den Endpunkt noch nicht → der Aufrufer schluckt es.
         let url = spawn_http_mock("404 Not Found").await;
-        let msg = CheckinBrandingMessage { sponsors: vec![] };
+        let msg = CheckinBrandingMessage {
+            sponsors: Some(vec![]),
+            logo: None,
+        };
         let result = push_checkin_branding(&build_client(), &url, "pw", &msg).await;
         assert!(matches!(result, Err(PushError::Status(404))));
+    }
+
+    #[test]
+    fn branding_message_omits_none_fields() {
+        // Feld-unabhängig: ein `None`-Feld darf NICHT im JSON stehen, sonst
+        // würde badhub es als „ersetzen/löschen" deuten statt „unberührt lassen".
+        let sponsors_only = CheckinBrandingMessage {
+            sponsors: Some(vec!["QUJD".to_string()]),
+            logo: None,
+        };
+        let j = serde_json::to_string(&sponsors_only).unwrap();
+        assert!(j.contains("sponsors"), "sponsors da: {j}");
+        assert!(!j.contains("logo"), "logo NICHT da: {j}");
+
+        let logo_only = CheckinBrandingMessage {
+            sponsors: None,
+            logo: Some("QUJD".to_string()),
+        };
+        let j = serde_json::to_string(&logo_only).unwrap();
+        assert!(j.contains("logo"), "logo da: {j}");
+        assert!(!j.contains("sponsors"), "sponsors NICHT da: {j}");
+
+        // Leeres Logo (löschen) wird als "" gesendet — present, nicht weggelassen.
+        let clear = CheckinBrandingMessage {
+            sponsors: None,
+            logo: Some(String::new()),
+        };
+        assert_eq!(serde_json::to_string(&clear).unwrap(), r#"{"logo":""}"#);
     }
 }
