@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.186
+
+- **Check-In-Hauptfeld-Filter wirkt jetzt wirklich.** Der Filter aus
+  v0.9.185 las die falsche Stelle (`Entry.StageID`, in echten Turnieren
+  leer) und ließ deshalb an echten Daten alle Reservisten und
+  Ausgeschlossenen auf der Liste. Er liest die Zuordnung jetzt aus dem
+  `StageEntries`-Container von BTP — am laufenden Turnier bestätigt
+  (z. B. HE-C: 31 → 26, die 1 Reserve und 4 Ausschließen fliegen raus).
+  **Wer v0.9.185 nutzt, sollte auf diese Version aktualisieren** —
+  vorher greift der Filter je nach Turnier gar nicht.
+- **Court-Monitor: größere Schrift, mehr Fläche.** Namen (Einzel und
+  Doppel) und Satzstand deutlich größer, die Ränder knapper — aus
+  Hallendistanz auf großen TVs besser lesbar.
+
 ## v0.9.185
 
 - **Check-In-Liste zeigt nur noch Hauptfeld-Meldungen.** Reservisten,
