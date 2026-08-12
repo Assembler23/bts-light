@@ -143,8 +143,9 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Anzeige (fest)         | `/court/{label}/display`       | `/{ns}/court/{label}/display`  |
 | Status (fest)          | `/court/{label}/state`         | `/{ns}/court/{label}/state`    |
 | **Court-Übersicht**    | `/info/overview`               | (LAN-only erstmal)             |
-| **In Vorbereitung**    | `/info/preparation`            | (LAN-only erstmal)             |
-| Vorbereitungs-Daten    | `/info/preparation/state`      | (LAN-only erstmal)             |
+| **In Vorbereitung**    | `/info/preparation`            | `/{ns}/info/preparation`       |
+| Vorbereitungs-Daten    | `/info/preparation/state`      | `/{ns}/info/preparation/state` |
+| **Werbung (Rotation)** | `/info/ad`                     | `/{ns}/info/ad`                |
 | Flaggen                | `/flags/{code}.svg`            | `/{ns}/flags/{code}.svg`       |
 | Flaggen (TL-Seite)     | `/flags/{code}.svg`            | `/flags/{code}.svg` (ns-los)   |
 | Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |

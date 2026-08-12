@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.192
+
+- **Cloud-Monitore: „Werbung" (Rotation) funktioniert jetzt.** Nach „In
+  Vorbereitung" (v0.9.191) liefert der Relay nun auch die **Werbe-Rotation**
+  im Cloud aus: `ad.html` ist BASE-fähig, der Relay serviert `/{ns}/info/ad`
+  und die volle Bilderliste über `/{ns}/info/ad/state` (Indizes). Weist man
+  einem Cloud-Monitor „Werbung" zu, rotiert er die hinterlegten Werbebilder.
+  (Werbe-**Einzelbild** ist dateinamenbasiert und bleibt LAN-only; **Court-
+  Übersicht** folgt, **Siegerehrung** bleibt LAN-only.)
+
 ## v0.9.191
 
 - **Cloud-Monitore: „In Vorbereitung" funktioniert jetzt (+ Fundament für die

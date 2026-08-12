@@ -41,9 +41,10 @@ LAN-only; im Cloud fällt sie sauber auf „unassigned" zurück, kein 404).
 
 - **Vorbereitung**: Relay serviert `/{ns}/info/preparation` (HTML) +
   `/{ns}/info/preparation/state` (aus `prepared`, gleiche JSON-Form wie LAN).
-- **Werbung**: Relay serviert `/{ns}/info/ad` (HTML); `/{ns}/info/ad/state`
-  um das volle `ads`-Array (Indizes) erweitern (rotation), zusätzlich zu
-  `barAds`/`hasLogo`.
+- **Werbung** ✅ (v0.9.192): Relay serviert `/{ns}/info/ad` (HTML) und
+  `/{ns}/info/ad/state` mit vollem `ads`-Array (Indizes, Rotation) zusätzlich
+  zu `barAds`/`hasLogo`. Redirect-Gate um `AdRotation` erweitert. Werbe-
+  Einzelbild (`AdSingle`, dateinamenbasiert) bleibt LAN-only.
 - **Übersicht**: Relay serviert `/{ns}/info/overview` (HTML) +
   `/{ns}/info/overview/state` (aus `courts`+`court_matches`+`court_scores`).
   `overview.html` von `/health` auf diesen dedizierten State umstellen (LAN
