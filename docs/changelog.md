@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.190
+
+- **Sponsor-Leiste (Phase 2): auch im Cloud-Modus.** Die kleine Werbung neben
+  dem Turnierlogo erscheint jetzt auch auf **Cloud-Monitoren** (im laufenden
+  Spiel) und **Cloud-Tablets** (breite Geräte). Der bts-light-Host schickt die
+  Leisten-Markierungen und das Turnierlogo mit dem (änderungs-gegateten)
+  Monitor-Upload zum Relay; das Relay liefert sie über `/{ns}/info/logo` und
+  `/{ns}/info/ad/state` aus. Feldübersicht/Vorbereitung bleiben vorerst
+  LAN-only (Cloud-Info-Anzeigen sind noch nicht ausgebaut). Die badhub-Seiten
+  (Check-in/Zeitplan) folgen in Phase 3.
+
 ## v0.9.189
 
 - **Sponsor-Leiste (Phase 1): kleine Werbung neben dem Turnierlogo.** Jedes

@@ -98,6 +98,10 @@ type Tx = mpsc::UnboundedSender<Message>;
 struct AdImage {
     content_type: String,
     bytes: Vec<u8>,
+    /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste erscheinen
+    /// soll (Sponsor-Leiste). Bestimmt, welche Indizes `/{ns}/info/ad/state`
+    /// als `barAds` ausweist.
+    in_bar: bool,
 }
 
 /// Court-Monitor-Datensatz eines Namespace: Anzeige-Konfiguration und
@@ -108,6 +112,9 @@ struct MonitorBundle {
     ads: Vec<AdImage>,
     /// Aufruf-Timer-Schwellen (vom Host hochgeladen) für die Monitor-Anzeige.
     call_timer: relay_proto::CallTimerView,
+    /// Turnierlogo für die Sponsor-Leiste (Content-Type + Rohbytes), falls der
+    /// Host eins hochgeladen hat. `None` = kein Logo.
+    logo: Option<AdImage>,
 }
 
 /// Ein Namespace: ein bts-light-Host und seine Tablets.
@@ -393,6 +400,8 @@ async fn main() {
         .route("/{ns}/monitor/control", post(monitor_control_upload))
         .route("/{ns}/monitor-devices", get(monitor_devices_list))
         .route("/{ns}/info/announce/state", get(announce_state))
+        .route("/{ns}/info/ad/state", get(ad_bar_state))
+        .route("/{ns}/info/logo", get(tournament_logo))
         .route("/{ns}/pairing-code", post(pairing_code_create))
         .route("/pair/{code}", get(pairing_resolve))
         .route("/{ns}/slaves", get(slaves_list))
@@ -1110,6 +1119,79 @@ async fn ad_image(
     }
 }
 
+/// Liefert das hochgeladene **Turnierlogo** eines Namespace (Sponsor-Leiste im
+/// Cloud-Modus). Kein Logo → 404, damit die Seite per `onerror` sauber
+/// degradiert. Gegenstück zum LAN-`/info/logo`; die Cloud-Anzeigeseiten rufen
+/// beide über denselben relativen Pfad ab.
+async fn tournament_logo(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let logo = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns)
+            .and_then(|n| n.monitor.as_ref())
+            .and_then(|m| m.logo.as_ref())
+            .map(|l| (l.content_type.clone(), l.bytes.clone()))
+    };
+    match logo {
+        Some((content_type, bytes)) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=300".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => (
+            [(header::CACHE_CONTROL, "public, max-age=60".to_string())],
+            StatusCode::NOT_FOUND,
+        )
+            .into_response(),
+    }
+}
+
+/// Zustand für die Sponsor-Leiste der Cloud-Anzeigeseiten: welche Werbebild-
+/// **Indizes** in die Leiste gehören (`barAds`) und ob ein Logo vorliegt
+/// (`hasLogo`). Gegenstück zum LAN-`/info/ad/state` (dort Dateinamen, hier
+/// Indizes – genau wie `MonitorState.ads`). `intervalS` für die Vollständigkeit.
+async fn ad_bar_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let (bar_ads, has_logo, interval_s) = {
+        let map = broker.namespaces.lock().await;
+        match map.get(&ns).and_then(|n| n.monitor.as_ref()) {
+            Some(m) => {
+                let bar: Vec<String> = m
+                    .ads
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| a.in_bar)
+                    .map(|(i, _)| i.to_string())
+                    .collect();
+                (bar, m.logo.is_some(), m.config.ad_interval_s.max(1))
+            }
+            None => (Vec::new(), false, 1),
+        }
+    };
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({
+            "barAds": bar_ads,
+            "hasLogo": has_logo,
+            "intervalS": interval_s,
+        })),
+    )
+        .into_response()
+}
+
 /// Nimmt den Court-Monitor-Datensatz (Konfiguration + Werbebilder) vom
 /// bts-light-Host entgegen. Nur erlaubt, solange der Host verbunden ist –
 /// das verhindert das Anlegen von Namespaces ohne Host.
@@ -1139,8 +1221,24 @@ async fn monitor_upload(
         ads.push(AdImage {
             content_type: sanitize_content_type(&ad.content_type),
             bytes,
+            in_bar: ad.in_bar,
         });
     }
+    // Turnierlogo (falls mitgeschickt) – dieselbe Größen-/MIME-Absicherung wie
+    // bei den Ads; ein kaputtes Base64 verwirft nur das Logo, nicht den Upload.
+    let logo = upload.logo.and_then(|l| {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(l.data.as_bytes())
+            .ok()?;
+        if bytes.is_empty() || bytes.len() > MAX_ADS_TOTAL {
+            return None;
+        }
+        Some(AdImage {
+            content_type: sanitize_content_type(&l.content_type),
+            bytes,
+            in_bar: false,
+        })
+    });
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
@@ -1150,6 +1248,7 @@ async fn monitor_upload(
         tournament_name: upload.tournament_name,
         ads,
         call_timer: upload.call_timer,
+        logo,
     });
     tracing::info!("Namespace '{ns}': Court-Monitor-Datensatz aktualisiert");
     (StatusCode::OK, "ok")

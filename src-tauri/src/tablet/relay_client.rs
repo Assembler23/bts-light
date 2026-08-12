@@ -178,6 +178,14 @@ fn monitor_fingerprint(ctx: &ServerCtx) -> String {
     // muss der Upload neu feuern, damit der Relay sie kennt.
     let app = ctx.app_config();
     let mut s = format!("{:?}|{:?}", app.court_monitor, app.call_timer);
+    // Turnierlogo: Länge des Base64 + MIME reicht als Wechsel-Indikator (ein
+    // neues Logo ändert beides), ohne die ganzen Daten in den Abdruck zu ziehen.
+    s.push_str(&format!(
+        "|logo:{}:{}",
+        app.tournament_logo.data.len(),
+        app.tournament_logo.mime
+    ));
+    let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
     for name in monitor::list_ads(&ctx.monitor_dir) {
         let (len, mtime) = std::fs::metadata(ctx.monitor_dir.join(&name))
             .map(|m| {
@@ -190,7 +198,10 @@ fn monitor_fingerprint(ctx: &ServerCtx) -> String {
                 (m.len(), mt)
             })
             .unwrap_or((0, 0));
-        s.push_str(&format!("|{name}:{len}:{mtime}"));
+        // Bar-Markierung in den Abdruck: ein Umschalten „in Leiste" muss den
+        // Upload neu auslösen, sonst zeigt der Cloud-Monitor die alte Auswahl.
+        let in_bar = bar.contains(&name);
+        s.push_str(&format!("|{name}:{len}:{mtime}:{in_bar}"));
     }
     s
 }
@@ -198,6 +209,7 @@ fn monitor_fingerprint(ctx: &ServerCtx) -> String {
 /// Baut den Court-Monitor-Datensatz und POSTet ihn zum Relay.
 async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String> {
     let cfg = ctx.monitor_config();
+    let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
     let mut ads = Vec::new();
     let mut total = 0usize;
     for name in monitor::list_ads(&ctx.monitor_dir)
@@ -214,9 +226,25 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
         ads.push(AdUpload {
             content_type: monitor::image_mime(&name).to_string(),
             data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            in_bar: bar.contains(&name),
         });
     }
-    let ct = ctx.app_config().call_timer;
+    let app = ctx.app_config();
+    let ct = &app.call_timer;
+    // Turnierlogo für die Sponsor-Leiste mitschicken (nur wenn gesetzt). Die
+    // Config hält es bereits Base64 – kein erneutes Kodieren nötig.
+    let logo = if app.tournament_logo.data.is_empty() {
+        None
+    } else {
+        Some(relay_proto::LogoUpload {
+            content_type: if app.tournament_logo.mime.is_empty() {
+                "image/png".to_string()
+            } else {
+                app.tournament_logo.mime.clone()
+            },
+            data: app.tournament_logo.data.clone(),
+        })
+    };
     let upload = MonitorUpload {
         config: monitor::to_monitor_config(&cfg),
         tournament_name: ctx.tablet.tournament_name(),
@@ -226,6 +254,7 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
             second_call_minutes: ct.second_call_minutes,
             third_call_minutes: ct.third_call_minutes,
         },
+        logo,
     };
     let url = format!("{RELAY_HTTP}/{install_id}/monitor");
     let resp = ctx

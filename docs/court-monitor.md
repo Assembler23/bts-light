@@ -148,8 +148,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Flaggen                | `/flags/{code}.svg`            | `/{ns}/flags/{code}.svg`       |
 | Flaggen (TL-Seite)     | `/flags/{code}.svg`            | `/flags/{code}.svg` (ns-los)   |
 | Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |
-| Werbe-/Leisten-Zustand | `/info/ad/state`               | (LAN-only erstmal)             |
-| **Turnierlogo**        | `/info/logo`                   | (LAN-only erstmal)             |
+| Werbe-/Leisten-Zustand | `/info/ad/state`               | `/{ns}/info/ad/state`          |
+| **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
 | Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |
