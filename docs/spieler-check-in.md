@@ -135,6 +135,30 @@ Meldeliste wäre dann veraltet, ohne dass es jemand merkt.
 Anders als beim `tset` gibt es **keinen Heartbeat** — die Meldeliste sind
 Stammdaten, badhub hält sie dauerhaft.
 
+### Sponsor-Werbebilder der Check-In-Seite (seit v0.9.194)
+
+Die als „Leiste" markierten Court-Werbebilder (Feature *Sponsor-Leiste*,
+Spec [`features/werbung-leisten.md`](features/werbung-leisten.md)) erscheinen
+zusätzlich klein auf den badhub-Check-In-/Zeitplan-Seiten. Beim Umschalten des
+„Leiste"-Häkchens sendet bts-light sie an einen **eigenen** badhub-Endpunkt
+(nicht `centry_list`):
+
+| Feld | Wert |
+|---|---|
+| Endpunkt | `POST /api/checkin-branding` (abgeleitet aus `config.badhub.url`, letztes Pfadsegment ersetzt) |
+| Auth | Liveticker-Passwort als Bearer — **derselbe** Kanal, keine GUID im Body |
+| Body | `{"sponsors": ["<roh-Base64>", …]}` (jpg/png/gif, max 4, `checkin_sponsor_max()`-konform) |
+| Nachrichtentyp | `CheckinBrandingMessage` ([`badhub/payload.rs`](../src-tauri/src/badhub/payload.rs)) |
+
+Die Turnier-Zuordnung passiert **allein über das Bearer-Passwort** (badhub:
+`liveUpdateAuth` → `tournament_key` → Check-In-UUID) — anders als `centry_list`
+trägt der Body keine GUID. **Additiv und feuer-und-vergiss**: ohne
+konfiguriertes badhub-Passwort passiert nichts; HTTP 404/400 bedeutet „badhub
+kennt den Endpunkt noch nicht" (ältere Version) und wird — wie beim
+Roster-Push — nur geloggt, nicht als Fehler gezeigt. Datenschutzlich
+unkritisch: übertragen werden nur die vom Operator selbst hochgeladenen
+Werbebilder, keine Personendaten.
+
 ## Einrichtung durch die Turnierleitung
 
 Im Einrichtungs-Assistenten, Abschnitt **Hallen-Check-In**:

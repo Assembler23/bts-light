@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.194
+
+- **Sponsor-Werbebilder erscheinen auf den badhub-Check-In-Seiten.** Markiert
+  man ein Werbebild mit dem Haken „Leiste", schiebt bts-light es jetzt auch an
+  den Hallen-Check-In auf badhub (`POST /api/checkin-branding`, Bearer =
+  Liveticker-Passwort — kein zweiter Zugang). So steht der Sponsor nicht nur in
+  den Hallen-Anzeigen, sondern auch auf der Check-In-/Zeitplan-Seite der Spieler.
+  Übertragen werden bis zu 4 Bilder als Base64, **nur beim Umschalten des
+  Häkchens** (kein Heartbeat). Rein additiv: ohne badhub-Passwort passiert
+  nichts, und solange badhub den Endpunkt noch nicht kennt, wird still nichts
+  gesendet (kein Fehler). *Hinweis: sichtbar wird das erst, sobald die
+  zugehörige badhub-Version ausgerollt ist.*
+
 ## v0.9.193
 
 - **Cloud-Monitore: „Court-Übersicht" funktioniert jetzt.** Als letzter Schritt

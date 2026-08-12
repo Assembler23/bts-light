@@ -2838,11 +2838,75 @@ pub fn list_court_ads(app: AppHandle) -> Vec<CourtAd> {
         .collect()
 }
 
+/// Obergrenze der an den badhub-Check-In gesendeten Leisten-Sponsoren.
+/// Spiegelt badhubs `checkin_sponsor_max()` (4) — mehr legt badhub ohnehin
+/// nicht ab.
+const MAX_BRANDING_SPONSORS: usize = 4;
+
+/// Sammelt die als „Leiste" markierten Werbebilder als roh-Base64-Strings
+/// (alphabetisch, auf [`MAX_BRANDING_SPONSORS`] gedeckelt). Genau die Form, die
+/// der badhub-Endpunkt erwartet (`{"sponsors":[…]}`). Unlesbare Dateien fallen
+/// still weg.
+fn collect_bar_sponsors_b64(ad_dir: &std::path::Path, bar_path: &std::path::Path) -> Vec<String> {
+    use base64::Engine;
+    let bar = crate::tablet::monitor::read_ad_bar(bar_path);
+    crate::tablet::monitor::list_ads(ad_dir)
+        .into_iter()
+        .filter(|name| bar.contains(name))
+        .take(MAX_BRANDING_SPONSORS)
+        .filter_map(|name| std::fs::read(ad_dir.join(&name)).ok())
+        .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes))
+        .collect()
+}
+
+/// Schiebt die aktuellen Leisten-Sponsoren an den badhub-Check-In (Phase 3 der
+/// Sponsor-Leiste). **Additiv und feuer-und-vergiss**: ohne konfiguriertes
+/// Badhub-Passwort passiert nichts; Fehler (inkl. „badhub kennt den Endpunkt
+/// noch nicht" = 404/400) werden nur geloggt und stören das Speichern nicht.
+/// Läuft asynchron, damit das synchrone Command sofort zurückkehrt.
+fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
+    let (live_url, password) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (cfg.badhub.url.clone(), cfg.badhub.password.clone())
+    };
+    // Kein Liveticker konfiguriert → kein Turnier, an das wir senden könnten.
+    if password.is_empty() {
+        return;
+    }
+    let sponsors = collect_bar_sponsors_b64(&monitor_ad_dir(app), &monitor_ad_bar_path(app));
+    let anzahl = sponsors.len();
+    let url = crate::badhub::push::checkin_branding_url(&live_url);
+    tauri::async_runtime::spawn(async move {
+        let client = crate::badhub::push::build_client();
+        let msg = crate::badhub::payload::CheckinBrandingMessage { sponsors };
+        match crate::badhub::push::push_checkin_branding(&client, &url, &password, &msg).await {
+            Ok(()) => tracing::debug!(anzahl, "Leisten-Sponsoren an badhub gesendet"),
+            // badhub kennt den Endpunkt noch nicht (ältere Version) — kein Fehler.
+            Err(crate::badhub::push::PushError::Status(404))
+            | Err(crate::badhub::push::PushError::Status(400)) => {
+                tracing::info!(
+                    "badhub kennt den Sponsor-Endpunkt noch nicht — Leiste nicht gesendet"
+                )
+            }
+            Err(e) => {
+                tracing::warn!("Leisten-Sponsoren konnten nicht an badhub gesendet werden: {e}")
+            }
+        }
+    });
+}
+
 /// Markiert ein Werbebild als „auch klein in der Leiste zeigen" (`in_bar=true`)
 /// oder entfernt die Markierung. Die Leiste (neben dem Turnierlogo) zeigt genau
-/// die markierten Bilder — in der Regel 1–2 Sponsoren.
+/// die markierten Bilder — in der Regel 1–2 Sponsoren. Nach dem Speichern
+/// werden die Sponsoren zusätzlich an den badhub-Check-In geschoben (Phase 3,
+/// additiv/feuer-und-vergiss).
 #[tauri::command]
-pub fn set_court_ad_bar(app: AppHandle, file: String, in_bar: bool) -> Result<(), String> {
+pub fn set_court_ad_bar(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file: String,
+    in_bar: bool,
+) -> Result<(), String> {
     if !crate::tablet::monitor::is_safe_image_name(&file) {
         return Err("Ungültiger Dateiname.".to_string());
     }
@@ -2854,7 +2918,9 @@ pub fn set_court_ad_bar(app: AppHandle, file: String, in_bar: bool) -> Result<()
         bar.remove(&file);
     }
     crate::tablet::monitor::write_ad_bar(&bar_path, &bar)
-        .map_err(|e| format!("Leisten-Markierung speichern fehlgeschlagen: {e}"))
+        .map_err(|e| format!("Leisten-Markierung speichern fehlgeschlagen: {e}"))?;
+    push_bar_sponsors_to_badhub(&app, &state);
+    Ok(())
 }
 
 /// Setzt oder löscht das Anzeige-Label eines Werbebilds. Ein leerer
@@ -3405,5 +3471,39 @@ mod tests {
         // Doppelpunkt im Netznamen bleibt erhalten (Split nur am ersten ':').
         let text = "    SSID                   : Halle:2 5G";
         assert_eq!(parse_netsh_ssid(text), Some("Halle:2 5G".to_string()));
+    }
+
+    #[test]
+    fn bar_sponsors_are_collected_marked_only_sorted_and_capped() {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        let ad_dir = dir.path();
+        // Fünf Bilder mit unterschiedlichem Inhalt; nur die markierten zählen.
+        for name in ["a.png", "b.png", "c.png", "d.png", "e.png"] {
+            std::fs::write(ad_dir.join(name), name.as_bytes()).unwrap();
+        }
+        // Ein Nicht-Bild wird von list_ads ohnehin gefiltert (Sicherheitsnetz).
+        std::fs::write(ad_dir.join("court-ad-bar.json"), b"[]").unwrap();
+        let bar_path = ad_dir.join("court-ad-bar.json");
+        // Markiere 5 (mehr als der Deckel) — erwartet: a..d (alphabetisch, 4).
+        let marked: std::collections::HashSet<String> =
+            ["e.png", "d.png", "c.png", "b.png", "a.png"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+        crate::tablet::monitor::write_ad_bar(&bar_path, &marked).unwrap();
+
+        let got = collect_bar_sponsors_b64(ad_dir, &bar_path);
+        assert_eq!(got.len(), MAX_BRANDING_SPONSORS, "auf 4 gedeckelt");
+        let expect: Vec<String> = ["a.png", "b.png", "c.png", "d.png"]
+            .iter()
+            .map(|n| base64::engine::general_purpose::STANDARD.encode(n.as_bytes()))
+            .collect();
+        assert_eq!(got, expect, "alphabetisch, roh-Base64 des Dateiinhalts");
+
+        // Ohne Markierungen → leer (nichts zu senden).
+        let empty: std::collections::HashSet<String> = std::collections::HashSet::new();
+        crate::tablet::monitor::write_ad_bar(&bar_path, &empty).unwrap();
+        assert!(collect_bar_sponsors_b64(ad_dir, &bar_path).is_empty());
     }
 }
