@@ -965,12 +965,16 @@ const API = location.pathname.replace(/\/+$/, "") + "/api";
 // Die Flaggen liegen neben der Seite (`/flags/GER.svg`), im Hallennetz wie
 // hinter dem Cloud-Präfix.
 const FLAGGEN_BASIS = location.pathname.replace(/\/tl\/?$/, "") + "/flags/";
-// Vereinslogos liegen wie die Flaggen relativ zur Seite — im Hallennetz am
-// Host-Wurzelpfad (`/info/club-logo`), im Cloud-Modus hinter dem Präfix
-// (`/bts-relay/info/club-logo`). Im Cloud-Modus liefert das Relay diesen Pfad
-// (noch) nicht aus; dann greift der `onerror`-Rückfall und es bleibt beim
-// Namen. Der turnierweite badhub-Logo-Resolver löst das später übergreifend.
-const LOGO_BASIS = location.pathname.replace(/\/tl\/?$/, "") + "/info/club-logo?name=";
+// Vereinslogos: im Hallennetz vom Turnier-PC (`/info/club-logo`) — der holt
+// das Bild aus dem badhub-Bestand und liefert es lokal aus, funktioniert also
+// auch ohne Internet am Anzeigegerät und matcht Vereinsnamen unscharf. Im
+// Cloud-Modus kennt das Relay diesen Pfad nicht; dort zeigt die Seite direkt
+// auf den öffentlichen badhub-Resolver (`/api/v1/club-logo`, exakter Name).
+// Fehlt ein Logo, greift in beiden Fällen der `onerror`-Rückfall (nur Name).
+const TL_PRAEFIX = location.pathname.replace(/\/tl\/?$/, "");
+const LOGO_BASIS = TL_PRAEFIX === ""
+  ? "/info/club-logo?name="
+  : "https://badhub.de/api/v1/club-logo?name=";
 
 const $ = (id) => document.getElementById(id);
 

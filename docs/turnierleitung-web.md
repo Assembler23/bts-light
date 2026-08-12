@@ -202,11 +202,14 @@ Tablet-Spielzettel gleichermaßen. Zwei getrennte Optionen:
   aus dem badhub-Bestand (dieselbe Quelle wie die Siegerliste). Zu einem
   Verein ohne hinterlegtes Logo bleibt es beim Namen.
 
-Im Hallennetz (LAN) laden die Logos direkt vom Turnier-PC. Im Cloud-Modus
-liefert das Relay den Logo-Pfad (noch) nicht aus — dort erscheint vorerst
-nur der Name; die Logos folgen mit dem geplanten, turnierweiten
-badhub-Logo-Resolver. Der **Verein** ist wie die Nationalität ein bewusst
-zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
+Im Hallennetz (LAN) holt der Turnier-PC die Logos (funktioniert ohne Internet
+am Anzeigegerät und matcht Vereinsnamen unscharf). Im Cloud-Modus lädt die
+Seite die Logos direkt über den öffentlichen badhub-Logo-Resolver
+(`/api/v1/club-logo`); dort zählt der **exakte** Vereinsname, ein Verein mit
+Zusatz wie „(Berlin)" wird also nur getroffen, wenn er in badhub genauso
+heißt. Fehlt ein Logo, bleibt es beim Namen. Der **Verein** ist wie die
+Nationalität ein bewusst zuschaltbares, standardmäßig ausgeschaltetes
+Anzeige-Feld (Datenschutz).
 
 ### Punktverlauf ansehen
 

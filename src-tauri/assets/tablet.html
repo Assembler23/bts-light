@@ -967,11 +967,15 @@ const SETTINGS_PIN = (function () {
 // So funktioniert dieselbe Datei für beide Verbindungsarten.
 const BASE_PATH = location.pathname.replace(/\/court\/[^/]*\/?$/, '');
 
-// Vereinslogo-Endpunkt, relativ zum Basis-Pfad (wie die übrigen Endpunkte).
-// LAN → "/info/club-logo" (Host), Cloud → "/bts-relay/<id>/info/club-logo".
-// Im Cloud-Modus liefert der Relay diesen Pfad (noch) nicht; dann greift der
-// onerror-Rückfall und es bleibt beim Vereinsnamen.
-const LOGO_BASE = BASE_PATH + '/info/club-logo?name=';
+// Vereinslogo-Endpunkt. LAN: vom Turnier-PC ("/info/club-logo") — der holt das
+// Bild aus dem badhub-Bestand und liefert es lokal aus (funktioniert ohne
+// Internet am Tablet, unscharfes Namensmatching). Cloud: der Relay kennt diesen
+// Pfad nicht, deshalb direkt der öffentliche badhub-Resolver ("/api/v1/club-
+// logo", exakter Name). Fehlt ein Logo, greift in beiden Fällen der onerror-
+// Rückfall (nur Name). BASE_PATH ist im LAN leer, im Cloud "/bts-relay/<id>".
+const LOGO_BASE = BASE_PATH === ''
+  ? '/info/club-logo?name='
+  : 'https://badhub.de/api/v1/club-logo?name=';
 
 // ─────────────────────────── Diagnose-Log ──────────────────────────────
 // Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,
