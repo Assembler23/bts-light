@@ -57,6 +57,12 @@ const MAX_ADS: usize = 24;
 /// Obergrenze der Gesamtgröße aller Werbebilder eines Namespace (12 MB).
 const MAX_ADS_TOTAL: usize = 12 * 1024 * 1024;
 
+/// Obergrenze fürs Turnierlogo (2 MB) – dasselbe Maß, das die bts-light-App
+/// beim Setzen des Logos erzwingt. Ein eigener, knapper Cap statt des vollen
+/// Ad-Budgets: das Logo ist naturgemäß klein und soll die Speicherobergrenze
+/// je Namespace nicht verdoppeln.
+const MAX_LOGO_BYTES: usize = 2 * 1024 * 1024;
+
 /// Body-Limit der Werbe-Upload-Route – Base64 bläht die Rohdaten ~+33 % auf.
 const MONITOR_UPLOAD_LIMIT: usize = 20 * 1024 * 1024;
 
@@ -1158,10 +1164,7 @@ async fn tournament_logo(
 /// **Indizes** in die Leiste gehören (`barAds`) und ob ein Logo vorliegt
 /// (`hasLogo`). Gegenstück zum LAN-`/info/ad/state` (dort Dateinamen, hier
 /// Indizes – genau wie `MonitorState.ads`). `intervalS` für die Vollständigkeit.
-async fn ad_bar_state(
-    State(broker): State<Broker>,
-    Path(ns): Path<String>,
-) -> impl IntoResponse {
+async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
@@ -1224,13 +1227,14 @@ async fn monitor_upload(
             in_bar: ad.in_bar,
         });
     }
-    // Turnierlogo (falls mitgeschickt) – dieselbe Größen-/MIME-Absicherung wie
-    // bei den Ads; ein kaputtes Base64 verwirft nur das Logo, nicht den Upload.
+    // Turnierlogo (falls mitgeschickt) – MIME wie bei den Ads gewhitelistet,
+    // Größe gegen den eigenen knappen `MAX_LOGO_BYTES`-Cap; ein kaputtes Base64
+    // oder ein zu großes Logo verwirft nur das Logo, nicht den Upload.
     let logo = upload.logo.and_then(|l| {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(l.data.as_bytes())
             .ok()?;
-        if bytes.is_empty() || bytes.len() > MAX_ADS_TOTAL {
+        if bytes.is_empty() || bytes.len() > MAX_LOGO_BYTES {
             return None;
         }
         Some(AdImage {
@@ -3452,6 +3456,68 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&body[..], br#"{"sets":[]}"#);
+    }
+
+    #[tokio::test]
+    async fn monitor_upload_exposes_bar_ads_and_logo() {
+        use base64::Engine;
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        const NS2: &str = "b1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, NS, &host).await;
+
+        let upload = relay_proto::MonitorUpload {
+            config: relay_proto::MonitorConfig::default(),
+            tournament_name: "Test-Cup".into(),
+            ads: vec![
+                // Index 0 in der Leiste, Index 1 nur Vollbild-Rotation.
+                relay_proto::AdUpload {
+                    content_type: "image/png".into(),
+                    data: b64(b"bar-bild"),
+                    in_bar: true,
+                },
+                relay_proto::AdUpload {
+                    content_type: "image/jpeg".into(),
+                    data: b64(b"voll-bild"),
+                    in_bar: false,
+                },
+            ],
+            call_timer: relay_proto::CallTimerView::default(),
+            logo: Some(relay_proto::LogoUpload {
+                content_type: "image/png".into(),
+                data: b64(b"logo-bytes"),
+            }),
+        };
+        let resp = monitor_upload(State(broker.clone()), Path(NS.into()), axum::Json(upload))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // /{ns}/info/ad/state: nur der in_bar-Index, hasLogo true.
+        let state = ad_bar_state(State(broker.clone()), Path(NS.into()))
+            .await
+            .into_response();
+        assert_eq!(state.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(state.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["barAds"], serde_json::json!(["0"]));
+        assert_eq!(json["hasLogo"], serde_json::json!(true));
+
+        // /{ns}/info/logo: liefert die Logo-Bytes.
+        let logo = tournament_logo(State(broker.clone()), Path(NS.into()))
+            .await
+            .into_response();
+        assert_eq!(logo.status(), StatusCode::OK);
+        let logo_bytes = axum::body::to_bytes(logo.into_body(), 4096).await.unwrap();
+        assert_eq!(&logo_bytes[..], b"logo-bytes");
+
+        // Unbekannter Namespace ohne Logo → 404 (sauberer onerror-Rückfall).
+        let miss = tournament_logo(State(broker.clone()), Path(NS2.into()))
+            .await
+            .into_response();
+        assert_eq!(miss.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
