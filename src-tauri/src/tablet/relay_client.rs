@@ -274,17 +274,18 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
 /// Feld-Zuweisungen + Fernbefehle (nur bei Änderung) und holt die
 /// aktuelle Geräteliste für die „Court-Monitore"-Seite.
 async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut String) {
-    // Cloud-Pfad transportiert weiterhin nur Feld-Zuweisungen (CourtID).
-    // Info-Monitor-Zuweisungen (`InfoOverview`/`InfoPreparation`) sind heute
-    // LAN-only — sie werden hier verworfen (Cloud-Pis bleiben dann
-    // unzugewiesen). TODO: Cloud-Wire-Protokoll für Info-Targets ausbauen.
-    let assignments: std::collections::HashMap<String, i64> =
-        monitor::read_assignments(&ctx.assignments_path)
-            .into_iter()
-            .filter_map(|(k, t)| t.court_id().map(|c| (k, c)))
-            .collect();
+    // Volle Anzeige-Ziele in `targets` (Court, Info-Übersicht/Vorbereitung/
+    // Sieger, Werbung, Kombi) — so kann der Cloud-Monitor auch Nicht-Court-
+    // Sichten umleiten. `assignments` (nur CourtID) bleibt zusätzlich befüllt,
+    // damit ein noch nicht aktualisiertes Relay wenigstens die Court-Ziele kennt.
+    let targets = monitor::read_assignments(&ctx.assignments_path);
+    let assignments: std::collections::HashMap<String, i64> = targets
+        .iter()
+        .filter_map(|(k, t)| t.court_id().map(|c| (k.clone(), c)))
+        .collect();
     let control = MonitorControl {
         assignments,
+        targets,
         commands: ctx.tablet.monitor_commands(),
     };
     let fp = serde_json::to_string(&control).unwrap_or_default();

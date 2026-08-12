@@ -537,9 +537,18 @@ pub struct MonitorDeviceInfo {
 /// werden (anders als [`MonitorUpload`] mit den Werbebildern).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorControl {
-    /// Geräte-ID → CourtID des zugewiesenen Felds.
+    /// Geräte-ID → CourtID des zugewiesenen Felds. **Nur Court-Ziele** — bleibt
+    /// für alte Relays lesbar, die `targets` noch nicht kennen.
     #[serde(default)]
     pub assignments: HashMap<String, i64>,
+    /// Geräte-ID → **vollständiges** Anzeige-Ziel (Court, Info-Übersicht/
+    /// Vorbereitung/Sieger, Werbung, Kombi). `#[serde(default)]` hält ältere
+    /// Host-Uploads ohne dieses Feld lesbar. Ein neues Relay bevorzugt `targets`
+    /// und kann so auch Info-/Werbe-Monitore im Cloud-Modus umleiten — vorher
+    /// gingen nur Court-Ziele durch (der Rest blieb „unzugewiesen", zeigte also
+    /// nur das bts-light-Logo).
+    #[serde(default)]
+    pub targets: HashMap<String, MonitorTarget>,
     /// Geräte-ID → offener Fernbefehl.
     pub commands: HashMap<String, MonitorCommand>,
 }

@@ -47,6 +47,11 @@ const TL_HTML: &str = include_str!("../../src-tauri/assets/tl.html");
 /// Die Court-Monitor-Anzeige – dieselbe Datei wie in der bts-light-App.
 const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
 
+/// Der „In Vorbereitung"-Info-Monitor – dieselbe Datei wie im LAN. Leitet
+/// seinen Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/…` ohne
+/// Templating.
+const PREPARATION_HTML: &str = include_str!("../../src-tauri/assets/preparation.html");
+
 /// Gebündelte SVG-Länderflaggen (IOC-Code → `<code>.svg`), ausgeliefert
 /// unter `/{ns}/flags/{file}`.
 static FLAGS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../src-tauri/assets/flags");
@@ -408,6 +413,8 @@ async fn main() {
         .route("/{ns}/info/announce/state", get(announce_state))
         .route("/{ns}/info/ad/state", get(ad_bar_state))
         .route("/{ns}/info/logo", get(tournament_logo))
+        .route("/{ns}/info/preparation", get(preparation_page))
+        .route("/{ns}/info/preparation/state", get(preparation_state))
         .route("/{ns}/pairing-code", post(pairing_code_create))
         .route("/pair/{code}", get(pairing_resolve))
         .route("/{ns}/slaves", get(slaves_list))
@@ -681,14 +688,38 @@ async fn monitor_device_state(
     }
     namespace.monitor_seen.insert(q.device.clone(), now_ms());
     let command = namespace.monitor_control.commands.get(&q.device).copied();
-    let assigned = namespace
+    // Volles Ziel bevorzugen; ein noch nicht aktualisierter Host liefert nur
+    // `assignments` (CourtID) — die als Court-Ziel nachbilden.
+    let target = namespace
         .monitor_control
-        .assignments
+        .targets
         .get(&q.device)
-        .copied();
-    let mut state = match assigned {
-        Some(court_id) => build_monitor_state(namespace, court_id),
-        None => unassigned_state(&q.device),
+        .cloned()
+        .or_else(|| {
+            namespace
+                .monitor_control
+                .assignments
+                .get(&q.device)
+                .map(|&id| relay_proto::MonitorTarget::court(id))
+        });
+    let mut state = match target {
+        Some(relay_proto::MonitorTarget::Court { court_id }) => {
+            build_monitor_state(namespace, court_id)
+        }
+        // Nur auf Ziele umleiten, die der Relay auch WIRKLICH ausliefert —
+        // heute allein „In Vorbereitung". Würden wir pauschal `redirect_path()`
+        // nehmen, landete ein Übersicht-/Werbe-/Sieger-/Kombi-Monitor im Cloud
+        // auf einer 404-Seite ohne JS und damit ohne Selbstheilung (schlimmer
+        // als die Kopplungs-Seite, die weiterpollt). Übersicht/Werbung folgen,
+        // sobald der Relay ihre Seiten serviert; bis dahin bleiben sie
+        // „unzugewiesen".
+        Some(t @ relay_proto::MonitorTarget::InfoPreparation) => {
+            let mut s = unassigned_state(&q.device);
+            s.unassigned = false;
+            s.redirect_to = t.redirect_path();
+            s
+        }
+        Some(_) | None => unassigned_state(&q.device),
     };
     state.command = command;
     state.device_code = device_code(&q.device);
@@ -729,16 +760,19 @@ async fn monitor_devices_list(
     let map = broker.namespaces.lock().await;
     let devices: Vec<MonitorDeviceInfo> = match map.get(&ns) {
         Some(n) => {
-            // Cloud-Pfad transportiert die Zuweisungen weiterhin als
-            // `HashMap<String, i64>` (CourtID-only). Info-Monitor-Zuweisungen
-            // sind heute nur LAN-seitig – `MonitorTarget::Court`-Wrap ist
-            // damit korrekt für alles, was über den Relay läuft.
-            let assignments: std::collections::HashMap<String, relay_proto::MonitorTarget> = n
+            // Volle Ziele bevorzugen (Court, Info, Werbung, Kombi), damit die
+            // Geräteliste im Tool das echte Ziel zeigt. Ein alter Host ohne
+            // `targets` liefert nur `assignments` (CourtID) → als Court-Ziel
+            // nachbilden, für die übrigen Geräte greift der `targets`-Eintrag.
+            let mut assignments: std::collections::HashMap<String, relay_proto::MonitorTarget> = n
                 .monitor_control
                 .assignments
                 .iter()
                 .map(|(k, &v)| (k.clone(), relay_proto::MonitorTarget::court(v)))
                 .collect();
+            for (k, t) in &n.monitor_control.targets {
+                assignments.insert(k.clone(), t.clone());
+            }
             relay_proto::build_device_list(&assignments, &n.court_labels, &n.monitor_seen, now_ms())
         }
         None => Vec::new(),
@@ -1191,6 +1225,63 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
             "hasLogo": has_logo,
             "intervalS": interval_s,
         })),
+    )
+        .into_response()
+}
+
+/// Der „In Vorbereitung"-Info-Monitor im Cloud-Modus (HTML). Dieselbe Datei wie
+/// im LAN; sie leitet ihren Basis-Pfad aus der eigenen URL ab, läuft also unter
+/// `/{ns}/info/preparation` ohne Templating.
+async fn preparation_page(Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(PREPARATION_HTML),
+    )
+        .into_response()
+}
+
+/// Zustand des Vorbereitungs-Monitors: die vom Host gepushten aufgerufenen
+/// Spiele (`prepared`) in der Kandidaten-Form, die `preparation.html` erwartet.
+/// Alle Einträge sind aufgerufen (`call` gesetzt) — der Cloud-Monitor zeigt
+/// damit genau die „In Vorbereitung"-Liste (ohne die reinen Zeitplan-Einträge,
+/// die nur der LAN-Server aus dem vollen BTP-Snapshot kennt).
+async fn preparation_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let candidates: Vec<serde_json::Value> = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns)
+            .map(|n| {
+                n.prepared
+                    .iter()
+                    .map(|pm| {
+                        // PreparedMatch trägt kein `draw_name` → Label aus Klasse
+                        // + Runde (kosmetisch; die Namen sind der Kern).
+                        let label = format!("{} {}", pm.class_label, pm.round_name)
+                            .trim()
+                            .to_string();
+                        serde_json::json!({
+                            "match_num": pm.match_number,
+                            "label": label,
+                            "team1": pm.team_a.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                            "team2": pm.team_b.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                            "call": { "hall": pm.hall, "called_at_ms": pm.called_at_ms },
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({ "candidates": candidates })),
     )
         .into_response()
 }
@@ -3521,6 +3612,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cloud_monitor_redirects_non_court_targets() {
+        // Regression: Cloud-Monitore mit einem Info-/Werbe-Ziel bekamen früher
+        // keinen Redirect (nur CourtID reiste) → blieben „unzugewiesen" (Logo).
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, NS, &host).await;
+
+        let mut targets = std::collections::HashMap::new();
+        targets.insert(
+            "pi-prep".to_string(),
+            relay_proto::MonitorTarget::InfoPreparation,
+        );
+        targets.insert("pi-court".to_string(), relay_proto::MonitorTarget::court(5));
+        // Noch nicht vom Relay servierte Sicht: darf NICHT umleiten (sonst
+        // 404-Sackgasse) → bleibt „unzugewiesen", pollt weiter, heilt sich.
+        targets.insert(
+            "pi-overview".to_string(),
+            relay_proto::MonitorTarget::InfoOverview { hall: None },
+        );
+        let control = relay_proto::MonitorControl {
+            assignments: std::collections::HashMap::new(),
+            targets,
+            commands: std::collections::HashMap::new(),
+        };
+        let up =
+            monitor_control_upload(State(broker.clone()), Path(NS.into()), axum::Json(control))
+                .await
+                .into_response();
+        assert_eq!(up.status(), StatusCode::OK);
+
+        // Info-Ziel → Redirect gesetzt, nicht mehr „unassigned".
+        let read_state = |dev: &str| {
+            let b = broker.clone();
+            let d = dev.to_string();
+            async move {
+                let r = monitor_device_state(
+                    State(b),
+                    Path(NS.into()),
+                    axum::extract::Query(DeviceQuery { device: d }),
+                )
+                .await
+                .into_response();
+                let bytes = axum::body::to_bytes(r.into_body(), 8192).await.unwrap();
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+            }
+        };
+        let prep = read_state("pi-prep").await;
+        assert_eq!(prep["redirectTo"], serde_json::json!("/info/preparation"));
+        assert_eq!(prep["unassigned"], serde_json::json!(false));
+
+        // Court-Ziel → kein Redirect, courtId gesetzt.
+        let court = read_state("pi-court").await;
+        assert_eq!(court["courtId"], serde_json::json!(5));
+        assert!(court["redirectTo"].is_null());
+
+        // Noch nicht serviertes Ziel (Übersicht) → KEIN Redirect, unassigned
+        // (Selbstheilung), statt 404-Sackgasse.
+        let ov = read_state("pi-overview").await;
+        assert!(ov["redirectTo"].is_null());
+        assert_eq!(ov["unassigned"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
     async fn timeline_without_recording_yields_404_and_foreign_token_is_rejected() {
         let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
 
@@ -4202,6 +4357,46 @@ mod tests {
         .await;
         let map = broker.namespaces.lock().await;
         assert!(map.get("ns1").unwrap().prepared.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cloud_preparation_state_lists_prepared_matches() {
+        // Cloud-Info-Monitor „In Vorbereitung": die gepushten aufgerufenen
+        // Spiele erscheinen als Kandidaten (mit `call`), sodass preparation.html
+        // sie im Cloud-Modus rendern kann.
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, NS, &host).await;
+        handle_host_frame(
+            &broker,
+            NS,
+            HostFrame::Prepared {
+                prepared: vec![prepared(42, "Halle 1"), prepared(43, "Halle 2")],
+            },
+            &host,
+        )
+        .await;
+
+        let resp = preparation_state(State(broker.clone()), Path(NS.into()))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let cands = json["candidates"].as_array().unwrap();
+        assert_eq!(cands.len(), 2);
+        // Jeder Kandidat ist „aufgerufen" (call gesetzt) und trägt die Halle.
+        assert_eq!(cands[0]["call"]["hall"], serde_json::json!("Halle 1"));
+        assert!(!cands[0]["team1"].as_array().unwrap().is_empty());
+
+        // Unbekannter Namespace → 404 (die Seite zeigt dann „keine Verbindung").
+        let miss = preparation_state(State(broker.clone()), Path("nope".into()))
+            .await
+            .into_response();
+        assert_eq!(miss.status(), StatusCode::NOT_FOUND);
     }
 
     /// Der Hallenfilter der Ansage-Antwort zeigt jeder Halle nur ihre eigenen
