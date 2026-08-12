@@ -163,6 +163,17 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
   Containers signalisiert Liga-Modus
 - `Players` → `Player`
 - `Entries` → `Entry`
+- `Stages` → `Stage{ID, EventID, StageType}` – Turnierabschnitte je Event.
+  `StageType`: **1 = Hauptfeld, 2 = Qualifikation, 8 = Playoff, 9998 =
+  Reserve, 9999 = Ausschließen** (am Mitschnitt + laufendem Turnier
+  gemessen). Der Typ ist stabil; der Stage-**Name** ist frei benennbar.
+- `StageEntries` → `StageEntry{ID, EntryID, StageID, Status, Seed1?}` – die
+  **maßgebliche Zuordnung Meldung → Stage** (Struktur-Probe 12.08.2026,
+  `tests/checkin_roster_probe.rs`). Ein Turnier mit 424 Meldungen hat 424
+  `StageEntry`-Einträge; darüber steht, ob eine Meldung im Hauptfeld,
+  in Reserve oder in Ausschließen liegt. **`Entry.StageID` bleibt in
+  echten Daten leer** — der Hauptfeld-Filter der Check-In-Liste liest
+  deshalb primär `StageEntries` ([spieler-check-in.md](spieler-check-in.md)).
 - `Courts` → `Court`
 - `Locations` → `Location` – Standorte/Hallen, von `Court.LocationID` referenziert
 - `Officials` → `Official` (Schiedsrichter)

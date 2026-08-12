@@ -560,17 +560,24 @@ const STAGE_AUSSCHLIESSEN: i64 = 9999;
 /// stehen — Reservisten und Ausgeschlossene sollen sich nicht einchecken,
 /// reine Quali-Teilnehmer erst, wenn sie sich qualifiziert haben.
 ///
-/// Zwei Quellen, defensiv kombiniert:
+/// Drei Quellen, defensiv kombiniert:
 ///
-///  1. **Direkt am Entry** (`Entry.StageID`), falls BTP es liefert. In den
-///     vorliegenden Mitschnitten (nur Hauptfeld-Meldungen) kam das Feld nie
-///     vor — BTP lässt leere Felder generell weg (wie `ClubID`), deshalb ist
-///     offen, ob es bei Reserve-Meldungen erscheint. Wenn ja, greift es hier.
-///  2. **Über die Platzierung**: ein Entry, der ausschließlich in Draws von
+///  1. **`StageEntries`** — der Container, den BTP je Meldung führt
+///     (`EntryID` → `StageID`). **In echten Turnieren die maßgebliche
+///     Quelle** (Struktur-Probe 2026-08-12: HE C = 26 Hauptfeld / 1
+///     Reserve / 4 Ausschließen ausschließlich hierüber; `Entry.StageID`
+///     war leer). Eine Zuordnung auf eine Reserve-/Ausschließen-/Quali-
+///     Stage schließt aus; eine auf Hauptfeld/Playoff hält.
+///  2. **Direkt am Entry** (`Entry.StageID`), falls BTP es doch liefert —
+///     in den Mitschnitten nie beobachtet, aber als Rückfall belassen.
+///  3. **Über die Platzierung**: ein Entry, der ausschließlich in Draws von
 ///     Qualifikations-Stages steht, gehört (noch) nicht aufs Hauptfeld. Wer
 ///     sich qualifiziert, bekommt einen Slot in einem Hauptfeld-Draw und
 ///     fällt damit wieder aus dieser Menge. Playoff zählt bewusst zur
 ///     Hauptfeld-Seite (Turnierverlauf, keine Vorqualifikation).
+///
+/// Eine Hauptfeld-Evidenz aus IRGENDEINER Quelle rettet (im Zweifel steht
+/// jemand zu viel auf der Liste, nie zu wenig).
 ///
 /// **Unplatzierte Meldungen bleiben unangetastet**: vor der Auslosung gibt es
 /// keine Slots, und genau dann muss die Meldeliste vollständig sein — die
@@ -623,21 +630,50 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
         }
     }
 
+    // Quelle 1: StageEntries (EntryID → StageID). In echten Daten die
+    // maßgebliche Zuordnung. Je Entry Hauptfeld- bzw. Nicht-Hauptfeld-
+    // Evidenz sammeln; unauflösbare Stages liefern keine.
+    let mut se_hauptfeld: HashSet<i64> = HashSet::new();
+    let mut se_nicht: HashSet<i64> = HashSet::new();
+    if let Some(group) = xml::find(t, "StageEntries") {
+        for se in group.children() {
+            let (Some(entry), Some(stage)) = (child_int(se, "EntryID"), child_int(se, "StageID"))
+            else {
+                continue;
+            };
+            match stage_type.get(&stage).copied() {
+                Some(ty) if ist_nicht_hauptfeld(ty) => {
+                    se_nicht.insert(entry);
+                }
+                Some(_) => {
+                    se_hauptfeld.insert(entry);
+                }
+                None => {}
+            }
+        }
+    }
+
+    // Hauptfeld-Evidenz aus IRGENDEINER Quelle rettet.
+    let hat_hauptfeld =
+        |entry: i64| hauptfeld_platziert.contains(&entry) || se_hauptfeld.contains(&entry);
+
     let mut raus: HashSet<i64> = HashSet::new();
 
-    // Quelle 2: ausschließlich in Nicht-Hauptfeld-Draws platziert.
-    for &entry in &quali_platziert {
-        if !hauptfeld_platziert.contains(&entry) {
+    // Quelle 1: StageEntries-Zuordnung auf Reserve/Ausschließen/Quali.
+    for &entry in &se_nicht {
+        if !hat_hauptfeld(entry) {
             raus.insert(entry);
         }
     }
 
-    // Quelle 1: direkte Stage-Zuordnung am Entry — aber eine nachweisliche
-    // Hauptfeld-Platzierung RETTET (Code-Review 2026-08-12): zieht BTP eine
-    // Quali-Zuordnung am Entry nach der Qualifikation nicht nach, darf der
-    // laengst im Hauptfeld platzierte Spieler nicht verbannt bleiben.
-    // Dieselbe Leitlinie wie ueberall im Filter: im Zweifel steht jemand zu
-    // viel auf der Liste, nie jemand zu wenig.
+    // Quelle 3: ausschließlich in Nicht-Hauptfeld-Draws platziert.
+    for &entry in &quali_platziert {
+        if !hat_hauptfeld(entry) {
+            raus.insert(entry);
+        }
+    }
+
+    // Quelle 2: direkte Stage-Zuordnung am Entry (Rückfall).
     if let Some(entries) = xml::find(t, "Entries") {
         for e in entries.children() {
             let (Some(id), Some(stage)) = (child_int(e, "ID"), child_int(e, "StageID")) else {
@@ -646,7 +682,7 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
             if stage_type
                 .get(&stage)
                 .is_some_and(|&ty| ist_nicht_hauptfeld(ty))
-                && !hauptfeld_platziert.contains(&id)
+                && !hat_hauptfeld(id)
             {
                 raus.insert(id);
             }
@@ -1458,6 +1494,17 @@ mod tests {
         extra_matches: Vec<Node>,
         extra_entry_felder: Vec<(i64, i64)>,
     ) -> Vec<Node> {
+        turnier_mit_stages_und_stageentries(extra_matches, extra_entry_felder, vec![])
+    }
+
+    /// Wie `turnier_mit_stages`, aber zusätzlich mit `StageEntries`-Einträgen
+    /// (`(EntryID, StageID)`) — die in echten BTP-Daten maßgebliche
+    /// Zuordnung Meldung → Stage (Struktur-Probe 2026-08-12).
+    fn turnier_mit_stages_und_stageentries(
+        extra_matches: Vec<Node>,
+        extra_entry_felder: Vec<(i64, i64)>,
+        stage_entries: Vec<(i64, i64)>,
+    ) -> Vec<Node> {
         let spieler = |id: i64, name: &str| {
             Node::group(
                 "Player",
@@ -1537,6 +1584,24 @@ mod tests {
                         vec![spieler(1, "Anna"), spieler(2, "Bernd"), spieler(3, "Carla")],
                     ),
                     Node::group("Entries", vec![entry(101, 1), entry(102, 2), entry(103, 3)]),
+                    Node::group(
+                        "StageEntries",
+                        stage_entries
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (entry, stage))| {
+                                Node::group(
+                                    "StageEntry",
+                                    vec![
+                                        Node::integer("ID", 900 + i as i64),
+                                        Node::integer("EntryID", *entry),
+                                        Node::integer("StageID", *stage),
+                                        Node::integer("Status", 0),
+                                    ],
+                                )
+                            })
+                            .collect(),
+                    ),
                     Node::group("Matches", extra_matches),
                 ],
             )],
@@ -1581,6 +1646,39 @@ mod tests {
         // Playoff (StageType 8) ist Turnierverlauf, keine Vorqualifikation —
         // eine reine Playoff-Platzierung bleibt auf der Liste.
         let tree = turnier_mit_stages(vec![slot_in(30, 1000, 101)], vec![]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(snapshot.entries.iter().any(|e| e.id == 101));
+    }
+
+    #[test]
+    fn roster_drops_reserve_and_exclude_via_stageentries() {
+        // DER REALE FALL (Struktur-Probe 2026-08-12): BTP legt die
+        // Meldungs→Stage-Zuordnung im StageEntries-Container ab, nicht am
+        // Entry.StageID. Entry 101 steht im Hauptfeld (Stage 1), 102 in
+        // Reserve (Stage 3 = Typ 9998), 103 in Ausschließen (Stage 4 =
+        // Typ 9999) — nur 101 gehört auf die Check-In-Liste.
+        let tree =
+            turnier_mit_stages_und_stageentries(vec![], vec![], vec![(101, 1), (102, 3), (103, 4)]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        let ids: Vec<i64> = snapshot.entries.iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![101]);
+    }
+
+    #[test]
+    fn roster_keeps_main_stageentry_even_with_reserve_stageentry() {
+        // Rettung über Quellen hinweg: Eine Hauptfeld-Zuordnung in
+        // StageEntries hält die Meldung, selbst wenn zusätzlich eine
+        // Reserve-Zuordnung existiert (im Zweifel zu viel, nie zu wenig).
+        let tree = turnier_mit_stages_und_stageentries(vec![], vec![], vec![(101, 1), (101, 3)]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(snapshot.entries.iter().any(|e| e.id == 101));
+    }
+
+    #[test]
+    fn roster_stageentry_to_playoff_stage_stays() {
+        // Playoff (Typ 8) zählt zur Hauptfeld-Seite — eine StageEntry-
+        // Zuordnung dorthin bleibt auf der Liste.
+        let tree = turnier_mit_stages_und_stageentries(vec![], vec![], vec![(101, 5)]);
         let snapshot = parse_snapshot(&tree).unwrap();
         assert!(snapshot.entries.iter().any(|e| e.id == 101));
     }
