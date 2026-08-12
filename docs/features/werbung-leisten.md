@@ -92,19 +92,20 @@ lokale DB. „Zeitplan" = Check-in-Anfangszeiten je Klasse (kein Match-Spielplan
 4. ✅ Rust-Test `read_write_ad_bar_roundtrip`. `docs`: `court-monitor.md`,
    `changelog`.
 
-### Phase 2 — Cloud + Tablet
+### Phase 2 — Cloud (Monitor + Tablet) — **UMGESETZT (v0.9.190)**
 
-1. Logo + `bar_ads` in `MonitorUpload` (`relay-proto`) + Ablage im Relay
-   (`MonitorBundle`) + Route `/{ns}/logo` (analog `ad_image`); Cloud-
-   `MonitorState` trägt Logo-Verweis + `bar_ads`-Indizes. Sparsam: der Monitor-
-   Upload ist bereits änderungs-gegated (`monitor_fingerprint` um Logo +
-   `in_bar` erweitern).
-2. `tablet.html`-Kopf: kompaktes Logo + Sponsor (enger Platz → klein, evtl.
-   nur bei Breite X).
-3. Übersicht/Vorbereitung im Cloud: **nur** falls das Info-Target-Protokoll
-   ausgebaut wird — sonst als Nicht-Ziel dieser Phase markiert.
-4. `relay-proto`-Serde-Roundtrips (Logo-Feld default-kompatibel),
-   Relay-Routing-Test.
+1. ✅ `AdUpload.in_bar` + `MonitorUpload.logo` (`relay-proto`, serde-default-
+   kompatibel) → Relay `MonitorBundle` (Logo als `AdImage`, `in_bar` je Ad).
+   Neue Relay-Routen `/{ns}/info/logo` und `/{ns}/info/ad/state` (barAds als
+   **Indizes**, `hasLogo`). Sparsam: `monitor_fingerprint` um Logo + `in_bar`
+   erweitert, Upload bleibt änderungs-gegated.
+2. ✅ Cloud-**Tablet** und -**Monitor** nutzen dieselben Phase-1-HTML-Snippets
+   (BASE-relativ) — mit den neuen Relay-Routen greift die Leiste jetzt auch im
+   Cloud-Modus. Keine HTML-Änderung nötig.
+3. Übersicht/Vorbereitung im Cloud: **Nicht-Ziel** (Cloud-Info-Targets noch
+   nicht ausgebaut, `relay_client.rs`-TODO) — bleiben LAN-only.
+4. ✅ `relay-proto`-Serde-Roundtrip + Default-Kompat-Test
+   (`ad_upload_in_bar_and_logo_default_to_off`).
 
 ### Phase 3 — badhub Check-in + Zeitplan (Cross-Repo)
 

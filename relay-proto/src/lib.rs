@@ -211,6 +211,22 @@ pub struct AdUpload {
     pub content_type: String,
     /// Bilddaten, Base64 (Standard-Alphabet).
     pub data: String,
+    /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste erscheinen
+    /// soll (Sponsor-Leiste). `#[serde(default)]` (= aus) hält ältere Uploads
+    /// lesbar.
+    #[serde(rename = "inBar", default)]
+    pub in_bar: bool,
+}
+
+/// Das Turnierlogo für die Sponsor-Leiste der Cloud-Anzeigeseiten – Base64,
+/// damit es in den Monitor-Upload passt. Wird bewusst nur mitgeschickt, wenn
+/// gesetzt (Option = None → kein Logo), und der Upload ist änderungs-gegated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogoUpload {
+    #[serde(rename = "contentType")]
+    pub content_type: String,
+    /// Bilddaten, Base64 (Standard-Alphabet).
+    pub data: String,
 }
 
 /// Court-Monitor-Datensatz, den der bts-light-Host zum Relay hochlädt –
@@ -227,6 +243,10 @@ pub struct MonitorUpload {
     /// ältere Host-Uploads lesbar.
     #[serde(rename = "callTimer", default)]
     pub call_timer: CallTimerView,
+    /// Turnierlogo für die Sponsor-Leiste (`None` = keins). `#[serde(default)]`
+    /// hält ältere Host-Uploads ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub logo: Option<LogoUpload>,
 }
 
 /// Was ein Court-Monitor-Gerät anzeigen soll – per Gerät zugewiesen.
@@ -2215,13 +2235,27 @@ mod tests {
             ads: vec![AdUpload {
                 content_type: "image/png".into(),
                 data: "AAAA".into(),
+                in_bar: true,
             }],
             call_timer: CallTimerView {
                 enabled: true,
                 second_call_minutes: 2.0,
                 third_call_minutes: 4.0,
             },
+            logo: Some(LogoUpload {
+                content_type: "image/png".into(),
+                data: "BBBB".into(),
+            }),
         });
+    }
+
+    #[test]
+    fn ad_upload_in_bar_and_logo_default_to_off() {
+        // Älterer Host-Upload ohne `inBar`/`logo` bleibt lesbar (Default aus).
+        let old = r#"{"config":{"adIntervalS":8,"showDiscipline":true,"showRound":true,"showMatchNumber":true,"showTimer":true},"tournamentName":"T","ads":[{"contentType":"image/png","data":"AAAA"}]}"#;
+        let up: MonitorUpload = serde_json::from_str(old).unwrap();
+        assert!(!up.ads[0].in_bar);
+        assert!(up.logo.is_none());
     }
 
     #[test]
