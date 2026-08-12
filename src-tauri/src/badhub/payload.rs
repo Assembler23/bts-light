@@ -290,15 +290,24 @@ pub struct CheckinRosterMessage {
     pub rid: u64,
 }
 
-/// Sponsor-Werbebilder der „Leiste" für den badhub-Check-In (Phase 3 der
-/// Sponsor-Leiste). `sponsors` sind roh-Base64-kodierte Rasterbilder
-/// (jpg/png/gif, max. 4); badhub legt sie als `sponsor_{uuid}_{n}.{ext}` ab.
-/// **Keine GUID im Body**: anders als die Meldeliste adressiert dieser
-/// Endpunkt das Turnier allein über das Bearer-Liveticker-Passwort (badhub
-/// löst darüber `tournament_key` → Check-In-UUID auf).
+/// Branding (Sponsoren + Turnierlogo) für den badhub-Check-In (Phase 3 der
+/// Sponsor-Leiste). `sponsors` sind roh-Base64-Rasterbilder (jpg/png/gif,
+/// max. 4); `logo` ist das roh-Base64-Turnierlogo (png/jpg/webp). **Keine GUID
+/// im Body**: anders als die Meldeliste adressiert dieser Endpunkt das Turnier
+/// allein über das Bearer-Liveticker-Passwort (badhub löst `tournament_key` →
+/// Check-In-UUID auf).
+///
+/// **Feld-unabhängig:** Ein `None`-Feld wird nicht gesendet → badhub lässt es
+/// unberührt; `Some(…)` ersetzt es (leerer String / leere Liste = löschen). So
+/// senden bts-lights zwei Auslöser je nur ihr Feld: das Sponsor-Häkchen die
+/// Sponsoren, das Speichern der Einstellungen das (geänderte) Logo — ohne das
+/// jeweils andere neu über die Leitung zu schicken (das Logo ist bis 2 MB groß).
 #[derive(Debug, Serialize, PartialEq)]
 pub struct CheckinBrandingMessage {
-    pub sponsors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sponsors: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
 }
 
 /// Eine Spielklasse in der Meldeliste.

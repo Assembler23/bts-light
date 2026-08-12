@@ -125,8 +125,20 @@ lokale DB. „Zeitplan" = Check-in-Anfangszeiten je Klasse (kein Match-Spielplan
    URL wird aus `config.badhub.url` abgeleitet (letztes Pfadsegment ersetzt).
    Code: `commands.rs collect_bar_sponsors_b64`/`push_bar_sponsors_to_badhub`,
    `badhub/push.rs checkin_branding_url`/`push_checkin_branding`,
-   `badhub/payload.rs CheckinBrandingMessage`. **Noch offen:** Logo über denselben
-   Weg (statt Heartbeat-`tset`) übertragen + aus dem `tset` nehmen (Minimierung).
+   `badhub/payload.rs CheckinBrandingMessage`.
+
+   ✅ **Logo-Push umgesetzt (v0.9.195):** Ändert der Operator das Turnierlogo,
+   schiebt bts-light es beim Speichern (`save_config`, nur bei echter Änderung)
+   über **denselben** Endpunkt an badhub (`CheckinBrandingMessage.logo`, roh-
+   Base64; leer = löschen). Die Nachricht ist **feld-unabhängig**: das Sponsor-
+   Häkchen sendet nur `sponsors`, das Speichern nur `logo` — beide `Option`, ein
+   `None`-Feld wird weggelassen und lässt badhub das andere unberührt (spart die
+   bis 2 MB Logo-Bytes bei jedem Sponsor-Toggle). badhub speichert es als
+   `checkin_{uuid}.{ext}`; `turnierLogoUrl()` bevorzugt die Datei bereits vor dem
+   tset-Snapshot. Code: `commands.rs push_logo_to_badhub`/`spawn_branding_push`.
+   **Noch offen (separater PR nach badhub-Deploy):** das Logo aus dem
+   Heartbeat-`tset` nehmen (`sync.rs`) — erst sicher, wenn badhub es nachweislich
+   aus der Datei ausliefert, sonst verlieren Check-In/Zeitplan das Logo.
 2. badhub-Auslieferung: Endpunkt(e) analog `/checkin/{uuid}/logo`
    (Inhalts-Validierung, kein SVG, `nosniff`, Cache). nginx-Block „kein PHP in
    `public/assets/logos/`" muss vor Rollout stehen.

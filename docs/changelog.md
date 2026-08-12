@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.195
+
+- **Turnierlogo für den Check-In sparsamer übertragen.** Das Logo reist jetzt
+  **einmalig beim Speichern** an den badhub-Check-In (über denselben
+  `/api/checkin-branding`-Weg wie die Sponsoren) — statt es bisher alle 60 s
+  base64 im Liveticker-Heartbeat mitzuschicken. Ändert der Operator das Logo,
+  wird es einmal gesendet; sonst nichts. Sponsoren und Logo lösen unabhängig aus
+  (das Häkchen die Sponsoren, das Speichern das Logo), sodass nicht bei jedem
+  Sponsor-Toggle das ganze Logo mitreist. *Der eigentliche Verzicht auf das Logo
+  im Heartbeat folgt in einem späteren Schritt, sobald die badhub-Version
+  ausgerollt ist — bis dahin ändert sich für die Anzeige nichts.*
+
 ## v0.9.194
 
 - **Sponsor-Werbebilder erscheinen auf den badhub-Check-In-Seiten.** Markiert
