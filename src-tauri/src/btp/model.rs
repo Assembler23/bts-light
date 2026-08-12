@@ -6,7 +6,7 @@
 //! `PlanningID` der Slots verweisen). Echte, anzeigbare Paarungen tragen
 //! `IsMatch = true`. Siehe `docs/btp_protocol.md`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -545,6 +545,117 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
     list
 }
 
+/// BTP-`StageType`-Werte, gemessen am echten Mitschnitt
+/// (`tests/fixtures/btp-tournament*.bin`): 1 = Hauptfeld, 2 = Qualifikation,
+/// 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen. Der **Typ** ist stabil —
+/// der Stage-**Name** ist frei benennbar und taugt nicht zum Filtern.
+const STAGE_QUALIFIKATION: i64 = 2;
+const STAGE_RESERVE: i64 = 9998;
+const STAGE_AUSSCHLIESSEN: i64 = 9999;
+
+/// EntryIDs, die NICHT aufs Hauptfeld gehören (Filter der Check-In-Liste).
+///
+/// BTP ordnet Meldungen einer Stage zu (Hauptfeld, Qualifikation, Reserve,
+/// Ausschließen). Auf der Check-In-Liste sollen nur Hauptfeld-Meldungen
+/// stehen — Reservisten und Ausgeschlossene sollen sich nicht einchecken,
+/// reine Quali-Teilnehmer erst, wenn sie sich qualifiziert haben.
+///
+/// Zwei Quellen, defensiv kombiniert:
+///
+///  1. **Direkt am Entry** (`Entry.StageID`), falls BTP es liefert. In den
+///     vorliegenden Mitschnitten (nur Hauptfeld-Meldungen) kam das Feld nie
+///     vor — BTP lässt leere Felder generell weg (wie `ClubID`), deshalb ist
+///     offen, ob es bei Reserve-Meldungen erscheint. Wenn ja, greift es hier.
+///  2. **Über die Platzierung**: ein Entry, der ausschließlich in Draws von
+///     Qualifikations-Stages steht, gehört (noch) nicht aufs Hauptfeld. Wer
+///     sich qualifiziert, bekommt einen Slot in einem Hauptfeld-Draw und
+///     fällt damit wieder aus dieser Menge. Playoff zählt bewusst zur
+///     Hauptfeld-Seite (Turnierverlauf, keine Vorqualifikation).
+///
+/// **Unplatzierte Meldungen bleiben unangetastet**: vor der Auslosung gibt es
+/// keine Slots, und genau dann muss die Meldeliste vollständig sein — die
+/// Kern-Eigenschaft des Check-Ins (docs/spieler-check-in.md). Nicht
+/// auflösbare Stage-Verweise kosten die Meldung ebenfalls nie: im Zweifel
+/// steht jemand zu viel auf der Liste, nie jemand zu wenig.
+fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
+    // StageID → StageType.
+    let mut stage_type: HashMap<i64, i64> = HashMap::new();
+    if let Some(group) = xml::find(t, "Stages") {
+        for s in group.children() {
+            if let (Some(id), Some(ty)) = (child_int(s, "ID"), child_int(s, "StageType")) {
+                stage_type.insert(id, ty);
+            }
+        }
+    }
+    let ist_nicht_hauptfeld =
+        |ty: i64| ty == STAGE_QUALIFIKATION || ty == STAGE_RESERVE || ty == STAGE_AUSSCHLIESSEN;
+
+    // Platzierungs-Evidenz ZUERST: je Entry, ob er irgendwo hauptfeld-seitig
+    // bzw. irgendwo nicht-hauptfeld-seitig in einem Draw steht. Draws ohne
+    // auflösbare Stage liefern keine Evidenz (weder dafür noch dagegen).
+    let mut draw_type: HashMap<i64, i64> = HashMap::new();
+    if let Some(group) = xml::find(t, "Draws") {
+        for d in group.children() {
+            if let (Some(id), Some(ty)) = (
+                child_int(d, "ID"),
+                child_int(d, "StageID").and_then(|s| stage_type.get(&s).copied()),
+            ) {
+                draw_type.insert(id, ty);
+            }
+        }
+    }
+    let mut hauptfeld_platziert: HashSet<i64> = HashSet::new();
+    let mut quali_platziert: HashSet<i64> = HashSet::new();
+    if let Some(matches) = xml::find(t, "Matches") {
+        for m in matches.children() {
+            let (Some(draw), Some(entry)) = (child_int(m, "DrawID"), child_int(m, "EntryID"))
+            else {
+                continue;
+            };
+            let Some(&ty) = draw_type.get(&draw) else {
+                continue;
+            };
+            if ist_nicht_hauptfeld(ty) {
+                quali_platziert.insert(entry);
+            } else {
+                hauptfeld_platziert.insert(entry);
+            }
+        }
+    }
+
+    let mut raus: HashSet<i64> = HashSet::new();
+
+    // Quelle 2: ausschließlich in Nicht-Hauptfeld-Draws platziert.
+    for &entry in &quali_platziert {
+        if !hauptfeld_platziert.contains(&entry) {
+            raus.insert(entry);
+        }
+    }
+
+    // Quelle 1: direkte Stage-Zuordnung am Entry — aber eine nachweisliche
+    // Hauptfeld-Platzierung RETTET (Code-Review 2026-08-12): zieht BTP eine
+    // Quali-Zuordnung am Entry nach der Qualifikation nicht nach, darf der
+    // laengst im Hauptfeld platzierte Spieler nicht verbannt bleiben.
+    // Dieselbe Leitlinie wie ueberall im Filter: im Zweifel steht jemand zu
+    // viel auf der Liste, nie jemand zu wenig.
+    if let Some(entries) = xml::find(t, "Entries") {
+        for e in entries.children() {
+            let (Some(id), Some(stage)) = (child_int(e, "ID"), child_int(e, "StageID")) else {
+                continue;
+            };
+            if stage_type
+                .get(&stage)
+                .is_some_and(|&ty| ist_nicht_hauptfeld(ty))
+                && !hauptfeld_platziert.contains(&id)
+            {
+                raus.insert(id);
+            }
+        }
+    }
+
+    raus
+}
+
 /// Meldeliste des Turniers (BTP `Entries`) mit aufgelösten Spielern, nach
 /// EntryID sortiert.
 ///
@@ -553,16 +664,41 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
 /// der Grund, warum die Meldeliste ohne Auslosung auskommt.
 ///
 /// Meldungen ohne auflösbare Spieler werden verworfen: ein Eintrag ohne Namen
-/// wäre auf der Check-In-Seite nicht anklickbar und nur verwirrend.
+/// wäre auf der Check-In-Seite nicht anklickbar und nur verwirrend. Ebenso
+/// verworfen werden Meldungen, die laut Stage-Zuordnung nicht aufs Hauptfeld
+/// gehören ([`non_main_stage_entries`]) — Reservisten, Ausgeschlossene und
+/// reine Quali-Platzierungen haben auf der Check-In-Liste nichts verloren.
 fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
     let Some(entries) = xml::find(t, "Entries") else {
         return Vec::new();
     };
+    let nicht_hauptfeld = non_main_stage_entries(t);
+    // Einmal gesammelt protokollieren, warum Gemeldete auf der Check-In-Seite
+    // fehlen — sonst faellt es niemandem auf (dieselbe Lehre wie beim
+    // Anonymisierungs-Filter auf der badhub-Seite).
+    let gefiltert = entries
+        .children()
+        .iter()
+        .filter_map(|e| child_int(e, "ID"))
+        .filter(|id| nicht_hauptfeld.contains(id))
+        .count();
+    if gefiltert > 0 {
+        tracing::info!(
+            anzahl = gefiltert,
+            "Meldungen ausserhalb des Hauptfelds aus der Check-In-Liste gefiltert \
+             (Qualifikation/Reserve/Ausschliessen)"
+        );
+    }
     let mut list: Vec<BtpEntry> = entries
         .children()
         .iter()
         .filter_map(|e| {
             let id = child_int(e, "ID")?;
+            if nicht_hauptfeld.contains(&id) {
+                // Bewusst still im Normalfall protokolliert: die Anzahl steht
+                // gesammelt im tracing unten, ein Log je Meldung wäre Rauschen.
+                return None;
+            }
             let event_id = child_int(e, "EventID")?;
             let referenced: Vec<i64> = ["Player1ID", "Player2ID"]
                 .iter()
@@ -1312,6 +1448,240 @@ mod tests {
         assert_eq!(snapshot.entries.len(), 1);
         assert_eq!(snapshot.entries[0].players.len(), 1);
         assert_eq!(snapshot.entries[0].players[0].id, 1);
+    }
+
+    /// Baum-Helfer für die Hauptfeld-Filter-Tests: zwei Stages (Hauptfeld
+    /// Typ 1, Qualifikation Typ 2, Reserve 9998, Ausschließen 9999 — die
+    /// Typen aus dem echten Mitschnitt), je ein Draw auf Hauptfeld und
+    /// Qualifikation, drei Einzel-Meldungen.
+    fn turnier_mit_stages(
+        extra_matches: Vec<Node>,
+        extra_entry_felder: Vec<(i64, i64)>,
+    ) -> Vec<Node> {
+        let spieler = |id: i64, name: &str| {
+            Node::group(
+                "Player",
+                vec![Node::integer("ID", id), Node::string("Lastname", name)],
+            )
+        };
+        let stage = |id: i64, typ: i64| {
+            Node::group(
+                "Stage",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("StageType", typ),
+                ],
+            )
+        };
+        let entry = |id: i64, player: i64| {
+            let mut felder = vec![
+                Node::integer("ID", id),
+                Node::integer("EventID", 1),
+                Node::integer("Player1ID", player),
+            ];
+            // Optional eine direkte Stage-Zuordnung am Entry anhängen.
+            for (eid, stage_id) in &extra_entry_felder {
+                if *eid == id {
+                    felder.push(Node::integer("StageID", *stage_id));
+                }
+            }
+            Node::group("Entry", felder)
+        };
+        vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![
+                    Node::group(
+                        "Stages",
+                        vec![
+                            stage(1, 1),
+                            stage(2, 2),
+                            stage(3, 9998),
+                            stage(4, 9999),
+                            stage(5, 8),
+                        ],
+                    ),
+                    Node::group(
+                        "Draws",
+                        vec![
+                            Node::group(
+                                "Draw",
+                                vec![
+                                    Node::integer("ID", 10),
+                                    Node::integer("EventID", 1),
+                                    Node::integer("StageID", 1), // Hauptfeld
+                                ],
+                            ),
+                            Node::group(
+                                "Draw",
+                                vec![
+                                    Node::integer("ID", 20),
+                                    Node::integer("EventID", 1),
+                                    Node::integer("StageID", 2), // Qualifikation
+                                ],
+                            ),
+                            Node::group(
+                                "Draw",
+                                vec![
+                                    Node::integer("ID", 30),
+                                    Node::integer("EventID", 1),
+                                    Node::integer("StageID", 5), // Playoff
+                                ],
+                            ),
+                        ],
+                    ),
+                    Node::group(
+                        "Players",
+                        vec![spieler(1, "Anna"), spieler(2, "Bernd"), spieler(3, "Carla")],
+                    ),
+                    Node::group("Entries", vec![entry(101, 1), entry(102, 2), entry(103, 3)]),
+                    Node::group("Matches", extra_matches),
+                ],
+            )],
+        )]
+    }
+
+    /// Teilnehmer-Slot (Platzierung) eines Entries in einem Draw.
+    fn slot_in(draw: i64, planning: i64, entry: i64) -> Node {
+        Node::group(
+            "Match",
+            vec![
+                Node::integer("DrawID", draw),
+                Node::integer("PlanningID", planning),
+                Node::integer("EntryID", entry),
+            ],
+        )
+    }
+
+    #[test]
+    fn roster_drops_entries_placed_only_in_qualification_draws() {
+        // Entry 101 steht im Hauptfeld-Draw, 102 NUR im Quali-Draw, 103 ist
+        // unplatziert (vor der Auslosung). Nur die reine Quali-Platzierung
+        // fliegt aus der Meldeliste — Unplatzierte bleiben, sonst wäre die
+        // Liste vor der Auslosung leer (Kern-Eigenschaft des Check-Ins).
+        let tree = turnier_mit_stages(vec![slot_in(10, 1000, 101), slot_in(20, 1000, 102)], vec![]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        let ids: Vec<i64> = snapshot.entries.iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![101, 103]);
+    }
+
+    #[test]
+    fn roster_keeps_entries_placed_in_quali_and_main_draw() {
+        // Wer sich qualifiziert hat, steht in BEIDEN Draws — und gehört auf
+        // die Liste.
+        let tree = turnier_mit_stages(vec![slot_in(20, 1000, 102), slot_in(10, 2000, 102)], vec![]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(snapshot.entries.iter().any(|e| e.id == 102));
+    }
+
+    #[test]
+    fn roster_keeps_playoff_only_placements() {
+        // Playoff (StageType 8) ist Turnierverlauf, keine Vorqualifikation —
+        // eine reine Playoff-Platzierung bleibt auf der Liste.
+        let tree = turnier_mit_stages(vec![slot_in(30, 1000, 101)], vec![]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(snapshot.entries.iter().any(|e| e.id == 101));
+    }
+
+    #[test]
+    fn roster_drops_entries_with_direct_non_main_stage_assignment() {
+        // Falls BTP die Meldungs-Stage direkt am Entry mitschickt (in den
+        // Mitschnitten nie beobachtet, aber BTP lässt leere Felder generell
+        // weg): Reserve (9998) und Ausschließen (9999) fliegen raus,
+        // Hauptfeld (Typ 1) bleibt.
+        let tree = turnier_mit_stages(vec![], vec![(101, 3), (102, 4), (103, 1)]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        let ids: Vec<i64> = snapshot.entries.iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![103]);
+    }
+
+    #[test]
+    fn roster_ignores_unknown_stage_references() {
+        // Ein Entry mit StageID auf eine fehlende Stage darf die Meldung
+        // NICHT kosten — im Zweifel bleibt sie auf der Liste (falsch fehlend
+        // wäre schlimmer als falsch vorhanden; die Turnierleitung kann jeden
+        // ignorieren).
+        let tree = turnier_mit_stages(vec![], vec![(101, 777)]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.entries.len(), 3);
+    }
+
+    #[test]
+    fn roster_ignores_draws_with_unresolvable_stage() {
+        // Auch ein Draw, dessen StageID auf keine bekannte Stage zeigt,
+        // liefert keine Evidenz — eine Platzierung dort ist weder Hauptfeld
+        // noch Qualifikation, die Meldung bleibt auf der Liste (dieselbe
+        // "Grenze mit Absicht" wie beim Entry-Verweis oben).
+        let tree = vec![Node::group(
+            "Result",
+            vec![Node::group(
+                "Tournament",
+                vec![
+                    Node::group(
+                        "Stages",
+                        vec![Node::group(
+                            "Stage",
+                            vec![
+                                Node::integer("ID", 1),
+                                Node::integer("EventID", 1),
+                                Node::integer("StageType", 1),
+                            ],
+                        )],
+                    ),
+                    Node::group(
+                        "Draws",
+                        vec![Node::group(
+                            "Draw",
+                            vec![
+                                Node::integer("ID", 99),
+                                Node::integer("EventID", 1),
+                                Node::integer("StageID", 777), // unbekannte Stage
+                            ],
+                        )],
+                    ),
+                    Node::group(
+                        "Players",
+                        vec![Node::group(
+                            "Player",
+                            vec![Node::integer("ID", 1), Node::string("Lastname", "Anna")],
+                        )],
+                    ),
+                    Node::group(
+                        "Entries",
+                        vec![Node::group(
+                            "Entry",
+                            vec![
+                                Node::integer("ID", 101),
+                                Node::integer("EventID", 1),
+                                Node::integer("Player1ID", 1),
+                            ],
+                        )],
+                    ),
+                    Node::group("Matches", vec![slot_in(99, 1000, 101)]),
+                ],
+            )],
+        )];
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+    }
+
+    #[test]
+    fn roster_rescues_direct_quali_assignment_with_main_draw_slot() {
+        // Konfliktfall (Code-Review 2026-08-12): Entry 101 traegt DIREKT die
+        // Quali-Stage (BTP hat die Zuordnung nach der Qualifikation nicht
+        // nachgezogen), steht aber laengst in einem Hauptfeld-Draw. Die
+        // nachweisliche Platzierung RETTET — der Qualifizierte gehoert auf
+        // die Check-In-Liste.
+        let tree = turnier_mit_stages(vec![slot_in(10, 1000, 101)], vec![(101, 2)]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(snapshot.entries.iter().any(|e| e.id == 101));
+        // Ohne die Rettung (nur direkte Zuordnung, keine Platzierung) fliegt
+        // derselbe Entry weiterhin raus.
+        let tree = turnier_mit_stages(vec![], vec![(101, 2)]);
+        let snapshot = parse_snapshot(&tree).unwrap();
+        assert!(!snapshot.entries.iter().any(|e| e.id == 101));
     }
 
     #[test]

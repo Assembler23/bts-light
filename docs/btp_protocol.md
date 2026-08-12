@@ -363,9 +363,21 @@ auf den jeweiligen.
 
 **Event:** `ID`, `Name`, `GameTypeID` (1 = Einzel, 2 = Doppel),
 `GenderID` (1 = Herren, 2 = Damen, 3 = Mixed).
-**Draw:** `ID`, `Name`, `EventID`.
+**Stage:** `ID`, `Name`, `EventID`, **`StageType`**, `DisplayOrder`. Der
+`StageType` ist der stabile Schlüssel (der Name ist frei benennbar) —
+gemessen an beiden Turnier-Mitschnitten: **1 = Hauptfeld,
+2 = Qualifikation, 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen**.
+Der Hauptfeld-Filter der Check-In-Meldeliste hängt daran
+(`non_main_stage_entries()` in [`btp/model.rs`](../src-tauri/src/btp/model.rs),
+[docs/spieler-check-in.md](spieler-check-in.md)).
+**Draw:** `ID`, `Name`, `EventID`, `StageID`, `DrawTypeID`, `DrawSize`,
+`Position`, `DisplayOrder` u. a. — über `StageID` hängt der Draw an seiner
+Stage.
 **Entry:** `ID`, **`EventID`**, `Player1ID`, `Player2ID` (zweiter Spieler nur
-bei Doppel).
+bei Doppel). Eine `StageID` am Entry wurde in den Mitschnitten (nur
+Hauptfeld-Meldungen) **nie beobachtet**; da BTP leere Felder generell
+weglässt, ist offen, ob sie bei Reserve-/Quali-Meldungen erscheint — der
+Parser liest sie opportunistisch (s. o.).
 
 > **`Entry.EventID` ist die Meldeliste.** Ein `Entry` kennt seine Klasse
 > **direkt** — unabhängig davon, ob für sie schon eine Auslosung existiert.

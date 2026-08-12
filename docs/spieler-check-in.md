@@ -58,6 +58,42 @@ Im Code:
 - Meldungen **ohne** `EventID` oder ohne auflösbare Spieler werden verworfen —
   ein namenloser Eintrag wäre auf der Check-In-Seite nicht anklickbar.
 
+### Nur Hauptfeld-Meldungen (seit 2026-08-12)
+
+BTP ordnet jede Meldung einer **Stage** zu — Hauptfeld, Qualifikation,
+Reserve, Ausschließen. Auf der Check-In-Liste stehen nur
+**Hauptfeld-Meldungen**: Reservisten und Ausgeschlossene sollen sich nicht
+einchecken, reine Quali-Teilnehmer erst, wenn sie sich qualifiziert haben.
+Gefiltert wird in `entry_list()` über `non_main_stage_entries()`
+([`btp/model.rs`](../src-tauri/src/btp/model.rs)); die Anzahl gefilterter
+Meldungen wird geloggt (sonst fiele nie auf, warum jemand auf der Seite
+fehlt).
+
+**Filterschlüssel ist der numerische `StageType`** (1 = Hauptfeld,
+2 = Qualifikation, 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen —
+gemessen an den Mitschnitten `tests/fixtures/btp-tournament*.bin`), **nie**
+der frei benennbare Stage-Name. Zwei Quellen, defensiv kombiniert:
+
+1. **Direkt am Entry** (`Entry.StageID`), falls BTP es mitschickt. In den
+   vorliegenden Mitschnitten (nur Hauptfeld-Meldungen) kam das Feld nie vor;
+   BTP lässt leere Felder generell weg (wie `ClubID`), deshalb ist offen, ob
+   es bei Reserve-Meldungen erscheint. Wenn ja, greift es hier.
+2. **Über die Platzierung**: eine Meldung, die ausschließlich in Draws von
+   Qualifikations-Stages platziert ist, gehört (noch) nicht aufs Hauptfeld.
+   Wer sich qualifiziert, bekommt einen Slot in einem Hauptfeld-Draw und
+   erscheint damit wieder auf der Liste. Playoff zählt zur Hauptfeld-Seite
+   (Turnierverlauf, keine Vorqualifikation).
+
+Drei Grenzen mit Absicht: **Unplatzierte bleiben immer drin** — vor der
+Auslosung gibt es keine Slots, und genau dann muss die Liste vollständig
+sein (die Kern-Eigenschaft oben). **Unbekannte Stage-Verweise kosten die
+Meldung nie** — im Zweifel steht jemand zu viel auf der Liste, nie jemand zu
+wenig; die Turnierleitung kann Überzählige ignorieren, aber ein zu Unrecht
+Fehlender kann sich nicht einchecken. Und **badhub braucht dafür nichts zu
+wissen** — die Filterung passiert vor dem Push, der `centry_list`-Vertrag
+bleibt unverändert (gefilterte Meldungen verschwinden dort wie eine
+BTP-Abmeldung).
+
 ### Turnier- und Spieler-Identität
 
 | | Schlüssel | Warum |

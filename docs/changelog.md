@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.185
+
+- **Check-In-Liste zeigt nur noch Hauptfeld-Meldungen.** Reservisten,
+  Ausgeschlossene und reine Qualifikations-Teilnehmer erscheinen nicht mehr
+  auf der Check-In-Seite; wer sich qualifiziert, taucht automatisch wieder
+  auf. Vor der Auslosung ändert sich nichts — unplatzierte Meldungen bleiben
+  vollständig. Gefiltert wird über den BTP-Stage-Typ, umbenannte Stages
+  stören also nicht.
+
 ## v0.9.184
 
 Fasst die nie einzeln veröffentlichten Stände v0.9.182/183 mit zusammen.
