@@ -587,9 +587,8 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
             }
         }
     }
-    let ist_nicht_hauptfeld = |ty: i64| {
-        ty == STAGE_QUALIFIKATION || ty == STAGE_RESERVE || ty == STAGE_AUSSCHLIESSEN
-    };
+    let ist_nicht_hauptfeld =
+        |ty: i64| ty == STAGE_QUALIFIKATION || ty == STAGE_RESERVE || ty == STAGE_AUSSCHLIESSEN;
 
     // Platzierungs-Evidenz ZUERST: je Entry, ob er irgendwo hauptfeld-seitig
     // bzw. irgendwo nicht-hauptfeld-seitig in einem Draw steht. Draws ohne
@@ -644,7 +643,9 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
             let (Some(id), Some(stage)) = (child_int(e, "ID"), child_int(e, "StageID")) else {
                 continue;
             };
-            if stage_type.get(&stage).is_some_and(|&ty| ist_nicht_hauptfeld(ty))
+            if stage_type
+                .get(&stage)
+                .is_some_and(|&ty| ist_nicht_hauptfeld(ty))
                 && !hauptfeld_platziert.contains(&id)
             {
                 raus.insert(id);
@@ -1453,7 +1454,10 @@ mod tests {
     /// Typ 1, Qualifikation Typ 2, Reserve 9998, Ausschließen 9999 — die
     /// Typen aus dem echten Mitschnitt), je ein Draw auf Hauptfeld und
     /// Qualifikation, drei Einzel-Meldungen.
-    fn turnier_mit_stages(extra_matches: Vec<Node>, extra_entry_felder: Vec<(i64, i64)>) -> Vec<Node> {
+    fn turnier_mit_stages(
+        extra_matches: Vec<Node>,
+        extra_entry_felder: Vec<(i64, i64)>,
+    ) -> Vec<Node> {
         let spieler = |id: i64, name: &str| {
             Node::group(
                 "Player",
@@ -1491,7 +1495,13 @@ mod tests {
                 vec![
                     Node::group(
                         "Stages",
-                        vec![stage(1, 1), stage(2, 2), stage(3, 9998), stage(4, 9999), stage(5, 8)],
+                        vec![
+                            stage(1, 1),
+                            stage(2, 2),
+                            stage(3, 9998),
+                            stage(4, 9999),
+                            stage(5, 8),
+                        ],
                     ),
                     Node::group(
                         "Draws",
@@ -1551,10 +1561,7 @@ mod tests {
         // unplatziert (vor der Auslosung). Nur die reine Quali-Platzierung
         // fliegt aus der Meldeliste — Unplatzierte bleiben, sonst wäre die
         // Liste vor der Auslosung leer (Kern-Eigenschaft des Check-Ins).
-        let tree = turnier_mit_stages(
-            vec![slot_in(10, 1000, 101), slot_in(20, 1000, 102)],
-            vec![],
-        );
+        let tree = turnier_mit_stages(vec![slot_in(10, 1000, 101), slot_in(20, 1000, 102)], vec![]);
         let snapshot = parse_snapshot(&tree).unwrap();
         let ids: Vec<i64> = snapshot.entries.iter().map(|e| e.id).collect();
         assert_eq!(ids, vec![101, 103]);
@@ -1564,10 +1571,7 @@ mod tests {
     fn roster_keeps_entries_placed_in_quali_and_main_draw() {
         // Wer sich qualifiziert hat, steht in BEIDEN Draws — und gehört auf
         // die Liste.
-        let tree = turnier_mit_stages(
-            vec![slot_in(20, 1000, 102), slot_in(10, 2000, 102)],
-            vec![],
-        );
+        let tree = turnier_mit_stages(vec![slot_in(20, 1000, 102), slot_in(10, 2000, 102)], vec![]);
         let snapshot = parse_snapshot(&tree).unwrap();
         assert!(snapshot.entries.iter().any(|e| e.id == 102));
     }
