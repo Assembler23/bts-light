@@ -56,6 +56,11 @@ const PREPARATION_HTML: &str = include_str!("../../src-tauri/assets/preparation.
 /// ihren Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/info/ad`.
 const AD_HTML: &str = include_str!("../../src-tauri/assets/ad.html");
 
+/// Die Court-Übersicht (alle Felder × aktuelles Spiel) – dieselbe Datei wie im
+/// LAN. Leitet ihren Basis-Pfad aus der eigenen URL ab und holt ihre Daten über
+/// `<BASE>health`; läuft also unter `/{ns}/info/overview` gegen `/{ns}/health`.
+const OVERVIEW_HTML: &str = include_str!("../../src-tauri/assets/overview.html");
+
 /// Gebündelte SVG-Länderflaggen (IOC-Code → `<code>.svg`), ausgeliefert
 /// unter `/{ns}/flags/{file}`.
 static FLAGS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../src-tauri/assets/flags");
@@ -420,6 +425,8 @@ async fn main() {
         .route("/{ns}/info/preparation", get(preparation_page))
         .route("/{ns}/info/preparation/state", get(preparation_state))
         .route("/{ns}/info/ad", get(ad_page))
+        .route("/{ns}/info/overview", get(overview_page))
+        .route("/{ns}/health", get(overview_health))
         .route("/{ns}/pairing-code", post(pairing_code_create))
         .route("/pair/{code}", get(pairing_resolve))
         .route("/{ns}/slaves", get(slaves_list))
@@ -712,15 +719,16 @@ async fn monitor_device_state(
             build_monitor_state(namespace, court_id)
         }
         // Nur auf Ziele umleiten, die der Relay auch WIRKLICH ausliefert —
-        // heute „In Vorbereitung" und „Werbung" (Rotation). Würden wir pauschal
-        // `redirect_path()` nehmen, landete ein Übersicht-/Sieger-/Kombi-Monitor
-        // (oder Werbe-Einzelbild, das dateinamenbasiert ist und der Relay per
-        // Index nicht auflöst) im Cloud auf einer 404-Seite ohne JS und damit
-        // ohne Selbstheilung (schlimmer als die Kopplungs-Seite, die
-        // weiterpollt). Übersicht folgt, sobald der Relay ihre Seite serviert.
+        // Court-Übersicht, „In Vorbereitung" und „Werbung" (Rotation). Würden
+        // wir pauschal `redirect_path()` nehmen, landete ein Sieger-/Kombi-
+        // Monitor (oder Werbe-Einzelbild, das dateinamenbasiert ist und der
+        // Relay per Index nicht auflöst) im Cloud auf einer 404-Seite ohne JS
+        // und damit ohne Selbstheilung (schlimmer als die Kopplungs-Seite, die
+        // weiterpollt).
         Some(
             t @ (relay_proto::MonitorTarget::InfoPreparation
-            | relay_proto::MonitorTarget::AdRotation),
+            | relay_proto::MonitorTarget::AdRotation
+            | relay_proto::MonitorTarget::InfoOverview { .. }),
         ) => {
             let mut s = unassigned_state(&q.device);
             s.unassigned = false;
@@ -1250,6 +1258,81 @@ async fn ad_page(Path(ns): Path<String>) -> impl IntoResponse {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     ([(header::CACHE_CONTROL, "no-store")], Html(AD_HTML)).into_response()
+}
+
+/// Die Court-Übersicht im Cloud-Modus (HTML). Dieselbe Datei wie im LAN; sie
+/// holt ihre Daten über `<BASE>health`, hier `/{ns}/health`.
+async fn overview_page(Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Html(OVERVIEW_HTML)).into_response()
+}
+
+/// Datenquelle der Cloud-Court-Übersicht (`overview.html` pollt `<BASE>health`).
+/// Baut je Feld die Anzeige-Form aus dem, was der Host schon zum Relay pusht:
+/// Feldliste (`courts`), aktuelles Match (`court_matches`), Satzstand
+/// (`court_scores`), 1.-Aufruf-Zeit (`court_on_court_since`) und die
+/// Aufruf-Timer-Schwellen. Aufschlag/Verletzung/Turnierleitungs-Ruf stehen im
+/// Cloud (noch) nicht zur Verfügung — sie werden konservativ weggelassen; die
+/// Seite degradiert sauber (kein Aufschlag-Highlight, keine Badges), der Kern
+/// (Feld × Spiel × Satzstand × Aufruf-Uhr) ist vollständig.
+async fn overview_health(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let (courts, call_timer) = {
+        let map = broker.namespaces.lock().await;
+        match map.get(&ns) {
+            Some(n) => {
+                let names = |team: &[relay_proto::PlayerBrief]| {
+                    team.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+                };
+                let courts: Vec<serde_json::Value> = n
+                    .courts
+                    .iter()
+                    .map(|c| {
+                        let m = n.court_matches.get(&c.id);
+                        let sets = n.court_scores.get(&c.id).cloned().unwrap_or_default();
+                        serde_json::json!({
+                            "court_id": c.id,
+                            "court": c.label,
+                            "location": c.hall,
+                            "match_id": m.map(|m| m.match_id).unwrap_or(0),
+                            "match_name": m.map(|m| m.event_label.clone()).unwrap_or_default(),
+                            "team1": m.map(|m| names(&m.team_a)).unwrap_or_default(),
+                            "team2": m.map(|m| names(&m.team_b)).unwrap_or_default(),
+                            "sets": sets,
+                            "on_court_since_ms": n.court_on_court_since.get(&c.id).copied(),
+                            // Im Cloud (noch) nicht verfügbar → weggelassen/false.
+                            "serving_team": serde_json::Value::Null,
+                            "injury": false,
+                            "official_call": false,
+                        })
+                    })
+                    .collect();
+                let ct = n
+                    .monitor
+                    .as_ref()
+                    .map(|mo| mo.call_timer.clone())
+                    .unwrap_or_default();
+                (courts, ct)
+            }
+            None => (Vec::new(), relay_proto::CallTimerView::default()),
+        }
+    };
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({
+            "courts": courts,
+            "serverNowMs": now_ms(),
+            "callTimer": call_timer,
+        })),
+    )
+        .into_response()
 }
 
 /// Der „In Vorbereitung"-Info-Monitor im Cloud-Modus (HTML). Dieselbe Datei wie
@@ -3653,11 +3736,16 @@ mod tests {
         targets.insert("pi-court".to_string(), relay_proto::MonitorTarget::court(5));
         // Werbung (Rotation) wird ebenfalls serviert → leitet um.
         targets.insert("pi-ad".to_string(), relay_proto::MonitorTarget::AdRotation);
-        // Noch nicht vom Relay servierte Sicht: darf NICHT umleiten (sonst
-        // 404-Sackgasse) → bleibt „unzugewiesen", pollt weiter, heilt sich.
+        // Court-Übersicht wird jetzt ebenfalls serviert → leitet um.
         targets.insert(
             "pi-overview".to_string(),
             relay_proto::MonitorTarget::InfoOverview { hall: None },
+        );
+        // Siegerehrung: (noch) nicht servierte Sicht → darf NICHT umleiten (sonst
+        // 404-Sackgasse) → bleibt „unzugewiesen", pollt weiter, heilt sich.
+        targets.insert(
+            "pi-winners".to_string(),
+            relay_proto::MonitorTarget::InfoWinners { rank: None },
         );
         let control = relay_proto::MonitorControl {
             assignments: std::collections::HashMap::new(),
@@ -3703,11 +3791,94 @@ mod tests {
         assert_eq!(court["courtId"], serde_json::json!(5));
         assert!(court["redirectTo"].is_null());
 
-        // Noch nicht serviertes Ziel (Übersicht) → KEIN Redirect, unassigned
-        // (Selbstheilung), statt 404-Sackgasse.
+        // Court-Übersicht → Redirect auf die Übersichts-Seite.
         let ov = read_state("pi-overview").await;
-        assert!(ov["redirectTo"].is_null());
-        assert_eq!(ov["unassigned"], serde_json::json!(true));
+        assert_eq!(ov["redirectTo"], serde_json::json!("/info/overview"));
+        assert_eq!(ov["unassigned"], serde_json::json!(false));
+
+        // Noch nicht serviertes Ziel (Siegerehrung) → KEIN Redirect, unassigned
+        // (Selbstheilung), statt 404-Sackgasse.
+        let win = read_state("pi-winners").await;
+        assert!(win["redirectTo"].is_null());
+        assert_eq!(win["unassigned"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn cloud_overview_health_lists_courts_with_match_and_score() {
+        // Die Cloud-Court-Übersicht (`overview.html`) pollt `/{ns}/health`; der
+        // Relay baut daraus je Feld die Anzeige-Form aus dem, was der Host schon
+        // pusht (Feldliste, Match, Satzstand, 1.-Aufruf-Zeit).
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![
+                relay_proto::CourtBrief {
+                    id: 101,
+                    label: "1".into(),
+                    hall: "Halle 1".into(),
+                },
+                // Feld ohne Match → leere Anzeige, aber gelistet.
+                relay_proto::CourtBrief {
+                    id: 102,
+                    label: "2".into(),
+                    hall: "Halle 1".into(),
+                },
+            ];
+            ns.court_matches.insert(101, brief(7));
+            ns.court_scores.insert(101, vec![SetAb { a: 21, b: 15 }]);
+            ns.court_on_court_since.insert(101, 1000);
+            ns.monitor = Some(MonitorBundle {
+                config: MonitorConfig::default(),
+                tournament_name: String::new(),
+                ads: Vec::new(),
+                call_timer: relay_proto::CallTimerView {
+                    enabled: true,
+                    second_call_minutes: 2.0,
+                    third_call_minutes: 5.0,
+                },
+                logo: None,
+            });
+        }
+        register_host(&broker, NS, &host).await;
+
+        let resp = overview_health(State(broker.clone()), Path(NS.into()))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 8192).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        let courts = v["courts"].as_array().unwrap();
+        assert_eq!(courts.len(), 2);
+        // Feld mit Match: Kernfelder vollständig.
+        let c0 = &courts[0];
+        assert_eq!(c0["court_id"], serde_json::json!(101));
+        assert_eq!(c0["court"], serde_json::json!("1"));
+        assert_eq!(c0["location"], serde_json::json!("Halle 1"));
+        assert_eq!(c0["match_id"], serde_json::json!(7));
+        assert_eq!(c0["team1"], serde_json::json!(["Anna"]));
+        assert_eq!(c0["sets"][0]["a"], serde_json::json!(21));
+        assert_eq!(c0["on_court_since_ms"], serde_json::json!(1000));
+        // Im Cloud (noch) nicht verfügbar → konservativ weggelassen.
+        assert!(c0["serving_team"].is_null());
+        assert_eq!(c0["injury"], serde_json::json!(false));
+        // Feld ohne Match: gelistet, aber leer.
+        let c1 = &courts[1];
+        assert_eq!(c1["court_id"], serde_json::json!(102));
+        assert_eq!(c1["match_id"], serde_json::json!(0));
+        assert!(c1["on_court_since_ms"].is_null());
+        // Aufruf-Timer in camelCase, wie die LAN-`/health` ihn liefert.
+        assert_eq!(v["callTimer"]["enabled"], serde_json::json!(true));
+        assert_eq!(v["callTimer"]["secondCallMinutes"], serde_json::json!(2.0));
+
+        // Unbekannter Namespace → 404, kein Datenleck.
+        let miss = overview_health(State(broker.clone()), Path("nope".into()))
+            .await
+            .into_response();
+        assert_eq!(miss.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

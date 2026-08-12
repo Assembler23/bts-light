@@ -1,6 +1,8 @@
 # Cloud-Info-Monitore — Übersicht/Vorbereitung/Werbung übers Relay
 
-**Status:** In Umsetzung. Ziel-Version-Reihe ab v0.9.191.
+**Status:** Umgesetzt für Vorbereitung (v0.9.191), Werbung (v0.9.192) und
+Court-Übersicht (v0.9.193). Siegerehrung bleibt LAN-only (kein Ergebnis-Daten
+im Relay). Ziel-Version-Reihe ab v0.9.191.
 
 ## Problem
 
@@ -45,10 +47,15 @@ LAN-only; im Cloud fällt sie sauber auf „unassigned" zurück, kein 404).
   `/{ns}/info/ad/state` mit vollem `ads`-Array (Indizes, Rotation) zusätzlich
   zu `barAds`/`hasLogo`. Redirect-Gate um `AdRotation` erweitert. Werbe-
   Einzelbild (`AdSingle`, dateinamenbasiert) bleibt LAN-only.
-- **Übersicht**: Relay serviert `/{ns}/info/overview` (HTML) +
-  `/{ns}/info/overview/state` (aus `courts`+`court_matches`+`court_scores`).
-  `overview.html` von `/health` auf diesen dedizierten State umstellen (LAN
-  liefert ihn ebenso), damit LAN und Cloud dieselbe Quelle nutzen.
+- **Übersicht** ✅ (v0.9.193): Relay serviert `/{ns}/info/overview` (HTML) +
+  `/{ns}/health` — denselben Endpunkt, den `overview.html` ohnehin pollt (kein
+  eigener `/info/overview/state` nötig, LAN und Cloud teilen die Vertragsform).
+  Der Relay baut je Feld die Anzeige-Form aus `courts` (CourtBrief) +
+  `court_matches` + `court_scores` + `court_on_court_since` + `monitor.call_timer`.
+  **Bewusste Degradation im Cloud:** Aufschlag (`serving_team`), Verletzung und
+  Turnierleitungs-Ruf stehen im Relay nicht zur Verfügung → konservativ
+  weggelassen (kein Highlight/Badge); der Kern (Feld × Spiel × Satzstand ×
+  Aufruf-Uhr) ist vollständig. Redirect-Gate um `InfoOverview` erweitert.
 
 ### Reihenfolge
 

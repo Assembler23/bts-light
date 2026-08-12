@@ -142,7 +142,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Status (Gerät)         | `/monitor/state?device=`       | `/{ns}/monitor/state?device=`  |
 | Anzeige (fest)         | `/court/{label}/display`       | `/{ns}/court/{label}/display`  |
 | Status (fest)          | `/court/{label}/state`         | `/{ns}/court/{label}/state`    |
-| **Court-Übersicht**    | `/info/overview`               | (LAN-only erstmal)             |
+| **Court-Übersicht**    | `/info/overview`               | `/{ns}/info/overview`          |
+| Übersichts-Daten       | `/health`                      | `/{ns}/health`                 |
 | **In Vorbereitung**    | `/info/preparation`            | `/{ns}/info/preparation`       |
 | Vorbereitungs-Daten    | `/info/preparation/state`      | `/{ns}/info/preparation/state` |
 | **Werbung (Rotation)** | `/info/ad`                     | `/{ns}/info/ad`                |
@@ -209,9 +210,11 @@ synchronen Pi-Uhr driftet. Gated durch die `call_timer`-Einstellung
   Wartephase** (aufgerufen, aber noch nicht am Zählen; `hasStarted()` prüft
   Punkte/Aufschläger). Sobald das Spiel zählt, verschwindet der Chip, damit
   ein Board voller laufender Spiele nicht komplett rot wird. Datenquelle ist
-  der `/health`-Poll (`courts` + `serverNowMs` + `callTimer`); die
-  `overview.html` ist LAN-seitig (der Relay serviert nur die Einzelanzeige,
-  die die Aufruf-Uhr bereits selbst zeigt).
+  der `/health`-Poll (`courts` + `serverNowMs` + `callTimer`) — im **Cloud**
+  (ab v0.9.193) derselbe Endpunkt `/{ns}/health`, den der Relay aus
+  `courts`/`court_matches`/`court_scores`/`court_on_court_since` baut. Bewusst
+  weggelassen im Cloud: Aufschlag-Highlight, Verletzungs-/TL-Badges (stehen im
+  Relay nicht bereit); Feld × Spiel × Satzstand × Aufruf-Uhr sind vollständig.
 
 ## Entschiedenes Match (kein Geister-Satz)
 

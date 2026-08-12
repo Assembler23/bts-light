@@ -212,6 +212,12 @@ main {
   // ── Konfiguration aus URL-Parametern ────────────────────────────────
   var params = new URLSearchParams(location.search);
 
+  // Basis-Pfad aus dem eigenen URL: LAN "/", Cloud "/bts-relay/{ns}/". Die
+  // Seite wird unter "<BASE>info/overview" ausgeliefert; alle Fetches/Flaggen/
+  // Umleitungen laufen darüber, damit sie im Cloud unter dem Namespace-Präfix
+  // landen (kein absolutes "/…" → 404).
+  var BASE = location.pathname.replace(/info\/overview\/?$/, '');
+
   // Rotation: ?rotate=0|90|180|270 — body bekommt CSS-Klasse rotate-<n>.
   // Damit lässt sich ein Pivot-Monitor ohne OS-Eingriff drehen.
   var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
@@ -247,7 +253,7 @@ main {
             return '[' + new Date(e.t).toISOString() + '] ' + e.level + ' ' + e.event
               + (e.d !== undefined ? ' ' + JSON.stringify(e.d) : '');
           }).join('\n') + '\n';
-      fetch('/pi-log?device=' + encodeURIComponent(mlogDevice()), {
+      fetch(BASE + 'pi-log?device=' + encodeURIComponent(mlogDevice()), {
         method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: body, keepalive: true,
       }).catch(function () {});
     } catch (x) {}
@@ -318,7 +324,7 @@ main {
     img.className = 'flag';
     var code = (nat || '').trim().toUpperCase();
     if (code) {
-      img.src = '/flags/' + encodeURIComponent(code) + '.svg';
+      img.src = BASE + 'flags/' + encodeURIComponent(code) + '.svg';
       img.onerror = function () { img.classList.add('hidden'); };
     } else {
       img.classList.add('hidden');
@@ -580,7 +586,7 @@ main {
   var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
@@ -588,10 +594,11 @@ main {
         // Reihenfolge wie monitor.html: navigieren wir weg, wird KEIN Befehl
         // mehr ausgeführt (sonst würde ein gleichzeitiges „Neu laden" die
         // Navigation abbrechen). Erst Reassignment prüfen + früh raus …
-        if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
+        if (s.redirectTo && !currentUrlMatches(BASE + String(s.redirectTo).replace(/^\//, ''))) {
           noRedirectPolls = 0;
-          var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
-          navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
+          var dest = BASE + String(s.redirectTo).replace(/^\//, '');
+          var sep = dest.indexOf('?') >= 0 ? '&' : '?';
+          navigateWithRotate(dest + sep + 'device=' + encodeURIComponent(deviceId));
           return;
         }
         if (!s.redirectTo) {
@@ -600,7 +607,7 @@ main {
           if (++noRedirectPolls < DEASSIGN_AFTER) return;
           mlog('info', 'deassign_to_monitor', { polls: noRedirectPolls });
           uploadMonitorLog();
-          navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
+          navigateWithRotate(BASE + 'monitor?device=' + encodeURIComponent(deviceId));
           return;
         }
         noRedirectPolls = 0;
@@ -659,8 +666,8 @@ main {
     // Geraete-ID als Heartbeat-Markierung (v0.9.22) — Server zaehlt
     // den /health-Poll dann als Online-Lebenszeichen.
     return deviceId
-      ? '/health?device=' + encodeURIComponent(deviceId)
-      : '/health';
+      ? BASE + 'health?device=' + encodeURIComponent(deviceId)
+      : BASE + 'health';
   }
   function tick() {
     fetch(healthUrl(), { cache: 'no-store' })
@@ -689,14 +696,14 @@ main {
     if (!box) return;
     function paint(st) {
       var h = '';
-      if (st && st.hasLogo) h += '<img src="/info/logo" alt="" onerror="this.remove()">';
+      if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
       ((st && st.barAds) || []).forEach(function (f) {
-        h += '<img src="/ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
+        h += '<img src="' + BASE + 'ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
       });
       box.innerHTML = h;
     }
     function poll() {
-      fetch('/info/ad/state', { cache: 'no-store' })
+      fetch(BASE + 'info/ad/state', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(paint).catch(function () {});
     }
