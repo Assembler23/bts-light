@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.191
+
+- **Cloud-Monitore: „In Vorbereitung" funktioniert jetzt (+ Fundament für die
+  übrigen Info-Sichten).** Wies man einem Court-Monitor im Cloud-Modus eine
+  Nicht-Court-Sicht zu, blieb er auf dem bts-light-Logo hängen — der Relay
+  transportierte nur die Feld-Zuweisung (CourtID) und verwarf alle anderen
+  Ziele; die Info-Seiten waren zudem LAN-gebaut (absolute Pfade). Neu: das
+  **vollständige Ziel** reist zum Relay (`MonitorControl.targets`), der Relay
+  leitet den Monitor auf die passende Seite um, und die Seiten lösen ihren
+  Basis-Pfad selbst auf (LAN wie Cloud). **„In Vorbereitung"** liefert der
+  Relay jetzt komplett aus (Seite + Daten). **Werbung** und **Court-Übersicht**
+  folgen als nächste Schritte; **Siegerehrung** bleibt vorerst LAN-only (dem
+  Relay fehlen die Ergebnisdaten). Details:
+  [features/cloud-info-monitor.md](features/cloud-info-monitor.md).
+
 ## v0.9.190
 
 - **Sponsor-Leiste (Phase 2): auch im Cloud-Modus.** Die kleine Werbung neben

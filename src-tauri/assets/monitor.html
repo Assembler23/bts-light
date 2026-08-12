@@ -959,11 +959,17 @@
     // Vor handleCommand pruefen (Code-Review v0.9.19 HIGH): ein anstehender
     // reload-/identify-Command darf nicht auf einer Seite zuenden, die im
     // gleichen Tick wegnavigiert — sonst zerstoert der reload den Wechsel.
-    if (state.redirectTo && typeof state.redirectTo === "string"
-        && location.pathname !== state.redirectTo) {
-      var sep = state.redirectTo.indexOf("?") >= 0 ? "&" : "?";
-      location.href = state.redirectTo + sep + "device=" + encodeURIComponent(DEVICE_ID);
-      return;
+    if (state.redirectTo && typeof state.redirectTo === "string") {
+      // BASE-relativ auflösen: im LAN ist BASE "/", im Cloud
+      // "/bts-relay/{ns}/". Der Server liefert `redirectTo` als absoluten
+      // Info-Pfad ("/info/preparation") — den hängen wir hinter BASE, damit die
+      // Umleitung im Cloud unter dem Namespace-Präfix landet (sonst 404).
+      var dest = BASE + state.redirectTo.replace(/^\//, "");
+      if (location.pathname !== dest) {
+        var sep = dest.indexOf("?") >= 0 ? "&" : "?";
+        location.href = dest + sep + "device=" + encodeURIComponent(DEVICE_ID);
+        return;
+      }
     }
 
     if (MODE === "device") handleCommand(state.command);

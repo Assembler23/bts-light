@@ -136,6 +136,12 @@ main {
 
   var params = new URLSearchParams(location.search);
 
+  // Basis-Pfad aus dem eigenen URL abgeleitet: LAN "/", Cloud
+  // "/bts-relay/{ns}/". Die Seite wird unter "<BASE>info/preparation"
+  // ausgeliefert; alle Fetches/Umleitungen laufen darüber, damit sie im Cloud
+  // unter dem Namespace-Präfix landen (kein absolutes "/info/…" → 404).
+  var BASE = location.pathname.replace(/info\/preparation\/?$/, '');
+
   // Pivot-Rotation per URL-Parameter.
   var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
   if (rotate === '90' || rotate === '180' || rotate === '270') {
@@ -277,17 +283,22 @@ main {
     }
     location.href = href;
   }
+  // Ziel-Pfad des Servers ("/info/…") BASE-relativ auflösen (Cloud-Präfix).
+  function resolveDest(redirectTo) { return BASE + String(redirectTo).replace(/^\//, ''); }
   function checkReassignment() {
     if (!deviceId) return;
-    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
-        if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
-          var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
-          navigateWithRotate(s.redirectTo + sep + 'device=' + encodeURIComponent(deviceId));
-        } else if (!s.redirectTo) {
-          navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
+        if (s.redirectTo) {
+          var dest = resolveDest(s.redirectTo);
+          if (!currentUrlMatches(dest)) {
+            var sep = dest.indexOf('?') >= 0 ? '&' : '?';
+            navigateWithRotate(dest + sep + 'device=' + encodeURIComponent(deviceId));
+          }
+        } else {
+          navigateWithRotate(BASE + 'monitor?device=' + encodeURIComponent(deviceId));
         }
       })
       .catch(function () {});
@@ -297,8 +308,8 @@ main {
   function stateUrl() {
     // Geraete-ID als Heartbeat-Markierung (v0.9.22).
     return deviceId
-      ? '/info/preparation/state?device=' + encodeURIComponent(deviceId)
-      : '/info/preparation/state';
+      ? BASE + 'info/preparation/state?device=' + encodeURIComponent(deviceId)
+      : BASE + 'info/preparation/state';
   }
   function tick() {
     fetch(stateUrl(), { cache: 'no-store' })
@@ -325,14 +336,14 @@ main {
     if (!box) return;
     function paint(st) {
       var h = '';
-      if (st && st.hasLogo) h += '<img src="/info/logo" alt="" onerror="this.remove()">';
+      if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
       ((st && st.barAds) || []).forEach(function (f) {
-        h += '<img src="/ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
+        h += '<img src="' + BASE + 'ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
       });
       box.innerHTML = h;
     }
     function poll() {
-      fetch('/info/ad/state', { cache: 'no-store' })
+      fetch(BASE + 'info/ad/state', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(paint).catch(function () {});
     }
