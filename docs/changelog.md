@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.179
+
+- **Check-In-Liste zeigt nur noch Hauptfeld-Meldungen.** Reservisten,
+  Ausgeschlossene und reine Qualifikations-Teilnehmer erscheinen nicht mehr
+  auf der Check-In-Seite; wer sich qualifiziert, taucht automatisch wieder
+  auf. Vor der Auslosung ändert sich nichts — unplatzierte Meldungen bleiben
+  vollständig. Gefiltert wird über den BTP-Stage-Typ, umbenannte Stages
+  stören also nicht.
+- **Abgemeldete in der Turnierleitungs-Sicht.** Wer in badhub als abgemeldet
+  geführt wird, erscheint in der Check-In-Übersicht der Turnierleitung
+  durchgestrichen, zählt nicht mehr in den Fehlt-Zählern und fällt aus
+  Fehlt-Liste und Fehlt-Ansage — niemand ruft mehr Spieler aus, die längst
+  abgesagt haben.
+
 ## v0.9.178
 
 Fünf Ausbauten der Turnierleitungs-Oberfläche im Browser (TL-Web), alle am
