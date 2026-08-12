@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.193
+
+- **Cloud-Monitore: „Court-Übersicht" funktioniert jetzt.** Als letzter Schritt
+  der Cloud-Info-Reihe (nach „In Vorbereitung" v0.9.191 und „Werbung" v0.9.192)
+  liefert der Relay nun auch die **Feld-Übersicht** im Cloud aus: `overview.html`
+  ist BASE-fähig, der Relay serviert `/{ns}/info/overview` und ihre Daten über
+  `/{ns}/health` — denselben Endpunkt, den die Seite ohnehin pollt (LAN und
+  Cloud teilen die Vertragsform). Weist man einem Cloud-Monitor „Court-Übersicht"
+  zu, zeigt er jetzt alle Felder mit Spiel, Paarung, Satzstand und Aufruf-Uhr.
+  Bewusst **weggelassen im Cloud**, weil im Relay nicht vorhanden: Aufschlag-
+  Highlight sowie Verletzungs-/TL-Badges. **Siegerehrung** bleibt LAN-only (dem
+  Relay fehlen die Ergebnisdaten). Damit ist die Cloud-Info-Monitor-Reihe
+  abgeschlossen.
+
 ## v0.9.192
 
 - **Cloud-Monitore: „Werbung" (Rotation) funktioniert jetzt.** Nach „In
