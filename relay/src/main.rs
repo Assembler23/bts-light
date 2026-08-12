@@ -4390,7 +4390,7 @@ mod tests {
         assert_eq!(cands.len(), 2);
         // Jeder Kandidat ist „aufgerufen" (call gesetzt) und trägt die Halle.
         assert_eq!(cands[0]["call"]["hall"], serde_json::json!("Halle 1"));
-        assert!(cands[0]["team1"].as_array().unwrap().len() >= 1);
+        assert!(!cands[0]["team1"].as_array().unwrap().is_empty());
 
         // Unbekannter Namespace → 404 (die Seite zeigt dann „keine Verbindung").
         let miss = preparation_state(State(broker.clone()), Path("nope".into()))
