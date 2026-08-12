@@ -540,10 +540,23 @@ main {
     return Math.min(4, Math.ceil(Math.sqrt(n)));
   }
 
-  // ── Poll-Schleife ──────────────────────────────────────────────────
-  var POLL_OK_MS = 5000;
-  var POLL_FAIL_MS = 8000;
+  // ── Poll-Schleife (A1: Push-getrieben, Poll als Fallback) ────────────
+  // Der Voll-Stand kommt IMMER über denselben `fetch(healthUrl())` – egal ob
+  // ein Nudge ihn auslöst oder der Fallback-Poll. Eine Datenquelle, ein
+  // Renderpfad → kein Flackern. Der Monitor-WS-Nudge (irgendein Feld hat sich
+  // geändert) löst den Fetch niedrig-latent aus; der 250-ms-Poll ist nur noch
+  // der Stille-/Ausfall-Fallback und pausiert, solange frische Nudges kommen.
+  var FALLBACK_MS = 250;      // Fallback-Poll-Takt (früher POLL_OK_MS = 5000)
+  var FAIL_MS = 2000;         // nach Fehler kurz ruhiger (früher POLL_FAIL_MS = 8000)
+  var PUSH_FRESH_MS = 1200;   // so lange nach dem letzten Nudge gilt Push als „frisch"
+  var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
   var errorCount = 0;
+  var lastNudgeAt = 0;
+  var mwsOpen = false;
+  var fetching = false, refetchQueued = false;
+  var backoffUntil = 0;                 // nach einem Fehler kurz zurückhalten
+  var coalesceTimer = null, lastFetchStart = 0;
+  var lastSeqByCourt = {};              // lastSeq-Guard je Feld
 
   function showOffline(show) {
     var el = document.getElementById('offline');
@@ -669,24 +682,53 @@ main {
       ? BASE + 'health?device=' + encodeURIComponent(deviceId)
       : BASE + 'health';
   }
-  function tick() {
+  // Der eigentliche Health-Fetch (ohne eigene Terminierung). In-Flight-Schutz:
+  // Nudge und Fallback teilen sich diesen Fetch; läuft schon einer, wird EIN
+  // Nachschlag gemerkt, damit am Ende sicher der neueste Stand geholt wird.
+  function pollHealth() {
+    if (fetching) { refetchQueued = true; return; }
+    fetching = true;
     fetch(healthUrl(), { cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function (data) {
-        errorCount = 0; showOffline(false);
+        errorCount = 0; backoffUntil = 0; showOffline(false);
         render(data);
         // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —
         // erstmal leer lassen, kein Drama für die Funktionalität.
-        setTimeout(tick, POLL_OK_MS);
+        pollDone();
       })
       .catch(function () {
         errorCount++;
         if (errorCount >= 2) showOffline(true);
-        setTimeout(tick, POLL_FAIL_MS);
+        backoffUntil = Date.now() + FAIL_MS; // moderat: nach Fehler kurz warten
+        pollDone();
       });
+  }
+  function pollDone() {
+    fetching = false;
+    if (refetchQueued) { refetchQueued = false; requestPoll(); }
+  }
+  // Fetch coalescen: höchstens ~1 Fetch je COALESCE_MS. Nach einem Fehler bis
+  // backoffUntil zurückhalten (Nudge wie Fallback), damit ein down-Server nicht
+  // im 250-ms-Takt bombardiert wird.
+  function requestPoll() {
+    if (Date.now() < backoffUntil) return;
+    var now = Date.now();
+    var wait = COALESCE_MS - (now - lastFetchStart);
+    if (wait <= 0) { lastFetchStart = now; pollHealth(); }
+    else if (!coalesceTimer) {
+      coalesceTimer = setTimeout(function () {
+        coalesceTimer = null; lastFetchStart = Date.now(); pollHealth();
+      }, wait);
+    }
+  }
+  // Push gilt als „frisch", solange die WS offen ist UND kürzlich ein Nudge
+  // (irgendein Feld) kam. Dann pausiert der Fallback-Poll.
+  function pushHealthy() {
+    return mwsOpen && (Date.now() - lastNudgeAt) < PUSH_FRESH_MS;
   }
   // Sponsor-Leiste (Turnierlogo + als „in Leiste" markierte Werbebilder) —
   // unabhängig vom Health-Poll, selten aktualisiert (Bilder ändern sich kaum).
@@ -710,7 +752,63 @@ main {
     poll();
     setInterval(poll, 60000);
   })();
-  tick();
+
+  // ── Poll-Fallback + Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────
+  requestPoll();
+  // Fallback-Takt: nur pollen, wenn KEIN frischer Push da ist. Solange Nudges
+  // (irgendein Feld) kommen, ist der Poll pausiert; nach >~1,2 s Stille ODER
+  // bei WS-Abriss (mwsOpen=false) läuft er sofort wieder.
+  setInterval(function () { if (!pushHealthy()) requestPoll(); }, FALLBACK_MS);
+
+  // Der Server schickt über den Monitor-WS nur „Feld X geändert, seq N" (keine
+  // Score-Daten); wir lösen daraufhin den bestehenden Health-Fetch aus. Die
+  // Übersicht zeigt ALLE Felder → ohne ?court abonnieren (Nudges aller Felder).
+  // WS-URL wie beim Tablet aus BASE + location.protocol (ws/wss durch den Proxy):
+  //   LAN   ws://host/monitor-ws
+  //   Cloud wss://badhub.de/bts-relay/{ns}/monitor-ws
+  function monitorWsUrl() {
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    return proto + location.host + BASE + 'monitor-ws';
+  }
+  var mws = null;
+  var mwsBackoff = 1000, MWS_BACKOFF_MAX = 15000, mwsNextAt = 0;
+  function mwsConnect() {
+    if (mws && mws.readyState !== WebSocket.CLOSED) return; // verbindet/verbunden
+    try { mws = new WebSocket(monitorWsUrl()); }
+    catch (e) { mwsSchedule(); return; }
+    mws.onopen = function () { mwsOpen = true; mwsBackoff = 1000; mlog('info', 'mws_open'); };
+    mws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (typeof msg.court !== 'number' || typeof msg.seq !== 'number') return;
+      // lastSeq-Guard je Feld: veraltete/doppelte Nudges (seq ≤ zuletzt) weg.
+      var prev = lastSeqByCourt[msg.court] || 0;
+      if (msg.seq <= prev) return;
+      lastSeqByCourt[msg.court] = msg.seq;
+      // Jedes gültige Nudge beweist: der Push-Kanal lebt → Poll pausieren und
+      // den Voll-Stand niedrig-latent holen (coalesct).
+      lastNudgeAt = Date.now();
+      requestPoll();
+    };
+    mws.onclose = function () { mwsOpen = false; mwsSchedule(); };
+    mws.onerror = function () { /* onclose folgt und plant den Reconnect */ };
+  }
+  function mwsSchedule() {
+    // Exponentielles Backoff – schont im Cloud-Modus den Relay, wenn noch kein
+    // Host verbunden ist (Namespace existiert dann nicht → sofortiger Close).
+    // Der Poll-Fallback überbrückt die Zeit bis zum Host.
+    mwsNextAt = Date.now() + mwsBackoff;
+    mwsBackoff = Math.min(MWS_BACKOFF_MAX, mwsBackoff * 2);
+  }
+  // Watchdog: einziger Reconnect-Treiber (Muster aus tablet.html). Verbindet
+  // neu, sobald der Socket fehlt/geschlossen ist und das Backoff-Fenster
+  // abgelaufen ist. KEIN Force-Close bei Stille – die deckt der Poll-Fallback ab.
+  setInterval(function () {
+    if ((!mws || mws.readyState === WebSocket.CLOSED) && Date.now() >= mwsNextAt) {
+      mwsConnect();
+    }
+  }, 2000);
+  mwsConnect();
 })();
 </script>
 </body>

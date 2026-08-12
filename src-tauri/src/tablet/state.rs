@@ -387,7 +387,31 @@ pub struct TabletState {
     /// das hieran und schreibt die neuere Korrektur sofort erneut
     /// (Selbstheilung statt stillem Überschreiben).
     last_direct_btp_write: RwLock<HashMap<i64, (crate::btp::proto::MatchUpdate, u64)>>,
+    /// Court-Monitor-Nudge-Abonnenten (A1, ADR 0016): CourtID → Sende-Enden der
+    /// Monitor-WS-Verbindungen, die **genau dieses Feld** beobachten (ein
+    /// Court-Monitor, `monitor.html`). Bei einer Änderung des Felds bekommt
+    /// jeder Eintrag ein winziges „Feld geändert, seq N"-Signal; die Anzeige
+    /// holt daraufhin den Vollstand über ihre bestehende Poll-Route (eine
+    /// Datenquelle, kein Flackern).
+    monitor_subs: RwLock<HashMap<i64, Vec<MonitorNudgeTx>>>,
+    /// Nudge-Abonnenten **ohne** Feld-Filter: die Feld-Übersicht
+    /// (`overview.html`) will Signale ALLER Felder. Jeder `notify_monitor`
+    /// weckt zusätzlich diese Liste.
+    monitor_subs_all: RwLock<Vec<MonitorNudgeTx>>,
+    /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
+    /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
+    monitor_seq: RwLock<HashMap<i64, u64>>,
 }
+
+/// Sende-Ende eines Monitor-Nudge-Kanals (A1, ADR 0016). Trägt den fertig
+/// serialisierten JSON-Nudge `{"court":<i64>,"seq":<u64>}`; der WS-Handler
+/// reicht ihn 1:1 auf seinen Socket. Unbounded, weil `notify_monitor` NIE
+/// blockieren darf (es läuft unter dem `record_score`-Lock).
+pub type MonitorNudgeTx = tokio::sync::mpsc::UnboundedSender<String>;
+/// Empfangs-Ende eines Monitor-Nudge-Kanals; der WS-Handler leert es auf
+/// seinen Socket. Fällt die Verbindung weg, wird das `Rx` fallengelassen und
+/// der zugehörige `Tx` beim nächsten `notify_monitor` ausgesiebt.
+pub type MonitorNudgeRx = tokio::sync::mpsc::UnboundedReceiver<String>;
 
 /// Ein fehlgeschlagener BTP-Ergebnis-Write in der Nachschub-Queue.
 #[derive(Debug, Clone)]
@@ -934,6 +958,9 @@ impl TabletState {
         }
         // Stand auf Platte sichern, damit ein App-Neustart ihn behält.
         self.persist_scores();
+        // Niedrig-latente Anzeige (A1, ADR 0016): Court-Monitor + Feld-
+        // Übersicht sofort anstoßen, statt auf ihren nächsten Poll zu warten.
+        self.notify_monitor(court_id);
     }
 
     /// Pfad der Live-Score-Datei setzen (beim Start). Aktiviert die Persistenz.
@@ -1032,6 +1059,63 @@ impl TabletState {
         });
         session.injury = injury;
         session.official = official;
+        // Meldungs-Zustand (Pause/Verletzung) ist am Court-Monitor sichtbar →
+        // Anzeige anstoßen.
+        self.notify_monitor(court_id);
+    }
+
+    /// Meldet einen Court-Monitor als Nudge-Abonnenten an (A1, ADR 0016).
+    /// `court = Some(id)` → nur Nudges dieses Felds (Court-Monitor
+    /// `monitor.html`); `court = None` → Nudges ALLER Felder (Feld-Übersicht
+    /// `overview.html`). Liefert das Empfangs-Ende, das der WS-Handler auf
+    /// seinen Socket leert; fällt es weg, siebt der nächste `notify_monitor`
+    /// den toten Sender aus.
+    pub fn subscribe_monitor(&self, court: Option<i64>) -> MonitorNudgeRx {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        match court {
+            Some(c) => self
+                .monitor_subs
+                .write()
+                .unwrap()
+                .entry(c)
+                .or_default()
+                .push(tx),
+            None => self.monitor_subs_all.write().unwrap().push(tx),
+        }
+        rx
+    }
+
+    /// Weckt die Monitor-Abonnenten eines Felds (A1, ADR 0016): erhöht die
+    /// pro-Court-Sequenz und schickt den winzigen Nudge
+    /// `{"court":<id>,"seq":<n>}` an die Abonnenten GENAU dieses Felds UND an
+    /// die „alle Felder"-Abonnenten (Feld-Übersicht). Tote Sender (Anzeige
+    /// weg) werden dabei ausgesiebt. Kein `.await`, kein Netz — der Kanal ist
+    /// unbounded, `send` kehrt sofort zurück; das Halten des `record_score`-
+    /// Locks ist damit unkritisch.
+    pub fn notify_monitor(&self, court_id: i64) {
+        let seq = {
+            let mut seqs = self.monitor_seq.write().unwrap();
+            let s = seqs.entry(court_id).or_insert(0);
+            *s += 1;
+            *s
+        };
+        let nudge = serde_json::json!({ "court": court_id, "seq": seq }).to_string();
+        // Feld-spezifische Abonnenten: senden + tote aussieben, leere Liste
+        // ganz entfernen (kein Speicher-Leck über die Turnierdauer).
+        {
+            let mut subs = self.monitor_subs.write().unwrap();
+            if let Some(list) = subs.get_mut(&court_id) {
+                list.retain(|tx| tx.send(nudge.clone()).is_ok());
+                if list.is_empty() {
+                    subs.remove(&court_id);
+                }
+            }
+        }
+        // „Alle Felder"-Abonnenten (Feld-Übersicht `overview.html`).
+        self.monitor_subs_all
+            .write()
+            .unwrap()
+            .retain(|tx| tx.send(nudge.clone()).is_ok());
     }
 
     /// Beansprucht das Feld für ein Tablet und gibt dessen Token zurück.
@@ -1538,6 +1622,8 @@ impl TabletState {
         self.release_court_claim(court_id);
         // Entfernten Stand auch aus der Datei nehmen.
         self.persist_scores();
+        // Match-Räumung ist am Monitor sichtbar (Feld wird leer) → anstoßen.
+        self.notify_monitor(court_id);
     }
 
     /// Hinterlegt einen Walkover-Vorschlag. Je EntryID gibt es höchstens
@@ -3587,5 +3673,72 @@ mod tests {
             .map(|e| e.names)
             .collect();
         assert_eq!(names, vec![vec!["C".to_string()], vec!["B".to_string()]]);
+    }
+
+    // ───────────── Court-Monitor-Nudge (A1, ADR 0016) ─────────────
+
+    /// Liest den `court`/`seq` aus einem Nudge-JSON.
+    fn parse_nudge(json: &str) -> (i64, u64) {
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        (v["court"].as_i64().unwrap(), v["seq"].as_u64().unwrap())
+    }
+
+    #[test]
+    fn notify_monitor_wakes_only_the_courts_subscribers_and_the_all_list() {
+        // Broker-Routing: `notify_monitor(5)` weckt GENAU die Court-5-Anzeige
+        // und die „alle Felder"-Übersicht — die Court-3-Anzeige bleibt still.
+        let st = TabletState::default();
+        let mut sub5 = st.subscribe_monitor(Some(5));
+        let mut sub3 = st.subscribe_monitor(Some(3));
+        let mut sub_all = st.subscribe_monitor(None);
+
+        st.notify_monitor(5);
+
+        // Court-5-Abonnent bekommt den Nudge fürs Feld 5.
+        let (court, seq) = parse_nudge(&sub5.try_recv().expect("Court-5 wird geweckt"));
+        assert_eq!((court, seq), (5, 1));
+        // „Alle Felder"-Abonnent ebenfalls.
+        let (court_all, _) = parse_nudge(&sub_all.try_recv().expect("Übersicht wird geweckt"));
+        assert_eq!(court_all, 5);
+        // Court-3-Abonnent NICHT.
+        assert!(sub3.try_recv().is_err(), "Feld 3 bleibt unberührt");
+    }
+
+    #[test]
+    fn monitor_seq_is_monotonic_per_court() {
+        // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
+        let st = TabletState::default();
+        let mut a = st.subscribe_monitor(Some(1));
+        let mut b = st.subscribe_monitor(Some(2));
+
+        st.notify_monitor(1);
+        st.notify_monitor(1);
+        st.notify_monitor(2);
+
+        assert_eq!(parse_nudge(&a.try_recv().unwrap()).1, 1);
+        assert_eq!(parse_nudge(&a.try_recv().unwrap()).1, 2);
+        // Feld 2 hat seinen eigenen Zähler, beginnt also wieder bei 1.
+        assert_eq!(parse_nudge(&b.try_recv().unwrap()).1, 1);
+    }
+
+    #[test]
+    fn dead_monitor_subscriber_is_pruned_on_next_notify() {
+        // Subscribe/Unsubscribe-Lebenszyklus: Fällt die Anzeige weg (Rx
+        // fallengelassen), siebt der nächste Nudge den toten Sender aus —
+        // die interne Liste des Felds verschwindet danach ganz.
+        let st = TabletState::default();
+        let sub = st.subscribe_monitor(Some(7));
+        assert_eq!(
+            st.monitor_subs.read().unwrap().get(&7).map(|v| v.len()),
+            Some(1)
+        );
+
+        drop(sub); // Anzeige verschwindet.
+        st.notify_monitor(7);
+
+        assert!(
+            st.monitor_subs.read().unwrap().get(&7).is_none(),
+            "toter Abonnent ausgesiebt, leere Liste entfernt"
+        );
     }
 }

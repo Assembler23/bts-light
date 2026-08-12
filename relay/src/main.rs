@@ -221,7 +221,35 @@ struct Namespace {
     /// Zählt jede neue Host-Verbindung. Teil des ETags, weil die Revision
     /// beim Neustart des Turnier-PCs wieder klein beginnt.
     tl_gen: u64,
+    /// Court-Monitor-Nudge-Abonnenten (A1, ADR 0016): CourtID → Sende-Enden
+    /// der Monitor-WS-Verbindungen, die **genau dieses Feld** beobachten (ein
+    /// Court-Monitor). Bei einer Änderung des Felds bekommt jeder Eintrag ein
+    /// winziges „Feld geändert, seq N"-Signal; die Anzeige holt daraufhin den
+    /// Vollstand über ihre bestehende Poll-Route. Namespace-lokal — ein Nudge
+    /// verlässt seinen Namespace nie.
+    monitor_subs: HashMap<i64, Vec<Tx>>,
+    /// Nudge-Abonnenten **ohne** Feld-Filter: die Feld-Übersicht
+    /// (`overview.html`) will Signale ALLER Felder dieses Namespace.
+    monitor_subs_all: Vec<Tx>,
+    /// Pro-Court monoton steigende Nudge-Sequenz (Client verwirft Veraltetes).
+    monitor_seq: HashMap<i64, u64>,
 }
+
+/// Der winzige Monitor-Nudge (A1, ADR 0016): „Feld `court` hat sich geändert,
+/// Sequenz `seq`". Trägt bewusst KEINE Score-Daten — die Anzeige holt den
+/// Vollstand über ihre bestehende Poll-Route (eine Datenquelle, kein
+/// Flackern). Identisches Drahtformat wie am LAN-Server.
+#[derive(Serialize)]
+struct MonitorNudge {
+    court: i64,
+    seq: u64,
+}
+
+/// Obergrenze der Monitor-Nudge-Abonnenten je Namespace (Fan-out-/DoS-
+/// Schutz, analog `MAX_MONITOR_DEVICES`). Ein reales Turnier hat je Feld
+/// wenige TVs; darüber hinausgehende Verbindungen fallen still auf ihren
+/// Poll-Fallback zurück (kein Regress).
+const MAX_MONITOR_SUBS: usize = 256;
 
 impl Namespace {
     fn new() -> Self {
@@ -252,6 +280,9 @@ impl Namespace {
             timeline_pending: HashMap::new(),
             tl_devices: HashMap::new(),
             tl_gen: 0,
+            monitor_subs: HashMap::new(),
+            monitor_subs_all: Vec::new(),
+            monitor_seq: HashMap::new(),
         }
     }
 
@@ -438,6 +469,9 @@ async fn main() {
             post(monitor_upload).layer(DefaultBodyLimit::max(MONITOR_UPLOAD_LIMIT)),
         )
         .route("/{ns}/ws", get(tablet_ws))
+        // Court-Monitor-Nudge (A1, ADR 0016): niedrig-latente Anzeige über die
+        // Cloud. `court` gesetzt → nur dieses Feld, fehlt es → alle Felder.
+        .route("/{ns}/monitor-ws", get(monitor_ws))
         .route("/{ns}/host-ws", get(host_ws))
         .route("/{ns}/result", post(result));
 
@@ -1672,6 +1706,148 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     }
 }
 
+// ─────────────────────── Court-Monitor-Nudge (A1) ─────────────────────────
+
+/// Query der Monitor-Nudge-WS: optionale CourtID. Fehlt sie, abonniert der
+/// Client Nudges ALLER Felder (Feld-Übersicht `overview.html`); ist sie
+/// gesetzt, nur die dieses Felds (Court-Monitor `monitor.html`).
+#[derive(serde::Deserialize)]
+struct MonitorWsQuery {
+    court: Option<i64>,
+}
+
+/// Upgrade der Court-Monitor-Nudge-WS (A1, ADR 0016). `valid_namespace`-Guard
+/// wie die übrigen Namespace-Routen; kein `identify`-Handshake nötig (die
+/// Anzeige liest nur, der Court steht im Query).
+async fn monitor_ws(
+    ws: WebSocketUpgrade,
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Query(q): Query<MonitorWsQuery>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let court = q.court;
+    ws.on_upgrade(move |socket| monitor_conn(socket, broker, ns, court))
+        .into_response()
+}
+
+/// Eine Court-Monitor-Nudge-Verbindung (A1, ADR 0016). Analog zum LAN-Server:
+/// nur winzige „Feld X geändert, seq N"-Signale; die Anzeige holt den
+/// Vollstand über ihre bestehende Poll-Route (eine Datenquelle, kein
+/// Flackern). Der Sender liegt ausschließlich im eigenen Namespace →
+/// Namespace-Isolation strikt.
+///
+/// TODO(A1): Match-Zuweisung/-Räumung stößt der Relay noch nicht an — der
+/// Cloud-Score-Weg (`forward_score`) ist der Muss; die ~250-ms-Poll deckt die
+/// Zuweisungs-Latenz ab (Score-Cache-Räumung folgt dem Host-Frame, nicht
+/// einem lokalen State-Aufruf).
+async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: Option<i64>) {
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    subscribe_monitor(&broker, &ns, court, &tx).await;
+    let mut ping = tokio::time::interval(HEARTBEAT);
+    loop {
+        tokio::select! {
+            outgoing = rx.recv() => {
+                match outgoing {
+                    Some(m) => { if socket.send(m).await.is_err() { break } }
+                    None => break,
+                }
+            }
+            incoming = socket.recv() => {
+                // Die Anzeige sendet nichts Fachliches; wir lesen nur, um
+                // Close/Fehler (tote Verbindung) zu bemerken.
+                match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {}
+                }
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
+            }
+        }
+    }
+    unsubscribe_monitor(&broker, &ns, court, &tx).await;
+}
+
+/// Trägt eine Monitor-Verbindung als Nudge-Abonnent ein (A1). Legt den
+/// Namespace **nicht** an, falls er fehlt: Ohne Host gibt es nichts zu
+/// melden, und ein von Zuschauer-TVs erzeugter Namespace hätte keinen
+/// Aufräum-Pfad (`is_empty` zählt Monitore bewusst nicht mit). Fehlt der
+/// Namespace, bleibt die Verbindung still (Poll-Fallback) und der Client
+/// verbindet sich neu, sobald der Host da ist.
+async fn subscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: &Tx) {
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(ns) else {
+        return;
+    };
+    // Fan-out-Deckel: über der Grenze nicht eintragen (Verbindung degradiert
+    // still auf Poll). Schützt Speicher + Broadcast-Kosten je Namespace.
+    let total = namespace.monitor_subs.values().map(Vec::len).sum::<usize>()
+        + namespace.monitor_subs_all.len();
+    if total >= MAX_MONITOR_SUBS {
+        return;
+    }
+    match court {
+        Some(c) => namespace
+            .monitor_subs
+            .entry(c)
+            .or_default()
+            .push(tx.clone()),
+        None => namespace.monitor_subs_all.push(tx.clone()),
+    }
+}
+
+/// Trägt eine Monitor-Verbindung wieder aus (Verbindungsende). Vergleicht per
+/// `same_channel`, damit nur der eigene Sender verschwindet.
+async fn unsubscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: &Tx) {
+    let mut map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get_mut(ns) else {
+        return;
+    };
+    match court {
+        Some(c) => {
+            if let Some(list) = namespace.monitor_subs.get_mut(&c) {
+                list.retain(|t| !t.same_channel(tx));
+                if list.is_empty() {
+                    namespace.monitor_subs.remove(&c);
+                }
+            }
+        }
+        None => namespace.monitor_subs_all.retain(|t| !t.same_channel(tx)),
+    }
+    if namespace.is_empty() {
+        map.remove(ns);
+    }
+}
+
+/// Weckt die Monitor-Abonnenten eines Felds (A1, ADR 0016): erhöht die
+/// pro-Court-Sequenz und schickt den winzigen Nudge an die Abonnenten GENAU
+/// dieses Felds UND an die „alle Felder"-Abonnenten (Feld-Übersicht). Tote
+/// Sender (Anzeige weg) werden ausgesiebt. Namespace-lokal — der Aufrufer
+/// hält bereits den Namespace, ein Nudge verlässt ihn nie.
+fn notify_monitor(namespace: &mut Namespace, court_id: i64) {
+    let seq = {
+        let s = namespace.monitor_seq.entry(court_id).or_insert(0);
+        *s += 1;
+        *s
+    };
+    let nudge = text(&MonitorNudge {
+        court: court_id,
+        seq,
+    });
+    if let Some(list) = namespace.monitor_subs.get_mut(&court_id) {
+        list.retain(|t| t.send(nudge.clone()).is_ok());
+        if list.is_empty() {
+            namespace.monitor_subs.remove(&court_id);
+        }
+    }
+    namespace
+        .monitor_subs_all
+        .retain(|t| t.send(nudge.clone()).is_ok());
+}
+
 /// Ergebnis eines Tablet-Verbindungsversuchs an einem Feld.
 enum AttachResult {
     /// Das Tablet schiedst dieses Feld nun aktiv.
@@ -1916,6 +2092,11 @@ async fn forward_score(
         b: score_b,
     });
     namespace.court_scores.insert(court_id, sets);
+    // Niedrig-latente Anzeige (A1, ADR 0016): Court-Monitor + Feld-Übersicht
+    // dieses Namespace sofort anstoßen, statt auf ihren nächsten Poll zu
+    // warten. Muss NACH dem Cache-Insert stehen, damit der ausgelöste
+    // Poll-`fetch` bereits den neuen Stand sieht.
+    notify_monitor(namespace, court_id);
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::ScoreUpdate {
@@ -3146,6 +3327,132 @@ mod tests {
         ns.host_last_seen = now_ms();
         drop(map);
         (broker, rx, host_tx)
+    }
+
+    // ───────────── Court-Monitor-Nudge (A1, ADR 0016) ─────────────
+
+    /// Liest `court`/`seq` aus einem Nudge-Text-Frame.
+    fn nudge_of(m: Message) -> (i64, u64) {
+        let Message::Text(t) = m else {
+            panic!("kein Text-Frame");
+        };
+        let v: serde_json::Value = serde_json::from_str(t.as_str()).unwrap();
+        (v["court"].as_i64().unwrap(), v["seq"].as_u64().unwrap())
+    }
+
+    #[test]
+    fn monitor_nudge_routes_to_court_and_all_but_not_other_courts() {
+        // Broker-Routing: `notify_monitor(5)` weckt GENAU die Court-5-Anzeige
+        // und die „alle Felder"-Übersicht — Feld 3 bleibt still.
+        let mut ns = Namespace::new();
+        let (tx5, mut rx5) = mpsc::unbounded_channel();
+        let (tx3, mut rx3) = mpsc::unbounded_channel();
+        let (tx_all, mut rx_all) = mpsc::unbounded_channel();
+        ns.monitor_subs.entry(5).or_default().push(tx5);
+        ns.monitor_subs.entry(3).or_default().push(tx3);
+        ns.monitor_subs_all.push(tx_all);
+
+        notify_monitor(&mut ns, 5);
+
+        assert_eq!(nudge_of(rx5.try_recv().unwrap()), (5, 1));
+        assert_eq!(nudge_of(rx_all.try_recv().unwrap()).0, 5);
+        assert!(rx3.try_recv().is_err(), "Feld 3 bleibt unberührt");
+    }
+
+    #[test]
+    fn monitor_seq_is_monotonic_per_court() {
+        // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
+        let mut ns = Namespace::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        ns.monitor_subs.entry(1).or_default().push(tx1);
+        ns.monitor_subs.entry(2).or_default().push(tx2);
+
+        notify_monitor(&mut ns, 1);
+        notify_monitor(&mut ns, 1);
+        notify_monitor(&mut ns, 2);
+
+        assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 1);
+        assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 2);
+        assert_eq!(nudge_of(rx2.try_recv().unwrap()).1, 1);
+    }
+
+    #[test]
+    fn dead_monitor_subscriber_is_pruned_on_next_nudge() {
+        // Fällt die Anzeige weg (Rx fallengelassen), siebt der nächste Nudge
+        // den toten Sender aus und entfernt die leere Feld-Liste.
+        let mut ns = Namespace::new();
+        let (tx, rx) = mpsc::unbounded_channel();
+        ns.monitor_subs.entry(4).or_default().push(tx);
+        drop(rx);
+
+        notify_monitor(&mut ns, 4);
+
+        assert!(
+            ns.monitor_subs.get(&4).is_none(),
+            "toter Abonnent ausgesiebt"
+        );
+    }
+
+    #[tokio::test]
+    async fn monitor_nudge_stays_within_its_namespace() {
+        // Namespace-Isolation: Ein Nudge in ns-a erreicht KEINEN Abonnenten
+        // in ns-b — die Trennung der Turniere ist strikt.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (h_a, _ra) = mpsc::unbounded_channel();
+        let (h_b, _rb) = mpsc::unbounded_channel();
+        register_host(&broker, "ns-a", &h_a).await;
+        register_host(&broker, "ns-b", &h_b).await;
+        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        subscribe_monitor(&broker, "ns-a", Some(5), &tx_a).await;
+        subscribe_monitor(&broker, "ns-b", Some(5), &tx_b).await;
+
+        {
+            let mut map = broker.namespaces.lock().await;
+            notify_monitor(map.get_mut("ns-a").unwrap(), 5);
+        }
+
+        assert!(rx_a.try_recv().is_ok(), "ns-a wird geweckt");
+        assert!(
+            rx_b.try_recv().is_err(),
+            "ns-b bleibt still (Namespace-Isolation)"
+        );
+    }
+
+    #[tokio::test]
+    async fn monitor_subscribe_and_unsubscribe_lifecycle() {
+        // Der Abonnent wird eingetragen und beim Verbindungsende wieder
+        // ausgetragen; der Namespace bleibt, solange der Host verbunden ist.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (h, _rh) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &h).await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        subscribe_monitor(&broker, "ns1", Some(9), &tx).await;
+        {
+            let map = broker.namespaces.lock().await;
+            assert_eq!(
+                map.get("ns1").unwrap().monitor_subs.get(&9).map(Vec::len),
+                Some(1)
+            );
+        }
+
+        unsubscribe_monitor(&broker, "ns1", Some(9), &tx).await;
+        {
+            let map = broker.namespaces.lock().await;
+            assert!(map.get("ns1").unwrap().monitor_subs.get(&9).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn monitor_subscribe_without_host_does_not_create_a_namespace() {
+        // Ohne Host wird KEIN Namespace angelegt (kein Zuschauer-TV soll durch
+        // bloßes Verbinden Speicher belegen — es gäbe keinen Aufräum-Pfad).
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        subscribe_monitor(&broker, "ns-ghost", None, &tx).await;
+        assert!(broker.namespaces.lock().await.get("ns-ghost").is_none());
     }
 
     // ───────────────── Turnierleitungs-Oberfläche (TL-Web) ─────────────────

@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.196
+
+- **Spielstand erscheint auf dem TV nahezu sofort.** Court-Monitor und
+  Feld-Übersicht bekommen den neuen Stand jetzt per WebSocket-„Nudge"
+  angestoßen, statt bis zu 1 s (Monitor) bzw. 5 s (Übersicht) auf den nächsten
+  Poll zu warten. Der Nudge trägt nur „Feld X geändert" — die Anzeige holt sich
+  wie bisher den vollen Stand, es gibt also kein Flackern. Reißt die Verbindung
+  ab (WLAN-Wechsel), übernimmt sofort ein schnelles Poll (250 ms) und der Push
+  verbindet sich im Hintergrund neu — kein Stillstand. Gilt für LAN und Cloud
+  (beide Hallen). Erster Baustein des Robustheits-Pakets „Echtzeit-Score-Strecke"
+  (Spec `docs/features/turnier-robustheit.md`, ADR 0016).
+
 ## v0.9.195
 
 - **Turnierlogo für den Check-In sparsamer übertragen.** Das Logo reist jetzt
