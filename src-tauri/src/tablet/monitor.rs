@@ -146,7 +146,10 @@ pub fn read_ad_bar(path: &Path) -> std::collections::HashSet<String> {
 
 /// Schreibt die „Leisten-Sponsor"-Markierungen (atomar, sortiert für stabile
 /// Diffs).
-pub fn write_ad_bar(path: &Path, marked: &std::collections::HashSet<String>) -> std::io::Result<()> {
+pub fn write_ad_bar(
+    path: &Path,
+    marked: &std::collections::HashSet<String>,
+) -> std::io::Result<()> {
     let mut list: Vec<&String> = marked.iter().collect();
     list.sort();
     let json = serde_json::to_string_pretty(&list).unwrap_or_else(|_| "[]".to_string());
