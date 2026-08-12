@@ -190,8 +190,8 @@ Nebenhallen-TVs).
 
 Reihenfolge kleiner, überprüfbarer Schritte:
 1. **A1 Quick-Win:** Poll `monitor.html:1032` / `overview.html:544` auf ~250 ms.
-2. **A1 Push (WS-Nudge):** Registry `monitor_subs` + Route `/court/{id}/ws`
-   (LAN) und `/{ns}/monitor-ws` (Cloud); Broadcast in `record_score`/
+2. **A1 Push (WS-Nudge):** Registry `monitor_subs` + Route `/monitor-ws?court={id}`
+   (LAN) und `/{ns}/monitor-ws?court={id}` (Cloud); Broadcast in `record_score`/
    `forward_score`; Client-WS mit „Push aktiv → Poll pausiert" + Reconnect. →
    Version-Bump, auslieferbar.
 3. **A2 Ownership (hinter Flag):** `reconnect_decision(...)` + `scored_since_claim`;

@@ -1782,10 +1782,20 @@ async fn monitor_ws_upgrade(
 /// Score/Alert/Räumung. Bis dahin deckt der ~250-ms-Poll-Fallback die
 /// Zuweisungs-Latenz ab (Score ist das Muss, Spec Paket A).
 async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Option<i64>) {
-    let mut rx = ctx.tablet.subscribe_monitor(court);
+    // Kanal hier anlegen und das Sende-Ende dem State reichen (wie im Relay),
+    // damit wir es am Verbindungsende per `unsubscribe_monitor` gezielt wieder
+    // austragen können.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Fan-out-Deckel (A1, ADR 0016): über `MAX_MONITOR_SUBS` lehnt der State
+    // das Abo ab — die Verbindung sauber schließen, die Anzeige bedient sich
+    // dann aus ihrem 250-ms-Poll-Fallback (kein stiller Hänger, kein DoS).
+    if !ctx.tablet.subscribe_monitor(court, &tx) {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
     // Herzschlag: hält die Leitung wach und erkennt tote Sockets (analog zum
-    // Tablet-WS-Ping). Fällt die Verbindung weg, endet die Schleife und das
-    // `rx` wird fallengelassen → der Sender siebt sich beim nächsten Nudge aus.
+    // Tablet-WS-Ping). Fällt die Verbindung weg, endet die Schleife und wir
+    // tragen das Abo unten explizit wieder aus.
     let mut ping = tokio::time::interval(Duration::from_secs(15));
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -1815,6 +1825,9 @@ async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Optio
             }
         }
     }
+    // Verbindungsende: Abo explizit austragen (nicht nur lazy beim nächsten
+    // Nudge) — sonst hielte ein stiller Court tote Sender beliebig lange.
+    ctx.tablet.unsubscribe_monitor(court, &tx);
 }
 
 /// Sendet eine `ServerMsg` über den Tablet-Socket.

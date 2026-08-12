@@ -27,6 +27,13 @@ fn now_ms() -> u64 {
 /// Überschreitung wird das am längsten nicht gesehene Gerät verdrängt.
 const MAX_MONITOR_DEVICES: usize = 128;
 
+/// Fan-out-Deckel der Court-Monitor-Nudge-Abos je Server (A1, ADR 0016) —
+/// derselbe Wert wie im Relay (`MAX_MONITOR_SUBS`). Über der Grenze lehnt
+/// `subscribe_monitor` ein weiteres Abo ab; die Anzeige fällt still auf ihren
+/// Poll-Fallback zurück. Schützt Speicher und Broadcast-Kosten gegen einen
+/// Zuschauer-DoS (viele TVs/Tabs, die den Monitor-WS öffnen).
+const MAX_MONITOR_SUBS: usize = 256;
+
 /// Wie lange eine frisch nach BTP geschriebene Feldzuweisung als belegt gilt,
 /// bevor BTP sie bestätigt hat.
 ///
@@ -1048,41 +1055,77 @@ impl TabletState {
 
     /// Meldungs-Zustand (Verletzung / Turnierleitung gerufen) des Felds setzen.
     pub fn record_alert(&self, court_id: i64, injury: bool, official: bool) {
-        let mut courts = self.courts.write().unwrap();
-        let session = courts.entry(court_id).or_insert(CourtSession {
-            match_id: 0,
-            sets: Vec::new(),
-            connected: true,
-            battery: None,
-            injury: false,
-            official: false,
-        });
-        session.injury = injury;
-        session.official = official;
+        {
+            let mut courts = self.courts.write().unwrap();
+            let session = courts.entry(court_id).or_insert(CourtSession {
+                match_id: 0,
+                sets: Vec::new(),
+                connected: true,
+                battery: None,
+                injury: false,
+                official: false,
+            });
+            session.injury = injury;
+            session.official = official;
+        }
         // Meldungs-Zustand (Pause/Verletzung) ist am Court-Monitor sichtbar →
-        // Anzeige anstoßen.
+        // Anzeige anstoßen. Wie bei `record_score` erst den `courts`-Guard
+        // droppen, DANN nudgen (Lock nicht über den Broadcast halten).
         self.notify_monitor(court_id);
     }
 
     /// Meldet einen Court-Monitor als Nudge-Abonnenten an (A1, ADR 0016).
     /// `court = Some(id)` → nur Nudges dieses Felds (Court-Monitor
     /// `monitor.html`); `court = None` → Nudges ALLER Felder (Feld-Übersicht
-    /// `overview.html`). Liefert das Empfangs-Ende, das der WS-Handler auf
-    /// seinen Socket leert; fällt es weg, siebt der nächste `notify_monitor`
-    /// den toten Sender aus.
-    pub fn subscribe_monitor(&self, court: Option<i64>) -> MonitorNudgeRx {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    /// `overview.html`). Der Aufrufer (`monitor_socket`) besitzt den Kanal und
+    /// reicht sein Sende-Ende herein — analog zum Relay-Muster, damit
+    /// `unsubscribe_monitor` denselben Sender per `same_channel` wiederfindet.
+    ///
+    /// Liefert `true`, wenn das Abo eingetragen wurde; `false`, wenn der
+    /// Fan-out-Deckel `MAX_MONITOR_SUBS` erreicht ist — dann bedient der
+    /// Aufrufer die Verbindung nicht und die Anzeige fällt still auf Poll
+    /// zurück (Zuschauer-DoS-Schutz, spiegelt das Relay).
+    pub fn subscribe_monitor(&self, court: Option<i64>, tx: &MonitorNudgeTx) -> bool {
+        // Beide Listen in fester Reihenfolge (erst feld-spezifisch, dann
+        // „alle") sperren, um den Gesamtstand konsistent zu zählen. Nur diese
+        // Methode hält je beide Locks gleichzeitig; `notify_monitor`/
+        // `unsubscribe_monitor` fassen immer nur eines an → kein Deadlock.
+        let mut subs = self.monitor_subs.write().unwrap();
+        let mut subs_all = self.monitor_subs_all.write().unwrap();
+        let total = subs.values().map(Vec::len).sum::<usize>() + subs_all.len();
+        if total >= MAX_MONITOR_SUBS {
+            return false;
+        }
         match court {
-            Some(c) => self
-                .monitor_subs
+            Some(c) => subs.entry(c).or_default().push(tx.clone()),
+            None => subs_all.push(tx.clone()),
+        }
+        true
+    }
+
+    /// Trägt eine Monitor-Verbindung wieder aus (Verbindungsende, A1). Der
+    /// `notify_monitor`-Pfad siebt tote Sender zwar ohnehin lazy aus, doch das
+    /// greift erst beim nächsten Nudge des betroffenen Felds — ein stiller
+    /// Court könnte tote Einträge beliebig lange halten. Darum trägt der
+    /// WS-Handler seinen Sender beim Schließen explizit aus (per
+    /// `same_channel`, damit nur der eigene verschwindet). Spiegelt das Relay.
+    pub fn unsubscribe_monitor(&self, court: Option<i64>, tx: &MonitorNudgeTx) {
+        match court {
+            Some(c) => {
+                let mut subs = self.monitor_subs.write().unwrap();
+                if let Some(list) = subs.get_mut(&c) {
+                    list.retain(|t| !t.same_channel(tx));
+                    if list.is_empty() {
+                        subs.remove(&c);
+                    }
+                }
+            }
+            None => self
+                .monitor_subs_all
                 .write()
                 .unwrap()
-                .entry(c)
-                .or_default()
-                .push(tx),
-            None => self.monitor_subs_all.write().unwrap().push(tx),
+                .retain(|t| !t.same_channel(tx)),
         }
-        rx
     }
 
     /// Weckt die Monitor-Abonnenten eines Felds (A1, ADR 0016): erhöht die
@@ -1172,6 +1215,10 @@ impl TabletState {
     /// Spiegelt den Spielzustand des aktiven Tablets am Feld.
     pub fn set_court_state(&self, court_id: i64, state: String) {
         self.court_state.write().unwrap().insert(court_id, state);
+        // Aufschlag/Pause (`court_state`) ist am Court-Monitor sichtbar →
+        // Anzeige anstoßen (A1, ADR 0016). Der Schreib-Guard ist mit dem
+        // Semikolon oben schon gefallen; kein Lock über den Broadcast.
+        self.notify_monitor(court_id);
     }
 
     /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
@@ -1605,6 +1652,12 @@ impl TabletState {
             self.court_state.write().unwrap().insert(to_court_id, state);
         }
         self.persist_scores();
+        // Der Stand wandert von Quell- auf Zielfeld — BEIDE Anzeigen sind
+        // betroffen (Quellfeld wird leer, Zielfeld zeigt den Stand). Sonst
+        // hinge jeder TV bis zu seinem nächsten Poll (A1, ADR 0016). Erst hier,
+        // nachdem alle Schreib-Guards gefallen sind (wie `record_score`).
+        self.notify_monitor(from_court_id);
+        self.notify_monitor(to_court_id);
     }
 
     pub fn clear_court(&self, court_id: i64) {
@@ -3683,14 +3736,26 @@ mod tests {
         (v["court"].as_i64().unwrap(), v["seq"].as_u64().unwrap())
     }
 
+    /// Legt einen Monitor-Kanal an, abonniert ihn und gibt das Empfangs-Ende
+    /// zurück (der State hält eine Sender-Klon-Referenz). Kapselt das seit dem
+    /// Fan-out-Deckel geänderte `subscribe_monitor(court, &tx)`-Muster.
+    fn sub_monitor(st: &TabletState, court: Option<i64>) -> MonitorNudgeRx {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(
+            st.subscribe_monitor(court, &tx),
+            "unter dem Deckel akzeptiert"
+        );
+        rx
+    }
+
     #[test]
     fn notify_monitor_wakes_only_the_courts_subscribers_and_the_all_list() {
         // Broker-Routing: `notify_monitor(5)` weckt GENAU die Court-5-Anzeige
         // und die „alle Felder"-Übersicht — die Court-3-Anzeige bleibt still.
         let st = TabletState::default();
-        let mut sub5 = st.subscribe_monitor(Some(5));
-        let mut sub3 = st.subscribe_monitor(Some(3));
-        let mut sub_all = st.subscribe_monitor(None);
+        let mut sub5 = sub_monitor(&st, Some(5));
+        let mut sub3 = sub_monitor(&st, Some(3));
+        let mut sub_all = sub_monitor(&st, None);
 
         st.notify_monitor(5);
 
@@ -3708,8 +3773,8 @@ mod tests {
     fn monitor_seq_is_monotonic_per_court() {
         // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
         let st = TabletState::default();
-        let mut a = st.subscribe_monitor(Some(1));
-        let mut b = st.subscribe_monitor(Some(2));
+        let mut a = sub_monitor(&st, Some(1));
+        let mut b = sub_monitor(&st, Some(2));
 
         st.notify_monitor(1);
         st.notify_monitor(1);
@@ -3727,7 +3792,7 @@ mod tests {
         // fallengelassen), siebt der nächste Nudge den toten Sender aus —
         // die interne Liste des Felds verschwindet danach ganz.
         let st = TabletState::default();
-        let sub = st.subscribe_monitor(Some(7));
+        let sub = sub_monitor(&st, Some(7));
         assert_eq!(
             st.monitor_subs.read().unwrap().get(&7).map(|v| v.len()),
             Some(1)
@@ -3740,5 +3805,47 @@ mod tests {
             st.monitor_subs.read().unwrap().get(&7).is_none(),
             "toter Abonnent ausgesiebt, leere Liste entfernt"
         );
+    }
+
+    #[test]
+    fn unsubscribe_monitor_removes_only_the_own_sender() {
+        // Explizites Austragen (Verbindungsende) entfernt GENAU den eigenen
+        // Sender; ein zweiter Abonnent desselben Felds bleibt bestehen.
+        let st = TabletState::default();
+        let (tx_a, _rx_a) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_b, _rx_b) = tokio::sync::mpsc::unbounded_channel();
+        assert!(st.subscribe_monitor(Some(4), &tx_a));
+        assert!(st.subscribe_monitor(Some(4), &tx_b));
+
+        st.unsubscribe_monitor(Some(4), &tx_a);
+
+        let subs = st.monitor_subs.read().unwrap();
+        let list = subs.get(&4).expect("Feld-Liste bleibt (tx_b noch drin)");
+        assert_eq!(list.len(), 1, "nur tx_a ausgetragen");
+        assert!(list[0].same_channel(&tx_b), "der verbliebene ist tx_b");
+    }
+
+    #[test]
+    fn monitor_fanout_cap_rejects_the_over_limit_subscription() {
+        // Fan-out-Deckel (N5): Bis exakt `MAX_MONITOR_SUBS` werden Abos
+        // eingetragen; das (N+1)-te wird abgelehnt (Zuschauer-DoS-Schutz).
+        let st = TabletState::default();
+        // Rx-Enden lebendig halten, sonst gälten die Sender als tot.
+        let mut keep = Vec::new();
+        for _ in 0..MAX_MONITOR_SUBS {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            keep.push(rx);
+            assert!(
+                st.subscribe_monitor(Some(1), &tx),
+                "unter dem Deckel akzeptiert"
+            );
+        }
+        let (tx_over, _rx_over) = tokio::sync::mpsc::unbounded_channel();
+        assert!(
+            !st.subscribe_monitor(Some(1), &tx_over),
+            "über dem Deckel abgelehnt"
+        );
+        let total: usize = st.monitor_subs.read().unwrap().values().map(Vec::len).sum();
+        assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
     }
 }

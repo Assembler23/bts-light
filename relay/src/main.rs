@@ -3446,6 +3446,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn monitor_fanout_cap_rejects_the_over_limit_subscription() {
+        // Fan-out-Deckel (N5): Bis exakt `MAX_MONITOR_SUBS` werden Abos
+        // eingetragen; das (N+1)-te wird abgelehnt (Zuschauer-DoS-Schutz).
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (h, _rh) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &h).await;
+        for _ in 0..MAX_MONITOR_SUBS {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            subscribe_monitor(&broker, "ns1", Some(1), &tx).await;
+        }
+        {
+            let map = broker.namespaces.lock().await;
+            let total: usize = map
+                .get("ns1")
+                .unwrap()
+                .monitor_subs
+                .values()
+                .map(Vec::len)
+                .sum();
+            assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
+        }
+        // Das (N+1)-te Abo wird abgelehnt — der Gesamtstand bleibt am Deckel.
+        let (tx_over, _rx_over) = mpsc::unbounded_channel();
+        subscribe_monitor(&broker, "ns1", Some(1), &tx_over).await;
+        {
+            let map = broker.namespaces.lock().await;
+            let total: usize = map
+                .get("ns1")
+                .unwrap()
+                .monitor_subs
+                .values()
+                .map(Vec::len)
+                .sum();
+            assert_eq!(total, MAX_MONITOR_SUBS, "über dem Deckel kein weiteres Abo");
+        }
+    }
+
+    #[tokio::test]
     async fn monitor_subscribe_without_host_does_not_create_a_namespace() {
         // Ohne Host wird KEIN Namespace angelegt (kein Zuschauer-TV soll durch
         // bloßes Verbinden Speicher belegen — es gäbe keinen Aufräum-Pfad).

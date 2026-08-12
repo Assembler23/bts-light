@@ -19,7 +19,9 @@ und darf keinen Regress erzeugen.
 ## Entscheidung
 
 **WebSocket-„Nudge".** Server und Relay erhalten je eine neue Monitor-WS-Route
-(`/court/{id}/ws` bzw. `/{ns}/monitor-ws`) und eine Subscriber-Registry je Court.
+(LAN `/monitor-ws?court={id}` bzw. Cloud `/{ns}/monitor-ws?court={id}`; die
+CourtID steht im Query, nicht im Pfad — fehlt sie, abonniert der Client alle
+Felder für die Übersicht) und eine Subscriber-Registry je Court.
 Bei Score-/Zustandsänderung (`record_score` / `forward_score`) wird an die Subs
 des betroffenen Courts ein **winziger Nudge** gesendet: „Court X geändert, seq N".
 Der Client löst daraufhin **seinen bestehenden `fetch`** auf die schon vorhandene

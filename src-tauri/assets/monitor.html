@@ -1113,7 +1113,16 @@
     if (mws && mws.readyState !== WebSocket.CLOSED) return; // verbindet/verbunden
     try { mws = new WebSocket(monitorWsUrl()); }
     catch (e) { mwsSchedule(); return; }
-    mws.onopen = function () { mwsOpen = true; mwsBackoff = 1000; mlog("info", "mws_open"); };
+    mws.onopen = function () {
+      mwsOpen = true; mwsBackoff = 1000;
+      // Nach Server-/Relay-Neustart springt die seq wieder auf 0. Der alte
+      // lastSeq-Höchstwert würde dann JEDEN neuen Nudge als „veraltet"
+      // verwerfen, bis der Server den alten Wert überholt → Anzeige hängt.
+      // Darum je frischer Verbindung zurücksetzen (innerhalb einer Verbindung
+      // ist der Guard dank TCP-Ordnung ohnehin redundant).
+      lastSeqByCourt = {};
+      mlog("info", "mws_open");
+    };
     mws.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
