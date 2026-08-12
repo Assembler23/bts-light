@@ -144,8 +144,13 @@
       font-size: 13vmin; font-weight: 800;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .players.doubles .name .given { font-size: 3.6vmin; }
-    .players.doubles .name .family { font-size: 8vmin; }
+    /* Doppel: zwei Namen je Hälfte, früher auf 8vmin gedeckelt — aus
+       Hallendistanz (Turnier-Feedback 12.08.2026: „über 50 m auf einem
+       32-Zoll-TV") zu klein. Vertikal ist Platz (je Hälfte ~42vh, zwei
+       Namen à ~15vmin passen mit Rand), deshalb deutlich größer. Lange
+       Doppelnamen kürzt weiterhin die Ellipsis. */
+    .players.doubles .name .given { font-size: 4.2vmin; }
+    .players.doubles .name .family { font-size: 11vmin; }
     .serve-dot {
       flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;

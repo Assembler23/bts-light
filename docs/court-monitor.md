@@ -40,9 +40,11 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
 - **Fußzeile:** Runde + Spielnummer (je einzeln abschaltbar).
 - Alles über `vh`/`vw`/`vmin` skaliert → füllt jeden TV 32"–55" ohne
   Anpassung.
-- **Schriftgrößen** (seit v0.9.145, Turnier-Feedback „Namen zu klein"):
-  Nachname 13vmin (Doppel 8), Vorname 4.4vmin (Doppel 3.6), laufender
-  Satz 17vmin. Lange Namen kürzen weiterhin per Ellipsis statt umzubrechen.
+- **Schriftgrößen** (Turnier-Feedback „Namen zu klein"): Nachname 13vmin
+  (**Doppel 11**, seit 12.08.2026 von 8 hochgesetzt — „über 50 m auf
+  einem 32-Zoll-TV lesbar"; die zwei Namen je Hälfte passen bei ~42vh
+  Hälften-Höhe weiterhin), Vorname 4.4vmin (Doppel 4.2), laufender Satz
+  17vmin. Lange Namen kürzen weiterhin per Ellipsis statt umzubrechen.
 
 Die Anzeige-Seite ist `src-tauri/assets/monitor.html` — eine
 eigenständige HTML/CSS/JS-Datei, read-only Geschwister von `tablet.html`.
