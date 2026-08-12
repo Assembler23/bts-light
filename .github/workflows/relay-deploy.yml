@@ -4,9 +4,11 @@ name: Relay bauen & deployen
 # Läuft bei Änderungen am Relay-Code auf main, plus manuell.
 #
 # Voraussetzungen auf dem Server (einmalig, siehe docs/cloud-relay.md):
-#   - Verzeichnis /opt/bts-relay/ existiert, dem badhub-User schreibbar
-#   - systemd-Unit bts-relay.service installiert (ops/bts-relay.service)
-#   - sudoers: badhub darf `systemctl restart bts-relay` ohne Passwort
+#   - Verzeichnis /opt/bts-relay/ existiert, der Gruppe bts-deploy schreibbar
+#   - systemd-Unit bts-relay.service installiert (ops/bts-relay.service),
+#     laeuft als eigener Benutzer bts-relay — NICHT als badhub
+#   - sudoers: bts-deploy darf `systemctl restart bts-relay` ohne Passwort,
+#     und sonst nichts
 on:
   workflow_dispatch:
   push:
@@ -42,7 +44,7 @@ jobs:
       - name: SSH einrichten
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_DEPLOY_KEY_V2 }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
 
@@ -52,8 +54,8 @@ jobs:
         run: |
           set -euo pipefail
           rsync -av target/release/bts-relay \
-            badhub@178.104.221.177:/opt/bts-relay/bts-relay.new
-          ssh badhub@178.104.221.177 \
+            bts-deploy@178.104.221.177:/opt/bts-relay/bts-relay.new
+          ssh bts-deploy@178.104.221.177 \
             'mv /opt/bts-relay/bts-relay.new /opt/bts-relay/bts-relay \
              && sudo systemctl restart bts-relay \
              && sleep 2 \

@@ -335,21 +335,74 @@ hinter nginx.
 `relay-proto/` oder `tablet.html` auf `main`, plus `workflow_dispatch`).
 Reproduzierbar gebaut, kein Rust-Toolchain auf dem Prod-Server nötig.
 
+**Zwei getrennte Benutzer (seit 2026-08-12).** Vorher lief der Dienst als `badhub`
+und GitHub Actions deployte als `badhub` — ein Benutzer mit `NOPASSWD: ALL`. Damit war
+der Deploy-Schlüssel faktisch ein Root-Schlüssel für den badhub-Produktivserver, und
+zwar auch nach einer Trennung des Deploy-Benutzers: Wer die Relay-Binary austauschen
+und den Dienst neu starten darf, bekäme Code-Ausführung als `badhub`. Deshalb sind
+**beide** Rollen getrennt:
+
+| Benutzer | Rolle |
+|---|---|
+| `bts-relay` | führt `bts-relay.service` aus — Systembenutzer, `nologin`, kein sudo |
+| `bts-deploy` | GitHub Actions deployt als dieser Benutzer — kein sudo ausser einem Befehl |
+| `badhub` | bleibt der administrative Benutzer, unverändert |
+
+Gegengeprüft: Ersetzt `bts-deploy` die Binary und startet neu, läuft der Code als
+`bts-relay` — nicht als `badhub`, nicht als root.
+
 **Einmalige Server-Einrichtung:**
 
 ```sh
-# Verzeichnis anlegen, dem Deploy-User schreibbar
-sudo mkdir -p /opt/bts-relay && sudo chown badhub:badhub /opt/bts-relay
+# Benutzer: Dienst und Deployment getrennt, beide ohne allgemeines sudo
+sudo useradd --system --no-create-home --home-dir /nonexistent \
+     --shell /usr/sbin/nologin bts-relay
+sudo useradd --create-home --shell /bin/bash bts-deploy
 
-# systemd-Unit installieren
+# Verzeichnisse: Eigentuemer bleibt badhub (haelt den alten Weg als Rollback),
+# Gruppe bts-deploy schreibt, setgid vererbt sie an neue Dateien.
+sudo mkdir -p /opt/bts-relay
+sudo chown badhub:bts-deploy /opt/bts-relay && sudo chmod 2775 /opt/bts-relay
+sudo chown badhub:bts-deploy /var/www/badhub/public/download/bts-light
+sudo chmod 2775 /var/www/badhub/public/download/bts-light
+
+# Log-Verzeichnis: der Dienst schreibt ueber die Gruppe. Das setgid-Bit ist
+# PFLICHT — ohne es kann er nach dem naechsten Tageswechsel nicht mehr schreiben.
+sudo chgrp -R bts-relay /var/www/badhub/storage/relay-logs
+sudo chmod 2775 /var/www/badhub/storage/relay-logs
+
+# systemd-Unit installieren (User=bts-relay)
 sudo cp ops/bts-relay.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now bts-relay
 
-# sudoers: badhub darf den Dienst neu starten (für den CI-Deploy)
-echo 'badhub ALL=(root) NOPASSWD: /usr/bin/systemctl restart bts-relay' \
-  | sudo tee /etc/sudoers.d/bts-relay
+# sudoers: GENAU ein Befehl, keine Wildcards. Erst validieren, dann installieren —
+# eine kaputte sudoers-Datei sperrt jeden sudo-Zugang aus.
+echo 'bts-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart bts-relay' \
+  | sudo tee /etc/sudoers.d/bts-deploy
+sudo chmod 0440 /etc/sudoers.d/bts-deploy && sudo visudo -c
+
+# SSH-Schluessel fuer den Deploy — vier Restriktionen, kein Forced Command
+# (der Deploy braucht mehrere Befehle: rsync, mv, curl, ls).
+sudo -u bts-deploy ssh-keygen -t ed25519 -N "" -f /home/bts-deploy/.ssh/id_ed25519
+# Oeffentlichen Teil mit Praefix in ~bts-deploy/.ssh/authorized_keys eintragen:
+#   no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 …
 ```
+
+**Deployment-Weg.** `git push`/Tag → GitHub Actions → SSH als `bts-deploy` →
+Deployment. Vollständig unattended: **kein Passwort**, keine manuelle SSH-Sitzung,
+keine Freigabe-Klicks. Der private Schlüssel liegt im Repo-Secret
+`SSH_DEPLOY_KEY_V2`, `SSH_KNOWN_HOSTS` ist unverändert.
+
+> **Rollback.** Das alte Secret `SSH_DEPLOY_KEY` und der alte Schlüssel
+> `github-actions-bts-light-deploy` in `/home/badhub/.ssh/authorized_keys` bleiben
+> vorerst bestehen. Zurück heißt: in den beiden Workflows `bts-deploy@` → `badhub@`
+> und `SSH_DEPLOY_KEY_V2` → `SSH_DEPLOY_KEY`. Deshalb wurde ein **zweites** Secret
+> angelegt statt das bestehende zu überschreiben — GitHub-Secrets sind nicht
+> auslesbar, ein Überschreiben wäre unumkehrbar gewesen.
+>
+> Bestehende Zugänge sind unverändert: `badhub` (Administration) und `tilo`
+> (SFTP-Datenlieferung).
 
 **nginx** – den `location /bts-relay/`-Block aus `ops/nginx-bts-relay.conf`
 in den `badhub.de`-Server-Block (Port 443) übernehmen, plus den
