@@ -71,18 +71,27 @@ fehlt).
 
 **Filterschlüssel ist der numerische `StageType`** (1 = Hauptfeld,
 2 = Qualifikation, 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen —
-gemessen an den Mitschnitten `tests/fixtures/btp-tournament*.bin`), **nie**
-der frei benennbare Stage-Name. Zwei Quellen, defensiv kombiniert:
+gemessen an den Mitschnitten **und einem laufenden Turnier**), **nie** der
+frei benennbare Stage-Name. Drei Quellen, defensiv kombiniert:
 
-1. **Direkt am Entry** (`Entry.StageID`), falls BTP es mitschickt. In den
-   vorliegenden Mitschnitten (nur Hauptfeld-Meldungen) kam das Feld nie vor;
-   BTP lässt leere Felder generell weg (wie `ClubID`), deshalb ist offen, ob
-   es bei Reserve-Meldungen erscheint. Wenn ja, greift es hier.
-2. **Über die Platzierung**: eine Meldung, die ausschließlich in Draws von
+1. **`StageEntries`** (`EntryID → StageID`) — in echten Turnieren die
+   **maßgebliche** Zuordnung. Gemessen am laufenden Turnier (Struktur-Probe
+   `tests/checkin_roster_probe.rs`, 12.08.2026): HE C = 26 Hauptfeld,
+   1 Reserve, 4 Ausschließen — **ausschließlich hierüber**; `Entry.StageID`
+   war leer. Eine Zuordnung auf Reserve/Ausschließen/Quali schließt aus,
+   eine auf Hauptfeld/Playoff hält.
+2. **Direkt am Entry** (`Entry.StageID`), falls BTP es doch mitschickt —
+   in keinem beobachteten Turnier belegt, als Rückfall belassen.
+3. **Über die Platzierung**: eine Meldung, die ausschließlich in Draws von
    Qualifikations-Stages platziert ist, gehört (noch) nicht aufs Hauptfeld.
    Wer sich qualifiziert, bekommt einen Slot in einem Hauptfeld-Draw und
    erscheint damit wieder auf der Liste. Playoff zählt zur Hauptfeld-Seite
    (Turnierverlauf, keine Vorqualifikation).
+
+> **Wichtig — behoben 12.08.2026:** Die erste Fassung (v0.9.185) las nur
+> Quelle 2 und 3 und filterte an echten Daten **gar nichts** (HE C blieb
+> 31 statt 26), weil BTP die Zuordnung in `StageEntries` führt, nicht am
+> `Entry.StageID`. Erst mit Quelle 1 greift der Filter.
 
 Drei Grenzen mit Absicht: **Unplatzierte bleiben immer drin** — vor der
 Auslosung gibt es keine Slots, und genau dann muss die Liste vollständig
