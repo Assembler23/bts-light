@@ -1291,11 +1291,23 @@ async fn overview_health(
                 let names = |team: &[relay_proto::PlayerBrief]| {
                     team.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
                 };
+                // Nationalitäten parallel zu den Namen (leerer String = unbekannt)
+                // — die Länderflaggen der Übersicht. Der Host pusht `nationality`
+                // nur, wenn das (default-aus) Anzeige-Feld eingeschaltet ist; ist
+                // es leer, blendet overview.html die Flagge stumm aus.
+                let nats = |team: &[relay_proto::PlayerBrief]| {
+                    team.iter()
+                        .map(|p| p.nationality.clone().unwrap_or_default())
+                        .collect::<Vec<_>>()
+                };
                 let courts: Vec<serde_json::Value> = n
                     .courts
                     .iter()
                     .map(|c| {
                         let m = n.court_matches.get(&c.id);
+                        // Satzstand als `Vec<SetAb>` → JSON `[{"a":…,"b":…}]`. Die
+                        // LAN-`/health` liefert `[[a,b]]`; overview.html `setVal()`
+                        // akzeptiert beide Formen, daher unkritisch.
                         let sets = n.court_scores.get(&c.id).cloned().unwrap_or_default();
                         serde_json::json!({
                             "court_id": c.id,
@@ -1305,9 +1317,12 @@ async fn overview_health(
                             "match_name": m.map(|m| m.event_label.clone()).unwrap_or_default(),
                             "team1": m.map(|m| names(&m.team_a)).unwrap_or_default(),
                             "team2": m.map(|m| names(&m.team_b)).unwrap_or_default(),
+                            "team1_nationalities": m.map(|m| nats(&m.team_a)).unwrap_or_default(),
+                            "team2_nationalities": m.map(|m| nats(&m.team_b)).unwrap_or_default(),
                             "sets": sets,
                             "on_court_since_ms": n.court_on_court_since.get(&c.id).copied(),
-                            // Im Cloud (noch) nicht verfügbar → weggelassen/false.
+                            // Aufschlag/Verletzung/TL-Ruf hält der Relay nicht → im
+                            // Cloud konservativ weggelassen (kein Highlight/Badge).
                             "serving_team": serde_json::Value::Null,
                             "injury": false,
                             "official_call": false,
@@ -3860,6 +3875,8 @@ mod tests {
         assert_eq!(c0["location"], serde_json::json!("Halle 1"));
         assert_eq!(c0["match_id"], serde_json::json!(7));
         assert_eq!(c0["team1"], serde_json::json!(["Anna"]));
+        // Länderflaggen: Nationalitäten parallel zu den Namen (aus PlayerBrief).
+        assert_eq!(c0["team1_nationalities"], serde_json::json!(["GER"]));
         assert_eq!(c0["sets"][0]["a"], serde_json::json!(21));
         assert_eq!(c0["on_court_since_ms"], serde_json::json!(1000));
         // Im Cloud (noch) nicht verfügbar → konservativ weggelassen.
