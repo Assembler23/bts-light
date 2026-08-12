@@ -13,9 +13,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Geräte** (nicht je Gerät); Tablets übernehmen sie beim nächsten Neuladen
   bzw. mit der nächsten Paarung. Standardmäßig aus. Die Logos stammen aus dem
   badhub-Bestand (wie auf der Siegerliste); fehlt zu einem Verein ein Logo,
-  bleibt es beim Namen. Im Hallennetz (LAN) laden die Logos sofort; im
-  Cloud-Modus folgen sie mit dem geplanten badhub-Logo-Resolver — der Name
-  wird in beiden Fällen angezeigt.
+  bleibt es beim Namen. Im Hallennetz (LAN) holt der Turnier-PC die Logos
+  (funktioniert ohne Internet am Anzeigegerät, unscharfes Namensmatching); im
+  Cloud-Modus laden sie direkt über den öffentlichen badhub-Logo-Resolver
+  (`/api/v1/club-logo`, exakter Vereinsname). Der Name wird in beiden Fällen
+  angezeigt.
 
 ## v0.9.186
 

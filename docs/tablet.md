@@ -136,9 +136,10 @@ Aufstellung:
   **Vereinsname** und/oder das **Vereinslogo**. Die beiden Schalter reisen
   **in-band** mit der Paarung (`MatchBrief.show_club_names/logos`), das Tablet
   übernimmt eine Änderung also mit der nächsten Zuweisung ohne Neuladen.
-  Standard aus. Logos laden im LAN direkt vom Turnier-PC (`/info/club-logo`);
-  fehlt eines, bleibt es beim Namen. Im Cloud-Modus liefert das Relay den
-  Logo-Pfad (noch) nicht — dort erscheint vorerst nur der Name.
+  Standard aus. Logos laden im LAN vom Turnier-PC (`/info/club-logo`,
+  offline-fähig, unscharfes Namensmatching); im Cloud-Modus direkt über den
+  öffentlichen badhub-Resolver (`/api/v1/club-logo`, exakter Name). Fehlt
+  eines, bleibt es beim Namen.
 - **Punktverlauf** ([punktverlauf.md](punktverlauf.md)): Das Tablet
   protokolliert jeden Ballwechsel (`rallyLog`, überlebt Reload und
   Geräte-Übernahme) und meldet ihn dem Turnier-PC (`rally`-Frame; nach
