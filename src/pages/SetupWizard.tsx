@@ -356,6 +356,13 @@ export function SetupWizard({
   const [cmComboVertical, setCmComboVertical] = useState(
     cm.combo_vertical ?? false,
   );
+  // Turnierweite Vereins-Anzeige (TL-Web + Tablet). Zentral, nicht je Gerät.
+  const disp = initialConfig.display ?? {
+    show_club_names: false,
+    show_club_logos: false,
+  };
+  const [showClubNames, setShowClubNames] = useState(disp.show_club_names);
+  const [showClubLogos, setShowClubLogos] = useState(disp.show_club_logos);
   const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
   const [test, setTest] = useState<TestState>({ kind: "idle" });
@@ -530,6 +537,10 @@ export function SetupWizard({
       // (`keep_host_managed_fields`), aber ein leeres Array wäre trotzdem
       // falsch beim allerersten Speichern vor dem ersten Laden.
       hall_layouts: initialConfig.hall_layouts ?? [],
+      display: {
+        show_club_names: showClubNames,
+        show_club_logos: showClubLogos,
+      },
     };
   }
 
@@ -1416,6 +1427,41 @@ export function SetupWizard({
           </div>
         </section>
       )}
+
+      {/* Vereins-Anzeige (turnierweit, TL-Web + Tablet) */}
+      <section
+        id="section-vereine"
+        className="flex flex-col gap-2 scroll-mt-4"
+      >
+        <SectionHeader icon={Image}>Vereine anzeigen</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Zeigt in der <strong>Turnierleitungssicht</strong> und auf dem{" "}
+          <strong>Tablet-Spielzettel</strong> optional den Verein zu jedem
+          Spieler. Gilt <strong>turnierweit</strong> für alle Geräte, nicht je
+          Gerät. Standardmäßig aus. Die Tablets übernehmen die Änderung beim
+          nächsten Neuladen.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={showClubNames}
+            onChange={(e) => setShowClubNames(e.currentTarget.checked)}
+          />
+          Vereinsnamen anzeigen
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={showClubLogos}
+            onChange={(e) => setShowClubLogos(e.currentTarget.checked)}
+          />
+          Vereinslogos anzeigen
+        </label>
+        <p className="text-xs text-slate-500">
+          Die Logos kommen aus dem badhub-Bestand (wie auf der Siegerliste). Zu
+          einem Verein ohne hinterlegtes Logo bleibt die Zeile ohne Wappen.
+        </p>
+      </section>
 
       {/* Court-Monitor */}
       <section

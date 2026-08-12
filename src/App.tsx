@@ -118,6 +118,8 @@ function defaultConfig(): AppConfig {
     tl_web: { enabled: false, devices: [] },
     // Hallen-Raster: leer = Fließ-Darstellung, wird auf der Felderübersicht gepflegt.
     hall_layouts: [],
+    // Vereins-Anzeige (turnierweit): standardmäßig aus.
+    display: { show_club_names: false, show_club_logos: false },
   };
 }
 

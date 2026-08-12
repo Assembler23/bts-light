@@ -2786,11 +2786,13 @@ mod tests {
                 id: 1,
                 name: "Anna".into(),
                 nationality: Some("GER".into()),
+                club: None,
             }],
             team_b: vec![PlayerBrief {
                 id: 11,
                 name: "Ben".into(),
                 nationality: None,
+                club: None,
             }],
             event_label: "HE G1".into(),
             best_of_sets: 3,
@@ -2802,6 +2804,8 @@ mod tests {
             match_number: Some(14),
             scorekeeper: Vec::new(),
             scorekeeper_assigned: false,
+            show_club_names: false,
+            show_club_logos: false,
         }
     }
 
@@ -3971,11 +3975,13 @@ mod tests {
                 id: 1,
                 name: "Anna Weber".into(),
                 nationality: Some("GER".into()),
+                club: None,
             }],
             team_b: vec![PlayerBrief {
                 id: 2,
                 name: "Bea Schulz".into(),
                 nationality: None,
+                club: None,
             }],
             match_number: Some(101),
             called_at_ms: 1_700_000_000_000,

@@ -120,6 +120,10 @@ pub struct CourtOverview {
     /// wenn unbekannt) – Grundlage der automatischen DE/EN-Ansage.
     pub team1_nationalities: Vec<String>,
     pub team2_nationalities: Vec<String>,
+    /// Vereinsnamen, parallel zu `team1`/`team2` (leerer String, wenn BTP
+    /// keinen führt) – zuschaltbares Anzeige-Feld in TL-Web/Tablet.
+    pub team1_clubs: Vec<String>,
+    pub team2_clubs: Vec<String>,
     /// Aktueller Satzstand – vom Tablet, falls aktiv, sonst aus BTP.
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
@@ -1937,6 +1941,11 @@ impl TabletState {
                         .map(|p| p.nationality.clone().unwrap_or_default())
                         .collect::<Vec<String>>()
                 };
+                let clubs = |team: &[crate::btp::model::BtpPlayer]| {
+                    team.iter()
+                        .map(|p| p.club.clone().unwrap_or_default())
+                        .collect::<Vec<String>>()
+                };
                 // Tablet-court_state EINMAL lesen + parsen — so sind Aufschlag-
                 // und Pause-Info garantiert vom selben Stand abgeleitet (kein
                 // zweiter Lock, kein doppeltes Parsen).
@@ -2002,6 +2011,8 @@ impl TabletState {
                         .unwrap_or_default(),
                     team1_nationalities: m.map(|mm| nationalities(&mm.team1)).unwrap_or_default(),
                     team2_nationalities: m.map(|mm| nationalities(&mm.team2)).unwrap_or_default(),
+                    team1_clubs: m.map(|mm| clubs(&mm.team1)).unwrap_or_default(),
+                    team2_clubs: m.map(|mm| clubs(&mm.team2)).unwrap_or_default(),
                     sets,
                     tablet_connected,
                     // Aufruf-Stufe aus der gemeinsamen Zählung: Beide

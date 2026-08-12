@@ -131,6 +131,14 @@ Aufstellung:
   dessen Korken in Flugrichtung zum diagonal gegenüberliegenden
   Aufschlagfeld zeigt) und Annehmer auf
   dem Spielfeld – im Einzel ein Name je Hälfte, im Doppel zwei.
+- **Verein (optional)**: Ist die turnierweite Vereins-Anzeige im Setup
+  („Vereine anzeigen") eingeschaltet, steht unter dem Spielernamen klein der
+  **Vereinsname** und/oder das **Vereinslogo**. Die beiden Schalter reisen
+  **in-band** mit der Paarung (`MatchBrief.show_club_names/logos`), das Tablet
+  übernimmt eine Änderung also mit der nächsten Zuweisung ohne Neuladen.
+  Standard aus. Logos laden im LAN direkt vom Turnier-PC (`/info/club-logo`);
+  fehlt eines, bleibt es beim Namen. Im Cloud-Modus liefert das Relay den
+  Logo-Pfad (noch) nicht — dort erscheint vorerst nur der Name.
 - **Punktverlauf** ([punktverlauf.md](punktverlauf.md)): Das Tablet
   protokolliert jeden Ballwechsel (`rallyLog`, überlebt Reload und
   Geräte-Übernahme) und meldet ihn dem Turnier-PC (`rally`-Frame; nach

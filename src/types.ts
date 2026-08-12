@@ -527,6 +527,17 @@ export interface AppConfig {
   /** Raster-Anordnung der Felder je Halle (Felderübersicht + TL-Web). Leer =
    *  Fließ-Darstellung ohne festes Raster. */
   hall_layouts: HallLayoutConfig[];
+  /** Turnierweite Anzeige-Optionen (Vereinsname/-logo in TL-Web + Tablet).
+   *  Zentral, nicht je Gerät. */
+  display: DisplayConfig;
+}
+
+/** Turnierweite Anzeige-Schalter für Spielernamen (Rust: config::DisplayConfig).
+ *  Vereinsname und -logo sind wie die Nationalität bewusst zuschaltbare,
+ *  standardmäßig ausgeschaltete Anzeige-Felder. */
+export interface DisplayConfig {
+  show_club_names: boolean;
+  show_club_logos: boolean;
 }
 
 /** Ecke, in der die Feld-Nummerierung beginnt — aus Sicht der Turnierleitung

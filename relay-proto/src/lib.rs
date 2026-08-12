@@ -44,6 +44,11 @@ pub struct PlayerBrief {
     /// ältere Frames ohne dieses Feld lesbar.
     #[serde(default)]
     pub nationality: Option<String>,
+    /// Vereinsname (BTP), Grundlage für die optionale Vereinsanzeige auf dem
+    /// Tablet-Spielzettel. Wie die Nationalität turnierweit zuschaltbar und
+    /// standardmäßig aus. `#[serde(default)]` hält ältere Frames lesbar.
+    #[serde(default)]
+    pub club: Option<String>,
 }
 
 /// Match-Kurzinfo fürs Tablet (Schema wie bei badhub-tournament).
@@ -98,6 +103,14 @@ pub struct MatchBrief {
     /// aktiv) — nur dann sagt die ferne Halle „Tabletbedienung" mit an (ADR 0007).
     #[serde(rename = "scorekeeperAssigned", default)]
     pub scorekeeper_assigned: bool,
+    /// Turnierweite Anzeige-Schalter: ob das Tablet Vereinsname bzw. -logo
+    /// zeigen darf. Kommen **in-band** mit der Paarung, damit LAN und Cloud
+    /// dieselbe zentrale Einstellung ohne Seiten-Neuladen übernehmen.
+    /// `#[serde(default)]` hält ältere Frames lesbar (aus).
+    #[serde(rename = "showClubNames", default)]
+    pub show_club_names: bool,
+    #[serde(rename = "showClubLogos", default)]
+    pub show_club_logos: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -1871,11 +1884,13 @@ mod tests {
                     id: 1,
                     name: "Anna".into(),
                     nationality: Some("GER".into()),
+                    club: Some("SC Musterstadt".into()),
                 }],
                 team_b: vec![PlayerBrief {
                     id: 11,
                     name: "Ben".into(),
                     nationality: None,
+                    club: None,
                 }],
                 event_label: "HE G1".into(),
                 best_of_sets: 3,
@@ -1887,6 +1902,8 @@ mod tests {
                 match_number: Some(14),
                 scorekeeper: vec!["Cara / Dora".into()],
                 scorekeeper_assigned: false,
+                show_club_names: true,
+                show_club_logos: false,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -1960,11 +1977,13 @@ mod tests {
                     id: 1,
                     name: "Anna Weber".into(),
                     nationality: Some("GER".into()),
+                    club: Some("TV Beispiel".into()),
                 }],
                 team_b: vec![PlayerBrief {
                     id: 2,
                     name: "Bea Schulz".into(),
                     nationality: None,
+                    club: None,
                 }],
                 match_number: Some(101),
                 called_at_ms: 1_700_000_000_000,
@@ -2056,6 +2075,29 @@ mod tests {
                 court_id: 0,
                 court_label: "Feld 2".into(),
                 hall: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn player_brief_club_roundtrips_and_defaults() {
+        // Neues Feld hält den Roundtrip (mit und ohne Verein).
+        roundtrip(&PlayerBrief {
+            id: 3,
+            name: "Cara Lang".into(),
+            nationality: Some("AUT".into()),
+            club: Some("BC Beispiel".into()),
+        });
+        // Älterer Host/Relay ohne `club` bleibt lesbar (Default = None).
+        let old = r#"{"id":9,"name":"Dora Kurz","nationality":"GER"}"#;
+        let brief: PlayerBrief = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            brief,
+            PlayerBrief {
+                id: 9,
+                name: "Dora Kurz".into(),
+                nationality: Some("GER".into()),
+                club: None,
             }
         );
     }

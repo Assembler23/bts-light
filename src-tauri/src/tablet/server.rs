@@ -1650,6 +1650,7 @@ pub(crate) fn match_brief(
     m: &BtpMatch,
     scorekeeper: Vec<String>,
     scorekeeper_assigned: bool,
+    display: &crate::config::DisplayConfig,
 ) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
@@ -1659,6 +1660,7 @@ pub(crate) fn match_brief(
                 id: base + i as i64,
                 name: p.name.clone(),
                 nationality: p.nationality.clone(),
+                club: p.club.clone(),
             })
             .collect()
     };
@@ -1678,6 +1680,8 @@ pub(crate) fn match_brief(
         match_number: m.match_num,
         scorekeeper,
         scorekeeper_assigned,
+        show_club_names: display.show_club_names,
+        show_club_logos: display.show_club_logos,
     }
 }
 
@@ -1929,7 +1933,7 @@ async fn push_match(
             ServerMsg::MatchAssigned {
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(m, sk, ska)
+                    match_brief(m, sk, ska, &ctx.app_config().display)
                 },
             }
         }
@@ -2127,6 +2131,30 @@ mod tests {
             preparation_hall: None,
             scoring: ScoringFormat::default(),
         }
+    }
+
+    #[test]
+    fn match_brief_carries_club_and_display_flags() {
+        let mut m = match_on_court();
+        m.team1 = vec![BtpPlayer {
+            club: Some("SC Musterstadt".into()),
+            ..player("A")
+        }];
+        // Flags eingeschaltet → landen im Brief; der Verein reist am Spieler mit.
+        let on = crate::config::DisplayConfig {
+            show_club_names: true,
+            show_club_logos: true,
+        };
+        let brief = match_brief(&m, Vec::new(), false, &on);
+        assert!(brief.show_club_names);
+        assert!(brief.show_club_logos);
+        assert_eq!(brief.team_a[0].club.as_deref(), Some("SC Musterstadt"));
+        // Standard (aus) → Flags aus, Verein reist trotzdem mit (Tablet blendet
+        // ihn dann nur nicht ein).
+        let brief_off = match_brief(&m, Vec::new(), false, &crate::config::DisplayConfig::default());
+        assert!(!brief_off.show_club_names);
+        assert!(!brief_off.show_club_logos);
+        assert_eq!(brief_off.team_a[0].club.as_deref(), Some("SC Musterstadt"));
     }
 
     /// ServerCtx mit Match 42 auf Court 101; BTP zeigt auf 127.0.0.1:`port`.

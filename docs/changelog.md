@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.187
+
+- **Vereine anzeigen (optional, turnierweit).** In der Turnierleitungssicht
+  und auf dem Tablet-Spielzettel lassen sich jetzt **Vereinsname** und
+  **Vereinslogo** je Spieler einblenden — zwei getrennt schaltbare Optionen
+  im Setup unter „Vereine anzeigen". Die Einstellung gilt **zentral für alle
+  Geräte** (nicht je Gerät); Tablets übernehmen sie beim nächsten Neuladen
+  bzw. mit der nächsten Paarung. Standardmäßig aus. Die Logos stammen aus dem
+  badhub-Bestand (wie auf der Siegerliste); fehlt zu einem Verein ein Logo,
+  bleibt es beim Namen. Im Hallennetz (LAN) laden die Logos sofort; im
+  Cloud-Modus folgen sie mit dem geplanten badhub-Logo-Resolver — der Name
+  wird in beiden Fällen angezeigt.
+
 ## v0.9.186
 
 - **Check-In-Hauptfeld-Filter wirkt jetzt wirklich.** Der Filter aus
