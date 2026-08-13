@@ -92,6 +92,34 @@ Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
    meldet sich per LOGIN an und schreibt das Match mit `SENDUPDATE` zurück
    nach BTP (siehe [btp_protocol.md](btp_protocol.md)).
 
+## Ergebnis-Übermittlung verlustsicher (Hebel B, ADR 0018)
+
+Der Ergebnis-Weg ist mehrfach abgesichert, damit ein WLAN-/Cloud-Aussetzer kein
+Ergebnis verliert und den Schiri nicht blockiert:
+
+- **Der Klick blockiert nicht.** „Ergebnis übermitteln" legt das Ergebnis als
+  `pendingResult` in localStorage und sendet im Hintergrund; die UI zeigt sofort
+  „wird übermittelt, wird automatisch wiederholt". Wiederholung alle 5 s **bis der
+  Server `ok:true` bestätigt** — übersteht Netzausfall, Reconnect und
+  Tablet-Reload. Ein **Backstop-Timeout** (~12 s, `AbortController`) bricht einen
+  hängenden Einzel-Fetch ab und startet den Retry sofort.
+- **Idempotenz (kein Endlos-Retry / Doppel-Write):** Nach einem erfolgreichen
+  Write räumt der Server das Feld. Ein Wiederholungs-POST für dasselbe Match mit
+  **identischem** Ergebnis (`sets`, Sieger, ScoreStatus) quittiert
+  `process_result` deshalb mit `ok` (statt „Kein Match auf diesem Court") — so
+  löscht das Tablet `pendingResult` und hört auf zu wiederholen. **R5 bleibt:**
+  ein **abweichender** Payload auf ein geräumtes/gewechseltes Feld fällt weiter
+  auf Fehler; ein Retry nach Ablauf des kurzen Idempotenz-Fensters (~60 s) auch —
+  eine echte spätere Korrektur wird nicht abgewürgt.
+- **Host-Retry-Queue auf Platte:** Scheitert der BTP-Write host-seitig, landet das
+  Ergebnis in der BTP-Retry-Queue (30-s-Flush). Diese Queue wird **atomar auf
+  Platte** persistiert (`btp-retry.json`, turnier-gegated über den
+  Turniernamen) und beim Start wieder geladen — so übersteht ein Ergebnis auch
+  einen **Host-App-Neustart** (Durabilität: App-Neustart, nicht Stromausfall).
+- **Cloud:** Der Relay wartet auf die `ResultAck` nur noch **8 s** (statt 20 s),
+  damit `pending`-Slots bei zäher Leitung schneller frei werden; der Client retryt
+  ohnehin (idempotent).
+
 ## Match-Setup (Seiten- und Aufschlagwahl)
 
 Sobald ein Match aufs Feld kommt, führt ein kurzer Assistent durch die

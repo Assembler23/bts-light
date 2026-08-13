@@ -6,8 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -480,6 +480,23 @@ pub struct TabletState {
     /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
     /// höchstens ein Eintrag, der neueste Stand gewinnt.
     btp_retry: RwLock<Vec<PendingBtpWrite>>,
+    /// Pfad der `btp-retry.json` (persistente Nachschub-Queue, ADR 0018).
+    /// `OnceLock`, weil `TabletState` `derive(Default)` nutzt und den Pfad
+    /// erst beim Start erfährt. Ungesetzt = Persistenz aus (z. B. in Tests).
+    btp_retry_path: OnceLock<PathBuf>,
+    /// Serialisiert die Schreibvorgänge auf `btp-retry.json` (Vorbild
+    /// `scores_persist_lock`): mehrere Ergebnis-Writes können gleichzeitig
+    /// einreihen; ohne dieses Lock schnitten sich die Schreiber die Datei ab.
+    btp_retry_persist_lock: Mutex<()>,
+    /// Turnier-Guard der persistierten Queue = `snapshot.tournament_name`
+    /// (immer verfügbar, ADR 0015). Beim Laden wird bei Mismatch verworfen
+    /// (BTP-`match_id` sind nur pro Turnier eindeutig); leerer Name → die
+    /// Queue wird nicht geschrieben (ließe sich keinem Turnier zuordnen).
+    btp_retry_tournament: RwLock<String>,
+    /// Ob die Queue schon einmal von Platte geladen wurde. Der erste
+    /// `set_snapshot` (Turnier-Guard nun verfügbar) triggert das Laden genau
+    /// einmal (CAS); spätere Snapshots aktualisieren nur den Guard.
+    btp_retry_loaded: AtomicBool,
     /// Match-ID → (letzter ERFOLGREICHER Direkt-Write, Zeitpunkt Unix-ms).
     /// Schließt das Nachschub-Race: Landet ein (langsamer) Queue-Write NACH
     /// einer zwischenzeitlich erfolgreichen Korrektur, erkennt der Flush
@@ -608,12 +625,115 @@ struct PersistedScore {
     sets: Vec<(i64, i64)>,
 }
 
+/// Auf Platte gesicherte BTP-Nachschub-Queue (übersteht App-Neustart, ADR
+/// 0018). **Eigenes Schema** statt `#[derive(Serialize)]` direkt auf dem
+/// BTP-Wire-Typ `MatchUpdate` (Entscheidung 3): explizite, versionierbare
+/// Grenze zwischen Platten-Format und Protokoll — eine Protokolländerung
+/// zieht nicht stillschweigend das Disk-Schema mit. Vorbild `PersistedScore`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedBtpQueue {
+    /// Turnier-Guard = `snapshot.tournament_name`. Beim Laden wird die Datei
+    /// bei Mismatch verworfen (BTP-`match_id` sind nur pro Turnier eindeutig).
+    tournament: String,
+    entries: Vec<PersistedBtpEntry>,
+}
+
+/// Ein persistierter Nachschub-Eintrag (Platten-Spiegel von `PendingBtpWrite`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedBtpEntry {
+    update: PersistedMatchUpdate,
+    /// Bezugszeitpunkt (Unix-ms) — steuert nach dem Laden weiterhin das
+    /// Spieler-Checkout-Fenster und die Höchst-Lebensdauer (`prepare_btp_retry`).
+    enqueued_ms: u64,
+}
+
+/// Platten-Spiegel aller `MatchUpdate`-Felder (inkl. `player_ids`,
+/// `end_ts_ms` — nur BTP-IDs, keine Namen/Geburtsjahr).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedMatchUpdate {
+    btp_match_id: i64,
+    draw_id: i64,
+    planning_id: i64,
+    sets: Vec<(i64, i64)>,
+    team1_won: bool,
+    duration_mins: i64,
+    score_status: i64,
+    free_court_id: Option<i64>,
+    player_ids: Vec<i64>,
+    end_ts_ms: Option<u64>,
+}
+
+impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
+    fn from(u: &crate::btp::proto::MatchUpdate) -> Self {
+        PersistedMatchUpdate {
+            btp_match_id: u.btp_match_id,
+            draw_id: u.draw_id,
+            planning_id: u.planning_id,
+            sets: u.sets.clone(),
+            team1_won: u.team1_won,
+            duration_mins: u.duration_mins,
+            score_status: u.score_status,
+            free_court_id: u.free_court_id,
+            player_ids: u.player_ids.clone(),
+            end_ts_ms: u.end_ts_ms,
+        }
+    }
+}
+
+impl From<PersistedMatchUpdate> for crate::btp::proto::MatchUpdate {
+    fn from(p: PersistedMatchUpdate) -> Self {
+        crate::btp::proto::MatchUpdate {
+            btp_match_id: p.btp_match_id,
+            draw_id: p.draw_id,
+            planning_id: p.planning_id,
+            sets: p.sets,
+            team1_won: p.team1_won,
+            duration_mins: p.duration_mins,
+            score_status: p.score_status,
+            free_court_id: p.free_court_id,
+            player_ids: p.player_ids,
+            end_ts_ms: p.end_ts_ms,
+        }
+    }
+}
+
+impl From<&PendingBtpWrite> for PersistedBtpEntry {
+    fn from(w: &PendingBtpWrite) -> Self {
+        PersistedBtpEntry {
+            update: (&w.update).into(),
+            enqueued_ms: w.enqueued_ms,
+        }
+    }
+}
+
+impl From<PersistedBtpEntry> for PendingBtpWrite {
+    fn from(e: PersistedBtpEntry) -> Self {
+        PendingBtpWrite {
+            update: e.update.into(),
+            enqueued_ms: e.enqueued_ms,
+        }
+    }
+}
+
 impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
         self.timeline.set_tournament(&snapshot.tournament_name);
+        // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
+        // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
+        *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
+        // Beim ERSTEN Snapshot ist der Guard verfügbar → die Queue genau
+        // einmal (CAS) von Platte laden (Merge, nicht Replace). Spätere
+        // Snapshots aktualisieren nur den Guard.
+        if self
+            .btp_retry_loaded
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.load_btp_retry();
+        }
         *self.snapshot.write().unwrap() = Some(snapshot);
     }
 
@@ -629,21 +749,25 @@ impl TabletState {
     /// des ERSTEN Fehlschlags bleibt (er steuert das Spieler-Checkout-
     /// Fenster und die Höchst-Lebensdauer).
     pub fn queue_btp_retry(&self, update: crate::btp::proto::MatchUpdate, now: u64) {
-        let mut q = self.btp_retry.write().unwrap();
-        if let Some(e) = q
-            .iter_mut()
-            .find(|e| e.update.btp_match_id == update.btp_match_id)
         {
-            e.update = update;
-            return;
-        }
-        if q.len() >= BTP_RETRY_CAP {
-            q.remove(0); // ältesten opfern — Queue darf nie unbegrenzt wachsen
-        }
-        q.push(PendingBtpWrite {
-            update,
-            enqueued_ms: now,
-        });
+            let mut q = self.btp_retry.write().unwrap();
+            if let Some(e) = q
+                .iter_mut()
+                .find(|e| e.update.btp_match_id == update.btp_match_id)
+            {
+                e.update = update;
+            } else {
+                if q.len() >= BTP_RETRY_CAP {
+                    q.remove(0); // ältesten opfern — Queue darf nie unbegrenzt wachsen
+                }
+                q.push(PendingBtpWrite {
+                    update,
+                    enqueued_ms: now,
+                });
+            }
+        } // Write-Lock hier freigeben — die Platten-I/O läuft NIE unter dem
+          // Daten-Lock (ADR 0018, Entscheidung 4; Vorbild `persist_scores`).
+        self.persist_btp_retry();
     }
 
     /// Entfernt den Queue-Eintrag eines Matches — nach erfolgreichem Write
@@ -653,6 +777,91 @@ impl TabletState {
             .write()
             .unwrap()
             .retain(|e| e.update.btp_match_id != match_id);
+        // Verkleinerte Queue synchron auf Platte spiegeln (der Write-Lock der
+        // Zeile oben ist mit dem Statement schon wieder freigegeben).
+        self.persist_btp_retry();
+    }
+
+    /// Pfad der persistenten Nachschub-Queue setzen (beim Start). Aktiviert
+    /// die Persistenz; ohne Pfad sind `persist`/`load` No-ops (Tests).
+    pub fn set_btp_retry_path(&self, path: PathBuf) {
+        let _ = self.btp_retry_path.set(path);
+    }
+
+    /// Die aktuelle Nachschub-Queue synchron + atomar nach `btp-retry.json`
+    /// schreiben (best effort: ein Schreibfehler darf die Ergebnisannahme NIE
+    /// blockieren — wie `persist_scores`). No-op ohne Pfad oder ohne Turnier.
+    fn persist_btp_retry(&self) {
+        let Some(path) = self.btp_retry_path.get().cloned() else {
+            return; // kein Pfad → Persistenz aus
+        };
+        // Schreiber serialisieren (Vorbild `scores_persist_lock`): sonst
+        // könnten zwei gleichzeitige Ergebnis-Writes Temp- oder Zieldatei
+        // gegenseitig zerlegen.
+        let _guard = self.btp_retry_persist_lock.lock().unwrap();
+        let tournament = self.btp_retry_tournament.read().unwrap().clone();
+        if tournament.is_empty() {
+            // Ohne Turnier-Guard nicht schreiben — die Datei ließe sich beim
+            // Laden keinem Turnier zuordnen (und würde verworfen).
+            return;
+        }
+        // Queue unter kurzem `read()` klonen, Read-Guard sofort fallenlassen —
+        // die anschließende Datei-I/O hält KEIN Daten-Lock.
+        let entries: Vec<PersistedBtpEntry> = {
+            let q = self.btp_retry.read().unwrap();
+            q.iter().map(PersistedBtpEntry::from).collect()
+        };
+        let data = PersistedBtpQueue {
+            tournament,
+            entries,
+        };
+        if let Ok(json) = serde_json::to_string(&data) {
+            // Atomar: erst Temp-Datei, dann umbenennen — nie eine halb
+            // geschriebene btp-retry.json (kein `fsync` → Durabilität nur
+            // gegen App-Neustart, nicht Stromausfall; bewusst, ADR 0018).
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
+    }
+
+    /// Die persistierte Nachschub-Queue beim ersten Snapshot laden (Turnier-
+    /// Guard verfügbar). Fehlende/korrupte Datei → leere Queue, kein Panic.
+    /// **Merge statt Replace**: nur match_ids laden, die noch nicht in der
+    /// Queue stehen — frisch (nach Start) Eingereihtes gewinnt. **Keine**
+    /// erneute Match-Validierung (R5): die Einträge waren vor dem Neustart
+    /// validiert; Turnier-Guard + `prepare_btp_retry`-Drop-Regeln (Sieger da,
+    /// zu alt, Feld neu belegt) fangen Veraltetes beim Flush ab.
+    fn load_btp_retry(&self) {
+        let Some(path) = self.btp_retry_path.get() else {
+            return; // kein Pfad → nichts zu laden
+        };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return; // keine Datei (erster Start) → leere Queue
+        };
+        let Ok(data) = serde_json::from_str::<PersistedBtpQueue>(&text) else {
+            tracing::warn!("btp-retry.json unlesbar – ignoriere");
+            return;
+        };
+        let current = self.btp_retry_tournament.read().unwrap().clone();
+        if data.tournament != current {
+            // Fremdes Turnier: verwerfen — ein Replay schriebe sonst in ein
+            // gleichnamiges Match eines ANDEREN Turniers (match_id-Kollision).
+            tracing::warn!("btp-retry.json gehört zu einem anderen Turnier – verworfen");
+            return;
+        }
+        let mut q = self.btp_retry.write().unwrap();
+        for entry in data.entries {
+            let mid = entry.update.btp_match_id;
+            if q.iter().any(|e| e.update.btp_match_id == mid) {
+                continue; // frisch Eingereihtes gewinnt (Merge, nicht Replace)
+            }
+            if q.len() >= BTP_RETRY_CAP {
+                break; // Kapazitäts-Deckel — geladene Reste verwerfen
+            }
+            q.push(entry.into());
+        }
     }
 
     /// Kopie der aktuellen Nachschub-Queue (für den Flush im Sync-Loop).
@@ -3988,6 +4197,140 @@ mod tests {
         let q = st.btp_retries();
         assert_eq!(q.len(), 1);
         assert_eq!(q[0].update.btp_match_id, 8);
+    }
+
+    // ── Persistente Nachschub-Queue (ADR 0018, Hebel B/(b)) ────────────────
+
+    /// Snapshot mit einem bestimmten Turnier-Namen (Turnier-Guard).
+    fn snap_named(name: &str) -> BtpSnapshot {
+        let mut s = snapshot(Vec::new(), Vec::new());
+        s.tournament_name = name.to_string();
+        s
+    }
+
+    #[test]
+    fn btp_retry_persist_and_reload_roundtrip() {
+        // App-Neustart: gefüllte Queue sichern, frische Instanz mit gleichem
+        // Turnier lädt sie identisch (inkl. player_ids + enqueued_ms).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+
+        let st = TabletState::default();
+        st.set_btp_retry_path(path.clone());
+        st.set_snapshot(snap_named("Cup A"));
+        let mut u = upd(7, 42);
+        u.player_ids = vec![55, 66];
+        u.end_ts_ms = Some(1_700_000_000_000);
+        st.queue_btp_retry(u, 4_242);
+        assert!(path.exists(), "queue_btp_retry schreibt die Datei");
+
+        let st2 = TabletState::default();
+        st2.set_btp_retry_path(path.clone());
+        st2.set_snapshot(snap_named("Cup A"));
+        let q = st2.btp_retries();
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0].update.btp_match_id, 7);
+        assert_eq!(q[0].update.duration_mins, 42);
+        assert_eq!(q[0].update.player_ids, vec![55, 66]);
+        assert_eq!(q[0].update.end_ts_ms, Some(1_700_000_000_000));
+        assert_eq!(q[0].enqueued_ms, 4_242, "Bezugszeitpunkt bleibt erhalten");
+    }
+
+    #[test]
+    fn btp_retry_discards_foreign_tournament() {
+        // Turnier-Guard: unter „Cup A" persistiert, Load mit „Cup B" verwirft
+        // (BTP-match_id kollidieren sonst über Turniere hinweg).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+
+        let st = TabletState::default();
+        st.set_btp_retry_path(path.clone());
+        st.set_snapshot(snap_named("Cup A"));
+        st.queue_btp_retry(upd(7, 30), 1_000);
+
+        let st2 = TabletState::default();
+        st2.set_btp_retry_path(path.clone());
+        st2.set_snapshot(snap_named("Cup B"));
+        assert!(
+            st2.btp_retries().is_empty(),
+            "fremdes Turnier → Queue verworfen"
+        );
+    }
+
+    #[test]
+    fn btp_retry_missing_file_is_empty() {
+        // Erster Start: Datei fehlt → leere Queue, kein Fehler.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+        let st = TabletState::default();
+        st.set_btp_retry_path(path);
+        st.set_snapshot(snap_named("Cup A"));
+        assert!(st.btp_retries().is_empty());
+    }
+
+    #[test]
+    fn btp_retry_corrupt_file_is_empty_no_panic() {
+        // Halbe/kaputte JSON → leere Queue + warn, kein Panic.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+        std::fs::write(&path, b"{ \"tournament\": \"Cup A\", \"entr").unwrap();
+        let st = TabletState::default();
+        st.set_btp_retry_path(path);
+        st.set_snapshot(snap_named("Cup A"));
+        assert!(st.btp_retries().is_empty());
+    }
+
+    #[test]
+    fn btp_retry_clear_persists_shrunken_queue() {
+        // clear_btp_retry schreibt synchron die verkleinerte Datei.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+
+        let st = TabletState::default();
+        st.set_btp_retry_path(path.clone());
+        st.set_snapshot(snap_named("Cup A"));
+        st.queue_btp_retry(upd(7, 30), 1_000);
+        st.queue_btp_retry(upd(8, 20), 2_000);
+        st.clear_btp_retry(7);
+
+        let st2 = TabletState::default();
+        st2.set_btp_retry_path(path.clone());
+        st2.set_snapshot(snap_named("Cup A"));
+        let q = st2.btp_retries();
+        assert_eq!(q.len(), 1, "nach clear nur noch ein Eintrag auf Platte");
+        assert_eq!(q[0].update.btp_match_id, 8);
+    }
+
+    #[test]
+    fn btp_retry_load_merges_keeping_fresh_entries() {
+        // Merge statt Replace: ein zwischen Start und erstem Snapshot frisch
+        // eingereihter Eintrag überlebt das Laden (frisch gewinnt).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+
+        // Alt-Stand auf Platte: Match 7, duration 30.
+        let st = TabletState::default();
+        st.set_btp_retry_path(path.clone());
+        st.set_snapshot(snap_named("Cup A"));
+        st.queue_btp_retry(upd(7, 30), 1_000);
+
+        // „Neustart": Match 7 (duration 99) frisch eingereiht, BEVOR der erste
+        // Snapshot das Laden auslöst.
+        let st2 = TabletState::default();
+        st2.set_btp_retry_path(path.clone());
+        st2.queue_btp_retry(upd(7, 99), 5_000);
+        st2.set_snapshot(snap_named("Cup A"));
+        let q = st2.btp_retries();
+        assert_eq!(q.len(), 1);
+        assert_eq!(
+            q.iter()
+                .find(|e| e.update.btp_match_id == 7)
+                .unwrap()
+                .update
+                .duration_mins,
+            99,
+            "frisch Eingereihtes wird nicht vom Alt-Stand überschrieben"
+        );
     }
 
     // ── Zähltafelbediener-Warteschlange (ADR 0007, Phase 1) ────────────────

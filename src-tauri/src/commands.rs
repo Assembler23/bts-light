@@ -165,6 +165,17 @@ fn tablet_scores_path(app: &AppHandle) -> std::path::PathBuf {
         .join("live-scores.json")
 }
 
+/// Pfad zur persistenten BTP-Nachschub-Queue (ADR 0018). Übersteht einen
+/// App-Neustart, damit ein noch nicht nach BTP geschriebenes Ergebnis nicht
+/// verloren geht. Geladen wird die Queue erst beim ersten Snapshot
+/// (turnier-gegated), geschrieben bei jedem `queue`/`clear`.
+fn tablet_btp_retry_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("btp-retry.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -752,6 +763,11 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     }
     tablet.load_scores(&scores_path);
     tablet.set_scores_path(scores_path);
+    // Persistente BTP-Nachschub-Queue (ADR 0018): Pfad VOR dem ersten Sync
+    // setzen (gleiches Verzeichnis wie die Live-Stände, oben schon angelegt).
+    // Geladen wird die Queue erst beim ersten Snapshot — dann liegt der
+    // Turnier-Guard (`tournament_name`) vor.
+    tablet.set_btp_retry_path(tablet_btp_retry_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.

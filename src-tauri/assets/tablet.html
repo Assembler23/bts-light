@@ -2949,6 +2949,13 @@ function reopen() {
 // Tablet-Reload – das offene Ergebnis liegt in localStorage.
 let resultRetryTimer = null;
 const RESULT_RETRY_MS = 5000;
+// Hebel B / ADR 0018: Backstop-Timeout für den einzelnen /result-Fetch. Ohne
+// ihn könnte eine tote Cloud-Verbindung die Promise bis zum Relay-Timeout (~8 s)
+// oder länger offen halten, bevor der 5-s-Retry startet. 12 s liegt bewusst
+// ÜBER dem Relay-Timeout — im Normalfall antwortet der Relay bei ~8 s (ggf.
+// ok:false) und der reguläre Retry greift; der Abort ist nur für die wirklich
+// tote Leitung. Kein Verlustrisiko: pendingResult wird erst bei ok:true gelöscht.
+const RESULT_ABORT_MS = 12000;
 
 function submit() {
   // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ist das Match in BTP bereits
@@ -2992,11 +2999,17 @@ async function trySubmitPending() {
   if (STATE.finalized) { tlog('info', 'submit_retry_suppressed_finalized'); return; }
   const pr = STATE.pendingResult;
   if (!pr) return;
+  // Backstop-Timeout (Hebel B): bricht der Fetch nicht von selbst ab (tote
+  // Leitung), erzwingt der AbortController nach RESULT_ABORT_MS den catch →
+  // sofortiger Retry statt endloses Warten. Timer im finally räumen.
+  const ac = new AbortController();
+  const abortTimer = setTimeout(() => ac.abort(), RESULT_ABORT_MS);
   try {
     const res = await fetch(BASE_PATH + '/result', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(pr),
+      signal: ac.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
@@ -3012,6 +3025,8 @@ async function trySubmitPending() {
     tlog('warn', 'submit_retry', { matchId: pr.matchId, error: String(err) });
     render();
     resultRetryTimer = setTimeout(trySubmitPending, RESULT_RETRY_MS);
+  } finally {
+    clearTimeout(abortTimer);
   }
 }
 

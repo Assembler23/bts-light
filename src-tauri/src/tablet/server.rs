@@ -1432,12 +1432,85 @@ pub(crate) fn build_manual_dq_update(
     })
 }
 
+/// Zeitfenster, in dem ein Wiederholungs-POST mit **identischem** bereits
+/// geschriebenem Ergebnis als Bestätigung (statt Fehler) quittiert wird. 5 min:
+/// großzügig über dem Client-Retry-Takt (5 s), deckt auch ein Tablet ab, das
+/// nach längerem WLAN-Aussetzer denselben Stand erneut sendet. Ein langes
+/// Fenster ist HIER sicher, weil `settled_ok` feldgenau vergleicht — eine echte
+/// spätere Korrektur (TL-Reopen, andere Sätze) hat abweichende Felder und wird
+/// deshalb NIE quittiert (fällt weiter auf Fehler), unabhängig vom TTL. Zudem
+/// überschreibt jeder neue Write den Merker, sodass er stets den letzten Stand
+/// trägt.
+const RESULT_IDEMPOTENCY_TTL: u64 = 300_000;
+
+/// Ist dieser Ergebnis-POST die **Wiederholung** eines bereits erfolgreich
+/// nach BTP geschriebenen, **identischen** Ergebnisses? Nur dann darf
+/// `process_result` mit `ok()` statt Fehler quittieren, obwohl das Feld
+/// inzwischen geräumt oder neu belegt ist — sonst löschte das Tablet sein
+/// `pendingResult` nie und wiederholte endlos (und ein zeitgleicher zweiter
+/// POST auf ein noch belegtes Feld löste einen Doppel-Write aus).
+///
+/// **R5 (korrektheitskritisch — ein zu breites `ok()` = stiller
+/// Ergebnisverlust):** Verglichen werden ausschließlich die **entscheidenden
+/// Felder** `(sets, team1_won, score_status)` gegen den feldgenauen
+/// „zuletzt-geschrieben"-Merker. Ein abweichender Payload (auch eine
+/// sieger-gleiche Korrektur mit anderen Sätzen) ist eine veraltete oder falsche
+/// Einreichung und liefert `false` → der Aufrufer gibt den originalen Fehler
+/// zurück. Bewusst KEIN Snapshot-Sieger-Netz (das nur die Sieger-Seite prüfte
+/// und Korrekturen fälschlich abwürgte — Review-BLOCKER).
+fn settled_ok(ctx: &ServerCtx, body: &ResultBody, now: u64) -> bool {
+    // Eingehendes Ergebnis ableiten — braucht das Match `m` NICHT. Die
+    // Format-Prüfung (`sets_fit_format`, R5) ist hier bewusst nicht nötig:
+    // Verglichen wird nur gegen den bereits VALIDIERT geschriebenen Stand.
+    let raw_sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
+    let Ok((sets, team1_won, score_status)) =
+        derive_result(raw_sets, body.walkover, body.retired, false, body.winner)
+    else {
+        return false; // ungültiger Payload → keine Bestätigung
+    };
+
+    // Der „zuletzt-geschrieben"-Merker, gesetzt in `write_result_settled` VOR
+    // `clear_court`. Liegt er im TTL und stimmen die drei entscheidenden Felder
+    // überein → identischer Retry → quittieren. BEWUSST NUR dieser feldgenaue
+    // Vergleich (kein Snapshot-Sieger-Netz): Ein fertig geschriebenes Match trägt
+    // im BTP-Snapshot dauerhaft einen Sieger; ein reiner Sieger-Seiten-Vergleich
+    // würde eine spätere TL-Ergebniskorrektur (Reopen, gleicher Sieger, ANDERE
+    // Sätze) fälschlich als „erledigt" quittieren und still verwerfen
+    // (Review-BLOCKER). Der feldgenaue Merker quittiert ausschließlich einen
+    // wirklich identischen Wiederholungs-POST — eine Korrektur (abweichende
+    // Sätze/Status) fällt weiter auf Fehler. Das großzügige TTL deckt auch ein
+    // Tablet ab, das nach längerem Offline denselben Stand erneut sendet.
+    ctx.tablet
+        .direct_btp_write_since(body.match_id, now.saturating_sub(RESULT_IDEMPOTENCY_TTL))
+        .is_some_and(|prev| {
+            prev.sets == sets && prev.team1_won == team1_won && prev.score_status == score_status
+        })
+}
+
 pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
+    // Zeitquelle wie im ganzen Modul (Unix-ms), einmal für den
+    // Idempotenz-Check ermittelt.
+    let now = now_ms();
     let Some(m) = ctx.tablet.match_for_court(body.court_id) else {
-        return ResultResponse::err("Kein Match auf diesem Court.");
+        // Feld nach erfolgreichem Write geräumt: Bevor das ein Fehler wird,
+        // prüfen, ob dies nur die WIEDERHOLUNG des bereits geschriebenen,
+        // IDENTISCHEN Ergebnisses ist — dann quittieren (das Tablet löscht sein
+        // `pendingResult`, der Retry stoppt). Ein abweichender Payload fällt
+        // weiter auf den Fehler durch (R5, veraltete Einreichung).
+        return if settled_ok(ctx, body, now) {
+            ResultResponse::ok()
+        } else {
+            ResultResponse::err("Kein Match auf diesem Court.")
+        };
     };
     if m.id != body.match_id {
-        return ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.");
+        // Feld inzwischen mit einem anderen Match belegt: dieselbe
+        // Idempotenz-Prüfung (identischer Alt-Retry → ok, sonst Fehler).
+        return if settled_ok(ctx, body, now) {
+            ResultResponse::ok()
+        } else {
+            ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.")
+        };
     }
 
     let raw_sets: Vec<(i64, i64)> = body.sets.iter().map(|s| (s.a, s.b)).collect();
@@ -3001,6 +3074,167 @@ mod tests {
         assert_eq!(int(&m, "ScoreStatus"), Some(1), "Kampflos");
         let sets = xml::find(&m, "Sets").expect("Sets");
         assert!(sets.children().is_empty(), "Kampflos verwirft Sätze");
+    }
+
+    // ── Idempotenz (Hebel B, Teil c): Retry auf geräumtem/gewechseltem Feld ──
+
+    /// Setzt den Snapshot auf genau diese Matches (Feld „1"), sonst leer —
+    /// simuliert einen frischen BTP-Poll. Leere Liste = Feld geräumt.
+    fn set_matches(ctx: &ServerCtx, matches: Vec<BtpMatch>) {
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches,
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+        });
+    }
+
+    /// Ein „zuletzt-geschrieben"-Merker für Match 42 (nur die entscheidenden
+    /// Felder zählen für den Idempotenz-Vergleich).
+    fn merker_update(
+        sets: Vec<(i64, i64)>,
+        team1_won: bool,
+        score_status: i64,
+    ) -> proto::MatchUpdate {
+        proto::MatchUpdate {
+            btp_match_id: 42,
+            draw_id: 7,
+            planning_id: 1001,
+            sets,
+            team1_won,
+            duration_mins: 0,
+            score_status,
+            free_court_id: Some(101),
+            player_ids: vec![],
+            end_ts_ms: None,
+        }
+    }
+
+    /// (1) Erfolgreicher Write, Feld danach geräumt, **identischer** Retry →
+    /// `ok` (nicht „Kein Match auf diesem Court") → das Tablet löscht sein
+    /// pendingResult, der Retry stoppt.
+    #[tokio::test]
+    async fn idempotent_retry_on_cleared_court_is_acked() {
+        let (port, _rec) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // 1. Erfolgreicher Write (setzt den Merker via write_result_settled).
+        assert!(
+            process_result(&ctx, &body_with(&[(21, 10), (21, 15)]))
+                .await
+                .ok
+        );
+        // BTP-Poll nach dem Write: Feld geräumt (Match nicht mehr OnCourt).
+        set_matches(&ctx, vec![]);
+        // 2. Identischer Retry → quittiert.
+        let retry = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(
+            retry.ok,
+            "identischer Retry auf geräumtem Feld quittiert: {:?}",
+            retry.error
+        );
+    }
+
+    /// (2) R5: Retry mit **abweichenden** Sätzen auf geräumtem Feld →
+    /// **Fehler** (veraltete/falsche Einreichung, keine Falsch-Bestätigung).
+    #[tokio::test]
+    async fn diverging_retry_on_cleared_court_still_errors() {
+        let (port, _rec) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        assert!(
+            process_result(&ctx, &body_with(&[(21, 10), (21, 15)]))
+                .await
+                .ok
+        );
+        set_matches(&ctx, vec![]); // Feld geräumt, Snapshot ohne Sieger
+                                   // Abweichende Sätze (Team 1 gewinnt weiter, aber andere Punkte).
+        let resp = process_result(&ctx, &body_with(&[(21, 18), (21, 19)])).await;
+        assert!(!resp.ok, "abweichender Payload darf nicht quittiert werden");
+    }
+
+    /// (3) Ein **genuin neues** Ergebnis auf einem noch belegten Feld läuft
+    /// durch die normale Validierung + Write — die Idempotenz greift dort
+    /// NICHT (auch wenn für das Match bereits ein Merker existiert).
+    #[tokio::test]
+    async fn genuine_new_result_on_occupied_court_writes_through() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Vorheriger Write setzt den Merker; das Feld bleibt aber belegt
+        // (Snapshot unverändert, Match 42 weiter OnCourt).
+        assert!(
+            process_result(&ctx, &body_with(&[(21, 10), (21, 15)]))
+                .await
+                .ok
+        );
+        // Abweichendes neues Ergebnis auf dem noch belegten Feld → Write.
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 18)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            2,
+            "beide Ergebnisse gingen als eigener SENDUPDATE nach BTP"
+        );
+    }
+
+    /// (4) Liegt der Merker **älter** als das TTL, wird ein Retry wieder mit
+    /// Fehler beantwortet — eine echte spätere Korrektur soll nicht als „schon
+    /// erledigt" abgewürgt werden.
+    #[tokio::test]
+    async fn expired_marker_no_longer_acks_retry() {
+        let ctx = make_ctx(1); // toter Port — es kommt zu keinem Write
+        let old = now_ms().saturating_sub(RESULT_IDEMPOTENCY_TTL + 5_000);
+        ctx.tablet
+            .note_direct_btp_write(merker_update(vec![(21, 10), (21, 15)], true, 0), old);
+        set_matches(&ctx, vec![]); // Feld geräumt, kein Sieger im Snapshot
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(!resp.ok, "Merker älter als TTL → Fehler statt ok");
+    }
+
+    /// (5) Feld hat gewechselt (`m.id` ≠ `match_id`), der Merker trägt das
+    /// identische Alt-Ergebnis → `ok` (der Retry des alten Matches wird
+    /// quittiert, auch wenn inzwischen ein anderes Match auf dem Feld steht).
+    #[tokio::test]
+    async fn identical_old_result_on_switched_court_is_acked() {
+        let ctx = make_ctx(1); // toter Port — reine Idempotenz, kein Write
+        ctx.tablet
+            .note_direct_btp_write(merker_update(vec![(21, 10), (21, 15)], true, 0), now_ms());
+        // Feld 101 ist inzwischen mit einem ANDEREN Match (99) belegt.
+        let mut other = match_on_court();
+        other.id = 99;
+        set_matches(&ctx, vec![other]);
+        // Retry des alten Match-42-Ergebnisses (body_with adressiert Match 42).
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(
+            resp.ok,
+            "identischer Alt-Retry auf gewechseltem Feld quittiert: {:?}",
+            resp.error
+        );
+    }
+
+    /// (6) Regression zum Review-BLOCKER: Ein fertig geschriebenes Match trägt im
+    /// BTP-Snapshot dauerhaft einen Sieger. Ein **abweichendes** (sieger-gleiches)
+    /// Ergebnis auf dem geräumten Feld darf NICHT allein wegen der passenden
+    /// Sieger-Seite quittiert werden (das wäre ein stiller Verlust einer echten
+    /// TL-Korrektur) — ohne feldgenauen Merker liefert `settled_ok` `false`.
+    #[tokio::test]
+    async fn diverging_result_is_not_acked_by_snapshot_winner() {
+        let ctx = make_ctx(1); // toter Port — kein Write, also KEIN Merker
+                               // Snapshot: Match 42 ist fertig (Sieger Team 1) und NICHT mehr auf Feld
+                               // 101 (geräumt) → match_for_court(101) == None → settled_ok-Pfad.
+        let mut finished = match_on_court();
+        finished.winner = Some(1);
+        finished.status = MatchStatus::Finished;
+        finished.court_id = None;
+        set_matches(&ctx, vec![finished]);
+        // Abweichende Sätze, aber Team 1 gewinnt weiter (Sieger-Seite passt).
+        let resp = process_result(&ctx, &body_with(&[(21, 18), (21, 19)])).await;
+        assert!(
+            !resp.ok,
+            "sieger-gleiches, aber abweichendes Ergebnis darf NICHT quittiert werden"
+        );
     }
 
     // ── Ablehnungen: ungültige Ergebnisse werden NICHT nach BTP geschrieben ──

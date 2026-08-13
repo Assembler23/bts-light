@@ -343,8 +343,14 @@ bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst sagt er beide an).
 
 **Grenzen (bekannt):**
 
-- **Kein lokaler Puffer** — jede Ergebnis-Übermittlung läuft synchron über die
-  Cloud (20-s-Timeout); bei Aussetzern erneut senden.
+- **Ergebnis-Übermittlung ist gepuffert** (Hebel B, ADR 0018): Das Tablet legt
+  das Ergebnis in localStorage und wiederholt es bis zur Bestätigung; die
+  Host-BTP-Retry-Queue liegt zusätzlich auf Platte (übersteht Host-Neustart,
+  turnier-gegated). Der Relay wartet auf die `ResultAck` nur noch **8 s** (statt
+  20 s), der Client-Fetch bricht nach ~12 s als Backstop ab und retryt.
+  `process_result` quittiert einen Wiederholungs-POST für ein bereits
+  geschriebenes **identisches** Ergebnis idempotent mit `ok` (kein Endlos-Retry,
+  kein Doppel-Write). Durabilität: gegen App-Neustart, nicht gegen Stromausfall.
 - **Cloud-Tablet-PIN = `0000`** (der Relay kennt den Operator-PIN nicht,
   `relay/src/main.rs` `__TABLET_PIN__` leer → `tablet.html`-Fallback), und das
   Cloud-Feldwechsel-Menü listet **alle** Hallen. Ein Helfer in Halle B könnte
