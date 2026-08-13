@@ -21,6 +21,14 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   bekommt beim Verbinden den echten Stand statt 0:0 restauriert. Relay-Teil
   greift mit dem automatischen Relay-Deploy sofort; die App braucht dieses
   Update. Doku: `docs/court-monitor.md` („Score-Spiegel des Hosts").
+- **Schiedsrichter: die ersten Schalter im Setup.** Der neue Abschnitt
+  „Schiedsrichter" hat den globalen Schalter „Mit Schiedsrichtern spielen"
+  und die beiden Rotations-Schalter (SR/AR). **Standardmäßig aus** — wer
+  ohne Schiedsrichter arbeitet, merkt nichts. Die eigentliche Bedienung
+  (Zuweisung je Spiel, Reihenfolge, Sperrlisten, Ansage) kommt mit den
+  nächsten Schritten; der Hinweis im Abschnitt sagt das auch. Grundlage
+  ist der BTP-Parser für die Schiedsrichterliste und die SR-/AR-Felder am
+  Spiel. Spec `docs/features/schiedsrichter-management.md`, ADR 0021/0022.
 
 ## v0.9.199
 
