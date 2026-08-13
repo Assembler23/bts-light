@@ -3201,6 +3201,45 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 let _ = t.send(text(&ServerMsg::MatchCleared));
             }
         }
+        HostFrame::ScoreUpdate {
+            court_id,
+            match_id,
+            sets,
+            state,
+        } => {
+            // Satzstand-Spiegel des Hosts (Turnier-Befund 13.08.2026): Im
+            // LAN(+Cloud)-Betrieb zählen die Tablets am Relay vorbei — nur
+            // dieser Spiegel hält Cloud-Monitor/-Übersicht auf Stand. Der
+            // Host ist autoritativ (kein Holder-Check wie beim Tablet-Weg),
+            // aber der Stale-Schutz bleibt: Ein Nachzügler eines Matches,
+            // das nicht (mehr) auf dem Feld liegt, wird verworfen — die
+            // Frame-Reihenfolge Host→Relay ist FIFO, ein Widerspruch heißt
+            // also „altes Spiel".
+            if sets.len() > 10 || !match_id_matches_court(namespace, court_id, match_id) {
+                return true;
+            }
+            // Ein LEERER Spiegel überschreibt keinen vorhandenen Stand: Ein
+            // frisch ersetzter Turnier-PC (ohne `live-scores.json`) meldet
+            // fürs laufende Match leere Sätze — der Live-Stand des zählenden
+            // Cloud-Tablets darf dadurch nicht auf 0:0 zurückfallen.
+            if !sets.is_empty() || !namespace.court_scores.contains_key(&court_id) {
+                namespace.court_scores.insert(court_id, sets);
+            }
+            // Tablet-Spielzustand (Aufschlag, Pause) opak übernehmen — mit
+            // derselben Größengrenze UND derselben Prüfung der EINGEBETTETEN
+            // Match-ID wie beim direkten Tablet-`state_sync`
+            // (`store_court_state`): Der Host-Cache wird bei einem reinen
+            // BTP-Court-Move nicht sofort geleert und könnte sonst den State
+            // des alten Spiels unter der neuen Match-ID einschleusen.
+            if let Some(state) = state {
+                let embedded_ok =
+                    !relay_proto::state_sync_match_id(&state).is_some_and(|m| m != match_id);
+                if state.len() <= MAX_STATE_LEN && embedded_ok {
+                    namespace.court_state.insert(court_id, state);
+                }
+            }
+            notify_monitor(namespace, court_id);
+        }
         HostFrame::Freetext { id, hall, text } => {
             // Längen hart begrenzen (Schutz vor RAM-Aufblähung durch
             // pathologische Frames; char-genau, kein Byte-Slice-Panic).
@@ -4633,6 +4672,153 @@ mod tests {
         let ns = broker.namespaces.lock().await;
         assert!(!ns["ns1"].court_scores.contains_key(&101));
         assert_eq!(ns["ns1"].court_on_court_since.get(&101), Some(&2000));
+    }
+
+    /// Host-Score-Spiegel (Turnier-Befund 13.08.2026): Im LAN(+Cloud)-Betrieb
+    /// zählen die Tablets am Relay vorbei — der Host spiegelt den Stand per
+    /// `HostFrame::ScoreUpdate`. Der Relay übernimmt ihn in den Anzeige-Cache
+    /// (`court_scores` + `court_state`), weckt die Monitor-Abonnenten des
+    /// Felds und `build_monitor_state` zeigt den Stand. Ein Nachzügler eines
+    /// fremden Matches wird verworfen (Stale-Schutz wie beim Tablet-Weg).
+    #[tokio::test]
+    async fn host_score_mirror_fills_the_display_cache_and_nudges() {
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (mon_tx, mut mon_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert(101, brief(7));
+            ns.monitor_subs.entry(101).or_default().push(mon_tx);
+        }
+        register_host(&broker, "ns1", &host).await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 7,
+                sets: vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }],
+                state: Some(r#"{"matchId":7}"#.into()),
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let ns = &map["ns1"];
+            assert_eq!(
+                ns.court_scores.get(&101),
+                Some(&vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }])
+            );
+            assert_eq!(
+                ns.court_state.get(&101),
+                Some(&r#"{"matchId":7}"#.to_string())
+            );
+            let state = build_monitor_state(ns, 101);
+            assert_eq!(
+                state.match_info.expect("Match am Feld").sets,
+                vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }]
+            );
+        }
+        assert!(mon_rx.try_recv().is_ok(), "Monitor-Abonnent wird geweckt");
+
+        // Nachzügler eines fremden Matches → verworfen, Cache unangetastet.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 9,
+                sets: vec![SetAb { a: 1, b: 0 }],
+                state: Some(r#"{"matchId":9}"#.into()),
+            },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(
+            map["ns1"].court_scores.get(&101),
+            Some(&vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }]),
+            "fremdes Match verändert den Stand nicht"
+        );
+        assert_eq!(
+            map["ns1"].court_state.get(&101),
+            Some(&r#"{"matchId":7}"#.to_string()),
+            "fremdes Match verändert den Zustand nicht"
+        );
+    }
+
+    /// Zwei Schutzregeln des Host-Spiegels (Review-Befunde zum v0.9.200-Fix):
+    /// (a) Ein LEERER Spiegel (Host ohne lokalen Stand, z. B. frisch
+    /// ersetzter Turnier-PC, dessen `live-scores.json` nicht mitreist) darf
+    /// einen vorhandenen Live-Stand eines Cloud-Tablets nicht auf 0:0
+    /// zurückwerfen. (b) Ein `court_state`, dessen EINGEBETTETE Match-ID
+    /// (`match.matchId`) nicht zum gemeldeten Match passt (Host-Cache nach
+    /// Court-Move noch nicht geleert), wird verworfen — dieselbe Prüfung,
+    /// die `store_court_state` beim direkten Tablet-Weg macht.
+    #[tokio::test]
+    async fn host_score_mirror_guards_against_empty_and_stale_payloads() {
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert(101, brief(7));
+            // Live-Stand eines zählenden Cloud-Tablets.
+            ns.court_scores.insert(101, vec![SetAb { a: 11, b: 9 }]);
+            ns.court_state
+                .insert(101, r#"{"match":{"matchId":7},"a":11}"#.into());
+        }
+        register_host(&broker, "ns1", &host).await;
+
+        // (a) Leerer Spiegel → Live-Stand bleibt unangetastet.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 7,
+                sets: vec![],
+                state: None,
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            assert_eq!(
+                map["ns1"].court_scores.get(&101),
+                Some(&vec![SetAb { a: 11, b: 9 }]),
+                "leerer Spiegel wirft den Live-Stand nicht auf 0:0 zurück"
+            );
+        }
+
+        // (b) State mit fremder eingebetteter Match-ID → sets übernommen,
+        // state verworfen (der alte, korrekte State bleibt stehen).
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 7,
+                sets: vec![SetAb { a: 12, b: 9 }],
+                state: Some(r#"{"match":{"matchId":6},"a":21}"#.into()),
+            },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(
+            map["ns1"].court_scores.get(&101),
+            Some(&vec![SetAb { a: 12, b: 9 }]),
+            "plausible Sätze werden übernommen"
+        );
+        assert_eq!(
+            map["ns1"].court_state.get(&101),
+            Some(&r#"{"match":{"matchId":7},"a":11}"#.to_string()),
+            "State eines fremden Matches wird verworfen"
+        );
     }
 
     #[tokio::test]

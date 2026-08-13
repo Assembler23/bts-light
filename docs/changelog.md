@@ -4,6 +4,32 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.200
+
+- **Cloud-Monitore und Cloud-Übersicht zeigen jetzt auch die Stände von
+  LAN-Tablets.** Der Relay kannte Punktestand und Spielzustand bisher nur
+  von Tablets, die selbst über die Cloud zählen — im `LanAndCloud`-
+  Mischbetrieb (Tablets im Hallen-LAN, Anzeigen über badhub.de) blieben
+  Cloud-Monitor, Court-Anzeige und Feld-Übersicht deshalb auf 0:0 stehen
+  (Turnier-Befund 13.08.2026, Zwei-Hallen-Turnier). Der Host spiegelt jetzt
+  jeden Feld-Stand (Satzliste + Tablet-Spielzustand mit Aufschlag/Pause) als
+  `HostFrame::ScoreUpdate` an den Relay — nudge-getrieben plus 2-s-Sweep
+  nach dem Zuweisungs-Push (fängt Relay-Neustarts, Court-Wechsel und
+  BTP-Handeingaben ein), dedupliziert per Fingerabdruck. Der Relay übernimmt
+  den Spiegel mit Stale-Schutz; leere Sätze überschreiben keinen Live-Stand
+  eines zählenden Cloud-Tablets. Nebeneffekt: Ein Ersatz-Cloud-Tablet
+  bekommt beim Verbinden den echten Stand statt 0:0 restauriert. Relay-Teil
+  greift mit dem automatischen Relay-Deploy sofort; die App braucht dieses
+  Update. Doku: `docs/court-monitor.md` („Score-Spiegel des Hosts").
+- **Schiedsrichter: die ersten Schalter im Setup.** Der neue Abschnitt
+  „Schiedsrichter" hat den globalen Schalter „Mit Schiedsrichtern spielen"
+  und die beiden Rotations-Schalter (SR/AR). **Standardmäßig aus** — wer
+  ohne Schiedsrichter arbeitet, merkt nichts. Die eigentliche Bedienung
+  (Zuweisung je Spiel, Reihenfolge, Sperrlisten, Ansage) kommt mit den
+  nächsten Schritten; der Hinweis im Abschnitt sagt das auch. Grundlage
+  ist der BTP-Parser für die Schiedsrichterliste und die SR-/AR-Felder am
+  Spiel. Spec `docs/features/schiedsrichter-management.md`, ADR 0021/0022.
+
 ## v0.9.199
 
 - **Tote Cloud-Verbindungen werden schneller erkannt (Cluster-Hebel D).** Zwei

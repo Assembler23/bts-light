@@ -1373,6 +1373,30 @@ pub enum HostFrame {
         #[serde(default)]
         hall: String,
     },
+    /// Satzstand-Spiegel des Hosts (autoritativ). Im LAN(+Cloud)-Betrieb
+    /// zählen die Tablets am Relay vorbei direkt gegen den Host — ohne diesen
+    /// Spiegel bleiben Cloud-Monitor und Cloud-Übersicht auf 0:0 stehen
+    /// (Turnier-Befund 13.08.2026). Der Relay übernimmt `sets` (und, falls
+    /// vorhanden, den **opaken** Tablet-`court_state` mit Aufschlag/Pause) in
+    /// seinen Anzeige-Cache und weckt die Monitor-Abonnenten — derselbe Pfad,
+    /// den ein Cloud-Tablet über `TabletMsg::ScoreUpdate` nimmt.
+    ScoreUpdate {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        /// Match, zu dem der Stand gehört — der Relay verwirft den Spiegel,
+        /// wenn das Feld inzwischen ein anderes Match trägt (Stale-Schutz,
+        /// gleiche Regel wie beim Tablet-Weg / HM-03).
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        /// Vollständige Satzliste (abgeschlossene Sätze + laufender Satz).
+        #[serde(default)]
+        sets: Vec<SetAb>,
+        /// Roher Tablet-Spielzustand (Aufschlag, Pause) als JSON-String —
+        /// opak wie beim Tablet-`state_sync`; `None` = kein Tablet-Zustand
+        /// bekannt (der bisherige Relay-Stand bleibt dann stehen).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        state: Option<String>,
+    },
     /// Freitext-Ansage (Master → Relay → ferne Halle). Der Cloud-Ansage-Slave
     /// holt sie über `GET /{ns}/info/announce/freetext` und spricht sie lokal.
     Freetext {
@@ -2124,6 +2148,48 @@ mod tests {
             winner: Some(2),
             cascade_walkover: false,
         });
+    }
+
+    /// Host→Relay-Score-Spiegel: Im LAN(+Cloud)-Betrieb zählen die Tablets am
+    /// Host vorbei am Relay — dieses Frame trägt den Satzstand (und optional
+    /// den opaken `court_state`) zum Relay, damit Cloud-Monitor und
+    /// Cloud-Übersicht nicht auf 0:0 stehen bleiben.
+    #[test]
+    fn host_score_update_roundtrips_with_camel_case_wire() {
+        let frame = HostFrame::ScoreUpdate {
+            court_id: 5,
+            match_id: 77,
+            sets: vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }],
+            state: Some(r#"{"score":"3:1"}"#.into()),
+        };
+        roundtrip(&frame);
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains(r#""type":"score_update""#));
+        assert!(json.contains(r#""courtId":5"#));
+        assert!(json.contains(r#""matchId":77"#));
+
+        // Ohne `state` (kein Tablet-Zustand vorhanden) → Feld fehlt auf der
+        // Wire, parst als None; `sets` leer ist zulässig (Match ohne Punkte).
+        let json = serde_json::to_string(&HostFrame::ScoreUpdate {
+            court_id: 5,
+            match_id: 77,
+            sets: vec![],
+            state: None,
+        })
+        .unwrap();
+        assert!(!json.contains("state"), "None-state bleibt weg: {json}");
+        let parsed: HostFrame =
+            serde_json::from_str(r#"{"type":"score_update","courtId":5,"matchId":77,"sets":[]}"#)
+                .unwrap();
+        assert_eq!(
+            parsed,
+            HostFrame::ScoreUpdate {
+                court_id: 5,
+                match_id: 77,
+                sets: vec![],
+                state: None,
+            }
+        );
     }
 
     #[test]

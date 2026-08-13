@@ -21,11 +21,12 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use relay_proto::{
     AdUpload, AnnounceState, CourtBrief, HostFrame, MonitorControl, MonitorDeviceInfo,
-    MonitorUpload, PlayerBrief, PreparedMatch, RelayFrame, ResultBody,
+    MonitorUpload, PlayerBrief, PreparedMatch, RelayFrame, ResultBody, SetAb,
 };
 
 use crate::tablet::monitor;
 use crate::tablet::server::{handle_score, match_brief, process_result, ServerCtx};
+use crate::tablet::state::{MonitorNudge, MonitorNudgeTx, TabletState};
 
 /// Öffentliche Relay-Basis – der Host-Pfad hängt die `install_id` an.
 const RELAY_HOST: &str = "wss://badhub.de/bts-relay";
@@ -131,6 +132,28 @@ async fn serve(
     let mut last_incoming = tokio::time::Instant::now();
     let mut idle_ticker = tokio::time::interval(RELAY_READ_IDLE / 3);
     idle_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Score-Spiegel (Turnier-Befund 13.08.2026): Der Host abonniert seinen
+    // EIGENEN Monitor-Nudge-Kanal („alle Felder", wie die LAN-Übersicht) und
+    // spiegelt bei jedem Signal den Stand des Felds zum Relay — sonst bleiben
+    // Cloud-Monitor/-Übersicht auf 0:0, sobald die Tablets im LAN zählen.
+    // Der Guard trägt das Abo bei JEDEM Sitzungsende wieder aus (auch beim
+    // Read-Idle-`Err`), damit Reconnects den Fan-out-Deckel nicht auffüllen.
+    let (nudge_tx, mut nudge_rx) = mpsc::unbounded_channel::<String>();
+    if !ctx.tablet.subscribe_monitor(None, &nudge_tx) {
+        tracing::warn!(
+            "Score-Spiegel: Nudge-Deckel erreicht — Cloud-Anzeigen folgen nur dem Match-Wechsel"
+        );
+    }
+    let _nudge_guard = NudgeGuard {
+        tablet: &ctx.tablet,
+        tx: nudge_tx,
+    };
+    // Kein Spiegel VOR dem ersten Zuweisungs-Push: Der Relay verwirft einen
+    // Spiegel für ein ihm unbekanntes Match (Stale-Schutz) — nach seinem
+    // Neustart wäre der Stand dann bis zum nächsten Punkt unsichtbar
+    // (Review-Befund). Der erste `ticker`-Tick feuert sofort und schickt
+    // MatchAssigned + Spiegel in der richtigen Reihenfolge.
+    let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -144,7 +167,7 @@ async fn serve(
                 match msg {
                     WsMessage::Text(t) => {
                         if let Ok(frame) = serde_json::from_str::<RelayFrame>(t.as_str()) {
-                            handle_frame(ctx, frame, &tx, &mut last_match).await;
+                            handle_frame(ctx, frame, &tx, &mut last_match, &mut score_fp).await;
                         }
                     }
                     WsMessage::Ping(p) => { let _ = tx.send(WsMessage::Pong(p)); }
@@ -159,7 +182,19 @@ async fn serve(
                 }
             }
             _ = ticker.tick() => {
-                push_all_courts(ctx, &tx, &mut last_match);
+                push_all_courts(ctx, &tx, &mut last_match, &mut score_fp);
+                // Score-Spiegel-Sweep NACH den Zuweisungen (gleiche FIFO-Wire
+                // → der Relay kennt die Matches, bevor der Spiegel eintrifft).
+                // Fängt drei nudge-lose Fälle mit ≤2 s Verzug ein: Reconnect/
+                // Relay-Neustart (leerer Cache dort), Court-Wechsel (FP eben
+                // invalidiert) und BTP-getriebene Stände ohne Tablet
+                // (Handeingabe in BTP nudgt nicht). Dank Fingerabdruck sendet
+                // ein Tick ohne Änderung nichts.
+                for court in ctx.tablet.courts() {
+                    if let Some(frame) = score_mirror_frame(&ctx.tablet, court.id, &mut score_fp) {
+                        let _ = tx.send(text(&frame));
+                    }
+                }
                 push_freetext(ctx, &tx, &mut last_freetext);
                 // Zugänge zuerst: Der Zustand nützt nichts, solange der Relay
                 // niemanden kennt, dem er ihn zeigen dürfte.
@@ -177,6 +212,18 @@ async fn serve(
             }
             _ = control_ticker.tick() => {
                 sync_monitor_control(ctx, install_id, &mut control_fp).await;
+            }
+            nudge = nudge_rx.recv() => {
+                // Feld hat sich geändert (Punkt, Zustand, Match): Stand
+                // spiegeln, falls er sich fürs Relay wirklich unterscheidet.
+                let court_id = nudge
+                    .and_then(|n| serde_json::from_str::<MonitorNudge>(&n).ok())
+                    .map(|n| n.court);
+                if let Some(court_id) = court_id {
+                    if let Some(frame) = score_mirror_frame(&ctx.tablet, court_id, &mut score_fp) {
+                        let _ = tx.send(text(&frame));
+                    }
+                }
             }
             _ = idle_ticker.tick() => {
                 // Half-open erkannt: seit RELAY_READ_IDLE kein Frame/Ping.
@@ -350,6 +397,7 @@ async fn handle_frame(
     frame: RelayFrame,
     tx: &mpsc::UnboundedSender<WsMessage>,
     last_match: &mut HashMap<i64, Option<(i64, bool)>>,
+    score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     match frame {
         RelayFrame::TabletConnected { court_id, .. } => {
@@ -357,7 +405,7 @@ async fn handle_frame(
             tracing::info!("Tablet verbunden für Feld {court_id} (Cloud)");
             // Sofort das aktuelle Match nachschieben (statt 2 s zu warten).
             last_match.remove(&court_id);
-            push_court(ctx, court_id, tx, last_match);
+            push_court(ctx, court_id, tx, last_match, score_fp);
         }
         RelayFrame::TabletDisconnected { court_id, .. } => {
             ctx.tablet.detach_tablet(court_id);
@@ -528,6 +576,7 @@ fn push_court(
     court_id: i64,
     tx: &mpsc::UnboundedSender<WsMessage>,
     last_match: &mut HashMap<i64, Option<(i64, bool)>>,
+    score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     let court_label = ctx.tablet.court_display_label(court_id);
     let hall = ctx.tablet.court_hall(court_id);
@@ -550,6 +599,12 @@ fn push_court(
         return;
     }
     last_match.insert(court_id, key);
+    // Zuweisungs-Wechsel: Der Relay setzt seinen Anzeige-Cache neu auf und
+    // hat einen davor eingetroffenen Spiegel womöglich verworfen (Match dort
+    // noch unbekannt — z. B. nach Relay-Neustart oder Court-Wechsel). Den
+    // Spiegel-Fingerabdruck verwerfen, damit der Sweep dieses Ticks den
+    // Stand direkt NACH der Zuweisung erneut schickt (dieselbe FIFO-Wire).
+    score_fp.remove(&court_id);
     let frame = match effective {
         Some(m) => {
             tracing::info!(
@@ -586,9 +641,10 @@ fn push_all_courts(
     ctx: &ServerCtx,
     tx: &mpsc::UnboundedSender<WsMessage>,
     last_match: &mut HashMap<i64, Option<(i64, bool)>>,
+    score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     for court in ctx.tablet.courts() {
-        push_court(ctx, court.id, tx, last_match);
+        push_court(ctx, court.id, tx, last_match, score_fp);
     }
 }
 
@@ -965,6 +1021,55 @@ fn azure_share(ctx: &ServerCtx) -> Option<relay_proto::AzureTtsShare> {
     )
 }
 
+/// Trägt das Monitor-Nudge-Abo des Score-Spiegels beim Sitzungsende wieder
+/// aus — als Drop-Guard, damit auch der `Err`-Ausstieg des Read-Idle-Wächters
+/// aufräumt und Reconnects den Fan-out-Deckel (`MAX_MONITOR_SUBS`) nicht
+/// allmählich auffüllen.
+struct NudgeGuard<'a> {
+    tablet: &'a TabletState,
+    tx: MonitorNudgeTx,
+}
+
+impl Drop for NudgeGuard<'_> {
+    fn drop(&mut self) {
+        self.tablet.unsubscribe_monitor(None, &self.tx);
+    }
+}
+
+/// Baut den Score-Spiegel-Frame (Host→Relay) für ein Feld — oder `None`,
+/// wenn dort kein Match liegt oder sich seit dem letzten Senden nichts
+/// geändert hat (Turnier-Befund 13.08.2026: Im LAN(+Cloud)-Betrieb zählen
+/// die Tablets am Relay vorbei; ohne diesen Spiegel bleiben Cloud-Monitor
+/// und Cloud-Übersicht auf 0:0 stehen).
+///
+/// `last` hält je Feld das zuletzt gebaute Frame als Fingerabdruck: Der
+/// Nudge-Kanal feuert auch für Akku-/Verbindungs-Ereignisse, und ein
+/// unverändert wiederholtes Frame würde die Cloud-Monitore grundlos wecken.
+/// `push_court` verwirft den Eintrag eines Felds bei jedem Zuweisungs-Push —
+/// der Sweep spiegelt dann erneut, NACHDEM der Relay das Match kennt.
+fn score_mirror_frame(
+    tablet: &TabletState,
+    court_id: i64,
+    last: &mut HashMap<i64, HostFrame>,
+) -> Option<HostFrame> {
+    let mirror = tablet.score_mirror_of(court_id)?;
+    let frame = HostFrame::ScoreUpdate {
+        court_id,
+        match_id: mirror.match_id,
+        sets: mirror
+            .sets
+            .into_iter()
+            .map(|(a, b)| SetAb { a, b })
+            .collect(),
+        state: mirror.state,
+    };
+    if last.get(&court_id) == Some(&frame) {
+        return None;
+    }
+    last.insert(court_id, frame.clone());
+    Some(frame)
+}
+
 /// Serialisiert einen Wert zu einem WebSocket-Text-Frame.
 fn text<T: serde::Serialize>(value: &T) -> WsMessage {
     WsMessage::Text(serde_json::to_string(value).unwrap_or_default().into())
@@ -1004,6 +1109,48 @@ mod tests {
         let now = Instant::now();
         let last = now - Duration::from_secs(4);
         assert!(!is_stale(last, now, RELAY_READ_IDLE));
+    }
+
+    /// Score-Spiegel Host→Relay (Turnier-Befund 13.08.2026): Der Frame trägt
+    /// den effektiven Feld-Stand (Tablet-Score + Tablet-Zustand), wird aber
+    /// nur bei ÄNDERUNG gebaut — der Nudge-Kanal feuert auch für Akku-/
+    /// Verbindungs-Ereignisse, und unverändertes Wiederholen würde die
+    /// Cloud-Monitore grundlos wecken.
+    #[test]
+    fn score_mirror_frame_reports_only_changes() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snapshot(vec![match_on_court(7, 101)]));
+        let mut last = HashMap::new();
+
+        // Erster Stand (noch kein Tablet): Match bekannt, Sätze leer.
+        match score_mirror_frame(&tablet, 101, &mut last).expect("erster Stand wird gemeldet") {
+            HostFrame::ScoreUpdate {
+                court_id,
+                match_id,
+                sets,
+                state,
+            } => {
+                assert_eq!((court_id, match_id), (101, 7));
+                assert!(sets.is_empty(), "ohne Tablet: BTP-Stand (leer)");
+                assert!(state.is_none(), "kein Tablet-Zustand vorhanden");
+            }
+            f => panic!("unerwartetes Frame: {f:?}"),
+        }
+        // Unverändert → nichts zu senden.
+        assert!(score_mirror_frame(&tablet, 101, &mut last).is_none());
+
+        // Das Tablet zählt → der neue Stand wird genau einmal gemeldet.
+        tablet.record_score(101, 7, vec![(11, 9)]);
+        match score_mirror_frame(&tablet, 101, &mut last).expect("Änderung wird gemeldet") {
+            HostFrame::ScoreUpdate { sets, .. } => {
+                assert_eq!(sets, vec![relay_proto::SetAb { a: 11, b: 9 }]);
+            }
+            f => panic!("unerwartetes Frame: {f:?}"),
+        }
+        assert!(score_mirror_frame(&tablet, 101, &mut last).is_none());
+
+        // Feld ohne Match → nichts zu senden.
+        assert!(score_mirror_frame(&tablet, 999, &mut last).is_none());
     }
 
     fn player(n: &str) -> BtpPlayer {
@@ -1148,31 +1295,68 @@ mod tests {
         let ctx = ctx_with(vec![match_on_court(42, 101)]);
         let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
         let mut last: HashMap<i64, Option<(i64, bool)>> = HashMap::new();
+        let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
 
-        // 1) Zuweisung → genau ein MatchAssigned.
-        push_court(&ctx, 101, &tx, &mut last);
+        // Der Spiegel-Fingerabdruck des Felds ist gesetzt (als hätte der
+        // Sweep schon gespiegelt) — ein Zuweisungs-Push muss ihn verwerfen.
+        score_fp.insert(
+            101,
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 42,
+                sets: vec![],
+                state: None,
+            },
+        );
+
+        // 1) Zuweisung → genau ein MatchAssigned; Spiegel-FP invalidiert,
+        // damit der Sweep des Ticks den Stand NACH der Zuweisung neu spiegelt
+        // (Review-Befund: Relay-Neustart/Court-Wechsel verwarf den Spiegel,
+        // der Fingerabdruck verhinderte dann jede Wiederholung).
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
         let f1 = rx.try_recv().expect("ein Frame erwartet");
         assert!(
             text_of(&f1).contains("\"type\":\"match_assigned\""),
             "erwartet match_assigned, war: {}",
             text_of(&f1)
         );
+        assert!(
+            !score_fp.contains_key(&101),
+            "Zuweisungs-Push verwirft den Spiegel-Fingerabdruck"
+        );
 
-        // 2) Unveränderter Stand → kein erneuter Push (Dedup).
-        push_court(&ctx, 101, &tx, &mut last);
+        // 2) Unveränderter Stand → kein erneuter Push (Dedup), FP unberührt.
+        score_fp.insert(
+            101,
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 42,
+                sets: vec![],
+                state: None,
+            },
+        );
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
         assert!(
             rx.try_recv().is_err(),
             "kein doppelter Push bei gleichem Stand"
         );
+        assert!(
+            score_fp.contains_key(&101),
+            "Dedup-Fall lässt den Spiegel-Fingerabdruck stehen"
+        );
 
         // 3) Match verlässt das Feld → genau ein MatchCleared.
         ctx.tablet.set_snapshot(snapshot(vec![]));
-        push_court(&ctx, 101, &tx, &mut last);
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
         let f3 = rx.try_recv().expect("Clear-Frame erwartet");
         assert!(
             text_of(&f3).contains("\"type\":\"match_cleared\""),
             "erwartet match_cleared, war: {}",
             text_of(&f3)
+        );
+        assert!(
+            !score_fp.contains_key(&101),
+            "auch die Aufhebung verwirft den Spiegel-Fingerabdruck"
         );
     }
 }
