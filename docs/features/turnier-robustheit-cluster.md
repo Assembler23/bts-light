@@ -17,8 +17,8 @@ daraus vier Hebel, priorisiert.
 
 | # | Hebel | Kern | Detail-Spec |
 |---|-------|------|-------------|
-| **A** | **Echtzeit-Robustheit der Score-Strecke** | A1 niedrig-latente Anzeige (TVs pollen 1 s/5 s → Push) + A2 Reconnect-Wahrheit (Tablet = Wahrheit, „Slot-Halter gewinnt") | [turnier-robustheit.md](turnier-robustheit.md) ✅ abgestimmt |
-| **B** | **Lokaler Ergebnis-Puffer (Cloud)** | `/result` ist synchron, 20-s-Timeout, kein Puffer → Klick hängt bei Cloud-Aussetzer. Ergebnis lokal puffern + async wiederholen | *offen* |
+| **A** | **Echtzeit-Robustheit der Score-Strecke** | A1 niedrig-latente Anzeige (TVs pollen 1 s/5 s → Push) + A2 Reconnect-Wahrheit (Tablet = Wahrheit, „Slot-Halter gewinnt") | [turnier-robustheit.md](turnier-robustheit.md) ✅ **umgesetzt v0.9.196/197** |
+| **B** | **Ergebnis-Weg verlustsicher** | Client/Host-Puffer existieren schon; Rest: `process_result`-Idempotenz (kein Endlos-Retry/Doppel-Write) + Client-Fetch-Timeout + Host-Retry-Queue auf Platte | [ergebnis-puffer.md](ergebnis-puffer.md) ✅ abgestimmt |
 | **C** | **Last-/Soak-Test (36 Geräte, Reconnect-Sturm)** | Robustheit ist logisch da, aber nie unter Last verifiziert. Harness, das das reale Setup simuliert | *offen* |
 | **D** | **Tote-Verbindungs-Erkennung schärfen** | Tote TCP-Slots halten Host-/Feld-Slot bis zum Timeout (17-Min-Fall); Risikoprofil der Eigen-Router-Nebenhalle. Kürzere Heartbeats/TCP-Keepalive | *offen* |
 
