@@ -172,6 +172,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // Punktverlauf on-demand (AK-5): gleicher Pfad wie über den Relay,
         // damit tl.html in beiden Modi identisch abruft.
         .route("/tl/api/timeline/{match_id}", get(tl_timeline))
+        .route("/tl/api/officials/{official_id}", get(tl_official_detail))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -1133,6 +1134,27 @@ async fn tl_timeline(
         )
             .into_response(),
     }
+}
+
+/// Sperrlisten und Einsätze **eines** Schiedsrichters (Spec
+/// schiedsrichter-management) — bewusst on-demand und nie Teil des
+/// Zustands-Pushes: Sperrlisten kodieren persönliche Beziehungen und
+/// gehören nicht in den Stand, den jedes gekoppelte Gerät bekommt.
+/// Gleicher Zugang wie `tl_state` (Geräte-Token).
+async fn tl_official_detail(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(official_id): axum::extract::Path<i64>,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        crate::tablet::tl::official_detail_json(&ctx.tablet, official_id),
+    )
+        .into_response()
 }
 
 /// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine

@@ -529,7 +529,13 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Wartezeit, nicht um eine ganze Paarung. */
 .sk { margin-bottom: 16px; }
 .sk .count { color: var(--ink-faint); font-weight: 600; }
-.sk #sk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sk #sk-list, .sk #off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sk #off-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.sk #off-list li.paused { opacity: .55; }
+.sk #off-list .off-name { flex: 1; }
+.sk #off-list button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: inherit; }
+.sk #off-list button:hover { border-color: var(--accent); color: var(--accent); }
+.warnflag { background: #b45309; color: #fff; border-radius: 5px; padding: 0 5px; font-size: 11px; }
 .sk #sk-list li {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 8px 10px; min-height: 44px;
@@ -804,10 +810,20 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────────
    Kleiner 📈-Knopf an Feldkachel/Beendet-Zeile, Overlay mit je Satz
    einem SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
-.graphbtn, .fin-row [data-fin-graph] {
+.graphbtn, .fin-row [data-fin-graph], .offbtn {
   border: 1px solid var(--line); background: var(--card);
   border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: .85rem;
 }
+.offbtn { margin-left: 6px; font-size: .78rem; padding: 1px 6px; }
+/* Pflege-Ansicht im Overlay: Beschriftung über dem Feld, wie im Setup. */
+.off-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; font-size: .85rem; }
+.off-field input, .off-field textarea, .off-field select {
+  background: var(--card); color: inherit; border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 7px; font: inherit;
+}
+.off-h3 { margin: 14px 0 6px; font-size: .9rem; }
+#off-seen { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#off-seen li { display: flex; gap: 8px; align-items: center; }
 .graph-overlay {
   position: fixed; inset: 0; z-index: 70;
   display: flex; align-items: center; justify-content: center;
@@ -899,6 +915,10 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
           <button type="submit">Hinzufügen</button>
         </form>
       </details>
+      <details class="sk" id="off-box" hidden>
+        <summary>Schiedsrichter <span class="count" id="off-count"></span></summary>
+        <ol id="off-list"></ol>
+      </details>
       <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
       <div id="queue"></div>
       <details class="fin" id="fin-box" hidden>
@@ -945,6 +965,19 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <button type="button" id="graph-close" aria-label="Punktverlauf schließen">×</button>
     </div>
     <div class="graph-body" id="graph-body"></div>
+  </div>
+</div>
+
+<!-- Schiedsrichter-Pflege: Sperrlisten, Verein und Einsätze kommen
+     on-demand von /tl/api/officials/… — sie stehen bewusst NICHT im
+     Zustand, den jedes Gerät bekommt (Personendaten). -->
+<div class="graph-overlay" id="off-overlay" hidden>
+  <div class="graph-box">
+    <div class="graph-head">
+      <span id="off-title">Schiedsrichter</span>
+      <button type="button" id="off-close" aria-label="schließen">×</button>
+    </div>
+    <div class="graph-body" id="off-body"></div>
   </div>
 </div>
 
@@ -2107,6 +2140,19 @@ function courtCard(c, cellStyle) {
   const bediener = c.scorekeeper && c.scorekeeper.length
     ? `<div class="meta">Bedienung: ${esc(c.scorekeeper.join(" / "))}</div>` : "";
 
+  // Schiedsrichter/Aufschlagrichter (Spec schiedsrichter-management): Namen
+  // plus Konflikt-KATEGORIE. Der Auswahl-Knopf öffnet die Einteilung; er
+  // erscheint nur bei laufendem Spiel und eingeschaltetem SR-Betrieb.
+  const schiris = state.officials_managed && c.match_id
+    ? `<div class="meta">
+         ${(c.sr || []).length ? `SR: ${esc(c.sr.join(" / "))}` : "SR: –"}
+         ${(c.ar || []).length ? ` · AR: ${esc(c.ar.join(" / "))}` : ""}
+         ${c.official_warn ? `<span class="warnflag" title="Konflikt">${esc(c.official_warn)}</span>` : ""}
+         <button type="button" class="offbtn" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
+                 title="Schiedsrichter einteilen">einteilen</button>
+       </div>`
+    : "";
+
   // Erneut aufrufen: nur bei einem Spiel, das noch nicht angefangen hat, und
   // nur solange es etwas zu zählen gibt. Nach dem dritten Aufruf entscheidet
   // die Turnierleitung, nicht noch ein Knopf.
@@ -2143,7 +2189,7 @@ function courtCard(c, cellStyle) {
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}</div>
-    ${body}${bediener}
+    ${body}${bediener}${schiris}
     <div class="card-foot">${foot}${graph}${nachruf}</div>
   </article>`;
 }
@@ -2187,6 +2233,16 @@ function wireCourts(box) {
       const c = state.courts.find((x) => String(x.match_id) === btn.dataset.graph);
       if (!c) return;
       openTimeline(c.match_id, `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`, null);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Einteilen-Knopf: wie der Graph-Knopf mit gestopptem Weiterreichen,
+  // sonst wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
+  box.querySelectorAll("button[data-off-court]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openOfficialAssign(Number(btn.dataset.offCourt), Number(btn.dataset.offMatch));
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -3252,6 +3308,158 @@ function timelineSetFinal(set) {
 // gewerteten Sätze (nur aus der Beendet-Liste, für den Abweichungs-
 // Hinweis) und der Poll-Timer fürs Mitwachsen laufender Spiele.
 let graphCtx = null;
+// ── Schiedsrichter (Spec schiedsrichter-management) ───────────────────
+// Die Liste steht im Zustand (Name, Pause, Dienst, Einsatz-Zähler).
+// Sperrlisten, Verein und die Einsatz-Liste kommen NUR auf gezielte
+// Anfrage über /tl/api/officials/… — sie kodieren persönliche Beziehungen
+// und haben im Broadcast-Zustand nichts zu suchen.
+function renderOfficials() {
+  const box = $("off-box");
+  box.hidden = !state.officials_managed;
+  if (box.hidden) return;
+  const list = state.officials || [];
+  $("off-count").textContent = list.length ? `(${list.length})` : "";
+  $("off-list").innerHTML = list.map((o, i) => `<li class="${o.paused ? "paused" : ""}">
+      <span class="num">${i + 1}.</span>
+      <span class="off-name">${esc(o.name)}</span>
+      ${o.on_duty_court_id ? `<span class="meta">im Dienst</span>` : ""}
+      <button type="button" data-off-detail="${o.id}" title="Sperren, Verein und Einsätze">${o.appearances}×</button>
+      <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
+        title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
+      ${i > 0 ? `<button type="button" data-off-up="${o.id}" data-before="${list[i - 1].id}"
+          title="in der Reihenfolge vorziehen" aria-label="vorziehen">▲</button>` : ""}
+    </li>`).join("");
+  $("off-list").querySelectorAll("[data-off-pause]").forEach((b) =>
+    b.addEventListener("click", () => send(
+      `off-pause-${b.dataset.offPause}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_pause", officialId: Number(b.dataset.offPause), paused: !b.dataset.paused },
+      b.dataset.paused ? "Wieder eingeteilt." : "Pausiert.",
+    )));
+  $("off-list").querySelectorAll("[data-off-up]").forEach((b) =>
+    b.addEventListener("click", () => send(
+      `off-up-${b.dataset.offUp}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_reorder", officialId: Number(b.dataset.offUp), beforeOfficialId: Number(b.dataset.before) },
+      "Reihenfolge geändert.",
+    )));
+  $("off-list").querySelectorAll("[data-off-detail]").forEach((b) =>
+    b.addEventListener("click", () => openOfficialDetail(Number(b.dataset.offDetail))));
+}
+
+/** Offener Pflege-Dialog: `{ id, name }` oder null. */
+let offCtx = null;
+
+async function openOfficialDetail(id) {
+  const o = (state.officials || []).find((x) => x.id === id);
+  offCtx = { id, name: o ? o.name : "" };
+  $("off-title").textContent = offCtx.name || "Schiedsrichter";
+  $("off-body").innerHTML = `<p class="graph-note">Wird geladen …</p>`;
+  $("off-overlay").hidden = false;
+  try {
+    const res = await fetch(`${API}/officials/${id}`, {
+      headers: { Authorization: "Bearer " + token },
+      cache: "no-store",
+    });
+    if (!offCtx || offCtx.id !== id) return; // Overlay inzwischen gewechselt
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    renderOfficialDetail(await res.json());
+  } catch {
+    if (offCtx && offCtx.id === id) {
+      $("off-body").innerHTML = `<p class="graph-note">Die Angaben sind gerade nicht
+        abrufbar — die Version des Turnier-PCs kennt das Schiedsrichter-Modul
+        möglicherweise noch nicht, oder die Verbindung fehlt.</p>`;
+    }
+  }
+}
+
+function renderOfficialDetail(d) {
+  const einsaetze = (d.appearances || []).map((a) => `<li>
+      <span class="num">${a.role === "ar" ? "AR" : "SR"}</span>
+      <span class="off-name">${esc(a.match_name || "")}</span>
+      <span class="meta">${esc(a.court || "")}</span>
+      <span class="meta">${a.finished_at ? new Date(a.finished_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+    </li>`).join("");
+  $("off-body").innerHTML = `
+    <label class="off-field">Verein
+      <input type="text" id="off-club" maxlength="80" value="${esc(d.club || "")}" />
+    </label>
+    <label class="off-field">Gesperrte Vereine (einer je Zeile)
+      <textarea id="off-clubs" rows="3">${esc((d.blocked_clubs || []).join("
+"))}</textarea>
+    </label>
+    <label class="off-field">Gesperrte Spieler (BTP-IDs, mit Komma)
+      <input type="text" id="off-players" value="${esc((d.blocked_players || []).join(", "))}" />
+    </label>
+    <button type="button" id="off-save">Speichern</button>
+    <p class="graph-note">Diese Angaben bleiben auf dem Turnier-PC und werden
+      beim Turnierwechsel verworfen.</p>
+    <h3 class="off-h3">Einsätze</h3>
+    <ol id="off-seen">${einsaetze || '<li class="meta">noch keiner</li>'}</ol>`;
+  $("off-save").addEventListener("click", () => {
+    const id = offCtx && offCtx.id;
+    if (!id) return;
+    const clubs = $("off-clubs").value.split("
+").map((c) => c.trim()).filter(Boolean);
+    const players = $("off-players").value.split(/[,\s]+/)
+      .map((p) => parseInt(p, 10)).filter((p) => Number.isFinite(p) && p > 0);
+    // Verein und Sperrlisten sind zwei Aktionen — der Aktionssatz ist
+    // geschlossen (ADR 0011), und beide Angaben werden getrennt gepflegt.
+    send(`off-club-${id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_set_club", officialId: id, club: $("off-club").value }, null);
+    send(`off-block-${id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_blocklist_set", officialId: id, clubs, players },
+      "Gespeichert.");
+    $("off-overlay").hidden = true;
+    offCtx = null;
+  });
+}
+
+/**
+ * Einteilung eines Felds: je Dienst eine Auswahl aus der Rotationsliste.
+ *
+ * Eine Zuweisung mit Konflikt wird **ausgeführt** — die Turnierleitung
+ * entscheidet, die App warnt nur (Spec Nr. 2). Die Warnung selbst kommt mit
+ * dem nächsten Zustand an der Kachel an, weil der Turnier-PC sie berechnet.
+ */
+function openOfficialAssign(courtId, matchId) {
+  const c = (state.courts || []).find((x) => x.court_id === courtId);
+  const liste = state.officials || [];
+  offCtx = null; // kein Detail-Abruf offen
+  $("off-title").textContent = c ? `Feld ${c.court}` : "Einteilung";
+  const auswahl = (rolle, aktuell) => `
+    <label class="off-field">${rolle === "sr" ? "Schiedsrichter" : "Aufschlagrichter"}
+      <select data-off-role="${rolle}">
+        <option value="">—</option>
+        ${liste.map((o) => `<option value="${o.id}" ${
+          (aktuell || []).includes(o.name) ? "selected" : ""
+        }>${esc(o.name)}${o.paused ? " (Pause)" : ""}</option>`).join("")}
+      </select>
+    </label>`;
+  $("off-body").innerHTML = auswahl("sr", c && c.sr) + auswahl("ar", c && c.ar) +
+    `<p class="graph-note">Steht in BTP schon ein Schiedsrichter am Spiel,
+      gilt dieser — die Auswahl hier wirkt dann nicht.</p>`;
+  $("off-overlay").hidden = false;
+  $("off-body").querySelectorAll("select[data-off-role]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const rolle = sel.dataset.offRole;
+      const wert = sel.value;
+      const stempel = Math.floor(Date.now() / OP_WINDOW_MS);
+      if (!wert) {
+        send(`off-clear-${matchId}-${rolle}-${stempel}`,
+          { action: "official_clear", courtId, matchId, role: rolle }, "Zuweisung gelöst.");
+      } else {
+        send(`off-assign-${matchId}-${rolle}-${wert}-${stempel}`,
+          { action: "official_assign", courtId, matchId, officialId: Number(wert), role: rolle },
+          "Eingeteilt.");
+      }
+    });
+  });
+}
+
+$("off-close").addEventListener("click", () => {
+  $("off-overlay").hidden = true;
+  offCtx = null;
+});
+
 let graphTimer = null;
 
 async function fetchTimeline() {
@@ -3475,6 +3683,7 @@ function render() {
   renderCourts();
   renderWalkovers();
   renderScorekeepers();
+  renderOfficials();
   renderQueue();
   renderFinished();
 }

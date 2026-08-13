@@ -248,6 +248,10 @@ struct Namespace {
     /// Antwort `(found, json)` — der Relay hält keine Verläufe vor (AK-5),
     /// er reicht nur durch.
     timeline_pending: HashMap<u64, oneshot::Sender<(bool, String)>>,
+    /// Offene Schiedsrichter-Detailabrufe (Sperrlisten, Einsätze):
+    /// `req_id` → wartender HTTP-Handler. Wie beim Punktverlauf reicht der
+    /// Relay nur durch — diese Personendaten hält er **nie** vor.
+    official_pending: HashMap<u64, oneshot::Sender<String>>,
     /// Belegte Geräteplätze: Zugang → letzter Zugriff (Unix-ms). Begrenzt,
     /// damit nicht Dutzende Browser denselben Turnier-PC abfragen.
     tl_devices: HashMap<String, u64>,
@@ -318,6 +322,7 @@ impl Namespace {
             tl_state: None,
             tl_pending: HashMap::new(),
             timeline_pending: HashMap::new(),
+            official_pending: HashMap::new(),
             tl_devices: HashMap::new(),
             tl_gen: 0,
             monitor_subs: HashMap::new(),
@@ -533,6 +538,10 @@ async fn main() {
             // gleicher Pfad wie am LAN-Server, damit tl.html in beiden
             // Modi identisch abruft.
             .route("/tl/api/timeline/{match_id}", get(tl_timeline_route))
+            .route(
+                "/tl/api/officials/{official_id}",
+                get(tl_official_detail_route),
+            )
             // Flaggen für die TL-Seite: Sie hängt ohne Namespace unter
             // `/tl` und findet ihre Flaggen deshalb unter `/flags/…` —
             // Begründung am Handler.
@@ -2732,6 +2741,10 @@ fn forget_tl_access(namespace: &mut Namespace) {
     // 503, sonst kippte ein offenes Overlay beim Reconnect kurz auf
     // „Zu diesem Spiel liegt kein Punktverlauf vor" (Review 2026-08-11).
     namespace.timeline_pending.clear();
+    // Dito: fallen lassen statt leer beantworten — sonst zeigte eine offene
+    // Pflege-Ansicht beim Reconnect kurz leere Sperrlisten und überschriebe
+    // sie beim Speichern.
+    namespace.official_pending.clear();
 }
 
 /// Der abgelegte Anzeige-Zustand (Revision + JSON), falls einer da ist.
@@ -3040,6 +3053,105 @@ async fn tl_timeline_route(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Der Turnier-PC hat nicht geantwortet — seine Version kennt \
                  den Punktverlauf möglicherweise noch nicht.",
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Sperrlisten und Einsätze eines Schiedsrichters — Muster
+/// [`tl_timeline_route`]. Der Relay reicht die Anfrage an den Turnier-PC
+/// durch und die Antwort unverändert zurück; diese Personendaten liegen
+/// nie im gespiegelten Zustand.
+async fn tl_official_detail_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+    Path(official_id): Path<i64>,
+) -> axum::response::Response {
+    let token = bearer(&headers);
+    let now = now_ms();
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    let (ack_rx, req_id) = {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
+        let Some(host) = namespace.host.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if namespace.official_pending.len() >= MAX_PENDING_PER_NS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele offene Anfragen — bitte kurz warten.",
+            )
+                .into_response();
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.official_pending.insert(req_id, ack_tx);
+        if host
+            .send(text(&RelayFrame::OfficialDetailRequest {
+                req_id,
+                official_id,
+            }))
+            .is_err()
+        {
+            namespace.official_pending.remove(&req_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht erreichbar.",
+            )
+                .into_response();
+        }
+        (ack_rx, req_id)
+    };
+    match tokio::time::timeout(TL_TIMEOUT, ack_rx).await {
+        Ok(Ok(json)) if !json.is_empty() => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            json,
+        )
+            .into_response(),
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(&ns) {
+                namespace.official_pending.remove(&req_id);
+            }
+            // Auch der Versions-Schiefstand landet hier: Ein älterer
+            // Turnier-PC kennt den Frame nicht und antwortet nie.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC hat nicht geantwortet — seine Version kennt                  das Schiedsrichter-Modul möglicherweise noch nicht.",
             )
                 .into_response()
         }
@@ -3384,6 +3496,17 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
         // Punktverlauf-Antwort des Hosts → an den wartenden Abruf. Der
         // Größen-Deckel gilt auch hier: ein überlanger Verlauf wird zur
         // ehrlichen Fehlanzeige statt zum Speicherfresser.
+        HostFrame::OfficialDetail { req_id, json } => {
+            if let Some(pending) = namespace.official_pending.remove(&req_id) {
+                // Größen-Deckel wie beim Verlauf: Eine überlange Antwort
+                // wird zur ehrlichen Fehlanzeige statt zum Speicherfresser.
+                let _ = pending.send(if json.len() > relay_proto::MAX_TIMELINE_LEN {
+                    String::new()
+                } else {
+                    json
+                });
+            }
+        }
         HostFrame::TimelineData {
             req_id,
             found,
@@ -4487,6 +4610,57 @@ mod tests {
         )
         .await;
         assert_eq!(warten.await.unwrap().status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn official_details_pass_through_and_reject_foreign_tokens() {
+        // Sperrlisten sind Personendaten: Der Relay hält sie nie vor, er
+        // reicht Anfrage und Antwort durch — und nur mit gültigem Zugang.
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+
+        let mut falsch = axum::http::HeaderMap::new();
+        falsch.insert(header::AUTHORIZATION, "Bearer falsch".parse().unwrap());
+        let antwort = tl_official_detail_route(State(broker.clone()), falsch, Path(3)).await;
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten = tokio::spawn(async move {
+            tl_official_detail_route(State(broker2), headers, Path(3)).await
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::OfficialDetailRequest {
+            req_id,
+            official_id,
+        } = serde_json::from_str::<RelayFrame>(t.as_str()).unwrap()
+        else {
+            panic!("OfficialDetailRequest erwartet")
+        };
+        assert_eq!(official_id, 3);
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::OfficialDetail {
+                req_id,
+                json: r#"{"blocked_clubs":["SC Nachbar"]}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("SC Nachbar"));
     }
 
     #[tokio::test]

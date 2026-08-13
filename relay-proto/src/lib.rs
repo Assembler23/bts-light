@@ -1069,6 +1069,17 @@ impl PrepCallSide {
         [PrepCallSide::Both, PrepCallSide::Team1, PrepCallSide::Team2];
 }
 
+/// Dienst eines Officials an einem Spiel. BTP: `Official1ID` = Schiedsrichter,
+/// `Official2ID` = Aufschlagrichter (an der BTP-Maske verifiziert).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TlOfficialRole {
+    /// Schiedsrichter.
+    Sr,
+    /// Aufschlagrichter.
+    Ar,
+}
+
 /// Die Aktionen, die ein Turnierleitungs-Gerät auslösen darf — ein **bewusst
 /// geschlossener** Satz (ADR 0011). Was hier nicht steht, ist nicht
 /// darstellbar; der Relay leitet nur weiter, entschieden und validiert wird
@@ -1205,6 +1216,82 @@ pub enum TlAction {
     ScorekeeperAdd { names: Vec<String> },
     /// Automatische Feldvergabe an-/abschalten.
     SetAutoAssign { enabled: bool },
+
+    // ── Schiedsrichter (Spec schiedsrichter-management) ──────────────
+    /// Einem Spiel einen Schiedsrichter oder Aufschlagrichter zuweisen.
+    ///
+    /// Die Zuweisung hängt am **Spiel**, nicht am Feld — nach Spielende
+    /// bleibt sie ihm zugeordnet (Grundlage der Einsatz-Ableitung). Das
+    /// Feld reist trotzdem mit: Es ordnet die Aktion demselben Feld zu wie
+    /// die übrigen Feld-Aktionen und schützt so vor zwei gleichzeitigen
+    /// Zugriffen auf dasselbe Feld.
+    OfficialAssign {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        role: TlOfficialRole,
+    },
+    /// Eine Zuweisung lösen.
+    OfficialClear {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        role: TlOfficialRole,
+    },
+    /// Einen Schiedsrichter pausieren oder wieder einteilen.
+    OfficialPause {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        paused: bool,
+    },
+    /// Einen Schiedsrichter in der Reihenfolge vor einen anderen ziehen;
+    /// ohne Ziel ans Ende.
+    OfficialReorder {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        #[serde(
+            rename = "beforeOfficialId",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        before_official_id: Option<i64>,
+    },
+    /// Stammverein pflegen (BTP überträgt am Official keinen).
+    OfficialSetClub {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        club: String,
+    },
+    /// Sperrlisten setzen (ersetzt beide Listen).
+    ///
+    /// Diese Angaben sind Personendaten: Sie reisen **nur** in dieser
+    /// Aktion und in der Antwort der gezielten Leseroute — nie im
+    /// Broadcast-Zustand, den alle Geräte bekommen.
+    OfficialBlocklistSet {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        clubs: Vec<String>,
+        players: Vec<i64>,
+    },
+    /// Die drei Schalter eines Felds setzen (SR-Rotation, AR-Rotation,
+    /// Zähltafelbediener-Vergabe).
+    OfficialsCourtToggle {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        sr: bool,
+        ar: bool,
+        operator: bool,
+    },
+    /// Schiedsrichter und Aufschlagrichter eines Felds ansagen (manueller
+    /// Knopf — eine nachträgliche Zuweisung sagt nie von selbst an).
+    AnnounceOfficials {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
 }
 
 /// Grund einer Ablehnung — **maschinenlesbar**, damit die Seite gezielt
@@ -1491,6 +1578,18 @@ pub enum HostFrame {
         req_id: u64,
         #[serde(default)]
         found: bool,
+        #[serde(default)]
+        json: String,
+    },
+    /// Antwort auf einen [`RelayFrame::OfficialDetailRequest`]: Sperrlisten,
+    /// Stammverein und Einsatz-Liste eines Schiedsrichters als **opaker**
+    /// JSON-String (Muster [`HostFrame::TimelineData`]).
+    ///
+    /// Kein `found`-Flag: Ein unbekannter Schiedsrichter liefert leere
+    /// Listen, damit die Pflege-Ansicht sich trotzdem öffnen lässt.
+    OfficialDetail {
+        #[serde(rename = "reqId")]
+        req_id: u64,
         #[serde(default)]
         json: String,
     },
@@ -1820,6 +1919,16 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "matchId")]
         match_id: i64,
+    },
+    /// Ein TL-Gerät möchte Sperrlisten und Einsätze eines Schiedsrichters
+    /// sehen (Spec schiedsrichter-management). Wie beim Punktverlauf
+    /// Request/Response über `req_id`; der Relay bleibt Briefträger und
+    /// hält diese Personendaten **nie** vor.
+    OfficialDetailRequest {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(rename = "officialId")]
+        official_id: i64,
     },
 }
 
@@ -2828,7 +2937,59 @@ mod tests {
                 names: vec!["Müller".to_string(), "Schmidt".to_string()],
             },
             TlAction::SetAutoAssign { enabled: true },
+            // Schiedsrichter (Spec schiedsrichter-management, Schritt 8)
+            TlAction::OfficialAssign {
+                court_id: 5,
+                match_id: 4711,
+                official_id: 3,
+                role: TlOfficialRole::Sr,
+            },
+            TlAction::OfficialClear {
+                court_id: 5,
+                match_id: 4711,
+                role: TlOfficialRole::Ar,
+            },
+            TlAction::OfficialPause {
+                official_id: 3,
+                paused: true,
+            },
+            TlAction::OfficialReorder {
+                official_id: 3,
+                before_official_id: Some(7),
+            },
+            TlAction::OfficialSetClub {
+                official_id: 3,
+                club: "TSV Musterstadt".to_string(),
+            },
+            TlAction::OfficialBlocklistSet {
+                official_id: 3,
+                clubs: vec!["SC Nachbar".to_string()],
+                players: vec![42, 43],
+            },
+            TlAction::OfficialsCourtToggle {
+                court_id: 5,
+                sr: true,
+                ar: false,
+                operator: true,
+            },
+            TlAction::AnnounceOfficials { court_id: 5 },
         ]
+    }
+
+    #[test]
+    fn tl_official_assign_wire_form() {
+        // Wire-Vertrag mit tl.html — festgenagelt wie bei `assign_court`.
+        let json = serde_json::to_string(&TlAction::OfficialAssign {
+            court_id: 5,
+            match_id: 4711,
+            official_id: 3,
+            role: TlOfficialRole::Sr,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"official_assign","courtId":5,"matchId":4711,"officialId":3,"role":"sr"}"#
+        );
     }
 
     #[test]
@@ -3112,6 +3273,14 @@ mod tests {
             court_id: 7,
             match_id: 42,
             timeline: beispiel_timeline(),
+        });
+        roundtrip(&RelayFrame::OfficialDetailRequest {
+            req_id: 8,
+            official_id: 3,
+        });
+        roundtrip(&HostFrame::OfficialDetail {
+            req_id: 8,
+            json: r#"{"blocked_clubs":[]}"#.to_string(),
         });
         roundtrip(&RelayFrame::TimelineRequest {
             req_id: 9,

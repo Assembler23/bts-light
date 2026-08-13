@@ -8,11 +8,11 @@ ADRs: [0021 (Rücksync)](adr/0021-officials-ruecksync-eigenstaendiger-write.md),
 [0022 (Ablage Turnierdaten)](adr/0022-officials-turnierdaten-eigene-datei.md) ·
 BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibweg").
 
-> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–7 des Spec-Plans
+> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–8 des Spec-Plans
 > (BTP-Messung, Parser, Konfiguration, Roster-Speicher, Rotation +
-> Konflikt-Erkennung, feldweise Schalter, Commands + Client-Oberfläche).
-> TL-Web, Tablet-Anzeige, Ansagen und Rücksync folgen mit den nächsten
-> Schritten; dieser Text wächst mit.
+> Konflikt-Erkennung, feldweise Schalter, Commands + Client-Oberfläche,
+> Wire + TL-Web). Tablet-Anzeige, Ansagen und Rücksync folgen mit den
+> nächsten Schritten; dieser Text wächst mit.
 
 ## Konfiguration
 
@@ -219,3 +219,26 @@ TL-Web über die authentifizierte Leseroute nutzt.
 Einstellungen). Grund: Der Sync-Lauf liest seine Konfiguration nur beim Start
 — ohne diesen Spiegel bliebe ein frisch gesetztes Häkchen bis zum nächsten
 Stoppen/Starten der Übertragung wirkungslos.
+
+## TL-Web (Schritt 8)
+
+Wire-Ebene und Bedienung sind in [cloud-relay.md](cloud-relay.md) bzw.
+[turnierleitung-web.md](turnierleitung-web.md) beschrieben. Der Kern:
+
+- **Broadcast-`TlState`** trägt `officials_managed`, die reduzierte Liste
+  `officials` (`id`, `name`, `paused`, `on_duty_court_id`, `appearances`)
+  und je Feld `sr`/`ar`/`official_warn` plus die drei Feld-Schalter.
+- **Sperrlisten, Verein und Einsatz-Liste** kommen ausschließlich über
+  `GET /tl/api/officials/{id}` (Geräte-Token; im Cloud-Modus durchgereicht
+  per `OfficialDetailRequest`/`OfficialDetail`). Beide Wächter-Tests in
+  `tl.rs` prüfen das mit einem Officials-Fixture: Der **Name** ist bewusst
+  freigegeben (Gegenprobe im Test), Sperrlisten und Stammverein stehen auf
+  der Verbotsliste.
+- **Aktionen** (geschlossener Satz): `official_assign`, `official_clear`,
+  `official_pause`, `official_reorder`, `official_set_club`,
+  `official_blocklist_set`, `officials_court_toggle`, `announce_officials`.
+  Fingerabdruck und Protokoll-Etikett nennen **nie** Vereinsnamen oder
+  Sperrlisten — die Protokolle werden zur Fehlersuche hochgeladen.
+
+**Relay-Deploy vor dem Client-Release:** Ein alter Relay weist unbekannte
+Aktionen ab; im Hallennetz (LAN) ist nichts betroffen.

@@ -284,6 +284,30 @@ Relay setzt daraus `ownership_active`. Ältere Tablets/Relays ohne die Felder
 fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
 [tablet.md](tablet.md).
 
+### Schiedsrichter (Spec schiedsrichter-management)
+
+Neue `TlAction`-Varianten (geschlossener Satz, ADR 0011):
+`official_assign`, `official_clear`, `official_pause`, `official_reorder`,
+`official_set_club`, `official_blocklist_set`, `officials_court_toggle`,
+`announce_officials`. Die Rolle reist als `"sr"`/`"ar"`
+(`relay_proto::TlOfficialRole`).
+
+Dazu ein Frame-Paar für den **gezielten** Detail-Abruf, Muster Punktverlauf:
+`RelayFrame::OfficialDetailRequest { req_id, official_id }` →
+`HostFrame::OfficialDetail { req_id, json }`, ausgeliefert über
+`GET /tl/api/officials/{official_id}` (Geräte-Token). Der Relay hält diese
+Antwort **nie** vor — Sperrlisten sind Personendaten; er korreliert nur über
+`req_id` und lässt offene Anfragen beim Host-Abriss fallen (wie beim
+Punktverlauf), statt sie leer zu beantworten.
+
+Der Broadcast-`TlState` trägt dagegen nur: `officials_managed`, die Liste
+`officials` (Name, Pause, Dienst-Feld, Einsatz-Zähler) und je Feld
+`sr`/`ar`/`official_warn` samt den drei Feld-Schaltern. Zwei Wächter-Tests in
+`tl.rs` halten das durchsetzbar fest.
+
+**Reihenfolge beim Ausrollen:** Ein alter Relay lehnt unbekannte Aktionen ab
+— erst Relay deployen, dann den Client veröffentlichen.
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die

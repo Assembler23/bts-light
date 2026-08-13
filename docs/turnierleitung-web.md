@@ -240,6 +240,33 @@ Gesprochen wird nie auf diesem Gerät: Die Seite beauftragt die Ansage, und
 gesprochen wird sie dort, wo die Anlage hängt. Hört in der Zielhalle gerade
 kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
 
+### Schiedsrichter einteilen
+
+Spielt das Turnier mit Schiedsrichtern (Einstellungen → Schiedsrichter),
+zeigt die Seite zusätzlich:
+
+- **Abschnitt „Schiedsrichter"** unter der Zähltafel-Warteschlange: die
+  Liste in Rotationsreihenfolge mit Dienst-Marke, Pause-Knopf, Pfeil zum
+  Vorziehen und der Zahl der bisherigen Einsätze. Ein Tipp auf die Zahl
+  öffnet die Pflege: Stammverein, gesperrte Vereine, gesperrte Spieler und
+  die Einsatz-Liste im Detail.
+- **An jeder belegten Feld-Kachel** „SR: … · AR: …" samt Warnfarbe, wenn ein
+  Konflikt besteht (Kategorie „Verein" oder „Person" — der Grund bleibt am
+  Turnier-PC), plus den Knopf **einteilen** für die Auswahl je Dienst.
+
+Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
+Turnierleitung entscheidet. Steht in BTP schon ein Schiedsrichter am Spiel,
+gilt dieser — die Auswahl hier wirkt dann nicht.
+
+Sperrlisten, Verein und Einsatz-Liste stehen **nicht** im Zustand, den alle
+gekoppelten Geräte bekommen: Sie kodieren persönliche Beziehungen und werden
+erst beim Öffnen der Pflege gezielt und mit dem Geräte-Zugang abgerufen
+(`/tl/api/officials/{id}`, gleiches Muster wie der Punktverlauf).
+
+**Im Cloud-Betrieb** funktioniert die Schiedsrichter-Bedienung erst, wenn der
+Relay auf badhub.de die neuen Aktionen kennt (Deploy vor dem Client-Release);
+im Hallennetz sofort.
+
 ## Grenzen, die im Betrieb auffallen
 
 - **Acht Geräte gleichzeitig.** Das neunte wird abgewiesen; ein

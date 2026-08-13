@@ -564,6 +564,16 @@ async fn handle_frame(
                 json: json.unwrap_or_default(),
             }));
         }
+        // Ebenso on-demand: Sperrlisten und Einsätze eines Schiedsrichters.
+        // Diese Personendaten verlassen den Host nur auf gezielte Anfrage
+        // eines gekoppelten Geräts — nie im Broadcast-Zustand.
+        RelayFrame::OfficialDetailRequest {
+            req_id,
+            official_id,
+        } => {
+            let json = crate::tablet::tl::official_detail_json(&ctx.tablet, official_id);
+            let _ = tx.send(text(&HostFrame::OfficialDetail { req_id, json }));
+        }
     }
 }
 
