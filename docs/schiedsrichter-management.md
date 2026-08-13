@@ -365,3 +365,37 @@ komplette Modul unausgeführt und die Seite leer; genau das ist beim Bau
 dieses Features passiert (ein Zeilenumbruch mitten in einem String-Literal
 im Sperrlisten-Dialog). Seitdem prüft `scripts/check-asset-syntax.mjs` alle
 Inline-Skripte der Assets, eingehängt in `ci.yml`.
+
+## Offen: Verfügbarkeit je Tag (Messfrage, 13.08.2026)
+
+BTP führt in der Schiedsrichterliste die **Tage**, an denen jemand da ist —
+ein Schiedsrichter, der nur freitags kommt, soll samstags gar nicht erst in
+der Rotation stehen. Ob diese Angabe über den Draht kommt, ist **ungeklärt**:
+
+- Die Messung vom 13.08.2026 sah nur `Official{ID, Name, FirstName,
+  Country}`. Das ist **kein** Beweis für „gibt es nicht": Am Testturnier
+  waren keine Tage gepflegt, und **BTP lässt leere Felder generell weg** —
+  genau daran ist auch der Verein nicht aufgefallen, bis er gepflegt wurde
+  (und dann trotzdem nicht kam).
+- Die Probe `tests/btp_officials_probe.rs` beantwortet die Frage jetzt mit:
+  Sie listet alle Official-Feldnamen, sucht gezielt nach tages- und
+  datumsverdächtigen Namen und schaut zusätzlich nach einem **eigenen**
+  Container (`OfficialDays`, `Availability`, …) — BTP könnte die Tage auch
+  getrennt führen, so wie `Entries` neben `Players` stehen.
+
+**So wird gemessen:** In BTP bei *einem* Schiedsrichter die Tage pflegen, bei
+einem anderen nicht, dann
+
+```
+cargo test -p bts-light --test btp_officials_probe -- --ignored --nocapture
+```
+
+Erst der Vergleich beider Zeilen zeigt, ob das Feld existiert und wie es heißt.
+
+**Wenn die Tage kommen:** Die Rotation blendet Officials aus, die heute nicht
+da sind — technisch dieselbe Stelle wie „pausiert" (`next_free` überspringt
+sie), nur aus BTP gespeist statt von Hand geschaltet.
+
+**Wenn sie nicht kommen:** Dann bleibt die Verfügbarkeit Pflege in BTS Light.
+Der heutige Pausen-Schalter deckt den Fall schon ab — er müsste dann nur
+einen Tagesbezug bekommen, damit man ihn nicht jeden Morgen neu setzt.
