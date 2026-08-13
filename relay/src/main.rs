@@ -5876,7 +5876,78 @@ mod load {
         drop(keep_rx);
     }
 
+    /// **Cap-Boundary:** treibt die Deckel ABSICHTLICH ÜBER ihre Grenze und
+    /// prüft, dass GENAU am Deckel abgeschnitten wird (Überschuss abgewiesen).
+    /// Anders als die übrigen Szenarien (die unter den Caps bleiben und deren
+    /// `== min(N, Cap)` sich auf `== N` reduziert) macht DAS die ADR-0019-Aussage
+    /// „Cap-Einhaltung bewiesen" wahr: entfernte man einen Cap-Check im Broker,
+    /// würde `== Cap` rot (Review-Befund MEDIUM). `over` = Überschuss über den
+    /// Deckel. Alle Abos/Attaches laufen nebenläufig gegen den Namespace-Mutex.
+    async fn run_cap_boundary(broker: Broker, over: usize) {
+        let ns = fresh_ns(0);
+        let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+        register_host(&broker, &ns, &host_tx).await;
+
+        let mut rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut set = JoinSet::new();
+
+        // Monitor-Subs: MAX_MONITOR_SUBS + over Abos (alle in die „alle"-Liste).
+        for _ in 0..(MAX_MONITOR_SUBS + over) {
+            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            rxs.push(rx);
+            let b = broker.clone();
+            let ns_c = ns.clone();
+            set.spawn(async move {
+                subscribe_monitor(&b, &ns_c, None, &tx).await;
+            });
+        }
+        // Tablets: MAX_TABLETS_PER_NS + over DISTINKTE Felder (je ein Tablet) —
+        // jenseits des Deckels wird ein neues Feld abgewiesen.
+        for c in 0..(MAX_TABLETS_PER_NS + over) {
+            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            rxs.push(rx);
+            let b = broker.clone();
+            let ns_c = ns.clone();
+            let dev = format!("cap-dev-{c}");
+            let court = c as i64;
+            set.spawn(async move {
+                attach_tablet(&b, &ns_c, court, &dev, &tx).await;
+            });
+        }
+        while let Some(r) = set.join_next().await {
+            r.expect("Task-Panik im Cap-Boundary");
+        }
+
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("Namespace existiert");
+        let sub_total: usize =
+            n.monitor_subs.values().map(Vec::len).sum::<usize>() + n.monitor_subs_all.len();
+        assert_eq!(
+            sub_total, MAX_MONITOR_SUBS,
+            "Monitor-Sub-Cap schneidet GENAU am Deckel ab (Überschuss abgewiesen)"
+        );
+        assert_eq!(
+            n.tablets.len(),
+            MAX_TABLETS_PER_NS,
+            "Tablet-Cap schneidet GENAU am Deckel ab (Überschuss abgewiesen)"
+        );
+        drop(rxs);
+        drop(host_rx);
+    }
+
     // ─────────────────── Leichte CI-Wache (Sekunden, grün) ──────────────────
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn light_cap_boundary() {
+        // over=4: knapp über MAX_MONITOR_SUBS/MAX_TABLETS_PER_NS, schnell +
+        // deterministisch (der Deckel ist eine harte Grenze unter dem Mutex).
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            run_cap_boundary(Broker::new("t".into()), 4),
+        )
+        .await
+        .expect("Timeout = Hang → Testfehler");
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn light_mass_connect() {
@@ -5919,6 +5990,19 @@ mod load {
     }
 
     // ────────────── Schwere Soak-Variante (manuell, `--ignored`) ────────────
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
+    async fn soak_cap_boundary() {
+        // Deutlich über dem Deckel — die harte Grenze muss auch unter starkem
+        // gleichzeitigem Andrang exakt greifen.
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            run_cap_boundary(Broker::new("t".into()), 128),
+        )
+        .await
+        .expect("Timeout = Hang → Testfehler");
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
