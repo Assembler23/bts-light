@@ -158,6 +158,8 @@ mod tests {
             finished_at: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            official1_id: None,
+            official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
         }
     }
@@ -172,6 +174,7 @@ mod tests {
             court_infos: Vec::new(),
             events: Vec::new(),
             entries: Vec::new(),
+            officials: Vec::new(),
         }
     }
 
@@ -281,6 +284,7 @@ mod tests {
                 event_id: 1,
                 players: vec![player(1, "Anna", "Beispiel")],
             }],
+            officials: Vec::new(),
         }
     }
 

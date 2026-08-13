@@ -1089,6 +1089,7 @@ mod tests {
             court_infos: Vec::new(),
             events: Vec::new(),
             entries: Vec::new(),
+            officials: Vec::new(),
             matches: vec![BtpMatch {
                 display_order: None,
                 from1: None,
@@ -1132,6 +1133,8 @@ mod tests {
                 finished_at: None,
                 preparation_call_ts: None,
                 preparation_hall: None,
+                official1_id: None,
+                official2_id: None,
                 scoring: crate::btp::model::ScoringFormat::default(),
             }],
         }
@@ -1218,6 +1221,8 @@ mod tests {
             finished_at: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            official1_id: None,
+            official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
         }
     }
@@ -1245,6 +1250,7 @@ mod tests {
             matches,
             events: Vec::new(),
             entries: Vec::new(),
+            officials: Vec::new(),
         }
     }
 

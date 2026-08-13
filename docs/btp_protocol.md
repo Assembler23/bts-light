@@ -333,6 +333,12 @@ gepflegten Schiedsrichtern; ADR
   zurücklesen (Poll statt Einmal-Check) — die erste Messfassung ohne
   Poll-Schleife hatte deshalb fälschlich „ignoriert" gemeldet.
 
+bts-light liest die Officials seither: `BtpOfficial` +
+`BtpSnapshot::officials` (`official_list`, fehlender Container ⇒ leere
+Liste) und `BtpMatch::official1_id`/`official2_id` (0 gilt als „nicht
+gesetzt", wie bei `LocationID`) in
+[`btp/model.rs`](../src-tauri/src/btp/model.rs).
+
 ### Die Reihenfolge der angesetzten Spiele
 
 **`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**

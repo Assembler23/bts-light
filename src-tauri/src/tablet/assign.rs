@@ -683,6 +683,8 @@ mod tests {
             finished_at: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            official1_id: None,
+            official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
         }
     }
@@ -712,6 +714,7 @@ mod tests {
             matches,
             events: Vec::new(),
             entries: Vec::new(),
+            officials: Vec::new(),
         }
     }
 

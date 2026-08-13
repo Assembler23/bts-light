@@ -1046,6 +1046,8 @@ mod tests {
             finished_at: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            official1_id: None,
+            official2_id: None,
             scoring: ScoringFormat::default(),
         }
     }
@@ -1060,6 +1062,7 @@ mod tests {
             court_infos: vec![],
             events: Vec::new(),
             entries: Vec::new(),
+            officials: Vec::new(),
         }
     }
 
