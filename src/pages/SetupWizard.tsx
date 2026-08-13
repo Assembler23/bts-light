@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Check,
   Cloud,
+  Gavel,
   Image,
   Info,
   KeyRound,
@@ -331,6 +332,11 @@ export function SetupWizard({
   const [skEnabled, setSkEnabled] = useState(
     initialConfig.scorekeeper?.enabled ?? false,
   );
+  // Schiedsrichtermanagement: globale Schalter (Details in der Spielübersicht).
+  const off = initialConfig.officials;
+  const [offEnabled, setOffEnabled] = useState(off?.enabled ?? false);
+  const [offRotationSr, setOffRotationSr] = useState(off?.rotation_sr ?? false);
+  const [offRotationAr, setOffRotationAr] = useState(off?.rotation_ar ?? false);
   // Automatische Feldvergabe.
   const aa = initialConfig.auto_assign;
   const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
@@ -494,6 +500,11 @@ export function SetupWizard({
       scorekeeper: {
         enabled: skEnabled,
         break_seconds: initialConfig.scorekeeper?.break_seconds ?? 300,
+      },
+      officials: {
+        enabled: offEnabled,
+        rotation_sr: offRotationSr,
+        rotation_ar: offRotationAr,
       },
       auto_assign: {
         enabled: aaEnabled,
@@ -1239,6 +1250,59 @@ export function SetupWizard({
           />
           Zähltafelbediener-Warteschlange führen
         </label>
+      </section>
+
+      {/* Schiedsrichter (SR/AR) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Gavel}>Schiedsrichter</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Für Turniere mit Schiedsrichtern: BTS Light übernimmt die
+          Schiedsrichterliste aus BTP; jedem Spiel lassen sich Schiedsrichter
+          (SR) und Aufschlagrichter (AR) zuweisen. Ausgeschaltet erscheint
+          nirgends ein SR/AR-Element.
+        </p>
+        <p className="flex items-start gap-1.5 text-xs text-amber-700">
+          <Info size={14} className="mt-0.5 shrink-0" />
+          Die Bedienung (Zuweisung, Reihenfolge, Sperrlisten) wird gerade
+          schrittweise ausgebaut und erscheint mit den nächsten Updates in der
+          Spielübersicht und auf der Turnierleitungs-Seite. Die Schalter hier
+          legen jetzt schon fest, ob und wie sie dann eingeblendet wird.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={offEnabled}
+            onChange={(e) => setOffEnabled(e.currentTarget.checked)}
+          />
+          Mit Schiedsrichtern spielen
+        </label>
+
+        {offEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={offRotationSr}
+                onChange={(e) => setOffRotationSr(e.currentTarget.checked)}
+              />
+              Schiedsrichter automatisch rotieren
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={offRotationAr}
+                onChange={(e) => setOffRotationAr(e.currentTarget.checked)}
+              />
+              Aufschlagrichter automatisch rotieren
+            </label>
+            <p className="text-xs text-slate-500">
+              Die Rotation bestückt neu belegte Felder mit dem nächsten freien
+              Schiedsrichter aus der Reihenfolge; pausierte, im Einsatz
+              befindliche und Schiedsrichter mit Vereins-/Personen-Konflikt
+              werden übersprungen.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Automatische Feldvergabe */}

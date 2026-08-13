@@ -110,6 +110,12 @@ function defaultConfig(): AppConfig {
       tournament_uuid: "",
       missing_names_max: 8,
     },
+    // Schiedsrichtermanagement: standardmäßig aus (wie der Rust-Default).
+    officials: {
+      enabled: false,
+      rotation_sr: false,
+      rotation_ar: false,
+    },
     discipline_hall_rules: [],
     locked_courts: [],
     tablet_settings_pin: "0000",

@@ -98,6 +98,18 @@ export interface ScorekeeperConfig {
   break_seconds: number;
 }
 
+/** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).
+ *  Turnier-Spezifisches (Reihenfolge, Pausen, Sperrlisten) liegt bewusst NICHT
+ *  hier, sondern in einer turniergebundenen Datei (ADR 0022). */
+export interface OfficialsConfig {
+  /** Mit Schiedsrichtern spielen? Aus = keine SR/AR-Elemente irgendwo. */
+  enabled: boolean;
+  /** Automatische Rotation für Schiedsrichter? */
+  rotation_sr: boolean;
+  /** Automatische Rotation für Aufschlagrichter? */
+  rotation_ar: boolean;
+}
+
 /** Einstellungen der automatischen Feldvergabe (Rust: config::AutoAssignConfig). */
 export interface AutoAssignConfig {
   /** Automatische Feldvergabe aktiv? */
@@ -514,6 +526,8 @@ export interface AppConfig {
   auto_assign: AutoAssignConfig;
   /** Hallen-Check-In (ADR 0009). */
   checkin: CheckinConfig;
+  /** Schiedsrichtermanagement (globale Schalter). */
+  officials: OfficialsConfig;
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
    *  ein (manuell + automatisch). Leer = keine Einschränkung. */
   discipline_hall_rules: DisciplineHallRule[];
