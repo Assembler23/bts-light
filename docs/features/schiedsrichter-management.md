@@ -2,8 +2,10 @@
 
 > Status: **freigegeben 2026-08-13** (via /idee: Brief → Grill → How-To → Review; inkl. Nachträge Sperrlisten-Pflege in TL-Web und Einsatz-Ableitung aus beendeten Spielen).
 > Quelle: Idee (Nutzer-Brief 2026-08-13). Betroffene Crates: src-tauri, relay-proto, relay (Neucompile/Deploy), src.
-> ADR: docs/adr/ — zwei ADRs werden zu Beginn der Umsetzung angelegt (Rücksync-Modell,
-> Ablage der Turnierdaten; Inhalte unten festgelegt).
+> ADR: [0021 (Rücksync: eigenständiger Write)](../adr/0021-officials-ruecksync-eigenstaendiger-write.md) ·
+> [0022 (Ablage Turnierdaten)](../adr/0022-officials-turnierdaten-eigene-datei.md).
+> Schritt 1 (BTP-Messung) am 13.08.2026 **erledigt** — Ergebnisse eingearbeitet,
+> Details in [btp_protocol.md](../btp_protocol.md) („Officials: Struktur & Schreibweg").
 
 ## Kontext / Problem
 
@@ -61,10 +63,6 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
 - **Kein eigenständiges Pflegen der SR-Stammliste** in BTS Light — Quelle
   ist BTP (R2). BTS Light pflegt nur Zusatzdaten (Sperrlisten, Pausen,
   Reihenfolge, ggf. Vereins-Override).
-- **Kein eigenständiger „Official ändern"-Schreibweg** nach BTP für laufende
-  Spiele in dieser Ausbaustufe: Rücksync passiert ausschließlich eingebettet
-  ins Match-Update beim Ruf aufs Feld (wie Original-BTS). Nachträgliche
-  Änderungen bleiben BTS-Light-seitig.
 - **Keine Erkennung** „SR ist gerade selbst als Spieler aufgerufen" —
   Officials und Players sind in BTP getrennte Container ohne belegte
   Verknüpfung (bekannte Grenze, wird dokumentiert).
@@ -75,7 +73,7 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
 
 - **Crates/Komponenten:**
   - `src-tauri/src/btp/model.rs` — `BtpOfficial` + Parser, `BtpMatch.official1_id/official2_id`.
-  - `src-tauri/src/btp/proto.rs` — `court_assign_request` um `Official1ID`/`Official2ID` erweitern.
+  - `src-tauri/src/btp/proto.rs` — eigenständiger `officials_request` (Muster `highlight_request`) + `court_assign_request` um `Official1ID`/`Official2ID` erweitern.
   - `src-tauri/src/tablet/state.rs` — Official-Roster (Rotation, Pausen, Sperrlisten, Zuweisungen).
   - `src-tauri/src/sync.rs` — Master-Hook `track_officials`; Feld-Filter der Bediener-Vergabe.
   - `src-tauri/src/config.rs` — `OfficialsConfig { enabled, rotation_sr, rotation_ar }`.
@@ -125,11 +123,13 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
     Officials erweitert (Freigabe-Begründung im Test, wie bei
     Nation/Verein). Kein Geburtsjahr, keine Lizenznummer.
 - **Abhängigkeiten:**
-  - **BTP-Messung als Vorbedingung** (Schritt 1 der Umsetzung): Struktur des
-    `Officials`-Containers (insb. `ClubID`), Semantik `Official1ID` (SR) vs.
-    `Official2ID` (AR), Verhalten des Match-Updates mit Officials
-    (Schreiben **und Zurücklesen** — Präzedenzfall `LocationID`: BTP
-    quittiert `Result=1`, verwirft den Wert).
+  - **BTP-Messung — erledigt 13.08.2026** (`btp_officials_probe.rs`,
+    Test-BTP mit drei Officials): `Official{ID, Name, FirstName, Country}`,
+    **kein Verein** auf dem Draht ⇒ Stammverein wird in BTS Light gepflegt.
+    `Official1ID` = SR, `Official2ID` = AR (an der BTP-Maske verifiziert).
+    Official-Writes werden **angenommen** — eigenständig wie eingebettet,
+    Löschen per `0`, Übernahme asynchron ≤1 s (Zurücklesen mit Poll).
+    Details: [btp_protocol.md](../btp_protocol.md), ADR 0021.
   - **Relay-Deploy auf badhub.de vor dem Client-Release** (neue
     `TlAction`-Varianten; Deploy macht ein Kollege).
   - Keine neue Cargo-/npm-Dependency.
@@ -145,7 +145,8 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
    TL-Web. Manuelle Zuweisung mit Konflikt ⇒ Zuweisung wird ausgeführt
    **und** Warnung (Kategorie) angezeigt.
 3. **Konflikt-Begriff:** Ein Official hat einen Konflikt mit einem Spiel,
-   wenn (a) sein Verein (aus BTP; Fallback manueller Vereins-Override) mit
+   wenn (a) sein **in BTS Light gepflegter Stammverein** (BTP überträgt
+   keinen Verein am Official — Messung 13.08.2026) mit
    dem Verein eines beteiligten Spielers übereinstimmt, (b) ein an ihm
    gepflegter Sperr-Verein beteiligt ist oder (c) ein an ihm gepflegter
    Sperr-Spieler beteiligt ist. Kategorien: „Verein", „Person".
@@ -179,10 +180,15 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
    „Service judge: …"). Nachträgliche Zuweisungen lösen **keine**
    automatische Ansage aus; Client und TL-Web haben einen manuellen Knopf
    „SR/AR ansagen".
-9. **Rücksync nach BTP:** Beim Ruf aufs Feld (manuell, Auto-Vergabe,
-   TL-Web) werden die lokal zugewiesenen `Official1ID`/`Official2ID`
-   in das bestehende Match-Update eingebettet — additiv, ohne `Status`-Feld
-   (Check-in-Bits-Falle v0.9.103). Kein weiterer Schreibweg.
+9. **Rücksync nach BTP — jede Änderung, sofort** (ADR 0021, Messung
+   13.08.2026: beide Schreibformen nachweislich angenommen): Jede
+   SR/AR-Zuweisungsänderung geht per eigenständigem Match-Update
+   (`ID, DrawID, PlanningID, Official1ID, Official2ID`, Löschen = `0`,
+   **ohne** `Status`-Feld — Check-in-Bits-Falle v0.9.103) nach BTP;
+   beim Ruf aufs Feld wandern die Officials zusätzlich mit ins bestehende
+   Zuweisungs-Update. Reconcile-Muster wie die Highlights (Diff, Retry,
+   Stand nur bei `Ok` übernehmen). BTP übernimmt asynchron (≤1 s) — die
+   Anzeige hält den geschriebenen Wert, bis der Snapshot ihn bestätigt.
 10. **Persistenz:** Reihenfolge, Pausen, Sperrlisten, Overrides, feldweise
     Schalter, lokale Zuweisungen und die Einsatz-Historie überleben
     App-Neustart/Absturz; Turnierwechsel verwirft sie.
@@ -239,11 +245,12 @@ Positiv:
 - [ ] Die Feld-Ansage nennt zugewiesenen SR (und AR, falls gesetzt) nach der
   Tabletbedienung; der manuelle Ansage-Knopf sagt SR/AR eines Feldes an;
   eine nachträgliche Zuweisung allein löst keine Ansage aus.
-- [ ] Beim Ruf aufs Feld enthält das BTP-Match-Update die lokal
-  zugewiesenen Official-IDs (Request-Aufbau-Test: additiv, ohne
-  `Status`-Feld); das Schreib-Experiment am echten BTP bestätigt per
-  Zurücklesen, dass BTP die Werte übernimmt — andernfalls wird der
-  Rücksync deaktiviert und ADR A dokumentiert das (Overlay bleibt).
+- [ ] Jede SR/AR-Zuweisungsänderung in BTS Light erscheint in BTP
+  (eigenständiges Match-Update, Löschen = `0`); beim Ruf aufs Feld
+  enthält das Zuweisungs-Update die Official-IDs zusätzlich
+  (Request-Aufbau-Tests: additiv, ohne `Status`-Feld). Ein
+  fehlgeschlagener Write wird im nächsten Sync-Zyklus wiederholt
+  (Reconcile-Diff-Test).
 - [ ] Rotationsreihenfolge, Pausen, Sperrlisten und feldweise Schalter sind
   nach App-Neustart unverändert; nach Turnierwechsel sind sie verworfen.
 
@@ -289,8 +296,10 @@ grün, `npm run build` fehlerfrei. Rust-Unit-Tests mindestens:
 - **TL-State:** Allowlist-Wächter (`ERLAUBT`) + Datenschutz-Wächter mit
   Officials-Fixture (nicht-leer-Assert, Verbotsliste um Sperrlisten-Marker
   ergänzt, Gegenprobe SR-Name mit Freigabe-Begründung).
-- **Rücksync:** Request-Aufbau-Test des erweiterten
-  `court_assign_request` (Official-Felder vorhanden, kein `Status`).
+- **Rücksync:** Request-Aufbau-Tests für `officials_request` und den
+  erweiterten `court_assign_request` (Official-Felder vorhanden, Löschen
+  = `0`, kein `Status`); Reconcile-Diff (nur Änderungen schreiben, bei
+  `Err` im nächsten Zyklus erneut).
 - **Ansagen:** Segment-/SSML-Bauer nennen SR/AR nur bei Zuweisung
   (Frontend-seitig über bestehende announcer-Testmuster, sonst manueller
   Abgleich Segments ↔ SSML).
@@ -303,13 +312,14 @@ Rotation, Pause, manueller Konflikt, Ansage, Tablet-Anzeige, App-Neustart.
 
 ## Risiken & Rollback
 
-- **BTP verwirft `Official*ID`** beim Schreiben (Präzedenzfall
-  `LocationID`): Das Experiment liest zurück; negativ ⇒ Rücksync entfällt,
-  Overlay-Betrieb ist vollwertig (Anzeige, Rotation, Ansagen funktionieren
-  ohne Rücksync).
-- **ClubID am Official existiert nicht:** Vereins-Override in BTS Light
-  wird vom optionalen Fallback zum regulären Pflegefeld; Konflikt-Warnung
-  (a) greift dann nur bei gepflegtem Override.
+- **Andere BTP-Version verhält sich beim Official-Write anders** (gemessen
+  wurde eine Version an einem Turnier): Das Reconcile-Muster liest ohnehin
+  über den Snapshot zurück; verwirft ein BTP die Werte doch, bleibt der
+  Overlay-Betrieb vollwertig (Anzeige, Rotation, Ansagen ohne Rücksync).
+  Die Probe (`btp_officials_probe.rs`) bleibt zur Gegenprüfung im Repo.
+- **Vereinspflege ist Handarbeit:** BTP liefert keinen Verein am Official
+  (gemessen) — die Vereins-Konflikt-Warnung (a) greift nur, wenn die
+  Turnierleitung den Stammverein in BTS Light gepflegt hat.
 - **Relay-Deploy-Reihenfolge:** Alte Relays lehnen unbekannte
   `TlAction`-Varianten ab — TL-Web-Officials-Bedienung im Cloud-Modus
   funktioniert erst nach dem Relay-Deploy (Kollege); LAN ist nicht
@@ -325,12 +335,12 @@ Rotation, Pause, manueller Konflikt, Ansage, Tablet-Anzeige, App-Neustart.
 
 ## Offene Fragen / Annahmen
 
-- **Messung ausstehend (Vorbedingung, Schritt 1 der Umsetzung):**
-  (a) Felder des `Officials`-Containers — insb. ob `ClubID` existiert
-  (Annahme: ja, analog `Player.ClubID`); (b) Semantik-Annahme
-  `Official1ID` = Schiedsrichter, `Official2ID` = Aufschlagrichter;
-  (c) ob BTP eingebettete Official-IDs im Match-Update übernimmt.
-  Die Spec gilt für beide Ausgänge (Fallbacks oben definiert).
+- **Messung erledigt (13.08.2026, Testturnier mit drei Officials):**
+  (a) `Official`-Felder: `ID`, `Name`, `FirstName`, `Country` — **kein
+  Verein** (auch nach Pflege in BTP kam nur `Country` hinzu) ⇒ Stammverein
+  wird in BTS Light gepflegt; (b) `Official1ID` = Schiedsrichter,
+  `Official2ID` = Aufschlagrichter — bestätigt; (c) Official-Writes werden
+  angenommen (eigenständig und eingebettet), Übernahme asynchron ≤1 s.
 - **Annahme:** Die BTP-Officials-Liste ändert sich im Turnierverlauf selten;
   ein Sync-Zyklus (Bestandsmechanik) reicht als Aktualisierungsweg.
 - **Bekannte Grenze:** Ein SR, der selbst Spieler ist, wird von der
@@ -360,10 +370,9 @@ Details und Code-Anker: How-To unter
 `docs/features/_intake/schiedsrichter-management/3-how-to.md`
 (gitignoriert). Reihenfolge der kleinen, je für sich grünen Schritte:
 
-1. **Messung am echten BTP** (`btp_officials_probe`, Schreib-Experiment mit
-   Zurücklesen; Muster `btp_location_probe.rs` /
-   `btp_overwrite_experiment.rs`) → Ergebnisse in `btp_protocol.md`,
-   ADR A/B anlegen.
+1. ~~Messung am echten BTP~~ **erledigt 13.08.2026**
+   (`tests/btp_officials_probe.rs` bleibt als Messwerkzeug im Repo;
+   Ergebnisse in `btp_protocol.md`, ADR 0021/0022 angelegt).
 2. Parser (`BtpOfficial`, `official_map` nach `player_map`-Muster,
    Match-Felder nach `location_id`-Muster).
 3. `OfficialsConfig` + `types.ts` + SetupWizard-Schalter.
@@ -386,8 +395,11 @@ Details und Code-Anker: How-To unter
 9. Tablet-Anzeige (tablet.html, `match_brief()`), ferne Halle über
    `AnnounceCourt`/`MatchAssigned`.
 10. Ansagen (Segments + SSML synchron, Aufrufer, manueller Knopf).
-11. Rücksync (`court_assign_request` additiv erweitern; Verdrahtung an
-    allen drei Einstiegen über die gemeinsame `MatchCourt`-Struct).
+11. Rücksync (ADR 0021): eigenständiger `officials_request` (Muster
+    `highlight_request`) + Reconcile im Sync-Loop (Muster
+    `reconcile_highlights`); zusätzlich `court_assign_request` additiv
+    erweitern (Verdrahtung an allen drei Einstiegen über die gemeinsame
+    `MatchCourt`-Struct).
 12. Doku + Version dreifach bumpen (`src-tauri/Cargo.toml`,
     `src-tauri/tauri.conf.json`, `package.json`).
 
