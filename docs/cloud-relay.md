@@ -299,6 +299,27 @@ fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
   geleakter ID der Namespace ohnehin als kompromittiert gilt →
   Roadmap-Feature „Master-Identität umziehen" ist die eigentliche
   Gegenmaßnahme.
+- **Tote-Tablet-Slot in ~15 s frei (Cluster D):** Die Tablet↔Relay-Strecke
+  spiegelt jetzt das `host_conn`-Muster — der Relay pingt jedes Tablet alle
+  **5 s** (`TABLET_PING`), und bleibt ein Lebenszeichen (Frame **oder** Pong)
+  länger als **15 s** (`TABLET_STALE`, = 3 verpasste Pongs) aus, beendet sich
+  die Verbindung selbst und gibt den Court-Slot frei (statt bis zum ~30-s-
+  Ping-Sendefehler). Der Browser auto-pongt auf **Protokoll-Ebene** — immun
+  gegen die JS-Timer-Drosselung backgroundeter mobiler Seiten, also kein
+  Fehl-Drop eines lebenden Feldes; ein 5–10-s-WLAN-Hänger (< 15 s) ebenso
+  wenig. Der `detach_tablet`-Slot-Guard (`same_channel`) bleibt: eine per
+  Reclaim (dasselbe Gerät) abgelöste Alt-Verbindung räumt dem neuen Tablet
+  beim Stale-Drop nichts weg (R4). Ein Fehl-Drop wäre harmlos (Reconnect +
+  Reclaim, Stand persistiert) → kein Kill-Switch.
+- **Half-open Host-Client in ~15 s erkannt (Cluster D):** Der Host-Client
+  (`relay_client.rs`) verwirft eine Verbindung, auf der **15 s** kein
+  Lebenszeichen (Frame oder Relay-Ping) eintrifft (`RELAY_READ_IDLE`,
+  Option A) → `run` reconnectet mit frischem Socket (Backoff-Reset). So
+  reconnectet ein stiller Master bei half-open TCP (Netz weg, kein RST) in
+  ~15 s statt nach dem OS-TCP-Timeout (Minuten). **Kopplung:** Die Schwelle
+  nutzt den bestehenden Relay-Ping und setzt `HOST_PING ≤ 5 s` voraus — ein
+  bewusster, im Code + [ADR 0020](adr/0020-tote-verbindung-read-idle-tablet-stale.md)
+  dokumentierter Mono-Repo-Vertrag; kein zusätzlicher Client-Ping.
 - bts-light validiert jedes eingehende Ergebnis (`process_result`):
   Match-ID muss zum aktuellen Court-Match passen, Satzstand plausibel.
   Diese Prüfung ist dieselbe wie im LAN-Modus.

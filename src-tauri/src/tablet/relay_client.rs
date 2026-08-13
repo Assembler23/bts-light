@@ -43,6 +43,25 @@ const MONITOR_TICK: Duration = Duration::from_secs(30);
 /// Geräteliste) – kurz, damit Befehle zügig am Monitor ankommen.
 const CONTROL_TICK: Duration = Duration::from_secs(3);
 
+/// Read-Idle-Schwelle (Hebel D / ADR 0020, Option A): Bleibt jedes
+/// Lebenszeichen des Relays (Frame **oder** Relay-Ping) länger aus, gilt die
+/// Verbindung als half-open tot → `serve` gibt `Err` zurück, `run`
+/// reconnectet (frischer Socket, Backoff-Reset). **Kein eigener Client-Ping.**
+///
+/// **Kopplungs-Vertrag:** Diese Schwelle setzt voraus, dass der Relay
+/// mindestens alle ~5 s pingt (`HOST_PING` der `relay`-Crate). Relay und App
+/// liegen im selben Repo und werden koordiniert deployt — eine künftige
+/// `HOST_PING`-Änderung ist eine bewusst abzustimmende Änderung.
+const RELAY_READ_IDLE: Duration = Duration::from_secs(15);
+
+/// Reine Stale-Entscheidung: liegt der letzte Empfang mindestens `threshold`
+/// zurück? Ausgelagert, damit die Grenz-Semantik (`>=`) ohne Laufzeit/Clock
+/// prüfbar ist. `tokio::time::Instant`, damit `tokio::time::pause()` in Tests
+/// griffe (konsistent mit dem Read-Idle-Ticker).
+fn is_stale(last: tokio::time::Instant, now: tokio::time::Instant, threshold: Duration) -> bool {
+    now.duration_since(last) >= threshold
+}
+
 /// Obergrenze der Werbebilder bzw. ihrer Gesamtgröße beim Upload zum Relay.
 const MAX_UPLOAD_ADS: usize = 24;
 const MAX_UPLOAD_TOTAL: usize = 12 * 1024 * 1024;
@@ -105,12 +124,23 @@ async fn serve(
     let mut control_ticker = tokio::time::interval(CONTROL_TICK);
     control_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut control_fp = String::new();
+    // Read-Idle-Wächter (Hebel D): erkennt eine half-open Host-Verbindung an
+    // ausbleibendem Empfang. Der Ticker feuert dichter als die Schwelle
+    // (~5 s bei RELAY_READ_IDLE = 15 s), damit die Stille spätestens ~15 s
+    // nach dem letzten Frame/Ping auffällt.
+    let mut last_incoming = tokio::time::Instant::now();
+    let mut idle_ticker = tokio::time::interval(RELAY_READ_IDLE / 3);
+    idle_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
             incoming = read.next() => {
                 let Some(msg) = incoming else { break };
                 let msg = msg.map_err(|e| e.to_string())?;
+                // Lebenszeichen des Relays: deckt Text-Frame + Ping (+ alle
+                // übrigen Frames) ab — der Read-Idle-Wächter braucht keinen
+                // eigenen Client-Ping (Option A).
+                last_incoming = tokio::time::Instant::now();
                 match msg {
                     WsMessage::Text(t) => {
                         if let Ok(frame) = serde_json::from_str::<RelayFrame>(t.as_str()) {
@@ -147,6 +177,14 @@ async fn serve(
             }
             _ = control_ticker.tick() => {
                 sync_monitor_control(ctx, install_id, &mut control_fp).await;
+            }
+            _ = idle_ticker.tick() => {
+                // Half-open erkannt: seit RELAY_READ_IDLE kein Frame/Ping.
+                // `Err` beendet `serve` → `run` öffnet einen frischen Socket
+                // (Backoff resettet bei Erfolg auf ~1 s). Kein Client-Ping.
+                if is_stale(last_incoming, tokio::time::Instant::now(), RELAY_READ_IDLE) {
+                    return Err("Relay-Read-Idle: 15 s ohne Antwort → reconnect".into());
+                }
             }
         }
     }
@@ -941,6 +979,32 @@ mod tests {
     use crate::config::AppConfig;
     use crate::tablet::state::TabletState;
     use std::collections::HashMap;
+
+    #[test]
+    fn is_stale_grenzfaelle() {
+        use tokio::time::{Duration, Instant};
+        let t0 = Instant::now();
+        // Knapp unter der Schwelle → noch lebendig (Grenze ist `>=`).
+        let almost = t0 + RELAY_READ_IDLE - Duration::from_millis(1);
+        assert!(!is_stale(t0, almost, RELAY_READ_IDLE));
+        // Exakt an der Schwelle → Read-Idle, reconnect.
+        assert!(is_stale(t0, t0 + RELAY_READ_IDLE, RELAY_READ_IDLE));
+        // Deutlich darüber → Read-Idle.
+        assert!(is_stale(
+            t0,
+            t0 + RELAY_READ_IDLE + Duration::from_secs(5),
+            RELAY_READ_IDLE
+        ));
+    }
+
+    #[test]
+    fn gesunde_verbindung_nicht_stale() {
+        use tokio::time::{Duration, Instant};
+        // Frischer Empfang (4 s alt bei RELAY_READ_IDLE = 15 s) → kein Drop.
+        let now = Instant::now();
+        let last = now - Duration::from_secs(4);
+        assert!(!is_stale(last, now, RELAY_READ_IDLE));
+    }
 
     fn player(n: &str) -> BtpPlayer {
         BtpPlayer {
