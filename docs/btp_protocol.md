@@ -305,6 +305,34 @@ Connector schreibbar zu machen. Deshalb bleibt die Hallen-Festlegung in
 TL-Web (`TlAction::SetHall`) bewusst host-lokal (bts-light + Liveticker)
 statt nach BTP zurückzuschreiben.
 
+### Officials: Struktur & Schreibweg (gemessen 13.08.2026)
+
+Messgrundlage für das [Schiedsrichtermanagement](features/schiedsrichter-management.md)
+(Probe: `tests/btp_officials_probe.rs`, Test-BTP „TEST Köpi-Cup" mit drei
+gepflegten Schiedsrichtern; ADR
+[0021](adr/0021-officials-ruecksync-eigenstaendiger-write.md)):
+
+- **Struktur:** `Officials > Official{ID, Name, FirstName, Country}` —
+  **kein Verein/ClubID** auf dem Draht, auch nachdem in BTP am
+  Schiedsrichter gepflegt wurde (nur `Country` kam hinzu; BTP lässt leere
+  Felder generell weg). Der Verein eines Schiedsrichters muss also in
+  bts-light gepflegt werden.
+- **Semantik:** `Match.Official1ID` = Schiedsrichter, `Match.Official2ID`
+  = Aufschlagrichter (am Testturnier gegen die BTP-Maske verifiziert).
+  Beide Felder erscheinen nur, wenn gepflegt.
+- **Schreibweg — anders als `LocationID` funktioniert er:** Ein
+  `SENDUPDATE` mit `Match{ID, DrawID, PlanningID, Official1ID,
+  Official2ID}` (bewusst **ohne `Status`**, Check-in-Bits-Falle) wird
+  **übernommen** — eigenständig (V1) genauso wie eingebettet in die
+  Feldzuweisungs-Form mit `CourtID` + `Courts`-Block (V2). Löschen per
+  Wert `0`. Keine Nebenwirkungen an `CourtID`/`Sets`/`Winner`/`Status`;
+  Restores verifiziert.
+- **Asynchrone Übernahme:** Die Antwort ist sofort `Result=1`, aber ein
+  unmittelbar folgender `SENDTOURNAMENTINFO` zeigt noch den alten Stand;
+  nach ≤1 s steht der neue Wert. Schreibpfade müssen also tolerant
+  zurücklesen (Poll statt Einmal-Check) — die erste Messfassung ohne
+  Poll-Schleife hatte deshalb fälschlich „ignoriert" gemeldet.
+
 ### Die Reihenfolge der angesetzten Spiele
 
 **`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**
@@ -370,7 +398,9 @@ Location"); bei mehreren Hallen je ein Eintrag, `Court.LocationID` zeigt
 auf den jeweiligen.
 
 **Official:** `ID`, `Name`, `FirstName` (Schreibweise weicht von Player ab),
-`Country`.
+`Country`. **Mehr nicht** — insbesondere keine `ClubID` (gemessen
+13.08.2026, siehe „Officials: Struktur & Schreibweg"). Am Match:
+`Official1ID` = Schiedsrichter, `Official2ID` = Aufschlagrichter.
 
 **Event:** `ID`, `Name`, `GameTypeID` (1 = Einzel, 2 = Doppel),
 `GenderID` (1 = Herren, 2 = Damen, 3 = Mixed).

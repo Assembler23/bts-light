@@ -319,11 +319,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Rotation mit Pausen und manueller Reihenfolge (getrennt SR/AR),
   feldweise Schalter inkl. Tabletbediener-Vergabe (drei Mischformen),
   Ansagen, Tablet-Anzeige (LAN + Cloud + ferne Halle), Rücksync nach BTP
-  beim Feld-Aufruf. **Vorbedingung im Plan:** Messung am echten BTP
-  (Officials-Struktur, ClubID, Schreibweg mit Zurücklesen).
+  bei **jeder** Zuweisungsänderung. **Messung erledigt 13.08.2026**
+  (`btp_officials_probe.rs`): kein Verein am Official ⇒ Pflege in
+  BTS Light; Official1=SR/Official2=AR; Writes werden angenommen
+  (asynchron ≤1 s).
   Spec: [features/schiedsrichter-management.md](features/schiedsrichter-management.md) ·
-  ADR A (Rücksync-Modell) und ADR B (Ablage Turnierdaten) werden zu
-  Umsetzungsbeginn angelegt.
+  ADR [0021](adr/0021-officials-ruecksync-eigenstaendiger-write.md) ·
+  ADR [0022](adr/0022-officials-turnierdaten-eigene-datei.md).
 - **Hallen-Check-In** — Spieler bestätigen vor Beginn ihrer Spielklasse über
   eine öffentliche Webseite selbst, dass sie in der Halle sind; die
   Turnierleitung sieht **vor der Auslosung**, wer fehlt, und kann Fehlende
