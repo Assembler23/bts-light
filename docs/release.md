@@ -83,6 +83,47 @@ Button) innerhalb weniger Sekunden.
 `workflow_dispatch` (Actions-Tab → „Run workflow") baut nur zum Test und
 veröffentlicht **nicht**.
 
+## Wenn das Taggen vergessen wird
+
+Der Versionssprung passiert inzwischen **innerhalb** der Feature-Commits
+(`… (v0.9.199)`); es gibt keinen eigenen „Release vX.Y.Z"-Commit mehr, der zum
+Taggen auffordert. Ohne Tag fällt nichts auf: `main` ist grün, kein Job schlägt
+fehl — nur auf dem Turnier-PC kommt nichts an. Zweimal passiert: einmal blieb
+`v0.9.186` liegen, dann zwölf Versionen (`0.9.188`–`0.9.199`) **in 19 Stunden**.
+
+Dagegen läuft der Workflow **`release-faellig.yml`** (bei Push auf `main` und
+täglich 06:20 UTC). Er meldet — er blockiert nichts, ist kein Required-Check und
+setzt **keine** Tags:
+
+| Grenze | Wert | fängt |
+|---|---|---|
+| Uhr | ältester unveröffentlichter Commit ≥ **24 h** | „liegt liegen" |
+| Menge | ≥ **5** unveröffentlichte Versionssprünge | „hat sich gestapelt" |
+
+**Warum zwei Grenzen:** Je eine allein hätte den echten Vorfall verschluckt, und
+das ist gemessen, nicht geschätzt. Eine Grenze auf das Alter der *aktuellen*
+Version greift nie, weil bei schnellen Sprüngen jede Version von der nächsten
+überschrieben wird (`0.9.199` war zum Zeitpunkt der Meldung 1,4 h alt). Und das
+Alter des *ältesten* offenen Commits lag bei 19 h, also unter 24 h. Nur die
+Menge (zwölf Sprünge) schlug an.
+
+Reine Doku-, ADR-, Workflow- und Test-Änderungen zählen nicht als
+auslieferbar (`istAuslieferbar()` in `scripts/check-version-tagged.mjs`) —
+sonst wäre der Check nach jeder Doku-Ergänzung rot und würde zu Rauschen.
+
+Lokal nachsehen:
+
+```bash
+node scripts/check-version-tagged.mjs   # exit 0 = nichts fällig
+```
+
+**Kein Auto-Tag, bewusst:** Der Tag löst ein Auto-Update auf allen laufenden
+Turnier-PCs aus. Ob das gerade passt, weiß nur ein Mensch — deshalb bleibt der
+Ablauf, wie er ist: Tilo meldet, wann getaggt wird, der Check ist nur das Netz.
+
+**Grenze des Checks:** Er macht das Vergessen sichtbar, ersetzt aber keine
+Zustellung. Wer das Repo zwei Tage nicht öffnet, sieht auch das rote Kreuz nicht.
+
 ## Benötigte GitHub-Secrets (einmalig eingerichtet)
 
 | Secret | Zweck |

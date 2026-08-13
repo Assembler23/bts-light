@@ -1,0 +1,57 @@
+# Meldet, wenn Arbeit auf main auf ein Release wartet und damit keinen
+# Turnier-PC erreicht.
+#
+# Dieser Workflow BLOCKIERT NICHTS. Er ist kein Required-Check, er läuft nicht
+# auf Pull Requests und er setzt keine Tags. Der Ablauf bleibt wie er ist:
+# Tilo meldet, wann getaggt wird. Das hier ist das Netz für den Fall, dass es
+# niemand meldet — zweimal passiert, einmal blieb v0.9.186 liegen, dann zwölf
+# Versionen (0.9.188-0.9.199) in 19 Stunden.
+#
+# Warum kein Auto-Tag: Der Tag löst ein Auto-Update auf allen laufenden
+# Turnier-PCs aus. Ob das gerade passt, weiß nur ein Mensch — das ist auch der
+# einzige Vorbehalt, den docs/release.md ausdrücklich nennt.
+#
+# Sichtbarkeit: Der Push-Lauf sorgt dafür, dass das Ergebnis im CI-Sweep
+# auftaucht, den der Betreiber beim Session-Start liest (letzter Run auf main).
+# Der Tageslauf holt die Fälle, in denen nach dem letzten Merge nichts mehr
+# passiert — genau das war der Vorfall.
+#
+# @see scripts/check-version-tagged.mjs   (Regel + Messwerte)
+# @see scripts/test-version-tagged.mjs    (Regel-Tests, laufen in ci.yml)
+# @see docs/release.md
+name: Release fällig?
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 06:20 UTC — vor dem Arbeitstag, damit ein über Nacht liegengebliebener
+    # Stapel am Morgen sichtbar ist.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+
+# Ein überholter Lauf bringt nichts; der neueste Stand zählt.
+concurrency:
+  group: release-faellig
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: release faellig
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Volle Historie UND Tags: der Check vergleicht main gegen den letzten
+          # Tag und liest den Versionssprung aus der Cargo.toml-Historie. Mit
+          # fetch-depth 1 fände er nichts und wäre stumm grün — die
+          # gefährlichste Variante.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ist ein Release fällig?
+        run: node scripts/check-version-tagged.mjs
