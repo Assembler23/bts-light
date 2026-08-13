@@ -32,6 +32,7 @@ import { SetupWizard } from "./pages/SetupWizard";
 import { TabletPanel } from "./pages/TabletPanel";
 import { TlWebPanel } from "./pages/TlWebPanel";
 import { CheckinPanel } from "./pages/CheckinPanel";
+import { OfficialsPanel } from "./pages/OfficialsPanel";
 import { WinnersPage } from "./pages/WinnersPage";
 import type {
   AppConfig,
@@ -395,6 +396,10 @@ function App() {
         // Hält keinen eigenen Stand: die Seite pollt badhub und schreibt
         // direkt dorthin durch (AK-C13). Deshalb auch kein `onConfigSaved`.
         return <CheckinPanel announce={config.announce} />;
+      case "officials":
+        // Hält keinen eigenen Stand: die Seite liest den Roster über
+        // Commands und schreibt direkt durch.
+        return <OfficialsPanel enabled={config.officials?.enabled ?? false} />;
       case "announce":
         return (
           <AnnouncePage

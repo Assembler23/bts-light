@@ -631,14 +631,13 @@ impl SyncEngine {
     /// Zuweisung von Hand löscht, bekäme sie sonst im nächsten Poll zurück.
     /// Nach Spielende rücken die Officials ans Ende der Reihenfolge — ihre
     /// Zuweisung bleibt am Match stehen (Grundlage der Einsatz-Ableitung).
-    fn track_officials(
-        &mut self,
-        snapshot: &BtpSnapshot,
-        tablet: &TabletState,
-        config: &AppConfig,
-    ) {
+    /// Die globalen Schalter kommen aus dem Roster-Speicher, nicht aus der
+    /// Sync-Konfiguration: Diese wird einmal beim Start gelesen, jene folgt
+    /// den Einstellungen sofort.
+    fn track_officials(&mut self, snapshot: &BtpSnapshot, tablet: &TabletState) {
         let store = tablet.officials_store();
-        if !config.officials.enabled {
+        let (rotation_sr, rotation_ar) = store.rotation();
+        if !store.enabled() {
             // Abschalten mitten im Turnier räumt alles (Spec Nr. 1) — sonst
             // bliebe ein Name in einer Anzeige hängen.
             store.clear_assignments();
@@ -703,8 +702,8 @@ impl SyncEngine {
                 btp_ar: m.official2_id,
                 bekannt: &bekannt,
                 im_dienst: &im_dienst,
-                sr: config.officials.rotation_sr && schalter.sr,
-                ar: config.officials.rotation_ar && schalter.ar,
+                sr: rotation_sr && schalter.sr,
+                ar: rotation_ar && schalter.ar,
             });
             // Frisch Zugewiesene zählen sofort als im Dienst — sonst bekäme
             // das nächste Feld im selben Zyklus dieselbe Person.
@@ -1093,7 +1092,7 @@ impl SyncEngine {
         // bewusst NACH `set_snapshot` — der Roster ist dann ans Turnier
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der
         // Ansage-Slave ist oben schon zurückgekehrt.
-        self.track_officials(&snapshot, tablet, config);
+        self.track_officials(&snapshot, tablet);
         tablet.apply_tablet_scores(&mut snapshot);
         // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
         // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
@@ -2006,27 +2005,21 @@ mod tests {
         s
     }
 
-    fn cfg_officials(sr: bool, ar: bool) -> AppConfig {
-        let mut c = AppConfig::default();
-        c.officials.enabled = true;
-        c.officials.rotation_sr = sr;
-        c.officials.rotation_ar = ar;
-        c
-    }
-
-    /// Engine + Tablet mit gebundenem Turnier und drei Officials.
-    fn officials_setup() -> (SyncEngine, TabletState) {
-        (SyncEngine::new(), TabletState::default())
+    /// Engine + Tablet mit eingeschaltetem Schiedsrichter-Betrieb.
+    fn officials_setup(rot_sr: bool, rot_ar: bool) -> (SyncEngine, TabletState) {
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        tablet.officials_store().set_rotation(rot_sr, rot_ar);
+        (SyncEngine::new(), tablet)
     }
 
     #[test]
     fn track_officials_bestueckt_ein_neu_belegtes_feld() {
-        let (mut engine, tablet) = officials_setup();
-        let cfg = cfg_officials(true, false);
+        let (mut engine, tablet) = officials_setup(true, false);
         let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
         tablet.set_snapshot(snap.clone());
 
-        engine.track_officials(&snap, &tablet, &cfg);
+        engine.track_officials(&snap, &tablet);
         let store = tablet.officials_store();
         assert_eq!(store.assignment(10).sr, Some(1));
         assert_eq!(store.assignment(10).ar, None, "AR-Rotation ist aus");
@@ -2036,17 +2029,16 @@ mod tests {
     fn track_officials_fuellt_eine_entfernte_zuweisung_nicht_wieder_auf() {
         // Spec Nr. 4: Bestückt wird beim NEU-Belegen. Wer bewusst ohne SR
         // spielen lässt, darf ihn nicht im nächsten Poll zurückbekommen.
-        let (mut engine, tablet) = officials_setup();
-        let cfg = cfg_officials(true, false);
+        let (mut engine, tablet) = officials_setup(true, false);
         let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
         tablet.set_snapshot(snap.clone());
-        engine.track_officials(&snap, &tablet, &cfg);
+        engine.track_officials(&snap, &tablet);
         assert_eq!(tablet.officials_store().assignment(10).sr, Some(1));
 
         tablet
             .officials_store()
             .clear_assignment(10, crate::tablet::officials::OfficialRole::Sr);
-        engine.track_officials(&snap, &tablet, &cfg);
+        engine.track_officials(&snap, &tablet);
         assert_eq!(
             tablet.officials_store().assignment(10).sr,
             None,
@@ -2059,16 +2051,15 @@ mod tests {
         // Nach dem Spiel ans Ende der Reihenfolge (Spec Nr. 4) — die
         // Zuweisung selbst bleibt am Match stehen (Spec Nr. 11,
         // Einsatz-Ableitung).
-        let (mut engine, tablet) = officials_setup();
-        let cfg = cfg_officials(true, true);
+        let (mut engine, tablet) = officials_setup(true, true);
         let snap1 = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
         tablet.set_snapshot(snap1.clone());
-        engine.track_officials(&snap1, &tablet, &cfg);
+        engine.track_officials(&snap1, &tablet);
         assert_eq!(tablet.officials_store().order(), vec![1, 2, 3]);
 
         let snap2 = snap_officials(vec![finished_named(10, 42, "A", "B")], &[1, 2, 3]);
         tablet.set_snapshot(snap2.clone());
-        engine.track_officials(&snap2, &tablet, &cfg);
+        engine.track_officials(&snap2, &tablet);
         assert_eq!(
             tablet.officials_store().order(),
             vec![3, 1, 2],
@@ -2083,8 +2074,7 @@ mod tests {
 
     #[test]
     fn track_officials_vergibt_niemanden_doppelt_ueber_zwei_felder() {
-        let (mut engine, tablet) = officials_setup();
-        let cfg = cfg_officials(true, true);
+        let (mut engine, tablet) = officials_setup(true, true);
         let snap = snap_officials(
             vec![
                 oncourt_named(10, 5, "A", "B"),
@@ -2093,7 +2083,7 @@ mod tests {
             &[1, 2, 3, 4],
         );
         tablet.set_snapshot(snap.clone());
-        engine.track_officials(&snap, &tablet, &cfg);
+        engine.track_officials(&snap, &tablet);
         let store = tablet.officials_store();
         // Feld 5 (kleinere CourtID) zuerst: 1+2, dann Feld 6: 3+4.
         assert_eq!(
@@ -2114,8 +2104,7 @@ mod tests {
 
     #[test]
     fn track_officials_respektiert_den_feldschalter() {
-        let (mut engine, tablet) = officials_setup();
-        let cfg = cfg_officials(true, true);
+        let (mut engine, tablet) = officials_setup(true, true);
         let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
         tablet.set_snapshot(snap.clone());
         tablet.officials_store().set_court_switches(
@@ -2126,7 +2115,7 @@ mod tests {
                 operator: true,
             },
         );
-        engine.track_officials(&snap, &tablet, &cfg);
+        engine.track_officials(&snap, &tablet);
         let a = tablet.officials_store().assignment(10);
         assert_eq!(a.sr, None, "SR-Rotation ist für dieses Feld aus");
         assert_eq!(a.ar, Some(1), "AR-Rotation läuft weiter");
@@ -2136,15 +2125,14 @@ mod tests {
     fn track_officials_raeumt_alles_wenn_der_globale_schalter_aus_ist() {
         // Spec Nr. 1: Abschalten mitten im Turnier räumt die Zuweisungen —
         // sonst bliebe ein Name in einer Anzeige hängen.
-        let (mut engine, tablet) = officials_setup();
-        let cfg = cfg_officials(true, true);
+        let (mut engine, tablet) = officials_setup(true, true);
         let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
         tablet.set_snapshot(snap.clone());
-        engine.track_officials(&snap, &tablet, &cfg);
+        engine.track_officials(&snap, &tablet);
         assert!(!tablet.officials_store().assignments().is_empty());
 
-        let aus = AppConfig::default(); // officials.enabled = false
-        engine.track_officials(&snap, &tablet, &aus);
+        tablet.officials_store().set_enabled(false);
+        engine.track_officials(&snap, &tablet);
         assert!(tablet.officials_store().assignments().is_empty());
     }
 

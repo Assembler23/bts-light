@@ -56,7 +56,7 @@ interface Props {
   mode?: "wizard" | "settings";
   /** Abschnitt, zu dem beim Öffnen gescrollt wird (Sprung aus einem
    *  ausgegrauten Menüpunkt der Seitenleiste). */
-  focus?: "ansagen" | "court-monitor" | "check-in";
+  focus?: "ansagen" | "court-monitor" | "check-in" | "schiedsrichter";
 }
 
 type TestState =
@@ -1253,7 +1253,7 @@ export function SetupWizard({
       </section>
 
       {/* Schiedsrichter (SR/AR) */}
-      <section className="flex flex-col gap-2">
+      <section id="section-schiedsrichter" className="flex flex-col gap-2 scroll-mt-4">
         <SectionHeader icon={Gavel}>Schiedsrichter</SectionHeader>
         <p className="text-xs text-slate-500">
           Für Turniere mit Schiedsrichtern: BTS Light übernimmt die

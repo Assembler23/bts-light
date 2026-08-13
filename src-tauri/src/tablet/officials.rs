@@ -89,6 +89,30 @@ pub fn official_conflict(extra: &OfficialExtra, players: &[BtpPlayer]) -> Option
     None
 }
 
+/// Ein beendetes Spiel, so viel davon, wie die Einsatz-Ableitung braucht.
+/// Bewusst schlank statt `BtpMatch`: Der Speicher soll nichts über Spieler
+/// oder Klassen wissen müssen, um Einsätze zu zählen.
+pub struct FinishedMatch {
+    pub match_id: i64,
+    /// `Official1ID` des BTP-Matches (gewinnt gegen die lokale Zuweisung).
+    pub btp_sr: Option<i64>,
+    /// `Official2ID` des BTP-Matches.
+    pub btp_ar: Option<i64>,
+    /// Feld, auf dem gespielt wurde (falls BTP es noch führt).
+    pub court_id: Option<i64>,
+    /// Endezeit (Unix-ms) aus `stamp_finished`.
+    pub finished_at: Option<u64>,
+}
+
+/// Ein Einsatz eines Officials (abgeleitet, nicht gespeichert).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Appearance {
+    pub match_id: i64,
+    pub role: OfficialRole,
+    pub court_id: Option<i64>,
+    pub finished_at: Option<u64>,
+}
+
 /// Eingabe der Auto-Rotation für **ein** Feld. Als Struct, weil die Regel
 /// von sieben Dingen abhängt — und weil so am Aufrufer lesbar steht, was
 /// womit verglichen wird.
@@ -238,6 +262,11 @@ struct Inner {
 pub struct OfficialsStore {
     /// Ablage-Datei. `None` = Persistenz aus (Tests, Slave-Betrieb).
     path: RwLock<Option<PathBuf>>,
+    /// Läuft das Turnier mit Schiedsrichtern? Reiner Laufzeit-Spiegel der
+    /// Konfiguration (nicht Teil der Datei — der Schalter ist geräteweit).
+    enabled: RwLock<bool>,
+    /// Automatische Rotation (SR, AR) — ebenfalls Spiegel der Konfiguration.
+    rotation: RwLock<(bool, bool)>,
     inner: Mutex<Inner>,
     /// Serialisiert die Dateizugriffe (Muster `scores_persist_lock`).
     persist_lock: Mutex<()>,
@@ -298,6 +327,34 @@ impl OfficialsStore {
         // nach dem Wechsel darf die Personendaten des alten Turniers nicht
         // wieder auferstehen lassen.
         self.persist();
+    }
+
+    /// Wird mit Schiedsrichtern gespielt (`officials.enabled`)? Laufzeit-
+    /// Spiegel der Konfiguration, damit Anzeige-Pfade (Feldübersicht,
+    /// TL-State, Tablet) das Feature ausblenden können, ohne die
+    /// `AppConfig` zu kennen. Aus ⇒ nirgends ein SR/AR-Element (Spec Nr. 1).
+    pub fn enabled(&self) -> bool {
+        *self.enabled.read().unwrap()
+    }
+
+    /// Schalter setzen (beim App-Start und beim Speichern der Einstellungen).
+    pub fn set_enabled(&self, on: bool) {
+        *self.enabled.write().unwrap() = on;
+    }
+
+    /// Laufen die automatischen Rotationen (SR, AR)?
+    pub fn rotation(&self) -> (bool, bool) {
+        *self.rotation.read().unwrap()
+    }
+
+    /// Rotations-Schalter setzen (wie [`set_enabled`](Self::set_enabled)).
+    ///
+    /// Die globalen Schalter liegen bewusst **hier** und nicht in der
+    /// Sync-Konfiguration: Der Sync-Lauf bekommt seine Config einmal beim
+    /// Start und liest sie nie neu — ein Häkchen in den Einstellungen bliebe
+    /// sonst bis zum Neustart der Übertragung wirkungslos.
+    pub fn set_rotation(&self, sr: bool, ar: bool) {
+        *self.rotation.write().unwrap() = (sr, ar);
     }
 
     /// Turnier, zu dem der aktuelle Stand gehört (leer = noch keins).
@@ -528,6 +585,61 @@ impl OfficialsStore {
             return Some(id);
         }
         None
+    }
+
+    /// Einen Official in der Reihenfolge vor einen anderen ziehen
+    /// (`before = None` ⇒ ans Ende). Unbekannte IDs ändern nichts.
+    pub fn reorder(&self, official_id: i64, before: Option<i64>) {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let order = &mut inner.file.order;
+            let Some(von) = order.iter().position(|id| *id == official_id) else {
+                return;
+            };
+            // Vor sich selbst ziehen ist keine Bewegung.
+            if before == Some(official_id) {
+                return;
+            }
+            let ziel = match before {
+                Some(b) => match order.iter().position(|id| *id == b) {
+                    Some(p) => p,
+                    None => return, // unbekanntes Ziel ⇒ lieber nichts tun
+                },
+                None => order.len(),
+            };
+            let id = order.remove(von);
+            // Nach dem Entfernen rutscht alles hinter `von` eine Stelle vor.
+            let ziel = if ziel > von { ziel - 1 } else { ziel };
+            order.insert(ziel, id);
+        }
+        self.persist();
+    }
+
+    /// Einsätze je Official, abgeleitet aus den **beendeten** Spielen
+    /// (Spec Nr. 11 — keine eigene Historien-Datenhaltung). Je Official
+    /// chronologisch nach Endezeit.
+    pub fn appearances(&self, finished: &[FinishedMatch]) -> HashMap<i64, Vec<Appearance>> {
+        let mut out: HashMap<i64, Vec<Appearance>> = HashMap::new();
+        for f in finished {
+            let wirksam = self.effective(f.match_id, f.btp_sr, f.btp_ar);
+            for (id, role) in [
+                (wirksam.sr, OfficialRole::Sr),
+                (wirksam.ar, OfficialRole::Ar),
+            ] {
+                let Some(id) = id else { continue };
+                out.entry(id).or_default().push(Appearance {
+                    match_id: f.match_id,
+                    role,
+                    court_id: f.court_id,
+                    finished_at: f.finished_at,
+                });
+            }
+        }
+        for liste in out.values_mut() {
+            // Ohne Endezeit (Altbestand) ans Ende, sonst chronologisch.
+            liste.sort_by_key(|a| (a.finished_at.unwrap_or(u64::MAX), a.match_id));
+        }
+        out
     }
 
     /// Officials ans Ende der Reihenfolge rücken (nach Spielende, Spec Nr. 4).
@@ -835,6 +947,91 @@ mod tests {
         );
         // Ohne BTP-Wert gilt die lokale Zuweisung.
         assert_eq!(store.effective(500, None, None).sr, Some(3));
+    }
+
+    #[test]
+    fn reihenfolge_laesst_sich_von_hand_umsortieren() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3, 4]);
+        // 4 vor 2 ziehen.
+        store.reorder(4, Some(2));
+        assert_eq!(store.order(), vec![1, 4, 2, 3]);
+        // Ohne Ziel ans Ende.
+        store.reorder(1, None);
+        assert_eq!(store.order(), vec![4, 2, 3, 1]);
+        // An denselben Platz bzw. vor sich selbst: unverändert.
+        store.reorder(4, Some(4));
+        assert_eq!(store.order(), vec![4, 2, 3, 1]);
+        // Unbekannte IDs ändern nichts.
+        store.reorder(99, Some(2));
+        store.reorder(2, Some(99));
+        assert_eq!(store.order(), vec![4, 2, 3, 1]);
+    }
+
+    #[test]
+    fn einsaetze_werden_aus_den_beendeten_spielen_abgeleitet() {
+        // Spec Nr. 11: keine eigene Historie — Zähler und Liste entstehen
+        // aus den beendeten Spielen (BTP-Wert ODER lokale Zuweisung).
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        store.assign(501, OfficialRole::Ar, 1);
+        store.assign(502, OfficialRole::Sr, 1); // läuft noch
+
+        let beendet = vec![
+            FinishedMatch {
+                match_id: 500,
+                btp_sr: None,
+                btp_ar: None,
+                court_id: Some(5),
+                finished_at: Some(1_000),
+            },
+            FinishedMatch {
+                match_id: 501,
+                btp_sr: None,
+                btp_ar: None,
+                court_id: Some(6),
+                finished_at: Some(2_000),
+            },
+            // Ein Spiel, an dem BTP selbst einen Schiedsrichter trägt.
+            FinishedMatch {
+                match_id: 600,
+                btp_sr: Some(2),
+                btp_ar: None,
+                court_id: Some(5),
+                finished_at: Some(3_000),
+            },
+        ];
+        let e = store.appearances(&beendet);
+        let von_1 = e.get(&1).expect("Official 1 hat Einsätze");
+        assert_eq!(von_1.len(), 2, "das laufende Spiel zählt nicht");
+        assert_eq!(von_1[0].role, OfficialRole::Sr);
+        assert_eq!(von_1[0].match_id, 500);
+        assert_eq!(von_1[0].court_id, Some(5));
+        assert_eq!(von_1[0].finished_at, Some(1_000));
+        assert_eq!(von_1[1].role, OfficialRole::Ar);
+        // Chronologisch, damit die Liste im Overlay lesbar ist.
+        assert!(von_1[0].finished_at <= von_1[1].finished_at);
+        // BTP-Wert zählt genauso.
+        assert_eq!(e.get(&2).map(Vec::len), Some(1));
+        assert!(!e.contains_key(&3));
+    }
+
+    #[test]
+    fn eine_vor_spielbeginn_entfernte_zuweisung_ergibt_keinen_einsatz() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        store.clear_assignment(500, OfficialRole::Sr);
+        let beendet = vec![FinishedMatch {
+            match_id: 500,
+            btp_sr: None,
+            btp_ar: None,
+            court_id: Some(5),
+            finished_at: Some(1_000),
+        }];
+        assert!(store.appearances(&beendet).is_empty());
     }
 
     #[test]

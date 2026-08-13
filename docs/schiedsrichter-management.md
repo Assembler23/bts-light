@@ -8,11 +8,11 @@ ADRs: [0021 (Rücksync)](adr/0021-officials-ruecksync-eigenstaendiger-write.md),
 [0022 (Ablage Turnierdaten)](adr/0022-officials-turnierdaten-eigene-datei.md) ·
 BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibweg").
 
-> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–6 des Spec-Plans
+> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–7 des Spec-Plans
 > (BTP-Messung, Parser, Konfiguration, Roster-Speicher, Rotation +
-> Konflikt-Erkennung, feldweise Schalter). Bedienung, TL-Web,
-> Tablet-Anzeige, Ansagen und Rücksync folgen mit den nächsten Schritten;
-> dieser Text wächst mit.
+> Konflikt-Erkennung, feldweise Schalter, Commands + Client-Oberfläche).
+> TL-Web, Tablet-Anzeige, Ansagen und Rücksync folgen mit den nächsten
+> Schritten; dieser Text wächst mit.
 
 ## Konfiguration
 
@@ -174,3 +174,48 @@ Feldschalter-Defaults, Konflikt-Kategorien, Rotations-Zweige) sowie
 `sync.rs::track_officials_*`-Tests (Neu-Belegung, kein Nachfüllen nach
 manuellem Löschen, Spielende, Doppel-Dienst, Feldschalter, globales
 Abschalten).
+
+## Bedienung am Turnier-PC (Schritt 7)
+
+Eigener Menüpunkt **„Schiedsrichter"** (`pages/OfficialsPanel.tsx`) — in der
+Seitenleiste ausgegraut, solange ohne Schiedsrichter gespielt wird; ein Klick
+springt dann in den Einstellungs-Abschnitt mit dem Häkchen.
+
+Die Seite hat drei Abschnitte:
+
+1. **Rotationsreihenfolge** — Liste in Zuteilungsreihenfolge mit Dienst-Marke,
+   Pause-Knopf, Pfeilen zum Umsortieren, Vereinsfeld, Sperren-Dialog und
+   Einsatz-Zähler (öffnet die Einsatz-Liste).
+2. **Einteilung der laufenden Spiele** — je belegtem Feld ein Auswahlfeld für
+   SR und AR. Eine Zuweisung mit Konflikt wird **ausgeführt** und daneben als
+   „Konflikt: Verein/Person" gemeldet (Spec Nr. 2).
+3. **Felder** — die drei Schalter je Feld (SR-Rotation, AR-Rotation,
+   Bediener-Vergabe).
+
+Zusätzlich zeigt die **Spielübersicht** an jeder belegten Feld-Kachel
+„SR: … · AR: …" samt Warn-Marke.
+
+### Commands (R1)
+
+| Command | Zweck |
+|---|---|
+| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler |
+| `official_assign` / `official_clear` | Zuweisung setzen/lösen; `assign` liefert die Konflikt-Kategorie zurück |
+| `official_pause`, `official_reorder`, `official_set_club` | Pause, Reihenfolge, Stammverein |
+| `official_blocklists` / `official_set_blocklists` | Sperrlisten **gezielt** lesen/schreiben |
+| `official_appearances` | Einsatz-Liste eines Officials (Spiel, Rolle, Feld, Endezeit) |
+| `officials_court_switches` / `officials_set_court_switches` | feldweise Schalter |
+
+**Sperrlisten reisen nie mit der Liste.** `officials_roster` trägt nur die
+*Anzahl* der Einträge; die Inhalte kommen ausschließlich über
+`official_blocklists` für genau einen Official — dasselbe Muster, das später
+TL-Web über die authentifizierte Leseroute nutzt.
+
+### Globale Schalter zur Laufzeit
+
+`officials.enabled`, `rotation_sr` und `rotation_ar` stehen zwar in der
+`config.json`, werden aber zusätzlich im Roster-Speicher gespiegelt
+(`set_enabled`/`set_rotation`, gesetzt beim App-Start und beim Speichern der
+Einstellungen). Grund: Der Sync-Lauf liest seine Konfiguration nur beim Start
+— ohne diesen Spiegel bliebe ein frisch gesetztes Häkchen bis zum nächsten
+Stoppen/Starten der Übertragung wirkungslos.

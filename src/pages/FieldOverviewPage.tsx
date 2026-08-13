@@ -829,11 +829,28 @@ export function FieldOverviewPage({
                               {ball === "match" ? "Matchball" : "Satzball"}
                             </div>
                           )}
-                          {/* Tabletbediener (= „Schiedsrichter"-Spalte, bis das
-                              Schiri-Modul echte Schiris liefert). */}
+                          {/* Tabletbediener (Zähltafel, ADR 0007). */}
                           {c.scorekeeper.length > 0 && (
                             <div className="truncate text-[11px] text-slate-400">
                               Bediener: {c.scorekeeper.join(" / ")}
+                            </div>
+                          )}
+                          {/* Schiedsrichter/Aufschlagrichter (Spec
+                              schiedsrichter-management). Nur gefüllt, wenn mit
+                              Schiedsrichtern gespielt wird. */}
+                          {(c.sr.length > 0 || c.ar.length > 0) && (
+                            <div className="truncate text-[11px] text-slate-500">
+                              {c.sr.length > 0 && <>SR: {c.sr.join(" / ")}</>}
+                              {c.sr.length > 0 && c.ar.length > 0 && " · "}
+                              {c.ar.length > 0 && <>AR: {c.ar.join(" / ")}</>}
+                              {c.official_warn && (
+                                <span
+                                  className="ml-1 rounded bg-amber-200 px-1 font-medium text-amber-900"
+                                  title={`Konflikt: ${c.official_warn}`}
+                                >
+                                  ⚠ {c.official_warn}
+                                </span>
+                              )}
                             </div>
                           )}
                           {callTimer.enabled &&

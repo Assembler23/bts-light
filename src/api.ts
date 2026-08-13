@@ -18,6 +18,10 @@ import type {
   PairingCode,
   PreparationView,
   ScorekeeperEntry,
+  OfficialView,
+  AppearanceView,
+  BlocklistView,
+  CourtSwitchesView,
   InternetStatus,
   SlaveInfo,
   SlaveDeviceInfo,
@@ -376,3 +380,78 @@ export const monitorCommand = (
  *  Backend abgelehnt). */
 export const forgetMonitorDevice = (deviceId: string): Promise<void> =>
   invoke("forget_monitor_device", { deviceId });
+
+// ───────────── Schiedsrichter (Spec schiedsrichter-management) ─────────────
+
+/** Die Schiedsrichterliste des Turniers in Rotationsreihenfolge, angereichert
+ *  um Pausen, Stammverein, aktuellen Dienst und Einsatz-Zähler. */
+export const officialsRoster = (): Promise<OfficialView[]> =>
+  invoke("officials_roster");
+
+/** Weist einem Spiel einen Schiedsrichter (`"sr"`) oder Aufschlagrichter
+ *  (`"ar"`) zu. Liefert die Konflikt-Kategorie, falls einer besteht — die
+ *  Zuweisung wird trotzdem ausgeführt (die Turnierleitung entscheidet). */
+export const officialAssign = (
+  matchId: number,
+  role: "sr" | "ar",
+  officialId: number,
+): Promise<string | null> =>
+  invoke("official_assign", { matchId, role, officialId });
+
+/** Löst die Zuweisung eines Spiels. */
+export const officialClear = (
+  matchId: number,
+  role: "sr" | "ar",
+): Promise<void> => invoke("official_clear", { matchId, role });
+
+/** Pausiert einen Schiedsrichter oder aktiviert ihn wieder. */
+export const officialPause = (
+  officialId: number,
+  paused: boolean,
+): Promise<void> => invoke("official_pause", { officialId, paused });
+
+/** Zieht einen Schiedsrichter in der Reihenfolge vor einen anderen
+ *  (`beforeOfficialId = null` ⇒ ans Ende). */
+export const officialReorder = (
+  officialId: number,
+  beforeOfficialId: number | null,
+): Promise<void> =>
+  invoke("official_reorder", { officialId, beforeOfficialId });
+
+/** Pflegt den Stammverein (BTP liefert am Official keinen). */
+export const officialSetClub = (
+  officialId: number,
+  club: string,
+): Promise<void> => invoke("official_set_club", { officialId, club });
+
+/** Lädt die Sperrlisten eines Schiedsrichters — gezielt auf Anfrage, damit
+ *  diese Personendaten nicht in jeder Listen-Abfrage mitreisen. */
+export const officialBlocklists = (
+  officialId: number,
+): Promise<BlocklistView> => invoke("official_blocklists", { officialId });
+
+/** Setzt die Sperrlisten eines Schiedsrichters (ersetzt beide Listen). */
+export const officialSetBlocklists = (
+  officialId: number,
+  clubs: string[],
+  players: number[],
+): Promise<void> =>
+  invoke("official_set_blocklists", { officialId, clubs, players });
+
+/** Die Einsätze eines Schiedsrichters im Detail (Spiel, Rolle, Feld, Ende). */
+export const officialAppearances = (
+  officialId: number,
+): Promise<AppearanceView[]> => invoke("official_appearances", { officialId });
+
+/** Feldweise Schalter (SR-Rotation, AR-Rotation, Bediener-Vergabe). */
+export const officialsCourtSwitches = (): Promise<CourtSwitchesView[]> =>
+  invoke("officials_court_switches");
+
+/** Setzt die feldweisen Schalter eines Felds. */
+export const officialsSetCourtSwitches = (
+  courtId: number,
+  sr: boolean,
+  ar: boolean,
+  operator: boolean,
+): Promise<void> =>
+  invoke("officials_set_court_switches", { courtId, sr, ar, operator });

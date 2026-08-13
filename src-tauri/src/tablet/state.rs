@@ -187,6 +187,16 @@ pub struct CourtOverview {
     /// punktverlauf-graph)? Felderübersicht und TL-Web bieten den
     /// Graph-Klick nur dann an.
     pub has_timeline: bool,
+    /// Schiedsrichter des laufenden Spiels (Spec `schiedsrichter-management`).
+    /// Leer, wenn keiner zugewiesen ist oder ohne Schiedsrichter gespielt
+    /// wird. Als Liste, damit die Anzeige dieselbe Form hat wie `scorekeeper`.
+    pub sr: Vec<String>,
+    /// Aufschlagrichter des laufenden Spiels.
+    pub ar: Vec<String>,
+    /// Konflikt-Kategorie („Verein"/„Person"), wenn ein zugewiesener
+    /// Official nicht zu diesem Spiel passt. Bewusst nur die Kategorie —
+    /// der Grund (welcher Verein, welcher Spieler) bleibt am Turnier-PC.
+    pub official_warn: Option<String>,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -770,6 +780,44 @@ impl TabletState {
     /// Der Schiedsrichter-Roster (Spec `schiedsrichter-management`).
     pub fn officials_store(&self) -> &crate::tablet::officials::OfficialsStore {
         &self.officials
+    }
+
+    /// Namen von SR und AR eines Spiels plus Konflikt-Kategorie — die Form,
+    /// die Feldübersicht, TL-State und Tablet gleichermaßen anzeigen.
+    ///
+    /// Ohne SR-Betrieb (`officials.enabled` aus) ist alles leer: Ein Turnier,
+    /// das ohne Schiedsrichter spielt, soll auch dann keinen sehen, wenn in
+    /// BTP zufällig einer am Spiel steht (Spec Nr. 1).
+    pub fn court_officials(
+        &self,
+        m: Option<&BtpMatch>,
+        snap: &BtpSnapshot,
+    ) -> (Vec<String>, Vec<String>, Option<String>) {
+        let leer = (Vec::new(), Vec::new(), None);
+        if !self.officials.enabled() {
+            return leer;
+        }
+        let Some(m) = m else { return leer };
+        let wirksam = self
+            .officials
+            .effective(m.id, m.official1_id, m.official2_id);
+        let name = |id: Option<i64>| -> Vec<String> {
+            id.and_then(|id| snap.official(id))
+                .map(|o| vec![o.display_name()])
+                .unwrap_or_default()
+        };
+        // Konflikt-Warnung: Der Grund bleibt hier, nach außen geht nur die
+        // Kategorie. Beide Dienste werden geprüft, der erste Treffer zählt.
+        let spieler: Vec<crate::btp::model::BtpPlayer> =
+            m.team1.iter().chain(m.team2.iter()).cloned().collect();
+        let warn = [wirksam.sr, wirksam.ar]
+            .into_iter()
+            .flatten()
+            .find_map(|id| {
+                crate::tablet::officials::official_conflict(&self.officials.extra(id), &spieler)
+            })
+            .map(|k| k.label().to_string());
+        (name(wirksam.sr), name(wirksam.ar), warn)
     }
 
     /// Reiht einen fehlgeschlagenen BTP-Ergebnis-Write in die
@@ -2552,6 +2600,7 @@ impl TabletState {
                 } else {
                     None
                 };
+                let (sr_names, ar_names, official_warn) = self.court_officials(m, snap);
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
@@ -2622,6 +2671,13 @@ impl TabletState {
                     best_of: m.map(|mm| mm.scoring.best_of).unwrap_or(0),
                     target_score: m.map(|mm| mm.scoring.target_score).unwrap_or(0),
                     cap_score: m.map(|mm| mm.scoring.cap_score).unwrap_or(0),
+                    // Schiedsrichter/Aufschlagrichter des laufenden Spiels
+                    // (Spec schiedsrichter-management Nr. 7). BTP gewinnt
+                    // gegen die lokale Zuweisung; ohne SR-Betrieb bleibt
+                    // alles leer.
+                    sr: sr_names,
+                    ar: ar_names,
+                    official_warn,
                 }
             })
             .collect()
@@ -4333,6 +4389,50 @@ mod tests {
             first: String::new(),
             nationality: None,
         }
+    }
+
+    #[test]
+    fn overview_zeigt_schiedsrichter_nur_bei_aktivem_betrieb() {
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![match_on(1, Some(5), MatchStatus::OnCourt)],
+            vec![(5, "Feld 1"), (6, "Feld 2")],
+        );
+        snap.officials = vec![official(1), official(2)];
+        st.set_snapshot(snap);
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        // Feature aus (Default) ⇒ kein Wort von Schiedsrichtern.
+        let c = &st.overview()[0];
+        assert!(c.sr.is_empty());
+        assert!(c.official_warn.is_none());
+
+        // Feature an ⇒ Name am belegten Feld, freies Feld bleibt leer.
+        st.officials_store().set_enabled(true);
+        let o = st.overview();
+        assert_eq!(o[0].sr, vec!["Schiri1".to_string()]);
+        assert!(o[0].ar.is_empty(), "kein AR zugewiesen");
+        assert!(o[1].sr.is_empty(), "Feld ohne Spiel");
+    }
+
+    #[test]
+    fn overview_meldet_die_konflikt_kategorie_am_feld() {
+        // Manuelle Zuweisung mit Konflikt wird ausgeführt UND gewarnt
+        // (Spec Nr. 2) — die Anzeige trägt nur die Kategorie, nie den Grund.
+        let st = TabletState::default();
+        let mut m = match_on(1, Some(5), MatchStatus::OnCourt);
+        m.team1[0].club = Some("TSV Musterstadt".into());
+        let mut snap = snapshot(vec![m], vec![(5, "Feld 1")]);
+        snap.officials = vec![official(1)];
+        st.set_snapshot(snap);
+        st.officials_store().set_enabled(true);
+        st.officials_store().set_club(1, "TSV Musterstadt");
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        let c = &st.overview()[0];
+        assert_eq!(c.official_warn.as_deref(), Some("Verein"));
     }
 
     #[test]
