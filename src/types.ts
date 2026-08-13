@@ -701,6 +701,10 @@ export interface CourtOverview {
    *  nicht zum Spiel passt; null = kein Konflikt. Nur die Kategorie — der
    *  Grund bleibt am Turnier-PC. */
   official_warn: string | null;
+  /** IDs der wirksamen Besetzung (0 = keiner) — die Auswahl trifft damit die
+   *  Person, nicht den Namen (Namensgleichheit kommt vor). */
+  sr_id: number;
+  ar_id: number;
   /** Feld vom Operator gesperrt (bts-light-seitig) → rot, keine Auto-Vergabe. */
   locked: boolean;
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld

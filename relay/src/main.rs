@@ -3151,7 +3151,8 @@ async fn tl_official_detail_route(
             // Turnier-PC kennt den Frame nicht und antwortet nie.
             (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "Der Turnier-PC hat nicht geantwortet — seine Version kennt                  das Schiedsrichter-Modul möglicherweise noch nicht.",
+                "Der Turnier-PC hat nicht geantwortet — seine Version kennt \
+                 das Schiedsrichter-Modul möglicherweise noch nicht.",
             )
                 .into_response()
         }
@@ -3494,8 +3495,6 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             }
         }
         // Punktverlauf-Antwort des Hosts → an den wartenden Abruf. Der
-        // Größen-Deckel gilt auch hier: ein überlanger Verlauf wird zur
-        // ehrlichen Fehlanzeige statt zum Speicherfresser.
         HostFrame::OfficialDetail { req_id, json } => {
             if let Some(pending) = namespace.official_pending.remove(&req_id) {
                 // Größen-Deckel wie beim Verlauf: Eine überlange Antwort
@@ -3507,6 +3506,8 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 });
             }
         }
+        // Größen-Deckel gilt auch hier: ein überlanger Verlauf wird zur
+        // ehrlichen Fehlanzeige statt zum Speicherfresser.
         HostFrame::TimelineData {
             req_id,
             found,

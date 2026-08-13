@@ -308,9 +308,9 @@ export function OfficialsPanel({
           Einteilung der laufenden Spiele
         </h2>
         <p className="text-xs text-slate-500">
-          Jederzeit änderbar, auch mitten im Spiel. Steht in BTP schon ein
-          Schiedsrichter am Spiel, gilt dieser — die Auswahl hier wirkt dann
-          nicht.
+          Jederzeit änderbar, auch mitten im Spiel. Die Auswahl geht an BTP und
+          erscheint dort im nächsten Abgleich; bis dahin zeigt die Zeile noch
+          den Stand aus BTP.
         </p>
         {belegte.length === 0 ? (
           <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
@@ -335,11 +335,7 @@ export function OfficialsPanel({
                   >
                     {rolle.toUpperCase()}
                     <select
-                      value={
-                        roster.find(
-                          (o) => o.name === (rolle === "sr" ? c.sr : c.ar)[0],
-                        )?.id ?? ""
-                      }
+                      value={(rolle === "sr" ? c.sr_id : c.ar_id) || ""}
                       onChange={(e) => {
                         const wert = e.target.value;
                         const fertig = () => {

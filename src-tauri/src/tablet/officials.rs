@@ -558,8 +558,13 @@ impl OfficialsStore {
             return;
         }
         let wirksam = self.effective(input.match_id, input.btp_sr, input.btp_ar);
-        let sr_offen = input.sr && wirksam.sr.is_none();
-        let ar_offen = input.ar && wirksam.ar.is_none();
+        // Ein ausdrücklich gelöster Dienst (`Some(0)`) ist **kein** offener
+        // Dienst: Wer von Hand ohne Schiedsrichter spielen lässt, soll ihn
+        // auch nach einem Neustart nicht zurückbekommen — dort sieht jedes
+        // belegte Feld wie neu belegt aus.
+        let lokal = self.assignment(input.match_id);
+        let sr_offen = input.sr && wirksam.sr.is_none() && lokal.sr.is_none();
+        let ar_offen = input.ar && wirksam.ar.is_none() && lokal.ar.is_none();
         if !sr_offen && !ar_offen {
             return;
         }
@@ -657,6 +662,51 @@ impl OfficialsStore {
             liste.sort_by_key(|a| (a.finished_at.unwrap_or(u64::MAX), a.match_id));
         }
         out
+    }
+
+    /// Eine lokale Absicht loslassen, sobald BTP sie zeigt (R2).
+    ///
+    /// Der Schreibweg bevorzugt die lokale Zuweisung — sonst ließe sich eine
+    /// einmal geschriebene Besetzung nie wieder ändern. Bliebe sie danach
+    /// aber liegen, überschriebe der nächste Sync-Zyklus **jede** spätere
+    /// Änderung in BTP selbst, für den Rest des Turniers. Deshalb: Sobald
+    /// der Snapshot einen Wert für diesen Dienst trägt (egal welchen) oder
+    /// das ausdrückliche „keiner" bestätigt, wird der lokale Eintrag
+    /// entfernt und BTP ist wieder allein die Wahrheit.
+    ///
+    /// Die Einsatz-Ableitung verliert dadurch nichts: Sie liest denselben
+    /// Wert dann aus dem BTP-Match.
+    pub fn confirm(&self, match_id: i64, btp_sr: Option<i64>, btp_ar: Option<i64>) {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let Some(a) = inner.file.assignments.get_mut(&match_id) else {
+                return;
+            };
+            let erfuellt = |lokal: Option<i64>, btp: Option<i64>| -> bool {
+                match lokal {
+                    // Ausdrückliches „keiner": erfüllt, sobald BTP auch
+                    // niemanden mehr trägt.
+                    Some(0) => dienst(btp).is_none(),
+                    // Zuweisung: erfüllt, sobald BTP überhaupt etwas trägt —
+                    // auch einen anderen Wert, denn dann hat jemand in BTP
+                    // entschieden, und BTP gewinnt.
+                    Some(_) => dienst(btp).is_some(),
+                    None => false,
+                }
+            };
+            if erfuellt(a.sr, btp_sr) {
+                a.sr = None;
+            }
+            if erfuellt(a.ar, btp_ar) {
+                a.ar = None;
+            }
+            if a.is_empty() {
+                inner.file.assignments.remove(&match_id);
+            } else {
+                return; // nichts verändert oder nur teilweise — kein Schreiben
+            }
+        }
+        self.persist();
     }
 
     /// Officials ans Ende der Reihenfolge rücken (nach Spielende, Spec Nr. 4).
@@ -1049,6 +1099,73 @@ mod tests {
             finished_at: Some(1_000),
         }];
         assert!(store.appearances(&beendet).is_empty());
+    }
+
+    #[test]
+    fn eine_von_btp_bestaetigte_zuweisung_wird_lokal_losgelassen() {
+        // R2: Sobald BTP den geschriebenen Wert trägt, ist BTP wieder allein
+        // die Wahrheit. Ohne dieses Loslassen würde der Schreibweg (der die
+        // lokale Absicht bevorzugt) eine spätere Änderung IN BTP bei jedem
+        // Sync-Zyklus wieder überschreiben — für den Rest des Turniers.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        store.assign(501, OfficialRole::Ar, 2);
+        store.clear_assignment(502, OfficialRole::Sr); // ausdrücklich keiner
+
+        // BTP meldet den SR von 500 zurück ⇒ lokale Absicht ist erfüllt.
+        store.confirm(500, Some(1), None);
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+
+        // Anderer Wert in BTP (dort von Hand geändert) ⇒ ebenfalls
+        // loslassen: BTP gewinnt, und der nächste Zyklus schreibt nichts
+        // mehr dagegen.
+        store.confirm(501, None, Some(9));
+        assert_eq!(store.assignment(501), MatchOfficials::default());
+
+        // Ausdrückliches „keiner" gilt als erfüllt, sobald BTP auch nichts
+        // mehr trägt.
+        store.confirm(502, None, None);
+        assert_eq!(store.assignment(502), MatchOfficials::default());
+    }
+
+    #[test]
+    fn eine_noch_nicht_uebernommene_zuweisung_bleibt_stehen() {
+        // Solange BTP den Wert nicht zeigt, bleibt die Absicht bestehen —
+        // sonst ginge sie zwischen Schreiben und Übernahme (≤ 1 s) verloren.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        store.confirm(500, None, None);
+        assert_eq!(store.assignment(500).sr, Some(1));
+
+        // Und ein ausdrückliches „keiner" bleibt, solange BTP noch jemanden
+        // trägt.
+        store.clear_assignment(501, OfficialRole::Sr);
+        store.confirm(501, Some(3), None);
+        assert_eq!(store.assignment(501).sr, Some(0));
+    }
+
+    #[test]
+    fn die_rotation_respektiert_ein_ausdrueckliches_keiner() {
+        // Wer den Schiedsrichter von Hand löst, will ohne spielen — auch
+        // nach einem Neustart, bei dem jedes belegte Feld wie neu belegt
+        // aussieht.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        store.clear_assignment(500, OfficialRole::Sr);
+        let players = vec![spieler(10, "")];
+        let bekannt = [1, 2];
+        let dienst = HashSet::new();
+        let mut e = eingabe(500, &players, &bekannt, &dienst);
+        e.ar = false;
+        store.rotate_court(e);
+        assert_eq!(
+            store.assignment(500).sr,
+            Some(0),
+            "die Rotation füllt ein ausdrückliches „keiner“ nicht auf"
+        );
     }
 
     #[test]

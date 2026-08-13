@@ -3443,18 +3443,21 @@ function openOfficialAssign(courtId, matchId) {
   const liste = state.officials || [];
   offCtx = null; // kein Detail-Abruf offen
   $("off-title").textContent = c ? `Feld ${c.court}` : "Einteilung";
+  // Vorauswahl über die ID, nicht über den Namen: Zwei Schiedsrichter mit
+  // gleichem Anzeigenamen sind in einer großen Liste realistisch, und die
+  // Auswahl muss die Person treffen.
   const auswahl = (rolle, aktuell) => `
     <label class="off-field">${rolle === "sr" ? "Schiedsrichter" : "Aufschlagrichter"}
       <select data-off-role="${rolle}">
         <option value="">—</option>
         ${liste.map((o) => `<option value="${o.id}" ${
-          (aktuell || []).includes(o.name) ? "selected" : ""
+          o.id === aktuell ? "selected" : ""
         }>${esc(o.name)}${o.paused ? " (Pause)" : ""}</option>`).join("")}
       </select>
     </label>`;
-  $("off-body").innerHTML = auswahl("sr", c && c.sr) + auswahl("ar", c && c.ar) +
-    `<p class="graph-note">Steht in BTP schon ein Schiedsrichter am Spiel,
-      gilt dieser — die Auswahl hier wirkt dann nicht.</p>`;
+  $("off-body").innerHTML = auswahl("sr", c && c.sr_id) + auswahl("ar", c && c.ar_id) +
+    `<p class="graph-note">Die Auswahl geht an BTP und erscheint dort im
+      nächsten Abgleich; bis dahin zeigt die Kachel noch den Stand aus BTP.</p>`;
   $("off-overlay").hidden = false;
   $("off-body").querySelectorAll("select[data-off-role]").forEach((sel) => {
     sel.addEventListener("change", () => {

@@ -197,6 +197,11 @@ pub struct CourtOverview {
     /// Official nicht zu diesem Spiel passt. Bewusst nur die Kategorie —
     /// der Grund (welcher Verein, welcher Spieler) bleibt am Turnier-PC.
     pub official_warn: Option<String>,
+    /// IDs der wirksamen Besetzung (0 = keiner). Die **Bedienung** braucht
+    /// sie: Zwei Schiedsrichter können denselben Anzeigenamen tragen, und
+    /// eine Auswahl über den Namen träfe dann den Falschen.
+    pub sr_id: i64,
+    pub ar_id: i64,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -818,6 +823,19 @@ impl TabletState {
         ))
     }
 
+    /// Die wirksamen Official-IDs eines Spiels (0 = keiner) — für die
+    /// Bedienung, die eine Person eindeutig treffen muss.
+    pub fn court_official_ids(&self, m: Option<&BtpMatch>) -> (i64, i64) {
+        if !self.officials.enabled() {
+            return (0, 0);
+        }
+        let Some(m) = m else { return (0, 0) };
+        let w = self
+            .officials
+            .effective(m.id, m.official1_id, m.official2_id);
+        (w.sr.unwrap_or(0), w.ar.unwrap_or(0))
+    }
+
     /// Nur die Namen von SR und AR eines Spiels — die Form, die ins
     /// [`MatchBrief`](relay_proto::MatchBrief) ans Tablet geht (LAN wie
     /// Cloud, ferne Halle eingeschlossen). Holt sich den Snapshot selbst,
@@ -1124,8 +1142,14 @@ impl TabletState {
     /// `schiedsrichter-management` Nr. 6 — dort bedient der Schiedsrichter
     /// selbst), bleiben außen vor und verbrauchen **keinen** Eintrag aus der
     /// Warteschlange. Ohne Eintrag gilt „aktiv", das Bestandsverhalten.
+    ///
+    /// Der Schalter greift **nur bei eingeschaltetem Schiedsrichter-Betrieb**:
+    /// Seine einzige Bedienstelle liegt in der Schiedsrichter-Oberfläche, und
+    /// die ist ohne das Feature nicht erreichbar. Ohne diese Bedingung bliebe
+    /// ein einmal ausgenommenes Feld nach dem Abschalten für immer ohne
+    /// Bediener, ohne dass es irgendwo zurückzunehmen wäre.
     pub fn assign_scorekeeper_for_court(&self, court_id: i64, match_id: i64) {
-        if !self.officials.court_switches(court_id).operator {
+        if self.officials.enabled() && !self.officials.court_switches(court_id).operator {
             return;
         }
         {
@@ -2649,6 +2673,7 @@ impl TabletState {
                     None
                 };
                 let (sr_names, ar_names, official_warn) = self.court_officials(m, snap);
+                let official_ids = self.court_official_ids(m);
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
@@ -2726,6 +2751,8 @@ impl TabletState {
                     sr: sr_names,
                     ar: ar_names,
                     official_warn,
+                    sr_id: official_ids.0,
+                    ar_id: official_ids.1,
                 }
             })
             .collect()
@@ -4513,6 +4540,7 @@ mod tests {
         // bedient, brauchen keinen Spieler als Bediener — und dürfen der
         // Warteschlange deshalb auch keinen wegnehmen.
         let st = TabletState::default();
+        st.officials_store().set_enabled(true);
         st.officials_store().set_court_switches(
             5,
             crate::tablet::officials::CourtSwitches {
@@ -4535,6 +4563,14 @@ mod tests {
         st.assign_scorekeeper_for_court(6, 43);
         assert!(st.assigned_scorekeeper(6).is_some());
         assert!(st.scorekeeper_queue().is_empty());
+
+        // Und ohne Schiedsrichter-Betrieb greift der Schalter gar nicht:
+        // Sonst bliebe ein ausgenommenes Feld nach dem Abschalten für immer
+        // ohne Bediener — die Bedienstelle dafür ist dann unerreichbar.
+        st.officials_store().set_enabled(false);
+        st.enqueue_scorekeeper(2, vec!["B".into()], 9, 2_000);
+        st.assign_scorekeeper_for_court(5, 44);
+        assert_eq!(st.assigned_scorekeeper(5), Some(vec!["B".to_string()]));
     }
 
     #[test]
@@ -4558,7 +4594,11 @@ mod tests {
         let mut snap = snap_named("Cup A");
         snap.officials = vec![official(3), official(5), official(8)];
         st.set_snapshot(snap);
-        assert_eq!(st.officials_store().order(), vec![3, 5, 8], "neuer kommt an");
+        assert_eq!(
+            st.officials_store().order(),
+            vec![3, 5, 8],
+            "neuer kommt an"
+        );
         assert!(st.officials_store().extra(3).paused, "Pause bleibt");
 
         // … überleben den Turnierwechsel NICHT.

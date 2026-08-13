@@ -2807,6 +2807,16 @@ pub struct CourtSwitchesView {
     pub operator: bool,
 }
 
+/// Läuft dieses Turnier mit Schiedsrichtern? Schreibende Officials-Commands
+/// beginnen damit — sonst landeten Zusatzdaten (darunter Sperrlisten, also
+/// Personendaten) in der Turnierdatei eines Turniers ohne Schiedsrichter.
+fn officials_an(state: &State<'_, AppState>) -> Result<(), String> {
+    if state.tablet.officials_store().enabled() {
+        return Ok(());
+    }
+    Err("Dieses Turnier läuft ohne Schiedsrichter.".to_string())
+}
+
 /// „sr"/„ar" in die Rolle übersetzen; alles andere ist ein Bedienfehler.
 fn parse_role(role: &str) -> Result<crate::tablet::officials::OfficialRole, String> {
     match role {
@@ -2852,7 +2862,8 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
     };
     let einsaetze = store.appearances(&officials_finished_input(&snap));
     // Wer tut gerade wo Dienst? Aus den laufenden Spielen.
-    let mut dienst: std::collections::HashMap<i64, (i64, String)> = std::collections::HashMap::new();
+    let mut dienst: std::collections::HashMap<i64, (i64, String)> =
+        std::collections::HashMap::new();
     for m in snap
         .matches
         .iter()
@@ -2906,6 +2917,7 @@ pub fn official_assign(
     role: String,
     official_id: i64,
 ) -> Result<Option<String>, String> {
+    officials_an(&state)?;
     let role = parse_role(&role)?;
     let store = state.tablet.officials_store();
     store.assign(match_id, role, official_id);
@@ -2921,7 +2933,12 @@ pub fn official_assign(
 
 /// Eine Zuweisung lösen.
 #[tauri::command]
-pub fn official_clear(state: State<'_, AppState>, match_id: i64, role: String) -> Result<(), String> {
+pub fn official_clear(
+    state: State<'_, AppState>,
+    match_id: i64,
+    role: String,
+) -> Result<(), String> {
+    officials_an(&state)?;
     state
         .tablet
         .officials_store()
@@ -2932,8 +2949,17 @@ pub fn official_clear(state: State<'_, AppState>, match_id: i64, role: String) -
 /// Einen Official pausieren oder wieder aktivieren (Pause, kommt später,
 /// geht früher). Seine Position in der Reihenfolge bleibt.
 #[tauri::command]
-pub fn official_pause(state: State<'_, AppState>, official_id: i64, paused: bool) {
-    state.tablet.officials_store().set_paused(official_id, paused);
+pub fn official_pause(
+    state: State<'_, AppState>,
+    official_id: i64,
+    paused: bool,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state
+        .tablet
+        .officials_store()
+        .set_paused(official_id, paused);
+    Ok(())
 }
 
 /// Einen Official in der Reihenfolge vor einen anderen ziehen
@@ -2943,17 +2969,25 @@ pub fn official_reorder(
     state: State<'_, AppState>,
     official_id: i64,
     before_official_id: Option<i64>,
-) {
+) -> Result<(), String> {
+    officials_an(&state)?;
     state
         .tablet
         .officials_store()
         .reorder(official_id, before_official_id);
+    Ok(())
 }
 
 /// Stammverein pflegen (BTP liefert am Official keinen — Messung 13.08.2026).
 #[tauri::command]
-pub fn official_set_club(state: State<'_, AppState>, official_id: i64, club: String) {
+pub fn official_set_club(
+    state: State<'_, AppState>,
+    official_id: i64,
+    club: String,
+) -> Result<(), String> {
+    officials_an(&state)?;
     state.tablet.officials_store().set_club(official_id, &club);
+    Ok(())
 }
 
 /// Die Sperrlisten eines Officials — **nur auf gezielte Anfrage**, damit
@@ -2974,11 +3008,13 @@ pub fn official_set_blocklists(
     official_id: i64,
     clubs: Vec<String>,
     players: Vec<i64>,
-) {
+) -> Result<(), String> {
+    officials_an(&state)?;
     state
         .tablet
         .officials_store()
         .set_blocklists(official_id, clubs, players);
+    Ok(())
 }
 
 /// Die Einsätze eines Officials im Detail (Spiel, Rolle, Feld, Endezeit) —
@@ -3000,7 +3036,11 @@ pub fn official_appearances(state: State<'_, AppState>, official_id: i64) -> Vec
                         match_id: a.match_id,
                         role: role_str(a.role),
                         match_name: m
-                            .map(|m| format!("{} {}", m.draw_name, m.round_name).trim().to_string())
+                            .map(|m| {
+                                format!("{} {}", m.draw_name, m.round_name)
+                                    .trim()
+                                    .to_string()
+                            })
                             .unwrap_or_default(),
                         court: a
                             .court_id
@@ -3045,11 +3085,13 @@ pub fn officials_set_court_switches(
     sr: bool,
     ar: bool,
     operator: bool,
-) {
-    state
-        .tablet
-        .officials_store()
-        .set_court_switches(court_id, crate::tablet::officials::CourtSwitches { sr, ar, operator });
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state.tablet.officials_store().set_court_switches(
+        court_id,
+        crate::tablet::officials::CourtSwitches { sr, ar, operator },
+    );
+    Ok(())
 }
 
 // ───────────────────────────── Siegerehrung ───────────────────────────────

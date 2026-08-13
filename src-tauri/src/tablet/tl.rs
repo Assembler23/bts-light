@@ -440,14 +440,10 @@ pub(crate) fn apply_state_action(
             official_id,
             role,
         } => {
-            let store = tablet.officials_store();
-            if !store.enabled() {
-                return Err(TlResponse::err(
-                    C::NotAllowed,
-                    "Dieses Turnier läuft ohne Schiedsrichter.",
-                ));
-            }
-            store.assign(*match_id, tl_role(*role), *official_id);
+            officials_an(tablet)?;
+            tablet
+                .officials_store()
+                .assign(*match_id, tl_role(*role), *official_id);
             Ok(TlResponse::ok(0))
         }
         A::OfficialClear {
@@ -455,6 +451,7 @@ pub(crate) fn apply_state_action(
             match_id,
             role,
         } => {
+            officials_an(tablet)?;
             tablet
                 .officials_store()
                 .clear_assignment(*match_id, tl_role(*role));
@@ -464,6 +461,7 @@ pub(crate) fn apply_state_action(
             official_id,
             paused,
         } => {
+            officials_an(tablet)?;
             tablet.officials_store().set_paused(*official_id, *paused);
             Ok(TlResponse::ok(0))
         }
@@ -471,12 +469,14 @@ pub(crate) fn apply_state_action(
             official_id,
             before_official_id,
         } => {
+            officials_an(tablet)?;
             tablet
                 .officials_store()
                 .reorder(*official_id, *before_official_id);
             Ok(TlResponse::ok(0))
         }
         A::OfficialSetClub { official_id, club } => {
+            officials_an(tablet)?;
             tablet.officials_store().set_club(*official_id, club);
             Ok(TlResponse::ok(0))
         }
@@ -485,6 +485,10 @@ pub(crate) fn apply_state_action(
             clubs,
             players,
         } => {
+            // Sperrlisten sind Personendaten — sie sollen gar nicht erst in
+            // der Turnierdatei eines Turniers landen, das ohne
+            // Schiedsrichter läuft.
+            officials_an(tablet)?;
             tablet
                 .officials_store()
                 .set_blocklists(*official_id, clubs.clone(), players.clone());
@@ -496,6 +500,7 @@ pub(crate) fn apply_state_action(
             ar,
             operator,
         } => {
+            officials_an(tablet)?;
             tablet.officials_store().set_court_switches(
                 *court_id,
                 crate::tablet::officials::CourtSwitches {
@@ -507,13 +512,7 @@ pub(crate) fn apply_state_action(
             Ok(TlResponse::ok(0))
         }
         A::AnnounceOfficials { court_id } => {
-            let store = tablet.officials_store();
-            if !store.enabled() {
-                return Err(TlResponse::err(
-                    C::NotAllowed,
-                    "Dieses Turnier läuft ohne Schiedsrichter.",
-                ));
-            }
+            officials_an(tablet)?;
             let Some(snap) = tablet.snapshot_clone() else {
                 return Err(TlResponse::err(
                     C::NotAllowed,
@@ -522,10 +521,9 @@ pub(crate) fn apply_state_action(
             };
             // Nur ansagen, was es zu sagen gibt — sonst ginge ein Gong ohne
             // Inhalt in die Halle.
-            let m = snap
-                .matches
-                .iter()
-                .find(|m| m.court_id == Some(*court_id) && m.status == crate::btp::model::MatchStatus::OnCourt);
+            let m = snap.matches.iter().find(|m| {
+                m.court_id == Some(*court_id) && m.status == crate::btp::model::MatchStatus::OnCourt
+            });
             let (sr, ar, _) = tablet.court_officials(m, &snap);
             if sr.is_empty() && ar.is_empty() {
                 return Err(TlResponse::err(
@@ -929,7 +927,20 @@ pub(crate) fn plan_walkover_action(
     Ok(updates)
 }
 
-/// Berührt diese Aktion eine Feldzuordnung (und damit BTP)?
+/// Läuft dieses Turnier überhaupt mit Schiedsrichtern? Jede
+/// Officials-Aktion beginnt damit — sonst schriebe ein Gerät Zusatzdaten
+/// (darunter Sperrlisten, also Personendaten) in die Turnierdatei eines
+/// Turniers, das gar keine Schiedsrichter führt.
+fn officials_an(tablet: &TabletState) -> Result<(), relay_proto::TlResponse> {
+    if tablet.officials_store().enabled() {
+        return Ok(());
+    }
+    Err(relay_proto::TlResponse::err(
+        relay_proto::TlErrorCode::NotAllowed,
+        "Dieses Turnier läuft ohne Schiedsrichter.",
+    ))
+}
+
 /// Wire-Rolle in die Rolle des Roster-Speichers übersetzen.
 fn tl_role(role: relay_proto::TlOfficialRole) -> crate::tablet::officials::OfficialRole {
     match role {
@@ -946,6 +957,7 @@ fn role_key(role: relay_proto::TlOfficialRole) -> &'static str {
     }
 }
 
+/// Berührt diese Aktion eine Feldzuordnung (und damit BTP)?
 fn touches_courts(action: &relay_proto::TlAction) -> bool {
     use relay_proto::TlAction as A;
     matches!(
@@ -1751,6 +1763,13 @@ pub struct TlCourt {
     /// Grund (welcher Verein, welcher Spieler) verlässt den Turnier-PC nie.
     #[serde(default)]
     pub official_warn: Option<String>,
+    /// IDs der wirksamen Besetzung (0 = keiner) — die Auswahl auf der Seite
+    /// trifft damit die Person, nicht den Namen (Namensgleichheit kommt in
+    /// großen Listen vor).
+    #[serde(default)]
+    pub sr_id: i64,
+    #[serde(default)]
+    pub ar_id: i64,
     /// Die drei Feld-Schalter, damit die Seite sie zeigen und setzen kann.
     #[serde(default)]
     pub rotate_sr: bool,
@@ -2329,12 +2348,6 @@ fn call_timer_view(config: &AppConfig) -> TlCallTimer {
     }
 }
 
-/// Beschneidet die Feld-Übersicht auf das, was die Turnierleitung braucht.
-///
-/// Bewusst **weggelassen**: Nationalitäten (nur für die Sprachwahl der
-/// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
-/// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
-/// Vergabehilfe).
 /// Sperrlisten, Stammverein und Einsatz-Liste **eines** Schiedsrichters als
 /// JSON — die Antwort der gezielten Leseroute (`/tl/api/officials/{id}`).
 ///
@@ -2443,7 +2456,10 @@ fn officials_view(
         .officials
         .iter()
         .map(|o| {
-            let pos = order.iter().position(|id| *id == o.id).unwrap_or(usize::MAX);
+            let pos = order
+                .iter()
+                .position(|id| *id == o.id)
+                .unwrap_or(usize::MAX);
             (
                 pos,
                 TlOfficial {
@@ -2460,6 +2476,12 @@ fn officials_view(
     out.into_iter().map(|(_, o)| o).collect()
 }
 
+/// Beschneidet die Feld-Übersicht auf das, was die Turnierleitung braucht.
+///
+/// Bewusst **weggelassen**: Nationalitäten (nur für die Sprachwahl der
+/// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
+/// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
+/// Vergabehilfe).
 fn court_view(
     c: crate::tablet::state::CourtOverview,
     clearing: Option<i64>,
@@ -2507,6 +2529,8 @@ fn court_view(
         sr: c.sr,
         ar: c.ar,
         official_warn: c.official_warn,
+        sr_id: c.sr_id,
+        ar_id: c.ar_id,
         rotate_sr: schalter.sr,
         rotate_ar: schalter.ar,
         assign_operator: schalter.operator,
@@ -4668,6 +4692,8 @@ mod tests {
             "sr",
             "ar",
             "official_warn",
+            "sr_id",
+            "ar_id",
             "rotate_sr",
             "rotate_ar",
             "assign_operator",
@@ -4934,11 +4960,11 @@ mod tests {
             // Zustand, den alle Geräte bekommen, sondern nur auf gezielte,
             // per Geräte-Token authentifizierte Anfrage. Der Stammverein
             // gehört zur selben Pflege-Ansicht.
-            "sc gesperrt",       // gesperrter Verein aus dem Fixture
-            "4242",              // gesperrter Spieler aus dem Fixture
-            "blocked_clubs",     // die Felder selbst
-            "blocked_players",   // (schlicht `blocked` gibt es in der
-            "tsv sperrverein",   // Warteliste bereits — anderer Zweck)
+            "sc gesperrt",     // gesperrter Verein aus dem Fixture
+            "4242",            // gesperrter Spieler aus dem Fixture
+            "blocked_clubs",   // die Felder selbst
+            "blocked_players", // (schlicht `blocked` gibt es in der
+            "tsv sperrverein", // Warteliste bereits — anderer Zweck)
         ] {
             assert!(
                 !json.contains(verboten),

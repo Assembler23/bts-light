@@ -100,7 +100,7 @@ async fn serve(
     let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
     // CourtID → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
     // 2-s-Ticker unverändert dasselbe Match immer wieder pusht.
-    let mut last_match: HashMap<i64, Option<(i64, bool)>> = HashMap::new();
+    let mut last_match: HashMap<i64, Option<(i64, bool, String)>> = HashMap::new();
     // Zuletzt an den Relay gepushte Freitext-ID (B1a: Cloud-Ansage der fernen
     // Halle). Nur neue Items (id > last) werden geschickt.
     let mut last_freetext: u64 = 0;
@@ -396,7 +396,7 @@ async fn handle_frame(
     ctx: &Arc<ServerCtx>,
     frame: RelayFrame,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<(i64, bool)>>,
+    last_match: &mut HashMap<i64, Option<(i64, bool, String)>>,
     score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     match frame {
@@ -585,7 +585,7 @@ fn push_court(
     ctx: &ServerCtx,
     court_id: i64,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<(i64, bool)>>,
+    last_match: &mut HashMap<i64, Option<(i64, bool, String)>>,
     score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     let court_label = ctx.tablet.court_display_label(court_id);
@@ -604,7 +604,16 @@ fn push_court(
         },
     };
     let finalized = finalized && effective.is_some();
-    let key = effective.as_ref().map(|m| (m.id, finalized));
+    // Schlüssel inkl. Besetzung (siehe `server::push_match`): Eine
+    // Zuweisung mitten im Spiel ändert die matchId nicht, muss das Tablet
+    // aber erreichen — im Cloud-Weg genauso wie im LAN.
+    let key = effective.as_ref().map(|m| {
+        (
+            m.id,
+            finalized,
+            crate::tablet::server::officials_key(&ctx.tablet.match_officials(m)),
+        )
+    });
     if last_match.get(&court_id) == Some(&key) {
         return;
     }
@@ -657,7 +666,7 @@ fn push_court(
 fn push_all_courts(
     ctx: &ServerCtx,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<(i64, bool)>>,
+    last_match: &mut HashMap<i64, Option<(i64, bool, String)>>,
     score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     for court in ctx.tablet.courts() {
@@ -1311,7 +1320,7 @@ mod tests {
     fn push_court_sends_once_dedups_then_clears() {
         let ctx = ctx_with(vec![match_on_court(42, 101)]);
         let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
-        let mut last: HashMap<i64, Option<(i64, bool)>> = HashMap::new();
+        let mut last: HashMap<i64, Option<(i64, bool, String)>> = HashMap::new();
         let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
 
         // Der Spiegel-Fingerabdruck des Felds ist gesetzt (als hätte der

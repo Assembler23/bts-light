@@ -210,9 +210,6 @@ fn prepare_btp_retry(
     RetryAction::Write(Box::new(update))
 }
 
-/// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
-/// Snapshot noch ruf-bar (Scheduled, beide Mannschaften stehen). Aufs Feld
-/// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0. Rein.
 /// Die Schiedsrichter-Änderungen, die noch nach BTP müssen (ADR 0021).
 ///
 /// Rein und damit testbar: Soll-Stand ist die **wirksame** Besetzung
@@ -250,6 +247,9 @@ fn officials_entries(
     out
 }
 
+/// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
+/// Snapshot noch ruf-bar (Scheduled, beide Mannschaften stehen). Aufs Feld
+/// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0. Rein.
 fn highlight_desired(
     calls: &[crate::tablet::state::PreparationCall],
     snapshot: &BtpSnapshot,
@@ -445,6 +445,12 @@ impl SyncEngine {
         tablet: &TabletState,
         snapshot: &BtpSnapshot,
     ) {
+        // Erst loslassen, was BTP inzwischen zeigt (R2) — sonst schriebe der
+        // Diff unten eine spätere Änderung IN BTP wieder zurück.
+        let store = tablet.officials_store();
+        for m in &snapshot.matches {
+            store.confirm(m.id, m.official1_id, m.official2_id);
+        }
         let entries = officials_entries(tablet, snapshot, &self.officials_written);
         if entries.is_empty() {
             // Aufräumen: Was BTP inzwischen trägt, muss nicht länger als
@@ -753,7 +759,8 @@ impl SyncEngine {
         let bekannt: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
         let mut im_dienst: HashSet<i64> = HashSet::new();
         for m in snapshot.matches.iter().filter(|m| {
-            m.status == MatchStatus::OnCourt && m.court_id.is_some_and(|c| oncourt_now.contains_key(&c))
+            m.status == MatchStatus::OnCourt
+                && m.court_id.is_some_and(|c| oncourt_now.contains_key(&c))
         }) {
             let w = store.effective(m.id, m.official1_id, m.official2_id);
             im_dienst.extend(w.sr);

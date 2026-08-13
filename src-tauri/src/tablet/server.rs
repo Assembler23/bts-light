@@ -1772,8 +1772,6 @@ pub(crate) async fn write_courts_to_btp(
 /// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
 /// Aufrufe in BTP sichtbar. Eigener Login + `highlight_request` (Match-Knoten
 /// nur mit Identität + Highlight, kein `Status`/Ergebnis). Best-effort-Aufrufer
-/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
-/// davon unberührt.
 /// Schreibt **nur** die Schiedsrichter-Besetzung nach BTP (ADR 0021),
 /// Muster [`write_highlight_to_btp`]: eigene Sitzung, ein `SENDUPDATE`,
 /// Antwort geprüft. Der Aufrufer übernimmt den Stand erst bei `Ok` — ein
@@ -1805,6 +1803,8 @@ pub(crate) async fn write_officials_to_btp(
         .map_err(|e| e.to_string())
 }
 
+/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
+/// davon unberührt.
 pub(crate) async fn write_highlight_to_btp(
     config: &AppConfig,
     entries: &[proto::HighlightEntry],
@@ -1992,7 +1992,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // Tablet sein altes (längst entferntes) Match, weil `None == None` (kein
     // Match) den Dedup auslöste. `finalized` im Schlüssel, weil der Übergang
     // OnCourt→Finished die matchId nicht ändert, das Tablet aber erreichen muss.
-    let mut last_match: Option<(i64, bool)> = Some((i64::MIN, false));
+    let mut last_match: Option<(i64, bool, String)> = Some((i64::MIN, false, String::new()));
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
     let mut superseded = false;
@@ -2257,13 +2257,20 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     }
 }
 
+/// Fingerabdruck der Besetzung für den Push-Schlüssel: Ändert sich
+/// Schiedsrichter oder Aufschlagrichter, ändert sich der Schlüssel — nur so
+/// erreicht eine Zuweisung mitten im Spiel das Tablet.
+pub(crate) fn officials_key(officials: &(Vec<String>, Vec<String>)) -> String {
+    format!("{}|{}", officials.0.join("/"), officials.1.join("/"))
+}
+
 /// Sendet `match_assigned`/`match_cleared`, sobald sich das Match des
 /// Felds (per CourtID) gegenüber dem zuletzt gemeldeten Stand geändert hat.
 async fn push_match(
     court_id: i64,
     ctx: &ServerCtx,
     socket: &mut WebSocket,
-    last: &mut Option<(i64, bool)>,
+    last: &mut Option<(i64, bool, String)>,
 ) {
     // A2 / ADR 0017, Regel b: Ein gerade in BTP finalisiertes Match liefert
     // `match_for_court` nicht mehr (Status Finished ≠ OnCourt), das Tablet trägt
@@ -2282,9 +2289,18 @@ async fn push_match(
     };
     // `finalized` nur echt, wenn wir das Match auch nachreichen können.
     let finalized = finalized && effective.is_some();
-    // Zustands-Schlüssel inkl. `finalized`: der Übergang OnCourt→Finished
-    // ändert die matchId NICHT, muss das Tablet aber erreichen.
-    let key = effective.as_ref().map(|m| (m.id, finalized));
+    // Zustands-Schlüssel inkl. `finalized` UND Besetzung: Der Übergang
+    // OnCourt→Finished ändert die matchId nicht, muss das Tablet aber
+    // erreichen — und ebenso wenig ändert sie sich, wenn die Turnierleitung
+    // mitten im Spiel einen Schiedsrichter einteilt. Ohne die Besetzung im
+    // Schlüssel bliebe das Tablet beim Stand der Zuweisung stehen.
+    let key = effective.as_ref().map(|m| {
+        (
+            m.id,
+            finalized,
+            officials_key(&ctx.tablet.match_officials(m)),
+        )
+    });
     if key == *last {
         return;
     }

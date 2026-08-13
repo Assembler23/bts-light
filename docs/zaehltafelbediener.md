@@ -59,7 +59,9 @@ Feld bedient der Schiedsrichter das Tablet selbst: `assign_scorekeeper_for_court
 kehrt sofort zurück, das Feld bekommt keinen Bediener und **verbraucht auch
 keinen Eintrag** aus der Warteschlange — der Wartende bleibt für ein anderes
 Feld übrig. Ohne Eintrag gilt „Vergabe aktiv"; für bestehende Installationen
-ändert sich nichts.
+ändert sich nichts. Der Schalter wirkt nur, solange der
+Schiedsrichter-Betrieb eingeschaltet ist — sonst wäre er nach dem Abschalten
+nirgends mehr zurückzunehmen.
 
 ## Ansage (Scheibe 3, v0.9.165)
 

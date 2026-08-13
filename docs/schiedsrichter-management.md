@@ -153,10 +153,11 @@ Drei unabhängige Schalter je CourtID (`CourtSwitches`), Default alle aktiv:
 Zähltafelbediener-Vergabe. Der Operator-Schalter wirkt in
 `state.rs::assign_scorekeeper_for_court`: Ein ausgenommenes Feld bekommt
 keinen Bediener und **verbraucht keinen Eintrag** aus der Warteschlange
-(siehe [zaehltafelbediener.md](zaehltafelbediener.md)). Er gehört zur
-Feldkonfiguration und gilt unabhängig von `officials.enabled` — sonst
-änderte das Ein-/Ausschalten des Schiedsrichter-Betriebs still die
-Bediener-Vergabe.
+(siehe [zaehltafelbediener.md](zaehltafelbediener.md)). Er greift **nur bei
+eingeschaltetem Schiedsrichter-Betrieb**: Seine einzige Bedienstelle liegt in
+der Schiedsrichter-Oberfläche, und die ist ohne das Feature nicht erreichbar
+— ein einmal ausgenommenes Feld bliebe sonst nach dem Abschalten für immer
+ohne Bediener, ohne dass es irgendwo zurückzunehmen wäre.
 
 Aus den Kombinationen ergeben sich die drei Betriebsformen: SR bedient
 selbst (`operator` aus), SR mit Papierzettel (alle drei an), kein SR
@@ -312,5 +313,21 @@ nicht wörtlich gilt:
   statt gelöscht.
 - **Lösen** merkt sich als `Some(0)` („ausdrücklich keiner"), nicht als
   „nie angefasst". Nur so geht die `0` nach BTP und der Schiedsrichter
-  verschwindet auch dort. Bestätigt ist beides erst, wenn der nächste
-  Snapshot es zeigt.
+  verschwindet auch dort. Ein so gelöster Dienst gilt für die Rotation als
+  **erledigt**, nicht als offen — sonst bekäme ein bewusst ohne
+  Schiedsrichter spielendes Feld nach einem App-Neustart wieder einen
+  zugeteilt (dort sieht jedes belegte Feld wie neu belegt aus).
+- **Loslassen nach Bestätigung** (`OfficialsStore::confirm`, im Sync-Loop vor
+  dem Diff): Sobald der Snapshot für einen Dienst einen Wert zeigt — oder das
+  ausdrückliche „keiner" bestätigt —, wird der lokale Eintrag entfernt und
+  BTP ist wieder allein die Wahrheit (R2). **Ohne diesen Schritt** würde eine
+  spätere Änderung *in BTP* bei jedem Sync-Zyklus wieder überschrieben, für
+  den Rest des Turniers. Die Einsatz-Ableitung verliert dabei nichts: Sie
+  liest denselben Wert dann aus dem BTP-Match.
+
+### Was das Tablet erreicht
+
+Der Push-Schlüssel beider Wege (LAN und Cloud) enthält neben Match-ID und
+`finalized` einen Fingerabdruck der Besetzung. Ohne ihn erreichte eine
+Zuweisung, die **nach** dem Ruf aufs Feld erfolgt, das Tablet nie — die
+Match-ID ändert sich dabei ja nicht.
