@@ -252,10 +252,21 @@ Feld die persistente Geräte-Kennung (`deviceId`) des aktiven Tablets.
 Meldet sich **dasselbe** Gerät nach einem Netz-Aussetzer erneut, ersetzt
 es seine tote Vorgänger-Session nahtlos (kein „Feld belegt"); fremde
 Geräte sehen weiterhin den Übernehmen-Dialog. Den gespiegelten Spielstand
-schickt der Relay wie bisher als `state_restore` — das Tablet wendet ihn
-aber nur noch an, wenn er **neuer** ist als sein lokaler Stand
-(Stand-Revision `rev` im Snapshot, „neuer gewinnt"), sonst repariert es
-den Relay-Cache mit den offline weitergezählten Punkten. Details:
+schickt der Relay als `state_restore`.
+
+**Reconnect-Wahrheit „Slot-Halter gewinnt" (seit v0.9.197, ADR 0017):** Die
+Autorität, wessen Stand beim Reconnect gilt, berechnet der Relay selbst — er
+kennt den Slot-Halter je Feld über `tablet_devices`. Das `state_restore`-Frame
+trägt dafür zwei neue Felder (`#[serde(default)]`, abwärtskompatibel):
+`authoritative` (das Tablet setzt seinen lokalen Stand durch bzw. adoptiert den
+Relay-Stand) und `ownership_active` (Schalter: neues Ownership-Verhalten vs.
+altes `rev`). „Legitim weitergezählt" leitet der Relay konservativ aus
+`court_scores` ab (nicht-leerer Live-Stand ⇒ ein Übernehmer wird **nie**
+überschrieben). Das **Finalisiert**-Flag reist im `MatchBrief` (aus dem
+BTP-Status des Hosts). **Legacy-Rollback im Cloud:** der Host reicht
+`reconnect_legacy_rev` im `HostFrame::Courts`-Push mit (wie `azureTts`); der
+Relay setzt daraus `ownership_active`. Ältere Tablets/Relays ohne die Felder
+fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
 [tablet.md](tablet.md).
 
 ## Sicherheit

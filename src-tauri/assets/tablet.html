@@ -1048,6 +1048,13 @@ const STATE = {
   currentSet: { left: 0, right: 0 },
   history: /** @type {object[]} */ ([]),
   finished: false,
+  // A2 / ADR 0017, Regel b: Ist das zugewiesene Match in BTP finalisiert
+  // (Sieger steht / per Hand fertig eingegeben)? Kommt im MatchBrief
+  // (`match_assigned`, Feld `finalized`). Ist es gesetzt, TRITT DAS TABLET
+  // ZURÜCK: kein Score-Push, kein state_sync-Push, keine Ergebnis-Absendung —
+  // damit es das Hand-Ergebnis nicht überbügelt. Ein neues/anderes Match hebt
+  // das Gate wieder auf.
+  finalized: /** @type {boolean} */ (false),
   submittedOk: false,
   // Noch nicht bestätigtes Endergebnis – wird im Hintergrund wiederholt,
   // bis der Server ok:true meldet. { matchId, courtLabel, sets } | null.
@@ -1280,11 +1287,25 @@ function connect() {
     try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
     if (msg.type === 'pong') { return; } // reines Lebenszeichen
     if (msg.type === 'match_assigned') {
-      tlog('info', 'match_assigned', { matchId: msg.match?.matchId });
+      const incomingFinalized = !!(msg.match && msg.match.finalized);
+      tlog('info', 'match_assigned', { matchId: msg.match?.matchId, finalized: incomingFinalized });
       // Feld erfolgreich (zurück-)belegt → etwaigen Retry stoppen.
       clearReidentify();
       STATE.occupied = false;
       loadMatch(msg.match);
+      // A2 / ADR 0017, Regel b (Finalisiert-Gate): Der MatchBrief trägt die
+      // BTP-Wahrheit. Ist das Match finalisiert, tritt das Tablet zurück und
+      // pusht nichts mehr (unten in sendScoreUpdate/persistState/submit
+      // gegated). `loadMatch` hat bei einem NEUEN Match STATE.finalized bereits
+      // zurückgesetzt — hier setzen wir es autoritativ aus dem Frame, so dass
+      // auch der Übergang OnCourt→Finished (gleiche matchId) greift und ein
+      // neues, nicht-finalisiertes Match das Gate wieder aufhebt.
+      STATE.finalized = incomingFinalized;
+      if (STATE.finalized) {
+        tlog('info', 'match_finalized_stand_down', { matchId: msg.match?.matchId });
+        render();
+        return;
+      }
       // Nach einer Wieder-Anmeldung den lokalen Stand re-pushen: Bei
       // demselben Match ist loadMatch ein No-Op (Stand bleibt), der Server
       // hat nach einem Reconnect aber evtl. nur 0:0 – sendScoreUpdate bringt
@@ -1307,29 +1328,61 @@ function connect() {
       try {
         const p = JSON.parse(msg.state);
         if (p) {
-          // „Neuer gewinnt": Der Server-Cache ist während eines Netz-
-          // Aussetzers veraltet — hat DIESES Tablet zum SELBEN Match einen
-          // gleich neuen oder neueren Stand (rev), bleibt der lokale Stand
-          // stehen und wird sofort zurückgespiegelt (state_sync + score),
-          // statt dass offline gezählte Punkte überbügelt werden.
-          const sameMatch = STATE.match && p.match
-            && STATE.match.matchId === p.match.matchId;
-          const localRev = STATE.rev || 0;
-          const incomingRev = typeof p.rev === 'number' ? p.rev : 0;
-          if (sameMatch && localRev >= incomingRev) {
-            tlog('info', 'state_restore_kept_local', { localRev, incomingRev });
-            persistState(true); // repariert den Server-Cache mit unserem Stand
-            sendScoreUpdate();  // Liveticker/TV ziehen nach
-            sendRallySync();    // … und der Punktverlauf ebenso
-            render();
+          // A2 / ADR 0017 (Reconnect-Wahrheit): Wer entscheidet, wessen Stand
+          // gilt? Das hängt am Modus des Servers.
+          if (msg.ownership_active) {
+            // OWNERSHIP-Modus: Server/Relay HABEN die Autorität berechnet
+            // (Slot-Halter gewinnt). Das Tablet FOLGT `authoritative` statt
+            // selbst per rev zu entscheiden. owner_epoch/owner_device sind rein
+            // diagnostisch.
+            if (msg.authoritative) {
+              // Wir sind der Slot-Halter/Reclaimer → lokale Wahrheit
+              // durchsetzen (wie im bisherigen kept-local-Zweig): den
+              // Server-Cache mit unserem Stand reparieren und TV/Liveticker/
+              // Punktverlauf nachziehen.
+              tlog('info', 'state_restore_authoritative', { ownerEpoch: msg.owner_epoch, ownerDevice: msg.owner_device });
+              persistState(true);
+              sendScoreUpdate();
+              sendRallySync();
+              render();
+            } else {
+              // Ein anderer Halter hat legitim weitergezählt ODER das Match ist
+              // finalisiert → ADOPTIEREN: den mitgeschickten Stand übernehmen,
+              // nicht überschreiben.
+              tlog('info', 'state_restore_adopt', { ownerEpoch: msg.owner_epoch, ownerDevice: msg.owner_device });
+              applyPersistedState(p);
+              persistState(true);
+              sendRallySync();
+              render();
+            }
           } else {
-            tlog('info', 'state_restore_applied', { localRev, incomingRev });
-            applyPersistedState(p);
-            persistState(true);
-            // Übernahme/Restore: der geerbte Verlauf wird die Wahrheit des
-            // Hosts — das übernehmende Gerät zeichnet nahtlos weiter (AK-10).
-            sendRallySync();
-            render();
+            // LEGACY-Modus (Config `reconnect_legacy_rev`) ODER altes
+            // Server-Frame ohne `ownership_active` → bestehende rev-Logik
+            // UNVERÄNDERT: „Neuer gewinnt" — hat DIESES Tablet zum SELBEN Match
+            // einen gleich neuen oder neueren Stand (rev), bleibt der lokale
+            // Stand stehen und wird zurückgespiegelt, statt offline gezählte
+            // Punkte zu überbügeln. So bleibt „Legacy" wirklich das alte
+            // Verhalten (und öffnet den Reconnect-Bug nicht durch blindes
+            // Befolgen von `authoritative`).
+            const sameMatch = STATE.match && p.match
+              && STATE.match.matchId === p.match.matchId;
+            const localRev = STATE.rev || 0;
+            const incomingRev = typeof p.rev === 'number' ? p.rev : 0;
+            if (sameMatch && localRev >= incomingRev) {
+              tlog('info', 'state_restore_kept_local', { localRev, incomingRev });
+              persistState(true); // repariert den Server-Cache mit unserem Stand
+              sendScoreUpdate();  // Liveticker/TV ziehen nach
+              sendRallySync();    // … und der Punktverlauf ebenso
+              render();
+            } else {
+              tlog('info', 'state_restore_applied', { localRev, incomingRev });
+              applyPersistedState(p);
+              persistState(true);
+              // Übernahme/Restore: der geerbte Verlauf wird die Wahrheit des
+              // Hosts — das übernehmende Gerät zeichnet nahtlos weiter (AK-10).
+              sendRallySync();
+              render();
+            }
           }
         }
       } catch (e) { tlog('warn', 'state_restore_failed', String(e)); }
@@ -1397,6 +1450,10 @@ function clearReidentify() {
 }
 
 function sendScoreUpdate() {
+  // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ist das Match in BTP
+  // finalisiert (Hand-Ergebnis), pusht das Tablet KEINEN Score mehr — es
+  // überbügelt das eingegebene Ergebnis nicht.
+  if (STATE.finalized) return;
   if (!ws || ws.readyState !== WebSocket.OPEN || !STATE.match || !STATE.teamOnSide) return;
   // Score-Update an den Director zurück: in Team-A/B-Koordinaten umrechnen
   const sideOfA = STATE.teamOnSide.a;
@@ -1831,9 +1888,12 @@ function persistState(fromRestore) {
   const json = JSON.stringify(snap);
   try { localStorage.setItem(PERSIST_KEY, json); } catch { /* QuotaExceeded o.ä. */ }
   // Stand an den Server spiegeln, damit ein übernehmendes Gerät das
-  // laufende Spiel bekommt (nur als aktives Tablet sinnvoll).
+  // laufende Spiel bekommt (nur als aktives Tablet sinnvoll). A2 / ADR 0017,
+  // Regel b: Bei finalisiertem Match KEIN state_sync-Push — der lokale
+  // Snapshot (localStorage) bleibt für einen Reload erhalten, aber der
+  // Server-Cache wird nicht mehr überschrieben (Hand-Ergebnis gewinnt).
   if (ws && ws.readyState === WebSocket.OPEN
-      && STATE.match && !STATE.locked && !STATE.occupied) {
+      && STATE.match && !STATE.locked && !STATE.occupied && !STATE.finalized) {
     ws.send(JSON.stringify({ type: 'state_sync', state: json }));
   }
 }
@@ -1911,6 +1971,9 @@ function loadMatch(match) {
   STATE.currentSet = { left: 0, right: 0 };
   STATE.history = [];
   STATE.finished = false;
+  // A2 / ADR 0017, Regel b: Neues (anderes) Match → Finalisiert-Gate lösen.
+  // Der `match_assigned`-Handler setzt es gleich danach aus dem Frame neu.
+  STATE.finalized = false;
   STATE.submittedOk = false;
   STATE.teamOnSide = null;
   STATE.positions = null;
@@ -1952,6 +2015,8 @@ function clearMatch() {
   STATE.currentSet = { left: 0, right: 0 };
   STATE.history = [];
   STATE.finished = false;
+  // A2 / ADR 0017, Regel b: Feld leer → Gate lösen (kein Match, kein Push).
+  STATE.finalized = false;
   STATE.submittedOk = false;
   STATE.teamOnSide = null;
   STATE.positions = null;
@@ -2886,6 +2951,10 @@ let resultRetryTimer = null;
 const RESULT_RETRY_MS = 5000;
 
 function submit() {
+  // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ist das Match in BTP bereits
+  // finalisiert (per Hand fertig eingegeben), sendet das Tablet KEIN Ergebnis
+  // — es überbügelt das Hand-Ergebnis nicht.
+  if (STATE.finalized) { tlog('info', 'submit_suppressed_finalized', { matchId: STATE.match?.matchId }); return; }
   if (!STATE.match || !STATE.teamOnSide || STATE.pendingResult) return;
   // Bei Aufgabe (retired) UND Kampflos (walkover) muss der Sieger feststehen.
   if ((STATE.retired || STATE.walkover) && !STATE.retiredWinner) return;
@@ -2917,6 +2986,10 @@ function submit() {
 // sich selbst neu, bis der Server ok:true bestätigt.
 async function trySubmitPending() {
   if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
+  // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein noch offenes Ergebnis wird
+  // NICHT (weiter) übermittelt, sobald das Match in BTP finalisiert ist — das
+  // per Hand eingegebene Ergebnis bleibt unangetastet.
+  if (STATE.finalized) { tlog('info', 'submit_retry_suppressed_finalized'); return; }
   const pr = STATE.pendingResult;
   if (!pr) return;
   try {

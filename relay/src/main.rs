@@ -233,6 +233,13 @@ struct Namespace {
     monitor_subs_all: Vec<Tx>,
     /// Pro-Court monoton steigende Nudge-Sequenz (Client verwirft Veraltetes).
     monitor_seq: HashMap<i64, u64>,
+    /// A2 / ADR 0017 (Reconnect-Wahrheit): der Legacy-rev-Schalter des Hosts,
+    /// vom Host über `HostFrame::Courts` durchgereicht. `false` (Default) =
+    /// Ownership aktiv → der Relay meldet `ownership_active=true` im
+    /// `StateRestore` und das Tablet folgt der Autorität. `true` = Legacy →
+    /// `ownership_active=false`, das Tablet nutzt seine rev-Logik. So greift
+    /// der Laufzeit-Rollback AUCH im Cloud-Modus.
+    reconnect_legacy_rev: bool,
 }
 
 /// Der winzige Monitor-Nudge (A1, ADR 0016): „Feld `court` hat sich geändert,
@@ -283,6 +290,7 @@ impl Namespace {
             monitor_subs: HashMap::new(),
             monitor_subs_all: Vec::new(),
             monitor_seq: HashMap::new(),
+            reconnect_legacy_rev: false,
         }
     }
 
@@ -1868,6 +1876,48 @@ fn label_of(namespace: &Namespace, court_id: i64) -> String {
         .unwrap_or_default()
 }
 
+/// Cloud-Pendant zur reinen `reconnect_decision` (state.rs, A2 / ADR 0017):
+/// bestimmt, ob ein (re)verbindendes Tablet der AUTORITÄTS-Halter ist und
+/// seinen lokalen Stand durchsetzen darf (`true`) oder den mitgeschickten
+/// `state` adoptiert (`false`). Der Relay kennt den Slot-Halter über
+/// `tablet_devices`.
+///
+/// `owner_device` = aktuell eingetragener Halter VOR diesem (Re-)Attach
+/// (`None` = Feld frei). `owner_scored` = hat dieser Halter seit seiner
+/// Übernahme gezählt.
+///
+/// Regeln identisch zu `reconnect_decision`:
+/// - `finalized` → `false` (Hand-Ergebnis nicht überbügeln).
+/// - Feld frei ODER Halter == Rückkehrer → `true` (Reclaimer ist die Wahrheit).
+/// - Fremder Halter UND `owner_scored` → `false` (legitimer Übernehmer gewinnt).
+/// - Fremder Halter OHNE Score → `true` (Rückkehrer gewinnt deterministisch).
+///
+/// KONSERVATIV (Cloud-Besonderheit): Der Relay hat KEIN per-Claim-Flag wie der
+/// Host. Er leitet `owner_scored` aus `court_scores` ab (liegt ein nicht-leerer
+/// Live-Stand am Feld, gilt der Halter als „hat gezählt"). Im Zweifel wird
+/// `owner_scored = true` gewählt — dann tritt der Rückkehrer zurück und ein
+/// legitimer Übernehmer wird NIE überschrieben (das Ziel der Konfliktregel;
+/// der bewusste stille Verlierer ist der Rückkehrer, nicht der Übernehmer).
+fn relay_reconnect_authoritative(
+    returning_device: &str,
+    owner_device: Option<&str>,
+    owner_scored: bool,
+    finalized: bool,
+) -> bool {
+    // Regel b (A2 / ADR 0017): `finalized` reist vom Host im MatchBrief zum
+    // Relay (BTP-Wahrheit, in `court_matches` gespeichert); ist das Match
+    // finalisiert, überbügelt kein zurückkehrendes Tablet das Hand-Ergebnis.
+    if finalized {
+        return false;
+    }
+    match owner_device {
+        None => true,
+        Some(dev) if dev == returning_device => true,
+        Some(_) if owner_scored => false,
+        Some(_) => true,
+    }
+}
+
 /// Versucht, ein Tablet als aktiv schiedsendes Gerät an einem Feld (per
 /// CourtID) zu registrieren. Ist das Feld schon belegt, bleibt das Tablet
 /// passiv.
@@ -1903,6 +1953,27 @@ async fn attach_tablet(
         tracing::warn!("Namespace '{ns}' am Tablet-Limit – Feld {court_id} abgewiesen");
         return AttachResult::Rejected;
     }
+    // A2 / ADR 0017: Den Slot-Halter VOR dem Überschreiben festhalten — die
+    // Konfliktregel braucht den Zustand von vorher (nach dem `insert` sind wir
+    // selbst der Halter). `owner_scored` konservativ aus `court_scores`.
+    let prev_owner_device = namespace.tablet_devices.get(&court_id).cloned();
+    let owner_scored = namespace
+        .court_scores
+        .get(&court_id)
+        .is_some_and(|s| !s.is_empty());
+    // A2 / ADR 0017, Regel b: Der Host reicht `finalized` im MatchBrief mit
+    // (BTP-Wahrheit); der Relay hat es im zuletzt zugewiesenen Match des Felds
+    // (`court_matches`). Ist das Match finalisiert, tritt der Rückkehrer
+    // zurück → authoritative=false (Hand-Ergebnis nicht überbügeln).
+    let finalized = namespace
+        .court_matches
+        .get(&court_id)
+        .is_some_and(|m| m.finalized);
+    // A2 / ADR 0017: Ownership-Modus? Der Host reicht den Legacy-Schalter über
+    // `HostFrame::Courts` durch. Im Legacy-Modus meldet der Relay
+    // `ownership_active=false`, worauf das Tablet seine rev-Logik nutzt
+    // (Laufzeit-Rollback auch im Cloud-Modus).
+    let ownership = !namespace.reconnect_legacy_rev;
     namespace.tablets.insert(court_id, tx.clone());
     namespace
         .tablet_devices
@@ -1917,8 +1988,25 @@ async fn attach_tablet(
     // wiederhergestellt wurde oder das Feld ohne Stand startet.
     if let Some(state) = namespace.court_state.get(&court_id) {
         let len = state.len();
+        // A2 / ADR 0017: Autorität nach dem Slot-Halter bestimmen. Erreichbar
+        // sind hier nur „Feld frei" oder „dasselbe Gerät reclaimt" (fremde
+        // Geräte kehren oben mit `AttachResult::Occupied` um) → beide Fälle
+        // ergeben authoritative=true; die Regel ist dennoch vollständig
+        // verdrahtet (und für den späteren Gate-Umbau vorbereitet).
+        // Der Relay führt keine Epoch → owner_epoch=0. `ownership_active`
+        // spiegelt den durchgereichten Legacy-Schalter.
+        let authoritative = relay_reconnect_authoritative(
+            device_id,
+            prev_owner_device.as_deref(),
+            owner_scored,
+            finalized,
+        );
         let _ = tx.send(text(&ServerMsg::StateRestore {
             state: state.clone(),
+            ownership_active: ownership,
+            authoritative,
+            owner_epoch: 0,
+            owner_device: device_id.to_string(),
         }));
         tracing::info!("Feld {court_id} (Namespace '{ns}'): StateRestore gesendet ({len} Bytes)");
     } else {
@@ -1947,11 +2035,23 @@ async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, device_id: &s
     namespace
         .tablet_devices
         .insert(court_id, device_id.to_string());
+    // A2 / ADR 0017: Ownership-Modus? (Legacy-Schalter des Hosts, durchgereicht
+    // über `HostFrame::Courts`.) Im Legacy-Modus meldet der Relay
+    // `ownership_active=false`, worauf das Tablet seine rev-Logik nutzt.
+    let ownership = !namespace.reconnect_legacy_rev;
     // Laufenden Spielstand an das übernehmende Tablet übergeben.
     if let Some(state) = namespace.court_state.get(&court_id) {
         let len = state.len();
+        // A2 / ADR 0017: Eine BEWUSSTE Übernahme adoptiert den laufenden Stand
+        // des Felds — das übernehmende Gerät hat keine eigene „lokale Wahrheit".
+        // Daher authoritative=false (adoptieren); konservativ, damit ein
+        // frisch übernehmendes Tablet den Live-Stand nie überschreibt.
         let _ = tx.send(text(&ServerMsg::StateRestore {
             state: state.clone(),
+            ownership_active: ownership,
+            authoritative: false,
+            owner_epoch: 0,
+            owner_device: device_id.to_string(),
         }));
         tracing::info!(
             "Feld {court_id} (Namespace '{ns}'): Übernahme – StateRestore gesendet ({len} Bytes)"
@@ -3072,7 +3172,11 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 let _ = pending.send(ResultResponse { ok, error });
             }
         }
-        HostFrame::Courts { courts, azure_tts } => {
+        HostFrame::Courts {
+            courts,
+            azure_tts,
+            reconnect_legacy_rev,
+        } => {
             // Vollständige Feld-Liste für das Cloud-Feldwechsel-Menü merken.
             // Leere Liste NICHT übernehmen: der Host schickt sie nur, um die
             // Azure-Vererbung zu transportieren, solange BTP noch kein
@@ -3083,6 +3187,11 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // Azure-Vererbung: jeder Push ist autoritativ, auch `None`
             // (Azure am Master deaktiviert → geerbte Config verfällt).
             namespace.azure_tts = azure_tts;
+            // A2 / ADR 0017: Legacy-rev-Schalter des Hosts übernehmen (jeder
+            // Push autoritativ) — steuert `ownership_active` beim nächsten
+            // Reconnect. Ältere Hosts senden `false` per `#[serde(default)]`
+            // (Ownership aktiv, sicherer Default).
+            namespace.reconnect_legacy_rev = reconnect_legacy_rev;
         }
         HostFrame::Prepared { mut prepared } => {
             // Aufgerufene Spiele der fernen Hallen für die Slave-Spielübersicht
@@ -3302,6 +3411,7 @@ mod tests {
             scorekeeper_assigned: false,
             show_club_names: false,
             show_club_logos: false,
+            finalized: false,
         }
     }
 
@@ -4822,6 +4932,210 @@ mod tests {
             "fremdes Gerät bleibt draußen"
         );
         assert!(old_rx.try_recv().is_err(), "alte Session bleibt aktiv");
+    }
+
+    /// A2 / ADR 0017: Wahrheitstabelle des Cloud-Pendants zu
+    /// `reconnect_decision`. Autorität nach Slot-Halter (`tablet_devices`):
+    /// gleicher Eintrag → Rückkehrer ist autoritativ; fremder Eintrag hängt am
+    /// „hat gezählt".
+    #[test]
+    fn relay_reconnect_authoritative_truth_table() {
+        // Feld frei → Rückkehrer ist die Wahrheit.
+        assert!(relay_reconnect_authoritative("dev-a", None, false, false));
+        // Gleicher tablet_devices-Eintrag (eigener Reclaim) → autoritativ,
+        // auch wenn schon gezählt wurde.
+        assert!(relay_reconnect_authoritative(
+            "dev-a",
+            Some("dev-a"),
+            true,
+            false
+        ));
+        // Fremder Halter, hat gezählt → Rückkehrer tritt zurück.
+        assert!(!relay_reconnect_authoritative(
+            "dev-a",
+            Some("dev-b"),
+            true,
+            false
+        ));
+        // Fremder Halter, hat NICHT gezählt → Rückkehrer gewinnt.
+        assert!(relay_reconnect_authoritative(
+            "dev-a",
+            Some("dev-b"),
+            false,
+            false
+        ));
+        // Finalisiert → nie überbügeln (StandDown), egal wer hält.
+        assert!(!relay_reconnect_authoritative(
+            "dev-a",
+            Some("dev-a"),
+            false,
+            true
+        ));
+    }
+
+    /// A2 / ADR 0017 (Wire-Ebene): Beim Reconnect DESSELBEN Geräts liefert der
+    /// Relay ein `StateRestore` mit `authoritative=true` — der Reclaimer setzt
+    /// seinen lokalen Stand durch.
+    #[tokio::test]
+    async fn same_device_reconnect_state_restore_is_authoritative() {
+        let (broker, _old_rx, _host) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.tablet_devices.insert(101, "dev-x".into());
+            ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
+        }
+        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
+        assert!(matches!(res, AttachResult::Active));
+        // Unter den gesendeten Frames muss das StateRestore mit
+        // authoritative=true sein.
+        let mut saw_authoritative = false;
+        while let Ok(Message::Text(t)) = new_rx.try_recv() {
+            if let Ok(ServerMsg::StateRestore { authoritative, .. }) =
+                serde_json::from_str::<ServerMsg>(t.as_str())
+            {
+                assert!(authoritative, "eigener Reclaim ist autoritativ");
+                saw_authoritative = true;
+            }
+        }
+        assert!(saw_authoritative, "StateRestore wurde gesendet");
+    }
+
+    /// A2 / ADR 0017 (Wire-Ebene): `ownership_active` im `StateRestore`
+    /// spiegelt den durchgereichten Legacy-Schalter. Default (kein Legacy) →
+    /// `ownership_active=true` (Tablet folgt der Autorität); Legacy an →
+    /// `ownership_active=false` (Tablet nutzt seine rev-Logik).
+    #[tokio::test]
+    async fn state_restore_ownership_active_reflects_legacy_flag() {
+        // Default: Ownership aktiv.
+        let (broker, _old_rx, _host) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.tablet_devices.insert(101, "dev-x".into());
+            ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
+        }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        attach_tablet(&broker, "ns1", 101, "dev-x", &tx).await;
+        let mut saw = false;
+        while let Ok(Message::Text(t)) = rx.try_recv() {
+            if let Ok(ServerMsg::StateRestore {
+                ownership_active, ..
+            }) = serde_json::from_str::<ServerMsg>(t.as_str())
+            {
+                assert!(ownership_active, "Default → Ownership aktiv");
+                saw = true;
+            }
+        }
+        assert!(saw, "StateRestore wurde gesendet");
+
+        // Legacy an: der Relay meldet ownership_active=false.
+        let (broker2, _old_rx2, _host2) = broker_with_tablet(101).await;
+        {
+            let mut map = broker2.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.reconnect_legacy_rev = true;
+            ns.tablet_devices.insert(101, "dev-x".into());
+            ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
+        }
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        attach_tablet(&broker2, "ns1", 101, "dev-x", &tx2).await;
+        let mut saw2 = false;
+        while let Ok(Message::Text(t)) = rx2.try_recv() {
+            if let Ok(ServerMsg::StateRestore {
+                ownership_active, ..
+            }) = serde_json::from_str::<ServerMsg>(t.as_str())
+            {
+                assert!(!ownership_active, "Legacy → Ownership inaktiv (rev)");
+                saw2 = true;
+            }
+        }
+        assert!(saw2, "StateRestore wurde gesendet");
+    }
+
+    /// A2 / ADR 0017 (Wire-Ebene): Ein `HostFrame::Courts` mit
+    /// `reconnect_legacy_rev=true` schaltet den Namespace auf Legacy — der
+    /// nächste Reconnect meldet dann `ownership_active=false`.
+    #[tokio::test]
+    async fn courts_frame_sets_namespace_legacy_flag() {
+        let (broker, _old_rx, host) = broker_with_tablet(101).await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Courts {
+                courts: vec![],
+                azure_tts: None,
+                reconnect_legacy_rev: true,
+            },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        assert!(
+            map.get("ns1").unwrap().reconnect_legacy_rev,
+            "Courts-Frame hat den Legacy-Schalter übernommen"
+        );
+    }
+
+    /// A2 / ADR 0017, Regel b (Wire-Ebene): Trägt das zuletzt zugewiesene Match
+    /// des Felds `finalized:true` (vom Host im MatchBrief hereingereicht), tritt
+    /// selbst der eigene Reclaimer beim Reconnect zurück — `StateRestore` mit
+    /// `authoritative=false`, damit das Hand-Ergebnis nicht überbügelt wird.
+    #[tokio::test]
+    async fn reconnect_stands_down_when_court_match_finalized() {
+        let (broker, _old_rx, _host) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.tablet_devices.insert(101, "dev-x".into());
+            ns.court_state.insert(101, "{\"score\":\"21:19\"}".into());
+            // Zuletzt zugewiesenes Match ist in BTP finalisiert.
+            let mut finalized = brief(7);
+            finalized.finalized = true;
+            ns.court_matches.insert(101, finalized);
+        }
+        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
+        assert!(matches!(res, AttachResult::Active));
+        let mut saw_restore = false;
+        while let Ok(Message::Text(t)) = new_rx.try_recv() {
+            if let Ok(ServerMsg::StateRestore { authoritative, .. }) =
+                serde_json::from_str::<ServerMsg>(t.as_str())
+            {
+                assert!(
+                    !authoritative,
+                    "finalisiertes Match → Rückkehrer tritt zurück"
+                );
+                saw_restore = true;
+            }
+        }
+        assert!(saw_restore, "StateRestore wurde gesendet");
+    }
+
+    /// A2 / ADR 0017 (Wire-Ebene): Eine bewusste Übernahme (`take_over_court`)
+    /// liefert `authoritative=false` — das übernehmende Tablet adoptiert den
+    /// laufenden Stand statt ihn zu überschreiben.
+    #[tokio::test]
+    async fn take_over_state_restore_is_not_authoritative() {
+        let (broker, _old_rx, _host) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.court_state.insert(101, "{\"score\":\"9:9\"}".into());
+        }
+        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        take_over_court(&broker, "ns1", 101, "dev-neu", &new_tx).await;
+        let mut saw_restore = false;
+        while let Ok(Message::Text(t)) = new_rx.try_recv() {
+            if let Ok(ServerMsg::StateRestore { authoritative, .. }) =
+                serde_json::from_str::<ServerMsg>(t.as_str())
+            {
+                assert!(!authoritative, "Übernahme adoptiert, ist nicht autoritativ");
+                saw_restore = true;
+            }
+        }
+        assert!(saw_restore, "StateRestore wurde gesendet");
     }
 
     /// Nachlaufende Frames einer ABGELÖSTEN Session (Reconnect-Reclaim/

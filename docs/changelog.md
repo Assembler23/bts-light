@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.197
+
+- **Das zählende Tablet bleibt bei Verbindungsabrissen die Wahrheit.** Bei
+  störanfälligem WLAN (viele Fremdgeräte in der Halle) kann ein Tablet kurz die
+  Verbindung verlieren. Kehrt es im selben Spiel zurück und hat **niemand
+  übernommen**, setzt es jetzt seinen lokalen Stand zuverlässig durch — statt
+  ihn womöglich mit einem veralteten Server-Stand zu überschreiben. Hat dagegen
+  ein **anderes** Tablet übernommen und weitergezählt, tritt das zurückkehrende
+  Gerät zurück (kein Überschreiben). Und wurde das Spiel in der Zwischenzeit
+  **per Hand fertig eingegeben**, überbügelt das Tablet dieses Ergebnis nicht
+  mehr. Die Entscheidung trifft jetzt der Server anhand des „Feld-Halters"
+  (statt eines geräte-lokalen Zählers) — deterministisch und im LAN wie Cloud.
+  Zweiter Baustein des Robustheits-Pakets (Spec `docs/features/turnier-robustheit.md`,
+  ADR 0017). Im Notfall per Einstellung `reconnect_legacy_rev` zur Laufzeit aufs
+  alte Verhalten zurückschaltbar.
+
 ## v0.9.196
 
 - **Spielstand erscheint auf dem TV nahezu sofort.** Court-Monitor und

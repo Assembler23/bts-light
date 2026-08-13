@@ -564,6 +564,13 @@ impl SyncEngine {
             // Das vorige Spiel hat das Feld verlassen — beendet + mit Sieger?
             if let Some(fm) = snapshot.matches.iter().find(|m| m.id == prev_match_id) {
                 if fm.status == MatchStatus::Finished {
+                    // A2 / ADR 0017, Regel b: Der Übergang OnCourt→Finished ist
+                    // genau das Finalisiert-Signal — das Feld hat sein Match in
+                    // BTP fertig (Sieger steht). Merken (mit der Match-ID), damit
+                    // der Server dem Tablet, das noch dieselbe matchId trägt,
+                    // `finalized:true` schickt und ein nachlaufender Score
+                    // verworfen wird. R2 gewahrt: die Wahrheit bleibt BTP.
+                    tablet.mark_finalized(court_id, prev_match_id);
                     if let Some(w) = fm.winner {
                         let loser = if w == 1 { &fm.team2 } else { &fm.team1 };
                         let names: Vec<String> = loser.iter().map(|p| p.name.clone()).collect();
@@ -579,6 +586,13 @@ impl SyncEngine {
                     }
                 }
             }
+        }
+        // A2 / ADR 0017, Regel b: Steht auf einem Feld inzwischen ein ANDERES
+        // Match, ist ein früherer Finalisiert-Merker Geschichte — räumen, damit
+        // ein Score des neuen Spiels nicht fälschlich als „finalisiert" gilt.
+        // Die TTL fängt Felder ab, die nie ein neues Match bekommen.
+        for (&court_id, &match_id) in &oncourt_now {
+            tablet.clear_finalized_if_other(court_id, match_id);
         }
         // Zuweisung beim Feld-Aufruf (ADR 0007, Scheibe 2): jedem belegten Feld
         // einen Bediener aus der Warteschlange zuordnen (idempotent je Spiel);
@@ -1880,6 +1894,65 @@ mod tests {
         );
         engine.track_scorekeepers(&snap2, &tablet, false);
         assert_eq!(tablet.scorekeeper(5), vec!["B".to_string()]);
+    }
+
+    #[test]
+    fn track_scorekeepers_marks_finalized_on_court() {
+        // A2 / ADR 0017, Regel b: Der Übergang OnCourt→Finished setzt den
+        // Finalisiert-Merker (Feld + Match-ID) — Grundlage dafür, dem Tablet
+        // `finalized:true` zu schicken und einen nachlaufenden Score zu
+        // verwerfen. Zyklus 1: Match 1 läuft auf Feld 5; Zyklus 2: beendet.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet, false);
+        assert_eq!(
+            tablet.recently_finalized(5),
+            None,
+            "läuft noch → nicht finalisiert"
+        );
+        let snap2 = snap_with(
+            Vec::new(),
+            vec![finished_named(1, 42, "A", "B")],
+            Vec::new(),
+        );
+        engine.track_scorekeepers(&snap2, &tablet, false);
+        assert_eq!(
+            tablet.recently_finalized(5),
+            Some(1),
+            "beendet → Merker trägt die Match-ID"
+        );
+        assert!(tablet.is_match_finalized(5, 1));
+        assert!(
+            !tablet.is_match_finalized(5, 999),
+            "andere Match-ID → nicht finalisiert"
+        );
+    }
+
+    #[test]
+    fn track_scorekeepers_clears_finalized_on_new_match() {
+        // A2 / ADR 0017, Regel b (Ablauf des Merkers): Bekommt das Feld ein
+        // NEUES Match, ist der alte Finalisiert-Merker Geschichte — sonst
+        // gälte ein Score des neuen Spiels fälschlich als finalisiert.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap1 = snap_with(Vec::new(), vec![oncourt_named(1, 5, "A", "B")], Vec::new());
+        engine.track_scorekeepers(&snap1, &tablet, false);
+        let snap2 = snap_with(
+            Vec::new(),
+            vec![finished_named(1, 42, "A", "B")],
+            Vec::new(),
+        );
+        engine.track_scorekeepers(&snap2, &tablet, false);
+        assert_eq!(tablet.recently_finalized(5), Some(1));
+        // Neues Match 2 läuft nun auf Feld 5 → Merker geräumt.
+        let snap3 = snap_with(Vec::new(), vec![oncourt_named(2, 5, "C", "D")], Vec::new());
+        engine.track_scorekeepers(&snap3, &tablet, false);
+        assert_eq!(
+            tablet.recently_finalized(5),
+            None,
+            "neues Match räumt den Merker"
+        );
     }
 
     #[test]

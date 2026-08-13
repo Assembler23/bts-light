@@ -546,6 +546,19 @@ pub struct AppConfig {
     /// leer = Fließ-Darstellung ohne festes Raster.
     #[serde(default)]
     pub hall_layouts: Vec<HallLayoutConfig>,
+    /// A2 / ADR 0017 (Reconnect-Wahrheit): Rückfall auf das alte
+    /// rev-Zähler-Verhalten. `false` (Default) = NEUES Ownership-Verhalten
+    /// aktiv — nach einem Tablet-Reconnect entscheidet der Slot-Halter, wessen
+    /// Stand gilt (Server/Relay liefern die Autorität im `StateRestore`).
+    /// `true` = Legacy: der Server setzt `authoritative` immer auf `true` und
+    /// das Tablet entscheidet wie bisher selbst per rev-Zähler — der
+    /// Laufzeit-Rollback im laufenden Turnier, falls das neue Verhalten
+    /// Probleme macht. Server/Relay lesen das Flag bei JEDER
+    /// Reconnect-Entscheidung frisch aus der `config.json`, damit der Schalter
+    /// ohne App-Neustart greift. `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub reconnect_legacy_rev: bool,
 }
 
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
@@ -834,6 +847,28 @@ mod tests {
         assert_eq!(zurueck.hall_layouts, cfg.hall_layouts);
     }
 
+    /// A2 / ADR 0017: Der Reconnect-Schalter ist standardmäßig AUS
+    /// (`false` = neues Ownership-Verhalten aktiv), und eine ältere
+    /// `config.json` ohne das Feld bleibt lesbar und fällt auf den Default.
+    #[test]
+    fn reconnect_legacy_rev_defaults_off_and_old_config_stays_readable() {
+        // Default: neues Verhalten aktiv.
+        assert!(!AppConfig::default().reconnect_legacy_rev);
+        // Alte Config ohne das Feld → serde default (false), lädt weiter.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config ohne Reconnect-Feld lädt");
+        assert!(!cfg.reconnect_legacy_rev);
+        // Explizit gesetzter Legacy-Schalter überlebt Speichern + Laden.
+        let mut cfg = cfg;
+        cfg.reconnect_legacy_rev = true;
+        let json = serde_json::to_string(&cfg).expect("serialisiert");
+        let zurueck: AppConfig = serde_json::from_str(&json).expect("lädt");
+        assert!(zurueck.reconnect_legacy_rev);
+    }
+
     #[test]
     fn hall_layout_without_vertical_key_loads_as_horizontal() {
         // Upgrade-Pfad v0.9.178 → danach: Ein Raster-Eintrag ohne das neue
@@ -1046,6 +1081,7 @@ mod tests {
                 show_club_names: true,
                 show_club_logos: true,
             },
+            reconnect_legacy_rev: true,
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
