@@ -178,6 +178,39 @@ pub struct BtpCourt {
     pub sort_order: i64,
 }
 
+/// Ein Schiedsrichter/Aufschlagrichter des Turniers (BTP `Official`).
+///
+/// Gemessene Feldform (13.08.2026, `tests/btp_officials_probe.rs`): BTP
+/// liefert nur `ID`, `Name`, `FirstName` und optional `Country` —
+/// insbesondere **keinen Verein**. Der Stammverein wird deshalb in
+/// bts-light gepflegt (docs/features/schiedsrichter-management.md).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtpOfficial {
+    /// Stabile BTP-interne OfficialID — turnier-spezifisch, im nächsten
+    /// Turnier bezeichnet dieselbe ID jemand anderen.
+    pub id: i64,
+    /// Nachname (BTP `Official.Name` — Schreibweise weicht von Player ab).
+    pub name: String,
+    /// Vorname (BTP `FirstName`); leer, wenn nicht gepflegt.
+    pub first: String,
+    /// Nationalität als IOC-Code (BTP `Country`, z. B. „GER"), falls
+    /// gepflegt — gleicher Begriff wie `BtpPlayer::nationality`, damit der
+    /// Anzeige-Schalter „Nationalität" beide Stellen meint.
+    pub nationality: Option<String>,
+}
+
+impl BtpOfficial {
+    /// Anzeigename „Vorname Nachname" — ohne hängende Leerzeichen, wenn
+    /// ein Teil fehlt (Muster `checkin_state::display_name`).
+    pub fn display_name(&self) -> String {
+        match (self.first.trim(), self.name.trim()) {
+            (first, "") => first.to_string(),
+            ("", name) => name.to_string(),
+            (first, name) => format!("{first} {name}"),
+        }
+    }
+}
+
 /// Eine anzeigbare Paarung.
 /// Aufgelöste Zählweise eines Matches (aus dem BTP-`ScoringFormat`). BTP führt
 /// die Formate zentral (`ScoringFormats`) und ordnet sie je `Stage` zu; der
@@ -315,6 +348,13 @@ pub struct BtpMatch {
     /// gemessen, das sie pflegt — dort trugen 48 Matches eine `LocationID`,
     /// die meisten davon ohne jede Feldzuweisung.
     pub location_id: Option<i64>,
+    /// **Schiedsrichter** des Spiels (BTP `Match.Official1ID` →
+    /// `Officials > Official`). Semantik am 13.08.2026 an der BTP-Maske
+    /// verifiziert: Official1 = Schiedsrichter. Nur gefüllt, wenn gepflegt.
+    pub official1_id: Option<i64>,
+    /// **Aufschlagrichter** des Spiels (BTP `Match.Official2ID`);
+    /// Official2 = Aufschlagrichter (gemessen wie `official1_id`).
+    pub official2_id: Option<i64>,
     /// Satz-Ergebnisse als (Team1, Team2)-Punkte.
     pub sets: Vec<(i64, i64)>,
     /// Sieger: 1 oder 2, falls entschieden.
@@ -366,6 +406,10 @@ pub struct BtpSnapshot {
     /// Meldeliste des Turniers (BTP `Entries`), nach EntryID sortiert —
     /// **auch für Klassen ohne Auslosung**. Grundlage des Hallen-Check-Ins.
     pub entries: Vec<BtpEntry>,
+    /// Schiedsrichterliste des Turniers (BTP `Officials`) in
+    /// Dokumentreihenfolge. Leer, wenn das Turnier keine Schiedsrichter
+    /// pflegt — der Normalfall, kein Fehler.
+    pub officials: Vec<BtpOfficial>,
 }
 
 impl BtpSnapshot {
@@ -394,6 +438,13 @@ impl BtpSnapshot {
             .find(|l| l.id == location_id)
             .map(|l| l.name.clone())
             .unwrap_or_default()
+    }
+
+    /// Official zu einer BTP-`OfficialID` — die eine Auflösungsstelle für
+    /// `BtpMatch::official1_id`/`official2_id` (Rotation, Konflikt-Prüfung,
+    /// Anzeige), statt dass jeder Aufrufer die Liste selbst durchsucht.
+    pub fn official(&self, id: i64) -> Option<&BtpOfficial> {
+        self.officials.iter().find(|o| o.id == id)
     }
 
     /// Anzeige-Bezeichnung eines Felds für Monitore und Tablets. Bei einem
@@ -463,6 +514,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
         court_infos: court_list(t),
         events: event_list(t),
         entries: entry_list(t, &players),
+        officials: official_list(t),
     })
 }
 
@@ -841,6 +893,28 @@ fn court_list(t: &[Node]) -> Vec<BtpCourt> {
     courts
 }
 
+/// Schiedsrichterliste in BTP-Dokumentreihenfolge. Einträge ohne ID werden
+/// verworfen; ein fehlender Container ergibt eine leere Liste.
+fn official_list(t: &[Node]) -> Vec<BtpOfficial> {
+    let Some(group) = xml::find(t, "Officials") else {
+        return Vec::new();
+    };
+    group
+        .children()
+        .iter()
+        .filter_map(|n| {
+            Some(BtpOfficial {
+                id: child_int(n, "ID")?,
+                name: child_str(n, "Name").unwrap_or_default().to_string(),
+                first: child_str(n, "FirstName").unwrap_or_default().to_string(),
+                nationality: child_str(n, "Country")
+                    .map(str::to_string)
+                    .filter(|c| !c.is_empty()),
+            })
+        })
+        .collect()
+}
+
 /// DrawID → Draw-Name.
 fn draw_map(t: &[Node]) -> HashMap<i64, String> {
     id_name_map(t, "Draws")
@@ -1092,6 +1166,10 @@ fn parse_matches(
             court_id,
             // Geplanter Spielort; 0 gilt als „nicht gesetzt".
             location_id: child_int(m, "LocationID").filter(|&id| id > 0),
+            // Schiedsrichter/Aufschlagrichter; 0 gilt als „nicht gesetzt"
+            // (dieselbe Konvention, mit der der Rücksync löscht, ADR 0021).
+            official1_id: child_int(m, "Official1ID").filter(|&id| id > 0),
+            official2_id: child_int(m, "Official2ID").filter(|&id| id > 0),
             sets: parse_sets(m),
             winner,
             result: MatchResult::from_score_status(child_int(m, "ScoreStatus").unwrap_or(0)),
@@ -2231,6 +2309,7 @@ mod tests {
                 .collect(),
             events: Vec::new(),
             entries: Vec::new(),
+            officials: Vec::new(),
         }
     }
 
@@ -2355,6 +2434,98 @@ mod tests {
         let map = player_map(&tree, &clubs);
         assert_eq!(map[&1].club.as_deref(), Some("VfL Lichtenrade"));
         assert_eq!(map[&2].club, None);
+    }
+
+    #[test]
+    fn official_list_reads_officials_country_optional() {
+        // Gemessene Feldform (13.08.2026): ID, Name, FirstName, Country —
+        // FirstName/Country fehlen, wenn in BTP nicht gepflegt.
+        let tree = vec![Node::group(
+            "Officials",
+            vec![
+                Node::group(
+                    "Official",
+                    vec![
+                        Node::integer("ID", 1),
+                        Node::string("Name", "Weber"),
+                        Node::string("FirstName", "Hans"),
+                        Node::string("Country", "GER"),
+                    ],
+                ),
+                Node::group(
+                    "Official",
+                    vec![Node::integer("ID", 2), Node::string("Name", "Kaiser")],
+                ),
+                // Ohne ID → verworfen (kein anonymer Eintrag im Roster).
+                Node::group("Official", vec![Node::string("Name", "Ohne")]),
+            ],
+        )];
+        let list = official_list(&tree);
+        assert_eq!(list.len(), 2);
+        assert_eq!(
+            list[0],
+            BtpOfficial {
+                id: 1,
+                name: "Weber".into(),
+                first: "Hans".into(),
+                nationality: Some("GER".into()),
+            }
+        );
+        assert_eq!(list[0].display_name(), "Hans Weber");
+        assert_eq!(list[1].first, "");
+        assert_eq!(list[1].nationality, None);
+        assert_eq!(list[1].display_name(), "Kaiser");
+        // Fehlender Nachname erzeugt kein hängendes Leerzeichen.
+        let nur_vorname = BtpOfficial {
+            id: 9,
+            name: String::new(),
+            first: "Hans".into(),
+            nationality: None,
+        };
+        assert_eq!(nur_vorname.display_name(), "Hans");
+    }
+
+    #[test]
+    fn missing_officials_container_yields_empty_list() {
+        // Turniere ohne Schiedsrichter schicken gar keinen Container —
+        // das ist der Normalfall und darf kein Fehler sein.
+        assert!(official_list(&[]).is_empty());
+    }
+
+    #[test]
+    fn matches_carry_official_ids_zero_counts_as_unset() {
+        // Über parse_snapshot statt direkt über das private parse_matches —
+        // so bleibt der Test von dessen Signatur unabhängig.
+        let tree = tournament_with(vec![
+            Node::group(
+                "Officials",
+                vec![Node::group(
+                    "Official",
+                    vec![Node::integer("ID", 2), Node::string("Name", "Kaiser")],
+                )],
+            ),
+            Node::group(
+                "Matches",
+                vec![Node::group(
+                    "Match",
+                    vec![
+                        Node::integer("ID", 5),
+                        Node::boolean("IsMatch", true),
+                        Node::integer("Official1ID", 2),
+                        // 0 = „nicht gepflegt" (projektweite Konvention,
+                        // wie LocationID) — muss als fehlend gelten.
+                        Node::integer("Official2ID", 0),
+                    ],
+                )],
+            ),
+        ]);
+        let snap = parse_snapshot(&tree).expect("Snapshot");
+        assert_eq!(snap.matches.len(), 1);
+        assert_eq!(snap.matches[0].official1_id, Some(2));
+        assert_eq!(snap.matches[0].official2_id, None);
+        // Die Auflösungsstelle: OfficialID → Official.
+        assert_eq!(snap.official(2).map(|o| o.name.as_str()), Some("Kaiser"));
+        assert_eq!(snap.official(99), None);
     }
 
     #[test]
