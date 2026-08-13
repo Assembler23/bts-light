@@ -89,6 +89,51 @@ pub fn official_conflict(extra: &OfficialExtra, players: &[BtpPlayer]) -> Option
     None
 }
 
+/// Ein Spieler zur Auswahl in der Sperrlisten-Pflege.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PickPlayer {
+    /// BTP-`PlayerID` — das, was gespeichert wird.
+    pub id: i64,
+    /// Anzeigename, nach dem gesucht wird.
+    pub name: String,
+    /// Verein, um Namensgleiche zu unterscheiden (leer, wenn BTP keinen führt).
+    pub club: String,
+}
+
+/// Spieler und Vereine des Turniers zur **Auswahl** — Grundlage der
+/// Sperrlisten-Pflege und des Stammvereins.
+///
+/// Ohne sie müsste die Turnierleitung BTP-`PlayerID`s von Hand eintippen;
+/// niemand kennt die Kennung von Anna Müller. Quelle ist die Meldeliste
+/// (`BtpSnapshot::entries`) statt der Paarungen: Sie ist vollständig, auch
+/// für Klassen ohne Auslosung. Beide Listen sind einmalig und alphabetisch,
+/// damit die Vorschläge beim Tippen vorhersagbar sind.
+pub fn pick_lists(entries: &[crate::btp::model::BtpEntry]) -> (Vec<PickPlayer>, Vec<String>) {
+    let mut spieler: HashMap<i64, PickPlayer> = HashMap::new();
+    let mut vereine: HashSet<String> = HashSet::new();
+    for e in entries {
+        for p in &e.players {
+            if p.id <= 0 {
+                continue; // ohne Kennung nicht speicherbar
+            }
+            let club = p.club.clone().unwrap_or_default().trim().to_string();
+            if !club.is_empty() {
+                vereine.insert(club.clone());
+            }
+            spieler.entry(p.id).or_insert_with(|| PickPlayer {
+                id: p.id,
+                name: p.name.clone(),
+                club,
+            });
+        }
+    }
+    let mut spieler: Vec<PickPlayer> = spieler.into_values().collect();
+    spieler.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+    let mut vereine: Vec<String> = vereine.into_iter().collect();
+    vereine.sort();
+    (spieler, vereine)
+}
+
 /// Ein beendetes Spiel, so viel davon, wie die Einsatz-Ableitung braucht.
 /// Bewusst schlank statt `BtpMatch`: Der Speicher soll nichts über Spieler
 /// oder Klassen wissen müssen, um Einsätze zu zählen.
@@ -817,6 +862,28 @@ mod tests {
     use crate::btp::model::BtpPlayer;
     use std::path::Path;
 
+    /// Ein Spieler mit Namen und Verein.
+    fn spieler_mit(id: i64, name: &str, club: &str) -> BtpPlayer {
+        BtpPlayer {
+            id,
+            name: name.to_string(),
+            first: String::new(),
+            last: name.to_string(),
+            member_id: None,
+            nationality: None,
+            club: (!club.is_empty()).then(|| club.to_string()),
+        }
+    }
+
+    /// Eine Meldung mit diesen Spielern.
+    fn entry(players: Vec<BtpPlayer>) -> crate::btp::model::BtpEntry {
+        crate::btp::model::BtpEntry {
+            id: players.first().map(|p| p.id).unwrap_or(0),
+            event_id: 1,
+            players,
+        }
+    }
+
     /// Ein Spieler mit Verein (leer = ohne Vereinszuordnung).
     fn spieler(id: i64, club: &str) -> BtpPlayer {
         BtpPlayer {
@@ -848,6 +915,41 @@ mod tests {
             sr: true,
             ar: true,
         }
+    }
+
+    #[test]
+    fn die_auswahllisten_kommen_aus_der_meldeliste() {
+        // Sperr-Spieler und Vereine sollen sich AUSWÄHLEN lassen — niemand
+        // kennt die BTP-PlayerID von Anna Müller. Grundlage ist die
+        // Meldeliste (vollständiger als die Paarungen: auch Klassen ohne
+        // Auslosung sind dabei).
+        let entries = vec![
+            entry(vec![spieler_mit(7, "Anna Müller", "TSV Musterstadt")]),
+            entry(vec![
+                spieler_mit(8, "Ben Weber", "SC Nachbar"),
+                spieler_mit(9, "Cara Fischer", "TSV Musterstadt"),
+            ]),
+            // Dieselbe Person in einer zweiten Klasse — nur einmal listen.
+            entry(vec![spieler_mit(7, "Anna Müller", "TSV Musterstadt")]),
+            // Ohne Verein: taucht als Spieler auf, erweitert die Vereinsliste
+            // aber nicht.
+            entry(vec![spieler_mit(10, "Dora Ohne", "")]),
+        ];
+
+        let (spieler, vereine) = pick_lists(&entries);
+        assert_eq!(spieler.len(), 4, "jede Person genau einmal");
+        // Alphabetisch, damit die Liste beim Tippen vorhersagbar ist.
+        assert_eq!(spieler[0].name, "Anna Müller");
+        assert_eq!(spieler[0].id, 7);
+        assert_eq!(spieler[0].club, "TSV Musterstadt");
+        assert_eq!(spieler[3].name, "Dora Ohne");
+        assert_eq!(spieler[3].club, "");
+
+        assert_eq!(
+            vereine,
+            vec!["SC Nachbar".to_string(), "TSV Musterstadt".to_string()],
+            "Vereine einmalig und alphabetisch, Leereinträge draußen"
+        );
     }
 
     #[test]

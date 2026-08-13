@@ -332,6 +332,31 @@ Der Push-Schlüssel beider Wege (LAN und Cloud) enthält neben Match-ID und
 Zuweisung, die **nach** dem Ruf aufs Feld erfolgt, das Tablet nie — die
 Match-ID ändert sich dabei ja nicht.
 
+## Sperrlisten pflegen: auswählen statt tippen
+
+Die Sperr-Spieler stehen als BTP-`PlayerID` in der Turnierdatei — gepflegt
+werden sie aber **nie** als Zahl: Niemand kennt die Kennung von Anna Müller
+auswendig, und eine vertippte ID warnt einfach nie (still falsch ist
+schlimmer als gar nicht).
+
+`officials.rs::pick_lists(entries)` sammelt dafür aus der **Meldeliste**
+(`BtpSnapshot::entries`, vollständiger als die Paarungen — auch Klassen ohne
+Auslosung sind dabei) zwei Listen: alle Spieler (`id`, `name`, `club`) und
+alle Vereine, jeweils einmalig und alphabetisch. Der Verein steht dabei, um
+Namensgleiche zu unterscheiden.
+
+Beide Listen reisen mit der **gezielten** Antwort des Pflege-Dialogs
+(`official_blocklists` bzw. `/tl/api/officials/{id}`), nicht im
+Broadcast-Zustand: Die Meldeliste ist deutlich größer als alles, was die
+Seite sonst bekommt, und wird nur beim bewussten Öffnen gebraucht.
+
+In beiden Oberflächen gilt dieselbe Bedienung: **Spieler** ausschließlich
+über Suche (ab zwei Zeichen, max. 25 Treffer) und Klick; **Vereine** über
+Vorschlagsliste, aber mit Freitext — ein Verein, der (noch) nicht gemeldet
+ist, muss sich trotzdem sperren lassen. Gewählte Sperren stehen als
+entfernbare Marken. Wer inzwischen aus der Meldeliste verschwunden ist,
+behält seine Sperre (dann ohne Namen), statt still herauszufallen.
+
 ## Warum die CI die Asset-Syntax prüft
 
 `tl.html` und `tablet.html` durchlaufen **keinen** Build — sie gehen so an

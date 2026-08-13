@@ -822,6 +822,21 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
   border-radius: 8px; padding: 5px 7px; font: inherit;
 }
 .off-h3 { margin: 14px 0 6px; font-size: .9rem; }
+/* Gewählte Sperren als entfernbare Marken — eine Liste zum Ansehen, nicht
+   zum Tippen. */
+.off-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.off-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: .8rem;
+}
+.off-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; }
+.off-chip button:hover { color: var(--accent); }
+.off-hits { list-style: none; margin: 4px 0 0; padding: 0; max-height: 160px; overflow-y: auto; }
+.off-hits button {
+  display: flex; width: 100%; gap: 8px; align-items: center; text-align: left;
+  background: none; border: 0; color: inherit; padding: 4px 6px; cursor: pointer; font: inherit;
+}
+.off-hits button:hover { background: var(--card); }
 #off-seen { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 #off-seen li { display: flex; gap: 8px; align-items: center; }
 .graph-overlay {
@@ -3396,27 +3411,76 @@ function renderOfficialDetail(d) {
       <span class="meta">${esc(a.court || "")}</span>
       <span class="meta">${a.finished_at ? new Date(a.finished_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
     </li>`).join("");
+  // Auswahllisten des Turniers (kommen mit derselben Antwort). Gepflegt
+  // wird per Auswahl, nicht per Tipperei: Eine BTP-Spieler-ID kennt niemand
+  // auswendig, und ein vertippter Verein warnt einfach nie.
+  offPick = {
+    players: d.pick_players || [],
+    clubs: d.pick_clubs || [],
+    // Gewählte Spieler mit Namen; wer nicht mehr in der Meldeliste steht,
+    // behält seine Sperre (dann ohne Namen) statt still herauszufallen.
+    gewaehltePlayers: (d.blocked_players || []).map((id) =>
+      (d.pick_players || []).find((p) => p.id === id) || { id, name: `Spieler ${id}`, club: "" }),
+    gewaehlteClubs: (d.blocked_clubs || []).slice(),
+  };
   $("off-body").innerHTML = `
     <label class="off-field">Verein
-      <input type="text" id="off-club" maxlength="80" value="${esc(d.club || "")}" />
+      <input type="text" id="off-club" maxlength="80" list="off-club-list" value="${esc(d.club || "")}" />
+      <datalist id="off-club-list">
+        ${offPick.clubs.map((c) => `<option value="${esc(c)}"></option>`).join("")}
+      </datalist>
     </label>
-    <label class="off-field">Gesperrte Vereine (einer je Zeile)
-      <textarea id="off-clubs" rows="3">${esc((d.blocked_clubs || []).join("\n"))}</textarea>
-    </label>
-    <label class="off-field">Gesperrte Spieler (BTP-IDs, mit Komma)
-      <input type="text" id="off-players" value="${esc((d.blocked_players || []).join(", "))}" />
-    </label>
+    <div class="off-field">Gesperrte Vereine
+      <div id="off-club-chips" class="off-chips"></div>
+      <input type="text" id="off-club-add" list="off-club-list"
+             placeholder="Verein wählen oder eingeben, dann Enter" />
+    </div>
+    <div class="off-field">Gesperrte Spieler
+      <div id="off-player-chips" class="off-chips"></div>
+      <input type="text" id="off-player-search" placeholder="Spieler suchen …" />
+      <ul id="off-player-hits" class="off-hits"></ul>
+    </div>
     <button type="button" id="off-save">Speichern</button>
     <p class="graph-note">Diese Angaben bleiben auf dem Turnier-PC und werden
       beim Turnierwechsel verworfen.</p>
     <h3 class="off-h3">Einsätze</h3>
     <ol id="off-seen">${einsaetze || '<li class="meta">noch keiner</li>'}</ol>`;
+
+  renderOffChips();
+  $("off-club-add").addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    const wert = ev.target.value.trim();
+    if (wert && !offPick.gewaehlteClubs.includes(wert)) {
+      offPick.gewaehlteClubs.push(wert);
+      renderOffChips();
+    }
+    ev.target.value = "";
+  });
+  $("off-player-search").addEventListener("input", (ev) => {
+    const q = ev.target.value.trim().toLowerCase();
+    const treffer = q.length < 2 ? [] : offPick.players
+      .filter((p) => !offPick.gewaehltePlayers.some((x) => x.id === p.id))
+      .filter((p) => `${p.name} ${p.club}`.toLowerCase().includes(q))
+      .slice(0, 25);
+    $("off-player-hits").innerHTML = treffer.map((p) =>
+      `<li><button type="button" data-pick="${p.id}">${esc(p.name)}
+         <span class="meta">${esc(p.club || "")}</span></button></li>`).join("");
+    $("off-player-hits").querySelectorAll("[data-pick]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const p = offPick.players.find((x) => x.id === Number(b.dataset.pick));
+        if (p) offPick.gewaehltePlayers.push(p);
+        $("off-player-search").value = "";
+        $("off-player-hits").innerHTML = "";
+        renderOffChips();
+      }));
+  });
+
   $("off-save").addEventListener("click", () => {
     const id = offCtx && offCtx.id;
     if (!id) return;
-    const clubs = $("off-clubs").value.split("\n").map((c) => c.trim()).filter(Boolean);
-    const players = $("off-players").value.split(/[,\s]+/)
-      .map((p) => parseInt(p, 10)).filter((p) => Number.isFinite(p) && p > 0);
+    const clubs = offPick.gewaehlteClubs.slice();
+    const players = offPick.gewaehltePlayers.map((p) => p.id);
     // Verein und Sperrlisten sind zwei Aktionen — der Aktionssatz ist
     // geschlossen (ADR 0011), und beide Angaben werden getrennt gepflegt.
     send(`off-club-${id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
@@ -3427,6 +3491,36 @@ function renderOfficialDetail(d) {
     $("off-overlay").hidden = true;
     offCtx = null;
   });
+}
+
+/** Auswahllisten und Auswahl des offenen Pflege-Dialogs. */
+let offPick = { players: [], clubs: [], gewaehltePlayers: [], gewaehlteClubs: [] };
+
+/** Die gewählten Sperren als entfernbare Marken zeichnen. */
+function renderOffChips() {
+  const chip = (text, zusatz, attr) =>
+    `<span class="off-chip">${esc(text)}${
+      zusatz ? ` <span class="meta">${esc(zusatz)}</span>` : ""
+    }<button type="button" ${attr} aria-label="Sperre entfernen">×</button></span>`;
+
+  $("off-club-chips").innerHTML = offPick.gewaehlteClubs.length
+    ? offPick.gewaehlteClubs.map((c) => chip(c, "", `data-del-club="${esc(c)}"`)).join("")
+    : '<span class="meta">keine</span>';
+  $("off-player-chips").innerHTML = offPick.gewaehltePlayers.length
+    ? offPick.gewaehltePlayers.map((p) => chip(p.name, p.club, `data-del-player="${p.id}"`)).join("")
+    : '<span class="meta">keine</span>';
+
+  $("off-club-chips").querySelectorAll("[data-del-club]").forEach((b) =>
+    b.addEventListener("click", () => {
+      offPick.gewaehlteClubs = offPick.gewaehlteClubs.filter((c) => c !== b.dataset.delClub);
+      renderOffChips();
+    }));
+  $("off-player-chips").querySelectorAll("[data-del-player]").forEach((b) =>
+    b.addEventListener("click", () => {
+      offPick.gewaehltePlayers = offPick.gewaehltePlayers
+        .filter((p) => p.id !== Number(b.dataset.delPlayer));
+      renderOffChips();
+    }));
 }
 
 /**

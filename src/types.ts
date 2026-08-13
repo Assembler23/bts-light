@@ -914,6 +914,18 @@ export interface AppearanceView {
 export interface BlocklistView {
   clubs: string[];
   players: number[];
+  /** Alle Spieler des Turniers zur Auswahl — niemand kennt PlayerIDs. */
+  pick_players: PickPlayer[];
+  /** Alle Vereine des Turniers zur Auswahl. */
+  pick_clubs: string[];
+}
+
+/** Ein Spieler zur Auswahl in der Sperrlisten-Pflege. */
+export interface PickPlayer {
+  id: number;
+  name: string;
+  /** Verein — unterscheidet Namensgleiche. */
+  club: string;
 }
 
 /** Feldweise Schalter: SR-Rotation, AR-Rotation, Zähltafelbediener-Vergabe. */

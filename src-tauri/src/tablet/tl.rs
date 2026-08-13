@@ -2406,12 +2406,23 @@ pub(crate) fn official_detail_json(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    // Auswahllisten für die Pflege (Spieler + Vereine des Turniers). Sie
+    // reisen mit dieser gezielten Antwort, nicht im Broadcast-Zustand: Die
+    // Meldeliste ist deutlich größer als alles, was die Seite sonst
+    // bekommt, und sie wird nur beim bewussten Öffnen des Dialogs
+    // gebraucht.
+    let (pick_players, pick_clubs) = snap
+        .as_ref()
+        .map(|snap| crate::tablet::officials::pick_lists(&snap.entries))
+        .unwrap_or_default();
     serde_json::json!({
         "official_id": official_id,
         "club": extra.club,
         "blocked_clubs": extra.blocked_clubs,
         "blocked_players": extra.blocked_players,
         "appearances": einsaetze,
+        "pick_players": pick_players,
+        "pick_clubs": pick_clubs,
     })
     .to_string()
 }

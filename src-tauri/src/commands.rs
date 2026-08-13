@@ -2790,11 +2790,16 @@ pub struct AppearanceView {
     pub finished_at: Option<u64>,
 }
 
-/// Die Sperrlisten eines Officials (Personendaten — nur auf Anfrage).
+/// Die Sperrlisten eines Officials (Personendaten — nur auf Anfrage),
+/// zusammen mit den Auswahllisten für die Pflege.
 #[derive(Serialize)]
 pub struct BlocklistView {
     pub clubs: Vec<String>,
     pub players: Vec<i64>,
+    /// Alle Spieler des Turniers zur Auswahl (statt PlayerID-Tipperei).
+    pub pick_players: Vec<crate::tablet::officials::PickPlayer>,
+    /// Alle Vereine des Turniers zur Auswahl.
+    pub pick_clubs: Vec<String>,
 }
 
 /// Feldweise Schalter für die Bedienoberfläche.
@@ -2995,9 +3000,18 @@ pub fn official_set_club(
 #[tauri::command]
 pub fn official_blocklists(state: State<'_, AppState>, official_id: i64) -> BlocklistView {
     let extra = state.tablet.officials_store().extra(official_id);
+    // Die Auswahllisten kommen mit derselben Antwort: Der Dialog wird
+    // bewusst geöffnet, ein zweiter Rundlauf brächte nichts.
+    let (pick_players, pick_clubs) = state
+        .tablet
+        .snapshot_clone()
+        .map(|snap| crate::tablet::officials::pick_lists(&snap.entries))
+        .unwrap_or_default();
     BlocklistView {
         clubs: extra.blocked_clubs,
         players: extra.blocked_players,
+        pick_players,
+        pick_clubs,
     }
 }
 

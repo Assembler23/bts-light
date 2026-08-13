@@ -37,6 +37,7 @@ import type {
   CourtOverview,
   CourtSwitchesView,
   OfficialView,
+  PickPlayer,
 } from "../types";
 
 /** Uhrzeit einer Endezeit (Unix-ms) — Datum spielt am Turniertag keine Rolle. */
@@ -61,8 +62,15 @@ export function OfficialsPanel({
   const [courts, setCourts] = useState<CourtSwitchesView[]>([]);
   /** Offenes Overlay: Sperrlisten-Pflege bzw. Einsatz-Liste eines Officials. */
   const [blockFor, setBlockFor] = useState<OfficialView | null>(null);
-  const [blockClubs, setBlockClubs] = useState("");
-  const [blockPlayers, setBlockPlayers] = useState("");
+  /** Gesperrte Vereine des offenen Dialogs (als Liste, nicht als Text). */
+  const [blockClubs, setBlockClubs] = useState<string[]>([]);
+  /** Gesperrte Spieler des offenen Dialogs — ausgewählt, nicht getippt. */
+  const [blockPlayers, setBlockPlayers] = useState<PickPlayer[]>([]);
+  /** Auswahllisten des Turniers (kommen mit dem Dialog-Abruf). */
+  const [pickPlayers, setPickPlayers] = useState<PickPlayer[]>([]);
+  const [pickClubs, setPickClubs] = useState<string[]>([]);
+  /** Suchtext der Spieler-Auswahl im Dialog. */
+  const [suche, setSuche] = useState("");
   const [seenFor, setSeenFor] = useState<OfficialView | null>(null);
   const [seen, setSeen] = useState<AppearanceView[]>([]);
   const [felder, setFelder] = useState<CourtOverview[]>([]);
@@ -92,24 +100,33 @@ export function OfficialsPanel({
 
   const oeffneSperrlisten = (o: OfficialView) => {
     setBlockFor(o);
+    setSuche("");
     officialBlocklists(o.id)
       .then((b) => {
-        setBlockClubs(b.clubs.join("\n"));
-        setBlockPlayers(b.players.join(", "));
+        setBlockClubs(b.clubs);
+        setPickPlayers(b.pick_players);
+        setPickClubs(b.pick_clubs);
+        // Gespeichert sind IDs — für die Anzeige die Namen dazuholen. Wer
+        // inzwischen aus der Meldeliste verschwunden ist, behält seine
+        // Sperre (dann ohne Namen), statt still herauszufallen.
+        setBlockPlayers(
+          b.players.map(
+            (id) =>
+              b.pick_players.find((p) => p.id === id) ?? {
+                id,
+                name: `Spieler ${id}`,
+                club: "",
+              },
+          ),
+        );
       })
       .catch(() => {});
   };
 
   const speichereSperrlisten = () => {
     if (!blockFor) return;
-    const clubs = blockClubs
-      .split("\n")
-      .map((c) => c.trim())
-      .filter(Boolean);
-    const players = blockPlayers
-      .split(/[,\s]+/)
-      .map((p) => Number.parseInt(p, 10))
-      .filter((p) => Number.isFinite(p) && p > 0);
+    const clubs = blockClubs;
+    const players = blockPlayers.map((p) => p.id);
     officialSetBlocklists(blockFor.id, clubs, players)
       .then(() => {
         setBlockFor(null);
@@ -459,24 +476,127 @@ export function OfficialsPanel({
               Diese Angaben bleiben auf diesem Rechner und werden beim
               Turnierwechsel verworfen.
             </p>
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              Gesperrte Vereine (einer je Zeile)
-              <textarea
-                value={blockClubs}
-                onChange={(e) => setBlockClubs(e.target.value)}
-                rows={4}
-                className="rounded border border-slate-200 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              Gesperrte Spieler (BTP-Spieler-IDs, mit Komma getrennt)
+            {/* Vereine: Auswahl aus dem Turnier, Freitext bleibt möglich —
+                ein Verein, der (noch) nicht gemeldet ist, muss sich trotzdem
+                sperren lassen. */}
+            <div className="flex flex-col gap-1 text-xs text-slate-600">
+              Gesperrte Vereine
+              <div className="flex flex-wrap gap-1">
+                {blockClubs.map((c) => (
+                  <span
+                    key={c}
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-slate-700"
+                  >
+                    {c}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBlockClubs(blockClubs.filter((x) => x !== c))
+                      }
+                      title="Sperre entfernen"
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+                {blockClubs.length === 0 && (
+                  <span className="text-slate-400">keine</span>
+                )}
+              </div>
               <input
                 type="text"
-                value={blockPlayers}
-                onChange={(e) => setBlockPlayers(e.target.value)}
+                list="pick-clubs"
+                placeholder="Verein wählen oder eingeben, dann Enter"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  const wert = e.currentTarget.value.trim();
+                  if (wert && !blockClubs.includes(wert)) {
+                    setBlockClubs([...blockClubs, wert]);
+                  }
+                  e.currentTarget.value = "";
+                }}
                 className="rounded border border-slate-200 px-2 py-1 text-sm"
               />
-            </label>
+              <datalist id="pick-clubs">
+                {pickClubs.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </div>
+
+            {/* Spieler: ausschließlich Auswahl. Eine BTP-Spieler-ID kennt
+                niemand auswendig — getippt wird der Name, gespeichert die ID. */}
+            <div className="flex flex-col gap-1 text-xs text-slate-600">
+              Gesperrte Spieler
+              <div className="flex flex-wrap gap-1">
+                {blockPlayers.map((p) => (
+                  <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-slate-700"
+                  >
+                    {p.name}
+                    {p.club && (
+                      <span className="text-slate-400">({p.club})</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBlockPlayers(
+                          blockPlayers.filter((x) => x.id !== p.id),
+                        )
+                      }
+                      title="Sperre entfernen"
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+                {blockPlayers.length === 0 && (
+                  <span className="text-slate-400">keine</span>
+                )}
+              </div>
+              <input
+                type="text"
+                value={suche}
+                onChange={(e) => setSuche(e.target.value)}
+                placeholder="Spieler suchen …"
+                className="rounded border border-slate-200 px-2 py-1 text-sm"
+              />
+              {suche.trim().length >= 2 && (
+                <ul className="max-h-40 overflow-y-auto rounded border border-slate-200">
+                  {pickPlayers
+                    .filter(
+                      (p) =>
+                        !blockPlayers.some((x) => x.id === p.id) &&
+                        `${p.name} ${p.club}`
+                          .toLowerCase()
+                          .includes(suche.trim().toLowerCase()),
+                    )
+                    .slice(0, 25)
+                    .map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBlockPlayers([...blockPlayers, p]);
+                            setSuche("");
+                          }}
+                          className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-slate-50"
+                        >
+                          <span className="flex-1">{p.name}</span>
+                          <span className="text-xs text-slate-400">
+                            {p.club}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2">
               <button
                 type="button"
