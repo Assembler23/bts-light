@@ -286,6 +286,27 @@ impl Default for ScorekeeperConfig {
     }
 }
 
+/// Schiedsrichtermanagement (Spec `docs/features/schiedsrichter-management.md`).
+/// Opt-in — standardmäßig aus, damit Turniere ohne Schiedsrichter unverändert
+/// laufen und nirgends SR/AR-Bedienelemente erscheinen.
+///
+/// Hier liegen nur die **geräteweiten** Schalter. Alles Turnier-Spezifische
+/// (feldweise Schalter, Rotationsreihenfolge, Pausen, Sperrlisten,
+/// Vereins-Overrides) liegt bewusst in einer turniergebundenen Datei außerhalb
+/// der config.json (ADR 0022) — Sperrlisten sind Personendaten und dürfen
+/// nicht ins Identitäts-Export-Bündel wandern.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OfficialsConfig {
+    /// Mit Schiedsrichtern spielen? Aus ⇒ keine SR/AR-Elemente in Client,
+    /// TL-Web, Tablet und Ansagen (wie heute).
+    pub enabled: bool,
+    /// Automatische Rotation für Schiedsrichter (Official1)?
+    pub rotation_sr: bool,
+    /// Automatische Rotation für Aufschlagrichter (Official2)?
+    pub rotation_ar: bool,
+}
+
 /// Einstellungen des Hallen-Check-Ins (ADR 0009). Opt-in — standardmäßig aus,
 /// damit Turniere ohne Check-In unverändert laufen.
 ///
@@ -516,6 +537,11 @@ pub struct AppConfig {
     /// Konfigurationsdateien lesbar.
     #[serde(default)]
     pub checkin: CheckinConfig,
+    /// Schiedsrichtermanagement (globale Schalter; Turnierdaten liegen in
+    /// einer eigenen Datei, ADR 0022). `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub officials: OfficialsConfig,
     /// Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
     /// ein (manuell + automatisch). Leer = keine Einschränkung. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -869,6 +895,43 @@ mod tests {
         assert!(zurueck.reconnect_legacy_rev);
     }
 
+    /// Schiedsrichtermanagement (Spec Schritt 3): Die globalen Schalter sind
+    /// standardmäßig AUS — Bestandsinstallationen verhalten sich nach dem
+    /// Auto-Update unverändert — und eine ältere config.json ohne das Feld
+    /// bleibt lesbar. (Der Speichern+Laden-Roundtrip gesetzter Schalter läuft
+    /// in `save_then_load_roundtrip` mit.)
+    #[test]
+    fn officials_default_off_and_old_config_stays_readable() {
+        // Default: Feature aus, keine Rotation.
+        let def = OfficialsConfig::default();
+        assert!(!def.enabled);
+        assert!(!def.rotation_sr);
+        assert!(!def.rotation_ar);
+        // Alte Config ohne das Feld → serde default, lädt weiter.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config ohne officials-Feld lädt");
+        assert_eq!(cfg.officials, OfficialsConfig::default());
+    }
+
+    /// Teilbefüllter officials-Block (z. B. von Hand editiert oder aus einer
+    /// künftigen Version mit weniger Feldern): fehlende Schalter fallen auf
+    /// ihren Default (aus) statt das Laden scheitern zu lassen.
+    #[test]
+    fn officials_block_with_missing_keys_falls_back_to_defaults() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "officials":{"enabled":true}}"#,
+        )
+        .expect("Config mit teilbefülltem officials-Block lädt");
+        assert!(cfg.officials.enabled);
+        assert!(!cfg.officials.rotation_sr);
+        assert!(!cfg.officials.rotation_ar);
+    }
+
     #[test]
     fn hall_layout_without_vertical_key_loads_as_horizontal() {
         // Upgrade-Pfad v0.9.178 → danach: Ein Raster-Eintrag ohne das neue
@@ -1047,6 +1110,11 @@ mod tests {
                 enabled: true,
                 tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
                 missing_names_max: 5,
+            },
+            officials: OfficialsConfig {
+                enabled: true,
+                rotation_sr: true,
+                rotation_ar: false,
             },
             discipline_hall_rules: vec![DisciplineHallRule {
                 discipline: "mens_singles".to_string(),
