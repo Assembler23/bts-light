@@ -3389,7 +3389,7 @@ mod tests {
         notify_monitor(&mut ns, 4);
 
         assert!(
-            ns.monitor_subs.get(&4).is_none(),
+            !ns.monitor_subs.contains_key(&4),
             "toter Abonnent ausgesiebt"
         );
     }
@@ -3441,7 +3441,7 @@ mod tests {
         unsubscribe_monitor(&broker, "ns1", Some(9), &tx).await;
         {
             let map = broker.namespaces.lock().await;
-            assert!(map.get("ns1").unwrap().monitor_subs.get(&9).is_none());
+            assert!(!map.get("ns1").unwrap().monitor_subs.contains_key(&9));
         }
     }
 
