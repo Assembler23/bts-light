@@ -1433,11 +1433,15 @@ pub(crate) fn build_manual_dq_update(
 }
 
 /// Zeitfenster, in dem ein Wiederholungs-POST mit **identischem** bereits
-/// geschriebenem Ergebnis als Bestätigung (statt Fehler) quittiert wird.
-/// Großzügig über dem Client-Retry-Takt (5 s), aber kurz genug, dass eine
-/// echte spätere Korrektur (TL-Reopen, Minuten danach) NICHT fälschlich als
-/// „schon erledigt" abgewürgt wird.
-const RESULT_IDEMPOTENCY_TTL: u64 = 60_000;
+/// geschriebenem Ergebnis als Bestätigung (statt Fehler) quittiert wird. 5 min:
+/// großzügig über dem Client-Retry-Takt (5 s), deckt auch ein Tablet ab, das
+/// nach längerem WLAN-Aussetzer denselben Stand erneut sendet. Ein langes
+/// Fenster ist HIER sicher, weil `settled_ok` feldgenau vergleicht — eine echte
+/// spätere Korrektur (TL-Reopen, andere Sätze) hat abweichende Felder und wird
+/// deshalb NIE quittiert (fällt weiter auf Fehler), unabhängig vom TTL. Zudem
+/// überschreibt jeder neue Write den Merker, sodass er stets den letzten Stand
+/// trägt.
+const RESULT_IDEMPOTENCY_TTL: u64 = 300_000;
 
 /// Ist dieser Ergebnis-POST die **Wiederholung** eines bereits erfolgreich
 /// nach BTP geschriebenen, **identischen** Ergebnisses? Nur dann darf
@@ -1447,11 +1451,13 @@ const RESULT_IDEMPOTENCY_TTL: u64 = 60_000;
 /// POST auf ein noch belegtes Feld löste einen Doppel-Write aus).
 ///
 /// **R5 (korrektheitskritisch — ein zu breites `ok()` = stiller
-/// Ergebnisverlust):** Verglichen werden die **entscheidenden Felder**
-/// `(sets, team1_won, score_status)`. Ein abweichender Payload ist eine
-/// veraltete oder falsche Einreichung und liefert `false` → der Aufrufer gibt
-/// den originalen Fehler zurück. Das TTL verhindert zusätzlich, dass eine echte
-/// spätere Korrektur fälschlich quittiert wird.
+/// Ergebnisverlust):** Verglichen werden ausschließlich die **entscheidenden
+/// Felder** `(sets, team1_won, score_status)` gegen den feldgenauen
+/// „zuletzt-geschrieben"-Merker. Ein abweichender Payload (auch eine
+/// sieger-gleiche Korrektur mit anderen Sätzen) ist eine veraltete oder falsche
+/// Einreichung und liefert `false` → der Aufrufer gibt den originalen Fehler
+/// zurück. Bewusst KEIN Snapshot-Sieger-Netz (das nur die Sieger-Seite prüfte
+/// und Korrekturen fälschlich abwürgte — Review-BLOCKER).
 fn settled_ok(ctx: &ServerCtx, body: &ResultBody, now: u64) -> bool {
     // Eingehendes Ergebnis ableiten — braucht das Match `m` NICHT. Die
     // Format-Prüfung (`sets_fit_format`, R5) ist hier bewusst nicht nötig:
@@ -1463,27 +1469,22 @@ fn settled_ok(ctx: &ServerCtx, body: &ResultBody, now: u64) -> bool {
         return false; // ungültiger Payload → keine Bestätigung
     };
 
-    // Primär (deterministisch): der „zuletzt-geschrieben"-Merker, gesetzt in
-    // `write_result_settled` VOR `clear_court`. Liegt er im TTL und stimmen die
-    // entscheidenden Felder überein → identischer Retry → quittieren.
-    let direct_hit = ctx
-        .tablet
+    // Der „zuletzt-geschrieben"-Merker, gesetzt in `write_result_settled` VOR
+    // `clear_court`. Liegt er im TTL und stimmen die drei entscheidenden Felder
+    // überein → identischer Retry → quittieren. BEWUSST NUR dieser feldgenaue
+    // Vergleich (kein Snapshot-Sieger-Netz): Ein fertig geschriebenes Match trägt
+    // im BTP-Snapshot dauerhaft einen Sieger; ein reiner Sieger-Seiten-Vergleich
+    // würde eine spätere TL-Ergebniskorrektur (Reopen, gleicher Sieger, ANDERE
+    // Sätze) fälschlich als „erledigt" quittieren und still verwerfen
+    // (Review-BLOCKER). Der feldgenaue Merker quittiert ausschließlich einen
+    // wirklich identischen Wiederholungs-POST — eine Korrektur (abweichende
+    // Sätze/Status) fällt weiter auf Fehler. Das großzügige TTL deckt auch ein
+    // Tablet ab, das nach längerem Offline denselben Stand erneut sendet.
+    ctx.tablet
         .direct_btp_write_since(body.match_id, now.saturating_sub(RESULT_IDEMPOTENCY_TTL))
         .is_some_and(|prev| {
             prev.sets == sets && prev.team1_won == team1_won && prev.score_status == score_status
-        });
-
-    // Netz (sekundär): der ~2-s-Poll-Snapshot trägt für die `match_id` bereits
-    // einen Sieger, dessen Seite mit dem eingehenden Ergebnis übereinstimmt.
-    // Fängt den Fall, dass der Merker verfallen ist, BTP das Ergebnis aber
-    // schon zurückgemeldet hat (BTP `Winner`: 1 = Team 1, sonst Team 2).
-    let snapshot_hit = ctx
-        .tablet
-        .snapshot_match(body.match_id)
-        .and_then(|m| m.winner)
-        .is_some_and(|winner| (winner == 1) == team1_won);
-
-    direct_hit || snapshot_hit
+        })
 }
 
 pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
@@ -3210,6 +3211,29 @@ mod tests {
             resp.ok,
             "identischer Alt-Retry auf gewechseltem Feld quittiert: {:?}",
             resp.error
+        );
+    }
+
+    /// (6) Regression zum Review-BLOCKER: Ein fertig geschriebenes Match trägt im
+    /// BTP-Snapshot dauerhaft einen Sieger. Ein **abweichendes** (sieger-gleiches)
+    /// Ergebnis auf dem geräumten Feld darf NICHT allein wegen der passenden
+    /// Sieger-Seite quittiert werden (das wäre ein stiller Verlust einer echten
+    /// TL-Korrektur) — ohne feldgenauen Merker liefert `settled_ok` `false`.
+    #[tokio::test]
+    async fn diverging_result_is_not_acked_by_snapshot_winner() {
+        let ctx = make_ctx(1); // toter Port — kein Write, also KEIN Merker
+                               // Snapshot: Match 42 ist fertig (Sieger Team 1) und NICHT mehr auf Feld
+                               // 101 (geräumt) → match_for_court(101) == None → settled_ok-Pfad.
+        let mut finished = match_on_court();
+        finished.winner = Some(1);
+        finished.status = MatchStatus::Finished;
+        finished.court_id = None;
+        set_matches(&ctx, vec![finished]);
+        // Abweichende Sätze, aber Team 1 gewinnt weiter (Sieger-Seite passt).
+        let resp = process_result(&ctx, &body_with(&[(21, 18), (21, 19)])).await;
+        assert!(
+            !resp.ok,
+            "sieger-gleiches, aber abweichendes Ergebnis darf NICHT quittiert werden"
         );
     }
 
