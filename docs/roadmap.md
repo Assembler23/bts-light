@@ -313,6 +313,17 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Schiedsrichtermanagement** — BTP-Schiedsrichterliste in BTS Light:
+  SR/AR je Spiel zuweisen (Client + TL-Web, auch bei laufendem Spiel),
+  Konflikt-Warnungen (Verein/Sperr-Spieler, nie blockierend), automatische
+  Rotation mit Pausen und manueller Reihenfolge (getrennt SR/AR),
+  feldweise Schalter inkl. Tabletbediener-Vergabe (drei Mischformen),
+  Ansagen, Tablet-Anzeige (LAN + Cloud + ferne Halle), Rücksync nach BTP
+  beim Feld-Aufruf. **Vorbedingung im Plan:** Messung am echten BTP
+  (Officials-Struktur, ClubID, Schreibweg mit Zurücklesen).
+  Spec: [features/schiedsrichter-management.md](features/schiedsrichter-management.md) ·
+  ADR A (Rücksync-Modell) und ADR B (Ablage Turnierdaten) werden zu
+  Umsetzungsbeginn angelegt.
 - **Hallen-Check-In** — Spieler bestätigen vor Beginn ihrer Spielklasse über
   eine öffentliche Webseite selbst, dass sie in der Halle sind; die
   Turnierleitung sieht **vor der Auslosung**, wer fehlt, und kann Fehlende
