@@ -15,10 +15,12 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   [features/turnier-robustheit.md](features/turnier-robustheit.md), ADR 0016/0017)
   — **✅ umgesetzt v0.9.196/197 (#204/#205)**. **B** Ergebnis-Weg verlustsicher
   (Idempotenz + persistente Retry-Queue; [features/ergebnis-puffer.md](features/ergebnis-puffer.md),
-  ADR 0018) — **Spec abgestimmt 2026-08-13**. **C** Last-/Soak-Test des
-  Relay-Brokers (In-Process, [features/last-soak-test.md](features/last-soak-test.md),
-  ADR 0019) — **Spec abgestimmt 2026-08-13**; LAN-Server-Last als Folge-Erweiterung.
-  **D** Tote-Verbindungs-Erkennung schärfen — offen, eigene Spec.
+  ADR 0018) — **✅ v0.9.198 (#206)**. **C** Last-/Soak-Test des Relay-Brokers
+  (In-Process, [features/last-soak-test.md](features/last-soak-test.md), ADR 0019)
+  — **✅ (#207/#208)**; LAN-Server-Last als Folge-Erweiterung. **D**
+  Tote-Verbindungs-Erkennung schärfen (Host-Client Read-Idle + Tablet↔Relay-
+  Empfangs-Stale; [features/tote-verbindungen.md](features/tote-verbindungen.md),
+  ADR 0020) — **Spec abgestimmt 2026-08-13**.
 - **BTP-Ergebnis-Regression** *(Fix implementiert, wartet auf Release
   v0.9.145)*: Spiele wurden in BTP nicht automatisch beendet — `Status`
   fehlte seit v0.9.103 im Ergebnis-`SENDUPDATE`; zudem Ergebnis +
