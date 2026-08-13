@@ -34,6 +34,13 @@ const MAX_MONITOR_DEVICES: usize = 128;
 /// Zuschauer-DoS (viele TVs/Tabs, die den Monitor-WS öffnen).
 const MAX_MONITOR_SUBS: usize = 256;
 
+/// Lebensdauer des Finalisiert-Merkers (A2 / ADR 0017, Regel b). Lang genug,
+/// dass ein kurz abgerissenes Tablet nach seiner Rückkehr noch „finalized"
+/// erfährt und das Hand-Ergebnis nicht überbügelt; kurz genug, dass der Merker
+/// nicht ewig hängt, falls das Feld nie ein neues Match bekommt (Turnierende).
+/// Ein neues Match auf dem Feld räumt den Merker unabhängig davon sofort.
+const FINALIZED_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Wie lange eine frisch nach BTP geschriebene Feldzuweisung als belegt gilt,
 /// bevor BTP sie bestätigt hat.
 ///
@@ -251,6 +258,72 @@ pub struct ScorekeeperEntry {
     pub enqueued_ms: u64,
 }
 
+/// Ownership-Token eines Felds (A2 / ADR 0017): WER hält den Slot gerade und
+/// hat er seit seiner Übernahme gezählt? `epoch` = der monotone `claim_court`-
+/// Token, `device` = aktives Tablet. Autorität ist der Slot-Halter, nicht ein
+/// rev-Zähler — das ist die Grundlage der Reconnect-Konfliktregel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CourtOwner {
+    /// Monotone Claim-Epoche (`token` aus `claim_court`).
+    pub epoch: u64,
+    /// Geräte-ID des aktuellen Halters (leer bei alten Tablet-Seiten).
+    pub device: String,
+    /// Hat dieser Halter seit seinem Claim mindestens einen Score erzeugt?
+    pub scored_since_claim: bool,
+}
+
+/// Ausgang der reinen Reconnect-Entscheidung (A2 / ADR 0017).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectDecision {
+    /// Das zurückkehrende Tablet setzt seinen LOKALEN Stand durch.
+    KeepLocal,
+    /// Das zurückkehrende Tablet tritt zurück (adoptiert / zählt nicht mehr).
+    StandDown,
+}
+
+/// Reine, unit-testbare Reconnect-Entscheidung (A2 / ADR 0017): Nach einem
+/// Tablet-Reconnect im selben Spiel entscheidet der SLOT-HALTER, nicht ein
+/// rev-Zähler, wessen Stand gilt. Deterministisch, ohne `self`/Lock.
+///
+/// `returning_device` = Geräte-ID des zurückkehrenden Tablets.
+/// `current_owner` = aktueller Slot-Halter (`None` = Feld frei). Für die
+/// Reconnect-Stelle ist das der Halter VOR dem erneuten Claim.
+/// `finalized` = das Match wurde per Hand fertig eingegeben (aus dem BTP-Status
+/// abgeleitet, siehe [`TabletState::recently_finalized`]) — dann darf kein
+/// Tablet das Ergebnis überbügeln.
+///
+/// Regeln (in dieser Reihenfolge, deterministisch):
+/// 1. `finalized` → `StandDown` (Hand-Ergebnis nicht überbügeln).
+/// 2. Feld frei (`None`) → `KeepLocal` (niemand hat übernommen).
+/// 3. Halter == Rückkehrer → `KeepLocal` (der Reclaimer/Halter ist die Wahrheit).
+/// 4. Fremder Halter UND hat seit der Übernahme gezählt → `StandDown`
+///    (der legitime Übernehmer gewinnt).
+/// 5. Fremder Halter OHNE Score seit der Übernahme → `KeepLocal` (der
+///    Rückkehrer gewinnt deterministisch; bei echter Divergenz ist der
+///    stille Verlierer bewusst in Kauf genommen — siehe ADR 0017).
+///
+/// `epoch` des Rückkehrers ist für die Entscheidung NICHT nötig (Autorität ist
+/// gerätebasiert); sie wird nur zur Diagnose mitgeführt.
+pub fn reconnect_decision(
+    returning_device: &str,
+    current_owner: Option<CourtOwner>,
+    finalized: bool,
+) -> ReconnectDecision {
+    // Regel b (A2 / ADR 0017): Das Finalisiert-Signal wird vom Sync-Loop aus
+    // dem BTP-Status abgeleitet (`TabletState::recently_finalized`) und an den
+    // Reconnect-Eintritten hereingereicht — ein finalisiertes Match darf kein
+    // Tablet mehr überbügeln.
+    if finalized {
+        return ReconnectDecision::StandDown;
+    }
+    match current_owner {
+        None => ReconnectDecision::KeepLocal,
+        Some(owner) if owner.device == returning_device => ReconnectDecision::KeepLocal,
+        Some(owner) if owner.scored_since_claim => ReconnectDecision::StandDown,
+        Some(_) => ReconnectDecision::KeepLocal,
+    }
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -263,6 +336,25 @@ pub struct TabletState {
     active: RwLock<HashMap<i64, (u64, String)>>,
     /// Fortlaufender Zähler, vergibt eindeutige Court-Tokens.
     token_seq: AtomicU64,
+    /// CourtID → hat der AKTUELLE Slot-Halter seit seinem `claim_court`
+    /// mindestens einen Score erzeugt? (A2 / ADR 0017, Reconnect-Wahrheit.)
+    /// Grundlage der Konfliktregel „legitim weitergezählt": nur wenn ein
+    /// ANDERES Gerät den Slot hält UND seit der Übernahme gezählt hat, tritt
+    /// ein zurückkehrendes Tablet zurück. Gesetzt in `record_score`,
+    /// zurückgesetzt in `claim_court` (neuer Claim = neuer Zähl-Abschnitt).
+    /// Ein Court ohne Eintrag hat seit dem letzten Claim nicht gezählt.
+    scored_since_claim: RwLock<HashSet<i64>>,
+    /// CourtID → (Match-ID, Zeitpunkt) des zuletzt in BTP FINALISIERTEN Matches
+    /// dieses Felds (A2 / ADR 0017, Regel b). `match_for_court` liefert beendete
+    /// Matches nicht mehr (Status Finished ≠ OnCourt); dieser Merker erlaubt es
+    /// dem Server, dem Tablet — das noch dieselbe matchId trägt — `finalized:true`
+    /// zu schicken (Rücktritt statt bloßer `MatchCleared`) und einen nachlaufenden
+    /// Score fürs finalisierte Match zu verwerfen. R2 gewahrt: die Wahrheit
+    /// bleibt BTP, wir spiegeln nur den Finished-Status. Kurze TTL
+    /// ([`FINALIZED_TTL`]), damit der Merker nicht ewig hängt; ein Feld mit
+    /// OnCourt-Match räumt ihn ohnehin bedingungslos (`clear_finalized`). Vom
+    /// Sync-Loop beim Übergang OnCourt→Finished gesetzt.
+    recently_finalized: RwLock<HashMap<i64, (i64, std::time::Instant)>>,
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
     court_state: RwLock<HashMap<i64, String>>,
@@ -950,6 +1042,14 @@ impl TabletState {
 
     /// Satzstand vom Tablet übernehmen.
     pub fn record_score(&self, court_id: i64, match_id: i64, sets: Vec<(i64, i64)>) {
+        // A2 / ADR 0017: Der aktuelle Slot-Halter hat seit seinem Claim gezählt —
+        // das macht ihn zum „legitimen Weiterzähler". Das Flag wird BEWUSST VOR
+        // dem Score-Write gesetzt (getrennte Locks): Ein gleichzeitig
+        // reconnectendes Tablet, das `court_owner` liest, sieht dann nie „Score
+        // schon geschrieben, Flag noch nicht" — das Fenster löst sich in die
+        // SICHERE Richtung auf (im Zweifel `scored=true` ⇒ Rückkehrer tritt
+        // zurück, überschreibt den Übernehmer NICHT). Review-Befund M2.
+        self.scored_since_claim.write().unwrap().insert(court_id);
         {
             let mut courts = self.courts.write().unwrap();
             let session = courts.entry(court_id).or_insert(CourtSession {
@@ -1171,7 +1271,85 @@ impl TabletState {
             .write()
             .unwrap()
             .insert(court_id, (token, device_id.to_string()));
+        // A2 / ADR 0017: Ein neuer Claim eröffnet einen neuen Zähl-Abschnitt —
+        // der neue Halter hat noch nicht gezählt. Ohne dieses Zurücksetzen
+        // würde ein alter „scored"-Zustand fälschlich den frischen Übernehmer
+        // als „hat schon weitergezählt" ausweisen.
+        self.scored_since_claim.write().unwrap().remove(&court_id);
         token
+    }
+
+    /// Aktueller Slot-Halter eines Felds als Ownership-Token (A2 / ADR 0017):
+    /// `(epoch, device, scored_since_claim)`. `None` = Feld frei. Baut den
+    /// Wert aus `active` (Epoch + Gerät) und dem `scored_since_claim`-Flag.
+    /// Grundlage für [`reconnect_decision`] an den Reconnect-Eintritten.
+    pub fn court_owner(&self, court_id: i64) -> Option<CourtOwner> {
+        let active = self.active.read().unwrap();
+        let (epoch, device) = active.get(&court_id)?;
+        let scored = self.scored_since_claim.read().unwrap().contains(&court_id);
+        Some(CourtOwner {
+            epoch: *epoch,
+            device: device.clone(),
+            scored_since_claim: scored,
+        })
+    }
+
+    /// Ein Match per ID aus dem aktuellen Snapshot – UNABHÄNGIG vom Status
+    /// (anders als [`Self::match_for_court`], das nur OnCourt liefert). Für das
+    /// Finalisiert-Signal (A2 / ADR 0017): das gerade beendete Match trägt
+    /// Status Finished, muss dem Tablet aber noch mit `finalized:true`
+    /// nachgereicht werden. `None`, wenn das Match nicht im Snapshot steht.
+    pub fn snapshot_match(&self, match_id: i64) -> Option<BtpMatch> {
+        let guard = self.snapshot.read().unwrap();
+        let snap = guard.as_ref()?;
+        snap.matches.iter().find(|m| m.id == match_id).cloned()
+    }
+
+    /// OnCourt→Finished: das dem Feld zugewiesene Match ist in BTP finalisiert
+    /// (Sieger steht, per Hand fertig eingegeben — A2 / ADR 0017, Regel b). Vom
+    /// Sync-Loop beim Übergang mit der Match-ID gesetzt; TTL-frisch gehalten.
+    pub fn mark_finalized(&self, court_id: i64, match_id: i64) {
+        self.recently_finalized
+            .write()
+            .unwrap()
+            .insert(court_id, (match_id, std::time::Instant::now()));
+    }
+
+    /// Match-ID des zuletzt finalisierten Matches dieses Felds, falls der Merker
+    /// noch frisch ist (innerhalb [`FINALIZED_TTL`]); sonst `None`. Räumt einen
+    /// abgelaufenen Eintrag nebenbei weg, damit die Karte nicht wächst.
+    pub fn recently_finalized(&self, court_id: i64) -> Option<i64> {
+        let mut map = self.recently_finalized.write().unwrap();
+        match map.get(&court_id) {
+            Some((mid, at)) if at.elapsed() < FINALIZED_TTL => Some(*mid),
+            Some(_) => {
+                map.remove(&court_id);
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Ist GENAU dieses Match auf dem Feld gerade finalisiert? Grundlage des
+    /// Finalisiert-Gates in `handle_score` (A2 / ADR 0017): ein nachlaufender
+    /// Score fürs finalisierte Match wird verworfen — das Gate ERGÄNZT den
+    /// Stale-/Plausibilitäts-Filter, R5 (`process_result`) bleibt unberührt.
+    pub fn is_match_finalized(&self, court_id: i64, match_id: i64) -> bool {
+        self.recently_finalized(court_id) == Some(match_id)
+    }
+
+    /// Räumt den Finalisiert-Merker eines Felds **bedingungslos** — vom Sync-Loop
+    /// je Zyklus für jedes Feld aufgerufen, das ein Match **OnCourt** hat. Ein
+    /// OnCourt-Match ist per BTP-Definition nicht finalisiert; jeder Merker auf so
+    /// einem Feld ist daher veraltet und muss weg — auch wenn dieselbe matchId
+    /// zurückkehrt (TL-Ergebniskorrektur/Undo setzt ein finalisiertes Match auf
+    /// demselben Feld wieder OnCourt; ohne dieses bedingungslose Räumen verwürfe
+    /// `handle_score` dessen Punkte still bis zum TTL-Ablauf — Review-Befund).
+    /// Felder OHNE OnCourt-Match iteriert der Aufrufer nicht → dort hält der
+    /// Merker (das Tablet zeigt noch das fertige Spiel; späte Scores gegated),
+    /// bis die TTL greift.
+    pub fn clear_finalized(&self, court_id: i64) {
+        self.recently_finalized.write().unwrap().remove(&court_id);
     }
 
     /// Ist `token` noch das aktive Tablet dieses Felds?
@@ -3537,6 +3715,219 @@ mod tests {
         st.release_court(1, new);
         assert!(!st.court_occupied(1));
         assert!(!st.court_held_by_device(1, "dev-x"));
+    }
+
+    // ───────────── A2 / ADR 0017: Reconnect-Wahrheit „Slot-Halter gewinnt" ─────────────
+
+    fn owner(epoch: u64, device: &str, scored: bool) -> CourtOwner {
+        CourtOwner {
+            epoch,
+            device: device.to_string(),
+            scored_since_claim: scored,
+        }
+    }
+
+    /// Regel 2: Feld frei (kein Halter) → der Rückkehrer setzt lokal durch.
+    #[test]
+    fn reconnect_decision_slot_free_keeps_local() {
+        assert_eq!(
+            reconnect_decision("dev-a", None, false),
+            ReconnectDecision::KeepLocal
+        );
+    }
+
+    /// Regel 3: Der Rückkehrer ist selbst der Halter (eigener Reclaim) →
+    /// KeepLocal, auch wenn dieser Halter schon gezählt hat.
+    #[test]
+    fn reconnect_decision_own_reclaim_keeps_local() {
+        assert_eq!(
+            reconnect_decision("dev-a", Some(owner(5, "dev-a", true)), false),
+            ReconnectDecision::KeepLocal
+        );
+    }
+
+    /// Regel 4: Ein FREMDES Gerät hält den Slot UND hat seit der Übernahme
+    /// gezählt → der Rückkehrer tritt zurück (legitimer Übernehmer gewinnt).
+    #[test]
+    fn reconnect_decision_foreign_owner_scored_stands_down() {
+        assert_eq!(
+            reconnect_decision("dev-a", Some(owner(7, "dev-b", true)), false),
+            ReconnectDecision::StandDown
+        );
+    }
+
+    /// Regel 5: Fremder Halter, aber OHNE Score seit der Übernahme → der
+    /// Rückkehrer gewinnt deterministisch (KeepLocal).
+    #[test]
+    fn reconnect_decision_foreign_owner_not_scored_keeps_local() {
+        assert_eq!(
+            reconnect_decision("dev-a", Some(owner(7, "dev-b", false)), false),
+            ReconnectDecision::KeepLocal
+        );
+    }
+
+    /// Regel 1: Ein finalisiertes Match darf nie überbügelt werden → StandDown,
+    /// unabhängig vom Halter (auch beim eigenen Reclaim, auch bei freiem Feld).
+    #[test]
+    fn reconnect_decision_finalized_always_stands_down() {
+        assert_eq!(
+            reconnect_decision("dev-a", None, true),
+            ReconnectDecision::StandDown
+        );
+        assert_eq!(
+            reconnect_decision("dev-a", Some(owner(5, "dev-a", false)), true),
+            ReconnectDecision::StandDown
+        );
+        assert_eq!(
+            reconnect_decision("dev-a", Some(owner(7, "dev-b", false)), true),
+            ReconnectDecision::StandDown
+        );
+    }
+
+    /// `scored_since_claim`: nach dem Claim false, nach `record_score` true,
+    /// nach erneutem Claim wieder false (neuer Zähl-Abschnitt).
+    #[test]
+    fn scored_since_claim_tracks_counting_section() {
+        let st = TabletState::default();
+        st.claim_court(1, "dev-a");
+        assert_eq!(
+            st.court_owner(1),
+            Some(owner(1, "dev-a", false)),
+            "frisch geclaimt: noch nicht gezählt"
+        );
+
+        st.record_score(1, 100, vec![(5, 3)]);
+        assert_eq!(
+            st.court_owner(1),
+            Some(owner(1, "dev-a", true)),
+            "nach record_score: gezählt"
+        );
+
+        // Übernahme durch ein anderes Gerät: neuer Zähl-Abschnitt, Flag zurück.
+        st.claim_court(1, "dev-b");
+        assert_eq!(
+            st.court_owner(1),
+            Some(owner(2, "dev-b", false)),
+            "neuer Claim: Zähler wieder auf false"
+        );
+    }
+
+    /// `court_owner` liefert `None` für ein freies Feld.
+    #[test]
+    fn court_owner_none_when_free() {
+        let st = TabletState::default();
+        assert_eq!(st.court_owner(9), None);
+    }
+
+    /// Epoch-Monotonie: aufeinanderfolgende Claims liefern strikt steigende
+    /// Tokens (die Epoch der Ownership) — auch über verschiedene Felder hinweg.
+    #[test]
+    fn claim_court_epochs_are_strictly_increasing() {
+        let st = TabletState::default();
+        let e1 = st.claim_court(1, "dev-a");
+        let e2 = st.claim_court(1, "dev-b");
+        let e3 = st.claim_court(2, "dev-c");
+        assert!(e1 < e2, "erneuter Claim desselben Felds steigt");
+        assert!(e2 < e3, "Claim eines anderen Felds steigt weiter");
+        assert_eq!(st.court_owner(1).map(|o| o.epoch), Some(e2));
+        assert_eq!(st.court_owner(2).map(|o| o.epoch), Some(e3));
+    }
+
+    /// Die Reconnect-Kette real durchgespielt: Gerät A zählt, Gerät B
+    /// übernimmt den Slot und zählt weiter — A kehrt zurück und tritt zurück.
+    #[test]
+    fn reconnect_end_to_end_foreign_takeover_scored() {
+        let st = TabletState::default();
+        st.claim_court(1, "dev-a");
+        st.record_score(1, 100, vec![(11, 9)]);
+        // B übernimmt und zählt.
+        st.claim_court(1, "dev-b");
+        st.record_score(1, 100, vec![(11, 11)]);
+        // A kehrt zurück: der aktuelle Halter (B) hat gezählt → StandDown.
+        assert_eq!(
+            reconnect_decision("dev-a", st.court_owner(1), false),
+            ReconnectDecision::StandDown
+        );
+    }
+
+    /// Gegenprobe: B übernimmt, hat aber noch NICHT gezählt — A gewinnt.
+    #[test]
+    fn reconnect_end_to_end_foreign_takeover_not_scored() {
+        let st = TabletState::default();
+        st.claim_court(1, "dev-a");
+        st.record_score(1, 100, vec![(11, 9)]);
+        st.claim_court(1, "dev-b"); // Übernahme ohne eigenen Score
+        assert_eq!(
+            reconnect_decision("dev-a", st.court_owner(1), false),
+            ReconnectDecision::KeepLocal
+        );
+    }
+
+    // ─────────── A2 / ADR 0017, Regel b: Finalisiert-Signal ───────────
+
+    /// Setzen und Lesen des Finalisiert-Merkers samt Match-Bindung.
+    #[test]
+    fn recently_finalized_set_and_lookup() {
+        let st = TabletState::default();
+        assert_eq!(st.recently_finalized(5), None, "frisch: kein Merker");
+        st.mark_finalized(5, 42);
+        assert_eq!(st.recently_finalized(5), Some(42));
+        assert!(st.is_match_finalized(5, 42));
+        assert!(!st.is_match_finalized(5, 43), "andere Match-ID → nein");
+        assert!(!st.is_match_finalized(6, 42), "anderes Feld → nein");
+    }
+
+    /// TTL-Ablauf: ein Merker älter als [`FINALIZED_TTL`] gilt als abgelaufen
+    /// und wird beim Lesen weggeräumt (der Merker darf nicht ewig hängen).
+    #[test]
+    fn recently_finalized_expires_after_ttl() {
+        let st = TabletState::default();
+        // Direkt einen überalterten Zeitstempel setzen (Test im selben Modul).
+        let stale = std::time::Instant::now()
+            .checked_sub(FINALIZED_TTL + std::time::Duration::from_secs(1))
+            .expect("Instant weit genug in der Vergangenheit");
+        st.recently_finalized
+            .write()
+            .unwrap()
+            .insert(5, (42, stale));
+        assert_eq!(st.recently_finalized(5), None, "abgelaufen → None");
+        assert!(
+            !st.recently_finalized.read().unwrap().contains_key(&5),
+            "abgelaufener Eintrag wird beim Lesen geräumt"
+        );
+    }
+
+    /// `clear_finalized`: ein Feld mit OnCourt-Match räumt den Merker
+    /// bedingungslos — auch bei derselben matchId (TL-Ergebniskorrektur/Undo),
+    /// sonst würden dessen Punkte still verworfen (Review-Befund M1).
+    #[test]
+    fn clear_finalized_removes_marker_unconditionally() {
+        let st = TabletState::default();
+        st.mark_finalized(5, 42);
+        // Dasselbe Match kehrt OnCourt zurück (Ergebniskorrektur) → Merker weg.
+        st.clear_finalized(5);
+        assert_eq!(
+            st.recently_finalized(5),
+            None,
+            "OnCourt (auch gleiche matchId) → geräumt"
+        );
+    }
+
+    /// End-to-End: Ist das Feld finalisiert, tritt sogar der EIGENE Halter beim
+    /// Reconnect zurück (Regel b schlägt „eigener Reclaim = KeepLocal"). So
+    /// überbügelt kein Tablet das per Hand eingegebene Ergebnis.
+    #[test]
+    fn reconnect_end_to_end_finalized_stands_down() {
+        let st = TabletState::default();
+        st.claim_court(1, "dev-a");
+        st.record_score(1, 100, vec![(21, 10)]);
+        st.mark_finalized(1, 100);
+        let finalized = st.recently_finalized(1).is_some();
+        assert!(finalized);
+        assert_eq!(
+            reconnect_decision("dev-a", st.court_owner(1), finalized),
+            ReconnectDecision::StandDown
+        );
     }
 
     // ───────────────────── Nachschub-Queue (A5) ─────────────────────

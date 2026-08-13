@@ -111,6 +111,14 @@ pub struct MatchBrief {
     pub show_club_names: bool,
     #[serde(rename = "showClubLogos", default)]
     pub show_club_logos: bool,
+    /// `true`, wenn das zugewiesene Match in BTP finalisiert ist (Sieger steht,
+    /// per Hand fertig eingegeben — A2 / ADR 0017). Dann tritt das Tablet
+    /// zurück: kein Score-Push, kein state_sync, keine Ergebnis-Absendung
+    /// (`tablet.html` gated diese Pfade über `STATE.finalized`), damit das
+    /// Hand-Ergebnis nicht überbügelt wird. `#[serde(default)]` hält ältere
+    /// Frames lesbar (false → altes Verhalten).
+    #[serde(default)]
+    pub finalized: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -875,7 +883,36 @@ pub enum ServerMsg {
     /// Spielzustand für ein Tablet, das einen Court übernimmt – damit es
     /// das laufende Spiel fortsetzt statt bei 0:0 zu beginnen.
     #[serde(rename = "state_restore")]
-    StateRestore { state: String },
+    StateRestore {
+        state: String,
+        /// A2 / ADR 0017 (Reconnect-Wahrheit): Ist der Server bzw. Relay im
+        /// OWNERSHIP-Modus? `true` → der Server hat die Autorität berechnet
+        /// (Slot-Halter gewinnt) und das Tablet FOLGT `authoritative`.
+        /// `false` → Legacy-Modus (Config `reconnect_legacy_rev`) ODER ein
+        /// ALTES Server-Frame ganz ohne dieses Feld: dann greift auf dem
+        /// Tablet die bestehende rev-Logik. Dieses Gate hält „Legacy" sauber —
+        /// ohne es würde ein Tablet `authoritative` auch im Legacy-Fall blind
+        /// befolgen und der Reconnect-Bug bliebe offen. `#[serde(default)]` →
+        /// altes Frame = `false` = rev-Fallback (Auto-Update-sicher).
+        #[serde(default)]
+        ownership_active: bool,
+        /// A2 / ADR 0017 (Reconnect-Wahrheit): vom Server bzw. Relay
+        /// berechnete Autorität — NUR wirksam, wenn `ownership_active`. `true`
+        /// → das Tablet setzt seinen LOKALEN Stand durch (es ist der
+        /// Slot-Halter/Reclaimer und damit die Wahrheit); `false` → es
+        /// ADOPTIERT den mitgeschickten `state` (bewusste Übernahme eines
+        /// fremden Felds oder finalisiertes Match). `#[serde(default)]` hält
+        /// ältere Nachrichten OHNE das Feld lesbar.
+        #[serde(default)]
+        authoritative: bool,
+        /// Diagnose / Tablet-Selbsttest: `epoch` (der `claim_court`-Token) und
+        /// Geräte-ID des aktuellen Slot-Halters. Erlauben dem Tablet zu prüfen
+        /// „bin ich der Halter?". `#[serde(default)]` = abwärtskompatibel.
+        #[serde(default)]
+        owner_epoch: u64,
+        #[serde(default)]
+        owner_device: String,
+    },
     /// Antwort auf [`TabletMsg::Ping`] – bestätigt dem Tablet die lebende
     /// Verbindung.
     #[serde(rename = "pong")]
@@ -1373,6 +1410,16 @@ pub enum HostFrame {
         /// parsen (Serde ignoriert unbekannte Felder).
         #[serde(rename = "azureTts", skip_serializing_if = "Option::is_none", default)]
         azure_tts: Option<AzureTtsShare>,
+        /// A2 / ADR 0017 (Reconnect-Wahrheit): der Legacy-rev-Schalter des
+        /// Hosts. Der Relay kennt die App-Config nicht direkt; der Host reicht
+        /// sie über diesen periodischen Frame durch, damit der
+        /// Laufzeit-Rollback (Legacy = altes rev-Verhalten) AUCH im Cloud-Modus
+        /// greift: der Relay setzt dann `ownership_active = !reconnect_legacy_rev`
+        /// im `StateRestore`. `#[serde(rename)]` für camelCase auf der Wire,
+        /// `#[serde(default)]` = ältere Hosts → `false` = Ownership aktiv
+        /// (sicherer Default).
+        #[serde(rename = "reconnectLegacyRev", default)]
+        reconnect_legacy_rev: bool,
     },
     /// Die aktuell zugelassenen Turnierleitungs-Geräte. Der Host stellt sie
     /// aus, der Relay spiegelt sie nur (ADR 0012) — die `install_id`
@@ -1844,6 +1891,48 @@ mod tests {
         );
     }
 
+    /// A2 / ADR 0017: `StateRestore` mit den neuen Autoritäts-Feldern
+    /// (inkl. `ownership_active`) serialisiert und deserialisiert verlustfrei.
+    #[test]
+    fn state_restore_roundtrip_with_authority_fields() {
+        roundtrip(&ServerMsg::StateRestore {
+            state: "{\"score\":\"3:5\"}".to_string(),
+            ownership_active: true,
+            authoritative: true,
+            owner_epoch: 42,
+            owner_device: "dev-abc".to_string(),
+        });
+        // Ownership-Modus mit „adoptieren" (authoritative=false).
+        roundtrip(&ServerMsg::StateRestore {
+            state: "{}".to_string(),
+            ownership_active: true,
+            authoritative: false,
+            owner_epoch: 7,
+            owner_device: "dev-x".to_string(),
+        });
+    }
+
+    /// Abwärtskompatibilität: eine ältere `state_restore`-Nachricht OHNE die
+    /// neuen Felder bleibt lesbar — `ownership_active`/`authoritative`/`owner_*`
+    /// fallen per `#[serde(default)]` auf ihre Defaults (false/false/0/leer).
+    /// `ownership_active=false` ist genau der Auto-Update-sichere rev-Fallback:
+    /// das Tablet ignoriert `authoritative` und nutzt seine rev-Logik.
+    #[test]
+    fn state_restore_backward_compatible_without_authority_fields() {
+        let msg: ServerMsg =
+            serde_json::from_str(r#"{"type":"state_restore","state":"{}"}"#).unwrap();
+        assert_eq!(
+            msg,
+            ServerMsg::StateRestore {
+                state: "{}".to_string(),
+                ownership_active: false,
+                authoritative: false,
+                owner_epoch: 0,
+                owner_device: String::new(),
+            }
+        );
+    }
+
     #[test]
     fn tablet_msg_identify_without_court_id_defaults_to_zero() {
         // Älteres Tablet ohne courtId-Feld bleibt deserialisierbar.
@@ -1933,12 +2022,57 @@ mod tests {
                 scorekeeper_assigned: false,
                 show_club_names: true,
                 show_club_logos: false,
+                finalized: false,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"match_assigned""#));
         assert!(json.contains(r#""match":{"#));
         roundtrip(&msg);
+    }
+
+    /// Serde-Roundtrip des A2-Finalisiert-Flags (ADR 0017): ein `MatchBrief`
+    /// MIT `finalized:true` übersteht Hin-/Rückwandlung, und ein ALTES Frame
+    /// OHNE das Feld liest sich per `#[serde(default)]` als `finalized:false`
+    /// (Auto-Update-sicher — ältere Relays/Clients bleiben kompatibel).
+    #[test]
+    fn match_brief_finalized_roundtrip_and_default() {
+        let brief = MatchBrief {
+            match_id: 7,
+            team_a: vec![PlayerBrief {
+                id: 1,
+                name: "Anna".into(),
+                nationality: None,
+                club: None,
+            }],
+            team_b: vec![PlayerBrief {
+                id: 11,
+                name: "Ben".into(),
+                nationality: None,
+                club: None,
+            }],
+            event_label: "HE G1".into(),
+            best_of_sets: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+            discipline: "mens_singles".into(),
+            class_label: String::new(),
+            match_number: None,
+            scorekeeper: Vec::new(),
+            scorekeeper_assigned: false,
+            show_club_names: false,
+            show_club_logos: false,
+            finalized: true,
+        };
+        let json = serde_json::to_string(&brief).unwrap();
+        assert!(json.contains(r#""finalized":true"#));
+        roundtrip(&brief);
+
+        // Altes Frame ohne das Feld → Default false.
+        let legacy = r#"{"matchId":7,"teamA":[],"teamB":[],"eventLabel":"HE G1","bestOfSets":3,"targetScore":21}"#;
+        let parsed: MatchBrief = serde_json::from_str(legacy).unwrap();
+        assert!(!parsed.finalized, "fehlendes Feld → finalized=false");
     }
 
     #[test]
@@ -2041,12 +2175,14 @@ mod tests {
                     "de-DE-FlorianMultilingualNeural".to_string(),
                 )]),
             }),
+            reconnect_legacy_rev: false,
         });
         // … und ohne Azure wird das Feld gar nicht erst serialisiert
         // (alte Relays sehen exakt das bisherige Frame-Format).
         let json = serde_json::to_string(&HostFrame::Courts {
             courts: vec![],
             azure_tts: None,
+            reconnect_legacy_rev: false,
         })
         .unwrap();
         assert!(!json.contains("azureTts"));
@@ -2057,7 +2193,8 @@ mod tests {
             frame,
             HostFrame::Courts {
                 courts: vec![],
-                azure_tts: None
+                azure_tts: None,
+                reconnect_legacy_rev: false,
             }
         );
 
@@ -2090,6 +2227,36 @@ mod tests {
                 .get("mens_singles")
                 .map(String::as_str),
             Some("de-DE-FlorianMultilingualNeural")
+        );
+    }
+
+    /// A2 / ADR 0017: Der `reconnect_legacy_rev`-Schalter reist im
+    /// `Courts`-Frame vom Host zum Relay (Cloud-Rollback). Roundtrip mit
+    /// `true`; ein älterer Host ohne das Feld liest sich als `false`
+    /// (= Ownership aktiv, sicherer Default).
+    #[test]
+    fn courts_frame_carries_reconnect_legacy_rev() {
+        roundtrip(&HostFrame::Courts {
+            courts: vec![],
+            azure_tts: None,
+            reconnect_legacy_rev: true,
+        });
+        let json = serde_json::to_string(&HostFrame::Courts {
+            courts: vec![],
+            azure_tts: None,
+            reconnect_legacy_rev: true,
+        })
+        .unwrap();
+        assert!(json.contains(r#""reconnectLegacyRev":true"#));
+        // Älterer Host ohne das Feld → Default false.
+        let frame: HostFrame = serde_json::from_str(r#"{"type":"courts","courts":[]}"#).unwrap();
+        assert_eq!(
+            frame,
+            HostFrame::Courts {
+                courts: vec![],
+                azure_tts: None,
+                reconnect_legacy_rev: false,
+            }
         );
     }
 

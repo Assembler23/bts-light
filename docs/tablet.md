@@ -314,15 +314,51 @@ kein „Feld belegt"-Overlay, kein manueller Übernehmen-Tap. Nur ein
 **fremdes** Gerät sieht weiterhin den Übernehmen-Dialog. Alte
 Tablet-Seiten ohne Kennung verhalten sich wie bisher.
 
-Zusätzlich schützt eine **Stand-Revision** die offline gezählten Punkte:
+### Reconnect-Wahrheit: der Slot-Halter gewinnt (seit v0.9.197)
+
+Bei störanfälligem WLAN (hunderte Fremdgeräte in der Halle) muss das
+zählende Tablet die **Wahrheit des laufenden Spiels** halten. Seit v0.9.197
+entscheidet das **nicht mehr** ein geräte-lokaler `rev`-Zähler, sondern der
+**Slot-Halter** — wer den Feld-Slot laut Server legitim hält (R4: ein aktives
+Tablet je Court). Der Server/Relay **berechnet** die Autorität und schickt sie
+beim Reconnect explizit im `state_restore` mit (`authoritative`,
+`ownership_active`; ADR 0017):
+
+- Kehrt **dasselbe** Gerät zurück und niemand hat übernommen → es **setzt seinen
+  lokalen Stand durch** (Server-Cache + TV + Liveticker ziehen nach).
+- Hat ein **anderes** Gerät den Slot übernommen **und weitergezählt** → das
+  zurückkehrende Tablet **tritt zurück** und überschreibt den Übernehmer nicht —
+  auch wenn sein lokaler `rev` höher ist (das war der Bug der reinen
+  `rev`-Lösung: die geerbte gemeinsame Basis machte `rev` geräteübergreifend
+  unvergleichbar).
+- Bei echter **Divergenz** (beide haben nach einem Split gezählt) gewinnt der
+  aktuelle Slot-Halter **deterministisch** — der andere Stand geht bewusst
+  **still** verloren (Determinismus statt manueller Auflösung).
+
+**Finalisiert-Schutz:** Wird ein Match in BTP **per Hand fertig eingegeben**
+(finalisiert, `MatchStatus::Finished`), reist ein `finalized`-Flag im
+Match-Frame zum Tablet. Das Tablet **tritt dann zurück**: es pusht keinen Score
+mehr und sendet kein Ergebnis, überbügelt das Hand-Ergebnis also nicht. Der
+Server verwirft zusätzlich einen Score für ein bereits finalisiertes Match
+(ergänzt `process_result`, R5).
+
+**Rollback im Turnier:** Die Config `reconnect_legacy_rev` (Default aus =
+Ownership aktiv) schaltet zur Laufzeit auf das alte `rev`-Verhalten zurück
+(unten). Der Server signalisiert das dem Tablet über `ownership_active=false`;
+ältere App-Versionen ohne die Felder fallen per `serde(default)` ebenfalls auf
+`rev` zurück (Auto-Update-sicher).
+
+#### Altes `rev`-Verhalten (Legacy-Fallback)
+
 Jede lokale Änderung zählt `rev` im persistierten Snapshot hoch. Schickt
 der Server beim Reconnect seinen (während des Aussetzers veralteten)
 Spielstand (`state_restore`), gilt **„neuer gewinnt"**: Hat das Tablet
 zum selben Match einen gleich neuen oder neueren Stand, behält es ihn
-und spiegelt ihn sofort zurück (Server-Cache + Liveticker ziehen nach) —
-vorher überbügelte der alte Server-Stand die weitergezählten Punkte
-(Turnier-Befund 18.07.2026). Ein frisches Gerät (Reload ohne Stand,
-Ersatz-Tablet, echte Übernahme) übernimmt den Server-Stand unverändert.
+und spiegelt ihn sofort zurück — vorher überbügelte der alte Server-Stand
+die weitergezählten Punkte (Turnier-Befund 18.07.2026). Ein frisches Gerät
+(Reload ohne Stand, Ersatz-Tablet, echte Übernahme) übernimmt den
+Server-Stand unverändert. Dieser Pfad greift, wenn `ownership_active=false`
+(Legacy-Schalter an oder alte App/altes Relay).
 
 ## Einrichtung im Turnier
 

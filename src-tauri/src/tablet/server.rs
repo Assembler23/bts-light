@@ -37,7 +37,7 @@ use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
 use crate::tablet::assets::{self, TABLET_HTML};
 use crate::tablet::monitor;
-use crate::tablet::state::TabletState;
+use crate::tablet::state::{reconnect_decision, ReconnectDecision, TabletState};
 
 /// Fester Port des Tablet-Servers im Hallen-LAN.
 pub const TABLET_PORT: u16 = 8088;
@@ -1708,6 +1708,16 @@ pub(crate) async fn write_highlight_to_btp(
 
 // ─────────────────────────────── WebSocket ────────────────────────────────
 
+/// A2 / ADR 0017 (Reconnect-Wahrheit): Ist der Server im OWNERSHIP-Modus? Dann
+/// berechnet er die Autorität (Slot-Halter gewinnt) und das Tablet folgt
+/// `authoritative`. Im Legacy-Modus (`reconnect_legacy_rev = true`) liefert er
+/// `ownership_active = false`, worauf das Tablet die bestehende rev-Logik nutzt
+/// — das hält den Laufzeit-Rollback sauber (das Tablet befolgt `authoritative`
+/// eben NICHT blind, siehe ADR 0017). Reine Funktion → unit-testbar.
+fn ownership_active(config: &AppConfig) -> bool {
+    !config.reconnect_legacy_rev
+}
+
 /// Baut die Match-Kurzinfo fürs Tablet. BTP liefert das Spielsystem nicht
 /// zuverlässig – Standard ist Best-of-3 bis 21 (Badminton-Normalfall).
 pub(crate) fn match_brief(
@@ -1715,6 +1725,7 @@ pub(crate) fn match_brief(
     scorekeeper: Vec<String>,
     scorekeeper_assigned: bool,
     display: &crate::config::DisplayConfig,
+    finalized: bool,
 ) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
@@ -1746,6 +1757,7 @@ pub(crate) fn match_brief(
         scorekeeper_assigned,
         show_club_names: display.show_club_names,
         show_club_logos: display.show_club_logos,
+        finalized,
     }
 }
 
@@ -1844,12 +1856,14 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // Feld-Identität dieser Verbindung: die CourtID, sobald sich das Tablet
     // per `identify` gebunden hat.
     let mut court: Option<i64> = None;
-    // Zuletzt ans Tablet gemeldete Match-ID. Sentinel `Some(i64::MIN)` =
-    // „in dieser Verbindung noch nichts gesendet", damit der ERSTE push_match
-    // immer feuert – auch ein `MatchCleared`, wenn das Feld leer ist. Sonst
-    // behielte ein nach Inaktivität neu verbundenes Tablet sein altes (längst
-    // entferntes) Match, weil `None == None` (kein Match) den Dedup auslöste.
-    let mut last_match: Option<i64> = Some(i64::MIN);
+    // Zuletzt ans Tablet gemeldete (Match-ID, finalized). Sentinel
+    // `Some((i64::MIN, false))` = „in dieser Verbindung noch nichts gesendet",
+    // damit der ERSTE push_match immer feuert – auch ein `MatchCleared`, wenn
+    // das Feld leer ist. Sonst behielte ein nach Inaktivität neu verbundenes
+    // Tablet sein altes (längst entferntes) Match, weil `None == None` (kein
+    // Match) den Dedup auslöste. `finalized` im Schlüssel, weil der Übergang
+    // OnCourt→Finished die matchId nicht ändert, das Tablet aber erreichen muss.
+    let mut last_match: Option<(i64, bool)> = Some((i64::MIN, false));
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
     let mut superseded = false;
@@ -1900,7 +1914,13 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     tracing::info!("Feld {court_id} belegt – Tablet wartet auf Übernahme");
                                     send_msg(&mut socket, &ServerMsg::CourtOccupied).await;
                                 } else {
-                                    my_token = Some(ctx.tablet.claim_court(court_id, &my_device));
+                                    // A2 / ADR 0017: Den Slot-Halter VOR dem
+                                    // Reclaim festhalten — nach `claim_court` sind
+                                    // wir selbst der Halter, die Konfliktregel
+                                    // braucht aber den Zustand von vorher.
+                                    let owner_before = ctx.tablet.court_owner(court_id);
+                                    let token = ctx.tablet.claim_court(court_id, &my_device);
+                                    my_token = Some(token);
                                     ctx.tablet.attach_tablet(court_id);
                                     tracing::info!("Tablet verbunden für Feld {court_id}");
                                     // Gespeicherten Spielstand auch beim normalen
@@ -1911,8 +1931,41 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     // matchId zum gleich gepushten Match passt
                                     // (tablet.html), sonst überschreibt push_match.
                                     if let Some(state) = ctx.tablet.court_state(court_id) {
-                                        send_msg(&mut socket, &ServerMsg::StateRestore { state })
-                                            .await;
+                                        // A2 / ADR 0017: Autorität bestimmen. Der
+                                        // Legacy-Schalter wird bei JEDER Entscheidung
+                                        // frisch aus der config.json gelesen
+                                        // (Laufzeit-Rollback). Er steuert AUSSCHLIESSLICH
+                                        // `ownership_active`: ist er gesetzt, meldet der
+                                        // Server `ownership_active=false` und das Tablet
+                                        // nutzt weiter die rev-Logik (statt `authoritative`
+                                        // blind zu befolgen — sonst öffnete „Legacy" den
+                                        // Reconnect-Bug wieder). `authoritative` selbst ist
+                                        // NUR noch die reine Konfliktentscheidung.
+                                        let cfg = ctx.app_config();
+                                        let ownership = ownership_active(&cfg);
+                                        // A2 / ADR 0017, Regel b: Ist das Match des
+                                        // Felds in BTP finalisiert (per Hand fertig),
+                                        // tritt der Rückkehrer zurück → StandDown
+                                        // (überbügelt das Hand-Ergebnis nicht). Der
+                                        // Merker wird vom Sync-Loop aus dem BTP-Status
+                                        // gesetzt (`recently_finalized`).
+                                        let finalized =
+                                            ctx.tablet.recently_finalized(court_id).is_some();
+                                        let authoritative = matches!(
+                                            reconnect_decision(&my_device, owner_before, finalized),
+                                            ReconnectDecision::KeepLocal
+                                        );
+                                        send_msg(
+                                            &mut socket,
+                                            &ServerMsg::StateRestore {
+                                                state,
+                                                ownership_active: ownership,
+                                                authoritative,
+                                                owner_epoch: token,
+                                                owner_device: my_device.clone(),
+                                            },
+                                        )
+                                        .await;
                                     }
                                     push_match(court_id, &ctx, &mut socket, &mut last_match).await;
                                 }
@@ -1922,12 +1975,33 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     if !device_id.is_empty() {
                                         my_device = device_id;
                                     }
-                                    my_token = Some(ctx.tablet.claim_court(c, &my_device));
+                                    let token = ctx.tablet.claim_court(c, &my_device);
+                                    my_token = Some(token);
                                     ctx.tablet.attach_tablet(c);
                                     last_match = None;
                                     tracing::info!("Tablet übernimmt Feld {c}");
                                     if let Some(state) = ctx.tablet.court_state(c) {
-                                        send_msg(&mut socket, &ServerMsg::StateRestore { state }).await;
+                                        // A2 / ADR 0017: Eine BEWUSSTE Übernahme
+                                        // adoptiert den laufenden Stand des Felds —
+                                        // das übernehmende Gerät hat keine eigene
+                                        // „lokale Wahrheit", die es verteidigen
+                                        // müsste. Daher authoritative=false
+                                        // (adoptieren). Im Legacy-Modus meldet
+                                        // `ownership_active=false`, dann ignoriert das
+                                        // Tablet `authoritative` und entscheidet per
+                                        // rev — Laufzeit-Rollback.
+                                        let cfg = ctx.app_config();
+                                        send_msg(
+                                            &mut socket,
+                                            &ServerMsg::StateRestore {
+                                                state,
+                                                ownership_active: ownership_active(&cfg),
+                                                authoritative: false,
+                                                owner_epoch: token,
+                                                owner_device: my_device.clone(),
+                                            },
+                                        )
+                                        .await;
                                     }
                                     push_match(c, &ctx, &mut socket, &mut last_match).await;
                                 }
@@ -2060,21 +2134,42 @@ async fn push_match(
     court_id: i64,
     ctx: &ServerCtx,
     socket: &mut WebSocket,
-    last: &mut Option<i64>,
+    last: &mut Option<(i64, bool)>,
 ) {
+    // A2 / ADR 0017, Regel b: Ein gerade in BTP finalisiertes Match liefert
+    // `match_for_court` nicht mehr (Status Finished ≠ OnCourt), das Tablet trägt
+    // aber noch dessen matchId. Solange der kurzlebige Merker steht, schicken
+    // wir das finalisierte Match mit `finalized:true` weiter (Rücktritt statt
+    // bloßer `MatchCleared`), damit das Tablet das Hand-Ergebnis nicht
+    // überbügelt. R2 gewahrt: die Wahrheit bleibt BTP, wir spiegeln nur den
+    // Finished-Status.
     let current = ctx.tablet.match_for_court(court_id);
-    let current_id = current.as_ref().map(|m| m.id);
-    if current_id == *last {
+    let (effective, finalized) = match current {
+        Some(m) => (Some(m), false),
+        None => match ctx.tablet.recently_finalized(court_id) {
+            Some(mid) => (ctx.tablet.snapshot_match(mid), true),
+            None => (None, false),
+        },
+    };
+    // `finalized` nur echt, wenn wir das Match auch nachreichen können.
+    let finalized = finalized && effective.is_some();
+    // Zustands-Schlüssel inkl. `finalized`: der Übergang OnCourt→Finished
+    // ändert die matchId NICHT, muss das Tablet aber erreichen.
+    let key = effective.as_ref().map(|m| (m.id, finalized));
+    if key == *last {
         return;
     }
-    *last = current_id;
-    let msg = match &current {
+    *last = key;
+    let msg = match &effective {
         Some(m) => {
-            tracing::info!("Feld {court_id}: Match {} ans Tablet zugewiesen", m.id);
+            tracing::info!(
+                "Feld {court_id}: Match {} ans Tablet zugewiesen (finalized={finalized})",
+                m.id
+            );
             ServerMsg::MatchAssigned {
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(m, sk, ska, &ctx.app_config().display)
+                    match_brief(m, sk, ska, &ctx.app_config().display, finalized)
                 },
             }
         }
@@ -2116,6 +2211,19 @@ pub(crate) async fn handle_score(
     match_id: i64,
     ctx: &ServerCtx,
 ) {
+    // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein Score fürs bereits in BTP
+    // finalisierte Match dieses Felds wird verworfen — das per Hand eingegebene
+    // Ergebnis darf nicht überbügelt werden. Steht VOR dem Match-Lookup, weil
+    // ein finalisiertes Match nicht mehr OnCourt ist (`match_for_court` läge
+    // `None`) und der Merker die matchId trägt. matchId 0 (alte Tablet-Seite)
+    // kann nicht zugeordnet werden → läuft wie bisher weiter. Das Gate ERGÄNZT
+    // den Stale-Filter; R5 bleibt (`process_result` validiert weiter).
+    if match_id != 0 && ctx.tablet.is_match_finalized(court_id, match_id) {
+        tracing::info!(
+            "Score von Feld {court_id} verworfen: Match {match_id} ist in BTP finalisiert"
+        );
+        return;
+    }
     let Some(m) = ctx.tablet.match_for_court(court_id) else {
         return;
     };
@@ -2286,9 +2394,10 @@ mod tests {
             show_club_names: true,
             show_club_logos: true,
         };
-        let brief = match_brief(&m, Vec::new(), false, &on);
+        let brief = match_brief(&m, Vec::new(), false, &on, false);
         assert!(brief.show_club_names);
         assert!(brief.show_club_logos);
+        assert!(!brief.finalized);
         assert_eq!(brief.team_a[0].club.as_deref(), Some("SC Musterstadt"));
         // Standard (aus) → Flags aus, Verein reist trotzdem mit (Tablet blendet
         // ihn dann nur nicht ein).
@@ -2297,6 +2406,7 @@ mod tests {
             Vec::new(),
             false,
             &crate::config::DisplayConfig::default(),
+            false,
         );
         assert!(!brief_off.show_club_names);
         assert!(!brief_off.show_club_logos);
@@ -2593,6 +2703,43 @@ mod tests {
             ctx.tablet.monitor_court(101).sets,
             vec![(10, 8)],
             "Stand des aktuellen Matches bleibt unangetastet"
+        );
+    }
+
+    /// A2 / ADR 0017: `ownership_active` spiegelt exakt den Legacy-Schalter.
+    /// Default (`reconnect_legacy_rev = false`) → Ownership aktiv, das Tablet
+    /// folgt der server-berechneten Autorität. Legacy an → `ownership_active`
+    /// false, das Tablet fällt auf seine rev-Logik zurück (Laufzeit-Rollback).
+    #[test]
+    fn ownership_active_reflects_legacy_flag() {
+        let mut cfg = AppConfig::default();
+        assert!(!cfg.reconnect_legacy_rev, "Default: Ownership-Verhalten");
+        assert!(ownership_active(&cfg), "Default → Ownership aktiv");
+        cfg.reconnect_legacy_rev = true;
+        assert!(
+            !ownership_active(&cfg),
+            "Legacy an → Ownership inaktiv (rev)"
+        );
+    }
+
+    /// Finalisiert-Gate (A2 / ADR 0017, Regel b): Ist das Match des Felds in
+    /// BTP finalisiert (per Hand fertig eingegeben), verwirft `handle_score`
+    /// einen nachlaufenden Score fürs selbe Match — das Hand-Ergebnis wird
+    /// nicht überbügelt. Ein Score mit fremder/0-matchId bleibt vom Gate
+    /// unberührt (greift dort nur der bestehende Stale-Filter).
+    #[tokio::test]
+    async fn handle_score_drops_score_of_finalized_match() {
+        let ctx = make_ctx(1); // toter Port — es kommt nie zu BTP/Netz
+        ctx.tablet.record_score(101, 42, vec![(21, 10)]);
+        // Match 42 auf Feld 101 ist in BTP finalisiert.
+        ctx.tablet.mark_finalized(101, 42);
+        // Nachzügler fürs finalisierte Match 42 → verworfen (kein Push, kein
+        // Überschreiben des Hand-Ergebnisses).
+        handle_score(101, 21, 15, &[], 42, &ctx).await;
+        assert_eq!(
+            ctx.tablet.monitor_court(101).sets,
+            vec![(21, 10)],
+            "finalisiertes Match: nachlaufender Score verworfen"
         );
     }
 

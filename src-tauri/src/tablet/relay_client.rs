@@ -80,7 +80,7 @@ async fn serve(
     let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
     // CourtID → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
     // 2-s-Ticker unverändert dasselbe Match immer wieder pusht.
-    let mut last_match: HashMap<i64, Option<i64>> = HashMap::new();
+    let mut last_match: HashMap<i64, Option<(i64, bool)>> = HashMap::new();
     // Zuletzt an den Relay gepushte Freitext-ID (B1a: Cloud-Ansage der fernen
     // Halle). Nur neue Items (id > last) werden geschickt.
     let mut last_freetext: u64 = 0;
@@ -311,7 +311,7 @@ async fn handle_frame(
     ctx: &Arc<ServerCtx>,
     frame: RelayFrame,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<i64>>,
+    last_match: &mut HashMap<i64, Option<(i64, bool)>>,
 ) {
     match frame {
         RelayFrame::TabletConnected { court_id, .. } => {
@@ -489,20 +489,33 @@ fn push_court(
     ctx: &ServerCtx,
     court_id: i64,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<i64>>,
+    last_match: &mut HashMap<i64, Option<(i64, bool)>>,
 ) {
     let court_label = ctx.tablet.court_display_label(court_id);
     let hall = ctx.tablet.court_hall(court_id);
+    // A2 / ADR 0017, Regel b: Wie im LAN-Pfad (`push_match`) ein in BTP
+    // finalisiertes Match dem Tablet mit `finalized:true` nachreichen, solange
+    // es noch dieselbe matchId trägt — `match_for_court` liefert es nicht mehr
+    // (Status Finished ≠ OnCourt). `finalized` reist vom Host (= BTP-Wahrheit)
+    // im MatchBrief zum Relay und weiter zum Tablet.
     let current = ctx.tablet.match_for_court(court_id);
-    let current_id = current.as_ref().map(|m| m.id);
-    if last_match.get(&court_id) == Some(&current_id) {
+    let (effective, finalized) = match current {
+        Some(m) => (Some(m), false),
+        None => match ctx.tablet.recently_finalized(court_id) {
+            Some(mid) => (ctx.tablet.snapshot_match(mid), true),
+            None => (None, false),
+        },
+    };
+    let finalized = finalized && effective.is_some();
+    let key = effective.as_ref().map(|m| (m.id, finalized));
+    if last_match.get(&court_id) == Some(&key) {
         return;
     }
-    last_match.insert(court_id, current_id);
-    let frame = match current {
+    last_match.insert(court_id, key);
+    let frame = match effective {
         Some(m) => {
             tracing::info!(
-                "Feld {court_id}: Match {} ans Tablet zugewiesen (Cloud)",
+                "Feld {court_id}: Match {} ans Tablet zugewiesen (Cloud, finalized={finalized})",
                 m.id
             );
             HostFrame::MatchAssigned {
@@ -511,7 +524,7 @@ fn push_court(
                 hall,
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(&m, sk, ska, &ctx.app_config().display)
+                    match_brief(&m, sk, ska, &ctx.app_config().display, finalized)
                 },
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
                 // wie die Spielübersicht) – auch bei Reconnect identisch.
@@ -534,7 +547,7 @@ fn push_court(
 fn push_all_courts(
     ctx: &ServerCtx,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<i64>>,
+    last_match: &mut HashMap<i64, Option<(i64, bool)>>,
 ) {
     for court in ctx.tablet.courts() {
         push_court(ctx, court.id, tx, last_match);
@@ -745,8 +758,16 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
     // Turnier geladen hat (Review-Befund). Der Relay übernimmt eine leere
     // Feldliste nicht (schützt das Tablet-Feldwechsel-Menü bei Aussetzern).
     let azure_tts = azure_share(ctx);
+    // A2 / ADR 0017: den Legacy-rev-Schalter mit durchreichen, damit der
+    // Relay `ownership_active` setzen kann (Laufzeit-Rollback im Cloud-Modus).
+    // Frisch aus der Config, wie überall — der Schalter greift ohne Neustart.
+    let reconnect_legacy_rev = ctx.app_config().reconnect_legacy_rev;
     if !courts.is_empty() || azure_tts.is_some() {
-        let _ = tx.send(text(&HostFrame::Courts { courts, azure_tts }));
+        let _ = tx.send(text(&HostFrame::Courts {
+            courts,
+            azure_tts,
+            reconnect_legacy_rev,
+        }));
     }
 }
 
@@ -1059,7 +1080,7 @@ mod tests {
     fn push_court_sends_once_dedups_then_clears() {
         let ctx = ctx_with(vec![match_on_court(42, 101)]);
         let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
-        let mut last: HashMap<i64, Option<i64>> = HashMap::new();
+        let mut last: HashMap<i64, Option<(i64, bool)>> = HashMap::new();
 
         // 1) Zuweisung → genau ein MatchAssigned.
         push_court(&ctx, 101, &tx, &mut last);
