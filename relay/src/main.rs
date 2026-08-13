@@ -90,6 +90,12 @@ const HEARTBEAT: Duration = Duration::from_secs(30);
 /// Ping-Intervall der HOST-Verbindung – bewusst enger als [`HEARTBEAT`],
 /// damit `host_last_seen` (Pong-Stempel) höchstens ~5 s alt ist und die
 /// Stale-Erkennung schnell und sicher entscheiden kann.
+///
+/// **Kopplung (nicht ohne Abstimmung erhöhen):** Der Host-Client
+/// (`src-tauri/.../relay_client.rs`, `RELAY_READ_IDLE = 15 s`, Hebel D /
+/// ADR 0020) verlässt sich darauf, dass dieser Ping ≤ 5 s bleibt — er
+/// erkennt eine half-open Verbindung an ausbleibendem Empfang und pingt
+/// selbst nicht. Wird `HOST_PING` größer, muss `RELAY_READ_IDLE` mitziehen.
 const HOST_PING: Duration = Duration::from_secs(5);
 
 /// Nach so viel Empfangs-Stille gilt eine Host-Verbindung als tot

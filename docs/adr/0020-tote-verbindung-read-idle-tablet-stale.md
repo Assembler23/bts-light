@@ -63,3 +63,9 @@ geteilte Konstante `HEARTBEAT` (30 s, auch für `monitor_conn`) bleibt unveränd
   ≤ 30 Felder, wie `host_conn` je Host). Kein Kill-Switch → falls sich die
   Schwellen im Feld doch als zu aggressiv zeigen, ist eine Konstanten-Anpassung +
   Deploy nötig (bewusst, da Fehl-Drops harmlos sind).
+- **Versionierung:** Nur die App-Version wird gebumpt (v0.9.199);
+  `relay/Cargo.toml` bleibt bei `0.1.0`. Die Relay-Crate-Version ist **nicht**
+  release-/auto-update-gekoppelt und wurde auch in den bisherigen relay-
+  berührenden PRs (A1/A3 #204, B #206, C #207) nie verändert — der Relay wird
+  aus demselben Git-Tag rebuilt und vom Admin deployt. Ein separater Relay-Bump
+  bliebe rein kosmetisch und bräche die bestehende Konvention.
