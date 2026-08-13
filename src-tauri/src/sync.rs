@@ -83,6 +83,10 @@ pub struct SyncEngine {
     /// Stelle im Zyklus als der der Zähltafelbediener. Ein gemeinsamer
     /// Merker würde beide aneinanderketten.
     officials_oncourt_prev: HashMap<i64, i64>,
+    /// Zuletzt nach BTP geschriebene Besetzung je Match (ADR 0021).
+    /// BTP übernimmt asynchron; ohne diesen Merker schriebe jeder Zyklus
+    /// denselben Wert erneut, bis der Snapshot nachzieht.
+    officials_written: HashMap<i64, (i64, i64)>,
     /// CourtID → Zeitpunkt (Unix-ms), seit dem ein Feld frei ist (kein Match
     /// referenziert es). Grundlage der Wartezeit der automatischen Feldvergabe.
     court_free_since: HashMap<i64, u64>,
@@ -209,6 +213,43 @@ fn prepare_btp_retry(
 /// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
 /// Snapshot noch ruf-bar (Scheduled, beide Mannschaften stehen). Aufs Feld
 /// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0. Rein.
+/// Die Schiedsrichter-Änderungen, die noch nach BTP müssen (ADR 0021).
+///
+/// Rein und damit testbar: Soll-Stand ist die **wirksame** Besetzung
+/// (BTP gewinnt, sonst die lokale Zuweisung), Ist-Stand das, was der
+/// Snapshot am Match trägt. Geschrieben wird nur der Unterschied — und
+/// nicht erneut, was schon geschrieben und von BTP noch nicht
+/// zurückgemeldet wurde (`geschrieben`); BTP übernimmt asynchron (≤1 s,
+/// Messung 13.08.2026), sonst liefe jeder Zyklus in denselben Write.
+fn officials_entries(
+    tablet: &TabletState,
+    snapshot: &BtpSnapshot,
+    geschrieben: &HashMap<i64, (i64, i64)>,
+) -> Vec<crate::btp::proto::OfficialsEntry> {
+    let store = tablet.officials_store();
+    if !store.enabled() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for m in &snapshot.matches {
+        let Some((sr, ar)) = tablet.officials_for_write(m) else {
+            continue;
+        };
+        let ist = (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0));
+        if ist == (sr, ar) || geschrieben.get(&m.id) == Some(&(sr, ar)) {
+            continue;
+        }
+        out.push(crate::btp::proto::OfficialsEntry {
+            match_id: m.id,
+            draw_id: m.draw_id,
+            planning_id: m.planning_id,
+            official1_id: sr,
+            official2_id: ar,
+        });
+    }
+    out
+}
+
 fn highlight_desired(
     calls: &[crate::tablet::state::PreparationCall],
     snapshot: &BtpSnapshot,
@@ -265,6 +306,7 @@ impl SyncEngine {
             last_topology: None,
             oncourt_prev: HashMap::new(),
             officials_oncourt_prev: HashMap::new(),
+            officials_written: HashMap::new(),
             court_free_since: HashMap::new(),
             pending_auto: HashMap::new(),
             last_btp_retry_flush: None,
@@ -387,6 +429,44 @@ impl SyncEngine {
             }
             // Nicht übernehmen → nächster Zyklus versucht es erneut.
             Err(e) => tracing::warn!("BTP-Highlight-Update fehlgeschlagen: {e}"),
+        }
+    }
+
+    /// Schiedsrichter-Zuweisungen nach BTP zurückschreiben (ADR 0021).
+    ///
+    /// Muster [`reconcile_highlights`]: nur der Unterschied geht raus, der
+    /// Stand wird **nur bei `Ok`** übernommen — ein fehlgeschlagener Write
+    /// wird im nächsten Zyklus wiederholt. BTP übernimmt asynchron (≤ 1 s,
+    /// Messung 13.08.2026), deshalb der Merker: Ohne ihn schriebe jeder
+    /// Zyklus dasselbe erneut, bis der Snapshot nachzieht.
+    async fn reconcile_officials(
+        &mut self,
+        config: &AppConfig,
+        tablet: &TabletState,
+        snapshot: &BtpSnapshot,
+    ) {
+        let entries = officials_entries(tablet, snapshot, &self.officials_written);
+        if entries.is_empty() {
+            // Aufräumen: Was BTP inzwischen trägt, muss nicht länger als
+            // „geschrieben" gemerkt werden (sonst wüchse die Karte über das
+            // Turnier).
+            self.officials_written
+                .retain(|id, _| snapshot.matches.iter().any(|m| m.id == *id));
+            return;
+        }
+        match crate::tablet::server::write_officials_to_btp(config, &entries).await {
+            Ok(()) => {
+                tracing::info!(
+                    "BTP-Schiedsrichter aktualisiert: {} Änderung(en)",
+                    entries.len()
+                );
+                for e in &entries {
+                    self.officials_written
+                        .insert(e.match_id, (e.official1_id, e.official2_id));
+                }
+            }
+            // Nicht übernehmen → nächster Zyklus versucht es erneut.
+            Err(e) => tracing::warn!("BTP-Schiedsrichter-Update fehlgeschlagen: {e}"),
         }
     }
 
@@ -948,6 +1028,9 @@ impl SyncEngine {
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
                 court_id: court.id,
+                // Die Besetzung wandert mit ins Zuweisungs-Update
+                // (ADR 0021) — ein Request statt zwei.
+                officials: tablet.officials_for_write(m),
             });
             // Feld gilt jetzt als belegt – Wartezeit zurücksetzen und die
             // Zuweisung als „unterwegs" merken, damit weder Feld noch Match bis
@@ -1104,6 +1187,9 @@ impl SyncEngine {
         // Aufrufe zusätzlich in BTP sichtbar machen (P1, Highlight-Flag) —
         // nur der Diff zum letzten Stand, nur wenn sich etwas geändert hat.
         self.reconcile_highlights(config, tablet, &snapshot).await;
+        // Schiedsrichter-Besetzung zurückschreiben (ADR 0021) — direkt nach
+        // den Highlights, aus demselben Snapshot.
+        self.reconcile_officials(config, tablet, &snapshot).await;
         // Meldeliste für den Hallen-Check-In (ADR 0009) vorbereiten — gesendet
         // wird sie erst NACH dem Liveticker-Push (siehe unten).
         let roster = self.plan_checkin_roster(config, &snapshot);
@@ -1987,6 +2073,73 @@ mod tests {
         assert_eq!(snap2.matches[0].finished_at, Some(first));
     }
 
+    #[test]
+    fn officials_writes_only_the_difference_to_btp() {
+        // ADR 0021: geschrieben wird, was BTP noch nicht trägt — und nur das.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut m1 = oncourt_named(10, 5, "A", "B");
+        m1.draw_id = 3;
+        m1.planning_id = 1002;
+        let mut m2 = oncourt_named(11, 6, "C", "D");
+        m2.draw_id = 3;
+        m2.planning_id = 1003;
+        // BTP trägt an Match 11 schon denselben Schiedsrichter.
+        m2.official1_id = Some(2);
+        let snap = snap_officials(vec![m1, m2], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
+        tablet
+            .officials_store()
+            .assign(11, crate::tablet::officials::OfficialRole::Sr, 2);
+
+        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        assert_eq!(offen.len(), 1, "nur Match 10 weicht ab");
+        assert_eq!(offen[0].match_id, 10);
+        assert_eq!(offen[0].draw_id, 3);
+        assert_eq!(offen[0].planning_id, 1002);
+        assert_eq!(offen[0].official1_id, 1);
+        assert_eq!(offen[0].official2_id, 0, "kein AR ⇒ 0");
+
+        // Schon geschrieben (und von BTP noch nicht zurückgemeldet) ⇒ nicht
+        // erneut schreiben, sonst liefe jeder Zyklus in denselben Write.
+        let mut geschrieben = HashMap::new();
+        geschrieben.insert(10i64, (1i64, 0i64));
+        assert!(officials_entries(&tablet, &snap, &geschrieben).is_empty());
+
+        // Ohne Schiedsrichter-Betrieb wird gar nichts geschrieben.
+        tablet.officials_store().set_enabled(false);
+        assert!(officials_entries(&tablet, &snap, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn officials_write_clears_a_removed_assignment_with_zero() {
+        // Löschen ist die 0 — sonst bliebe ein abgezogener Schiedsrichter in
+        // BTP stehen.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut m = oncourt_named(10, 5, "A", "B");
+        m.draw_id = 3;
+        m.planning_id = 1002;
+        m.official1_id = Some(1); // BTP kennt ihn noch
+        let snap = snap_officials(vec![m], &[1]);
+        tablet.set_snapshot(snap.clone());
+        // Lokal ausdrücklich entfernt.
+        tablet
+            .officials_store()
+            .clear_assignment(10, crate::tablet::officials::OfficialRole::Sr);
+
+        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        assert_eq!(offen.len(), 1);
+        assert_eq!(
+            offen[0].official1_id, 0,
+            "das ausdrückliche Lösen geht als 0 nach BTP — sonst bliebe der \
+             Schiedsrichter dort für immer stehen"
+        );
+    }
+
     // --- Schiedsrichter-Rotation (Spec schiedsrichter-management, Nr. 4) ---
 
     fn official_named(id: i64) -> crate::btp::model::BtpOfficial {
@@ -2041,8 +2194,9 @@ mod tests {
         engine.track_officials(&snap, &tablet);
         assert_eq!(
             tablet.officials_store().assignment(10).sr,
-            None,
-            "unverändertes Feld wird nicht neu bestückt"
+            Some(0),
+            "unverändertes Feld wird nicht neu bestückt; die Löschung bleibt \
+             als ausdrückliches „keiner“ stehen — so geht sie nach BTP"
         );
     }
 

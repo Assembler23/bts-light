@@ -715,3 +715,16 @@ erneut; schlägt auch das fehl, wird sie wieder eingereiht. Ein doppelter
 toggelt nichts). Die Queue lebt im Speicher — ein App-Neustart leert sie
 (das Tablet hält sein Ergebnis ohnehin bis zum `ok:true`). Bei bestätigt
 leerem Turnier-Stand (Leer-Snapshot-Guard) pausiert der Nachschub.
+
+### Officials schreiben (Umsetzung ab v0.9.201)
+
+Zwei Formen, beide am 13.08.2026 gemessen und angenommen:
+
+- **eigenständig** (`proto.rs::officials_request`) — `Match{ID, DrawID,
+  PlanningID, Official1ID, Official2ID}`, `0` löscht den Dienst;
+- **eingebettet** in `court_assign_request` beim Ruf aufs Feld
+  (`MatchCourt::officials`, additiv).
+
+Beide **ohne** `Status` (Check-in-Bitfeld, Regression v0.9.103) und ohne
+Ergebnisfelder. BTP übernimmt asynchron (≤ 1 s) — zurückgelesen wird über
+den nächsten Snapshot, nicht per Einmal-Check.

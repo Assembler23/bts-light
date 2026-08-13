@@ -4,6 +4,46 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.201
+
+- **Schiedsrichtermanagement** (Spec
+  [schiedsrichter-management](features/schiedsrichter-management.md),
+  ADR 0021/0022) — standardmäßig **aus**; Turniere ohne Schiedsrichter
+  verhalten sich unverändert. Eingeschaltet unter Einstellungen →
+  Schiedsrichter:
+  - **Liste aus BTP.** Der `Officials`-Container wird gelesen; BTS Light
+    pflegt nur die Zusatzdaten, die BTP nicht kennt — Rotationsreihenfolge,
+    Pausen, Stammverein (BTP überträgt keinen), Sperrlisten und die
+    feldweisen Schalter. Alles turniergebunden in
+    `officials-state.json`, beim Turnierwechsel verworfen.
+  - **Einteilung je Spiel** aus dem Client (neuer Menüpunkt
+    „Schiedsrichter") und aus TL-Web, jederzeit änderbar, auch mitten im
+    Spiel. Eine Zuweisung mit Konflikt (eigener Verein, gesperrter Verein,
+    gesperrter Spieler) wird **ausgeführt** und nur gekennzeichnet — die
+    Turnierleitung entscheidet.
+  - **Automatische Rotation**, getrennt für Schiedsrichter und
+    Aufschlagrichter und je Feld abschaltbar: Ein neu belegtes Feld bekommt
+    den nächsten nicht pausierten, dienstfreien, konfliktfreien Official;
+    nach dem Spiel rückt er ans Ende. Von Hand gelöste Zuweisungen füllt die
+    Rotation **nicht** wieder auf.
+  - **Feldweise Tabletbediener-Vergabe:** Auf Feldern, die der
+    Schiedsrichter selbst bedient, verbraucht das Feld keinen Wartenden aus
+    der Zähltafel-Schlange mehr (Default unverändert „alle Felder aktiv").
+  - **Anzeige** am Schiri-Tablet (LAN, Cloud und ferne Halle), in der
+    Spielübersicht und in TL-Web; **Ansage** von Schiedsrichter und
+    Aufschlagrichter am Ende der Feld-Ansage, plus manueller Knopf für
+    nachträgliche Zuweisungen.
+  - **Rücksync nach BTP** bei jeder Änderung (eigenständiges Match-Update,
+    Löschen als `0`, ohne `Status`-Feld) und zusätzlich eingebettet in das
+    Zuweisungs-Update beim Ruf aufs Feld. Ein fehlgeschlagener Write wird im
+    nächsten Sync-Zyklus wiederholt.
+  - **Datenschutz:** Sperrlisten und Stammverein stehen nie im Zustand, den
+    alle Turnierleitungs-Geräte bekommen — sie kommen nur auf gezielte, per
+    Geräte-Token authentifizierte Anfrage. Zwei Wächter-Tests halten das
+    fest.
+  - **Cloud-Hinweis:** Die Schiedsrichter-Bedienung in TL-Web funktioniert
+    über den Cloud-Weg erst nach dem Relay-Deploy; im Hallennetz sofort.
+
 ## v0.9.200
 
 - **Cloud-Monitore und Cloud-Übersicht zeigen jetzt auch die Stände von

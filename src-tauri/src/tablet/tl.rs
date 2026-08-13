@@ -148,6 +148,10 @@ pub(crate) fn plan_court_action(
                     draw_id: m.draw_id,
                     planning_id: m.planning_id,
                     court_id,
+                    // Bleibt hier leer: Diese Funktion ist rein (kein
+                    // Zustand). Die Besetzung trägt der Aufrufer nach, der
+                    // den Roster kennt (ADR 0021).
+                    officials: None,
                 }]
             })
             .unwrap_or_default()
@@ -1058,7 +1062,22 @@ pub(crate) async fn execute(
     let reserved = ctx.tablet.reserved_courts(now_ms);
 
     let plan = match plan_court_action(&snap, &config, &locked, &reserved, &action) {
-        Ok(plan) => plan,
+        Ok(mut plan) => {
+            // Beim Ruf aufs Feld die Schiedsrichter-Besetzung mitschreiben
+            // (ADR 0021). `plan_court_action` bleibt rein und kennt den
+            // Roster nicht — deshalb hier, wo der Zustand vorliegt.
+            for mc in &mut plan.match_courts {
+                if mc.court_id == 0 {
+                    continue; // Freigeben lässt die Besetzung unangetastet
+                }
+                mc.officials = snap
+                    .matches
+                    .iter()
+                    .find(|m| m.id == mc.match_id)
+                    .and_then(|m| ctx.tablet.officials_for_write(m));
+            }
+            plan
+        }
         Err(response) => {
             // Auch Ablehnungen werden festgehalten — nur so lässt sich nach
             // dem Turnier zählen, wie oft sich zwei Geräte in die Quere

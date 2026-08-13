@@ -236,6 +236,26 @@ pub struct MatchCourt {
     pub planning_id: i64,
     /// Neue Court-ID am Match; `0` = Zuordnung löschen.
     pub court_id: i64,
+    /// Schiedsrichter und Aufschlagrichter (`Official1ID`, `Official2ID`),
+    /// die beim Ruf aufs Feld **mitgeschrieben** werden sollen; `0` löscht
+    /// den jeweiligen Dienst (ADR 0021). `None` = gar nicht anfassen —
+    /// Turniere ohne Schiedsrichter schreiben dann kein zusätzliches Feld,
+    /// und der Request bleibt exakt wie bisher.
+    pub officials: Option<(i64, i64)>,
+}
+
+/// Ein Match, dessen Schiedsrichter-Besetzung eigenständig nach BTP
+/// geschrieben wird (ADR 0021: Rücksync bei **jeder** Änderung, nicht nur
+/// beim Ruf aufs Feld). Muster [`HighlightEntry`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OfficialsEntry {
+    pub match_id: i64,
+    pub draw_id: i64,
+    pub planning_id: i64,
+    /// Schiedsrichter (`Official1ID`); `0` = löschen.
+    pub official1_id: i64,
+    /// Aufschlagrichter (`Official2ID`); `0` = löschen.
+    pub official2_id: i64,
 }
 
 /// Ein Match, dessen `Highlight`-Flag in BTP gesetzt/gelöscht werden soll
@@ -285,6 +305,46 @@ pub fn highlight_request(
     wire::encode_message(&xml::encode(&nodes))
 }
 
+/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **nur** die
+/// Schiedsrichter-Besetzung schreibt (ADR 0021).
+///
+/// Muster [`highlight_request`]: Identität (`ID`, `DrawID`, `PlanningID`)
+/// plus die beiden Official-Felder, sonst nichts — insbesondere **kein**
+/// `Status` (Check-in-Bitfeld, Regression v0.9.103). `0` löscht den Dienst;
+/// gemessen am 13.08.2026 nimmt BTP beide Schreibformen an und übernimmt
+/// asynchron (≤1 s), weshalb der Sync-Loop den Stand zurückliest statt ihn
+/// zu glauben.
+pub fn officials_request(
+    entries: &[OfficialsEntry],
+    session_key: &str,
+    password: Option<&str>,
+) -> Vec<u8> {
+    let match_nodes: Vec<Node> = entries
+        .iter()
+        .map(|e| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("ID", e.match_id),
+                    Node::integer("DrawID", e.draw_id),
+                    Node::integer("PlanningID", e.planning_id),
+                    Node::integer("Official1ID", e.official1_id),
+                    Node::integer("Official2ID", e.official2_id),
+                ],
+            )
+        })
+        .collect();
+    let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
+    nodes.push(Node::group(
+        "Update",
+        vec![Node::group(
+            "Tournament",
+            vec![Node::group("Matches", match_nodes)],
+        )],
+    ));
+    wire::encode_message(&xml::encode(&nodes))
+}
+
 /// Fertige Wire-Bytes für einen `SENDUPDATE`, der **Feld-Zuweisungen** nach BTP
 /// schreibt: einen `Courts`-Block (`Court{ID,[MatchID]}`, MatchID weglassen =
 /// frei) UND optional einen `Matches`-Block, der `Match.CourtID` setzt/löscht.
@@ -318,19 +378,23 @@ pub fn court_assign_request(
         let match_nodes: Vec<Node> = match_courts
             .iter()
             .map(|mc| {
-                Node::group(
-                    "Match",
-                    vec![
-                        Node::integer("ID", mc.match_id),
-                        // KEIN `Status` schreiben (Check-in-Bitfeld in BTP) —
-                        // sonst würden die Spieler bei jeder Feldzuweisung als
-                        // nicht eingecheckt markiert (rot→gelb). BTP behält den
-                        // Stand, wenn wir das Feld weglassen.
-                        Node::integer("CourtID", mc.court_id),
-                        Node::integer("DrawID", mc.draw_id),
-                        Node::integer("PlanningID", mc.planning_id),
-                    ],
-                )
+                let mut children = vec![
+                    Node::integer("ID", mc.match_id),
+                    // KEIN `Status` schreiben (Check-in-Bitfeld in BTP) —
+                    // sonst würden die Spieler bei jeder Feldzuweisung als
+                    // nicht eingecheckt markiert (rot→gelb). BTP behält den
+                    // Stand, wenn wir das Feld weglassen.
+                    Node::integer("CourtID", mc.court_id),
+                    Node::integer("DrawID", mc.draw_id),
+                    Node::integer("PlanningID", mc.planning_id),
+                ];
+                // Officials nur, wenn dieses Turnier sie führt (ADR 0021) —
+                // sonst bleibt der Request unverändert zum Bestand.
+                if let Some((sr, ar)) = mc.officials {
+                    children.push(Node::integer("Official1ID", sr));
+                    children.push(Node::integer("Official2ID", ar));
+                }
+                Node::group("Match", children)
             })
             .collect();
         tournament_children.push(Node::group("Matches", match_nodes));
@@ -777,6 +841,7 @@ mod tests {
                 draw_id: 3,
                 planning_id: 1002,
                 court_id: 0,
+                officials: None,
             }],
             "S",
             None,
@@ -794,6 +859,80 @@ mod tests {
             xml::find(&m, "Status").is_none(),
             "kein Status (Check-in-Bitfeld)"
         );
+    }
+
+    #[test]
+    fn officials_request_writes_only_identity_and_officials() {
+        // ADR 0021: eigenstaendiger Write je Aenderung — Identitaet plus
+        // Official1/2, sonst nichts. Loeschen ist die 0.
+        let req = officials_request(
+            &[OfficialsEntry {
+                match_id: 42,
+                draw_id: 3,
+                planning_id: 1002,
+                official1_id: 5,
+                official2_id: 0,
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "ID"), Some(42));
+        assert_eq!(child_int(&m, "DrawID"), Some(3));
+        assert_eq!(child_int(&m, "PlanningID"), Some(1002));
+        assert_eq!(child_int(&m, "Official1ID"), Some(5));
+        assert_eq!(child_int(&m, "Official2ID"), Some(0), "0 = loeschen");
+        // Regression (v0.9.103): NIEMALS das Status-Bitfeld schreiben.
+        assert!(
+            xml::find(&m, "Status").is_none(),
+            "kein Status (Check-in-Bitfeld)"
+        );
+        assert!(xml::find(&m, "CourtID").is_none(), "nur die Officials");
+        assert!(xml::find(&m, "Winner").is_none());
+    }
+
+    #[test]
+    fn court_assign_request_carries_officials_when_set() {
+        // Beim Ruf aufs Feld wandern die Officials additiv mit — ein
+        // Request statt zwei (ADR 0021), weiterhin ohne `Status`.
+        let req = court_assign_request(
+            &[CourtAssignment {
+                court_id: 7,
+                match_id: Some(42),
+            }],
+            &[MatchCourt {
+                match_id: 42,
+                draw_id: 3,
+                planning_id: 1002,
+                court_id: 7,
+                officials: Some((5, 0)),
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "CourtID"), Some(7));
+        assert_eq!(child_int(&m, "Official1ID"), Some(5));
+        assert_eq!(child_int(&m, "Official2ID"), Some(0));
+        assert!(xml::find(&m, "Status").is_none());
+
+        // Ohne Officials-Angabe bleibt der Request exakt wie bisher —
+        // Turniere ohne Schiedsrichter schreiben kein zusaetzliches Feld.
+        let ohne = court_assign_request(
+            &[],
+            &[MatchCourt {
+                match_id: 42,
+                draw_id: 3,
+                planning_id: 1002,
+                court_id: 7,
+                officials: None,
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&ohne);
+        assert!(xml::find(&m, "Official1ID").is_none());
+        assert!(xml::find(&m, "Official2ID").is_none());
     }
 
     #[test]

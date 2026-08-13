@@ -611,3 +611,10 @@ verliehen):
 - **`docs/ops/deployment.md` teils veraltet** (badhub-Repo): Der Abschnitt
   „Deploy: Produktion" beschreibt noch das KAS-`deploy_prod.sh`, obwohl
   Prod längst über `deploy_hetzner.sh` auf Hetzner läuft.
+
+## Schiedsrichtermanagement — umgesetzt (v0.9.201)
+
+Die Spec [features/schiedsrichter-management.md](features/schiedsrichter-management.md)
+ist vollständig umgesetzt (Doku: [schiedsrichter-management.md](schiedsrichter-management.md)).
+Offen bleiben der Feldtest an einem Turnier mit Schiedsrichtern und — für
+den Cloud-Weg — der Relay-Deploy auf badhub.de vor dem Client-Release.

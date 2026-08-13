@@ -789,6 +789,35 @@ impl TabletState {
         &self.officials
     }
 
+    /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**
+    /// geschrieben werden soll (ADR 0021): `(Official1ID, Official2ID)`,
+    /// `0` = kein Dienst.
+    ///
+    /// `None` heißt „gar nicht anfassen": ohne Schiedsrichter-Betrieb und
+    /// bei einem Spiel, das in BTS Light nie eingeteilt wurde, bleibt der
+    /// Request exakt wie im Bestand.
+    ///
+    /// Hier — und **nur** hier — schlägt die lokale Absicht den BTP-Stand:
+    /// Wer von Hand umteilt oder eine Zuweisung löst, will genau das nach
+    /// BTP schreiben; sonst ließe sich eine einmal geschriebene Besetzung nie
+    /// wieder ändern. Die **Anzeige** folgt weiter der Spec-Regel „BTP
+    /// gewinnt" (`OfficialsStore::effective`) — bestätigt ist erst, was der
+    /// nächste Snapshot zeigt. Ein Dienst, den BTS Light nie angefasst hat,
+    /// wird unverändert mitgeschrieben statt gelöscht.
+    pub fn officials_for_write(&self, m: &BtpMatch) -> Option<(i64, i64)> {
+        if !self.officials.enabled() {
+            return None;
+        }
+        let lokal = self.officials.assignment(m.id);
+        if lokal.sr.is_none() && lokal.ar.is_none() {
+            return None;
+        }
+        Some((
+            lokal.sr.or(m.official1_id).unwrap_or(0),
+            lokal.ar.or(m.official2_id).unwrap_or(0),
+        ))
+    }
+
     /// Nur die Namen von SR und AR eines Spiels — die Form, die ins
     /// [`MatchBrief`](relay_proto::MatchBrief) ans Tablet geht (LAN wie
     /// Cloud, ferne Halle eingeschlossen). Holt sich den Snapshot selbst,

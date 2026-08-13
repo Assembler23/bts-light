@@ -1602,6 +1602,12 @@ pub async fn assign_court(
             draw_id,
             planning_id,
             court_id,
+            // Beim Ruf aufs Feld wandert die Besetzung mit (ADR 0021) —
+            // ein Request statt zwei.
+            officials: state
+                .tablet
+                .snapshot_match(match_id)
+                .and_then(|m| state.tablet.officials_for_write(&m)),
         }],
         None => Vec::new(),
     };
@@ -1637,6 +1643,9 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
             draw_id: m.draw_id,
             planning_id: m.planning_id,
             court_id: 0, // 0 = Feldzuordnung am Match löschen
+            // Beim Freigeben die Besetzung nicht anfassen: Das Spiel ist
+            // nicht zu Ende, es wird nur vom Feld genommen.
+            officials: None,
         }],
         None => Vec::new(),
     };

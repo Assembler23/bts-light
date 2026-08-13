@@ -184,9 +184,19 @@ pub struct MatchOfficials {
 }
 
 impl MatchOfficials {
+    /// `None` = in BTS Light nie angefasst, `Some(0)` = **ausdrücklich
+    /// keiner** (von Hand gelöst). Der Unterschied zählt: Ohne ihn ließe
+    /// sich ein Schiedsrichter, den BTP schon trägt, nie wieder entfernen —
+    /// der Rücksync fände keinen Unterschied und schriebe nie eine `0`.
     fn is_empty(&self) -> bool {
         self.sr.is_none() && self.ar.is_none()
     }
+}
+
+/// Eine Official-ID als echter Dienst: `Some(0)` (ausdrücklich keiner) und
+/// `None` werden beide zu „kein Dienst".
+fn dienst(id: Option<i64>) -> Option<i64> {
+    id.filter(|v| *v > 0)
 }
 
 /// Feldweise Schalter (Spec Nr. 6): SR-Rotation, AR-Rotation und
@@ -485,10 +495,17 @@ impl OfficialsStore {
     }
 
     /// Zuweisung eines Spiels lösen.
+    ///
+    /// Merkt sich das als **ausdrückliches** „keiner" (`Some(0)`), nicht als
+    /// „nie angefasst": Nur so schreibt der Rücksync die `0` nach BTP und
+    /// der Dienst verschwindet auch dort (ADR 0021).
     pub fn clear_assignment(&self, match_id: i64, role: OfficialRole) {
+        if match_id <= 0 {
+            return;
+        }
         self.mit_zuweisung(match_id, |a| match role {
-            OfficialRole::Sr => a.sr = None,
-            OfficialRole::Ar => a.ar = None,
+            OfficialRole::Sr => a.sr = Some(0),
+            OfficialRole::Ar => a.ar = Some(0),
         });
     }
 
@@ -528,8 +545,8 @@ impl OfficialsStore {
     ) -> MatchOfficials {
         let lokal = self.assignment(match_id);
         MatchOfficials {
-            sr: btp_sr.or(lokal.sr),
-            ar: btp_ar.or(lokal.ar),
+            sr: dienst(btp_sr).or(dienst(lokal.sr)),
+            ar: dienst(btp_ar).or(dienst(lokal.ar)),
         }
     }
 
@@ -1193,18 +1210,21 @@ mod tests {
         store.assign(501, OfficialRole::Sr, 3);
         assert_eq!(store.assignments().len(), 2);
 
+        // Gelöst heißt **ausdrücklich keiner** (`Some(0)`), nicht „nie
+        // angefasst" — nur so schreibt der Rücksync die 0 nach BTP.
         store.clear_assignment(500, OfficialRole::Ar);
         assert_eq!(
             store.assignment(500),
             MatchOfficials {
                 sr: Some(1),
-                ar: None
+                ar: Some(0)
             }
         );
-        // Letzte Rolle gelöst ⇒ kein leerer Rest-Eintrag.
+        // Wirksam ist der Dienst damit weg.
+        assert_eq!(store.effective(500, None, None).ar, None);
         store.clear_assignment(500, OfficialRole::Sr);
-        assert_eq!(store.assignment(500), MatchOfficials::default());
-        assert_eq!(store.assignments().len(), 1);
+        assert_eq!(store.effective(500, None, None), MatchOfficials::default());
+        assert_eq!(store.assignments().len(), 2, "die Absicht bleibt gemerkt");
 
         // Globales Abschalten räumt alles (Spec Nr. 1).
         store.clear_assignments();

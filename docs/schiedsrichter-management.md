@@ -8,9 +8,9 @@ ADRs: [0021 (Rücksync)](adr/0021-officials-ruecksync-eigenstaendiger-write.md),
 [0022 (Ablage Turnierdaten)](adr/0022-officials-turnierdaten-eigene-datei.md) ·
 BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibweg").
 
-> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–10 des Spec-Plans
-> (bis einschließlich Tablet-Anzeige und Ansagen). Der Rücksync nach BTP
-> folgt als letzter Schritt; dieser Text wächst mit.
+> **Stand: vollständig umgesetzt** (v0.9.201, Schritte 1–12 des Spec-Plans).
+> Offen ist nur der Feldtest am Turnier — und im Cloud-Betrieb der
+> Relay-Deploy, ohne den TL-Web die neuen Aktionen nicht absetzen kann.
 
 ## Konfiguration
 
@@ -279,3 +279,38 @@ Azure-Pfad XML-escaped im SSML. Damit sagen sie Wort für Wort dasselbe.
   Client neben der Einteilung und in TL-Web an der Feld-Kachel; TL-Web löst
   ihn über `announce_officials` aus, gesprochen wird in der Zielhalle
   (`AnnounceJobKind::Officials`).
+
+## Rücksync nach BTP (Schritt 11, ADR 0021)
+
+Jede Änderung der Besetzung geht nach BTP — auf zwei Wegen:
+
+1. **Eigenständig**, `proto.rs::officials_request` (Muster
+   `highlight_request`): Identität (`ID`, `DrawID`, `PlanningID`) plus
+   `Official1ID`/`Official2ID`, sonst nichts. Löschen ist die `0`; **kein**
+   `Status`-Feld (Check-in-Bitfeld, Regression v0.9.103).
+   Der Sync-Loop ruft `reconcile_officials` direkt nach den Highlights: Es
+   geht nur der **Unterschied** raus, der Stand wird nur bei `Ok`
+   übernommen, ein Fehlschlag wird im nächsten Zyklus wiederholt. Weil BTP
+   asynchron übernimmt (≤ 1 s, Messung 13.08.2026), merkt sich die Engine
+   das Geschriebene, bis der Snapshot nachzieht.
+2. **Eingebettet** beim Ruf aufs Feld: `court_assign_request` trägt die
+   Officials additiv mit (`MatchCourt::officials`), verdrahtet an allen drei
+   Einstiegen (`commands.rs::assign_court`, `sync.rs::auto_assign`,
+   TL-Web-Pfad in `tl.rs`). Ohne Schiedsrichter-Betrieb bleibt der Request
+   **exakt** wie im Bestand — dann steht dort kein zusätzliches Feld.
+
+### Anzeigen und Schreiben folgen verschiedenen Regeln
+
+Das ist Absicht und der einzige Punkt, an dem die Spec-Regel „BTP gewinnt"
+nicht wörtlich gilt:
+
+- **Anzeige** (`effective`): Trägt das BTP-Match einen Wert, gilt dieser.
+- **Schreiben** (`officials_for_write`): Hier schlägt die lokale Absicht den
+  BTP-Stand. Sonst ließe sich eine einmal nach BTP geschriebene Besetzung
+  nie wieder ändern — der Rücksync fände keinen Unterschied mehr. Ein
+  Dienst, den BTS Light nie angefasst hat, wird unverändert mitgeschrieben
+  statt gelöscht.
+- **Lösen** merkt sich als `Some(0)` („ausdrücklich keiner"), nicht als
+  „nie angefasst". Nur so geht die `0` nach BTP und der Schiedsrichter
+  verschwindet auch dort. Bestätigt ist beides erst, wenn der nächste
+  Snapshot es zeigt.

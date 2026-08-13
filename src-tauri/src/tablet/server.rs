@@ -1774,6 +1774,37 @@ pub(crate) async fn write_courts_to_btp(
 /// nur mit Identität + Highlight, kein `Status`/Ergebnis). Best-effort-Aufrufer
 /// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
 /// davon unberührt.
+/// Schreibt **nur** die Schiedsrichter-Besetzung nach BTP (ADR 0021),
+/// Muster [`write_highlight_to_btp`]: eigene Sitzung, ein `SENDUPDATE`,
+/// Antwort geprüft. Der Aufrufer übernimmt den Stand erst bei `Ok` — ein
+/// Fehlschlag wird im nächsten Sync-Zyklus wiederholt.
+pub(crate) async fn write_officials_to_btp(
+    config: &AppConfig,
+    entries: &[proto::OfficialsEntry],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let host = &config.btp.host;
+    let port = config.btp.port;
+    let pw = config.btp.password.as_deref();
+
+    let login_raw = client::send_request(host, port, &proto::login_request(pw))
+        .await
+        .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    let session = proto::parse_login_response(
+        &proto::decode_response(&login_raw).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let upd_raw =
+        client::send_request(host, port, &proto::officials_request(entries, &session, pw))
+            .await
+            .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
 pub(crate) async fn write_highlight_to_btp(
     config: &AppConfig,
     entries: &[proto::HighlightEntry],
