@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.198
+
+- **Ergebnisse gehen auch bei Cloud-Aussetzern und Neustarts nicht verloren.**
+  Der Ergebnis-Weg ist jetzt rundum abgesichert (Cluster-Hebel B): Ein bereits
+  erfolgreich übermitteltes Ergebnis, dessen Bestätigung im Netz verloren ging,
+  ließ das Tablet früher **endlos** wiederholen (und konnte doppelt schreiben) —
+  jetzt quittiert der Server einen solchen Wiederholungsversuch idempotent, das
+  Tablet ist fertig. Ein hängender Sende-Versuch bricht nach ~12 s ab und
+  wiederholt sofort (statt bis 20 s zu warten; der Relay wartet nur noch 8 s).
+  Und die host-seitige Nachschub-Warteschlange liegt nun **auf Platte** — ein
+  Neustart des Turnier-PCs verliert kein noch offenes Ergebnis mehr. Kein
+  sichtbarer Bedienunterschied; nur zuverlässiger. Spec
+  `docs/features/ergebnis-puffer.md`, ADR 0018.
+
 ## v0.9.197
 
 - **Das zählende Tablet bleibt bei Verbindungsabrissen die Wahrheit.** Bei

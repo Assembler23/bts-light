@@ -96,7 +96,11 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
    host-ws (Muster TL-Kommando) — der Relay hält keine Verläufe vor.
 5. „Ergebnis übermitteln" → `POST …/result` → Relay reicht es per
    WebSocket-Frame an den Host → bts-light schreibt per `SENDUPDATE` nach
-   BTP und antwortet mit `ResultAck`.
+   BTP und antwortet mit `ResultAck`. Der Relay wartet auf die `ResultAck` nur
+   **8 s** (`RESULT_TIMEOUT`, seit Hebel B / ADR 0018; vorher 20 s) — danach
+   `ok:false`, der Client puffert und retryt ohnehin (idempotent). Das kürzere
+   Warten gibt den `pending`-Slot (`MAX_PENDING_PER_NS`) schneller frei. Details:
+   [tablet.md](tablet.md) („Ergebnis-Übermittlung verlustsicher").
 
 **Aufgerufene Spiele in die ferne Halle (Cluster C Stufe 2, v0.9.154):**
 Der Host pusht seine in Vorbereitung gerufenen Spiele als

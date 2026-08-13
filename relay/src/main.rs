@@ -99,8 +99,12 @@ const HOST_PING: Duration = Duration::from_secs(5);
 /// kann also nie einen gesunden Host verdrängen (R4 bleibt gewahrt).
 const HOST_STALE: Duration = Duration::from_secs(15);
 
-/// Wie lange der Relay auf die `ResultAck` von bts-light wartet.
-const RESULT_TIMEOUT: Duration = Duration::from_secs(20);
+/// Wie lange der Relay auf die `ResultAck` von bts-light wartet. 8 s (nicht mehr
+/// 20 s, Hebel B / ADR 0018): Der Client puffert das Ergebnis ohnehin und retryt
+/// (idempotent seit dem `process_result`-Idempotenz-Zweig) — ein kürzeres
+/// Warten gibt den `pending`-Slot (Cap `MAX_PENDING_PER_NS`) bei zäher Leitung
+/// schneller frei, statt ihn 20 s je Versuch zu binden.
+const RESULT_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Obergrenze gleichzeitiger Namespaces (Speicher-Schutz – jede echte
 /// Installation ist ein Namespace, real also höchstens ein paar Hundert).
