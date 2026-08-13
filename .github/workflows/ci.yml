@@ -94,6 +94,11 @@ jobs:
       - name: Check-In-Doppel (JS)
         run: node scripts/test-checkin-pairs.mjs
 
+      # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
+      # weil je eine allein den echten Vorfall verschluckt haette.
+      - name: Release-Faellig-Regel (JS)
+        run: node scripts/test-version-tagged.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check
