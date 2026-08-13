@@ -6,6 +6,7 @@ pub mod assign;
 pub mod club_logos;
 pub mod mdns;
 pub mod monitor;
+pub mod officials;
 pub mod relay_client;
 pub mod server;
 pub mod slave_bridge;

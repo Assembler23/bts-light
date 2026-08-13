@@ -176,6 +176,16 @@ fn tablet_btp_retry_path(app: &AppHandle) -> std::path::PathBuf {
         .join("btp-retry.json")
 }
 
+/// Pfad des Schiedsrichter-Rosters (ADR 0022). Bewusst **außerhalb** der
+/// config.json: Sperrlisten sind Personendaten und dürfen nicht ins
+/// Identitäts-Bündel wandern; der Stand gilt zudem nur für ein Turnier.
+fn tablet_officials_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("officials-state.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -768,6 +778,11 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Geladen wird die Queue erst beim ersten Snapshot — dann liegt der
     // Turnier-Guard (`tournament_name`) vor.
     tablet.set_btp_retry_path(tablet_btp_retry_path(&app));
+    // Schiedsrichter-Roster (ADR 0022): Pfad jetzt, das Turnier kommt mit dem
+    // ersten Snapshot — passt der Datei-Kopf nicht, wird der Stand verworfen.
+    tablet
+        .officials_store()
+        .set_path(tablet_officials_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.

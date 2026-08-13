@@ -445,6 +445,12 @@ pub struct TabletState {
     /// Er hängt hier, weil LAN-Server, Relay-Client und Tauri-Commands
     /// denselben Stand sehen müssen — wie beim übrigen Tablet-Zustand.
     timeline: crate::tablet::timeline::TimelineStore,
+    /// Schiedsrichter-Roster (Spec `schiedsrichter-management`, ADR 0022):
+    /// Rotationsreihenfolge, Pausen, Sperrlisten, feldweise Schalter und
+    /// lokale SR/AR-Zuweisungen — turniergebunden persistiert. Er hängt hier,
+    /// weil LAN-Server, Relay-Client und Tauri-Commands denselben Stand
+    /// sehen müssen; die Stammliste selbst bleibt BTPs (R2).
+    officials: crate::tablet::officials::OfficialsStore,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -732,6 +738,13 @@ impl TabletState {
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
         self.timeline.set_tournament(&snapshot.tournament_name);
+        // Schiedsrichter-Roster ebenso (ADR 0022) — und danach die
+        // BTP-Officials-Liste in die Rotationsreihenfolge aufnehmen: neue
+        // hinten dran, bekannte auf ihrem Platz. Reihenfolge der beiden
+        // Aufrufe zählt: erst binden/verwerfen, dann füllen.
+        self.officials.set_tournament(&snapshot.tournament_name);
+        let official_ids: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
+        self.officials.sync_roster(&official_ids);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -752,6 +765,11 @@ impl TabletState {
     /// und Tauri-Commands).
     pub fn timeline_store(&self) -> &crate::tablet::timeline::TimelineStore {
         &self.timeline
+    }
+
+    /// Der Schiedsrichter-Roster (Spec `schiedsrichter-management`).
+    pub fn officials_store(&self) -> &crate::tablet::officials::OfficialsStore {
+        &self.officials
     }
 
     /// Reiht einen fehlgeschlagenen BTP-Ergebnis-Write in die
@@ -4298,6 +4316,48 @@ mod tests {
         let mut s = snapshot(Vec::new(), Vec::new());
         s.tournament_name = name.to_string();
         s
+    }
+
+    /// Ein Official mit dieser ID (Name nur zur Unterscheidung).
+    fn official(id: i64) -> crate::btp::model::BtpOfficial {
+        crate::btp::model::BtpOfficial {
+            id,
+            name: format!("Schiri{id}"),
+            first: String::new(),
+            nationality: None,
+        }
+    }
+
+    #[test]
+    fn snapshot_bindet_das_officials_roster_ans_turnier() {
+        // Der Roster folgt dem Snapshot: Turnier binden, neue Officials in
+        // die Rotationsreihenfolge aufnehmen — beim Turnierwechsel wird der
+        // Stand verworfen (ADR 0022).
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.officials_store()
+            .set_path(dir.path().join("officials-state.json"));
+
+        let mut snap = snap_named("Cup A");
+        snap.officials = vec![official(3), official(5)];
+        st.set_snapshot(snap);
+        assert_eq!(st.officials_store().tournament(), "Cup A");
+        assert_eq!(st.officials_store().order(), vec![3, 5]);
+
+        // Zusatzdaten des laufenden Turniers …
+        st.officials_store().set_paused(3, true);
+        let mut snap = snap_named("Cup A");
+        snap.officials = vec![official(3), official(5), official(8)];
+        st.set_snapshot(snap);
+        assert_eq!(st.officials_store().order(), vec![3, 5, 8], "neuer kommt an");
+        assert!(st.officials_store().extra(3).paused, "Pause bleibt");
+
+        // … überleben den Turnierwechsel NICHT.
+        let mut snap = snap_named("Cup B");
+        snap.officials = vec![official(9)];
+        st.set_snapshot(snap);
+        assert_eq!(st.officials_store().order(), vec![9]);
+        assert!(!st.officials_store().extra(3).paused);
     }
 
     #[test]
