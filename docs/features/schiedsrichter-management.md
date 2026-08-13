@@ -87,9 +87,16 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
 - **Architekturregeln:**
   - **R1**: Alle Bedienung läuft über Tauri-Commands (Client) bzw. `TlAction` (TL-Web).
   - **R2**: BTP ist die Wahrheit. SR-Liste kommt aus `SENDTOURNAMENTINFO`.
-    **Konfliktregel:** Trägt das BTP-Match `Official1ID`/`Official2ID`,
-    gewinnt der BTP-Wert und überschreibt die lokale Zuweisung; lokale
-    Zuweisungen sind ein Overlay für Spiele, an denen BTP nichts stehen hat.
+    **Konfliktregel (ADR 0021, Entscheidung 3):** Trägt der Snapshot am
+    Match `Official1ID`/`Official2ID`, gilt dieser Wert. Eine **frisch
+    geschriebene** Zuweisung wird jedoch bis zur Bestätigung im Snapshot
+    lokal weiter angezeigt — die Messung 13.08.2026 hat gezeigt, dass BTP
+    den Write **asynchron** übernimmt (≤ 1 s, sofortiges Zurücklesen zeigt
+    noch den alten Stand). Ohne dieses Halten würde jede Zuweisung im
+    Moment nach dem Klick auf den alten Wert zurückspringen. Lokale
+    Zuweisungen sind also ein Overlay für das Bestätigungsfenster und für
+    den Fehlerfall des Writes — nicht nur für Spiele, an denen BTP nichts
+    stehen hat.
   - **R3**: LAN und Cloud gleichwertig — Tablet-Anzeige über `MatchBrief`
     (beide Wege), TL-Web-Aktionen über den bestehenden Action-Kanal, ferne
     Halle (Cloud-Slave) inklusive Ansage von Anfang an.
@@ -101,7 +108,7 @@ Auto-Rotation einem Spiel mit eigenem Vereins-/Personen-Konflikt zugeteilt.
   - Turnier-gebundene Laufzeitdaten (feldweise Schalter, Reihenfolge,
     Pausen, Sperrlisten, Vereins-Overrides, Zuweisungen) liegen **nicht** in
     config.json, sondern in einer eigenen Datei im App-Datenverzeichnis,
-    am Turnier geschlüsselt (ADR B; Muster `live-scores.json` /
+    am Turnier geschlüsselt (ADR 0022; Muster `live-scores.json` /
     ADR 0015). Feldweise Bediener-Vergabe: Default **alle Felder aktiv** —
     Verhalten bestehender Installationen ändert sich nicht.
   - `identifier` und Updater-Pfad bleiben unangetastet.
@@ -360,7 +367,7 @@ Im selben Commit wie der jeweilige Code:
   Officials-Bedienung in TL-Web.
 - `docs/cloud-relay.md` — neue Wire-Typen/Aktionen.
 - `docs/multi-hall.md` — Querverweis-Liste ergänzen.
-- `docs/adr/` — ADR A (Rücksync-Modell), ADR B (Ablage Turnierdaten).
+- `docs/adr/` — ADR 0021 (Rücksync-Modell), ADR 0022 (Ablage Turnierdaten); beide angelegt 13.08.2026.
 - `docs/changelog.md` — je veröffentlichter Version.
 - `docs/roadmap.md` — Verweis auf diese Spec.
 
@@ -376,7 +383,7 @@ Details und Code-Anker: How-To unter
 2. Parser (`BtpOfficial`, `official_map` nach `player_map`-Muster,
    Match-Felder nach `location_id`-Muster).
 3. `OfficialsConfig` + `types.ts` + SetupWizard-Schalter.
-4. Roster-State + turniergebundene Persistenzdatei (ADR B). Zuweisungen
+4. Roster-State + turniergebundene Persistenzdatei (ADR 0022). Zuweisungen
    bleiben nach Spielende dem Match zugeordnet (Basis der
    Einsatz-Ableitung — keine eigene Historien-Datenhaltung).
 5. Rotation + Konflikt-Erkennung + Sync-Hook `track_officials`
