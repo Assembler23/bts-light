@@ -310,6 +310,14 @@ Gestartet in `commands.rs::start_sync` nur bei gültigem `master_namespace`,
 beendet in `stop_sync`. **Tablets bleiben Direkt-Cloud** (Weg A) — die Brücke
 ist nur für Monitore, weil Tablet-Ergebnisse ins Master-BTP müssen.
 
+**Punktestand auf Cloud-Monitoren (v0.9.200):** Der Relay kannte Satzstand
+und Spielzustand nur von Tablets, die selbst über die Cloud zählen — zählten
+sie im LAN (Master-Halle im `LanAndCloud`-Betrieb), blieben alle
+Cloud-Anzeigen auf 0:0 (Turnier-Befund 13.08.2026). Seit v0.9.200 spiegelt
+der Master jeden Feld-Stand als `HostFrame::ScoreUpdate` an den Relay;
+Details in [court-monitor.md](court-monitor.md) („Score-Spiegel des Hosts")
+und [cloud-relay.md](cloud-relay.md).
+
 ### Hallen-Auswahl auf dem Cloud-Slave — warum eigens
 
 `announce_hall` ist die eine Einstellung, die **sowohl** die Ansage (welche

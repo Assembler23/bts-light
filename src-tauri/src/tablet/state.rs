@@ -519,6 +519,17 @@ pub struct TabletState {
     monitor_seq: RwLock<HashMap<i64, u64>>,
 }
 
+/// Der Monitor-Nudge auf der Wire: `{"court":<id>,"seq":<n>}` (A1, ADR 0016).
+/// Geteilter Typ für Erzeuger ([`TabletState::notify_monitor`]) und
+/// Verbraucher (LAN-Monitor-WS reicht den String 1:1 durch; der
+/// Relay-Client parst ihn für den Score-Spiegel) — Producer und Consumer
+/// können so nicht stillschweigend auseinanderlaufen.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct MonitorNudge {
+    pub court: i64,
+    pub seq: u64,
+}
+
 /// Sende-Ende eines Monitor-Nudge-Kanals (A1, ADR 0016). Trägt den fertig
 /// serialisierten JSON-Nudge `{"court":<i64>,"seq":<u64>}`; der WS-Handler
 /// reicht ihn 1:1 auf seinen Socket. Unbounded, weil `notify_monitor` NIE
@@ -1451,7 +1462,11 @@ impl TabletState {
             *s += 1;
             *s
         };
-        let nudge = serde_json::json!({ "court": court_id, "seq": seq }).to_string();
+        let nudge = serde_json::to_string(&MonitorNudge {
+            court: court_id,
+            seq,
+        })
+        .unwrap_or_default();
         // Feld-spezifische Abonnenten: senden + tote aussieben, leere Liste
         // ganz entfernen (kein Speicher-Leck über die Turnierdauer).
         {
@@ -2591,6 +2606,35 @@ impl TabletState {
     /// effektivem Satzstand (Tablet-getrieben falls aktiv, sonst aus BTP)
     /// und der gespiegelte Tablet-Spielzustand (Aufschlag/Pause). Vom
     /// Court-Monitor-Endpunkt genutzt.
+    /// Schlanker Blick fürs Score-Spiegeln zum Relay (v0.9.200) — dieselbe
+    /// Auswahl wie [`Self::monitor_court`] (Tablet-Stand vor BTP-Stand, ohne
+    /// `connected`-Prüfung), aber ohne das Klonen des vollen `BtpMatch`: Der
+    /// Spiegel läuft bei jedem Nudge und im 2-s-Sweep über alle Felder.
+    /// `None` = kein Match auf dem Feld, nichts zu spiegeln.
+    pub fn score_mirror_of(&self, court_id: i64) -> Option<ScoreMirror> {
+        let (match_id, btp_sets) = {
+            let guard = self.snapshot.read().unwrap();
+            let m = guard.as_ref().and_then(|snap| {
+                snap.matches
+                    .iter()
+                    .find(|m| m.status == MatchStatus::OnCourt && m.court_id == Some(court_id))
+            })?;
+            (m.id, m.sets.clone())
+        };
+        let sets = {
+            let courts = self.courts.read().unwrap();
+            match courts.get(&court_id) {
+                Some(s) if s.match_id == match_id && !s.sets.is_empty() => s.sets.clone(),
+                _ => btp_sets,
+            }
+        };
+        Some(ScoreMirror {
+            match_id,
+            sets,
+            state: self.court_state(court_id),
+        })
+    }
+
     pub fn monitor_court(&self, court_id: i64) -> MonitorCourt {
         let guard = self.snapshot.read().unwrap();
         let tournament_name = guard
@@ -2720,6 +2764,16 @@ impl TabletState {
 
 /// Monitor-relevante Daten eines Feldes (Rückgabe von
 /// [`TabletState::monitor_court`]). Reiner Transport – nicht serialisiert.
+/// Spiegel-Stand eines Felds fürs Relay ([`TabletState::score_mirror_of`]):
+/// Match, effektiver Satzstand und roher Tablet-Spielzustand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScoreMirror {
+    pub match_id: i64,
+    pub sets: Vec<(i64, i64)>,
+    /// Gespiegelter Tablet-Spielzustand (JSON-String), falls vorhanden.
+    pub state: Option<String>,
+}
+
 pub struct MonitorCourt {
     /// Turniername (für die Werbe-/Leerlauf-Anzeige).
     pub tournament_name: String,
@@ -3236,6 +3290,41 @@ mod tests {
         );
         // Das Komposit-Label kombiniert Halle und Feldname.
         assert_eq!(st.court_display_label(401), "Halle 2 · 1");
+    }
+
+    /// Schlanker Spiegel-Blick fürs Relay (v0.9.200): dieselbe effektive
+    /// Satzstand-Auswahl wie `monitor_court` (Tablet-Stand vor BTP-Stand),
+    /// aber ohne das Klonen des vollen `BtpMatch` — der Spiegel läuft bei
+    /// jedem Nudge und im 2-s-Sweep über alle Felder.
+    #[test]
+    fn score_mirror_of_returns_the_effective_court_state() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
+        ));
+        // Ohne Tablet: BTP-Stand (match_on setzt sets = [(5,3)]), kein State.
+        assert_eq!(
+            st.score_mirror_of(101),
+            Some(ScoreMirror {
+                match_id: 1,
+                sets: vec![(5, 3)],
+                state: None,
+            })
+        );
+        // Tablet zählt und spiegelt seinen Zustand: beides kommt mit.
+        st.record_score(101, 1, vec![(11, 9)]);
+        st.set_court_state(101, r#"{"match":{"matchId":1}}"#.into());
+        assert_eq!(
+            st.score_mirror_of(101),
+            Some(ScoreMirror {
+                match_id: 1,
+                sets: vec![(11, 9)],
+                state: Some(r#"{"match":{"matchId":1}}"#.to_string()),
+            })
+        );
+        // Feld ohne Match → nichts zu spiegeln.
+        assert_eq!(st.score_mirror_of(102), None);
     }
 
     #[test]

@@ -136,9 +136,42 @@ roher `court_state` + Konfiguration + Werbebild-Liste.
 
 | Wert            | Tablet zählt        | kein Tablet              |
 |-----------------|---------------------|--------------------------|
-| Satzstand       | live vom Tablet     | aus BTP (LAN) / 0:0 (Cloud) |
+| Satzstand       | live vom Tablet     | aus BTP                  |
 | Aufschlag       | angezeigt           | nicht angezeigt          |
 | Pausen-Timer    | angezeigt           | nicht angezeigt          |
+
+### Score-Spiegel des Hosts (v0.9.200): Cloud-Anzeigen auch bei LAN-Tablets
+
+Bis v0.9.199 kannte der Relay Satzstand und `court_state` **nur von
+Cloud-Tablets** (`score_update`/`state_sync` über die Tablet-WS). Zählte ein
+Tablet im LAN — der Normalfall im `LanAndCloud`-Mischbetrieb —, blieben
+Cloud-Monitor, Cloud-Court-Anzeige und Cloud-Übersicht auf 0:0 stehen
+(Turnier-Befund 13.08.2026, Zwei-Hallen-Turnier).
+
+Seit v0.9.200 spiegelt der Host jeden Feld-Stand als
+`HostFrame::ScoreUpdate` (Satzliste + opaker `court_state`) an den Relay,
+auf zwei Wegen:
+
+- **Nudge-getrieben** (niedrige Latenz): Der Relay-Client abonniert den
+  **eigenen** Monitor-Nudge-Kanal (A1, „alle Felder" wie die LAN-Übersicht)
+  und schickt bei jedem Signal den Stand des Felds.
+- **2-s-Sweep** im Zuweisungs-Tick, **nach** `push_all_courts` (gleiche
+  FIFO-Wire → der Relay kennt das Match, bevor der Spiegel eintrifft). Der
+  Sweep fängt die nudge-losen Fälle ein: Reconnect/Relay-Neustart (leerer
+  Cache dort), Court-Wechsel und BTP-Handeingaben ohne Tablet. Ein
+  Zuweisungs-Push verwirft den Fingerabdruck des Felds, damit der Sweep
+  einen zuvor vom Relay verworfenen Spiegel sicher wiederholt.
+
+Beide Wege deduplizieren über einen Fingerabdruck je Feld (das zuletzt
+gebaute Frame). Der Relay übernimmt den Stand in
+`court_scores`/`court_state` mit dem Stale-Schutz des Tablet-Wegs — plus
+zwei Spiegel-Regeln: **Leere Sätze überschreiben keinen vorhandenen
+Live-Stand** (frisch ersetzter Turnier-PC ohne `live-scores.json` darf ein
+zählendes Cloud-Tablet nicht auf 0:0 zurückwerfen), und ein `court_state`,
+dessen **eingebettete** `match.matchId` nicht zum gemeldeten Match passt,
+wird verworfen (wie `store_court_state`). Damit zeigen die Cloud-Anzeigen
+auch Aufschlag und Pausen-Timer des LAN-Tablets; nur das `serving_team` im
+`/{ns}/health` der Übersicht bleibt vorerst `null`.
 
 ## Sponsor-Leiste (kleine Werbung neben dem Turnierlogo)
 
@@ -241,6 +274,9 @@ synchronen Pi-Uhr driftet. Gated durch die `call_timer`-Einstellung
   `courts`/`court_matches`/`court_scores`/`court_on_court_since` baut. Bewusst
   weggelassen im Cloud: Aufschlag-Highlight, Verletzungs-/TL-Badges (stehen im
   Relay nicht bereit); Feld × Spiel × Satzstand × Aufruf-Uhr sind vollständig.
+  Der Satzstand kommt dabei seit v0.9.200 auch für LAN-Tablets an — über den
+  Score-Spiegel des Hosts (siehe oben); davor blieb er im Cloud leer, sobald
+  das Tablet nicht selbst über den Relay zählte.
 
 ## Entschiedenes Match (kein Geister-Satz)
 

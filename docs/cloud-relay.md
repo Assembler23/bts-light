@@ -85,6 +85,17 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 3. Der Host pusht alle 2 s die Court→Match-Zuweisung; der Relay leitet sie
    an das jeweilige Tablet.
 4. Jeder Punkt am Tablet → `score_update` → Relay → Host → Liveticker.
+   **Rückrichtung (v0.9.200):** Der Host spiegelt jeden Feld-Stand als
+   `HostFrame::ScoreUpdate` (Satzliste + opaker `court_state`) an den
+   Relay — nudge-getrieben (A1-Abo auf dem eigenen Monitor-Kanal) plus
+   ein 2-s-Sweep **nach** dem Zuweisungs-Push (fängt Reconnects,
+   Court-Wechsel und BTP-Handeingaben ein), dedupliziert per
+   Fingerabdruck. Nur so sehen Cloud-Monitor/-Übersicht auch die Stände
+   von **LAN**-Tablets (`LanAndCloud`-Mischbetrieb); der Relay übernimmt
+   sie mit demselben Stale-Schutz wie beim Tablet-Weg (plus: leere Sätze
+   überschreiben keinen Live-Stand, ein `state` mit fremder eingebetteter
+   Match-ID wird verworfen) und weckt die Monitor-Abonnenten. Details:
+   [court-monitor.md](court-monitor.md) („Score-Spiegel des Hosts").
    Zusätzlich seit dem Punktverlauf-Graph
    ([Spec](features/punktverlauf-graph.md), ADR 0014): je Ballwechsel ein
    `rally`-Frame und nach Undo/Reconnect/Übernahme ein `rally_sync`
