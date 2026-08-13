@@ -587,12 +587,15 @@ impl SyncEngine {
                 }
             }
         }
-        // A2 / ADR 0017, Regel b: Steht auf einem Feld inzwischen ein ANDERES
-        // Match, ist ein früherer Finalisiert-Merker Geschichte — räumen, damit
-        // ein Score des neuen Spiels nicht fälschlich als „finalisiert" gilt.
-        // Die TTL fängt Felder ab, die nie ein neues Match bekommen.
-        for (&court_id, &match_id) in &oncourt_now {
-            tablet.clear_finalized_if_other(court_id, match_id);
+        // A2 / ADR 0017, Regel b: Jedes Feld mit einem Match OnCourt ist per
+        // BTP-Definition nicht finalisiert — den Finalisiert-Merker dort
+        // BEDINGUNGSLOS räumen. Das deckt sowohl ein neues Match als auch die
+        // TL-Ergebniskorrektur ab (finalisiertes Match kehrt mit DERSELBEN
+        // matchId auf dasselbe Feld zurück); sonst verwürfe `handle_score` dessen
+        // Punkte still bis zum TTL-Ablauf. Die TTL fängt nur Felder ab, die kein
+        // neues Match bekommen (Tablet zeigt noch das fertige Spiel).
+        for &court_id in oncourt_now.keys() {
+            tablet.clear_finalized(court_id);
         }
         // Zuweisung beim Feld-Aufruf (ADR 0007, Scheibe 2): jedem belegten Feld
         // einen Bediener aus der Warteschlange zuordnen (idempotent je Spiel);

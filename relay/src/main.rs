@@ -1988,11 +1988,13 @@ async fn attach_tablet(
     // wiederhergestellt wurde oder das Feld ohne Stand startet.
     if let Some(state) = namespace.court_state.get(&court_id) {
         let len = state.len();
-        // A2 / ADR 0017: Autorität nach dem Slot-Halter bestimmen. Erreichbar
-        // sind hier nur „Feld frei" oder „dasselbe Gerät reclaimt" (fremde
-        // Geräte kehren oben mit `AttachResult::Occupied` um) → beide Fälle
-        // ergeben authoritative=true; die Regel ist dennoch vollständig
-        // verdrahtet (und für den späteren Gate-Umbau vorbereitet).
+        // A2 / ADR 0017: Autorität nach dem Slot-Halter bestimmen. „Feld frei"
+        // und „dasselbe Gerät reclaimt" ergeben authoritative=true. Erreichbar
+        // ist hier aber AUCH der fremde Halter: ist dessen Tablet-Session tot
+        // (`tablets`-Eintrag weg), `tablet_devices` nennt ihn aber noch, kommt
+        // ein ANDERES Gerät bis hierher — dann liefert `relay_reconnect_
+        // authoritative` korrekt authoritative=false (adoptieren, nicht
+        // überschreiben). Genau das ist der wichtige Cloud-Reconnect-Pfad.
         // Der Relay führt keine Epoch → owner_epoch=0. `ownership_active`
         // spiegelt den durchgereichten Legacy-Schalter.
         let authoritative = relay_reconnect_authoritative(

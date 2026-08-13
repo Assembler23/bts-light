@@ -351,9 +351,9 @@ pub struct TabletState {
     /// zu schicken (Rücktritt statt bloßer `MatchCleared`) und einen nachlaufenden
     /// Score fürs finalisierte Match zu verwerfen. R2 gewahrt: die Wahrheit
     /// bleibt BTP, wir spiegeln nur den Finished-Status. Kurze TTL
-    /// ([`FINALIZED_TTL`]), damit der Merker nicht ewig hängt; ein neues Match
-    /// auf dem Feld räumt ihn ohnehin (`clear_finalized_if_other`). Vom Sync-Loop
-    /// beim Übergang OnCourt→Finished gesetzt.
+    /// ([`FINALIZED_TTL`]), damit der Merker nicht ewig hängt; ein Feld mit
+    /// OnCourt-Match räumt ihn ohnehin bedingungslos (`clear_finalized`). Vom
+    /// Sync-Loop beim Übergang OnCourt→Finished gesetzt.
     recently_finalized: RwLock<HashMap<i64, (i64, std::time::Instant)>>,
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
@@ -1042,6 +1042,14 @@ impl TabletState {
 
     /// Satzstand vom Tablet übernehmen.
     pub fn record_score(&self, court_id: i64, match_id: i64, sets: Vec<(i64, i64)>) {
+        // A2 / ADR 0017: Der aktuelle Slot-Halter hat seit seinem Claim gezählt —
+        // das macht ihn zum „legitimen Weiterzähler". Das Flag wird BEWUSST VOR
+        // dem Score-Write gesetzt (getrennte Locks): Ein gleichzeitig
+        // reconnectendes Tablet, das `court_owner` liest, sieht dann nie „Score
+        // schon geschrieben, Flag noch nicht" — das Fenster löst sich in die
+        // SICHERE Richtung auf (im Zweifel `scored=true` ⇒ Rückkehrer tritt
+        // zurück, überschreibt den Übernehmer NICHT). Review-Befund M2.
+        self.scored_since_claim.write().unwrap().insert(court_id);
         {
             let mut courts = self.courts.write().unwrap();
             let session = courts.entry(court_id).or_insert(CourtSession {
@@ -1055,10 +1063,6 @@ impl TabletState {
             session.match_id = match_id;
             session.sets = sets;
         }
-        // A2 / ADR 0017: Der aktuelle Slot-Halter hat seit seinem Claim
-        // gezählt — das macht ihn zum „legitimen Weiterzähler". Der Guard oben
-        // ist mit dem `}` schon gefallen; hier nur das scored-Flag setzen.
-        self.scored_since_claim.write().unwrap().insert(court_id);
         // Stand auf Platte sichern, damit ein App-Neustart ihn behält.
         self.persist_scores();
         // Niedrig-latente Anzeige (A1, ADR 0016): Court-Monitor + Feld-
@@ -1334,18 +1338,18 @@ impl TabletState {
         self.recently_finalized(court_id) == Some(match_id)
     }
 
-    /// Räumt den Finalisiert-Merker eines Felds, sobald dort ein NEUES (anderes)
-    /// Match läuft — dann ist das alte Ergebnis Geschichte und ein Score des
-    /// neuen Spiels darf nicht fälschlich als „finalisiert" gelten. Vom
-    /// Sync-Loop je Zyklus für jedes belegte Feld aufgerufen.
-    pub fn clear_finalized_if_other(&self, court_id: i64, current_match_id: i64) {
-        let mut map = self.recently_finalized.write().unwrap();
-        if map
-            .get(&court_id)
-            .is_some_and(|(mid, _)| *mid != current_match_id)
-        {
-            map.remove(&court_id);
-        }
+    /// Räumt den Finalisiert-Merker eines Felds **bedingungslos** — vom Sync-Loop
+    /// je Zyklus für jedes Feld aufgerufen, das ein Match **OnCourt** hat. Ein
+    /// OnCourt-Match ist per BTP-Definition nicht finalisiert; jeder Merker auf so
+    /// einem Feld ist daher veraltet und muss weg — auch wenn dieselbe matchId
+    /// zurückkehrt (TL-Ergebniskorrektur/Undo setzt ein finalisiertes Match auf
+    /// demselben Feld wieder OnCourt; ohne dieses bedingungslose Räumen verwürfe
+    /// `handle_score` dessen Punkte still bis zum TTL-Ablauf — Review-Befund).
+    /// Felder OHNE OnCourt-Match iteriert der Aufrufer nicht → dort hält der
+    /// Merker (das Tablet zeigt noch das fertige Spiel; späte Scores gegated),
+    /// bis die TTL greift.
+    pub fn clear_finalized(&self, court_id: i64) {
+        self.recently_finalized.write().unwrap().remove(&court_id);
     }
 
     /// Ist `token` noch das aktive Tablet dieses Felds?
@@ -3893,20 +3897,20 @@ mod tests {
         );
     }
 
-    /// `clear_finalized_if_other`: ein neues Match auf dem Feld räumt den
-    /// Merker, dasselbe Match lässt ihn stehen.
+    /// `clear_finalized`: ein Feld mit OnCourt-Match räumt den Merker
+    /// bedingungslos — auch bei derselben matchId (TL-Ergebniskorrektur/Undo),
+    /// sonst würden dessen Punkte still verworfen (Review-Befund M1).
     #[test]
-    fn clear_finalized_only_on_other_match() {
+    fn clear_finalized_removes_marker_unconditionally() {
         let st = TabletState::default();
         st.mark_finalized(5, 42);
-        st.clear_finalized_if_other(5, 42);
+        // Dasselbe Match kehrt OnCourt zurück (Ergebniskorrektur) → Merker weg.
+        st.clear_finalized(5);
         assert_eq!(
             st.recently_finalized(5),
-            Some(42),
-            "gleiches Match → bleibt"
+            None,
+            "OnCourt (auch gleiche matchId) → geräumt"
         );
-        st.clear_finalized_if_other(5, 99);
-        assert_eq!(st.recently_finalized(5), None, "anderes Match → geräumt");
     }
 
     /// End-to-End: Ist das Feld finalisiert, tritt sogar der EIGENE Halter beim
