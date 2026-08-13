@@ -38,6 +38,7 @@ anpassen:
 | **Wire-Kompatibilität App↔Relay**: Serde-Roundtrips aller Frames, `#[serde(default)]`-Abwärtskompatibilität, `merge_device_lists` | `relay-proto/lib.rs` (25) |
 | **BTP-Parser**: Snapshot-Parsing inkl. Regressionen echter Turnier-Captures | `btp/model.rs`, `btp/xml.rs`, `btp/wire.rs` (33) · `tests/btp_capture.rs` (echte BTP-Mitschnitte als Fixtures) |
 | Court-Monitor-Routen, Slave-Brücke, Sieger-Logik, Config-Migration | `tablet/monitor.rs`, `tablet/slave_bridge.rs`, `tablet/winners.rs`, `config.rs` |
+| **Relay-Broker unter Last** (Cluster-Hebel C, ADR 0019): Massen-Connect, Reconnect-Sturm, Nudge-Fan-out, Ergebnis-Schwall, Cleanup — unter echter Multi-Thread-Contention. Bewiesen: Caps, genau ein Halter je Court, Namespace-Isolation, `is_empty`-Cleanup, kein Panic. **Nicht** bewiesen: Socket-Backpressure/Queue-Wachstum (siehe Lücken). | `relay/main.rs` — `#[cfg(test)] mod load` (`run_mass_connect`/`run_reconnect_storm`/`run_nudge_fanout`/`run_result_storm`/`run_cleanup`; leicht in der CI, Soak `#[ignore]`: `cargo test -p bts-relay -- --ignored`) |
 
 ## Regeln für jede Änderung
 
@@ -83,6 +84,15 @@ anpassen:
   Wertung.
 - **`run_once`-Gesamtzyklus** (Netz + BTP + badhub zusammen): nur in
   Teilen testbar; die Einzelschritte sind abgedeckt.
+- **Socket-Ebene des Relays unter Last** (Cluster-Hebel C, ADR 0019): Der
+  In-Process-Last-Harness (`relay/main.rs mod load`) beweist die Broker-
+  Invarianten unter echter Contention, aber **nicht** die
+  Socket-`send().await`-Backpressure in den `select!`-Loops noch das
+  unbegrenzte Wachstum der `UnboundedSender`-Queue bei zähem Socket (der
+  Harness leert die Empfänger selbst). Diese reale Netz-Robustheit deckt die
+  **manuelle 36-Geräte-Messung** im echten WLAN ab. Ein volles E2E-WS-Harness
+  ist bewusst zurückgestellt. Ebenso offen: **LAN-Server-Last**
+  (`tablet/state.rs`, blockierender `std::sync::RwLock`) als Folge-Erweiterung.
 
 ## Abgleich mit Tilos Original-BTS
 

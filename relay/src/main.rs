@@ -5327,3 +5327,641 @@ mod tests {
         );
     }
 }
+
+// ─────────────────────────── Last-/Soak-Harness (Hebel C) ──────────────────
+//
+// In-Process-Concurrency-Test des Brokers (ADR 0019,
+// docs/features/last-soak-test.md). Viele `tokio::spawn`-Tasks treiben die
+// Broker-Eintrittspunkte gegen EINEN geteilten `Broker` (Clone) unter echter
+// Multi-Thread-Contention am globalen `namespaces`-Mutex.
+//
+// **BEWIESEN** (nur das, nichts mehr): Cap-Einhaltung, Ownership-End-Invariante
+// (genau ein Halter je Court, `T-1` Superseded), Routing/Nudge-Zählung,
+// Namespace-Isolation, `is_empty`-Cleanup, „kein Panic + terminiert unter
+// Timeout". **NICHT bewiesen** (bewusst, ADR 0019): Socket-`send().await`-
+// Backpressure, unbegrenztes Wachstum der `UnboundedSender`-Queue, HTTP-Layer,
+// echte Scheduling-Reihenfolge; „Deadlock-Freiheit" wird NICHT behauptet.
+//
+// Assertions-Doktrin (gegen Flakiness): JEDE End-Assertion läuft NACH dem Join
+// ALLER Tasks und prüft NUR reihenfolge-unabhängige Invarianten (Zählung/
+// Existenz) — nie „welches Gerät gewann", nie `seq`-Reihenfolge. Die
+// Empfangs-Enden (`rx`) bleiben im Test-Hauptscope; nur `tx`-Klone wandern in
+// die Tasks/den Broker — sonst siebte `retain(send.is_ok())` einen Sender aus
+// und die Zählung würde falsch. Ein umschließender `tokio::time::timeout` gilt
+// als Testfehler (Hang). Leichte Variante = CI-Regressionswache; schwere
+// `#[ignore]`-Soak-Variante ≥ reales Setup, manuell.
+#[cfg(test)]
+mod load {
+    use super::*;
+    use tokio::sync::mpsc::UnboundedReceiver;
+    use tokio::task::JoinSet;
+
+    /// Größe eines Lastszenarios. Leichte (CI) und schwere (Soak) Variante
+    /// rufen denselben `run_*`-Kern mit unterschiedlichen Werten — so gibt es
+    /// keine doppelten Assertionen.
+    struct LoadParams {
+        /// Anzahl gleichzeitiger Namespaces (Turniere/Installationen).
+        namespaces: usize,
+        /// Felder je Namespace.
+        courts_per_ns: usize,
+        /// Gleichzeitig um EIN Feld ringende Tablets (Massen-Connect + der
+        /// Reconnect-Sturm nutzen dies als `T`).
+        tablets_per_court: usize,
+        /// Monitor-Abonnenten je Namespace (Massen-Connect + Cleanup).
+        subs_per_ns: usize,
+        /// Nudges je Feld im Fan-out-Szenario (`N_c`).
+        notifies_per_court: usize,
+        /// Ergebnis-`POST`s je Namespace im Ergebnis-Schwall.
+        results: usize,
+        /// Großzügiges Gesamt-Timeout je Lauf; Ablauf = Hang = Testfehler.
+        timeout: Duration,
+    }
+
+    /// Kleine, in Sekunden laufende Werte — genug Contention für die
+    /// CI-Wache, ohne die Suite zu bremsen. Muss REPRODUZIERBAR grün sein.
+    fn light() -> LoadParams {
+        LoadParams {
+            namespaces: 3,
+            courts_per_ns: 4,
+            tablets_per_court: 4,
+            subs_per_ns: 4,
+            notifies_per_court: 6,
+            results: 20,
+            timeout: Duration::from_secs(10),
+        }
+    }
+
+    /// Schwere Werte ≥ reales Setup (z. B. eine 18-Feld-Halle) für den
+    /// manuellen Soak-Lauf vor dem Turnier.
+    fn soak() -> LoadParams {
+        LoadParams {
+            namespaces: 3,
+            courts_per_ns: 18,
+            tablets_per_court: 8,
+            subs_per_ns: 32,
+            notifies_per_court: 40,
+            results: 200,
+            timeout: Duration::from_secs(60),
+        }
+    }
+
+    /// Baut eine gültige, im `valid_namespace`-Format (`8-4-4-4-12`) liegende
+    /// UUID aus dem Index — deterministisch und kollisionsfrei je `i`.
+    fn fresh_ns(i: usize) -> String {
+        let ns = format!("{:08x}-0000-4000-8000-{:012x}", i as u32, i as u64);
+        debug_assert!(
+            valid_namespace(&ns),
+            "fresh_ns muss valid_namespace erfüllen"
+        );
+        ns
+    }
+
+    /// Registriert `tx` als Host des Namespace (wie eine frisch angenommene
+    /// Host-Verbindung). Eigener schmaler Helfer — das Pendant in `mod tests`
+    /// ist modul-privat.
+    async fn register_host(broker: &Broker, ns: &str, tx: &Tx) {
+        let mut map = broker.namespaces.lock().await;
+        let namespace = map.entry(ns.into()).or_insert_with(Namespace::new);
+        namespace.host = Some(tx.clone());
+        namespace.host_last_seen = now_ms();
+    }
+
+    /// Liest `court`/`seq` aus einem Nudge-Text-Frame (wie in `mod tests`).
+    fn nudge_of(m: Message) -> (i64, u64) {
+        let Message::Text(t) = m else {
+            panic!("kein Text-Frame");
+        };
+        let v: serde_json::Value = serde_json::from_str(t.as_str()).unwrap();
+        (v["court"].as_i64().unwrap(), v["seq"].as_u64().unwrap())
+    }
+
+    /// Ist der Frame ein `session_superseded` (abgelöstes Tablet)?
+    fn is_superseded(m: &Message) -> bool {
+        let Message::Text(t) = m else { return false };
+        serde_json::from_str::<serde_json::Value>(t.as_str())
+            .ok()
+            .and_then(|v| v["type"].as_str().map(|s| s == "session_superseded"))
+            .unwrap_or(false)
+    }
+
+    /// Bekannte, erlaubte Fehlermeldungen des Ergebnis-Wegs (Cap/Timeout/
+    /// Verbindungsverlust). Alles andere gilt als unerwartet.
+    fn known_result_error(msg: Option<&str>) -> bool {
+        matches!(
+            msg,
+            Some("Zu viele offene Übermittlungen – bitte kurz warten.")
+                | Some("Zeitüberschreitung – bts-light hat nicht geantwortet.")
+                | Some("bts-light ist nicht erreichbar.")
+                | Some("bts-light ist nicht mit dem Relay verbunden.")
+                | Some("Verbindung zu bts-light verloren.")
+        )
+    }
+
+    // ─────────────────────────── Szenarien ─────────────────────────────────
+
+    /// **Massen-Connect:** M NS × Host × F Felder × je T ringende Tablets + S
+    /// Monitor-Subs, alle gleichzeitig. Endcheck: je NS `tablets.len() ==
+    /// min(F, MAX_TABLETS_PER_NS)` (genau ein Halter je Feld), Subs-Summe
+    /// `== min(S, MAX_MONITOR_SUBS)`, `namespaces.len() <= MAX_NAMESPACES` und
+    /// KEIN Cap überschritten.
+    async fn run_mass_connect(broker: Broker, p: &LoadParams) {
+        let courts = p.courts_per_ns;
+        let tablets = p.tablets_per_court;
+        let subs = p.subs_per_ns;
+
+        // rx im Hauptscope halten — nur tx-Klone wandern in die Tasks.
+        let mut rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut host_rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut ns_list: Vec<String> = Vec::new();
+        let mut set = JoinSet::new();
+
+        for i in 0..p.namespaces {
+            let ns = fresh_ns(i);
+            let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+            register_host(&broker, &ns, &host_tx).await;
+            host_rxs.push(host_rx);
+
+            // T Tablets je Feld, distinct device_id → genau eines wird Halter,
+            // die übrigen bleiben passiv (Occupied), nichts wird abgelehnt,
+            // solange F <= MAX_TABLETS_PER_NS.
+            for c in 0..courts {
+                for t in 0..tablets {
+                    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                    rxs.push(rx);
+                    let b = broker.clone();
+                    let ns_c = ns.clone();
+                    let dev = format!("dev-{i}-{c}-{t}");
+                    let court = c as i64;
+                    set.spawn(async move {
+                        attach_tablet(&b, &ns_c, court, &dev, &tx).await;
+                    });
+                }
+            }
+            // S Subs, gemischt court-spezifisch/„alle" — Deckel greift auf die
+            // Summe.
+            for s in 0..subs {
+                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                rxs.push(rx);
+                let b = broker.clone();
+                let ns_c = ns.clone();
+                let court = if s % 2 == 0 {
+                    Some((s % courts.max(1)) as i64)
+                } else {
+                    None
+                };
+                set.spawn(async move {
+                    subscribe_monitor(&b, &ns_c, court, &tx).await;
+                });
+            }
+            ns_list.push(ns);
+        }
+
+        while let Some(r) = set.join_next().await {
+            r.expect("Task-Panik im Massen-Connect");
+        }
+
+        let map = broker.namespaces.lock().await;
+        assert!(map.len() <= MAX_NAMESPACES, "Namespace-Cap eingehalten");
+        for ns in &ns_list {
+            let n = map.get(ns).expect("Namespace existiert");
+            let expect_tablets = courts.min(MAX_TABLETS_PER_NS);
+            assert_eq!(
+                n.tablets.len(),
+                expect_tablets,
+                "genau ein Halter je Feld, Cap eingehalten"
+            );
+            assert!(
+                n.tablets.len() <= MAX_TABLETS_PER_NS,
+                "Tablet-Cap nie überschritten"
+            );
+            let sub_total: usize =
+                n.monitor_subs.values().map(Vec::len).sum::<usize>() + n.monitor_subs_all.len();
+            assert_eq!(
+                sub_total,
+                subs.min(MAX_MONITOR_SUBS),
+                "Subs-Summe == min(S, Deckel)"
+            );
+            assert!(
+                sub_total <= MAX_MONITOR_SUBS,
+                "Monitor-Cap nie überschritten"
+            );
+        }
+        // rx/host_rx bewusst bis hier halten (Sender-Klone sonst ausgesiebt).
+        drop(rxs);
+        drop(host_rxs);
+    }
+
+    /// **Reconnect-Sturm:** je Feld ringen T Tasks per `take_over_court`
+    /// (distinct device_id) um den Slot. Der Mutex serialisiert die `insert`s:
+    /// der erste trifft den leeren Slot (kein Supersede), die restlichen `T-1`
+    /// verdrängen den Vorgänger. Endcheck je Feld: GENAU ein Halter (Identität
+    /// offen), Superseded-Summe `== T-1`, kein Panic.
+    async fn run_reconnect_storm(broker: Broker, p: &LoadParams) {
+        let t = p.tablets_per_court;
+        // Je (NS, Feld) alle rx sammeln, um die Superseded-Frames zu zählen.
+        let mut groups: Vec<(String, i64, Vec<UnboundedReceiver<Message>>)> = Vec::new();
+        let mut set = JoinSet::new();
+
+        for i in 0..p.namespaces {
+            let ns = fresh_ns(i);
+            for c in 0..p.courts_per_ns {
+                let court = c as i64;
+                let mut court_rx = Vec::with_capacity(t);
+                for k in 0..t {
+                    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                    court_rx.push(rx);
+                    let b = broker.clone();
+                    let ns_c = ns.clone();
+                    let dev = format!("dev-{i}-{c}-{k}");
+                    set.spawn(async move {
+                        take_over_court(&b, &ns_c, court, &dev, &tx).await;
+                    });
+                }
+                groups.push((ns.clone(), court, court_rx));
+            }
+        }
+
+        while let Some(r) = set.join_next().await {
+            r.expect("Task-Panik im Reconnect-Sturm");
+        }
+
+        let map = broker.namespaces.lock().await;
+        for (ns, court, mut court_rx) in groups {
+            let n = map.get(&ns).expect("Namespace existiert");
+            assert!(
+                n.tablets.contains_key(&court),
+                "Feld {court} hat genau einen Halter"
+            );
+            let mut superseded = 0usize;
+            for rx in court_rx.iter_mut() {
+                while let Ok(m) = rx.try_recv() {
+                    assert!(is_superseded(&m), "nur Ablöse-Frames erwartet");
+                    superseded += 1;
+                }
+            }
+            assert_eq!(superseded, t - 1, "Feld {court}: genau T-1 Ablösungen");
+        }
+    }
+
+    /// **Nudge-Fan-out:** ein Namespace A mit je Feld einem court-spezifischen
+    /// Sub + einem „alle"-Sub; dazu ein Fremd-Namespace B mit Sub. Viele
+    /// `notify_monitor`-Tasks feuern `N_c` Nudges je Feld. Endcheck: jeder
+    /// court-c-Sub sah GENAU `N_c` Nudges (alle `court==c`), der „alle"-Sub sah
+    /// `Σ N_c`, der Fremd-NS-Sub 0 (Isolation). `seq`-Reihenfolge NICHT geprüft.
+    async fn run_nudge_fanout(broker: Broker, p: &LoadParams) {
+        let courts = p.courts_per_ns;
+        let notifies = p.notifies_per_court;
+        let nsa = fresh_ns(0);
+        let nsb = fresh_ns(1);
+
+        // Hosts, damit `subscribe_monitor` die Namespaces bespielt. Die Host-rx
+        // bleiben bis Funktionsende gebunden (nicht `let _ = …`, das dropt).
+        let (ha, _rha) = mpsc::unbounded_channel::<Message>();
+        let (hb, _rhb) = mpsc::unbounded_channel::<Message>();
+        register_host(&broker, &nsa, &ha).await;
+        register_host(&broker, &nsb, &hb).await;
+
+        // court-spezifische Subs (Index == Feld), „alle"-Sub, Fremd-NS-Sub.
+        let mut court_rx: Vec<UnboundedReceiver<Message>> = Vec::with_capacity(courts);
+        for c in 0..courts {
+            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            subscribe_monitor(&broker, &nsa, Some(c as i64), &tx).await;
+            court_rx.push(rx);
+        }
+        let (tx_all, mut all_rx) = mpsc::unbounded_channel::<Message>();
+        subscribe_monitor(&broker, &nsa, None, &tx_all).await;
+        let (tx_f, mut foreign_rx) = mpsc::unbounded_channel::<Message>();
+        subscribe_monitor(&broker, &nsb, Some(0), &tx_f).await;
+
+        let mut set = JoinSet::new();
+        for c in 0..courts {
+            for _ in 0..notifies {
+                let b = broker.clone();
+                let ns = nsa.clone();
+                let court = c as i64;
+                set.spawn(async move {
+                    let mut m = b.namespaces.lock().await;
+                    if let Some(n) = m.get_mut(&ns) {
+                        notify_monitor(n, court);
+                    }
+                });
+            }
+        }
+        while let Some(r) = set.join_next().await {
+            r.expect("Task-Panik im Nudge-Fan-out");
+        }
+
+        for (c, rx) in court_rx.iter_mut().enumerate() {
+            let mut cnt = 0usize;
+            while let Ok(m) = rx.try_recv() {
+                let (court, _seq) = nudge_of(m);
+                assert_eq!(court, c as i64, "court-Sub sah nur sein Feld");
+                cnt += 1;
+            }
+            assert_eq!(cnt, notifies, "Feld {c}: genau N_c Nudges");
+        }
+        let mut all_cnt = 0usize;
+        while all_rx.try_recv().is_ok() {
+            all_cnt += 1;
+        }
+        assert_eq!(all_cnt, courts * notifies, "„alle\"-Sub sah Σ N_c");
+        assert!(
+            foreign_rx.try_recv().is_err(),
+            "Fremd-NS-Sub blieb still (Isolation)"
+        );
+    }
+
+    /// **Ergebnis-Schwall:** je NS ein Host + eine schlanke Acker-Task, die die
+    /// weitergeleiteten `RelayFrame::Result` sofort mit `HostFrame::ResultAck`
+    /// beantwortet. Viele parallele `result`-`POST`s (inkl. idempotenter Retries
+    /// mit geteilter `match_id`). Endcheck: je NS `pending.is_empty()`; jede
+    /// Antwort `ok()` ODER bekannter Fehlerstring; `MAX_PENDING_PER_NS` nie
+    /// überschritten (Nachweis = End-`pending` leer); kein Panic.
+    async fn run_result_storm(broker: Broker, p: &LoadParams) {
+        let results = p.results;
+        let courts = p.courts_per_ns.max(1);
+        let mut ns_list: Vec<String> = Vec::new();
+        let mut ackers: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
+        for i in 0..p.namespaces {
+            let ns = fresh_ns(i);
+            let (host_tx, mut host_rx) = mpsc::unbounded_channel::<Message>();
+            register_host(&broker, &ns, &host_tx).await;
+            // Schlanke Acker-Task: Frame lesen → `reqId` ziehen → sofort acken.
+            // So schlägt das 8-s-`RESULT_TIMEOUT` nie zu. `host_tx` wandert mit
+            // (jeder Klon erfüllt den `same_channel`-Check); die Task wird nach
+            // dem Join der POSTs abgebrochen (sie hält selbst einen Sender).
+            let b = broker.clone();
+            let ns_c = ns.clone();
+            let acker = tokio::spawn(async move {
+                while let Some(msg) = host_rx.recv().await {
+                    let Message::Text(txt) = msg else { continue };
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(txt.as_str()) else {
+                        continue;
+                    };
+                    if let Some(req_id) = v.get("reqId").and_then(|x| x.as_u64()) {
+                        handle_host_frame(
+                            &b,
+                            &ns_c,
+                            HostFrame::ResultAck {
+                                req_id,
+                                ok: true,
+                                error: None,
+                            },
+                            &host_tx,
+                        )
+                        .await;
+                    }
+                }
+            });
+            ackers.push(acker);
+            ns_list.push(ns);
+        }
+
+        let mut set: JoinSet<ResultResponse> = JoinSet::new();
+        for ns in &ns_list {
+            for k in 0..results {
+                let b = broker.clone();
+                let ns_c = ns.clone();
+                // Geteilte `match_id` für ~die Hälfte = idempotente Retries;
+                // der Relay vergibt je POST dennoch eine eigene `req_id`.
+                let match_id = (k % (results / 2 + 1)) as i64;
+                let court_id = (k % courts) as i64;
+                set.spawn(async move {
+                    let body = ResultBody {
+                        match_id,
+                        court_id,
+                        court_label: String::new(),
+                        sets: Vec::new(),
+                        retired: false,
+                        walkover: false,
+                        winner: None,
+                        cascade_walkover: false,
+                    };
+                    result(State(b), Path(ns_c), Json(body)).await.0
+                });
+            }
+        }
+        while let Some(r) = set.join_next().await {
+            let resp = r.expect("Task-Panik im Ergebnis-Schwall");
+            assert!(
+                resp.ok || known_result_error(resp.error.as_deref()),
+                "Antwort ok() oder bekannter Fehler, war: {resp:?}"
+            );
+        }
+
+        // Alle POSTs sind zurück → jeder weitergeleitete Frame wurde entweder
+        // geackt (pending entfernt) oder lief in den Timeout (Handler entfernt
+        // pending selbst). Die Acker werden jetzt abgebrochen.
+        for acker in &ackers {
+            acker.abort();
+        }
+        let map = broker.namespaces.lock().await;
+        for ns in &ns_list {
+            let empty = map.get(ns).map(|n| n.pending.is_empty()).unwrap_or(true);
+            assert!(
+                empty,
+                "je NS keine offenen Übermittlungen (Cap nie gerissen)"
+            );
+        }
+    }
+
+    /// **Cleanup:** ein voll bespielter Namespace (Host + je Feld ein Tablet +
+    /// S Subs) wird komplett getrennt. Endcheck: nach dem Austragen aller Subs
+    /// sind die Sub-Listen `is_empty`; nach Host-Freigabe + Tablet-Detach ist
+    /// der Namespace via `Namespace::is_empty()` aus `namespaces` entfernt
+    /// (kein unbegrenztes Wachsen).
+    async fn run_cleanup(broker: Broker, p: &LoadParams) {
+        let courts = p.courts_per_ns;
+        let subs = p.subs_per_ns;
+        let mut ns_list: Vec<String> = Vec::new();
+        // Pro NS die Sende-Enden + rx aufbewahren (detach/unsubscribe brauchen
+        // den EIGENEN Sender via `same_channel`).
+        let mut per_ns_tablets: Vec<Vec<(i64, Tx)>> = Vec::new();
+        let mut per_ns_subs: Vec<Vec<(Option<i64>, Tx)>> = Vec::new();
+        let mut host_txs: Vec<Tx> = Vec::new();
+        let mut keep_rx: Vec<UnboundedReceiver<Message>> = Vec::new();
+
+        for i in 0..p.namespaces {
+            let ns = fresh_ns(i);
+            let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+            register_host(&broker, &ns, &host_tx).await;
+            keep_rx.push(host_rx);
+
+            let mut tablets = Vec::with_capacity(courts);
+            for c in 0..courts {
+                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                keep_rx.push(rx);
+                let dev = format!("dev-{i}-{c}");
+                attach_tablet(&broker, &ns, c as i64, &dev, &tx).await;
+                tablets.push((c as i64, tx));
+            }
+            let mut sub_list = Vec::with_capacity(subs);
+            for s in 0..subs {
+                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                keep_rx.push(rx);
+                let court = if s % 2 == 0 {
+                    Some((s % courts.max(1)) as i64)
+                } else {
+                    None
+                };
+                subscribe_monitor(&broker, &ns, court, &tx).await;
+                sub_list.push((court, tx));
+            }
+
+            per_ns_tablets.push(tablets);
+            per_ns_subs.push(sub_list);
+            host_txs.push(host_tx);
+            ns_list.push(ns);
+        }
+
+        // Phase A (nebenläufig): alle Subs austragen. Der Namespace lebt noch
+        // (Host + Tablets), also lässt sich die leere Sub-Liste danach prüfen.
+        let mut set = JoinSet::new();
+        for (ns, sub_list) in ns_list.iter().zip(per_ns_subs) {
+            for (court, tx) in sub_list {
+                let b = broker.clone();
+                let ns_c = ns.clone();
+                set.spawn(async move {
+                    unsubscribe_monitor(&b, &ns_c, court, &tx).await;
+                });
+            }
+        }
+        while let Some(r) = set.join_next().await {
+            r.expect("Task-Panik beim Sub-Austragen");
+        }
+        {
+            let map = broker.namespaces.lock().await;
+            for ns in &ns_list {
+                let n = map.get(ns).expect("Namespace lebt noch (Host+Tablets)");
+                assert!(n.monitor_subs.is_empty(), "court-Sub-Listen leer");
+                assert!(n.monitor_subs_all.is_empty(), "„alle\"-Sub-Liste leer");
+            }
+        }
+
+        // Host-Slot je NS freigeben (setzt nur `host = None`, entfernt nicht) —
+        // danach räumt der LETZTE Tablet-Detach den nun leeren Namespace ab.
+        {
+            let mut map = broker.namespaces.lock().await;
+            for (ns, host_tx) in ns_list.iter().zip(&host_txs) {
+                if let Some(n) = map.get_mut(ns) {
+                    release_host_slot(n, host_tx);
+                }
+            }
+        }
+
+        // Phase B (nebenläufig): alle Tablets trennen. Der letzte Detach je NS
+        // sieht `is_empty()` und entfernt den Namespace.
+        let mut set = JoinSet::new();
+        for (ns, tablets) in ns_list.iter().zip(per_ns_tablets) {
+            for (court, tx) in tablets {
+                let b = broker.clone();
+                let ns_c = ns.clone();
+                set.spawn(async move {
+                    detach_tablet(&b, &ns_c, court, &tx).await;
+                });
+            }
+        }
+        while let Some(r) = set.join_next().await {
+            r.expect("Task-Panik beim Tablet-Detach");
+        }
+
+        let map = broker.namespaces.lock().await;
+        for ns in &ns_list {
+            assert!(
+                map.get(ns).is_none(),
+                "Namespace nach vollständiger Trennung entfernt"
+            );
+        }
+        drop(keep_rx);
+    }
+
+    // ─────────────────── Leichte CI-Wache (Sekunden, grün) ──────────────────
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn light_mass_connect() {
+        let p = light();
+        tokio::time::timeout(p.timeout, run_mass_connect(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn light_reconnect_storm() {
+        let p = light();
+        tokio::time::timeout(p.timeout, run_reconnect_storm(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn light_nudge_fanout() {
+        let p = light();
+        tokio::time::timeout(p.timeout, run_nudge_fanout(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn light_result_storm() {
+        let p = light();
+        tokio::time::timeout(p.timeout, run_result_storm(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn light_cleanup() {
+        let p = light();
+        tokio::time::timeout(p.timeout, run_cleanup(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    // ────────────── Schwere Soak-Variante (manuell, `--ignored`) ────────────
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
+    async fn soak_mass_connect() {
+        let p = soak();
+        tokio::time::timeout(p.timeout, run_mass_connect(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
+    async fn soak_reconnect_storm() {
+        let p = soak();
+        tokio::time::timeout(p.timeout, run_reconnect_storm(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
+    async fn soak_nudge_fanout() {
+        let p = soak();
+        tokio::time::timeout(p.timeout, run_nudge_fanout(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
+    async fn soak_result_storm() {
+        let p = soak();
+        tokio::time::timeout(p.timeout, run_result_storm(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Soak: manuell vor dem Turnier (cargo test -p bts-relay -- --ignored)"]
+    async fn soak_cleanup() {
+        let p = soak();
+        tokio::time::timeout(p.timeout, run_cleanup(Broker::new("t".into()), &p))
+            .await
+            .expect("Timeout = Hang → Testfehler");
+    }
+}

@@ -340,6 +340,26 @@ fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
   Slave-Frontend als `CloudAnnounce.azure_discipline_voices` exponiert. Auch
   serde-abwärtskompatibel (alter Master ohne Feld → leere Zuordnung).
 
+## Last-/Soak-Test des Brokers (Cluster-Hebel C, ADR 0019)
+
+Der Broker ist der geteilte Serialisierungspunkt (globaler `namespaces`-Mutex).
+Ein **In-Process-Concurrency-Harness** (`relay/src/main.rs`, `#[cfg(test)] mod
+load`) treibt die Eintrittspunkte aus vielen `tokio`-Tasks unter echter
+**Multi-Thread-Contention** (`worker_threads = 4`) und prüft — jeweils **nach
+`JoinSet::join_all`**, nur reihenfolge-unabhängige Invarianten — Massen-Connect,
+Reconnect-Sturm (genau ein Halter je Court, `T-1` Superseded), Nudge-Fan-out
+(Namespace-Isolation), Ergebnis-Schwall (`pending` leer, `MAX_PENDING_PER_NS`)
+und Cleanup (`is_empty`).
+
+**Bewiesen:** Cap-Einhaltung, Ownership-End-Invariante, Namespace-Isolation,
+Aufräumen, kein Panic + Terminierung. **Bewusst NICHT bewiesen** (der Harness
+leert die mpsc-Empfänger selbst): Socket-`send().await`-Backpressure und
+unbegrenztes Wachstum der `UnboundedSender`-Queue bei zähem Socket, HTTP-Layer,
+Scheduling-Reihenfolge — „Deadlock-Freiheit" wird nicht behauptet (der Broker
+hält den Mutex nie über `.await`). Diese Socket-/Netz-Realität deckt die
+**manuelle 36-Geräte-Messung** im echten WLAN ab. Die leichte Variante läuft in
+der CI, die Soak-Variante manuell: `cargo test -p bts-relay -- --ignored`.
+
 ## Deployment
 
 Der Relay läuft als systemd-Dienst auf dem Hetzner-Server (`178.104.221.177`)
