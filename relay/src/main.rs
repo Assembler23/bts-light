@@ -4711,7 +4711,10 @@ mod tests {
                 ns.court_scores.get(&101),
                 Some(&vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }])
             );
-            assert_eq!(ns.court_state.get(&101), Some(&r#"{"matchId":7}"#.to_string()));
+            assert_eq!(
+                ns.court_state.get(&101),
+                Some(&r#"{"matchId":7}"#.to_string())
+            );
             let state = build_monitor_state(ns, 101);
             assert_eq!(
                 state.match_info.expect("Match am Feld").sets,

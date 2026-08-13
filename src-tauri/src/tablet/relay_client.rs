@@ -1056,7 +1056,11 @@ fn score_mirror_frame(
     let frame = HostFrame::ScoreUpdate {
         court_id,
         match_id: mirror.match_id,
-        sets: mirror.sets.into_iter().map(|(a, b)| SetAb { a, b }).collect(),
+        sets: mirror
+            .sets
+            .into_iter()
+            .map(|(a, b)| SetAb { a, b })
+            .collect(),
         state: mirror.state,
     };
     if last.get(&court_id) == Some(&frame) {
