@@ -1024,7 +1024,14 @@ impl TabletState {
     /// gespielt hat (`from_court_id`), sonst den ältesten Wartenden. Idempotent
     /// je (Feld, Match): steht schon ein Bediener für genau dieses Spiel, passiert
     /// nichts. Ist die Schlange leer, bleibt das Feld ohne Bediener.
+    /// Felder, auf denen die Bediener-Vergabe abgeschaltet ist (Spec
+    /// `schiedsrichter-management` Nr. 6 — dort bedient der Schiedsrichter
+    /// selbst), bleiben außen vor und verbrauchen **keinen** Eintrag aus der
+    /// Warteschlange. Ohne Eintrag gilt „aktiv", das Bestandsverhalten.
     pub fn assign_scorekeeper_for_court(&self, court_id: i64, match_id: i64) {
+        if !self.officials.court_switches(court_id).operator {
+            return;
+        }
         {
             let assigned = self.assigned_scorekeeper.read().unwrap();
             if assigned.get(&court_id).map(|(m, _)| *m) == Some(match_id) {
@@ -4326,6 +4333,36 @@ mod tests {
             first: String::new(),
             nationality: None,
         }
+    }
+
+    #[test]
+    fn ein_feld_ohne_bedienervergabe_verbraucht_keinen_eintrag() {
+        // Spec Nr. 6: Felder, auf denen der Schiedsrichter selbst das Tablet
+        // bedient, brauchen keinen Spieler als Bediener — und dürfen der
+        // Warteschlange deshalb auch keinen wegnehmen.
+        let st = TabletState::default();
+        st.officials_store().set_court_switches(
+            5,
+            crate::tablet::officials::CourtSwitches {
+                sr: true,
+                ar: true,
+                operator: false,
+            },
+        );
+        st.enqueue_scorekeeper(1, vec!["A".into()], 9, 1_000);
+
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(st.assigned_scorekeeper(5).is_none(), "Feld ist ausgenommen");
+        assert_eq!(
+            st.scorekeeper_queue().len(),
+            1,
+            "der Eintrag bleibt für ein anderes Feld erhalten"
+        );
+
+        // Default (kein Eintrag) bleibt aktiv — Bestandsverhalten.
+        st.assign_scorekeeper_for_court(6, 43);
+        assert!(st.assigned_scorekeeper(6).is_some());
+        assert!(st.scorekeeper_queue().is_empty());
     }
 
     #[test]

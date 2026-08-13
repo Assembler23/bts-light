@@ -21,11 +21,95 @@
 //!   sie liegen — sie sind die Grundlage der Einsatz-Ableitung (Spec Nr. 11,
 //!   keine eigene Historien-Datenhaltung).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
+
+use crate::btp::model::BtpPlayer;
+
+/// Warum ein Official nicht zu einem Spiel passt. Mehr Kategorien braucht
+/// die Anzeige nicht — der *Grund* (welcher Verein, welcher Spieler) bleibt
+/// bewusst auf dem Turnier-PC (Personendaten).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConflictKind {
+    /// Eigener Stammverein oder ein gesperrter Verein ist beteiligt.
+    Club,
+    /// Ein namentlich gesperrter Spieler ist beteiligt.
+    Person,
+}
+
+impl ConflictKind {
+    /// Wort für die Anzeige („Verein"/„Person").
+    pub fn label(&self) -> &'static str {
+        match self {
+            ConflictKind::Club => "Verein",
+            ConflictKind::Person => "Person",
+        }
+    }
+}
+
+/// Hat dieser Official einen Konflikt mit den Spielern dieses Spiels?
+/// (Spec Nr. 3). Reine Funktion — die Auto-Rotation überspringt Konflikte,
+/// eine manuelle Zuweisung wird trotzdem ausgeführt und nur gewarnt.
+///
+/// Geprüft wird in der Reihenfolge der Spec: eigener Verein, Sperr-Verein,
+/// Sperr-Spieler. Treffen mehrere zu, gewinnt der erste — die Warnung nennt
+/// ohnehin nur die Kategorie.
+pub fn official_conflict(extra: &OfficialExtra, players: &[BtpPlayer]) -> Option<ConflictKind> {
+    let vereine: Vec<&str> = players
+        .iter()
+        .filter_map(|p| p.club.as_deref())
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .collect();
+    // Vereinsnamen sind Handeingabe (BTP liefert am Official keinen) —
+    // Groß-/Kleinschreibung und Leerzeichen dürfen nicht entscheiden.
+    let gleich = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+
+    let eigener = extra.club.trim();
+    if !eigener.is_empty() && vereine.iter().any(|c| gleich(c, eigener)) {
+        return Some(ConflictKind::Club);
+    }
+    if extra
+        .blocked_clubs
+        .iter()
+        .any(|b| !b.trim().is_empty() && vereine.iter().any(|c| gleich(c, b)))
+    {
+        return Some(ConflictKind::Club);
+    }
+    if players
+        .iter()
+        .any(|p| p.id > 0 && extra.blocked_players.contains(&p.id))
+    {
+        return Some(ConflictKind::Person);
+    }
+    None
+}
+
+/// Eingabe der Auto-Rotation für **ein** Feld. Als Struct, weil die Regel
+/// von sieben Dingen abhängt — und weil so am Aufrufer lesbar steht, was
+/// womit verglichen wird.
+pub struct RotationInput<'a> {
+    /// Das Spiel, das gerade auf dem Feld steht.
+    pub match_id: i64,
+    /// Seine Spieler (Grundlage der Konflikt-Prüfung).
+    pub players: &'a [BtpPlayer],
+    /// `Official1ID` des BTP-Matches, falls gesetzt — BTP gewinnt.
+    pub btp_sr: Option<i64>,
+    /// `Official2ID` des BTP-Matches, falls gesetzt.
+    pub btp_ar: Option<i64>,
+    /// Official-IDs, die BTP aktuell kennt; nur die dürfen zugewiesen werden.
+    pub bekannt: &'a [i64],
+    /// Wer gerade auf einem ANDEREN Feld Dienst tut (SR oder AR).
+    pub im_dienst: &'a HashSet<i64>,
+    /// SR-Rotation für dieses Feld aktiv (globaler Schalter UND Feldschalter)?
+    pub sr: bool,
+    /// AR-Rotation für dieses Feld aktiv?
+    pub ar: bool,
+}
 
 /// Dienst eines Officials an einem Spiel. BTP: `Official1ID` = SR,
 /// `Official2ID` = AR (an der BTP-Maske verifiziert, Messung 13.08.2026).
@@ -376,6 +460,94 @@ impl OfficialsStore {
         self.persist();
     }
 
+    /// Die **wirksame** Besetzung eines Spiels: Trägt das BTP-Match
+    /// `Official1ID`/`Official2ID`, gewinnt BTP (R2); sonst gilt die lokale
+    /// Zuweisung (Overlay-Modell, Spec „Konfliktregel").
+    pub fn effective(
+        &self,
+        match_id: i64,
+        btp_sr: Option<i64>,
+        btp_ar: Option<i64>,
+    ) -> MatchOfficials {
+        let lokal = self.assignment(match_id);
+        MatchOfficials {
+            sr: btp_sr.or(lokal.sr),
+            ar: btp_ar.or(lokal.ar),
+        }
+    }
+
+    /// Freie Dienste eines neu belegten Felds aus der Reihenfolge besetzen
+    /// (Spec Nr. 4). Belegte Dienste bleiben unangetastet — auch deshalb ist
+    /// der Aufruf idempotent.
+    pub fn rotate_court(&self, input: RotationInput<'_>) {
+        if input.match_id <= 0 {
+            return;
+        }
+        let wirksam = self.effective(input.match_id, input.btp_sr, input.btp_ar);
+        let sr_offen = input.sr && wirksam.sr.is_none();
+        let ar_offen = input.ar && wirksam.ar.is_none();
+        if !sr_offen && !ar_offen {
+            return;
+        }
+        // Wer an DIESEM Spiel schon Dienst tut, kommt für den zweiten Dienst
+        // nicht in Frage — dieselbe Person ist nie SR und AR zugleich.
+        let mut vergeben: HashSet<i64> = input.im_dienst.clone();
+        vergeben.extend(wirksam.sr);
+        vergeben.extend(wirksam.ar);
+
+        for (offen, role) in [(sr_offen, OfficialRole::Sr), (ar_offen, OfficialRole::Ar)] {
+            if !offen {
+                continue;
+            }
+            let Some(id) = self.next_free(input.bekannt, &vergeben, input.players) else {
+                continue; // niemand frei ⇒ Feld bleibt ohne diesen Dienst
+            };
+            vergeben.insert(id);
+            self.assign(input.match_id, role, id);
+        }
+    }
+
+    /// Der nächste Official der Reihenfolge, der zugewiesen werden darf:
+    /// BTP kennt ihn, er ist nicht pausiert, hat keinen Dienst und keinen
+    /// Konflikt. Konflikte werden hier **still** übersprungen — gewarnt wird
+    /// nur bei manueller Zuweisung (Spec Nr. 4).
+    fn next_free(
+        &self,
+        bekannt: &[i64],
+        vergeben: &HashSet<i64>,
+        players: &[BtpPlayer],
+    ) -> Option<i64> {
+        for id in self.order() {
+            if !bekannt.contains(&id) || vergeben.contains(&id) {
+                continue;
+            }
+            let extra = self.extra(id);
+            if extra.paused || official_conflict(&extra, players).is_some() {
+                continue;
+            }
+            return Some(id);
+        }
+        None
+    }
+
+    /// Officials ans Ende der Reihenfolge rücken (nach Spielende, Spec Nr. 4).
+    pub fn move_to_end(&self, official_ids: &[i64]) {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let betroffen: Vec<i64> = official_ids
+                .iter()
+                .copied()
+                .filter(|id| inner.file.order.contains(id))
+                .collect();
+            if betroffen.is_empty() {
+                return;
+            }
+            inner.file.order.retain(|id| !betroffen.contains(id));
+            inner.file.order.extend(betroffen);
+        }
+        self.persist();
+    }
+
     // ── Feldweise Schalter ────────────────────────────────────────────
 
     /// Schalter eines Felds (fehlt ein Eintrag: alles aktiv).
@@ -463,7 +635,223 @@ impl OfficialsStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::btp::model::BtpPlayer;
     use std::path::Path;
+
+    /// Ein Spieler mit Verein (leer = ohne Vereinszuordnung).
+    fn spieler(id: i64, club: &str) -> BtpPlayer {
+        BtpPlayer {
+            id,
+            name: format!("Spieler{id}"),
+            first: String::new(),
+            last: format!("Spieler{id}"),
+            member_id: None,
+            nationality: None,
+            club: (!club.is_empty()).then(|| club.to_string()),
+        }
+    }
+
+    /// Rotations-Eingabe für ein Feld mit diesen Spielern; nichts aus BTP
+    /// gesetzt, niemand im Dienst, beide Rotationen an.
+    fn eingabe<'a>(
+        match_id: i64,
+        players: &'a [BtpPlayer],
+        bekannt: &'a [i64],
+        im_dienst: &'a HashSet<i64>,
+    ) -> RotationInput<'a> {
+        RotationInput {
+            match_id,
+            players,
+            btp_sr: None,
+            btp_ar: None,
+            bekannt,
+            im_dienst,
+            sr: true,
+            ar: true,
+        }
+    }
+
+    #[test]
+    fn konflikt_erkennt_eigenen_verein_sperrverein_und_sperrspieler() {
+        let players = vec![spieler(1, "TSV Musterstadt"), spieler(2, "SC Nachbar")];
+
+        // Kein Bezug ⇒ kein Konflikt.
+        let neutral = OfficialExtra::default();
+        assert_eq!(official_conflict(&neutral, &players), None);
+
+        // (a) eigener Stammverein ist beteiligt ⇒ „Verein"
+        let eigener = OfficialExtra {
+            club: "TSV Musterstadt".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            official_conflict(&eigener, &players),
+            Some(ConflictKind::Club)
+        );
+        // Handeingabe: Groß-/Kleinschreibung und Leerzeichen dürfen nicht
+        // darüber entscheiden, ob gewarnt wird.
+        let geschludert = OfficialExtra {
+            club: "  tsv musterstadt ".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            official_conflict(&geschludert, &players),
+            Some(ConflictKind::Club)
+        );
+
+        // (b) zusätzlich gesperrter Verein ⇒ „Verein"
+        let sperrverein = OfficialExtra {
+            blocked_clubs: vec!["SC Nachbar".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            official_conflict(&sperrverein, &players),
+            Some(ConflictKind::Club)
+        );
+
+        // (c) gesperrter Spieler ⇒ „Person"
+        let sperrspieler = OfficialExtra {
+            blocked_players: vec![2],
+            ..Default::default()
+        };
+        assert_eq!(
+            official_conflict(&sperrspieler, &players),
+            Some(ConflictKind::Person)
+        );
+
+        // Ein Spieler ohne Vereinszuordnung löst nie einen Vereins-Konflikt
+        // aus — sonst warnte ein leeres Feld gegen ein leeres Feld.
+        let ohne_verein = vec![spieler(3, "")];
+        let leerer_verein = OfficialExtra {
+            club: String::new(),
+            ..Default::default()
+        };
+        assert_eq!(official_conflict(&leerer_verein, &ohne_verein), None);
+        assert_eq!(official_conflict(&eigener, &ohne_verein), None);
+    }
+
+    #[test]
+    fn rotation_nimmt_den_naechsten_freien_aus_der_reihenfolge() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        let players = vec![spieler(10, "TSV Musterstadt")];
+        let bekannt = [1, 2, 3];
+        let dienst = HashSet::new();
+
+        store.rotate_court(eingabe(500, &players, &bekannt, &dienst));
+        // SR = erster, AR = zweiter: dieselbe Person tut nie zwei Dienste.
+        assert_eq!(
+            store.assignment(500),
+            MatchOfficials {
+                sr: Some(1),
+                ar: Some(2)
+            }
+        );
+
+        // Idempotent: ein zweiter Lauf ändert nichts.
+        store.rotate_court(eingabe(500, &players, &bekannt, &dienst));
+        assert_eq!(store.assignment(500).sr, Some(1));
+    }
+
+    #[test]
+    fn rotation_ueberspringt_pausierte_im_dienst_und_konflikt() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3, 4]);
+        store.set_paused(1, true); // pausiert
+        store.set_club(2, "TSV Musterstadt"); // Vereins-Konflikt
+        let dienst: HashSet<i64> = [3].into_iter().collect(); // 3 pfeift woanders
+        let players = vec![spieler(10, "TSV Musterstadt")];
+        let bekannt = [1, 2, 3, 4];
+
+        let mut e = eingabe(500, &players, &bekannt, &dienst);
+        e.ar = false; // nur SR besetzen
+        store.rotate_court(e);
+        assert_eq!(
+            store.assignment(500),
+            MatchOfficials {
+                sr: Some(4),
+                ar: None
+            },
+            "1 pausiert, 2 Konflikt, 3 im Dienst ⇒ 4"
+        );
+    }
+
+    #[test]
+    fn rotation_laesst_das_feld_leer_wenn_niemand_frei_ist() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1]);
+        store.set_paused(1, true);
+        let players = vec![spieler(10, "")];
+        let bekannt = [1];
+        let dienst = HashSet::new();
+        store.rotate_court(eingabe(500, &players, &bekannt, &dienst));
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+    }
+
+    #[test]
+    fn rotation_weist_nur_officials_zu_die_btp_noch_kennt() {
+        // Verschwindet ein Official aus der BTP-Liste, bleibt seine Position
+        // stehen (inert) — zugewiesen wird er nicht mehr.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let bekannt = [2]; // 1 ist aus BTP verschwunden
+        let dienst = HashSet::new();
+        let mut e = eingabe(500, &players, &bekannt, &dienst);
+        e.ar = false;
+        store.rotate_court(e);
+        assert_eq!(store.assignment(500).sr, Some(2));
+        assert_eq!(store.order(), vec![1, 2], "Position bleibt");
+    }
+
+    #[test]
+    fn btp_gewinnt_gegen_die_lokale_zuweisung() {
+        // Spec-Konfliktregel: Trägt das BTP-Match Official1/2, gilt BTP —
+        // die Rotation füllt dort nichts nach, und die Anzeige zeigt BTP.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.assign(500, OfficialRole::Sr, 3);
+        let players = vec![spieler(10, "")];
+        let bekannt = [1, 2, 3];
+        let dienst = HashSet::new();
+
+        let mut e = eingabe(500, &players, &bekannt, &dienst);
+        e.btp_sr = Some(9);
+        e.ar = false;
+        store.rotate_court(e);
+        // Lokal bleibt 3 stehen, wirksam ist aber 9 (BTP).
+        assert_eq!(store.assignment(500).sr, Some(3));
+        assert_eq!(
+            store.effective(500, Some(9), None),
+            MatchOfficials {
+                sr: Some(9),
+                ar: None
+            }
+        );
+        // Ohne BTP-Wert gilt die lokale Zuweisung.
+        assert_eq!(store.effective(500, None, None).sr, Some(3));
+    }
+
+    #[test]
+    fn nach_spielende_rueckt_der_official_ans_ende_der_reihenfolge() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.move_to_end(&[1]);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        // Mehrere auf einmal (SR + AR desselben Spiels) behalten ihre
+        // relative Reihenfolge.
+        store.move_to_end(&[2, 3]);
+        assert_eq!(store.order(), vec![1, 2, 3]);
+        // Unbekannte IDs ändern nichts.
+        store.move_to_end(&[99]);
+        assert_eq!(store.order(), vec![1, 2, 3]);
+    }
 
     fn store_mit_datei(dir: &Path) -> OfficialsStore {
         let store = OfficialsStore::default();

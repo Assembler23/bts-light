@@ -78,6 +78,11 @@ pub struct SyncEngine {
     /// Spiels. Wechselt das (Spiel verlässt das Feld) und ist es beendet,
     /// merkt sich der State den Verlierer als Zähltafelbediener fürs Feld.
     oncourt_prev: HashMap<i64, i64>,
+    /// Derselbe Vorher-Stand, aber für die Schiedsrichter-Rotation: Sie
+    /// bestückt nur **neu** belegte Felder, und ihr Hook läuft an anderer
+    /// Stelle im Zyklus als der der Zähltafelbediener. Ein gemeinsamer
+    /// Merker würde beide aneinanderketten.
+    officials_oncourt_prev: HashMap<i64, i64>,
     /// CourtID → Zeitpunkt (Unix-ms), seit dem ein Feld frei ist (kein Match
     /// referenziert es). Grundlage der Wartezeit der automatischen Feldvergabe.
     court_free_since: HashMap<i64, u64>,
@@ -259,6 +264,7 @@ impl SyncEngine {
             last_push_at: None,
             last_topology: None,
             oncourt_prev: HashMap::new(),
+            officials_oncourt_prev: HashMap::new(),
             court_free_since: HashMap::new(),
             pending_auto: HashMap::new(),
             last_btp_retry_flush: None,
@@ -616,6 +622,101 @@ impl SyncEngine {
             tablet.clear_scorekeeper_assignments();
         }
         self.oncourt_prev = oncourt_now;
+    }
+
+    /// Schiedsrichter-Rotation (Spec `schiedsrichter-management` Nr. 4).
+    ///
+    /// Master-only und bewusst **nur beim Neu-Belegen**: Bestückt wird ein
+    /// Feld in dem Zyklus, in dem ein anderes Spiel darauf kommt. Wer eine
+    /// Zuweisung von Hand löscht, bekäme sie sonst im nächsten Poll zurück.
+    /// Nach Spielende rücken die Officials ans Ende der Reihenfolge — ihre
+    /// Zuweisung bleibt am Match stehen (Grundlage der Einsatz-Ableitung).
+    fn track_officials(
+        &mut self,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+        config: &AppConfig,
+    ) {
+        let store = tablet.officials_store();
+        if !config.officials.enabled {
+            // Abschalten mitten im Turnier räumt alles (Spec Nr. 1) — sonst
+            // bliebe ein Name in einer Anzeige hängen.
+            store.clear_assignments();
+            self.officials_oncourt_prev.clear();
+            return;
+        }
+        let oncourt_now: HashMap<i64, i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|c| (c, m.id)))
+            .collect();
+
+        // Verlassene Felder: War das vorige Spiel beendet, rücken seine
+        // Officials ans Ende der Reihenfolge.
+        for (&court_id, &prev_match_id) in &self.officials_oncourt_prev {
+            if oncourt_now.get(&court_id) == Some(&prev_match_id) {
+                continue;
+            }
+            let Some(fm) = snapshot.matches.iter().find(|m| m.id == prev_match_id) else {
+                continue;
+            };
+            if fm.status != MatchStatus::Finished {
+                continue;
+            }
+            let wirksam = store.effective(fm.id, fm.official1_id, fm.official2_id);
+            let fertig: Vec<i64> = wirksam.sr.into_iter().chain(wirksam.ar).collect();
+            store.move_to_end(&fertig);
+        }
+
+        // Wer tut gerade irgendwo Dienst? Aus den laufenden Spielen, damit
+        // niemand zwei Felder gleichzeitig bekommt.
+        let bekannt: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
+        let mut im_dienst: HashSet<i64> = HashSet::new();
+        for m in snapshot.matches.iter().filter(|m| {
+            m.status == MatchStatus::OnCourt && m.court_id.is_some_and(|c| oncourt_now.contains_key(&c))
+        }) {
+            let w = store.effective(m.id, m.official1_id, m.official2_id);
+            im_dienst.extend(w.sr);
+            im_dienst.extend(w.ar);
+        }
+
+        // Neu belegte Felder bestücken — nach CourtID sortiert, damit die
+        // Verteilung bei mehreren gleichzeitig deterministisch ist.
+        let mut courts: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
+        courts.sort_by_key(|&(c, _)| c);
+        for (court_id, match_id) in courts {
+            if self.officials_oncourt_prev.get(&court_id) == Some(&match_id) {
+                continue; // unverändert belegt ⇒ nichts nachfüllen
+            }
+            let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) else {
+                continue;
+            };
+            let schalter = store.court_switches(court_id);
+            let players: Vec<crate::btp::model::BtpPlayer> =
+                m.team1.iter().chain(m.team2.iter()).cloned().collect();
+            let vorher = store.effective(match_id, m.official1_id, m.official2_id);
+            store.rotate_court(crate::tablet::officials::RotationInput {
+                match_id,
+                players: &players,
+                btp_sr: m.official1_id,
+                btp_ar: m.official2_id,
+                bekannt: &bekannt,
+                im_dienst: &im_dienst,
+                sr: config.officials.rotation_sr && schalter.sr,
+                ar: config.officials.rotation_ar && schalter.ar,
+            });
+            // Frisch Zugewiesene zählen sofort als im Dienst — sonst bekäme
+            // das nächste Feld im selben Zyklus dieselbe Person.
+            let nachher = store.effective(match_id, m.official1_id, m.official2_id);
+            if vorher.sr != nachher.sr {
+                im_dienst.extend(nachher.sr);
+            }
+            if vorher.ar != nachher.ar {
+                im_dienst.extend(nachher.ar);
+            }
+        }
+        self.officials_oncourt_prev = oncourt_now;
     }
 
     /// Bestimmt die automatischen Feldvergaben dieses Zyklus und pflegt dabei
@@ -988,6 +1089,11 @@ impl SyncEngine {
         if config.slave_mode {
             return SyncOutcome::SlaveActive;
         }
+        // Schiedsrichter-Rotation (Spec schiedsrichter-management Nr. 4):
+        // bewusst NACH `set_snapshot` — der Roster ist dann ans Turnier
+        // gebunden und um neue BTP-Officials ergänzt. Master-only: der
+        // Ansage-Slave ist oben schon zurückgekehrt.
+        self.track_officials(&snapshot, tablet, config);
         tablet.apply_tablet_scores(&mut snapshot);
         // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
         // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
@@ -1880,6 +1986,166 @@ mod tests {
         snap2.matches[0].finished_at = None;
         engine.stamp_finished(&mut snap2);
         assert_eq!(snap2.matches[0].finished_at, Some(first));
+    }
+
+    // --- Schiedsrichter-Rotation (Spec schiedsrichter-management, Nr. 4) ---
+
+    fn official_named(id: i64) -> crate::btp::model::BtpOfficial {
+        crate::btp::model::BtpOfficial {
+            id,
+            name: format!("Schiri{id}"),
+            first: String::new(),
+            nationality: None,
+        }
+    }
+
+    /// Snapshot mit Officials-Liste.
+    fn snap_officials(matches: Vec<BtpMatch>, ids: &[i64]) -> BtpSnapshot {
+        let mut s = snap_with(Vec::new(), matches, Vec::new());
+        s.officials = ids.iter().copied().map(official_named).collect();
+        s
+    }
+
+    fn cfg_officials(sr: bool, ar: bool) -> AppConfig {
+        let mut c = AppConfig::default();
+        c.officials.enabled = true;
+        c.officials.rotation_sr = sr;
+        c.officials.rotation_ar = ar;
+        c
+    }
+
+    /// Engine + Tablet mit gebundenem Turnier und drei Officials.
+    fn officials_setup() -> (SyncEngine, TabletState) {
+        (SyncEngine::new(), TabletState::default())
+    }
+
+    #[test]
+    fn track_officials_bestueckt_ein_neu_belegtes_feld() {
+        let (mut engine, tablet) = officials_setup();
+        let cfg = cfg_officials(true, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+
+        engine.track_officials(&snap, &tablet, &cfg);
+        let store = tablet.officials_store();
+        assert_eq!(store.assignment(10).sr, Some(1));
+        assert_eq!(store.assignment(10).ar, None, "AR-Rotation ist aus");
+    }
+
+    #[test]
+    fn track_officials_fuellt_eine_entfernte_zuweisung_nicht_wieder_auf() {
+        // Spec Nr. 4: Bestückt wird beim NEU-Belegen. Wer bewusst ohne SR
+        // spielen lässt, darf ihn nicht im nächsten Poll zurückbekommen.
+        let (mut engine, tablet) = officials_setup();
+        let cfg = cfg_officials(true, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet, &cfg);
+        assert_eq!(tablet.officials_store().assignment(10).sr, Some(1));
+
+        tablet
+            .officials_store()
+            .clear_assignment(10, crate::tablet::officials::OfficialRole::Sr);
+        engine.track_officials(&snap, &tablet, &cfg);
+        assert_eq!(
+            tablet.officials_store().assignment(10).sr,
+            None,
+            "unverändertes Feld wird nicht neu bestückt"
+        );
+    }
+
+    #[test]
+    fn track_officials_rueckt_nach_spielende_ans_ende_und_behaelt_die_zuweisung() {
+        // Nach dem Spiel ans Ende der Reihenfolge (Spec Nr. 4) — die
+        // Zuweisung selbst bleibt am Match stehen (Spec Nr. 11,
+        // Einsatz-Ableitung).
+        let (mut engine, tablet) = officials_setup();
+        let cfg = cfg_officials(true, true);
+        let snap1 = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap1.clone());
+        engine.track_officials(&snap1, &tablet, &cfg);
+        assert_eq!(tablet.officials_store().order(), vec![1, 2, 3]);
+
+        let snap2 = snap_officials(vec![finished_named(10, 42, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap2.clone());
+        engine.track_officials(&snap2, &tablet, &cfg);
+        assert_eq!(
+            tablet.officials_store().order(),
+            vec![3, 1, 2],
+            "SR und AR des beendeten Spiels rücken ans Ende"
+        );
+        assert_eq!(
+            tablet.officials_store().assignment(10).sr,
+            Some(1),
+            "Zuweisung bleibt dem beendeten Spiel erhalten"
+        );
+    }
+
+    #[test]
+    fn track_officials_vergibt_niemanden_doppelt_ueber_zwei_felder() {
+        let (mut engine, tablet) = officials_setup();
+        let cfg = cfg_officials(true, true);
+        let snap = snap_officials(
+            vec![
+                oncourt_named(10, 5, "A", "B"),
+                oncourt_named(11, 6, "C", "D"),
+            ],
+            &[1, 2, 3, 4],
+        );
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet, &cfg);
+        let store = tablet.officials_store();
+        // Feld 5 (kleinere CourtID) zuerst: 1+2, dann Feld 6: 3+4.
+        assert_eq!(
+            store.assignment(10),
+            crate::tablet::officials::MatchOfficials {
+                sr: Some(1),
+                ar: Some(2)
+            }
+        );
+        assert_eq!(
+            store.assignment(11),
+            crate::tablet::officials::MatchOfficials {
+                sr: Some(3),
+                ar: Some(4)
+            }
+        );
+    }
+
+    #[test]
+    fn track_officials_respektiert_den_feldschalter() {
+        let (mut engine, tablet) = officials_setup();
+        let cfg = cfg_officials(true, true);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        tablet.officials_store().set_court_switches(
+            5,
+            crate::tablet::officials::CourtSwitches {
+                sr: false,
+                ar: true,
+                operator: true,
+            },
+        );
+        engine.track_officials(&snap, &tablet, &cfg);
+        let a = tablet.officials_store().assignment(10);
+        assert_eq!(a.sr, None, "SR-Rotation ist für dieses Feld aus");
+        assert_eq!(a.ar, Some(1), "AR-Rotation läuft weiter");
+    }
+
+    #[test]
+    fn track_officials_raeumt_alles_wenn_der_globale_schalter_aus_ist() {
+        // Spec Nr. 1: Abschalten mitten im Turnier räumt die Zuweisungen —
+        // sonst bliebe ein Name in einer Anzeige hängen.
+        let (mut engine, tablet) = officials_setup();
+        let cfg = cfg_officials(true, true);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet, &cfg);
+        assert!(!tablet.officials_store().assignments().is_empty());
+
+        let aus = AppConfig::default(); // officials.enabled = false
+        engine.track_officials(&snap, &tablet, &aus);
+        assert!(tablet.officials_store().assignments().is_empty());
     }
 
     #[test]
