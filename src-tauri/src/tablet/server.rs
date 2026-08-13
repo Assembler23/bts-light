@@ -176,6 +176,10 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
         .route("/ws", get(ws_upgrade))
+        // Court-Monitor-Nudge (A1, ADR 0016): niedrig-latente Anzeige. `court`
+        // gesetzt → nur dieses Feld (Court-Monitor), fehlt es → alle Felder
+        // (Feld-Übersicht). Siehe `monitor_ws_upgrade`.
+        .route("/monitor-ws", get(monitor_ws_upgrade))
         .with_state(ctx);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", TABLET_PORT)).await?;
@@ -1747,6 +1751,83 @@ pub(crate) fn match_brief(
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, ctx))
+}
+
+/// Query der Monitor-Nudge-WS: optionale CourtID. Fehlt sie, abonniert der
+/// Client Nudges ALLER Felder (Feld-Übersicht `overview.html`); ist sie
+/// gesetzt, nur die dieses Felds (Court-Monitor `monitor.html`).
+#[derive(serde::Deserialize)]
+struct MonitorWsQuery {
+    court: Option<i64>,
+}
+
+/// Upgrade der Court-Monitor-Nudge-WS (A1, ADR 0016). Kein `identify`-
+/// Handshake nötig: eine Anzeige liest nur, der Court steht im Query.
+async fn monitor_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<MonitorWsQuery>,
+) -> impl IntoResponse {
+    let court = q.court;
+    ws.on_upgrade(move |socket| monitor_socket(socket, ctx, court))
+}
+
+/// Eine Court-Monitor-Nudge-Verbindung (A1, ADR 0016). Der Server schickt
+/// hier nur winzige „Feld X geändert, seq N"-Signale; die Anzeige holt den
+/// Vollstand daraufhin über ihre bestehende Poll-Route. So bleibt der
+/// Poll-Endpunkt die **einzige** Datenquelle (ein Renderpfad, kein Flackern).
+///
+/// TODO(A1): Match-Zuweisung wird noch nicht angestoßen — sie ist
+/// BTP-Snapshot-getrieben (Sync-Loop), nicht ein einzelner State-Aufruf wie
+/// Score/Alert/Räumung. Bis dahin deckt der ~250-ms-Poll-Fallback die
+/// Zuweisungs-Latenz ab (Score ist das Muss, Spec Paket A).
+async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Option<i64>) {
+    // Kanal hier anlegen und das Sende-Ende dem State reichen (wie im Relay),
+    // damit wir es am Verbindungsende per `unsubscribe_monitor` gezielt wieder
+    // austragen können.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Fan-out-Deckel (A1, ADR 0016): über `MAX_MONITOR_SUBS` lehnt der State
+    // das Abo ab — die Verbindung sauber schließen, die Anzeige bedient sich
+    // dann aus ihrem 250-ms-Poll-Fallback (kein stiller Hänger, kein DoS).
+    if !ctx.tablet.subscribe_monitor(court, &tx) {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    // Herzschlag: hält die Leitung wach und erkennt tote Sockets (analog zum
+    // Tablet-WS-Ping). Fällt die Verbindung weg, endet die Schleife und wir
+    // tragen das Abo unten explizit wieder aus.
+    let mut ping = tokio::time::interval(Duration::from_secs(15));
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            nudge = rx.recv() => {
+                match nudge {
+                    Some(json) => {
+                        if socket.send(Message::Text(Utf8Bytes::from(json))).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            incoming = socket.recv() => {
+                // Die Anzeige sendet nichts Fachliches; wir lesen nur, um
+                // Close/Fehler (tote Verbindung) zu bemerken.
+                match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {}
+                }
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    // Verbindungsende: Abo explizit austragen (nicht nur lazy beim nächsten
+    // Nudge) — sonst hielte ein stiller Court tote Sender beliebig lange.
+    ctx.tablet.unsubscribe_monitor(court, &tx);
 }
 
 /// Sendet eine `ServerMsg` über den Tablet-Socket.

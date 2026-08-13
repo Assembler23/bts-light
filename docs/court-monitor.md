@@ -89,6 +89,32 @@ Endlos-Reload).
 **Direkt-Variante:** Wer einen Monitor fest auf ein Feld nageln will,
 nutzt weiterhin `…/court/<Feld>/display` — ohne Zuweisungs-Schritt.
 
+## Niedrig-latente Anzeige (WS-Nudge)
+
+Der Spielstand erscheint auf dem TV **nahezu sofort** (statt erst beim nächsten
+Poll). Grundlage ist ein **WebSocket-„Nudge"** (ADR 0016): Ändert sich an einem
+Feld etwas (Punkt gezählt, Aufruf/Pause, Feld geräumt), schickt der Server/Relay
+an die Monitor-Clients ein winziges `{"court":<id>,"seq":<n>}` — **keine**
+Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
+`/health`-`fetch` aus. So bleibt der Poll-Endpunkt die **einzige** Datenquelle
+(eine Serialisierung, ein Renderpfad) — kein Flackern, kein Rückwärtsspringen.
+
+- **Routen:** `GET /monitor-ws?court={id}` (LAN) bzw. `GET /{ns}/monitor-ws?court={id}`
+  (Cloud, durch nginx `/bts-relay/` wie die Tablet-WS). `court` weggelassen →
+  Nudges **aller** Felder (Feld-Übersicht `overview.html`); gesetzt → nur dieses
+  Feld (fester Court-Monitor). Geräte-zugewiesene Monitore abonnieren alle Felder
+  und filtern clientseitig auf ihr aktuelles Feld.
+- **`seq`** zählt je Feld monoton hoch; veraltete/doppelte Nudges verwirft der
+  Client (`lastSeq`-Guard).
+- **Poll bleibt Fallback:** Solange Nudges eintreffen, pausiert das
+  Intervall-Poll; bei WS-Abriss (WLAN-Wechsel, Cloud-Namespace noch nicht da)
+  oder >~1 s Nudge-Stille übernimmt es sofort wieder (250 ms). Ein
+  Reconnect-Watchdog verbindet den WS mit Backoff neu. **Kein Regress** — fällt
+  der Push aus, verhält sich die Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Grenzen:** Die **Feld-/Match-Zuweisung** wird (noch) nicht genudgt (sie ist
+  BTP-Snapshot-getrieben, kein Einzel-Event) — hier greift der 250-ms-Poll. Der
+  Nudge ist reine Anzeige-Beschleunigung; er ändert keine Ownership/Zählung.
+
 ## Datenfluss
 
 Der Monitor braucht **keinen neuen Datenweg** — alle Daten liegen schon
