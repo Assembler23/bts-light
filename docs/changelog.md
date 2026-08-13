@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.199
+
+- **Tote Cloud-Verbindungen werden schneller erkannt (Cluster-Hebel D).** Zwei
+  passive Strecken fielen bisher erst spät auf. Ein **totes Tablet** belegte
+  seinen Court-Slot bis zum ~30-s-Ping — jetzt pingt der Relay jedes Tablet
+  alle 5 s und gibt den Slot bei 15 s Stille frei (wie beim Host). Und ein
+  **half-open Master** (Netz weg ohne sauberes Trennen) reconnectet jetzt in
+  ~15 s statt erst nach dem OS-TCP-Timeout (Minuten). Der Browser antwortet auf
+  Protokoll-Ebene, also wird kein lebendes — auch kein in den Hintergrund
+  gelegtes — Tablet fälschlich gedroppt, und ein kurzer WLAN-Hänger (< 15 s)
+  ebenso wenig. Kein Bedienunterschied; nur schnelleres Aufräumen toter
+  Verbindungen. Spec `docs/features/tote-verbindungen.md`, ADR 0020.
+
 ## v0.9.198
 
 - **Ergebnisse gehen auch bei Cloud-Aussetzern und Neustarts nicht verloren.**

@@ -1,6 +1,6 @@
 # 0020 — Tote-Verbindungs-Erkennung: Read-Idle (Option A) + Tablet-Empfangs-Stale
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-08-13
 
 Gehört zu [docs/features/tote-verbindungen.md](../features/tote-verbindungen.md)

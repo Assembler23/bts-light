@@ -99,6 +99,29 @@ const HOST_PING: Duration = Duration::from_secs(5);
 /// kann also nie einen gesunden Host verdrängen (R4 bleibt gewahrt).
 const HOST_STALE: Duration = Duration::from_secs(15);
 
+/// Ping-Intervall der TABLET-Verbindung — bewusst enger als [`HEARTBEAT`]
+/// (die geteilte 30-s-Konstante bleibt `monitor_conn` vorbehalten). Der
+/// Relay pingt jedes Tablet aktiv; der Browser auto-pongt auf **Protokoll-
+/// Ebene**, immun gegen die JS-Timer-Drosselung backgroundeter mobiler
+/// Seiten. So fällt ein totes Tablet schnell auf, ohne ein lebendes zu
+/// verdrängen (Hebel D / ADR 0020).
+const TABLET_PING: Duration = Duration::from_secs(5);
+
+/// Nach so viel Empfangs-Stille gilt eine Tablet-Verbindung als tot
+/// (= 3 verpasste Pongs bei [`TABLET_PING`]): Die Verbindung beendet sich
+/// selbst und gibt den Relay-Slot frei (in ~15 s statt bei ~30 s+). Ein
+/// LEBENDIGES Tablet pongt binnen ~5 s — ein gesundes Feld wird also nie
+/// gedroppt; ein 5–10-s-WLAN-Hänger (< 15 s) ebenso wenig.
+const TABLET_STALE: Duration = Duration::from_secs(15);
+
+/// Reine Stale-Entscheidung: liegt der letzte Empfang mindestens `threshold`
+/// zurück? Ausgelagert, damit die Grenz-Semantik (`>=`) ohne Laufzeit/Clock
+/// prüfbar ist. `tokio::time::Instant`, damit `tokio::time::pause()` in Tests
+/// greift (wie im ganzen Zombie-/Stale-Pfad).
+fn is_stale(last: tokio::time::Instant, now: tokio::time::Instant, threshold: Duration) -> bool {
+    now.duration_since(last) >= threshold
+}
+
 /// Wie lange der Relay auf die `ResultAck` von bts-light wartet. 8 s (nicht mehr
 /// 20 s, Hebel B / ADR 0018): Der Client puffert das Ergebnis ohnehin und retryt
 /// (idempotent seit dem `process_result`-Idempotenz-Zweig) — ein kürzeres
@@ -1616,12 +1639,21 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     // Persistente Geräte-Kennung (aus identify/take_over) — leer bei
     // alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
     let mut my_device = String::new();
-    let mut ping = tokio::time::interval(HEARTBEAT);
+    // Enger Ping-Takt + Empfangs-Stale wie bei `host_conn`: Der Relay pingt
+    // aktiv, der Browser auto-pongt auf Protokoll-Ebene. Bleibt jedes
+    // Lebenszeichen (Frame/Pong) länger als TABLET_STALE aus, beendet sich
+    // die Verbindung selbst und gibt den Court-Slot frei (Hebel D).
+    let mut ping = tokio::time::interval(TABLET_PING);
+    let mut last_incoming = tokio::time::Instant::now();
 
     loop {
         tokio::select! {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
+                // VOR dem inneren `match` stempeln: gilt für Text/Pong/Close/
+                // alle — ein `Message::Pong` (fällt in `_ => {}`) frischt den
+                // Stempel damit ebenso auf, ganz ohne eigenen Pong-Arm.
+                last_incoming = tokio::time::Instant::now();
                 match msg {
                     Message::Text(t) => {
                         match serde_json::from_str::<TabletMsg>(t.as_str()) {
@@ -1706,6 +1738,13 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                 }
             }
             _ = ping.tick() => {
+                if is_stale(last_incoming, tokio::time::Instant::now(), TABLET_STALE) {
+                    tracing::warn!(
+                        "Tablet (Namespace '{ns}') seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs()
+                    );
+                    break;
+                }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
             }
         }
@@ -4889,6 +4928,44 @@ mod tests {
         // pongt alle HOST_PING — die Übernahme-Schwelle muss deutlich
         // darüber liegen, sonst würde ein lebendiger Host verdrängt.
         assert!(HOST_STALE >= HOST_PING * 3);
+    }
+
+    #[test]
+    fn tablet_stale_invariant() {
+        // Analog zum Host: Ein gesundes Tablet pongt alle TABLET_PING —
+        // die Stale-Schwelle muss ≥ 3× darüber liegen (3 verpasste Pongs),
+        // sonst würde ein lebendes (auch backgroundetes) Feld fälschlich
+        // gedroppt.
+        assert!(TABLET_STALE >= TABLET_PING * 3);
+    }
+
+    #[test]
+    fn is_stale_grenzfaelle() {
+        use tokio::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let threshold = Duration::from_secs(15);
+        // Knapp unter der Schwelle → noch lebendig (Grenze ist `>=`).
+        let almost = t0 + threshold - Duration::from_millis(1);
+        assert!(!is_stale(t0, almost, threshold));
+        // Exakt an der Schwelle → tot.
+        let exact = t0 + threshold;
+        assert!(is_stale(t0, exact, threshold));
+        // Deutlich darüber → tot.
+        assert!(is_stale(
+            t0,
+            t0 + threshold + Duration::from_secs(5),
+            threshold
+        ));
+    }
+
+    #[test]
+    fn gesundes_tablet_nicht_stale() {
+        use tokio::time::{Duration, Instant};
+        // Ein Tablet, dessen Stempel je Ping/Pong frisch bleibt (hier: erst
+        // 4 s alt bei TABLET_STALE = 15 s), wird nie gedroppt.
+        let now = Instant::now();
+        let last = now - Duration::from_secs(4);
+        assert!(!is_stale(last, now, TABLET_STALE));
     }
 
     /// Reconnect-Erkennung: Meldet sich DASSELBE Gerät erneut an einem

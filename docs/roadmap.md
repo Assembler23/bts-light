@@ -20,7 +20,7 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   — **✅ (#207/#208)**; LAN-Server-Last als Folge-Erweiterung. **D**
   Tote-Verbindungs-Erkennung schärfen (Host-Client Read-Idle + Tablet↔Relay-
   Empfangs-Stale; [features/tote-verbindungen.md](features/tote-verbindungen.md),
-  ADR 0020) — **Spec abgestimmt 2026-08-13**.
+  ADR 0020) — **✅ umgesetzt v0.9.199**.
 - **BTP-Ergebnis-Regression** *(Fix implementiert, wartet auf Release
   v0.9.145)*: Spiele wurden in BTP nicht automatisch beendet — `Status`
   fehlte seit v0.9.103 im Ergebnis-`SENDUPDATE`; zudem Ergebnis +
