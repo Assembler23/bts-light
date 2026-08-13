@@ -59,6 +59,13 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # Die Assets (tl.html, tablet.html, monitor.html …) durchlaufen KEINEN
+      # Build — ein Syntaxfehler darin lässt die Seite im Betrieb leer. Am
+      # 13.08.2026 ist genau das passiert (Zeilenumbruch in einem
+      # String-Literal), deshalb prüft die CI die Inline-Skripte.
+      - name: Asset-Syntax (JS in HTML)
+        run: node scripts/check-asset-syntax.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)

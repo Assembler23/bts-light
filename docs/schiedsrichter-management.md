@@ -331,3 +331,12 @@ Der Push-Schlüssel beider Wege (LAN und Cloud) enthält neben Match-ID und
 `finalized` einen Fingerabdruck der Besetzung. Ohne ihn erreichte eine
 Zuweisung, die **nach** dem Ruf aufs Feld erfolgt, das Tablet nie — die
 Match-ID ändert sich dabei ja nicht.
+
+## Warum die CI die Asset-Syntax prüft
+
+`tl.html` und `tablet.html` durchlaufen **keinen** Build — sie gehen so an
+Browser und Tablets, wie sie im Repo stehen. Ein Syntaxfehler lässt das
+komplette Modul unausgeführt und die Seite leer; genau das ist beim Bau
+dieses Features passiert (ein Zeilenumbruch mitten in einem String-Literal
+im Sperrlisten-Dialog). Seitdem prüft `scripts/check-asset-syntax.mjs` alle
+Inline-Skripte der Assets, eingehängt in `ci.yml`.

@@ -3401,8 +3401,7 @@ function renderOfficialDetail(d) {
       <input type="text" id="off-club" maxlength="80" value="${esc(d.club || "")}" />
     </label>
     <label class="off-field">Gesperrte Vereine (einer je Zeile)
-      <textarea id="off-clubs" rows="3">${esc((d.blocked_clubs || []).join("
-"))}</textarea>
+      <textarea id="off-clubs" rows="3">${esc((d.blocked_clubs || []).join("\n"))}</textarea>
     </label>
     <label class="off-field">Gesperrte Spieler (BTP-IDs, mit Komma)
       <input type="text" id="off-players" value="${esc((d.blocked_players || []).join(", "))}" />
@@ -3415,8 +3414,7 @@ function renderOfficialDetail(d) {
   $("off-save").addEventListener("click", () => {
     const id = offCtx && offCtx.id;
     if (!id) return;
-    const clubs = $("off-clubs").value.split("
-").map((c) => c.trim()).filter(Boolean);
+    const clubs = $("off-clubs").value.split("\n").map((c) => c.trim()).filter(Boolean);
     const players = $("off-players").value.split(/[,\s]+/)
       .map((p) => parseInt(p, 10)).filter((p) => Number.isFinite(p) && p > 0);
     // Verein und Sperrlisten sind zwei Aktionen — der Aktionssatz ist
