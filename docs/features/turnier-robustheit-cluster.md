@@ -19,7 +19,7 @@ daraus vier Hebel, priorisiert.
 |---|-------|------|-------------|
 | **A** | **Echtzeit-Robustheit der Score-Strecke** | A1 niedrig-latente Anzeige (TVs pollen 1 s/5 s → Push) + A2 Reconnect-Wahrheit (Tablet = Wahrheit, „Slot-Halter gewinnt") | [turnier-robustheit.md](turnier-robustheit.md) ✅ **umgesetzt v0.9.196/197** |
 | **B** | **Ergebnis-Weg verlustsicher** | Client/Host-Puffer existieren schon; Rest: `process_result`-Idempotenz (kein Endlos-Retry/Doppel-Write) + Client-Fetch-Timeout + Host-Retry-Queue auf Platte | [ergebnis-puffer.md](ergebnis-puffer.md) ✅ abgestimmt |
-| **C** | **Last-/Soak-Test (36 Geräte, Reconnect-Sturm)** | Robustheit ist logisch da, aber nie unter Last verifiziert. Harness, das das reale Setup simuliert | *offen* |
+| **C** | **Last-/Soak-Test des Relay-Brokers** | In-Process-Concurrency-Harness (multi_thread) gegen die Broker-Eintrittspunkte: beweist Invarianten (Caps, Ownership, Isolation, Cleanup, kein Panic) unter Contention. Socket-Backpressure NICHT abgedeckt (→ manuelle 36-Geräte-Messung). LAN-Server = Folge | [last-soak-test.md](last-soak-test.md) ✅ abgestimmt |
 | **D** | **Tote-Verbindungs-Erkennung schärfen** | Tote TCP-Slots halten Host-/Feld-Slot bis zum Timeout (17-Min-Fall); Risikoprofil der Eigen-Router-Nebenhalle. Kürzere Heartbeats/TCP-Keepalive | *offen* |
 
 ## Abhängigkeiten & Reihenfolge
