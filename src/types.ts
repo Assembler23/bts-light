@@ -486,6 +486,11 @@ export type AnnounceJob = {
       stage: number;
     }
   | {
+      /** Nur die Besetzung ansagen (Schiedsrichter/Aufschlagrichter). */
+      kind: "officials";
+      courtId: number;
+    }
+  | {
       kind: "prep_call";
       matchId: number;
       side: "both" | "team1" | "team2";

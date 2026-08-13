@@ -8,11 +8,9 @@ ADRs: [0021 (Rücksync)](adr/0021-officials-ruecksync-eigenstaendiger-write.md),
 [0022 (Ablage Turnierdaten)](adr/0022-officials-turnierdaten-eigene-datei.md) ·
 BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibweg").
 
-> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–8 des Spec-Plans
-> (BTP-Messung, Parser, Konfiguration, Roster-Speicher, Rotation +
-> Konflikt-Erkennung, feldweise Schalter, Commands + Client-Oberfläche,
-> Wire + TL-Web). Tablet-Anzeige, Ansagen und Rücksync folgen mit den
-> nächsten Schritten; dieser Text wächst mit.
+> **Stand: im Aufbau.** Umgesetzt sind die Schritte 1–10 des Spec-Plans
+> (bis einschließlich Tablet-Anzeige und Ansagen). Der Rücksync nach BTP
+> folgt als letzter Schritt; dieser Text wächst mit.
 
 ## Konfiguration
 
@@ -242,3 +240,42 @@ Wire-Ebene und Bedienung sind in [cloud-relay.md](cloud-relay.md) bzw.
 
 **Relay-Deploy vor dem Client-Release:** Ein alter Relay weist unbekannte
 Aktionen ab; im Hallennetz (LAN) ist nichts betroffen.
+
+## Tablet-Anzeige (Schritt 9)
+
+`MatchBrief` bekommt `srNames`/`arNames` — **Namen statt IDs**, damit das
+Tablet nichts auflösen muss und keine Officials-Liste braucht. Beide Felder
+tragen `#[serde(default)]`: Ältere Frames bleiben lesbar (leere Listen).
+
+Gefüllt werden sie an den beiden Push-Pfaden (`server.rs` für LAN,
+`relay_client.rs` für Cloud) über `TabletState::match_officials` — dieselbe
+Auflösung wie in der Feldübersicht, inklusive „ohne Schiedsrichter-Betrieb
+bleibt alles leer". Damit sieht auch die **ferne Halle** (Cloud-Slave) die
+Besetzung, weil der Brief mit `MatchAssigned` mitreist.
+
+`tablet.html` zeigt sie in der Einrichtung neben dem Zähltafel-Hinweis
+(„⚖️ Schiedsrichter / Umpire: …"); während des Zählens zählt der Bildschirm,
+nicht die Besetzung.
+
+## Ansagen (Schritt 10)
+
+`announcer.ts` bekommt `umpireNames`/`serviceJudgeNames` und den Schalter
+`officialsOnly`. Die Segmente stehen **nach** der Tabletbedienung:
+
+| | Deutsch | Englisch |
+|---|---|---|
+| SR | „Schiedsrichter: {Name}." | „Umpire: {Name}." |
+| AR | „Aufschlagrichter: {Name}." | „Service judge: {Name}." |
+
+Beide Ansage-Wege bauen sie aus **derselben** Funktion
+(`officialSegments`) — der Web-Speech-Pfad als eigene Utterances, der
+Azure-Pfad XML-escaped im SSML. Damit sagen sie Wort für Wort dasselbe.
+
+- **Feld-Ansage:** `announceCourt` gibt `court.sr`/`court.ar` mit; ohne
+  Zuweisung entfällt das Segment ersatzlos.
+- **Manueller Knopf** (`announceOfficials`, `officialsOnly`): sagt nur Feld
+  und Besetzung an — eine nachträgliche Zuweisung soll nicht die ganze
+  Paarung erneut aufrufen, das Spiel läuft ja schon. Der Knopf sitzt im
+  Client neben der Einteilung und in TL-Web an der Feld-Kachel; TL-Web löst
+  ihn über `announce_officials` aus, gesprochen wird in der Zielhalle
+  (`AnnounceJobKind::Officials`).

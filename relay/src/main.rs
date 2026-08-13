@@ -3625,6 +3625,8 @@ mod tests {
             show_club_names: false,
             show_club_logos: false,
             finalized: false,
+            sr_names: Vec::new(),
+            ar_names: Vec::new(),
         }
     }
 

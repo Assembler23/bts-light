@@ -9,6 +9,7 @@ import {
   Gavel,
   Info,
   ListChecks,
+  Megaphone,
   Pause,
   Play,
   X,
@@ -28,8 +29,11 @@ import {
   officialsSetCourtSwitches,
   tabletOverview,
 } from "../api";
+import { announceOfficials } from "../io/announceCourt";
 import type {
+  AnnounceConfig,
   AppearanceView,
+  AzureTtsConfig,
   CourtOverview,
   CourtSwitchesView,
   OfficialView,
@@ -44,7 +48,15 @@ function timeOf(ms: number | null): string {
   });
 }
 
-export function OfficialsPanel({ enabled }: { enabled: boolean }) {
+export function OfficialsPanel({
+  enabled,
+  announce,
+  azureTts,
+}: {
+  enabled: boolean;
+  announce: AnnounceConfig;
+  azureTts?: AzureTtsConfig;
+}) {
   const [roster, setRoster] = useState<OfficialView[]>([]);
   const [courts, setCourts] = useState<CourtSwitchesView[]>([]);
   /** Offenes Overlay: Sperrlisten-Pflege bzw. Einsatz-Liste eines Officials. */
@@ -362,6 +374,19 @@ export function OfficialsPanel({ enabled }: { enabled: boolean }) {
                   <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">
                     Konflikt: {warnung[c.court_id] || c.official_warn}
                   </span>
+                )}
+                {/* Nachträgliche Zuweisungen sagen nie von selbst an
+                    (Spec Nr. 8) — dafür dieser Knopf. */}
+                {announce.enabled && (c.sr.length > 0 || c.ar.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => announceOfficials(c, announce, azureTts)}
+                    title="Schiedsrichter und Aufschlagrichter ansagen"
+                    className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                  >
+                    <Megaphone size={13} />
+                    ansagen
+                  </button>
                 )}
               </div>
             ))}

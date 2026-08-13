@@ -119,6 +119,16 @@ pub struct MatchBrief {
     /// Frames lesbar (false → altes Verhalten).
     #[serde(default)]
     pub finalized: bool,
+    /// Schiedsrichter und Aufschlagrichter dieses Spiels — als **Namen**,
+    /// nicht als IDs: Das Tablet müsste sie sonst auflösen und dazu die
+    /// Officials-Liste kennen. Leer, wenn keiner zugewiesen ist oder ohne
+    /// Schiedsrichter gespielt wird. `#[serde(default)]` hält ältere Frames
+    /// lesbar. Gilt für LAN und Cloud gleichermaßen, ferne Halle
+    /// eingeschlossen (der Brief reist mit `MatchAssigned`).
+    #[serde(rename = "srNames", default)]
+    pub sr_names: Vec<String>,
+    #[serde(rename = "arNames", default)]
+    pub ar_names: Vec<String>,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -860,6 +870,12 @@ impl MatchTimeline {
 }
 
 /// Nachrichten vom Server an das Tablet.
+// Wie bei [`HostFrame`]: `MatchAssigned` trägt ein volles `MatchBrief` und
+// ist damit deutlich größer als die schlanken Varianten — bewusst
+// akzeptiert. Diese Frames gehen serialisiert über die Leitung, sie liegen
+// nicht in großer Zahl auf dem Stack; Boxing bliebe an jeder
+// Konstruktions- und Match-Stelle hängen, ohne realen Gewinn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMsg {
@@ -2156,6 +2172,8 @@ mod tests {
                 show_club_names: true,
                 show_club_logos: false,
                 finalized: false,
+                sr_names: vec!["Sabine Schiedsmann".into()],
+                ar_names: Vec::new(),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -2197,15 +2215,24 @@ mod tests {
             show_club_names: false,
             show_club_logos: false,
             finalized: true,
+            sr_names: vec!["Sabine Schiedsmann".into()],
+            ar_names: vec!["Alex Aufschlag".into()],
         };
         let json = serde_json::to_string(&brief).unwrap();
         assert!(json.contains(r#""finalized":true"#));
+        // Die Namen reisen in camelCase mit — das ist der Vertrag mit
+        // `tablet.html` (Spec schiedsrichter-management Nr. 7).
+        assert!(json.contains(r#""srNames":["Sabine Schiedsmann"]"#));
+        assert!(json.contains(r#""arNames":["Alex Aufschlag"]"#));
         roundtrip(&brief);
 
-        // Altes Frame ohne das Feld → Default false.
+        // Altes Frame ohne das Feld → Default false bzw. leere Listen: Ein
+        // älterer Relay/Client bleibt lesbar (Auto-Update-Sicherheit).
         let legacy = r#"{"matchId":7,"teamA":[],"teamB":[],"eventLabel":"HE G1","bestOfSets":3,"targetScore":21}"#;
         let parsed: MatchBrief = serde_json::from_str(legacy).unwrap();
         assert!(!parsed.finalized, "fehlendes Feld → finalized=false");
+        assert!(parsed.sr_names.is_empty());
+        assert!(parsed.ar_names.is_empty());
     }
 
     #[test]

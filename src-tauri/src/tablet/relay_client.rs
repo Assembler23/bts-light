@@ -627,7 +627,14 @@ fn push_court(
                 hall,
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(&m, sk, ska, &ctx.app_config().display, finalized)
+                    match_brief(
+                        &m,
+                        sk,
+                        ska,
+                        &ctx.app_config().display,
+                        finalized,
+                        ctx.tablet.match_officials(&m),
+                    )
                 },
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
                 // wie die Spielübersicht) – auch bei Reconnect identisch.

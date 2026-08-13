@@ -599,6 +599,13 @@ pub enum AnnounceJobKind {
         /// Die Stufe, die der Turnier-PC gezählt hat (2 oder 3).
         stage: u8,
     },
+    /// Nur die Besetzung eines Felds ansagen (Schiedsrichter,
+    /// Aufschlagrichter) — der manuelle Knopf aus Client und TL-Web. Eine
+    /// nachträgliche Zuweisung sagt nie von selbst an (Spec Nr. 8).
+    Officials {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
     /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels.
     PrepCall {
         #[serde(rename = "matchId")]
@@ -780,6 +787,18 @@ impl TabletState {
     /// Der Schiedsrichter-Roster (Spec `schiedsrichter-management`).
     pub fn officials_store(&self) -> &crate::tablet::officials::OfficialsStore {
         &self.officials
+    }
+
+    /// Nur die Namen von SR und AR eines Spiels — die Form, die ins
+    /// [`MatchBrief`](relay_proto::MatchBrief) ans Tablet geht (LAN wie
+    /// Cloud, ferne Halle eingeschlossen). Holt sich den Snapshot selbst,
+    /// weil die Push-Pfade keinen zur Hand haben.
+    pub fn match_officials(&self, m: &BtpMatch) -> (Vec<String>, Vec<String>) {
+        let Some(snap) = self.snapshot_clone() else {
+            return (Vec::new(), Vec::new());
+        };
+        let (sr, ar, _) = self.court_officials(Some(m), &snap);
+        (sr, ar)
     }
 
     /// Namen von SR und AR eines Spiels plus Konflikt-Kategorie — die Form,
@@ -4414,6 +4433,30 @@ mod tests {
         assert_eq!(o[0].sr, vec!["Schiri1".to_string()]);
         assert!(o[0].ar.is_empty(), "kein AR zugewiesen");
         assert!(o[1].sr.is_empty(), "Feld ohne Spiel");
+    }
+
+    #[test]
+    fn das_tablet_bekommt_die_namen_von_sr_und_ar() {
+        // Spec Nr. 7: Das Schiri-Tablet zeigt SR/AR des laufenden Spiels —
+        // als Namen, damit es nichts auflösen muss (LAN wie Cloud).
+        let st = TabletState::default();
+        let m = match_on(1, Some(5), MatchStatus::OnCourt);
+        let mut snap = snapshot(vec![m.clone()], vec![(5, "Feld 1")]);
+        snap.officials = vec![official(1), official(2)];
+        st.set_snapshot(snap);
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Sr, 1);
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Ar, 2);
+
+        // Ohne Schiedsrichter-Betrieb bleibt der Brief leer.
+        assert_eq!(st.match_officials(&m), (Vec::new(), Vec::new()));
+
+        st.officials_store().set_enabled(true);
+        assert_eq!(
+            st.match_officials(&m),
+            (vec!["Schiri1".to_string()], vec!["Schiri2".to_string()])
+        );
     }
 
     #[test]

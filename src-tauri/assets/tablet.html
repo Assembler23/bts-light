@@ -726,6 +726,10 @@
   <div class="subtitle" id="setup-subtitle"></div>
   <!-- Hinweis Zähltafelbediener: Verlierer des Vorspiels auf diesem Feld. -->
   <div class="sk-hint" id="setup-scorekeeper" hidden></div>
+  <!-- Schiedsrichter/Aufschlagrichter dieses Spiels (Spec
+       schiedsrichter-management). Kommt als Namen im MatchBrief, LAN wie
+       Cloud; leer, wenn ohne Schiedsrichter gespielt wird. -->
+  <div class="sk-hint" id="setup-officials" hidden></div>
   <div class="options" id="setup-options"></div>
   <button type="button" class="setup-back" id="setup-back">← Zurück · Back</button>
 </div>
@@ -1176,6 +1180,7 @@ const els = {
   setupSubtitle: document.getElementById('setup-subtitle'),
   setupOptions: document.getElementById('setup-options'),
   setupScorekeeper: document.getElementById('setup-scorekeeper'),
+  setupOfficials: document.getElementById('setup-officials'),
   setupBack: document.getElementById('setup-back'),
   finishedOverlay: document.getElementById('finished-overlay'),
   finishedUmpire: document.getElementById('finished-umpire'),
@@ -3074,6 +3079,7 @@ function renderSetupModal() {
   // Hinweis Zähltafelbediener nur im ersten Schritt (Seitenwahl), wenn ein
   // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
   renderScorekeeperHint(STATE.setup === 'choose-side');
+  renderOfficialsHint(STATE.setup === 'choose-side');
   if (STATE.setup === 'choose-side') {
     setSetupText(
       'Welches Team steht links?', 'Which team is on the left?',
@@ -3164,6 +3170,33 @@ function renderScorekeeperHint(show) {
     `🧮 <span class="sk-label">Zähltafel / Scoreboard:</span> ` +
     `<span class="sk-names">${joined}</span>`;
   els.setupScorekeeper.hidden = false;
+}
+
+/**
+ * Schiedsrichter/Aufschlagrichter des Spiels (Spec schiedsrichter-management).
+ *
+ * Wie der Zähltafel-Hinweis nur in der Einrichtung: Während des Zählens
+ * zählt der Bildschirm, nicht die Besetzung. Namen kommen fertig im
+ * `MatchBrief` — das Tablet löst nichts auf.
+ */
+function renderOfficialsHint(show) {
+  const sr = (STATE.match && Array.isArray(STATE.match.srNames)) ? STATE.match.srNames : [];
+  const ar = (STATE.match && Array.isArray(STATE.match.arNames)) ? STATE.match.arNames : [];
+  if (!show || (sr.length === 0 && ar.length === 0)) {
+    els.setupOfficials.hidden = true;
+    return;
+  }
+  const teile = [];
+  if (sr.length) {
+    teile.push(`<span class="sk-label">Schiedsrichter / Umpire:</span> ` +
+      `<span class="sk-names">${sr.map(escapeHtml).join(' / ')}</span>`);
+  }
+  if (ar.length) {
+    teile.push(`<span class="sk-label">Aufschlagrichter / Service judge:</span> ` +
+      `<span class="sk-names">${ar.map(escapeHtml).join(' / ')}</span>`);
+  }
+  els.setupOfficials.innerHTML = `⚖️ ` + teile.join(' · ');
+  els.setupOfficials.hidden = false;
 }
 
 function renderPartnerHint(teamKey, playerId) {

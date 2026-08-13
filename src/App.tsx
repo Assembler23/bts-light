@@ -399,7 +399,13 @@ function App() {
       case "officials":
         // Hält keinen eigenen Stand: die Seite liest den Roster über
         // Commands und schreibt direkt durch.
-        return <OfficialsPanel enabled={config.officials?.enabled ?? false} />;
+        return (
+          <OfficialsPanel
+            enabled={config.officials?.enabled ?? false}
+            announce={config.announce}
+            azureTts={config.azure_tts}
+          />
+        );
       case "announce":
         return (
           <AnnouncePage

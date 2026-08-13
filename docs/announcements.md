@@ -466,3 +466,22 @@ Stimme die Namen **nativ** spricht. Ablauf:
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
+
+## Schiedsrichter und Aufschlagrichter
+
+Läuft das Turnier mit Schiedsrichtern (Spec
+[schiedsrichter-management](schiedsrichter-management.md)), nennt die
+Feld-Ansage nach der Tabletbedienung:
+
+- „Schiedsrichter: {Name}." / englisch „Umpire: {Name}."
+- „Aufschlagrichter: {Name}." / englisch „Service judge: {Name}."
+
+Angesagt wird nur, was auch zugewiesen ist; ohne Schiedsrichter-Betrieb
+entfällt beides ersatzlos. Segment- und SSML-Bauer nutzen dieselbe Quelle
+(`officialSegments` in `io/announcer.ts`), damit Browser-Stimme und
+Azure-Stimme identisch sprechen.
+
+**Nachträgliche Zuweisungen sagen nicht von selbst an.** Wer mitten im Spiel
+einen Schiedsrichter einteilt, löst die Ansage mit dem Knopf „ansagen" aus —
+in der Schiedsrichter-Seite des Clients oder an der Feld-Kachel in TL-Web.
+Diese Ansage nennt nur Feld und Besetzung, nicht noch einmal die Paarung.

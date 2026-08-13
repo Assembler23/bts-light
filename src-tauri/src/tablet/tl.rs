@@ -502,6 +502,50 @@ pub(crate) fn apply_state_action(
             );
             Ok(TlResponse::ok(0))
         }
+        A::AnnounceOfficials { court_id } => {
+            let store = tablet.officials_store();
+            if !store.enabled() {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Dieses Turnier läuft ohne Schiedsrichter.",
+                ));
+            }
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Nur ansagen, was es zu sagen gibt — sonst ginge ein Gong ohne
+            // Inhalt in die Halle.
+            let m = snap
+                .matches
+                .iter()
+                .find(|m| m.court_id == Some(*court_id) && m.status == crate::btp::model::MatchStatus::OnCourt);
+            let (sr, ar, _) = tablet.court_officials(m, &snap);
+            if sr.is_empty() && ar.is_empty() {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Diesem Feld ist niemand zugewiesen.",
+                ));
+            }
+            let hall = snap
+                .court_infos
+                .iter()
+                .find(|c| c.id == *court_id)
+                .and_then(|c| c.location_id)
+                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::Officials {
+                    court_id: *court_id,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
         A::SetAutoAssign { enabled } => {
             // Laufzeit-Schalter, nicht die Grundeinstellung: Der Sync-Lauf
             // liest die Konfiguration nach dem Start nicht neu, eine

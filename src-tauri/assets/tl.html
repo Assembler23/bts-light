@@ -2150,6 +2150,9 @@ function courtCard(c, cellStyle) {
          ${c.official_warn ? `<span class="warnflag" title="Konflikt">${esc(c.official_warn)}</span>` : ""}
          <button type="button" class="offbtn" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
                  title="Schiedsrichter einteilen">einteilen</button>
+         ${(c.sr || []).length || (c.ar || []).length
+           ? `<button type="button" class="offbtn" data-off-say="${c.court_id}"
+                 title="Schiedsrichter ansagen">ansagen</button>` : ""}
        </div>`
     : "";
 
@@ -2239,6 +2242,21 @@ function wireCourts(box) {
 
   // Einteilen-Knopf: wie der Graph-Knopf mit gestopptem Weiterreichen,
   // sonst wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
+  // Ansage-Knopf: eine nachträgliche Zuweisung sagt nie von selbst an
+  // (Spec Nr. 8) — gesprochen wird in der Halle, nicht auf diesem Gerät.
+  box.querySelectorAll("button[data-off-say]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.offSay);
+      send(
+        `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "announce_officials", courtId },
+        "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
   box.querySelectorAll("button[data-off-court]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();

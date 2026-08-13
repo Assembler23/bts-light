@@ -1821,6 +1821,7 @@ pub(crate) fn match_brief(
     scorekeeper_assigned: bool,
     display: &crate::config::DisplayConfig,
     finalized: bool,
+    officials: (Vec<String>, Vec<String>),
 ) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
@@ -1853,6 +1854,8 @@ pub(crate) fn match_brief(
         show_club_names: display.show_club_names,
         show_club_logos: display.show_club_logos,
         finalized,
+        sr_names: officials.0,
+        ar_names: officials.1,
     }
 }
 
@@ -2264,7 +2267,14 @@ async fn push_match(
             ServerMsg::MatchAssigned {
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(m, sk, ska, &ctx.app_config().display, finalized)
+                    match_brief(
+                        m,
+                        sk,
+                        ska,
+                        &ctx.app_config().display,
+                        finalized,
+                        ctx.tablet.match_officials(m),
+                    )
                 },
             }
         }
@@ -2491,7 +2501,7 @@ mod tests {
             show_club_names: true,
             show_club_logos: true,
         };
-        let brief = match_brief(&m, Vec::new(), false, &on, false);
+        let brief = match_brief(&m, Vec::new(), false, &on, false, (Vec::new(), Vec::new()));
         assert!(brief.show_club_names);
         assert!(brief.show_club_logos);
         assert!(!brief.finalized);
@@ -2504,6 +2514,7 @@ mod tests {
             false,
             &crate::config::DisplayConfig::default(),
             false,
+            (Vec::new(), Vec::new()),
         );
         assert!(!brief_off.show_club_names);
         assert!(!brief_off.show_club_logos);
