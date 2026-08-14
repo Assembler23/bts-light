@@ -548,6 +548,19 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .sk #off-list .off-name { flex: 1; }
 .sk #off-list button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: inherit; }
 .sk #off-list button:hover { border-color: var(--accent); color: var(--accent); }
+.sk #off-list .drag-griff {
+  /* Trefffläche vergrößern, wie beim Spielliste-Griff (`.row .drag-griff`) —
+     per Minus-Rand aus dem Fluss zurückgerechnet. */
+  padding: 9px 8px;
+  margin: -9px -4px -9px -8px;
+}
+/* Während des Ziehens gehoben + hervorgehoben — die Zeile wandert ja schon
+   live im DOM, das hier ist nur die Rückmeldung „das ist die gegriffene". */
+#off-list li.dragging-item {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+  border-color: var(--accent);
+  background: #eff6ff;
+}
 .warnflag { background: #b45309; color: #fff; border-radius: 5px; padding: 0 5px; font-size: 11px; }
 .sk #sk-list li {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -714,6 +727,14 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
   line-height: 1;
   user-select: none;
   flex: none;
+  border-radius: 6px;
+}
+/* Sichtbarer Fokusring für den Tastaturweg (Pfeiltasten, Code-Review-Fund
+   14.08.2026) — ohne das wäre der Griff per Tab erreichbar, aber niemand
+   sähe, dass er es gerade ist. */
+.drag-griff:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .row .drag-griff {
   /* Trefffläche über Padding auf ~40px vergrößern, per Minus-Rand aus dem
@@ -944,7 +965,8 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
         </form>
       </details>
       <details class="sk" id="off-box" hidden>
-        <summary>Schiedsrichter <span class="count" id="off-count"></span></summary>
+        <summary>Schiedsrichter <span class="count" id="off-count"></span>
+          <span class="meta" id="off-next"></span></summary>
         <ol id="off-list"></ol>
       </details>
       <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
@@ -3129,6 +3151,130 @@ function startTouchDrag(el, match, fromCourtId, down) {
   window.addEventListener("pointercancel", cancel);
 }
 
+// ── Listen per Drag&Drop umsortieren (wiederverwendbar) ──────────────────
+// Eigener, von `enableDrag`/`startTouchDrag` UNABHÄNGIGER Automat (eigene
+// Wächter-Variable) — die Geste ist grundverschieden (eine Zeile wandert
+// INNERHALB ihrer eigenen Liste, statt auf ein fremdes Ziel fallengelassen
+// zu werden), aber dieselben hart erarbeiteten Touch-Lektionen gelten
+// unverändert: Zieh-Griff mit statischem `touch-action:none` (`.drag-griff`,
+// s. o.), zusätzlich ein nativer `touchmove`-Blocker mit `{passive:false}`
+// für den Rest der Geste (der Finger verlässt den Griff ja gerade, wenn
+// Zeilen einsortiert werden), `setPointerCapture`, Pointer-ID-Filter gegen
+// einen zweiten Finger.
+//
+// Bewusst OHNE jeden Bezug zur Schiedsrichter-Fachlichkeit — eine künftige
+// Liste (geplant: Spielliste) braucht nur `data-id` an den direkten
+// Kind-Elementen und je einen `.drag-griff` darin, dann funktioniert sie
+// genauso über `enableReorderDrag(container, onReorder)`.
+//
+// Zieh-Griff-Pflicht für BEIDE Zeigertypen (anders als `enableDrag` oben,
+// das für Maus die ganze Zeile/Kachel greifbar lässt): Eine Listenzeile
+// trägt hier mehrere eigene Knöpfe (Pause, Sperren, Einsätze …) — ein
+// Maus-Zug ab irgendwo auf der Zeile kollidierte damit ständig mit einem
+// Klick auf einen dieser Knöpfe.
+let reorderDragPending = false;
+
+/**
+ * `list`: Container, dessen direkte Kind-Elemente mit `[data-id]` die
+ * sortierbaren Zeilen sind (jede braucht innen einen `.drag-griff`).
+ * `onReorder(id, beforeId)`: nur aufgerufen, wenn sich die Reihenfolge beim
+ * Loslassen tatsächlich geändert hat; `id`/`beforeId` sind die `data-id`-
+ * Werte als String, `beforeId === null` heißt „ans Ende".
+ */
+function enableReorderDrag(list, onReorder) {
+  Array.from(list.children).forEach((li) => {
+    if (!li.dataset.id) return;
+    const griff = li.querySelector(".drag-griff");
+    griff?.addEventListener("pointerdown", (down) => {
+      if (down.pointerType !== "touch" && down.button !== 0) return;
+      if (reorderDragPending) return;
+      startReorderDrag(list, li, down, onReorder);
+    });
+    // Tastatur-/Screenreader-Weg (Code-Review-Fund 14.08.2026): ohne die
+    // frühere Pfeil-Bedienung bräuchte es sonst gar keinen Nicht-Zieh-Weg
+    // mehr, die Reihenfolge zu ändern — dieselbe Vor-/Zurück-Formel wie die
+    // entfernten Pfeile, jetzt am fokussierten Griff.
+    griff?.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+      ev.preventDefault();
+      const items = Array.from(list.children).filter((el) => el.dataset.id);
+      const i = items.indexOf(li);
+      if (i === -1) return;
+      if (ev.key === "ArrowUp") {
+        if (i === 0) return;
+        onReorder(li.dataset.id, items[i - 1].dataset.id);
+      } else {
+        if (i >= items.length - 1) return;
+        const beforeId = i + 2 < items.length ? items[i + 2].dataset.id : null;
+        onReorder(li.dataset.id, beforeId);
+      }
+    });
+  });
+}
+
+function startReorderDrag(list, li, down, onReorder) {
+  reorderDragPending = true;
+  const pointerId = down.pointerId;
+  const isTouch = down.pointerType === "touch";
+  const items = () => Array.from(list.children).filter((el) => el.dataset.id);
+  const before = items();
+  const originalNext = li.nextElementSibling;
+  li.classList.add("dragging-item");
+  document.body.classList.add("dragging");
+  document.getSelection()?.removeAllRanges();
+  try { li.setPointerCapture(pointerId); } catch { /* Finger schon weg */ }
+
+  // Wie bei `startTouchDrag`: Nur ein nativer `touchmove`-Blocker verhindert
+  // zuverlässig das Scrollen für die GANZE Geste, sobald der Finger den
+  // Griff (dessen `touch-action:none` nur dort gilt) verlassen hat.
+  function blockScroll(ev) { ev.preventDefault(); }
+  if (isTouch) {
+    window.addEventListener("touchmove", blockScroll, { passive: false });
+  }
+
+  function move(ev) {
+    if (ev.pointerId !== pointerId) return;
+    const siblings = items().filter((el) => el !== li);
+    let target = null;
+    for (const el of siblings) {
+      const r = el.getBoundingClientRect();
+      if (ev.clientY < r.top + r.height / 2) { target = el; break; }
+    }
+    if (target) list.insertBefore(li, target);
+    else list.appendChild(li);
+  }
+
+  function teardown(ev, cancelled) {
+    reorderDragPending = false;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    if (isTouch) window.removeEventListener("touchmove", blockScroll, { passive: false });
+    document.body.classList.remove("dragging");
+    li.classList.remove("dragging-item");
+    try { li.releasePointerCapture(pointerId); } catch { /* Finger schon weg */ }
+    // Nach einem Zug folgt noch ein Klick-Ereignis — ohne diese Sperre
+    // würde es auf der Zeile ungewollt zuschlagen (Muster `enableDrag`).
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 0);
+    if (cancelled) {
+      list.insertBefore(li, originalNext);
+      return;
+    }
+    const after = items();
+    const changed = after.some((el, i) => el !== before[i]);
+    if (!changed) return;
+    const i = after.indexOf(li);
+    const beforeId = i + 1 < after.length ? after[i + 1].dataset.id : null;
+    onReorder(li.dataset.id, beforeId);
+  }
+  const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
+  const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+}
+
 function renderQueue() {
   const box = $("queue");
   if (!state) return;
@@ -3398,15 +3544,29 @@ function renderOfficials() {
   if (box.hidden) return;
   const list = state.officials || [];
   $("off-count").textContent = list.length ? `(${list.length})` : "";
-  $("off-list").innerHTML = list.map((o, i) => `<li class="${o.paused ? "paused" : ""}">
+  // Auch bei zugeklappter Liste sichtbar: wer als Nächstes zugeteilt würde
+  // (erster weder pausierter noch schon im Dienst befindlicher Eintrag) —
+  // ohne Konflikt-Prüfung, die braucht ein konkretes Spiel als Bezug.
+  const next = list.find((o) => !o.paused && !o.on_duty_court_id);
+  $("off-next").textContent = next ? `nächster: ${next.name}` : "";
+  // Während eines laufenden Zugs die Liste NICHT neu bauen (Code-Review-Fund
+  // 14.08.2026): `innerHTML` ersetzt jede Zeile durch einen neuen Knoten —
+  // die gerade gezogene würde dabei aus dem DOM gerissen, `move()` mischte
+  // sie danach mit frisch gerenderten Geschwistern, und `beforeId` beim
+  // Loslassen bezöge sich auf einen falschen Stand. Der Zug selbst schreibt
+  // beim Loslassen (`onReorder`), das löst denselben Poll-getriebenen
+  // Re-Render aus — dann ist er wieder erlaubt.
+  if (reorderDragPending) return;
+  $("off-list").innerHTML = list.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
+      <span class="drag-griff" tabindex="0" role="button"
+        title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+        aria-label="${esc(o.name)} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>
       <span class="num">${i + 1}.</span>
       <span class="off-name">${esc(o.name)}</span>
       ${o.on_duty_court_id ? `<span class="meta">im Dienst</span>` : ""}
       <button type="button" data-off-detail="${o.id}" title="Sperren, Verein und Einsätze">${o.appearances}×</button>
       <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
         title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
-      ${i > 0 ? `<button type="button" data-off-up="${o.id}" data-before="${list[i - 1].id}"
-          title="in der Reihenfolge vorziehen" aria-label="vorziehen">▲</button>` : ""}
     </li>`).join("");
   $("off-list").querySelectorAll("[data-off-pause]").forEach((b) =>
     b.addEventListener("click", () => send(
@@ -3414,14 +3574,13 @@ function renderOfficials() {
       { action: "official_pause", officialId: Number(b.dataset.offPause), paused: !b.dataset.paused },
       b.dataset.paused ? "Wieder eingeteilt." : "Pausiert.",
     )));
-  $("off-list").querySelectorAll("[data-off-up]").forEach((b) =>
-    b.addEventListener("click", () => send(
-      `off-up-${b.dataset.offUp}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-      { action: "official_reorder", officialId: Number(b.dataset.offUp), beforeOfficialId: Number(b.dataset.before) },
-      "Reihenfolge geändert.",
-    )));
   $("off-list").querySelectorAll("[data-off-detail]").forEach((b) =>
     b.addEventListener("click", () => openOfficialDetail(Number(b.dataset.offDetail))));
+  enableReorderDrag($("off-list"), (id, beforeId) => send(
+    `off-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "official_reorder", officialId: Number(id), beforeOfficialId: beforeId === null ? null : Number(beforeId) },
+    "Reihenfolge geändert.",
+  ));
 }
 
 /** Offener Pflege-Dialog: `{ id, name }` oder null. */

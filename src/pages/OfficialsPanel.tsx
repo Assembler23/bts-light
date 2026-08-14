@@ -3,10 +3,9 @@
 // Schalter. Die Stammliste selbst kommt aus BTP und wird hier nur gezeigt —
 // gepflegt wird sie in BTP (R2).
 import {
-  ArrowDown,
-  ArrowUp,
   Ban,
   Gavel,
+  GripVertical,
   Info,
   ListChecks,
   Megaphone,
@@ -30,6 +29,7 @@ import {
   tabletOverview,
 } from "../api";
 import { announceOfficials } from "../io/announceCourt";
+import { useDragReorder } from "../state/useDragReorder";
 import type {
   AnnounceConfig,
   AppearanceView,
@@ -142,22 +142,15 @@ export function OfficialsPanel({
       .catch(() => {});
   };
 
-  /** Einen Platz nach oben: vor den Vorgänger ziehen. */
-  const hoch = (i: number) => {
-    if (i === 0) return;
-    officialReorder(roster[i].id, roster[i - 1].id)
-      .then(laden)
-      .catch(() => {});
-  };
-
-  /** Einen Platz nach unten: vor den Übernächsten (oder ans Ende). */
-  const runter = (i: number) => {
-    if (i >= roster.length - 1) return;
-    const ziel = i + 2 < roster.length ? roster[i + 2].id : null;
-    officialReorder(roster[i].id, ziel)
-      .then(laden)
-      .catch(() => {});
-  };
+  const { order, registerRow, dragHandleProps, draggingId } = useDragReorder(
+    roster,
+    (o) => o.id,
+    (id, beforeId) => {
+      officialReorder(id, beforeId)
+        .then(laden)
+        .catch(() => {});
+    },
+  );
 
   const belegte = felder.filter((c) => c.match_id > 0);
 
@@ -219,15 +212,27 @@ export function OfficialsPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {roster.map((o, i) => (
+            {order.map((o, i) => (
               <div
                 key={o.id}
+                ref={(el) => registerRow(o.id, el)}
                 className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                  draggingId === o.id ? "border-sky-400 bg-sky-50 shadow-md" :
                   o.paused
                     ? "border-slate-200 bg-slate-50 text-slate-400"
                     : "border-slate-200 bg-white text-slate-700"
                 }`}
               >
+                <span
+                  {...dragHandleProps(o.id)}
+                  tabIndex={0}
+                  role="button"
+                  title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+                  aria-label={`${o.name} in der Reihenfolge verschieben — ziehen oder Pfeiltasten`}
+                  className="cursor-grab touch-none rounded text-slate-400 outline-none focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
+                >
+                  <GripVertical size={16} />
+                </span>
                 <span className="w-6 text-right text-xs text-slate-400">
                   {i + 1}.
                 </span>
@@ -294,25 +299,6 @@ export function OfficialsPanel({
                   className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
                 >
                   {o.paused ? <Play size={13} /> : <Pause size={13} />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => hoch(i)}
-                  disabled={i === 0}
-                  title="Nach oben"
-                  className="rounded border border-slate-200 px-1.5 py-1 text-slate-600 hover:bg-slate-50 disabled:opacity-30"
-                >
-                  <ArrowUp size={13} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runter(i)}
-                  disabled={i >= roster.length - 1}
-                  title="Nach unten"
-                  className="rounded border border-slate-200 px-1.5 py-1 text-slate-600 hover:bg-slate-50 disabled:opacity-30"
-                >
-                  <ArrowDown size={13} />
                 </button>
               </div>
             ))}

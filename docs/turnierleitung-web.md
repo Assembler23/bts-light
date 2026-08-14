@@ -264,10 +264,12 @@ Spielt das Turnier mit Schiedsrichtern (Einstellungen → Schiedsrichter),
 zeigt die Seite zusätzlich:
 
 - **Abschnitt „Schiedsrichter"** unter der Zähltafel-Warteschlange: die
-  Liste in Rotationsreihenfolge mit Dienst-Marke, Pause-Knopf, Pfeil zum
-  Vorziehen und der Zahl der bisherigen Einsätze. Ein Tipp auf die Zahl
-  öffnet die Pflege: Stammverein, gesperrte Vereine, gesperrte Spieler und
-  die Einsatz-Liste im Detail.
+  Liste in Rotationsreihenfolge mit Dienst-Marke, Pause-Knopf, Zieh-Griff
+  zum Umsortieren (Drag & Drop, auch auf dem Tablet — seit 14.08.2026,
+  ersetzt die frühere Pfeil-Bedienung) und der Zahl der bisherigen Einsätze.
+  Ein Tipp auf die Zahl öffnet die Pflege: Stammverein, gesperrte Vereine,
+  gesperrte Spieler und die Einsatz-Liste im Detail. Auch bei eingeklappter
+  Liste steht in der Kopfzeile, wer als Nächstes zugeteilt würde.
 - **An jeder belegten Feld-Kachel** „SR: … · AR: …" samt Warnfarbe, wenn ein
   Konflikt besteht (Kategorie „Verein" oder „Person" — der Grund bleibt am
   Turnier-PC), plus den Knopf **einteilen** für die Auswahl je Dienst.

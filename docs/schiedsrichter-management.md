@@ -187,8 +187,9 @@ springt dann in den Einstellungs-Abschnitt mit dem Häkchen.
 Die Seite hat drei Abschnitte:
 
 1. **Rotationsreihenfolge** — Liste in Zuteilungsreihenfolge mit Dienst-Marke,
-   Pause-Knopf, Pfeilen zum Umsortieren, Vereinsfeld, Sperren-Dialog und
-   Einsatz-Zähler (öffnet die Einsatz-Liste).
+   Pause-Knopf, Zieh-Griff zum Umsortieren (Drag & Drop, seit 14.08.2026 —
+   ersetzt die frühere Pfeil-Bedienung, siehe unten), Vereinsfeld,
+   Sperren-Dialog und Einsatz-Zähler (öffnet die Einsatz-Liste).
 2. **Einteilung der laufenden Spiele** — je belegtem Feld ein Auswahlfeld für
    SR und AR. Eine Zuweisung mit Konflikt wird **ausgeführt** und daneben als
    „Konflikt: Verein/Person" gemeldet (Spec Nr. 2).
