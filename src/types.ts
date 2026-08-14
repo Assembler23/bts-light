@@ -822,6 +822,11 @@ export interface PreparationCandidate {
   /** Von der automatischen Feldvergabe ausgenommen (Spec
    *  `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt. */
   excluded: boolean;
+  /** In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage der
+   *  Hallen-Abschnitte (Spec `spielliste-manuelle-reihenfolge`). */
+  hall: string;
+  /** Steht dieses Spiel gerade im manuellen Präfix seiner Halle? */
+  manual: boolean;
 }
 
 /** Eine Halle des Turniers (Rust: commands::PreparationLocation). */

@@ -196,6 +196,13 @@ fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
         .join("excluded-matches.json")
 }
 
+fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("queue-order.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -815,6 +822,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
+    tablet.set_queue_order_path(tablet_queue_order_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -1758,6 +1766,12 @@ pub struct PreparationCandidate {
     /// Von der automatischen Feldvergabe ausgenommen (Spec
     /// `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt.
     pub excluded: bool,
+    /// In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage der
+    /// Hallen-Abschnitte in der Vorbereitungs-Liste (Spec
+    /// `spielliste-manuelle-reihenfolge`).
+    pub hall: String,
+    /// Steht dieses Spiel gerade im manuellen Präfix seiner Halle?
+    pub manual: bool,
 }
 
 /// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
@@ -1786,7 +1800,19 @@ pub struct PreparationLocation {
 /// (`apply_preparation_calls` in `run_once`) auf.
 #[tauri::command]
 pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
-    let tablet = &state.tablet;
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    preparation_candidates_for(&state.tablet, &cfg)
+}
+
+/// Kernlogik von [`preparation_candidates`] ohne den Tauri-`State`-Wrapper —
+/// direkt testbar und Grundlage des Cross-Site-Regressionstests
+/// (`tests/queue_order_consistency.rs`, ADR 0023): ein Vergleich gegen
+/// `tl.rs::build_state` und `badhub/payload.rs::build_tset` für dieselben
+/// Testdaten. `pub`, damit der Integrationstest sie erreicht.
+pub fn preparation_candidates_for(
+    tablet: &crate::tablet::state::TabletState,
+    cfg: &AppConfig,
+) -> PreparationView {
     let Some(snapshot) = tablet.snapshot_clone() else {
         return PreparationView {
             candidates: Vec::new(),
@@ -1794,16 +1820,51 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
         };
     };
     let calls = tablet.preparation_calls();
+    let manual_halls = tablet.manual_halls();
 
-    let mut candidates: Vec<PreparationCandidate> = snapshot
-        .matches
-        .iter()
-        .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
-        // Nur echte Paarungen – beide Mannschaften müssen feststehen.
-        .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
-        .map(|m| {
+    // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`)
+    // — **derselbe** gemeinsame Helfer wie an den anderen vier Sortier-
+    // Stellen, sonst zeigte diese Liste eine andere Reihenfolge als TL-Web.
+    let mut ordered: Vec<(
+        crate::tablet::assign::ManualOrderSortKey,
+        &crate::btp::model::BtpMatch,
+        String,
+    )> =
+        snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
+            // Nur echte Paarungen – beide Mannschaften müssen feststehen.
+            .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
+            .map(|m| {
+                let call = calls.iter().find(|c| c.match_id == m.id);
+                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+                let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                    snapshot
+                        .locations
+                        .iter()
+                        .find(|l| l.id == lid)
+                        .map(|l| l.name.as_str())
+                });
+                let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                    cfg,
+                    &snapshot,
+                    m,
+                    manual_hall,
+                    called_hall,
+                    call.is_some(),
+                    tablet.queue_order_store(),
+                );
+                (key, m, hall)
+            })
+            .collect();
+    ordered.sort_by_key(|(key, _, _)| *key);
+
+    let candidates: Vec<PreparationCandidate> = ordered
+        .into_iter()
+        .map(|(_, m, hall)| {
             let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
-                let hall = c.location_id.and_then(|lid| {
+                let call_hall = c.location_id.and_then(|lid| {
                     snapshot
                         .locations
                         .iter()
@@ -1812,10 +1873,11 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                 });
                 PreparationCallInfo {
                     location_id: c.location_id,
-                    hall: hall.unwrap_or_default(),
+                    hall: call_hall.unwrap_or_default(),
                     called_at_ms: c.called_at_ms,
                 }
             });
+            let manual = tablet.queue_order_store().rank(&hall, m.id).is_some();
             PreparationCandidate {
                 match_id: m.id,
                 label: format!("{} {}", m.draw_name, m.round_name)
@@ -1841,27 +1903,11 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                 match_num: m.match_num,
                 call,
                 excluded: tablet.auto_assign_excluded(m.id),
+                hall,
+                manual,
             }
         })
         .collect();
-    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), dann nach der
-    // Ansetzungsreihenfolge des Turnierplans (DisplayOrder), danach nach
-    // Spielnummer – konsistent zur Auto-Feldvergabe.
-    let plan: std::collections::HashMap<i64, (Option<i64>, Option<i64>)> = snapshot
-        .matches
-        .iter()
-        .map(|m| (m.id, (m.planned_time, Some(m.draw_id))))
-        .collect();
-    candidates.sort_by_key(|c| {
-        let (zeit, reihenfolge) = plan.get(&c.match_id).copied().unwrap_or((None, None));
-        crate::tablet::assign::sort_key_parts(
-            c.call.is_some(),
-            zeit,
-            reihenfolge,
-            c.match_num,
-            c.match_id,
-        )
-    });
 
     let locations = snapshot
         .locations
@@ -3008,6 +3054,30 @@ pub fn auto_assign_exclude(
     state
         .tablet
         .set_auto_assign_excluded(match_id, excluded);
+    Ok(())
+}
+
+/// Ein noch nicht gerufenes Spiel in der manuellen Präfix-Reihenfolge
+/// seiner Halle vor ein anderes ziehen (Spec
+/// `spielliste-manuelle-reihenfolge`, ADR 0023). Derselbe Einstiegspunkt
+/// wie der TL-Web-Weg (`TlAction::QueueReorder`) —
+/// `TabletState::queue_reorder` leitet die Halle selbst aus dem Match ab.
+#[tauri::command]
+pub fn queue_reorder(
+    state: State<'_, AppState>,
+    match_id: i64,
+    before_match_id: Option<i64>,
+) -> Result<(), String> {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    state.tablet.queue_reorder(&cfg, match_id, before_match_id);
+    Ok(())
+}
+
+/// Die manuelle Spielreihenfolge **aller** Hallen auf einmal verwerfen
+/// (globaler Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`).
+#[tauri::command]
+pub fn queue_order_reset(state: State<'_, AppState>) -> Result<(), String> {
+    state.tablet.queue_order_reset();
     Ok(())
 }
 

@@ -1183,6 +1183,28 @@ pub enum TlAction {
         match_id: i64,
         excluded: bool,
     },
+    /// Ein noch nicht gerufenes Spiel in der manuellen Präfix-Reihenfolge
+    /// seiner Halle vor ein anderes ziehen (Spec
+    /// `spielliste-manuelle-reihenfolge`, ADR 0023); `before_match_id =
+    /// None` heißt „ans Ende des aktuell sichtbaren Präfix-Blocks", nicht
+    /// ans Ende der Gesamtliste. Bewusst ohne Hallen-Parameter — die Halle
+    /// wird serverseitig aus `hall_for_match` desselben Matches abgeleitet
+    /// (R2: das Frontend erfindet keine Halle, es zieht nur zwei
+    /// Match-IDs relativ zueinander).
+    QueueReorder {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        #[serde(
+            rename = "beforeMatchId",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        before_match_id: Option<i64>,
+    },
+    /// Die komplette manuelle Spielreihenfolge **aller** Hallen auf einmal
+    /// verwerfen — bewusst ohne Hallen-Parameter, kein Reset je einzelne
+    /// Halle (Nicht-Ziel der Spec).
+    QueueOrderReset,
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -2947,6 +2969,11 @@ mod tests {
                 match_id: 4711,
                 excluded: true,
             },
+            TlAction::QueueReorder {
+                match_id: 4711,
+                before_match_id: Some(4712),
+            },
+            TlAction::QueueOrderReset,
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,

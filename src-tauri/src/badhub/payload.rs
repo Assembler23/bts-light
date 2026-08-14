@@ -6,9 +6,51 @@
 //! Der `tset` umfasst Turniername, belegte Courts mit den laufenden
 //! Matches, die zuletzt beendeten Matches und die anstehenden Matches.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use serde::Serialize;
 
 use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchResult, MatchStatus};
+use crate::config::AppConfig;
+use crate::tablet::queue_order::QueueOrderStore;
+
+/// Kontext für die manuelle Spielreihenfolge (Spec
+/// `spielliste-manuelle-reihenfolge`, ADR 0023) — nötig, um
+/// [`upcoming`] mit **derselben** Sortierung wie die übrigen vier Stellen zu
+/// bauen (`assign::resolve_and_sort_key`). `build_tset`/`diff`/`plan` kannten
+/// bisher nur den `BtpSnapshot`; die manuelle Reihenfolge lebt aber im
+/// `TabletState`, außerhalb des Snapshots — deshalb dieser zusätzliche,
+/// schlanke Parameter statt eines direkten `&TabletState`-Zugriffs (der
+/// `badhub`-Modul unnötig an `tablet` koppeln würde).
+pub struct LivetickerContext<'a> {
+    pub config: &'a AppConfig,
+    /// Von Hand gesetzte Hallen (`TabletState::manual_halls`) — bereits als
+    /// eigenständige, geklonte `HashMap` geliefert, kein Lifetime-Problem.
+    pub manual_halls: HashMap<i64, String>,
+    pub order: &'a QueueOrderStore,
+}
+
+impl<'a> LivetickerContext<'a> {
+    pub fn new(config: &'a AppConfig, manual_halls: HashMap<i64, String>, order: &'a QueueOrderStore) -> Self {
+        Self {
+            config,
+            manual_halls,
+            order,
+        }
+    }
+
+    /// Kontext ohne Präfix/Hallen-Overrides — für Aufrufer (Tests, Fixtures),
+    /// denen die manuelle Reihenfolge egal ist. Reines `sort_key`-Verhalten.
+    pub fn bare(config: &'a AppConfig) -> Self {
+        static EMPTY_ORDER: OnceLock<QueueOrderStore> = OnceLock::new();
+        Self {
+            config,
+            manual_halls: HashMap::new(),
+            order: EMPTY_ORDER.get_or_init(QueueOrderStore::default),
+        }
+    }
+}
 
 /// Höchstzahl der beendeten Matches im `tset`. Großzügig bemessen, damit an
 /// einem Turniertag praktisch alle Spiele erscheinen; deckelt nur extrem
@@ -176,26 +218,40 @@ fn recent_finished(snapshot: &BtpSnapshot) -> Vec<TsetMatch> {
 }
 
 /// Anstehende Matches (geplant, noch nicht auf Court, mit Spielern), max. 15.
-fn upcoming(snapshot: &BtpSnapshot) -> Vec<TsetMatch> {
+fn upcoming(snapshot: &BtpSnapshot, ctx: &LivetickerContext) -> Vec<TsetMatch> {
     let mut scheduled: Vec<&BtpMatch> = snapshot
         .matches
         .iter()
         .filter(|m| m.status == MatchStatus::Scheduled)
         .filter(|m| !m.team1.is_empty() || !m.team2.is_empty())
         .collect();
-    // **Dieselbe Reihenfolge wie überall sonst** (`assign::sort_key`):
-    // gerufene zuerst, dann die Ansetzung des Turnierplans, erst danach die
-    // Spielnummer. Der Liveticker ist die Ansicht mit den meisten Augen —
-    // zeigte er andere „nächste Spiele" als der Plan der Turnierleitung,
-    // stünden Zuschauer am falschen Feld, und bei nur 15 Einträgen fielen
-    // die tatsächlich nächsten Spiele ganz heraus.
-    scheduled.sort_by_key(|m| crate::tablet::assign::sort_key(m, m.preparation_call_ts.is_some()));
+    // **Dieselbe Reihenfolge wie überall sonst** (`assign::resolve_and_sort_key`,
+    // ADR 0023): gerufene zuerst, dann der manuelle Präfix je Halle, sonst
+    // die Ansetzung des Turnierplans, erst danach die Spielnummer. Der
+    // Liveticker ist die Ansicht mit den meisten Augen — zeigte er andere
+    // „nächste Spiele" als der Plan der Turnierleitung, stünden Zuschauer am
+    // falschen Feld, und bei nur 15 Einträgen fielen die tatsächlich
+    // nächsten Spiele ganz heraus.
+    scheduled.sort_by_key(|m| {
+        let manual_hall = ctx.manual_halls.get(&m.id).map(String::as_str);
+        let called_hall = m.preparation_hall.as_deref();
+        let (_, _, key) = crate::tablet::assign::resolve_and_sort_key(
+            ctx.config,
+            snapshot,
+            m,
+            manual_hall,
+            called_hall,
+            m.preparation_call_ts.is_some(),
+            ctx.order,
+        );
+        key
+    });
     scheduled.truncate(UPCOMING_LIMIT);
     scheduled.iter().map(|m| to_upcoming_match(m)).collect()
 }
 
 /// Baut die `tset`-Nachricht aus einem Snapshot.
-pub fn build_tset(snapshot: &BtpSnapshot, rid: u64) -> TsetMessage {
+pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, ctx: &LivetickerContext) -> TsetMessage {
     let on_court: Vec<&BtpMatch> = snapshot
         .matches
         .iter()
@@ -225,7 +281,7 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64) -> TsetMessage {
             courts,
             matches: on_court.iter().map(|m| to_tset_match(m)).collect(),
             recent_finished_matches: recent_finished(snapshot),
-            upcoming_matches: upcoming(snapshot),
+            upcoming_matches: upcoming(snapshot, ctx),
             // Logo wird erst im Sync-Loop aus der Config gefüllt (build_tset
             // kennt die Config nicht) – hier leer lassen.
             tournament_logo: String::new(),
@@ -490,7 +546,7 @@ mod tests {
                 sample_match(3, MatchStatus::Scheduled, None),
             ],
         };
-        let tset = build_tset(&snapshot, 7);
+        let tset = build_tset(&snapshot, 7, &LivetickerContext::bare(&AppConfig::default()));
         assert_eq!(tset.kind, "tset");
         assert_eq!(tset.rid, 7);
         assert_eq!(tset.event.matches.len(), 1);
@@ -512,7 +568,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![sample_match(14, MatchStatus::OnCourt, Some("1"))],
         };
-        let m = &build_tset(&snapshot, 1).event.matches[0];
+        let m = &build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.matches[0];
         assert_eq!(m.id, "btp_14");
         assert_eq!(m.n, "HE G1");
         assert_eq!(m.s, vec![[21, 19], [21, 15]]);
@@ -548,7 +604,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![early, late, unstamped],
         };
-        let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
+        let finished = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.recent_finished_matches;
         // early + late bleiben, unstamped fällt raus; neueste zuerst.
         assert_eq!(finished.len(), 2);
         assert_eq!(finished[0].id, "btp_2");
@@ -577,7 +633,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![a, b],
         };
-        let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
+        let finished = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.recent_finished_matches;
         assert_eq!(finished[0].id, "btp_2");
         assert_eq!(finished[1].id, "btp_1");
     }
@@ -598,7 +654,7 @@ mod tests {
                 sample_match(6, MatchStatus::OnCourt, Some("1")),
             ],
         };
-        let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
+        let upcoming = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.upcoming_matches;
         assert_eq!(upcoming.len(), 1);
         assert_eq!(upcoming[0].id, "btp_5");
         assert_eq!(upcoming[0].match_num, Some(5));
@@ -636,7 +692,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![viel_spaeter, spaet, frueh],
         };
-        let ids: Vec<String> = build_tset(&snapshot, 1)
+        let ids: Vec<String> = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default()))
             .event
             .upcoming_matches
             .into_iter()
@@ -671,7 +727,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![uncalled, called],
         };
-        let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
+        let upcoming = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.upcoming_matches;
         assert_eq!(upcoming.len(), 2);
         // Gerufenes Match zuerst, trotz höherer Spielnummer.
         assert_eq!(upcoming[0].id, "btp_5");
@@ -681,6 +737,45 @@ mod tests {
         assert_eq!(upcoming[1].id, "btp_9");
         assert_eq!(upcoming[1].preparation_call_ts, None);
         assert_eq!(upcoming[1].hall, None);
+    }
+
+    #[test]
+    fn upcoming_respects_the_manual_prefix_like_every_other_view() {
+        // Spec `spielliste-manuelle-reihenfolge`, Blocker 5: der Liveticker
+        // darf als einzige der fünf Sortier-Stellen nicht von der manuellen
+        // Reihenfolge abweichen — auch ohne Hallen-Trennung im Snapshot.
+        let mut spaet = sample_match(7, MatchStatus::Scheduled, None);
+        spaet.match_num = Some(7);
+        spaet.planned_time = Some(202_702_051_100);
+        let mut frueh = sample_match(1, MatchStatus::Scheduled, None);
+        frueh.match_num = Some(1);
+        frueh.planned_time = Some(202_702_050_900);
+
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: vec![frueh, spaet],
+        };
+        let config = AppConfig::default();
+        let order = QueueOrderStore::default();
+        // Ohne Hallen-Angabe lösen beide Matches auf die leere Halle auf —
+        // 7 (später angesetzt) manuell vor 1 (früher angesetzt) ziehen.
+        order.reorder("", &[1, 7], 7, Some(1));
+        let ctx = LivetickerContext::new(&config, HashMap::new(), &order);
+
+        let ids: Vec<String> = build_tset(&snapshot, 1, &ctx)
+            .event
+            .upcoming_matches
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec!["btp_7", "btp_1"], "manueller Präfix schlägt PlannedTime");
     }
 
     #[test]
@@ -701,7 +796,7 @@ mod tests {
                 sample_match(3, MatchStatus::Scheduled, None),
             ],
         };
-        let upcoming = build_tset(&snapshot, 1).event.upcoming_matches;
+        let upcoming = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.upcoming_matches;
         // sample_match setzt match_num = id → nach Nummer sortiert: 3, 7.
         assert_eq!(upcoming[0].id, "btp_3");
         assert_eq!(upcoming[1].id, "btp_7");
@@ -720,7 +815,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
-        let json = serde_json::to_string(&build_tset(&snapshot, 42)).unwrap();
+        let json = serde_json::to_string(&build_tset(&snapshot, 42, &LivetickerContext::bare(&AppConfig::default()))).unwrap();
         assert!(json.contains(r#""type":"tset""#));
         assert!(json.contains(r#""recent_finished_matches":[]"#));
         assert!(json.contains(r#""upcoming_matches":[]"#));
@@ -750,7 +845,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![walkover, regular],
         };
-        let finished = build_tset(&snapshot, 1).event.recent_finished_matches;
+        let finished = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.recent_finished_matches;
         let by_id = |id: &str| finished.iter().find(|m| m.id == id).unwrap();
         assert_eq!(by_id("btp_1").outcome, Some("walkover"));
         assert_eq!(by_id("btp_2").outcome, None);
@@ -787,7 +882,7 @@ mod tests {
             entries: Vec::new(),
             officials: Vec::new(),
         };
-        let tset = build_tset(&snapshot, 1);
+        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default()));
         assert_eq!(tset.event.courts.len(), 1);
         assert_eq!(tset.event.courts[0].num, "1");
         assert_eq!(tset.event.courts[0].hall, "Halle 2");
@@ -808,7 +903,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
-        let tset = build_tset(&snapshot, 1);
+        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default()));
         assert_eq!(tset.event.courts[0].hall, "");
     }
 

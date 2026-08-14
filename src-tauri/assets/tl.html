@@ -459,6 +459,25 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    `feldvergabe-ausnahme`) — Warnfarbe wie `.why`, damit es in der Liste
    auffällt, ohne wie ein Fehler ("blocked") zu wirken. */
 .row .excl-badge { font-size: .82rem; color: var(--warn); font-weight: 650; flex-basis: 100%; }
+/* Manuell einsortiert (Spec `spielliste-manuelle-reihenfolge`) — Akzentfarbe
+   statt Warnfarbe: kein Problem, nur eine bewusste Turnierleitungs-
+   Entscheidung, die sichtbar bleiben soll. */
+.row .manual-badge { font-size: .82rem; color: var(--accent); font-weight: 650; }
+.row.dragging-item {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+  border-color: var(--accent);
+  background: #eff6ff;
+}
+/* Globaler Reset-Knopf neben der Überschrift „Als Nächstes" — bewusst kein
+   eigener Abschnitt, damit er nicht wie eine der Hallen-Gruppen wirkt. Nur
+   sichtbar, solange irgendein Spiel manuell einsortiert ist. */
+h2 .reset-order {
+  float: right; font-size: .72rem; font-weight: 600; text-transform: none;
+  letter-spacing: normal; color: var(--ink-soft); background: none;
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+  cursor: pointer;
+}
+h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
 /* Quadratischer Umschalter mit Sinnbild, so groß wie ein Finger, ohne
    Text — geteiltes Box-Modell für den Vorbereitungs-Aufruf (`.prep`,
    gedrückt = ist gerufen) und die Auto-Vergabe-Ausnahme (`.auto-excl`,
@@ -630,6 +649,13 @@ details[open] > summary::before { transform: rotate(90deg); }
 details > summary:hover { color: var(--ink-soft); }
 details > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .section + .section { margin-top: 16px; }
+/* Hallen-Abschnitte innerhalb „Spielbereit" (Spec
+   `spielliste-manuelle-reihenfolge`) — nur sichtbar, wenn ohne Hallenfilter
+   mehr als eine Halle Spiele beisteuert. */
+.section h3 {
+  margin: 14px 0 6px; font-size: .8rem; font-weight: 700; color: var(--ink-soft);
+}
+.section h3:first-of-type { margin-top: 0; }
 .note { font-size: .82rem; color: var(--ink-soft); margin: 6px 0 0; }
 .note.warn { color: var(--warn); font-weight: 600; }
 
@@ -969,7 +995,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
           <span class="meta" id="off-next"></span></summary>
         <ol id="off-list"></ol>
       </details>
-      <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
+      <h2>Als Nächstes <span class="count" id="queue-count"></span>
+        <button type="button" id="queue-reset" class="reset-order" hidden
+          title="Verwirft die manuelle Sortierung ALLER Hallen — danach gilt wieder BTPs eigene Reihenfolge">
+          Reihenfolge zurücksetzen</button>
+      </h2>
       <div id="queue"></div>
       <details class="fin" id="fin-box" hidden>
         <summary>Beendet <span class="count" id="fin-count"></span></summary>
@@ -2626,7 +2656,7 @@ function enableSteg() {
   });
 }
 
-function queueRow(m) {
+function queueRow(m, draggable = false) {
   const parts = [];
   // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
   // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
@@ -2634,13 +2664,18 @@ function queueRow(m) {
   // Bedingung braucht: Eine blockierte Zeile ist so wenig ziehbar wie
   // antippbar.
   const pickable = !m.blocked;
-  if (pickable) {
+  // `draggable` gilt nur für die „Spielbereit"-Zeilen (Spec
+  // `spielliste-manuelle-reihenfolge`) — gerufene, wartende und hallenlose
+  // Zeilen bekommen keinen Griff: Der Präfix wirkt nur innerhalb der noch
+  // nicht gerufenen Spiele (Blocker 1 der Klärung).
+  if (pickable && draggable) {
     // Zieh-Griff: eigenes Element statt der ganzen Zeile als Ziehfläche
-    // (siehe CSS-Erklärung bei `.drag-griff` und `enableDrag` im Skript).
-    // `aria-hidden`, weil er eine rein visuelle Zusatz-Affordanz ist — der
-    // barrierefreie Weg bleibt Antippen-dann-Antippen, unverändert über die
-    // ganze Zeile erreichbar.
-    parts.push(`<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>`);
+    // (siehe CSS-Erklärung bei `.drag-griff` und `enableReorderDrag` im
+    // Skript). Fokussierbar mit Pfeiltasten-Fallback (wie beim
+    // Schiedsrichter-Griff) — kein reines Dekorationselement mehr.
+    parts.push(`<span class="drag-griff" tabindex="0" role="button"
+      title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+      aria-label="Spiel in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>`);
   }
   if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
   // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
@@ -2669,6 +2704,12 @@ function queueRow(m) {
   // Zuweisen bleibt unberührt, deshalb kein "blocked".
   if (m.excluded_from_auto_assign) {
     parts.push(`<span class="excl-badge" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
+  }
+  // Manuell einsortiert (Spec `spielliste-manuelle-reihenfolge`) — sichtbar
+  // markiert, damit die Turnierleitung erkennt, welche Spiele von der
+  // BTP-Reihenfolge abweichen (Review-Entscheidung 14.08.2026).
+  if (m.manual) {
+    parts.push(`<span class="manual-badge" title="Manuell in die Reihenfolge dieser Halle einsortiert">☰ Manuell einsortiert</span>`);
   }
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
@@ -2736,7 +2777,7 @@ function queueRow(m) {
   }
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
-               data-match="${m.match_id}"
+               data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
 }
@@ -3275,9 +3316,34 @@ function startReorderDrag(list, li, down, onReorder) {
   window.addEventListener("pointercancel", cancel);
 }
 
+/**
+ * Manuelle Reihenfolge (Spec `spielliste-manuelle-reihenfolge`): ein Zug
+ * darf Match-IDs nur innerhalb DERSELBEN Halle relativ zueinander verschieben
+ * — sonst löste `assign::hall_for_match` serverseitig ein stilles No-Op aus
+ * (siehe ADR 0023, Risiko „Zug über Hallengrenzen"). Bei aktivem Hallenfilter
+ * ist `ready` schon einhallig; ohne Filter im Mehr-Hallen-Turnier wird VOR
+ * dem Rendern nach `m.hall` gruppiert, jede Gruppe bekommt einen eigenen
+ * Zieh-Container. So kann die Geste im Browser gar nicht erst über eine
+ * Hallengrenze hinweg starten.
+ */
+function groupByHall(list) {
+  if (!state.multi_hall || hallFilter) return [[hallFilter || "", list]];
+  const byHall = new Map();
+  for (const m of list) {
+    const key = m.hall || "";
+    if (!byHall.has(key)) byHall.set(key, []);
+    byHall.get(key).push(m);
+  }
+  return [...byHall.entries()].sort(([a], [b]) => a.localeCompare(b, "de"));
+}
+
 function renderQueue() {
   const box = $("queue");
   if (!state) return;
+  // Während eines laufenden Zugs NICHT neu bauen (Muster `renderOfficials`,
+  // Code-Review-Fund 14.08.2026 dort übernommen) — sonst risse `innerHTML`
+  // die gerade gezogene Zeile aus dem DOM.
+  if (reorderDragPending) return;
   // Bei aktivem Hallenfilter bleiben Spiele ohne Hallenzuordnung sichtbar —
   // ein weggefiltertes Spiel wird nicht vergeben und blockiert am Ende den
   // Zeitplan.
@@ -3290,20 +3356,29 @@ function renderQueue() {
   const waiting = mine.filter((m) => !m.prep_call && m.blocked);
   $("queue-count").textContent = `(${mine.length + noHall.length})`;
 
-  const section = (title, list, open) =>
+  const section = (title, list) =>
     !list.length ? "" :
     `<div class="section"><h2>${esc(title)} <span class="count">(${list.length})</span></h2>
-     <div class="queue">${list.map(queueRow).join("")}</div></div>`;
+     <div class="queue">${list.map((m) => queueRow(m)).join("")}</div></div>`;
 
   let html = section("In Vorbereitung gerufen", called);
-  html += section("Spielbereit", ready);
+  if (ready.length) {
+    const gruppen = groupByHall(ready);
+    const zeigeUeberschriften = gruppen.length > 1;
+    html += `<div class="section"><h2>Spielbereit <span class="count">(${ready.length})</span></h2>` +
+      gruppen.map(([hall, list]) => `
+        ${zeigeUeberschriften ? `<h3>${esc(hall || "Ohne Hallenzuordnung")}</h3>` : ""}
+        <div class="queue" data-hall="${esc(hall)}">${list.map((m) => queueRow(m, true)).join("")}</div>
+      `).join("") +
+      `</div>`;
+  }
   if (waiting.length) {
     html += `<div class="section"><details><summary>Noch nicht bereit (${waiting.length})</summary>
-      <div class="queue">${waiting.map(queueRow).join("")}</div></details></div>`;
+      <div class="queue">${waiting.map((m) => queueRow(m)).join("")}</div></details></div>`;
   }
   if (noHall.length) {
     html += `<div class="section"><details open><summary>Ohne Hallenzuordnung (${noHall.length})</summary>
-      <div class="queue">${noHall.map(queueRow).join("")}</div></details></div>`;
+      <div class="queue">${noHall.map((m) => queueRow(m)).join("")}</div></details></div>`;
   }
   if (!mine.length && !noHall.length) {
     html = `<p class="note">Kein Spiel wartet${hallFilter ? " in dieser Halle" : ""}.</p>`;
@@ -3314,6 +3389,25 @@ function renderQueue() {
   }
   box.innerHTML = html;
   wireQueue(box);
+  box.querySelectorAll(".queue[data-hall]").forEach((container) => {
+    enableReorderDrag(container, (id, beforeId) => send(
+      `queue-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "queue_reorder", matchId: Number(id), beforeMatchId: beforeId === null ? null : Number(beforeId) },
+      "Reihenfolge geändert.",
+    ));
+  });
+  // Reset-Knopf nur zeigen, solange irgendein Spiel manuell einsortiert ist
+  // — sonst gäbe es nichts zurückzusetzen.
+  $("queue-reset").hidden = !state.queue.some((m) => m.manual);
+}
+
+/** Verwirft die manuelle Reihenfolge ALLER Hallen (globaler Reset-Knopf). */
+function resetQueueOrder() {
+  send(
+    `queue-order-reset-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "queue_order_reset" },
+    "Manuelle Reihenfolge zurückgesetzt.",
+  );
 }
 
 /**
@@ -4101,6 +4195,7 @@ function start() {
     if (!resBusy) sendResult();
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
+  $("queue-reset").addEventListener("click", resetQueueOrder);
   // Das Formular steht fest im Markup (siehe `renderScorekeepers`) und
   // wird nie neu gezeichnet — die Verdrahtung gehört deshalb hierher, nicht
   // in eine Render-Funktion, sonst hätte jeder Abruf einen weiteren

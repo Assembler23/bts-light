@@ -95,6 +95,19 @@ export const autoAssignExclude = (
   excluded: boolean,
 ): Promise<void> => invoke("auto_assign_exclude", { matchId, excluded });
 
+/** Ein noch nicht gerufenes Spiel vor ein anderes ziehen (Spec
+ *  `spielliste-manuelle-reihenfolge`, ADR 0023) — die Halle wird
+ *  serverseitig aus dem Match abgeleitet. `beforeMatchId = null` heißt
+ *  „ans Ende des aktuell sichtbaren Präfix-Blocks". */
+export const queueReorder = (
+  matchId: number,
+  beforeMatchId: number | null,
+): Promise<void> => invoke("queue_reorder", { matchId, beforeMatchId });
+
+/** Verwirft die manuelle Spielreihenfolge ALLER Hallen auf einmal (globaler
+ *  Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`). */
+export const queueOrderReset = (): Promise<void> => invoke("queue_order_reset");
+
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
 

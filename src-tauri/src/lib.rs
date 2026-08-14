@@ -138,6 +138,8 @@ pub fn run() {
             commands::official_clear,
             commands::official_pause,
             commands::auto_assign_exclude,
+            commands::queue_reorder,
+            commands::queue_order_reset,
             commands::official_reorder,
             commands::official_set_club,
             commands::official_blocklists,

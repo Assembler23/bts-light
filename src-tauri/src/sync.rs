@@ -520,6 +520,41 @@ impl SyncEngine {
         tablet.retain_auto_assign_exclusions(&keep);
     }
 
+    /// Aufräumen der manuellen Spielreihenfolge (Spec
+    /// `spielliste-manuelle-reihenfolge`, ADR 0023): Ein Match bleibt im
+    /// Präfix **seiner aktuellen Halle** erhalten, solange es spielbereit
+    /// und noch nicht zugewiesen ist. Wechselt die abgeleitete Halle
+    /// (`SetHall`, neuer Vorbereitungs-Aufruf), fällt der Eintrag aus der
+    /// alten Halle heraus und taucht in der neuen NICHT automatisch wieder
+    /// auf (kein Auto-Insert). Wird das Match zugewiesen/beendet oder
+    /// verschwindet es aus dem Snapshot, steht es in keiner Halle mehr im
+    /// `keep`-Set und wird komplett entfernt. Kein BTP-Write, rein lokal.
+    fn reconcile_queue_order(&self, config: &AppConfig, tablet: &TabletState, snapshot: &BtpSnapshot) {
+        let manual = tablet.manual_halls();
+        let calls = tablet.preparation_calls();
+        let mut keep_by_hall: HashMap<String, HashSet<i64>> = HashMap::new();
+        for m in snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Scheduled)
+            .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
+        {
+            let call = calls.iter().find(|c| c.match_id == m.id);
+            let manual_hall = manual.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _) =
+                crate::tablet::assign::hall_for_match(config, snapshot, m, manual_hall, called_hall);
+            keep_by_hall.entry(hall).or_default().insert(m.id);
+        }
+        tablet.queue_order_store().retain(&keep_by_hall);
+    }
+
     /// Nachschub-Queue flushen (A5): fehlgeschlagene Ergebnis-Writes
     /// erneut nach BTP schreiben. Läuft nur im Master-Modus, frühestens
     /// alle [`BTP_RETRY_FLUSH_EVERY`], und nur wenn der aktuelle Poll BTP
@@ -1006,13 +1041,36 @@ impl SyncEngine {
             })
             .collect();
         // Reihenfolge: manuell „in Vorbereitung" gerufene zuerst (Override),
-        // sonst den BTP-Zeitplan von oben nach unten (PlannedTime), dann
-        // Spielnummer/ID als Tiebreaker. Ohne Ansetzung → ans Ende der Zeit-
-        // gruppe, danach greift die Spielnummer (Verhalten wie bisher).
+        // dann der manuelle Präfix je Halle (Spec
+        // `spielliste-manuelle-reihenfolge`), sonst den BTP-Zeitplan von
+        // oben nach unten (PlannedTime), dann Spielnummer/ID als
+        // Tiebreaker. Ohne Ansetzung → ans Ende der Zeitgruppe, danach
+        // greift die Spielnummer (Verhalten wie bisher).
         // Die Reihenfolge liegt in `tablet::assign` und wird mit der Anzeige
         // geteilt — zeigte die Liste eine andere als die Automatik benutzt,
         // verlöre die Turnierleitung das Vertrauen in beide.
-        ready.sort_by_key(|m| crate::tablet::assign::sort_key(m, call_for(m.id).is_some()));
+        let manual_halls = tablet.manual_halls();
+        ready.sort_by_key(|m| {
+            let call = call_for(m.id);
+            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (_, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                config,
+                snapshot,
+                m,
+                manual_hall,
+                called_hall,
+                call.is_some(),
+                tablet.queue_order_store(),
+            );
+            key
+        });
 
         // ── Spieler-Verfügbarkeit ────────────────────────────────────────
         // Wer gerade spielt und wer noch pausiert, liegt in `tablet::assign`
@@ -1273,15 +1331,27 @@ impl SyncEngine {
         // `feldvergabe-ausnahme`) — braucht kein Slave, der macht ohnehin
         // keine Auto-Vergabe (oben schon zurückgekehrt).
         self.reconcile_auto_assign_exclusions(tablet, &snapshot);
+        // Manuelle Spielreihenfolge ebenso aufräumen (Spec
+        // `spielliste-manuelle-reihenfolge`) — direkt danach, gleiche
+        // Bedingungen (lokal, kein Slave nötig).
+        self.reconcile_queue_order(config, tablet, &snapshot);
         // Meldeliste für den Hallen-Check-In (ADR 0009) vorbereiten — gesendet
         // wird sie erst NACH dem Liveticker-Push (siehe unten).
         let roster = self.plan_checkin_roster(config, &snapshot);
+        // Kontext der manuellen Spielreihenfolge (Spec
+        // `spielliste-manuelle-reihenfolge`) — lebt außerhalb des Snapshots,
+        // deshalb hier einmal je Zyklus frisch gebaut.
+        let queue_ctx = crate::badhub::payload::LivetickerContext::new(
+            config,
+            tablet.manual_halls(),
+            tablet.queue_order_store(),
+        );
         // Heartbeat: Ist regulär nichts zu senden, aber seit dem letzten
         // Push >60 s vergangen, wird ein voller `tset` als Lebenszeichen
         // erzwungen (Diff gegen `None`). badhub frischt damit `updated_at`
         // auf und erkennt das Turnier als aktiv.
-        let mut update = match self.plan(&snapshot) {
-            Update::None if self.heartbeat_due() => diff(None, &snapshot, self.rid),
+        let mut update = match self.plan(&snapshot, &queue_ctx) {
+            Update::None if self.heartbeat_due() => diff(None, &snapshot, self.rid, &queue_ctx),
             other => other,
         };
         // Turnierlogo aus der Config in den vollen `tset`-Event injizieren –
@@ -1331,8 +1401,8 @@ impl SyncEngine {
     }
 
     /// Plant das nächste Update gegen den zuletzt gesendeten Stand.
-    fn plan(&self, current: &BtpSnapshot) -> Update {
-        diff(self.last_pushed.as_ref(), current, self.rid)
+    fn plan(&self, current: &BtpSnapshot, ctx: &crate::badhub::payload::LivetickerContext) -> Update {
+        diff(self.last_pushed.as_ref(), current, self.rid, ctx)
     }
 
     /// Nach erfolgreichem Push: Stand merken, Request-ID erhöhen.
@@ -1417,14 +1487,14 @@ mod tests {
     #[test]
     fn first_plan_is_always_full() {
         let engine = SyncEngine::new();
-        assert!(matches!(engine.plan(&snapshot()), Update::Full(_)));
+        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::Full(_)));
     }
 
     #[test]
     fn unchanged_snapshot_after_success_plans_nothing() {
         let mut engine = SyncEngine::new();
         engine.on_success(snapshot());
-        assert!(matches!(engine.plan(&snapshot()), Update::None));
+        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::None));
     }
 
     #[test]
@@ -1432,10 +1502,10 @@ mod tests {
         let mut engine = SyncEngine::new();
         engine.on_success(snapshot());
         // Ohne Fehler wäre ein unveränderter Snapshot ein No-op …
-        assert!(matches!(engine.plan(&snapshot()), Update::None));
+        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::None));
         // … nach einem Push-Fehler aber wird wieder voll gesendet.
         engine.on_failure();
-        assert!(matches!(engine.plan(&snapshot()), Update::Full(_)));
+        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::Full(_)));
     }
 
     #[test]
@@ -1689,6 +1759,73 @@ mod tests {
     }
 
     #[test]
+    fn queue_order_wird_bei_spielende_automatisch_entfernt() {
+        // Spec `spielliste-manuelle-reihenfolge`, Blocker 3: ein Match
+        // verlässt den Präfix automatisch, sobald es beendet ist oder aus
+        // dem Snapshot verschwindet.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet
+            .queue_order_store()
+            .reorder("", &[7, 8], 7, Some(8));
+        assert_eq!(tablet.queue_order_store().rank("", 7), Some(0));
+
+        let snap = snap_with(
+            Vec::new(),
+            vec![
+                finished_named(7, 0, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
+        assert_eq!(tablet.queue_order_store().rank("", 7), None, "beendetes Match aufgeräumt");
+
+        // Match 8 verschwindet ganz aus dem Snapshot.
+        let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
+        engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
+        assert_eq!(tablet.queue_order_store().rank("", 8), None);
+    }
+
+    #[test]
+    fn queue_order_faellt_beim_hallenwechsel_aus_der_alten_halle_ohne_auto_insert() {
+        // Spec `spielliste-manuelle-reihenfolge`, Blocker 2: ändert sich
+        // die abgeleitete Halle eines Matches, verliert es seinen
+        // Präfix-Platz in der alten Halle — und taucht NICHT automatisch
+        // in der neuen wieder auf.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet
+            .queue_order_store()
+            .reorder("Halle A", &[7], 7, None);
+        assert_eq!(tablet.queue_order_store().rank("Halle A", 7), Some(0));
+
+        // Match 7 bekommt jetzt von Hand die Halle "Halle B".
+        tablet.set_manual_hall(7, "Halle B");
+        let snap = snap_with(
+            Vec::new(),
+            vec![ready_named(7, None, "A", "B")],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
+        assert_eq!(tablet.queue_order_store().rank("Halle A", 7), None);
+        assert_eq!(
+            tablet.queue_order_store().rank("Halle B", 7),
+            None,
+            "kein Auto-Insert in die neue Halle"
+        );
+    }
+
+    #[test]
     fn auto_assign_skips_excluded_match() {
         // Spec `feldvergabe-ausnahme`: ein ausgenommenes Match wird
         // übersprungen, auch wenn ein Feld frei ist und es sonst spielbereit
@@ -1847,6 +1984,62 @@ mod tests {
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert_eq!(courts.len(), 1);
         assert_eq!(courts[0].match_id, Some(8));
+    }
+
+    #[test]
+    fn auto_assign_prefers_a_manually_advanced_match_over_the_earlier_schedule() {
+        // Spec `spielliste-manuelle-reihenfolge`: ein manuell vorgezogenes
+        // Match bekommt bevorzugt ein frei werdendes Feld — auch wenn ein
+        // anderes Match früher angesetzt ist.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, Some(202506141400), "A", "B"), // später angesetzt
+                ready_named(8, Some(202506141000), "C", "D"), // früher angesetzt
+            ],
+            Vec::new(),
+        );
+        // Beide Matches liegen ohne Halle in "" — 7 vor 8 ziehen.
+        tablet.queue_order_store().reorder("", &[7, 8], 7, Some(8));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(7), "manueller Vorrang schlägt PlannedTime");
+    }
+
+    #[test]
+    fn a_manually_advanced_but_excluded_match_is_still_skipped_by_auto_assign() {
+        // Zusammenspiel mit der Feldvergabe-Ausnahme (Constraint aus dem
+        // Brief `spielliste-manuelle-reihenfolge`): ein ausgenommenes Spiel
+        // bleibt ausgenommen, unabhängig von seiner Präfix-Position — es
+        // steht zwar ganz vorn in der Anzeige, wird aber nie automatisch
+        // zugewiesen.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, Some(202506141400), "A", "B"),
+                ready_named(8, Some(202506141000), "C", "D"),
+            ],
+            Vec::new(),
+        );
+        tablet.queue_order_store().reorder("", &[7, 8], 7, Some(8));
+        tablet.set_auto_assign_excluded(7, true);
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(
+            courts.len(),
+            1,
+            "das Feld bleibt nicht leer, nur weil das vorgezogene Match ausgenommen ist"
+        );
+        assert_eq!(
+            courts[0].match_id,
+            Some(8),
+            "ausgenommenes Match 7 wird trotz Präfix-Vorrang übersprungen"
+        );
     }
 
     #[test]

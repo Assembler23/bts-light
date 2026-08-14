@@ -341,6 +341,25 @@ pub(crate) fn apply_state_action(
             tablet.set_auto_assign_excluded(*match_id, *excluded);
             Ok(TlResponse::ok(0))
         }
+        A::QueueReorder {
+            match_id,
+            before_match_id,
+        } => {
+            // Wie ExcludeFromAutoAssign: ein unbekanntes Match erschiene
+            // nirgends und ließe sich auch nicht sinnvoll einsortieren.
+            if !known_match(*match_id) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!("Spiel {match_id} gibt es im aktuellen Turnierstand nicht."),
+                ));
+            }
+            tablet.queue_reorder(config, *match_id, *before_match_id);
+            Ok(TlResponse::ok(0))
+        }
+        A::QueueOrderReset => {
+            tablet.queue_order_reset();
+            Ok(TlResponse::ok(0))
+        }
         A::ScorekeeperAdd { names } => {
             let names: Vec<String> = names
                 .iter()
@@ -1461,6 +1480,11 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             operator,
         } => format!("off-court:{court_id}:{sr}:{ar}:{operator}"),
         A::AnnounceOfficials { court_id } => format!("off-announce:{court_id}"),
+        A::QueueReorder {
+            match_id,
+            before_match_id,
+        } => format!("queue-order:{match_id}:{}", before_match_id.unwrap_or(0)),
+        A::QueueOrderReset => "queue-order-reset".to_string(),
     }
 }
 
@@ -1527,6 +1551,8 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Feld-Schalter von Feld {court_id}")
         }
         A::AnnounceOfficials { court_id } => format!("Schiedsrichter-Ansage Feld {court_id}"),
+        A::QueueReorder { match_id, .. } => format!("Spielliste umsortiert (Spiel {match_id})"),
+        A::QueueOrderReset => "Manuelle Spielreihenfolge zurückgesetzt".to_string(),
         A::SetAutoAssign { enabled } => {
             format!(
                 "Automatische Vergabe {}",
@@ -1854,6 +1880,12 @@ pub struct TlMatch {
     /// unberührt — reine Anzeige-Information für das Badge in der Liste.
     #[serde(default)]
     pub excluded_from_auto_assign: bool,
+    /// Steht dieses Spiel gerade im manuellen Präfix seiner Halle (Spec
+    /// `spielliste-manuelle-reihenfolge`)? Reine Anzeige-Information fürs
+    /// Badge in der Liste — die tatsächliche Sortierung liegt bereits in
+    /// der Reihenfolge dieser Liste selbst.
+    #[serde(default)]
+    pub manual: bool,
 }
 
 /// Eine Halle des Turniers.
@@ -1962,7 +1994,7 @@ impl From<Blocked> for TlBlocked {
 /// kostet bei jedem Abruf und auf jedem Gerät. Die Liste ist nach
 /// Dringlichkeit sortiert, die vorderen sind die, um die es geht — was
 /// wegfällt, meldet `truncated_halls` ehrlich.
-const QUEUE_LIMIT_PER_HALL: usize = 120;
+pub(crate) const QUEUE_LIMIT_PER_HALL: usize = 120;
 
 /// Höchstzahl beendeter Spiele im Zustand. Die Seite ist ein
 /// Arbeits-Werkzeug, kein Archiv — wer mehr braucht, schaut in BTP.
@@ -2005,9 +2037,10 @@ pub struct TlFinished {
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
 type OrderedMatch<'a> = (
-    (bool, i64, i64, i64, i64),
+    assign::ManualOrderSortKey,
     &'a crate::btp::model::BtpMatch,
     String,
+    HallSource,
 );
 
 /// Baut den Anzeige-Zustand aus dem aktuellen BTP-Stand und dem, was der Host
@@ -2108,23 +2141,27 @@ pub(crate) fn build_state_limited(
         })
         .map(|m| {
             let call = called_hall(m.id);
-            let (hall, _) = assign::hall_for_match(
+            let manual_hall = manual.get(&m.id).map(String::as_str);
+            let called_hall_str = call.as_ref().map(|(h, _)| h.as_str());
+            let (hall, hall_source, key) = assign::resolve_and_sort_key(
                 config,
                 &snap,
                 m,
-                manual.get(&m.id).map(String::as_str),
-                call.as_ref().map(|(h, _)| h.as_str()),
+                manual_hall,
+                called_hall_str,
+                call.is_some(),
+                tablet.queue_order_store(),
             );
-            (assign::sort_key(m, call.is_some()), m, hall)
+            (key, m, hall, hall_source)
         })
         .collect();
-    ordered.sort_by_key(|(key, _, _)| *key);
+    ordered.sort_by_key(|(key, _, _, _)| *key);
 
     // Je Halle kappen, nicht über das ganze Turnier.
     let mut per_hall: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut truncated: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut queue: Vec<TlMatch> = Vec::new();
-    for (_, m, hall) in ordered {
+    for (_, m, hall, hall_source) in ordered {
         let count = per_hall.entry(hall.clone()).or_insert(0);
         if *count >= queue_limit {
             truncated.insert(hall);
@@ -2132,13 +2169,7 @@ pub(crate) fn build_state_limited(
         }
         *count += 1;
         let call = called_hall(m.id);
-        let (_, hall_source) = assign::hall_for_match(
-            config,
-            &snap,
-            m,
-            manual.get(&m.id).map(String::as_str),
-            call.as_ref().map(|(h, _)| h.as_str()),
-        );
+        let manually_ordered = tablet.queue_order_store().rank(&hall, m.id).is_some();
         queue.push(TlMatch {
             match_id: m.id,
             match_num: m.match_num,
@@ -2178,6 +2209,7 @@ pub(crate) fn build_state_limited(
             }),
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
+            manual: manually_ordered,
         });
     }
 
@@ -3782,6 +3814,95 @@ mod tests {
     }
 
     #[test]
+    fn queue_reorder_moves_a_match_within_its_hall_and_marks_it_manual() {
+        // Spec `spielliste-manuelle-reihenfolge`: Match 3 (BTP-Reihenfolge
+        // zuletzt, da Spielnummer 3) vor Match 1 ziehen — der Präfix
+        // enthält danach nur das gezogene Match, Match 1 folgt weiter über
+        // die normale BTP-Reihenfolge unmittelbar dahinter.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(1), a_match(2), a_match(3)],
+            Vec::new(),
+        ));
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::QueueReorder {
+                match_id: 3,
+                before_match_id: Some(1),
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+
+        let state = build_state(&tablet, &AppConfig::default(), 0, 1);
+        let ids: Vec<i64> = state.queue.iter().map(|m| m.match_id).collect();
+        assert_eq!(ids, vec![3, 1, 2], "3 vorgezogen, Rest folgt BTP-Reihenfolge");
+        let manual_flags: std::collections::HashMap<i64, bool> =
+            state.queue.iter().map(|m| (m.match_id, m.manual)).collect();
+        assert!(manual_flags[&3], "gezogenes Match ist markiert");
+        assert!(
+            !manual_flags[&1],
+            "Zielmatch braucht keinen eigenen Präfix-Rang"
+        );
+    }
+
+    #[test]
+    fn queue_reorder_rejects_an_unknown_match() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::QueueReorder {
+                match_id: 999,
+                before_match_id: None,
+            },
+        )
+        .unwrap_err();
+        assert!(!err.ok);
+    }
+
+    #[test]
+    fn queue_order_reset_clears_every_halls_prefix() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(1), a_match(2), a_match(3)],
+            Vec::new(),
+        ));
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::QueueReorder {
+                match_id: 3,
+                before_match_id: Some(1),
+            },
+        )
+        .unwrap();
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::QueueOrderReset,
+        )
+        .unwrap();
+        assert!(done.ok);
+
+        let state = build_state(&tablet, &AppConfig::default(), 0, 1);
+        let ids: Vec<i64> = state.queue.iter().map(|m| m.match_id).collect();
+        assert_eq!(ids, vec![1, 2, 3], "wieder reine BTP-Reihenfolge");
+        assert!(state.queue.iter().all(|m| !m.manual));
+    }
+
+    #[test]
     fn a_second_call_counts_up_at_the_host_and_orders_the_announcement() {
         // Der erneute Aufruf tut zweierlei: Er zählt die Stufe hoch (damit
         // jedes Gerät dieselbe Zahl sieht) und beauftragt die Ansage in der
@@ -4793,6 +4914,9 @@ mod tests {
             // Spec `feldvergabe-ausnahme`: reines Bool-Flag „Auto-Vergabe
             // übergeht dieses Spiel gerade" — keine Angabe zu Personen.
             "excluded_from_auto_assign",
+            // Spec `spielliste-manuelle-reihenfolge`: reines Bool-Flag „steht
+            // im manuellen Präfix seiner Halle" — keine Angabe zu Personen.
+            "manual",
             // Warteschlange der Zähltafelbediener: Namen stehen ohnehin je Feld im
             // Zustand (`scorekeeper`); der `key` ist eine zufällige Kennung ohne
             // Personenbezug, `enqueued_ms` eine Uhrzeit.

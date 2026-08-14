@@ -473,6 +473,13 @@ pub struct TabletState {
     /// demselben Grund wie `officials`: TL-Web-Actions und Tauri-Commands
     /// müssen denselben Stand sehen.
     auto_assign_exclusions: crate::tablet::exclusion::AutoAssignExclusionStore,
+    /// Manuelle Spielreihenfolge je Halle (Spec
+    /// `spielliste-manuelle-reihenfolge`, ADR 0023): Match-IDs im
+    /// Präfix-Block ihrer Halle, turniergebunden persistiert. Er hängt hier
+    /// aus demselben Grund wie `officials`/`auto_assign_exclusions`: TL-Web
+    /// und Desktop müssen denselben Stand sehen; die BTP-Reihenfolge selbst
+    /// bleibt unangetastet (R2).
+    queue_order: crate::tablet::queue_order::QueueOrderStore,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -785,6 +792,8 @@ impl TabletState {
         // ADR 0022, Spec `feldvergabe-ausnahme`).
         self.auto_assign_exclusions
             .set_tournament(&snapshot.tournament_name);
+        // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
+        self.queue_order.set_tournament(&snapshot.tournament_name);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -834,9 +843,96 @@ impl TabletState {
         self.auto_assign_exclusions.retain(keep);
     }
 
+    /// Der Speicher der manuellen Spielreihenfolge (Spec
+    /// `spielliste-manuelle-reihenfolge`) — geteilt von TL-Web-Actions,
+    /// Tauri-Commands und `sync.rs`.
+    pub fn queue_order_store(&self) -> &crate::tablet::queue_order::QueueOrderStore {
+        &self.queue_order
+    }
+
+    /// Ein noch nicht gerufenes Spiel vor ein anderes ziehen (Spec
+    /// `spielliste-manuelle-reihenfolge`) — **geteilter Einstiegspunkt**
+    /// für den TL-Web-Dispatch (`tl.rs::apply_state_action`) und den
+    /// Desktop-Command (`commands::queue_reorder`), damit ein Zug auf
+    /// beiden Oberflächen identisch wirkt (Konsistenz-Pflicht, ADR 0023).
+    /// Die Halle wird HIER aus dem Match abgeleitet, nicht vom Aufrufer
+    /// übergeben (R2). Liefert `false`, wenn das Match nicht (mehr) im
+    /// aktuellen Snapshot steht.
+    pub fn queue_reorder(
+        &self,
+        config: &crate::config::AppConfig,
+        match_id: i64,
+        before_match_id: Option<i64>,
+    ) -> bool {
+        let Some(snap) = self.snapshot_clone() else {
+            return false;
+        };
+        let Some(m) = snap.matches.iter().find(|m| m.id == match_id) else {
+            return false;
+        };
+        let manual = self.manual_halls();
+        let called: HashSet<i64> = self
+            .preparation_calls()
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
+        let (hall, _) = crate::tablet::assign::hall_for_match(
+            config,
+            &snap,
+            m,
+            manual.get(&match_id).map(String::as_str),
+            None,
+        );
+        let effective = crate::tablet::assign::ready_queue_for_hall(
+            config,
+            &snap,
+            &manual,
+            &called,
+            &self.queue_order,
+            &hall,
+        );
+        // TL-Web zeigt je Halle nur die ersten `QUEUE_LIMIT_PER_HALL` Spiele
+        // (`tl::build_state_limited`) — der neue Präfix darf serverseitig nie
+        // mehr Spiele umfassen, als die ziehende Oberfläche überhaupt zeigen
+        // konnte. Sonst zöge ein Zug ans (dort unsichtbare) Ende der vollen
+        // Liste Spiele in den Präfix, die auf TL-Web niemand gesehen hat
+        // (Code-Review-Fund 14.08.2026). Das gezogene und das Zielspiel
+        // selbst bleiben immer erreichbar — auch wenn sie (nur vom
+        // unbegrenzten Desktop-Weg aus möglich) jenseits der Grenze liegen.
+        let visible = [
+            Some(crate::tablet::tl::QUEUE_LIMIT_PER_HALL),
+            effective
+                .iter()
+                .position(|id| *id == match_id)
+                .map(|p| p + 1),
+            before_match_id
+                .and_then(|b| effective.iter().position(|id| *id == b))
+                .map(|p| p + 1),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(effective.len())
+        .min(effective.len());
+        self.queue_order
+            .reorder(&hall, &effective[..visible], match_id, before_match_id);
+        true
+    }
+
+    /// Die manuelle Reihenfolge **aller** Hallen auf einmal verwerfen
+    /// (globaler Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`).
+    pub fn queue_order_reset(&self) {
+        self.queue_order.reset_all();
+    }
+
     /// Ablage-Datei der Auto-Vergabe-Ausnahmeliste setzen (beim App-Start).
     pub fn set_auto_assign_exclusions_path(&self, path: std::path::PathBuf) {
         self.auto_assign_exclusions.set_path(path);
+    }
+
+    /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
+    pub fn set_queue_order_path(&self, path: std::path::PathBuf) {
+        self.queue_order.set_path(path);
     }
 
     /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**
@@ -4733,6 +4829,32 @@ mod tests {
         // … ein Turnierwechsel verwirft sie.
         st.set_snapshot(snap_named("Cup B"));
         assert!(!st.auto_assign_excluded(10));
+    }
+
+    #[test]
+    fn queue_reorder_never_backfills_matches_beyond_what_tl_web_could_show() {
+        // Code-Review-Fund 14.08.2026: TL-Web zeigt je Halle nur die ersten
+        // `tl::QUEUE_LIMIT_PER_HALL` (120) Spiele. Ohne Deckel würde ein Zug
+        // ans (dort unsichtbare) Ende der VOLLEN Liste auch Spiele jenseits
+        // der 120 in den Präfix ziehen, die niemand gesehen hat.
+        let matches: Vec<BtpMatch> = (1..=125)
+            .map(|id| match_on(id, None, MatchStatus::Scheduled))
+            .collect();
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(matches, Vec::new()));
+
+        // Match 119 liegt innerhalb der sichtbaren ersten 120 — ans Ende
+        // ziehen (before=None).
+        assert!(st.queue_reorder(&crate::config::AppConfig::default(), 119, None));
+
+        assert_eq!(
+            st.queue_order_store().rank("", 121),
+            None,
+            "Match 121 lag jenseits der TL-Web-Kappungsgrenze — darf nicht in den Präfix gezogen werden"
+        );
+        assert_eq!(st.queue_order_store().rank("", 125), None);
+        // Das gezogene Match selbst landet weiterhin im Präfix.
+        assert!(st.queue_order_store().rank("", 119).is_some());
     }
 
     #[test]

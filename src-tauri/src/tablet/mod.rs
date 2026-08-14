@@ -8,6 +8,7 @@ pub mod exclusion;
 pub mod mdns;
 pub mod monitor;
 pub mod officials;
+pub mod queue_order;
 pub mod relay_client;
 pub mod server;
 pub mod slave_bridge;

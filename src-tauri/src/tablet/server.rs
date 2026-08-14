@@ -950,16 +950,51 @@ async fn info_preparation_state(
         }
     };
     let calls = ctx.tablet.preparation_calls();
+    let manual_halls = ctx.tablet.manual_halls();
 
-    let mut candidates: Vec<serde_json::Value> = snapshot
-        .matches
-        .iter()
-        .filter(|m| {
-            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
-        })
-        .map(|m| {
+    // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
+    // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
+    // sonst zeigte diese Liste eine andere Reihenfolge als TL-Web/Desktop).
+    let mut ordered: Vec<(
+        crate::tablet::assign::ManualOrderSortKey,
+        &crate::btp::model::BtpMatch,
+        String,
+    )> =
+        snapshot
+            .matches
+            .iter()
+            .filter(|m| {
+                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+            })
+            .map(|m| {
+                let call = calls.iter().find(|c| c.match_id == m.id);
+                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+                let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                    snapshot
+                        .locations
+                        .iter()
+                        .find(|l| l.id == lid)
+                        .map(|l| l.name.as_str())
+                });
+                let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                    &ctx.config,
+                    &snapshot,
+                    m,
+                    manual_hall,
+                    called_hall,
+                    call.is_some(),
+                    ctx.tablet.queue_order_store(),
+                );
+                (key, m, hall)
+            })
+            .collect();
+    ordered.sort_by_key(|(key, _, _)| *key);
+
+    let candidates: Vec<serde_json::Value> = ordered
+        .into_iter()
+        .map(|(_, m, hall)| {
             let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
-                let hall = c
+                let call_hall = c
                     .location_id
                     .and_then(|lid| {
                         snapshot
@@ -970,10 +1005,11 @@ async fn info_preparation_state(
                     })
                     .unwrap_or_default();
                 serde_json::json!({
-                    "hall": hall,
+                    "hall": call_hall,
                     "called_at_ms": c.called_at_ms,
                 })
             });
+            let manual = ctx.tablet.queue_order_store().rank(&hall, m.id).is_some();
             serde_json::json!({
                 "match_id": m.id,
                 "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
@@ -983,24 +1019,11 @@ async fn info_preparation_state(
                 "planned_time": m.planned_time,
                 "draw_id": m.draw_id,
                 "call": call,
+                "hall": hall,
+                "manual": manual,
             })
         })
         .collect();
-
-    // Gerufene zuerst, dann die Ansetzung des Turnierplans (Zeit, dann
-    // Reihenfolge im Zeitfenster), danach die Spielnummer – dieselbe
-    // Definition wie in `assign::sort_key`, damit Tablet, Monitor,
-    // Turnierleitung und Automatik dieselbe Liste zeigen.
-    candidates.sort_by_key(|c| {
-        let zahl = |feld: &str| c.get(feld).and_then(|v| v.as_i64());
-        crate::tablet::assign::sort_key_parts(
-            c.get("call").map(|v| !v.is_null()).unwrap_or(false),
-            zahl("planned_time"),
-            zahl("draw_id"),
-            zahl("match_num"),
-            zahl("match_id").unwrap_or(0),
-        )
-    });
 
     (
         [(header::CACHE_CONTROL, "no-store")],
