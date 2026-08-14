@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.202
+
+- **Schiedsrichter-Rückschreib-Race nach frischer Feldzuweisung behoben**
+  (Live-Befund 14.08.2026, Zwei-Hallen-Turnier). Ein eigenständiges
+  Schiedsrichter-`SENDUPDATE` direkt nach einer Feldzuweisung ließ BTP die
+  eben erst angekommene Feldzuweisung wieder verlieren — zwei
+  `SENDUPDATE`s zum selben Match binnen Sekunden brachten BTPs eigene
+  Persistenz durcheinander. Der Schiedsrichter-Abgleich lässt ein frisch
+  aufs Feld gerufenes Match jetzt 10 Sekunden in Ruhe, damit die bereits
+  eingebettete Besetzung Zeit hat anzukommen. Dabei zusätzlich behoben:
+  Werden mehrere Felder im selben Zyklus fertig, rücken ihre
+  Schiedsrichter jetzt deterministisch nach Feldnummer sortiert ans Ende
+  der Rotation statt in zufälliger Reihenfolge.
+- **Spiele von der automatischen Feldvergabe ausnehmen** (Spec
+  [feldvergabe-ausnahme](features/feldvergabe-ausnahme.md)). Die
+  Turnierleitung kann ein einzelnes Spiel per Knopfdruck — in TL-Web und
+  am Turnier-PC — temporär von der automatischen Feldvergabe ausnehmen,
+  bis es manuell reaktiviert wird oder das Match endet. Manuelles
+  Zuweisen bleibt für ein ausgenommenes Spiel jederzeit möglich; ein
+  Badge markiert die Zeile in beiden Oberflächen. Der Zustand ist
+  turniergebunden persistiert (eigene Datei, Muster ADR 0022) und
+  überlebt damit einen Neustart des Turnier-PCs.
+
 ## v0.9.201
 
 - **Beim Start werden nicht mehr alle laufenden Spiele angesagt.** Die
