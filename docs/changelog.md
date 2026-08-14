@@ -6,6 +6,17 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
 ## v0.9.201
 
+- **Beim Start werden nicht mehr alle laufenden Spiele angesagt.** Die
+  ersten Abrufe der Feld-Ansage kommen, bevor der Sync-Lauf seinen ersten
+  BTP-Schnappschuss hat — sie liefern **null Felder**. Dieser leere Stand
+  galt als Baseline, und beim nächsten Abruf war damit jedes belegte Feld
+  „frisch aufgerufen": Wer die App mitten im Turnier startete, hörte alle
+  laufenden Spiele am Stück. Die Baseline gilt jetzt erst als gesetzt, wenn
+  überhaupt Felder dabei sind; Felder **ohne** Spiel bleiben ein gültiger
+  Anfangsstand, damit der erste Aufruf des Turniertags weiterhin angesagt
+  wird. (Der Fall „Ansage-Halle im Betrieb umschalten" hat dieselbe
+  Fehlerklasse und ist bewusst unverändert — siehe
+  [announcements.md](announcements.md).)
 - **Schiedsrichtermanagement** (Spec
   [schiedsrichter-management](features/schiedsrichter-management.md),
   ADR 0021/0022) — standardmäßig **aus**; Turniere ohne Schiedsrichter
@@ -45,6 +56,9 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     über den Cloud-Weg erst nach dem Relay-Deploy; im Hallennetz sofort.
 
 ## v0.9.200
+
+> **Nie veröffentlicht** — der Tag wurde nicht gesetzt. Die Änderungen sind
+> in `main` und gehen mit v0.9.201 gemeinsam an die Installationen.
 
 - **Cloud-Monitore und Cloud-Übersicht zeigen jetzt auch die Stände von
   LAN-Tablets.** Der Relay kannte Punktestand und Spielzustand bisher nur
