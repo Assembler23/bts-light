@@ -21,6 +21,15 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   zusätzlich behoben: Werden mehrere Felder im selben Zyklus fertig,
   rücken ihre Schiedsrichter jetzt deterministisch nach Feldnummer
   sortiert ans Ende der Rotation statt in zufälliger Reihenfolge.
+- **Schiedsrichter-Besetzung ging bei jedem Spielabschluss verloren,
+  behoben** (Live-Befund 14.08.2026, Fortsetzung). Das Ergebnis-`SENDUPDATE`
+  trug `Official1ID`/`Official2ID` gar nicht — BTP hat die Besetzung eines
+  Matches dadurch bei jedem Ergebnis-Eintrag gelöscht, egal wie alt die
+  Zuweisung war. Das erklärte drei Symptome auf einmal: Rotation rückte
+  niemanden ans Ende, der Einsatz-Zähler zählte nicht hoch, beendete Spiele
+  zeigten keine Schiedsrichter. Jeder Ergebnis-Schreibweg (Tablet, Desktop,
+  TL-Web, Disqualifikation, Walkover, Nachschub-Queue) reassertiert jetzt
+  die aktuell bekannte Besetzung im selben Request.
 - **Spiele von der automatischen Feldvergabe ausnehmen** (Spec
   [feldvergabe-ausnahme](features/feldvergabe-ausnahme.md)). Die
   Turnierleitung kann ein einzelnes Spiel per Knopfdruck — in TL-Web und

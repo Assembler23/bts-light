@@ -796,6 +796,7 @@ pub(crate) fn plan_result_action(
     on_court_since: Option<u64>,
     now_ms: u64,
     action: &relay_proto::TlAction,
+    officials: Option<(i64, i64)>,
 ) -> Result<Vec<crate::btp::proto::MatchUpdate>, relay_proto::TlResponse> {
     use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
 
@@ -870,6 +871,7 @@ pub(crate) fn plan_result_action(
                 on_court_since,
                 now_ms,
                 *overwrite,
+                officials,
             )
             .map_err(|e| {
                 // „Bereits gewertet" ohne Überschreib-Wunsch ist kein
@@ -901,6 +903,7 @@ pub(crate) fn plan_result_action(
 pub(crate) fn walkover_updates(
     candidates: &[crate::tablet::state::WalkoverCandidate],
     match_ids: &[i64],
+    officials: &std::collections::HashMap<i64, (i64, i64)>,
 ) -> Vec<crate::btp::proto::MatchUpdate> {
     candidates
         .iter()
@@ -917,6 +920,11 @@ pub(crate) fn walkover_updates(
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            // Kampflose Spiele standen selten schon auf einem Feld, aber
+            // falls doch (z. B. Aufgabe statt Disqualifikation gemeldet),
+            // reasserted dieselbe Regel wie bei jedem Ergebnis-Write die
+            // bekannte Besetzung mit (Live-Befund 14.08.2026).
+            officials: officials.get(&c.match_id).copied(),
         })
         .collect()
 }
@@ -930,8 +938,9 @@ pub(crate) fn walkover_updates(
 pub(crate) fn plan_walkover_action(
     candidates: &[crate::tablet::state::WalkoverCandidate],
     match_ids: &[i64],
+    officials: &std::collections::HashMap<i64, (i64, i64)>,
 ) -> Result<Vec<crate::btp::proto::MatchUpdate>, relay_proto::TlResponse> {
-    let updates = walkover_updates(candidates, match_ids);
+    let updates = walkover_updates(candidates, match_ids, officials);
     if updates.is_empty() {
         return Err(relay_proto::TlResponse::err(
             relay_proto::TlErrorCode::AlreadyHandled,
@@ -1225,7 +1234,8 @@ async fn execute_result_action(
                 .find(|m| m.id == *match_id)
                 .and_then(|m| m.court_id)
                 .and_then(|cid| ctx.tablet.on_court_since_ms(cid, *match_id));
-            match plan_result_action(&snap, on_court_since, now_ms, action) {
+            let officials = ctx.tablet.officials_for_result(*match_id);
+            match plan_result_action(&snap, on_court_since, now_ms, action, officials) {
                 Ok(u) => u,
                 Err(rejected) => return Some(rejected),
             }
@@ -1246,9 +1256,14 @@ async fn execute_result_action(
                      schon bearbeitet.",
                 ));
             };
+            let officials: std::collections::HashMap<i64, (i64, i64)> = match_ids
+                .iter()
+                .filter_map(|id| ctx.tablet.officials_for_result(*id).map(|o| (*id, o)))
+                .collect();
             let planned = match plan_walkover_action(
                 &ctx.tablet.walkover_candidates(proposal.entry_id),
                 match_ids,
+                &officials,
             ) {
                 Ok(u) => u,
                 Err(rejected) => {
@@ -3220,6 +3235,7 @@ mod tests {
                 winner: None,
                 overwrite: false,
             },
+            None,
         )
         .expect("erlaubt");
         assert_eq!(updates.len(), 1);
@@ -3254,6 +3270,7 @@ mod tests {
                 winner: None,
                 overwrite: false,
             },
+            None,
         )
         .expect("erlaubt — auch ohne Feld muss sich ein Endstand eintragen lassen");
         assert_eq!(updates.len(), 1);
@@ -3290,6 +3307,7 @@ mod tests {
                 winner: None,
                 overwrite: false,
             },
+            None,
         )
         .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
@@ -3313,6 +3331,7 @@ mod tests {
                 winner: Some(1),
                 overwrite: false,
             },
+            None,
         )
         .unwrap_err();
         assert!(
@@ -3343,11 +3362,11 @@ mod tests {
 
         // Ohne ausdrücklichen Wunsch bleibt es bei „schon gewertet" — so
         // ersetzt niemand versehentlich ein Ergebnis.
-        let err = plan_result_action(&s, None, 9_000, &aktion(false)).unwrap_err();
+        let err = plan_result_action(&s, None, 9_000, &aktion(false), None).unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::AlreadyScored));
 
         // Mit ausdrücklichem Wunsch geht es durch.
-        let updates = plan_result_action(&s, None, 9_000, &aktion(true)).unwrap();
+        let updates = plan_result_action(&s, None, 9_000, &aktion(true), None).unwrap();
         assert_eq!(updates.len(), 1);
         assert!(updates[0].team1_won);
     }
@@ -3375,6 +3394,7 @@ mod tests {
                 winner: None,
                 overwrite: true,
             },
+            None,
         )
         .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::CorrectionBlocked));
@@ -3404,14 +3424,16 @@ mod tests {
                 retired_is_team1: false,
             },
         ];
-        let updates = walkover_updates(&candidates, &[11, 12]);
+        let updates = walkover_updates(&candidates, &[11, 12], &std::collections::HashMap::new());
         assert_eq!(updates.len(), 2);
         assert_eq!(updates[0].score_status, 1, "1 = kampflos");
         assert!(updates[0].sets.is_empty(), "kampflos hat keine Sätze");
         assert!(!updates[0].team1_won, "Team 1 hat aufgegeben");
         assert!(updates[1].team1_won, "hier war es Team 2");
         // Ein nicht ausgewähltes Spiel bleibt unangetastet.
-        assert!(walkover_updates(&candidates, &[11]).len() == 1);
+        assert!(
+            walkover_updates(&candidates, &[11], &std::collections::HashMap::new()).len() == 1
+        );
     }
 
     /// Ein Spiel, das auf einem Feld steht — Grundlage der Aufruf-Tests.
@@ -4165,11 +4187,18 @@ mod tests {
             opponent: "Meier".to_string(),
             retired_is_team1: true,
         }];
-        let err = plan_walkover_action(&candidates, &[99]).unwrap_err();
+        let err =
+            plan_walkover_action(&candidates, &[99], &std::collections::HashMap::new())
+                .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::AlreadyHandled));
         assert!(!err.ok);
         // Mit einem noch vorhandenen Kandidaten geht es weiter wie bisher.
-        assert_eq!(plan_walkover_action(&candidates, &[11]).unwrap().len(), 1);
+        assert_eq!(
+            plan_walkover_action(&candidates, &[11], &std::collections::HashMap::new())
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

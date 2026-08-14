@@ -101,6 +101,20 @@ pub struct MatchUpdate {
     /// Spielende (Unix-ms). Zusammen mit `player_ids` Grundlage der
     /// `Player.LastTimeOnCourt`-Zeitstempel (lokale Uhrzeit).
     pub end_ts_ms: Option<u64>,
+    /// Schiedsrichter/Aufschlagrichter (`Official1ID`/`Official2ID`), die im
+    /// selben Request reasserted werden; `0` = kein Dienst. `None` = Feld
+    /// weglassen (Turnier ohne Schiedsrichter-Betrieb).
+    ///
+    /// **Pflicht, sobald das Match eine Besetzung trägt** (Live-Befund
+    /// 14.08.2026): Das Ergebnis-`SENDUPDATE` liess BTP beobachtbar die
+    /// Schiedsrichter-Besetzung des Matches löschen, wenn der Match-Knoten
+    /// sie wegliess — dieselbe Klasse Regression wie bei `CourtID` (siehe
+    /// `MatchCourt::court_id`). Reasserted der Request denselben Wert, den
+    /// der zeitlich nähere Rücksync gerade geschrieben hat, bleibt die
+    /// Besetzung am beendeten Match erhalten — Grundlage von Rotation
+    /// (`officials.rs::move_to_end`) und Einsatz-Zähler
+    /// (`officials.rs::appearances`).
+    pub officials: Option<(i64, i64)>,
 }
 
 /// Unix-Millisekunden → BTP-`DateTime` in **lokaler** Zeit (BTP zeigt
@@ -120,6 +134,19 @@ fn local_datetime(unix_ms: u64) -> xml::DateTime {
         minute: dt.minute(),
         second: dt.second(),
         millis: dt.timestamp_subsec_millis(),
+    }
+}
+
+/// `Official1ID`/`Official2ID` an einen Match-Knoten anhängen, wenn gesetzt
+/// — geteilt zwischen `update_request` und `court_assign_request` (Code-
+/// Review-Fund 14.08.2026: vorher an beiden Stellen dupliziert; eine
+/// künftige Änderung an dieser Kodierung darf nur eine Stelle treffen
+/// müssen, sonst öffnet sich genau die Regressionsklasse wieder, die diese
+/// beiden Schreibwege gerade erst geschlossen haben).
+fn push_officials_nodes(children: &mut Vec<Node>, officials: Option<(i64, i64)>) {
+    if let Some((sr, ar)) = officials {
+        children.push(Node::integer("Official1ID", sr));
+        children.push(Node::integer("Official2ID", ar));
     }
 }
 
@@ -165,6 +192,7 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
     }
     match_children.push(Node::integer("DrawID", update.draw_id));
     match_children.push(Node::integer("PlanningID", update.planning_id));
+    push_officials_nodes(&mut match_children, update.officials);
     let match_node = Node::group("Match", match_children);
 
     let mut tournament_children = Vec::new();
@@ -363,10 +391,7 @@ pub fn court_assign_request(
                 ];
                 // Officials nur, wenn dieses Turnier sie führt (ADR 0021) —
                 // sonst bleibt der Request unverändert zum Bestand.
-                if let Some((sr, ar)) = mc.officials {
-                    children.push(Node::integer("Official1ID", sr));
-                    children.push(Node::integer("Official2ID", ar));
-                }
+                push_officials_nodes(&mut children, mc.officials);
                 Node::group("Match", children)
             })
             .collect();
@@ -553,6 +578,7 @@ mod tests {
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            officials: None,
         }
     }
 
@@ -594,6 +620,27 @@ mod tests {
         // `Status` MUSS im Ergebnis stehen, sonst schließt BTP das Match
         // nicht ab (Regression v0.9.103, Live-Befund Turnier 17.07.2026).
         assert_eq!(child_int(&m, "Status"), Some(0));
+    }
+
+    #[test]
+    fn update_request_reasserts_officials_when_set() {
+        // Live-Befund 14.08.2026: Ohne dieses Feld verlor BTP die
+        // Schiedsrichter-Besetzung eines Matches, sobald das Ergebnis
+        // eintraf — dieselbe Klasse Regression wie bei CourtID.
+        let mut u = sample_update();
+        u.officials = Some((5, 0));
+        let m = match_node(&update_request(&u, "S", None));
+        assert_eq!(child_int(&m, "Official1ID"), Some(5));
+        assert_eq!(child_int(&m, "Official2ID"), Some(0), "kein AR ⇒ 0");
+    }
+
+    #[test]
+    fn update_request_without_officials_has_no_official_nodes() {
+        // Turnier ohne Schiedsrichter-Betrieb: Feld bleibt weg, nicht 0 —
+        // sonst würde ein bestehender Dienst ungewollt gelöscht.
+        let m = match_node(&update_request(&sample_update(), "S", None));
+        assert!(xml::find(&m, "Official1ID").is_none());
+        assert!(xml::find(&m, "Official2ID").is_none());
     }
 
     #[test]

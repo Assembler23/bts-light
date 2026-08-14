@@ -508,6 +508,8 @@ Update {
         CourtID:     <BTP-Court-ID> (das ECHTE Feld bleibt am Match — s. u.)
         DrawID:      <Draw des Matches>
         PlanningID:  <Planungsposition im Draw>
+        Official1ID: <SR-ID>         (nur bei Schiedsrichter-Betrieb — s. u.)
+        Official2ID: <AR-ID>
       }
     }
     Players {                       (nur bei Tablet-Ergebnis: Spielende je Spieler)
@@ -555,6 +557,17 @@ Update {
 > konnte das gerade geschriebene Ergebnis wieder entwerten. Bei Walkover
 > aus der Turnierleitung (`free_court_id = None`) entfallen `Courts`-Block
 > und `CourtID`.
+
+> ⚠️ **`Official1ID`/`Official2ID` niemals aus dem Ergebnis-Request weglassen,
+> sobald Schiedsrichter-Betrieb läuft** (Live-Befund 14.08.2026, dieselbe
+> Fehlerklasse wie `Status` oben). Ohne dieses Feld löschte BTP die
+> Schiedsrichter-Besetzung eines Matches bei **jedem** Ergebnis-Eintrag —
+> egal ob die Zuweisung Sekunden oder über eine Stunde alt war. Fix:
+> `MatchUpdate::officials` reassertiert die aktuell bekannte Besetzung
+> (BTP-Wert gewinnt, sonst lokale Zuweisung, sonst explizit `(0, 0)`) in
+> jedem Ergebnis-Write. `None` nur ohne Schiedsrichter-Betrieb — dann bleibt
+> der Request unverändert zum Bestand. Details:
+> [schiedsrichter-management.md](schiedsrichter-management.md#ergebnis-write-löschte-die-besetzung-live-befund-14082026-fortsetzung).
 
 ### Vorbereitungs-Aufruf-Highlight (P1)
 

@@ -1421,6 +1421,7 @@ pub async fn confirm_walkover(
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            officials: tablet.officials_for_result(cand.match_id),
         };
         match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
             Ok(()) => {
@@ -1485,8 +1486,9 @@ pub async fn enter_result(
     let on_court_since = m
         .court_id
         .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
+    let officials = tablet.officials_for_result(m.id);
     let update =
-        crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms)?;
+        crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms, officials)?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
@@ -1543,8 +1545,15 @@ pub async fn disqualify_match(
     let on_court_since = m
         .court_id
         .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
-    let update =
-        crate::tablet::server::build_manual_dq_update(m, loser_team, sets, on_court_since, end_ms)?;
+    let officials = tablet.officials_for_result(m.id);
+    let update = crate::tablet::server::build_manual_dq_update(
+        m,
+        loser_team,
+        sets,
+        on_court_since,
+        end_ms,
+        officials,
+    )?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {

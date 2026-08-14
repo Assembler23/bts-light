@@ -707,6 +707,11 @@ struct PersistedMatchUpdate {
     free_court_id: Option<i64>,
     player_ids: Vec<i64>,
     end_ts_ms: Option<u64>,
+    /// Schiedsrichter-Besetzung (Live-Befund 14.08.2026, siehe
+    /// `MatchUpdate::officials`). `#[serde(default)]`, damit eine vor diesem
+    /// Feld persistierte Queue-Datei beim App-Neustart weiter lesbar bleibt.
+    #[serde(default)]
+    officials: Option<(i64, i64)>,
 }
 
 impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
@@ -722,6 +727,7 @@ impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
             free_court_id: u.free_court_id,
             player_ids: u.player_ids.clone(),
             end_ts_ms: u.end_ts_ms,
+            officials: u.officials,
         }
     }
 }
@@ -739,6 +745,7 @@ impl From<PersistedMatchUpdate> for crate::btp::proto::MatchUpdate {
             free_court_id: p.free_court_id,
             player_ids: p.player_ids,
             end_ts_ms: p.end_ts_ms,
+            officials: p.officials,
         }
     }
 }
@@ -1416,6 +1423,29 @@ impl TabletState {
             .iter()
             .find(|m| m.id == match_id)
             .map(|m| (m.draw_id, m.planning_id))
+    }
+
+    /// Die Schiedsrichter-Besetzung, die ein Ergebnis-`SENDUPDATE` für dieses
+    /// Match reassertieren soll (Live-Befund 14.08.2026, siehe
+    /// `MatchUpdate::officials`): `None`, wenn ohne Schiedsrichter-Betrieb
+    /// gespielt wird — dann bleibt der Request unverändert zum Bestand.
+    /// Sonst immer `Some((sr, ar))` (`0` = kein Dienst), auch wenn nie
+    /// jemand zugewiesen war — das schreibt explizit „niemand" und ist
+    /// dieselbe Werte-Reassertion wie beim Feld selbst.
+    pub fn officials_for_result(&self, match_id: i64) -> Option<(i64, i64)> {
+        if !self.officials.enabled() {
+            return None;
+        }
+        let (btp_sr, btp_ar) = self
+            .snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .and_then(|s| s.matches.iter().find(|m| m.id == match_id))
+            .map(|m| (m.official1_id, m.official2_id))
+            .unwrap_or((None, None));
+        let wirksam = self.officials.effective(match_id, btp_sr, btp_ar);
+        Some((wirksam.sr.unwrap_or(0), wirksam.ar.unwrap_or(0)))
     }
 
     /// Tablet hat sich für ein Feld verbunden. `match_id` startet auf 0 –
@@ -4439,6 +4469,7 @@ mod tests {
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            officials: None,
         }
     }
 
@@ -4645,6 +4676,41 @@ mod tests {
         st.set_snapshot(snap);
         assert_eq!(st.officials_store().order(), vec![9]);
         assert!(!st.officials_store().extra(3).paused);
+    }
+
+    #[test]
+    fn officials_for_result_reasserts_the_known_occupation() {
+        // Live-Befund 14.08.2026: Das Ergebnis-SENDUPDATE verlor die
+        // Schiedsrichter-Besetzung, wenn der Match-Knoten sie wegliess.
+        // `officials_for_result` liefert deshalb immer einen konkreten
+        // Wert, solange der Schiedsrichter-Betrieb läuft.
+        let st = TabletState::default();
+
+        // Ohne Schiedsrichter-Betrieb: nichts anfassen.
+        let mut m = match_on(10, Some(5), MatchStatus::OnCourt);
+        st.set_snapshot(snapshot(vec![m.clone()], Vec::new()));
+        assert_eq!(st.officials_for_result(10), None);
+
+        st.officials_store().set_enabled(true);
+
+        // BTP kennt die Besetzung bereits — die gewinnt.
+        m.official1_id = Some(3);
+        st.set_snapshot(snapshot(vec![m.clone()], Vec::new()));
+        assert_eq!(st.officials_for_result(10), Some((3, 0)));
+
+        // BTP kennt nichts, aber lokal ist eine Zuweisung vorgemerkt.
+        m.official1_id = None;
+        st.set_snapshot(snapshot(vec![m.clone()], Vec::new()));
+        st.officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 4);
+        assert_eq!(st.officials_for_result(10), Some((4, 0)));
+
+        // Gar nichts bekannt: explizit „niemand" (0, 0), nicht None — sonst
+        // bliebe der Request unverändert und ein späterer BTP-Eintrag würde
+        // nie überschrieben.
+        let unbekannt = match_on(11, Some(6), MatchStatus::OnCourt);
+        st.set_snapshot(snapshot(vec![unbekannt], Vec::new()));
+        assert_eq!(st.officials_for_result(11), Some((0, 0)));
     }
 
     #[test]

@@ -71,6 +71,15 @@ feststeht (offene KO-Plätze werden übersprungen).
 jeweils **nicht** aufgebende Seite, und schreibt es per `SENDUPDATE`
 (`write_result_to_btp`).
 
+**Schiedsrichter-Besetzung reasserted** (Live-Befund 14.08.2026, wie bei
+jedem anderen Ergebnis-Write, siehe
+[schiedsrichter-management.md](schiedsrichter-management.md#ergebnis-write-löschte-die-besetzung-live-befund-14082026-fortsetzung)):
+`confirm_walkover` liest die aktuell bekannte Besetzung über
+`TabletState::officials_for_result(match_id)` und trägt sie im selben
+`MatchUpdate` mit — kampflose Spiele standen selten schon auf einem Feld,
+aber falls doch (z. B. eine Aufgabe wird als Walkover statt Disqualifikation
+gemeldet), verliert BTP die Besetzung dadurch nicht.
+
 ### Ergebnis aus der Turnierleitung eintragen (`enter_result`)
 
 Verwandte TL-Wertung (Plan 12, Backend-Finalisierung — Tilo 20.07.:

@@ -1337,8 +1337,9 @@ pub(crate) fn build_manual_result_update(
     sets: Vec<(i64, i64)>,
     on_court_since: Option<u64>,
     now: u64,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
-    build_manual_result_update_opt(m, sets, on_court_since, now, false)
+    build_manual_result_update_opt(m, sets, on_court_since, now, false, officials)
 }
 
 /// Wie [`build_manual_result_update`], aber mit ausdrücklicher
@@ -1354,6 +1355,7 @@ pub(crate) fn build_manual_result_update_opt(
     on_court_since: Option<u64>,
     now: u64,
     overwrite: bool,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() && !overwrite {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
@@ -1376,6 +1378,7 @@ pub(crate) fn build_manual_result_update_opt(
         free_court_id,
         player_ids,
         end_ts_ms,
+        officials,
     })
 }
 
@@ -1425,6 +1428,7 @@ pub(crate) fn build_manual_dq_update(
     sets: Vec<(i64, i64)>,
     on_court_since: Option<u64>,
     now: u64,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
@@ -1451,6 +1455,7 @@ pub(crate) fn build_manual_dq_update(
         free_court_id,
         player_ids,
         end_ts_ms,
+        officials,
     })
 }
 
@@ -1586,6 +1591,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         free_court_id: Some(body.court_id),
         player_ids,
         end_ts_ms: Some(end_ms),
+        officials: ctx.tablet.officials_for_result(m.id),
     };
 
     // Log-Label: Das Tablet liefert sein courtLabel nicht auf jedem Pfad
@@ -2746,12 +2752,30 @@ mod tests {
     // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────
 
     #[test]
+    fn manual_result_reasserts_the_given_officials() {
+        // Live-Befund 14.08.2026: Ohne dieses Feld verlor BTP die
+        // Schiedsrichter-Besetzung eines Matches, sobald das Ergebnis
+        // eintraf. `build_manual_result_update` muss den übergebenen Wert
+        // unverändert in den `MatchUpdate` durchreichen.
+        let m = match_on_court();
+        let u = build_manual_result_update(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            61_000,
+            Some((4, 0)),
+        )
+        .unwrap();
+        assert_eq!(u.officials, Some((4, 0)));
+    }
+
+    #[test]
     fn manual_result_on_court_frees_field_and_checks_out() {
         // Match 42 auf Feld 101, 2:0 → Feld wird freigegeben, Spieler
         // ausgecheckt (Endzeit gesetzt), Dauer aus dem Aufruf-Stempel.
         let m = match_on_court(); // court_id 101, scoring default (21/30)
         let u =
-            build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000).unwrap();
+            build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000, None).unwrap();
         assert_eq!(u.btp_match_id, 42);
         assert!(u.team1_won);
         assert_eq!(u.score_status, 0);
@@ -2768,7 +2792,7 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000).unwrap();
+        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000, None).unwrap();
         assert_eq!(u.free_court_id, None);
         assert!(u.player_ids.is_empty());
         assert_eq!(u.end_ts_ms, None);
@@ -2780,16 +2804,16 @@ mod tests {
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(1);
-        assert!(build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0).is_err());
+        assert!(build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0, None).is_err());
         // Laufender Satz (5:3) → abgelehnt (nicht regulär zu Ende).
         let m = match_on_court();
-        let err = build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0).unwrap_err();
+        let err = build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0, None).unwrap_err();
         assert!(
             err.contains("5:3"),
             "Fehler nennt den unfertigen Satz: {err}"
         );
         // Unentschiedener Satzstand (1:1) → kein Sieger.
-        assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0).is_err());
+        assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0, None).is_err());
     }
 
     #[test]
@@ -2798,7 +2822,7 @@ mod tests {
         // ScoreStatus 3, ein LAUFENDER Satz (5:3) bleibt erhalten (anders als
         // beim regulären Eintrag, der ihn ablehnt), Feld wird freigegeben.
         let m = match_on_court(); // court_id 101
-        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000).unwrap();
+        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000, None).unwrap();
         assert_eq!(u.score_status, 3);
         assert!(!u.team1_won, "disqualifiziertes Team 1 verliert");
         assert_eq!(u.sets, vec![(21, 10), (5, 3)], "Teil-Satz bleibt");
@@ -2811,11 +2835,11 @@ mod tests {
     fn manual_dq_rejects_invalid_team_and_already_decided() {
         let m = match_on_court();
         // Ungültiges Team (nur 1/2 erlaubt).
-        assert!(build_manual_dq_update(&m, 3, vec![], None, 0).is_err());
+        assert!(build_manual_dq_update(&m, 3, vec![], None, 0, None).is_err());
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(2);
-        assert!(build_manual_dq_update(&done, 1, vec![], None, 0).is_err());
+        assert!(build_manual_dq_update(&done, 1, vec![], None, 0, None).is_err());
     }
 
     #[test]
@@ -2825,7 +2849,7 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000).unwrap();
+        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000, None).unwrap();
         assert_eq!(u.score_status, 3);
         assert!(u.team1_won, "Team 2 disqualifiziert → Team 1 gewinnt");
         assert_eq!(u.free_court_id, None);
@@ -3204,6 +3228,7 @@ mod tests {
             free_court_id: Some(101),
             player_ids: vec![],
             end_ts_ms: None,
+            officials: None,
         }
     }
 

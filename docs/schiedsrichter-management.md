@@ -375,6 +375,35 @@ deutlich enger als das behobene Problem (das bei **jeder** frischen
 Feldzuweisung mit Schiedsrichter-Rotation auftrat). Keine weitere
 Mitigation vorgesehen, solange kein Turnier-Befund das Gegenteil zeigt.
 
+### Ergebnis-Write löschte die Besetzung (Live-Befund 14.08.2026, Fortsetzung)
+
+Der `CourtID`-Fix oben deckte nur die **Feldzuweisung** ab. Am selben
+Turnier zeigte sich unabhängig davon ein **zweiter** Fall derselben
+Fehlerklasse: Das Ergebnis-`SENDUPDATE` (`update_request`, gebaut in
+`server::build_manual_result_update_opt`/`build_manual_dq_update` sowie
+direkt in `process_result`) trug `Official1ID`/`Official2ID` gar nicht —
+und BTP hat die Schiedsrichter-Besetzung eines Matches dadurch bei
+**jedem** Spielabschluss gelöscht, unabhängig davon, wie lange sie vorher
+stand (beobachtet sowohl bei einer Zuweisung von 74 Sekunden als auch bei
+über einer Stunde). Das erklärte gleich drei Symptome auf einmal:
+
+- Die **Rotation** rückte niemanden ans Ende (`move_to_end`) — es gab ja
+  nichts, was das gerade beendete Match noch als Besetzung kannte.
+- Der **Einsatz-Zähler** (`appearances`) zählte nicht hoch — er liest
+  `Match.official1_id`/`official2_id` der beendeten Spiele, und die waren
+  leer.
+- Die **Liste der beendeten Spiele** zeigte keine Schiedsrichter.
+
+**Fix:** `MatchUpdate` trägt jetzt ein `officials: Option<(i64, i64)>` —
+gefüllt über `TabletState::officials_for_result(match_id)` (BTP-Wert
+gewinnt, sonst lokale Zuweisung, sonst explizit `(0, 0)` — nie `None`,
+solange der Schiedsrichter-Betrieb läuft) an **jedem** Ergebnis-Schreibweg:
+Tablet (`process_result`), Turnierleitung (Desktop + TL-Web, regulär und
+Disqualifikation), Walkover und die Nachschub-Queue (persistiert das Feld
+mit, `#[serde(default)]` für ältere Queue-Dateien). `officials_for_result`
+liefert `None` nur, wenn ohne Schiedsrichter-Betrieb gespielt wird — dann
+bleibt der Request unverändert zum Bestand.
+
 ### Was das Tablet erreicht
 
 Der Push-Schlüssel beider Wege (LAN und Cloud) enthält neben Match-ID und

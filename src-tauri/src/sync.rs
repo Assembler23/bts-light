@@ -179,6 +179,7 @@ fn prepare_btp_retry(
     entry: &crate::tablet::state::PendingBtpWrite,
     snapshot: &BtpSnapshot,
     now: u64,
+    tablet: &TabletState,
 ) -> RetryAction {
     // winner.is_some() impliziert im Modell Finished (model.rs setzt den
     // Status genau dann) — der Sieger allein ist das Kriterium.
@@ -206,6 +207,14 @@ fn prepare_btp_retry(
         if !still_ours {
             update.free_court_id = None;
         }
+    }
+    // Besetzung neu abfragen statt die beim Einreihen eingefrorene zu
+    // wiederholen (Code-Review-Fund 14.08.2026): Zwischen Einreihen und
+    // Nachschub kann die Turnierleitung die Zuweisung korrigiert haben —
+    // der veraltete Wert würde die Korrektur sonst stillschweigend
+    // überschreiben.
+    if update.officials.is_some() {
+        update.officials = tablet.officials_for_result(update.btp_match_id);
     }
     RetryAction::Write(Box::new(update))
 }
@@ -473,8 +482,16 @@ impl SyncEngine {
         match crate::tablet::server::write_officials_to_btp(config, &entries).await {
             Ok(()) => {
                 tracing::info!(
-                    "BTP-Schiedsrichter aktualisiert: {} Änderung(en)",
-                    entries.len()
+                    "BTP-Schiedsrichter aktualisiert: {} Änderung(en): {}",
+                    entries.len(),
+                    entries
+                        .iter()
+                        .map(|e| format!(
+                            "Spiel {} (Feld {})→{:?}",
+                            e.match_id, e.court_id, e.officials
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
                 for e in &entries {
                     if let Some(officials) = e.officials {
@@ -542,7 +559,7 @@ impl SyncEngine {
             if !tablet.btp_retry_pending(match_id) {
                 continue;
             }
-            match prepare_btp_retry(&entry, snapshot, now) {
+            match prepare_btp_retry(&entry, snapshot, now, tablet) {
                 RetryAction::Drop(reason) => {
                     tablet.clear_btp_retry(match_id);
                     tracing::warn!("Nachschub für Match {match_id} verworfen: {reason}");
@@ -788,6 +805,18 @@ impl SyncEngine {
             }
             let wirksam = store.effective(fm.id, fm.official1_id, fm.official2_id);
             let fertig: Vec<i64> = wirksam.sr.into_iter().chain(wirksam.ar).collect();
+            if fertig.is_empty() {
+                tracing::info!(
+                    "Feld {court_id}: Spiel {} beendet, aber keine Schiedsrichter-Besetzung \
+                     bekannt (weder BTP noch lokal) — nichts rückt ans Ende",
+                    fm.id
+                );
+            } else {
+                tracing::info!(
+                    "Feld {court_id}: Spiel {} beendet — {:?} rücken ans Ende der Rotation",
+                    fm.id, fertig
+                );
+            }
             store.move_to_end(&fertig);
         }
 
@@ -2068,6 +2097,7 @@ mod tests {
             free_court_id: free_court,
             player_ids: vec![11, 12],
             end_ts_ms: Some(500_000),
+            officials: None,
         }
     }
 
@@ -2084,7 +2114,7 @@ mod tests {
         // der Nachschub darf es NIE überschreiben.
         let snap = snap_with(Vec::new(), vec![finished_named(7, 1, "A", "B")], Vec::new());
         assert_eq!(
-            prepare_btp_retry(&pending(7, None, 0), &snap, 1_000),
+            prepare_btp_retry(&pending(7, None, 0), &snap, 1_000, &TabletState::default()),
             RetryAction::Drop("BTP hat bereits ein Ergebnis")
         );
     }
@@ -2094,7 +2124,7 @@ mod tests {
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         let too_old = BTP_RETRY_MAX_AGE.as_millis() as u64 + 1;
         assert_eq!(
-            prepare_btp_retry(&pending(7, None, 0), &snap, too_old),
+            prepare_btp_retry(&pending(7, None, 0), &snap, too_old, &TabletState::default()),
             RetryAction::Drop("Eintrag zu alt")
         );
     }
@@ -2105,7 +2135,9 @@ mod tests {
         // auschecken/umstempeln — Ergebnis + Sätze bleiben unverändert.
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         let late = PLAYER_CHECKOUT_WINDOW.as_millis() as u64 + 1;
-        let RetryAction::Write(u) = prepare_btp_retry(&pending(7, None, 0), &snap, late) else {
+        let RetryAction::Write(u) =
+            prepare_btp_retry(&pending(7, None, 0), &snap, late, &TabletState::default())
+        else {
             panic!("Write erwartet");
         };
         assert!(u.player_ids.is_empty());
@@ -2119,7 +2151,12 @@ mod tests {
         let mut ours = ready_match(7, 1);
         ours.court_id = Some(5);
         let snap = snap_with(Vec::new(), vec![ours], Vec::new());
-        let RetryAction::Write(u) = prepare_btp_retry(&pending(7, Some(5), 0), &snap, 1_000) else {
+        let RetryAction::Write(u) = prepare_btp_retry(
+            &pending(7, Some(5), 0),
+            &snap,
+            1_000,
+            &TabletState::default(),
+        ) else {
             panic!("Write erwartet");
         };
         assert_eq!(u.free_court_id, Some(5));
@@ -2129,8 +2166,12 @@ mod tests {
         let mut other = ready_match(9, 2);
         other.court_id = Some(5);
         let snap2 = snap_with(Vec::new(), vec![other], Vec::new());
-        let RetryAction::Write(u2) = prepare_btp_retry(&pending(7, Some(5), 0), &snap2, 1_000)
-        else {
+        let RetryAction::Write(u2) = prepare_btp_retry(
+            &pending(7, Some(5), 0),
+            &snap2,
+            1_000,
+            &TabletState::default(),
+        ) else {
             panic!("Write erwartet");
         };
         assert_eq!(u2.free_court_id, None);
@@ -2142,10 +2183,41 @@ mod tests {
         ours.court_id = Some(5);
         let snap = snap_with(Vec::new(), vec![ours], Vec::new());
         let entry = pending(7, Some(5), 0);
-        let RetryAction::Write(u) = prepare_btp_retry(&entry, &snap, 1_000) else {
+        let RetryAction::Write(u) =
+            prepare_btp_retry(&entry, &snap, 1_000, &TabletState::default())
+        else {
             panic!("Write erwartet");
         };
         assert_eq!(*u, entry.update, "frischer Eintrag geht 1:1 raus");
+    }
+
+    #[test]
+    fn retry_refreshes_a_stale_officials_value_instead_of_replaying_it() {
+        // Code-Review-Fund 14.08.2026: Zwischen Einreihen und Nachschub kann
+        // die Turnierleitung die Besetzung korrigiert haben — der beim
+        // Einreihen eingefrorene Wert darf die Korrektur nicht überschreiben.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut ours = ready_match(7, 1);
+        ours.court_id = Some(5);
+        let snap = snap_with(Vec::new(), vec![ours], Vec::new());
+        // Nach dem Einreihen (mit Besetzung 5,0) korrigiert die
+        // Turnierleitung auf Official 7.
+        tablet
+            .officials_store()
+            .assign(7, crate::tablet::officials::OfficialRole::Sr, 7);
+
+        let mut entry = pending(7, Some(5), 0);
+        entry.update.officials = Some((5, 0));
+        let RetryAction::Write(u) = prepare_btp_retry(&entry, &snap, 1_000, &tablet) else {
+            panic!("Write erwartet");
+        };
+        assert_eq!(
+            u.officials,
+            Some((7, 0)),
+            "der Nachschub schreibt die aktuelle Besetzung, nicht die beim \
+             Einreihen eingefrorene"
+        );
     }
 
     // ──────────────── Spielende-Stempel & Zähltafelbediener ────────────────
