@@ -4,7 +4,7 @@ import {
   preparationCandidates,
   tabletOverview,
 } from "../api";
-import { announceCourt } from "../io/announceCourt";
+import { announceCourt, announceOfficials } from "../io/announceCourt";
 import {
   playPreparationAnnouncement,
   resolveAnnouncementLanguage,
@@ -93,6 +93,16 @@ export function AnnounceJobPlayer({
         if (!court || court.match_id !== job.matchId) return;
         const stage = job.stage >= 3 ? 3 : 2;
         announceCourt(court, cfg, azureRef.current, stage);
+        return;
+      }
+
+      if (job.kind === "officials") {
+        // Nur die Besetzung: Namen stehen im aktuellen Feld-Stand, der
+        // Auftrag trägt sie bewusst nicht mit sich.
+        const info = await tabletOverview().catch(() => null);
+        const court = info?.courts.find((c) => c.court_id === job.courtId);
+        if (!court) return;
+        announceOfficials(court, cfg, azureRef.current);
         return;
       }
 

@@ -7,6 +7,7 @@ import {
   ClipboardList,
   LayoutGrid,
   type LucideIcon,
+  Gavel,
   Megaphone,
   SlidersHorizontal,
   Tablet,
@@ -24,6 +25,7 @@ export type NavView =
   | "tablets"
   | "tlweb"
   | "checkin"
+  | "officials"
   | "announce"
   | "monitors"
   | "winners"
@@ -32,7 +34,11 @@ export type NavView =
 
 /** Abschnitts-Anker in den Einstellungen (für den Sprung aus einem
  *  ausgegrauten Menüpunkt). */
-export type SettingsFocus = "ansagen" | "court-monitor" | "check-in";
+export type SettingsFocus =
+  | "ansagen"
+  | "court-monitor"
+  | "check-in"
+  | "schiedsrichter";
 
 interface NavItem {
   view: NavView;
@@ -68,6 +74,15 @@ function items(config: AppConfig): NavItem[] {
       icon: UserCheck,
       enabled: config.checkin.enabled && config.checkin.tournament_uuid !== "",
       focus: "check-in",
+    },
+    // Ausgegraut, solange ohne Schiedsrichter gespielt wird — der Klick
+    // springt in den Einstellungs-Abschnitt, in dem das Häkchen sitzt.
+    {
+      view: "officials",
+      label: "Schiedsrichter",
+      icon: Gavel,
+      enabled: config.officials?.enabled ?? false,
+      focus: "schiedsrichter",
     },
     {
       view: "announce",

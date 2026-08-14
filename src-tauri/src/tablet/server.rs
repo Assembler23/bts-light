@@ -172,6 +172,7 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // Punktverlauf on-demand (AK-5): gleicher Pfad wie über den Relay,
         // damit tl.html in beiden Modi identisch abruft.
         .route("/tl/api/timeline/{match_id}", get(tl_timeline))
+        .route("/tl/api/officials/{official_id}", get(tl_official_detail))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -949,16 +950,50 @@ async fn info_preparation_state(
         }
     };
     let calls = ctx.tablet.preparation_calls();
+    let manual_halls = ctx.tablet.manual_halls();
 
-    let mut candidates: Vec<serde_json::Value> = snapshot
+    // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
+    // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
+    // sonst zeigte diese Liste eine andere Reihenfolge als TL-Web/Desktop).
+    let mut ordered: Vec<(
+        crate::tablet::assign::ManualOrderSortKey,
+        &crate::btp::model::BtpMatch,
+        String,
+    )> = snapshot
         .matches
         .iter()
         .filter(|m| {
             m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
         })
         .map(|m| {
+            let call = calls.iter().find(|c| c.match_id == m.id);
+            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                &ctx.config,
+                &snapshot,
+                m,
+                manual_hall,
+                called_hall,
+                call.is_some(),
+                ctx.tablet.queue_order_store(),
+            );
+            (key, m, hall)
+        })
+        .collect();
+    ordered.sort_by_key(|(key, _, _)| *key);
+
+    let candidates: Vec<serde_json::Value> = ordered
+        .into_iter()
+        .map(|(_, m, hall)| {
             let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
-                let hall = c
+                let call_hall = c
                     .location_id
                     .and_then(|lid| {
                         snapshot
@@ -969,10 +1004,11 @@ async fn info_preparation_state(
                     })
                     .unwrap_or_default();
                 serde_json::json!({
-                    "hall": hall,
+                    "hall": call_hall,
                     "called_at_ms": c.called_at_ms,
                 })
             });
+            let manual = ctx.tablet.queue_order_store().rank(&hall, m.id).is_some();
             serde_json::json!({
                 "match_id": m.id,
                 "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
@@ -982,24 +1018,11 @@ async fn info_preparation_state(
                 "planned_time": m.planned_time,
                 "draw_id": m.draw_id,
                 "call": call,
+                "hall": hall,
+                "manual": manual,
             })
         })
         .collect();
-
-    // Gerufene zuerst, dann die Ansetzung des Turnierplans (Zeit, dann
-    // Reihenfolge im Zeitfenster), danach die Spielnummer – dieselbe
-    // Definition wie in `assign::sort_key`, damit Tablet, Monitor,
-    // Turnierleitung und Automatik dieselbe Liste zeigen.
-    candidates.sort_by_key(|c| {
-        let zahl = |feld: &str| c.get(feld).and_then(|v| v.as_i64());
-        crate::tablet::assign::sort_key_parts(
-            c.get("call").map(|v| !v.is_null()).unwrap_or(false),
-            zahl("planned_time"),
-            zahl("draw_id"),
-            zahl("match_num"),
-            zahl("match_id").unwrap_or(0),
-        )
-    });
 
     (
         [(header::CACHE_CONTROL, "no-store")],
@@ -1133,6 +1156,27 @@ async fn tl_timeline(
         )
             .into_response(),
     }
+}
+
+/// Sperrlisten und Einsätze **eines** Schiedsrichters (Spec
+/// schiedsrichter-management) — bewusst on-demand und nie Teil des
+/// Zustands-Pushes: Sperrlisten kodieren persönliche Beziehungen und
+/// gehören nicht in den Stand, den jedes gekoppelte Gerät bekommt.
+/// Gleicher Zugang wie `tl_state` (Geräte-Token).
+async fn tl_official_detail(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(official_id): axum::extract::Path<i64>,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        crate::tablet::tl::official_detail_json(&ctx.tablet, official_id),
+    )
+        .into_response()
 }
 
 /// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine
@@ -1315,8 +1359,9 @@ pub(crate) fn build_manual_result_update(
     sets: Vec<(i64, i64)>,
     on_court_since: Option<u64>,
     now: u64,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
-    build_manual_result_update_opt(m, sets, on_court_since, now, false)
+    build_manual_result_update_opt(m, sets, on_court_since, now, false, officials)
 }
 
 /// Wie [`build_manual_result_update`], aber mit ausdrücklicher
@@ -1332,6 +1377,7 @@ pub(crate) fn build_manual_result_update_opt(
     on_court_since: Option<u64>,
     now: u64,
     overwrite: bool,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() && !overwrite {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
@@ -1354,6 +1400,7 @@ pub(crate) fn build_manual_result_update_opt(
         free_court_id,
         player_ids,
         end_ts_ms,
+        officials,
     })
 }
 
@@ -1403,6 +1450,7 @@ pub(crate) fn build_manual_dq_update(
     sets: Vec<(i64, i64)>,
     on_court_since: Option<u64>,
     now: u64,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
@@ -1429,6 +1477,7 @@ pub(crate) fn build_manual_dq_update(
         free_court_id,
         player_ids,
         end_ts_ms,
+        officials,
     })
 }
 
@@ -1564,6 +1613,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         free_court_id: Some(body.court_id),
         player_ids,
         end_ts_ms: Some(end_ms),
+        officials: ctx.tablet.officials_for_result(m.id),
     };
 
     // Log-Label: Das Tablet liefert sein courtLabel nicht auf jedem Pfad
@@ -1747,11 +1797,51 @@ pub(crate) async fn write_courts_to_btp(
         .map_err(|e| e.to_string())
 }
 
+/// Schreibt **nur** die Schiedsrichter-Besetzung nach BTP (ADR 0021),
+/// Muster [`write_courts_to_btp`]: eigene Sitzung, ein `SENDUPDATE`, Antwort
+/// geprüft. Der Aufrufer übernimmt den Stand erst bei `Ok` — ein Fehlschlag
+/// wird im nächsten Sync-Zyklus wiederholt.
+///
+/// Läuft über [`proto::court_assign_request`] mit leerem `courts`-Block —
+/// jeder Eintrag trägt seine aktuelle `CourtID` mit (siehe
+/// [`proto::MatchCourt::court_id`]), damit dieser eigenständige Write nie
+/// eine gerade erst angekommene Feldzuweisung überschreiben kann.
+pub(crate) async fn write_officials_to_btp(
+    config: &AppConfig,
+    entries: &[proto::MatchCourt],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let host = &config.btp.host;
+    let port = config.btp.port;
+    let pw = config.btp.password.as_deref();
+
+    let login_raw = client::send_request(host, port, &proto::login_request(pw))
+        .await
+        .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    let session = proto::parse_login_response(
+        &proto::decode_response(&login_raw).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let upd_raw = client::send_request(
+        host,
+        port,
+        &proto::court_assign_request(&[], entries, &session, pw),
+    )
+    .await
+    .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
 /// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
-/// Aufrufe in BTP sichtbar. Eigener Login + `highlight_request` (Match-Knoten
-/// nur mit Identität + Highlight, kein `Status`/Ergebnis). Best-effort-Aufrufer
-/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
-/// davon unberührt.
+/// Aufrufe im BTP-Planer sichtbar. Eigene Sitzung, ein `SENDUPDATE`
+/// (`proto::highlight_request`, Match-Knoten nur mit Identität +
+/// Highlight, kein `Status`/Ergebnis). Best-effort: Aufrufer
+/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand
+/// bleibt davon unberührt.
 pub(crate) async fn write_highlight_to_btp(
     config: &AppConfig,
     entries: &[proto::HighlightEntry],
@@ -1799,6 +1889,7 @@ pub(crate) fn match_brief(
     scorekeeper_assigned: bool,
     display: &crate::config::DisplayConfig,
     finalized: bool,
+    officials: (Vec<String>, Vec<String>),
 ) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
@@ -1831,6 +1922,8 @@ pub(crate) fn match_brief(
         show_club_names: display.show_club_names,
         show_club_logos: display.show_club_logos,
         finalized,
+        sr_names: officials.0,
+        ar_names: officials.1,
     }
 }
 
@@ -1936,7 +2029,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // Tablet sein altes (längst entferntes) Match, weil `None == None` (kein
     // Match) den Dedup auslöste. `finalized` im Schlüssel, weil der Übergang
     // OnCourt→Finished die matchId nicht ändert, das Tablet aber erreichen muss.
-    let mut last_match: Option<(i64, bool)> = Some((i64::MIN, false));
+    let mut last_match: Option<(i64, bool, String)> = Some((i64::MIN, false, String::new()));
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
     let mut superseded = false;
@@ -2201,13 +2294,20 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     }
 }
 
+/// Fingerabdruck der Besetzung für den Push-Schlüssel: Ändert sich
+/// Schiedsrichter oder Aufschlagrichter, ändert sich der Schlüssel — nur so
+/// erreicht eine Zuweisung mitten im Spiel das Tablet.
+pub(crate) fn officials_key(officials: &(Vec<String>, Vec<String>)) -> String {
+    format!("{}|{}", officials.0.join("/"), officials.1.join("/"))
+}
+
 /// Sendet `match_assigned`/`match_cleared`, sobald sich das Match des
 /// Felds (per CourtID) gegenüber dem zuletzt gemeldeten Stand geändert hat.
 async fn push_match(
     court_id: i64,
     ctx: &ServerCtx,
     socket: &mut WebSocket,
-    last: &mut Option<(i64, bool)>,
+    last: &mut Option<(i64, bool, String)>,
 ) {
     // A2 / ADR 0017, Regel b: Ein gerade in BTP finalisiertes Match liefert
     // `match_for_court` nicht mehr (Status Finished ≠ OnCourt), das Tablet trägt
@@ -2226,9 +2326,18 @@ async fn push_match(
     };
     // `finalized` nur echt, wenn wir das Match auch nachreichen können.
     let finalized = finalized && effective.is_some();
-    // Zustands-Schlüssel inkl. `finalized`: der Übergang OnCourt→Finished
-    // ändert die matchId NICHT, muss das Tablet aber erreichen.
-    let key = effective.as_ref().map(|m| (m.id, finalized));
+    // Zustands-Schlüssel inkl. `finalized` UND Besetzung: Der Übergang
+    // OnCourt→Finished ändert die matchId nicht, muss das Tablet aber
+    // erreichen — und ebenso wenig ändert sie sich, wenn die Turnierleitung
+    // mitten im Spiel einen Schiedsrichter einteilt. Ohne die Besetzung im
+    // Schlüssel bliebe das Tablet beim Stand der Zuweisung stehen.
+    let key = effective.as_ref().map(|m| {
+        (
+            m.id,
+            finalized,
+            officials_key(&ctx.tablet.match_officials(m)),
+        )
+    });
     if key == *last {
         return;
     }
@@ -2242,7 +2351,14 @@ async fn push_match(
             ServerMsg::MatchAssigned {
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(m, sk, ska, &ctx.app_config().display, finalized)
+                    match_brief(
+                        m,
+                        sk,
+                        ska,
+                        &ctx.app_config().display,
+                        finalized,
+                        ctx.tablet.match_officials(m),
+                    )
                 },
             }
         }
@@ -2469,7 +2585,7 @@ mod tests {
             show_club_names: true,
             show_club_logos: true,
         };
-        let brief = match_brief(&m, Vec::new(), false, &on, false);
+        let brief = match_brief(&m, Vec::new(), false, &on, false, (Vec::new(), Vec::new()));
         assert!(brief.show_club_names);
         assert!(brief.show_club_logos);
         assert!(!brief.finalized);
@@ -2482,6 +2598,7 @@ mod tests {
             false,
             &crate::config::DisplayConfig::default(),
             false,
+            (Vec::new(), Vec::new()),
         );
         assert!(!brief_off.show_club_names);
         assert!(!brief_off.show_club_logos);
@@ -2657,12 +2774,30 @@ mod tests {
     // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────
 
     #[test]
+    fn manual_result_reasserts_the_given_officials() {
+        // Live-Befund 14.08.2026: Ohne dieses Feld verlor BTP die
+        // Schiedsrichter-Besetzung eines Matches, sobald das Ergebnis
+        // eintraf. `build_manual_result_update` muss den übergebenen Wert
+        // unverändert in den `MatchUpdate` durchreichen.
+        let m = match_on_court();
+        let u = build_manual_result_update(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            61_000,
+            Some((4, 0)),
+        )
+        .unwrap();
+        assert_eq!(u.officials, Some((4, 0)));
+    }
+
+    #[test]
     fn manual_result_on_court_frees_field_and_checks_out() {
         // Match 42 auf Feld 101, 2:0 → Feld wird freigegeben, Spieler
         // ausgecheckt (Endzeit gesetzt), Dauer aus dem Aufruf-Stempel.
         let m = match_on_court(); // court_id 101, scoring default (21/30)
-        let u =
-            build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000).unwrap();
+        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000, None)
+            .unwrap();
         assert_eq!(u.btp_match_id, 42);
         assert!(u.team1_won);
         assert_eq!(u.score_status, 0);
@@ -2679,7 +2814,8 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000).unwrap();
+        let u =
+            build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000, None).unwrap();
         assert_eq!(u.free_court_id, None);
         assert!(u.player_ids.is_empty());
         assert_eq!(u.end_ts_ms, None);
@@ -2691,16 +2827,21 @@ mod tests {
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(1);
-        assert!(build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0).is_err());
+        assert!(
+            build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0, None).is_err()
+        );
         // Laufender Satz (5:3) → abgelehnt (nicht regulär zu Ende).
         let m = match_on_court();
-        let err = build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0).unwrap_err();
+        let err =
+            build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0, None).unwrap_err();
         assert!(
             err.contains("5:3"),
             "Fehler nennt den unfertigen Satz: {err}"
         );
         // Unentschiedener Satzstand (1:1) → kein Sieger.
-        assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0).is_err());
+        assert!(
+            build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0, None).is_err()
+        );
     }
 
     #[test]
@@ -2709,7 +2850,8 @@ mod tests {
         // ScoreStatus 3, ein LAUFENDER Satz (5:3) bleibt erhalten (anders als
         // beim regulären Eintrag, der ihn ablehnt), Feld wird freigegeben.
         let m = match_on_court(); // court_id 101
-        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000).unwrap();
+        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000, None)
+            .unwrap();
         assert_eq!(u.score_status, 3);
         assert!(!u.team1_won, "disqualifiziertes Team 1 verliert");
         assert_eq!(u.sets, vec![(21, 10), (5, 3)], "Teil-Satz bleibt");
@@ -2722,11 +2864,11 @@ mod tests {
     fn manual_dq_rejects_invalid_team_and_already_decided() {
         let m = match_on_court();
         // Ungültiges Team (nur 1/2 erlaubt).
-        assert!(build_manual_dq_update(&m, 3, vec![], None, 0).is_err());
+        assert!(build_manual_dq_update(&m, 3, vec![], None, 0, None).is_err());
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(2);
-        assert!(build_manual_dq_update(&done, 1, vec![], None, 0).is_err());
+        assert!(build_manual_dq_update(&done, 1, vec![], None, 0, None).is_err());
     }
 
     #[test]
@@ -2736,7 +2878,7 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000).unwrap();
+        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000, None).unwrap();
         assert_eq!(u.score_status, 3);
         assert!(u.team1_won, "Team 2 disqualifiziert → Team 1 gewinnt");
         assert_eq!(u.free_court_id, None);
@@ -3115,6 +3257,7 @@ mod tests {
             free_court_id: Some(101),
             player_ids: vec![],
             end_ts_ms: None,
+            officials: None,
         }
     }
 

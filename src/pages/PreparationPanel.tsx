@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Megaphone, Volume2, X } from "lucide-react";
+import { GripVertical, Megaphone, RotateCcw, Volume2, X } from "lucide-react";
 import {
   callPreparation,
   preparationCandidates,
+  queueOrderReset,
+  queueReorder,
   retractPreparation,
 } from "../api";
 import {
@@ -10,6 +12,7 @@ import {
   resolveAnnouncementLanguage,
 } from "../io/announcer";
 import { azureOption } from "../io/azureAnnounce";
+import { useDragReorder } from "../state/useDragReorder";
 import type {
   AnnounceConfig,
   AzureTtsConfig,
@@ -98,6 +101,22 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     [candidates],
   );
 
+  // Offene Kandidaten je Halle gruppiert (Spec
+  // `spielliste-manuelle-reihenfolge`): ein Zug darf Match-IDs nur innerhalb
+  // DERSELBEN Halle relativ zueinander verschieben, sonst löste
+  // `assign::hall_for_match` serverseitig ein stilles No-Op aus (ADR 0023).
+  // Bei nur einer Halle bleibt es bei einer einzigen, unbeschrifteten Gruppe.
+  const openGroups = useMemo((): [string, PreparationCandidate[]][] => {
+    if (!multiHall) return [["", open]];
+    const byHall = new Map<string, PreparationCandidate[]>();
+    for (const c of open) {
+      const key = c.hall || "";
+      if (!byHall.has(key)) byHall.set(key, []);
+      byHall.get(key)!.push(c);
+    }
+    return [...byHall.entries()].sort(([a], [b]) => a.localeCompare(b, "de"));
+  }, [open, multiHall]);
+
   // Auswahl auf noch offene Kandidaten beschränken (gerufene rausfiltern).
   useEffect(() => {
     setChecked((prev) => {
@@ -123,6 +142,21 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         setLocations(v.locations);
       })
       .catch(() => {});
+
+  // Ein noch nicht gerufenes Spiel vor ein anderes ziehen (Spec
+  // `spielliste-manuelle-reihenfolge`) — die Halle wird serverseitig aus
+  // dem Match abgeleitet, hier wird nur (id, beforeId) übertragen.
+  const reorderOpen = (matchId: number, beforeMatchId: number | null) => {
+    queueReorder(matchId, beforeMatchId)
+      .then(refresh)
+      .catch(() => {});
+  };
+
+  const resetQueueOrder = () => {
+    queueOrderReset()
+      .then(refresh)
+      .catch(() => {});
+  };
 
   const callSelected = async () => {
     if (checked.size === 0) return;
@@ -244,36 +278,34 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         </p>
       ) : (
         <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <ul className="flex flex-col gap-1.5">
-            {open.map((c) => (
-              <li key={c.match_id}>
-                <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 transition-colors hover:bg-slate-50">
-                  <input
-                    type="checkbox"
-                    checked={checked.has(c.match_id)}
-                    onChange={() => toggle(c.match_id)}
-                    className="size-4 accent-sky-600"
-                  />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm">
-                      <span className="font-medium">{c.label || "Spiel"}</span>
-                      {c.match_num !== null && (
-                        <span className="text-slate-400">
-                          {" "}
-                          · Nr. {c.match_num}
-                        </span>
-                      )}
-                    </span>
-                    <span className="truncate text-xs text-slate-500">
-                      {c.team1.length > 0 ? c.team1.join(" / ") : "—"}{" "}
-                      <span className="text-slate-400">gegen</span>{" "}
-                      {c.team2.length > 0 ? c.team2.join(" / ") : "—"}
-                    </span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          {/* Reset-Knopf: verwirft die manuelle Reihenfolge ALLER Hallen auf
+              einmal (Spec `spielliste-manuelle-reihenfolge`) — nur sichtbar,
+              solange irgendein Spiel manuell einsortiert ist. */}
+          {candidates.some((c) => c.manual) && (
+            <div className="flex justify-end">
+              <button
+                onClick={resetQueueOrder}
+                title="Verwirft die manuelle Sortierung ALLER Hallen — danach gilt wieder BTPs eigene Reihenfolge"
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs
+                           font-medium text-slate-500 transition-colors hover:bg-slate-100
+                           hover:text-slate-700"
+              >
+                <RotateCcw size={13} />
+                Reihenfolge zurücksetzen
+              </button>
+            </div>
+          )}
+          {openGroups.map(([hall, items]) => (
+            <OpenHallGroup
+              key={hall}
+              hall={hall}
+              items={items}
+              showHeading={openGroups.length > 1}
+              checked={checked}
+              toggle={toggle}
+              onReorder={reorderOpen}
+            />
+          ))}
 
           {/* Aufruf-Zeile: Hallen-Auswahl (nur Mehr-Hallen) + Button. */}
           <div className="mt-1 flex items-center justify-end gap-2">
@@ -401,4 +433,90 @@ function sinceLabel(calledAtMs: number): string {
   const mins = Math.floor((Date.now() - calledAtMs) / 60000);
   if (mins <= 0) return "gerade eben";
   return `vor ${mins} Min.`;
+}
+
+/**
+ * Eine Hallen-Gruppe der offenen Kandidaten, ziehbar per `useDragReorder`
+ * (Spec `spielliste-manuelle-reihenfolge`, gleiche Bausteine wie
+ * `OfficialsPanel`). Eigene Komponente, weil `useDragReorder` je Hallen-
+ * Gruppe genau einmal aufgerufen werden muss (Hook-Regeln — eine dynamische
+ * Anzahl Hallen verbietet den Hook-Aufruf direkt in einer Schleife).
+ */
+function OpenHallGroup({
+  hall,
+  items,
+  showHeading,
+  checked,
+  toggle,
+  onReorder,
+}: {
+  hall: string;
+  items: PreparationCandidate[];
+  showHeading: boolean;
+  checked: Set<number>;
+  toggle: (id: number) => void;
+  onReorder: (matchId: number, beforeMatchId: number | null) => void;
+}) {
+  const { order, registerRow, dragHandleProps } = useDragReorder(
+    items,
+    (c) => c.match_id,
+    onReorder,
+  );
+  return (
+    <div className="flex flex-col gap-1.5">
+      {showHeading && (
+        <h4 className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {hall || "Ohne Hallenzuordnung"}
+        </h4>
+      )}
+      <ul className="flex flex-col gap-1.5">
+        {order.map((c) => (
+          <li
+            key={c.match_id}
+            ref={(el) => registerRow(c.match_id, el)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200
+                       px-1.5 py-1 transition-colors hover:bg-slate-50"
+          >
+            <span
+              {...dragHandleProps(c.match_id)}
+              tabIndex={0}
+              role="button"
+              title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+              aria-label={`${c.label || "Spiel"} in der Reihenfolge verschieben — ziehen oder Pfeiltasten`}
+              className="cursor-grab touch-none rounded text-slate-400 outline-none
+                         focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
+            >
+              <GripVertical size={16} />
+            </span>
+            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 py-1">
+              <input
+                type="checkbox"
+                checked={checked.has(c.match_id)}
+                onChange={() => toggle(c.match_id)}
+                className="size-4 accent-sky-600"
+              />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm">
+                  <span className="font-medium">{c.label || "Spiel"}</span>
+                  {c.match_num !== null && (
+                    <span className="text-slate-400"> · Nr. {c.match_num}</span>
+                  )}
+                  {c.manual && (
+                    <span className="ml-1.5 text-xs font-semibold text-sky-600">
+                      Manuell einsortiert
+                    </span>
+                  )}
+                </span>
+                <span className="truncate text-xs text-slate-500">
+                  {c.team1.length > 0 ? c.team1.join(" / ") : "—"}{" "}
+                  <span className="text-slate-400">gegen</span>{" "}
+                  {c.team2.length > 0 ? c.team2.join(" / ") : "—"}
+                </span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

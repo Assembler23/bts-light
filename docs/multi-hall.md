@@ -393,3 +393,12 @@ bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst sagt er beide an).
 | Geräte-Liste vereinen | `relay-proto/src/lib.rs` (`merge_device_lists`) | [cloud-relay.md](cloud-relay.md) |
 | Feld-Raster je Halle | `config.rs` (`hall_layouts`), `src/io/hallGrid.mjs`, `FieldOverviewPage.tsx`, `tablet/tl.rs` (`TlHallLayout`), `assets/tl.html` | [features/feld-raster.md](features/feld-raster.md), [turnierleitung-web.md](turnierleitung-web.md) |
 | Vorbereitungs-Aufrufe je Halle | `src-tauri/src/tablet/state.rs`, `src/pages/PreparationPanel.tsx` | [preparation.md](preparation.md) |
+
+## Schiedsrichter in mehreren Hallen
+
+Das [Schiedsrichtermanagement](schiedsrichter-management.md) folgt derselben
+Architektur: Die Besetzung hängt am Spiel (nicht am Feld), die Anzeige geht
+über `MatchBrief` an LAN- **und** Cloud-Tablets — die ferne Halle
+eingeschlossen —, und die Ansage wird in der Halle des Felds gesprochen
+(`AnnounceJobKind::Officials`). Die feldweisen Schalter sind an der CourtID
+geschlüsselt und damit hallenübergreifend eindeutig.

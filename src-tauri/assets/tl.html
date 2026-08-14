@@ -455,19 +455,51 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row.blocked { background: #f8fafc; }
 .row .why { font-size: .82rem; color: var(--warn); flex-basis: 100%; }
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
-/* Der Vorbereitungs-Aufruf als Umschalter mit Sinnbild: quadratisch, so
-   groß wie ein Finger, ohne Text. Gedrückt = ist gerufen. */
-.row .prep {
+/* Ausgenommen von der automatischen Feldvergabe (Spec
+   `feldvergabe-ausnahme`) — Warnfarbe wie `.why`, damit es in der Liste
+   auffällt, ohne wie ein Fehler ("blocked") zu wirken. */
+.row .excl-badge { font-size: .82rem; color: var(--warn); font-weight: 650; flex-basis: 100%; }
+/* Manuell einsortiert (Spec `spielliste-manuelle-reihenfolge`) — Akzentfarbe
+   statt Warnfarbe: kein Problem, nur eine bewusste Turnierleitungs-
+   Entscheidung, die sichtbar bleiben soll. */
+.row .manual-badge { font-size: .82rem; color: var(--accent); font-weight: 650; }
+.row.dragging-item {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+  border-color: var(--accent);
+  background: #eff6ff;
+}
+/* Globaler Reset-Knopf neben der Überschrift „Als Nächstes" — bewusst kein
+   eigener Abschnitt, damit er nicht wie eine der Hallen-Gruppen wirkt. Nur
+   sichtbar, solange irgendein Spiel manuell einsortiert ist. */
+h2 .reset-order {
+  float: right; font-size: .72rem; font-weight: 600; text-transform: none;
+  letter-spacing: normal; color: var(--ink-soft); background: none;
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+  cursor: pointer;
+}
+h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
+/* Quadratischer Umschalter mit Sinnbild, so groß wie ein Finger, ohne
+   Text — geteiltes Box-Modell für den Vorbereitungs-Aufruf (`.prep`,
+   gedrückt = ist gerufen) und die Auto-Vergabe-Ausnahme (`.auto-excl`,
+   gedrückt = ausgenommen); nur die Zustandsfarbe unterscheidet sie. */
+.row .prep, .row .auto-excl {
   display: grid; place-items: center;
   width: 40px; height: 40px; padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
+.row .auto-excl { font-size: 1.1rem; }
 .row .prep:hover { border-color: var(--accent); color: var(--accent); }
 .row .prep[aria-pressed="true"] {
   border-color: var(--accent); background: #eff6ff; color: var(--accent);
 }
-.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+.row .auto-excl:hover { border-color: var(--warn); color: var(--warn); }
+.row .auto-excl[aria-pressed="true"] {
+  border-color: var(--warn); background: #fff7ed; color: var(--warn);
+}
+.row[aria-selected="true"] .prep, .row[aria-selected="true"] .auto-excl {
+  border-color: #475569; background: #1e293b; color: #e2e8f0;
+}
 
 /* Nachruf: drei kleine Knöpfe an einer Beschriftung. Kleiner als der
    Vorbereitungs-Aufruf, weil sie die Ausnahme sind — man braucht sie nur,
@@ -529,7 +561,26 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Wartezeit, nicht um eine ganze Paarung. */
 .sk { margin-bottom: 16px; }
 .sk .count { color: var(--ink-faint); font-weight: 600; }
-.sk #sk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sk #sk-list, .sk #off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sk #off-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.sk #off-list li.paused { opacity: .55; }
+.sk #off-list .off-name { flex: 1; }
+.sk #off-list button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: inherit; }
+.sk #off-list button:hover { border-color: var(--accent); color: var(--accent); }
+.sk #off-list .drag-griff {
+  /* Trefffläche vergrößern, wie beim Spielliste-Griff (`.row .drag-griff`) —
+     per Minus-Rand aus dem Fluss zurückgerechnet. */
+  padding: 9px 8px;
+  margin: -9px -4px -9px -8px;
+}
+/* Während des Ziehens gehoben + hervorgehoben — die Zeile wandert ja schon
+   live im DOM, das hier ist nur die Rückmeldung „das ist die gegriffene". */
+#off-list li.dragging-item {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+  border-color: var(--accent);
+  background: #eff6ff;
+}
+.warnflag { background: #b45309; color: #fff; border-radius: 5px; padding: 0 5px; font-size: 11px; }
 .sk #sk-list li {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 8px 10px; min-height: 44px;
@@ -598,6 +649,13 @@ details[open] > summary::before { transform: rotate(90deg); }
 details > summary:hover { color: var(--ink-soft); }
 details > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .section + .section { margin-top: 16px; }
+/* Hallen-Abschnitte innerhalb „Spielbereit" (Spec
+   `spielliste-manuelle-reihenfolge`) — nur sichtbar, wenn ohne Hallenfilter
+   mehr als eine Halle Spiele beisteuert. */
+.section h3 {
+  margin: 14px 0 6px; font-size: .8rem; font-weight: 700; color: var(--ink-soft);
+}
+.section h3:first-of-type { margin-top: 0; }
 .note { font-size: .82rem; color: var(--ink-soft); margin: 6px 0 0; }
 .note.warn { color: var(--warn); font-weight: 600; }
 
@@ -695,6 +753,14 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
   line-height: 1;
   user-select: none;
   flex: none;
+  border-radius: 6px;
+}
+/* Sichtbarer Fokusring für den Tastaturweg (Pfeiltasten, Code-Review-Fund
+   14.08.2026) — ohne das wäre der Griff per Tab erreichbar, aber niemand
+   sähe, dass er es gerade ist. */
+.drag-griff:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .row .drag-griff {
   /* Trefffläche über Padding auf ~40px vergrößern, per Minus-Rand aus dem
@@ -804,10 +870,35 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────────
    Kleiner 📈-Knopf an Feldkachel/Beendet-Zeile, Overlay mit je Satz
    einem SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
-.graphbtn, .fin-row [data-fin-graph] {
+.graphbtn, .fin-row [data-fin-graph], .offbtn {
   border: 1px solid var(--line); background: var(--card);
   border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: .85rem;
 }
+.offbtn { margin-left: 6px; font-size: .78rem; padding: 1px 6px; }
+/* Pflege-Ansicht im Overlay: Beschriftung über dem Feld, wie im Setup. */
+.off-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; font-size: .85rem; }
+.off-field input, .off-field textarea, .off-field select {
+  background: var(--card); color: inherit; border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 7px; font: inherit;
+}
+.off-h3 { margin: 14px 0 6px; font-size: .9rem; }
+/* Gewählte Sperren als entfernbare Marken — eine Liste zum Ansehen, nicht
+   zum Tippen. */
+.off-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.off-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: .8rem;
+}
+.off-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; }
+.off-chip button:hover { color: var(--accent); }
+.off-hits { list-style: none; margin: 4px 0 0; padding: 0; max-height: 160px; overflow-y: auto; }
+.off-hits button {
+  display: flex; width: 100%; gap: 8px; align-items: center; text-align: left;
+  background: none; border: 0; color: inherit; padding: 4px 6px; cursor: pointer; font: inherit;
+}
+.off-hits button:hover { background: var(--card); }
+#off-seen { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#off-seen li { display: flex; gap: 8px; align-items: center; }
 .graph-overlay {
   position: fixed; inset: 0; z-index: 70;
   display: flex; align-items: center; justify-content: center;
@@ -899,7 +990,16 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
           <button type="submit">Hinzufügen</button>
         </form>
       </details>
-      <h2>Als Nächstes <span class="count" id="queue-count"></span></h2>
+      <details class="sk" id="off-box" hidden>
+        <summary>Schiedsrichter <span class="count" id="off-count"></span>
+          <span class="meta" id="off-next"></span></summary>
+        <ol id="off-list"></ol>
+      </details>
+      <h2>Als Nächstes <span class="count" id="queue-count"></span>
+        <button type="button" id="queue-reset" class="reset-order" hidden
+          title="Verwirft die manuelle Sortierung ALLER Hallen — danach gilt wieder BTPs eigene Reihenfolge">
+          Reihenfolge zurücksetzen</button>
+      </h2>
       <div id="queue"></div>
       <details class="fin" id="fin-box" hidden>
         <summary>Beendet <span class="count" id="fin-count"></span></summary>
@@ -945,6 +1045,19 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <button type="button" id="graph-close" aria-label="Punktverlauf schließen">×</button>
     </div>
     <div class="graph-body" id="graph-body"></div>
+  </div>
+</div>
+
+<!-- Schiedsrichter-Pflege: Sperrlisten, Verein und Einsätze kommen
+     on-demand von /tl/api/officials/… — sie stehen bewusst NICHT im
+     Zustand, den jedes Gerät bekommt (Personendaten). -->
+<div class="graph-overlay" id="off-overlay" hidden>
+  <div class="graph-box">
+    <div class="graph-head">
+      <span id="off-title">Schiedsrichter</span>
+      <button type="button" id="off-close" aria-label="schließen">×</button>
+    </div>
+    <div class="graph-body" id="off-body"></div>
   </div>
 </div>
 
@@ -2107,6 +2220,22 @@ function courtCard(c, cellStyle) {
   const bediener = c.scorekeeper && c.scorekeeper.length
     ? `<div class="meta">Bedienung: ${esc(c.scorekeeper.join(" / "))}</div>` : "";
 
+  // Schiedsrichter/Aufschlagrichter (Spec schiedsrichter-management): Namen
+  // plus Konflikt-KATEGORIE. Der Auswahl-Knopf öffnet die Einteilung; er
+  // erscheint nur bei laufendem Spiel und eingeschaltetem SR-Betrieb.
+  const schiris = state.officials_managed && c.match_id
+    ? `<div class="meta">
+         ${(c.sr || []).length ? `SR: ${esc(c.sr.join(" / "))}` : "SR: –"}
+         ${(c.ar || []).length ? ` · AR: ${esc(c.ar.join(" / "))}` : ""}
+         ${c.official_warn ? `<span class="warnflag" title="Konflikt">${esc(c.official_warn)}</span>` : ""}
+         <button type="button" class="offbtn" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
+                 title="Schiedsrichter einteilen">einteilen</button>
+         ${(c.sr || []).length || (c.ar || []).length
+           ? `<button type="button" class="offbtn" data-off-say="${c.court_id}"
+                 title="Schiedsrichter ansagen">ansagen</button>` : ""}
+       </div>`
+    : "";
+
   // Erneut aufrufen: nur bei einem Spiel, das noch nicht angefangen hat, und
   // nur solange es etwas zu zählen gibt. Nach dem dritten Aufruf entscheidet
   // die Turnierleitung, nicht noch ein Knopf.
@@ -2143,7 +2272,7 @@ function courtCard(c, cellStyle) {
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}</div>
-    ${body}${bediener}
+    ${body}${bediener}${schiris}
     <div class="card-foot">${foot}${graph}${nachruf}</div>
   </article>`;
 }
@@ -2187,6 +2316,31 @@ function wireCourts(box) {
       const c = state.courts.find((x) => String(x.match_id) === btn.dataset.graph);
       if (!c) return;
       openTimeline(c.match_id, `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`, null);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Einteilen-Knopf: wie der Graph-Knopf mit gestopptem Weiterreichen,
+  // sonst wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
+  // Ansage-Knopf: eine nachträgliche Zuweisung sagt nie von selbst an
+  // (Spec Nr. 8) — gesprochen wird in der Halle, nicht auf diesem Gerät.
+  box.querySelectorAll("button[data-off-say]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.offSay);
+      send(
+        `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "announce_officials", courtId },
+        "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  box.querySelectorAll("button[data-off-court]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openOfficialAssign(Number(btn.dataset.offCourt), Number(btn.dataset.offMatch));
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -2502,7 +2656,7 @@ function enableSteg() {
   });
 }
 
-function queueRow(m) {
+function queueRow(m, draggable = false) {
   const parts = [];
   // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
   // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
@@ -2510,13 +2664,18 @@ function queueRow(m) {
   // Bedingung braucht: Eine blockierte Zeile ist so wenig ziehbar wie
   // antippbar.
   const pickable = !m.blocked;
-  if (pickable) {
+  // `draggable` gilt nur für die „Spielbereit"-Zeilen (Spec
+  // `spielliste-manuelle-reihenfolge`) — gerufene, wartende und hallenlose
+  // Zeilen bekommen keinen Griff: Der Präfix wirkt nur innerhalb der noch
+  // nicht gerufenen Spiele (Blocker 1 der Klärung).
+  if (pickable && draggable) {
     // Zieh-Griff: eigenes Element statt der ganzen Zeile als Ziehfläche
-    // (siehe CSS-Erklärung bei `.drag-griff` und `enableDrag` im Skript).
-    // `aria-hidden`, weil er eine rein visuelle Zusatz-Affordanz ist — der
-    // barrierefreie Weg bleibt Antippen-dann-Antippen, unverändert über die
-    // ganze Zeile erreichbar.
-    parts.push(`<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>`);
+    // (siehe CSS-Erklärung bei `.drag-griff` und `enableReorderDrag` im
+    // Skript). Fokussierbar mit Pfeiltasten-Fallback (wie beim
+    // Schiedsrichter-Griff) — kein reines Dekorationselement mehr.
+    parts.push(`<span class="drag-griff" tabindex="0" role="button"
+      title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+      aria-label="Spiel in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>`);
   }
   if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
   // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
@@ -2540,6 +2699,18 @@ function queueRow(m) {
       ? `${esc(who)} spielt gerade`
       : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
   }
+  // Ausgenommen von der automatischen Feldvergabe (Spec
+  // `feldvergabe-ausnahme`) — Badge, damit es niemand vergisst; manuelles
+  // Zuweisen bleibt unberührt, deshalb kein "blocked".
+  if (m.excluded_from_auto_assign) {
+    parts.push(`<span class="excl-badge" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
+  }
+  // Manuell einsortiert (Spec `spielliste-manuelle-reihenfolge`) — sichtbar
+  // markiert, damit die Turnierleitung erkennt, welche Spiele von der
+  // BTP-Reihenfolge abweichen (Review-Entscheidung 14.08.2026).
+  if (m.manual) {
+    parts.push(`<span class="manual-badge" title="Manuell in die Reihenfolge dieser Halle einsortiert">☰ Manuell einsortiert</span>`);
+  }
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
   // frei ist. Deshalb ein eigener Knopf statt einer Geste.
@@ -2552,6 +2723,18 @@ function queueRow(m) {
   parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
+
+  // Von der automatischen Feldvergabe ausnehmen (Spec
+  // `feldvergabe-ausnahme`) — betrifft nie das manuelle Zuweisen, deshalb
+  // ein eigener Umschalter neben dem Vorbereitungs-Knopf statt einer Geste
+  // auf der Zeile selbst.
+  const exclTitel = m.excluded_from_auto_assign
+    ? "Wieder in die automatische Feldvergabe aufnehmen"
+    : "Von der automatischen Feldvergabe ausnehmen";
+  parts.push(`<button type="button" class="auto-excl${m.excluded_from_auto_assign ? " aktiv" : ""}"
+    data-auto-excl="${m.match_id}"
+    aria-pressed="${m.excluded_from_auto_assign ? "true" : "false"}"
+    title="${exclTitel}" aria-label="${exclTitel}">⏸</button>`);
 
   // Spielort setzen, ohne ein Feld zu belegen. BTP liefert `LocationID` nur,
   // wenn das Turnier die Spalte selbst pflegt, und nimmt Rückschreibungen
@@ -2594,7 +2777,7 @@ function queueRow(m) {
   }
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
-               data-match="${m.match_id}"
+               data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
 }
@@ -2611,6 +2794,21 @@ function wireQueue(box) {
       togglePrepCall(match);
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll("button[data-auto-excl]").forEach((btn) => {
+    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
+    if (!match) return;
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = match.match_id;
+      const excluded = !match.excluded_from_auto_assign;
+      send(
+        `auto-excl-${matchId}-${excluded}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "exclude_from_auto_assign", matchId, excluded },
+        excluded ? "Von der Auto-Vergabe ausgenommen." : "Wieder in der Auto-Vergabe.",
+      );
+    });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   box.querySelectorAll("select[data-hall-for]").forEach((sel) => {
@@ -2994,9 +3192,158 @@ function startTouchDrag(el, match, fromCourtId, down) {
   window.addEventListener("pointercancel", cancel);
 }
 
+// ── Listen per Drag&Drop umsortieren (wiederverwendbar) ──────────────────
+// Eigener, von `enableDrag`/`startTouchDrag` UNABHÄNGIGER Automat (eigene
+// Wächter-Variable) — die Geste ist grundverschieden (eine Zeile wandert
+// INNERHALB ihrer eigenen Liste, statt auf ein fremdes Ziel fallengelassen
+// zu werden), aber dieselben hart erarbeiteten Touch-Lektionen gelten
+// unverändert: Zieh-Griff mit statischem `touch-action:none` (`.drag-griff`,
+// s. o.), zusätzlich ein nativer `touchmove`-Blocker mit `{passive:false}`
+// für den Rest der Geste (der Finger verlässt den Griff ja gerade, wenn
+// Zeilen einsortiert werden), `setPointerCapture`, Pointer-ID-Filter gegen
+// einen zweiten Finger.
+//
+// Bewusst OHNE jeden Bezug zur Schiedsrichter-Fachlichkeit — eine künftige
+// Liste (geplant: Spielliste) braucht nur `data-id` an den direkten
+// Kind-Elementen und je einen `.drag-griff` darin, dann funktioniert sie
+// genauso über `enableReorderDrag(container, onReorder)`.
+//
+// Zieh-Griff-Pflicht für BEIDE Zeigertypen (anders als `enableDrag` oben,
+// das für Maus die ganze Zeile/Kachel greifbar lässt): Eine Listenzeile
+// trägt hier mehrere eigene Knöpfe (Pause, Sperren, Einsätze …) — ein
+// Maus-Zug ab irgendwo auf der Zeile kollidierte damit ständig mit einem
+// Klick auf einen dieser Knöpfe.
+let reorderDragPending = false;
+
+/**
+ * `list`: Container, dessen direkte Kind-Elemente mit `[data-id]` die
+ * sortierbaren Zeilen sind (jede braucht innen einen `.drag-griff`).
+ * `onReorder(id, beforeId)`: nur aufgerufen, wenn sich die Reihenfolge beim
+ * Loslassen tatsächlich geändert hat; `id`/`beforeId` sind die `data-id`-
+ * Werte als String, `beforeId === null` heißt „ans Ende".
+ */
+function enableReorderDrag(list, onReorder) {
+  Array.from(list.children).forEach((li) => {
+    if (!li.dataset.id) return;
+    const griff = li.querySelector(".drag-griff");
+    griff?.addEventListener("pointerdown", (down) => {
+      if (down.pointerType !== "touch" && down.button !== 0) return;
+      if (reorderDragPending) return;
+      startReorderDrag(list, li, down, onReorder);
+    });
+    // Tastatur-/Screenreader-Weg (Code-Review-Fund 14.08.2026): ohne die
+    // frühere Pfeil-Bedienung bräuchte es sonst gar keinen Nicht-Zieh-Weg
+    // mehr, die Reihenfolge zu ändern — dieselbe Vor-/Zurück-Formel wie die
+    // entfernten Pfeile, jetzt am fokussierten Griff.
+    griff?.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+      ev.preventDefault();
+      const items = Array.from(list.children).filter((el) => el.dataset.id);
+      const i = items.indexOf(li);
+      if (i === -1) return;
+      if (ev.key === "ArrowUp") {
+        if (i === 0) return;
+        onReorder(li.dataset.id, items[i - 1].dataset.id);
+      } else {
+        if (i >= items.length - 1) return;
+        const beforeId = i + 2 < items.length ? items[i + 2].dataset.id : null;
+        onReorder(li.dataset.id, beforeId);
+      }
+    });
+  });
+}
+
+function startReorderDrag(list, li, down, onReorder) {
+  reorderDragPending = true;
+  const pointerId = down.pointerId;
+  const isTouch = down.pointerType === "touch";
+  const items = () => Array.from(list.children).filter((el) => el.dataset.id);
+  const before = items();
+  const originalNext = li.nextElementSibling;
+  li.classList.add("dragging-item");
+  document.body.classList.add("dragging");
+  document.getSelection()?.removeAllRanges();
+  try { li.setPointerCapture(pointerId); } catch { /* Finger schon weg */ }
+
+  // Wie bei `startTouchDrag`: Nur ein nativer `touchmove`-Blocker verhindert
+  // zuverlässig das Scrollen für die GANZE Geste, sobald der Finger den
+  // Griff (dessen `touch-action:none` nur dort gilt) verlassen hat.
+  function blockScroll(ev) { ev.preventDefault(); }
+  if (isTouch) {
+    window.addEventListener("touchmove", blockScroll, { passive: false });
+  }
+
+  function move(ev) {
+    if (ev.pointerId !== pointerId) return;
+    const siblings = items().filter((el) => el !== li);
+    let target = null;
+    for (const el of siblings) {
+      const r = el.getBoundingClientRect();
+      if (ev.clientY < r.top + r.height / 2) { target = el; break; }
+    }
+    if (target) list.insertBefore(li, target);
+    else list.appendChild(li);
+  }
+
+  function teardown(ev, cancelled) {
+    reorderDragPending = false;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    if (isTouch) window.removeEventListener("touchmove", blockScroll, { passive: false });
+    document.body.classList.remove("dragging");
+    li.classList.remove("dragging-item");
+    try { li.releasePointerCapture(pointerId); } catch { /* Finger schon weg */ }
+    // Nach einem Zug folgt noch ein Klick-Ereignis — ohne diese Sperre
+    // würde es auf der Zeile ungewollt zuschlagen (Muster `enableDrag`).
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 0);
+    if (cancelled) {
+      list.insertBefore(li, originalNext);
+      return;
+    }
+    const after = items();
+    const changed = after.some((el, i) => el !== before[i]);
+    if (!changed) return;
+    const i = after.indexOf(li);
+    const beforeId = i + 1 < after.length ? after[i + 1].dataset.id : null;
+    onReorder(li.dataset.id, beforeId);
+  }
+  const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
+  const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+}
+
+/**
+ * Manuelle Reihenfolge (Spec `spielliste-manuelle-reihenfolge`): ein Zug
+ * darf Match-IDs nur innerhalb DERSELBEN Halle relativ zueinander verschieben
+ * — sonst löste `assign::hall_for_match` serverseitig ein stilles No-Op aus
+ * (siehe ADR 0023, Risiko „Zug über Hallengrenzen"). Bei aktivem Hallenfilter
+ * ist `ready` schon einhallig; ohne Filter im Mehr-Hallen-Turnier wird VOR
+ * dem Rendern nach `m.hall` gruppiert, jede Gruppe bekommt einen eigenen
+ * Zieh-Container. So kann die Geste im Browser gar nicht erst über eine
+ * Hallengrenze hinweg starten.
+ */
+function groupByHall(list) {
+  if (!state.multi_hall || hallFilter) return [[hallFilter || "", list]];
+  const byHall = new Map();
+  for (const m of list) {
+    const key = m.hall || "";
+    if (!byHall.has(key)) byHall.set(key, []);
+    byHall.get(key).push(m);
+  }
+  return [...byHall.entries()].sort(([a], [b]) => a.localeCompare(b, "de"));
+}
+
 function renderQueue() {
   const box = $("queue");
   if (!state) return;
+  // Während eines laufenden Zugs NICHT neu bauen (Muster `renderOfficials`,
+  // Code-Review-Fund 14.08.2026 dort übernommen) — sonst risse `innerHTML`
+  // die gerade gezogene Zeile aus dem DOM.
+  if (reorderDragPending) return;
   // Bei aktivem Hallenfilter bleiben Spiele ohne Hallenzuordnung sichtbar —
   // ein weggefiltertes Spiel wird nicht vergeben und blockiert am Ende den
   // Zeitplan.
@@ -3009,20 +3356,29 @@ function renderQueue() {
   const waiting = mine.filter((m) => !m.prep_call && m.blocked);
   $("queue-count").textContent = `(${mine.length + noHall.length})`;
 
-  const section = (title, list, open) =>
+  const section = (title, list) =>
     !list.length ? "" :
     `<div class="section"><h2>${esc(title)} <span class="count">(${list.length})</span></h2>
-     <div class="queue">${list.map(queueRow).join("")}</div></div>`;
+     <div class="queue">${list.map((m) => queueRow(m)).join("")}</div></div>`;
 
   let html = section("In Vorbereitung gerufen", called);
-  html += section("Spielbereit", ready);
+  if (ready.length) {
+    const gruppen = groupByHall(ready);
+    const zeigeUeberschriften = gruppen.length > 1;
+    html += `<div class="section"><h2>Spielbereit <span class="count">(${ready.length})</span></h2>` +
+      gruppen.map(([hall, list]) => `
+        ${zeigeUeberschriften ? `<h3>${esc(hall || "Ohne Hallenzuordnung")}</h3>` : ""}
+        <div class="queue" data-hall="${esc(hall)}">${list.map((m) => queueRow(m, true)).join("")}</div>
+      `).join("") +
+      `</div>`;
+  }
   if (waiting.length) {
     html += `<div class="section"><details><summary>Noch nicht bereit (${waiting.length})</summary>
-      <div class="queue">${waiting.map(queueRow).join("")}</div></details></div>`;
+      <div class="queue">${waiting.map((m) => queueRow(m)).join("")}</div></details></div>`;
   }
   if (noHall.length) {
     html += `<div class="section"><details open><summary>Ohne Hallenzuordnung (${noHall.length})</summary>
-      <div class="queue">${noHall.map(queueRow).join("")}</div></details></div>`;
+      <div class="queue">${noHall.map((m) => queueRow(m)).join("")}</div></details></div>`;
   }
   if (!mine.length && !noHall.length) {
     html = `<p class="note">Kein Spiel wartet${hallFilter ? " in dieser Halle" : ""}.</p>`;
@@ -3033,6 +3389,25 @@ function renderQueue() {
   }
   box.innerHTML = html;
   wireQueue(box);
+  box.querySelectorAll(".queue[data-hall]").forEach((container) => {
+    enableReorderDrag(container, (id, beforeId) => send(
+      `queue-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "queue_reorder", matchId: Number(id), beforeMatchId: beforeId === null ? null : Number(beforeId) },
+      "Reihenfolge geändert.",
+    ));
+  });
+  // Reset-Knopf nur zeigen, solange irgendein Spiel manuell einsortiert ist
+  // — sonst gäbe es nichts zurückzusetzen.
+  $("queue-reset").hidden = !state.queue.some((m) => m.manual);
+}
+
+/** Verwirft die manuelle Reihenfolge ALLER Hallen (globaler Reset-Knopf). */
+function resetQueueOrder() {
+  send(
+    `queue-order-reset-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "queue_order_reset" },
+    "Manuelle Reihenfolge zurückgesetzt.",
+  );
 }
 
 /**
@@ -3252,6 +3627,251 @@ function timelineSetFinal(set) {
 // gewerteten Sätze (nur aus der Beendet-Liste, für den Abweichungs-
 // Hinweis) und der Poll-Timer fürs Mitwachsen laufender Spiele.
 let graphCtx = null;
+// ── Schiedsrichter (Spec schiedsrichter-management) ───────────────────
+// Die Liste steht im Zustand (Name, Pause, Dienst, Einsatz-Zähler).
+// Sperrlisten, Verein und die Einsatz-Liste kommen NUR auf gezielte
+// Anfrage über /tl/api/officials/… — sie kodieren persönliche Beziehungen
+// und haben im Broadcast-Zustand nichts zu suchen.
+function renderOfficials() {
+  const box = $("off-box");
+  box.hidden = !state.officials_managed;
+  if (box.hidden) return;
+  const list = state.officials || [];
+  $("off-count").textContent = list.length ? `(${list.length})` : "";
+  // Auch bei zugeklappter Liste sichtbar: wer als Nächstes zugeteilt würde
+  // (erster weder pausierter noch schon im Dienst befindlicher Eintrag) —
+  // ohne Konflikt-Prüfung, die braucht ein konkretes Spiel als Bezug.
+  const next = list.find((o) => !o.paused && !o.on_duty_court_id);
+  $("off-next").textContent = next ? `nächster: ${next.name}` : "";
+  // Während eines laufenden Zugs die Liste NICHT neu bauen (Code-Review-Fund
+  // 14.08.2026): `innerHTML` ersetzt jede Zeile durch einen neuen Knoten —
+  // die gerade gezogene würde dabei aus dem DOM gerissen, `move()` mischte
+  // sie danach mit frisch gerenderten Geschwistern, und `beforeId` beim
+  // Loslassen bezöge sich auf einen falschen Stand. Der Zug selbst schreibt
+  // beim Loslassen (`onReorder`), das löst denselben Poll-getriebenen
+  // Re-Render aus — dann ist er wieder erlaubt.
+  if (reorderDragPending) return;
+  $("off-list").innerHTML = list.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
+      <span class="drag-griff" tabindex="0" role="button"
+        title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+        aria-label="${esc(o.name)} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>
+      <span class="num">${i + 1}.</span>
+      <span class="off-name">${esc(o.name)}</span>
+      ${o.on_duty_court_id ? `<span class="meta">im Dienst</span>` : ""}
+      <button type="button" data-off-detail="${o.id}" title="Sperren, Verein und Einsätze">${o.appearances}×</button>
+      <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
+        title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
+    </li>`).join("");
+  $("off-list").querySelectorAll("[data-off-pause]").forEach((b) =>
+    b.addEventListener("click", () => send(
+      `off-pause-${b.dataset.offPause}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_pause", officialId: Number(b.dataset.offPause), paused: !b.dataset.paused },
+      b.dataset.paused ? "Wieder eingeteilt." : "Pausiert.",
+    )));
+  $("off-list").querySelectorAll("[data-off-detail]").forEach((b) =>
+    b.addEventListener("click", () => openOfficialDetail(Number(b.dataset.offDetail))));
+  enableReorderDrag($("off-list"), (id, beforeId) => send(
+    `off-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "official_reorder", officialId: Number(id), beforeOfficialId: beforeId === null ? null : Number(beforeId) },
+    "Reihenfolge geändert.",
+  ));
+}
+
+/** Offener Pflege-Dialog: `{ id, name }` oder null. */
+let offCtx = null;
+
+async function openOfficialDetail(id) {
+  const o = (state.officials || []).find((x) => x.id === id);
+  offCtx = { id, name: o ? o.name : "" };
+  $("off-title").textContent = offCtx.name || "Schiedsrichter";
+  $("off-body").innerHTML = `<p class="graph-note">Wird geladen …</p>`;
+  $("off-overlay").hidden = false;
+  try {
+    const res = await fetch(`${API}/officials/${id}`, {
+      headers: { Authorization: "Bearer " + token },
+      cache: "no-store",
+    });
+    if (!offCtx || offCtx.id !== id) return; // Overlay inzwischen gewechselt
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    renderOfficialDetail(await res.json());
+  } catch {
+    if (offCtx && offCtx.id === id) {
+      $("off-body").innerHTML = `<p class="graph-note">Die Angaben sind gerade nicht
+        abrufbar — die Version des Turnier-PCs kennt das Schiedsrichter-Modul
+        möglicherweise noch nicht, oder die Verbindung fehlt.</p>`;
+    }
+  }
+}
+
+function renderOfficialDetail(d) {
+  const einsaetze = (d.appearances || []).map((a) => `<li>
+      <span class="num">${a.role === "ar" ? "AR" : "SR"}</span>
+      <span class="off-name">${esc(a.match_name || "")}</span>
+      <span class="meta">${esc(a.court || "")}</span>
+      <span class="meta">${a.finished_at ? new Date(a.finished_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+    </li>`).join("");
+  // Auswahllisten des Turniers (kommen mit derselben Antwort). Gepflegt
+  // wird per Auswahl, nicht per Tipperei: Eine BTP-Spieler-ID kennt niemand
+  // auswendig, und ein vertippter Verein warnt einfach nie.
+  offPick = {
+    players: d.pick_players || [],
+    clubs: d.pick_clubs || [],
+    // Gewählte Spieler mit Namen; wer nicht mehr in der Meldeliste steht,
+    // behält seine Sperre (dann ohne Namen) statt still herauszufallen.
+    gewaehltePlayers: (d.blocked_players || []).map((id) =>
+      (d.pick_players || []).find((p) => p.id === id) || { id, name: `Spieler ${id}`, club: "" }),
+    gewaehlteClubs: (d.blocked_clubs || []).slice(),
+  };
+  $("off-body").innerHTML = `
+    <label class="off-field">Verein
+      <input type="text" id="off-club" maxlength="80" list="off-club-list" value="${esc(d.club || "")}" />
+      <datalist id="off-club-list">
+        ${offPick.clubs.map((c) => `<option value="${esc(c)}"></option>`).join("")}
+      </datalist>
+    </label>
+    <div class="off-field">Gesperrte Vereine
+      <div id="off-club-chips" class="off-chips"></div>
+      <input type="text" id="off-club-add" list="off-club-list"
+             placeholder="Verein wählen oder eingeben, dann Enter" />
+    </div>
+    <div class="off-field">Gesperrte Spieler
+      <div id="off-player-chips" class="off-chips"></div>
+      <input type="text" id="off-player-search" placeholder="Spieler suchen …" />
+      <ul id="off-player-hits" class="off-hits"></ul>
+    </div>
+    <button type="button" id="off-save">Speichern</button>
+    <p class="graph-note">Diese Angaben bleiben auf dem Turnier-PC und werden
+      beim Turnierwechsel verworfen.</p>
+    <h3 class="off-h3">Einsätze</h3>
+    <ol id="off-seen">${einsaetze || '<li class="meta">noch keiner</li>'}</ol>`;
+
+  renderOffChips();
+  $("off-club-add").addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    const wert = ev.target.value.trim();
+    if (wert && !offPick.gewaehlteClubs.includes(wert)) {
+      offPick.gewaehlteClubs.push(wert);
+      renderOffChips();
+    }
+    ev.target.value = "";
+  });
+  $("off-player-search").addEventListener("input", (ev) => {
+    const q = ev.target.value.trim().toLowerCase();
+    const treffer = q.length < 2 ? [] : offPick.players
+      .filter((p) => !offPick.gewaehltePlayers.some((x) => x.id === p.id))
+      .filter((p) => `${p.name} ${p.club}`.toLowerCase().includes(q))
+      .slice(0, 25);
+    $("off-player-hits").innerHTML = treffer.map((p) =>
+      `<li><button type="button" data-pick="${p.id}">${esc(p.name)}
+         <span class="meta">${esc(p.club || "")}</span></button></li>`).join("");
+    $("off-player-hits").querySelectorAll("[data-pick]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const p = offPick.players.find((x) => x.id === Number(b.dataset.pick));
+        if (p) offPick.gewaehltePlayers.push(p);
+        $("off-player-search").value = "";
+        $("off-player-hits").innerHTML = "";
+        renderOffChips();
+      }));
+  });
+
+  $("off-save").addEventListener("click", () => {
+    const id = offCtx && offCtx.id;
+    if (!id) return;
+    const clubs = offPick.gewaehlteClubs.slice();
+    const players = offPick.gewaehltePlayers.map((p) => p.id);
+    // Verein und Sperrlisten sind zwei Aktionen — der Aktionssatz ist
+    // geschlossen (ADR 0011), und beide Angaben werden getrennt gepflegt.
+    send(`off-club-${id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_set_club", officialId: id, club: $("off-club").value }, null);
+    send(`off-block-${id}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "official_blocklist_set", officialId: id, clubs, players },
+      "Gespeichert.");
+    $("off-overlay").hidden = true;
+    offCtx = null;
+  });
+}
+
+/** Auswahllisten und Auswahl des offenen Pflege-Dialogs. */
+let offPick = { players: [], clubs: [], gewaehltePlayers: [], gewaehlteClubs: [] };
+
+/** Die gewählten Sperren als entfernbare Marken zeichnen. */
+function renderOffChips() {
+  const chip = (text, zusatz, attr) =>
+    `<span class="off-chip">${esc(text)}${
+      zusatz ? ` <span class="meta">${esc(zusatz)}</span>` : ""
+    }<button type="button" ${attr} aria-label="Sperre entfernen">×</button></span>`;
+
+  $("off-club-chips").innerHTML = offPick.gewaehlteClubs.length
+    ? offPick.gewaehlteClubs.map((c) => chip(c, "", `data-del-club="${esc(c)}"`)).join("")
+    : '<span class="meta">keine</span>';
+  $("off-player-chips").innerHTML = offPick.gewaehltePlayers.length
+    ? offPick.gewaehltePlayers.map((p) => chip(p.name, p.club, `data-del-player="${p.id}"`)).join("")
+    : '<span class="meta">keine</span>';
+
+  $("off-club-chips").querySelectorAll("[data-del-club]").forEach((b) =>
+    b.addEventListener("click", () => {
+      offPick.gewaehlteClubs = offPick.gewaehlteClubs.filter((c) => c !== b.dataset.delClub);
+      renderOffChips();
+    }));
+  $("off-player-chips").querySelectorAll("[data-del-player]").forEach((b) =>
+    b.addEventListener("click", () => {
+      offPick.gewaehltePlayers = offPick.gewaehltePlayers
+        .filter((p) => p.id !== Number(b.dataset.delPlayer));
+      renderOffChips();
+    }));
+}
+
+/**
+ * Einteilung eines Felds: je Dienst eine Auswahl aus der Rotationsliste.
+ *
+ * Eine Zuweisung mit Konflikt wird **ausgeführt** — die Turnierleitung
+ * entscheidet, die App warnt nur (Spec Nr. 2). Die Warnung selbst kommt mit
+ * dem nächsten Zustand an der Kachel an, weil der Turnier-PC sie berechnet.
+ */
+function openOfficialAssign(courtId, matchId) {
+  const c = (state.courts || []).find((x) => x.court_id === courtId);
+  const liste = state.officials || [];
+  offCtx = null; // kein Detail-Abruf offen
+  $("off-title").textContent = c ? `Feld ${c.court}` : "Einteilung";
+  // Vorauswahl über die ID, nicht über den Namen: Zwei Schiedsrichter mit
+  // gleichem Anzeigenamen sind in einer großen Liste realistisch, und die
+  // Auswahl muss die Person treffen.
+  const auswahl = (rolle, aktuell) => `
+    <label class="off-field">${rolle === "sr" ? "Schiedsrichter" : "Aufschlagrichter"}
+      <select data-off-role="${rolle}">
+        <option value="">—</option>
+        ${liste.map((o) => `<option value="${o.id}" ${
+          o.id === aktuell ? "selected" : ""
+        }>${esc(o.name)}${o.paused ? " (Pause)" : ""}</option>`).join("")}
+      </select>
+    </label>`;
+  $("off-body").innerHTML = auswahl("sr", c && c.sr_id) + auswahl("ar", c && c.ar_id) +
+    `<p class="graph-note">Die Auswahl geht an BTP und erscheint dort im
+      nächsten Abgleich; bis dahin zeigt die Kachel noch den Stand aus BTP.</p>`;
+  $("off-overlay").hidden = false;
+  $("off-body").querySelectorAll("select[data-off-role]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const rolle = sel.dataset.offRole;
+      const wert = sel.value;
+      const stempel = Math.floor(Date.now() / OP_WINDOW_MS);
+      if (!wert) {
+        send(`off-clear-${matchId}-${rolle}-${stempel}`,
+          { action: "official_clear", courtId, matchId, role: rolle }, "Zuweisung gelöst.");
+      } else {
+        send(`off-assign-${matchId}-${rolle}-${wert}-${stempel}`,
+          { action: "official_assign", courtId, matchId, officialId: Number(wert), role: rolle },
+          "Eingeteilt.");
+      }
+    });
+  });
+}
+
+$("off-close").addEventListener("click", () => {
+  $("off-overlay").hidden = true;
+  offCtx = null;
+});
+
 let graphTimer = null;
 
 async function fetchTimeline() {
@@ -3475,6 +4095,7 @@ function render() {
   renderCourts();
   renderWalkovers();
   renderScorekeepers();
+  renderOfficials();
   renderQueue();
   renderFinished();
 }
@@ -3574,6 +4195,7 @@ function start() {
     if (!resBusy) sendResult();
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
+  $("queue-reset").addEventListener("click", resetQueueOrder);
   // Das Formular steht fest im Markup (siehe `renderScorekeepers`) und
   // wird nie neu gezeichnet — die Verdrahtung gehört deshalb hierher, nicht
   // in eine Render-Funktion, sonst hätte jeder Abruf einen weiteren

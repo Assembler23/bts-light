@@ -101,6 +101,20 @@ pub struct MatchUpdate {
     /// Spielende (Unix-ms). Zusammen mit `player_ids` Grundlage der
     /// `Player.LastTimeOnCourt`-Zeitstempel (lokale Uhrzeit).
     pub end_ts_ms: Option<u64>,
+    /// Schiedsrichter/Aufschlagrichter (`Official1ID`/`Official2ID`), die im
+    /// selben Request reasserted werden; `0` = kein Dienst. `None` = Feld
+    /// weglassen (Turnier ohne Schiedsrichter-Betrieb).
+    ///
+    /// **Pflicht, sobald das Match eine Besetzung trägt** (Live-Befund
+    /// 14.08.2026): Das Ergebnis-`SENDUPDATE` liess BTP beobachtbar die
+    /// Schiedsrichter-Besetzung des Matches löschen, wenn der Match-Knoten
+    /// sie wegliess — dieselbe Klasse Regression wie bei `CourtID` (siehe
+    /// `MatchCourt::court_id`). Reasserted der Request denselben Wert, den
+    /// der zeitlich nähere Rücksync gerade geschrieben hat, bleibt die
+    /// Besetzung am beendeten Match erhalten — Grundlage von Rotation
+    /// (`officials.rs::move_to_end`) und Einsatz-Zähler
+    /// (`officials.rs::appearances`).
+    pub officials: Option<(i64, i64)>,
 }
 
 /// Unix-Millisekunden → BTP-`DateTime` in **lokaler** Zeit (BTP zeigt
@@ -120,6 +134,19 @@ fn local_datetime(unix_ms: u64) -> xml::DateTime {
         minute: dt.minute(),
         second: dt.second(),
         millis: dt.timestamp_subsec_millis(),
+    }
+}
+
+/// `Official1ID`/`Official2ID` an einen Match-Knoten anhängen, wenn gesetzt
+/// — geteilt zwischen `update_request` und `court_assign_request` (Code-
+/// Review-Fund 14.08.2026: vorher an beiden Stellen dupliziert; eine
+/// künftige Änderung an dieser Kodierung darf nur eine Stelle treffen
+/// müssen, sonst öffnet sich genau die Regressionsklasse wieder, die diese
+/// beiden Schreibwege gerade erst geschlossen haben).
+fn push_officials_nodes(children: &mut Vec<Node>, officials: Option<(i64, i64)>) {
+    if let Some((sr, ar)) = officials {
+        children.push(Node::integer("Official1ID", sr));
+        children.push(Node::integer("Official2ID", ar));
     }
 }
 
@@ -165,6 +192,7 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
     }
     match_children.push(Node::integer("DrawID", update.draw_id));
     match_children.push(Node::integer("PlanningID", update.planning_id));
+    push_officials_nodes(&mut match_children, update.officials);
     let match_node = Node::group("Match", match_children);
 
     let mut tournament_children = Vec::new();
@@ -229,13 +257,41 @@ pub struct CourtAssignment {
 /// Eigenschaften). Bewusst OHNE `Winner`/`Sets`/`ScoreStatus` – das ist ein
 /// reines Feld-Update, kein Ergebnis (Vorbild BTS: Result-Felder nur wenn ein
 /// Ergebnis vorliegt).
+///
+/// **`court_id` immer die zuletzt bekannte BTP-Wahrheit, nie geraten**
+/// (Live-Befund 14.08.2026): Der eigenständige Schiedsrichter-Rücksync
+/// (`sync.rs::officials_entries`) nutzt diese Form jetzt ebenfalls — mit
+/// `court_id` aus dem aktuellen Snapshot statt einem separaten, das Feld
+/// weglassenden Request. Zwei `SENDUPDATE`s zum selben Match kurz
+/// hintereinander liessen BTP sonst beobachtbar die CourtID verlieren,
+/// wenn der zweite Request sie nicht mit ansagte — reasserted er sie
+/// dagegen (denselben Wert, den der Snapshot gerade zeigt), ist die
+/// Schreibreihenfolge der beiden Requests folgenlos.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatchCourt {
     pub match_id: i64,
     pub draw_id: i64,
     pub planning_id: i64,
-    /// Neue Court-ID am Match; `0` = Zuordnung löschen.
+    /// Neue bzw. aktuell bekannte Court-ID am Match. Zwei legitime
+    /// Anlässe für `0`: **echtes Freigeben** — dann steht im selben
+    /// Request auch der passende `CourtAssignment` im `Courts`-Block
+    /// (z. B. `commands.rs::free_court`), der die Löschung tatsächlich
+    /// bewirkt; **Reassertion beim eigenständigen Schiedsrichter-Write**
+    /// (`sync.rs::officials_entries`, leerer `Courts`-Block) — dort ist
+    /// `0` nur der Snapshot-Wert eines Matches, das nie auf einem Feld
+    /// stand, keine Löschung. Nur in Kombination mit einem **belegten**
+    /// Match UND einem leeren `Courts`-Block wäre `0` falsch: Das würde
+    /// die reale Feld-Information am Match löschen (Regression v0.9.103,
+    /// siehe oben bei `Courts`-Block) — genau das verhindert
+    /// `officials_entries`, indem es `m.court_id` aus dem Snapshot
+    /// übernimmt statt 0 zu raten.
     pub court_id: i64,
+    /// Schiedsrichter und Aufschlagrichter (`Official1ID`, `Official2ID`),
+    /// die mitgeschrieben werden sollen; `0` löscht den jeweiligen Dienst
+    /// (ADR 0021). `None` = gar nicht anfassen — Turniere ohne
+    /// Schiedsrichter schreiben dann kein zusätzliches Feld, und der
+    /// Request bleibt exakt wie bisher.
+    pub officials: Option<(i64, i64)>,
 }
 
 /// Ein Match, dessen `Highlight`-Flag in BTP gesetzt/gelöscht werden soll
@@ -291,6 +347,11 @@ pub fn highlight_request(
 /// Beides in einem Request (BTP akzeptiert `Courts` + `Matches` parallel). So
 /// wird beim Freigeben nicht nur die Court-Verknüpfung gelöst, sondern auch
 /// Halle+Feld am Match entfernt (`court_id = 0`). Nach Vorbild Original-BTS.
+///
+/// Mit leerem `courts` und nur `match_courts` (keine Feldzuweisung, nur ein
+/// Match-Update) ist das zugleich die Form des eigenständigen
+/// Schiedsrichter-Rücksyncs (`sync.rs::reconcile_officials`) — siehe
+/// [`MatchCourt::court_id`].
 pub fn court_assign_request(
     courts: &[CourtAssignment],
     match_courts: &[MatchCourt],
@@ -318,19 +379,20 @@ pub fn court_assign_request(
         let match_nodes: Vec<Node> = match_courts
             .iter()
             .map(|mc| {
-                Node::group(
-                    "Match",
-                    vec![
-                        Node::integer("ID", mc.match_id),
-                        // KEIN `Status` schreiben (Check-in-Bitfeld in BTP) —
-                        // sonst würden die Spieler bei jeder Feldzuweisung als
-                        // nicht eingecheckt markiert (rot→gelb). BTP behält den
-                        // Stand, wenn wir das Feld weglassen.
-                        Node::integer("CourtID", mc.court_id),
-                        Node::integer("DrawID", mc.draw_id),
-                        Node::integer("PlanningID", mc.planning_id),
-                    ],
-                )
+                let mut children = vec![
+                    Node::integer("ID", mc.match_id),
+                    // KEIN `Status` schreiben (Check-in-Bitfeld in BTP) —
+                    // sonst würden die Spieler bei jeder Feldzuweisung als
+                    // nicht eingecheckt markiert (rot→gelb). BTP behält den
+                    // Stand, wenn wir das Feld weglassen.
+                    Node::integer("CourtID", mc.court_id),
+                    Node::integer("DrawID", mc.draw_id),
+                    Node::integer("PlanningID", mc.planning_id),
+                ];
+                // Officials nur, wenn dieses Turnier sie führt (ADR 0021) —
+                // sonst bleibt der Request unverändert zum Bestand.
+                push_officials_nodes(&mut children, mc.officials);
+                Node::group("Match", children)
             })
             .collect();
         tournament_children.push(Node::group("Matches", match_nodes));
@@ -516,6 +578,7 @@ mod tests {
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            officials: None,
         }
     }
 
@@ -557,6 +620,27 @@ mod tests {
         // `Status` MUSS im Ergebnis stehen, sonst schließt BTP das Match
         // nicht ab (Regression v0.9.103, Live-Befund Turnier 17.07.2026).
         assert_eq!(child_int(&m, "Status"), Some(0));
+    }
+
+    #[test]
+    fn update_request_reasserts_officials_when_set() {
+        // Live-Befund 14.08.2026: Ohne dieses Feld verlor BTP die
+        // Schiedsrichter-Besetzung eines Matches, sobald das Ergebnis
+        // eintraf — dieselbe Klasse Regression wie bei CourtID.
+        let mut u = sample_update();
+        u.officials = Some((5, 0));
+        let m = match_node(&update_request(&u, "S", None));
+        assert_eq!(child_int(&m, "Official1ID"), Some(5));
+        assert_eq!(child_int(&m, "Official2ID"), Some(0), "kein AR ⇒ 0");
+    }
+
+    #[test]
+    fn update_request_without_officials_has_no_official_nodes() {
+        // Turnier ohne Schiedsrichter-Betrieb: Feld bleibt weg, nicht 0 —
+        // sonst würde ein bestehender Dienst ungewollt gelöscht.
+        let m = match_node(&update_request(&sample_update(), "S", None));
+        assert!(xml::find(&m, "Official1ID").is_none());
+        assert!(xml::find(&m, "Official2ID").is_none());
     }
 
     #[test]
@@ -777,6 +861,7 @@ mod tests {
                 draw_id: 3,
                 planning_id: 1002,
                 court_id: 0,
+                officials: None,
             }],
             "S",
             None,
@@ -794,6 +879,50 @@ mod tests {
             xml::find(&m, "Status").is_none(),
             "kein Status (Check-in-Bitfeld)"
         );
+    }
+
+    #[test]
+    fn court_assign_request_carries_officials_when_set() {
+        // Beim Ruf aufs Feld wandern die Officials additiv mit — ein
+        // Request statt zwei (ADR 0021), weiterhin ohne `Status`.
+        let req = court_assign_request(
+            &[CourtAssignment {
+                court_id: 7,
+                match_id: Some(42),
+            }],
+            &[MatchCourt {
+                match_id: 42,
+                draw_id: 3,
+                planning_id: 1002,
+                court_id: 7,
+                officials: Some((5, 0)),
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "CourtID"), Some(7));
+        assert_eq!(child_int(&m, "Official1ID"), Some(5));
+        assert_eq!(child_int(&m, "Official2ID"), Some(0));
+        assert!(xml::find(&m, "Status").is_none());
+
+        // Ohne Officials-Angabe bleibt der Request exakt wie bisher —
+        // Turniere ohne Schiedsrichter schreiben kein zusaetzliches Feld.
+        let ohne = court_assign_request(
+            &[],
+            &[MatchCourt {
+                match_id: 42,
+                draw_id: 3,
+                planning_id: 1002,
+                court_id: 7,
+                officials: None,
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&ohne);
+        assert!(xml::find(&m, "Official1ID").is_none());
+        assert!(xml::find(&m, "Official2ID").is_none());
     }
 
     #[test]

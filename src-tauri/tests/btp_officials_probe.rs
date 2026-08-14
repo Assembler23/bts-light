@@ -126,6 +126,46 @@ async fn what_does_this_tournament_send_about_officials() {
                 })
                 .collect();
             println!("Vereinsverdächtige Official-Felder: {treffer:?}");
+
+            // **Frage 4 (Nachtrag 13.08.2026):** BTP kann in der
+            // Schiedsrichterliste die **Tage** führen, an denen jemand da
+            // ist (Freitag ja, Samstag nein). Kommt das über den Draht?
+            //
+            // Wichtig für die Auswertung: BTP lässt leere Felder generell
+            // weg (so verschwand auch der Verein). Vor dem Lauf deshalb in
+            // BTP bei **einem** Schiedsrichter die Tage pflegen und bei
+            // einem anderen nicht — nur der Vergleich beider Zeilen oben
+            // zeigt, ob das Feld existiert und wie es heißt.
+            let tage = [
+                "day", "tag", "avail", "verfug", "verfüg", "date", "datum", "from", "to", "von",
+                "bis", "start", "end", "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+            ];
+            let tages_treffer: Vec<&String> = felder
+                .keys()
+                .filter(|n| {
+                    let l = n.to_lowercase();
+                    tage.iter().any(|v| l.contains(v))
+                })
+                .collect();
+            println!("Tages-/Verfügbarkeits-verdächtige Official-Felder: {tages_treffer:?}");
+        }
+    }
+
+    // 2b. Ein eigener Container für die Verfügbarkeit? BTP könnte die Tage
+    //     statt am Official auch getrennt führen (Muster `Entries`, die
+    //     ebenfalls neben den `Players` stehen). Die Container-Liste oben
+    //     zeigt alle Namen; hier die verdächtigen im Detail.
+    for name in ["OfficialDays", "Availability", "Days", "Duty", "Schedule"] {
+        if let Some(g) = suche(&nodes, name) {
+            println!("\n=== {name}: {} Einträge ===", g.children().len());
+            for e in g.children().iter().take(10) {
+                let kv: Vec<String> = e
+                    .children()
+                    .iter()
+                    .map(|c| format!("{}={}", c.id(), wert_maskiert(c.id(), c.value())))
+                    .collect();
+                println!("  {}", kv.join("  "));
+            }
         }
     }
 

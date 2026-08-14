@@ -4,7 +4,97 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.202
+
+- **Schiedsrichter-Rückschreib-Race nach frischer Feldzuweisung behoben**
+  (Live-Befund 14.08.2026, Zwei-Hallen-Turnier). Ein eigenständiges
+  Schiedsrichter-`SENDUPDATE` ohne `CourtID`-Feld ließ BTP, wenn es kurz
+  nach einer Feldzuweisung auf dasselbe Match traf, die eben erst
+  angekommene Feldzuweisung wieder verlieren — zwei `SENDUPDATE`s zum
+  selben Match in enger Folge brachten BTPs eigene Persistenz
+  durcheinander. Ein erster Fix (feste 10-Sekunden-Karenzzeit) reichte
+  nicht — der reale Abstand zwischen Feldzuweisung und Schiedsrichter-Write
+  lag am Turnier teils bei 11–18 Sekunden. Der eigentliche Fix: Der
+  Schiedsrichter-Abgleich schreibt jetzt bei **jedem** Write die aktuell
+  bekannte `CourtID` mit — dann ist die Reihenfolge zweier Requests zum
+  selben Match folgenlos, unabhängig vom zeitlichen Abstand. Dabei
+  zusätzlich behoben: Werden mehrere Felder im selben Zyklus fertig,
+  rücken ihre Schiedsrichter jetzt deterministisch nach Feldnummer
+  sortiert ans Ende der Rotation statt in zufälliger Reihenfolge.
+- **Schiedsrichter-Besetzung ging bei jedem Spielabschluss verloren,
+  behoben** (Live-Befund 14.08.2026, Fortsetzung). Das Ergebnis-`SENDUPDATE`
+  trug `Official1ID`/`Official2ID` gar nicht — BTP hat die Besetzung eines
+  Matches dadurch bei jedem Ergebnis-Eintrag gelöscht, egal wie alt die
+  Zuweisung war. Das erklärte drei Symptome auf einmal: Rotation rückte
+  niemanden ans Ende, der Einsatz-Zähler zählte nicht hoch, beendete Spiele
+  zeigten keine Schiedsrichter. Jeder Ergebnis-Schreibweg (Tablet, Desktop,
+  TL-Web, Disqualifikation, Walkover, Nachschub-Queue) reassertiert jetzt
+  die aktuell bekannte Besetzung im selben Request.
+- **Spiele von der automatischen Feldvergabe ausnehmen** (Spec
+  [feldvergabe-ausnahme](features/feldvergabe-ausnahme.md)). Die
+  Turnierleitung kann ein einzelnes Spiel per Knopfdruck — in TL-Web und
+  am Turnier-PC — temporär von der automatischen Feldvergabe ausnehmen,
+  bis es manuell reaktiviert wird oder das Match endet. Manuelles
+  Zuweisen bleibt für ein ausgenommenes Spiel jederzeit möglich; ein
+  Badge markiert die Zeile in beiden Oberflächen. Der Zustand ist
+  turniergebunden persistiert (eigene Datei, Muster ADR 0022) und
+  überlebt damit einen Neustart des Turnier-PCs.
+
+## v0.9.201
+
+- **Beim Start werden nicht mehr alle laufenden Spiele angesagt.** Die
+  ersten Abrufe der Feld-Ansage kommen, bevor der Sync-Lauf seinen ersten
+  BTP-Schnappschuss hat — sie liefern **null Felder**. Dieser leere Stand
+  galt als Baseline, und beim nächsten Abruf war damit jedes belegte Feld
+  „frisch aufgerufen": Wer die App mitten im Turnier startete, hörte alle
+  laufenden Spiele am Stück. Die Baseline gilt jetzt erst als gesetzt, wenn
+  überhaupt Felder dabei sind; Felder **ohne** Spiel bleiben ein gültiger
+  Anfangsstand, damit der erste Aufruf des Turniertags weiterhin angesagt
+  wird. (Der Fall „Ansage-Halle im Betrieb umschalten" hat dieselbe
+  Fehlerklasse und ist bewusst unverändert — siehe
+  [announcements.md](announcements.md).)
+- **Schiedsrichtermanagement** (Spec
+  [schiedsrichter-management](features/schiedsrichter-management.md),
+  ADR 0021/0022) — standardmäßig **aus**; Turniere ohne Schiedsrichter
+  verhalten sich unverändert. Eingeschaltet unter Einstellungen →
+  Schiedsrichter:
+  - **Liste aus BTP.** Der `Officials`-Container wird gelesen; BTS Light
+    pflegt nur die Zusatzdaten, die BTP nicht kennt — Rotationsreihenfolge,
+    Pausen, Stammverein (BTP überträgt keinen), Sperrlisten und die
+    feldweisen Schalter. Alles turniergebunden in
+    `officials-state.json`, beim Turnierwechsel verworfen.
+  - **Einteilung je Spiel** aus dem Client (neuer Menüpunkt
+    „Schiedsrichter") und aus TL-Web, jederzeit änderbar, auch mitten im
+    Spiel. Eine Zuweisung mit Konflikt (eigener Verein, gesperrter Verein,
+    gesperrter Spieler) wird **ausgeführt** und nur gekennzeichnet — die
+    Turnierleitung entscheidet.
+  - **Automatische Rotation**, getrennt für Schiedsrichter und
+    Aufschlagrichter und je Feld abschaltbar: Ein neu belegtes Feld bekommt
+    den nächsten nicht pausierten, dienstfreien, konfliktfreien Official;
+    nach dem Spiel rückt er ans Ende. Von Hand gelöste Zuweisungen füllt die
+    Rotation **nicht** wieder auf.
+  - **Feldweise Tabletbediener-Vergabe:** Auf Feldern, die der
+    Schiedsrichter selbst bedient, verbraucht das Feld keinen Wartenden aus
+    der Zähltafel-Schlange mehr (Default unverändert „alle Felder aktiv").
+  - **Anzeige** am Schiri-Tablet (LAN, Cloud und ferne Halle), in der
+    Spielübersicht und in TL-Web; **Ansage** von Schiedsrichter und
+    Aufschlagrichter am Ende der Feld-Ansage, plus manueller Knopf für
+    nachträgliche Zuweisungen.
+  - **Rücksync nach BTP** bei jeder Änderung (eigenständiges Match-Update,
+    Löschen als `0`, ohne `Status`-Feld) und zusätzlich eingebettet in das
+    Zuweisungs-Update beim Ruf aufs Feld. Ein fehlgeschlagener Write wird im
+    nächsten Sync-Zyklus wiederholt.
+  - **Datenschutz:** Sperrlisten und Stammverein stehen nie im Zustand, den
+    alle Turnierleitungs-Geräte bekommen — sie kommen nur auf gezielte, per
+    Geräte-Token authentifizierte Anfrage. Zwei Wächter-Tests halten das
+    fest.
+  - **Cloud-Hinweis:** Die Schiedsrichter-Bedienung in TL-Web funktioniert
+    über den Cloud-Weg erst nach dem Relay-Deploy; im Hallennetz sofort.
+
 ## v0.9.200
+
+> **Nie veröffentlicht** — der Tag wurde nicht gesetzt. Die Änderungen sind
+> in `main` und gehen mit v0.9.201 gemeinsam an die Installationen.
 
 - **Cloud-Monitore und Cloud-Übersicht zeigen jetzt auch die Stände von
   LAN-Tablets.** Der Relay kannte Punktestand und Spielzustand bisher nur

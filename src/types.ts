@@ -486,6 +486,11 @@ export type AnnounceJob = {
       stage: number;
     }
   | {
+      /** Nur die Besetzung ansagen (Schiedsrichter/Aufschlagrichter). */
+      kind: "officials";
+      courtId: number;
+    }
+  | {
       kind: "prep_call";
       matchId: number;
       side: "both" | "team1" | "team2";
@@ -687,6 +692,19 @@ export interface CourtOverview {
   /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt — nur dann
    *  wird er angesagt (ADR 0007). */
   scorekeeper_assigned: boolean;
+  /** Schiedsrichter des laufenden Spiels (Spec schiedsrichter-management).
+   *  Leer, wenn keiner zugewiesen ist oder ohne Schiedsrichter gespielt wird. */
+  sr: string[];
+  /** Aufschlagrichter des laufenden Spiels. */
+  ar: string[];
+  /** Konflikt-Kategorie („Verein"/„Person"), wenn ein zugewiesener Official
+   *  nicht zum Spiel passt; null = kein Konflikt. Nur die Kategorie — der
+   *  Grund bleibt am Turnier-PC. */
+  official_warn: string | null;
+  /** IDs der wirksamen Besetzung (0 = keiner) — die Auswahl trifft damit die
+   *  Person, nicht den Namen (Namensgleichheit kommt vor). */
+  sr_id: number;
+  ar_id: number;
   /** Feld vom Operator gesperrt (bts-light-seitig) → rot, keine Auto-Vergabe. */
   locked: boolean;
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
@@ -801,6 +819,14 @@ export interface PreparationCandidate {
   match_num: number | null;
   /** Aufruf-Daten, falls das Spiel bereits gerufen wurde; sonst null. */
   call: PreparationCallInfo | null;
+  /** Von der automatischen Feldvergabe ausgenommen (Spec
+   *  `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt. */
+  excluded: boolean;
+  /** In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage der
+   *  Hallen-Abschnitte (Spec `spielliste-manuelle-reihenfolge`). */
+  hall: string;
+  /** Steht dieses Spiel gerade im manuellen Präfix seiner Halle? */
+  manual: boolean;
 }
 
 /** Eine Halle des Turniers (Rust: commands::PreparationLocation). */
@@ -859,4 +885,62 @@ export interface MatchTimeline {
   retired: boolean;
   /** Ergebnis abgegeben — es kommen keine Ballwechsel mehr. */
   finished: boolean;
+}
+
+/** Ein Schiedsrichter für die Bedienoberfläche (Rust: commands::OfficialView).
+ *  Die Inhalte der Sperrlisten sind bewusst nicht dabei — nur ihre Anzahl;
+ *  geladen werden sie auf gezielte Anfrage (Personendaten). */
+export interface OfficialView {
+  id: number;
+  /** Anzeigename „Vorname Nachname" aus BTP. */
+  name: string;
+  /** Position in der Rotationsreihenfolge (0-basiert). */
+  position: number;
+  paused: boolean;
+  /** In bts-light gepflegter Stammverein (BTP liefert am Official keinen). */
+  club: string;
+  /** Anzahl gesperrter Vereine + Spieler. */
+  blocked_count: number;
+  /** Feld, auf dem er gerade Dienst tut (null = frei), plus Rolle. */
+  on_duty_court_id: number | null;
+  on_duty_role: string | null;
+  /** Bisherige Einsätze, abgeleitet aus den beendeten Spielen. */
+  appearances: number;
+}
+
+/** Ein abgeleiteter Einsatz fürs Detail-Overlay (Rust: AppearanceView). */
+export interface AppearanceView {
+  match_id: number;
+  /** "sr" oder "ar". */
+  role: string;
+  match_name: string;
+  court: string;
+  finished_at: number | null;
+}
+
+/** Die Sperrlisten eines Officials (nur auf Anfrage geladen). */
+export interface BlocklistView {
+  clubs: string[];
+  players: number[];
+  /** Alle Spieler des Turniers zur Auswahl — niemand kennt PlayerIDs. */
+  pick_players: PickPlayer[];
+  /** Alle Vereine des Turniers zur Auswahl. */
+  pick_clubs: string[];
+}
+
+/** Ein Spieler zur Auswahl in der Sperrlisten-Pflege. */
+export interface PickPlayer {
+  id: number;
+  name: string;
+  /** Verein — unterscheidet Namensgleiche. */
+  club: string;
+}
+
+/** Feldweise Schalter: SR-Rotation, AR-Rotation, Zähltafelbediener-Vergabe. */
+export interface CourtSwitchesView {
+  court_id: number;
+  court: string;
+  sr: boolean;
+  ar: boolean;
+  operator: boolean;
 }

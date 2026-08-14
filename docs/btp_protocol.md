@@ -341,8 +341,9 @@ gesetzt", wie bei `LocationID`) in
 
 ### Die Reihenfolge der angesetzten Spiele
 
-**`PlannedTime` + `DisplayOrder` ergeben zusammen die gedruckte Spielliste.**
-Beides ist nötig, und beides war lange falsch bzw. gar nicht ausgewertet:
+**`PlannedTime` + Auslosung (`DrawID`) ergeben zusammen die gedruckte
+Spielliste.** Beides ist nötig, und beides war lange falsch bzw. gar nicht
+ausgewertet:
 
 - **`PlannedTime` ist ein `ITEM` vom Typ `DateTime`**, dessen Wert der
   Knoten `<DATETIME Y="2027" MM="2" D="5" H="9" M="0" …/>` ist — Attribute,
@@ -351,16 +352,21 @@ Beides ist nötig, und beides war lange falsch bzw. gar nicht ausgewertet:
   Turnier für unangesetzt.
 - **Alle Spiele eines Zeitfensters tragen dieselbe Zeit** — ein ganzer
   Vormittag steht auf 9:00. Die Reihenfolge *innerhalb* des Fensters gibt
-  `DisplayOrder` vor (je Draw ab 1). Ohne dieses Feld entscheidet die
-  Spielnummer, und die läuft quer: Aus der gedruckten Liste (Nr 2, 6, 2, 6 …)
-  wird „erst alle Nummer 2, dann alle Nummer 6".
+  die Auslosung (`DrawID`) vor, dann die Spielnummer. Ohne einen der beiden
+  Schlüssel läuft die reine Spielnummer quer: Aus der gedruckten Liste
+  (Nr 2, 6, 2, 6 …) wird „erst alle Nummer 2, dann alle Nummer 6".
+- **Bis 09.08.2026 stand hier `DisplayOrder`** statt `DrawID`. Gemessen an
+  einem echten Turnier trugen aber nur rund 10 % der Spiele einen Wert — die
+  ohne landeten hinter allen anderen, das erste Spiel des Tages stand
+  plötzlich an fünfter Stelle. `DrawID` ist an jedem Match gesetzt und
+  reproduziert dieselbe Reihenfolge zuverlässig.
 
 Belegt an einem echten Turnier (878 Paarungen, 759 davon angesetzt): Die
-Sortierung `PlannedTime → DisplayOrder → MatchNr → ID` reproduziert die aus
-BTP exportierte Spielliste **Position für Position**.
+Sortierung `PlannedTime → DrawID → MatchNr → ID` reproduziert die aus BTP
+exportierte Spielliste **Position für Position**.
 
 Implementierung: `parse_planned_time` in
-[model.rs](../src-tauri/src/btp/model.rs), `sort_key` in
+[model.rs](../src-tauri/src/btp/model.rs), `sort_key`/`sort_key_parts` in
 [assign.rs](../src-tauri/src/tablet/assign.rs).
 
 **Diese eine Definition gilt überall**, wo Spiele in eine Reihenfolge
@@ -369,20 +375,44 @@ niemand weiß mehr, welche stimmt:
 
 | Wo | Über |
 |---|---|
-| Automatische Feldvergabe | `sync.rs` → `assign::sort_key` |
-| Turnierleitungs-Oberfläche (Warteliste) | `tablet/tl.rs` → `assign::sort_key` |
-| Vorbereitungs-Kandidaten (Desktop) | `commands.rs` → `assign::sort_key_parts` |
-| Vorbereitungs-Kandidaten (Tablet/Monitor) | `tablet/server.rs` → `assign::sort_key_parts` |
-| **Liveticker „anstehende Spiele"** | `badhub/payload.rs` → `assign::sort_key` |
+| Automatische Feldvergabe | `sync.rs` → `assign::resolve_and_sort_key` |
+| Turnierleitungs-Oberfläche (Warteliste) | `tablet/tl.rs` → `assign::resolve_and_sort_key` |
+| Vorbereitungs-Kandidaten (Desktop) | `commands.rs` → `assign::resolve_and_sort_key` |
+| Vorbereitungs-Kandidaten (Tablet/Monitor) | `tablet/server.rs` → `assign::resolve_and_sort_key` |
+| **Liveticker „anstehende Spiele"** | `badhub/payload.rs` → `assign::resolve_and_sort_key` |
 
-Der Liveticker sortierte bis dahin **allein nach Spielnummer** — die
+Der Liveticker sortierte bis 12.08.2026 **allein nach Spielnummer** — die
 Ansicht mit den meisten Augen zeigte damit eine Reihenfolge, die im
 Turnierplan nirgends stand. Bei nur 15 Einträgen konnten die tatsächlich
 nächsten Spiele sogar ganz herausfallen.
 
+**Seit 14.08.2026 (Spec `spielliste-manuelle-reihenfolge`, ADR 0023)**
+kennt jede der fünf Stellen zusätzlich einen **manuellen Präfix je Halle**:
+`assign::resolve_and_sort_key` bündelt Hallen-Auflösung
+(`assign::hall_for_match`) + Präfix-Rang-Nachschlag
+(`tablet/queue_order.rs::QueueOrderStore::rank`) +
+`assign::sort_key_with_manual_order` zu **einem** verpflichtenden Helfer —
+genau der Punkt, den diese Tabelle seit jeher schützen soll. Ein
+Cross-Site-Regressionstest (`tests/queue_order_consistency.rs`) vergleicht
+TL-Web, Desktop und Liveticker gegeneinander. `DisplayOrder` selbst lässt
+sich **nicht** nach BTP zurückschreiben (siehe Abschnitt weiter unten) — die
+manuelle Reihenfolge bleibt daher rein host-lokal.
+
 Nicht betroffen: die Liste der **in Vorbereitung gerufenen** Spiele
 (`build_prepared_list`). Sie folgt der Reihenfolge der Aufrufe — wer
 zuerst gerufen wurde, steht oben, und das ist dort die richtige Ordnung.
+
+### `DisplayOrder` zurückschreiben — geht nicht
+
+Gemessen am 14.08.2026 (`btp_displayorder_probe.rs`,
+`does_btp_accept_a_displayorder_write_for_a_scheduled_match`): Ein
+`SENDUPDATE`, der an einem angesetzten, noch nicht zugewiesenen Match
+ausschließlich `ID, DrawID, PlanningID, DisplayOrder` schreibt, liefert
+`Result=1` — aber der nachfolgende Snapshot zeigt weiterhin den alten
+Wert. **Stiller No-Op, exakt dasselbe Verhalten wie bei `LocationID`**
+(siehe oben). Eine manuelle Spiel-Reihenfolge lässt sich also **nicht**
+nach BTP zurückschreiben; sie kann nur lokal in bts-light geführt und den
+fünf Sortier-Stellen aus der Tabelle oben vorgeschaltet werden.
 
 **Player:** `ID`, `Firstname`, `Lastname`, `Asianname` (wenn gesetzt → Anzeige
 `NACHNAME Vorname`), `Country` (Nationalität), `GenderID` (1 = m, 2 = w),
@@ -508,6 +538,8 @@ Update {
         CourtID:     <BTP-Court-ID> (das ECHTE Feld bleibt am Match — s. u.)
         DrawID:      <Draw des Matches>
         PlanningID:  <Planungsposition im Draw>
+        Official1ID: <SR-ID>         (nur bei Schiedsrichter-Betrieb — s. u.)
+        Official2ID: <AR-ID>
       }
     }
     Players {                       (nur bei Tablet-Ergebnis: Spielende je Spieler)
@@ -555,6 +587,17 @@ Update {
 > konnte das gerade geschriebene Ergebnis wieder entwerten. Bei Walkover
 > aus der Turnierleitung (`free_court_id = None`) entfallen `Courts`-Block
 > und `CourtID`.
+
+> ⚠️ **`Official1ID`/`Official2ID` niemals aus dem Ergebnis-Request weglassen,
+> sobald Schiedsrichter-Betrieb läuft** (Live-Befund 14.08.2026, dieselbe
+> Fehlerklasse wie `Status` oben). Ohne dieses Feld löschte BTP die
+> Schiedsrichter-Besetzung eines Matches bei **jedem** Ergebnis-Eintrag —
+> egal ob die Zuweisung Sekunden oder über eine Stunde alt war. Fix:
+> `MatchUpdate::officials` reassertiert die aktuell bekannte Besetzung
+> (BTP-Wert gewinnt, sonst lokale Zuweisung, sonst explizit `(0, 0)`) in
+> jedem Ergebnis-Write. `None` nur ohne Schiedsrichter-Betrieb — dann bleibt
+> der Request unverändert zum Bestand. Details:
+> [schiedsrichter-management.md](schiedsrichter-management.md#ergebnis-write-löschte-die-besetzung-live-befund-14082026-fortsetzung).
 
 ### Vorbereitungs-Aufruf-Highlight (P1)
 
@@ -715,3 +758,34 @@ erneut; schlägt auch das fehl, wird sie wieder eingereiht. Ein doppelter
 toggelt nichts). Die Queue lebt im Speicher — ein App-Neustart leert sie
 (das Tablet hält sein Ergebnis ohnehin bis zum `ok:true`). Bei bestätigt
 leerem Turnier-Stand (Leer-Snapshot-Guard) pausiert der Nachschub.
+
+### Officials schreiben (Umsetzung ab v0.9.201, überarbeitet v0.9.202)
+
+Eine Wire-Form für beide Anlässe (`proto.rs::court_assign_request` mit
+`MatchCourt`-Knoten): `Match{ID, DrawID, PlanningID, CourtID,
+[Official1ID, Official2ID]}`, `0` löscht Dienst bzw. Feldzuordnung. Ohne
+`Status` (Check-in-Bitfeld, Regression v0.9.103) und ohne Ergebnisfelder.
+BTP übernimmt asynchron (≤ 1 s) — zurückgelesen wird über den nächsten
+Snapshot, nicht per Einmal-Check.
+
+- **eigenständig** (`sync.rs::reconcile_officials`) — leerer `Courts`-Block,
+  nur `Matches`, `CourtID` immer aus dem aktuellen Snapshot mitgeschrieben
+  (`m.court_id.unwrap_or(0)`).
+- **eingebettet** beim Ruf aufs Feld — zusätzlich der `Courts`-Block
+  (`MatchCourt::officials` additiv).
+
+**Race mit einer frischen Feldzuweisung, behoben (Live-Befund 14.08.2026,
+verschärft/bestätigt nach einem verworfenen Zwischenfix).** Ursprünglich
+schickte die eigenständige Form **kein** `CourtID`-Feld (Muster
+`officials_request`, mittlerweile entfernt). Folgte dieser Write binnen
+Sekunden auf ein `court_assign_request` **desselben** Matches, verlor BTP
+dabei die eben erst angekommene `CourtID` wieder — zwei `SENDUPDATE`s zum
+selben Match in enger Folge brachten BTPs eigene Persistenz durcheinander.
+
+Ein erster Fix (feste Karenzzeit, 10 s) reichte nicht: Am selben Turnier
+gemessen lag der tatsächliche Abstand zwischen Feldzuweisung und
+eigenständigem Schiedsrichter-Write teils bei 11–18 s. **Der eigentliche
+Fix:** Die eigenständige Form schreibt die `CourtID` jetzt immer mit — dann
+ist die Reihenfolge zweier Requests zum selben Match folgenlos, egal wie
+knapp oder weit sie zeitlich auseinanderliegen. Details:
+[schiedsrichter-management.md](schiedsrichter-management.md#courtid-immer-mitschreiben-live-befund-14082026).

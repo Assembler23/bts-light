@@ -52,6 +52,17 @@ bleibt kein veralteter Name in der Anzeige hängen; angezeigt wird dann wieder
 der pro-Feld-Hinweis. Bei mehreren gleichzeitig neu belegten Feldern wird
 nach CourtID sortiert zugewiesen (deterministisch/fair).
 
+**Felder ohne Bediener-Vergabe.** Je Feld lässt sich die Vergabe abschalten
+(`CourtSwitches::operator`, turniergebunden gespeichert — siehe
+[schiedsrichter-management.md](schiedsrichter-management.md)). Auf so einem
+Feld bedient der Schiedsrichter das Tablet selbst: `assign_scorekeeper_for_court`
+kehrt sofort zurück, das Feld bekommt keinen Bediener und **verbraucht auch
+keinen Eintrag** aus der Warteschlange — der Wartende bleibt für ein anderes
+Feld übrig. Ohne Eintrag gilt „Vergabe aktiv"; für bestehende Installationen
+ändert sich nichts. Der Schalter wirkt nur, solange der
+Schiedsrichter-Betrieb eingeschaltet ist — sonst wäre er nach dem Abschalten
+nirgends mehr zurückzunehmen.
+
 ## Ansage (Scheibe 3, v0.9.165)
 
 Ist ein Bediener zugewiesen (`CourtOverview.scorekeeper_assigned == true`),

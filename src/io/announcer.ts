@@ -39,6 +39,14 @@ export interface AnnounceMatchInput {
   /** Zugewiesener Zähltafelbediener (ADR 0007) — wird am Ende als
    *  „Tabletbedienung: {Name}." angesagt. Leer/fehlend = nicht ansagen. */
   scorekeeperNames?: string[];
+  /** Schiedsrichter und Aufschlagrichter (Spec schiedsrichter-management) —
+   *  werden nach der Tabletbedienung als „Schiedsrichter: {Name}." bzw.
+   *  „Aufschlagrichter: {Name}." angesagt. Leer/fehlend = nicht ansagen. */
+  umpireNames?: string[];
+  serviceJudgeNames?: string[];
+  /** Nur die Besetzung ansagen (manueller Knopf „SR/AR ansagen"): Feld,
+   *  Schiedsrichter, Aufschlagrichter — ohne Disziplin und Paarung. */
+  officialsOnly?: boolean;
   /** Aufruf-Stufe: 1 = normaler (erster) Aufruf, 2 = „Zweiter Aufruf",
    *  3 = „Dritter und letzter Aufruf". Ab Stufe 2 wird das Label als eigenes
    *  Segment hinter Disziplin/Runde vor die Paarung gesetzt. Default 1. */
@@ -604,6 +612,12 @@ export function buildAnnouncementSegments(
   const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
+  // Manueller Knopf „SR/AR ansagen": nur Feld + Besetzung. Eine
+  // nachträgliche Zuweisung soll nicht die ganze Paarung erneut aufrufen —
+  // das Spiel läuft ja schon (Spec Nr. 8).
+  if (input.officialsOnly) {
+    return segments.concat(officialSegments(input, lang));
+  }
   if (disc) segments.push(`${disc}.`);
   // Runde ab Viertelfinale vor der Paarung ansagen (wertet die Ansage auf).
   if (round) segments.push(`${round}.`);
@@ -622,7 +636,32 @@ export function buildAnnouncementSegments(
     const label = lang === "de" ? "Tabletbedienung" : "Scoreboard operator";
     segments.push(`${label}: ${sk.join(" / ")}.`);
   }
+  // Schiedsrichter/Aufschlagrichter nach der Bedienung (Spec Nr. 8). Namen
+  // ohne Aussprache-Korrektur, wie bei der Bedienung: Das ist eine
+  // Zuständigkeits-Ansage, keine Spieler-Vorstellung.
+  for (const seg of officialSegments(input, lang)) segments.push(seg);
   return segments;
+}
+
+/** Die SR/AR-Segmente — eine Quelle für Segment- und SSML-Bauer, damit
+ *  beide Wege dasselbe sagen (sie werden getrennt zusammengesetzt). */
+function officialSegments(
+  input: AnnounceMatchInput,
+  lang: AnnounceLang,
+): string[] {
+  const clean = (v?: string[]) => (v ?? []).map((n) => n.trim()).filter(Boolean);
+  const out: string[] = [];
+  const sr = clean(input.umpireNames);
+  const ar = clean(input.serviceJudgeNames);
+  if (sr.length > 0) {
+    const label = lang === "de" ? "Schiedsrichter" : "Umpire";
+    out.push(`${label}: ${sr.join(" / ")}.`);
+  }
+  if (ar.length > 0) {
+    const label = lang === "de" ? "Aufschlagrichter" : "Service judge";
+    out.push(`${label}: ${ar.join(" / ")}.`);
+  }
+  return out;
 }
 
 // ─── Azure-SSML (hochwertige Ansage am Stück) ────────────────────────────
@@ -800,6 +839,14 @@ export function buildAnnouncementSsml(
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
 
   const parts: string[] = [`${court}.`];
+  if (input.officialsOnly) {
+    for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
+    const speakLangOnly = lang === "de" ? "de-DE" : "en-US";
+    return (
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangOnly}">` +
+      `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
+    );
+  }
   if (disc) parts.push(`${disc}.`);
   if (round) parts.push(`${xmlEscape(round)}.`);
   const stageLabel = callStageLabel(input.callStage, lang);
@@ -814,6 +861,9 @@ export function buildAnnouncementSsml(
     const label = lang === "de" ? "Tabletbedienung" : "Scoreboard operator";
     parts.push(`${xmlEscape(label)}: ${xmlEscape(sk.join(" / "))}.`);
   }
+  // Dieselben Segmente wie im Web-Speech-Pfad (`officialSegments`), damit
+  // beide Wege Wort für Wort dasselbe ansagen.
+  for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
 
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (

@@ -22,6 +22,20 @@ siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   nachträglich angesagt. Danach löst jede neue `match_id` auf einem Feld
   eine Ansage aus. Eine Match-ID wird im 5-s-Fenster nicht doppelt
   angesagt.
+- **Eine leere Antwort taugt nicht als Baseline** (Befund 14.08.2026): Die
+  ersten Abrufe nach dem Start kommen, bevor der Sync-Lauf seinen ersten
+  BTP-Schnappschuss hat — `tablet_overview()` liefert dann **null Felder**.
+  Galt das als Baseline, war beim nächsten Abruf jedes belegte Feld „neu",
+  und die App sagte beim Start **alle laufenden Spiele** an. Die Baseline
+  gilt deshalb erst als gesetzt, wenn überhaupt Felder dabei sind; Felder
+  **ohne** Spiel sind dagegen ein gültiger Anfangsstand (Turniermorgen —
+  sonst bliebe der erste Aufruf des Tages stumm). Die Entscheidung liegt in
+  [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs) und ist
+  über `scripts/test-announce-baseline.mjs` (CI) festgehalten.
+- **Noch offen, gleiche Fehlerklasse:** Wird die Ansage-Halle im Betrieb
+  umgeschaltet, gelten die belegten Felder der neuen Halle als frisch
+  aufgerufen und werden angesagt. Unverändert gelassen, weil es ein anderer
+  Fall ist als der Start.
 - **Engine:** [`src/io/announcer.ts`](../src/io/announcer.ts) — portiert
   aus der Schwester-App badhub-tournament.
 
@@ -466,3 +480,22 @@ Stimme die Namen **nativ** spricht. Ablauf:
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
+
+## Schiedsrichter und Aufschlagrichter
+
+Läuft das Turnier mit Schiedsrichtern (Spec
+[schiedsrichter-management](schiedsrichter-management.md)), nennt die
+Feld-Ansage nach der Tabletbedienung:
+
+- „Schiedsrichter: {Name}." / englisch „Umpire: {Name}."
+- „Aufschlagrichter: {Name}." / englisch „Service judge: {Name}."
+
+Angesagt wird nur, was auch zugewiesen ist; ohne Schiedsrichter-Betrieb
+entfällt beides ersatzlos. Segment- und SSML-Bauer nutzen dieselbe Quelle
+(`officialSegments` in `io/announcer.ts`), damit Browser-Stimme und
+Azure-Stimme identisch sprechen.
+
+**Nachträgliche Zuweisungen sagen nicht von selbst an.** Wer mitten im Spiel
+einen Schiedsrichter einteilt, löst die Ansage mit dem Knopf „ansagen" aus —
+in der Schiedsrichter-Seite des Clients oder an der Feld-Kachel in TL-Web.
+Diese Ansage nennt nur Feld und Besetzung, nicht noch einmal die Paarung.

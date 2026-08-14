@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::badhub::payload::{
-    build_tset, build_tupdate, CheckinRosterMessage, TsetMessage, TupdateMessage,
+    build_tset, build_tupdate, CheckinRosterMessage, LivetickerContext, TsetMessage, TupdateMessage,
 };
 use crate::btp::model::{BtpMatch, BtpSnapshot, MatchStatus};
 
@@ -24,22 +24,36 @@ pub enum Update {
 }
 
 /// Vergleicht den vorigen mit dem aktuellen Snapshot.
-pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64) -> Update {
+///
+/// `ctx` trägt die manuelle Spielreihenfolge (Spec
+/// `spielliste-manuelle-reihenfolge`) — sie lebt außerhalb von
+/// `BtpSnapshot`, ein reiner Reorder ohne begleitende BTP-Änderung fällt
+/// hier deshalb NICHT unter „strukturelle Änderung" und erreicht den
+/// Liveticker erst mit dem nächsten Heartbeat (bis zu 60 s). Dieselbe
+/// Charakteristik gilt bereits heute für eine von Hand gesetzte Halle
+/// (`manual_halls`) — kein neues, sondern ein bewusst hingenommenes,
+/// bestehendes Verhalten.
+pub fn diff(
+    prev: Option<&BtpSnapshot>,
+    current: &BtpSnapshot,
+    rid: u64,
+    ctx: &LivetickerContext,
+) -> Update {
     let Some(prev) = prev else {
         // Erster Snapshot – immer ein voller tset.
-        return Update::Full(build_tset(current, rid));
+        return Update::Full(build_tset(current, rid, ctx));
     };
 
     // Strukturelle Änderung an der Court-Belegung → voller tset.
     if court_assignment(prev) != court_assignment(current) {
-        return Update::Full(build_tset(current, rid));
+        return Update::Full(build_tset(current, rid, ctx));
     }
 
     // Geänderte „in Vorbereitung"-Aufrufe → voller tset. Ohne diesen Check
     // würde ein neuer/zurückgenommener Aufruf erst beim nächsten Heartbeat
     // (bis zu 60 s) gesendet.
     if preparation_calls(prev) != preparation_calls(current) {
-        return Update::Full(build_tset(current, rid));
+        return Update::Full(build_tset(current, rid, ctx));
     }
 
     // Gleiche Matches auf gleichen Courts: nur Punktestände vergleichen.
@@ -53,7 +67,7 @@ pub fn diff(prev: Option<&BtpSnapshot>, current: &BtpSnapshot, rid: u64) -> Upda
         [] => Update::None,
         [m] => Update::Single(build_tupdate(m, rid)),
         // Mehrere gleichzeitige Änderungen → der Einfachheit halber voll.
-        _ => Update::Full(build_tset(current, rid)),
+        _ => Update::Full(build_tset(current, rid, ctx)),
     }
 }
 
@@ -113,6 +127,7 @@ fn preparation_calls(snapshot: &BtpSnapshot) -> BTreeMap<i64, (u64, Option<&str>
 mod tests {
     use super::*;
     use crate::btp::model::{BtpPlayer, Discipline, MatchResult};
+    use crate::config::AppConfig;
 
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
@@ -181,21 +196,42 @@ mod tests {
     #[test]
     fn first_snapshot_is_always_full() {
         let current = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
-        assert!(matches!(diff(None, &current, 1), Update::Full(_)));
+        assert!(matches!(
+            diff(
+                None,
+                &current,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
     }
 
     #[test]
     fn unchanged_snapshot_sends_nothing() {
         let a = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
         let b = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
-        assert_eq!(diff(Some(&a), &b, 1), Update::None);
+        assert_eq!(
+            diff(
+                Some(&a),
+                &b,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::None
+        );
     }
 
     #[test]
     fn single_score_change_yields_tupdate() {
         let a = snapshot(vec![match_on_court(1, "1", vec![(5, 3)])]);
         let b = snapshot(vec![match_on_court(1, "1", vec![(6, 3)])]);
-        match diff(Some(&a), &b, 9) {
+        match diff(
+            Some(&a),
+            &b,
+            9,
+            &LivetickerContext::bare(&AppConfig::default()),
+        ) {
             Update::Single(msg) => {
                 assert_eq!(msg.match_update.id, "btp_1");
                 assert_eq!(msg.match_update.s, vec![[6, 3]]);
@@ -213,7 +249,15 @@ mod tests {
             match_on_court(1, "1", vec![(5, 3)]),
             match_on_court(2, "2", vec![(0, 0)]),
         ]);
-        assert!(matches!(diff(Some(&a), &b, 1), Update::Full(_)));
+        assert!(matches!(
+            diff(
+                Some(&a),
+                &b,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
     }
 
     #[test]
@@ -229,17 +273,38 @@ mod tests {
         let before = snapshot(vec![uncalled.clone()]);
         let after = snapshot(vec![called]);
         // Aufruf neu gesetzt → voller tset.
-        assert!(matches!(diff(Some(&before), &after, 1), Update::Full(_)));
+        assert!(matches!(
+            diff(
+                Some(&before),
+                &after,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
         // Kein Aufruf in beiden Snapshots → nichts senden.
         assert!(matches!(
-            diff(Some(&snapshot(vec![uncalled.clone()])), &before, 1),
+            diff(
+                Some(&snapshot(vec![uncalled.clone()])),
+                &before,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
             Update::None
         ));
         // Aufruf zurückgenommen (vorher gerufen, jetzt nicht mehr) → voller tset.
         let mut still_called = uncalled.clone();
         still_called.preparation_call_ts = Some(1_700_000_000_000);
         let a = snapshot(vec![still_called]);
-        assert!(matches!(diff(Some(&a), &before, 1), Update::Full(_)));
+        assert!(matches!(
+            diff(
+                Some(&a),
+                &before,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
     }
 
     #[test]
@@ -252,7 +317,15 @@ mod tests {
             match_on_court(1, "1", vec![(6, 3)]),
             match_on_court(2, "2", vec![(2, 3)]),
         ]);
-        assert!(matches!(diff(Some(&a), &b, 1), Update::Full(_)));
+        assert!(matches!(
+            diff(
+                Some(&a),
+                &b,
+                1,
+                &LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
     }
 
     // --- Meldeliste (Hallen-Check-In) --------------------------------------

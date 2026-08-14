@@ -4,8 +4,11 @@
 pub mod assets;
 pub mod assign;
 pub mod club_logos;
+pub mod exclusion;
 pub mod mdns;
 pub mod monitor;
+pub mod officials;
+pub mod queue_order;
 pub mod relay_client;
 pub mod server;
 pub mod slave_bridge;

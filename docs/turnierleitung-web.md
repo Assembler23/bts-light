@@ -151,6 +151,24 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Ein Spiel von der automatischen Feldvergabe ausnehmen
+
+An jeder Zeile der Warteliste sitzt neben dem Vorbereitungs-Aufruf-Knopf ein
+Pause-Umschalter (⏸). Gedrückt heißt: Dieses Spiel wird von der
+**automatischen** Feldvergabe übersprungen, solange die Ausnahme aktiv ist
+— ein Badge „⏸ Auto-Vergabe aus" markiert die Zeile zusätzlich. Praktisch,
+wenn ein Spieler kurzfristig nicht greifbar ist, das Spiel aber nicht
+sofort gewertet oder manuell verschoben werden soll.
+
+**Manuelles Zuweisen bleibt immer möglich** — die Ausnahme betrifft
+ausschließlich die Automatik. Ein erneuter Klick nimmt die Ausnahme
+zurück; sie räumt sich außerdem von selbst auf, sobald das Spiel gewertet
+ist. Bedienbar sowohl hier in TL-Web als auch am Turnier-PC (Felder-
+übersicht, Tabelle „Nicht zugewiesene Spiele") — beide Wege zeigen
+denselben Stand. Die Ausnahme überlebt einen Neustart des Turnier-PCs
+(`excluded-matches.json`, turniergebunden wie die Schiedsrichter-
+Einteilung).
+
 ### Anordnung wie in der Halle
 
 Statt Feldern in Formularreihenfolge lässt sich für jede Halle ein
@@ -239,6 +257,35 @@ auch nach einem Fenster-Resize.
 Gesprochen wird nie auf diesem Gerät: Die Seite beauftragt die Ansage, und
 gesprochen wird sie dort, wo die Anlage hängt. Hört in der Zielhalle gerade
 kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
+
+### Schiedsrichter einteilen
+
+Spielt das Turnier mit Schiedsrichtern (Einstellungen → Schiedsrichter),
+zeigt die Seite zusätzlich:
+
+- **Abschnitt „Schiedsrichter"** unter der Zähltafel-Warteschlange: die
+  Liste in Rotationsreihenfolge mit Dienst-Marke, Pause-Knopf, Zieh-Griff
+  zum Umsortieren (Drag & Drop, auch auf dem Tablet — seit 14.08.2026,
+  ersetzt die frühere Pfeil-Bedienung) und der Zahl der bisherigen Einsätze.
+  Ein Tipp auf die Zahl öffnet die Pflege: Stammverein, gesperrte Vereine,
+  gesperrte Spieler und die Einsatz-Liste im Detail. Auch bei eingeklappter
+  Liste steht in der Kopfzeile, wer als Nächstes zugeteilt würde.
+- **An jeder belegten Feld-Kachel** „SR: … · AR: …" samt Warnfarbe, wenn ein
+  Konflikt besteht (Kategorie „Verein" oder „Person" — der Grund bleibt am
+  Turnier-PC), plus den Knopf **einteilen** für die Auswahl je Dienst.
+
+Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
+Turnierleitung entscheidet. Steht in BTP schon ein Schiedsrichter am Spiel,
+gilt dieser — die Auswahl hier wirkt dann nicht.
+
+Sperrlisten, Verein und Einsatz-Liste stehen **nicht** im Zustand, den alle
+gekoppelten Geräte bekommen: Sie kodieren persönliche Beziehungen und werden
+erst beim Öffnen der Pflege gezielt und mit dem Geräte-Zugang abgerufen
+(`/tl/api/officials/{id}`, gleiches Muster wie der Punktverlauf).
+
+**Im Cloud-Betrieb** funktioniert die Schiedsrichter-Bedienung erst, wenn der
+Relay auf badhub.de die neuen Aktionen kennt (Deploy vor dem Client-Release);
+im Hallennetz sofort.
 
 ## Grenzen, die im Betrieb auffallen
 

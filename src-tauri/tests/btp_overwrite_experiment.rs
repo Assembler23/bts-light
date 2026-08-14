@@ -155,6 +155,7 @@ async fn filling_a_bracket_then_overwriting_shows_what_btp_recomputes() {
         free_court_id: None,
         player_ids: Vec::new(),
         end_ts_ms: None,
+        officials: None,
     };
 
     bericht(&snap, v1.id, folge.id, "SCHRITT 0 — Ausgangslage");
@@ -266,6 +267,7 @@ async fn overwriting_a_ko_result_changes_the_bracket_or_not() {
         free_court_id: None,
         player_ids: Vec::new(),
         end_ts_ms: None,
+        officials: None,
     };
 
     // **Die eigentliche Frage:** dieselbe Paarung mit dem anderen Sieger

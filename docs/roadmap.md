@@ -611,3 +611,43 @@ verliehen):
 - **`docs/ops/deployment.md` teils veraltet** (badhub-Repo): Der Abschnitt
   „Deploy: Produktion" beschreibt noch das KAS-`deploy_prod.sh`, obwohl
   Prod längst über `deploy_hetzner.sh` auf Hetzner läuft.
+
+## Schiedsrichtermanagement — umgesetzt (v0.9.201)
+
+Die Spec [features/schiedsrichter-management.md](features/schiedsrichter-management.md)
+ist vollständig umgesetzt (Doku: [schiedsrichter-management.md](schiedsrichter-management.md)).
+Offen bleiben der Feldtest an einem Turnier mit Schiedsrichtern und — für
+den Cloud-Weg — der Relay-Deploy auf badhub.de vor dem Client-Release.
+
+## Spiele von der automatischen Feldvergabe ausnehmen — umgesetzt, noch nicht released
+
+Die Spec [features/feldvergabe-ausnahme.md](features/feldvergabe-ausnahme.md)
+ist vollständig umgesetzt: Turnierleitung kann ein einzelnes Spiel per
+Knopfdruck (TL-Web und Turnier-PC) temporär von `sync.rs::auto_assign`
+ausschließen, bis es manuell reaktiviert wird oder das Match endet;
+manuelles Zuweisen bleibt unberührt. Persistenz nach dem ADR-0022-Muster
+(eigene turniergebundene Datei `excluded-matches.json`). Doku:
+[turnierleitung-web.md](turnierleitung-web.md). Offen bleiben der
+Feldtest an einem laufenden Turnier und der Versions-Bump für ein Release.
+
+## Spielliste per Drag&Drop manuell sortierbar — umgesetzt, noch nicht released
+
+Die Spec [features/spielliste-manuelle-reihenfolge.md](features/spielliste-manuelle-reihenfolge.md)
+ist vollständig umgesetzt (ADR [0023](adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md)):
+Turnierleitung zieht spielbereite, noch nicht gerufene Spiele in eine
+eigene, je Halle getrennte Reihenfolge (Präfix-Mechanik — jeder Zug
+speichert die effektive Reihenfolge vom Hallenanfang bis zum neuen Platz
+des gezogenen Spiels, alles danach folgt weiter BTPs eigener Reihenfolge).
+Wirkt an allen fünf Sortier-Stellen (`assign::resolve_and_sort_key`,
+gemeinsamer Helfer, abgesichert durch
+`tests/queue_order_consistency.rs`) sowie bei der automatischen
+Feldvergabe. Globaler Reset-Knopf (TL-Web + Desktop). Messung 14.08.2026
+(`btp_displayorder_probe.rs`, gegen TEST Köpi-Cup) belegt: `DisplayOrder`
+lässt sich nicht nach BTP zurückschreiben (stiller No-Op wie
+`LocationID`) — die Reihenfolge bleibt rein host-lokal. Persistenz nach
+dem ADR-0022-Muster (`queue-order.json`). Doku:
+[btp_protocol.md](btp_protocol.md), [preparation.md](preparation.md).
+Offen bleiben der Feldtest an einem Mehr-Hallen-Turnier, der manuelle
+Touch-/Drag-Test auf einem echten Tablet (wie schon bei der
+Schiedsrichter-Reihenfolge ausstehend) und der Versions-Bump für ein
+Release.
