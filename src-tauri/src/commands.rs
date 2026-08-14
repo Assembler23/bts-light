@@ -1495,8 +1495,13 @@ pub async fn enter_result(
         .court_id
         .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
     let officials = tablet.officials_for_result(m.id);
-    let update =
-        crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms, officials)?;
+    let update = crate::tablet::server::build_manual_result_update(
+        m,
+        sets,
+        on_court_since,
+        end_ms,
+        officials,
+    )?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
@@ -1829,35 +1834,34 @@ pub fn preparation_candidates_for(
         crate::tablet::assign::ManualOrderSortKey,
         &crate::btp::model::BtpMatch,
         String,
-    )> =
-        snapshot
-            .matches
-            .iter()
-            .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
-            // Nur echte Paarungen – beide Mannschaften müssen feststehen.
-            .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
-            .map(|m| {
-                let call = calls.iter().find(|c| c.match_id == m.id);
-                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
-                let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
-                    snapshot
-                        .locations
-                        .iter()
-                        .find(|l| l.id == lid)
-                        .map(|l| l.name.as_str())
-                });
-                let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
-                    cfg,
-                    &snapshot,
-                    m,
-                    manual_hall,
-                    called_hall,
-                    call.is_some(),
-                    tablet.queue_order_store(),
-                );
-                (key, m, hall)
-            })
-            .collect();
+    )> = snapshot
+        .matches
+        .iter()
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
+        // Nur echte Paarungen – beide Mannschaften müssen feststehen.
+        .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
+        .map(|m| {
+            let call = calls.iter().find(|c| c.match_id == m.id);
+            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                cfg,
+                &snapshot,
+                m,
+                manual_hall,
+                called_hall,
+                call.is_some(),
+                tablet.queue_order_store(),
+            );
+            (key, m, hall)
+        })
+        .collect();
     ordered.sort_by_key(|(key, _, _)| *key);
 
     let candidates: Vec<PreparationCandidate> = ordered
@@ -3051,9 +3055,7 @@ pub fn auto_assign_exclude(
     match_id: i64,
     excluded: bool,
 ) -> Result<(), String> {
-    state
-        .tablet
-        .set_auto_assign_excluded(match_id, excluded);
+    state.tablet.set_auto_assign_excluded(match_id, excluded);
     Ok(())
 }
 

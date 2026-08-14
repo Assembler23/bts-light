@@ -179,9 +179,7 @@ impl AutoAssignExclusionStore {
             Err(e) => {
                 // Alles andere (Sperre, Rechte, defekter Datenträger) heißt:
                 // Es gibt einen Stand, wir kommen nur gerade nicht dran.
-                tracing::warn!(
-                    "excluded-matches.json nicht lesbar ({e}) – Stand bleibt unberührt"
-                );
+                tracing::warn!("excluded-matches.json nicht lesbar ({e}) – Stand bleibt unberührt");
                 return Ladung::Unlesbar;
             }
         };

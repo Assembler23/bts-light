@@ -326,10 +326,7 @@ pub(crate) fn apply_state_action(
             tablet.set_manual_hall(*match_id, hall);
             Ok(TlResponse::ok(0))
         }
-        A::ExcludeFromAutoAssign {
-            match_id,
-            excluded,
-        } => {
+        A::ExcludeFromAutoAssign { match_id, excluded } => {
             // Wie bei CallPreparation: ein unbekanntes Match erschiene
             // nirgends und ließe sich auch nicht zurücknehmen.
             if !known_match(*match_id) {
@@ -1418,10 +1415,7 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         } => format!("prep:{}:{}", ids(match_ids), location_id.unwrap_or(0)),
         A::RetractPreparation { match_id } => format!("prep-retract:{match_id}"),
         A::SetHall { match_id, hall } => format!("hall:{match_id}:{hall}"),
-        A::ExcludeFromAutoAssign {
-            match_id,
-            excluded,
-        } => format!("excl:{match_id}:{excluded}"),
+        A::ExcludeFromAutoAssign { match_id, excluded } => format!("excl:{match_id}:{excluded}"),
         A::AnnounceCourtCall { court_id, match_id } => {
             format!("call:{match_id}:{court_id}")
         }
@@ -1515,10 +1509,7 @@ fn action_label(action: &relay_proto::TlAction) -> String {
                 format!("Spiel {match_id} nach {hall}")
             }
         }
-        A::ExcludeFromAutoAssign {
-            match_id,
-            excluded,
-        } => format!(
+        A::ExcludeFromAutoAssign { match_id, excluded } => format!(
             "Spiel {match_id} {} Auto-Vergabe",
             if *excluded { "aus" } else { "wieder in" }
         ),
@@ -3463,9 +3454,7 @@ mod tests {
         assert!(!updates[0].team1_won, "Team 1 hat aufgegeben");
         assert!(updates[1].team1_won, "hier war es Team 2");
         // Ein nicht ausgewähltes Spiel bleibt unangetastet.
-        assert!(
-            walkover_updates(&candidates, &[11], &std::collections::HashMap::new()).len() == 1
-        );
+        assert!(walkover_updates(&candidates, &[11], &std::collections::HashMap::new()).len() == 1);
     }
 
     /// Ein Spiel, das auf einem Feld steht — Grundlage der Aufruf-Tests.
@@ -3840,7 +3829,11 @@ mod tests {
 
         let state = build_state(&tablet, &AppConfig::default(), 0, 1);
         let ids: Vec<i64> = state.queue.iter().map(|m| m.match_id).collect();
-        assert_eq!(ids, vec![3, 1, 2], "3 vorgezogen, Rest folgt BTP-Reihenfolge");
+        assert_eq!(
+            ids,
+            vec![3, 1, 2],
+            "3 vorgezogen, Rest folgt BTP-Reihenfolge"
+        );
         let manual_flags: std::collections::HashMap<i64, bool> =
             state.queue.iter().map(|m| (m.match_id, m.manual)).collect();
         assert!(manual_flags[&3], "gezogenes Match ist markiert");
@@ -4308,9 +4301,8 @@ mod tests {
             opponent: "Meier".to_string(),
             retired_is_team1: true,
         }];
-        let err =
-            plan_walkover_action(&candidates, &[99], &std::collections::HashMap::new())
-                .unwrap_err();
+        let err = plan_walkover_action(&candidates, &[99], &std::collections::HashMap::new())
+            .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::AlreadyHandled));
         assert!(!err.ok);
         // Mit einem noch vorhandenen Kandidaten geht es weiter wie bisher.

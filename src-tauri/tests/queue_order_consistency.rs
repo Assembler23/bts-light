@@ -104,7 +104,9 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
     tablet.set_snapshot(snap.clone());
     // Keine Locations im Turnier gepflegt ⇒ alle Matches lösen auf die
     // leere Halle "" auf (wie in `assign.rs`/`queue_order.rs` getestet).
-    tablet.queue_order_store().reorder("", &[1, 2, 3], 3, Some(1));
+    tablet
+        .queue_order_store()
+        .reorder("", &[1, 2, 3], 3, Some(1));
 
     let tl_ids: Vec<i64> = tl::build_state(&tablet, &config, 0, 1)
         .queue

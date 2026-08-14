@@ -959,35 +959,34 @@ async fn info_preparation_state(
         crate::tablet::assign::ManualOrderSortKey,
         &crate::btp::model::BtpMatch,
         String,
-    )> =
-        snapshot
-            .matches
-            .iter()
-            .filter(|m| {
-                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
-            })
-            .map(|m| {
-                let call = calls.iter().find(|c| c.match_id == m.id);
-                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
-                let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
-                    snapshot
-                        .locations
-                        .iter()
-                        .find(|l| l.id == lid)
-                        .map(|l| l.name.as_str())
-                });
-                let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
-                    &ctx.config,
-                    &snapshot,
-                    m,
-                    manual_hall,
-                    called_hall,
-                    call.is_some(),
-                    ctx.tablet.queue_order_store(),
-                );
-                (key, m, hall)
-            })
-            .collect();
+    )> = snapshot
+        .matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+        })
+        .map(|m| {
+            let call = calls.iter().find(|c| c.match_id == m.id);
+            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                &ctx.config,
+                &snapshot,
+                m,
+                manual_hall,
+                called_hall,
+                call.is_some(),
+                ctx.tablet.queue_order_store(),
+            );
+            (key, m, hall)
+        })
+        .collect();
     ordered.sort_by_key(|(key, _, _)| *key);
 
     let candidates: Vec<serde_json::Value> = ordered
@@ -2797,8 +2796,8 @@ mod tests {
         // Match 42 auf Feld 101, 2:0 → Feld wird freigegeben, Spieler
         // ausgecheckt (Endzeit gesetzt), Dauer aus dem Aufruf-Stempel.
         let m = match_on_court(); // court_id 101, scoring default (21/30)
-        let u =
-            build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000, None).unwrap();
+        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000, None)
+            .unwrap();
         assert_eq!(u.btp_match_id, 42);
         assert!(u.team1_won);
         assert_eq!(u.score_status, 0);
@@ -2815,7 +2814,8 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000, None).unwrap();
+        let u =
+            build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000, None).unwrap();
         assert_eq!(u.free_court_id, None);
         assert!(u.player_ids.is_empty());
         assert_eq!(u.end_ts_ms, None);
@@ -2827,16 +2827,21 @@ mod tests {
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(1);
-        assert!(build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0, None).is_err());
+        assert!(
+            build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0, None).is_err()
+        );
         // Laufender Satz (5:3) → abgelehnt (nicht regulär zu Ende).
         let m = match_on_court();
-        let err = build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0, None).unwrap_err();
+        let err =
+            build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0, None).unwrap_err();
         assert!(
             err.contains("5:3"),
             "Fehler nennt den unfertigen Satz: {err}"
         );
         // Unentschiedener Satzstand (1:1) → kein Sieger.
-        assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0, None).is_err());
+        assert!(
+            build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0, None).is_err()
+        );
     }
 
     #[test]
@@ -2845,7 +2850,8 @@ mod tests {
         // ScoreStatus 3, ein LAUFENDER Satz (5:3) bleibt erhalten (anders als
         // beim regulären Eintrag, der ihn ablehnt), Feld wird freigegeben.
         let m = match_on_court(); // court_id 101
-        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000, None).unwrap();
+        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000, None)
+            .unwrap();
         assert_eq!(u.score_status, 3);
         assert!(!u.team1_won, "disqualifiziertes Team 1 verliert");
         assert_eq!(u.sets, vec![(21, 10), (5, 3)], "Teil-Satz bleibt");

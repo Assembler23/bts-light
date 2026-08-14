@@ -285,8 +285,8 @@ mod tests {
     fn ein_zweiter_zug_verschiebt_innerhalb_des_bestehenden_blocks() {
         let store = QueueOrderStore::default();
         store.reorder("Halle A", &[1, 2, 3, 4, 5], 4, Some(2)); // -> [1,4]
-        // Effektive Reihenfolge jetzt: 1,4,2,3,5 (Präfix [1,4] + Rest in
-        // BTP-Reihenfolge) — Match 1 vor Match 2 ziehen.
+                                                                // Effektive Reihenfolge jetzt: 1,4,2,3,5 (Präfix [1,4] + Rest in
+                                                                // BTP-Reihenfolge) — Match 1 vor Match 2 ziehen.
         store.reorder("Halle A", &[1, 4, 2, 3, 5], 1, Some(2));
         assert_eq!(store.rank("Halle A", 4), Some(0));
         assert_eq!(store.rank("Halle A", 1), Some(1));

@@ -529,7 +529,12 @@ impl SyncEngine {
     /// auf (kein Auto-Insert). Wird das Match zugewiesen/beendet oder
     /// verschwindet es aus dem Snapshot, steht es in keiner Halle mehr im
     /// `keep`-Set und wird komplett entfernt. Kein BTP-Write, rein lokal.
-    fn reconcile_queue_order(&self, config: &AppConfig, tablet: &TabletState, snapshot: &BtpSnapshot) {
+    fn reconcile_queue_order(
+        &self,
+        config: &AppConfig,
+        tablet: &TabletState,
+        snapshot: &BtpSnapshot,
+    ) {
         let manual = tablet.manual_halls();
         let calls = tablet.preparation_calls();
         let mut keep_by_hall: HashMap<String, HashSet<i64>> = HashMap::new();
@@ -548,8 +553,13 @@ impl SyncEngine {
                     .find(|l| l.id == lid)
                     .map(|l| l.name.as_str())
             });
-            let (hall, _) =
-                crate::tablet::assign::hall_for_match(config, snapshot, m, manual_hall, called_hall);
+            let (hall, _) = crate::tablet::assign::hall_for_match(
+                config,
+                snapshot,
+                m,
+                manual_hall,
+                called_hall,
+            );
             keep_by_hall.entry(hall).or_default().insert(m.id);
         }
         tablet.queue_order_store().retain(&keep_by_hall);
@@ -849,7 +859,8 @@ impl SyncEngine {
             } else {
                 tracing::info!(
                     "Feld {court_id}: Spiel {} beendet — {:?} rücken ans Ende der Rotation",
-                    fm.id, fertig
+                    fm.id,
+                    fertig
                 );
             }
             store.move_to_end(&fertig);
@@ -1401,7 +1412,11 @@ impl SyncEngine {
     }
 
     /// Plant das nächste Update gegen den zuletzt gesendeten Stand.
-    fn plan(&self, current: &BtpSnapshot, ctx: &crate::badhub::payload::LivetickerContext) -> Update {
+    fn plan(
+        &self,
+        current: &BtpSnapshot,
+        ctx: &crate::badhub::payload::LivetickerContext,
+    ) -> Update {
         diff(self.last_pushed.as_ref(), current, self.rid, ctx)
     }
 
@@ -1487,14 +1502,26 @@ mod tests {
     #[test]
     fn first_plan_is_always_full() {
         let engine = SyncEngine::new();
-        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::Full(_)));
+        assert!(matches!(
+            engine.plan(
+                &snapshot(),
+                &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
     }
 
     #[test]
     fn unchanged_snapshot_after_success_plans_nothing() {
         let mut engine = SyncEngine::new();
         engine.on_success(snapshot());
-        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::None));
+        assert!(matches!(
+            engine.plan(
+                &snapshot(),
+                &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::None
+        ));
     }
 
     #[test]
@@ -1502,10 +1529,22 @@ mod tests {
         let mut engine = SyncEngine::new();
         engine.on_success(snapshot());
         // Ohne Fehler wäre ein unveränderter Snapshot ein No-op …
-        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::None));
+        assert!(matches!(
+            engine.plan(
+                &snapshot(),
+                &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::None
+        ));
         // … nach einem Push-Fehler aber wird wieder voll gesendet.
         engine.on_failure();
-        assert!(matches!(engine.plan(&snapshot(), &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())), Update::Full(_)));
+        assert!(matches!(
+            engine.plan(
+                &snapshot(),
+                &crate::badhub::payload::LivetickerContext::bare(&AppConfig::default())
+            ),
+            Update::Full(_)
+        ));
     }
 
     #[test]
@@ -1748,8 +1787,14 @@ mod tests {
             Vec::new(),
         );
         engine.reconcile_auto_assign_exclusions(&tablet, &snap);
-        assert!(!tablet.auto_assign_excluded(7), "beendetes Match aufgeräumt");
-        assert!(tablet.auto_assign_excluded(8), "laufendes Match bleibt ausgenommen");
+        assert!(
+            !tablet.auto_assign_excluded(7),
+            "beendetes Match aufgeräumt"
+        );
+        assert!(
+            tablet.auto_assign_excluded(8),
+            "laufendes Match bleibt ausgenommen"
+        );
 
         // Match 8 verschwindet ganz aus dem Snapshot (z. B. gelöscht) —
         // auch das räumt auf.
@@ -1765,9 +1810,7 @@ mod tests {
         // dem Snapshot verschwindet.
         let engine = SyncEngine::new();
         let tablet = TabletState::default();
-        tablet
-            .queue_order_store()
-            .reorder("", &[7, 8], 7, Some(8));
+        tablet.queue_order_store().reorder("", &[7, 8], 7, Some(8));
         assert_eq!(tablet.queue_order_store().rank("", 7), Some(0));
 
         let snap = snap_with(
@@ -1779,7 +1822,11 @@ mod tests {
             Vec::new(),
         );
         engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
-        assert_eq!(tablet.queue_order_store().rank("", 7), None, "beendetes Match aufgeräumt");
+        assert_eq!(
+            tablet.queue_order_store().rank("", 7),
+            None,
+            "beendetes Match aufgeräumt"
+        );
 
         // Match 8 verschwindet ganz aus dem Snapshot.
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
@@ -1795,9 +1842,7 @@ mod tests {
         // in der neuen wieder auf.
         let engine = SyncEngine::new();
         let tablet = TabletState::default();
-        tablet
-            .queue_order_store()
-            .reorder("Halle A", &[7], 7, None);
+        tablet.queue_order_store().reorder("Halle A", &[7], 7, None);
         assert_eq!(tablet.queue_order_store().rank("Halle A", 7), Some(0));
 
         // Match 7 bekommt jetzt von Hand die Halle "Halle B".
@@ -1835,7 +1880,10 @@ mod tests {
         tablet.set_auto_assign_excluded(7, true);
         let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
-        assert!(courts.is_empty(), "ausgenommenes Match bleibt unberücksichtigt");
+        assert!(
+            courts.is_empty(),
+            "ausgenommenes Match bleibt unberücksichtigt"
+        );
 
         // Reaktiviert: wird beim nächsten Zyklus wieder berücksichtigt.
         tablet.set_auto_assign_excluded(7, false);
@@ -2006,7 +2054,11 @@ mod tests {
 
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert_eq!(courts.len(), 1);
-        assert_eq!(courts[0].match_id, Some(7), "manueller Vorrang schlägt PlannedTime");
+        assert_eq!(
+            courts[0].match_id,
+            Some(7),
+            "manueller Vorrang schlägt PlannedTime"
+        );
     }
 
     #[test]
@@ -2317,7 +2369,12 @@ mod tests {
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         let too_old = BTP_RETRY_MAX_AGE.as_millis() as u64 + 1;
         assert_eq!(
-            prepare_btp_retry(&pending(7, None, 0), &snap, too_old, &TabletState::default()),
+            prepare_btp_retry(
+                &pending(7, None, 0),
+                &snap,
+                too_old,
+                &TabletState::default()
+            ),
             RetryAction::Drop("Eintrag zu alt")
         );
     }

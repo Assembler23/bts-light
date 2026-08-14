@@ -32,7 +32,11 @@ pub struct LivetickerContext<'a> {
 }
 
 impl<'a> LivetickerContext<'a> {
-    pub fn new(config: &'a AppConfig, manual_halls: HashMap<i64, String>, order: &'a QueueOrderStore) -> Self {
+    pub fn new(
+        config: &'a AppConfig,
+        manual_halls: HashMap<i64, String>,
+        order: &'a QueueOrderStore,
+    ) -> Self {
         Self {
             config,
             manual_halls,
@@ -546,7 +550,11 @@ mod tests {
                 sample_match(3, MatchStatus::Scheduled, None),
             ],
         };
-        let tset = build_tset(&snapshot, 7, &LivetickerContext::bare(&AppConfig::default()));
+        let tset = build_tset(
+            &snapshot,
+            7,
+            &LivetickerContext::bare(&AppConfig::default()),
+        );
         assert_eq!(tset.kind, "tset");
         assert_eq!(tset.rid, 7);
         assert_eq!(tset.event.matches.len(), 1);
@@ -568,7 +576,13 @@ mod tests {
             officials: Vec::new(),
             matches: vec![sample_match(14, MatchStatus::OnCourt, Some("1"))],
         };
-        let m = &build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.matches[0];
+        let m = &build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .matches[0];
         assert_eq!(m.id, "btp_14");
         assert_eq!(m.n, "HE G1");
         assert_eq!(m.s, vec![[21, 19], [21, 15]]);
@@ -604,7 +618,13 @@ mod tests {
             officials: Vec::new(),
             matches: vec![early, late, unstamped],
         };
-        let finished = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.recent_finished_matches;
+        let finished = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .recent_finished_matches;
         // early + late bleiben, unstamped fällt raus; neueste zuerst.
         assert_eq!(finished.len(), 2);
         assert_eq!(finished[0].id, "btp_2");
@@ -633,7 +653,13 @@ mod tests {
             officials: Vec::new(),
             matches: vec![a, b],
         };
-        let finished = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.recent_finished_matches;
+        let finished = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .recent_finished_matches;
         assert_eq!(finished[0].id, "btp_2");
         assert_eq!(finished[1].id, "btp_1");
     }
@@ -654,7 +680,13 @@ mod tests {
                 sample_match(6, MatchStatus::OnCourt, Some("1")),
             ],
         };
-        let upcoming = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.upcoming_matches;
+        let upcoming = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .upcoming_matches;
         assert_eq!(upcoming.len(), 1);
         assert_eq!(upcoming[0].id, "btp_5");
         assert_eq!(upcoming[0].match_num, Some(5));
@@ -692,12 +724,16 @@ mod tests {
             officials: Vec::new(),
             matches: vec![viel_spaeter, spaet, frueh],
         };
-        let ids: Vec<String> = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default()))
-            .event
-            .upcoming_matches
-            .into_iter()
-            .map(|m| m.id)
-            .collect();
+        let ids: Vec<String> = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .upcoming_matches
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
         assert_eq!(
             ids,
             vec!["btp_1", "btp_2", "btp_3"],
@@ -727,7 +763,13 @@ mod tests {
             officials: Vec::new(),
             matches: vec![uncalled, called],
         };
-        let upcoming = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.upcoming_matches;
+        let upcoming = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .upcoming_matches;
         assert_eq!(upcoming.len(), 2);
         // Gerufenes Match zuerst, trotz höherer Spielnummer.
         assert_eq!(upcoming[0].id, "btp_5");
@@ -775,7 +817,11 @@ mod tests {
             .into_iter()
             .map(|m| m.id)
             .collect();
-        assert_eq!(ids, vec!["btp_7", "btp_1"], "manueller Präfix schlägt PlannedTime");
+        assert_eq!(
+            ids,
+            vec!["btp_7", "btp_1"],
+            "manueller Präfix schlägt PlannedTime"
+        );
     }
 
     #[test]
@@ -796,7 +842,13 @@ mod tests {
                 sample_match(3, MatchStatus::Scheduled, None),
             ],
         };
-        let upcoming = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.upcoming_matches;
+        let upcoming = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .upcoming_matches;
         // sample_match setzt match_num = id → nach Nummer sortiert: 3, 7.
         assert_eq!(upcoming[0].id, "btp_3");
         assert_eq!(upcoming[1].id, "btp_7");
@@ -815,7 +867,12 @@ mod tests {
             officials: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
-        let json = serde_json::to_string(&build_tset(&snapshot, 42, &LivetickerContext::bare(&AppConfig::default()))).unwrap();
+        let json = serde_json::to_string(&build_tset(
+            &snapshot,
+            42,
+            &LivetickerContext::bare(&AppConfig::default()),
+        ))
+        .unwrap();
         assert!(json.contains(r#""type":"tset""#));
         assert!(json.contains(r#""recent_finished_matches":[]"#));
         assert!(json.contains(r#""upcoming_matches":[]"#));
@@ -845,7 +902,13 @@ mod tests {
             officials: Vec::new(),
             matches: vec![walkover, regular],
         };
-        let finished = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default())).event.recent_finished_matches;
+        let finished = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .recent_finished_matches;
         let by_id = |id: &str| finished.iter().find(|m| m.id == id).unwrap();
         assert_eq!(by_id("btp_1").outcome, Some("walkover"));
         assert_eq!(by_id("btp_2").outcome, None);
@@ -882,7 +945,11 @@ mod tests {
             entries: Vec::new(),
             officials: Vec::new(),
         };
-        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default()));
+        let tset = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        );
         assert_eq!(tset.event.courts.len(), 1);
         assert_eq!(tset.event.courts[0].num, "1");
         assert_eq!(tset.event.courts[0].hall, "Halle 2");
@@ -903,7 +970,11 @@ mod tests {
             officials: Vec::new(),
             matches: vec![sample_match(1, MatchStatus::OnCourt, Some("1"))],
         };
-        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&AppConfig::default()));
+        let tset = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        );
         assert_eq!(tset.event.courts[0].hall, "");
     }
 

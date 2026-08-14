@@ -156,8 +156,14 @@ pub fn resolve_and_sort_key(
 ) -> (String, HallSource, ManualOrderSortKey) {
     let (hall, source) = hall_for_match(config, snap, m, manual_hall, called_hall);
     let rank = order.rank(&hall, m.id);
-    let key =
-        sort_key_with_manual_order(called, rank, m.planned_time, Some(m.draw_id), m.match_num, m.id);
+    let key = sort_key_with_manual_order(
+        called,
+        rank,
+        m.planned_time,
+        Some(m.draw_id),
+        m.match_num,
+        m.id,
+    );
     (hall, source, key)
 }
 
@@ -1454,7 +1460,8 @@ mod tests {
         // Blocker 1 der Klärung: der Präfix wirkt nur INNERHALB der noch
         // nicht gerufenen Spiele — ein Aufruf sticht immer.
         let called = sort_key_with_manual_order(true, None, Some(2), Some(2), Some(2), 2);
-        let praefix_erster = sort_key_with_manual_order(false, Some(0), Some(1), Some(1), Some(1), 1);
+        let praefix_erster =
+            sort_key_with_manual_order(false, Some(0), Some(1), Some(1), Some(1), 1);
         assert!(called < praefix_erster, "gerufen schlägt Präfix-Rang 0");
     }
 
@@ -1496,14 +1503,19 @@ mod tests {
         let mut frueh = a_match(1);
         frueh.planned_time = Some(202_608_071_200); // früh angesetzt
 
-        let s = snap(Vec::new(), vec![vorgezogen.clone(), frueh.clone()], Vec::new());
+        let s = snap(
+            Vec::new(),
+            vec![vorgezogen.clone(), frueh.clone()],
+            Vec::new(),
+        );
         let config = AppConfig::default();
         let order = QueueOrderStore::default();
         order.reorder("", &[1, 4], 4, Some(1)); // Match 4 vor Match 1 ziehen
 
         let (hall_vorgezogen, _, key_vorgezogen) =
             resolve_and_sort_key(&config, &s, &vorgezogen, None, None, false, &order);
-        let (_, _, key_frueh) = resolve_and_sort_key(&config, &s, &frueh, None, None, false, &order);
+        let (_, _, key_frueh) =
+            resolve_and_sort_key(&config, &s, &frueh, None, None, false, &order);
         assert_eq!(hall_vorgezogen, "", "Halle wird mit zurückgegeben");
         assert!(
             key_vorgezogen < key_frueh,
