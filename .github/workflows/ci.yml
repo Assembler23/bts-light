@@ -66,6 +66,12 @@ jobs:
       - name: Asset-Syntax (JS in HTML)
         run: node scripts/check-asset-syntax.mjs
 
+      # Baseline der Feld-Ansage: Ein leerer erster Abruf (Sync-Lauf hat noch
+      # keinen BTP-Schnappschuss) darf nicht als Baseline gelten — sonst sagt
+      # die App beim Start alle laufenden Spiele an (Befund 14.08.2026).
+      - name: Ansage-Baseline (JS)
+        run: node scripts/test-announce-baseline.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)
