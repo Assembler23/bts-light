@@ -716,26 +716,33 @@ toggelt nichts). Die Queue lebt im Speicher — ein App-Neustart leert sie
 (das Tablet hält sein Ergebnis ohnehin bis zum `ok:true`). Bei bestätigt
 leerem Turnier-Stand (Leer-Snapshot-Guard) pausiert der Nachschub.
 
-### Officials schreiben (Umsetzung ab v0.9.201)
+### Officials schreiben (Umsetzung ab v0.9.201, überarbeitet v0.9.202)
 
-Zwei Formen, beide am 13.08.2026 gemessen und angenommen:
+Eine Wire-Form für beide Anlässe (`proto.rs::court_assign_request` mit
+`MatchCourt`-Knoten): `Match{ID, DrawID, PlanningID, CourtID,
+[Official1ID, Official2ID]}`, `0` löscht Dienst bzw. Feldzuordnung. Ohne
+`Status` (Check-in-Bitfeld, Regression v0.9.103) und ohne Ergebnisfelder.
+BTP übernimmt asynchron (≤ 1 s) — zurückgelesen wird über den nächsten
+Snapshot, nicht per Einmal-Check.
 
-- **eigenständig** (`proto.rs::officials_request`) — `Match{ID, DrawID,
-  PlanningID, Official1ID, Official2ID}`, `0` löscht den Dienst;
-- **eingebettet** in `court_assign_request` beim Ruf aufs Feld
-  (`MatchCourt::officials`, additiv).
+- **eigenständig** (`sync.rs::reconcile_officials`) — leerer `Courts`-Block,
+  nur `Matches`, `CourtID` immer aus dem aktuellen Snapshot mitgeschrieben
+  (`m.court_id.unwrap_or(0)`).
+- **eingebettet** beim Ruf aufs Feld — zusätzlich der `Courts`-Block
+  (`MatchCourt::officials` additiv).
 
-Beide **ohne** `Status` (Check-in-Bitfeld, Regression v0.9.103) und ohne
-Ergebnisfelder. BTP übernimmt asynchron (≤ 1 s) — zurückgelesen wird über
-den nächsten Snapshot, nicht per Einmal-Check.
+**Race mit einer frischen Feldzuweisung, behoben (Live-Befund 14.08.2026,
+verschärft/bestätigt nach einem verworfenen Zwischenfix).** Ursprünglich
+schickte die eigenständige Form **kein** `CourtID`-Feld (Muster
+`officials_request`, mittlerweile entfernt). Folgte dieser Write binnen
+Sekunden auf ein `court_assign_request` **desselben** Matches, verlor BTP
+dabei die eben erst angekommene `CourtID` wieder — zwei `SENDUPDATE`s zum
+selben Match in enger Folge brachten BTPs eigene Persistenz durcheinander.
 
-**Race mit einer frischen Feldzuweisung (Live-Befund 14.08.2026).** Die
-Messung oben lief isoliert. Am laufenden Turnier zeigte sich: Folgt die
-eigenständige Form binnen Sekunden auf ein `court_assign_request` **desselben**
-Matches, verliert BTP dabei die eben erst angekommene `CourtID` wieder —
-obwohl die eigenständige Form gar kein `CourtID`-Feld sendet. Zwei
-`SENDUPDATE`s zum selben Match in enger Folge bringen BTPs eigene Persistenz
-durcheinander, unabhängig davon, welche Felder der zweite Request trägt.
-Mitigation: `officials_entries` (`sync.rs`) lässt ein frisch aufs Feld
-gerufenes Match `OFFICIALS_COURT_SETTLE_MS` (10 s) lang unangetastet, siehe
-[schiedsrichter-management.md](schiedsrichter-management.md#karenzzeit-nach-frischer-feldzuweisung-live-befund-14082026).
+Ein erster Fix (feste Karenzzeit, 10 s) reichte nicht: Am selben Turnier
+gemessen lag der tatsächliche Abstand zwischen Feldzuweisung und
+eigenständigem Schiedsrichter-Write teils bei 11–18 s. **Der eigentliche
+Fix:** Die eigenständige Form schreibt die `CourtID` jetzt immer mit — dann
+ist die Reihenfolge zweier Requests zum selben Match folgenlos, egal wie
+knapp oder weit sie zeitlich auseinanderliegen. Details:
+[schiedsrichter-management.md](schiedsrichter-management.md#courtid-immer-mitschreiben-live-befund-14082026).

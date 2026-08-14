@@ -24,18 +24,6 @@ use crate::tablet::state::TabletState;
 /// schließt und die Heartbeats ausbleiben.
 const HEARTBEAT_AFTER: Duration = Duration::from_secs(60);
 
-/// Karenzzeit, bevor eine frisch aufs Feld gerufene Paarung erneut Ziel des
-/// eigenständigen Schiedsrichter-Abgleichs wird (Live-Befund 14.08.2026,
-/// Turnier mit zwei Hallen: Match 1216/Feld 8). Die Feldzuweisung schreibt
-/// die Besetzung schon eingebettet mit (`plan_court_action`); folgt binnen
-/// Sekunden ein zweites, eigenständiges `SENDUPDATE` zum selben Match (nur
-/// Officials, kein `CourtID`), verliert BTP dabei beobachtbar die eben erst
-/// angekommene Feldzuweisung wieder — zwei Writes zum selben Match in enger
-/// Folge bringen BTPs eigene Persistenz durcheinander. Die Karenzzeit gibt
-/// der eingebetteten Besetzung Zeit, in BTP anzukommen, bevor hier
-/// nachkorrigiert wird.
-const OFFICIALS_COURT_SETTLE_MS: u64 = 10_000;
-
 /// Aktuelle Zeit in Unix-Millisekunden.
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -230,29 +218,27 @@ fn prepare_btp_retry(
 /// nicht erneut, was schon geschrieben und von BTP noch nicht
 /// zurückgemeldet wurde (`geschrieben`); BTP übernimmt asynchron (≤1 s,
 /// Messung 13.08.2026), sonst liefe jeder Zyklus in denselben Write.
+///
+/// **Schreibt immer die aktuelle `CourtID` mit** (Live-Befund 14.08.2026,
+/// siehe [`MatchCourt::court_id`]): Ein früherer, das Feld weglassender
+/// Write liess BTP beobachtbar die gerade erst angekommene Feldzuweisung
+/// wieder verlieren, wenn er kurz nach ihr auf demselben Match landete —
+/// unabhängig davon, wie kurz „kurz" war (eine testweise Karenzzeit von
+/// 10 s reichte am laufenden Turnier nicht). Reasserted der Write
+/// stattdessen dieselbe `CourtID`, die der Snapshot gerade zeigt, ist die
+/// Reihenfolge der beiden Requests folgenlos — eine Wartezeit erübrigt
+/// sich.
 fn officials_entries(
     tablet: &TabletState,
     snapshot: &BtpSnapshot,
     geschrieben: &HashMap<i64, (i64, i64)>,
-    now_ms: u64,
-) -> Vec<crate::btp::proto::OfficialsEntry> {
+) -> Vec<crate::btp::proto::MatchCourt> {
     let store = tablet.officials_store();
     if !store.enabled() {
         return Vec::new();
     }
     let mut out = Vec::new();
     for m in &snapshot.matches {
-        // Frisch aufs Feld gerufen? Siehe OFFICIALS_COURT_SETTLE_MS — der
-        // eigenständige Write muss der eingebetteten Besetzung aus der
-        // Feldzuweisung erst Zeit geben, sonst gefährdet er die gerade
-        // angekommene CourtID.
-        if let Some(court_id) = m.court_id {
-            if let Some(since) = tablet.on_court_since_ms(court_id, m.id) {
-                if now_ms.saturating_sub(since) < OFFICIALS_COURT_SETTLE_MS {
-                    continue;
-                }
-            }
-        }
         let Some((sr, ar)) = tablet.officials_for_write(m) else {
             continue;
         };
@@ -260,12 +246,12 @@ fn officials_entries(
         if ist == (sr, ar) || geschrieben.get(&m.id) == Some(&(sr, ar)) {
             continue;
         }
-        out.push(crate::btp::proto::OfficialsEntry {
+        out.push(crate::btp::proto::MatchCourt {
             match_id: m.id,
             draw_id: m.draw_id,
             planning_id: m.planning_id,
-            official1_id: sr,
-            official2_id: ar,
+            court_id: m.court_id.unwrap_or(0),
+            officials: Some((sr, ar)),
         });
     }
     out
@@ -475,7 +461,7 @@ impl SyncEngine {
         for m in &snapshot.matches {
             store.confirm(m.id, m.official1_id, m.official2_id);
         }
-        let entries = officials_entries(tablet, snapshot, &self.officials_written, now_ms());
+        let entries = officials_entries(tablet, snapshot, &self.officials_written);
         if entries.is_empty() {
             // Aufräumen: Was BTP inzwischen trägt, muss nicht länger als
             // „geschrieben" gemerkt werden (sonst wüchse die Karte über das
@@ -491,8 +477,9 @@ impl SyncEngine {
                     entries.len()
                 );
                 for e in &entries {
-                    self.officials_written
-                        .insert(e.match_id, (e.official1_id, e.official2_id));
+                    if let Some(officials) = e.officials {
+                        self.officials_written.insert(e.match_id, officials);
+                    }
                 }
             }
             // Nicht übernehmen → nächster Zyklus versucht es erneut.
@@ -2211,23 +2198,22 @@ mod tests {
             .officials_store()
             .assign(11, crate::tablet::officials::OfficialRole::Sr, 2);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new(), 0);
+        let offen = officials_entries(&tablet, &snap, &HashMap::new());
         assert_eq!(offen.len(), 1, "nur Match 10 weicht ab");
         assert_eq!(offen[0].match_id, 10);
         assert_eq!(offen[0].draw_id, 3);
         assert_eq!(offen[0].planning_id, 1002);
-        assert_eq!(offen[0].official1_id, 1);
-        assert_eq!(offen[0].official2_id, 0, "kein AR ⇒ 0");
+        assert_eq!(offen[0].officials, Some((1, 0)), "kein AR ⇒ 0");
 
         // Schon geschrieben (und von BTP noch nicht zurückgemeldet) ⇒ nicht
         // erneut schreiben, sonst liefe jeder Zyklus in denselben Write.
         let mut geschrieben = HashMap::new();
         geschrieben.insert(10i64, (1i64, 0i64));
-        assert!(officials_entries(&tablet, &snap, &geschrieben, 0).is_empty());
+        assert!(officials_entries(&tablet, &snap, &geschrieben).is_empty());
 
         // Ohne Schiedsrichter-Betrieb wird gar nichts geschrieben.
         tablet.officials_store().set_enabled(false);
-        assert!(officials_entries(&tablet, &snap, &HashMap::new(), 0).is_empty());
+        assert!(officials_entries(&tablet, &snap, &HashMap::new()).is_empty());
     }
 
     #[test]
@@ -2247,22 +2233,27 @@ mod tests {
             .officials_store()
             .clear_assignment(10, crate::tablet::officials::OfficialRole::Sr);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new(), 0);
+        let offen = officials_entries(&tablet, &snap, &HashMap::new());
         assert_eq!(offen.len(), 1);
         assert_eq!(
-            offen[0].official1_id, 0,
+            offen[0].officials,
+            Some((0, 0)),
             "das ausdrückliche Lösen geht als 0 nach BTP — sonst bliebe der \
              Schiedsrichter dort für immer stehen"
         );
     }
 
     #[test]
-    fn officials_entries_waits_out_a_fresh_court_assignment_before_correcting() {
-        // Live-Befund 14.08.2026 (Zwei-Hallen-Turnier, Match 1216/Feld 8): Ein
-        // eigenständiges Schiedsrichter-SENDUPDATE direkt nach einer frischen
-        // Feldzuweisung ließ BTP die eben erst angekommene CourtID wieder
-        // verlieren. Der Abgleich muss der eingebetteten Besetzung aus der
-        // Feldzuweisung (`plan_court_action`) erst Zeit geben.
+    fn officials_entries_always_reasserts_the_current_court_id() {
+        // Live-Befund 14.08.2026 (Zwei-Hallen-Turnier, Match 1216/Feld 8,
+        // erneut beobachtet nach einer testweise eingeführten 10s-Karenzzeit
+        // — der Abstand zum zweiten Write war real z. T. 11–18s, eine feste
+        // Wartezeit reicht also nicht): Ein eigenständiges
+        // Schiedsrichter-SENDUPDATE, das die CourtID wegliess, ließ BTP die
+        // gerade erst angekommene Feldzuweisung verlieren. Der Abgleich
+        // schreibt die aktuelle CourtID deshalb IMMER mit (siehe
+        // `MatchCourt::court_id`) — dann ist die Reihenfolge zweier Writes
+        // zum selben Match folgenlos, unabhängig vom zeitlichen Abstand.
         let tablet = TabletState::default();
         tablet.officials_store().set_enabled(true);
         let mut m = oncourt_named(10, 8, "A", "B"); // Feld 8
@@ -2274,39 +2265,29 @@ mod tests {
             .officials_store()
             .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
 
-        // Frisch aufs Feld gerufen, dieser Poll-Zyklus.
-        let mut oncourt = HashMap::new();
-        oncourt.insert(8i64, 10i64);
-        tablet.reconcile_on_court(&oncourt, 1_000);
-
-        // Innerhalb der Karenzzeit: BTP zeigt die Besetzung noch nicht, aber
-        // kein zweites SENDUPDATE fürs selbe Match — die Feldzuweisung selbst
-        // hat sie schon eingebettet mitgeschrieben.
-        assert!(
-            officials_entries(
-                &tablet,
-                &snap,
-                &HashMap::new(),
-                1_000 + OFFICIALS_COURT_SETTLE_MS - 1
-            )
-            .is_empty(),
-            "innerhalb der Karenzzeit darf kein zweites SENDUPDATE fürs selbe Match raus"
-        );
-
-        // Nach der Karenzzeit zeigt BTP die Besetzung immer noch nicht →
-        // jetzt greift der Abgleich wie gehabt.
-        let offen = officials_entries(
-            &tablet,
-            &snap,
-            &HashMap::new(),
-            1_000 + OFFICIALS_COURT_SETTLE_MS,
-        );
+        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        assert_eq!(offen.len(), 1);
         assert_eq!(
-            offen.len(),
-            1,
-            "nach der Karenzzeit korrigiert der Abgleich wieder"
+            offen[0].court_id, 8,
+            "die aktuell bekannte CourtID reist immer mit, egal wie kurz nach der \
+             Feldzuweisung der Abgleich schreibt"
         );
-        assert_eq!(offen[0].match_id, 10);
+        assert_eq!(offen[0].officials, Some((1, 0)));
+
+        // Ein Match, das noch nie auf einem Feld stand, schreibt 0 — das ist
+        // dieselbe „nicht gepflegt"-Bedeutung, die BTP dort ohnehin zeigt,
+        // keine Löschung einer echten Zuweisung.
+        let mut ohne_feld = ready_named(20, None, "C", "D");
+        ohne_feld.draw_id = 3;
+        ohne_feld.planning_id = 2001;
+        let snap2 = snap_officials(vec![ohne_feld], &[1, 2]);
+        tablet.set_snapshot(snap2.clone());
+        tablet
+            .officials_store()
+            .assign(20, crate::tablet::officials::OfficialRole::Sr, 2);
+        let offen2 = officials_entries(&tablet, &snap2, &HashMap::new());
+        assert_eq!(offen2.len(), 1);
+        assert_eq!(offen2[0].court_id, 0);
     }
 
     // --- Schiedsrichter-Rotation (Spec schiedsrichter-management, Nr. 4) ---

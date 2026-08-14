@@ -1115,7 +1115,12 @@ fn parse_matches(
         let draw_id = child_int(m, "DrawID");
         let resolve =
             |planning: Option<i64>| resolve_team(draw_id, planning, slots, entries, players);
-        let court_id = child_int(m, "CourtID");
+        // `0` gilt wie bei `LocationID` als „nicht gepflegt" — ein Match ist
+        // sonst fälschlich OnCourt, sobald BTP einmal ein explizites
+        // `<CourtID>0</CourtID>` statt des Weglassens sendet (Code-Review-
+        // Fund 14.08.2026: mehrere Stellen verlassen sich inzwischen auf
+        // „None heißt wirklich nie zugewiesen").
+        let court_id = child_int(m, "CourtID").filter(|&id| id > 0);
         let court = court_id.and_then(|id| courts.get(&id).cloned());
         // BTP nutzt Winner=0 als „noch kein Sieger" — nur 1/2 sind echte
         // Sieger. Sonst gälte ein Match mit Winner=0 fälschlich als entschieden

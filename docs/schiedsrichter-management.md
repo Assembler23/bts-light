@@ -287,22 +287,27 @@ Azure-Pfad XML-escaped im SSML. Damit sagen sie Wort für Wort dasselbe.
 
 ## Rücksync nach BTP (Schritt 11, ADR 0021)
 
-Jede Änderung der Besetzung geht nach BTP — auf zwei Wegen:
+Jede Änderung der Besetzung geht nach BTP — beide Wege laufen über
+**dieselbe** Wire-Form, `proto.rs::court_assign_request` mit
+`MatchCourt`-Knoten (Identität + `CourtID` + optional `Official1ID`/
+`Official2ID`), **kein** `Status`-Feld (Check-in-Bitfeld, Regression
+v0.9.103). Löschen eines Dienstes ist die `0`.
 
-1. **Eigenständig**, `proto.rs::officials_request` (Muster
-   `highlight_request`): Identität (`ID`, `DrawID`, `PlanningID`) plus
-   `Official1ID`/`Official2ID`, sonst nichts. Löschen ist die `0`; **kein**
-   `Status`-Feld (Check-in-Bitfeld, Regression v0.9.103).
-   Der Sync-Loop ruft `reconcile_officials` direkt nach den Highlights: Es
-   geht nur der **Unterschied** raus, der Stand wird nur bei `Ok`
-   übernommen, ein Fehlschlag wird im nächsten Zyklus wiederholt. Weil BTP
-   asynchron übernimmt (≤ 1 s, Messung 13.08.2026), merkt sich die Engine
-   das Geschriebene, bis der Snapshot nachzieht.
-2. **Eingebettet** beim Ruf aufs Feld: `court_assign_request` trägt die
-   Officials additiv mit (`MatchCourt::officials`), verdrahtet an allen drei
-   Einstiegen (`commands.rs::assign_court`, `sync.rs::auto_assign`,
-   TL-Web-Pfad in `tl.rs`). Ohne Schiedsrichter-Betrieb bleibt der Request
-   **exakt** wie im Bestand — dann steht dort kein zusätzliches Feld.
+1. **Eigenständig**, aus `sync.rs::reconcile_officials`/`officials_entries`:
+   leerer `Courts`-Block, nur der `Matches`-Block. Der Sync-Loop ruft
+   `reconcile_officials` direkt nach den Highlights: Es geht nur der
+   **Unterschied** raus, der Stand wird nur bei `Ok` übernommen, ein
+   Fehlschlag wird im nächsten Zyklus wiederholt. Weil BTP asynchron
+   übernimmt (≤ 1 s, Messung 13.08.2026), merkt sich die Engine das
+   Geschriebene, bis der Snapshot nachzieht. **Trägt immer die aktuell
+   bekannte `CourtID` mit** (`m.court_id.unwrap_or(0)` aus dem Snapshot) —
+   dazu mehr im Abschnitt „CourtID immer mitschreiben" unten.
+2. **Eingebettet** beim Ruf aufs Feld: derselbe `court_assign_request` trägt
+   dann zusätzlich den `Courts`-Block, die Officials additiv
+   (`MatchCourt::officials`), verdrahtet an allen drei Einstiegen
+   (`commands.rs::assign_court`, `sync.rs::auto_assign`, TL-Web-Pfad in
+   `tl.rs`). Ohne Schiedsrichter-Betrieb bleibt der Request **exakt** wie im
+   Bestand — dann steht dort kein zusätzliches Feld.
 
 ### Anzeigen und Schreiben folgen verschiedenen Regeln
 
@@ -329,23 +334,46 @@ nicht wörtlich gilt:
   den Rest des Turniers. Die Einsatz-Ableitung verliert dabei nichts: Sie
   liest denselben Wert dann aus dem BTP-Match.
 
-### Karenzzeit nach frischer Feldzuweisung (Live-Befund 14.08.2026)
+### CourtID immer mitschreiben (Live-Befund 14.08.2026)
 
-Ein eigenständiges Schiedsrichter-`SENDUPDATE` (Weg 1 oben), das binnen
-Sekunden auf ein **gerade erst** geschriebenes `court_assign_request`
-desselben Matches folgt, ließ BTP an einem laufenden Zwei-Hallen-Turnier
-beobachtbar die eben erst angekommene `CourtID` wieder verlieren (Match
-1216, Feld 8: zugewiesen, im nächsten Poll bestätigt, acht Sekunden später
-wieder leer — ohne dass irgendein Gerät das Feld freigegeben hätte). Zwei
+Ein eigenständiges Schiedsrichter-`SENDUPDATE`, das **kein** `CourtID`-Feld
+trug, ließ BTP an einem laufenden Zwei-Hallen-Turnier beobachtbar die eben
+erst angekommene Feldzuweisung wieder verlieren, wenn es kurz nach einem
+`court_assign_request` desselben Matches folgte (Match 1216, Feld 8:
+zugewiesen, im nächsten Poll bestätigt, wenige Sekunden später wieder
+leer — ohne dass irgendein Gerät das Feld freigegeben hätte). Zwei
 `SENDUPDATE`s zum selben Match in enger Folge bringen BTPs eigene
-Persistenz durcheinander, obwohl der zweite Request gar kein `CourtID`-Feld
-trägt.
+Persistenz durcheinander.
 
-`officials_entries` (`sync.rs`) lässt ein Match deshalb `OFFICIALS_COURT_SETTLE_MS`
-(10 s) in Ruhe, nachdem es laut `TabletState::on_court_since_ms` neu auf ein
-Feld gekommen ist — die eingebettete Besetzung aus der Feldzuweisung selbst
-(Weg 2) bekommt so Zeit, in BTP anzukommen, bevor der eigenständige Abgleich
-nachkorrigiert. Nach Ablauf der Karenzzeit greift der Abgleich unverändert.
+**Erster Versuch (verworfen): eine feste Karenzzeit.** `officials_entries`
+ließ ein frisch zugewiesenes Match zunächst `OFFICIALS_COURT_SETTLE_MS`
+(10 s) lang in Ruhe, bevor der eigenständige Abgleich nachkorrigiert. Am
+selben Turnier gemessen: Der tatsächliche Abstand zwischen Feldzuweisung
+und eigenständigem Schiedsrichter-Write lag teils bei 11–18 s — außerhalb
+des Fensters. Eine feste Wartezeit rät nur, wie lange BTP zum Verarbeiten
+braucht, und die Antwort war „länger als vermutet, und variabel".
+
+**Fix: `court_id` reist immer mit.** `officials_entries` (`sync.rs`)
+schreibt jetzt bei **jedem** eigenständigen Write die aktuell aus dem
+Snapshot bekannte `CourtID` mit (`MatchCourt::court_id`, `0` nur bei einem
+Match, das nie auf einem Feld stand — nie zum Freigeben eines belegten
+Felds, das bleibt Aufgabe des `Courts`-Blocks). Reasserted der Write
+denselben Wert, den der zeitlich nähere `court_assign_request` gerade
+geschrieben hat, ist die Reihenfolge der beiden Requests folgenlos — eine
+Wartezeit erübrigt sich, unabhängig davon, wie lange BTP tatsächlich
+braucht. `officials_request`/`OfficialsEntry` (die CourtID-lose Wire-Form)
+sind damit entfallen.
+
+**Bewusst akzeptierter Rest-Trade-off** (Code-Review-Fund 14.08.2026): Die
+Reassertion nimmt den `court_id`-Wert aus dem **zuletzt gepollten**
+Snapshot — ändert jemand die Feldzuordnung eines Matches über einen ganz
+anderen Weg (z. B. von Hand direkt in BTP) exakt im Fenster zwischen
+diesem Poll und dem Schiedsrichter-Write, würde der Write diese Änderung
+zurücksetzen. Das Fenster ist auf einen Poll-Zyklus begrenzt und tritt nur
+ein, wenn zufällig zeitgleich ein Schiedsrichter-Unterschied ansteht —
+deutlich enger als das behobene Problem (das bei **jeder** frischen
+Feldzuweisung mit Schiedsrichter-Rotation auftrat). Keine weitere
+Mitigation vorgesehen, solange kein Turnier-Befund das Gegenteil zeigt.
 
 ### Was das Tablet erreicht
 

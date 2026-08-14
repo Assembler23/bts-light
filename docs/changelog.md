@@ -8,15 +8,19 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
 - **Schiedsrichter-Rückschreib-Race nach frischer Feldzuweisung behoben**
   (Live-Befund 14.08.2026, Zwei-Hallen-Turnier). Ein eigenständiges
-  Schiedsrichter-`SENDUPDATE` direkt nach einer Feldzuweisung ließ BTP die
-  eben erst angekommene Feldzuweisung wieder verlieren — zwei
-  `SENDUPDATE`s zum selben Match binnen Sekunden brachten BTPs eigene
-  Persistenz durcheinander. Der Schiedsrichter-Abgleich lässt ein frisch
-  aufs Feld gerufenes Match jetzt 10 Sekunden in Ruhe, damit die bereits
-  eingebettete Besetzung Zeit hat anzukommen. Dabei zusätzlich behoben:
-  Werden mehrere Felder im selben Zyklus fertig, rücken ihre
-  Schiedsrichter jetzt deterministisch nach Feldnummer sortiert ans Ende
-  der Rotation statt in zufälliger Reihenfolge.
+  Schiedsrichter-`SENDUPDATE` ohne `CourtID`-Feld ließ BTP, wenn es kurz
+  nach einer Feldzuweisung auf dasselbe Match traf, die eben erst
+  angekommene Feldzuweisung wieder verlieren — zwei `SENDUPDATE`s zum
+  selben Match in enger Folge brachten BTPs eigene Persistenz
+  durcheinander. Ein erster Fix (feste 10-Sekunden-Karenzzeit) reichte
+  nicht — der reale Abstand zwischen Feldzuweisung und Schiedsrichter-Write
+  lag am Turnier teils bei 11–18 Sekunden. Der eigentliche Fix: Der
+  Schiedsrichter-Abgleich schreibt jetzt bei **jedem** Write die aktuell
+  bekannte `CourtID` mit — dann ist die Reihenfolge zweier Requests zum
+  selben Match folgenlos, unabhängig vom zeitlichen Abstand. Dabei
+  zusätzlich behoben: Werden mehrere Felder im selben Zyklus fertig,
+  rücken ihre Schiedsrichter jetzt deterministisch nach Feldnummer
+  sortiert ans Ende der Rotation statt in zufälliger Reihenfolge.
 - **Spiele von der automatischen Feldvergabe ausnehmen** (Spec
   [feldvergabe-ausnahme](features/feldvergabe-ausnahme.md)). Die
   Turnierleitung kann ein einzelnes Spiel per Knopfdruck — in TL-Web und

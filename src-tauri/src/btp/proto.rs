@@ -229,33 +229,41 @@ pub struct CourtAssignment {
 /// Eigenschaften). Bewusst OHNE `Winner`/`Sets`/`ScoreStatus` – das ist ein
 /// reines Feld-Update, kein Ergebnis (Vorbild BTS: Result-Felder nur wenn ein
 /// Ergebnis vorliegt).
+///
+/// **`court_id` immer die zuletzt bekannte BTP-Wahrheit, nie geraten**
+/// (Live-Befund 14.08.2026): Der eigenständige Schiedsrichter-Rücksync
+/// (`sync.rs::officials_entries`) nutzt diese Form jetzt ebenfalls — mit
+/// `court_id` aus dem aktuellen Snapshot statt einem separaten, das Feld
+/// weglassenden Request. Zwei `SENDUPDATE`s zum selben Match kurz
+/// hintereinander liessen BTP sonst beobachtbar die CourtID verlieren,
+/// wenn der zweite Request sie nicht mit ansagte — reasserted er sie
+/// dagegen (denselben Wert, den der Snapshot gerade zeigt), ist die
+/// Schreibreihenfolge der beiden Requests folgenlos.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatchCourt {
     pub match_id: i64,
     pub draw_id: i64,
     pub planning_id: i64,
-    /// Neue Court-ID am Match; `0` = Zuordnung löschen.
+    /// Neue bzw. aktuell bekannte Court-ID am Match. Zwei legitime
+    /// Anlässe für `0`: **echtes Freigeben** — dann steht im selben
+    /// Request auch der passende `CourtAssignment` im `Courts`-Block
+    /// (z. B. `commands.rs::free_court`), der die Löschung tatsächlich
+    /// bewirkt; **Reassertion beim eigenständigen Schiedsrichter-Write**
+    /// (`sync.rs::officials_entries`, leerer `Courts`-Block) — dort ist
+    /// `0` nur der Snapshot-Wert eines Matches, das nie auf einem Feld
+    /// stand, keine Löschung. Nur in Kombination mit einem **belegten**
+    /// Match UND einem leeren `Courts`-Block wäre `0` falsch: Das würde
+    /// die reale Feld-Information am Match löschen (Regression v0.9.103,
+    /// siehe oben bei `Courts`-Block) — genau das verhindert
+    /// `officials_entries`, indem es `m.court_id` aus dem Snapshot
+    /// übernimmt statt 0 zu raten.
     pub court_id: i64,
     /// Schiedsrichter und Aufschlagrichter (`Official1ID`, `Official2ID`),
-    /// die beim Ruf aufs Feld **mitgeschrieben** werden sollen; `0` löscht
-    /// den jeweiligen Dienst (ADR 0021). `None` = gar nicht anfassen —
-    /// Turniere ohne Schiedsrichter schreiben dann kein zusätzliches Feld,
-    /// und der Request bleibt exakt wie bisher.
+    /// die mitgeschrieben werden sollen; `0` löscht den jeweiligen Dienst
+    /// (ADR 0021). `None` = gar nicht anfassen — Turniere ohne
+    /// Schiedsrichter schreiben dann kein zusätzliches Feld, und der
+    /// Request bleibt exakt wie bisher.
     pub officials: Option<(i64, i64)>,
-}
-
-/// Ein Match, dessen Schiedsrichter-Besetzung eigenständig nach BTP
-/// geschrieben wird (ADR 0021: Rücksync bei **jeder** Änderung, nicht nur
-/// beim Ruf aufs Feld). Muster [`HighlightEntry`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct OfficialsEntry {
-    pub match_id: i64,
-    pub draw_id: i64,
-    pub planning_id: i64,
-    /// Schiedsrichter (`Official1ID`); `0` = löschen.
-    pub official1_id: i64,
-    /// Aufschlagrichter (`Official2ID`); `0` = löschen.
-    pub official2_id: i64,
 }
 
 /// Ein Match, dessen `Highlight`-Flag in BTP gesetzt/gelöscht werden soll
@@ -305,52 +313,17 @@ pub fn highlight_request(
     wire::encode_message(&xml::encode(&nodes))
 }
 
-/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **nur** die
-/// Schiedsrichter-Besetzung schreibt (ADR 0021).
-///
-/// Muster [`highlight_request`]: Identität (`ID`, `DrawID`, `PlanningID`)
-/// plus die beiden Official-Felder, sonst nichts — insbesondere **kein**
-/// `Status` (Check-in-Bitfeld, Regression v0.9.103). `0` löscht den Dienst;
-/// gemessen am 13.08.2026 nimmt BTP beide Schreibformen an und übernimmt
-/// asynchron (≤1 s), weshalb der Sync-Loop den Stand zurückliest statt ihn
-/// zu glauben.
-pub fn officials_request(
-    entries: &[OfficialsEntry],
-    session_key: &str,
-    password: Option<&str>,
-) -> Vec<u8> {
-    let match_nodes: Vec<Node> = entries
-        .iter()
-        .map(|e| {
-            Node::group(
-                "Match",
-                vec![
-                    Node::integer("ID", e.match_id),
-                    Node::integer("DrawID", e.draw_id),
-                    Node::integer("PlanningID", e.planning_id),
-                    Node::integer("Official1ID", e.official1_id),
-                    Node::integer("Official2ID", e.official2_id),
-                ],
-            )
-        })
-        .collect();
-    let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
-    nodes.push(Node::group(
-        "Update",
-        vec![Node::group(
-            "Tournament",
-            vec![Node::group("Matches", match_nodes)],
-        )],
-    ));
-    wire::encode_message(&xml::encode(&nodes))
-}
-
 /// Fertige Wire-Bytes für einen `SENDUPDATE`, der **Feld-Zuweisungen** nach BTP
 /// schreibt: einen `Courts`-Block (`Court{ID,[MatchID]}`, MatchID weglassen =
 /// frei) UND optional einen `Matches`-Block, der `Match.CourtID` setzt/löscht.
 /// Beides in einem Request (BTP akzeptiert `Courts` + `Matches` parallel). So
 /// wird beim Freigeben nicht nur die Court-Verknüpfung gelöst, sondern auch
 /// Halle+Feld am Match entfernt (`court_id = 0`). Nach Vorbild Original-BTS.
+///
+/// Mit leerem `courts` und nur `match_courts` (keine Feldzuweisung, nur ein
+/// Match-Update) ist das zugleich die Form des eigenständigen
+/// Schiedsrichter-Rücksyncs (`sync.rs::reconcile_officials`) — siehe
+/// [`MatchCourt::court_id`].
 pub fn court_assign_request(
     courts: &[CourtAssignment],
     match_courts: &[MatchCourt],
@@ -859,36 +832,6 @@ mod tests {
             xml::find(&m, "Status").is_none(),
             "kein Status (Check-in-Bitfeld)"
         );
-    }
-
-    #[test]
-    fn officials_request_writes_only_identity_and_officials() {
-        // ADR 0021: eigenstaendiger Write je Aenderung — Identitaet plus
-        // Official1/2, sonst nichts. Loeschen ist die 0.
-        let req = officials_request(
-            &[OfficialsEntry {
-                match_id: 42,
-                draw_id: 3,
-                planning_id: 1002,
-                official1_id: 5,
-                official2_id: 0,
-            }],
-            "S",
-            None,
-        );
-        let m = match_node(&req);
-        assert_eq!(child_int(&m, "ID"), Some(42));
-        assert_eq!(child_int(&m, "DrawID"), Some(3));
-        assert_eq!(child_int(&m, "PlanningID"), Some(1002));
-        assert_eq!(child_int(&m, "Official1ID"), Some(5));
-        assert_eq!(child_int(&m, "Official2ID"), Some(0), "0 = loeschen");
-        // Regression (v0.9.103): NIEMALS das Status-Bitfeld schreiben.
-        assert!(
-            xml::find(&m, "Status").is_none(),
-            "kein Status (Check-in-Bitfeld)"
-        );
-        assert!(xml::find(&m, "CourtID").is_none(), "nur die Officials");
-        assert!(xml::find(&m, "Winner").is_none());
     }
 
     #[test]

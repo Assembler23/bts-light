@@ -1769,16 +1769,18 @@ pub(crate) async fn write_courts_to_btp(
         .map_err(|e| e.to_string())
 }
 
-/// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
-/// Aufrufe in BTP sichtbar. Eigener Login + `highlight_request` (Match-Knoten
-/// nur mit Identität + Highlight, kein `Status`/Ergebnis). Best-effort-Aufrufer
 /// Schreibt **nur** die Schiedsrichter-Besetzung nach BTP (ADR 0021),
-/// Muster [`write_highlight_to_btp`]: eigene Sitzung, ein `SENDUPDATE`,
-/// Antwort geprüft. Der Aufrufer übernimmt den Stand erst bei `Ok` — ein
-/// Fehlschlag wird im nächsten Sync-Zyklus wiederholt.
+/// Muster [`write_courts_to_btp`]: eigene Sitzung, ein `SENDUPDATE`, Antwort
+/// geprüft. Der Aufrufer übernimmt den Stand erst bei `Ok` — ein Fehlschlag
+/// wird im nächsten Sync-Zyklus wiederholt.
+///
+/// Läuft über [`proto::court_assign_request`] mit leerem `courts`-Block —
+/// jeder Eintrag trägt seine aktuelle `CourtID` mit (siehe
+/// [`proto::MatchCourt::court_id`]), damit dieser eigenständige Write nie
+/// eine gerade erst angekommene Feldzuweisung überschreiben kann.
 pub(crate) async fn write_officials_to_btp(
     config: &AppConfig,
-    entries: &[proto::OfficialsEntry],
+    entries: &[proto::MatchCourt],
 ) -> Result<(), String> {
     if entries.is_empty() {
         return Ok(());
@@ -1795,16 +1797,23 @@ pub(crate) async fn write_officials_to_btp(
     )
     .map_err(|e| e.to_string())?;
 
-    let upd_raw =
-        client::send_request(host, port, &proto::officials_request(entries, &session, pw))
-            .await
-            .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    let upd_raw = client::send_request(
+        host,
+        port,
+        &proto::court_assign_request(&[], entries, &session, pw),
+    )
+    .await
+    .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
     proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
 }
 
-/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
-/// davon unberührt.
+/// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
+/// Aufrufe im BTP-Planer sichtbar. Eigene Sitzung, ein `SENDUPDATE`
+/// (`proto::highlight_request`, Match-Knoten nur mit Identität +
+/// Highlight, kein `Status`/Ergebnis). Best-effort: Aufrufer
+/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand
+/// bleibt davon unberührt.
 pub(crate) async fn write_highlight_to_btp(
     config: &AppConfig,
     entries: &[proto::HighlightEntry],
