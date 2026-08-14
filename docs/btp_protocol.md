@@ -728,3 +728,14 @@ Zwei Formen, beide am 13.08.2026 gemessen und angenommen:
 Beide **ohne** `Status` (Check-in-Bitfeld, Regression v0.9.103) und ohne
 Ergebnisfelder. BTP übernimmt asynchron (≤ 1 s) — zurückgelesen wird über
 den nächsten Snapshot, nicht per Einmal-Check.
+
+**Race mit einer frischen Feldzuweisung (Live-Befund 14.08.2026).** Die
+Messung oben lief isoliert. Am laufenden Turnier zeigte sich: Folgt die
+eigenständige Form binnen Sekunden auf ein `court_assign_request` **desselben**
+Matches, verliert BTP dabei die eben erst angekommene `CourtID` wieder —
+obwohl die eigenständige Form gar kein `CourtID`-Feld sendet. Zwei
+`SENDUPDATE`s zum selben Match in enger Folge bringen BTPs eigene Persistenz
+durcheinander, unabhängig davon, welche Felder der zweite Request trägt.
+Mitigation: `officials_entries` (`sync.rs`) lässt ein frisch aufs Feld
+gerufenes Match `OFFICIALS_COURT_SETTLE_MS` (10 s) lang unangetastet, siehe
+[schiedsrichter-management.md](schiedsrichter-management.md#karenzzeit-nach-frischer-feldzuweisung-live-befund-14082026).

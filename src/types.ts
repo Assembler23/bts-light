@@ -819,6 +819,9 @@ export interface PreparationCandidate {
   match_num: number | null;
   /** Aufruf-Daten, falls das Spiel bereits gerufen wurde; sonst null. */
   call: PreparationCallInfo | null;
+  /** Von der automatischen Feldvergabe ausgenommen (Spec
+   *  `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt. */
+  excluded: boolean;
 }
 
 /** Eine Halle des Turniers (Rust: commands::PreparationLocation). */

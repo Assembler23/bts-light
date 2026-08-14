@@ -1172,6 +1172,17 @@ pub enum TlAction {
         match_id: i64,
         hall: String,
     },
+    /// Ein Spiel von der automatischen Feldvergabe ausnehmen oder die
+    /// Ausnahme zurücknehmen (Spec `feldvergabe-ausnahme`). Betrifft
+    /// ausschließlich `sync.rs::auto_assign` — manuelles Zuweisen
+    /// (`AssignCourt`/`MoveMatch`) bleibt für ein ausgenommenes Spiel
+    /// jederzeit möglich, bewusst ohne BTP-Rückschreibung (rein
+    /// host-lokaler Bedienzustand, wie `SetHall`).
+    ExcludeFromAutoAssign {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        excluded: bool,
+    },
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -2931,6 +2942,10 @@ mod tests {
             TlAction::SetHall {
                 match_id: 4711,
                 hall: "Halle B".to_string(),
+            },
+            TlAction::ExcludeFromAutoAssign {
+                match_id: 4711,
+                excluded: true,
             },
             TlAction::AnnounceCourtCall {
                 court_id: 5,

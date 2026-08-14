@@ -186,6 +186,16 @@ fn tablet_officials_path(app: &AppHandle) -> std::path::PathBuf {
         .join("officials-state.json")
 }
 
+/// Pfad der Auto-Vergabe-Ausnahmeliste (Spec `feldvergabe-ausnahme`, Muster
+/// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur für
+/// ein Turnier, wie beim Schiedsrichter-Roster.
+fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("excluded-matches.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -801,6 +811,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     tablet
         .officials_store()
         .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
+    // Ausnahmeliste der automatischen Feldvergabe (Spec
+    // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
+    // kommt mit dem ersten Snapshot.
+    tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -1732,6 +1746,9 @@ pub struct PreparationCandidate {
     pub match_num: Option<i64>,
     /// Aufruf-Daten, falls das Match bereits gerufen wurde; sonst `null`.
     pub call: Option<PreparationCallInfo>,
+    /// Von der automatischen Feldvergabe ausgenommen (Spec
+    /// `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt.
+    pub excluded: bool,
 }
 
 /// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
@@ -1814,6 +1831,7 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                     .collect(),
                 match_num: m.match_num,
                 call,
+                excluded: tablet.auto_assign_excluded(m.id),
             }
         })
         .collect();
@@ -2964,6 +2982,23 @@ pub fn official_pause(
         .tablet
         .officials_store()
         .set_paused(official_id, paused);
+    Ok(())
+}
+
+/// Ein Spiel von der automatischen Feldvergabe ausnehmen oder die Ausnahme
+/// zurücknehmen (Spec `feldvergabe-ausnahme`). Derselbe Speicher wie der
+/// TL-Web-Weg (`TlAction::ExcludeFromAutoAssign`) — beide Wege mutieren
+/// `TabletState::set_auto_assign_excluded`, keine BTP-Rückschreibung.
+/// Unabhängig vom Schiedsrichter-Betrieb, deshalb ohne `officials_an`-Gate.
+#[tauri::command]
+pub fn auto_assign_exclude(
+    state: State<'_, AppState>,
+    match_id: i64,
+    excluded: bool,
+) -> Result<(), String> {
+    state
+        .tablet
+        .set_auto_assign_excluded(match_id, excluded);
     Ok(())
 }
 

@@ -16,6 +16,8 @@ import {
   ChartLine,
   Lock,
   Megaphone,
+  Pause,
+  Play,
   Settings,
   Trash2,
   Unlock,
@@ -25,6 +27,7 @@ import {
   addScorekeeper,
   advanceScorekeeper,
   assignCourt,
+  autoAssignExclude,
   disqualifyMatch,
   enterResult,
   finishedMatches,
@@ -965,6 +968,7 @@ export function FieldOverviewPage({
                   <th className="px-3 py-2 font-medium">Spiel</th>
                   <th className="px-3 py-2 font-medium">Spieler</th>
                   <th className="px-3 py-2 font-medium">Halle</th>
+                  <th className="px-3 py-2 font-medium">Auto-Vergabe</th>
                 </tr>
               </thead>
               <tbody>
@@ -1020,6 +1024,41 @@ export function FieldOverviewPage({
                             —
                           </span>
                         )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          disabled={busy}
+                          onClick={(e) => {
+                            // Nicht bis zur Zeile durchreichen — sonst
+                            // würde der Klick zusätzlich das Spiel
+                            // auswählen (Drag&Drop-Ziel).
+                            e.stopPropagation();
+                            void run(() =>
+                              autoAssignExclude(m.match_id, !m.excluded),
+                            );
+                          }}
+                          title={
+                            m.excluded
+                              ? "Wieder in die automatische Feldvergabe aufnehmen"
+                              : "Von der automatischen Feldvergabe ausnehmen"
+                          }
+                          aria-pressed={m.excluded}
+                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs disabled:opacity-50 ${
+                            m.excluded
+                              ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                              : active
+                                ? "text-white hover:bg-white/20"
+                                : "text-slate-400 hover:bg-slate-100"
+                          }`}
+                        >
+                          {m.excluded ? (
+                            <>
+                              <Pause size={13} /> ausgenommen
+                            </>
+                          ) : (
+                            <Play size={13} />
+                          )}
+                        </button>
                       </td>
                     </tr>
                   );

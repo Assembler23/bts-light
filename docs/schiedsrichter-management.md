@@ -140,6 +140,10 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
   Wert (`store.effective(...)`); die Rotation füllt dort nichts nach.
 - **Nach Spielende** rücken die Officials des beendeten Spiels ans Ende der
   Reihenfolge; ihre Zuweisung bleibt am Match stehen (Einsatz-Ableitung).
+  Werden mehrere Felder im selben Zyklus fertig, rücken ihre Officials **nach
+  CourtID sortiert** ans Ende — dieselbe Deterministik wie bei der Zuteilung
+  unten (bis v0.9.201 hing die Reihenfolge von der zufälligen
+  HashMap-Iteration ab).
 - **Mehrere Felder gleichzeitig:** nach CourtID sortiert, damit die
   Verteilung deterministisch ist; frisch Zugewiesene gelten sofort als im
   Dienst.
@@ -324,6 +328,24 @@ nicht wörtlich gilt:
   spätere Änderung *in BTP* bei jedem Sync-Zyklus wieder überschrieben, für
   den Rest des Turniers. Die Einsatz-Ableitung verliert dabei nichts: Sie
   liest denselben Wert dann aus dem BTP-Match.
+
+### Karenzzeit nach frischer Feldzuweisung (Live-Befund 14.08.2026)
+
+Ein eigenständiges Schiedsrichter-`SENDUPDATE` (Weg 1 oben), das binnen
+Sekunden auf ein **gerade erst** geschriebenes `court_assign_request`
+desselben Matches folgt, ließ BTP an einem laufenden Zwei-Hallen-Turnier
+beobachtbar die eben erst angekommene `CourtID` wieder verlieren (Match
+1216, Feld 8: zugewiesen, im nächsten Poll bestätigt, acht Sekunden später
+wieder leer — ohne dass irgendein Gerät das Feld freigegeben hätte). Zwei
+`SENDUPDATE`s zum selben Match in enger Folge bringen BTPs eigene
+Persistenz durcheinander, obwohl der zweite Request gar kein `CourtID`-Feld
+trägt.
+
+`officials_entries` (`sync.rs`) lässt ein Match deshalb `OFFICIALS_COURT_SETTLE_MS`
+(10 s) in Ruhe, nachdem es laut `TabletState::on_court_since_ms` neu auf ein
+Feld gekommen ist — die eingebettete Besetzung aus der Feldzuweisung selbst
+(Weg 2) bekommt so Zeit, in BTP anzukommen, bevor der eigenständige Abgleich
+nachkorrigiert. Nach Ablauf der Karenzzeit greift der Abgleich unverändert.
 
 ### Was das Tablet erreicht
 

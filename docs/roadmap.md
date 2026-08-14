@@ -618,3 +618,14 @@ Die Spec [features/schiedsrichter-management.md](features/schiedsrichter-managem
 ist vollständig umgesetzt (Doku: [schiedsrichter-management.md](schiedsrichter-management.md)).
 Offen bleiben der Feldtest an einem Turnier mit Schiedsrichtern und — für
 den Cloud-Weg — der Relay-Deploy auf badhub.de vor dem Client-Release.
+
+## Spiele von der automatischen Feldvergabe ausnehmen — umgesetzt, noch nicht released
+
+Die Spec [features/feldvergabe-ausnahme.md](features/feldvergabe-ausnahme.md)
+ist vollständig umgesetzt: Turnierleitung kann ein einzelnes Spiel per
+Knopfdruck (TL-Web und Turnier-PC) temporär von `sync.rs::auto_assign`
+ausschließen, bis es manuell reaktiviert wird oder das Match endet;
+manuelles Zuweisen bleibt unberührt. Persistenz nach dem ADR-0022-Muster
+(eigene turniergebundene Datei `excluded-matches.json`). Doku:
+[turnierleitung-web.md](turnierleitung-web.md). Offen bleiben der
+Feldtest an einem laufenden Turnier und der Versions-Bump für ein Release.

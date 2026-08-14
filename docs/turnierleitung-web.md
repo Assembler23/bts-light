@@ -151,6 +151,24 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Ein Spiel von der automatischen Feldvergabe ausnehmen
+
+An jeder Zeile der Warteliste sitzt neben dem Vorbereitungs-Aufruf-Knopf ein
+Pause-Umschalter (⏸). Gedrückt heißt: Dieses Spiel wird von der
+**automatischen** Feldvergabe übersprungen, solange die Ausnahme aktiv ist
+— ein Badge „⏸ Auto-Vergabe aus" markiert die Zeile zusätzlich. Praktisch,
+wenn ein Spieler kurzfristig nicht greifbar ist, das Spiel aber nicht
+sofort gewertet oder manuell verschoben werden soll.
+
+**Manuelles Zuweisen bleibt immer möglich** — die Ausnahme betrifft
+ausschließlich die Automatik. Ein erneuter Klick nimmt die Ausnahme
+zurück; sie räumt sich außerdem von selbst auf, sobald das Spiel gewertet
+ist. Bedienbar sowohl hier in TL-Web als auch am Turnier-PC (Felder-
+übersicht, Tabelle „Nicht zugewiesene Spiele") — beide Wege zeigen
+denselben Stand. Die Ausnahme überlebt einen Neustart des Turnier-PCs
+(`excluded-matches.json`, turniergebunden wie die Schiedsrichter-
+Einteilung).
+
 ### Anordnung wie in der Halle
 
 Statt Feldern in Formularreihenfolge lässt sich für jede Halle ein

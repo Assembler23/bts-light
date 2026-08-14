@@ -326,6 +326,21 @@ pub(crate) fn apply_state_action(
             tablet.set_manual_hall(*match_id, hall);
             Ok(TlResponse::ok(0))
         }
+        A::ExcludeFromAutoAssign {
+            match_id,
+            excluded,
+        } => {
+            // Wie bei CallPreparation: ein unbekanntes Match erschiene
+            // nirgends und ließe sich auch nicht zurücknehmen.
+            if !known_match(*match_id) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!("Spiel {match_id} gibt es im aktuellen Turnierstand nicht."),
+                ));
+            }
+            tablet.set_auto_assign_excluded(*match_id, *excluded);
+            Ok(TlResponse::ok(0))
+        }
         A::ScorekeeperAdd { names } => {
             let names: Vec<String> = names
                 .iter()
@@ -1369,6 +1384,10 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         } => format!("prep:{}:{}", ids(match_ids), location_id.unwrap_or(0)),
         A::RetractPreparation { match_id } => format!("prep-retract:{match_id}"),
         A::SetHall { match_id, hall } => format!("hall:{match_id}:{hall}"),
+        A::ExcludeFromAutoAssign {
+            match_id,
+            excluded,
+        } => format!("excl:{match_id}:{excluded}"),
         A::AnnounceCourtCall { court_id, match_id } => {
             format!("call:{match_id}:{court_id}")
         }
@@ -1457,6 +1476,13 @@ fn action_label(action: &relay_proto::TlAction) -> String {
                 format!("Spiel {match_id} nach {hall}")
             }
         }
+        A::ExcludeFromAutoAssign {
+            match_id,
+            excluded,
+        } => format!(
+            "Spiel {match_id} {} Auto-Vergabe",
+            if *excluded { "aus" } else { "wieder in" }
+        ),
         A::AnnounceCourtCall { court_id, .. } => format!("Erneuter Aufruf Feld {court_id}"),
         A::AnnouncePrepCall { .. } => "Erneuter Vorbereitungs-Aufruf".to_string(),
         A::EnterResult { match_id, .. } => format!("Ergebnis für Spiel {match_id}"),
@@ -1808,6 +1834,11 @@ pub struct TlMatch {
     pub prep_call: Option<TlPrepCall>,
     /// Warum das Spiel gerade nicht aufs Feld kann; `None` = spielbereit.
     pub blocked: Option<TlBlocked>,
+    /// Von der Turnierleitung von der automatischen Feldvergabe ausgenommen
+    /// (Spec `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon
+    /// unberührt — reine Anzeige-Information für das Badge in der Liste.
+    #[serde(default)]
+    pub excluded_from_auto_assign: bool,
 }
 
 /// Eine Halle des Turniers.
@@ -2131,6 +2162,7 @@ pub(crate) fn build_state_limited(
                 recalls: tablet.prep_calls_made(m.id),
             }),
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
+            excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
         });
     }
 
@@ -3674,6 +3706,60 @@ mod tests {
     }
 
     #[test]
+    fn exclude_from_auto_assign_sets_and_clears_the_exclusion() {
+        // Spec `feldvergabe-ausnahme`: TL-Web setzt/nimmt die Ausnahme
+        // zurück, betrifft ausschließlich den lokalen Store — kein
+        // BTP-Write, kein Rückgabewert außer Erfolg.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), vec![a_match(7)], Vec::new()));
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::ExcludeFromAutoAssign {
+                match_id: 7,
+                excluded: true,
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+        assert!(tablet.auto_assign_excluded(7));
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::ExcludeFromAutoAssign {
+                match_id: 7,
+                excluded: false,
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+        assert!(!tablet.auto_assign_excluded(7));
+    }
+
+    #[test]
+    fn exclude_from_auto_assign_rejects_an_unknown_match() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), Vec::new(), Vec::new()));
+
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            0,
+            &relay_proto::TlAction::ExcludeFromAutoAssign {
+                match_id: 999,
+                excluded: true,
+            },
+        )
+        .unwrap_err();
+        assert!(!err.ok);
+        assert!(!tablet.auto_assign_excluded(999));
+    }
+
+    #[test]
     fn a_second_call_counts_up_at_the_host_and_orders_the_announcement() {
         // Der erneute Aufruf tut zweierlei: Er zählt die Stufe hoch (damit
         // jedes Gerät dieselbe Zahl sieht) und beauftragt die Ansage in der
@@ -4675,6 +4761,9 @@ mod tests {
             "reason",
             "players",
             "until_ms",
+            // Spec `feldvergabe-ausnahme`: reines Bool-Flag „Auto-Vergabe
+            // übergeht dieses Spiel gerade" — keine Angabe zu Personen.
+            "excluded_from_auto_assign",
             // Warteschlange der Zähltafelbediener: Namen stehen ohnehin je Feld im
             // Zustand (`scorekeeper`); der `key` ist eine zufällige Kennung ohne
             // Personenbezug, `enqueued_ms` eine Uhrzeit.

@@ -455,19 +455,32 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row.blocked { background: #f8fafc; }
 .row .why { font-size: .82rem; color: var(--warn); flex-basis: 100%; }
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
-/* Der Vorbereitungs-Aufruf als Umschalter mit Sinnbild: quadratisch, so
-   groß wie ein Finger, ohne Text. Gedrückt = ist gerufen. */
-.row .prep {
+/* Ausgenommen von der automatischen Feldvergabe (Spec
+   `feldvergabe-ausnahme`) — Warnfarbe wie `.why`, damit es in der Liste
+   auffällt, ohne wie ein Fehler ("blocked") zu wirken. */
+.row .excl-badge { font-size: .82rem; color: var(--warn); font-weight: 650; flex-basis: 100%; }
+/* Quadratischer Umschalter mit Sinnbild, so groß wie ein Finger, ohne
+   Text — geteiltes Box-Modell für den Vorbereitungs-Aufruf (`.prep`,
+   gedrückt = ist gerufen) und die Auto-Vergabe-Ausnahme (`.auto-excl`,
+   gedrückt = ausgenommen); nur die Zustandsfarbe unterscheidet sie. */
+.row .prep, .row .auto-excl {
   display: grid; place-items: center;
   width: 40px; height: 40px; padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
+.row .auto-excl { font-size: 1.1rem; }
 .row .prep:hover { border-color: var(--accent); color: var(--accent); }
 .row .prep[aria-pressed="true"] {
   border-color: var(--accent); background: #eff6ff; color: var(--accent);
 }
-.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+.row .auto-excl:hover { border-color: var(--warn); color: var(--warn); }
+.row .auto-excl[aria-pressed="true"] {
+  border-color: var(--warn); background: #fff7ed; color: var(--warn);
+}
+.row[aria-selected="true"] .prep, .row[aria-selected="true"] .auto-excl {
+  border-color: #475569; background: #1e293b; color: #e2e8f0;
+}
 
 /* Nachruf: drei kleine Knöpfe an einer Beschriftung. Kleiner als der
    Vorbereitungs-Aufruf, weil sie die Ausnahme sind — man braucht sie nur,
@@ -2629,6 +2642,12 @@ function queueRow(m) {
       ? `${esc(who)} spielt gerade`
       : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
   }
+  // Ausgenommen von der automatischen Feldvergabe (Spec
+  // `feldvergabe-ausnahme`) — Badge, damit es niemand vergisst; manuelles
+  // Zuweisen bleibt unberührt, deshalb kein "blocked".
+  if (m.excluded_from_auto_assign) {
+    parts.push(`<span class="excl-badge" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
+  }
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
   // frei ist. Deshalb ein eigener Knopf statt einer Geste.
@@ -2641,6 +2660,18 @@ function queueRow(m) {
   parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
+
+  // Von der automatischen Feldvergabe ausnehmen (Spec
+  // `feldvergabe-ausnahme`) — betrifft nie das manuelle Zuweisen, deshalb
+  // ein eigener Umschalter neben dem Vorbereitungs-Knopf statt einer Geste
+  // auf der Zeile selbst.
+  const exclTitel = m.excluded_from_auto_assign
+    ? "Wieder in die automatische Feldvergabe aufnehmen"
+    : "Von der automatischen Feldvergabe ausnehmen";
+  parts.push(`<button type="button" class="auto-excl${m.excluded_from_auto_assign ? " aktiv" : ""}"
+    data-auto-excl="${m.match_id}"
+    aria-pressed="${m.excluded_from_auto_assign ? "true" : "false"}"
+    title="${exclTitel}" aria-label="${exclTitel}">⏸</button>`);
 
   // Spielort setzen, ohne ein Feld zu belegen. BTP liefert `LocationID` nur,
   // wenn das Turnier die Spalte selbst pflegt, und nimmt Rückschreibungen
@@ -2700,6 +2731,21 @@ function wireQueue(box) {
       togglePrepCall(match);
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll("button[data-auto-excl]").forEach((btn) => {
+    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
+    if (!match) return;
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = match.match_id;
+      const excluded = !match.excluded_from_auto_assign;
+      send(
+        `auto-excl-${matchId}-${excluded}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "exclude_from_auto_assign", matchId, excluded },
+        excluded ? "Von der Auto-Vergabe ausgenommen." : "Wieder in der Auto-Vergabe.",
+      );
+    });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   box.querySelectorAll("select[data-hall-for]").forEach((sel) => {

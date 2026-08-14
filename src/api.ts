@@ -88,6 +88,13 @@ export const setCourtLocked = (
   locked: boolean,
 ): Promise<void> => invoke("set_court_locked", { courtId, locked });
 
+/** Spiel von der automatischen Feldvergabe ausnehmen/wieder aufnehmen (Spec
+ *  `feldvergabe-ausnahme`) — betrifft nie manuelles Zuweisen. */
+export const autoAssignExclude = (
+  matchId: number,
+  excluded: boolean,
+): Promise<void> => invoke("auto_assign_exclude", { matchId, excluded });
+
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
 

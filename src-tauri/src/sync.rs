@@ -24,6 +24,18 @@ use crate::tablet::state::TabletState;
 /// schließt und die Heartbeats ausbleiben.
 const HEARTBEAT_AFTER: Duration = Duration::from_secs(60);
 
+/// Karenzzeit, bevor eine frisch aufs Feld gerufene Paarung erneut Ziel des
+/// eigenständigen Schiedsrichter-Abgleichs wird (Live-Befund 14.08.2026,
+/// Turnier mit zwei Hallen: Match 1216/Feld 8). Die Feldzuweisung schreibt
+/// die Besetzung schon eingebettet mit (`plan_court_action`); folgt binnen
+/// Sekunden ein zweites, eigenständiges `SENDUPDATE` zum selben Match (nur
+/// Officials, kein `CourtID`), verliert BTP dabei beobachtbar die eben erst
+/// angekommene Feldzuweisung wieder — zwei Writes zum selben Match in enger
+/// Folge bringen BTPs eigene Persistenz durcheinander. Die Karenzzeit gibt
+/// der eingebetteten Besetzung Zeit, in BTP anzukommen, bevor hier
+/// nachkorrigiert wird.
+const OFFICIALS_COURT_SETTLE_MS: u64 = 10_000;
+
 /// Aktuelle Zeit in Unix-Millisekunden.
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -222,6 +234,7 @@ fn officials_entries(
     tablet: &TabletState,
     snapshot: &BtpSnapshot,
     geschrieben: &HashMap<i64, (i64, i64)>,
+    now_ms: u64,
 ) -> Vec<crate::btp::proto::OfficialsEntry> {
     let store = tablet.officials_store();
     if !store.enabled() {
@@ -229,6 +242,17 @@ fn officials_entries(
     }
     let mut out = Vec::new();
     for m in &snapshot.matches {
+        // Frisch aufs Feld gerufen? Siehe OFFICIALS_COURT_SETTLE_MS — der
+        // eigenständige Write muss der eingebetteten Besetzung aus der
+        // Feldzuweisung erst Zeit geben, sonst gefährdet er die gerade
+        // angekommene CourtID.
+        if let Some(court_id) = m.court_id {
+            if let Some(since) = tablet.on_court_since_ms(court_id, m.id) {
+                if now_ms.saturating_sub(since) < OFFICIALS_COURT_SETTLE_MS {
+                    continue;
+                }
+            }
+        }
         let Some((sr, ar)) = tablet.officials_for_write(m) else {
             continue;
         };
@@ -451,7 +475,7 @@ impl SyncEngine {
         for m in &snapshot.matches {
             store.confirm(m.id, m.official1_id, m.official2_id);
         }
-        let entries = officials_entries(tablet, snapshot, &self.officials_written);
+        let entries = officials_entries(tablet, snapshot, &self.officials_written, now_ms());
         if entries.is_empty() {
             // Aufräumen: Was BTP inzwischen trägt, muss nicht länger als
             // „geschrieben" gemerkt werden (sonst wüchse die Karte über das
@@ -474,6 +498,22 @@ impl SyncEngine {
             // Nicht übernehmen → nächster Zyklus versucht es erneut.
             Err(e) => tracing::warn!("BTP-Schiedsrichter-Update fehlgeschlagen: {e}"),
         }
+    }
+
+    /// Aufräumen der Auto-Vergabe-Ausnahmeliste (Spec
+    /// `feldvergabe-ausnahme`): Eine Ausnahme wird entfernt, sobald das Match
+    /// `Finished` ist (deckt auch Walkover/Retired ab, die in BTP ebenfalls
+    /// über `Finished` + `Winner` laufen, keine eigene `MatchStatus`-Variante)
+    /// oder nicht mehr im Snapshot vorkommt. Kein BTP-Write, rein lokal —
+    /// anders als die übrigen `reconcile_*` deshalb nicht `async`.
+    fn reconcile_auto_assign_exclusions(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
+        let keep: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status != MatchStatus::Finished)
+            .map(|m| m.id)
+            .collect();
+        tablet.retain_auto_assign_exclusions(&keep);
     }
 
     /// Nachschub-Queue flushen (A5): fehlgeschlagene Ergebnis-Writes
@@ -738,8 +778,18 @@ impl SyncEngine {
             .collect();
 
         // Verlassene Felder: War das vorige Spiel beendet, rücken seine
-        // Officials ans Ende der Reihenfolge.
-        for (&court_id, &prev_match_id) in &self.officials_oncourt_prev {
+        // Officials ans Ende der Reihenfolge — nach CourtID sortiert, damit
+        // bei mehreren gleichzeitig verlassenen Feldern dieselbe
+        // Deterministik gilt wie bei der Zuteilung unten (sonst entschiede
+        // die zufällige HashMap-Iterationsreihenfolge, wer zuerst ans Ende
+        // rückt).
+        let mut verlassen: Vec<(i64, i64)> = self
+            .officials_oncourt_prev
+            .iter()
+            .map(|(&c, &m)| (c, m))
+            .collect();
+        verlassen.sort_by_key(|&(c, _)| c);
+        for (court_id, prev_match_id) in verlassen {
             if oncourt_now.get(&court_id) == Some(&prev_match_id) {
                 continue;
             }
@@ -986,6 +1036,12 @@ impl SyncEngine {
                 if used.contains(&m.id) || pending_matches.contains(&m.id) {
                     return false;
                 }
+                // Von der Turnierleitung ausgenommen (Spec
+                // `feldvergabe-ausnahme`) — manuelles Zuweisen bleibt davon
+                // unberührt, nur die Automatik überspringt es.
+                if tablet.auto_assign_excluded(m.id) {
+                    return false;
+                }
                 // Verfügbarkeit: kein Spieler darf gerade spielen oder noch in
                 // seiner Pause stecken (geteilte Regel) …
                 if availability.blocked(m, now).is_some() {
@@ -1197,6 +1253,10 @@ impl SyncEngine {
         // Schiedsrichter-Besetzung zurückschreiben (ADR 0021) — direkt nach
         // den Highlights, aus demselben Snapshot.
         self.reconcile_officials(config, tablet, &snapshot).await;
+        // Ausnahmeliste der Auto-Vergabe aufräumen (Spec
+        // `feldvergabe-ausnahme`) — braucht kein Slave, der macht ohnehin
+        // keine Auto-Vergabe (oben schon zurückgekehrt).
+        self.reconcile_auto_assign_exclusions(tablet, &snapshot);
         // Meldeliste für den Hallen-Check-In (ADR 0009) vorbereiten — gesendet
         // wird sie erst NACH dem Liveticker-Push (siehe unten).
         let roster = self.plan_checkin_roster(config, &snapshot);
@@ -1580,6 +1640,55 @@ mod tests {
         let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert!(courts.is_empty());
+    }
+
+    #[test]
+    fn exclusion_wird_bei_spielende_automatisch_entfernt() {
+        // Spec `feldvergabe-ausnahme`: Sobald ein ausgenommenes Match
+        // `Finished` ist, verschwindet die Ausnahme von selbst — sonst
+        // bliebe die Datei über das Turnierende hinaus voll.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.set_auto_assign_excluded(7, true);
+        tablet.set_auto_assign_excluded(8, true);
+
+        // Match 7 ist beendet, Match 8 läuft noch.
+        let snap = snap_with(
+            Vec::new(),
+            vec![
+                finished_named(7, 0, "A", "B"),
+                oncourt_named(8, 1, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        engine.reconcile_auto_assign_exclusions(&tablet, &snap);
+        assert!(!tablet.auto_assign_excluded(7), "beendetes Match aufgeräumt");
+        assert!(tablet.auto_assign_excluded(8), "laufendes Match bleibt ausgenommen");
+
+        // Match 8 verschwindet ganz aus dem Snapshot (z. B. gelöscht) —
+        // auch das räumt auf.
+        let snap = snap_with(Vec::new(), vec![finished_named(7, 0, "A", "B")], Vec::new());
+        engine.reconcile_auto_assign_exclusions(&tablet, &snap);
+        assert!(!tablet.auto_assign_excluded(8));
+    }
+
+    #[test]
+    fn auto_assign_skips_excluded_match() {
+        // Spec `feldvergabe-ausnahme`: ein ausgenommenes Match wird
+        // übersprungen, auch wenn ein Feld frei ist und es sonst spielbereit
+        // wäre.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.set_auto_assign_excluded(7, true);
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(courts.is_empty(), "ausgenommenes Match bleibt unberücksichtigt");
+
+        // Reaktiviert: wird beim nächsten Zyklus wieder berücksichtigt.
+        tablet.set_auto_assign_excluded(7, false);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(7));
     }
 
     #[test]
@@ -2102,7 +2211,7 @@ mod tests {
             .officials_store()
             .assign(11, crate::tablet::officials::OfficialRole::Sr, 2);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), 0);
         assert_eq!(offen.len(), 1, "nur Match 10 weicht ab");
         assert_eq!(offen[0].match_id, 10);
         assert_eq!(offen[0].draw_id, 3);
@@ -2114,11 +2223,11 @@ mod tests {
         // erneut schreiben, sonst liefe jeder Zyklus in denselben Write.
         let mut geschrieben = HashMap::new();
         geschrieben.insert(10i64, (1i64, 0i64));
-        assert!(officials_entries(&tablet, &snap, &geschrieben).is_empty());
+        assert!(officials_entries(&tablet, &snap, &geschrieben, 0).is_empty());
 
         // Ohne Schiedsrichter-Betrieb wird gar nichts geschrieben.
         tablet.officials_store().set_enabled(false);
-        assert!(officials_entries(&tablet, &snap, &HashMap::new()).is_empty());
+        assert!(officials_entries(&tablet, &snap, &HashMap::new(), 0).is_empty());
     }
 
     #[test]
@@ -2138,13 +2247,66 @@ mod tests {
             .officials_store()
             .clear_assignment(10, crate::tablet::officials::OfficialRole::Sr);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), 0);
         assert_eq!(offen.len(), 1);
         assert_eq!(
             offen[0].official1_id, 0,
             "das ausdrückliche Lösen geht als 0 nach BTP — sonst bliebe der \
              Schiedsrichter dort für immer stehen"
         );
+    }
+
+    #[test]
+    fn officials_entries_waits_out_a_fresh_court_assignment_before_correcting() {
+        // Live-Befund 14.08.2026 (Zwei-Hallen-Turnier, Match 1216/Feld 8): Ein
+        // eigenständiges Schiedsrichter-SENDUPDATE direkt nach einer frischen
+        // Feldzuweisung ließ BTP die eben erst angekommene CourtID wieder
+        // verlieren. Der Abgleich muss der eingebetteten Besetzung aus der
+        // Feldzuweisung (`plan_court_action`) erst Zeit geben.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut m = oncourt_named(10, 8, "A", "B"); // Feld 8
+        m.draw_id = 3;
+        m.planning_id = 1002;
+        let snap = snap_officials(vec![m], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        // Frisch aufs Feld gerufen, dieser Poll-Zyklus.
+        let mut oncourt = HashMap::new();
+        oncourt.insert(8i64, 10i64);
+        tablet.reconcile_on_court(&oncourt, 1_000);
+
+        // Innerhalb der Karenzzeit: BTP zeigt die Besetzung noch nicht, aber
+        // kein zweites SENDUPDATE fürs selbe Match — die Feldzuweisung selbst
+        // hat sie schon eingebettet mitgeschrieben.
+        assert!(
+            officials_entries(
+                &tablet,
+                &snap,
+                &HashMap::new(),
+                1_000 + OFFICIALS_COURT_SETTLE_MS - 1
+            )
+            .is_empty(),
+            "innerhalb der Karenzzeit darf kein zweites SENDUPDATE fürs selbe Match raus"
+        );
+
+        // Nach der Karenzzeit zeigt BTP die Besetzung immer noch nicht →
+        // jetzt greift der Abgleich wie gehabt.
+        let offen = officials_entries(
+            &tablet,
+            &snap,
+            &HashMap::new(),
+            1_000 + OFFICIALS_COURT_SETTLE_MS,
+        );
+        assert_eq!(
+            offen.len(),
+            1,
+            "nach der Karenzzeit korrigiert der Abgleich wieder"
+        );
+        assert_eq!(offen[0].match_id, 10);
     }
 
     // --- Schiedsrichter-Rotation (Spec schiedsrichter-management, Nr. 4) ---
@@ -2230,6 +2392,43 @@ mod tests {
             tablet.officials_store().assignment(10).sr,
             Some(1),
             "Zuweisung bleibt dem beendeten Spiel erhalten"
+        );
+    }
+
+    #[test]
+    fn track_officials_ans_ende_ruecken_ist_bei_mehreren_feldern_nach_courtid_sortiert() {
+        // Zwei Felder werden im selben Zyklus fertig — welches zuerst ans
+        // Ende der Reihenfolge rückt, muss wie bei der Zuteilung nach
+        // CourtID sortiert sein, nicht von der HashMap-Iterationsreihenfolge
+        // abhängen (sonst wäre das Ergebnis von Poll-Zyklus zu Poll-Zyklus
+        // unvorhersehbar).
+        let (mut engine, tablet) = officials_setup(true, true);
+        let snap1 = snap_officials(
+            vec![
+                oncourt_named(10, 7, "A", "B"), // höhere CourtID
+                oncourt_named(11, 3, "C", "D"), // niedrigere CourtID
+            ],
+            &[1, 2, 3, 4],
+        );
+        tablet.set_snapshot(snap1.clone());
+        engine.track_officials(&snap1, &tablet);
+        assert_eq!(tablet.officials_store().assignment(11).sr, Some(1));
+        assert_eq!(tablet.officials_store().assignment(10).sr, Some(3));
+
+        let snap2 = snap_officials(
+            vec![
+                finished_named(10, 1, "A", "B"),
+                finished_named(11, 2, "C", "D"),
+            ],
+            &[1, 2, 3, 4],
+        );
+        tablet.set_snapshot(snap2.clone());
+        engine.track_officials(&snap2, &tablet);
+        assert_eq!(
+            tablet.officials_store().order(),
+            vec![1, 2, 3, 4],
+            "Feld 3 (kleinere CourtID) rückt zuerst ans Ende (1,2), danach Feld 7 (3,4) — \
+             deterministisch nach CourtID, nicht nach HashMap-Reihenfolge"
         );
     }
 

@@ -466,6 +466,13 @@ pub struct TabletState {
     /// weil LAN-Server, Relay-Client und Tauri-Commands denselben Stand
     /// sehen müssen; die Stammliste selbst bleibt BTPs (R2).
     officials: crate::tablet::officials::OfficialsStore,
+    /// Ausnahmeliste der automatischen Feldvergabe (Spec
+    /// `feldvergabe-ausnahme`, Muster ADR 0022): Match-IDs, die die
+    /// Turnierleitung von `sync.rs::auto_assign` ausgenommen hat —
+    /// turniergebunden persistiert, kein Personendatum. Er hängt hier aus
+    /// demselben Grund wie `officials`: TL-Web-Actions und Tauri-Commands
+    /// müssen denselben Stand sehen.
+    auto_assign_exclusions: crate::tablet::exclusion::AutoAssignExclusionStore,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -767,6 +774,10 @@ impl TabletState {
         self.officials.set_tournament(&snapshot.tournament_name);
         let official_ids: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
         self.officials.sync_roster(&official_ids);
+        // Ausnahmeliste der Auto-Vergabe ebenso turniergebunden (Muster
+        // ADR 0022, Spec `feldvergabe-ausnahme`).
+        self.auto_assign_exclusions
+            .set_tournament(&snapshot.tournament_name);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -792,6 +803,33 @@ impl TabletState {
     /// Der Schiedsrichter-Roster (Spec `schiedsrichter-management`).
     pub fn officials_store(&self) -> &crate::tablet::officials::OfficialsStore {
         &self.officials
+    }
+
+    /// Ist dieses Match gerade von der automatischen Feldvergabe ausgenommen
+    /// (Spec `feldvergabe-ausnahme`)? Aufrufer bleiben `auto_assign`
+    /// (sync.rs) und beide Anzeigen (TL-Web-Warteliste,
+    /// Desktop-Kandidatenliste) — nie der Store direkt, damit es nur diese
+    /// eine Prüfung gibt.
+    pub fn auto_assign_excluded(&self, match_id: i64) -> bool {
+        self.auto_assign_exclusions.is_excluded(match_id)
+    }
+
+    /// Ausnahme setzen oder zurücknehmen — Ziel sowohl des TL-Web-Actions-
+    /// Pfads (`tl.rs`) als auch des Desktop-Commands (`commands.rs`), beide
+    /// auf demselben Speicher.
+    pub fn set_auto_assign_excluded(&self, match_id: i64, excluded: bool) {
+        self.auto_assign_exclusions.set_excluded(match_id, excluded);
+    }
+
+    /// Aufräumen bei Spielende (aus `sync.rs::reconcile_auto_assign_exclusions`):
+    /// entfernt jede Ausnahme, deren Match nicht mehr in `keep` steht.
+    pub fn retain_auto_assign_exclusions(&self, keep: &std::collections::HashSet<i64>) {
+        self.auto_assign_exclusions.retain(keep);
+    }
+
+    /// Ablage-Datei der Auto-Vergabe-Ausnahmeliste setzen (beim App-Start).
+    pub fn set_auto_assign_exclusions_path(&self, path: std::path::PathBuf) {
+        self.auto_assign_exclusions.set_path(path);
     }
 
     /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**
@@ -4607,6 +4645,28 @@ mod tests {
         st.set_snapshot(snap);
         assert_eq!(st.officials_store().order(), vec![9]);
         assert!(!st.officials_store().extra(3).paused);
+    }
+
+    #[test]
+    fn snapshot_bindet_die_auto_vergabe_ausnahmeliste_ans_turnier() {
+        // Spec `feldvergabe-ausnahme`, Muster ADR 0022: Turnier binden, beim
+        // Wechsel wird der Stand verworfen.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_auto_assign_exclusions_path(dir.path().join("excluded-matches.json"));
+
+        st.set_snapshot(snap_named("Cup A"));
+        st.set_auto_assign_excluded(10, true);
+        assert!(st.auto_assign_excluded(10));
+
+        // Derselbe Turniername im nächsten Snapshot lässt die Ausnahme
+        // stehen …
+        st.set_snapshot(snap_named("Cup A"));
+        assert!(st.auto_assign_excluded(10));
+
+        // … ein Turnierwechsel verwirft sie.
+        st.set_snapshot(snap_named("Cup B"));
+        assert!(!st.auto_assign_excluded(10));
     }
 
     #[test]

@@ -6,6 +6,9 @@
 > ADR: [0011 — Schreibender Cloud-Pfad für Turnierleitungs-Geräte](../adr/0011-tl-web-schreibender-cloud-pfad.md) ·
 > [0012 — Geräte-Identität für Turnierleitungs-Geräte](../adr/0012-tl-web-geraete-identitaet.md) ·
 > ADR zur Ergebniskorrektur folgt nach dem BTP-Experiment (Schritt 12).
+> Verwandt: [feldvergabe-ausnahme.md](feldvergabe-ausnahme.md) (eigene Spec)
+> ergänzt die Warteliste um einen Pause-Umschalter je Spiel, der es von der
+> automatischen Feldvergabe ausnimmt — nutzt dieselbe `TlAction`-Infrastruktur.
 
 ## Kontext / Problem
 
