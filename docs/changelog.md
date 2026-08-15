@@ -4,6 +4,42 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.203
+
+- **Turnierleitungs-Oberfläche: Panels und Profile** (Spec
+  [tl-web-panelsystem](features/tl-web-panelsystem.md), ADR
+  [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md) ·
+  [0025](adr/0025-tl-panel-profile-transport-persistenz.md)). Die Seite war
+  durch die vielen Einzelfeatures der letzten Wochen unübersichtlich
+  geworden: neun fest verdrahtete Abschnitte, die sich nur zuklappen, aber
+  nie wirklich abschalten ließen, fünf gewachsene Abzeichen-Farbfamilien
+  und Wartelisten-Zeilen mit bis zu zehn Bedienelementen. Jetzt ist jeder
+  Abschnitt ein **Panel** mit einheitlicher Kopfzeile — einzeln dauerhaft
+  aus-/einblendbar, per eigenem Griff umsortierbar und über Trennstege in
+  der Höhe frei verteilbar. Was davon wie aussieht, steckt in **benannten
+  Profilen** („Tablet", „Wandmonitor"), die serverseitig liegen, an der
+  Geräte-Identität hängen (also ein Neuladen und den Wechsel zwischen
+  Hallennetz und Cloud überstehen) und turnierübergreifend erhalten
+  bleiben. Sie ersetzen das alte, auf `localStorage` verstreute
+  „Anzeige"-Klappmenü — ein Konfigurationsort statt drei. Dazu ein
+  vereinheitlichtes **Abzeichen-System mit drei Dringlichkeitsstufen**
+  (Info/Warnung/Alarm; „Matchball" bleibt als reine Info optisch klar vom
+  Alarm-Rot „überfällig" getrennt) und **entschlackte Wartelisten-Zeilen**
+  — Nachruf, Auto-Vergabe-Umschalter und Hallen-Wähler liegen jetzt hinter
+  einem ⋮-Menü. Die Profil-Verwaltung läuft bewusst direkt in der
+  Weboberfläche (zweite benannte Ausnahme von „kein Setup aus dem Web",
+  begründet in ADR 0024) — reine Darstellungs-Präferenzen ohne
+  Sicherheitsbezug. Bestehende Installationen aktualisieren ohne
+  Migration: Ohne angelegtes Profil läuft die Seite auf einem eingebauten
+  Standard mit den bisherigen Voreinstellungen.
+- **Datenverlust-Pfad in der Konfiguration geschlossen** (im Zuge des
+  Panelsystems gefunden). Bis hierher schrieb ausschließlich der
+  Setup-Assistent die `config.json`; mit den Profilen kam ein zweiter
+  Schreibweg aus der Weboberfläche dazu. Beide arbeiten jetzt auf
+  **einem** gemeinsamen Konfigurationsstand — sonst hätte ein späteres
+  Speichern im Setup-Assistenten die zwischenzeitlich in der
+  Weboberfläche angelegten Profile kommentarlos überschrieben.
+
 ## v0.9.202
 
 - **Schiedsrichter-Rückschreib-Race nach frischer Feldzuweisung behoben**

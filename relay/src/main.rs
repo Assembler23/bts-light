@@ -238,6 +238,15 @@ struct Namespace {
     /// Die Kennung reist mit jedem Kommando zurück, damit das Protokoll des
     /// Turnier-PCs benennen kann, wer gehandelt hat.
     tl_tokens: HashMap<String, String>,
+    /// Panel-Profil je Zugang (Spec tl-web-panelsystem, ADR 0025): Zugang →
+    /// `profile_id`, parallel zu `tl_tokens`, mit demselben Lebenszyklus —
+    /// wird bei jedem `HostFrame::TlAuth` NEU aufgebaut (nicht ergänzt), so
+    /// dass ein Widerruf auch diese Zuordnung mit aufräumt. Grundlage des
+    /// `X-Tl-Active-Profile`-Antwort-Headers auf `/tl/api/state`. Lebt
+    /// strikt innerhalb DIESES `Namespace` — ein Zugang aus Namespace A darf
+    /// niemals einen Wert aus Namespace B liefern (Sicherheitsgrenze,
+    /// `security-reviewer`-Pflicht laut Spec).
+    tl_token_profile: HashMap<String, String>,
     /// Zuletzt gepushter Anzeige-Zustand: `(Revision, JSON)`. **Opak** — der
     /// Relay liest ihn nie, er legt ihn ab und liefert ihn aus. So bleibt
     /// jede Turnierlogik im Host (R5).
@@ -319,6 +328,7 @@ impl Namespace {
             pending: HashMap::new(),
             next_req: 1,
             tl_tokens: HashMap::new(),
+            tl_token_profile: HashMap::new(),
             tl_state: None,
             tl_pending: HashMap::new(),
             timeline_pending: HashMap::new(),
@@ -2626,6 +2636,11 @@ const MAX_TL_TOKENS: usize = relay_proto::MAX_TL_DEVICES_MIRRORED;
 /// Wie lange eine Anfrage auf die Quittung des Turnier-PCs wartet.
 const TL_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Antwort-Header mit dem Panel-Profil des aufrufenden Geräts (Spec
+/// tl-web-panelsystem, ADR 0025). Auf `/tl/api/state` gesetzt, auch bei 304
+/// — Header werden unabhängig vom gecachten Body immer gesendet.
+const X_TL_ACTIVE_PROFILE: &str = "x-tl-active-profile";
+
 // **Sperrreihenfolge:** Wird beides gebraucht, zuerst `namespaces`, dann
 // `tl_index` — nie umgekehrt. Die Handler lesen den Wegweiser deshalb in
 // einem eigenen Block, dessen Sperre fällt, bevor sie den Namespace greifen.
@@ -2919,6 +2934,12 @@ async fn tl_state_route(
         )
             .into_response();
     };
+    // Panel-Profil dieses Zugangs (Spec tl-web-panelsystem, ADR 0025) — aus
+    // der Namespace-lokalen Map, NIE aus einer anderen Quelle. Fehlt der
+    // Zugang darin (z. B. ein Host ohne dieses Feature), gibt es unten
+    // keinen Header — kein Raten auf ein Standardprofil, das entscheidet
+    // die Seite selbst.
+    let active_profile = namespace.tl_token_profile.get(&token).cloned();
     // Generation **und** Revision als ETag: Ein Gerät, das denselben Stand
     // schon hat, bekommt 304 und spart die Übertragung — bei einer Seite, die
     // alle zwei Sekunden fragt, ist das der Unterschied zwischen sparsam und
@@ -2929,26 +2950,37 @@ async fn tl_state_route(
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v == etag);
-    if unveraendert {
-        return (
+    let mut response = if unveraendert {
+        (
             StatusCode::NOT_MODIFIED,
             [
                 (header::ETAG, etag.as_str()),
                 (header::CACHE_CONTROL, "no-store"),
             ],
         )
-            .into_response();
+            .into_response()
+    } else {
+        (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            json,
+        )
+            .into_response()
+    };
+    // Frisch bei JEDER Antwort gesetzt, auch bei 304: Header werden
+    // unabhängig vom gecachten Body immer gesendet, der große Body bleibt
+    // cachebar (ADR 0025). Ein leerer Wert ist erlaubt (Standardprofil) —
+    // nur ein wirklich fehlender Eintrag liefert gar keinen Header.
+    if let Some(profile_id) = active_profile {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&profile_id) {
+            response.headers_mut().insert(X_TL_ACTIVE_PROFILE, value);
+        }
     }
-    (
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/json"),
-            (header::ETAG, etag.as_str()),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        json,
-    )
-        .into_response()
+    response
 }
 
 /// Punktverlauf eines Matches für ein Turnierleitungs-Gerät — **on-demand**
@@ -3436,7 +3468,14 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // **Ersetzen, nicht ergänzen**: Das ist der Widerruf. Ein
             // abhandengekommenes Tablet verliert seinen Zugang, sobald der
             // Turnier-PC ihn nicht mehr nennt — ergänzten wir hier, bliebe er
-            // bis zum Turnierende gültig.
+            // bis zum Turnierende gültig. Dieselbe Ersetzen-Regel gilt für
+            // die Profil-Zuordnung (`tl_token_profile`, ADR 0025): Ein
+            // widerrufener Zugang darf keinen Profil-Eintrag zurücklassen.
+            namespace.tl_token_profile = devices
+                .iter()
+                .filter(|d| !d.token.is_empty())
+                .map(|d| (d.token.clone(), d.profile_id.clone()))
+                .collect();
             namespace.tl_tokens = devices
                 .into_iter()
                 .filter(|d| !d.token.is_empty())
@@ -3912,6 +3951,7 @@ mod tests {
                 devices: vec![relay_proto::TlAuthDevice {
                     id: "tl-1".to_string(),
                     token: "token-a".to_string(),
+                    ..Default::default()
                 }],
             },
             &host,
@@ -3938,6 +3978,7 @@ mod tests {
                 devices: vec![relay_proto::TlAuthDevice {
                     id: "tl-1".to_string(),
                     token: "alt".to_string(),
+                    ..Default::default()
                 }],
             },
             &host,
@@ -3952,6 +3993,7 @@ mod tests {
                 devices: vec![relay_proto::TlAuthDevice {
                     id: "tl-2".to_string(),
                     token: "neu".to_string(),
+                    ..Default::default()
                 }],
             },
             &host,
@@ -4026,6 +4068,7 @@ mod tests {
                 devices: vec![relay_proto::TlAuthDevice {
                     id: "tl-neu".to_string(),
                     token: "neues-token".to_string(),
+                    ..Default::default()
                 }],
             },
             &host,
@@ -4036,6 +4079,200 @@ mod tests {
             "widerrufen"
         );
         assert!(tl_lookup(&broker, "ns1", "neues-token").await);
+    }
+
+    // ───────────── Panel-Profile (Spec tl-web-panelsystem, ADR 0025) ────────
+
+    #[tokio::test]
+    async fn tl_auth_push_mirrors_profile_id() {
+        // Der Host spiegelt die Profil-Zuordnung mit demselben Push wie die
+        // Zugänge — Grundlage des `X-Tl-Active-Profile`-Headers.
+        let (broker, _rx, host) = broker_with_tl_device("token-a").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "token-a".to_string(),
+                    profile_id: "profil-wand".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let ns = map.get("ns1").unwrap();
+        assert_eq!(
+            ns.tl_token_profile.get("token-a").map(String::as_str),
+            Some("profil-wand")
+        );
+    }
+
+    #[tokio::test]
+    async fn tl_auth_replace_clears_stale_profile_entries() {
+        // Ein neuer TlAuth-Push OHNE ein zuvor bekanntes Token räumt dessen
+        // Profil-Eintrag mit auf — dieselbe „Ersetzen, nicht ergänzen"-Regel
+        // wie bei `tl_tokens` (Widerruf, siehe
+        // `revoking_a_device_takes_effect_with_the_next_push` oben).
+        let (broker, _rx, host) = broker_with_tl_device("altes-token").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "altes-token".to_string(),
+                    profile_id: "profil-alt".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-2".to_string(),
+                    token: "neues-token".to_string(),
+                    profile_id: "profil-neu".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let ns = map.get("ns1").unwrap();
+        assert!(
+            !ns.tl_token_profile.contains_key("altes-token"),
+            "widerrufener Zugang darf keinen Profil-Eintrag zurücklassen"
+        );
+        assert_eq!(
+            ns.tl_token_profile.get("neues-token").map(String::as_str),
+            Some("profil-neu")
+        );
+    }
+
+    #[tokio::test]
+    async fn tl_state_route_sets_active_profile_header_on_200() {
+        let (broker, _rx, host) = broker_with_tl_device("token-a").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "token-a".to_string(),
+                    profile_id: "profil-wand".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 1,
+                json: r#"{"rev":1}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token-a".parse().unwrap());
+        let response = tl_state_route(State(broker.clone()), headers)
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-wand"
+        );
+    }
+
+    #[tokio::test]
+    async fn tl_state_route_sets_active_profile_header_on_304() {
+        let (broker, _rx, host) = broker_with_tl_device("token-a").await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlAuth {
+                devices: vec![relay_proto::TlAuthDevice {
+                    id: "tl-1".to_string(),
+                    token: "token-a".to_string(),
+                    profile_id: "profil-wand".to_string(),
+                }],
+            },
+            &host,
+        )
+        .await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 1,
+                json: r#"{"rev":1}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+
+        // Erst 200 holen, um den echten ETag zu kennen ...
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token-a".parse().unwrap());
+        let first = tl_state_route(State(broker.clone()), headers.clone())
+            .await
+            .into_response();
+        let etag = first.headers().get(header::ETAG).unwrap().clone();
+
+        // ... dann mit If-None-Match erneut anfragen: 304, aber der Header
+        // bleibt (Header werden unabhängig vom gecachten Body immer
+        // gesendet, ADR 0025).
+        headers.insert(header::IF_NONE_MATCH, etag);
+        let second = tl_state_route(State(broker.clone()), headers)
+            .await
+            .into_response();
+        assert_eq!(second.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            second.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-wand"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_token_gets_no_profile_header() {
+        // Kein Eintrag in `tl_token_profile` (z. B. ein Host, der dieses
+        // Feature noch nicht kennt, oder ein Gerät ohne Profilwahl) → gar
+        // kein Header. Das Frontend entscheidet clientseitig, was
+        // „Standard" bedeutet — der Relay rät nichts.
+        let (broker, _rx, host) = broker_with_tl_device("token-a").await;
+        // `broker_with_tl_device` trägt den Zugang direkt in `tl_tokens`
+        // ein, OHNE über `HostFrame::TlAuth` zu laufen — `tl_token_profile`
+        // bleibt also bewusst leer.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 1,
+                json: r#"{"rev":1}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token-a".parse().unwrap());
+        let response = tl_state_route(State(broker.clone()), headers)
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get(X_TL_ACTIVE_PROFILE).is_none(),
+            "kein Eintrag in der Map → kein Header, kein geratener Fallback"
+        );
     }
 
     #[tokio::test]
@@ -4064,6 +4301,7 @@ mod tests {
             .map(|i| relay_proto::TlAuthDevice {
                 id: format!("tl-{i}"),
                 token: format!("t-{i}"),
+                ..Default::default()
             })
             .collect();
         handle_host_frame(
@@ -4194,6 +4432,7 @@ mod tests {
                 devices: vec![relay_proto::TlAuthDevice {
                     id: "tl-3f2a".to_string(),
                     token: "geheim".to_string(),
+                    ..Default::default()
                 }],
             },
             &host_tx,

@@ -6,7 +6,8 @@ das Internet. Mehrere Helfer können gleichzeitig arbeiten.
 
 Diese Datei beschreibt **Einrichtung und Betrieb**. Wie es innen aussieht,
 steht in [features/turnierleitung-web.md](features/turnierleitung-web.md)
-(Spezifikation) und [cloud-relay.md](cloud-relay.md) (Wire-Ebene).
+(Spezifikation), [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md)
+(Panels und Profile) und [cloud-relay.md](cloud-relay.md) (Wire-Ebene).
 
 ## Einrichten
 
@@ -59,7 +60,12 @@ LAN+Cloud voraus.
   dieselbe Zahl.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
-  den Aufruf zurück. Daneben der **Nachruf** (beide Parteien oder nur eine).
+  den Aufruf zurück.
+- **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
+  wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
+  **Auto-Vergabe**-Umschalter und der **Hallen-Wähler**. Sichtbar bleibt
+  an der Zeile nur, was ständig gebraucht wird; so passt eine Zeile auch
+  auf einem schmalen Tablet in eine Zeile statt in vier.
 - **Was steht wo:** Jedes Spiel nennt seine **Klasse** in der gewohnten
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
@@ -70,15 +76,19 @@ LAN+Cloud voraus.
   sehr vielen Feldern verkleinern sich die Kacheln dafür stufenweise
   (kleinere Abstände, dann kleinere Schrift), bevor überhaupt gerollt wird.
 - **Zähltafel-Warteschlange:** Ist die Zähltafel-Verwaltung in bts-light
-  eingeschaltet, erscheint rechts ein eigener aufklappbarer Abschnitt mit
-  den wartenden Zähltafelbedienern. Von dort lässt sich jemand **vorziehen**
-  (an den Anfang der Schlange), aus der Schlange **entfernen** oder von Hand
-  neu **hinzufügen** — dieselben Aktionen wie am Turnier-PC. Ist die
-  Verwaltung ausgeschaltet, bleibt der Abschnitt unsichtbar.
-- **Beendet:** ein zugeklappter Abschnitt unter der Spielliste, neueste
-  zuerst. Aufgabe, kampflos gewertete und disqualifizierte Spiele tragen
-  eine eigene Kennzeichnung neben dem Satzstand. Über den Cloud-Weg ist auch
-  diese Liste ggf. gekürzt.
+  eingeschaltet, erscheint ein eigenes Panel mit den wartenden
+  Zähltafelbedienern. Von dort lässt sich jemand **vorziehen** (an den
+  Anfang der Schlange), aus der Schlange **entfernen** oder von Hand neu
+  **hinzufügen** — dieselben Aktionen wie am Turnier-PC. Ist die Verwaltung
+  ausgeschaltet, gibt es das Panel gar nicht.
+- **Beendet:** ein eigenes Panel unter der Spielliste, neueste zuerst.
+  Aufgabe, kampflos gewertete und disqualifizierte Spiele tragen eine eigene
+  Kennzeichnung neben dem Satzstand. Über den Cloud-Weg ist auch diese Liste
+  ggf. gekürzt.
+- **Was zu sehen ist, bestimmst du:** Jeder Abschnitt der Seite ist ein
+  **Panel**, das sich einzeln ausblenden, umsortieren und in der Höhe
+  verteilen lässt — gespeichert in einem **Profil** je Gerät. Siehe
+  „Panels" und „Profile" weiter unten.
 
 ### Die Farbe eines Feldes
 
@@ -104,13 +114,27 @@ gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
 
 Zusätzlich zum Zustands-Streifen bekommt eine laufende Kachel bei Satz- oder
 Matchball einen zweiten, umlaufenden Rahmen plus Abzeichen: **„Satzball"**
-(gelb) für den letzten Punkt eines Satzes, **„Matchball"** (rot, pulsierend
-— das Feld wird gleich frei) für den letzten Punkt des Matches. Das ist nur
-eine Planungshilfe für die Turnierleitung, keine Wertungslogik, und
-erscheint **ausschließlich hier**, nie auf den Hallen-TVs (Court-Monitor/
-Overview) — bewusste Scope-Entscheidung vom 20.07.2026, Plan 16. Die
-Streifenfarbe bleibt davon unberührt: Rot heißt am Streifen weiterhin
-„überfällig", nicht „Matchball".
+für den letzten Punkt eines Satzes, **„Matchball"** (pulsierend — das Feld
+wird gleich frei) für den letzten Punkt des Matches. Das ist nur eine
+Planungshilfe für die Turnierleitung, keine Wertungslogik, und erscheint
+**ausschließlich hier**, nie auf den Hallen-TVs (Court-Monitor/Overview) —
+bewusste Scope-Entscheidung vom 20.07.2026, Plan 16.
+
+#### Abzeichen: drei Dringlichkeitsstufen
+
+Alle kleinen Abzeichen an Feldkacheln und Listenzeilen folgen **einer**
+Skala — man muss sich nicht je Abzeichen merken, was seine Farbe bedeutet:
+
+| Stufe | Sieht so aus | Was da steht |
+|---|---|---|
+| **Info** | ruhig, nur umrandet | „Satzball", „Matchball", „manuell einsortiert" — Planungshilfe, nichts zu tun |
+| **Warnung** | gelb-orange gefüllt | „⏸ Auto-Vergabe aus", Schiedsrichter-Konflikt — bewusst gesetzt oder nachsehen |
+| **Alarm** | rot gefüllt | überfällig, gesperrt, Verletzung, „TL gerufen" — da muss jemand hin |
+
+Info-Abzeichen sind bewusst nur **umrandet** statt ausgefüllt: „Matchball"
+ist dadurch auf den ersten Blick von einem Alarm zu unterscheiden, auch
+wenn beide rötlich sind. Am Feld-**Streifen** heißt Rot weiterhin
+„überfällig", nie „Matchball".
 
 ### Spielort
 
@@ -153,10 +177,10 @@ endet mit dem Stoppen der Übertragung.
 
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 
-An jeder Zeile der Warteliste sitzt neben dem Vorbereitungs-Aufruf-Knopf ein
-Pause-Umschalter (⏸). Gedrückt heißt: Dieses Spiel wird von der
+Im **⋮-Menü** jeder Wartelisten-Zeile steht ein Pause-Umschalter
+(⏸ Auto-Vergabe). Gedrückt heißt: Dieses Spiel wird von der
 **automatischen** Feldvergabe übersprungen, solange die Ausnahme aktiv ist
-— ein Badge „⏸ Auto-Vergabe aus" markiert die Zeile zusätzlich. Praktisch,
+— ein Abzeichen „⏸ Auto-Vergabe aus" markiert die Zeile zusätzlich. Praktisch,
 wenn ein Spieler kurzfristig nicht greifbar ist, das Spiel aber nicht
 sofort gewertet oder manuell verschoben werden soll.
 
@@ -185,11 +209,66 @@ Fließ-Darstellung.
 Details zum Datenmodell und zur Vergleichsregel für Hallennamen:
 [features/feld-raster.md](features/feld-raster.md).
 
-### Anzeige (Klappmenü im Kopf)
+### Panels: was auf dieser Seite steht
 
-Drei Einstellungen, die **je Gerät** gelten und dort gespeichert bleiben —
-der eine Helfer sucht nach der Spielnummer aus dem Papierplan, der andere
-kann damit nichts anfangen:
+Die Seite besteht aus neun **Panels** — Felder, Aufgaben (Walkover),
+Zähltafel-Warteschlange, Schiedsrichter, die vier Wartelisten-Abschnitte
+(„In Vorbereitung gerufen", „Spielbereit", „Noch nicht bereit", „Ohne
+Hallenzuordnung") und „Beendet". Jedes trägt dieselbe Kopfzeile: Titel,
+Anzahl, und rechts ein **Auge** zum Aus- und Einblenden.
+
+- **Ausblenden ist dauerhaft** (nicht nur zugeklappt): Ein ausgeblendetes
+  Panel belegt keinen Platz mehr und bleibt nach einem Neuladen der Seite
+  ausgeblendet. Wer keine Schiedsrichter einteilt, wird den Abschnitt
+  dadurch wirklich los.
+- **Reihenfolge ändern**: Am Kopf jedes Panels sitzt ein Verschiebe-Griff
+  (Kreuz-Pfeile — bewusst ein anderes Symbol als der ⠿-Griff, mit dem man
+  einzelne *Zeilen* zieht). Ziehen oder mit den Pfeiltasten verschieben.
+- **Höhe verteilen**: Zwischen je zwei sichtbaren Panels sitzt ein
+  Trennsteg. Ziehen gibt dem einen Panel mehr Platz und dem anderen
+  weniger; **Doppeltipp** stellt die gleichmäßige Verteilung wieder her.
+  Kein Panel lässt sich auf null ziehen. Ist ein Panel dazwischen
+  ausgeblendet, greift der Steg automatisch das nächste sichtbare.
+- **„Felder" bleibt oben bzw. links** — das ist die feste Ankerposition
+  der Seite. Aus-/Einblenden und Höhe verteilen geht trotzdem, nur
+  umsortieren nicht. Ob die Spielliste rechts daneben oder darunter
+  steht, entscheidet weiterhin die Einstellung **Spielliste
+  rechts/darunter** (siehe Profile).
+
+### Profile (Knopf im Kopf)
+
+Alles, was diese Seite unterschiedlich aussehen lässt, steckt in einem
+**Profil**: welche Panels sichtbar sind, in welcher Reihenfolge, wie hoch,
+und die Anzeige-Häkchen weiter unten. Ein Tablet in der Hand braucht etwas
+anderes als ein Wandmonitor — statt an jedem Gerät einzeln zu schrauben,
+legst du einmal ein „Tablet"- und ein „Wandmonitor"-Profil an und wählst
+am jeweiligen Gerät seins.
+
+- **Anlegen/Bearbeiten/Löschen** über den **Profile**-Knopf im Kopf.
+  Löschen fragt nach und ist nicht rückgängig zu machen.
+- **Für dieses Gerät wählen** — die Wahl hängt am Gerät (nicht am Browser)
+  und übersteht ein Neuladen, im Hallennetz wie über die Cloud.
+- **Als Standard markieren** — welches Profil ein Gerät bekommt, das noch
+  keins gewählt hat.
+- Profile gelten **turnierübergreifend** und bleiben bei einem Neustart
+  des Turnier-PCs erhalten (sie stehen in der Konfiguration, nicht in den
+  Turnierdaten).
+- Wird ein Profil gelöscht, das ein Gerät gerade nutzt, fällt dieses Gerät
+  beim nächsten Abruf **von selbst auf das Standardprofil** zurück — ohne
+  Fehlermeldung.
+- Ändern zwei Geräte gleichzeitig dasselbe Profil, gewinnt die zuletzt
+  gespeicherte Fassung. Keine Warnung, kein Konfliktdialog — in der Praxis
+  richtet man Profile einmal vor dem Turnier ein, nicht gleichzeitig zu
+  zweit.
+- **Das Profil gilt verbindlich.** Anders als früher kann ein Gerät
+  einzelne Häkchen nicht mehr für sich überstimmen — wer es anders will,
+  legt ein eigenes Profil an. Dafür sieht man an jedem Gerät auch
+  wirklich das, was im gewählten Profil steht.
+- Ohne angelegtes Profil läuft die Seite auf einem eingebauten Standard
+  (alle Panels sichtbar, Voreinstellungen wie unten). Die erste eigene
+  Änderung macht daraus automatisch ein echtes Profil.
+
+Die Anzeige-Häkchen im Profil-Editor:
 
 - **Spielnummer zeigen** (Standard: an) — die Zahl ganz links in der Liste.
 - **Nationen zeigen** (Standard: **aus**) — die **Flagge** neben jedem
@@ -198,22 +277,19 @@ kann damit nichts anfangen:
   Turnieren.
 - **Spielliste rechts / darunter** (Standard: rechts) — auf einem
   schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
-  Reine Anzeigefrage, keine Turniereinstellung: Gerät A kann „rechts"
-  zeigen, Gerät B gleichzeitig „darunter".
 - **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
   einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
   „Beendet" zeigen sie unverändert weiter.
 
-Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
+Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
 
 #### Vereine (Vereinsname/-logo)
 
-Im Anzeige-Menü stehen **„Vereinsnamen zeigen"** und **„Vereinslogos zeigen"**
-— wie die übrigen Schalter **je Gerät** und dort gespeichert. Die
-**Voreinstellung** kommt aus dem Setup unter **„Vereine anzeigen"** (die
-turnierweite Wahl, die zugleich die Tablet-Spielzettel steuert); jedes Gerät
-darf sie für sich überstimmen. Standard turnierweit: **aus**.
+Im Profil-Editor stehen **„Vereinsnamen zeigen"** und **„Vereinslogos zeigen"**.
+Die **Voreinstellung** kommt aus dem Setup unter **„Vereine anzeigen"** (die
+turnierweite Wahl, die zugleich die Tablet-Spielzettel steuert); ein Profil
+kann sie überschreiben. Standard turnierweit: **aus**.
 
 - **Vereinsnamen zeigen** — der Vereinsname in einer eigenen kleinen Zeile
   **unter** dem Spielernamen (mit Wappen davor, wenn Logos an sind).
@@ -246,7 +322,9 @@ Zwischen Feldern und Spielliste sitzt ein **Trennsteg** (kleine Pille in
 der Lücke). Ziehen verschiebt die Grenze: nebeneinander die **Breite** der
 Liste, gestapelt („Spielliste darunter") ihre **Höhe**. Das Maß gilt
 **je Gerät** und je Anordnung getrennt und bleibt gespeichert
-(`localStorage`, wie die übrigen Anzeige-Einstellungen).
+(`localStorage`). Nicht zu verwechseln mit den Stegen **zwischen den
+Panels** innerhalb der Liste (siehe „Panels") — dieser hier trennt die
+beiden großen Bereiche voneinander.
 
 **Doppeltipp/Doppelklick auf den Steg** stellt die automatische,
 bedarfsgerechte Aufteilung der aktuellen Anordnung wieder her. Grenzen

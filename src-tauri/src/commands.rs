@@ -49,7 +49,17 @@ impl Default for SyncStatus {
 #[derive(Default)]
 pub struct AppState {
     /// Zuletzt geladene bzw. gespeicherte Konfiguration.
-    pub config: Mutex<AppConfig>,
+    ///
+    /// **Bewusst `Arc<Mutex<_>>`, nicht nur `Mutex<_>`:** Dasselbe Arc wird
+    /// 1:1 an `ServerCtx` gereicht (Konstruktion in `start_sync`/`run_sync`)
+    /// — LAN-Server, Relay-Client UND alle Tauri-Commands (`save_config`,
+    /// `tl_device_add`, … über `mutate_config`) mutieren so denselben
+    /// In-Memory-Stand statt zweier getrennter, gegeneinander driftender
+    /// Kopien. Vorher schrieb `ServerCtx::mutate_app_config` (Panel-Profile,
+    /// ADR 0025) direkt an der Platte vorbei am In-Memory-Stand — ein Lost-
+    /// Update, sobald danach `mutate_config`/`save_config` seinen eigenen
+    /// (veralteten) In-Memory-Stand komplett zurückschrieb.
+    pub config: Arc<Mutex<AppConfig>>,
     /// Aktueller Status der Sync-Schleife.
     pub status: Mutex<SyncStatus>,
     /// Handle der laufenden Polling-Schleife, falls aktiv.
@@ -230,6 +240,13 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     } else {
         incoming.tl_web.devices.clear();
     }
+    // Der Panel-Profil-Katalog wird ausschließlich über TlAction aus
+    // tl.html gepflegt (ADR 0024), nie über den Setup-Assistenten — dessen
+    // Speichern darf ihn nicht zurücksetzen. Anders als bei `devices` gibt
+    // es hier kein „Ausschalten löscht" (Profile bleiben auch bei
+    // abgeschalteter Oberfläche erhalten, sie sind keine Zugänge).
+    incoming.tl_web.profiles = current.tl_web.profiles.clone();
+    incoming.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht im
     // Assistenten — dessen Speichern darf sie nicht zurücksetzen.
     incoming.hall_layouts = current.hall_layouts.clone();
@@ -298,6 +315,14 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     // alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
     // wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am
     // neuen PC neu — ein QR-Scan je Gerät. Der Schalter bleibt erhalten.
+    //
+    // Der Panel-Profil-KATALOG (`tl_web.profiles`) wird bewusst NICHT
+    // gestrippt — anders als die Geräte ist er kein Zugang/Secret, sondern
+    // reine Layout-Konfiguration, und soll den Umzug überstehen wie
+    // `hall_layouts` (ADR 0025). Die GERÄTE-Zuordnung eines Profils
+    // (`TlDevice.profile_id`) verschwindet trotzdem vollständig — nicht
+    // durch einen eigenen Schritt, sondern automatisch, weil die Zeile
+    // darüber die komplette `devices`-Liste leert.
     cfg.tl_web.devices.clear();
     cfg
 }
@@ -329,6 +354,18 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     // altem Bündel die hier schon eingerichteten Raster stillschweigend wegwischen.
     if imported.hall_layouts.is_empty() {
         imported.hall_layouts = current.hall_layouts.clone();
+    }
+    // Derselbe Fall wie bei den Rastern (Task 9/11): Ein Bündel aus einer
+    // Version vor diesem Feature — oder eins von einer Installation ohne
+    // eingerichtete Profile — trägt ein leeres `profiles`. Das darf die am
+    // aktuellen PC schon eingerichteten Profile nicht stillschweigend
+    // löschen (ADR 0025). `default_profile_id` folgt mit derselben
+    // Bedingung: Er zeigt in den jeweils geltenden Katalog — ihn mit dem
+    // Katalog der anderen Quelle zu mischen ergäbe eine Kennung, die im
+    // übernommenen Katalog gar nicht existiert.
+    if imported.tl_web.profiles.is_empty() {
+        imported.tl_web.profiles = current.tl_web.profiles.clone();
+        imported.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     }
     imported
 }
@@ -879,6 +916,11 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         cfg_path,
         assignments_path,
         log_dir,
+        // Dasselbe Arc wie `AppState.config` — siehe Feld-Kommentar dort:
+        // `ServerCtx::mutate_app_config` (Panel-Profile) und `mutate_config`
+        // (Tauri-Commands) mutieren so einen einzigen In-Memory-Stand statt
+        // zweier gegeneinander driftender Kopien.
+        state.config.clone(),
     ));
     // LAN und Cloud sind unabhängig voneinander schaltbar – im
     // Doppelmodus (`LanAndCloud`) laufen beide Wege für dieselbe
@@ -2572,6 +2614,10 @@ pub fn tl_device_add(
         label: label.trim().chars().take(60).collect(),
         created_at_ms: now_ms(),
         hall: hall.trim().to_string(),
+        // Neu gekoppelte Geräte starten ohne Profilbindung — sie zeigen das
+        // turnierweite Standardprofil, bis eine Turnierleitung eines wählt
+        // (Spec tl-web-panelsystem).
+        profile_id: String::new(),
     };
     let neu = device.clone();
     let cfg = mutate_config(&app, &state, move |cfg| {
@@ -2671,10 +2717,29 @@ fn mutate_config<F>(
 where
     F: FnOnce(&mut AppConfig) -> Result<(), String>,
 {
-    let mut guard = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    mutate_config_at(&config_path(app), &state.config, aendern)
+}
+
+/// Kernlogik von [`mutate_config`], ohne `AppHandle`/`State` — dieselbe
+/// Sperre (`shared`), derselbe Lesen-Ändern-Schreiben-Zyklus, nur ohne die
+/// Tauri-Anbindung. Existiert, damit Tests aus anderen Modulen (namentlich
+/// `tablet::server`) den **echten** Tauri-Command-Schreibpfad gegen den
+/// echten `ServerCtx::mutate_app_config`-Schreibpfad testen können, statt
+/// beide Male dieselbe Logik ein zweites Mal nachzubauen — genau das
+/// Lost-Update-Regressionsszenario (kritischer Review-Fund, s. Feld-
+/// Kommentar `AppState.config`).
+pub(crate) fn mutate_config_at<F>(
+    config_path: &std::path::Path,
+    shared: &Arc<Mutex<AppConfig>>,
+    aendern: F,
+) -> Result<AppConfig, String>
+where
+    F: FnOnce(&mut AppConfig) -> Result<(), String>,
+{
+    let mut guard = shared.lock().expect("Config-Mutex nicht vergiftet");
     let mut cfg = guard.clone();
     aendern(&mut cfg)?;
-    cfg.save_to(&config_path(app)).map_err(|e| e.to_string())?;
+    cfg.save_to(config_path).map_err(|e| e.to_string())?;
     *guard = cfg.clone();
     Ok(cfg)
 }
@@ -3766,6 +3831,7 @@ mod tests {
             label: "gerade gekoppelt".to_string(),
             created_at_ms: 2,
             hall: String::new(),
+            profile_id: String::new(),
         });
 
         // Der Stand aus dem Fenster kennt das Gerät noch nicht.
@@ -3814,6 +3880,7 @@ mod tests {
             label: "l".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
 
         let from_ui = AppConfig::default(); // tl_web aus
@@ -3840,6 +3907,7 @@ mod tests {
             label: "Tablet TL".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
 
         let bundle = identity_bundle(cfg);
@@ -3869,6 +3937,7 @@ mod tests {
             label: "Tablet TL".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
         let imported = cfg_id("inst-neu", None, "", "");
 
@@ -3954,6 +4023,145 @@ mod tests {
             "das importierte Raster gilt, nicht das lokale"
         );
         assert_eq!(merged.hall_layouts[0].hall, "Halle Neu");
+    }
+
+    /// Minimales Panel-Profil für Identitäts-/Persistenz-Tests (Spec
+    /// tl-web-panelsystem).
+    fn profile(id: &str) -> crate::config::TlPanelProfile {
+        crate::config::TlPanelProfile {
+            id: id.to_string(),
+            name: format!("Profil {id}"),
+            panels: Vec::new(),
+            display: crate::config::TlDisplaySettings::default(),
+            updated_at_ms: 1,
+        }
+    }
+
+    #[test]
+    fn identity_bundle_strips_tl_device_profile_ids() {
+        // Regressionsschutz: identity_bundle löscht die komplette
+        // devices-Liste (ADR 0012) — das nimmt jede darin gespeicherte
+        // profile_id automatisch mit, ohne dass ein eigener Schritt nötig
+        // wäre. Dieser Test verankert genau diese implizite Garantie.
+        let mut cfg = cfg_id("inst-xyz", None, "", "");
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.profiles.push(profile("profil-a"));
+        cfg.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-1".to_string(),
+            token: "tok-geheim".to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-a".to_string(),
+        });
+
+        let bundle = identity_bundle(cfg);
+        assert!(
+            bundle.tl_web.devices.is_empty(),
+            "mit den Geräten verschwindet auch jede profile_id"
+        );
+    }
+
+    #[test]
+    fn identity_bundle_keeps_profile_catalog() {
+        // Anders als die Geräte-Tokens ist der Profil-KATALOG kein
+        // Zugang/Secret — er wandert beim Identitäts-Umzug mit (ADR 0025),
+        // wie `hall_layouts`.
+        let mut cfg = cfg_id("inst-xyz", None, "", "");
+        cfg.tl_web.profiles.push(profile("profil-a"));
+        cfg.tl_web.default_profile_id = "profil-a".to_string();
+
+        let bundle = identity_bundle(cfg);
+        assert_eq!(bundle.tl_web.profiles.len(), 1, "Katalog bleibt erhalten");
+        assert_eq!(bundle.tl_web.profiles[0].id, "profil-a");
+        assert_eq!(bundle.tl_web.default_profile_id, "profil-a");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_profiles_when_bundle_has_none() {
+        // Bündel aus einer Version vor diesem Feature (oder eins ohne
+        // eingerichtete Profile) trägt ein leeres `profiles` — das darf die
+        // am aktuellen PC eingerichteten Profile NICHT stillschweigend
+        // löschen (Muster hall_layouts, ADR 0025).
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.tl_web.profiles.push(profile("profil-lokal"));
+        current.tl_web.default_profile_id = "profil-lokal".to_string();
+        let imported = cfg_id("inst-neu", None, "", "");
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu", "Identität wird übernommen");
+        assert_eq!(
+            merged.tl_web.profiles.len(),
+            1,
+            "lokal eingerichtete Profile bleiben, wenn das Bündel keine trägt"
+        );
+        assert_eq!(merged.tl_web.profiles[0].id, "profil-lokal");
+        assert_eq!(merged.tl_web.default_profile_id, "profil-lokal");
+    }
+
+    #[test]
+    fn apply_imported_identity_takes_bundle_profiles_when_present() {
+        // Trägt das Bündel eigene Profile, gelten die (echter Umzug einer
+        // Installation, die den Katalog schon eingerichtet hatte) — nicht
+        // die am neuen PC ggf. schon vorhandenen. `default_profile_id`
+        // folgt demselben Katalog, sonst zeigte er womöglich auf eine
+        // Kennung, die im übernommenen Katalog gar nicht existiert.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.tl_web.profiles.push(profile("profil-alt"));
+        current.tl_web.default_profile_id = "profil-alt".to_string();
+        let mut imported = cfg_id("inst-neu", None, "", "");
+        imported.tl_web.profiles.push(profile("profil-neu"));
+        imported.tl_web.default_profile_id = "profil-neu".to_string();
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(
+            merged.tl_web.profiles.len(),
+            1,
+            "der importierte Katalog gilt, nicht der lokale"
+        );
+        assert_eq!(merged.tl_web.profiles[0].id, "profil-neu");
+        assert_eq!(merged.tl_web.default_profile_id, "profil-neu");
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_given_current_profiles() {
+        // Muster `saving_settings_does_not_revert_the_paired_device_list`:
+        // Die Einstellungsseite schickt IHREN (beim Öffnen aufgenommenen)
+        // Stand zurück; der Profil-Katalog wächst aber währenddessen über
+        // tl.html (ADR 0024/0025) — `keep_host_managed_fields` muss das
+        // `current` übergebene `tl_web.profiles` unangetastet in den
+        // gemergten Stand übernehmen.
+        //
+        // **Testet NUR diese Merge-Funktion isoliert** — mit einem von Hand
+        // gebauten `current`. Das prüft NICHT, ob `current` (in der echten
+        // App: `state.config.lock()`) zum Zeitpunkt des Aufrufs auch
+        // tatsächlich das gerade in tl.html gespeicherte Profil kennt — das
+        // war der eigentliche kritische Review-Fund: Vorher lief
+        // `ServerCtx::mutate_app_config` (TL-Profil-Speichern) komplett
+        // ohne den `AppState.config`-In-Memory-Stand zu berühren, sodass
+        // `current` hier in der Praxis veraltet gewesen wäre — dieser Test
+        // hätte den Fehler NICHT gefunden. Der echte End-zu-Ende-
+        // Regressionstest für dieses Szenario (beide Schreibpfade über
+        // denselben `Arc<Mutex<AppConfig>>`, echtes Temp-Verzeichnis, echtes
+        // Schreiben) liegt in `tablet::server::tests
+        // ::profile_save_survives_a_later_settings_save_lost_update_regression`.
+        let mut current = AppConfig::default();
+        current.tl_web.profiles.push(profile("frisch-angelegt"));
+        current.tl_web.default_profile_id = "frisch-angelegt".to_string();
+
+        // Der Stand aus dem Fenster kennt das Profil noch nicht.
+        let mut from_ui = AppConfig::default();
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert_eq!(
+            merged.tl_web.profiles.len(),
+            1,
+            "das inzwischen angelegte Profil bleibt"
+        );
+        assert_eq!(merged.tl_web.profiles[0].id, "frisch-angelegt");
+        assert_eq!(merged.tl_web.default_profile_id, "frisch-angelegt");
     }
 
     #[test]

@@ -9,6 +9,14 @@
 > Verwandt: [feldvergabe-ausnahme.md](feldvergabe-ausnahme.md) (eigene Spec)
 > ergänzt die Warteliste um einen Pause-Umschalter je Spiel, der es von der
 > automatischen Feldvergabe ausnimmt — nutzt dieselbe `TlAction`-Infrastruktur.
+> **Abgelöst in Teilen:** [tl-web-panelsystem.md](tl-web-panelsystem.md)
+> (2026-08-15) ersetzt die hier beschriebenen, geräte-lokal in
+> `localStorage` gehaltenen Anzeige-Einstellungen („Anzeige"-Klappmenü)
+> durch benannte, server-seitige **Profile** und macht die neun Abschnitte
+> der Seite zu einzeln ein-/ausblendbaren, umsortierbaren **Panels**.
+> Akzeptanzkriterien dieser Spec, die sich auf das alte Anzeige-Menü oder
+> auf `localStorage`-Persistenz der Anzeige-Schalter beziehen, gelten
+> dadurch als abgelöst.
 
 ## Kontext / Problem
 
@@ -56,7 +64,13 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
   BTP-Verbindung, Setup-Assistent, Geräte-Kopplung, Diagnose.
 - **Kein Setup und keine Einstellungen aus dem Web** — BTP-Verbindung,
   Verbindungsmodus, Passwörter, Gerätekopplung bleiben in der Desktop-App.
-  Einzige Ausnahme: der Schalter für die automatische Feldvergabe.
+  Zwei benannte Ausnahmen: der Schalter für die automatische Feldvergabe,
+  und (seit 2026-08-15) die **Panel-Profil-Verwaltung** — Anlegen,
+  Bearbeiten, Löschen und Wählen der reinen Darstellungs-Profile läuft
+  direkt in `tl.html`. Begründung und Abgrenzung:
+  [ADR 0024](../adr/0024-tl-panel-profile-verwaltung-im-web.md) — Profile
+  sind sicherheitsneutrale Anzeige-Präferenzen, anders als Zugänge und
+  Verbindungen.
 - **Kein Zugriff auf Diagnose, Logs oder Log-Upload** aus dem Web.
 - **Kein Start/Stopp des Liveticker-Pushs** aus dem Web.
 - **Keine Schiedsrichter-Anzeige.** BTP führt zwar `Officials` und

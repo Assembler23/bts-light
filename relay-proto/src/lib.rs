@@ -1096,6 +1096,92 @@ pub enum TlOfficialRole {
     Ar,
 }
 
+/// Ein einzelnes Panel innerhalb eines [`TlPanelProfileWire`]: Sichtbarkeit +
+/// relative Höhe (Spec tl-web-panelsystem). `key` benennt den Abschnitt
+/// (`"courts"`, `"walkovers"`, `"scorekeepers"`, `"officials"`,
+/// `"queue_called"`, `"queue_ready"`, `"queue_waiting"`, `"queue_no_hall"`,
+/// `"finished"`) — als String statt Enum, weil künftige Panels ohne
+/// Protokolländerung dazukommen können sollen; die Panel-**Liste** ist
+/// Konfiguration, kein geschlossener Aktions-Satz wie [`TlAction`] selbst.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TlPanelSettingWire {
+    pub key: String,
+    pub visible: bool,
+    #[serde(rename = "heightFr")]
+    pub height_fr: f64,
+}
+
+/// Seite, auf der die Warteliste/Ergebnis-Spalte im Panel-System erscheint
+/// (Spec tl-web-panelsystem).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlListPositionWire {
+    #[default]
+    Right,
+    Bottom,
+}
+
+/// Turnierweite Anzeige-Optionen eines Panel-Profils (Spec
+/// tl-web-panelsystem) — dieselben Schalter, die vorher als lose
+/// `localStorage`-Werte in `tl.html` lebten.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TlDisplaySettingsWire {
+    #[serde(rename = "showNumbers")]
+    pub show_numbers: bool,
+    #[serde(rename = "showNations")]
+    pub show_nations: bool,
+    #[serde(rename = "showClubNames")]
+    pub show_club_names: bool,
+    #[serde(rename = "showClubLogos")]
+    pub show_club_logos: bool,
+    #[serde(rename = "showDiscipline")]
+    pub show_discipline: bool,
+    #[serde(rename = "showRound")]
+    pub show_round: bool,
+    #[serde(rename = "showGroup")]
+    pub show_group: bool,
+    #[serde(rename = "listPosition")]
+    pub list_position: TlListPositionWire,
+}
+
+/// Ein benanntes Panel-Profil, wie es über die Wire-Grenze reist — sowohl als
+/// Payload von [`TlAction::ProfileSave`] (Browser → Host) als auch,
+/// unverändert wiederverwendet, als Element von `TlState.profiles` (Host →
+/// Browser; Spec tl-web-panelsystem, ADR 0025).
+///
+/// **Bewusst kein rohes `config::TlPanelProfile` über die Wire-Grenze**
+/// (dieselbe Trennung wie bei `TlDevice`/[`TlAuthDevice`]): `relay-proto`
+/// bleibt unabhängig von `src-tauri::config` — dort liegt die
+/// Host-interne, um Persistenz-Belange erweiterte Fassung. Der Host
+/// übersetzt in beide Richtungen (`tablet::tl::profile_to_wire`/
+/// `profile_from_wire`-Äquivalente).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TlPanelProfileWire {
+    /// Leer bei [`TlAction::ProfileSave`] = „neu anlegen" — der Host vergibt
+    /// dann eine Kennung.
+    pub id: String,
+    pub name: String,
+    /// Reihenfolge = Panel-Reihenfolge auf der Seite.
+    pub panels: Vec<TlPanelSettingWire>,
+    pub display: TlDisplaySettingsWire,
+    /// Vom Client mitgeschickt, aber beim Speichern vom Host **verworfen**
+    /// — der Host stempelt immer seine eigene Zeit (Last-Write-Wins-Marker;
+    /// verhindert, dass eine falsch gehende Client-Uhr eine neuere Änderung
+    /// verdrängt).
+    #[serde(rename = "updatedAtMs")]
+    pub updated_at_ms: u64,
+}
+
+/// Höchstzahl der Panel-Profile im Katalog (Spec tl-web-panelsystem).
+///
+/// Geteilt wie [`MAX_TL_DEVICES_MIRRORED`]: Der Katalog reist vollständig in
+/// jedem `TlState`-Push mit (R4 — `MAX_TL_STATE_LEN`), eine unbegrenzte
+/// Liste könnte den Zustand über das Limit treiben und die ganze
+/// Turnierleitungs-Oberfläche stumm schalten. 32 ist großzügig für die
+/// tatsächlichen Anwendungsfälle (Tablet/Wandmonitor-Varianten je Halle),
+/// ohne dass eine versehentliche Endlos-Anlage den Zustand sprengen kann.
+pub const MAX_TL_PROFILES: usize = 32;
+
 /// Die Aktionen, die ein Turnierleitungs-Gerät auslösen darf — ein **bewusst
 /// geschlossener** Satz (ADR 0011). Was hier nicht steht, ist nicht
 /// darstellbar; der Relay leitet nur weiter, entschieden und validiert wird
@@ -1105,7 +1191,12 @@ pub enum TlOfficialRole {
 /// gibt es hier keine ältere Gegenstelle zu schonen; ein stillschweigend
 /// ergänzter Wert würde stattdessen die jeweils weitreichendere oder
 /// ungeprüfte Variante auslösen.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Kein `Eq`** (nur `PartialEq`): `ProfileSave` trägt über
+/// [`TlPanelProfileWire`]/[`TlPanelSettingWire`] ein `f64` (`height_fr`),
+/// und `f64` selbst ist nicht `Eq`. Für Tests/Vergleiche reicht
+/// `PartialEq` — `assert_eq!` verlangt kein `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TlAction {
     /// Spiel auf ein freies Feld legen.
@@ -1340,6 +1431,36 @@ pub enum TlAction {
     AnnounceOfficials {
         #[serde(rename = "courtId")]
         court_id: i64,
+    },
+
+    // ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ──────────
+    /// Ein Profil anlegen oder überschreiben (Upsert nach `id`; leere `id`
+    /// = neu anlegen, der Host vergibt dann eine Kennung). Last-Write-Wins
+    /// — bewusst KEINE Konfliktprüfung gegen ein zuvor gesehenes
+    /// `updated_at_ms`: Die Spec verlangt ausdrücklich keine Fehlermeldung
+    /// bei gleichzeitiger Bearbeitung durch zwei Geräte.
+    ProfileSave { profile: TlPanelProfileWire },
+    /// Ein Profil löschen. Geräte, die es trugen, fallen beim nächsten Poll
+    /// auf das Standardprofil zurück — kein Fehlerzustand (Spec, Grill-Punkt
+    /// 7), Löschen eines bereits verschwundenen Profils ist ein No-Op.
+    ProfileDelete {
+        #[serde(rename = "profileId")]
+        profile_id: String,
+    },
+    /// Für das AUFRUFENDE Gerät ein Profil wählen. Bewusst **ohne**
+    /// Geräte-Feld: Das aufrufende Gerät ist aus der Bearer-Token-Auth
+    /// bekannt — ein Client-Feld könnte sonst ein fremdes Gerät umbiegen
+    /// (Sicherheitsgrenze, von `tablet::tl::execute` durchgesetzt). Leere
+    /// `profile_id` ("Standard") ist immer gültig.
+    ProfileSelect {
+        #[serde(rename = "profileId")]
+        profile_id: String,
+    },
+    /// Das turnierweite Standardprofil setzen (leer = eingebautes
+    /// Standardprofil, gilt für jedes Gerät ohne eigene Wahl).
+    ProfileSetDefault {
+        #[serde(rename = "profileId")]
+        profile_id: String,
     },
 }
 
@@ -1679,10 +1800,25 @@ pub const MAX_TL_STATE_LEN: usize = 64 * 1024;
 /// Die Kennung reist mit jedem Kommando zurück zum Host, damit sein
 /// Protokoll benennen kann, wer gehandelt hat. Der Zugang bleibt beim Relay
 /// und taucht nirgends sonst auf.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TlAuthDevice {
     pub id: String,
     pub token: String,
+    /// Gewähltes Panel-Profil dieses Geräts (Spec tl-web-panelsystem, ADR
+    /// 0025); leer = Standardprofil. Grundlage des
+    /// `X-Tl-Active-Profile`-Antwort-Headers (`relay::tl_state_route` /
+    /// `tablet::server::tl_state`).
+    ///
+    /// **Bewusste Ausnahme** von der oben dokumentierten Regel „kein
+    /// `#[serde(default)]` auf TL-Feldern": Diese Regel schützt davor, dass
+    /// ein still ergänzter Wert die weitreichendere/ungeprüfte Variante
+    /// auslöst (siehe [`TlAction`]-Dokkommentar). Hier ist „leer" aber die
+    /// NEUTRALSTE Lesart — sie bedeutet „Standardprofil", keine erweiterten
+    /// Rechte oder größere Sichtbarkeit. Ein alter Host, der dieses Feld
+    /// noch nicht kennt, sendet es schlicht nicht mit; `#[serde(default)]`
+    /// hält den Relay davon unabhängig lauffähig. Begründung: ADR 0025.
+    #[serde(default)]
+    pub profile_id: String,
 }
 
 /// Vom Master an Cloud-Slaves vererbte Azure-TTS-Konfiguration (ADR 0003).
@@ -1825,7 +1961,11 @@ pub struct SlaveInfo {
 }
 
 /// Frames vom Relay an den bts-light-Host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Kein `Eq`** (nur `PartialEq`): `TlCommand` trägt ein [`TlAction`], und
+/// das ist seit den Panel-Profilen (`f64`-Feld `height_fr`) selbst nicht
+/// mehr `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RelayFrame {
     /// Ein Tablet hat sich für diesen Court verbunden.
@@ -3042,6 +3182,33 @@ mod tests {
                 operator: true,
             },
             TlAction::AnnounceOfficials { court_id: 5 },
+            // Panel-Profile (Spec tl-web-panelsystem)
+            TlAction::ProfileSave {
+                profile: TlPanelProfileWire {
+                    id: "profil-1".to_string(),
+                    name: "Wandmonitor Halle 2".to_string(),
+                    panels: vec![TlPanelSettingWire {
+                        key: "courts".to_string(),
+                        visible: true,
+                        height_fr: 2.0,
+                    }],
+                    display: TlDisplaySettingsWire {
+                        show_numbers: true,
+                        list_position: TlListPositionWire::Bottom,
+                        ..Default::default()
+                    },
+                    updated_at_ms: 1_700_000_000_000,
+                },
+            },
+            TlAction::ProfileDelete {
+                profile_id: "profil-1".to_string(),
+            },
+            TlAction::ProfileSelect {
+                profile_id: "profil-1".to_string(),
+            },
+            TlAction::ProfileSetDefault {
+                profile_id: "profil-1".to_string(),
+            },
         ]
     }
 
@@ -3153,10 +3320,12 @@ mod tests {
                 TlAuthDevice {
                     id: "tl-1".to_string(),
                     token: "tok-a".to_string(),
+                    ..Default::default()
                 },
                 TlAuthDevice {
                     id: "tl-2".to_string(),
                     token: "tok-b".to_string(),
+                    ..Default::default()
                 },
             ],
         });
@@ -3164,6 +3333,61 @@ mod tests {
         // Gerät zugelassen" – etwa nach dem Entfernen des letzten.
         roundtrip(&HostFrame::TlAuth {
             devices: Vec::new(),
+        });
+    }
+
+    #[test]
+    fn tl_auth_device_profile_id_roundtrips_with_and_without_value() {
+        // ADR 0025: leer = Standardprofil, gesetzt = konkrete Wahl — beide
+        // Formen müssen die Wire-Grenze unverändert überstehen.
+        roundtrip(&TlAuthDevice {
+            id: "tl-1".to_string(),
+            token: "tok-a".to_string(),
+            profile_id: String::new(),
+        });
+        roundtrip(&TlAuthDevice {
+            id: "tl-1".to_string(),
+            token: "tok-a".to_string(),
+            profile_id: "profil-wand".to_string(),
+        });
+        // Ein alter Host, der `profile_id` noch nicht kennt, sendet das
+        // Feld schlicht nicht mit — `#[serde(default)]` hält das lesbar.
+        let alt: TlAuthDevice = serde_json::from_str(r#"{"id":"tl-1","token":"tok-a"}"#).unwrap();
+        assert!(alt.profile_id.is_empty());
+    }
+
+    #[test]
+    fn tl_panel_profile_wire_serde_roundtrip() {
+        // Spec tl-web-panelsystem: Der eigens für die Wire-Grenze
+        // definierte Profil-Typ (kein rohes `config::TlPanelProfile`)
+        // übersteht Serialisieren + Laden unverändert, inklusive
+        // verschachtelter Panel-Liste und Anzeige-Optionen.
+        roundtrip(&TlPanelProfileWire {
+            id: "profil-1".to_string(),
+            name: "Wandmonitor Halle 2".to_string(),
+            panels: vec![
+                TlPanelSettingWire {
+                    key: "courts".to_string(),
+                    visible: true,
+                    height_fr: 3.0,
+                },
+                TlPanelSettingWire {
+                    key: "officials".to_string(),
+                    visible: false,
+                    height_fr: 1.0,
+                },
+            ],
+            display: TlDisplaySettingsWire {
+                show_numbers: true,
+                show_nations: true,
+                show_club_names: false,
+                show_club_logos: false,
+                show_discipline: true,
+                show_round: true,
+                show_group: false,
+                list_position: TlListPositionWire::Bottom,
+            },
+            updated_at_ms: 1_700_000_000_000,
         });
     }
 
