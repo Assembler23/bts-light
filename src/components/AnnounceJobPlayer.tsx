@@ -92,7 +92,11 @@ export function AnnounceJobPlayer({
         // Aufruf wäre falsch, also lieber gar keiner.
         if (!court || court.match_id !== job.matchId) return;
         const stage = job.stage >= 3 ? 3 : 2;
-        announceCourt(court, cfg, azureRef.current, stage);
+        // Auch der Feld-Aufruf trägt seit dem gezielten Nachruf je Partei
+        // (Plan tl-liste-vereinfachen E1) eine Partei mit sich — wie der
+        // Vorbereitungs-Aufruf darunter. Fehlt sie (Auftrag aus einer
+        // älteren Fassung), gilt „beide", das bisherige Verhalten.
+        announceCourt(court, cfg, azureRef.current, stage, job.side ?? "both");
         return;
       }
 

@@ -4,6 +4,41 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.204
+
+- **Spielliste vereinfacht: hallenübergreifende Reihenfolge, eine Liste**
+  (ADR [0026](adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md),
+  löst [ADR 0023](adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md)
+  in der Hallen-Frage ab). Die manuelle Spielreihenfolge galt bisher **je
+  Halle getrennt** — die Warteliste zerschnitt zusätzlich in
+  Hallen-Gruppen und in vier Unterabschnitte („In Vorbereitung gerufen",
+  „Spielbereit", „Noch nicht bereit", „Ohne Hallenzuordnung"). Beides war
+  im Betrieb unpraktisch: Die Turnierleitung denkt die Spiele als eine
+  Abfolge, nicht als Blöcke. Jetzt gibt es **eine globale Reihenfolge**
+  und **ein Panel „Spiele"** (alle angesetzten Spiele, gerufene oben
+  angepinnt, Rest nach manueller bzw. BTP-Reihenfolge); der bisherige
+  Status steht als Abzeichen an der Zeile, die Halle als Kürzel. Alle
+  Spiele werden gezeigt, mit Nachladen beim Scrollen. Die Feldkacheln
+  bleiben nach Halle gruppiert — das bildet weiterhin die physische
+  Realität ab.
+- **Panels zuklappbar.** Zusätzlich zum Aus-/Einblenden lässt sich jedes
+  Panel auf seine Kopfzeile reduzieren; „Schiedsrichter" und „Spiele"
+  zeigen dabei den jeweils nächsten Eintrag im Kopf.
+- **Mehrspalten-Layout.** 1 bis 3 Spalten je Profil, jedes Panel bekommt
+  seine Spalte zugeordnet, Spaltenbreiten sind ziehbar. „Felder" ist damit
+  ein Panel wie jedes andere; die bisherige Einstellung „Spielliste
+  rechts/darunter" geht als Zwei-Spalten-Preset darin auf. Unter dem
+  Tablet-Breakpoint werden Spalten immer gestapelt, unabhängig vom Profil.
+- **Feldkachel und Spielzeile entschlackt.** Neues ⋯-Menü an der
+  Feldkachel (einteilen, ansagen, Aufruf wiederholen, 2. Aufruf Partei
+  A/B, Ergebnis eintragen); das ⋮-Menü der Spielzeile bekam „Nach oben
+  schieben" und „Ergebnis eintragen" dazu.
+- **Zweiter Aufruf am Feld — jetzt auch je Partei.** Bisher gab es am
+  Feld nur einen ungeteilten Nachruf; jetzt lässt sich gezielt „2. Aufruf
+  für Partei A" oder „für Partei B" auslösen (Roadmap-Wunsch vom
+  17.07.2026 damit erledigt). Die Aufruf-Stufe zählt weiterhin einmal je
+  Feld — ruft man nacheinander beide Parteien, zählt das als eine Runde.
+
 ## v0.9.203
 
 - **Turnierleitungs-Oberfläche: Panels und Profile** (Spec

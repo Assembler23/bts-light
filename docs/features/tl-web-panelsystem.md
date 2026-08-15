@@ -30,16 +30,30 @@ Information gleichzeitig sichtbar).
 ## Zielbild & Erfolgskriterien
 
 Die additiv gewachsene, starre Abschnitts-Liste wird durch ein einheitliches
-**Panel-System** ersetzt: jeder der 9 Abschnitte ist einzeln dauerhaft
-ein-/ausblendbar, umsortierbar und in der Höhe frei verteilbar. Benannte,
-server-seitige **Profile** bündeln diese Einstellungen an einem einzigen Ort
-(statt der heute auf drei Bedienstellen verstreuten Konfigurierbarkeit) und
-lösen den Tablet-vs-Großbildschirm-Zielkonflikt über Konfigurierbarkeit statt
-eine einzige "richtige" Darstellung.
+**Panel-System** ersetzt: jeder Abschnitt ist einzeln dauerhaft
+ein-/ausblendbar, zuklappbar, umsortierbar, einer Spalte zuordenbar und in
+der Höhe frei verteilbar. Benannte, server-seitige **Profile** bündeln
+diese Einstellungen an einem einzigen Ort (statt der heute auf drei
+Bedienstellen verstreuten Konfigurierbarkeit) und lösen den
+Tablet-vs-Großbildschirm-Zielkonflikt über Konfigurierbarkeit statt eine
+einzige "richtige" Darstellung.
+
+**Nachtrag 15.08.2026:** Im selben Umsetzungslauf kam ein zweiter,
+vom Nutzer angestoßener Feinschliff dazu (siehe „Nachtrag" am Ende dieser
+Spec und [ADR 0026](../adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md)):
+die vier Warteliste-Unterabschnitte wurden zu **einem** Panel „Spiele"
+zusammengeführt (Status jetzt ein Abzeichen an der Zeile statt eigener
+Abschnitt), die manuelle Reihenfolge wurde von „je Halle" auf **eine
+globale Reihenfolge** umgestellt, Panels wurden zusätzlich **zuklappbar**
+(nicht nur aus-/einblendbar), und das zunächst verworfene
+**Mehrspalten-Layout** wurde doch umgesetzt. Es sind jetzt **6 Panels**:
+Felder, Walkover-Vorschläge, Zähltafel-Warteschlange, Schiedsrichter,
+Spiele, Beendete Spiele.
 
 **Messbare Erfolgskriterien (am nächsten Testturnier/Einsatz prüfbar):**
-- Ein Turnierleiter kann alle 9 Panels einzeln aus- und einblenden, ohne
-  Erklärung zu benötigen (Zielgruppe: technisch unversierte Turnierleiter).
+- Ein Turnierleiter kann alle Panels einzeln aus- und einblenden sowie
+  auf-/zuklappen, ohne Erklärung zu benötigen (Zielgruppe: technisch
+  unversierte Turnierleiter).
 - Ein für ein Gerät gewähltes Profil übersteht Seiten-Reload zuverlässig
   (Geräte-Bindung, nicht nur Browser-Session).
 - Queue-Zeilen zeigen ohne aufgeklapptes Kontextmenü höchstens 6 sichtbare
@@ -56,11 +70,18 @@ eine einzige "richtige" Darstellung.
 - Andere Anzeige-Seiten (`assets/tablet.html`, `assets/overview.html`,
   `assets/monitor.html`, `assets/preparation.html`) bleiben unangetastet —
   andere Zielgruppen, anderes Problem.
-- Kein Mehrspalten-Grid für die Listen-Panels — eine Spalte bleibt, mit frei
-  verteilbarer Höhe je Panel statt Breiten-Aufteilung. Bewusste Abwägung,
-  keine Verwässerung: Feldkacheln wachsen bereits selbst in der Breite
-  (auto-fill Grid), nur die Listenspalte bleibt schmal, das wird nicht durch
-  ein zweites, komplexeres Layoutsystem gelöst.
+- ~~Kein Mehrspalten-Grid für die Listen-Panels~~ — **zurückgenommen am
+  15.08.2026.** Dieses Nicht-Ziel beruhte auf einem Lesefehler: In der
+  `/idee`-Phase waren *feste Spalten-Presets mit ziehbaren Breiten*
+  gewählt worden; die Antwort wurde als „eine Spalte reicht" verstanden.
+  Umgesetzt ist seither das **Mehrspalten-Layout** (1–3 Spalten je Profil,
+  Zuordnung je Panel, ziehbare Spaltenbreiten) — siehe Abschnitt F des
+  Umbauplans zur Spielliste. Kein freies Dashboard: feste Presets, kein
+  automatisches Umbrechen. Mit ihm entfällt auch der Sonderstatus von
+  „Felder" als fixierte Ankerposition, und die Einstellung „Spielliste
+  rechts/darunter" geht in den Presets auf (`list_position` bleibt in
+  Config und Wire erhalten und wird für Bestandsprofile einmalig in eine
+  Spaltenaufteilung übersetzt).
 - Keine automatische Migration bestehender `localStorage`-Anzeige-Werte —
   die neue Version startet mit einem eingebauten Standardprofil (heutige
   Default-Werte), TL richtet Profile einmalig neu ein.
@@ -133,9 +154,34 @@ eine einzige "richtige" Darstellung.
 
 ## Akzeptanzkriterien
 
-- [ ] Alle 9 Panels (Felder, Walkover, Zähltafel, Schiedsrichter, 4×
-      Queue-Untergruppen, Beendet) haben eine einheitliche Kopfzeile mit
-      Titel, Zähler und Ein-/Ausblend-Schalter.
+- [ ] Alle 6 Panels (Felder, Walkover, Zähltafel, Schiedsrichter, Spiele,
+      Beendete Spiele) haben eine einheitliche Kopfzeile mit Titel, Zähler,
+      Auf-/Zuklapp-Schalter und Ein-/Ausblend-Schalter.
+- [x] **(Nachtrag)** Ein zugeklapptes Panel zeigt in der Kopfzeile eine
+      Vorschau statt nur den Zähler: „Schiedsrichter" den nächsten
+      Schiedsrichter, „Spiele" das nächste Spiel. Ein zugeklapptes Panel
+      beansprucht keine Höhe im Steg-Verteilungsmodell.
+- [x] **(Nachtrag)** Die manuelle Reihenfolge gilt **hallenübergreifend**
+      (ADR 0026) — kein Präfix je Halle mehr. Die Spielliste zeigt keine
+      Hallen-Gruppierung; stattdessen trägt jede Zeile ein Hallen-Kürzel
+      (nur Anzeige). Gerufene Spiele stehen oben, alles Übrige folgt der
+      manuellen bzw. BTP-Reihenfolge — Spielbereitschaft ist kein
+      Sortierkriterium, nur noch ein Abzeichen an der Zeile.
+- [x] **(Nachtrag)** Das Panel „Spiele" zeigt alle angesetzten Spiele
+      (nichts wird weggelassen/gekürzt); die Länge wird durch
+      Nachladen beim Scrollen beherrscht.
+- [x] **(Nachtrag)** Das ⋮-Menü einer Spielzeile bietet zusätzlich „Nach
+      oben schieben" und „Ergebnis eintragen"; die Feldkachel hat ein
+      eigenes ⋯-Menü (einteilen, ansagen, Aufruf wiederholen, 2. Aufruf
+      Partei A/B, Ergebnis eintragen). Ein Aufruf je Partei zählt die
+      Aufruf-Stufe nicht doppelt, wenn beide Parteien nacheinander gerufen
+      werden.
+- [x] **(Nachtrag)** 1 bis 3 Spalten je Profil, Spalten-Zuordnung je
+      Panel, Spaltenbreiten ziehbar. Unter dem Tablet-Breakpoint werden
+      Spalten immer gestapelt, unabhängig vom Profil. „Felder" ist ein
+      Panel wie jedes andere (keine fixierte Ankerposition mehr);
+      „Spielliste rechts/darunter" wird für Bestandsprofile einmalig in
+      eine Spaltenaufteilung übersetzt.
 - [ ] Ein ausgeblendetes Panel bleibt nach Seiten-Reload ausgeblendet
       (persistiert im Profil, nicht nur im DOM-Zustand).
 - [ ] Panels lassen sich per Drag umsortieren; das Griffsymbol unterscheidet
@@ -302,3 +348,53 @@ Namespace-Grenzen).
 
 Version-Bump (`src-tauri/Cargo.toml` + `tauri.conf.json` + `package.json`
 gemeinsam) erst im letzten Schritt, nicht pro Zwischenschritt.
+
+## Nachtrag 15.08.2026 — Spielliste vereinfacht, Mehrspalten-Layout
+
+Im selben Umsetzungslauf, direkt im Anschluss an die erste Fassung, kamen
+auf Wunsch des Nutzers fünf weitere Änderungen dazu. Vollständiger Plan:
+`docs/features/_intake/tl-liste-vereinfachen/plan.md`. Architektur-
+Entscheidung: [ADR 0026](../adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md)
+(löst [ADR 0023](../adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md) ab).
+
+- **A — Sortierung hallenunabhängig.** `QueueOrderStore` führt eine
+  einzige globale `Vec<i64>` statt einer Map je Halle. Der Wire-Vertrag
+  (`TlAction::QueueReorder`/`QueueOrderReset`) änderte sich nicht — er trug
+  nie eine Halle. Der bestehende Schutz gegen die Hallengrenze
+  (`sync.rs::auto_assign::require_call`) hängt **nicht** am Sortier-Präfix,
+  sondern an der Aufruf-Pflicht im Mehr-Hallen-Betrieb — die Umstellung ist
+  dadurch gefahrlos. Eine bestehende `queue-order.json` im alten
+  Map-Format wird nicht migriert (neuer Feldname `queue` statt `order`);
+  das Turnier startet mit leerem Präfix, Turnierbindung bleibt erhalten.
+- **B — keine Hallen-Gruppierung in der Spielliste.** Ersetzt durch ein
+  Hallen-Kürzel je Zeile (kürzestes eindeutiges Präfix über alle Hallen).
+  Die Gruppierung der Feldkacheln nach Halle bleibt unverändert — sie ist
+  Voraussetzung des Feld-Rasters.
+- **C — eine Spielliste statt vier Unterabschnitten.** „In Vorbereitung
+  gerufen"/„Spielbereit"/„Noch nicht bereit"/„Ohne Hallenzuordnung" sind
+  jetzt ein Panel „Spiele" mit Status als Zeilen-Abzeichen. Alle
+  angesetzten Spiele werden gezeigt, mit Nachladen beim Scrollen.
+- **D — Panels zuklappbar.** Neues Profil-Feld `TlPanelSetting.collapsed`,
+  zweite Dimension neben `visible`.
+- **E — Feldkachel entschlackt** (⋯-Menü) **+ Aufruf je Partei am Feld.**
+  `TlAction::AnnounceCourtCall` bekam ein optionales `side` (Roadmap-Punkt
+  „Gezielter zweiter/dritter Aufruf — auch je Partei" damit erledigt). Die
+  Aufruf-Stufe zählt weiterhin einmal je Feld (Zusage: alle Geräte zeigen
+  dieselbe Zahl); eine Parteien-Maske der laufenden Runde verhindert
+  Doppelzählung, wenn nacheinander beide Parteien gerufen werden.
+- **F — Mehrspalten-Layout**, siehe Akzeptanzkriterien oben und ADR 0025
+  (Nachtrag dort). `TlPanelProfile.columns`/`column_widths`,
+  `TlPanelSetting.column` — reisen auf demselben Weg wie der übrige
+  Profil-Inhalt, kein neuer Datenpfad.
+
+**Betroffene zusätzliche Komponenten:** `tablet/queue_order.rs`,
+`tablet/assign.rs`, `sync.rs`, `tablet/state.rs`, `badhub/payload.rs`,
+`tests/queue_order_consistency.rs`, `src/pages/PreparationPanel.tsx`,
+`src/components/AnnounceJobPlayer.tsx`, `src/io/announceCourt.ts`.
+
+**Zusätzliche Doku-Pflicht:** `docs/features/spielliste-manuelle-reihenfolge.md`
+(Zielbild/Akzeptanzkriterien auf global umstellen), `docs/btp_protocol.md`
+(„je Halle" streichen), `docs/preparation.md` (Präfix global + Liveticker-
+Hinweis: ein langer Präfix aus einer Halle kann alle 15
+`display=next`-Plätze belegen), `docs/announcements.md` (Aufruf je Partei
+am Feld), `docs/adr/0023-…md` (Status auf „superseded by ADR-0026").

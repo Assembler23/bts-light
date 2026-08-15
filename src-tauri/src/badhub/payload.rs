@@ -806,9 +806,8 @@ mod tests {
         };
         let config = AppConfig::default();
         let order = QueueOrderStore::default();
-        // Ohne Hallen-Angabe lösen beide Matches auf die leere Halle auf —
         // 7 (später angesetzt) manuell vor 1 (früher angesetzt) ziehen.
-        order.reorder("", &[1, 7], 7, Some(1));
+        order.reorder(&[1, 7], 7, Some(1));
         let ctx = LivetickerContext::new(&config, HashMap::new(), &order);
 
         let ids: Vec<String> = build_tset(&snapshot, 1, &ctx)

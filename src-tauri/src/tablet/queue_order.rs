@@ -1,12 +1,13 @@
-//! Manuelle Spielreihenfolge je Halle (Spec
-//! `docs/features/spielliste-manuelle-reihenfolge.md`, ADR 0023).
+//! Manuelle Spielreihenfolge — **eine globale Liste** (Spec
+//! `docs/features/spielliste-manuelle-reihenfolge.md`, ADR 0026; ersetzt
+//! den Präfix je Halle aus ADR 0023).
 //!
 //! Enthält ausschließlich Match-IDs in ihrer manuell gezogenen Reihenfolge
 //! — kein Personendatum. R2 bleibt gewahrt: das ist ein zusätzlicher,
 //! rein lokal geprüfter Sortierschlüssel, keine Court-Zuordnung.
 //!
 //! **Präfix-Mechanik:** Ein Zug speichert nicht nur das gezogene Match,
-//! sondern die komplette effektive Reihenfolge **vom Anfang der Halle bis
+//! sondern die komplette effektive Reihenfolge **vom Anfang der Liste bis
 //! zum neuen Platz** des gezogenen Matches (Nutzer-Idee 14.08.2026:
 //! „speicher dir die Reihenfolge bis zu dem Spiel wo wir sortiert haben").
 //! Dadurch bleibt der manuell sortierte Block immer ein zusammenhängender
@@ -23,10 +24,11 @@
 //! - **Best effort**: ein Schreibfehler kostet höchstens die Anzeige-
 //!   Reihenfolge, nie ein Ergebnis.
 //! - **Aufräumen**: `sync.rs::reconcile_queue_order` entfernt einen
-//!   Eintrag, sobald sein Match zugewiesen/beendet/verschwunden ist oder
-//!   die Halle gewechselt hat — dieses Modul kennt selbst keinen Snapshot.
+//!   Eintrag, sobald sein Match zugewiesen/beendet/verschwunden ist —
+//!   dieses Modul kennt selbst keinen Snapshot. Ein Hallenwechsel hat auf
+//!   die Reihenfolge keine Auswirkung mehr (ADR 0026).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 
@@ -39,11 +41,17 @@ struct QueueOrderFile {
     /// BTP-Turniername (Setting 1001) — der Schlüssel des Stands.
     #[serde(default)]
     tournament: String,
-    /// Hallenname (wie `assign::hall_for_match` ihn liefert) → Match-IDs
-    /// in ihrer manuellen Reihenfolge. Fehlt eine Halle, hat sie (noch)
-    /// keinen Präfix.
+    /// Match-IDs in ihrer manuellen Reihenfolge — turnierweit, nicht je
+    /// Halle (ADR 0026).
+    ///
+    /// **Der Feldname ist bewusst neu** (früher `order: HashMap<Halle,
+    /// Vec<i64>>`): Eine alte Datei parst dadurch weiterhin fehlerfrei —
+    /// das unbekannte `order` wird ignoriert, `queue` fehlt und greift auf
+    /// den Default zurück. Ein gleichnamiges Feld mit neuem Typ hätte
+    /// stattdessen einen Parse-Fehler ausgelöst und den ganzen Stand
+    /// (inklusive Turnierbindung) verworfen.
     #[serde(default)]
-    order: HashMap<String, Vec<i64>>,
+    queue: Vec<i64>,
 }
 
 /// Ergebnis eines Ladeversuchs — Muster `exclusion.rs::Ladung`.
@@ -116,26 +124,26 @@ impl QueueOrderStore {
         self.inner.lock().unwrap().file.tournament.clone()
     }
 
-    /// Rang eines Matches im Präfix seiner Halle (0 = ganz vorn), `None`
+    /// Rang eines Matches im globalen Präfix (0 = ganz vorn), `None`
     /// wenn das Match nicht im Präfix steht.
-    pub fn rank(&self, hall: &str, match_id: i64) -> Option<usize> {
+    pub fn rank(&self, match_id: i64) -> Option<usize> {
         self.inner
             .lock()
             .unwrap()
             .file
-            .order
-            .get(hall)
-            .and_then(|ids| ids.iter().position(|id| *id == match_id))
+            .queue
+            .iter()
+            .position(|id| *id == match_id)
     }
 
     /// Ein Match vor ein anderes ziehen (`before = None` heißt „ans Ende
     /// des aktuell sichtbaren Präfix-Blocks"). `effective_order` ist die
-    /// aktuelle, vollständig sortierte Match-ID-Liste dieser Halle
+    /// aktuelle, vollständig sortierte Match-ID-Liste des Turniers
     /// (BTP-Reihenfolge + bisheriger Präfix kombiniert, wie sie die
     /// Anzeige im Moment des Zugs zeigt) — daraus wird der neue Präfix
     /// abgeleitet: alles vom Anfang bis zum neuen Platz des gezogenen
     /// Matches (siehe Modul-Kommentar).
-    pub fn reorder(&self, hall: &str, effective_order: &[i64], match_id: i64, before: Option<i64>) {
+    pub fn reorder(&self, effective_order: &[i64], match_id: i64, before: Option<i64>) {
         if before == Some(match_id) {
             return; // vor sich selbst ziehen ist keine Bewegung
         }
@@ -158,30 +166,21 @@ impl QueueOrderStore {
         let neuer_praefix: Vec<i64> = liste.into_iter().take(ziel + 1).collect();
         {
             let mut inner = self.inner.lock().unwrap();
-            inner.file.order.insert(hall.to_string(), neuer_praefix);
+            inner.file.queue = neuer_praefix;
         }
         self.persist();
     }
 
-    /// Aus jeder Hallen-Liste alle Match-IDs entfernen, die nicht mehr im
-    /// jeweiligen `keep`-Set stehen (Aufräumen bei Zuweisung/Spielende/
-    /// Hallenwechsel, aus `sync.rs::reconcile_queue_order`). Eine Halle,
-    /// die in `keep_by_hall` fehlt, wird komplett geleert. Liefert `true`,
-    /// wenn sich etwas geändert hat.
-    pub fn retain(&self, keep_by_hall: &HashMap<String, HashSet<i64>>) -> bool {
-        let leer = HashSet::new();
+    /// Alle Match-IDs entfernen, die nicht mehr im `keep`-Set stehen
+    /// (Aufräumen bei Zuweisung/Spielende/Verschwinden, aus
+    /// `sync.rs::reconcile_queue_order`; Muster `exclusion.rs::retain`).
+    /// Liefert `true`, wenn sich etwas geändert hat.
+    pub fn retain(&self, keep: &HashSet<i64>) -> bool {
         let changed = {
             let mut inner = self.inner.lock().unwrap();
-            let mut changed = false;
-            for (hall, ids) in inner.file.order.iter_mut() {
-                let keep = keep_by_hall.get(hall).unwrap_or(&leer);
-                let before = ids.len();
-                ids.retain(|id| keep.contains(id));
-                if ids.len() != before {
-                    changed = true;
-                }
-            }
-            changed
+            let before = inner.file.queue.len();
+            inner.file.queue.retain(|id| keep.contains(id));
+            inner.file.queue.len() != before
         };
         if changed {
             self.persist();
@@ -189,16 +188,16 @@ impl QueueOrderStore {
         changed
     }
 
-    /// Globaler Reset: die manuelle Reihenfolge **aller** Hallen auf
-    /// einmal verwerfen. Bewusst ohne Hallen-Parameter — kein Reset je
-    /// einzelne Halle (Nicht-Ziel der Spec).
+    /// Globaler Reset: die manuelle Reihenfolge auf einmal verwerfen.
+    /// Bewusst ohne Teil-Reset — kein Reset je Halle oder je Spiel
+    /// (Nicht-Ziel der Spec).
     pub fn reset_all(&self) {
         let changed = {
             let mut inner = self.inner.lock().unwrap();
-            if inner.file.order.is_empty() {
+            if inner.file.queue.is_empty() {
                 false
             } else {
-                inner.file.order.clear();
+                inner.file.queue.clear();
                 true
             }
         };
@@ -265,101 +264,129 @@ mod tests {
 
     #[test]
     fn ein_nie_angefasstes_match_wird_vor_ein_ziel_gezogen_und_backfillt_den_block() {
-        // BTP-Reihenfolge dieser Halle: 1, 2, 3, 4, 5. Match 4 wird vor
-        // Match 2 gezogen — der neue Präfix speichert den Anfang bis zum
-        // neuen Platz von 4: [1, 4]. Match 2 selbst braucht KEINEN
-        // expliziten Rang — es fällt beim nächsten Sortierlauf ohnehin
-        // direkt hinter den Präfix (BTP-Reihenfolge unter den nicht
-        // eingereihten Spielen bleibt 2, 3, 5), landet also weiterhin
-        // unmittelbar nach 4.
+        // BTP-Reihenfolge: 1, 2, 3, 4, 5. Match 4 wird vor Match 2
+        // gezogen — der neue Präfix speichert den Anfang bis zum neuen
+        // Platz von 4: [1, 4]. Match 2 selbst braucht KEINEN expliziten
+        // Rang — es fällt beim nächsten Sortierlauf ohnehin direkt hinter
+        // den Präfix (BTP-Reihenfolge unter den nicht eingereihten Spielen
+        // bleibt 2, 3, 5), landet also weiterhin unmittelbar nach 4.
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3, 4, 5], 4, Some(2));
-        assert_eq!(store.rank("Halle A", 1), Some(0));
-        assert_eq!(store.rank("Halle A", 4), Some(1));
-        assert_eq!(store.rank("Halle A", 2), None);
-        assert_eq!(store.rank("Halle A", 3), None);
-        assert_eq!(store.rank("Halle A", 5), None);
+        store.reorder(&[1, 2, 3, 4, 5], 4, Some(2));
+        assert_eq!(store.rank(1), Some(0));
+        assert_eq!(store.rank(4), Some(1));
+        assert_eq!(store.rank(2), None);
+        assert_eq!(store.rank(3), None);
+        assert_eq!(store.rank(5), None);
     }
 
     #[test]
     fn ein_zweiter_zug_verschiebt_innerhalb_des_bestehenden_blocks() {
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3, 4, 5], 4, Some(2)); // -> [1,4]
-                                                                // Effektive Reihenfolge jetzt: 1,4,2,3,5 (Präfix [1,4] + Rest in
-                                                                // BTP-Reihenfolge) — Match 1 vor Match 2 ziehen.
-        store.reorder("Halle A", &[1, 4, 2, 3, 5], 1, Some(2));
-        assert_eq!(store.rank("Halle A", 4), Some(0));
-        assert_eq!(store.rank("Halle A", 1), Some(1));
-        assert_eq!(store.rank("Halle A", 2), None);
+        store.reorder(&[1, 2, 3, 4, 5], 4, Some(2)); // -> [1,4]
+                                                     // Effektive Reihenfolge jetzt: 1,4,2,3,5 (Präfix [1,4] + Rest in
+                                                     // BTP-Reihenfolge) — Match 1 vor Match 2 ziehen.
+        store.reorder(&[1, 4, 2, 3, 5], 1, Some(2));
+        assert_eq!(store.rank(4), Some(0));
+        assert_eq!(store.rank(1), Some(1));
+        assert_eq!(store.rank(2), None);
     }
 
     #[test]
     fn vor_sich_selbst_ziehen_ist_keine_bewegung() {
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 2, Some(1)); // -> [2]
-        store.reorder("Halle A", &[2, 1, 3], 2, Some(2)); // No-Op
-        assert_eq!(store.rank("Halle A", 2), Some(0));
-        assert_eq!(store.rank("Halle A", 1), None);
+        store.reorder(&[1, 2, 3], 2, Some(1)); // -> [2]
+        store.reorder(&[2, 1, 3], 2, Some(2)); // No-Op
+        assert_eq!(store.rank(2), Some(0));
+        assert_eq!(store.rank(1), None);
     }
 
     #[test]
     fn unbekanntes_ziel_ist_ein_no_op() {
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 1, Some(99));
-        assert_eq!(store.rank("Halle A", 1), None);
+        store.reorder(&[1, 2, 3], 1, Some(99));
+        assert_eq!(store.rank(1), None);
     }
 
     #[test]
     fn unbekanntes_match_ist_ein_no_op() {
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 99, Some(2));
-        assert_eq!(store.rank("Halle A", 99), None);
+        store.reorder(&[1, 2, 3], 99, Some(2));
+        assert_eq!(store.rank(99), None);
     }
 
     #[test]
     fn before_none_zieht_ans_ende_des_sichtbaren_blocks_und_uebernimmt_die_ganze_liste() {
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 1, None);
-        assert_eq!(store.rank("Halle A", 2), Some(0));
-        assert_eq!(store.rank("Halle A", 3), Some(1));
-        assert_eq!(store.rank("Halle A", 1), Some(2));
+        store.reorder(&[1, 2, 3], 1, None);
+        assert_eq!(store.rank(2), Some(0));
+        assert_eq!(store.rank(3), Some(1));
+        assert_eq!(store.rank(1), Some(2));
     }
 
     #[test]
-    fn hallen_sind_unabhaengig_voneinander() {
+    fn die_reihenfolge_gilt_hallenuebergreifend() {
+        // ADR 0026: Spiele verschiedener Hallen stehen in EINER Liste und
+        // lassen sich gegeneinander ziehen — der Store kennt gar keine
+        // Halle mehr. Match 30 (Halle B) vor Match 2 (Halle A).
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 3, Some(1));
-        store.reorder("Halle B", &[10, 20, 30], 30, Some(10));
-        assert_eq!(store.rank("Halle A", 3), Some(0));
-        assert_eq!(store.rank("Halle B", 30), Some(0));
-        assert_eq!(store.rank("Halle B", 3), None);
+        store.reorder(&[1, 2, 3, 10, 20, 30], 30, Some(2));
+        assert_eq!(store.rank(1), Some(0));
+        assert_eq!(store.rank(30), Some(1));
+        assert_eq!(store.rank(2), None);
     }
 
     #[test]
     fn stand_ueberlebt_app_neustart() {
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_datei(dir.path());
-        store.reorder("Halle A", &[1, 2, 3], 3, Some(1));
+        store.reorder(&[1, 2, 3], 3, Some(1));
 
         let neu = store_mit_datei(dir.path());
-        assert_eq!(neu.rank("Halle A", 3), Some(0));
-        assert_eq!(neu.rank("Halle A", 1), None);
+        assert_eq!(neu.rank(3), Some(0));
+        assert_eq!(neu.rank(1), None);
+    }
+
+    #[test]
+    fn eine_datei_im_alten_hallen_format_laedt_ohne_fehler_mit_leerem_praefix() {
+        // ADR 0026: Es gibt keine Migration. Weil das Feld `queue` heißt
+        // (früher `order`), parst die alte Datei weiterhin fehlerfrei —
+        // das unbekannte `order` wird ignoriert, `queue` fehlt und greift
+        // auf den Default zurück. Entscheidend: Die TURNIERBINDUNG bleibt
+        // erhalten, der Stand wird also nicht als „fremdes Turnier"
+        // weggeworfen und die Datei nicht als unlesbar gemeldet.
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("queue-order.json");
+        std::fs::write(
+            &pfad,
+            r#"{"tournament":"Test BTS Light","order":{"Halle A":[3,1],"Halle B":[20]}}"#,
+        )
+        .unwrap();
+
+        let store = store_mit_datei(dir.path());
+        assert_eq!(store.tournament(), "Test BTS Light");
+        assert_eq!(store.rank(3), None);
+        assert_eq!(store.rank(1), None);
+        assert_eq!(store.rank(20), None);
+
+        // Und der Store ist danach voll benutzbar.
+        store.reorder(&[1, 2, 3], 3, Some(1));
+        assert_eq!(store.rank(3), Some(0));
     }
 
     #[test]
     fn turnierwechsel_verwirft_den_stand() {
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_datei(dir.path());
-        store.reorder("Halle A", &[1, 2, 3], 3, Some(1));
+        store.reorder(&[1, 2, 3], 3, Some(1));
 
         store.set_tournament("Ganz anderes Turnier");
-        assert_eq!(store.rank("Halle A", 3), None);
+        assert_eq!(store.rank(3), None);
         assert_eq!(store.tournament(), "Ganz anderes Turnier");
 
         let neu = QueueOrderStore::default();
         neu.set_path(dir.path().join("queue-order.json"));
         neu.set_tournament("Test BTS Light");
-        assert_eq!(neu.rank("Halle A", 3), None);
+        assert_eq!(neu.rank(3), None);
     }
 
     #[test]
@@ -377,62 +404,38 @@ mod tests {
 
         std::fs::remove_dir(&pfad).unwrap();
         let vorlage = store_mit_datei(dir.path());
-        vorlage.reorder("Halle A", &[1, 2], 2, Some(1));
+        vorlage.reorder(&[1, 2], 2, Some(1));
         store.set_tournament("Test BTS Light");
-        assert_eq!(store.rank("Halle A", 2), Some(0));
+        assert_eq!(store.rank(2), Some(0));
     }
 
     #[test]
-    fn retain_entfernt_je_halle_nur_was_fehlt() {
+    fn retain_entfernt_nur_was_fehlt() {
         let store = QueueOrderStore::default();
-        // Zwei Züge je Halle bauen einen echten Zwei-Elemente-Präfix auf.
-        store.reorder("Halle A", &[1, 2, 3, 4], 2, Some(1)); // -> A: [2]
-        store.reorder("Halle A", &[2, 1, 3, 4], 3, Some(1)); // -> A: [2,3]
-        store.reorder("Halle B", &[10, 20, 30], 20, Some(10)); // -> B: [20]
-        store.reorder("Halle B", &[20, 10, 30], 30, Some(10)); // -> B: [20,30]
-        assert_eq!(store.rank("Halle A", 2), Some(0));
-        assert_eq!(store.rank("Halle A", 3), Some(1));
-        assert_eq!(store.rank("Halle B", 20), Some(0));
-        assert_eq!(store.rank("Halle B", 30), Some(1));
+        // Zwei Züge bauen einen echten Zwei-Elemente-Präfix auf.
+        store.reorder(&[1, 2, 3, 4], 2, Some(1)); // -> [2]
+        store.reorder(&[2, 1, 3, 4], 3, Some(1)); // -> [2,3]
+        assert_eq!(store.rank(2), Some(0));
+        assert_eq!(store.rank(3), Some(1));
 
-        let mut keep = HashMap::new();
-        keep.insert("Halle A".to_string(), [2].into_iter().collect());
-        keep.insert("Halle B".to_string(), [20, 30].into_iter().collect());
+        let keep: HashSet<i64> = [2].into_iter().collect();
 
         assert!(store.retain(&keep));
-        assert_eq!(store.rank("Halle A", 2), Some(0));
-        assert_eq!(store.rank("Halle A", 3), None);
-        assert_eq!(store.rank("Halle B", 20), Some(0));
-        assert_eq!(store.rank("Halle B", 30), Some(1));
+        assert_eq!(store.rank(2), Some(0));
+        assert_eq!(store.rank(3), None);
 
         // Nochmal derselbe Aufruf ändert nichts mehr.
         assert!(!store.retain(&keep));
     }
 
     #[test]
-    fn hallenwechsel_entfernt_aus_der_alten_halle_ohne_auto_insert_in_der_neuen() {
+    fn reset_all_leert_die_reihenfolge_auf_einmal() {
         let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 3, Some(1)); // -> A: [3,1]
-
-        // Match 3 wechselt faktisch nach Halle B — keep_by_hall spiegelt
-        // das: Halle A darf 3 nicht mehr enthalten, Halle B taucht gar
-        // nicht erst auf (kein Auto-Insert).
-        let mut keep = HashMap::new();
-        keep.insert("Halle A".to_string(), [1].into_iter().collect());
-
-        assert!(store.retain(&keep));
-        assert_eq!(store.rank("Halle A", 3), None);
-        assert_eq!(store.rank("Halle B", 3), None);
-    }
-
-    #[test]
-    fn reset_all_leert_alle_hallen_auf_einmal() {
-        let store = QueueOrderStore::default();
-        store.reorder("Halle A", &[1, 2, 3], 3, Some(1));
-        store.reorder("Halle B", &[10, 20], 20, Some(10));
+        store.reorder(&[1, 2, 3], 3, Some(1));
+        assert_eq!(store.rank(3), Some(0));
 
         store.reset_all();
-        assert_eq!(store.rank("Halle A", 3), None);
-        assert_eq!(store.rank("Halle B", 20), None);
+        assert_eq!(store.rank(3), None);
+        assert_eq!(store.rank(1), None);
     }
 }

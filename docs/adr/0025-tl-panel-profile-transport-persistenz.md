@@ -94,3 +94,15 @@ nicht).
 - Profile überstehen Turnierwechsel und PC-Umzug (Identitäts-Export) —
   konsistent mit dem übrigen geräteklassenbezogenen Zustand (`hall_layouts`,
   `tl_web.devices`).
+- **Nachtrag 15.08.2026 (Mehrspalten-Layout):** Das Profil trägt seither
+  zusätzlich `columns`, `column_widths` und je Panel `column`. Sie reisen
+  auf exakt demselben Weg wie alles andere am Profil (Katalog in `TlState`,
+  Schreiben über `TlAction::ProfileSave`) — diese Entscheidung bleibt
+  unverändert gültig, es kommt kein neuer Datenpfad hinzu. Neu ist nur die
+  Abgrenzung, wer die Felder *deutet*: Der Host speichert und spiegelt sie
+  roh; die Ableitung „`columns == 0` ⇒ aus `display.list_position`"
+  passiert an genau einer Stelle in `tl.html` (`normalizedLayout()`) und
+  wird bei der ersten Änderung eines Bestandsprofils einmalig
+  festgeschrieben. Zwei Ableitungsstellen (Host und Browser) könnten
+  auseinanderlaufen und würden über `profileContentEquals()` die
+  optimistische Anzeige zurückspringen lassen.

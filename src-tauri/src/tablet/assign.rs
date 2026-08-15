@@ -155,7 +155,10 @@ pub fn resolve_and_sort_key(
     order: &QueueOrderStore,
 ) -> (String, HallSource, ManualOrderSortKey) {
     let (hall, source) = hall_for_match(config, snap, m, manual_hall, called_hall);
-    let rank = order.rank(&hall, m.id);
+    // Der Rang kommt aus EINER globalen Reihenfolge (ADR 0026) — die Halle
+    // wird hier nur noch aufgelöst, weil die Aufrufer sie für die Anzeige
+    // brauchen, nicht mehr für den Nachschlag.
+    let rank = order.rank(m.id);
     let key = sort_key_with_manual_order(
         called,
         rank,
@@ -167,24 +170,26 @@ pub fn resolve_and_sort_key(
     (hall, source, key)
 }
 
-/// Die aktuelle, vollständig sortierte Match-ID-Liste einer Halle —
+/// Die aktuelle, vollständig sortierte Match-ID-Liste des Turniers —
 /// **nur** noch nicht gerufene, spielbereite Spiele (BTP-Reihenfolge +
 /// bisheriger manueller Präfix kombiniert). Das ist die „aktuell gültige
 /// Liste", auf die ein `QueueReorder`-Zug angewendet wird
 /// ([`QueueOrderStore::reorder`]) — gerufene Spiele bleiben außen vor, sie
 /// sind nie Teil des ziehbaren Bereichs (Blocker 1 der Klärung).
 ///
+/// **Ohne Hallenfilter** (ADR 0026): Die Spielliste ist eine einzige
+/// Abfolge über alle Hallen, ein Zug wirkt entsprechend global.
+///
 /// Geteilter Helfer für TL-Web-Dispatch (`tl.rs`) und den Desktop-Command
 /// (`commands.rs`) — beide dürfen keine eigene Berechnung dieser Liste
 /// haben, sonst könnte ein Zug auf zwei Oberflächen unterschiedlich
 /// wirken.
-pub fn ready_queue_for_hall(
+pub fn ready_queue(
     config: &AppConfig,
     snap: &BtpSnapshot,
     manual_halls: &HashMap<i64, String>,
     called_match_ids: &HashSet<i64>,
     order: &QueueOrderStore,
-    hall: &str,
 ) -> Vec<i64> {
     let mut ordered: Vec<(ManualOrderSortKey, i64)> = snap
         .matches
@@ -195,13 +200,10 @@ pub fn ready_queue_for_hall(
                 && !m.team2.is_empty()
                 && !called_match_ids.contains(&m.id)
         })
-        .filter_map(|m| {
+        .map(|m| {
             let manual = manual_halls.get(&m.id).map(String::as_str);
-            let (h, _, key) = resolve_and_sort_key(config, snap, m, manual, None, false, order);
-            if h != hall {
-                return None;
-            }
-            Some((key, m.id))
+            let (_, _, key) = resolve_and_sort_key(config, snap, m, manual, None, false, order);
+            (key, m.id)
         })
         .collect();
     ordered.sort_by_key(|(key, _)| *key);
@@ -1495,7 +1497,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_and_sort_key_nutzt_den_praefix_der_richtigen_halle() {
+    fn resolve_and_sort_key_nutzt_den_globalen_praefix() {
         use crate::tablet::queue_order::QueueOrderStore;
 
         let mut vorgezogen = a_match(4);
@@ -1510,7 +1512,7 @@ mod tests {
         );
         let config = AppConfig::default();
         let order = QueueOrderStore::default();
-        order.reorder("", &[1, 4], 4, Some(1)); // Match 4 vor Match 1 ziehen
+        order.reorder(&[1, 4], 4, Some(1)); // Match 4 vor Match 1 ziehen
 
         let (hall_vorgezogen, _, key_vorgezogen) =
             resolve_and_sort_key(&config, &s, &vorgezogen, None, None, false, &order);
@@ -1524,7 +1526,33 @@ mod tests {
     }
 
     #[test]
-    fn ready_queue_for_hall_schliesst_gerufene_spiele_aus_und_respektiert_den_praefix() {
+    fn der_praefix_wirkt_ueber_hallengrenzen_hinweg() {
+        // ADR 0026: Der Rang wird global nachgeschlagen, nicht in der Halle
+        // des Matches. Ein in Halle B vorgezogenes Spiel steht damit auch
+        // vor einem früher angesetzten Spiel aus Halle A.
+        use crate::tablet::queue_order::QueueOrderStore;
+
+        let mut a = a_match(1);
+        a.planned_time = Some(202_608_071_200); // Halle A, früh
+        let mut b = a_match(2);
+        b.planned_time = Some(202_608_071_900); // Halle B, spät
+
+        let s = snap(Vec::new(), vec![a.clone(), b.clone()], Vec::new());
+        let config = AppConfig::default();
+        let order = QueueOrderStore::default();
+        order.reorder(&[1, 2], 2, Some(1));
+
+        let (hall_a, _, key_a) =
+            resolve_and_sort_key(&config, &s, &a, Some("Halle A"), None, false, &order);
+        let (hall_b, _, key_b) =
+            resolve_and_sort_key(&config, &s, &b, Some("Halle B"), None, false, &order);
+        assert_eq!(hall_a, "Halle A");
+        assert_eq!(hall_b, "Halle B");
+        assert!(key_b < key_a, "der Präfix kennt keine Hallengrenze mehr");
+    }
+
+    #[test]
+    fn ready_queue_schliesst_gerufene_spiele_aus_und_respektiert_den_praefix() {
         use crate::tablet::queue_order::QueueOrderStore;
         use std::collections::HashSet;
 
@@ -1545,12 +1573,41 @@ mod tests {
         let manual: HashMap<i64, String> = HashMap::new();
         let called: HashSet<i64> = [3].into_iter().collect();
 
-        let liste = ready_queue_for_hall(&config, &s, &manual, &called, &order, "");
+        let liste = ready_queue(&config, &s, &manual, &called, &order);
         assert_eq!(liste, vec![1, 2], "gerufenes Spiel 3 taucht nicht auf");
 
-        order.reorder("", &liste, 2, Some(1));
-        let liste2 = ready_queue_for_hall(&config, &s, &manual, &called, &order, "");
+        order.reorder(&liste, 2, Some(1));
+        let liste2 = ready_queue(&config, &s, &manual, &called, &order);
         assert_eq!(liste2, vec![2, 1], "Präfix wirkt in der effektiven Liste");
+    }
+
+    #[test]
+    fn ready_queue_enthaelt_alle_hallen_in_einer_liste() {
+        // ADR 0026: kein Hallenfilter mehr — die ziehbare Liste ist die
+        // gesamte Spielliste des Turniers.
+        use crate::tablet::queue_order::QueueOrderStore;
+        use std::collections::HashSet;
+
+        let mut m1 = a_match(1);
+        m1.planned_time = Some(202_608_071_200);
+        let mut m2 = a_match(2);
+        m2.planned_time = Some(202_608_071_300);
+        let mut m3 = a_match(3);
+        m3.planned_time = Some(202_608_071_400);
+
+        let s = snap(Vec::new(), vec![m1, m2, m3], Vec::new());
+        let config = AppConfig::default();
+        let order = QueueOrderStore::default();
+        // 1 in Halle A, 2 in Halle B, 3 ohne Hallenzuordnung.
+        let manual: HashMap<i64, String> = [(1, "Halle A".to_string()), (2, "Halle B".to_string())]
+            .into_iter()
+            .collect();
+        let called: HashSet<i64> = HashSet::new();
+
+        assert_eq!(
+            ready_queue(&config, &s, &manual, &called, &order),
+            vec![1, 2, 3]
+        );
     }
 
     #[test]

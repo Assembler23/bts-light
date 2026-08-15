@@ -124,7 +124,7 @@ den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
 
 | Baustein | Ort |
 |---|---|
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`) | `tablet/state.rs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`) | `tablet/state.rs` |
 | Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
 | Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`) | `tablet/tl.rs` |
 | Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
@@ -148,10 +148,51 @@ Eigenschaften, die im Turnierbetrieb zählen:
   was die Halle gehört hat.
 - **Nichts wird nachträglich falsch gesprochen.** Steht auf dem Feld
   inzwischen ein anderes Spiel, schweigt der Sprecher lieber.
+- **Je Partei ansagbar.** Beide Aufruf-Aufträge tragen eine Partei
+  (`side`: `both` / `team1` / `team2`) — siehe den nächsten Abschnitt.
 - **Sind Ansagen ausgeschaltet, wird gar nicht erst abgefragt.** Sonst
   meldete sich das Gerät als Ansage-Gerät, ohne je zu sprechen — und die
   Turnierleitung bekäme ein beruhigendes „Aufruf ausgelöst", während in der
   Halle nichts passiert.
+
+### Aufruf je Partei — am Meeting Point und am Feld
+
+Erscheint nur **eine** Partei, ruft die Turnierleitung gezielt sie nach.
+Das gibt es an zwei Orten, mit derselben Wire-Angabe
+(`relay_proto::PrepCallSide`: `both` / `team1` / `team2`) und demselben
+Ansage-Bild (nur die genannte Partei wird vorgelesen, die andere bleibt
+ungenannt):
+
+| Ort | Aktion | Partei | Wo die Stufe lebt |
+|---|---|---|---|
+| Meeting Point (Spiel in Vorbereitung) | `AnnouncePrepCall` | **Pflichtfeld** | je **(Spiel, Partei)** — `prep_call_stages` |
+| Feld (Spiel steht schon auf dem Court) | `AnnounceCourtCall` | **optional**, fehlend = beide | je **Feld** — `call_stages` |
+
+Der Unterschied ist Absicht: Am Meeting Point warten die Parteien
+unabhängig voneinander, am Feld gilt **eine** Stufe für alle Geräte
+(„Zweiter Aufruf" muss überall dieselbe Zahl sein).
+
+**Die Stufe am Feld zählt einmal je Aufruf-Runde.** Ein Partei-Aufruf ist
+ein vollwertiger Aufruf; wer aber nacheinander Partei A und Partei B ruft,
+hat **einmal** gerufen — beide hören „Zweiter Aufruf". Erst ein Aufruf an
+eine Partei, die auf dieser Stufe schon dran war, eröffnet die nächste
+(„Dritter und letzter Aufruf"). Der Turnier-PC merkt sich dazu je Feld die
+bereits gerufenen Parteien der aktuellen Stufe
+(`note_court_call_at_least`, Maske `SIDE_TEAM1`/`SIDE_TEAM2`). Ein Aufruf
+aus der Desktop-Oberfläche (`reached_court_call`) gilt immer beiden
+Parteien und schließt die Runde ab.
+
+**Vorgelesen** wird die Angabe am Ansage-Gerät: Der Auftrag trägt sie mit
+(`AnnounceJobKind::CourtCall.side`), `AnnounceJobPlayer` reicht sie an
+`announceCourt(..., side)` weiter, und das setzt — exakt wie der
+Vorbereitungs-Nachruf — nur die genannte Partei als `teamANames` und lässt
+`teamBNames` leer. Auch die Sprachwahl richtet sich dann nur nach den
+Nationen der genannten Partei.
+
+Ein älterer Browser, der `side` beim Feld-Aufruf nicht mitschickt, ruft
+unverändert beide Parteien — `None` ist hier die neutralere, nicht die
+weitreichendere Variante (Begründung: [cloud-relay.md](cloud-relay.md),
+Abschnitt „Erneute Aufrufe — je Partei").
 
 ### Grenzen (Stand Schritt 9)
 
@@ -424,7 +465,8 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
 - `src/io/azureAnnounce.ts` — baut die `AnnounceOptions.azure`-Option (nur wenn aktiv).
 - `src-tauri/src/azure_tts.rs` + `commands::azure_tts_speak` — Azure-Synthese (Key im Backend) + Datei-Cache.
 - `src-tauri/src/tablet/state.rs` — `AnnounceJob`/`AnnounceJobKind`, `call_stages`
-  (Aufruf-Stufen am Host), `announce_listeners` (wer hört gerade zu).
+  (Aufruf-Stufen am Host, inkl. der Parteien-Maske der laufenden Runde),
+  `side_mask`/`SIDE_TEAM1`/`SIDE_TEAM2`, `announce_listeners` (wer hört gerade zu).
 - `src-tauri/src/tablet/tl.rs` — `AnnounceCourtCall`/`AnnouncePrepCall`,
   `due_call_stage` (zeitliche Fälligkeit), `announcement_response` (Warnung
   ohne Ansage-Gerät).

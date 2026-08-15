@@ -1,6 +1,10 @@
 # 0023 — Manuelle Spielreihenfolge: Präfix je Halle, atomare Züge, ein Sortier-Helfer
 
-- **Status:** accepted
+- **Status:** superseded by [ADR 0026](0026-spielliste-eine-globale-reihenfolge-eine-liste.md)
+  in der Hallen-Frage (Präfix ist seit 15.08.2026 **global**, keine
+  Trennung je Halle mehr). Die Teilentscheidungen **atomare Züge** und
+  **ein verpflichtender gemeinsamer Sortier-Helfer** bleiben unverändert
+  gültig — ADR 0026 baut auf ihnen auf, statt sie zu ersetzen.
 - **Datum:** 2026-08-14
 
 ## Kontext

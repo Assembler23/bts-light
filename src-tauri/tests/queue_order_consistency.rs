@@ -1,5 +1,6 @@
 //! Cross-Site-Regressionstest der manuellen Spielreihenfolge (Spec
-//! `docs/features/spielliste-manuelle-reihenfolge.md`, ADR 0023, Blocker 4).
+//! `docs/features/spielliste-manuelle-reihenfolge.md`, ADR 0023 Blocker 4,
+//! seit ADR 0026 mit **einer globalen** Reihenfolge statt einer je Halle).
 //!
 //! `docs/btp_protocol.md` warnt ausdrücklich davor, dass die Sortier-Logik
 //! an mehreren Stellen dupliziert leicht auseinanderlaufen kann — „sonst
@@ -20,7 +21,8 @@
 
 use bts_light_lib::badhub::payload::{build_tset, LivetickerContext};
 use bts_light_lib::btp::model::{
-    BtpMatch, BtpPlayer, BtpSnapshot, Discipline, MatchResult, MatchStatus, ScoringFormat,
+    BtpLocation, BtpMatch, BtpPlayer, BtpSnapshot, Discipline, MatchResult, MatchStatus,
+    ScoringFormat,
 };
 use bts_light_lib::commands::preparation_candidates_for;
 use bts_light_lib::config::AppConfig;
@@ -74,12 +76,16 @@ fn a_match(id: i64, match_num: i64, planned_time: i64) -> BtpMatch {
 }
 
 fn snapshot(matches: Vec<BtpMatch>) -> BtpSnapshot {
+    snapshot_with_locations(matches, Vec::new())
+}
+
+fn snapshot_with_locations(matches: Vec<BtpMatch>, locations: Vec<BtpLocation>) -> BtpSnapshot {
     BtpSnapshot {
         tournament_name: "T".to_string(),
         rest_minutes: None,
         matches,
         courts: Vec::new(),
-        locations: Vec::new(),
+        locations,
         court_infos: Vec::new(),
         events: Vec::new(),
         entries: Vec::new(),
@@ -102,11 +108,7 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
 
     let tablet = TabletState::default();
     tablet.set_snapshot(snap.clone());
-    // Keine Locations im Turnier gepflegt ⇒ alle Matches lösen auf die
-    // leere Halle "" auf (wie in `assign.rs`/`queue_order.rs` getestet).
-    tablet
-        .queue_order_store()
-        .reorder("", &[1, 2, 3], 3, Some(1));
+    tablet.queue_order_store().reorder(&[1, 2, 3], 3, Some(1));
 
     let tl_ids: Vec<i64> = tl::build_state(&tablet, &config, 0, 1)
         .queue
@@ -114,6 +116,82 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
         .map(|m| m.match_id)
         .collect();
     assert_eq!(tl_ids, vec![3, 1, 2], "TL-Web: Präfix schlägt Ansetzung");
+
+    let desktop_ids: Vec<i64> = preparation_candidates_for(&tablet, &config)
+        .candidates
+        .iter()
+        .map(|c| c.match_id)
+        .collect();
+    assert_eq!(
+        desktop_ids, tl_ids,
+        "Desktop zeigt eine andere Reihenfolge als TL-Web"
+    );
+
+    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
+        .event
+        .upcoming_matches
+        .iter()
+        .map(|m| {
+            m.id.strip_prefix("btp_")
+                .and_then(|s| s.parse::<i64>().ok())
+                .expect("Match-ID im erwarteten Format")
+        })
+        .collect();
+    assert_eq!(
+        live_ids, tl_ids,
+        "Liveticker zeigt eine andere Reihenfolge als TL-Web/Desktop"
+    );
+}
+
+#[test]
+fn tl_web_desktop_and_liveticker_agree_across_two_halls() {
+    // Der Fall, den ADR 0026 neu erlaubt und den der Test bis dahin nicht
+    // abdeckte (`locations` war leer, also lief alles in der Halle ""):
+    // Ein Zug wirkt jetzt über die Hallengrenze hinweg. Match 4 (Halle B,
+    // spät angesetzt) wird vor Match 1 (Halle A, früh angesetzt) gezogen —
+    // alle drei Ansichten müssen danach dieselbe Abfolge zeigen.
+    let mut m1 = a_match(1, 1, 202_608_071_200);
+    m1.location_id = Some(1); // Halle A
+    let mut m2 = a_match(2, 2, 202_608_071_300);
+    m2.location_id = Some(2); // Halle B
+    let mut m3 = a_match(3, 3, 202_608_071_400);
+    m3.location_id = Some(1); // Halle A
+    let mut m4 = a_match(4, 4, 202_608_071_500);
+    m4.location_id = Some(2); // Halle B
+
+    let snap = snapshot_with_locations(
+        vec![m1, m2, m3, m4],
+        vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle A".to_string(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle B".to_string(),
+            },
+        ],
+    );
+    let config = AppConfig::default();
+
+    let tablet = TabletState::default();
+    tablet.set_snapshot(snap.clone());
+    tablet
+        .queue_order_store()
+        .reorder(&[1, 2, 3, 4], 4, Some(1));
+
+    let tl_queue = tl::build_state(&tablet, &config, 0, 1).queue;
+    let tl_ids: Vec<i64> = tl_queue.iter().map(|m| m.match_id).collect();
+    assert_eq!(
+        tl_ids,
+        vec![4, 1, 2, 3],
+        "TL-Web: der Zug wirkt über die Hallengrenze"
+    );
+    // Und die Halle bleibt dabei korrekt aufgelöst — sie ist jetzt reine
+    // Anzeige, kein Sortierkriterium mehr.
+    let halls: Vec<&str> = tl_queue.iter().map(|m| m.hall.as_str()).collect();
+    assert_eq!(halls, vec!["Halle B", "Halle A", "Halle B", "Halle A"]);
 
     let desktop_ids: Vec<i64> = preparation_candidates_for(&tablet, &config)
         .candidates

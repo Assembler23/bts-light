@@ -387,16 +387,19 @@ Turnierplan nirgends stand. Bei nur 15 Einträgen konnten die tatsächlich
 nächsten Spiele sogar ganz herausfallen.
 
 **Seit 14.08.2026 (Spec `spielliste-manuelle-reihenfolge`, ADR 0023)**
-kennt jede der fünf Stellen zusätzlich einen **manuellen Präfix je Halle**:
-`assign::resolve_and_sort_key` bündelt Hallen-Auflösung
-(`assign::hall_for_match`) + Präfix-Rang-Nachschlag
+kennt jede der fünf Stellen zusätzlich einen **manuellen Präfix** — seit
+15.08.2026 **hallenübergreifend** statt je Halle getrennt (ADR 0026, löst
+die Hallen-Frage von ADR 0023 ab). `assign::resolve_and_sort_key` bündelt
+Hallen-Auflösung (`assign::hall_for_match`, weiterhin nötig für die
+Anzeige) + globalen Präfix-Rang-Nachschlag
 (`tablet/queue_order.rs::QueueOrderStore::rank`) +
 `assign::sort_key_with_manual_order` zu **einem** verpflichtenden Helfer —
 genau der Punkt, den diese Tabelle seit jeher schützen soll. Ein
-Cross-Site-Regressionstest (`tests/queue_order_consistency.rs`) vergleicht
-TL-Web, Desktop und Liveticker gegeneinander. `DisplayOrder` selbst lässt
-sich **nicht** nach BTP zurückschreiben (siehe Abschnitt weiter unten) — die
-manuelle Reihenfolge bleibt daher rein host-lokal.
+Cross-Site-Regressionstest (`tests/queue_order_consistency.rs`, inkl.
+Zwei-Hallen-Szenario) vergleicht TL-Web, Desktop und Liveticker
+gegeneinander. `DisplayOrder` selbst lässt sich **nicht** nach BTP
+zurückschreiben (siehe Abschnitt weiter unten) — die manuelle Reihenfolge
+bleibt daher rein host-lokal.
 
 Nicht betroffen: die Liste der **in Vorbereitung gerufenen** Spiele
 (`build_prepared_list`). Sie folgt der Reihenfolge der Aufrufe — wer

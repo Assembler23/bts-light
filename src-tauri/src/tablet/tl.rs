@@ -393,7 +393,11 @@ pub(crate) fn apply_state_action(
             tablet.remove_walkover_proposal(proposal_id);
             Ok(TlResponse::ok(0))
         }
-        A::AnnounceCourtCall { court_id, match_id } => {
+        A::AnnounceCourtCall {
+            court_id,
+            match_id,
+            side,
+        } => {
             let Some(snap) = tablet.snapshot_clone() else {
                 return Err(TlResponse::err(
                     C::NotAllowed,
@@ -424,13 +428,25 @@ pub(crate) fn apply_state_action(
             // Die Uhr am Feld darf nicht weiter sein als der Aufruf: Steht
             // dort schon „Letzter Aufruf", wäre ein zweiter ein Rückschritt.
             let faellig = due_call_stage(tablet, config, *court_id, *match_id, now_ms);
-            let stage = tablet.note_court_call_at_least(*court_id, *match_id, faellig);
+            // Ein Partei-Aufruf ist ein vollwertiger Aufruf, zählt die Stufe
+            // aber nur EINMAL je Runde hoch: Wer erst Partei A und dann
+            // Partei B ruft, hat einmal gerufen, nicht zweimal (Spec
+            // tl-liste-vereinfachen E1 — die Regel steckt in
+            // `note_court_call_at_least`, damit Desktop und TL-Web sie
+            // teilen).
+            let stage = tablet.note_court_call_at_least(
+                *court_id,
+                *match_id,
+                faellig,
+                crate::tablet::state::side_mask(*side),
+            );
             tablet.publish_announce_job(
                 hall.clone(),
                 crate::tablet::state::AnnounceJobKind::CourtCall {
                     court_id: *court_id,
                     match_id: *match_id,
                     stage,
+                    side: side.unwrap_or(relay_proto::PrepCallSide::Both),
                 },
                 now_ms,
             );
@@ -630,10 +646,10 @@ pub(crate) fn build_state_with_rev(
 /// nicht. Ohne eigene Kürzung wäre die Cloud-Oberfläche also ausgerechnet in
 /// großen Turnieren tot, und niemand wüsste warum. Gekürzt wird die
 /// Warteliste — sie ist der große Teil und nach Dringlichkeit sortiert, die
-/// vorderen Spiele sind die, um die es geht. `truncated_halls` meldet es.
+/// vorderen Spiele sind die, um die es geht. `queue_truncated` meldet es.
 ///
 /// Liefert `(json, rev)`. Dass gekürzt wurde, steht im Zustand selbst
-/// (`truncated_halls`) — dort sieht es auch die Turnierleitung.
+/// (`queue_truncated`) — dort sieht es auch die Turnierleitung.
 pub(crate) fn state_for_relay(
     tablet: &TabletState,
     config: &AppConfig,
@@ -647,10 +663,16 @@ pub(crate) fn state_for_relay(
     // Leitung — die Live-Punktestände gehören dazu, sie sind der Grund, warum
     // man hinsieht. Bei voller Liste wäre das ein Dauerstrom von zehner
     // Kilobyte alle zwei Sekunden, auf einem Turnier-PC womöglich über
-    // Mobilfunk, neben dem Ergebnisweg nach BTP. Vierzig wartende Spiele je
-    // Halle sind mehr, als eine Turnierleitung unterwegs überblickt; was
-    // fehlt, meldet `truncated_halls` ehrlich, und im Hallennetz steht
-    // weiterhin die volle Liste.
+    // Mobilfunk, neben dem Ergebnisweg nach BTP. Vierzig wartende Spiele
+    // sind mehr, als eine Turnierleitung unterwegs überblickt; was fehlt,
+    // meldet `queue_truncated` ehrlich, und im Hallennetz steht weiterhin
+    // die volle Liste.
+    //
+    // Die Stufen gelten seit ADR 0026 turnierweit statt je Halle — bei
+    // zwei Hallen liefert die erste Stufe damit rund halb so viele Spiele
+    // wie zuvor. Das ist die gewollte Folge der einen gemeinsamen Liste:
+    // Vierzig Spiele der GEMEINSAMEN Abfolge sind genau das, was oben
+    // steht, egal in welcher Halle sie laufen.
     const STUFEN: [usize; 4] = [40, 20, 10, 5];
     let mut letzte = String::new();
     let mut letzte_rev = 0;
@@ -1445,8 +1467,15 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::RetractPreparation { match_id } => format!("prep-retract:{match_id}"),
         A::SetHall { match_id, hall } => format!("hall:{match_id}:{hall}"),
         A::ExcludeFromAutoAssign { match_id, excluded } => format!("excl:{match_id}:{excluded}"),
-        A::AnnounceCourtCall { court_id, match_id } => {
-            format!("call:{match_id}:{court_id}")
+        A::AnnounceCourtCall {
+            court_id,
+            match_id,
+            side,
+        } => {
+            // Die Partei gehört in den Fingerabdruck: „Partei A rufen" und
+            // „Partei B rufen" unter derselben Vorgangskennung sind zwei
+            // verschiedene Absichten, kein Doppeltipp.
+            format!("call:{match_id}:{court_id}:{side:?}")
         }
         A::AnnouncePrepCall { match_id, side } => format!("prep-call:{match_id}:{side:?}"),
         A::EnterResult {
@@ -1568,7 +1597,15 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             "Spiel {match_id} {} Auto-Vergabe",
             if *excluded { "aus" } else { "wieder in" }
         ),
-        A::AnnounceCourtCall { court_id, .. } => format!("Erneuter Aufruf Feld {court_id}"),
+        A::AnnounceCourtCall { court_id, side, .. } => match side {
+            Some(relay_proto::PrepCallSide::Team1) => {
+                format!("Erneuter Aufruf Feld {court_id}, Partei A")
+            }
+            Some(relay_proto::PrepCallSide::Team2) => {
+                format!("Erneuter Aufruf Feld {court_id}, Partei B")
+            }
+            _ => format!("Erneuter Aufruf Feld {court_id}"),
+        },
         A::AnnouncePrepCall { .. } => "Erneuter Vorbereitungs-Aufruf".to_string(),
         A::EnterResult { match_id, .. } => format!("Ergebnis für Spiel {match_id}"),
         A::ConfirmWalkover { .. } => "Kampflose Wertung".to_string(),
@@ -1722,13 +1759,19 @@ pub struct TlState {
     /// die Folgespiele derselben Mannschaft kampflos zu werten. Welche das
     /// sein sollen, entscheidet die Turnierleitung.
     pub walkovers: Vec<TlWalkover>,
-    /// Hallen, deren Warteliste gekappt wurde (leerer Name = Spiele ohne
-    /// Hallenzuordnung). Leer = nichts gekappt.
+    /// Wie viele wartende Spiele die Kappung weggelassen hat. `0` = die
+    /// Liste ist vollständig.
     ///
-    /// Gekappt wird **je Halle**, nicht über das ganze Turnier: Global
-    /// gekappt könnte die Sortierung eine komplette Halle verdrängen, und
-    /// das Gerät dort sähe eine leere Liste, obwohl hundert Spiele warten.
-    pub truncated_halls: Vec<String>,
+    /// **Ersetzt `truncated_halls: Vec<String>`** (ADR 0026): Gekappt wird
+    /// seit der einen globalen Reihenfolge turnierweit, eine Liste
+    /// betroffener Hallen wäre damit keine ehrliche Auskunft mehr — sie
+    /// beschriebe eine Grenze, die es nicht mehr gibt. Die Zahl ist das,
+    /// was die Turnierleitung wirklich wissen muss: wie viel am Ende
+    /// fehlt. (Der frühere Grund für die Trennung je Halle — „eine Halle
+    /// darf nicht komplett verdrängt werden" — ist mit der bewusst
+    /// hallenübergreifenden Sortierung aus ADR 0026 aufgegeben worden.)
+    #[serde(default)]
+    pub queue_truncated: usize,
     /// Verwaltet dieser Turnier-PC Zähltafelbediener? Nur dann zeigt die
     /// Seite den Warteschlangen-Abschnitt.
     pub scorekeeper_managed: bool,
@@ -2052,13 +2095,14 @@ impl From<Blocked> for TlBlocked {
     }
 }
 
-/// Wie viele wartende Spiele **je Halle** höchstens ausgeliefert werden.
+/// Wie viele wartende Spiele höchstens ausgeliefert werden — **turnierweit**
+/// (ADR 0026; bis dahin galt der Deckel je Halle).
 ///
 /// Bei großen Turnieren stehen mehrere hundert Spiele an; alle zu übertragen
 /// kostet bei jedem Abruf und auf jedem Gerät. Die Liste ist nach
 /// Dringlichkeit sortiert, die vorderen sind die, um die es geht — was
-/// wegfällt, meldet `truncated_halls` ehrlich.
-pub(crate) const QUEUE_LIMIT_PER_HALL: usize = 120;
+/// wegfällt, meldet `queue_truncated` ehrlich.
+pub(crate) const QUEUE_LIMIT: usize = 120;
 
 /// Höchstzahl beendeter Spiele im Zustand. Die Seite ist ein
 /// Arbeits-Werkzeug, kein Archiv — wer mehr braucht, schaut in BTP.
@@ -2113,14 +2157,15 @@ type OrderedMatch<'a> = (
 /// `rev` gibt der Aufrufer vor — er entscheidet, ob sich gegenüber dem
 /// zuletzt ausgelieferten Stand überhaupt etwas geändert hat.
 pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u64) -> TlState {
-    build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT_PER_HALL)
+    build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT)
 }
 
-/// Wie [`build_state`], aber mit vorgegebener Wartelisten-Länge je Halle.
+/// Wie [`build_state`], aber mit vorgegebener Wartelisten-Länge
+/// (turnierweit).
 ///
 /// Für den Weg über den Relay: Der legt einen zu großen Zustand gar nicht
 /// erst ab, und der Host erfährt davon nichts. Er muss also selbst kürzen —
-/// was wegfällt, meldet `truncated_halls` wie immer.
+/// was wegfällt, meldet `queue_truncated` wie immer.
 pub(crate) fn build_state_limited(
     tablet: &TabletState,
     config: &AppConfig,
@@ -2143,7 +2188,7 @@ pub(crate) fn build_state_limited(
             courts: Vec::new(),
             queue: Vec::new(),
             walkovers: Vec::new(),
-            truncated_halls: Vec::new(),
+            queue_truncated: 0,
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
             finished: Vec::new(),
@@ -2226,19 +2271,13 @@ pub(crate) fn build_state_limited(
         .collect();
     ordered.sort_by_key(|(key, _, _, _)| *key);
 
-    // Je Halle kappen, nicht über das ganze Turnier.
-    let mut per_hall: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut truncated: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Turnierweit kappen, nicht je Halle (ADR 0026) — die Liste ist eine
+    // einzige Abfolge, also gibt es auch nur eine Grenze.
+    let queue_truncated = ordered.len().saturating_sub(queue_limit);
     let mut queue: Vec<TlMatch> = Vec::new();
-    for (_, m, hall, hall_source) in ordered {
-        let count = per_hall.entry(hall.clone()).or_insert(0);
-        if *count >= queue_limit {
-            truncated.insert(hall);
-            continue;
-        }
-        *count += 1;
+    for (_, m, hall, hall_source) in ordered.into_iter().take(queue_limit) {
         let call = called_hall(m.id);
-        let manually_ordered = tablet.queue_order_store().rank(&hall, m.id).is_some();
+        let manually_ordered = tablet.queue_order_store().rank(m.id).is_some();
         queue.push(TlMatch {
             match_id: m.id,
             match_num: m.match_num,
@@ -2416,7 +2455,7 @@ pub(crate) fn build_state_limited(
                 })
             })
             .collect(),
-        truncated_halls: truncated.into_iter().collect(),
+        queue_truncated,
         officials_managed,
         officials,
         scorekeeper_managed,
@@ -2471,8 +2510,12 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
                 key: s.key.clone(),
                 visible: s.visible,
                 height_fr: s.height_fr,
+                collapsed: s.collapsed,
+                column: s.column,
             })
             .collect(),
+        columns: p.columns,
+        column_widths: p.column_widths.clone(),
         display: relay_proto::TlDisplaySettingsWire {
             show_numbers: p.display.show_numbers,
             show_nations: p.display.show_nations,
@@ -2504,6 +2547,8 @@ fn panels_from_wire(
             key: s.key.clone(),
             visible: s.visible,
             height_fr: s.height_fr,
+            collapsed: s.collapsed,
+            column: s.column,
         })
         .collect()
 }
@@ -2536,6 +2581,13 @@ const MAX_TL_PROFILE_NAME_LEN: usize = 60;
 /// feste Schlüssel; die Reserve fängt künftige Panels ab, ohne dass ein
 /// einzelner Aufruf den `TlState` sprengen kann (R4).
 const MAX_TL_PROFILE_PANELS: usize = 32;
+
+/// Höchstzahl der Spaltenbreiten in EINEM Profil. Das Frontend kennt drei
+/// feste Presets (1…3 Spalten); die Reserve fängt eine künftige vierte
+/// Spalte ab, ohne dass eine beliebig lange Zahlenliste den `TlState`
+/// sprengen kann (R4) — dieselbe Überlegung wie bei
+/// [`MAX_TL_PROFILE_PANELS`], nur ist hier die Liste noch kürzer.
+const MAX_TL_PROFILE_COLUMN_WIDTHS: usize = 8;
 
 /// Legt ein Panel-Profil an oder überschreibt es (Upsert nach `id`; Spec
 /// tl-web-panelsystem). Last-Write-Wins ohne Konfliktprüfung — die Spec
@@ -2576,6 +2628,17 @@ fn profile_save(
             format!("Ein Profil kann höchstens {MAX_TL_PROFILE_PANELS} Panels führen."),
         ));
     }
+    // Spaltenbreiten: dieselbe Überlegung wie bei den Panels — eine feste,
+    // im Frontend bekannte Menge (höchstens drei Spalten), also ist eine
+    // lange Liste ein Protokollfehler und kein Bedienfall.
+    if profile.column_widths.len() > MAX_TL_PROFILE_COLUMN_WIDTHS {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            format!(
+                "Ein Profil kann höchstens {MAX_TL_PROFILE_COLUMN_WIDTHS} Spaltenbreiten führen."
+            ),
+        ));
+    }
     let incoming_id = profile.id.trim();
     let exists =
         !incoming_id.is_empty() && config.tl_web.profiles.iter().any(|p| p.id == incoming_id);
@@ -2604,6 +2667,11 @@ fn profile_save(
         name: name.to_string(),
         panels: panels_from_wire(&profile.panels),
         display: display_settings_from_wire(&profile.display),
+        // Spaltenzahl/-breiten reist der Host nur durch (wie `collapsed`):
+        // Was 1…3 bedeutet und wie `0` aus `list_position` abgeleitet wird,
+        // weiß ausschließlich `tl.html`.
+        columns: profile.columns,
+        column_widths: profile.column_widths.clone(),
         updated_at_ms: now_ms,
     };
     if let Some(slot) = config.tl_web.profiles.iter_mut().find(|p| p.id == id) {
@@ -3345,12 +3413,12 @@ mod tests {
         // Große Turniere haben mehrere hundert wartende Spiele. Die Liste
         // ist nach Dringlichkeit sortiert; was hinten wegfällt, wird
         // gemeldet statt still unterschlagen.
-        let matches: Vec<BtpMatch> = (1..=QUEUE_LIMIT_PER_HALL as i64 + 5).map(a_match).collect();
+        let matches: Vec<BtpMatch> = (1..=QUEUE_LIMIT as i64 + 5).map(a_match).collect();
         let s = state_with(snap(Vec::new(), matches, Vec::new()), &AppConfig::default());
-        assert_eq!(s.queue.len(), QUEUE_LIMIT_PER_HALL);
-        // Ohne Hallenzuordnung ist die Gruppe der leere Name — auch sie
-        // meldet ihre Kappung, statt sie zu verschweigen.
-        assert_eq!(s.truncated_halls, vec![String::new()]);
+        assert_eq!(s.queue.len(), QUEUE_LIMIT);
+        // Wie viele Spiele fehlen, steht im Zustand — statt sie
+        // stillschweigend zu unterschlagen.
+        assert_eq!(s.queue_truncated, 5);
     }
 
     fn cfg_with_device(token: &str) -> AppConfig {
@@ -3964,17 +4032,14 @@ mod tests {
         // Und die Kürzung wird gemeldet, statt Spiele stillschweigend
         // verschwinden zu lassen.
         let state: TlState = serde_json::from_str(&json).unwrap();
-        assert!(
-            !state.truncated_halls.is_empty(),
-            "gekürzt, aber nicht gesagt"
-        );
+        assert!(state.queue_truncated > 0, "gekürzt, aber nicht gesagt");
 
         // Ein kleines Turnier verliert nichts.
         let klein = TabletState::default();
         klein.set_snapshot(snap(Vec::new(), vec![a_match(1)], Vec::new()));
         let (json, _rev) = state_for_relay(&klein, &AppConfig::default(), 1_000_000);
         let state: TlState = serde_json::from_str(&json).unwrap();
-        assert!(state.truncated_halls.is_empty());
+        assert_eq!(state.queue_truncated, 0);
         assert_eq!(state.queue.len(), 1);
     }
 
@@ -4253,12 +4318,16 @@ mod tests {
                 key: "courts".to_string(),
                 visible: true,
                 height_fr: 2.0,
+                collapsed: false,
+                column: 1,
             }],
             display: relay_proto::TlDisplaySettingsWire {
                 show_numbers: true,
                 list_position: relay_proto::TlListPositionWire::Bottom,
                 ..Default::default()
             },
+            columns: 1,
+            column_widths: Vec::new(),
             // Wird von `profile_save` ohnehin verworfen und durch `now_ms`
             // ersetzt — hier absichtlich ein Fantasiewert, um genau das zu
             // belegen.
@@ -4276,12 +4345,16 @@ mod tests {
                 key: "officials".into(),
                 visible: false,
                 height_fr: 1.5,
+                collapsed: true,
+                column: 2,
             }],
             display: crate::config::TlDisplaySettings {
                 show_club_names: true,
                 list_position: crate::config::TlListPosition::Bottom,
                 ..Default::default()
             },
+            columns: 2,
+            column_widths: vec![3.0, 1.0],
             updated_at_ms: 42,
         });
         let view = profiles_view(&config);
@@ -4292,6 +4365,10 @@ mod tests {
         assert_eq!(view[0].panels[0].key, "officials");
         assert!(!view[0].panels[0].visible);
         assert_eq!(view[0].panels[0].height_fr, 1.5);
+        assert!(
+            view[0].panels[0].collapsed,
+            "der Zuklapp-Zustand geht mit raus"
+        );
         assert!(view[0].display.show_club_names);
         assert_eq!(
             view[0].display.list_position,
@@ -4313,6 +4390,95 @@ mod tests {
         assert_eq!(config.tl_web.profiles.len(), 1, "Upsert, kein Duplikat");
         assert_eq!(config.tl_web.profiles[0].name, "Geändert");
         assert_eq!(config.tl_web.profiles[0].updated_at_ms, 2_000);
+    }
+
+    #[test]
+    fn profile_save_and_view_pass_the_collapsed_flag_through_both_ways() {
+        // Spec tl-liste-vereinfachen (D): Der Host reicht `collapsed` nur
+        // durch — hin (Browser → `config.json`) und zurück (`TlState`).
+        // Eine Anzeige-Logik gibt es serverseitig bewusst nicht.
+        let mut config = AppConfig::default();
+        let mut profil = wire_profile("profil-1", "Wandmonitor");
+        profil.panels.push(relay_proto::TlPanelSettingWire {
+            key: "queue".to_string(),
+            visible: true,
+            height_fr: 4.0,
+            collapsed: true,
+            column: 1,
+        });
+        profile_save(&mut config, &profil, 1_000).unwrap();
+
+        let gespeichert = &config.tl_web.profiles[0].panels;
+        assert!(!gespeichert[0].collapsed, "courts bleibt aufgeklappt");
+        assert!(gespeichert[1].collapsed, "queue kommt zugeklappt an");
+
+        let zurueck = &profiles_view(&config)[0].panels;
+        assert!(!zurueck[0].collapsed);
+        assert!(zurueck[1].collapsed);
+    }
+
+    #[test]
+    fn profile_save_and_view_pass_the_column_layout_through_both_ways() {
+        // Plan tl-liste-vereinfachen (F): Wie `collapsed` reicht der Host
+        // Spaltenzahl, Spaltenbreiten und die Spalte je Panel nur DURCH.
+        // Die Ableitung „columns == 0 ⇒ aus listPosition" sitzt allein in
+        // `tl.html`; serverseitig darf sich an den Zahlen nichts ändern.
+        let mut config = AppConfig::default();
+        let mut profil = wire_profile("profil-1", "Wandmonitor");
+        profil.columns = 3;
+        profil.column_widths = vec![2.0, 1.0, 1.5];
+        profil.panels.push(relay_proto::TlPanelSettingWire {
+            key: "queue".to_string(),
+            visible: true,
+            height_fr: 1.0,
+            collapsed: false,
+            column: 3,
+        });
+        profile_save(&mut config, &profil, 1_000).unwrap();
+
+        let gespeichert = &config.tl_web.profiles[0];
+        assert_eq!(gespeichert.columns, 3);
+        assert_eq!(gespeichert.column_widths, vec![2.0, 1.0, 1.5]);
+        assert_eq!(gespeichert.panels[0].column, 1, "courts bleibt Spalte 1");
+        assert_eq!(gespeichert.panels[1].column, 3);
+
+        let zurueck = &profiles_view(&config)[0];
+        assert_eq!(zurueck.columns, 3);
+        assert_eq!(zurueck.column_widths, vec![2.0, 1.0, 1.5]);
+        assert_eq!(zurueck.panels[1].column, 3);
+    }
+
+    #[test]
+    fn profile_save_keeps_an_old_profile_without_column_fields_unchanged() {
+        // Ein Browser von vor dem Mehrspalten-Layout schickt weder
+        // `columns`/`columnWidths` noch `column` — der Host speichert dann
+        // die Nullwerte, und `tl.html` liest daraus „aus listPosition
+        // ableiten". Kein serverseitiges Vorbelegen: Sonst wäre die
+        // Ableitung an ZWEI Stellen, die auseinanderlaufen können.
+        let mut config = AppConfig::default();
+        let mut profil = wire_profile("profil-1", "Alt");
+        profil.columns = 0;
+        profil.column_widths = Vec::new();
+        profil.panels[0].column = 0;
+        profile_save(&mut config, &profil, 1_000).unwrap();
+
+        let gespeichert = &config.tl_web.profiles[0];
+        assert_eq!(gespeichert.columns, 0);
+        assert!(gespeichert.column_widths.is_empty());
+        assert_eq!(gespeichert.panels[0].column, 0);
+    }
+
+    #[test]
+    fn profile_save_rejects_oversized_column_width_list() {
+        let mut config = AppConfig::default();
+        let mut profil = wire_profile("profil-1", "Zu viele Breiten");
+        profil.column_widths = vec![1.0; MAX_TL_PROFILE_COLUMN_WIDTHS + 1];
+        let err = profile_save(&mut config, &profil, 1_000).unwrap_err();
+        assert!(!err.ok);
+        assert!(
+            config.tl_web.profiles.is_empty(),
+            "abgelehnt — nichts gespeichert"
+        );
     }
 
     #[test]
@@ -4359,6 +4525,8 @@ mod tests {
                 key: format!("panel-{i}"),
                 visible: true,
                 height_fr: 1.0,
+                collapsed: false,
+                column: 1,
             })
             .collect();
         let err = profile_save(&mut config, &profil, 1_000).unwrap_err();
@@ -4430,6 +4598,7 @@ mod tests {
             panels: Vec::new(),
             display: crate::config::TlDisplaySettings::default(),
             updated_at_ms: 1,
+            ..Default::default()
         });
         config.tl_web.default_profile_id = "profil-1".into();
         config.tl_web.devices.push(crate::config::TlDevice {
@@ -4483,6 +4652,7 @@ mod tests {
             panels: Vec::new(),
             display: crate::config::TlDisplaySettings::default(),
             updated_at_ms: 1,
+            ..Default::default()
         });
         config.tl_web.devices.push(crate::config::TlDevice {
             id: "dev-a".into(),
@@ -4543,6 +4713,7 @@ mod tests {
             panels: Vec::new(),
             display: crate::config::TlDisplaySettings::default(),
             updated_at_ms: 1,
+            ..Default::default()
         });
         profile_set_default(&mut config, "profil-1").unwrap();
         assert_eq!(config.tl_web.default_profile_id, "profil-1");
@@ -4613,6 +4784,7 @@ mod tests {
             &relay_proto::TlAction::AnnounceCourtCall {
                 court_id: 3,
                 match_id: 7,
+                side: None,
             },
         )
         .unwrap();
@@ -4628,11 +4800,108 @@ mod tests {
                 court_id: 3,
                 match_id: 7,
                 stage: 2,
+                side: relay_proto::PrepCallSide::Both,
             }
         );
         assert!(
             tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
             "Halle A geht der Aufruf nichts an"
+        );
+    }
+
+    #[test]
+    fn a_court_call_can_target_a_single_party() {
+        // Spec tl-liste-vereinfachen E1: „2. Aufruf für Partei A/B" am
+        // Feld — Vorbild ist der Vorbereitungs-Nachruf je Partei. Der
+        // Auftrag trägt die Partei mit, damit das Ansage-Gerät nur diese
+        // nennt; die Stufe zählt weiterhin der Host, einmal je Runde.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        tablet.announce_jobs_since("", 0, 50_000);
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: Some(relay_proto::PrepCallSide::Team1),
+            },
+        )
+        .unwrap();
+        assert!(done.ok);
+        assert_eq!(tablet.calls_made(3, 7), 2);
+
+        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::CourtCall {
+                court_id: 3,
+                match_id: 7,
+                stage: 2,
+                side: relay_proto::PrepCallSide::Team1,
+            }
+        );
+
+        // Die andere Partei gehört zur selben Runde — Stufe bleibt 2.
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            51_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: Some(relay_proto::PrepCallSide::Team2),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            2,
+            "Partei A und danach Partei B sind EIN Aufruf"
+        );
+        let jobs = tablet.announce_jobs_since("", jobs[0].id, 51_000);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::CourtCall {
+                court_id: 3,
+                match_id: 7,
+                stage: 2,
+                side: relay_proto::PrepCallSide::Team2,
+            }
+        );
+    }
+
+    #[test]
+    fn a_court_call_without_a_party_still_means_both() {
+        // Rückwärtskompatibilität: Ein älterer Browser schickt kein `side`
+        // — das muss weiterhin genau der bisherige Aufruf an beide sein.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let action: relay_proto::TlAction =
+            serde_json::from_str(r#"{"action":"announce_court_call","courtId":3,"matchId":7}"#)
+                .unwrap();
+        apply_state_action(&tablet, &AppConfig::default(), 50_000, &action).unwrap();
+        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::CourtCall {
+                court_id: 3,
+                match_id: 7,
+                stage: 2,
+                side: relay_proto::PrepCallSide::Both,
+            }
         );
     }
 
@@ -4666,6 +4935,7 @@ mod tests {
             &relay_proto::TlAction::AnnounceCourtCall {
                 court_id: 3,
                 match_id: 7,
+                side: None,
             },
         )
         .unwrap();
@@ -4706,6 +4976,7 @@ mod tests {
             &relay_proto::TlAction::AnnounceCourtCall {
                 court_id: 3,
                 match_id: 7,
+                side: None,
             },
         )
         .unwrap();
@@ -4733,6 +5004,7 @@ mod tests {
             &relay_proto::TlAction::AnnounceCourtCall {
                 court_id: 3,
                 match_id: 99,
+                side: None,
             },
         )
         .unwrap_err();
@@ -4759,6 +5031,7 @@ mod tests {
             &relay_proto::TlAction::AnnounceCourtCall {
                 court_id: 3,
                 match_id: 7,
+                side: None,
             },
         )
         .unwrap();
@@ -4900,10 +5173,24 @@ mod tests {
                 A::AnnounceCourtCall {
                     court_id: 1,
                     match_id: 7,
+                    side: None,
                 },
                 A::AnnounceCourtCall {
                     court_id: 2,
                     match_id: 7,
+                    side: None,
+                },
+            ),
+            (
+                A::AnnounceCourtCall {
+                    court_id: 1,
+                    match_id: 7,
+                    side: Some(relay_proto::PrepCallSide::Team1),
+                },
+                A::AnnounceCourtCall {
+                    court_id: 1,
+                    match_id: 7,
+                    side: Some(relay_proto::PrepCallSide::Team2),
                 },
             ),
             (
@@ -5341,11 +5628,13 @@ mod tests {
     }
 
     #[test]
-    fn the_queue_cap_applies_per_hall_not_globally() {
-        // Global gekappt könnte eine ganze Halle wegfallen: Die Sortierung
-        // zieht die frühen Runden der ersten Halle nach vorn, und das Gerät
-        // in Halle C sähe eine leere Liste, obwohl dort hundert Spiele
-        // warten. Das verletzt „nie stillschweigend ausgeblendet".
+    fn the_queue_cap_applies_globally_not_per_hall() {
+        // ADR 0026: Die Spielliste ist EINE Abfolge, also gibt es auch nur
+        // EINE Grenze. Die bis dahin geltende Kappung je Halle ist bewusst
+        // aufgegeben — mit ihr hätte die Liste zwei Deckel, obwohl sie nur
+        // noch eine Reihenfolge kennt. Dass dabei eine Halle ganz aus der
+        // ausgelieferten Liste fallen kann, wird stattdessen ehrlich
+        // gemeldet (`queue_truncated`) statt strukturell verhindert.
         let mut cfg = AppConfig::default();
         cfg.discipline_hall_rules.push(DisciplineHallRule {
             discipline: "mens_singles".to_string(),
@@ -5359,7 +5648,7 @@ mod tests {
         });
 
         let mut matches = Vec::new();
-        for i in 1..=(QUEUE_LIMIT_PER_HALL as i64 + 10) {
+        for i in 1..=(QUEUE_LIMIT as i64 + 10) {
             let mut m = a_match(i);
             m.draw_name = "HE A".to_string();
             m.planned_time = Some(202_608_080_800 + i); // Halle A zuerst
@@ -5390,12 +5679,15 @@ mod tests {
             &cfg,
         );
 
+        assert_eq!(s.queue.len(), QUEUE_LIMIT, "genau ein globaler Deckel");
         let in_b = s.queue.iter().filter(|m| m.hall == "Halle B").count();
-        assert_eq!(in_b, 5, "Halle B darf nicht von Halle A verdrängt werden");
         assert_eq!(
-            s.truncated_halls,
-            vec!["Halle A".to_string()],
-            "nur Halle A wurde gekappt, und das steht dort"
+            in_b, 0,
+            "die später angesetzten Spiele der Halle B fallen hinten heraus"
+        );
+        assert_eq!(
+            s.queue_truncated, 15,
+            "was fehlt, wird gezählt und gemeldet"
         );
     }
 
@@ -5526,7 +5818,7 @@ mod tests {
             "not_started_minutes",
             "courts",
             "queue",
-            "truncated_halls",
+            "queue_truncated",
             // Walkover-Vorschläge: Mannschaftsnamen, die auch sonst überall
             // in der Ansicht stehen, plus Runde und Gegner. Die
             // Turnierleitung muss sehen, was sie da kampflos wertet.
@@ -5663,6 +5955,15 @@ mod tests {
             "panels",
             "visible",
             "heightFr",
+            // Auf-/Zuklapp-Zustand eines Panels — reine Layout-Angabe wie
+            // `visible`/`heightFr`, kein Personendatum.
+            "collapsed",
+            // Mehrspalten-Layout (Plan tl-liste-vereinfachen F): Spaltenzahl,
+            // Spaltenbreiten und die Spalte je Panel — genauso reine
+            // Layout-Zahlen wie `heightFr`, kein Personenbezug.
+            "columns",
+            "columnWidths",
+            "column",
             "display",
             "showNumbers",
             "showNations",
@@ -5738,6 +6039,8 @@ mod tests {
                 key: "courts".into(),
                 visible: true,
                 height_fr: 2.0,
+                collapsed: false,
+                column: 1,
             }],
             display: crate::config::TlDisplaySettings {
                 show_numbers: true,
@@ -5750,6 +6053,7 @@ mod tests {
                 list_position: crate::config::TlListPosition::Bottom,
             },
             updated_at_ms: 1_000,
+            ..Default::default()
         });
         config.tl_web.default_profile_id = "profil-1".into();
         let s = build_state(&tablet, &config, 1_000_000, 1);
@@ -5927,12 +6231,15 @@ mod tests {
                 key: "courts".into(),
                 visible: true,
                 height_fr: 2.0,
+                collapsed: false,
+                column: 1,
             }],
             display: crate::config::TlDisplaySettings {
                 show_numbers: true,
                 ..Default::default()
             },
             updated_at_ms: 1_000,
+            ..Default::default()
         });
         let s = build_state(&tablet, &config, 1_000_000, 7);
         assert!(

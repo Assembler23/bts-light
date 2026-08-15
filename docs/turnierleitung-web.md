@@ -211,29 +211,53 @@ Details zum Datenmodell und zur Vergleichsregel für Hallennamen:
 
 ### Panels: was auf dieser Seite steht
 
-Die Seite besteht aus neun **Panels** — Felder, Aufgaben (Walkover),
-Zähltafel-Warteschlange, Schiedsrichter, die vier Wartelisten-Abschnitte
-(„In Vorbereitung gerufen", „Spielbereit", „Noch nicht bereit", „Ohne
-Hallenzuordnung") und „Beendet". Jedes trägt dieselbe Kopfzeile: Titel,
-Anzahl, und rechts ein **Auge** zum Aus- und Einblenden.
+Die Seite besteht aus sechs **Panels** — Felder, Aufgaben (Walkover),
+Zähltafel-Warteschlange, Schiedsrichter, Spiele und „Beendete Spiele".
+Jedes trägt dieselbe Kopfzeile: Titel, Anzahl, ein **Auge** zum Aus- und
+Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
 
 - **Ausblenden ist dauerhaft** (nicht nur zugeklappt): Ein ausgeblendetes
   Panel belegt keinen Platz mehr und bleibt nach einem Neuladen der Seite
   ausgeblendet. Wer keine Schiedsrichter einteilt, wird den Abschnitt
   dadurch wirklich los.
 - **Reihenfolge ändern**: Am Kopf jedes Panels sitzt ein Verschiebe-Griff
-  (Kreuz-Pfeile — bewusst ein anderes Symbol als der ⠿-Griff, mit dem man
+  (drei Balken — bewusst ein anderes Symbol als der ⠿-Griff, mit dem man
   einzelne *Zeilen* zieht). Ziehen oder mit den Pfeiltasten verschieben.
-- **Höhe verteilen**: Zwischen je zwei sichtbaren Panels sitzt ein
-  Trennsteg. Ziehen gibt dem einen Panel mehr Platz und dem anderen
-  weniger; **Doppeltipp** stellt die gleichmäßige Verteilung wieder her.
-  Kein Panel lässt sich auf null ziehen. Ist ein Panel dazwischen
-  ausgeblendet, greift der Steg automatisch das nächste sichtbare.
-- **„Felder" bleibt oben bzw. links** — das ist die feste Ankerposition
-  der Seite. Aus-/Einblenden und Höhe verteilen geht trotzdem, nur
-  umsortieren nicht. Ob die Spielliste rechts daneben oder darunter
-  steht, entscheidet weiterhin die Einstellung **Spielliste
-  rechts/darunter** (siehe Profile).
+- **Höhe verteilen**: Zwischen je zwei sichtbaren Panels EINER Spalte
+  sitzt ein Trennsteg. Ziehen gibt dem einen Panel mehr Platz und dem
+  anderen weniger; **Doppeltipp** stellt die gleichmäßige Verteilung
+  wieder her. Kein Panel lässt sich auf null ziehen. Ist ein Panel
+  dazwischen ausgeblendet, greift der Steg automatisch das nächste
+  sichtbare.
+
+#### Spalten (1 bis 3)
+
+Wie viele Spalten die Seite nebeneinander zeigt, steht im Profil — **eine,
+zwei oder drei**. Jedes Panel trägt seine Spaltennummer; automatisch
+umgebrochen wird nichts.
+
+- **Voreinstellung: zwei Spalten**, Felder links, alles Übrige rechts —
+  genau das Bild, das die Seite vorher als festes Zweiergespann hatte.
+- **„Felder" ist ein Panel wie jedes andere** und darf in jeder Spalte
+  stehen. Die frühere feste Ankerposition oben/links gibt es nicht mehr.
+- **Spaltenbreite ziehen**: Zwischen zwei Spalten sitzt derselbe Steg wie
+  zwischen zwei Panels, nur senkrecht. Ziehen verschiebt die Grenze,
+  **Doppeltipp** verteilt wieder gleichmäßig. Eine Spalte lässt sich nicht
+  beliebig schmal ziehen.
+- **Panel in eine andere Spalte ziehen**: Am Verschiebe-Griff über die
+  Spaltengrenze ziehen — das ändert Reihenfolge und Spalte in einem Zug.
+  Eine noch leere Spalte lässt sich so nicht befüllen (sie ist gar nicht
+  da); dafür gibt es die Spaltenauswahl je Panel im Profil-Editor.
+- **Eine Spalte ohne sichtbares Panel** hinterlässt keinen leeren Streifen
+  — die übrigen teilen sich den Platz.
+- **Auf schmalen Geräten stehen die Spalten immer untereinander**
+  (Tablet-Hochformat, Telefon), egal was das Profil sagt: Ein
+  Wandmonitor-Profil darf ein Tablet nicht unbenutzbar machen.
+
+Die frühere Einstellung „Spielliste rechts/darunter" geht in den Spalten
+auf: „rechts" ist das Zwei-Spalten-Preset, „darunter" das mit einer
+Spalte. Ein Profil aus einer älteren Version wird beim ersten Öffnen
+entsprechend übersetzt und sieht dadurch unverändert aus.
 
 ### Profile (Knopf im Kopf)
 
@@ -275,8 +299,6 @@ Die Anzeige-Häkchen im Profil-Editor:
   Namen, dieselben Bilder wie auf dem Court-Monitor. Zu einer Nation ohne
   Flaggendatei erscheint das Kürzel. Hilfreich bei internationalen
   Turnieren.
-- **Spielliste rechts / darunter** (Standard: rechts) — auf einem
-  schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
 - **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
   einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
   „Beendet" zeigen sie unverändert weiter.
@@ -379,10 +401,11 @@ im Hallennetz sofort.
   abgelehnt — die Ablehnung erscheint im Dialog, nicht als Toast — was BTP
   beim Überschreiben mit dem Turnierbaum macht, ist noch nicht abschließend
   geklärt ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
-- Über den **Cloud-Weg** ist die Warteliste auf 40 Spiele je Halle gekürzt
-  (im Hallennetz sind es 120). Der Zustand geht bei jedem Ballwechsel neu
-  über die Leitung; die volle Liste wäre ein Dauerstrom über Mobilfunk. Was
-  fehlt, sagt die Seite.
+- Über den **Cloud-Weg** ist die Warteliste turnierweit auf 40 Spiele
+  gekürzt (im Hallennetz sind es 120; seit ADR 0026 gilt beide Grenzen
+  hallenübergreifend, nicht mehr je Halle). Der Zustand geht bei jedem
+  Ballwechsel neu über die Leitung; die volle Liste wäre ein Dauerstrom
+  über Mobilfunk. Was fehlt, sagt die Seite.
 
 ## Wenn etwas nicht geht
 

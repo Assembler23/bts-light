@@ -484,6 +484,11 @@ export type AnnounceJob = {
       matchId: number;
       /** 2 oder 3 — gezählt am Turnier-PC, nicht hier. */
       stage: number;
+      /** Welche Partei gemeint ist — Vorbild `prep_call`. Bei `team1`/
+       *  `team2` nennt die Ansage nur diese eine Partei. Der Turnier-PC
+       *  setzt das Feld immer (Rust-Default `both`); optional bleibt es
+       *  hier nur für Aufträge aus einer älteren Fassung. */
+      side?: "both" | "team1" | "team2";
     }
   | {
       /** Nur die Besetzung ansagen (Schiedsrichter/Aufschlagrichter). */
@@ -822,10 +827,11 @@ export interface PreparationCandidate {
   /** Von der automatischen Feldvergabe ausgenommen (Spec
    *  `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt. */
   excluded: boolean;
-  /** In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage der
-   *  Hallen-Abschnitte (Spec `spielliste-manuelle-reihenfolge`). */
+  /** In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage des
+   *  Hallen-Kürzels an der Spielzeile (ADR 0026). */
   hall: string;
-  /** Steht dieses Spiel gerade im manuellen Präfix seiner Halle? */
+  /** Steht dieses Spiel gerade im manuellen Präfix der (einen, globalen)
+   *  Reihenfolge? */
   manual: boolean;
 }
 

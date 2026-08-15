@@ -1098,17 +1098,39 @@ pub enum TlOfficialRole {
 
 /// Ein einzelnes Panel innerhalb eines [`TlPanelProfileWire`]: Sichtbarkeit +
 /// relative Höhe (Spec tl-web-panelsystem). `key` benennt den Abschnitt
-/// (`"courts"`, `"walkovers"`, `"scorekeepers"`, `"officials"`,
-/// `"queue_called"`, `"queue_ready"`, `"queue_waiting"`, `"queue_no_hall"`,
+/// (`"courts"`, `"walkovers"`, `"scorekeepers"`, `"officials"`, `"queue"`,
 /// `"finished"`) — als String statt Enum, weil künftige Panels ohne
 /// Protokolländerung dazukommen können sollen; die Panel-**Liste** ist
 /// Konfiguration, kein geschlossener Aktions-Satz wie [`TlAction`] selbst.
+/// (Bis 15.08.2026 gab es statt `"queue"` vier getrennte Schlüssel
+/// `queue_called`/`queue_ready`/`queue_waiting`/`queue_no_hall` — seit ADR
+/// 0026 ein einziges Panel, Status ist ein Zeilen-Abzeichen.)
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TlPanelSettingWire {
     pub key: String,
     pub visible: bool,
     #[serde(rename = "heightFr")]
     pub height_fr: f64,
+    /// Zugeklappt? Zweite, von `visible` unabhängige Dimension:
+    /// ausgeblendet = gar nicht da, zugeklappt = Kopfzeile sichtbar,
+    /// Inhalt eingeklappt.
+    ///
+    /// `#[serde(default)]`, weil ein Profil aus einem älteren Browser das
+    /// Feld nicht mitschickt — `false` (aufgeklappt) ist dann das
+    /// bisherige Verhalten. Der Host reicht den Wert nur durch; die
+    /// Anzeige-Logik liegt in `tl.html`.
+    #[serde(default)]
+    pub collapsed: bool,
+    /// Spalte des Mehrspalten-Layouts, **1-basiert** (passend zu
+    /// [`TlPanelProfileWire::columns`]). `0`/fehlend = Spalte 1 — außer in
+    /// einem Profil ganz ohne `columns`, wo `tl.html` die Aufteilung aus
+    /// `display.listPosition` ableitet.
+    ///
+    /// `#[serde(default)]` aus demselben Grund wie `collapsed`: Ein Profil
+    /// aus einem älteren Browser schickt das Feld nicht mit, und „Spalte 1"
+    /// ist die harmlose Lesart. Der Host reicht nur durch.
+    #[serde(default)]
+    pub column: u8,
 }
 
 /// Seite, auf der die Warteliste/Ergebnis-Spalte im Panel-System erscheint
@@ -1164,6 +1186,15 @@ pub struct TlPanelProfileWire {
     /// Reihenfolge = Panel-Reihenfolge auf der Seite.
     pub panels: Vec<TlPanelSettingWire>,
     pub display: TlDisplaySettingsWire,
+    /// Spaltenzahl des Seitenlayouts (1…3). `0`/fehlend = aus
+    /// `display.listPosition` ableiten (Bestandsprofile sehen dadurch
+    /// unverändert aus) — die Ableitung sitzt in `tl.html`, nicht hier.
+    #[serde(default)]
+    pub columns: u8,
+    /// Relative Spaltenbreiten wie `heightFr` bei den Panel-Höhen; leer =
+    /// gleichmäßig. Der Host reicht sie nur durch.
+    #[serde(rename = "columnWidths", default)]
+    pub column_widths: Vec<f64>,
     /// Vom Client mitgeschickt, aber beim Speichern vom Host **verworfen**
     /// — der Host stempelt immer seine eigene Zeit (Last-Write-Wins-Marker;
     /// verhindert, dass eine falsch gehende Client-Uhr eine neuere Änderung
@@ -1275,13 +1306,12 @@ pub enum TlAction {
         excluded: bool,
     },
     /// Ein noch nicht gerufenes Spiel in der manuellen Präfix-Reihenfolge
-    /// seiner Halle vor ein anderes ziehen (Spec
-    /// `spielliste-manuelle-reihenfolge`, ADR 0023); `before_match_id =
-    /// None` heißt „ans Ende des aktuell sichtbaren Präfix-Blocks", nicht
-    /// ans Ende der Gesamtliste. Bewusst ohne Hallen-Parameter — die Halle
-    /// wird serverseitig aus `hall_for_match` desselben Matches abgeleitet
-    /// (R2: das Frontend erfindet keine Halle, es zieht nur zwei
-    /// Match-IDs relativ zueinander).
+    /// vor ein anderes ziehen (Spec `spielliste-manuelle-reihenfolge`,
+    /// ADR 0026); `before_match_id = None` heißt „ans Ende des aktuell
+    /// sichtbaren Präfix-Blocks", nicht ans Ende der Gesamtliste. Die
+    /// Reihenfolge gilt turnierweit; ein Hallen-Parameter war hier nie
+    /// nötig und ist es seit ADR 0026 auch begrifflich nicht mehr — das
+    /// Frontend zieht nur zwei Match-IDs relativ zueinander.
     QueueReorder {
         #[serde(rename = "matchId")]
         match_id: i64,
@@ -1292,18 +1322,33 @@ pub enum TlAction {
         )]
         before_match_id: Option<i64>,
     },
-    /// Die komplette manuelle Spielreihenfolge **aller** Hallen auf einmal
-    /// verwerfen — bewusst ohne Hallen-Parameter, kein Reset je einzelne
-    /// Halle (Nicht-Ziel der Spec).
+    /// Die komplette manuelle Spielreihenfolge auf einmal verwerfen —
+    /// bewusst ohne Teil-Reset, weder je Halle noch je Spiel (Nicht-Ziel
+    /// der Spec).
     QueueOrderReset,
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
+    ///
+    /// `side` grenzt den Aufruf auf **eine Partei** ein (Vorbild
+    /// [`TlAction::AnnouncePrepCall`]) — für den häufigen Fall, dass nur
+    /// eine Seite fehlt. `None`/fehlend = beide Parteien.
     AnnounceCourtCall {
         #[serde(rename = "courtId")]
         court_id: i64,
         #[serde(rename = "matchId")]
         match_id: i64,
+        /// **Ausnahme von der „kein `#[serde(default)]`"-Regel dieses
+        /// Enums** — dieselbe Abwägung wie bei `winner` in
+        /// [`TlAction::EnterResult`] und `location_id` in
+        /// [`TlAction::CallPreparation`]: `None` ist hier die
+        /// **neutralere**, nicht die weitreichendere Variante. Ein
+        /// fehlendes Feld löst genau das bisherige Verhalten aus (beide
+        /// Parteien rufen), niemals einen gezielteren oder ungeprüften
+        /// Eingriff. Genau deshalb darf ein älterer Browser, der `side`
+        /// noch nicht kennt, weiter senden.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        side: Option<PrepCallSide>,
     },
     /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels; `side` grenzt
     /// auf eine Partei ein.
@@ -3117,6 +3162,12 @@ mod tests {
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,
+                side: None,
+            },
+            TlAction::AnnounceCourtCall {
+                court_id: 5,
+                match_id: 4711,
+                side: Some(PrepCallSide::Team2),
             },
             TlAction::AnnouncePrepCall {
                 match_id: 4711,
@@ -3191,12 +3242,16 @@ mod tests {
                         key: "courts".to_string(),
                         visible: true,
                         height_fr: 2.0,
+                        collapsed: false,
+                        column: 1,
                     }],
                     display: TlDisplaySettingsWire {
                         show_numbers: true,
                         list_position: TlListPositionWire::Bottom,
                         ..Default::default()
                     },
+                    columns: 2,
+                    column_widths: vec![2.0, 1.0],
                     updated_at_ms: 1_700_000_000_000,
                 },
             },
@@ -3370,11 +3425,22 @@ mod tests {
                     key: "courts".to_string(),
                     visible: true,
                     height_fr: 3.0,
+                    collapsed: false,
+                    column: 1,
                 },
                 TlPanelSettingWire {
                     key: "officials".to_string(),
+                    visible: true,
+                    height_fr: 1.0,
+                    collapsed: true,
+                    column: 2,
+                },
+                TlPanelSettingWire {
+                    key: "finished".to_string(),
                     visible: false,
                     height_fr: 1.0,
+                    collapsed: false,
+                    column: 3,
                 },
             ],
             display: TlDisplaySettingsWire {
@@ -3387,8 +3453,72 @@ mod tests {
                 show_group: false,
                 list_position: TlListPositionWire::Bottom,
             },
+            columns: 3,
+            column_widths: vec![2.0, 1.0, 1.5],
             updated_at_ms: 1_700_000_000_000,
         });
+    }
+
+    #[test]
+    fn tl_panel_profile_column_layout_wire_names_and_defaults() {
+        // Mehrspalten-Layout (Plan tl-liste-vereinfachen F): Die Feldnamen
+        // auf der Leitung sind camelCase (`columns`, `columnWidths`,
+        // `column`) …
+        let json = serde_json::to_string(&TlPanelProfileWire {
+            id: "profil-1".to_string(),
+            name: "Wandmonitor".to_string(),
+            panels: vec![TlPanelSettingWire {
+                key: "queue".to_string(),
+                visible: true,
+                height_fr: 1.0,
+                collapsed: false,
+                column: 3,
+            }],
+            display: TlDisplaySettingsWire::default(),
+            columns: 3,
+            column_widths: vec![2.0, 1.0, 1.0],
+            updated_at_ms: 7,
+        })
+        .unwrap();
+        assert!(json.contains(r#""columns":3"#), "{json}");
+        assert!(json.contains(r#""columnWidths":[2.0,1.0,1.0]"#), "{json}");
+        assert!(json.contains(r#""column":3"#), "{json}");
+
+        // … und ein älterer Browser, der keines der drei Felder kennt,
+        // bleibt lesbar: `0`/leer heißt „aus `listPosition` ableiten" bzw.
+        // „Spalte 1" — beides entscheidet `tl.html`, nicht der Host.
+        let alt: TlPanelProfileWire = serde_json::from_str(
+            r#"{"id":"p","name":"Alt","panels":[{"key":"queue","visible":true,"heightFr":1.0}],
+                "display":{"showNumbers":true,"showNations":false,"showClubNames":false,
+                           "showClubLogos":false,"showDiscipline":true,"showRound":true,
+                           "showGroup":true,"listPosition":"right"},
+                "updatedAtMs":1}"#,
+        )
+        .unwrap();
+        assert_eq!(alt.columns, 0);
+        assert!(alt.column_widths.is_empty());
+        assert_eq!(alt.panels[0].column, 0);
+    }
+
+    #[test]
+    fn tl_panel_setting_collapsed_wire_name_and_default() {
+        // Feldname auf der Leitung ist camelCase-neutral („collapsed"),
+        // und ein älterer Browser, der das Feld nicht kennt, bleibt
+        // lesbar: fehlendes `collapsed` ⇒ aufgeklappt (bisheriges
+        // Verhalten), nicht zugeklappt.
+        let json = serde_json::to_string(&TlPanelSettingWire {
+            key: "queue".to_string(),
+            visible: true,
+            height_fr: 2.0,
+            collapsed: true,
+            column: 1,
+        })
+        .unwrap();
+        assert!(json.contains(r#""collapsed":true"#), "{json}");
+
+        let alt: TlPanelSettingWire =
+            serde_json::from_str(r#"{"key":"queue","visible":true,"heightFr":2.0}"#).unwrap();
+        assert!(!alt.collapsed, "fehlendes Feld heißt aufgeklappt");
     }
 
     #[test]
@@ -3413,6 +3543,37 @@ mod tests {
 
         for side in PrepCallSide::ALL {
             roundtrip(&side);
+        }
+    }
+
+    #[test]
+    fn court_call_side_is_optional_and_defaults_to_both() {
+        // Anders als beim Vorbereitungs-Nachruf ist `side` hier optional:
+        // Der Aufruf am Feld gilt seit jeher beiden Parteien, und genau das
+        // ist die NEUTRALERE Variante — ein älterer Browser, der das Feld
+        // nicht kennt, löst damit exakt das bisherige Verhalten aus.
+        let alt: TlAction =
+            serde_json::from_str(r#"{"action":"announce_court_call","courtId":3,"matchId":7}"#)
+                .expect("ein alter Client ohne `side` bleibt lesbar");
+        assert_eq!(
+            alt,
+            TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: None,
+            }
+        );
+
+        // Ohne Partei taucht das Feld auch nicht auf der Leitung auf.
+        let json = serde_json::to_string(&alt).unwrap();
+        assert!(!json.contains("side"), "{json}");
+
+        for side in PrepCallSide::ALL {
+            roundtrip(&TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: Some(side),
+            });
         }
     }
 

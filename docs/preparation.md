@@ -58,14 +58,23 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 
 `auto_assign` (`src-tauri/src/sync.rs`) belegt freie Felder automatisch:
 
-- **Reihenfolge:** gerufene Spiele zuerst, danach der manuelle Präfix je
-  Halle, sonst der **BTP-Zeitplan** (`PlannedTime`), dann Auslosung
-  (`DrawID`)/Spielnummer/ID — `assign::resolve_and_sort_key`, **eine**
-  Definition an allen fünf Sortier-Stellen (Details, Datenmodell und
-  Messbefund zu `DisplayOrder`: [`docs/btp_protocol.md`](btp_protocol.md),
-  Spec [`docs/features/spielliste-manuelle-reihenfolge.md`](features/spielliste-manuelle-reihenfolge.md)).
+- **Reihenfolge:** gerufene Spiele zuerst, danach der manuelle Präfix
+  (seit 15.08.2026 **hallenübergreifend**, ADR 0026), sonst der
+  **BTP-Zeitplan** (`PlannedTime`), dann Auslosung (`DrawID`)/
+  Spielnummer/ID — `assign::resolve_and_sort_key`, **eine** Definition an
+  allen fünf Sortier-Stellen (Details, Datenmodell und Messbefund zu
+  `DisplayOrder`: [`docs/btp_protocol.md`](btp_protocol.md), Spec
+  [`docs/features/spielliste-manuelle-reihenfolge.md`](features/spielliste-manuelle-reihenfolge.md)).
   Die Kandidatenliste (`preparation_candidates`, `info_preparation_state`)
   sortiert identisch.
+
+  **Liveticker-Hinweis:** `badhub/payload.rs::upcoming` zeigt die nächsten
+  15 Spiele (`display=next&halle=…`). Weil die Reihenfolge jetzt
+  hallenübergreifend gilt, kann ein langer manueller Präfix aus **einer**
+  Halle alle 15 Plätze belegen — der Meeting-Point-TV der anderen Halle
+  zeigt dann vorübergehend keine Spiele. Bewusst in Kauf genommen (ADR
+  0026): Die Turnierleitung bestimmt die Reihenfolge jetzt absichtlich
+  hallenübergreifend.
 - **Spieler-Verfügbarkeit:** Ein spielbereites Match wird übersprungen, wenn ein
   Spieler gerade OnCourt ist, in diesem Zyklus schon ein Feld bekam, oder noch in
   seiner **Pause** ist. Identität via `player_key` (Lizenznr., sonst Name).

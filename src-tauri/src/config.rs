@@ -768,6 +768,23 @@ pub struct TlPanelSetting {
     /// Relative Höhen-Gewichtung; clientseitig gegen ein Mindestmaß
     /// geklammert (`tl.html`), hier unbeschränkt gespeichert.
     pub height_fr: f64,
+    /// Zugeklappt? **Zweite, unabhängige Dimension neben `visible`**:
+    /// ausgeblendet (`visible = false`) heißt „gar nicht da", zugeklappt
+    /// heißt „Kopfzeile sichtbar, Inhalt eingeklappt". Beide Zustände
+    /// liegen im Profil, überstehen also den Reload.
+    ///
+    /// Fehlt das Feld (Bestandsprofile), greift `false` — aufgeklappt,
+    /// also das bisherige Verhalten.
+    pub collapsed: bool,
+    /// In welcher Spalte des Mehrspalten-Layouts das Panel steht —
+    /// **1-basiert**, passend zu [`TlPanelProfile::columns`].
+    ///
+    /// `0`/fehlend heißt „Spalte 1". Die eine Ausnahme ist ein Profil, dem
+    /// auch `columns` fehlt: Dort leitet `tl.html` die ganze Aufteilung aus
+    /// `display.list_position` ab („rechts" = Felder links, Rest rechts).
+    /// Diese Ableitung sitzt bewusst **nur dort** — der Host reicht die
+    /// Zahlen durch und kennt die Panel-Fachlichkeit nicht.
+    pub column: u8,
 }
 
 /// Turnierweite Anzeige-Optionen eines Panel-Profils — dieselben Schalter,
@@ -803,6 +820,19 @@ pub struct TlPanelProfile {
     pub name: String,
     pub panels: Vec<TlPanelSetting>,
     pub display: TlDisplaySettings,
+    /// Spaltenzahl des Seitenlayouts (1…3, feste Presets — kein freies
+    /// Dashboard). `0`/fehlend = aus `display.list_position` ableiten:
+    /// „rechts" ⇒ zwei Spalten (Felder links, alles Übrige rechts),
+    /// „darunter" ⇒ eine Spalte. Damit sehen Bestandsprofile unverändert
+    /// aus, ohne dass `list_position` entfernt werden müsste.
+    ///
+    /// Die Ableitung selbst steht **ausschließlich** in `tl.html`
+    /// (`normalizedLayout()`) — hier wird nur gespeichert, was ankommt.
+    pub columns: u8,
+    /// Relative Spaltenbreiten, wie [`TlPanelSetting::height_fr`] bei den
+    /// Panel-Höhen: leer = gleichmäßig. Geklammert wird clientseitig
+    /// (`tl.html`), hier unbeschränkt gespeichert.
+    pub column_widths: Vec<f64>,
     /// Last-Write-Wins-Marker — **immer** vom Host beim Speichern
     /// gestempelt (`tablet::tl::profile_save`), nie vom Client übernommen.
     pub updated_at_ms: u64,
@@ -1068,11 +1098,22 @@ mod tests {
                     key: "courts".to_string(),
                     visible: true,
                     height_fr: 3.0,
+                    collapsed: false,
+                    column: 1,
                 },
                 TlPanelSetting {
                     key: "officials".to_string(),
+                    visible: true,
+                    height_fr: 1.0,
+                    collapsed: true,
+                    column: 2,
+                },
+                TlPanelSetting {
+                    key: "finished".to_string(),
                     visible: false,
                     height_fr: 1.0,
+                    collapsed: false,
+                    column: 3,
                 },
             ],
             display: TlDisplaySettings {
@@ -1085,11 +1126,47 @@ mod tests {
                 show_group: false,
                 list_position: TlListPosition::Bottom,
             },
+            columns: 3,
+            column_widths: vec![2.0, 1.0, 1.5],
             updated_at_ms: 1_700_000_000_000,
         };
         let json = serde_json::to_string(&profile).expect("serialisiert");
         let back: TlPanelProfile = serde_json::from_str(&json).expect("lädt");
         assert_eq!(profile, back);
+    }
+
+    /// Ein Profil aus einer `config.json` von vor dem Mehrspalten-Layout
+    /// kennt weder `columns`/`column_widths` noch `column` am Panel. Es lädt
+    /// trotzdem — und zwar mit den Nullwerten, die `tl.html` als „aus
+    /// `list_position` ableiten" bzw. „Spalte 1" liest. Ohne das wäre die
+    /// ganze `config.json` unlesbar.
+    #[test]
+    fn tl_panel_profile_columns_default_to_zero_on_old_config() {
+        let profile: TlPanelProfile = serde_json::from_str(
+            r#"{"id":"profil-1","name":"Alt",
+                "panels":[{"key":"queue","visible":true,"height_fr":2.0,"collapsed":false}],
+                "display":{"list_position":"right"},
+                "updated_at_ms":1}"#,
+        )
+        .expect("altes Profil lädt");
+        assert_eq!(profile.columns, 0, "0 = aus list_position ableiten");
+        assert!(profile.column_widths.is_empty(), "leer = gleichmäßig");
+        assert_eq!(profile.panels[0].column, 0, "0 = Spalte 1");
+    }
+
+    /// Ein Profil aus einer `config.json` von vor dem Auf-/Zuklappen kennt
+    /// `collapsed` nicht — es lädt trotzdem, und zwar aufgeklappt (das
+    /// bisherige Verhalten), nicht zugeklappt.
+    #[test]
+    fn tl_panel_setting_collapsed_defaults_to_open_on_old_config() {
+        let profile: TlPanelProfile = serde_json::from_str(
+            r#"{"id":"profil-1","name":"Alt",
+                "panels":[{"key":"queue","visible":true,"height_fr":2.0}],
+                "updated_at_ms":1}"#,
+        )
+        .expect("altes Profil lädt");
+        assert_eq!(profile.panels.len(), 1);
+        assert!(!profile.panels[0].collapsed);
     }
 
     /// Ein neu gekoppeltes Gerät (bzw. eines aus einer `config.json` ohne
@@ -1336,12 +1413,16 @@ mod tests {
                         key: "courts".to_string(),
                         visible: true,
                         height_fr: 2.0,
+                        collapsed: true,
+                        column: 1,
                     }],
                     display: TlDisplaySettings {
                         show_numbers: true,
                         list_position: TlListPosition::Bottom,
                         ..Default::default()
                     },
+                    columns: 2,
+                    column_widths: vec![1.5, 1.0],
                     updated_at_ms: 1_700_000_000_500,
                 }],
                 default_profile_id: "profil-1".to_string(),
