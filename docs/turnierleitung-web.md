@@ -321,13 +321,16 @@ kann sie überschreiben. Standard turnierweit: **aus**.
   ohne hinterlegtes Logo bleibt es beim Namen.
 
 Im Hallennetz (LAN) holt der Turnier-PC die Logos (funktioniert ohne Internet
-am Anzeigegerät und matcht Vereinsnamen unscharf). Im Cloud-Modus lädt die
-Seite die Logos direkt über den öffentlichen badhub-Logo-Resolver
-(`/api/v1/club-logo`); dort zählt der **exakte** Vereinsname, ein Verein mit
-Zusatz wie „(Berlin)" wird also nur getroffen, wenn er in badhub genauso
-heißt. Fehlt ein Logo, bleibt es beim Namen. Der **Verein** ist wie die
-Nationalität ein bewusst zuschaltbares, standardmäßig ausgeschaltetes
-Anzeige-Feld (Datenschutz).
+am Anzeigegerät). Im Cloud-Modus lädt die Seite die Logos direkt über den
+öffentlichen badhub-Logo-Resolver (`/api/v1/club-logo`). **Beide Wege fragen
+denselben Endpoint ab** — die Zuordnung des BTP-Vereinsnamens (inklusive
+gängiger Abkürzungen wie „BC" für „Badminton Club" und Klammerzusätzen wie
+„(Berlin)") macht badhub selbst, LAN und Cloud verhalten sich also gleich
+(Befund 15.08.2026: eine frühere, bts-light-eigene Zuordnung im LAN-Modus war
+schwächer als badhubs eigener Abgleich und ließ manche Vereine ohne Logo
+stehen, obwohl badhub eines hatte). Fehlt ein Logo bei badhub tatsächlich,
+bleibt es beim Namen. Der **Verein** ist wie die Nationalität ein bewusst
+zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
 
 ### Punktverlauf ansehen
 

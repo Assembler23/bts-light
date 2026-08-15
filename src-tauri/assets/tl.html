@@ -3369,7 +3369,7 @@ function queueRow(m, topMatchId) {
     status.push(`<span class="badge badge-warn" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
   }
   if (m.manual) {
-    status.push(`<span class="badge badge-info" title="Manuell in die Spielreihenfolge einsortiert">☰ Manuell einsortiert</span>`);
+    status.push(`<span class="badge badge-info" title="Manuell in die Spielreihenfolge einsortiert">↕️</span>`);
   }
   if (status.length) parts.push(`<span class="row-status">${status.join("")}</span>`);
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
@@ -4019,6 +4019,27 @@ function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff", gesch
   });
 }
 
+/**
+ * Nächster scrollbarer Vorfahre (den Container selbst eingeschlossen) —
+ * generisch statt an einen Panel-Klassennamen gebunden, weil
+ * `enableReorderDrag` an ganz verschiedenen Containern hängt (Spielliste,
+ * Schiedsrichter-Liste, Spalten-Stapel, Profil-Dialog). Der Zieh-Container
+ * selbst (z. B. `#queue-list`) trägt oft KEIN eigenes `overflow` — der
+ * tatsächliche Rahmen, der die Geste sichtbar begrenzt und scrollen soll,
+ * ist `.panel-body`, ein VORFAHRE davon. Ohne diese Suche würde sowohl die
+ * „Maus noch im Panel"-Grenze als auch das Auto-Scrollen am falschen
+ * (ungeklippten) Element ansetzen.
+ */
+function findScrollAncestor(el) {
+  let node = el;
+  while (node && node !== document.documentElement) {
+    if (getComputedStyle(node).overflowY === "auto"
+      || getComputedStyle(node).overflowY === "scroll") return node;
+    node = node.parentElement;
+  }
+  return el;
+}
+
 function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   reorderDragPending = true;
   const pointerId = down.pointerId;
@@ -4028,6 +4049,10 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   const listen = () => (geschwister ? geschwister() : [list]);
   const items = (l) => Array.from(l.children).filter((el) => el.dataset.id);
   const originalParent = li.parentElement;
+  // Einmal berechnet, nicht bei jedem `move()` — `getComputedStyle` bei
+  // 60 Ereignissen pro Sekunde wäre unnötige Arbeit für einen Wert, der sich
+  // während des Zugs nicht ändert.
+  const scrollBox = findScrollAncestor(originalParent);
   const originalNext = li.nextElementSibling;
   const before = items(originalParent);
   li.classList.add("dragging-item");
@@ -4068,6 +4093,29 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
 
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
+    // Umsortierung nur, wenn die Maus im sichtbaren Bereich des scrollbaren
+    // Panels bleibt (`scrollBox`, nicht der ungeklippte Zieh-Container) —
+    // sonst könnte ein Zug zu den Feldkacheln unbeabsichtigt die Reihenfolge
+    // ändern (ADR 0027: Umsortier-Griff nur im eigenen Panel aktiv).
+    const r = scrollBox.getBoundingClientRect();
+    const mouseInPanel = ev.clientX >= r.left && ev.clientX <= r.right
+      && ev.clientY >= r.top && ev.clientY <= r.bottom;
+    if (!mouseInPanel) return;
+
+    // Auto-Scroll während des Drag-Vorgangs: Wenn die Maus am oberen oder
+    // unteren Rand des sichtbaren Panels ist, wird `scrollBox` (das
+    // tatsächlich scrollende Element, siehe `findScrollAncestor`)
+    // automatisch gescrollt, damit Zeilen außerhalb des sichtbaren Bereichs
+    // erreicht werden können.
+    const SCROLL_MARGIN = 40; // px vom oberen/unteren Rand
+    const SCROLL_SPEED = 8; // px pro move-Event
+    if (ev.clientY < r.top + SCROLL_MARGIN) {
+      scrollBox.scrollTop = Math.max(0, scrollBox.scrollTop - SCROLL_SPEED);
+    } else if (ev.clientY > r.bottom - SCROLL_MARGIN) {
+      const maxScroll = scrollBox.scrollHeight - scrollBox.clientHeight;
+      scrollBox.scrollTop = Math.min(maxScroll, scrollBox.scrollTop + SCROLL_SPEED);
+    }
+
     const ziel = zielListe(ev);
     const siblings = items(ziel).filter((el) => el !== li);
     let target = null;
@@ -4106,6 +4154,13 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
     const i = after.indexOf(li);
     const beforeId = i + 1 < after.length ? after[i + 1].dataset.id : null;
     onReorder(li.dataset.id, beforeId, ziel);
+    // Auswahl löschen: Nach einem Umsortier-Zug soll kein Spiel mehr zum
+    // Umhängen ausgewählt sein (Muster wie in `assignTo()` nach erfolgreicher
+    // Zuweisung). Sonst würde die alte Auswahl störend in der neu aufgebauten
+    // Liste sichtbar bleiben.
+    picked = null;
+    renderActionBar();
+    renderQueue();
   }
   const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
   const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };

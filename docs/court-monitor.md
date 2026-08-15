@@ -507,15 +507,22 @@ Anzeige (`winners.html`):
   über die **volle Breite**. Footer zweizeilig: **Turniername** (klein) über der
   **Disziplin** (groß).
 - **Vereinslogos** neben dem Vereinsnamen (sofern in Badhub vorhanden):
-  - Quelle: `GET {base}/api/v1/club-logos` (key-frei, **verbandsübergreifend**) →
-    `{clubs:[{name, logo_url}]}`. `base` = Origin aus `badhub.url` (kein Slug
-    nötig → auch Teilnehmer aus anderen LVs bekommen ihr Logo). clubfinder war
-    geo-/verbandsgebunden, `/federations/…/clubs` braucht einen Key.
-  - Backend `tablet/club_logos.rs` matcht den BTP-Vereinsnamen (exakt → lose ohne
-    Klammerzusatz; mehrdeutige lose Treffer werden verworfen) und cacht
-    Vereinsliste (6 h / 60 s bei Fehler) + Bildbytes; Endpoint
-    `GET /info/club-logo?name=…` liefert das Bild lokal aus (auch für LAN-TVs ohne
-    Internet). SSRF-sicher: Bild-Origin == badhub-Origin; Slug streng validiert.
+  - Quelle: `GET {base}/api/v1/club-logo?name=<verein>` — derselbe Singular-
+    Resolver, den auch der Cloud-Modus der Turnierleitungs-Web direkt aus dem
+    Browser aufruft (`docs/turnierleitung-web.md`). `base` = Origin aus
+    `badhub.url` (kein Slug nötig → auch Teilnehmer aus anderen LVs bekommen
+    ihr Logo). Badhub löst den Vereinsnamen **selbst** auf, inklusive gängiger
+    Abkürzungen („BC" für „Badminton Club") und Klammerzusätzen
+    („(Berlin)") — `tablet/club_logos.rs` dupliziert diese Zuordnung
+    **nicht** mehr lokal (Befund 15.08.2026: die frühere Exakt-/Klammer-
+    Normalisierung gegen die Plural-Liste `/api/v1/club-logos` traf
+    Abkürzungen wie „BC" ≠ „Badminton Club" nicht — der Singular-Resolver
+    löst sie trotzdem auf, LAN und Cloud verwenden jetzt denselben Weg).
+  - Backend `tablet/club_logos.rs` fragt pro (normalisiertem) Vereinsnamen
+    einmal ab und cacht Bildbytes (6 h / 60 s bei Fehler); Endpoint
+    `GET /info/club-logo?name=…` liefert das Bild lokal aus (auch für LAN-TVs
+    ohne Internet — nur der Turnier-PC braucht welches). SSRF-sicher:
+    Bild-Origin (nach Redirect) == badhub-Origin.
   - Kein Treffer / kein Logo / offline → `<img onerror>` entfernt sich, es bleibt
     **nur der Name** (kein Platzhalter).
 - Sonderfall „zwei dritte Plätze" (kein Spiel um Platz 3): `?only=3` zeigt beide

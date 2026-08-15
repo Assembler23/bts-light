@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, Megaphone, RotateCcw, Volume2, X } from "lucide-react";
+import { ArrowUpDown, GripVertical, Megaphone, RotateCcw, Volume2, X } from "lucide-react";
 import {
   callPreparation,
   preparationCandidates,
@@ -370,9 +370,11 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                         </span>
                       )}
                       {c.manual && (
-                        <span className="ml-1.5 text-xs font-semibold text-sky-600">
-                          Manuell einsortiert
-                        </span>
+                        <ArrowUpDown
+                          size={12}
+                          className="ml-1.5 inline text-sky-600"
+                          aria-label="Manuell in die Spielreihenfolge einsortiert"
+                        />
                       )}
                     </span>
                     <span className="truncate text-xs text-slate-500">
