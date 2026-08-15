@@ -63,9 +63,24 @@ pub struct ServerCtx {
     /// App-Log-Verzeichnis (wie „Logs öffnen"). Hierhin schreibt der Server die
     /// von den Tablets hochgeladenen Diagnoselogs (Unterordner `tablet-logs`).
     pub log_dir: PathBuf,
+    /// Derselbe In-Memory-Konfigurationsstand wie `AppState.config`
+    /// (`commands.rs`) — ein einziges, geteiltes `Arc<Mutex<_>>` statt zweier
+    /// getrennter Kopien. `ServerCtx::mutate_app_config` (TlAction-
+    /// Ausführungen, Panel-Profile, Spec tl-web-panelsystem, ADR 0025) und
+    /// `commands::mutate_config` (Tauri-Commands wie `save_config`,
+    /// `tl_device_add`) sperren so exakt dasselbe Schloss: Egal welcher der
+    /// beiden Wege zuerst dran ist, der zweite sieht garantiert den Stand
+    /// des ersten als Ausgangspunkt seines eigenen Lesen-Ändern-Schreiben-
+    /// Zyklus — kein Lost-Update mehr zwischen den beiden Schreibpfaden.
+    /// (Vorher schrieb `mutate_app_config` direkt an der Platte vorbei am
+    /// In-Memory-Stand; ein `save_config` danach überschrieb die Datei mit
+    /// dem veralteten In-Memory-Stand und löschte den Platten-Schreibvorgang
+    /// wieder kommentarlos.)
+    shared_config: Arc<std::sync::Mutex<AppConfig>>,
 }
 
 impl ServerCtx {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tablet: Arc<TabletState>,
         config: AppConfig,
@@ -74,6 +89,7 @@ impl ServerCtx {
         config_path: PathBuf,
         assignments_path: PathBuf,
         log_dir: PathBuf,
+        shared_config: Arc<std::sync::Mutex<AppConfig>>,
     ) -> Self {
         Self {
             tablet,
@@ -84,6 +100,7 @@ impl ServerCtx {
             config_path,
             assignments_path,
             log_dir,
+            shared_config,
         }
     }
 
@@ -116,6 +133,44 @@ impl ServerCtx {
     /// hinaus.
     pub fn app_config_result(&self) -> Result<AppConfig, String> {
         AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())
+    }
+
+    /// Lässt `f` den **geteilten** In-Memory-Stand ändern (`shared_config`,
+    /// dasselbe `Arc<Mutex<_>>` wie `AppState.config`) und schreibt das
+    /// Ergebnis nach `config.json` — für TlAction-Ausführungen, die
+    /// `AppConfig`-Zustand pflegen (Panel-Profile, Spec tl-web-panelsystem,
+    /// ADR 0025). `f` darf die Änderung selbst ablehnen (`Err`) — dann
+    /// bleiben weder Datei noch In-Memory-Stand angetastet.
+    ///
+    /// **Kein Lost-Update mehr zwischen den zwei Schreibpfaden:** Der Guard
+    /// auf `shared_config` wird über den ganzen Lesen-Ändern-Schreiben-
+    /// Zyklus gehalten (nicht nur ums Schreiben) — dasselbe Schloss, das
+    /// auch `commands::mutate_config` (Tauri-Commands: `save_config`,
+    /// `tl_device_add`, …) hält. Zwei praktisch gleichzeitige Aufrufe (z. B.
+    /// zwei Geräte, die im selben Moment ein Profil speichern, ODER ein
+    /// Profil-Speichern gleichzeitig mit einer Einstellungsänderung im
+    /// Setup-Assistenten) laufen so strikt nacheinander, und jeder sieht als
+    /// Ausgangspunkt garantiert den Stand des jeweils anderen — „der letzte
+    /// gewinnt" (von der Spec ausdrücklich erlaubt), nie ein stiller
+    /// Datenverlust.
+    pub(crate) fn mutate_app_config<T>(
+        &self,
+        f: impl FnOnce(&mut AppConfig) -> Result<T, relay_proto::TlResponse>,
+    ) -> Result<T, relay_proto::TlResponse> {
+        let mut guard = self
+            .shared_config
+            .lock()
+            .expect("Config-Mutex nicht vergiftet");
+        let mut config = guard.clone();
+        let result = f(&mut config)?;
+        config.save_to(&self.config_path).map_err(|e| {
+            relay_proto::TlResponse::err(
+                relay_proto::TlErrorCode::NotAllowed,
+                format!("Konfiguration nicht schreibbar: {e}"),
+            )
+        })?;
+        *guard = config;
+        Ok(result)
     }
 
     /// Lädt die Geräte→Target-Zuweisungen frisch von der Platte. Ein
@@ -1103,13 +1158,20 @@ async fn tl_page() -> impl IntoResponse {
 }
 
 /// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche.
+/// Antwort-Header mit dem Panel-Profil des aufrufenden Geräts (Spec
+/// tl-web-panelsystem, ADR 0025) — derselbe Name wie `X_TL_ACTIVE_PROFILE`
+/// im Relay (`relay/src/main.rs`), damit `tl.html` LAN und Cloud identisch
+/// lesen kann. Auf `/tl/api/state` gesetzt, auch bei 304 (Header werden
+/// unabhängig vom gecachten Body immer gesendet).
+const X_TL_ACTIVE_PROFILE: &str = "x-tl-active-profile";
+
 async fn tl_state(
     State(ctx): State<Arc<ServerCtx>>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if tl_device(&ctx, &headers).is_none() {
+    let Some(device) = tl_device(&ctx, &headers) else {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
-    }
+    };
     // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz und eines
     // aus dem Internet müssen mit derselben Zahl denselben Stand meinen,
     // sonst träfe die Altersprüfung am Turnier-PC zufällige Entscheidungen.
@@ -1126,10 +1188,20 @@ async fn tl_state(
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v == etag);
-    if unveraendert {
-        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response();
+    let mut response = if unveraendert {
+        (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response()
+    } else {
+        (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
+    };
+    // Frisch bei JEDER Antwort, auch bei 304 — konsistent mit dem
+    // Cloud-Pfad (`relay::tl_state_route`). Leer (kein Profil gewählt) ist
+    // ein gültiger, erlaubter Wert (Standardprofil); nur ein ungültiger
+    // Header-Wert (sollte am gepflegten `profile_id` nie vorkommen) bleibt
+    // ohne Header statt die Antwort scheitern zu lassen.
+    if let Ok(value) = axum::http::HeaderValue::from_str(&device.profile_id) {
+        response.headers_mut().insert(X_TL_ACTIVE_PROFILE, value);
     }
-    (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
+    response
 }
 
 /// Punktverlauf eines Matches für die TL-Oberfläche (AK-5) — on-demand,
@@ -2641,6 +2713,7 @@ mod tests {
             ..Default::default()
         };
         let tmp = std::env::temp_dir();
+        let shared_config = Arc::new(std::sync::Mutex::new(config.clone()));
         ServerCtx::new(
             tablet,
             config,
@@ -2649,6 +2722,7 @@ mod tests {
             tmp.join("bts_test_config.json"),
             tmp.join("bts_test_assign.json"),
             tmp,
+            shared_config,
         )
     }
 
@@ -3449,5 +3523,249 @@ mod tests {
         let mut b = body_with(&[(21, 10), (21, 12)]);
         b.court_id = 999; // kein Match auf diesem Feld
         assert!(!rejected(b).await.ok);
+    }
+
+    // ───────────── Panel-Profile (Spec tl-web-panelsystem, ADR 0025) ────────
+
+    /// `ServerCtx` mit einer `config.json` in einem eigenen Temp-Verzeichnis
+    /// (nicht der geteilte `bts_test_config.json`-Pfad von [`make_ctx`], der
+    /// bei parallel laufenden Tests kollidieren könnte) und den gegebenen
+    /// Turnierleitungs-Geräten. Gibt das `TempDir` mit zurück, damit es nicht
+    /// vor Testende gelöscht wird — sowie den geteilten `Arc<Mutex<AppConfig>>`,
+    /// denselben, den `ServerCtx::mutate_app_config` benutzt (Lost-Update-
+    /// Regressionstest unten braucht Zugriff darauf, um den zweiten,
+    /// unabhängigen Schreibpfad — `commands::mutate_config_at` — auf
+    /// demselben Schloss nachzustellen).
+    fn make_tl_ctx(
+        devices: Vec<crate::config::TlDevice>,
+    ) -> (
+        ServerCtx,
+        Arc<std::sync::Mutex<AppConfig>>,
+        tempfile::TempDir,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut config = AppConfig::default();
+        config.tl_web.enabled = true;
+        config.tl_web.devices = devices;
+        config.save_to(&config_path).unwrap();
+
+        let tablet = Arc::new(TabletState::default());
+        let tmp = std::env::temp_dir();
+        let shared_config = Arc::new(std::sync::Mutex::new(config.clone()));
+        let ctx = ServerCtx::new(
+            tablet,
+            config,
+            reqwest::Client::new(),
+            tmp.clone(),
+            config_path,
+            dir.path().join("bts_test_assign_tl.json"),
+            tmp,
+            shared_config.clone(),
+        );
+        (ctx, shared_config, dir)
+    }
+
+    fn bearer_headers(token: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn tl_state_lan_sets_active_profile_header_matching_device() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-wand".into(),
+        }]);
+        let response = tl_state(State(Arc::new(ctx)), bearer_headers("tok-a"))
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-wand"
+        );
+    }
+
+    #[tokio::test]
+    async fn tl_state_lan_no_header_leak_across_devices() {
+        // Zwei Geräte mit unterschiedlichem Zugang UND unterschiedlichem
+        // Profil, in derselben Testreihe abgefragt — jedes bekommt exakt
+        // sein eigenes Profil im Header, nie das des anderen.
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![
+            crate::config::TlDevice {
+                id: "dev-a".into(),
+                token: "tok-a".into(),
+                label: "Tablet A".into(),
+                created_at_ms: 1,
+                hall: String::new(),
+                profile_id: "profil-a".into(),
+            },
+            crate::config::TlDevice {
+                id: "dev-b".into(),
+                token: "tok-b".into(),
+                label: "Tablet B".into(),
+                created_at_ms: 1,
+                hall: String::new(),
+                profile_id: "profil-b".into(),
+            },
+        ]);
+        let ctx = Arc::new(ctx);
+
+        let response_a = tl_state(State(ctx.clone()), bearer_headers("tok-a"))
+            .await
+            .into_response();
+        assert_eq!(
+            response_a.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-a"
+        );
+
+        let response_b = tl_state(State(ctx.clone()), bearer_headers("tok-b"))
+            .await
+            .into_response();
+        assert_eq!(
+            response_b.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-b",
+            "Gerät B darf niemals das Profil von Gerät A bekommen"
+        );
+    }
+
+    /// Regressionstest für den kritischen Review-Fund am
+    /// `AppState.config`/`ServerCtx.shared_config`-Umbau: **echtes**
+    /// Temp-Verzeichnis, **echtes** Schreiben auf beiden Wegen — kein reiner
+    /// Unit-Test einer isolierten Funktion (das täuschte beim vorherigen
+    /// `commands::tests::keep_host_managed_fields_preserves_the_given_current_profiles`
+    /// -Test (damals noch `save_config_keeps_live_edited_profiles`) Sicherheit
+    /// vor, ohne die reale In-Memory/Platte-Divergenz abzubilden).
+    ///
+    /// Szenario: (a) ein TL speichert ein Panel-Profil über den Profil-Pfad
+    /// (`tl::execute` → `execute_profile_action` → `ServerCtx
+    /// ::mutate_app_config`) — genau der Weg, den `tl.html` beim Speichern
+    /// eines Profils nimmt. (b) Direkt danach ändert der **bestehende**
+    /// Tauri-Command-Schreibpfad (`commands::mutate_config_at`, die reale
+    /// Kernlogik hinter `save_config`/`tl_device_add`/…) irgendeine andere
+    /// Einstellung — auf demselben geteilten `Arc<Mutex<AppConfig>>`, wie
+    /// es beide Wege in der echten App auch tun (`AppState.config` ==
+    /// `ServerCtx.shared_config`). (c) Das Profil aus (a) muss danach
+    /// sowohl auf der Platte als auch im geteilten In-Memory-Stand noch da
+    /// sein — vorher (getrennte Schreibpfade: `mutate_app_config` direkt
+    /// auf der Platte, `mutate_config` nur im veralteten In-Memory-Stand)
+    /// hätte (b) das Profil aus (a) kommentarlos wieder gelöscht.
+    #[tokio::test]
+    async fn profile_save_survives_a_later_settings_save_lost_update_regression() {
+        let (ctx, shared, dir) = make_tl_ctx(vec![]);
+        let config_path = dir.path().join("config.json");
+        let ctx = Arc::new(ctx);
+        let device = crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        };
+
+        // (a) Profil-Pfad: TL legt in tl.html ein Profil an.
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &device,
+            "op-profile-save",
+            1,
+            0,
+            relay_proto::TlAction::ProfileSave {
+                profile: relay_proto::TlPanelProfileWire {
+                    id: String::new(),
+                    name: "Wandmonitor Halle 2".into(),
+                    panels: vec![],
+                    display: relay_proto::TlDisplaySettingsWire::default(),
+                    updated_at_ms: 0, // wird vom Host gestempelt, s. profile_save
+                },
+            },
+        )
+        .await;
+        assert!(response.ok, "Profil-Speichern soll gelingen: {response:?}");
+
+        // (b) Bestehender Tauri-Command-Pfad: irgendeine andere Einstellung
+        // wird gespeichert — über dieselbe Kernlogik wie `save_config`, auf
+        // demselben geteilten Arc<Mutex<AppConfig>>.
+        crate::commands::mutate_config_at(&config_path, &shared, |cfg| {
+            cfg.badhub.url = "https://geaendert.example".to_string();
+            Ok(())
+        })
+        .expect("Einstellungsänderung soll sich speichern lassen");
+
+        // (c) Das Profil aus (a) ist NICHT verschwunden — weder auf der
+        // Platte noch im geteilten In-Memory-Stand.
+        let on_disk = AppConfig::load_from(&config_path).expect("config.json lesbar");
+        assert_eq!(
+            on_disk.tl_web.profiles.len(),
+            1,
+            "Profil darf durch die spätere Einstellungsänderung nicht verloren gehen"
+        );
+        assert_eq!(on_disk.tl_web.profiles[0].name, "Wandmonitor Halle 2");
+        assert_eq!(
+            on_disk.badhub.url, "https://geaendert.example",
+            "die spätere Einstellungsänderung selbst muss ebenfalls ankommen"
+        );
+
+        let in_memory = shared.lock().expect("Config-Mutex nicht vergiftet");
+        assert_eq!(
+            in_memory.tl_web.profiles.len(),
+            1,
+            "auch der geteilte In-Memory-Stand kennt das Profil noch"
+        );
+    }
+
+    /// Finding 2 (Review): Profil-Aktionen sind turnierunabhängige, reine
+    /// Layout-Einstellungen — `execute()` darf sie nicht hinter dem
+    /// „kein Turnier geladen"-Gate verstecken (das griff früher VOR der
+    /// Profil-Verzweigung). Ein TL, der morgens vor dem ersten BTP-Import
+    /// schon einen Wandmonitor einrichten will, muss das können.
+    #[tokio::test]
+    async fn profile_action_succeeds_without_a_loaded_tournament_snapshot() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![]);
+        // Kein `ctx.tablet.set_snapshot(...)` — `snapshot_clone()` liefert
+        // `None`, genau das Szenario „noch kein Turnier geladen".
+        assert!(ctx.tablet.snapshot_clone().is_none());
+        let ctx = Arc::new(ctx);
+        let device = crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        };
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &device,
+            "op-profile-no-snapshot",
+            1,
+            0,
+            relay_proto::TlAction::ProfileSave {
+                profile: relay_proto::TlPanelProfileWire {
+                    id: String::new(),
+                    name: "Vor dem ersten Import".into(),
+                    panels: vec![],
+                    display: relay_proto::TlDisplaySettingsWire::default(),
+                    updated_at_ms: 0,
+                },
+            },
+        )
+        .await;
+
+        assert!(
+            response.ok,
+            "Profil-Aktionen dürfen nicht am Snapshot-Gate scheitern: {response:?}"
+        );
     }
 }

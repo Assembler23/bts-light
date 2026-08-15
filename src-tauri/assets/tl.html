@@ -30,6 +30,16 @@
      ein, zwei Zeilen der Warteliste plus Rand — mehr braucht die Garantie
      nicht, den Rest holt sich die Liste ohnehin über `flex: 1 1 0`. */
   --liste-min: 10rem;
+  /* Mindesthöhe EINES Panels innerhalb der Listen-Spalte (Spec
+     tl-web-panelsystem) — verhindert, dass ein Panel-Rand (`.panel-steg`)
+     ein Panel auf 0/negative Höhe zieht. Kleiner als `--liste-min`
+     (das gilt für die ganze Spalte, das hier für einen einzelnen von
+     möglicherweise acht Panels darin): genug für Kopfzeile plus eine
+     Zeile Inhalt, wie beim Feld-Untergrenze-Pendant `FELDER_MIN` im
+     Skript. Einziger Ort, an dem diese Zahl steht — `wirePanelStegs()`
+     im Skript liest den aufgelösten Pixelwert über `getComputedStyle`
+     zurück (dasselbe Muster wie `--liste-min`/`fitCourts()`). */
+  --panel-min: 4.5rem;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -100,30 +110,18 @@ header {
 }
 .halls button:focus-visible, .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
-/* Anzeige-Vorlieben: ein kleines Klappmenü im Kopf. Was hier steht, ist
-   Geschmackssache je Gerät und darf niemanden stören, der es nicht braucht —
-   deshalb zugeklappt und unauffällig. */
-.anzeige { position: relative; font-size: .85rem; }
-.anzeige summary {
-  list-style: none; cursor: pointer; user-select: none;
-  padding: 7px 12px; min-height: 40px; display: flex; align-items: center;
-  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft);
+/* Profile (Spec tl-web-panelsystem): ersetzt das frühere Anzeige-Klappmenü
+   (neun lose `localStorage`-Häkchen) durch einen Knopf, der die
+   Profil-Verwaltung öffnet (`#profiles-overlay`, Muster `.graph-overlay`
+   wie Punktverlauf/Schiedsrichter-Pflege). Optik wie der bisherige
+   `.anzeige summary`-Knopf, damit die Kopfzeile nicht unruhig wird. */
+.profiles-btn {
+  font: inherit; font-size: .85rem; font-weight: 650; cursor: pointer;
+  padding: 7px 12px; min-height: 40px; display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--ink-soft);
 }
-.anzeige summary::-webkit-details-marker { display: none; }
-.anzeige[open] summary { border-color: var(--accent); color: var(--accent); }
-/* Die Schalter hängen als Kasten unter dem Knopf, statt die Kopfzeile
-   auseinanderzuschieben. */
-.anzeige .menue {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
-  display: flex; flex-direction: column;
-  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  box-shadow: var(--shadow); padding: 4px; min-width: 13rem;
-}
-.anzeige .menue label {
-  display: flex; align-items: center; gap: 9px; padding: 9px 10px;
-  white-space: nowrap; cursor: pointer; border-radius: 7px;
-}
-.anzeige .menue label:hover { background: #f1f5f9; }
+.profiles-btn:hover, .profiles-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
 
 /* Schalter für die automatische Vergabe. Sein Zustand muss auf einen Blick
    erkennbar sein: Läuft sie mit, während jemand von Hand umsortiert, räumt
@@ -175,6 +173,12 @@ main {
   display: flex; align-items: center; justify-content: center;
   height: 16px; cursor: row-resize;
 }
+/* Kaskaden-Falle wie bei `#app[hidden]` oben: Der eigene `display: flex`
+   schlägt sonst IMMER die UA-Regel `[hidden] { display: none; }` — nötig,
+   seit „Felder" per Profil ausblendbar ist (Spec tl-web-panelsystem,
+   `renderCourtsHead()` setzt `steg.hidden`, wenn kein Gegenüber mehr da
+   ist, den der Steg trennen könnte). */
+#steg[hidden] { display: none; }
 /* Sichtbar ist nur eine kleine Pille — die Greiffläche ist der ganze Steg. */
 #steg::after {
   content: ""; border-radius: 999px; background: var(--line);
@@ -282,13 +286,39 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   padding: 2px 7px; border-radius: 999px; background: #f1f5f9; color: var(--ink-soft);
 }
-.badge.alarm { background: #fee2e2; color: #991b1b; }
-.badge.warn { background: #ffedd5; color: #9a3412; }
+/* ── Drei-Stufen-Badges (Spec tl-web-panelsystem) ───────────────────────
+   Ersetzt fünf frühere, unkoordinierte Klassenfamilien (`.badge.alarm`/
+   `.warn`/`.gp`/`.gp-s`, `.excl-badge`, `.manual-badge`, `.warnflag`) PLUS
+   das bisher unbenannte `<span class="badge">gesperrt</span>` durch genau
+   drei Dringlichkeitsstufen. `.badge` bleibt die GEMEINSAME Basisklasse
+   (Form/Größe, inkl. der Kompaktstufen-Anpassungen `#courts.kacheln-*`
+   weiter unten) — jedes Badge trägt zusätzlich GENAU eine der drei
+   Stufenklassen.
+     - `.badge-alarm` — sofort handeln: gesperrt, Verletzung, TL gerufen.
+       (Nicht hier: „überfällig" selbst ist kein Badge, sondern der linke
+       Zustands-Streifen der Kachel — bleibt unverändert Alarm-Rot.)
+     - `.badge-warn` — im Blick behalten: Pause, kein Tablet, n-ter Aufruf
+       erfolgt, Feldvergabe-Ausnahme, Schiedsrichter-Konflikt.
+     - `.badge-info` — reine Information, kein Handlungsdruck: Matchball,
+       Satzball, „Manuell einsortiert", Ergebnis-Kennzeichnung (kampflos/
+       Aufgabe/disqualifiziert) in der Beendet-Liste. */
+.badge-alarm { background: #fee2e2; color: #991b1b; }
+.badge-warn { background: #ffedd5; color: #9a3412; }
+/* Info bewusst NICHT als Vollton-Fläche wie Alarm/Warnung: Das
+   Akzeptanzkriterium verlangt ausdrücklich, dass die rote, pulsierende
+   Matchball-Kennzeichnung nie mit dem alarmroten „überfällig"-Streifen
+   verwechselt wird. Statt einer roten Fläche deshalb ein Rahmen um
+   hellen/transparenten Grund — andere FORM, nicht nur eine andere
+   Textfarbe. Die Wiedererkennungsfarbe bleibt erhalten (rose=Matchball,
+   amber=Satzball, wie bisher und wie an FieldOverviewPage.tsx); Grundfarbe
+   ohne eigene Modifikator-Klasse (Manuell/Ergebnis-Kennzeichnung) bleibt
+   beim Akzent-Blau, das diese Zeilen schon vorher trugen. */
+.badge-info { background: #fff; border: 1.5px solid currentColor; color: var(--accent); }
+.badge-info.badge-info-match { color: #be123c; animation: gpPuls 1.2s ease-in-out infinite; }
+.badge-info.badge-info-set { color: #b45309; }
 /* Matchball pulsiert (das Feld wird gleich frei), Satzball bleibt ruhig —
    wie die entsprechenden Badges in der Felderübersicht der App. */
-.badge.gp   { background: #fecdd3; color: #881337; animation: gpPuls 1.2s ease-in-out infinite; }
-.badge.gp-s { background: #fde68a; color: #78350f; }
-@keyframes gpPuls { 50% { opacity: .55; } }
+@keyframes gpPuls { 50% { opacity: .5; } }
 .pair { font-weight: 600; line-height: 1.25; }
 
 /* ── Die Paarung ───────────────────────────────────────────────────────
@@ -447,22 +477,35 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px 12px; min-height: 56px;
-  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
 }
 .row .no { font-weight: 700; color: var(--ink-faint); min-width: 2.2rem; }
-.row .who { font-weight: 600; flex: 1 1 10rem; min-width: 0; }
+/* Name und Meta („Disziplin · Runde · Gruppe") zusammen EIN Flex-Kind —
+   vorher waren `.who` und `.draw` zwei eigene Top-Level-Elemente der Zeile.
+   Die Spielnummer bleibt bewusst ein eigenes Element davor (feste Breite,
+   damit die Nummern untereinander fluchten).
+   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) hält NICHT über
+   diese Zusammenlegung allein, sondern weil sich Zieh-Griff und Status
+   gegenseitig ausschließen: Der Griff erscheint nur im Abschnitt
+   „Spielbereit" (nur dort ist manuelles Umsortieren erlaubt), der Status
+   („gerufen seit" / „blockiert weil") nur in den drei anderen Abschnitten.
+   Wer hier ein weiteres Element ergänzt, muss diese Rechnung neu machen. */
+.row .who-block { display: flex; flex-direction: column; gap: 1px; flex: 1 1 10rem; min-width: 0; }
+.row .who { font-weight: 600; }
 .row .draw { font-size: .85rem; color: var(--ink-soft); }
 .row.blocked { background: #f8fafc; }
-.row .why { font-size: .82rem; color: var(--warn); flex-basis: 100%; }
+/* Wichtigster Status: „blockiert weil" ODER „gerufen seit" — nie beide
+   gleichzeitig (ergibt sich schon aus den Datenkategorien: eine wartende
+   Zeile ist entweder blockiert oder gerufen, nie beides). */
+.row .why { font-size: .82rem; color: var(--warn); font-weight: 650; }
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
-/* Ausgenommen von der automatischen Feldvergabe (Spec
-   `feldvergabe-ausnahme`) — Warnfarbe wie `.why`, damit es in der Liste
-   auffällt, ohne wie ein Fehler ("blocked") zu wirken. */
-.row .excl-badge { font-size: .82rem; color: var(--warn); font-weight: 650; flex-basis: 100%; }
-/* Manuell einsortiert (Spec `spielliste-manuelle-reihenfolge`) — Akzentfarbe
-   statt Warnfarbe: kein Problem, nur eine bewusste Turnierleitungs-
-   Entscheidung, die sichtbar bleiben soll. */
-.row .manual-badge { font-size: .82rem; color: var(--accent); font-weight: 650; }
+/* Die wichtigsten 1-2 Badges — Auto-Vergabe-Ausnahme (Spec
+   `feldvergabe-ausnahme`) und „Manuell einsortiert" (Spec
+   `spielliste-manuelle-reihenfolge`), jetzt über die geteilte
+   Drei-Stufen-Klasse (`.badge-warn`/`.badge-info`) eingefärbt statt über
+   eigene Klassen. Ein gemeinsamer Wrapper zählt als EIN Element in der
+   6-Elemente-Grenze, auch wenn beide Badges zugleich zutreffen. */
+.row .row-badges { display: flex; flex-wrap: wrap; gap: 4px; }
 .row.dragging-item {
   box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
   border-color: var(--accent);
@@ -471,61 +514,104 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 /* Globaler Reset-Knopf neben der Überschrift „Als Nächstes" — bewusst kein
    eigener Abschnitt, damit er nicht wie eine der Hallen-Gruppen wirkt. Nur
    sichtbar, solange irgendein Spiel manuell einsortiert ist. */
-h2 .reset-order {
-  float: right; font-size: .72rem; font-weight: 600; text-transform: none;
+.panel-head .reset-order {
+  font-size: .72rem; font-weight: 600; text-transform: none;
   letter-spacing: normal; color: var(--ink-soft); background: none;
   border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
-  cursor: pointer;
+  min-height: 28px; cursor: pointer;
 }
-h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
+.panel-head .reset-order:hover { border-color: var(--accent); color: var(--accent); }
 /* Quadratischer Umschalter mit Sinnbild, so groß wie ein Finger, ohne
-   Text — geteiltes Box-Modell für den Vorbereitungs-Aufruf (`.prep`,
-   gedrückt = ist gerufen) und die Auto-Vergabe-Ausnahme (`.auto-excl`,
-   gedrückt = ausgenommen); nur die Zustandsfarbe unterscheidet sie. */
-.row .prep, .row .auto-excl {
+   Text — der Vorbereitungs-Aufruf bleibt PRIMÄR sichtbar (Spec
+   tl-web-panelsystem, Schritt 11: vermutlich die häufigste Einzelaktion an
+   einer Zeile). Die Auto-Vergabe-Ausnahme zieht dagegen ins Kebab-Menü
+   (siehe dort) — seltener gebraucht, und ihr eigenes Symbol war im
+   entschlackten Zeilenbild ohnehin leicht mit dem Vorbereitungs-Knopf zu
+   verwechseln. */
+.row .prep {
   display: grid; place-items: center;
   width: 40px; height: 40px; padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
-.row .auto-excl { font-size: 1.1rem; }
 .row .prep:hover { border-color: var(--accent); color: var(--accent); }
 .row .prep[aria-pressed="true"] {
   border-color: var(--accent); background: #eff6ff; color: var(--accent);
+}
+.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+
+/* ── Kebab-Menü: Sekundäres einer Queue-Zeile ──────────────────────────
+   Spec tl-web-panelsystem, Schritt 11: eine Zeile zeigt ohne geöffnetes
+   Menü höchstens sechs Elemente. Bedienhäufigkeits-Einteilung (im
+   Code-Kommentar bei `queueRow()` ausführlicher begründet):
+   Vorbereitungs-Ruf bleibt PRIMÄR (siehe `.row .prep` oben); Nachrufe,
+   die Auto-Vergabe-Ausnahme und der (nur im Mehr-Hallen-Turnier ohne
+   Regel überhaupt sichtbare) Spielort-Wähler sind seltener gebraucht und
+   wandern hierher. `<details>` statt eigenem JS-Zustand — der offene
+   Zustand einer Zeile wird beim Neuzeichnen über `openKebabMatchId`
+   (Skript) gezielt wiederhergestellt, sonst schlösse sich das Menü alle
+   zwei Sekunden von selbst (Poll-Takt). */
+.row .kebab { position: relative; flex: none; }
+.row .kebab > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: grid; place-items: center;
+  width: 40px; height: 40px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); font-size: 1.3rem; font-weight: 700;
+  line-height: 1;
+}
+.row .kebab > summary::-webkit-details-marker { display: none; }
+.row .kebab[open] > summary { border-color: var(--accent); color: var(--accent); }
+.row .kebab-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
+}
+.row .kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
+.row .kebab-menu .kebab-label {
+  font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--ink-faint);
+}
+.row .kebab-menu .kebab-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Auto-Vergabe-Ausnahme: jetzt beschriftet (im Menü ist Platz), nicht mehr
+   nur ein Icon-Quadrat wie vorher auf der Zeile selbst. */
+.row .auto-excl {
+  font: inherit; font-weight: 650; font-size: .85rem; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft);
 }
 .row .auto-excl:hover { border-color: var(--warn); color: var(--warn); }
 .row .auto-excl[aria-pressed="true"] {
   border-color: var(--warn); background: #fff7ed; color: var(--warn);
 }
-.row[aria-selected="true"] .prep, .row[aria-selected="true"] .auto-excl {
-  border-color: #475569; background: #1e293b; color: #e2e8f0;
-}
 
-/* Nachruf: drei kleine Knöpfe an einer Beschriftung. Kleiner als der
-   Vorbereitungs-Aufruf, weil sie die Ausnahme sind — man braucht sie nur,
-   wenn jemand nicht kommt. Trotzdem groß genug für einen Finger. */
-.row .recall { font-size: .78rem; color: var(--ink-faint); display: flex; align-items: center; gap: 4px; }
+/* Nachruf: drei Knöpfe im Menü, jetzt mit vollem Text statt gekürzt auf
+   8rem — im Kebab ist genug Platz, das war vorher auf der Zeile selbst
+   nicht der Fall. */
+.row .recall { display: flex; flex-direction: column; gap: 6px; }
 .row .recall button {
-  font: inherit; font-weight: 650; padding: 6px 9px; min-height: 40px;
+  font: inherit; font-weight: 650; padding: 8px 12px; min-height: 40px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
-  max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: left;
 }
 .row .recall button:hover { border-color: var(--warn); color: var(--warn); }
 
 /* Spielort ohne Feld. Unauffällig, solange nichts gesetzt ist — es ist eine
    Ausnahme-Handlung, kein Pflichtfeld. Steht ein Ort von Hand fest, sagt der
    Wähler das durch seine Farbe, damit man abgeleitete und gesetzte Hallen
-   auseinanderhält. */
+   auseinanderhält. Jetzt im Kebab-Menü mit vollem Namen statt Kürzel — im
+   Menü ist Platz, den die Zeile selbst nicht mehr hergibt. */
 .row .hallwahl {
-  font: inherit; font-size: .8rem; font-weight: 650;
-  min-height: 40px; width: 3.6rem; padding: 6px 2px 6px 6px;
+  font: inherit; font-size: .85rem; font-weight: 650;
+  min-height: 40px; width: 100%; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
-  text-align: center;
 }
 .row .hallwahl.gesetzt { border-color: var(--accent); color: var(--accent); font-weight: 650; }
-.row[aria-selected="true"] .hallwahl { background: #1e293b; color: #e2e8f0; border-color: #475569; }
 
 /* Der Aufruf-Knopf am Feld. Er steht in der Fußzeile neben der Uhr — dort,
    wo die Turnierleitung ohnehin hinschaut, um zu sehen, ob etwas fällig
@@ -555,19 +641,17 @@ h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
 .wo button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
 
 /* Zähltafel-Warteschlange: nur sichtbar, wenn diese Installation
-   Zähltafelbediener verwaltet. Als aufklappbarer Abschnitt (der Rahmen
-   „details > summary" weiter unten liefert Pfeil und Beschriftung), im
-   Zeilenstil der Spielliste, aber kompakter — hier geht es um Namen und
-   Wartezeit, nicht um eine ganze Paarung. */
-.sk { margin-bottom: 16px; }
-.sk .count { color: var(--ink-faint); font-weight: 600; }
-.sk #sk-list, .sk #off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.sk #off-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
-.sk #off-list li.paused { opacity: .55; }
-.sk #off-list .off-name { flex: 1; }
-.sk #off-list button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: inherit; }
-.sk #off-list button:hover { border-color: var(--accent); color: var(--accent); }
-.sk #off-list .drag-griff {
+   Zähltafelbediener verwaltet — Muster für „Panel verfügbar, aber vom
+   Profil trotzdem ausgeblendet" (Spec tl-web-panelsystem, `panelAvailable`
+   im Skript). Zeilenstil der Spielliste, aber kompakter — hier geht es um
+   Namen und Wartezeit, nicht um eine ganze Paarung. */
+#sk-list, #off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#off-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+#off-list li.paused { opacity: .55; }
+#off-list .off-name { flex: 1; }
+#off-list button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: inherit; }
+#off-list button:hover { border-color: var(--accent); color: var(--accent); }
+#off-list .drag-griff {
   /* Trefffläche vergrößern, wie beim Spielliste-Griff (`.row .drag-griff`) —
      per Minus-Rand aus dem Fluss zurückgerechnet. */
   padding: 9px 8px;
@@ -580,20 +664,19 @@ h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
   border-color: var(--accent);
   background: #eff6ff;
 }
-.warnflag { background: #b45309; color: #fff; border-radius: 5px; padding: 0 5px; font-size: 11px; }
-.sk #sk-list li {
+#sk-list li {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 8px 10px; min-height: 44px;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
-.sk .sk-names { font-weight: 600; flex: 1 1 8rem; min-width: 0; }
-.sk .sk-wait { font-size: .82rem; color: var(--ink-soft); }
-.sk #sk-list button {
+.sk-names { font-weight: 600; flex: 1 1 8rem; min-width: 0; }
+.sk-wait { font-size: .82rem; color: var(--ink-soft); }
+#sk-list button {
   font: inherit; font-weight: 700; min-width: 40px; min-height: 40px; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
-.sk #sk-list button:hover { border-color: var(--accent); color: var(--accent); }
+#sk-list button:hover { border-color: var(--accent); color: var(--accent); }
 /* Das Formular bleibt beim Neuzeichnen unangetastet (nur `#sk-list` wird
    ersetzt) — sonst würde ein Name, an dem gerade getippt wird, alle zwei
    Sekunden vom nächsten Abruf gelöscht. */
@@ -609,13 +692,10 @@ h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
 }
 #sk-add button:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Beendet: fast reine Rückschau — deshalb zugeklappt und ohne die
-   Kachel-Optik der Warteliste, nur schmale Zeilen mit Sieger zuerst, Score
+/* Beendet: fast reine Rückschau — schmale Zeilen mit Sieger zuerst, Score
    und ggf. Aufgabe-/kampflos-Kennzeichnung. Der Korrektur-Stift ist die
    einzige Bedienung hier. */
-.fin { margin-top: 16px; }
-.fin .count { color: var(--ink-faint); font-weight: 600; }
-.fin #fin-list { display: flex; flex-direction: column; gap: 6px; }
+#fin-list { display: flex; flex-direction: column; gap: 6px; }
 .fin-row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 8px 10px; min-height: 44px;
@@ -632,22 +712,71 @@ h2 .reset-order:hover { border-color: var(--accent); color: var(--accent); }
 }
 .fin-row button:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Aufklappbare Abschnitte müssen als solche erkennbar sein — ohne Zeichen
-   wirken sie wie eine leere Sektion, und die Turnierleitung glaubt, es
-   gäbe dort nichts. */
-details > summary {
-  cursor: pointer; font-size: .8rem; font-weight: 700; color: var(--ink-faint);
-  text-transform: uppercase; letter-spacing: .06em; padding: 6px 0; min-height: 44px;
-  display: flex; align-items: center; gap: 8px; list-style: none;
+/* ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
+   Alle neun Abschnitte (Felder, Walkover, Zähltafel, Schiedsrichter, vier
+   Warteliste-Untergruppen, Beendet) laufen über EINEN Mechanismus statt
+   neun leicht unterschiedlichen Sonderfällen: eine einheitliche Kopfzeile
+   (Titel, Zähler, Ein-/Ausblend-Schalter), Sichtbarkeit/Reihenfolge/Höhe
+   aus dem AKTIVEN PROFIL statt aus `<details open>`/`hidden`-Attributen
+   (die einen Redraw nicht überleben — genau der Kritikpunkt der Spec).
+   „Felder" bekommt dieselbe Kopfzeile, ist aber strukturell weiterhin die
+   fixierte Ankerposition außerhalb von `#panel-stack` (eigene `<section>`,
+   kein Reorder-Griff) — siehe Kommentar bei `renderPanelStack()`. */
+#panel-stack { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.panel { display: flex; flex-direction: column; min-height: var(--panel-min); overflow: hidden; }
+.panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.panel-head {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; min-height: 44px;
 }
-details > summary::-webkit-details-marker { display: none; }
-details > summary::before {
-  content: "›"; font-size: 1.2rem; line-height: 1; color: var(--ink-faint);
-  transition: transform .15s ease; display: inline-block;
+.panel-spacer { flex: 1 1 auto; }
+.panel-title {
+  font-size: .8rem; font-weight: 700; color: var(--ink-faint);
+  text-transform: uppercase; letter-spacing: .06em;
 }
-details[open] > summary::before { transform: rotate(90deg); }
-details > summary:hover { color: var(--ink-soft); }
-details > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.panel-count { font-size: .8rem; font-weight: 600; color: var(--ink-faint); }
+/* Sichtbarkeits-Schalter: Auge-Sinnbild statt Text, sonst wirkt die
+   Kopfzeile bei neun Panels überladen — Beschriftung bleibt für
+   Vorlesehilfen und als Tooltip erhalten (wie beim Vorbereitungs-Knopf). */
+.panel-vis {
+  flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0;
+  border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+  background: var(--card); color: var(--ink-soft);
+}
+.panel-vis:hover { border-color: var(--accent); color: var(--accent); }
+.panel-vis[aria-pressed="false"] { color: var(--ink-faint); }
+/* Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
+   Item-Drag-Listen (Queue-Zeilen, Schiedsrichter-Zeilen, Feldkacheln,
+   `.drag-griff`) — Akzeptanzkriterium „Verwechslungsgefahr zwischen
+   ganzem Panel verschieben und einer Zeile verschieben". Drei gleich
+   lange Balken statt eines Punktrasters, deutlich unterscheidbar auch bei
+   kleiner Darstellung. `touch-action: none` GENAU HIER, exakt dasselbe
+   Muster wie bei `.drag-griff`/`#steg` — nur eine am Griff begonnene
+   Touch-Geste darf das native Scrollen der Spalte unterdrücken. */
+.panel-griff {
+  touch-action: none; cursor: grab; color: var(--ink-faint);
+  display: grid; place-items: center; flex: none;
+  /* 18px-Symbol + 11px Polster ringsum = 40px Trefffläche (Touch-Ergonomie
+     ≥ 40px), per Minus-Rand aus dem Fluss zurückgerechnet wie `.row .drag-griff`. */
+  padding: 11px; margin: -11px 0 -11px -5px; border-radius: 6px;
+}
+.panel-griff:hover { color: var(--ink-soft); background: #f1f5f9; }
+.panel-griff:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.panel.dragging-item { box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+/* Panel-Rand: generalisiertes `#steg`-Muster (siehe dort) auf beliebig
+   viele Panel-Grenzen statt nur Felder↔Liste — nur zwischen zwei
+   tatsächlich SICHTBAREN Panels im DOM (ausgeblendete Panels werden gar
+   nicht erst gerendert, siehe `renderPanelStack()`), damit sich der Rand
+   automatisch an den nächsten sichtbaren Nachbarn bindet, ohne eigene
+   Sonderlogik dafür zu brauchen. */
+.panel-steg {
+  flex: none; touch-action: none; user-select: none; -webkit-user-select: none;
+  display: flex; align-items: center; justify-content: center;
+  height: 16px; cursor: row-resize;
+}
+.panel-steg::after { content: ""; border-radius: 999px; background: var(--line); width: 44px; height: 4px; }
+.panel-steg:hover::after, .panel-steg.zieht::after { background: var(--ink-faint); }
+.panel-steg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .section + .section { margin-top: 16px; }
 /* Hallen-Abschnitte innerhalb „Spielbereit" (Spec
    `spielliste-manuelle-reihenfolge`) — nur sichtbar, wenn ohne Hallenfilter
@@ -928,6 +1057,77 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .graph-body svg { width: 100%; height: auto; display: block; }
 .graph-note { font-size: .78rem; color: var(--ink-faint); margin-top: 8px; }
 .graph-note.abweichung { color: var(--warn); font-weight: 600; }
+
+/* ── Profil-Verwaltung (Spec tl-web-panelsystem, ADR 0024/0025) ─────────
+   Läuft im selben Overlay-Rahmen wie Punktverlauf/Schiedsrichter-Pflege
+   (`.graph-overlay`/`.graph-box`/`.graph-head`/`.graph-body` oben) — zwei
+   Ansichten in EINEM Overlay: die Profil-Liste (Katalog, Aktionen je
+   Zeile) und der Profil-Editor (Name, Panels, Anzeige-Einstellungen).
+   `#profiles-body` wird je nach Ansicht komplett neu gezeichnet
+   (`renderProfilesOverlay()`), wie beim Schiedsrichter-Pflege-Overlay. */
+.prof-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px;
+}
+.prof-row .prof-name { font-weight: 650; flex: 1 1 8rem; min-width: 0; }
+.prof-row .prof-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.prof-row .prof-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.prof-row button, .prof-new button, .prof-editor button {
+  font: inherit; font-weight: 650; font-size: .82rem; padding: 7px 11px; min-height: 40px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+  cursor: pointer;
+}
+.prof-row button:hover, .prof-new button:hover, .prof-editor button:hover {
+  border-color: var(--accent); color: var(--accent);
+}
+.prof-row button.primary, .prof-editor button.primary {
+  background: var(--ink); color: #fff; border-color: var(--ink);
+}
+.prof-row button.danger:hover { border-color: var(--alarm); color: var(--alarm); }
+.prof-new { display: flex; gap: 8px; margin-top: 4px; }
+.prof-new input {
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
+}
+.prof-empty-hint { font-size: .85rem; color: var(--ink-soft); margin: 0 0 10px; }
+/* Editor: Name, Panel-Liste (Sichtbarkeit + Reihenfolge), Anzeige-Häkchen
+   — bündelt, was vorher auf drei Bedienstellen verstreut war (Spec-Ziel). */
+.prof-editor label.prof-field { display: flex; flex-direction: column; gap: 3px; font-size: .85rem; margin-bottom: 10px; }
+.prof-editor input[type="text"] {
+  font: inherit; padding: 8px 10px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
+}
+.prof-panels { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.prof-panels li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card);
+}
+.prof-panels li.prof-panel-anchor { background: #f8fafc; }
+/* Kästchen UND Name in einem `label` — die ganze Zeile ist antippbar,
+   nicht nur das kleine Kästchen (Touch-Ergonomie ≥ 40px). */
+.prof-panels .prof-panel-label {
+  flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
+  min-height: 40px; cursor: pointer;
+}
+.prof-panels .prof-panel-name { font-weight: 600; font-size: .88rem; }
+.prof-panels .prof-panel-hint { font-size: .74rem; color: var(--ink-faint); }
+/* Dieselbe visuelle Sprache wie das Live-Panel-System — derselbe Griff,
+   dieselbe Reorder-Logik (`enableReorderDrag`, gemeinsam genutzt). */
+.prof-check {
+  width: 22px; height: 22px; flex: none; cursor: pointer; accent-color: var(--accent);
+}
+/* `label` UMSCHLIESST Kontrollkästchen/Radio UND Text (wie im früheren
+   Anzeige-Menü, `.anzeige .menue label`) — die ganze Zeile ist damit
+   antippbar, nicht nur das kleine Kästchen selbst (Touch-Ergonomie
+   ≥ 40px, Akzeptanzkriterium). */
+.prof-editor .checkbox-row, .prof-editor .radio-row {
+  display: flex; align-items: center; gap: 9px; padding: 8px 4px; min-height: 40px;
+  font-size: .88rem; cursor: pointer;
+}
+.prof-editor fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
+.prof-editor legend { font-size: .78rem; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; padding: 0 4px; }
 </style>
 </head>
 <body>
@@ -945,20 +1145,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     <span class="halls" id="halls"></span>
     <button type="button" class="auto" id="auto-toggle" hidden></button>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
-    <details class="anzeige">
-      <summary>Anzeige</summary>
-      <div class="menue">
-        <label><input type="checkbox" id="opt-nummern" /> Spielnummer zeigen</label>
-        <label><input type="checkbox" id="opt-nationen" /> Nationen zeigen</label>
-        <label><input type="checkbox" id="opt-vereinsnamen" /> Vereinsnamen zeigen</label>
-        <label><input type="checkbox" id="opt-vereinslogos" /> Vereinslogos zeigen</label>
-        <label><input type="checkbox" id="opt-disziplin" /> Disziplin/Klasse zeigen</label>
-        <label><input type="checkbox" id="opt-runde" /> Runde zeigen</label>
-        <label><input type="checkbox" id="opt-gruppe" /> Gruppe zeigen</label>
-        <label><input type="radio" name="opt-liste" id="opt-liste-rechts" value="rechts" checked /> Spielliste rechts</label>
-        <label><input type="radio" name="opt-liste" id="opt-liste-unten" value="unten" /> Spielliste darunter</label>
-      </div>
-    </details>
+    <!-- Profile (Spec tl-web-panelsystem) ersetzen das frühere
+         Anzeige-Klappmenü — Panel-Sichtbarkeit/-Reihenfolge/-Höhe UND die
+         früheren Einzelschalter leben jetzt gebündelt im aktiven Profil,
+         verwaltet im Overlay unten (`#profiles-overlay`). -->
+    <button type="button" class="profiles-btn" id="profiles-open">Profile</button>
   </header>
   <div class="banner" id="banner"></div>
   <div class="action-bar" id="action-bar">
@@ -969,42 +1160,31 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     <button type="button" id="action-cancel">Abbrechen</button>
   </div>
   <main>
-    <section>
-      <h2>Felder <span class="count" id="courts-count"></span></h2>
+    <!-- „Felder" bleibt die einzige strukturell fixierte Ankerposition
+         (Spec tl-web-panelsystem) — eigene Section außerhalb von
+         `#panel-stack`, kein Reorder-Griff, aber dieselbe einheitliche
+         Kopfzeile (Titel/Zähler/Ein-Ausblend-Schalter) wie die anderen
+         acht Panels. `renderPanelStack()` befüllt `#courts-head`. -->
+    <section id="courts-section">
+      <div id="courts-head"></div>
       <div id="courts"></div>
     </section>
     <!-- Trennsteg: Aufteilung Felder/Spielliste per Ziehen — nebeneinander
          die Breite, gestapelt die Höhe. Doppeltipp stellt die Automatik
          wieder her. Ein DIV zwischen den Sections stört die
          :first-of-type/:last-of-type-Selektoren nicht (die zählen je
-         Element-Typ). -->
+         Element-Typ). Unverändert gegenüber vorher — das neue Panel-System
+         reorganisiert nur INNERHALB der Listen-Spalte, siehe
+         `docs/features/tl-web-panelsystem.md`. -->
     <div id="steg" role="separator" aria-label="Aufteilung zwischen Feldern und Spielliste ziehen"
          title="Ziehen: Aufteilung ändern · Doppeltipp: automatische Aufteilung"></div>
     <section>
-      <div id="walkovers"></div>
-      <details class="sk" id="sk-box" hidden>
-        <summary>Zähltafel-Warteschlange <span class="count" id="sk-count"></span></summary>
-        <ol id="sk-list"></ol>
-        <form id="sk-add">
-          <input type="text" id="sk-name" placeholder="Name (Doppel: A / B)" maxlength="80" />
-          <button type="submit">Hinzufügen</button>
-        </form>
-      </details>
-      <details class="sk" id="off-box" hidden>
-        <summary>Schiedsrichter <span class="count" id="off-count"></span>
-          <span class="meta" id="off-next"></span></summary>
-        <ol id="off-list"></ol>
-      </details>
-      <h2>Als Nächstes <span class="count" id="queue-count"></span>
-        <button type="button" id="queue-reset" class="reset-order" hidden
-          title="Verwirft die manuelle Sortierung ALLER Hallen — danach gilt wieder BTPs eigene Reihenfolge">
-          Reihenfolge zurücksetzen</button>
-      </h2>
-      <div id="queue"></div>
-      <details class="fin" id="fin-box" hidden>
-        <summary>Beendet <span class="count" id="fin-count"></span></summary>
-        <div id="fin-list"></div>
-      </details>
+      <!-- Die acht übrigen Panels (Walkover, Zähltafel, Schiedsrichter, vier
+           Warteliste-Untergruppen, Beendet) werden vollständig dynamisch
+           aus dem aktiven Profil gebaut — Reihenfolge, Sichtbarkeit und
+           Höhe kommen aus `panels[]`, nicht mehr aus statischem Markup mit
+           `<details>`/`hidden` (Spec-Kritik: überlebt keinen Redraw). -->
+      <div id="panel-stack"></div>
     </section>
   </main>
 </div>
@@ -1058,6 +1238,20 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
       <button type="button" id="off-close" aria-label="schließen">×</button>
     </div>
     <div class="graph-body" id="off-body"></div>
+  </div>
+</div>
+
+<!-- Profil-Verwaltung (Spec tl-web-panelsystem, ADR 0024/0025): Anlegen,
+     Umbenennen, Löschen, Standard markieren, für dieses Gerät wählen.
+     Zwei Ansichten in einem Overlay — Katalog-Liste und Editor — beide von
+     `renderProfilesOverlay()` in `#profiles-body` gezeichnet. -->
+<div class="graph-overlay" id="profiles-overlay" hidden>
+  <div class="graph-box">
+    <div class="graph-head">
+      <span id="profiles-title">Profile</span>
+      <button type="button" id="profiles-close" aria-label="schließen">×</button>
+    </div>
+    <div class="graph-body" id="profiles-body"></div>
   </div>
 </div>
 
@@ -1199,86 +1393,248 @@ const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="tr
   <path d="M17.5 6a9 9 0 0 1 0 12"/>
 </svg>`;
 
-// ── Anzeige-Vorlieben ─────────────────────────────────────────────────
-// Am Gerät, nicht am Turnier: Der eine Helfer sucht nach der Spielnummer aus
-// dem Papierplan, der andere kann damit nichts anfangen. Beides wäre als
-// turnierweite Einstellung falsch — es hinge davon ab, wer zuletzt gespeichert
-// hat.
-let zeigeNummern = localStorage.getItem("bts-tl-nummern") !== "aus";
-let zeigeNationen = localStorage.getItem("bts-tl-nationen") === "an";
+// ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ─────────────
+// Ersetzt die früheren, lose in `localStorage` verstreuten Anzeige-
+// Einzelschalter: „Profil" bündelt Panel-Sichtbarkeit/-Reihenfolge/-Höhe
+// UND die Anzeige-Einstellungen an einem Ort, geräteweit über den
+// bestehenden `TlAction`-Kanal verwaltet (ADR 0024 — zweite bewusste
+// Ausnahme von „kein Setup aus dem Web"). Das gewählte Profil ist ab jetzt
+// VERBINDLICH — keine geräte-lokale Override-Ebene mehr darüber (Spec
+// Nicht-Ziele: „wer abweichende Einstellungen will, wechselt/erstellt ein
+// eigenes Profil").
+const PANEL_KEYS = [
+  "courts", "walkovers", "scorekeepers", "officials",
+  "queue_called", "queue_ready", "queue_waiting", "queue_no_hall", "finished",
+];
+const PANEL_TITLES = {
+  courts: "Felder",
+  walkovers: "Aufgaben",
+  scorekeepers: "Zähltafel-Warteschlange",
+  officials: "Schiedsrichter",
+  queue_called: "In Vorbereitung gerufen",
+  queue_ready: "Spielbereit",
+  queue_waiting: "Noch nicht bereit",
+  queue_no_hall: "Ohne Hallenzuordnung",
+  finished: "Beendet",
+};
 
-// Verein je Gerät ein-/ausblendbar. Anders als die Nation gibt es dafür eine
-// turnierweite Voreinstellung (Setup „Vereine anzeigen", im Zustand als
-// `show_club_*`). Deshalb dreistufig: ist lokal nichts gewählt (`null`), gilt
-// die zentrale Vorgabe; sobald das Gerät den Schalter anfasst, gewinnt seine
-// Wahl. So sieht ein frisch geöffnetes Gerät das, was die Turnierleitung
-// zentral gesetzt hat, kann es aber für sich überstimmen.
-let vereinsnamenVorliebe = localStorage.getItem("bts-tl-vereinsnamen"); // "an"|"aus"|null
-let vereinslogosVorliebe = localStorage.getItem("bts-tl-vereinslogos");
-function zeigeVereinsnamenAktiv() {
-  return vereinsnamenVorliebe === null
-    ? !!(state && state.show_club_names)
-    : vereinsnamenVorliebe === "an";
-}
-function zeigeVereinslogosAktiv() {
-  return vereinslogosVorliebe === null
-    ? !!(state && state.show_club_logos)
-    : vereinslogosVorliebe === "an";
+// Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
+// Item-Drag-Listen (Queue-Zeilen, Schiedsrichter-Zeilen, Feldkacheln) —
+// Verwechslungsgefahr „ganzes Panel verschieben" vs. „eine Zeile
+// verschieben" ist ein explizites Akzeptanzkriterium. Drei gleich lange
+// Balken statt eines Punktrasters, klar unterscheidbar auch klein.
+const PANEL_GRIFF = `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="currentColor">
+  <rect x="2" y="3.7" width="16" height="2.6" rx="1.3"/>
+  <rect x="2" y="8.7" width="16" height="2.6" rx="1.3"/>
+  <rect x="2" y="13.7" width="16" height="2.6" rx="1.3"/>
+</svg>`;
+const AUGE_AUF = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"/><circle cx="12" cy="12" r="3"/>
+</svg>`;
+const AUGE_ZU = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 3l18 18"/>
+  <path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c7 0 10.5 7 10.5 7a17 17 0 0 1-3.4 4.3M6.7 6.7C3.9 8.6 1.5 12 1.5 12s3.5 7 10.5 7c1.4 0 2.7-.27 3.9-.73"/>
+  <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+</svg>`;
+
+/** Eingebautes Standardprofil (Spec: heutige Default-Werte). Wird NIE dem
+ *  Server gemeldet, solange niemand es aktiv anlegt/ändert — bleibt
+ *  `state.profiles` leer, liefert `resolveActiveProfile()` schlicht dieses
+ *  Objekt zur Anzeige, ohne je einen Schreibvorgang auszulösen. */
+function builtInProfile() {
+  return {
+    id: "",
+    name: "Standard",
+    panels: PANEL_KEYS.map((key) => ({ key, visible: true, heightFr: 1 })),
+    display: {
+      showNumbers: true, showNations: false,
+      showClubNames: false, showClubLogos: false,
+      showDiscipline: true, showRound: true, showGroup: true,
+      listPosition: "right",
+    },
+    updatedAtMs: 0,
+  };
 }
 
-function setzeVorliebe(name, an) {
-  if (name === "nummern") {
-    zeigeNummern = an;
-    localStorage.setItem("bts-tl-nummern", an ? "an" : "aus");
-  } else if (name === "vereinsnamen") {
-    vereinsnamenVorliebe = an ? "an" : "aus";
-    localStorage.setItem("bts-tl-vereinsnamen", vereinsnamenVorliebe);
-  } else if (name === "vereinslogos") {
-    vereinslogosVorliebe = an ? "an" : "aus";
-    localStorage.setItem("bts-tl-vereinslogos", vereinslogosVorliebe);
-  } else {
-    zeigeNationen = an;
-    localStorage.setItem("bts-tl-nationen", an ? "an" : "aus");
+/** Tiefe Kopie eines Profils — jede Änderung arbeitet auf einer Kopie, nie
+ *  direkt am zuletzt vom Server erhaltenen Objekt (`state.profiles`). */
+function cloneProfile(p) {
+  return {
+    id: p.id, name: p.name, updatedAtMs: p.updatedAtMs,
+    panels: (p.panels || []).map((x) => ({ key: x.key, visible: x.visible, heightFr: x.heightFr })),
+    display: { ...p.display },
+  };
+}
+
+/** `profile.panels`, ergänzt um fehlende Panel-Schlüssel (künftige Panels,
+ *  oder ein Profil von vor deren Einführung) — fehlende werden sichtbar
+ *  ans Ende angehängt, nie mehr als die neun bekannten Schlüssel behalten. */
+function normalizedPanels(profile) {
+  const bekannt = (profile.panels || []).filter((p) => PANEL_KEYS.includes(p.key));
+  const vorhanden = new Set(bekannt.map((p) => p.key));
+  for (const key of PANEL_KEYS) {
+    if (!vorhanden.has(key)) bekannt.push({ key, visible: true, heightFr: 1 });
   }
-  renderCourts();
-  renderQueue();
+  return bekannt;
 }
 
-// Disziplin/Klasse, Runde und Gruppe einzeln aus der Meta-Zeile der
-// Spielliste ausblendbar — je Gerät, Standard AN (Wunsch vom 10.08.2026
-// nach dem Turniertest: bei manchen Turnieren sagt „Gruppe 6" nichts, bei
-// anderen ist die Runde uninteressant, und die Zeile wird mit 120 wartenden
-// Spielen schnell unruhig). Wirkt NUR auf die Warteliste („Als Nächstes") —
-// an einer einzelnen Feldkachel und in „Beendet" ist dieselbe Angabe
-// Kontext zu genau einem Spiel, keine Liste, die man überfliegt, und bleibt
-// deshalb dort vollständig.
-let zeigeDisziplin = localStorage.getItem("bts-tl-zeige-disziplin") !== "aus";
-let zeigeRunde = localStorage.getItem("bts-tl-zeige-runde") !== "aus";
-let zeigeGruppe = localStorage.getItem("bts-tl-zeige-gruppe") !== "aus";
+/**
+ * Das für DIESES Gerät „aktive" Profil. Auflösungsreihenfolge (ADR 0025):
+ * 1) `pendingProfile` — lokale, optimistische Fassung nach einer eigenen
+ *    Änderung, bis der Katalog sie bestätigt (siehe `mutateActiveProfile`).
+ * 2) das per `X-Tl-Active-Profile`-Antwortkopf zugeordnete Profil.
+ * 3) das turnierweite Standardprofil (`state.default_profile_id`).
+ * 4) das eingebaute Standardprofil.
+ *
+ * Zeigt (2) oder (3) auf eine Kennung, die es im Katalog nicht (mehr) gibt
+ * — gelöscht, oder ein Zugang ohne Header —, fällt die Kette automatisch
+ * bis zum eingebauten Standard durch: genau das Akzeptanzkriterium „ein
+ * gelöschtes, zugewiesenes Profil fällt beim nächsten Poll ohne
+ * Fehlermeldung auf das Standardprofil zurück".
+ */
+let activeProfileHeaderId = "";
+let pendingProfile = null;
+/** Stand des Katalog-Eintrags, als die laufende Änderungskette begann —
+ *  Ausstiegskriterium, falls unsere Fassung nie inhaltlich ankommt. */
+let pendingBaseUpdatedAtMs = 0;
+/** Wie viele `profile_save`-Rufe gerade unterwegs sind. Solange >0 darf ein
+ *  fremder Katalog-Stand die eigene Fassung nicht verdrängen. */
+let pendingInFlight = 0;
 
-function setzeListenMeta(name, an) {
-  if (name === "disziplin") {
-    zeigeDisziplin = an;
-    localStorage.setItem("bts-tl-zeige-disziplin", an ? "an" : "aus");
-  } else if (name === "runde") {
-    zeigeRunde = an;
-    localStorage.setItem("bts-tl-zeige-runde", an ? "an" : "aus");
-  } else {
-    zeigeGruppe = an;
-    localStorage.setItem("bts-tl-zeige-gruppe", an ? "an" : "aus");
+/** Vergleicht die FACHLICHEN Felder zweier Profile (Name, Panels, Anzeige) —
+ *  bewusst ohne `updatedAtMs`: Den Zeitstempel vergibt der Host beim
+ *  Speichern selbst neu (`tablet/tl.rs::profile_save`), der Client kennt ihn
+ *  also nie im Voraus und kann nicht darauf warten. */
+function profileContentEquals(a, b) {
+  if (!a || !b) return false;
+  const fachlich = (p) => JSON.stringify({
+    name: p.name || "",
+    panels: normalizedPanels(p).map((x) => [x.key, !!x.visible, Number(x.heightFr) || 1]),
+    display: { ...builtInProfile().display, ...(p.display || {}) },
+  });
+  return fachlich(a) === fachlich(b);
+}
+
+function resolveActiveProfile() {
+  const katalog = (state && state.profiles) || [];
+  const findById = (id) => (id ? katalog.find((p) => p.id === id) : null);
+  if (pendingProfile) {
+    const eintrag = findById(pendingProfile.id);
+    // Ein reiner ID-Vergleich reichte hier NICHT: Bei jedem bereits
+    // eingerichteten Profil stehen Kennung und Geräte-Zuordnung schon VOR
+    // der Änderung im Katalog — die Prüfung hätte die eigene, gerade erst
+    // gezogene Panel-Höhe sofort wieder verworfen und das Panel beim
+    // Loslassen sichtbar zurückspringen lassen, bis der nächste Poll (bis
+    // zu 2 s) den gespeicherten Wert brachte. Bestätigt ist erst, was
+    // INHALTLICH angekommen ist.
+    const bestaetigt = eintrag
+      && activeProfileHeaderId === pendingProfile.id
+      && (profileContentEquals(eintrag, pendingProfile)
+        // Ausstieg: Ein fremdes Gerät hat dasselbe Profil zwischenzeitlich
+        // überschrieben (Last-Write-Wins laut Spec) — sobald nichts mehr
+        // von uns unterwegs ist, gewinnt der Server, sonst hinge unsere
+        // Fassung für immer fest.
+        || (pendingInFlight === 0 && (eintrag.updatedAtMs || 0) > pendingBaseUpdatedAtMs));
+    if (!bestaetigt) return pendingProfile;
+    pendingProfile = null;
   }
-  renderQueue();
+  return findById(activeProfileHeaderId) || findById(state && state.default_profile_id) || builtInProfile();
 }
 
-// Listen-Position: ebenfalls je Gerät, kein Wire-Feld (Task 12) — nur eine
-// Körperklasse, die die vorhandene Zweispalten-Regel für `main` umschaltet.
-function setzeListenPosition(unten) {
-  localStorage.setItem("bts-tl-liste", unten ? "unten" : "rechts");
+function activeDisplay() { return resolveActiveProfile().display || builtInProfile().display; }
+function zeigeNummern() { return !!activeDisplay().showNumbers; }
+function zeigeNationen() { return !!activeDisplay().showNations; }
+function zeigeVereinsnamenAktiv() { return !!activeDisplay().showClubNames; }
+function zeigeVereinslogosAktiv() { return !!activeDisplay().showClubLogos; }
+function zeigeDisziplinAktiv() { return !!activeDisplay().showDiscipline; }
+function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
+function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
+
+/** Listen-Position aus dem aktiven Profil auf die bestehende `body`-Klasse
+ *  anwenden — dieselbe CSS-Regel wie vorher (`body.liste-unten`), nur die
+ *  Quelle ist jetzt das Profil statt `localStorage`. */
+function applyListPosition() {
+  const unten = activeDisplay().listPosition === "bottom";
+  const zuvor = document.body.classList.contains("liste-unten");
   document.body.classList.toggle("liste-unten", unten);
-  // Nebeneinander (volle Höhe) und gestapelt (64-%-Obergrenze) messen die
-  // Felderbox unterschiedlich — eine unter der alten Anordnung gewählte
-  // Kompaktstufe muss beim Umschalten neu beurteilt werden.
-  scheduleFitCourts();
+  // Nebeneinander und gestapelt messen die Felderbox unterschiedlich — ein
+  // Wechsel muss die Kompaktstufe neu beurteilen lassen (wie zuvor beim
+  // manuellen Umschalten im Anzeige-Menü).
+  if (unten !== zuvor) scheduleFitCourts();
+}
+
+/** Frische, client-seitig vergebene Profil-Kennung — siehe ausführliche
+ *  Begründung bei `mutateActiveProfile()`. */
+function genProfileId() {
+  return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Zentrale Schreibstelle für JEDE Änderung am aktiven Profil DIESES
+ * Geräts — Panel-Sichtbarkeit, -Reihenfolge, -Höhe, Anzeige-Häkchen,
+ * Listen-Position. `mutator(profilKopie)` verändert die Kopie in place.
+ *
+ * Läuft das Gerät noch auf dem eingebauten Standardprofil (`id === ""`,
+ * nie dem Server gemeldet), MATERIALISIERT die erste Änderung es zu einem
+ * echten, eigenen Profil. Bewusst mit einer selbst vergebenen `id`
+ * (`genProfileId()`) statt leer zu senden: Leer heißt laut Wire-Vertrag
+ * „Host vergibt bei JEDEM Aufruf eine NEUE Kennung" — bei mehreren
+ * schnellen Änderungen (z. B. einen Panel-Rand ziehen und gleich danach
+ * ein Panel ausblenden, bevor die erste Antwort zurück ist) entstünden so
+ * mehrere Profile statt eines. Mit einer selbst vergebenen, stabilen ID
+ * ist jeder weitere Aufruf ein normales Upsert auf dieselbe ID — der Host
+ * behandelt eine nicht-leere `id` ohnehin identisch, ob vom Client oder
+ * von ihm selbst vergeben (`tablet/tl.rs::profile_save`). Direkt danach
+ * `profile_select`, damit dieses Gerät ab dem nächsten Poll über den
+ * Header an sein neues Profil gebunden bleibt — sonst entstünde ein
+ * Karteileichen-Profil im Katalog, das dieses Gerät selbst nie wieder
+ * sieht. `pendingProfile` hält die Änderung bis zur Bestätigung lokal
+ * sichtbar (siehe `resolveActiveProfile()`), unabhängig vom Netz-Timing.
+ */
+async function mutateActiveProfile(mutator, okMessage) {
+  const basis = pendingProfile || resolveActiveProfile();
+  const kopie = cloneProfile(basis);
+  kopie.panels = normalizedPanels(kopie);
+  mutator(kopie);
+  kopie.updatedAtMs = Date.now();
+  const warBuiltIn = !kopie.id;
+  if (warBuiltIn) {
+    kopie.id = genProfileId();
+    kopie.name = kopie.name && kopie.name !== "Standard" ? kopie.name : "Eigenes Profil";
+  }
+  // Nur beim START einer Änderungskette merken: Folgeänderungen, die auf
+  // einer noch unbestätigten Fassung aufsetzen, behalten denselben
+  // Ausgangsstand als Vergleichsmaß.
+  if (!pendingProfile) {
+    const eintrag = ((state && state.profiles) || []).find((p) => p.id === kopie.id);
+    pendingBaseUpdatedAtMs = (eintrag && eintrag.updatedAtMs) || 0;
+  }
+  pendingProfile = kopie;
+  render();
+  pendingInFlight += 1;
+  let ok = false;
+  try {
+    ok = await send(
+      `profile-save-${kopie.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      { action: "profile_save", profile: kopie },
+      okMessage,
+    );
+  } finally {
+    pendingInFlight -= 1;
+  }
+  if (!ok) {
+    // Abgelehnt (z. B. Profil-Obergrenze erreicht) — die optimistische
+    // Fassung zurücknehmen, der nächste Render zeigt wieder den echten
+    // Stand aus `state`.
+    pendingProfile = null;
+    render();
+    return;
+  }
+  if (warBuiltIn) {
+    await send(`profile-select-${kopie.id}`, { action: "profile_select", profileId: kopie.id }, null);
+  }
 }
 
 // ── Bedienzustand ─────────────────────────────────────────────────────
@@ -1500,8 +1856,15 @@ async function send(opId, action, onOk, opts) {
       // gesetzte Meldungen überschreiben einander sofort — die erste wäre
       // nur ein Aufblitzen. Gibt es eine Einschränkung, ist sie das
       // Wichtigere und färbt die Meldung.
-      if (answer.warning) toast(`${onOk} ${answer.warning}`, true);
-      else toast(onOk);
+      //
+      // `onOk` darf FEHLEN (`null`) — für hochfrequente, stille Aktionen
+      // wie einen Panel-Rand ziehen oder ein Panel per Drag umsortieren
+      // (Spec tl-web-panelsystem): Ein Toast bei JEDEM Loslassen wäre dort
+      // reine Ablenkung, kein neuer Erfolg, den man bestätigt sehen muss.
+      // Eine echte Einschränkung (`answer.warning`) bleibt trotzdem immer
+      // sichtbar, auch ohne eigenen Erfolgstext.
+      if (answer.warning) toast(`${onOk || "Erledigt."} ${answer.warning}`, true);
+      else if (onOk) toast(onOk);
       return true;
     }
     return fail(answer.error || "Die Aktion wurde abgelehnt.");
@@ -1531,23 +1894,6 @@ async function togglePrepCall(match) {
   );
 }
 
-/**
- * Kurzform eines Hallennamens für den engen Wähler in der Liste.
- *
- * So kurz wie möglich, aber eindeutig: „Kyritzer"/„Luckenwalder" werden zu
- * „Ky"/„Lu", zwei Hallen mit gleichem Anfang bekommen so viele Buchstaben,
- * wie sie zum Unterscheiden brauchen. Eine Abkürzung, unter der zwei Hallen
- * gleich aussehen, wäre schlimmer als ein langer Name.
- */
-function hallenKuerzel(name) {
-  const alle = (state.halls || []).map((h) => h.name);
-  for (let n = 2; n <= 12; n++) {
-    const kurz = (s) => s.trim().slice(0, n);
-    const menge = new Set(alle.map(kurz));
-    if (menge.size === alle.length) return kurz(name);
-  }
-  return name;
-}
 
 /** Die BTP-Kennung zu einem Hallennamen; `null`, wenn unbekannt. */
 function hallIdFor(hall) {
@@ -1784,7 +2130,17 @@ async function poll() {
       if (serverzeit) syncClock(serverzeit);
       failures = 0;
       lastOkMs = Date.now();
+      // Panel-Profil-Zuordnung (Spec tl-web-panelsystem, ADR 0025): Der
+      // Header kommt auf JEDER Antwort, auch bei 304 — der große,
+      // geteilte Zustand bleibt cachebar, die geräte-individuelle
+      // Zuordnung ist trotzdem immer aktuell. Ändert sich der Header ohne
+      // Zustandswechsel (z. B. direkt nach der eigenen Profil-Auswahl,
+      // bevor sich sonst am Turnier etwas ändert), muss trotzdem neu
+      // gezeichnet werden — `resolveActiveProfile()` hängt an ihm.
+      const vorherProfil = activeProfileHeaderId;
+      readActiveProfileHeader(res);
       renderConnection();
+      if (activeProfileHeaderId !== vorherProfil) render();
       return;
     }
     if (res.status === 429) {
@@ -1818,6 +2174,7 @@ async function poll() {
     }
     if (!res.ok) throw new Error("HTTP " + res.status);
     etag = res.headers.get("etag") || "";
+    readActiveProfileHeader(res);
     state = await res.json();
     // Die Serverzeit bevorzugt aus dem Kopf der Antwort: Über den Relay ist
     // der Stand zwischengespeichert, sein `server_now_ms` also der Zeitpunkt
@@ -1845,6 +2202,19 @@ function headerNow(res) {
   if (!d) return 0;
   const t = Date.parse(d);
   return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Panel-Profil-Zuordnung dieses Geräts aus dem Antwortkopf übernehmen
+ * (Spec tl-web-panelsystem, ADR 0025) — `X-Tl-Active-Profile`, auf JEDER
+ * `/tl/api/state`-Antwort gesetzt, auch bei 304. `Headers.get` ist
+ * case-insensitiv, die genaue Schreibweise hier ist egal. Leer/fehlend =
+ * kein Profil gewählt = eingebautes Standardprofil (`resolveActiveProfile`
+ * fällt dann automatisch weiter auf `default_profile_id` bzw. den
+ * eingebauten Standard zurück).
+ */
+function readActiveProfileHeader(res) {
+  activeProfileHeaderId = res.headers.get("X-Tl-Active-Profile") || "";
 }
 
 /** Die Seite gegen eine Erklärung tauschen. */
@@ -1929,10 +2299,11 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
 function pairOf(t1, t2, nat1, nat2, club1, club2) {
   const zeigeVereinsnamen = zeigeVereinsnamenAktiv();
   const zeigeVereinslogos = zeigeVereinslogosAktiv();
+  const nationenAn = zeigeNationen();
   const seite = (namen, nationen, vereine) => {
     const liste = (namen || []).length ? namen : ["?"];
     return liste.map((n, i) => {
-      const land = zeigeNationen ? (nationen || [])[i] : "";
+      const land = nationenAn ? (nationen || [])[i] : "";
       const verein = (vereine || [])[i] || "";
       const willName = zeigeVereinsnamen && verein;
       const willLogo = zeigeVereinslogos && verein;
@@ -2172,19 +2543,27 @@ function courtCard(c, cellStyle) {
   if (picked) classes.push(targetProblem(c) ? "blocked-target" : "target");
   if (pending && pending.courtId === c.court_id) classes.push("pending");
 
+  // Drei-Stufen-Badges (Spec tl-web-panelsystem, Schritt 10): „gesperrt"
+  // war bisher unbenannt (bloßes `.badge` ohne Stufe) — jetzt Alarm, wie
+  // Verletzung und TL-Ruf (sofort handeln). Pause/kein Tablet bleiben
+  // Warnung (im Blick behalten, kein sofortiger Handlungsdruck).
   const badges = [];
-  if (c.locked) badges.push('<span class="badge">gesperrt</span>');
-  if (c.injury) badges.push('<span class="badge alarm">Verletzung</span>');
-  if (c.official_call) badges.push('<span class="badge alarm">TL gerufen</span>');
-  if (c.pause) badges.push('<span class="badge warn">Pause</span>');
-  if (c.match_id && !c.tablet_connected) badges.push('<span class="badge warn">kein Tablet</span>');
+  if (c.locked) badges.push('<span class="badge badge-alarm">gesperrt</span>');
+  if (c.injury) badges.push('<span class="badge badge-alarm">Verletzung</span>');
+  if (c.official_call) badges.push('<span class="badge badge-alarm">TL gerufen</span>');
+  if (c.pause) badges.push('<span class="badge badge-warn">Pause</span>');
+  if (c.match_id && !c.tablet_connected) badges.push('<span class="badge badge-warn">kein Tablet</span>');
 
   // Satz-/Matchball: nur für die Turnierleitung, nie auf den Hallen-TVs
   // (Scope-Entscheidung 20.07.2026, Plan 16). Die Streifenfarben bleiben
-  // unangetastet — Rot heißt dort weiterhin „überfällig".
+  // unangetastet — Rot heißt dort weiterhin „überfällig". Info-Stufe, NICHT
+  // Alarm: reine Planungshilfe, kein Handlungsdruck — und die Form (Rahmen
+  // statt Vollton-Fläche, siehe CSS `.badge-info`) hält Matchball optisch
+  // klar vom alarmroten „überfällig"-Streifen auseinander (Akzeptanz-
+  // kriterium), obwohl beide dieselbe Grundfarbe (Rose/Rot) nutzen.
   const ball = c.match_id && !c.locked ? gamePointKind(c) : null;
-  if (ball === "match") { classes.push("gp-match"); badges.push('<span class="badge gp">Matchball</span>'); }
-  else if (ball === "set") { classes.push("gp-set"); badges.push('<span class="badge gp-s">Satzball</span>'); }
+  if (ball === "match") { classes.push("gp-match"); badges.push('<span class="badge badge-info badge-info-match">Matchball</span>'); }
+  else if (ball === "set") { classes.push("gp-set"); badges.push('<span class="badge badge-info badge-info-set">Satzball</span>'); }
 
   let body, foot = "";
   if (pending && pending.courtId === c.court_id) {
@@ -2227,7 +2606,7 @@ function courtCard(c, cellStyle) {
     ? `<div class="meta">
          ${(c.sr || []).length ? `SR: ${esc(c.sr.join(" / "))}` : "SR: –"}
          ${(c.ar || []).length ? ` · AR: ${esc(c.ar.join(" / "))}` : ""}
-         ${c.official_warn ? `<span class="warnflag" title="Konflikt">${esc(c.official_warn)}</span>` : ""}
+         ${c.official_warn ? `<span class="badge badge-warn" title="Konflikt">${esc(c.official_warn)}</span>` : ""}
          <button type="button" class="offbtn" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
                  title="Schiedsrichter einteilen">einteilen</button>
          ${(c.sr || []).length || (c.ar || []).length
@@ -2257,7 +2636,7 @@ function courtCard(c, cellStyle) {
   // Was schon gerufen wurde, steht als Tatsache da — sonst tippen zwei
   // Turnierleitungen nacheinander denselben Aufruf.
   const gerufen = c.match_id && gesprochen > 1
-    ? `<span class="badge warn">${gesprochen}. Aufruf erfolgt</span>` : "";
+    ? `<span class="badge badge-warn">${gesprochen}. Aufruf erfolgt</span>` : "";
   // Zieh-Griff: nur an belegten Feldern — ein freies Feld ist ein Ziel,
   // keine Ziehquelle. `aria-hidden` wie bei der Warteliste: rein visuelle
   // Zusatz-Affordanz, Antippen der Kachel bleibt der barrierefreie Weg.
@@ -2398,7 +2777,7 @@ function renderCourts() {
   const box = $("courts");
   if (!state) return;
   const courts = state.courts.filter((c) => !hallFilter || c.location === hallFilter);
-  $("courts-count").textContent = `(${courts.length})`;
+  setPanelCount("courts", courts.length);
   if (!courts.length) {
     box.innerHTML = `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`;
   } else if (state.multi_hall && !hallFilter) {
@@ -2464,6 +2843,11 @@ function fitCourts() {
   const listSection = document.querySelector("main > section:last-of-type");
   const box = $("courts");
   if (!main || !section || !listSection || !box) return;
+  // „Felder" per Profil ausgeblendet (Spec tl-web-panelsystem) — nichts zu
+  // messen, die Listen-Spalte bekommt über die normale Flex-Regel ohnehin
+  // den ganzen Platz (siehe `renderCourtsHead()`, das `section.hidden`
+  // setzt; `[hidden]` nimmt das Element vollständig aus dem Flex-Layout).
+  if (section.hidden) return;
   box.classList.remove("kacheln-kompakt", "kacheln-mini");
   section.classList.remove("courts-scroll");
   // Immer zuerst zurücksetzen: Ein von einem früheren Durchlauf (z. B. im
@@ -2656,6 +3040,26 @@ function enableSteg() {
   });
 }
 
+/**
+ * Eine Queue-Zeile zeigt ohne geöffnetes Kontextmenü höchstens SECHS
+ * sichtbare Elemente (Spec tl-web-panelsystem, Schritt 11 — vorher bis zu
+ * zehn). Einteilung nach Bedienhäufigkeit:
+ *
+ * PRIMÄR (immer sichtbar): Griff (nur „Spielbereit"), Nummer+Name+Meta
+ * (EIN Block, `.who-block`), der wichtigste Status — „gerufen seit" ODER
+ * „blockiert weil" (nie beides: eine Zeile ist laut Datenmodell entweder
+ * gerufen, blockiert oder keins von beiden), bis zu zwei Badges (Auto-
+ * Vergabe-Ausnahme/manuell einsortiert, EIN gemeinsamer Wrapper), der
+ * Vorbereitungs-Ruf-Knopf (vermutlich die häufigste Einzelaktion an einer
+ * Zeile) und das Kebab-Menü selbst. Macht im ungünstigsten Fall (Griff +
+ * Nummer/Name/Meta + Status + Badges + Ruf + Kebab) sechs Elemente.
+ *
+ * HINTER DEM KEBAB (⋮, seltener gebraucht): die Auto-Vergabe-Ausnahme
+ * (Umschalter, nicht die Anzeige-Badge — die bleibt primär sichtbar),
+ * alle drei Nachruf-Knöpfe (braucht man nur, wenn jemand nicht kommt) und
+ * der Spielort-Wähler (nur im Mehr-Hallen-Turnier ohne Disziplin-Regel
+ * überhaupt vorhanden — ohnehin die Ausnahme).
+ */
 function queueRow(m, draggable = false) {
   const parts = [];
   // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
@@ -2677,18 +3081,20 @@ function queueRow(m, draggable = false) {
       title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
       aria-label="Spiel in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>`);
   }
-  if (zeigeNummern) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
+  if (zeigeNummern()) parts.push(`<span class="no num">${m.match_num ?? "–"}</span>`);
   // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
   // entfernt danach sowohl fehlende Werte (BTP liefert keine Runde) als auch
   // ausgeschaltete zugleich, ohne dass ein Trenner „·" ins Leere zeigt.
   const metaHaeppchen = [];
-  if (zeigeDisziplin) metaHaeppchen.push(klasse(m.discipline, m.class_label));
-  if (zeigeGruppe) metaHaeppchen.push(m.draw_name);
-  if (zeigeRunde) metaHaeppchen.push(m.round_name);
-  parts.push(
-    `<span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club)}</span>`,
-    `<span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>`,
-  );
+  if (zeigeDisziplinAktiv()) metaHaeppchen.push(klasse(m.discipline, m.class_label));
+  if (zeigeGruppeAktiv()) metaHaeppchen.push(m.draw_name);
+  if (zeigeRundeAktiv()) metaHaeppchen.push(m.round_name);
+  // Name + Meta als EIN Flex-Kind (vorher zwei) — zählt in der
+  // 6-Elemente-Grenze nur einmal.
+  parts.push(`<span class="who-block">
+      <span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club)}</span>
+      <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
+    </span>`);
   if (m.prep_call) {
     parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
       gerufen seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
@@ -2699,21 +3105,22 @@ function queueRow(m, draggable = false) {
       ? `${esc(who)} spielt gerade`
       : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
   }
-  // Ausgenommen von der automatischen Feldvergabe (Spec
-  // `feldvergabe-ausnahme`) — Badge, damit es niemand vergisst; manuelles
-  // Zuweisen bleibt unberührt, deshalb kein "blocked".
+  // Die wichtigsten 1-2 Badges, EIN gemeinsamer Wrapper (Auto-Vergabe-
+  // Ausnahme, Spec `feldvergabe-ausnahme`; manuell einsortiert, Spec
+  // `spielliste-manuelle-reihenfolge`) — jetzt über die geteilte
+  // Drei-Stufen-Klasse eingefärbt (Schritt 10) statt eigener Klassen.
+  const badges = [];
   if (m.excluded_from_auto_assign) {
-    parts.push(`<span class="excl-badge" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
+    badges.push(`<span class="badge badge-warn" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
   }
-  // Manuell einsortiert (Spec `spielliste-manuelle-reihenfolge`) — sichtbar
-  // markiert, damit die Turnierleitung erkennt, welche Spiele von der
-  // BTP-Reihenfolge abweichen (Review-Entscheidung 14.08.2026).
   if (m.manual) {
-    parts.push(`<span class="manual-badge" title="Manuell in die Reihenfolge dieser Halle einsortiert">☰ Manuell einsortiert</span>`);
+    badges.push(`<span class="badge badge-info" title="Manuell in die Reihenfolge dieser Halle einsortiert">☰ Manuell einsortiert</span>`);
   }
+  if (badges.length) parts.push(`<span class="row-badges">${badges.join("")}</span>`);
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
-  // frei ist. Deshalb ein eigener Knopf statt einer Geste.
+  // frei ist. Deshalb ein eigener Knopf statt einer Geste, und bewusst
+  // PRIMÄR sichtbar (vermutlich die häufigste Einzelaktion an einer Zeile).
   //
   // Als Sinnbild statt als Satz: In einer Liste mit 120 Zeilen frisst der
   // ausgeschriebene Knopf die halbe Zeile. Ein Umschalter mit zwei Zuständen
@@ -2724,63 +3131,80 @@ function queueRow(m, draggable = false) {
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
 
-  // Von der automatischen Feldvergabe ausnehmen (Spec
-  // `feldvergabe-ausnahme`) — betrifft nie das manuelle Zuweisen, deshalb
-  // ein eigener Umschalter neben dem Vorbereitungs-Knopf statt einer Geste
-  // auf der Zeile selbst.
+  // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
+  const kebabGroups = [];
+  // Auto-Vergabe-Ausnahme: seltener gebraucht als der Vorbereitungs-Ruf,
+  // deshalb hier statt als zweiter Icon-Knopf auf der Zeile.
   const exclTitel = m.excluded_from_auto_assign
     ? "Wieder in die automatische Feldvergabe aufnehmen"
     : "Von der automatischen Feldvergabe ausnehmen";
-  parts.push(`<button type="button" class="auto-excl${m.excluded_from_auto_assign ? " aktiv" : ""}"
-    data-auto-excl="${m.match_id}"
-    aria-pressed="${m.excluded_from_auto_assign ? "true" : "false"}"
-    title="${exclTitel}" aria-label="${exclTitel}">⏸</button>`);
-
+  kebabGroups.push(`<div class="kebab-group">
+      <span class="kebab-label">Automatische Feldvergabe</span>
+      <div class="kebab-row">
+        <button type="button" class="auto-excl" data-auto-excl="${m.match_id}"
+          aria-pressed="${m.excluded_from_auto_assign ? "true" : "false"}"
+          title="${exclTitel}">⏸ ${m.excluded_from_auto_assign ? "Wieder aufnehmen" : "Ausnehmen"}</button>
+      </div>
+    </div>`);
   // Spielort setzen, ohne ein Feld zu belegen. BTP liefert `LocationID` nur,
   // wenn das Turnier die Spalte selbst pflegt, und nimmt Rückschreibungen
   // nicht an (SENDUPDATE mit LocationID: Result=1, Wert verworfen, gemessen
   // 10.08.2026) — ohne diesen Wähler bliebe ein Spiel ohne Disziplin-Regel
   // bis zum Aufruf hallenlos, und der Hallenfilter zeigte es in keiner der
   // beiden Hallen. Nur im Mehr-Hallen-Turnier; nur solange eine Regel es
-  // nicht ohnehin festlegt (dann wäre die Wahl folgenlos).
+  // nicht ohnehin festlegt (dann wäre die Wahl folgenlos) — ohnehin die
+  // Ausnahme, deshalb im Kebab statt auf der Zeile.
   if (state.multi_hall && m.hall_source !== "rule") {
-    // Kürzel statt voller Hallennamen: In einer Liste mit 120 Zeilen frisst
-    // „Luckenwalder" mehr Platz als die Paarung daneben. Der volle Name
-    // steht im Tooltip und in der aufgeklappten Liste.
+    // Voller Hallenname statt Kürzel: Im Kebab-Menü ist Platz, den die Zeile
+    // selbst nicht mehr hergibt.
     const optionen = ['<option value="" title="kein fester Spielort">–</option>']
       .concat(state.halls.map((h) =>
-        `<option value="${esc(h.name)}" title="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(hallenKuerzel(h.name))}</option>`));
-    // Grenze ehrlich im Tooltip: Der Wähler wirkt in bts-light, Vergabe und
-    // Liveticker, aber BTP verwirft den Spielort still (gemessen 10.08.2026)
-    // — ohne diesen Hinweis wirkt die Auswahl wie eine echte BTP-Ansetzung.
-    const grenze = "BTP übernimmt ihn nicht (Schnittstelle verwirft Spielort-Änderungen; gemessen 10.08.2026)";
-    const titel = m.hall
-      ? `Spielort: ${m.hall} — ${grenze}`
-      : `Spielort für Vergabe, Hallenfilter und Liveticker — ${grenze}`;
-    parts.push(`<select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
-      data-hall-for="${m.match_id}" title="${esc(titel)}"
-      aria-label="Spielort">${optionen.join("")}</select>`);
+        `<option value="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(h.name)}</option>`));
+    // Grenze ehrlich benannt: Der Wähler wirkt in bts-light, Vergabe und
+    // Liveticker, aber BTP verwirft den Spielort still (gemessen 10.08.2026).
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Spielort (BTP übernimmt ihn nicht)</span>
+        <div class="kebab-row">
+          <select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
+            data-hall-for="${m.match_id}" aria-label="Spielort">${optionen.join("")}</select>
+        </div>
+      </div>`);
   }
-  // Nachruf, wenn jemand nicht erscheint. Getrennt nach Partei, weil in der
-  // Regel nur eine fehlt — und wer schon da ist, muss sich nicht noch einmal
-  // angesprochen fühlen.
+  // Nachruf, wenn jemand nicht erscheint — seltener gebraucht als der
+  // Erst-Ruf, deshalb hier statt auf der Zeile. Getrennt nach Partei, weil
+  // in der Regel nur eine fehlt.
   if (m.prep_call) {
     // `data-made` trägt den Stand in die Vorgangskennung: Ein Doppeltipp vor
     // dem nächsten Neuzeichnen zählt als Wiederholung, ein bewusster zweiter
     // Nachruf danach geht durch.
     const stand = m.prep_call.recalls || 0;
-    parts.push(`<span class="recall">Nachruf:
-      <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide</button>
-      <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
-      <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
-    </span>`);
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Nachruf</span>
+        <div class="recall">
+          <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide Parteien</button>
+          <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
+          <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
+        </div>
+      </div>`);
   }
+  const kebabOffen = openKebabMatchId === m.match_id;
+  parts.push(`<details class="kebab" data-kebab="${m.match_id}"${kebabOffen ? " open" : ""}>
+      <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋮</summary>
+      <div class="kebab-menu">${kebabGroups.join("")}</div>
+    </details>`);
+
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
                data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
 }
+
+/** Welche Zeile ihr Kebab-Menü gerade offen hat — über Neuzeichnen hinweg
+ *  gemerkt (der Poll-Takt liegt bei 2s; ohne diesen Merker schlösse sich
+ *  das Menü mitten in der Bedienung von selbst, ein natives `<details>`
+ *  überlebt kein `innerHTML`-Ersetzen). */
+let openKebabMatchId = null;
 
 /** Verdrahtet die Zeilen der Warteliste. */
 function wireQueue(box) {
@@ -2795,6 +3219,25 @@ function wireQueue(box) {
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll(".kebab").forEach((det) => {
+    const matchId = Number(det.dataset.kebab);
+    // Weder Öffnen/Schließen noch ein Tipp im Menü darf die Zeile
+    // zusätzlich auswählen oder einen Zug starten.
+    det.addEventListener("click", (ev) => ev.stopPropagation());
+    det.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    det.addEventListener("toggle", () => {
+      if (det.open) {
+        openKebabMatchId = matchId;
+        // Nur EIN offenes Menü gleichzeitig — sonst häufen sich bei
+        // mehreren angetippten Zeilen die Kästen übereinander.
+        box.querySelectorAll(".kebab[open]").forEach((other) => {
+          if (other !== det) other.open = false;
+        });
+      } else if (openKebabMatchId === matchId) {
+        openKebabMatchId = null;
+      }
+    });
   });
   box.querySelectorAll("button[data-auto-excl]").forEach((btn) => {
     const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
@@ -3217,15 +3660,20 @@ let reorderDragPending = false;
 
 /**
  * `list`: Container, dessen direkte Kind-Elemente mit `[data-id]` die
- * sortierbaren Zeilen sind (jede braucht innen einen `.drag-griff`).
- * `onReorder(id, beforeId)`: nur aufgerufen, wenn sich die Reihenfolge beim
- * Loslassen tatsächlich geändert hat; `id`/`beforeId` sind die `data-id`-
- * Werte als String, `beforeId === null` heißt „ans Ende".
+ * sortierbaren Zeilen sind (jede braucht innen einen Griff, standardmäßig
+ * `.drag-griff`). `onReorder(id, beforeId)`: nur aufgerufen, wenn sich die
+ * Reihenfolge beim Loslassen tatsächlich geändert hat; `id`/`beforeId`
+ * sind die `data-id`-Werte als String, `beforeId === null` heißt „ans
+ * Ende". `griffSelector` (Default `.drag-griff`) generalisiert dasselbe
+ * Muster auf das Panel-Reorder (Spec tl-web-panelsystem): dort ist der
+ * Griff `.panel-griff` — bewusst ein ANDERES Sinnbild, damit „ganzes Panel
+ * verschieben" nie mit „eine Zeile verschieben" verwechselt wird, aber
+ * dieselbe erprobte Zeigegesten-/Tastatur-Logik dahinter.
  */
-function enableReorderDrag(list, onReorder) {
+function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff") {
   Array.from(list.children).forEach((li) => {
     if (!li.dataset.id) return;
-    const griff = li.querySelector(".drag-griff");
+    const griff = li.querySelector(griffSelector);
     griff?.addEventListener("pointerdown", (down) => {
       if (down.pointerType !== "touch" && down.button !== 0) return;
       if (reorderDragPending) return;
@@ -3316,6 +3764,320 @@ function startReorderDrag(list, li, down, onReorder) {
   window.addEventListener("pointercancel", cancel);
 }
 
+// ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
+// Alle neun Abschnitte laufen über EINEN Mechanismus: eine einheitliche
+// Kopfzeile (`panelHeadHtml`), Sichtbarkeit/Reihenfolge aus dem aktiven
+// Profil (`renderPanelStack`), Höhe über generalisierte Steg-Griffe
+// (`wirePanelStegs`, Vorbild `enableSteg`). „Felder" bekommt dieselbe
+// Kopfzeile über `renderCourtsHead()`, bleibt aber strukturell außerhalb
+// von `#panel-stack` (eigene, fixierte Ankerposition, siehe HTML-Kommentar
+// dort) — kein Reorder-Griff, kein Steg-Nachbar.
+
+/** Ist ein Panel bei DIESER Installation überhaupt vorhanden — unabhängig
+ *  von der Sichtbarkeits-Einstellung im Profil? Die beiden optionalen
+ *  Module (Zähltafel-Verwaltung, Schiedsrichter-Verwaltung) gibt es nur,
+ *  wenn die Installation sie eingeschaltet hat — bisher die `hidden`-Regel
+ *  auf `#sk-box`/`#off-box`, jetzt hier zentral geprüft. */
+function panelAvailable(key) {
+  if (key === "scorekeepers") return !!(state && state.scorekeeper_managed);
+  if (key === "officials") return !!(state && state.officials_managed);
+  return true;
+}
+
+/** Aktualisiert NUR den Zähler eines bereits gezeichneten Panels — läuft
+ *  bei JEDEM Poll (jede `render*()`-Funktion ruft das für ihr Panel auf),
+ *  unabhängig davon, ob `renderPanelStack()` das Gerüst neu gebaut hat.
+ *  Fehlt das Element (Panel gerade ausgeblendet), passiert einfach nichts. */
+function setPanelCount(key, n) {
+  const el = document.getElementById(`panel-count-${key}`);
+  if (el) el.textContent = `(${n})`;
+}
+
+/**
+ * Einheitliche Panel-Kopfzeile (Spec tl-web-panelsystem, Akzeptanzkriterium
+ * „Titel, Zähler, Ein-/Ausblend-Schalter"). `draggable` fügt den
+ * Panel-Reorder-Griff hinzu (nie für „Felder" — die fixierte
+ * Ankerposition). `extra` hängt zusätzliches Markup VOR den Sichtbarkeits-
+ * Schalter (genutzt für den Reihenfolge-zurücksetzen-Knopf bei
+ * „Spielbereit").
+ */
+function panelHeadHtml(key, visible, draggable, extra = "") {
+  const titel = PANEL_TITLES[key];
+  // `key` ist zwar durch `normalizedPanels()` schon auf die feste
+  // `PANEL_KEYS`-Liste gefiltert, bevor irgendetwas hier ankommt — trotzdem
+  // escaped: sonst hinge die Sicherheit dieser Attribute an einem Filter
+  // weit oben im Aufrufpfad, den ein späteres Refactoring lautlos entfernen
+  // könnte (`key` reist laut Wire-Vertrag als freier String).
+  const k = esc(key);
+  const griff = draggable ? `<span class="panel-griff" tabindex="0" role="button" data-id="${k}"
+      title="Panel verschieben oder mit Pfeiltasten umsortieren"
+      aria-label="${esc(titel)}-Panel in der Reihenfolge verschieben — ziehen oder Pfeiltasten">${PANEL_GRIFF}</span>` : "";
+  const visTitel = visible ? "Panel ausblenden" : "Panel einblenden";
+  return `<header class="panel-head" data-panel="${k}">
+      ${griff}
+      <span class="panel-title">${esc(titel)}</span>
+      <span class="panel-count" id="panel-count-${k}"></span>
+      <span class="panel-spacer"></span>
+      ${extra}
+      <button type="button" class="panel-vis" data-panel-vis="${k}"
+        aria-pressed="${visible ? "true" : "false"}" title="${visTitel}" aria-label="${visTitel}">
+        ${visible ? AUGE_AUF : AUGE_ZU}
+      </button>
+    </header>`;
+}
+
+/** Innerer Inhalt eines Panels — dieselben stabilen Element-IDs wie vor
+ *  dem Panel-System, damit die bestehenden `render*()`-Funktionen (mit
+ *  ihren Sonderregeln: Zug-Schutz, „nur bei echter Änderung neu bauen" …)
+ *  unverändert weiterarbeiten. Nur die äußere Verpackung ist neu. */
+function panelBodySkeleton(key) {
+  switch (key) {
+    case "walkovers":
+      return `<div id="walkovers"></div>`;
+    case "scorekeepers":
+      return `
+        <ol id="sk-list"></ol>
+        <form id="sk-add">
+          <input type="text" id="sk-name" placeholder="Name (Doppel: A / B)" maxlength="80" />
+          <button type="submit">Hinzufügen</button>
+        </form>`;
+    case "officials":
+      return `
+        <p class="meta" id="off-next"></p>
+        <ol id="off-list"></ol>`;
+    case "queue_called":
+      return `<div class="queue" id="queue-called"></div>`;
+    case "queue_ready":
+      return `<div id="queue-ready"></div>`;
+    case "queue_waiting":
+      return `<div class="queue" id="queue-waiting"></div>`;
+    case "queue_no_hall":
+      return `<div class="queue" id="queue-no-hall"></div>`;
+    case "finished":
+      return `<div id="fin-list"></div>`;
+    default:
+      return "";
+  }
+}
+
+/** Verdrahtet die Sichtbarkeits-Schalter aller Panel-Kopfzeilen innerhalb
+ *  von `container` (Panel-Stack ODER die „Felder"-Kopfzeile). */
+function wirePanelVis(container) {
+  container.querySelectorAll("[data-panel-vis]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const key = btn.dataset.panelVis;
+      mutateActiveProfile((p) => {
+        const setting = p.panels.find((x) => x.key === key);
+        if (setting) setting.visible = !setting.visible;
+      }, null);
+    });
+  });
+}
+
+/**
+ * Generalisiertes `#steg`-Muster (Vorbild `enableSteg()`) auf beliebig
+ * viele Panel-Grenzen: Jeder `.panel-steg` sitzt zwischen zwei direkten
+ * Geschwister-`.panel`-Elementen im DOM — und weil `renderPanelStack()`
+ * ausgeblendete Panels gar nicht erst rendert, ist der jeweils vorherige/
+ * nächste Geschwisterknoten IMMER ein sichtbares Panel. Die
+ * „bindet sich automatisch an den nächsten sichtbaren Nachbarn"-Regel
+ * (Akzeptanzkriterium) braucht dadurch keine eigene Sonderlogik.
+ *
+ * Höhen laufen über `flex-grow` (angewendet in `applyPanelHeights()`);
+ * beim Ziehen wird das Verhältnis der beiden Nachbarn ausgehend von ihren
+ * PIXEL-Höhen umgerechnet (Splitter-Standardmuster) — `heightFr` selbst
+ * ist eine relative Gewichtung, kein Pixelmaß, deshalb keine 1:1-Übernahme
+ * des Pixel-Deltas wie beim alten Felder/Liste-Steg.
+ */
+/** Läuft gerade ein Panel-Rand-Zug? Solange NICHT über `applyPanelHeights()`
+ *  neu einpassen — sonst überschriebe der Poll-Takt (alle 2s) die noch
+ *  ungespeicherten, live gezogenen `flexGrow`-Werte mit dem zuletzt
+ *  GESPEICHERTEN Stand und die Grenze zuckte unter dem Finger zurück
+ *  (Muster `reorderDragPending`, dasselbe Problem wie bei Queue-/
+ *  Schiedsrichter-Umsortierung). */
+let panelStegDragging = false;
+
+function wirePanelStegs(stack) {
+  stack.querySelectorAll(".panel-steg").forEach((steg) => {
+    const prev = steg.previousElementSibling;
+    const next = steg.nextElementSibling;
+    if (!prev || !next || !prev.classList.contains("panel") || !next.classList.contains("panel")) return;
+    const panelMinPx = () => parseFloat(getComputedStyle(prev).minHeight) || 40;
+    let bewegt = false;
+    steg.addEventListener("pointerdown", (down) => {
+      if (!down.isPrimary) return;
+      down.preventDefault();
+      steg.setPointerCapture(down.pointerId);
+      steg.classList.add("zieht");
+      document.body.classList.add("dragging");
+      panelStegDragging = true;
+      const rA = prev.getBoundingClientRect(), rB = next.getBoundingClientRect();
+      const summe = rA.height + rB.height;
+      const frA = parseFloat(prev.style.flexGrow) || 1;
+      const frB = parseFloat(next.style.flexGrow) || 1;
+      const frSumme = frA + frB;
+      const startY = down.clientY;
+      bewegt = false;
+      const min = panelMinPx();
+      const move = (ev) => {
+        const delta = ev.clientY - startY;
+        if (!bewegt && Math.abs(delta) < 3) return;
+        bewegt = true;
+        const neuA = Math.min(Math.max(rA.height + delta, min), Math.max(min, summe - min));
+        const neuFrA = frSumme * (neuA / summe);
+        prev.style.flexGrow = String(neuFrA);
+        next.style.flexGrow = String(Math.max(0.05, frSumme - neuFrA));
+      };
+      const done = () => {
+        steg.removeEventListener("pointermove", move);
+        steg.removeEventListener("pointerup", done);
+        steg.removeEventListener("pointercancel", done);
+        steg.classList.remove("zieht");
+        document.body.classList.remove("dragging");
+        panelStegDragging = false;
+        if (!bewegt) return;
+        const neuFrA = parseFloat(prev.style.flexGrow);
+        const neuFrB = parseFloat(next.style.flexGrow);
+        mutateActiveProfile((p) => {
+          const a = p.panels.find((x) => x.key === prev.dataset.panel);
+          const b = p.panels.find((x) => x.key === next.dataset.panel);
+          if (a) a.heightFr = neuFrA;
+          if (b) b.heightFr = neuFrB;
+        }, null);
+      };
+      steg.addEventListener("pointermove", move);
+      steg.addEventListener("pointerup", done);
+      steg.addEventListener("pointercancel", done);
+    });
+    // Doppeltipp/Doppelklick: gleichmäßige Verteilung wiederherstellen —
+    // dasselbe Verhalten wie beim alten Felder/Liste-Steg, nur jetzt für
+    // ALLE Panel-Höhen des aktiven Profils auf einmal (Akzeptanzkriterium:
+    // „stellt die automatische Verteilung zurück").
+    steg.addEventListener("dblclick", () => {
+      mutateActiveProfile((p) => { p.panels.forEach((x) => { x.heightFr = 1; }); }, "Höhen gleichmäßig verteilt.");
+    });
+    // Pfeiltasten-Fallback (Akzeptanzkriterium: für JEDE neue Drag-
+    // Interaktion, auch Panel-Rand-Resize).
+    steg.setAttribute("tabindex", "0");
+    steg.setAttribute("role", "separator");
+    steg.setAttribute("aria-label", `Höhe zwischen ${esc(PANEL_TITLES[prev.dataset.panel] || "")} und ${esc(PANEL_TITLES[next.dataset.panel] || "")} ziehen`);
+    steg.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+      ev.preventDefault();
+      mutateActiveProfile((p) => {
+        const a = p.panels.find((x) => x.key === prev.dataset.panel);
+        const b = p.panels.find((x) => x.key === next.dataset.panel);
+        if (!a || !b) return;
+        const summe = (a.heightFr || 1) + (b.heightFr || 1);
+        const schritt = 0.1;
+        let neuA = (a.heightFr || 1) + (ev.key === "ArrowUp" ? schritt : -schritt);
+        neuA = Math.min(Math.max(neuA, 0.2), summe - 0.2);
+        a.heightFr = neuA;
+        b.heightFr = summe - neuA;
+      }, null);
+    });
+  });
+}
+
+/** `flex-grow` aller sichtbaren Panels aus dem aktiven Profil anwenden —
+ *  unabhängig davon, ob das Gerüst gerade neu gebaut wurde (läuft bei
+ *  JEDEM `renderPanelStack()`-Aufruf, damit ein reiner Höhen-Wechsel ohne
+ *  Sichtbarkeits-/Reihenfolge-Änderung nicht das ganze Gerüst neu bauen
+ *  muss — das würde offene Kebab-Menüs und Scroll-Positionen zerstören). */
+function applyPanelHeights(stack, panels) {
+  const byKey = new Map(panels.map((p) => [p.key, p]));
+  stack.querySelectorAll(":scope > .panel").forEach((el) => {
+    const setting = byKey.get(el.dataset.panel);
+    el.style.flexGrow = String((setting && setting.heightFr) || 1);
+  });
+}
+
+/**
+ * Baut `#panel-stack` (die acht Nicht-„Felder"-Panels) aus dem aktiven
+ * Profil. Das DOM-Gerüst wird NUR neu gezeichnet, wenn sich Sichtbarkeit
+ * ODER Reihenfolge ODER die Verfügbarkeit (Zähltafel/Schiedsrichter erst
+ * gerade ein-/ausgeschaltet) wirklich geändert haben — sonst rissen alle
+ * zwei Sekunden (Poll-Takt) ein offenes Kebab-Menü, eine Scroll-Position
+ * oder ein laufender Zug ab (Muster `renderWalkovers`/`renderOfficials`:
+ * „nur bei echter Änderung neu bauen"). Ein reiner Höhen-Wechsel läuft
+ * separat über `applyPanelHeights()`, ausdrücklich AUSSERHALB der
+ * Signatur — sonst baute jeder Steg-Zug das Gerüst neu.
+ */
+function renderPanelStack() {
+  const stack = $("panel-stack");
+  if (!stack || !state) return;
+  // Während eines laufenden Rand-Zugs NICHT neu einpassen (siehe
+  // `panelStegDragging`-Kommentar) — der Zug selbst schreibt beim
+  // Loslassen (`mutateActiveProfile`), das löst denselben Poll-getriebenen
+  // Re-Render aus; dann ist er wieder erlaubt.
+  if (panelStegDragging) return;
+  const profile = resolveActiveProfile();
+  const panels = normalizedPanels(profile);
+  const sichtbar = panels.filter((p) => p.key !== "courts" && p.visible && panelAvailable(p.key));
+  const signatur = sichtbar.map((p) => p.key).join(",");
+  if (stack.dataset.shape !== signatur) {
+    stack.dataset.shape = signatur;
+    const teile = [];
+    sichtbar.forEach((p, i) => {
+      if (i > 0) teile.push(`<div class="panel-steg" role="separator" tabindex="-1"
+        title="Ziehen: Höhe ändern · Doppeltipp: gleichmäßig verteilen"></div>`);
+      const extra = p.key === "queue_ready"
+        ? `<button type="button" id="queue-reset" class="reset-order" hidden
+             title="Verwirft die manuelle Sortierung ALLER Hallen — danach gilt wieder BTPs eigene Reihenfolge">
+             Reihenfolge zurücksetzen</button>`
+        : "";
+      teile.push(`<section class="panel" data-panel="${esc(p.key)}" data-id="${esc(p.key)}">
+          ${panelHeadHtml(p.key, true, true, extra)}
+          <div class="panel-body">${panelBodySkeleton(p.key)}</div>
+        </section>`);
+    });
+    stack.innerHTML = teile.join("");
+    wirePanelVis(stack);
+    enableReorderDrag(stack, (id, beforeId) => {
+      mutateActiveProfile((p) => {
+        const arr = p.panels;
+        const from = arr.findIndex((x) => x.key === id);
+        if (from === -1) return;
+        const [moved] = arr.splice(from, 1);
+        const to = beforeId ? arr.findIndex((x) => x.key === beforeId) : -1;
+        if (to === -1) arr.push(moved); else arr.splice(to, 0, moved);
+      }, "Panel-Reihenfolge geändert.");
+    }, ".panel-griff");
+    wirePanelStegs(stack);
+    // `#queue-reset`/`#sk-add` existieren erst seit diesem Aufbau — anders
+    // als früher (fest im Markup) müssen sie HIER verdrahtet werden, nicht
+    // in `start()` (das läuft VOR dem ersten Zustand, die Elemente gäbe es
+    // noch gar nicht). Genau einmal je Neubau, kein Mehrfach-Zuhörer bei
+    // unverändertem Gerüst — `renderQueue()`/`renderScorekeepers()` selbst
+    // ersetzen nur die inneren Listen, nie diese Container.
+    stack.querySelector("#queue-reset")?.addEventListener("click", resetQueueOrder);
+    stack.querySelector("#sk-add")?.addEventListener("submit", addScorekeeper);
+    // Die frisch angelegten Container-IDs sind hier noch leer — `render()`
+    // ruft `renderPanelStack()` bewusst VOR den einzelnen `render*()`-
+    // Funktionen auf, die füllen sie im selben Durchlauf. Kein erneuter
+    // Aufruf hier nötig (und keiner, der eine Signatur-Prüfung umgehen
+    // könnte, die z. B. `renderWalkovers()` gegen Checkbox-Reset absichert).
+  }
+  applyPanelHeights(stack, panels);
+}
+
+/** Kopfzeile + Sichtbarkeit von „Felder" — bleibt strukturell außerhalb
+ *  von `#panel-stack` (fixierte Ankerposition), bekommt aber dieselbe
+ *  einheitliche Kopfzeile wie die anderen acht Panels. */
+function renderCourtsHead() {
+  const el = $("courts-head");
+  const section = $("courts-section");
+  const steg = $("steg");
+  if (!el || !section || !state) return;
+  const panels = normalizedPanels(resolveActiveProfile());
+  const setting = panels.find((p) => p.key === "courts") || { visible: true };
+  section.hidden = !setting.visible;
+  if (steg) steg.hidden = !setting.visible;
+  el.innerHTML = panelHeadHtml("courts", setting.visible, false);
+  wirePanelVis(el);
+}
+
 /**
  * Manuelle Reihenfolge (Spec `spielliste-manuelle-reihenfolge`): ein Zug
  * darf Match-IDs nur innerhalb DERSELBEN Halle relativ zueinander verschieben
@@ -3337,68 +4099,99 @@ function groupByHall(list) {
   return [...byHall.entries()].sort(([a], [b]) => a.localeCompare(b, "de"));
 }
 
-function renderQueue() {
-  const box = $("queue");
-  if (!state) return;
-  // Während eines laufenden Zugs NICHT neu bauen (Muster `renderOfficials`,
-  // Code-Review-Fund 14.08.2026 dort übernommen) — sonst risse `innerHTML`
-  // die gerade gezogene Zeile aus dem DOM.
-  if (reorderDragPending) return;
+/**
+ * Die Warteliste in ihre vier Panel-Untergruppen aufgeteilt (Spec
+ * tl-web-panelsystem: „In Vorbereitung gerufen"/„Spielbereit"/„Noch nicht
+ * bereit"/„Ohne Hallenzuordnung" sind seit dem Panel-System vier
+ * eigenständige, einzeln aus-/einblendbare Panels statt Unterabschnitte
+ * EINES Abschnitts). `renderQueue()` zeichnet daraus alle vier Panels und
+ * meldet je Panel den Zähler über `setPanelCount()` — eine Einteilung, vier
+ * Abschnitte, kein zweiter Rechenweg.
+ */
+function queueBuckets() {
+  if (!state) return { called: [], ready: [], waiting: [], noHall: [] };
   // Bei aktivem Hallenfilter bleiben Spiele ohne Hallenzuordnung sichtbar —
   // ein weggefiltertes Spiel wird nicht vergeben und blockiert am Ende den
   // Zeitplan.
   const inHall = (m) => !hallFilter || m.hall === hallFilter;
   const noHall = state.queue.filter((m) => hallFilter && !m.hall);
   const mine = state.queue.filter(inHall);
+  return {
+    called: mine.filter((m) => m.prep_call),
+    ready: mine.filter((m) => !m.prep_call && !m.blocked),
+    waiting: mine.filter((m) => !m.prep_call && m.blocked),
+    noHall,
+  };
+}
 
-  const called = mine.filter((m) => m.prep_call);
-  const ready = mine.filter((m) => !m.prep_call && !m.blocked);
-  const waiting = mine.filter((m) => !m.prep_call && m.blocked);
-  $("queue-count").textContent = `(${mine.length + noHall.length})`;
+function renderQueue() {
+  if (!state) return;
+  // Während eines laufenden Zugs NICHT neu bauen (Muster `renderOfficials`,
+  // Code-Review-Fund 14.08.2026 dort übernommen) — sonst risse `innerHTML`
+  // die gerade gezogene Zeile aus dem DOM.
+  if (reorderDragPending) return;
+  const { called, ready, waiting, noHall } = queueBuckets();
+  setPanelCount("queue_called", called.length);
+  setPanelCount("queue_ready", ready.length);
+  setPanelCount("queue_waiting", waiting.length);
+  setPanelCount("queue_no_hall", noHall.length);
 
-  const section = (title, list) =>
-    !list.length ? "" :
-    `<div class="section"><h2>${esc(title)} <span class="count">(${list.length})</span></h2>
-     <div class="queue">${list.map((m) => queueRow(m)).join("")}</div></div>`;
+  const calledBox = $("queue-called");
+  if (calledBox) {
+    calledBox.innerHTML = called.length
+      ? called.map((m) => queueRow(m)).join("")
+      : `<p class="note">Niemand in Vorbereitung gerufen.</p>`;
+    wireQueue(calledBox);
+  }
 
-  let html = section("In Vorbereitung gerufen", called);
-  if (ready.length) {
-    const gruppen = groupByHall(ready);
-    const zeigeUeberschriften = gruppen.length > 1;
-    html += `<div class="section"><h2>Spielbereit <span class="count">(${ready.length})</span></h2>` +
-      gruppen.map(([hall, list]) => `
-        ${zeigeUeberschriften ? `<h3>${esc(hall || "Ohne Hallenzuordnung")}</h3>` : ""}
-        <div class="queue" data-hall="${esc(hall)}">${list.map((m) => queueRow(m, true)).join("")}</div>
-      `).join("") +
-      `</div>`;
+  const readyBox = $("queue-ready");
+  if (readyBox) {
+    if (ready.length) {
+      const gruppen = groupByHall(ready);
+      const zeigeUeberschriften = gruppen.length > 1;
+      readyBox.innerHTML = gruppen.map(([hall, list]) => `
+          ${zeigeUeberschriften ? `<h3>${esc(hall || "Ohne Hallenzuordnung")}</h3>` : ""}
+          <div class="queue" data-hall="${esc(hall)}">${list.map((m) => queueRow(m, true)).join("")}</div>
+        `).join("");
+    } else {
+      readyBox.innerHTML = `<p class="note">Kein Spiel spielbereit${hallFilter ? " in dieser Halle" : ""}.</p>`;
+    }
+    if (state.truncated_halls && state.truncated_halls.length) {
+      const names = state.truncated_halls.map((h) => h || "ohne Hallenzuordnung").join(", ");
+      readyBox.insertAdjacentHTML("beforeend",
+        `<p class="note warn">Die Liste ist gekürzt (${esc(names)}) — weitere Spiele stehen weiter hinten an.</p>`);
+    }
+    wireQueue(readyBox);
+    readyBox.querySelectorAll(".queue[data-hall]").forEach((container) => {
+      enableReorderDrag(container, (id, beforeId) => send(
+        `queue-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "queue_reorder", matchId: Number(id), beforeMatchId: beforeId === null ? null : Number(beforeId) },
+        "Reihenfolge geändert.",
+      ));
+    });
   }
-  if (waiting.length) {
-    html += `<div class="section"><details><summary>Noch nicht bereit (${waiting.length})</summary>
-      <div class="queue">${waiting.map((m) => queueRow(m)).join("")}</div></details></div>`;
+
+  const waitingBox = $("queue-waiting");
+  if (waitingBox) {
+    waitingBox.innerHTML = waiting.length
+      ? waiting.map((m) => queueRow(m)).join("")
+      : `<p class="note">Niemand wartet noch.</p>`;
+    wireQueue(waitingBox);
   }
-  if (noHall.length) {
-    html += `<div class="section"><details open><summary>Ohne Hallenzuordnung (${noHall.length})</summary>
-      <div class="queue">${noHall.map((m) => queueRow(m)).join("")}</div></details></div>`;
+
+  const noHallBox = $("queue-no-hall");
+  if (noHallBox) {
+    noHallBox.innerHTML = noHall.length
+      ? noHall.map((m) => queueRow(m)).join("")
+      : `<p class="note">Kein Spiel ohne Hallenzuordnung.</p>`;
+    wireQueue(noHallBox);
   }
-  if (!mine.length && !noHall.length) {
-    html = `<p class="note">Kein Spiel wartet${hallFilter ? " in dieser Halle" : ""}.</p>`;
-  }
-  if (state.truncated_halls && state.truncated_halls.length) {
-    const names = state.truncated_halls.map((h) => h || "ohne Hallenzuordnung").join(", ");
-    html += `<p class="note warn">Die Liste ist gekürzt (${esc(names)}) — weitere Spiele stehen weiter hinten an.</p>`;
-  }
-  box.innerHTML = html;
-  wireQueue(box);
-  box.querySelectorAll(".queue[data-hall]").forEach((container) => {
-    enableReorderDrag(container, (id, beforeId) => send(
-      `queue-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-      { action: "queue_reorder", matchId: Number(id), beforeMatchId: beforeId === null ? null : Number(beforeId) },
-      "Reihenfolge geändert.",
-    ));
-  });
-  // Reset-Knopf nur zeigen, solange irgendein Spiel manuell einsortiert ist
-  // — sonst gäbe es nichts zurückzusetzen.
-  $("queue-reset").hidden = !state.queue.some((m) => m.manual);
+
+  // Reset-Knopf (im Kopf des „Spielbereit"-Panels) nur zeigen, solange
+  // irgendein Spiel manuell einsortiert ist — sonst gäbe es nichts
+  // zurückzusetzen.
+  const resetBtn = $("queue-reset");
+  if (resetBtn) resetBtn.hidden = !state.queue.some((m) => m.manual);
 }
 
 /** Verwirft die manuelle Reihenfolge ALLER Hallen (globaler Reset-Knopf). */
@@ -3426,7 +4219,13 @@ const woUnticked = new Set();
 function renderWalkovers() {
   const box = $("walkovers");
   const list = (state.walkovers || []);
-  if (!list.length) { box.innerHTML = ""; box.dataset.shape = ""; return; }
+  setPanelCount("walkovers", list.length);
+  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
+  if (!list.length) {
+    box.innerHTML = `<p class="note">Keine offenen Vorschläge.</p>`;
+    box.dataset.shape = "";
+    return;
+  }
   // Der Abschnitt wird nur neu gebaut, wenn er sich wirklich geändert hat.
   // Sonst setzte jede Abfrage die Kästchen auf „angekreuzt" zurück — wer ein
   // Spiel bewusst abwählt und zwei Sekunden zögert, wertete es kampflos,
@@ -3434,7 +4233,7 @@ function renderWalkovers() {
   const shape = list.map((w) => w.id + ":" + w.candidates.map((c) => c.match_id).join(",")).join("|");
   if (box.dataset.shape === shape) return;
   box.dataset.shape = shape;
-  box.innerHTML = `<h2>Aufgaben <span class="count">(${list.length})</span></h2>` +
+  box.innerHTML =
     list.map((w) => `
       <div class="wo" data-wo="${esc(w.id)}">
         <h4>${esc(w.retired_team)} hat aufgegeben <span class="meta">· ${esc(w.draw_name)}</span></h4>
@@ -3508,27 +4307,27 @@ function renderWalkovers() {
  * nächsten Abruf (alle zwei Sekunden) mitten im Tippen gelöscht.
  */
 function renderScorekeepers() {
-  const box = $("sk-box");
-  box.hidden = !state.scorekeeper_managed;
-  if (box.hidden) return;
+  if (!state.scorekeeper_managed) return; // Panel gar nicht verfügbar (Installation verwaltet keine Zähltafeln).
   const list = state.scorekeepers || [];
-  $("sk-count").textContent = list.length ? `(${list.length})` : "";
-  $("sk-list").innerHTML = list.map((e, i) => `<li>
+  setPanelCount("scorekeepers", list.length);
+  const box = $("sk-list");
+  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
+  box.innerHTML = list.length ? list.map((e, i) => `<li>
       <span class="sk-names">${esc(e.names.join(" / "))}</span>
       <span class="sk-wait num" data-since="${e.enqueued_ms}" title="wartet seit">${e.enqueued_ms ? elapsed(e.enqueued_ms) : ""}</span>
       ${i > 0 ? `<button type="button" data-sk-adv="${esc(e.key)}"
           title="an den Anfang der Warteschlange" aria-label="vorziehen">▲</button>` : ""}
       <button type="button" data-sk-del="${esc(e.key)}"
         title="aus der Warteschlange nehmen" aria-label="aus der Warteschlange nehmen">×</button>
-    </li>`).join("");
-  $("sk-list").querySelectorAll("[data-sk-adv]").forEach((b) =>
+    </li>`).join("") : `<li class="meta">niemand wartet</li>`;
+  box.querySelectorAll("[data-sk-adv]").forEach((b) =>
     b.addEventListener("click", () =>
       send(
         `sk-adv-${b.dataset.skAdv}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "scorekeeper_advance", key: b.dataset.skAdv },
         "Vorgezogen.",
       )));
-  $("sk-list").querySelectorAll("[data-sk-del]").forEach((b) =>
+  box.querySelectorAll("[data-sk-del]").forEach((b) =>
     b.addEventListener("click", () =>
       send(`sk-del-${b.dataset.skDel}`, { action: "scorekeeper_remove", key: b.dataset.skDel }, "Aus der Warteschlange entfernt.")));
 }
@@ -3633,16 +4432,18 @@ let graphCtx = null;
 // Anfrage über /tl/api/officials/… — sie kodieren persönliche Beziehungen
 // und haben im Broadcast-Zustand nichts zu suchen.
 function renderOfficials() {
-  const box = $("off-box");
-  box.hidden = !state.officials_managed;
-  if (box.hidden) return;
+  if (!state.officials_managed) return; // Panel gar nicht verfügbar (Turnier spielt ohne Schiedsrichter-Verwaltung).
   const list = state.officials || [];
-  $("off-count").textContent = list.length ? `(${list.length})` : "";
-  // Auch bei zugeklappter Liste sichtbar: wer als Nächstes zugeteilt würde
-  // (erster weder pausierter noch schon im Dienst befindlicher Eintrag) —
-  // ohne Konflikt-Prüfung, die braucht ein konkretes Spiel als Bezug.
+  setPanelCount("officials", list.length);
+  const box = $("off-list");
+  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
+  // Auch bei eingeklappter/ausgeblendeter Liste im Kopf sichtbar: wer als
+  // Nächstes zugeteilt würde (erster weder pausierter noch schon im Dienst
+  // befindlicher Eintrag) — ohne Konflikt-Prüfung, die braucht ein
+  // konkretes Spiel als Bezug.
   const next = list.find((o) => !o.paused && !o.on_duty_court_id);
-  $("off-next").textContent = next ? `nächster: ${next.name}` : "";
+  const naechsterEl = $("off-next");
+  if (naechsterEl) naechsterEl.textContent = next ? `nächster: ${next.name}` : "";
   // Während eines laufenden Zugs die Liste NICHT neu bauen (Code-Review-Fund
   // 14.08.2026): `innerHTML` ersetzt jede Zeile durch einen neuen Knoten —
   // die gerade gezogene würde dabei aus dem DOM gerissen, `move()` mischte
@@ -3651,7 +4452,7 @@ function renderOfficials() {
   // beim Loslassen (`onReorder`), das löst denselben Poll-getriebenen
   // Re-Render aus — dann ist er wieder erlaubt.
   if (reorderDragPending) return;
-  $("off-list").innerHTML = list.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
+  box.innerHTML = list.length ? list.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
       <span class="drag-griff" tabindex="0" role="button"
         title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
         aria-label="${esc(o.name)} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>
@@ -3661,16 +4462,16 @@ function renderOfficials() {
       <button type="button" data-off-detail="${o.id}" title="Sperren, Verein und Einsätze">${o.appearances}×</button>
       <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
         title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
-    </li>`).join("");
-  $("off-list").querySelectorAll("[data-off-pause]").forEach((b) =>
+    </li>`).join("") : `<li class="meta">keine Schiedsrichter eingetragen</li>`;
+  box.querySelectorAll("[data-off-pause]").forEach((b) =>
     b.addEventListener("click", () => send(
       `off-pause-${b.dataset.offPause}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
       { action: "official_pause", officialId: Number(b.dataset.offPause), paused: !b.dataset.paused },
       b.dataset.paused ? "Wieder eingeteilt." : "Pausiert.",
     )));
-  $("off-list").querySelectorAll("[data-off-detail]").forEach((b) =>
+  box.querySelectorAll("[data-off-detail]").forEach((b) =>
     b.addEventListener("click", () => openOfficialDetail(Number(b.dataset.offDetail))));
-  enableReorderDrag($("off-list"), (id, beforeId) => send(
+  enableReorderDrag(box, (id, beforeId) => send(
     `off-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
     { action: "official_reorder", officialId: Number(id), beforeOfficialId: beforeId === null ? null : Number(beforeId) },
     "Reihenfolge geändert.",
@@ -3872,6 +4673,285 @@ $("off-close").addEventListener("click", () => {
   offCtx = null;
 });
 
+// ── Profil-Verwaltung (Overlay, Spec tl-web-panelsystem, ADR 0024) ─────
+// Zweite, bewusste Ausnahme von „kein Setup aus dem Web" (ADR 0024) — läuft
+// über denselben `TlAction`-Kanal wie Schiedsrichter-Pflege/Feldvergabe-
+// Ausnahme, kein eigener Endpunkt, keine Umgehung der Bearer-Token-Auth.
+// Alle Nutzereingaben (Profilname) laufen konsequent durch `esc()`, wie an
+// jeder anderen Stelle dieser Seite auch — kein `innerHTML` mit rohem
+// Nutzertext.
+//
+// `profilesEditCtx` — `{ kopie, isNew }` im Editor, sonst `null`
+// (Listenansicht). Bewusst NICHT vom ambienten Poll-Takt neu gezeichnet
+// (anders als die Live-Seite): Ein Redraw mitten im Tippen des Namens
+// würde die Eingabe löschen (dasselbe Problem, das `#sk-add` schon lange
+// löst, indem sein Formular nie neu gezeichnet wird). Die Überschau-Liste
+// aktualisiert sich stattdessen GEZIELT nach jeder eigenen Aktion (Wählen/
+// Löschen/Standard setzen/Speichern), nicht bei jedem Fremd-Update.
+let profilesEditCtx = null;
+
+function openProfilesOverlay() {
+  profilesEditCtx = null;
+  $("profiles-overlay").hidden = false;
+  renderProfilesOverlay();
+}
+function closeProfilesOverlay() {
+  $("profiles-overlay").hidden = true;
+  profilesEditCtx = null;
+}
+
+function renderProfilesOverlay() {
+  if ($("profiles-overlay").hidden) return;
+  if (profilesEditCtx) renderProfileEditor(); else renderProfilesList();
+}
+
+function renderProfilesList() {
+  $("profiles-title").textContent = "Profile";
+  const katalog = (state && state.profiles) || [];
+  const aktivId = resolveActiveProfile().id;
+  const defaultId = (state && state.default_profile_id) || "";
+  const zeilen = katalog.map((p) => {
+    const tags = [];
+    if (p.id === defaultId) tags.push('<span class="badge badge-info">Standard</span>');
+    if (p.id === aktivId) tags.push('<span class="badge badge-info">aktiv auf diesem Gerät</span>');
+    return `<div class="prof-row" data-prof="${esc(p.id)}">
+        <span class="prof-name">${esc(p.name)}</span>
+        <span class="prof-tags">${tags.join("")}</span>
+        <span class="prof-actions">
+          <button type="button" data-prof-select="${esc(p.id)}"${p.id === aktivId ? " disabled" : ""}>Für dieses Gerät wählen</button>
+          <button type="button" data-prof-edit="${esc(p.id)}">Bearbeiten</button>
+          <button type="button" data-prof-default="${esc(p.id)}"${p.id === defaultId ? " disabled" : ""}>Als Standard</button>
+          <button type="button" class="danger" data-prof-delete="${esc(p.id)}">Löschen</button>
+        </span>
+      </div>`;
+  }).join("");
+  const leerHinweis = katalog.length
+    ? ""
+    : `<p class="prof-empty-hint">Noch kein eigenes Profil angelegt — dieses Gerät zeigt das eingebaute
+        Standardprofil (alle Panels sichtbar, heutige Anzeige-Voreinstellungen). Leg unten ein Profil an,
+        um Panels ein-/auszublenden, umzusortieren oder die Anzeige anzupassen.</p>`;
+  const builtinHinweis = aktivId
+    ? ""
+    : `<p class="prof-empty-hint">Dieses Gerät zeigt gerade das eingebaute Standardprofil.</p>`;
+  $("profiles-body").innerHTML = leerHinweis + builtinHinweis + zeilen + `
+    ${katalog.length ? `<div class="prof-row">
+        <span class="prof-name">Eingebautes Standardprofil</span>
+        <span class="prof-actions">
+          <button type="button" id="prof-select-builtin"${aktivId ? "" : " disabled"}>Für dieses Gerät wählen</button>
+        </span>
+      </div>` : ""}
+    <form class="prof-new" id="prof-new-form">
+      <input type="text" id="prof-new-name" placeholder="Name des neuen Profils" maxlength="60" required />
+      <button type="submit" class="primary">Anlegen</button>
+    </form>`;
+  wireProfilesListEvents();
+}
+
+function wireProfilesListEvents() {
+  $("profiles-body").querySelectorAll("[data-prof-select]").forEach((b) =>
+    b.addEventListener("click", () => profileSelectAction(b.dataset.profSelect)));
+  const builtinBtn = $("prof-select-builtin");
+  if (builtinBtn) builtinBtn.addEventListener("click", () => profileSelectAction(""));
+  $("profiles-body").querySelectorAll("[data-prof-edit]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const p = ((state && state.profiles) || []).find((x) => x.id === b.dataset.profEdit);
+      if (p) openProfileEditor(p);
+    }));
+  $("profiles-body").querySelectorAll("[data-prof-default]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const id = b.dataset.profDefault;
+      const ok = await send(
+        `profile-default-${id}-${Date.now()}`,
+        { action: "profile_set_default", profileId: id },
+        "Als Standard markiert.",
+      );
+      if (ok) { await poll(); renderProfilesOverlay(); }
+    }));
+  $("profiles-body").querySelectorAll("[data-prof-delete]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const id = b.dataset.profDelete;
+      const p = ((state && state.profiles) || []).find((x) => x.id === id);
+      const name = p ? p.name : "dieses Profil";
+      // Löschen ist nicht rückgängig zu machen (Spec) — deshalb eine
+      // ausdrückliche Bestätigung, wie beim Feld-Freigeben mit laufendem
+      // Spielstand an anderer Stelle dieser Seite.
+      if (!confirm(`„${name}" wirklich löschen? Das lässt sich nicht rückgängig machen. `
+        + `Geräte, die es zeigen, fallen beim nächsten Abruf automatisch auf das Standardprofil zurück.`)) {
+        return;
+      }
+      const ok = await send(
+        `profile-delete-${id}-${Date.now()}`,
+        { action: "profile_delete", profileId: id },
+        "Profil gelöscht.",
+      );
+      if (ok) { await poll(); renderProfilesOverlay(); }
+    }));
+  $("prof-new-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const name = $("prof-new-name").value.trim();
+    if (!name) return;
+    openProfileEditor(null);
+    // Namen direkt übernehmen — die Turnierleitung hat ihn schon
+    // eingetippt, ein zweites Mal im Editor wäre unnötig.
+    profilesEditCtx.kopie.name = name;
+    renderProfilesOverlay();
+  });
+}
+
+/** Für DIESES Gerät ein Profil wählen (`profileId === ""` = eingebautes
+ *  Standardprofil). Kein Geräte-Feld im Payload — das aufrufende Gerät ist
+ *  aus der Bearer-Token-Auth bekannt (Sicherheitsgrenze, ADR 0025). */
+async function profileSelectAction(id) {
+  const ok = await send(
+    `profile-select-${id || "default"}-${Date.now()}`,
+    { action: "profile_select", profileId: id },
+    id ? "Profil für dieses Gerät gewählt." : "Standardprofil für dieses Gerät gewählt.",
+  );
+  if (!ok) return;
+  activeProfileHeaderId = id; // optimistisch — der nächste Poll bestätigt über den Antwortkopf.
+  pendingProfile = null;
+  pendingBaseUpdatedAtMs = 0;
+  await poll();
+  renderProfilesOverlay();
+  render();
+}
+
+/** Editor öffnen — `existing` (aus `state.profiles`) zum Bearbeiten, `null`
+ *  für ein neues Profil (Vorlage: eingebautes Standardprofil). Vergibt bei
+ *  einem neuen Profil sofort eine eigene, stabile ID (siehe ausführliche
+ *  Begründung bei `mutateActiveProfile()` — dieselbe Überlegung gilt auch
+ *  hier: Ein zweiter Speichern-Klick nach einem Netzfehler soll dasselbe
+ *  Profil aktualisieren, nicht ein zweites anlegen). */
+function openProfileEditor(existing) {
+  const basis = existing ? cloneProfile(existing) : {
+    id: genProfileId(), name: "", updatedAtMs: 0,
+    panels: builtInProfile().panels.map((p) => ({ ...p })),
+    display: { ...builtInProfile().display },
+  };
+  basis.panels = normalizedPanels(basis);
+  profilesEditCtx = { kopie: basis, isNew: !existing };
+  renderProfilesOverlay();
+}
+
+function renderProfileEditor() {
+  const { kopie, isNew } = profilesEditCtx;
+  $("profiles-title").textContent = isNew ? "Profil anlegen" : "Profil bearbeiten";
+  const panelLi = (p) => {
+    const anker = p.key === "courts";
+    // „Felder" ist die einzige fixierte Ankerposition (Spec) — im Editor
+    // deshalb ohne Zieh-Griff UND bewusst OHNE `data-id`: `enableReorderDrag`
+    // zählt nur Kinder mit `data-id` als Ziehziele/-ziele, die Anker-Zeile
+    // nimmt an Zug-Zielsuche und Tastatur-Umsortierung dadurch gar nicht
+    // erst teil — sie könnte sonst kurzzeitig mitten in der Geste über die
+    // Ankerzeile hinweg verschoben werden, obwohl deren Position fix ist.
+    return `<li class="${anker ? "prof-panel-anchor" : ""}"${anker ? "" : ` data-id="${esc(p.key)}"`}>
+        ${anker ? "" : `<span class="drag-griff panel-griff" tabindex="0" role="button"
+            title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+            aria-label="${esc(PANEL_TITLES[p.key])} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">${PANEL_GRIFF}</span>`}
+        <label class="prof-panel-label">
+          <input type="checkbox" class="prof-check" data-panel-key="${esc(p.key)}" ${p.visible ? "checked" : ""} />
+          <span class="prof-panel-name">${esc(PANEL_TITLES[p.key])}</span>
+        </label>
+        ${anker ? `<span class="prof-panel-hint">fest oben/links</span>` : ""}
+      </li>`;
+  };
+  const courtsP = kopie.panels.find((p) => p.key === "courts");
+  const andere = kopie.panels.filter((p) => p.key !== "courts");
+  const d = kopie.display;
+  $("profiles-body").innerHTML = `
+    <label class="prof-field">Name
+      <input type="text" id="prof-edit-name" value="${esc(kopie.name)}" maxlength="60" required />
+    </label>
+    <ul class="prof-panels" id="prof-panels-list">
+      ${panelLi(courtsP)}
+      ${andere.map(panelLi).join("")}
+    </ul>
+    <fieldset>
+      <legend>Anzeige</legend>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-numbers" ${d.showNumbers ? "checked" : ""} /> Spielnummer zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-nations" ${d.showNations ? "checked" : ""} /> Nationen zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-club-names" ${d.showClubNames ? "checked" : ""} /> Vereinsnamen zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-club-logos" ${d.showClubLogos ? "checked" : ""} /> Vereinslogos zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-discipline" ${d.showDiscipline ? "checked" : ""} /> Disziplin/Klasse zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-round" ${d.showRound ? "checked" : ""} /> Runde zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
+    </fieldset>
+    <fieldset>
+      <legend>Spielliste</legend>
+      <label class="radio-row"><input type="radio" name="prof-list-pos" id="prof-list-right" ${d.listPosition !== "bottom" ? "checked" : ""} /> rechts</label>
+      <label class="radio-row"><input type="radio" name="prof-list-pos" id="prof-list-bottom" ${d.listPosition === "bottom" ? "checked" : ""} /> darunter</label>
+    </fieldset>
+    <div class="dlg-foot">
+      <button type="button" id="prof-edit-cancel">Abbrechen</button>
+      <button type="button" id="prof-edit-save" class="primary">Speichern</button>
+    </div>`;
+  wireProfileEditorEvents();
+}
+
+function wireProfileEditorEvents() {
+  const { kopie } = profilesEditCtx;
+  enableReorderDrag($("prof-panels-list"), (id, beforeId) => {
+    // Nur das Datenmodell nachziehen — die Reihenfolge im DOM hat der Zug
+    // selbst schon hergestellt (`startReorderDrag`), ein Re-Render hier
+    // würde den gerade beendeten Zug unnötig noch einmal aufreißen.
+    const arr = kopie.panels;
+    const from = arr.findIndex((x) => x.key === id);
+    if (from === -1) return;
+    const [moved] = arr.splice(from, 1);
+    const to = beforeId ? arr.findIndex((x) => x.key === beforeId) : -1;
+    if (to === -1) arr.push(moved); else arr.splice(to, 0, moved);
+  }, ".panel-griff");
+  $("prof-panels-list").querySelectorAll("[data-panel-key]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const setting = kopie.panels.find((p) => p.key === cb.dataset.panelKey);
+      if (setting) setting.visible = cb.checked;
+    });
+  });
+  $("prof-edit-cancel").addEventListener("click", () => { profilesEditCtx = null; renderProfilesOverlay(); });
+  $("prof-edit-save").addEventListener("click", async () => {
+    const name = $("prof-edit-name").value.trim();
+    if (!name) { toast("Bitte einen Namen eingeben.", true); return; }
+    kopie.name = name;
+    kopie.display = {
+      showNumbers: $("prof-show-numbers").checked,
+      showNations: $("prof-show-nations").checked,
+      showClubNames: $("prof-show-club-names").checked,
+      showClubLogos: $("prof-show-club-logos").checked,
+      showDiscipline: $("prof-show-discipline").checked,
+      showRound: $("prof-show-round").checked,
+      showGroup: $("prof-show-group").checked,
+      listPosition: $("prof-list-bottom").checked ? "bottom" : "right",
+    };
+    kopie.updatedAtMs = Date.now();
+    const warEigenesAktivesProfil = kopie.id && kopie.id === resolveActiveProfile().id;
+    // Ausgangsstand VOR dem Schreiben festhalten — sonst sähe die
+    // Bestätigungsprüfung in `resolveActiveProfile()` einen veralteten
+    // Vergleichswert und verwürfe die eigene Fassung sofort wieder.
+    const basisStand = ((state && state.profiles) || []).find((p) => p.id === kopie.id);
+    const basisMs = (basisStand && basisStand.updatedAtMs) || 0;
+    const ok = await send(
+      `profile-save-${kopie.id}-${Date.now()}`,
+      { action: "profile_save", profile: kopie },
+      "Profil gespeichert.",
+    );
+    if (!ok) return;
+    if (warEigenesAktivesProfil) {
+      pendingProfile = cloneProfile(kopie);
+      pendingBaseUpdatedAtMs = basisMs;
+    }
+    profilesEditCtx = null;
+    await poll();
+    renderProfilesOverlay();
+    render();
+  });
+}
+
+$("profiles-open").addEventListener("click", openProfilesOverlay);
+$("profiles-close").addEventListener("click", closeProfilesOverlay);
+$("profiles-overlay").addEventListener("click", (ev) => {
+  if (ev.target === ev.currentTarget) closeProfilesOverlay();
+});
+
 let graphTimer = null;
 
 async function fetchTimeline() {
@@ -3972,17 +5052,20 @@ function closeTimeline() {
 
 function renderFinished() {
   const list = state.finished || [];
-  $("fin-box").hidden = list.length === 0;
-  $("fin-count").textContent = list.length ? `(${list.length})` : "";
-  $("fin-list").innerHTML = list.map((f) => {
+  setPanelCount("finished", list.length);
+  const box = $("fin-list");
+  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
+  box.innerHTML = list.length ? list.map((f) => {
     // Sieger zuerst gilt auch für die Satzstände: Sonst läse man bei einem
     // Sieger-2-Spiel "Meier – Müller 15:21 · 18:21" — als hätte der zuerst
     // genannte (der Sieger!) jeden Satz verloren.
     const sets = (f.sets || [])
       .map(([a, b]) => (f.winner === 2 ? `${b}:${a}` : `${a}:${b}`))
       .join(" · ");
+    // Info-Stufe (Schritt 10): reine Ergebnis-Kennzeichnung einer bereits
+    // abgeschlossenen Partie, kein Handlungsdruck mehr.
     const badge = ERGEBNIS_BADGE[f.result]
-      ? `<span class="badge warn">${ERGEBNIS_BADGE[f.result]}</span>` : "";
+      ? `<span class="badge badge-info">${ERGEBNIS_BADGE[f.result]}</span>` : "";
     // Punktverlauf nur anbieten, wo einer aufgezeichnet wurde — Papier-
     // Ergebnisse haben keinen (has_timeline, Spec punktverlauf-graph).
     const graph = f.has_timeline
@@ -3996,8 +5079,8 @@ function renderFinished() {
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
     </div>`;
-  }).join("");
-  $("fin-list").querySelectorAll("[data-fin-graph]").forEach((b) =>
+  }).join("") : `<p class="note">Noch kein Spiel beendet.</p>`;
+  box.querySelectorAll("[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = list.find((x) => String(x.match_id) === b.dataset.finGraph);
       if (!f) return;
@@ -4010,7 +5093,7 @@ function renderFinished() {
   // Bei jedem Abruf neu verdrahten, wie bei der Zähltafel-Warteschlange:
   // `#fin-list` wird alle zwei Sekunden per innerHTML ersetzt, alte
   // Zuhörer hängen sonst an längst entfernten Knoten.
-  $("fin-list").querySelectorAll("[data-fin-fix]").forEach((b) =>
+  box.querySelectorAll("[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = list.find((x) => String(x.match_id) === b.dataset.finFix);
       if (!f) return;
@@ -4088,11 +5171,17 @@ function render() {
   // „Ergebnis eintragen" und „Feld freigeben" das laufende Spiel.
   if (picked && !pickIsStillValid()) picked = null;
   $("tournament").textContent = state.tournament || "";
+  applyListPosition();
   renderConnection();
   renderHalls();
   renderAutoToggle();
   renderActionBar();
+  renderCourtsHead();
   renderCourts();
+  // Erst das Gerüst (Sichtbarkeit/Reihenfolge/Höhe aus dem aktiven Profil),
+  // DANACH die einzelnen Panel-Inhalte — die brauchen die frisch gebauten
+  // (oder unverändert weiterbestehenden) Container-IDs.
+  renderPanelStack();
   renderWalkovers();
   renderScorekeepers();
   renderOfficials();
@@ -4195,12 +5284,12 @@ function start() {
     if (!resBusy) sendResult();
   });
   $("auto-toggle").addEventListener("click", toggleAuto);
-  $("queue-reset").addEventListener("click", resetQueueOrder);
-  // Das Formular steht fest im Markup (siehe `renderScorekeepers`) und
-  // wird nie neu gezeichnet — die Verdrahtung gehört deshalb hierher, nicht
-  // in eine Render-Funktion, sonst hätte jeder Abruf einen weiteren
-  // `submit`-Zuhörer angehängt.
-  $("sk-add").addEventListener("submit", addScorekeeper);
+  // `#queue-reset` und `#sk-add` stehen NICHT mehr fest im Markup (Spec
+  // tl-web-panelsystem: Panel-Inhalte werden dynamisch aus dem aktiven
+  // Profil gebaut) — beide existieren beim Start der Seite noch gar
+  // nicht. Ihre Verdrahtung passiert deshalb einmalig direkt in
+  // `renderPanelStack()`, wenn das jeweilige Panel-Gerüst gebaut wird,
+  // nicht hier.
   $("toast-close").addEventListener("click", hideToast);
   // Punktverlauf-Overlay: schließen per ×, Klick auf den Hintergrund
   // oder Escape (unten mit den übrigen Escape-Wegen).
@@ -4210,45 +5299,15 @@ function start() {
   });
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); }
+    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeProfilesOverlay(); }
   });
-  $("opt-nummern").checked = zeigeNummern;
-  $("opt-nationen").checked = zeigeNationen;
-  $("opt-nummern").addEventListener("change", (ev) =>
-    setzeVorliebe("nummern", ev.currentTarget.checked));
-  $("opt-nationen").addEventListener("change", (ev) =>
-    setzeVorliebe("nationen", ev.currentTarget.checked));
-  $("opt-vereinsnamen").addEventListener("change", (ev) =>
-    setzeVorliebe("vereinsnamen", ev.currentTarget.checked));
-  $("opt-vereinslogos").addEventListener("change", (ev) =>
-    setzeVorliebe("vereinslogos", ev.currentTarget.checked));
-  // Die beiden Vereins-Häkchen spiegeln den *wirksamen* Wert (zentrale Vorgabe
-  // oder lokale Überstimmung). Beim Öffnen des Menüs neu setzen, weil die
-  // zentrale Vorgabe erst mit dem ersten Zustand vom Server eintrifft.
-  const anzeigeMenu = document.querySelector("details.anzeige");
-  const syncVereinHaken = () => {
-    $("opt-vereinsnamen").checked = zeigeVereinsnamenAktiv();
-    $("opt-vereinslogos").checked = zeigeVereinslogosAktiv();
-  };
-  if (anzeigeMenu) anzeigeMenu.addEventListener("toggle", syncVereinHaken);
-  syncVereinHaken();
-  $("opt-disziplin").checked = zeigeDisziplin;
-  $("opt-runde").checked = zeigeRunde;
-  $("opt-gruppe").checked = zeigeGruppe;
-  $("opt-disziplin").addEventListener("change", (ev) =>
-    setzeListenMeta("disziplin", ev.currentTarget.checked));
-  $("opt-runde").addEventListener("change", (ev) =>
-    setzeListenMeta("runde", ev.currentTarget.checked));
-  $("opt-gruppe").addEventListener("change", (ev) =>
-    setzeListenMeta("gruppe", ev.currentTarget.checked));
-  const listeUnten = localStorage.getItem("bts-tl-liste") === "unten";
-  $("opt-liste-unten").checked = listeUnten;
-  $("opt-liste-rechts").checked = !listeUnten;
-  setzeListenPosition(listeUnten);
-  $("opt-liste-rechts").addEventListener("change", (ev) =>
-    ev.currentTarget.checked && setzeListenPosition(false));
-  $("opt-liste-unten").addEventListener("change", (ev) =>
-    ev.currentTarget.checked && setzeListenPosition(true));
+  // Anzeige-Einstellungen (Spielnummer/Nationen/Vereine/Disziplin/Runde/
+  // Gruppe/Listen-Position) sind seit dem Panel-System Teil des aktiven
+  // Profils (`activeDisplay()`) statt loser `localStorage`-Häkchen —
+  // `applyListPosition()` wendet die Listen-Position bei jedem `render()`
+  // an, die übrigen Werte lesen `queueRow()`/`pairOf()` direkt aus dem
+  // Profil. Nichts hier zu verdrahten; die Profil-Verwaltung selbst
+  // (Öffnen/Schließen/Editor) ist weiter oben bereits verdrahtet.
 
   enableSteg();
   messeKopf();

@@ -81,6 +81,10 @@ pub(crate) fn auth_devices(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice>
         .map(|d| relay_proto::TlAuthDevice {
             id: d.id.clone(),
             token: d.token.clone(),
+            // Panel-Profil-Zuordnung (Spec tl-web-panelsystem, ADR 0025):
+            // reitet auf demselben TlAuth-Spiegel wie Kennung/Zugang, damit
+            // der Relay sie in `X-Tl-Active-Profile` beantworten kann.
+            profile_id: d.profile_id.clone(),
         })
         .collect()
 }
@@ -96,6 +100,12 @@ pub(crate) fn auth_devices(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice>
 /// Gehasht statt im Klartext, weil dieser Wert in einer Variablen lebt, die
 /// beim Suchen nach Fehlern schnell ausgegeben ist. Dasselbe FNV-1a wie beim
 /// Ansage-Cache: klein, stabil, ohne Abhängigkeit.
+///
+/// Trägt auch `profile_id` mit (Spec tl-web-panelsystem, ADR 0025): Ändert
+/// sich nur die Profilwahl eines Geräts (Kennung/Zugang bleiben gleich),
+/// muss `push_tl_auth` das trotzdem als Änderung erkennen — sonst bliebe
+/// der Relay auf der alten Zuordnung stehen und der `X-Tl-Active-Profile`-
+/// Header zeigte ein Profil, das am Gerät längst nicht mehr gilt.
 pub(crate) fn auth_fingerprint(devices: &[relay_proto::TlAuthDevice]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for d in devices {
@@ -103,6 +113,8 @@ pub(crate) fn auth_fingerprint(devices: &[relay_proto::TlAuthDevice]) -> String 
             d.id.bytes()
                 .chain(b":".iter().copied())
                 .chain(d.token.bytes())
+                .chain(b":".iter().copied())
+                .chain(d.profile_id.bytes())
         {
             hash ^= u64::from(b);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
@@ -1057,6 +1069,23 @@ pub(crate) async fn execute(
         return known;
     }
 
+    // Panel-Profile: eigener Weg wie Wertungen unten, weil sie `AppConfig`/
+    // `config.json` ändern statt Turnier-Zustand — `apply_state_action`
+    // bleibt auf reine `TabletState`-Änderungen ohne Datei-I/O beschränkt
+    // (Spec tl-web-panelsystem, ADR 0025). **Bewusst VOR dem Snapshot-Gate
+    // unten:** Profile sind turnierunabhängige, reine Layout-Einstellungen
+    // (siehe `build_state_limited`, das `profiles`/`default_profile_id`
+    // bereits ohne geladenes Turnier liefert) — ein TL, der vor dem ersten
+    // BTP-Import schon einen Wandmonitor einrichtet, darf dafür nicht
+    // fälschlich „kein Turnier geladen" sehen.
+    if let Some(response) = execute_profile_action(ctx, device, now_ms, &action) {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
+
     // Frisch von der Platte: So greifen Widerruf und Abschalten sofort.
     let config = ctx.app_config();
     if config.slave_mode {
@@ -1479,6 +1508,32 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             before_match_id,
         } => format!("queue-order:{match_id}:{}", before_match_id.unwrap_or(0)),
         A::QueueOrderReset => "queue-order-reset".to_string(),
+        // Panel-Profile (Spec tl-web-panelsystem): der Fingerabdruck
+        // beschreibt den ganzen Inhalt (wie `EnterResult`), damit ein
+        // wiederverwendetes `op_id` zwei inhaltlich verschiedene Speicher-
+        // vorgänge nicht fälschlich als „schon erledigt" behandelt.
+        A::ProfileSave { profile } => format!(
+            "profile-save:{}:{}:{}:{}{}{}{}{}{}{}:{:?}",
+            profile.id,
+            profile.name,
+            profile
+                .panels
+                .iter()
+                .map(|p| format!("{}:{}:{}", p.key, p.visible, p.height_fr))
+                .collect::<Vec<_>>()
+                .join(","),
+            profile.display.show_numbers,
+            profile.display.show_nations,
+            profile.display.show_club_names,
+            profile.display.show_club_logos,
+            profile.display.show_discipline,
+            profile.display.show_round,
+            profile.display.show_group,
+            profile.display.list_position,
+        ),
+        A::ProfileDelete { profile_id } => format!("profile-delete:{profile_id}"),
+        A::ProfileSelect { profile_id } => format!("profile-select:{profile_id}"),
+        A::ProfileSetDefault { profile_id } => format!("profile-default:{profile_id}"),
     }
 }
 
@@ -1549,6 +1604,12 @@ fn action_label(action: &relay_proto::TlAction) -> String {
                 "Automatische Vergabe {}",
                 if *enabled { "an" } else { "aus" }
             )
+        }
+        A::ProfileSave { profile } => format!("Profil „{}“ gespeichert", profile.name),
+        A::ProfileDelete { profile_id } => format!("Profil {profile_id} gelöscht"),
+        A::ProfileSelect { profile_id } => format!("Profil {profile_id} gewählt"),
+        A::ProfileSetDefault { profile_id } => {
+            format!("Profil {profile_id} als Standard gesetzt")
         }
     }
 }
@@ -1700,6 +1761,18 @@ pub struct TlState {
     /// Geräte-Token authentifizierte Anfrage (`/tl/officials`).
     #[serde(default)]
     pub officials: Vec<TlOfficial>,
+    /// Der Panel-Profil-Katalog (Spec tl-web-panelsystem, ADR 0025) —
+    /// geteilt, klein, unkritisch, Muster `layouts_view`/`layouts`.
+    /// Wiederverwendet direkt den `relay-proto`-Wire-Typ statt eines
+    /// eigenen tl.rs-lokalen Structs: Derselbe `TlPanelProfileWire` reist
+    /// auch als [`relay_proto::TlAction::ProfileSave`]-Payload, das
+    /// Anlegen eines Duplikats brächte hier keinen Gewinn.
+    #[serde(default)]
+    pub profiles: Vec<relay_proto::TlPanelProfileWire>,
+    /// Turnierweiter Standard, wenn ein Gerät kein eigenes Profil gewählt
+    /// hat. Leer = eingebautes Standardprofil (tl.html kennt es).
+    #[serde(default)]
+    pub default_profile_id: String,
 }
 
 /// Ein Schiedsrichter im Turnierleitungs-Zustand.
@@ -2082,6 +2155,11 @@ pub(crate) fn build_state_limited(
             show_club_logos: config.display.show_club_logos,
             officials_managed: tablet.officials_store().enabled(),
             officials: Vec::new(),
+            // Der Profil-Katalog ist Host-Konfiguration, kein Turnierstand
+            // — er gilt auch, solange BTP noch nichts geliefert hat
+            // (dieselbe Begründung wie bei `layouts` oben).
+            profiles: profiles_view(config),
+            default_profile_id: config.tl_web.default_profile_id.clone(),
         };
     };
 
@@ -2347,6 +2425,8 @@ pub(crate) fn build_state_limited(
         layouts: layouts_view(config),
         show_club_names: config.display.show_club_names,
         show_club_logos: config.display.show_club_logos,
+        profiles: profiles_view(config),
+        default_profile_id: config.tl_web.default_profile_id.clone(),
     }
 }
 
@@ -2371,6 +2451,269 @@ fn layouts_view(config: &AppConfig) -> Vec<TlHallLayout> {
             vertical: l.vertical,
         })
         .collect()
+}
+
+/// Übersetzt den Profil-Katalog aus der Host-Konfiguration in die Wire-Form
+/// (Spec tl-web-panelsystem, ADR 0025) — Muster `layouts_view`.
+fn profiles_view(config: &AppConfig) -> Vec<relay_proto::TlPanelProfileWire> {
+    config.tl_web.profiles.iter().map(profile_to_wire).collect()
+}
+
+/// Ein einzelnes Profil aus der Host-Konfiguration in die Wire-Form.
+fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelProfileWire {
+    relay_proto::TlPanelProfileWire {
+        id: p.id.clone(),
+        name: p.name.clone(),
+        panels: p
+            .panels
+            .iter()
+            .map(|s| relay_proto::TlPanelSettingWire {
+                key: s.key.clone(),
+                visible: s.visible,
+                height_fr: s.height_fr,
+            })
+            .collect(),
+        display: relay_proto::TlDisplaySettingsWire {
+            show_numbers: p.display.show_numbers,
+            show_nations: p.display.show_nations,
+            show_club_names: p.display.show_club_names,
+            show_club_logos: p.display.show_club_logos,
+            show_discipline: p.display.show_discipline,
+            show_round: p.display.show_round,
+            show_group: p.display.show_group,
+            list_position: match p.display.list_position {
+                crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
+                crate::config::TlListPosition::Bottom => relay_proto::TlListPositionWire::Bottom,
+            },
+        },
+        updated_at_ms: p.updated_at_ms,
+    }
+}
+
+/// Die Umkehrung von [`profile_to_wire`]: ein von `tl.html` gesendetes
+/// [`relay_proto::TlPanelProfileWire`] (`TlAction::ProfileSave`-Payload) in
+/// die Host-Konfiguration übersetzen. `id`/`updated_at_ms` werden bewusst
+/// NICHT übernommen — die Kennung entscheidet `profile_save` (Upsert/neu
+/// vergeben), der Zeitstempel kommt immer vom Host (Last-Write-Wins-Marker).
+fn panels_from_wire(
+    panels: &[relay_proto::TlPanelSettingWire],
+) -> Vec<crate::config::TlPanelSetting> {
+    panels
+        .iter()
+        .map(|s| crate::config::TlPanelSetting {
+            key: s.key.clone(),
+            visible: s.visible,
+            height_fr: s.height_fr,
+        })
+        .collect()
+}
+
+/// Siehe [`panels_from_wire`] — dasselbe für die Anzeige-Optionen.
+fn display_settings_from_wire(
+    d: &relay_proto::TlDisplaySettingsWire,
+) -> crate::config::TlDisplaySettings {
+    crate::config::TlDisplaySettings {
+        show_numbers: d.show_numbers,
+        show_nations: d.show_nations,
+        show_club_names: d.show_club_names,
+        show_club_logos: d.show_club_logos,
+        show_discipline: d.show_discipline,
+        show_round: d.show_round,
+        show_group: d.show_group,
+        list_position: match d.list_position {
+            relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
+            relay_proto::TlListPositionWire::Bottom => crate::config::TlListPosition::Bottom,
+        },
+    }
+}
+
+/// Höchstlänge eines Profilnamens. Wie beim Geräte-Label (`tl_device_add`)
+/// gekappt statt abgelehnt — ein Anzeigefeld soll nicht mit einem Fehler
+/// antworten, nur weil jemand sehr viel tippt.
+const MAX_TL_PROFILE_NAME_LEN: usize = 60;
+
+/// Höchstzahl der Panel-Einträge in EINEM Profil. Das Frontend kennt neun
+/// feste Schlüssel; die Reserve fängt künftige Panels ab, ohne dass ein
+/// einzelner Aufruf den `TlState` sprengen kann (R4).
+const MAX_TL_PROFILE_PANELS: usize = 32;
+
+/// Legt ein Panel-Profil an oder überschreibt es (Upsert nach `id`; Spec
+/// tl-web-panelsystem). Last-Write-Wins ohne Konfliktprüfung — die Spec
+/// verlangt ausdrücklich keine Fehlermeldung bei gleichzeitiger Bearbeitung
+/// durch zwei Geräte, deshalb wird hier NICHT gegen ein zuvor gesehenes
+/// `updated_at_ms` geprüft. `updated_at_ms` stempelt immer der Host (`now_ms`),
+/// nie der Client — sonst könnte eine falsch gehende Client-Uhr eine neuere
+/// Änderung verdrängen.
+///
+/// Rein & testbar: kein Netz, kein `ServerCtx` — die Persistenz übernimmt
+/// der Aufrufer (`execute_profile_action`).
+fn profile_save(
+    config: &mut AppConfig,
+    profile: &relay_proto::TlPanelProfileWire,
+    now_ms: u64,
+) -> Result<(), relay_proto::TlResponse> {
+    use relay_proto::{TlErrorCode as C, TlResponse};
+
+    let name = profile.name.trim();
+    if name.is_empty() {
+        return Err(TlResponse::err(C::NotAllowed, "Profilname fehlt."));
+    }
+    // Der Katalog reist VOLLSTÄNDIG in jedem `TlState` mit (R4,
+    // `MAX_TL_STATE_LEN`). Ohne serverseitige Grenzen könnte ein einzelnes
+    // Gerät den Zustand über das Limit treiben und damit die Oberfläche
+    // ALLER Geräte lahmlegen — das `maxlength` im Browser ist über einen
+    // direkten Aufruf der Kommando-Route umgehbar.
+    // Name: kappen statt ablehnen (Muster `tl_device_add`-Label — bei einem
+    // Anzeigefeld ist stilles Kürzen weniger überraschend als ein Fehler).
+    let name: String = name.chars().take(MAX_TL_PROFILE_NAME_LEN).collect();
+    let name = name.as_str();
+    // Panels: ablehnen. Die Panel-Liste ist keine Freitext-Eingabe, sondern
+    // eine feste, im Frontend bekannte Menge (neun Schlüssel) — eine
+    // überlange Liste ist ein Protokollfehler, kein Bedienfall.
+    if profile.panels.len() > MAX_TL_PROFILE_PANELS {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            format!("Ein Profil kann höchstens {MAX_TL_PROFILE_PANELS} Panels führen."),
+        ));
+    }
+    let incoming_id = profile.id.trim();
+    let exists =
+        !incoming_id.is_empty() && config.tl_web.profiles.iter().any(|p| p.id == incoming_id);
+    // Kappung nur für ECHT neue Profile — ein Update eines bestehenden darf
+    // nicht scheitern, nur weil der Katalog voll ist (sonst könnte ein
+    // Profil, das schon existiert, plötzlich nicht mehr gespeichert werden).
+    if !exists && config.tl_web.profiles.len() >= relay_proto::MAX_TL_PROFILES {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            format!(
+                "Mehr als {} Profile sind nicht möglich — bitte zuerst eines löschen.",
+                relay_proto::MAX_TL_PROFILES
+            ),
+        ));
+    }
+    // Neu UND ohne mitgeschickte Kennung: Der Host vergibt eine — Muster
+    // `TabletState::add_scorekeeper_manual` (Zeit + laufender Index statt
+    // einer neuen Abhängigkeit).
+    let id = if incoming_id.is_empty() {
+        format!("profile-{now_ms}-{}", config.tl_web.profiles.len())
+    } else {
+        incoming_id.to_string()
+    };
+    let saved = crate::config::TlPanelProfile {
+        id: id.clone(),
+        name: name.to_string(),
+        panels: panels_from_wire(&profile.panels),
+        display: display_settings_from_wire(&profile.display),
+        updated_at_ms: now_ms,
+    };
+    if let Some(slot) = config.tl_web.profiles.iter_mut().find(|p| p.id == id) {
+        *slot = saved;
+    } else {
+        config.tl_web.profiles.push(saved);
+    }
+    Ok(())
+}
+
+/// Entfernt ein Panel-Profil. Geräte, die es trugen, fallen auf das
+/// Standardprofil zurück (leere `profile_id`) statt in einen Fehlerzustand
+/// zu laufen (Spec tl-web-panelsystem, Grill-Punkt 7). Das Löschen eines
+/// bereits verschwundenen Profils ist ein No-Op — Löschen ist idempotent,
+/// kein Fehler.
+fn profile_delete(config: &mut AppConfig, profile_id: &str) {
+    config.tl_web.profiles.retain(|p| p.id != profile_id);
+    for d in &mut config.tl_web.devices {
+        if d.profile_id == profile_id {
+            d.profile_id.clear();
+        }
+    }
+    if config.tl_web.default_profile_id == profile_id {
+        config.tl_web.default_profile_id.clear();
+    }
+}
+
+/// Wählt für das AUFRUFENDE Gerät ein Profil. `device_id` kommt aus der
+/// Bearer-Token-Authentifizierung, NIE aus einem Client-Feld — das ist die
+/// Sicherheitsgrenze: Ein Gerät darf nur sich selbst binden, nie ein
+/// anderes umbiegen. Leere `profile_id` ("Standard") ist immer gültig; jede
+/// andere muss im Katalog existieren.
+fn profile_select(
+    config: &mut AppConfig,
+    device_id: &str,
+    profile_id: &str,
+) -> Result<(), relay_proto::TlResponse> {
+    use relay_proto::{TlErrorCode as C, TlResponse};
+    if !profile_id.is_empty() && !config.tl_web.profiles.iter().any(|p| p.id == profile_id) {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            "Dieses Profil gibt es nicht (mehr).",
+        ));
+    }
+    if let Some(d) = config.tl_web.devices.iter_mut().find(|d| d.id == device_id) {
+        d.profile_id = profile_id.to_string();
+    }
+    Ok(())
+}
+
+/// Setzt das turnierweite Standardprofil. Leer ("eingebautes
+/// Standardprofil") ist immer gültig; jede andere Kennung muss im Katalog
+/// existieren.
+fn profile_set_default(
+    config: &mut AppConfig,
+    profile_id: &str,
+) -> Result<(), relay_proto::TlResponse> {
+    use relay_proto::{TlErrorCode as C, TlResponse};
+    if !profile_id.is_empty() && !config.tl_web.profiles.iter().any(|p| p.id == profile_id) {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            "Dieses Profil gibt es nicht (mehr).",
+        ));
+    }
+    config.tl_web.default_profile_id = profile_id.to_string();
+    Ok(())
+}
+
+/// Panel-Profile pflegen (Spec tl-web-panelsystem, ADR 0025): Diese vier
+/// Aktionen ändern `AppConfig`/`config.json`, nicht den Turnier-Zustand in
+/// `TabletState` — deshalb ein eigener Zweig wie `execute_result_action`,
+/// statt sie durch `apply_state_action` laufen zu lassen (die bleibt auf
+/// reine `TabletState`-Änderungen ohne Datei-I/O beschränkt).
+///
+/// `None` heißt: keine Profil-Aktion, an anderer Stelle weiterbehandeln.
+fn execute_profile_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    device: &crate::config::TlDevice,
+    now_ms: u64,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlResponse};
+
+    let ok_or = |result: Result<(), TlResponse>| match result {
+        Ok(()) => TlResponse::ok(0),
+        Err(response) => response,
+    };
+
+    match action {
+        A::ProfileSave { profile } => {
+            Some(ok_or(ctx.mutate_app_config(|config| {
+                profile_save(config, profile, now_ms)
+            })))
+        }
+        A::ProfileDelete { profile_id } => Some(ok_or(ctx.mutate_app_config(|config| {
+            profile_delete(config, profile_id);
+            Ok(())
+        }))),
+        A::ProfileSelect { profile_id } => {
+            Some(ok_or(ctx.mutate_app_config(|config| {
+                profile_select(config, &device.id, profile_id)
+            })))
+        }
+        A::ProfileSetDefault { profile_id } => {
+            Some(ok_or(ctx.mutate_app_config(|config| {
+                profile_set_default(config, profile_id)
+            })))
+        }
+        _ => None,
+    }
 }
 
 /// Die tatsächlich geltende Pflichtpause in Minuten — dieselbe Regel, nach
@@ -3019,6 +3362,7 @@ mod tests {
             label: "Tablet TL".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
         cfg
     }
@@ -3481,6 +3825,7 @@ mod tests {
             label: "Tablet Meeting Point".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         }];
         assert_eq!(
             device_by_id(&cfg, "tl-3f2a").map(|d| d.label),
@@ -3648,6 +3993,7 @@ mod tests {
             label: "Tablet".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         }];
         let vorher = auth_fingerprint(&auth_devices(&cfg));
 
@@ -3677,6 +4023,7 @@ mod tests {
             label: "Tablet von Anna Meier".to_string(),
             created_at_ms: 1,
             hall: "Halle A".to_string(),
+            profile_id: String::new(),
         }];
         let devices = auth_devices(&cfg);
         assert_eq!(devices.len(), 1);
@@ -3893,6 +4240,346 @@ mod tests {
         let ids: Vec<i64> = state.queue.iter().map(|m| m.match_id).collect();
         assert_eq!(ids, vec![1, 2, 3], "wieder reine BTP-Reihenfolge");
         assert!(state.queue.iter().all(|m| !m.manual));
+    }
+
+    // ───────────── Panel-Profile (Spec tl-web-panelsystem, ADR 0025) ────────
+
+    /// Minimales, gültiges Wire-Profil für Tests.
+    fn wire_profile(id: &str, name: &str) -> relay_proto::TlPanelProfileWire {
+        relay_proto::TlPanelProfileWire {
+            id: id.to_string(),
+            name: name.to_string(),
+            panels: vec![relay_proto::TlPanelSettingWire {
+                key: "courts".to_string(),
+                visible: true,
+                height_fr: 2.0,
+            }],
+            display: relay_proto::TlDisplaySettingsWire {
+                show_numbers: true,
+                list_position: relay_proto::TlListPositionWire::Bottom,
+                ..Default::default()
+            },
+            // Wird von `profile_save` ohnehin verworfen und durch `now_ms`
+            // ersetzt — hier absichtlich ein Fantasiewert, um genau das zu
+            // belegen.
+            updated_at_ms: 999,
+        }
+    }
+
+    #[test]
+    fn profiles_view_maps_config_to_wire_profiles() {
+        let mut config = AppConfig::default();
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "profil-1".into(),
+            name: "Wandmonitor".into(),
+            panels: vec![crate::config::TlPanelSetting {
+                key: "officials".into(),
+                visible: false,
+                height_fr: 1.5,
+            }],
+            display: crate::config::TlDisplaySettings {
+                show_club_names: true,
+                list_position: crate::config::TlListPosition::Bottom,
+                ..Default::default()
+            },
+            updated_at_ms: 42,
+        });
+        let view = profiles_view(&config);
+        assert_eq!(view.len(), 1);
+        assert_eq!(view[0].id, "profil-1");
+        assert_eq!(view[0].name, "Wandmonitor");
+        assert_eq!(view[0].panels.len(), 1);
+        assert_eq!(view[0].panels[0].key, "officials");
+        assert!(!view[0].panels[0].visible);
+        assert_eq!(view[0].panels[0].height_fr, 1.5);
+        assert!(view[0].display.show_club_names);
+        assert_eq!(
+            view[0].display.list_position,
+            relay_proto::TlListPositionWire::Bottom
+        );
+        assert_eq!(view[0].updated_at_ms, 42);
+    }
+
+    #[test]
+    fn execute_profile_save_upserts_by_id() {
+        let mut config = AppConfig::default();
+        profile_save(&mut config, &wire_profile("profil-1", "Erst"), 1_000).unwrap();
+        assert_eq!(config.tl_web.profiles.len(), 1);
+        assert_eq!(config.tl_web.profiles[0].name, "Erst");
+
+        // Zweiter Save mit derselben id + neuem Namen: überschreibt, statt
+        // ein zweites Element anzulegen.
+        profile_save(&mut config, &wire_profile("profil-1", "Geändert"), 2_000).unwrap();
+        assert_eq!(config.tl_web.profiles.len(), 1, "Upsert, kein Duplikat");
+        assert_eq!(config.tl_web.profiles[0].name, "Geändert");
+        assert_eq!(config.tl_web.profiles[0].updated_at_ms, 2_000);
+    }
+
+    #[test]
+    fn execute_profile_save_generates_id_when_empty() {
+        let mut config = AppConfig::default();
+        profile_save(&mut config, &wire_profile("", "Neu"), 5_000).unwrap();
+        assert_eq!(config.tl_web.profiles.len(), 1);
+        assert!(
+            !config.tl_web.profiles[0].id.is_empty(),
+            "der Host vergibt eine Kennung"
+        );
+        assert_eq!(config.tl_web.profiles[0].updated_at_ms, 5_000);
+    }
+
+    #[test]
+    fn execute_profile_save_rejects_empty_name() {
+        let mut config = AppConfig::default();
+        let err = profile_save(&mut config, &wire_profile("profil-1", "  "), 1_000).unwrap_err();
+        assert!(!err.ok);
+        assert!(config.tl_web.profiles.is_empty());
+    }
+
+    #[test]
+    fn profile_save_truncates_long_names() {
+        // Das `maxlength` im Browser ist über einen direkten Aufruf der
+        // Kommando-Route umgehbar — der Katalog reist vollständig in jedem
+        // `TlState` mit, ein überlanger Name dürfte ihn nicht sprengen.
+        let mut config = AppConfig::default();
+        let lang = "ä".repeat(500);
+        profile_save(&mut config, &wire_profile("profil-1", &lang), 1_000).unwrap();
+        assert_eq!(
+            config.tl_web.profiles[0].name.chars().count(),
+            MAX_TL_PROFILE_NAME_LEN,
+            "gekappt, nicht abgelehnt — und nach ZEICHEN, nicht nach Bytes"
+        );
+    }
+
+    #[test]
+    fn profile_save_rejects_oversized_panel_list() {
+        let mut config = AppConfig::default();
+        let mut profil = wire_profile("profil-1", "Zu viele Panels");
+        profil.panels = (0..MAX_TL_PROFILE_PANELS + 1)
+            .map(|i| relay_proto::TlPanelSettingWire {
+                key: format!("panel-{i}"),
+                visible: true,
+                height_fr: 1.0,
+            })
+            .collect();
+        let err = profile_save(&mut config, &profil, 1_000).unwrap_err();
+        assert!(!err.ok);
+        assert!(
+            config.tl_web.profiles.is_empty(),
+            "abgelehnt — nichts gespeichert"
+        );
+    }
+
+    #[test]
+    fn profiles_capped_at_max_tl_profiles() {
+        let mut config = AppConfig::default();
+        for i in 0..relay_proto::MAX_TL_PROFILES {
+            profile_save(
+                &mut config,
+                &wire_profile(&format!("profil-{i}"), &format!("P{i}")),
+                1_000,
+            )
+            .unwrap();
+        }
+        assert_eq!(config.tl_web.profiles.len(), relay_proto::MAX_TL_PROFILES);
+
+        // Ein NEUES Profil scheitert an der Kappung ...
+        let err =
+            profile_save(&mut config, &wire_profile("profil-neu", "Zu viel"), 1_000).unwrap_err();
+        assert!(!err.ok);
+        assert_eq!(config.tl_web.profiles.len(), relay_proto::MAX_TL_PROFILES);
+
+        // ... aber ein Update eines BESTEHENDEN Profils bleibt möglich —
+        // die Kappung darf ein Update nicht blockieren.
+        profile_save(
+            &mut config,
+            &wire_profile("profil-0", "Aktualisiert"),
+            2_000,
+        )
+        .unwrap();
+        assert_eq!(config.tl_web.profiles.len(), relay_proto::MAX_TL_PROFILES);
+        assert_eq!(config.tl_web.profiles[0].name, "Aktualisiert");
+    }
+
+    #[test]
+    fn last_write_wins_by_updated_at_ms() {
+        // Die Spec verlangt ausdrücklich KEINE Konfliktprüfung: Der zuletzt
+        // gespeicherte Stand gewinnt einfach, unabhängig von der Reihenfolge
+        // der `updated_at_ms`-Werte im Wire-Payload (die ohnehin verworfen
+        // werden — der Host stempelt selbst).
+        let mut config = AppConfig::default();
+        profile_save(&mut config, &wire_profile("profil-1", "Von Gerät A"), 5_000).unwrap();
+        profile_save(&mut config, &wire_profile("profil-1", "Von Gerät B"), 1_000).unwrap();
+        assert_eq!(
+            config.tl_web.profiles.len(),
+            1,
+            "kein Konflikt, kein Duplikat"
+        );
+        assert_eq!(
+            config.tl_web.profiles[0].name, "Von Gerät B",
+            "die zuletzt ausgeführte Aktion gewinnt"
+        );
+        assert_eq!(config.tl_web.profiles[0].updated_at_ms, 1_000);
+    }
+
+    #[test]
+    fn execute_profile_delete_falls_back_devices_to_default() {
+        let mut config = AppConfig::default();
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "profil-1".into(),
+            name: "Wandmonitor".into(),
+            panels: Vec::new(),
+            display: crate::config::TlDisplaySettings::default(),
+            updated_at_ms: 1,
+        });
+        config.tl_web.default_profile_id = "profil-1".into();
+        config.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-1".into(),
+        });
+        config.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-b".into(),
+            token: "tok-b".into(),
+            label: "Tablet B".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-anderes".into(),
+        });
+
+        profile_delete(&mut config, "profil-1");
+
+        assert!(config.tl_web.profiles.is_empty());
+        assert!(
+            config.tl_web.default_profile_id.is_empty(),
+            "auch der turnierweite Standard fällt zurück"
+        );
+        assert!(
+            config.tl_web.devices[0].profile_id.is_empty(),
+            "Gerät A trug das gelöschte Profil → Standard"
+        );
+        assert_eq!(
+            config.tl_web.devices[1].profile_id, "profil-anderes",
+            "Gerät B trug ein anderes Profil → unberührt"
+        );
+
+        // Löschen eines bereits verschwundenen Profils ist ein No-Op, kein
+        // Fehler.
+        profile_delete(&mut config, "profil-1");
+        assert!(config.tl_web.devices[0].profile_id.is_empty());
+    }
+
+    #[test]
+    fn execute_profile_select_sets_calling_devices_profile_id_not_target() {
+        // Sicherheitstest: `profile_select` bekommt die Geräte-Kennung aus
+        // der Auth (hier: `device_id`-Parameter), NIE aus einem Client-Feld
+        // — ein Gerät darf nur sich selbst binden.
+        let mut config = AppConfig::default();
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "profil-1".into(),
+            name: "Wandmonitor".into(),
+            panels: Vec::new(),
+            display: crate::config::TlDisplaySettings::default(),
+            updated_at_ms: 1,
+        });
+        config.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        });
+        config.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-b".into(),
+            token: "tok-b".into(),
+            label: "Tablet B".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        });
+
+        // Gerät A wählt ein Profil ...
+        profile_select(&mut config, "dev-a", "profil-1").unwrap();
+
+        assert_eq!(
+            config.tl_web.devices[0].profile_id, "profil-1",
+            "das aufrufende Gerät bekommt die Wahl"
+        );
+        assert!(
+            config.tl_web.devices[1].profile_id.is_empty(),
+            "ein fremdes Gerät bleibt unberührt, obwohl es in der Liste steht"
+        );
+    }
+
+    #[test]
+    fn execute_profile_select_accepts_empty_as_default_and_rejects_unknown() {
+        let mut config = AppConfig::default();
+        config.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-1".into(),
+        });
+        // Leer ("Standard") ist immer gültig, auch ohne Katalog.
+        profile_select(&mut config, "dev-a", "").unwrap();
+        assert!(config.tl_web.devices[0].profile_id.is_empty());
+
+        // Eine unbekannte Kennung wird abgelehnt.
+        let err = profile_select(&mut config, "dev-a", "spukt-nicht").unwrap_err();
+        assert!(!err.ok);
+    }
+
+    #[test]
+    fn execute_profile_set_default_updates_the_tournament_wide_default() {
+        let mut config = AppConfig::default();
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "profil-1".into(),
+            name: "Wandmonitor".into(),
+            panels: Vec::new(),
+            display: crate::config::TlDisplaySettings::default(),
+            updated_at_ms: 1,
+        });
+        profile_set_default(&mut config, "profil-1").unwrap();
+        assert_eq!(config.tl_web.default_profile_id, "profil-1");
+
+        let err = profile_set_default(&mut config, "unbekannt").unwrap_err();
+        assert!(!err.ok);
+        assert_eq!(
+            config.tl_web.default_profile_id, "profil-1",
+            "eine abgelehnte Änderung darf den bisherigen Stand nicht anrühren"
+        );
+
+        // Leer (eingebautes Standardprofil) ist immer gültig.
+        profile_set_default(&mut config, "").unwrap();
+        assert!(config.tl_web.default_profile_id.is_empty());
+    }
+
+    #[test]
+    fn touches_courts_false_for_profile_actions() {
+        for action in [
+            relay_proto::TlAction::ProfileSave {
+                profile: wire_profile("profil-1", "X"),
+            },
+            relay_proto::TlAction::ProfileDelete {
+                profile_id: "profil-1".to_string(),
+            },
+            relay_proto::TlAction::ProfileSelect {
+                profile_id: "profil-1".to_string(),
+            },
+            relay_proto::TlAction::ProfileSetDefault {
+                profile_id: "profil-1".to_string(),
+            },
+        ] {
+            assert!(
+                !touches_courts(&action),
+                "Panel-Profile sind reine Konfiguration, keine Feld-Aktion"
+            );
+        }
     }
 
     #[test]
@@ -4963,6 +5650,29 @@ mod tests {
             // Personendaten): ob tl.html Vereinsname/-logo einblenden darf.
             "show_club_names",
             "show_club_logos",
+            // Panel-Profile (Spec tl-web-panelsystem, ADR 0025): reine
+            // Layout-/Sichtbarkeits-Konfiguration ohne jeden Personenbezug.
+            // `id`/`name`/`key` sind bereits oben erlaubt (Schiedsrichter/
+            // Zähltafelbediener) — hier neu: der Profil-Katalog selbst, die
+            // Panel-Höhe/-Sichtbarkeit je Eintrag und die Anzeige-Schalter.
+            // Die Wire-Struct (`relay_proto::TlPanelProfileWire` & Co.)
+            // serialisiert camelCase, deshalb stehen hier die camelCase-
+            // Formen, nicht die Rust-Feldnamen.
+            "profiles",
+            "default_profile_id",
+            "panels",
+            "visible",
+            "heightFr",
+            "display",
+            "showNumbers",
+            "showNations",
+            "showClubNames",
+            "showClubLogos",
+            "showDiscipline",
+            "showRound",
+            "showGroup",
+            "listPosition",
+            "updatedAtMs",
         ];
 
         let tablet = TabletState::default();
@@ -5018,6 +5728,30 @@ mod tests {
             serpentine: false,
             vertical: false,
         });
+        // Ebenso ein Panel-Profil: Ohne Eintrag bliebe `profiles` leer und
+        // der Wächter sähe die `TlPanelProfileWire`-Felder (Panel-Liste,
+        // Anzeige-Optionen) nie.
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "profil-1".into(),
+            name: "Wandmonitor".into(),
+            panels: vec![crate::config::TlPanelSetting {
+                key: "courts".into(),
+                visible: true,
+                height_fr: 2.0,
+            }],
+            display: crate::config::TlDisplaySettings {
+                show_numbers: true,
+                show_nations: true,
+                show_club_names: true,
+                show_club_logos: true,
+                show_discipline: true,
+                show_round: true,
+                show_group: true,
+                list_position: crate::config::TlListPosition::Bottom,
+            },
+            updated_at_ms: 1_000,
+        });
+        config.tl_web.default_profile_id = "profil-1".into();
         let s = build_state(&tablet, &config, 1_000_000, 1);
         assert!(
             !s.officials.is_empty(),
@@ -5038,6 +5772,11 @@ mod tests {
             !s.scorekeepers.is_empty(),
             "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten, \
              sonst prüft dieser Test die `TlScorekeeper`-Felder gar nicht"
+        );
+        assert!(
+            !s.profiles.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein Panel-Profil enthalten, \
+             sonst prüft dieser Test die `TlPanelProfileWire`-Felder gar nicht"
         );
 
         let value = serde_json::to_value(&s).unwrap();
@@ -5176,6 +5915,25 @@ mod tests {
             serpentine: false,
             vertical: false,
         });
+        // Auch hier ein Panel-Profil (Spec tl-web-panelsystem): reine
+        // Layout-/Sichtbarkeits-Konfiguration, damit dieser Test
+        // strukturell mitprüft, dass `TlPanelProfileWire` keine
+        // Personendaten trägt — genau wie bei Raster/Zähltafelbediener/
+        // Schiedsrichtern oben.
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "profil-1".into(),
+            name: "Wandmonitor".into(),
+            panels: vec![crate::config::TlPanelSetting {
+                key: "courts".into(),
+                visible: true,
+                height_fr: 2.0,
+            }],
+            display: crate::config::TlDisplaySettings {
+                show_numbers: true,
+                ..Default::default()
+            },
+            updated_at_ms: 1_000,
+        });
         let s = build_state(&tablet, &config, 1_000_000, 7);
         assert!(
             !s.finished.is_empty(),
@@ -5188,6 +5946,10 @@ mod tests {
         assert!(
             !s.officials.is_empty(),
             "Fixture-Fehler: das Fixture muss einen Schiedsrichter enthalten"
+        );
+        assert!(
+            !s.profiles.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein Panel-Profil enthalten"
         );
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 

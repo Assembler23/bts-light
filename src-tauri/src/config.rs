@@ -646,6 +646,14 @@ pub struct TlDevice {
     /// Stufe noch nicht erzwungen, aber vorgesehen, damit ein Helfer der
     /// zweiten Halle später nicht versehentlich in der ersten vergibt.
     pub hall: String,
+    /// Gewähltes Panel-Profil (Spec tl-web-panelsystem, ADR 0025). Leer =
+    /// `TlWebConfig.default_profile_id` (bzw. das eingebaute Standardprofil,
+    /// wenn auch das leer ist). Kein eigenes `#[serde(default)]` nötig — der
+    /// Container trägt bereits `#[serde(default)]`, das deckt fehlende
+    /// Felder in jeder Tiefe ab (siehe `tl_device_without_hall_loads_unrestricted`).
+    /// Wird bewusst NICHT vom Identitäts-Export mitgenommen (bleibt lokal an
+    /// diesem Gerät hängen, wie Token/Label).
+    pub profile_id: String,
 }
 
 /// Turnierleitungs-Oberfläche im Browser (ADR 0012/0012). Opt-in —
@@ -665,6 +673,24 @@ pub struct TlWebConfig {
     /// Die gekoppelten Geräte. Entfernen = Zugang entziehen; mehr braucht
     /// der Widerruf nicht.
     pub devices: Vec<TlDevice>,
+    /// Der Panel-Profil-Katalog (Spec tl-web-panelsystem, ADR 0024/0025) —
+    /// installationsweit, nicht turniergebunden (Profile sind
+    /// geräteklassen-, keine Turnierdaten). Angelegt/bearbeitet/gelöscht
+    /// wird ausschließlich über `TlAction` aus `tl.html` (R1 greift hier
+    /// nicht, siehe ADR 0024), nie über den Setup-Assistenten — deshalb
+    /// schützt `keep_host_managed_fields` dieses Feld wie `devices`.
+    ///
+    /// Kein eigenes `#[serde(default)]`: Dieser Struct trägt bereits
+    /// `#[serde(default)]` auf Container-Ebene (siehe oben), das deckt jedes
+    /// fehlende Feld ab — anders als `HallLayoutConfig.vertical`, dessen
+    /// Struct KEINEN Container-Default hat. Ein weiteres `#[serde(default)]`
+    /// hier wäre redundant.
+    pub profiles: Vec<TlPanelProfile>,
+    /// Turnierweiter Standard, wenn ein Gerät kein eigenes Profil gewählt
+    /// hat. Leer = eingebautes Standardprofil (`tl.html` kennt es, ohne dass
+    /// es hier ein Element bräuchte). Selbe Begründung wie bei `profiles`:
+    /// kein eigenes `#[serde(default)]` nötig.
+    pub default_profile_id: String,
 }
 
 impl TlWebConfig {
@@ -701,6 +727,85 @@ impl TlWebConfig {
         self.devices.retain(|d| d.id != id);
         self.devices.len() != vorher
     }
+}
+
+/// Seite, auf der die Warteliste/Ergebnis-Spalte im Panel-System erscheint
+/// (Spec tl-web-panelsystem). Muster [`LayoutOrigin`]: Rust-Enum statt
+/// String, `rename_all = "snake_case"` liefert dieselbe Wire-Form wie
+/// `relay_proto::TlListPositionWire`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlListPosition {
+    Right,
+    Bottom,
+}
+
+impl Default for TlListPosition {
+    /// Reiner Serde-Nothilfe-Wert für ein einzelnes, unvollständig
+    /// gespeichertes Profil (siehe `TlDisplaySettings`) — **nicht** die
+    /// fachliche Vorgabe. Das eingebaute Standardprofil (Liste rechts) lebt
+    /// in `tl.html`, nicht hier.
+    fn default() -> Self {
+        Self::Right
+    }
+}
+
+/// Ein einzelnes Panel innerhalb eines [`TlPanelProfile`]: Sichtbarkeit +
+/// relative Höhe. `key` benennt den Abschnitt (`"courts"`, `"walkovers"`,
+/// `"scorekeepers"`, `"officials"`, `"queue_called"`, `"queue_ready"`,
+/// `"queue_waiting"`, `"queue_no_hall"`, `"finished"`) — als String statt
+/// Enum, damit künftige Panels ohne Protokolländerung dazukommen können.
+///
+/// `#[serde(default)]` auf Container-Ebene: Ein einzelnes Profil-Element,
+/// dem (z. B. nach einer künftigen Erweiterung) ein Feld fehlt, soll das
+/// Laden der GANZEN `config.json` nicht zum Scheitern bringen — Muster
+/// [`TlDevice`], nicht [`HallLayoutConfig`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlPanelSetting {
+    pub key: String,
+    pub visible: bool,
+    /// Relative Höhen-Gewichtung; clientseitig gegen ein Mindestmaß
+    /// geklammert (`tl.html`), hier unbeschränkt gespeichert.
+    pub height_fr: f64,
+}
+
+/// Turnierweite Anzeige-Optionen eines Panel-Profils — dieselben Schalter,
+/// die vorher als lose `localStorage`-Werte in `tl.html` lebten (Spec
+/// tl-web-panelsystem). Container-`#[serde(default)]` wie
+/// [`TlPanelSetting`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlDisplaySettings {
+    pub show_numbers: bool,
+    pub show_nations: bool,
+    pub show_club_names: bool,
+    pub show_club_logos: bool,
+    pub show_discipline: bool,
+    pub show_round: bool,
+    pub show_group: bool,
+    pub list_position: TlListPosition,
+}
+
+/// Ein benanntes Panel-Profil: Panel-Sichtbarkeit/-Reihenfolge/-Höhe +
+/// Anzeige-Optionen, an einem einzigen Ort statt auf drei Bedienstellen
+/// verstreut (Spec tl-web-panelsystem, ADR 0024/0025). `panels`-Reihenfolge
+/// = Panel-Reihenfolge auf der Seite.
+///
+/// Enthält **keine Personendaten** — reine Layout-/Sichtbarkeits-Angaben,
+/// deshalb ohne Bedenken auf einer aus dem Internet erreichbaren Seite
+/// pflegbar (ADR 0024) und ohne Bedenken im Identitäts-Export enthalten
+/// (`identity_bundle` strippt dieses Feld NICHT, anders als `TlDevice`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlPanelProfile {
+    pub id: String,
+    pub name: String,
+    pub panels: Vec<TlPanelSetting>,
+    pub display: TlDisplaySettings,
+    /// Last-Write-Wins-Marker — **immer** vom Host beim Speichern
+    /// gestempelt (`tablet::tl::profile_save`), nie vom Client übernommen.
+    pub updated_at_ms: u64,
 }
 
 impl AppConfig {
@@ -950,6 +1055,92 @@ mod tests {
         );
     }
 
+    /// Spec tl-web-panelsystem: Ein Panel-Profil (inkl. verschachtelter
+    /// Panel-Liste + Anzeige-Optionen) übersteht Serialisieren + Laden
+    /// unverändert.
+    #[test]
+    fn tl_panel_profile_serde_roundtrip() {
+        let profile = TlPanelProfile {
+            id: "profil-1".to_string(),
+            name: "Wandmonitor Halle 2".to_string(),
+            panels: vec![
+                TlPanelSetting {
+                    key: "courts".to_string(),
+                    visible: true,
+                    height_fr: 3.0,
+                },
+                TlPanelSetting {
+                    key: "officials".to_string(),
+                    visible: false,
+                    height_fr: 1.0,
+                },
+            ],
+            display: TlDisplaySettings {
+                show_numbers: true,
+                show_nations: true,
+                show_club_names: false,
+                show_club_logos: false,
+                show_discipline: true,
+                show_round: true,
+                show_group: false,
+                list_position: TlListPosition::Bottom,
+            },
+            updated_at_ms: 1_700_000_000_000,
+        };
+        let json = serde_json::to_string(&profile).expect("serialisiert");
+        let back: TlPanelProfile = serde_json::from_str(&json).expect("lädt");
+        assert_eq!(profile, back);
+    }
+
+    /// Ein neu gekoppeltes Gerät (bzw. eines aus einer `config.json` ohne
+    /// das Feld) hat keine Profilbindung — leer heißt „Standardprofil"
+    /// (ADR 0025).
+    #[test]
+    fn tl_device_profile_id_defaults_empty_on_old_config() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"h","port":1,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tl_web":{"enabled":true,"devices":[
+                    {"id":"d","token":"t","label":"L","created_at_ms":1}]}}"#,
+        )
+        .expect("Config mit altem Geräte-Eintrag ohne profile_id lädt");
+        assert_eq!(cfg.tl_web.devices.len(), 1);
+        assert!(cfg.tl_web.devices[0].profile_id.is_empty());
+    }
+
+    /// Fehlt der ganze `profiles`/`default_profile_id`-Block (ältere
+    /// `config.json`), bleibt `tl_web` trotzdem ladbar — Container-Default
+    /// von `TlWebConfig` deckt beide neuen Felder ab.
+    #[test]
+    fn tl_web_config_profiles_default_empty_on_missing_field() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"h","port":1,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tl_web":{"enabled":true,"devices":[]}}"#,
+        )
+        .expect("Config mit tl_web-Block ohne Profil-Felder lädt");
+        assert!(cfg.tl_web.profiles.is_empty());
+        assert!(cfg.tl_web.default_profile_id.is_empty());
+    }
+
+    /// Eine komplette `config.json` aus einer Version vor diesem Feature
+    /// (kein `tl_web`-Block überhaupt) lädt unverändert — dieselbe Prüfung
+    /// wie bei anderen Feature-Einführungen (`officials_default_off_and_old_config_stays_readable`),
+    /// hier über den ganzen Rollout-Weg hinweg: von „gar kein tl_web" bis
+    /// „tl_web ohne die neuen Felder".
+    #[test]
+    fn old_config_without_profiles_stays_readable() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config ganz ohne tl_web lädt");
+        assert!(!cfg.tl_web.enabled);
+        assert!(cfg.tl_web.devices.is_empty());
+        assert!(cfg.tl_web.profiles.is_empty());
+        assert!(cfg.tl_web.default_profile_id.is_empty());
+    }
+
     fn rule(disc: &str, draw: &str, hall: &str) -> DisciplineHallRule {
         DisciplineHallRule {
             discipline: disc.to_string(),
@@ -1136,7 +1327,24 @@ mod tests {
                     label: "Tablet Meeting Point".to_string(),
                     created_at_ms: 1_700_000_000_000,
                     hall: "Halle A".to_string(),
+                    profile_id: "profil-1".to_string(),
                 }],
+                profiles: vec![TlPanelProfile {
+                    id: "profil-1".to_string(),
+                    name: "Wandmonitor".to_string(),
+                    panels: vec![TlPanelSetting {
+                        key: "courts".to_string(),
+                        visible: true,
+                        height_fr: 2.0,
+                    }],
+                    display: TlDisplaySettings {
+                        show_numbers: true,
+                        list_position: TlListPosition::Bottom,
+                        ..Default::default()
+                    },
+                    updated_at_ms: 1_700_000_000_500,
+                }],
+                default_profile_id: "profil-1".to_string(),
             },
             hall_layouts: vec![HallLayoutConfig {
                 hall: "Halle A".to_string(),
@@ -1258,6 +1466,7 @@ mod tests {
             label: "Tablet Turnierleitung".to_string(),
             created_at_ms: 1_700_000_000_000,
             hall: "Halle 2".to_string(),
+            profile_id: String::new(),
         });
         cfg.save_to(&path).unwrap();
 
@@ -1441,6 +1650,7 @@ mod tl_device_tests {
             label: "Tablet".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         }
     }
 

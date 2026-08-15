@@ -1251,6 +1251,7 @@ mod tests {
             tmp.join("bts_rc_config.json"),
             tmp.join("bts_rc_assign.json"),
             tmp,
+            Arc::new(std::sync::Mutex::new(AppConfig::default())),
         )
     }
 

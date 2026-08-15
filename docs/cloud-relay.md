@@ -308,6 +308,66 @@ Der Broadcast-`TlState` trägt dagegen nur: `officials_managed`, die Liste
 **Reihenfolge beim Ausrollen:** Ein alter Relay lehnt unbekannte Aktionen ab
 — erst Relay deployen, dann den Client veröffentlichen.
 
+### Panel-Profile (Spec [tl-web-panelsystem](features/tl-web-panelsystem.md), ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md)/[0025](adr/0025-tl-panel-profile-transport-persistenz.md))
+
+Benannte Profile bündeln Panel-Sichtbarkeit/-Reihenfolge/-Höhe und die
+turnierweiten Anzeige-Schalter an einem Ort, damit ein Tablet im Handbetrieb
+und ein Wandmonitor mit demselben Turnier-PC unterschiedlich aussehen
+können. **Hybrid-Transport** (ADR 0025), weil `tl_state_route` einen
+einzigen, je Namespace gecachten Blob liefert — identisch für jedes
+Gerät — und eine per-Gerät unterschiedliche Information (welches Profil ist
+meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
+
+- **Katalog** (alle Profile inkl. Inhalt) → eingebettet in `TlState`
+  (`profiles: Vec<TlPanelProfileWire>`, `default_profile_id`), Muster
+  `layouts`/`TlHallLayout` — geteilt, klein, unkritisch, folgt demselben
+  Cache-/ETag-Modell wie der übrige Zustand.
+- **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
+  `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
+  Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →
+  `profile_id`), **strikt Namespace-lokal**, und liefert sie als
+  Antwort-Header `X-Tl-Active-Profile` auf **jede** `GET /tl/api/state`-
+  Antwort — auch bei `304`, da Header unabhängig vom gecachten Body immer
+  gesendet werden und der Body dadurch weiter cachebar bleibt. Fehlt der
+  Zugang in der Map (kein Profil zugewiesen), bleibt der Header schlicht
+  weg — kein geratener Fallback. Der LAN-Pfad setzt denselben Header direkt
+  aus dem authentifizierten `TlDevice` (`tablet::server::tl_state`).
+- **Schreiben** (Anlegen/Bearbeiten/Löschen/Wählen/Default) läuft in
+  beiden Betriebsarten identisch über vier neue `TlAction`-Varianten,
+  einmal geprüft in `tl.rs::execute` (R5):
+
+  | `TlAction` | Zweck |
+  |---|---|
+  | `profile_save` | Profil anlegen/überschreiben (Upsert nach `id`; leere `id` = neu, der Host vergibt dann eine Kennung). Last-Write-Wins — bewusst **keine** Konfliktprüfung gegen `updated_at_ms`, die Spec verlangt ausdrücklich keine Fehlermeldung bei gleichzeitiger Bearbeitung. Der Host stempelt `updated_at_ms` immer selbst. |
+  | `profile_delete` | Profil löschen; Geräte, die es trugen, fallen auf das Standardprofil zurück (leere `profile_id`) — kein Fehlerzustand. |
+  | `profile_select` | Für das **aufrufende** Gerät ein Profil wählen — bewusst ohne Geräte-Feld im Payload, das Gerät ist aus der Bearer-Token-Auth bekannt (Sicherheitsgrenze: ein Gerät darf nur sich selbst binden). |
+  | `profile_set_default` | Das turnierweite Standardprofil setzen (leer = eingebautes Standardprofil in `tl.html`). |
+
+`TlAuthDevice` trägt dafür ein neues Feld `profile_id: String`, mit
+`#[serde(default)]` **auf Feldebene** — eine bewusste, dokumentierte
+Ausnahme von der oben stehenden Regel „kein `#[serde(default)]` auf
+TL-Feldern": Diese Regel schützt davor, dass ein still ergänzter Wert die
+*weitreichendere* oder *ungeprüfte* Variante auslöst (fehlendes `expect`,
+fehlendes `tokens`, fehlendes `side`). Hier ist „leer" dagegen die
+**neutralste** Lesart — sie bedeutet „Standardprofil", keine erweiterten
+Rechte und keine größere Sichtbarkeit. Ein alter Host, der das Feld noch
+nicht kennt, sendet es schlicht nicht mit; der Relay bleibt damit
+abwärtskompatibel lauffähig (ADR 0025).
+
+**Sicherheitsgrenze, die `security-reviewer` explizit geprüft hat:** Ein
+Zugang aus Namespace A darf niemals einen `X-Tl-Active-Profile`-Wert aus
+Namespace B bekommen — die Map lebt strikt innerhalb ihres `Namespace`, kein
+globaler Zustand, genau wie `tl_tokens`.
+
+Persistenz bewusst **installationsweit** in `AppConfig` (`tl_web.profiles`
++ `tl_web.default_profile_id`), nicht turniergebunden: Profile sind
+geräteklassen-/installationsbezogen (welcher Wandmonitor zeigt was), nicht
+turnierbezogen. `keep_host_managed_fields` schützt live editierte Profile
+vor dem Setup-Assistenten (Muster `devices`); `identity_bundle` strippt den
+Profil-**Katalog** NICHT (kein Zugang/Secret, wandert bei PC-Umzug mit wie
+`hall_layouts`) — nur `TlDevice.profile_id` verschwindet implizit, weil der
+Identitäts-Export die komplette Geräteliste ohnehin leert (ADR 0012).
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die

@@ -287,6 +287,29 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **TL-Web Panelsystem** — umgesetzt 15.08.2026, **noch nicht released**
+  (Version 0.9.203 vorbereitet). Die neun Abschnitte der
+  Turnierleitungs-Oberfläche sind jetzt einzeln aus-/einblendbare,
+  umsortierbare und höhenverteilbare **Panels**; benannte, server-seitige
+  **Profile** (an der Geräte-Identität hängend, turnierübergreifend)
+  ersetzen das verstreute `localStorage`-Anzeige-Menü; dazu ein
+  3-stufiges Abzeichen-System und entschlackte Wartelisten-Zeilen
+  (⋮-Menü). Spec: [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md) ·
+  ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md) ·
+  [0025](adr/0025-tl-panel-profile-transport-persistenz.md).
+
+  **Blocker vor dem ersten echten Einsatz:** Das in der Spec verlangte
+  **dedizierte Testturnier** steht aus. Es ersetzt hier den sonst
+  üblichen Sicherheitsnetz-Fallback — die Datei wurde vollständig
+  ersetzt, es gibt bewusst keinen Umschalter zurück auf die alte
+  Oberfläche, und ein Rollback mitten im Turnier ist praktisch nicht
+  durchführbar. Checkliste in der Spec (iPad Safari · Android Chrome ·
+  Wandmonitor; Profil anlegen/bearbeiten/löschen/wählen; Profilwechsel
+  übersteht Reload; gelöschtes zugewiesenes Profil fällt auf Standard
+  zurück; WLAN aus/an bei offenem Editor; BTP-Neustart; zwei Geräte
+  bearbeiten gleichzeitig dasselbe Profil; Steg bindet an den nächsten
+  sichtbaren Nachbarn bei ausgeblendetem Zwischen-Panel).
+
 - **Turnierleitungs-Weboberfläche („TL-Web")** — ausgeliefert mit
   **v0.9.176** (Schritte 1–13 der Spec). Bedienung und Grenzen:
   [turnierleitung-web.md](turnierleitung-web.md) · Spec mit ehrlicher Bilanz
