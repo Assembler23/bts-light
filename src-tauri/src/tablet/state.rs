@@ -444,14 +444,20 @@ pub struct TabletState {
     /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
     /// die Grundeinstellung aus der Konfiguration.
     auto_assign_paused: RwLock<bool>,
-    /// Erfolgte Aufrufe je Feld: `court_id → (match_id, Stufe)`.
+    /// Erfolgte Aufrufe je Feld:
+    /// `court_id → (match_id, Stufe, bereits gerufene Parteien)`.
     ///
     /// Gehört an den Turnier-PC und nicht in die Geräte: Zählte jede Seite
     /// für sich, riefe ein Helfer zum zweiten Mal, während der nächste schon
     /// beim dritten ist — und niemand wüsste, ob das Spiel gleich gestrichen
     /// wird. Die Zahl ist die Zahl der **Aufrufe**, nicht der Zeitablauf; die
     /// Fälligkeitsanzeige bleibt davon unberührt.
-    call_stages: RwLock<HashMap<i64, (i64, u8)>>,
+    ///
+    /// Die Parteien-Maske ([`SIDE_TEAM1`]/[`SIDE_TEAM2`]) merkt sich, wer auf
+    /// der **aktuellen** Stufe schon gerufen wurde — damit „Partei A rufen"
+    /// und direkt danach „Partei B rufen" **eine** Aufruf-Runde bleiben und
+    /// die Stufe nicht zweimal hochzählen (Spec tl-liste-vereinfachen E1).
+    call_stages: RwLock<HashMap<i64, (i64, u8, u8)>>,
     /// Nachrufe am Meeting Point: `(match_id, Partei) → Stufe`. Getrennt nach
     /// Partei, weil in der Regel nur eine fehlt.
     prep_call_stages: RwLock<HashMap<(i64, String), u8>>,
@@ -599,6 +605,35 @@ pub struct FreetextItem {
     pub text: String,
 }
 
+/// Parteien-Maske der Aufruf-Zählung (siehe `TabletState::call_stages`):
+/// Bit 0 = erste Partei, Bit 1 = zweite Partei.
+///
+/// Bewusst eine Bitmaske statt eines zweiten `HashMap`-Schlüssels wie bei
+/// den Vorbereitungs-Nachrufen (`prep_call_stages`): Dort ist die Stufe je
+/// Partei eigenständig, hier bleibt sie **eine** Zahl je Feld (die Zusage
+/// „alle Geräte zeigen dieselbe Zahl"). Die Maske sagt nur, wer auf dieser
+/// Stufe schon dran war.
+pub const SIDE_TEAM1: u8 = 0b01;
+/// Siehe [`SIDE_TEAM1`].
+pub const SIDE_TEAM2: u8 = 0b10;
+/// Beide Parteien — das bisherige Verhalten eines Aufrufs.
+pub const SIDE_BOTH: u8 = SIDE_TEAM1 | SIDE_TEAM2;
+
+/// Übersetzt die Wire-Partei in die Maske der Aufruf-Zählung. `None` =
+/// beide (neutralste Variante, siehe `TlAction::AnnounceCourtCall`).
+pub fn side_mask(side: Option<relay_proto::PrepCallSide>) -> u8 {
+    match side {
+        Some(relay_proto::PrepCallSide::Team1) => SIDE_TEAM1,
+        Some(relay_proto::PrepCallSide::Team2) => SIDE_TEAM2,
+        Some(relay_proto::PrepCallSide::Both) | None => SIDE_BOTH,
+    }
+}
+
+/// Serde-Default für [`AnnounceJobKind::CourtCall::side`].
+fn both_side() -> relay_proto::PrepCallSide {
+    relay_proto::PrepCallSide::Both
+}
+
 /// Worum es bei einem Ansage-Auftrag geht.
 ///
 /// Bewusst **keine** fertigen Worte: Text, Gong, Stimme und die Aussprache
@@ -617,6 +652,12 @@ pub enum AnnounceJobKind {
         match_id: i64,
         /// Die Stufe, die der Turnier-PC gezählt hat (2 oder 3).
         stage: u8,
+        /// Welche Partei gemeint ist — Vorbild [`AnnounceJobKind::PrepCall`].
+        /// Das Ansage-Gerät nennt dann nur diese Partei, genau wie beim
+        /// Vorbereitungs-Nachruf. Fehlt das Feld (Auftrag aus einer älteren
+        /// Fassung), gilt `Both`.
+        #[serde(default = "both_side")]
+        side: relay_proto::PrepCallSide,
     },
     /// Nur die Besetzung eines Felds ansagen (Schiedsrichter,
     /// Aufschlagrichter) — der manuelle Knopf aus Client und TL-Web. Eine
@@ -855,9 +896,9 @@ impl TabletState {
     /// für den TL-Web-Dispatch (`tl.rs::apply_state_action`) und den
     /// Desktop-Command (`commands::queue_reorder`), damit ein Zug auf
     /// beiden Oberflächen identisch wirkt (Konsistenz-Pflicht, ADR 0023).
-    /// Die Halle wird HIER aus dem Match abgeleitet, nicht vom Aufrufer
-    /// übergeben (R2). Liefert `false`, wenn das Match nicht (mehr) im
-    /// aktuellen Snapshot steht.
+    /// Die Reihenfolge gilt turnierweit, nicht je Halle (ADR 0026).
+    /// Liefert `false`, wenn das Match nicht (mehr) im aktuellen Snapshot
+    /// steht.
     pub fn queue_reorder(
         &self,
         config: &crate::config::AppConfig,
@@ -867,31 +908,18 @@ impl TabletState {
         let Some(snap) = self.snapshot_clone() else {
             return false;
         };
-        let Some(m) = snap.matches.iter().find(|m| m.id == match_id) else {
+        if !snap.matches.iter().any(|m| m.id == match_id) {
             return false;
-        };
+        }
         let manual = self.manual_halls();
         let called: HashSet<i64> = self
             .preparation_calls()
             .iter()
             .map(|c| c.match_id)
             .collect();
-        let (hall, _) = crate::tablet::assign::hall_for_match(
-            config,
-            &snap,
-            m,
-            manual.get(&match_id).map(String::as_str),
-            None,
-        );
-        let effective = crate::tablet::assign::ready_queue_for_hall(
-            config,
-            &snap,
-            &manual,
-            &called,
-            &self.queue_order,
-            &hall,
-        );
-        // TL-Web zeigt je Halle nur die ersten `QUEUE_LIMIT_PER_HALL` Spiele
+        let effective =
+            crate::tablet::assign::ready_queue(config, &snap, &manual, &called, &self.queue_order);
+        // TL-Web zeigt nur die ersten `QUEUE_LIMIT` Spiele
         // (`tl::build_state_limited`) — der neue Präfix darf serverseitig nie
         // mehr Spiele umfassen, als die ziehende Oberfläche überhaupt zeigen
         // konnte. Sonst zöge ein Zug ans (dort unsichtbare) Ende der vollen
@@ -900,7 +928,7 @@ impl TabletState {
         // selbst bleiben immer erreichbar — auch wenn sie (nur vom
         // unbegrenzten Desktop-Weg aus möglich) jenseits der Grenze liegen.
         let visible = [
-            Some(crate::tablet::tl::QUEUE_LIMIT_PER_HALL),
+            Some(crate::tablet::tl::QUEUE_LIMIT),
             effective
                 .iter()
                 .position(|id| *id == match_id)
@@ -915,11 +943,11 @@ impl TabletState {
         .unwrap_or(effective.len())
         .min(effective.len());
         self.queue_order
-            .reorder(&hall, &effective[..visible], match_id, before_match_id);
+            .reorder(&effective[..visible], match_id, before_match_id);
         true
     }
 
-    /// Die manuelle Reihenfolge **aller** Hallen auf einmal verwerfen
+    /// Die manuelle Reihenfolge auf einmal verwerfen
     /// (globaler Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`).
     pub fn queue_order_reset(&self) {
         self.queue_order.reset_all();
@@ -1397,7 +1425,7 @@ impl TabletState {
         self.call_stages
             .write()
             .unwrap()
-            .retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
+            .retain(|court_id, (mid, _, _)| oncourt.get(court_id) == Some(mid));
     }
 
     /// Zeitpunkt (Unix-ms) des 1. Aufrufs für ein Feld, sofern dort das
@@ -2143,7 +2171,7 @@ impl TabletState {
     /// nicht mehr.
     pub fn calls_made(&self, court_id: i64, match_id: i64) -> u8 {
         match self.call_stages.read().unwrap().get(&court_id) {
-            Some((known, made)) if *known == match_id => *made,
+            Some((known, made, _)) if *known == match_id => *made,
             _ => 0,
         }
     }
@@ -2154,21 +2182,44 @@ impl TabletState {
     /// als erfolgte Stufe `max(1, calls_made)` und bietet die nächste an —
     /// die Rechnung hier muss dazu passen. `at_least` hebt auf die zeitlich
     /// fällige Stufe an; über den dritten Aufruf hinaus wird nicht gezählt.
-    pub fn note_court_call_at_least(&self, court_id: i64, match_id: i64, at_least: u8) -> u8 {
+    ///
+    /// `sides` ist die Parteien-Maske des Aufrufs
+    /// ([`SIDE_BOTH`]/[`SIDE_TEAM1`]/[`SIDE_TEAM2`]). Die Stufe steigt nur,
+    /// wenn eine der gerufenen Parteien auf der aktuellen Stufe **schon
+    /// einmal** gerufen wurde — „Partei A rufen, dann Partei B rufen" ist
+    /// damit eine Runde und zählt einmal, „zweimal Partei A" sind zwei
+    /// (Spec tl-liste-vereinfachen E1).
+    pub fn note_court_call_at_least(
+        &self,
+        court_id: i64,
+        match_id: i64,
+        at_least: u8,
+        sides: u8,
+    ) -> u8 {
         let mut g = self.call_stages.write().unwrap();
-        let entry = g.entry(court_id).or_insert((match_id, 0));
+        let entry = g.entry(court_id).or_insert((match_id, 0, 0));
         // Anderes Spiel auf dem Feld: von vorn, sonst erbte es die Aufrufe
         // seines Vorgängers und stünde sofort als dritter Aufruf da.
         if entry.0 != match_id {
-            *entry = (match_id, 0);
+            *entry = (match_id, 0, 0);
         }
-        entry.1 = (entry.1.max(1) + 1).max(at_least).min(3);
+        // Neue Runde, sobald sich die gerufenen Parteien mit den auf dieser
+        // Stufe bereits gerufenen überschneiden — oder wenn überhaupt noch
+        // nichts gerufen wurde (dann ist dieser Aufruf der zweite, denn auf
+        // dem Feld zu stehen war der erste).
+        if entry.1 == 0 || entry.2 & sides != 0 {
+            entry.1 = (entry.1.max(1) + 1).min(3);
+            entry.2 = 0;
+        }
+        entry.1 = entry.1.max(at_least).min(3);
+        entry.2 |= sides;
         entry.1
     }
 
-    /// Wie [`Self::note_court_call_at_least`] ohne zeitliche Untergrenze.
+    /// Wie [`Self::note_court_call_at_least`] ohne zeitliche Untergrenze,
+    /// für beide Parteien.
     pub fn note_court_call(&self, court_id: i64, match_id: i64) -> u8 {
-        self.note_court_call_at_least(court_id, match_id, 0)
+        self.note_court_call_at_least(court_id, match_id, 0, SIDE_BOTH)
     }
 
     /// Hält fest, dass eine bestimmte Stufe **gesprochen wurde**.
@@ -2179,14 +2230,19 @@ impl TabletState {
     /// sie stattdessen hochzählen lassen, liefe die gemeinsame Zählung ihr
     /// dauerhaft um eins voraus.
     ///
+    /// Der Desktop-Aufruf gilt **immer beiden Parteien** — die Runde ist
+    /// damit voll, ein anschließender Partei-Aufruf von der TL-Seite
+    /// eröffnet also die nächste Stufe.
+    ///
     /// Zurückgedreht wird nie: Zwei Geräte können sich überholen.
     pub fn reached_court_call(&self, court_id: i64, match_id: i64, stage: u8) -> u8 {
         let mut g = self.call_stages.write().unwrap();
-        let entry = g.entry(court_id).or_insert((match_id, 0));
+        let entry = g.entry(court_id).or_insert((match_id, 0, 0));
         if entry.0 != match_id {
-            *entry = (match_id, 0);
+            *entry = (match_id, 0, 0);
         }
         entry.1 = entry.1.max(stage).min(3);
+        entry.2 = SIDE_BOTH;
         entry.1
     }
 
@@ -3843,6 +3899,7 @@ mod tests {
                 court_id: 7,
                 match_id: 42,
                 stage: 2,
+                side: relay_proto::PrepCallSide::Both,
             },
             now,
         );
@@ -3888,6 +3945,7 @@ mod tests {
             court_id: 1,
             match_id: 7,
             stage: 2,
+            side: relay_proto::PrepCallSide::Both,
         };
         let first = st.publish_announce_job(String::new(), kind.clone(), 1_000);
         let second = st.publish_announce_job(String::new(), kind, 1_000);
@@ -3965,15 +4023,61 @@ mod tests {
         // gemeinsame Zählung anheben, aber nie zurückdrehen.
         let st = TabletState::default();
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 3),
+            st.note_court_call_at_least(101, 7, 3, SIDE_BOTH),
             3,
             "die Uhr war weiter"
         );
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 2),
+            st.note_court_call_at_least(101, 7, 2, SIDE_BOTH),
             3,
             "und eine niedrigere Vorgabe dreht nicht zurück"
         );
+    }
+
+    #[test]
+    fn calling_both_parties_one_after_the_other_is_one_call_round() {
+        // Spec tl-liste-vereinfachen E1: Ein Partei-Aufruf ist ein
+        // vollwertiger Aufruf und zählt die Stufe hoch — aber nur EINMAL
+        // je Runde. Wer erst Partei A und dann Partei B ruft, hat einmal
+        // gerufen, nicht zweimal.
+        let st = TabletState::default();
+        assert_eq!(
+            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1),
+            2,
+            "der erste Partei-Aufruf ist der zweite Aufruf"
+        );
+        assert_eq!(
+            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2),
+            2,
+            "die andere Partei gehört zur selben Runde"
+        );
+        assert_eq!(st.calls_made(101, 7), 2, "alle Geräte lesen dieselbe 2");
+
+        // Dieselbe Partei ein zweites Mal: das ist eine neue Runde.
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1), 3);
+        assert_eq!(st.calls_made(101, 7), 3);
+    }
+
+    #[test]
+    fn a_party_call_after_a_full_call_opens_the_next_stage() {
+        // Nach einem Aufruf an beide Parteien ist die Runde voll — der
+        // nächste Aufruf, egal an wen, ist der dritte und letzte.
+        let st = TabletState::default();
+        assert_eq!(st.note_court_call(101, 7), 2);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2), 3);
+        // Und die Gegenpartei schließt dieselbe (dritte) Runde ab.
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1), 3);
+    }
+
+    #[test]
+    fn a_desktop_call_closes_the_round_for_the_web_side_too() {
+        // Der Desktop-Aufruf gilt immer beiden Parteien und meldet nur
+        // seine Stufe (`reached_court_call`). Ein anschließender
+        // Partei-Aufruf von der TL-Seite muss deshalb die nächste Stufe
+        // eröffnen — sonst hörte die Halle zweimal „Zweiter Aufruf".
+        let st = TabletState::default();
+        assert_eq!(st.reached_court_call(101, 7, 2), 2);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1), 3);
     }
 
     #[test]
@@ -4833,8 +4937,8 @@ mod tests {
 
     #[test]
     fn queue_reorder_never_backfills_matches_beyond_what_tl_web_could_show() {
-        // Code-Review-Fund 14.08.2026: TL-Web zeigt je Halle nur die ersten
-        // `tl::QUEUE_LIMIT_PER_HALL` (120) Spiele. Ohne Deckel würde ein Zug
+        // Code-Review-Fund 14.08.2026: TL-Web zeigt nur die ersten
+        // `tl::QUEUE_LIMIT` (120) Spiele. Ohne Deckel würde ein Zug
         // ans (dort unsichtbare) Ende der VOLLEN Liste auch Spiele jenseits
         // der 120 in den Präfix ziehen, die niemand gesehen hat.
         let matches: Vec<BtpMatch> = (1..=125)
@@ -4848,13 +4952,13 @@ mod tests {
         assert!(st.queue_reorder(&crate::config::AppConfig::default(), 119, None));
 
         assert_eq!(
-            st.queue_order_store().rank("", 121),
+            st.queue_order_store().rank(121),
             None,
             "Match 121 lag jenseits der TL-Web-Kappungsgrenze — darf nicht in den Präfix gezogen werden"
         );
-        assert_eq!(st.queue_order_store().rank("", 125), None);
+        assert_eq!(st.queue_order_store().rank(125), None);
         // Das gezogene Match selbst landet weiterhin im Präfix.
-        assert!(st.queue_order_store().rank("", 119).is_some());
+        assert!(st.queue_order_store().rank(119).is_some());
     }
 
     #[test]

@@ -287,16 +287,25 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
-- **TL-Web Panelsystem** — umgesetzt 15.08.2026, **noch nicht released**
-  (Version 0.9.203 vorbereitet). Die neun Abschnitte der
-  Turnierleitungs-Oberfläche sind jetzt einzeln aus-/einblendbare,
-  umsortierbare und höhenverteilbare **Panels**; benannte, server-seitige
-  **Profile** (an der Geräte-Identität hängend, turnierübergreifend)
-  ersetzen das verstreute `localStorage`-Anzeige-Menü; dazu ein
-  3-stufiges Abzeichen-System und entschlackte Wartelisten-Zeilen
-  (⋮-Menü). Spec: [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md) ·
-  ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md) ·
-  [0025](adr/0025-tl-panel-profile-transport-persistenz.md).
+- **TL-Web Panelsystem** — Grundfassung released mit v0.9.203 (PR #218,
+  gemergt, Relay-Deploy gelaufen). **Zweite Runde umgesetzt 15.08.2026,
+  noch nicht released** (Version 0.9.204 vorbereitet): Die 6 Panels
+  (Felder, Walkover, Zähltafel, Schiedsrichter, Spiele, Beendete Spiele)
+  sind einzeln aus-/einblendbar, **zuklappbar** (mit Vorschau im Kopf),
+  umsortierbar, einer von **1–3 Spalten** zuordenbar und höhenverteilbar;
+  benannte, server-seitige **Profile** (an der Geräte-Identität hängend,
+  turnierübergreifend) ersetzen das verstreute `localStorage`-Anzeige-Menü;
+  dazu ein 3-stufiges Abzeichen-System. Zusätzlich in derselben Runde:
+  die manuelle Spielreihenfolge ist jetzt **hallenübergreifend** (ADR
+  0026, löst ADR 0023 in der Hallen-Frage ab), die vier
+  Wartelisten-Unterabschnitte sind zu einem Panel „Spiele" mit Status als
+  Zeilen-Abzeichen zusammengeführt, Feldkachel und Spielzeile haben
+  erweiterte ⋮-/⋯-Menüs (u. a. „Nach oben schieben", „Ergebnis
+  eintragen", 2. Aufruf je Partei am Feld). Spec:
+  [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md)
+  (Nachtrag am Ende) · ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md) ·
+  [0025](adr/0025-tl-panel-profile-transport-persistenz.md) ·
+  [0026](adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md).
 
   **Blocker vor dem ersten echten Einsatz:** Das in der Spec verlangte
   **dedizierte Testturnier** steht aus. Es ersetzt hier den sonst

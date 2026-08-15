@@ -6,23 +6,37 @@ import { playAnnouncement, resolveAnnouncementLanguage } from "./announcer";
 import { azureOption } from "./azureAnnounce";
 import type { AnnounceConfig, AzureTtsConfig, CourtOverview } from "../types";
 
+/**
+ * `side` benennt eine einzelne Partei (Nachruf „2. Aufruf für Partei A/B"
+ * an der Feldkachel, Plan tl-liste-vereinfachen E1). Dann wird nur diese
+ * gerufen — exakt wie beim Vorbereitungs-Nachruf je Partei: die genannte
+ * Partei steht als `teamANames`, die andere bleibt leer, und auch die
+ * Sprachwahl richtet sich nur nach den Nationen der genannten Partei.
+ * Ohne `side` (bzw. mit `"both"`) bleibt es beim bisherigen Verhalten.
+ */
 export function announceCourt(
   court: CourtOverview,
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
   callStage: 1 | 2 | 3 = 1,
+  side: "both" | "team1" | "team2" = "both",
 ): void {
-  const lang = resolveAnnouncementLanguage(
-    [...court.team1_nationalities, ...court.team2_nationalities],
-    announce.language_mode,
-  );
+  const nurEine = side === "team1" || side === "team2";
+  const zweite = side === "team2";
+  const namen = nurEine && zweite ? court.team2 : court.team1;
+  const nats = nurEine
+    ? (zweite ? court.team2_nationalities : court.team1_nationalities)
+    : [...court.team1_nationalities, ...court.team2_nationalities];
+  const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
   void playAnnouncement(
     {
       courtLabel: court.court,
       discipline: court.discipline,
       className: court.class_label,
-      teamANames: court.team1,
-      teamBNames: court.team2,
+      teamANames: namen,
+      // Bei einer einzelnen Partei bleibt die andere ungenannt — genau wie
+      // beim Vorbereitungs-Nachruf.
+      teamBNames: nurEine ? [] : court.team2,
       roundName: court.round_name,
       // Zähltafelbediener nur ansagen, wenn er zugewiesen wurde (ADR 0007) —
       // nicht der reine pro-Feld-Hinweis.

@@ -3,7 +3,14 @@
 > Status: **abgestimmt 2026-08-14** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Idee der Turnierleitung, 14.08.2026.
 > Betroffene Crates: src-tauri, relay-proto, src.
-> ADR: [0023-manuelle-spielreihenfolge-praefix-je-halle.md](adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md).
+> ADR: [0023-manuelle-spielreihenfolge-praefix-je-halle.md](adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md)
+> (Präfix-Grundlage: atomare Züge, ein gemeinsamer Sortier-Helfer — weiter
+> gültig).
+> **Nachtrag 15.08.2026:** Der Präfix ist seither **hallenübergreifend**
+> statt je Halle getrennt (der weiter unten beschriebene „je Halle"-Teil
+> ist damit abgelöst) — siehe
+> [0026-spielliste-eine-globale-reihenfolge-eine-liste.md](adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md)
+> und den Nachtrag in [features/tl-web-panelsystem.md](tl-web-panelsystem.md).
 
 ## Kontext / Problem
 

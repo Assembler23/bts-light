@@ -149,7 +149,7 @@ Die geteilten Typen in `relay-proto`:
 
 | Typ | Zweck |
 |---|---|
-| `TlAction` | Der **geschlossene** Satz erlaubter Aktionen (Feld belegen/räumen/umhängen, Vorbereitungs-Aufruf, erneuter Aufruf, Ergebnis, Walkover, Zähltafelbediener, Auto-Vergabe). Was hier nicht steht, ist nicht darstellbar. |
+| `TlAction` | Der **geschlossene** Satz erlaubter Aktionen (Feld belegen/räumen/umhängen, Vorbereitungs-Aufruf, erneuter Aufruf — wahlweise je Partei, siehe unten —, Ergebnis, Walkover, Zähltafelbediener, Auto-Vergabe). Was hier nicht steht, ist nicht darstellbar. |
 | `CourtExpectation` | Was das Gerät auf dem Feld **vorgefunden** hat (`any` / `free` / `match`). Stimmt es nicht mehr, lehnt der Host ab — so überschreiben zwei Geräte einander nicht stillschweigend. |
 | `TlResponse` + `TlErrorCode` | Antwort mit **maschinenlesbarem** Grund, damit die Seite gezielt reagieren kann, plus der Revision, auf die sie sich neu ausrichten soll. Kennt auch „ausgeführt, aber mit Hinweis" (etwa: in dieser Halle ist kein Ansage-Gerät verbunden) — ausdrücklich kein Fehler. |
 | `RelayFrame::TlCommand` | Kommando an den Host; `reqId` korreliert die Antwort, `opId` ist der Idempotenzschlüssel gegen doppelte Schreibvorgänge nach einem Netzwackler, `viewRev` die Revision der Ansicht, auf der die Aktion beruhte (Grundlage der Altersprüfung). |
@@ -284,6 +284,32 @@ Relay setzt daraus `ownership_active`. Ältere Tablets/Relays ohne die Felder
 fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
 [tablet.md](tablet.md).
 
+### Erneute Aufrufe — je Partei
+
+Beide Aufruf-Aktionen können auf **eine Partei** eingegrenzt werden; die
+Partei reist als `relay_proto::PrepCallSide` (`"both"` / `"team1"` /
+`"team2"`).
+
+| `TlAction` | Partei-Feld | Verhalten |
+|---|---|---|
+| `announce_prep_call` | `side` — **Pflicht** | Nachruf am Meeting Point. Die Stufe wird **je Partei** gezählt (`prep_call_stages`); die eine kann längst da sein, während die andere fehlt. |
+| `announce_court_call` | `side` — **optional**, fehlend = beide | Erneuter Aufruf am Feld. Die Stufe gehört dem **Feld**, nicht der Partei — alle Geräte zeigen dieselbe Zahl. |
+
+`announce_court_call.side` ist die **einzige** Ausnahme von der Regel „kein
+Feld in `TlAction` trägt `#[serde(default)]`" — hier ist `None` die
+*neutralere* Variante (beide Parteien, das Verhalten von jeher), nicht die
+weitreichendere. Dieselbe Abwägung wie bei `EnterResult.winner` und
+`CallPreparation.location_id`. Ein älterer Browser, der das Feld nicht
+kennt, ruft damit unverändert beide Parteien.
+
+**Stufenzählung am Feld:** Die Stufe steigt einmal je *Aufruf-Runde*. Ruft
+die Turnierleitung nacheinander Partei A und Partei B, ist das **eine**
+Runde (beide hören „Zweiter Aufruf"); erst ein Aufruf an eine bereits
+gerufene Partei eröffnet die nächste Stufe. Der Host merkt sich dazu je
+Feld, welche Parteien auf der aktuellen Stufe schon dran waren
+(`TabletState::call_stages`). Ein Aufruf aus der Desktop-Oberfläche
+(`reached_court_call`) gilt immer beiden und schließt die Runde ab.
+
 ### Schiedsrichter (Spec schiedsrichter-management)
 
 Neue `TlAction`-Varianten (geschlossener Satz, ADR 0011):
@@ -322,6 +348,18 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   (`profiles: Vec<TlPanelProfileWire>`, `default_profile_id`), Muster
   `layouts`/`TlHallLayout` — geteilt, klein, unkritisch, folgt demselben
   Cache-/ETag-Modell wie der übrige Zustand.
+  Ein Profil trägt neben Name, Panel-Liste und Anzeige-Schaltern die
+  Layout-Aufteilung: `columns` (1…3), `columnWidths` (relative
+  Spaltenbreiten, leer = gleichmäßig) und je Panel `heightFr`, `collapsed`
+  und `column` (1-basiert). Alle drei Layout-Felder tragen
+  `#[serde(default)]` — dieselbe Abwägung wie bei `TlAuthDevice.profile_id`
+  unten: `0`/leer ist die **neutralste** Lesart, nicht die
+  weitreichendere. Der Host **reicht sie nur durch**; was `0` bedeutet
+  („aus `listPosition` ableiten" bzw. „Spalte 1"), entscheidet
+  ausschließlich `tl.html`. Serverseitig begrenzt sind lediglich die
+  Längen (`MAX_TL_PROFILE_PANELS`, `MAX_TL_PROFILE_COLUMN_WIDTHS`), damit
+  ein einzelner Aufruf den `TlState` nicht über `MAX_TL_STATE_LEN` treiben
+  kann (R4).
 - **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
   `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
   Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →

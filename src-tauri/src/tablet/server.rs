@@ -1063,7 +1063,7 @@ async fn info_preparation_state(
                     "called_at_ms": c.called_at_ms,
                 })
             });
-            let manual = ctx.tablet.queue_order_store().rank(&hall, m.id).is_some();
+            let manual = ctx.tablet.queue_order_store().rank(m.id).is_some();
             serde_json::json!({
                 "match_id": m.id,
                 "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
@@ -3687,6 +3687,7 @@ mod tests {
                     panels: vec![],
                     display: relay_proto::TlDisplaySettingsWire::default(),
                     updated_at_ms: 0, // wird vom Host gestempelt, s. profile_save
+                    ..Default::default()
                 },
             },
         )
@@ -3758,6 +3759,7 @@ mod tests {
                     panels: vec![],
                     display: relay_proto::TlDisplaySettingsWire::default(),
                     updated_at_ms: 0,
+                    ..Default::default()
                 },
             },
         )

@@ -1923,7 +1923,7 @@ pub fn preparation_candidates_for(
                     called_at_ms: c.called_at_ms,
                 }
             });
-            let manual = tablet.queue_order_store().rank(&hall, m.id).is_some();
+            let manual = tablet.queue_order_store().rank(m.id).is_some();
             PreparationCandidate {
                 match_id: m.id,
                 label: format!("{} {}", m.draw_name, m.round_name)
@@ -4034,6 +4034,7 @@ mod tests {
             panels: Vec::new(),
             display: crate::config::TlDisplaySettings::default(),
             updated_at_ms: 1,
+            ..Default::default()
         }
     }
 

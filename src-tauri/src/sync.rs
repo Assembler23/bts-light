@@ -521,48 +521,24 @@ impl SyncEngine {
     }
 
     /// Aufräumen der manuellen Spielreihenfolge (Spec
-    /// `spielliste-manuelle-reihenfolge`, ADR 0023): Ein Match bleibt im
-    /// Präfix **seiner aktuellen Halle** erhalten, solange es spielbereit
-    /// und noch nicht zugewiesen ist. Wechselt die abgeleitete Halle
-    /// (`SetHall`, neuer Vorbereitungs-Aufruf), fällt der Eintrag aus der
-    /// alten Halle heraus und taucht in der neuen NICHT automatisch wieder
-    /// auf (kein Auto-Insert). Wird das Match zugewiesen/beendet oder
-    /// verschwindet es aus dem Snapshot, steht es in keiner Halle mehr im
-    /// `keep`-Set und wird komplett entfernt. Kein BTP-Write, rein lokal.
-    fn reconcile_queue_order(
-        &self,
-        config: &AppConfig,
-        tablet: &TabletState,
-        snapshot: &BtpSnapshot,
-    ) {
-        let manual = tablet.manual_halls();
-        let calls = tablet.preparation_calls();
-        let mut keep_by_hall: HashMap<String, HashSet<i64>> = HashMap::new();
-        for m in snapshot
+    /// `spielliste-manuelle-reihenfolge`, ADR 0026): Ein Match bleibt in
+    /// der Reihenfolge, solange es spielbereit und noch nicht zugewiesen
+    /// ist. Wird es zugewiesen/beendet oder verschwindet es aus dem
+    /// Snapshot, steht es nicht mehr im `keep`-Set und fällt heraus.
+    ///
+    /// Ein **Hallenwechsel** räumt seit ADR 0026 nichts mehr auf — die
+    /// Reihenfolge ist global, ein Wechsel der Halle ändert an der Abfolge
+    /// nichts. Deshalb braucht diese Stelle weder Konfiguration noch
+    /// Hallen-Auflösung. Kein BTP-Write, rein lokal.
+    fn reconcile_queue_order(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
+        let keep: HashSet<i64> = snapshot
             .matches
             .iter()
             .filter(|m| m.status == MatchStatus::Scheduled)
             .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
-        {
-            let call = calls.iter().find(|c| c.match_id == m.id);
-            let manual_hall = manual.get(&m.id).map(String::as_str);
-            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
-                snapshot
-                    .locations
-                    .iter()
-                    .find(|l| l.id == lid)
-                    .map(|l| l.name.as_str())
-            });
-            let (hall, _) = crate::tablet::assign::hall_for_match(
-                config,
-                snapshot,
-                m,
-                manual_hall,
-                called_hall,
-            );
-            keep_by_hall.entry(hall).or_default().insert(m.id);
-        }
-        tablet.queue_order_store().retain(&keep_by_hall);
+            .map(|m| m.id)
+            .collect();
+        tablet.queue_order_store().retain(&keep);
     }
 
     /// Nachschub-Queue flushen (A5): fehlgeschlagene Ergebnis-Writes
@@ -1345,7 +1321,7 @@ impl SyncEngine {
         // Manuelle Spielreihenfolge ebenso aufräumen (Spec
         // `spielliste-manuelle-reihenfolge`) — direkt danach, gleiche
         // Bedingungen (lokal, kein Slave nötig).
-        self.reconcile_queue_order(config, tablet, &snapshot);
+        self.reconcile_queue_order(tablet, &snapshot);
         // Meldeliste für den Hallen-Check-In (ADR 0009) vorbereiten — gesendet
         // wird sie erst NACH dem Liveticker-Push (siehe unten).
         let roster = self.plan_checkin_roster(config, &snapshot);
@@ -1810,8 +1786,8 @@ mod tests {
         // dem Snapshot verschwindet.
         let engine = SyncEngine::new();
         let tablet = TabletState::default();
-        tablet.queue_order_store().reorder("", &[7, 8], 7, Some(8));
-        assert_eq!(tablet.queue_order_store().rank("", 7), Some(0));
+        tablet.queue_order_store().reorder(&[7, 8], 7, Some(8));
+        assert_eq!(tablet.queue_order_store().rank(7), Some(0));
 
         let snap = snap_with(
             Vec::new(),
@@ -1821,35 +1797,37 @@ mod tests {
             ],
             Vec::new(),
         );
-        engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
+        engine.reconcile_queue_order(&tablet, &snap);
         assert_eq!(
-            tablet.queue_order_store().rank("", 7),
+            tablet.queue_order_store().rank(7),
             None,
             "beendetes Match aufgeräumt"
         );
 
         // Match 8 verschwindet ganz aus dem Snapshot.
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
-        engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
-        assert_eq!(tablet.queue_order_store().rank("", 8), None);
+        engine.reconcile_queue_order(&tablet, &snap);
+        assert_eq!(tablet.queue_order_store().rank(8), None);
     }
 
     #[test]
-    fn queue_order_faellt_beim_hallenwechsel_aus_der_alten_halle_ohne_auto_insert() {
-        // Spec `spielliste-manuelle-reihenfolge`, Blocker 2: ändert sich
-        // die abgeleitete Halle eines Matches, verliert es seinen
-        // Präfix-Platz in der alten Halle — und taucht NICHT automatisch
-        // in der neuen wieder auf.
+    fn ein_hallenwechsel_laesst_die_reihenfolge_unangetastet() {
+        // ADR 0026: Die Reihenfolge ist global — ein Hallenwechsel räumt
+        // seit dem NICHTS mehr auf (früher fiel der Eintrag aus der alten
+        // Halle heraus). Das Spiel behält seinen Platz.
         let engine = SyncEngine::new();
         let tablet = TabletState::default();
-        tablet.queue_order_store().reorder("Halle A", &[7], 7, None);
-        assert_eq!(tablet.queue_order_store().rank("Halle A", 7), Some(0));
+        tablet.queue_order_store().reorder(&[7, 8], 7, Some(8));
+        assert_eq!(tablet.queue_order_store().rank(7), Some(0));
 
         // Match 7 bekommt jetzt von Hand die Halle "Halle B".
         tablet.set_manual_hall(7, "Halle B");
         let snap = snap_with(
             Vec::new(),
-            vec![ready_named(7, None, "A", "B")],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
             vec![
                 crate::btp::model::BtpLocation {
                     id: 1,
@@ -1861,13 +1839,8 @@ mod tests {
                 },
             ],
         );
-        engine.reconcile_queue_order(&cfg_auto(true, 0.0), &tablet, &snap);
-        assert_eq!(tablet.queue_order_store().rank("Halle A", 7), None);
-        assert_eq!(
-            tablet.queue_order_store().rank("Halle B", 7),
-            None,
-            "kein Auto-Insert in die neue Halle"
-        );
+        engine.reconcile_queue_order(&tablet, &snap);
+        assert_eq!(tablet.queue_order_store().rank(7), Some(0));
     }
 
     #[test]
@@ -2049,8 +2022,8 @@ mod tests {
             ],
             Vec::new(),
         );
-        // Beide Matches liegen ohne Halle in "" — 7 vor 8 ziehen.
-        tablet.queue_order_store().reorder("", &[7, 8], 7, Some(8));
+        // 7 vor 8 ziehen.
+        tablet.queue_order_store().reorder(&[7, 8], 7, Some(8));
 
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert_eq!(courts.len(), 1);
@@ -2078,7 +2051,7 @@ mod tests {
             ],
             Vec::new(),
         );
-        tablet.queue_order_store().reorder("", &[7, 8], 7, Some(8));
+        tablet.queue_order_store().reorder(&[7, 8], 7, Some(8));
         tablet.set_auto_assign_excluded(7, true);
 
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);

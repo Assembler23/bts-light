@@ -23,23 +23,21 @@
   --warn: #d97706;
   --alarm: #dc2626;
   --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .1);
-  /* Mindesthöhe der Spielliste im gestapelten Layout (Telefon, „Spielliste
-     darunter") — der EINZIGE Ort, an dem diese Zahl steht: `fitCourts()`
-     im Skript liest den aufgelösten Pixelwert über `getComputedStyle`
-     zurück, statt sie ein zweites Mal im Skript zu duplizieren. Genug für
-     ein, zwei Zeilen der Warteliste plus Rand — mehr braucht die Garantie
-     nicht, den Rest holt sich die Liste ohnehin über `flex: 1 1 0`. */
-  --liste-min: 10rem;
-  /* Mindesthöhe EINES Panels innerhalb der Listen-Spalte (Spec
+  /* Mindesthöhe EINES Panels innerhalb seiner Spalte (Spec
      tl-web-panelsystem) — verhindert, dass ein Panel-Rand (`.panel-steg`)
-     ein Panel auf 0/negative Höhe zieht. Kleiner als `--liste-min`
-     (das gilt für die ganze Spalte, das hier für einen einzelnen von
-     möglicherweise acht Panels darin): genug für Kopfzeile plus eine
-     Zeile Inhalt, wie beim Feld-Untergrenze-Pendant `FELDER_MIN` im
-     Skript. Einziger Ort, an dem diese Zahl steht — `wirePanelStegs()`
+     ein Panel auf 0/negative Höhe zieht: genug für Kopfzeile plus eine
+     Zeile Inhalt. Einziger Ort, an dem diese Zahl steht — `wireStegs()`
      im Skript liest den aufgelösten Pixelwert über `getComputedStyle`
-     zurück (dasselbe Muster wie `--liste-min`/`fitCourts()`). */
+     zurück, statt sie ein zweites Mal im Skript zu duplizieren. */
   --panel-min: 4.5rem;
+  /* Dasselbe für die BREITE einer Spalte (Plan tl-liste-vereinfachen F) —
+     die Untergrenze, gegen die der Spalten-Steg (`.col-steg`) klammert.
+     Bewusst kleiner als die früheren 320px der festen Listen-Spalte: Drei
+     Spalten müssen bei 1100px Fensterbreite (dem Breakpoint, ab dem
+     überhaupt nebeneinander gestapelt wird) noch nebeneinander passen —
+     3 × 16rem + 2 Stege + Polster bleibt darunter. Gelesen wird der
+     aufgelöste Pixelwert wie bei `--panel-min`. */
+  --spalte-min: 16rem;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -148,93 +146,88 @@ header {
 }
 .banner.show { display: block; }
 
-/* ── Hauptbereich: Felder immer vollständig sichtbar, Liste rollt für sich
-   ─────────────────────────────────────────────────────────────────────
+/* ── Hauptbereich: 1 bis 3 Spalten voller Panels ──────────────────────
    `main` nimmt den kompletten Rest der Höhe unter Kopf/Störungsband
-   (`flex: 1 1 auto`) und rollt selbst nicht mehr — seine beiden Abschnitte
-   tun das je für sich, siehe unten. `padding-top` bekommt den Überstand des
-   Aktionsbands dazu (`--band`, von `messeKopf()` gesetzt): Das Band liegt
-   FEST über der Kopfzeile — ist es breiter als der Kopf (viele Hallen,
-   Umbruch), verdeckte es sonst die oberste Feldreihe. */
+   (`flex: 1 1 auto`) und rollt selbst nicht — das tun die Panel-Körper je
+   für sich. `padding-top` bekommt den Überstand des Aktionsbands dazu
+   (`--band`, von `messeKopf()` gesetzt): Das Band liegt FEST über der
+   Kopfzeile — ist es breiter als der Kopf (viele Hallen, Umbruch),
+   verdeckte es sonst die oberste Feldreihe.
+
+   Seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) ist `main`
+   kein fester Zweiklang „Felder | Liste" mehr, sondern der Behälter für
+   ein bis drei gleichrangige Spalten, die `renderPanels()` aus dem aktiven
+   Profil baut. „Felder" ist damit ein Panel wie jedes andere und kann in
+   jeder Spalte stehen. Kein `gap`: Den Abstand zwischen zwei Spalten
+   stellt der Spalten-Steg (`.col-steg`, 16px) — dieselbe Optik wie vorher,
+   und die Lücke ist zugleich die Greiffläche zum Ziehen. */
 main {
   flex: 1 1 auto; min-height: 0;
   padding: calc(16px + var(--band, 0px)) 16px 16px;
-  /* Kein `gap` mehr: Den Abstand zwischen Feldern und Liste stellt der
-     Trennsteg (#steg, 16px dick) — dieselbe Optik wie vorher, aber die
-     Lücke ist jetzt zugleich die Greiffläche zum Ziehen. */
   display: flex; flex-direction: column;
   overflow: hidden;
 }
-/* Trennsteg: gestapelt ein waagerechter Griff (zieht die Listen-HÖHE).
-   `touch-action: none` GENAU HIER, wie beim Zieh-Griff der Kacheln: Eine
-   am Steg beginnende Geste gehört dem Steg, nicht dem Scrollen. */
-#steg {
+/* Eine Spalte: ein senkrechter Panel-Stapel mit eigenen Höhen-Stegen
+   (`.panel-steg`). `min-width: 0` erlaubt das Schrumpfen unter die
+   Inhaltsbreite (sonst sprengte eine lange Zeile die Spaltenaufteilung),
+   `min-height: 0` dasselbe für die Höhe innerhalb von `main`. */
+.tl-column {
+  display: flex; flex-direction: column;
+  flex: 1 1 0; min-width: 0; min-height: 0;
+  /* Notausgang, kein Regelfall: Normalerweise schrumpfen die Panels selbst
+     auf den Platz der Spalte. Übersteigt aber schon die Summe ihrer
+     Mindesthöhen (`--panel-min`) die Spaltenhöhe — sechs Panels in einer
+     Spalte auf einem kleinen Telefon —, rollt die Spalte, statt die
+     unteren Panels wortlos abzuschneiden. */
+  overflow-y: auto;
+}
+/* Spalten-Steg: senkrechter Griff zwischen zwei Spalten (zieht die
+   BREITE). Bis auf Richtung und Sinnbild identisch zum Panel-Rand
+   (`.panel-steg`) — beide laufen im Skript durch DENSELBEN Mechanismus
+   (`wireStegs()`). `touch-action: none` GENAU HIER, wie beim Zieh-Griff
+   der Kacheln: Eine am Steg beginnende Geste gehört dem Steg, nicht dem
+   Scrollen. */
+.col-steg {
   flex: none; touch-action: none; user-select: none; -webkit-user-select: none;
   display: flex; align-items: center; justify-content: center;
-  height: 16px; cursor: row-resize;
+  width: 16px; cursor: col-resize;
 }
-/* Kaskaden-Falle wie bei `#app[hidden]` oben: Der eigene `display: flex`
-   schlägt sonst IMMER die UA-Regel `[hidden] { display: none; }` — nötig,
-   seit „Felder" per Profil ausblendbar ist (Spec tl-web-panelsystem,
-   `renderCourtsHead()` setzt `steg.hidden`, wenn kein Gegenüber mehr da
-   ist, den der Steg trennen könnte). */
-#steg[hidden] { display: none; }
-/* Sichtbar ist nur eine kleine Pille — die Greiffläche ist der ganze Steg. */
-#steg::after {
+.col-steg::after {
   content: ""; border-radius: 999px; background: var(--line);
-  width: 44px; height: 4px;
+  width: 4px; height: 44px;
 }
-#steg:hover::after, #steg.zieht::after { background: var(--ink-faint); }
-/* Felder: nie höher als ihr Platz. `fitCourts()` im Skript schrumpft dafür
-   erst Abstände/Schrift (Klassen `kacheln-kompakt`/`kacheln-mini` weiter
-   unten) und macht die Kachelbox erst als letzten Ausweg selbst rollbar
-   (`.courts-scroll`) — alle Felder auf einen Blick, die Liste läuft, die
-   Felder nicht. Gestapelt (Telefon-Breite und „Spielliste darunter") setzt
-   `fitCourts()` zusätzlich einen INLINE `max-height` — bedarfsgerecht,
-   nicht mehr ein starrer Anteil (siehe Kommentar dort): Kein CSS-Deckel
-   hier in der Grundregel, weil Inline-Style ihn ohnehin überstimmen würde,
-   sobald das Skript einmal gelaufen ist. */
-main > section:first-of-type {
-  flex: 0 0 auto; overflow: hidden;
-  /* Platz für den Schatten der Kacheln, den `overflow` sonst abschneidet. */
-  padding: 2px; margin: -2px;
-}
-main > section:first-of-type.courts-scroll { overflow-y: auto; }
-/* Spielliste: bekommt den kompletten Rest und rollt eigenständig — die
-   Felder darüber (oder daneben) bleiben davon unberührt. `min-height` ist
-   die harte Untergrenze aus `--liste-min` (CSS-Var, oben bei `:root`):
-   Selbst wenn `fitCourts()` den Feldern bedarfsgerecht viel Platz gibt,
-   behält die Liste IMMER mindestens dieses Maß — durchgesetzt vom Browser
-   selbst, nicht nur von der JS-Rechnung. */
-main > section:last-of-type {
-  flex: 1 1 0; min-height: var(--liste-min, 10rem); overflow-y: auto;
-}
+.col-steg:hover::after, .col-steg.zieht::after { background: var(--ink-faint); }
+.col-steg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (min-width: 1100px) {
-  /* Auf dem Desktop nebeneinander: Felder links (was läuft), Liste rechts
-     (was als Nächstes dran ist). Beide Spalten sind hier genauso hoch wie
-     `main` selbst (`align-items: stretch`) — die Felder bekommen dadurch
-     die GANZE Höhe, kein Deckel nötig. Auf dem Telefon bleibt es bei der
-     gestapelten Regel von oben — dort reicht ohnehin nur eine Spalte
-     nebeneinander nicht. */
+  /* Ab dem bestehenden Tablet-Breakpoint stehen die Spalten nebeneinander
+     und sind alle genauso hoch wie `main` selbst (`align-items: stretch`). */
   main { flex-direction: row; align-items: stretch; }
-  main > section:first-of-type { flex: 3 1 0; min-width: 0; max-height: none; }
-  /* `min-width` zusätzlich zur `flex-basis`: Ein `flex-shrink` von 1 (Teil
-     der Kurzschreibweise) ließe die Spalte sonst unter 320px schrumpfen,
-     sobald die Felder-Spalte daneben mehr Platz beansprucht — genau die
-     320px-Untergrenze, die vorher `minmax(320px, 2fr)` im Grid gab. */
-  main > section:last-of-type { flex: 2 1 320px; min-width: 320px; }
-  /* Listen-Position je Gerät (Anzeige-Menü „Spielliste darunter"): wieder
-     gestapelt statt nebeneinander — dieselbe bedarfsgerechte Aufteilung wie
-     unter 1100px, nur bei größerer Fensterbreite (`fitCourts()` erkennt
-     „gestapelt" an `flex-direction: column`, nicht an der Fensterbreite). */
-  body.liste-unten main { flex-direction: column; align-items: stretch; }
-  body.liste-unten main > section:first-of-type { flex: 0 0 auto; }
-  body.liste-unten main > section:last-of-type { flex: 1 1 0; }
-  /* Nebeneinander wird der Steg zum senkrechten Griff (zieht die
-     Listen-BREITE). Gestapelt („Spielliste darunter") gilt die Grundregel. */
-  body:not(.liste-unten) #steg { height: auto; width: 16px; cursor: col-resize; }
-  body:not(.liste-unten) #steg::after { width: 4px; height: 44px; }
+  /* Untergrenze der Spaltenbreite — zusätzlich zur `flex-basis`, weil der
+     `flex-shrink: 1` aus `flex: 1 1 0` eine Spalte sonst beliebig schmal
+     zusammendrücken ließe, sobald eine Nachbarspalte mehr Gewicht bekommt.
+     Zugleich der Wert, den `wireStegs()` beim Ziehen ausliest. */
+  main > .tl-column { min-width: var(--spalte-min); }
 }
+@media (max-width: 1099.98px) {
+  /* Unter dem Breakpoint werden die Spalten IMMER untereinander gestapelt,
+     egal was das Profil sagt: Ein Wandmonitor-Profil mit drei Spalten darf
+     ein Tablet im Hochformat nicht unbenutzbar machen — Profile gibt es
+     gerade dafür, dass dasselbe Turnier auf verschiedenen Geräten
+     verschieden aussieht, nicht dafür, dass ein Gerät ausfällt.
+     `flex-grow: 1 !important`, weil `applyColumnWidths()` die gezogene
+     Gewichtung als Inline-Style setzt — und Inline schlägt jede
+     Klassenregel. Gestapelt ist eine BREITEN-Gewichtung sinnlos, hier
+     bekommt jede Spalte denselben Höhenanteil. Der Spalten-Steg
+     verschwindet mit: Er zöge sonst eine Breite, die es nicht gibt. */
+  main > .tl-column { flex-grow: 1 !important; }
+  main > .col-steg { display: none; }
+}
+/* Platz für den Schatten der Feld-Kacheln, den das `overflow` des
+   Panel-Körpers sonst abschneidet. Nur Polster, kein Minus-Rand: Der
+   Panel-Körper rollt (`overflow-y: auto`, was `overflow-x` auf `auto`
+   mitzieht), ein negativer Rand brächte deshalb eine waagerechte
+   Bildlaufleiste. */
+#courts { padding: 2px; }
 h2 {
   margin: 0 0 10px; font-size: .8rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint);
@@ -439,7 +432,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-kompakt .badge { font-size: .62rem; padding: 1px 5px; }
 #courts.kacheln-kompakt .meta, #courts.kacheln-kompakt .pair { font-size: .8rem; }
 #courts.kacheln-kompakt .score, #courts.kacheln-kompakt .clock { font-size: .92rem; }
-#courts.kacheln-kompakt .callbtn { padding: 5px 9px; min-height: 34px; font-size: .74rem; }
+/* Das Kebab der Kachel schrumpft mit — es sitzt in der Kopfzeile neben dem
+   Zieh-Griff und würde die gesparte Höhe sonst gleich wieder auffressen.
+   Sein MENÜ bleibt in voller Größe (nur der Auslöser schrumpft): Wer es
+   öffnet, bedient danach beschriftete Knöpfe, und die müssen treffbar
+   bleiben. */
+#courts.kacheln-kompakt .kebab > summary { width: 34px; height: 34px; font-size: 1.1rem; }
 #courts.kacheln-kompakt .hall-group h3 { font-size: .82rem; margin-bottom: 5px; }
 #courts.kacheln-kompakt .hall-group + .hall-group { margin-top: 10px; }
 
@@ -459,7 +457,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-mini .pair { font-size: .68rem; }
 #courts.kacheln-mini .score, #courts.kacheln-mini .clock { font-size: .78rem; }
 #courts.kacheln-mini .score small, #courts.kacheln-mini .clock small { font-size: .56rem; }
-#courts.kacheln-mini .callbtn { padding: 4px 7px; min-height: 32px; font-size: .66rem; }
+/* 32px wie der frühere Aufruf-Knopf in dieser Stufe (`.callbtn`,
+   `min-height: 32px`) — die bewusst in Kauf genommene Untergrenze der
+   dichtesten Darstellung, nicht weiter unterboten. */
+#courts.kacheln-mini .kebab > summary { width: 32px; height: 32px; font-size: 1rem; }
 /* Kleinerer Griff (Vorgabe: „kleinere Grips") — NUR das Sinnbild schrumpft.
    Polsterung/Trefffläche bleiben bei den 8px der Grundregel
    (`.card-top .drag-griff` weiter unten; die negativen Ränder gleichen sie
@@ -470,9 +471,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-mini .hall-group + .hall-group { margin-top: 8px; }
 
 /* ── Spielliste ────────────────────────────────────────────────────────
-   Drei Abschnitte, in der Reihenfolge des Arbeitsablaufs: gerufen (warten
-   am Meeting Point), spielbereit (die Vergabemasse), noch nicht bereit
-   (sichtbar, aber eingeklappt). */
+   EINE Liste über alle Hallen und alle Bereitschaftslagen (ADR 0026):
+   gerufene Spiele oben angepinnt (das macht bereits die Server-Sortierung),
+   alles Übrige in der geplanten Abfolge. Was früher vier Abschnitte waren
+   („gerufen"/„spielbereit"/„nicht bereit"/„ohne Hallenzuordnung"), steht
+   jetzt als Status an der Zeile — siehe `.row-status` unten. */
 .queue { display: flex; flex-direction: column; gap: 8px; }
 .row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -484,36 +487,60 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    vorher waren `.who` und `.draw` zwei eigene Top-Level-Elemente der Zeile.
    Die Spielnummer bleibt bewusst ein eigenes Element davor (feste Breite,
    damit die Nummern untereinander fluchten).
-   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) hält NICHT über
-   diese Zusammenlegung allein, sondern weil sich Zieh-Griff und Status
-   gegenseitig ausschließen: Der Griff erscheint nur im Abschnitt
-   „Spielbereit" (nur dort ist manuelles Umsortieren erlaubt), der Status
-   („gerufen seit" / „blockiert weil") nur in den drei anderen Abschnitten.
+
+   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) NEU GERECHNET
+   nach dem Umbau auf eine einzige Spielliste (ADR 0026). Ungünstigster Fall:
+     1 Zieh-Griff · 2 Spielnummer · 3 Name+Meta (`.who-block`) ·
+     4 Statusblock (`.row-status`) · 5 Vorbereitungs-Ruf · 6 Kebab
+   — genau sechs.
+
+   Die frühere Rechnung trug über den gegenseitigen Ausschluss von Griff und
+   Status („Griff nur im Abschnitt Spielbereit, Status nur in den drei
+   anderen"). Dieser Ausschluss existiert seit dem Umbau nicht mehr: Es gibt
+   nur noch eine Liste, der Griff hängt allein daran, dass ein Spiel noch
+   nicht gerufen ist — und eine nicht gerufene Zeile trägt sehr wohl einen
+   Status („nicht bereit", „ohne Halle"). Tragend ist stattdessen, dass ALLES
+   Status-Artige in EINEM Wrapper steckt: Hallen-Kürzel, Bereitschafts-Status
+   samt Begründungstext und die beiden Abzeichen (Auto-Vergabe-Ausnahme,
+   manuell einsortiert). Vorher waren Status und Abzeichen zwei Kinder.
    Wer hier ein weiteres Element ergänzt, muss diese Rechnung neu machen. */
 .row .who-block { display: flex; flex-direction: column; gap: 1px; flex: 1 1 10rem; min-width: 0; }
 .row .who { font-weight: 600; }
 .row .draw { font-size: .85rem; color: var(--ink-soft); }
 .row.blocked { background: #f8fafc; }
-/* Wichtigster Status: „blockiert weil" ODER „gerufen seit" — nie beide
-   gleichzeitig (ergibt sich schon aus den Datenkategorien: eine wartende
-   Zeile ist entweder blockiert oder gerufen, nie beides). */
+/* Der Statusblock: EIN Flex-Kind, beliebig viele Marken darin (siehe die
+   Rechnung oben). Umbrechend, damit vier Marken auf einem Telefon die Zeile
+   nicht sprengen. */
+.row .row-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+/* Begründungstexte neben dem jeweiligen Abzeichen: „blockiert weil" bzw.
+   „seit wann gerufen". Farbe passend zur Stufe des Abzeichens daneben
+   (Warnung bzw. Info), damit Marke und Text als eine Aussage lesbar sind. */
 .row .why { font-size: .82rem; color: var(--warn); font-weight: 650; }
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
-/* Die wichtigsten 1-2 Badges — Auto-Vergabe-Ausnahme (Spec
-   `feldvergabe-ausnahme`) und „Manuell einsortiert" (Spec
-   `spielliste-manuelle-reihenfolge`), jetzt über die geteilte
-   Drei-Stufen-Klasse (`.badge-warn`/`.badge-info`) eingefärbt statt über
-   eigene Klassen. Ein gemeinsamer Wrapper zählt als EIN Element in der
-   6-Elemente-Grenze, auch wenn beide Badges zugleich zutreffen. */
-.row .row-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Hallen-Kürzel (ADR 0026): ersetzt die frühere Hallen-Gruppierung der
+   Liste. Bewusst KEIN Abzeichen der Drei-Stufen-Familie — es ist keine
+   Dringlichkeit, sondern eine Ortsangabe, und ein vierter Farbtopf ist
+   ausdrücklich unerwünscht. Deshalb dieselbe stumme Chip-Optik wie das
+   Nations-Kürzel (`.nat`). Voller Hallenname im `title`. */
+.row .hall-kuerzel {
+  flex: none; padding: 1px 6px; border-radius: 6px;
+  background: #f1f5f9; color: var(--ink-soft);
+  font-size: .72rem; font-weight: 700; letter-spacing: .02em;
+}
+/* Nachlade-Marke am Listenende (ADR 0026): unsichtbar, aber ausdrücklich
+   EINEN Pixel hoch — ein Element ohne Fläche ist für den
+   `IntersectionObserver` ein Grenzfall, den nicht jede Engine gleich
+   behandelt. Ein Pixel kostet nichts und macht die Messung eindeutig. */
+#queue-sentinel { height: 1px; }
 .row.dragging-item {
   box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
   border-color: var(--accent);
   background: #eff6ff;
 }
-/* Globaler Reset-Knopf neben der Überschrift „Als Nächstes" — bewusst kein
-   eigener Abschnitt, damit er nicht wie eine der Hallen-Gruppen wirkt. Nur
-   sichtbar, solange irgendein Spiel manuell einsortiert ist. */
+/* Globaler Reset-Knopf in der Kopfzeile des Panels „Spiele" — er verwirft
+   die manuelle Reihenfolge des ganzen Turniers (seit ADR 0026 gibt es nur
+   noch eine). Nur sichtbar, solange irgendein Spiel manuell einsortiert
+   ist. */
 .panel-head .reset-order {
   font-size: .72rem; font-weight: 600; text-transform: none;
   letter-spacing: normal; color: var(--ink-soft); background: none;
@@ -540,7 +567,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 
-/* ── Kebab-Menü: Sekundäres einer Queue-Zeile ──────────────────────────
+/* ── Kebab-Menü: Sekundäres einer Zeile ODER einer Feldkachel ──────────
    Spec tl-web-panelsystem, Schritt 11: eine Zeile zeigt ohne geöffnetes
    Menü höchstens sechs Elemente. Bedienhäufigkeits-Einteilung (im
    Code-Kommentar bei `queueRow()` ausführlicher begründet):
@@ -548,11 +575,16 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    die Auto-Vergabe-Ausnahme und der (nur im Mehr-Hallen-Turnier ohne
    Regel überhaupt sichtbare) Spielort-Wähler sind seltener gebraucht und
    wandern hierher. `<details>` statt eigenem JS-Zustand — der offene
-   Zustand einer Zeile wird beim Neuzeichnen über `openKebabMatchId`
-   (Skript) gezielt wiederhergestellt, sonst schlösse sich das Menü alle
-   zwei Sekunden von selbst (Poll-Takt). */
-.row .kebab { position: relative; flex: none; }
-.row .kebab > summary {
+   Zustand wird beim Neuzeichnen über `openKebabMatchId` bzw.
+   `openKebabCourtId` (Skript) gezielt wiederhergestellt, sonst schlösse
+   sich das Menü alle zwei Sekunden von selbst (Poll-Takt).
+
+   Bewusst NICHT mehr auf `.row` eingeschränkt: Dieselbe Optik und dieselbe
+   Mechanik trägt seit ADR 0026/Plan E auch die Feldkachel („einteilen",
+   „ansagen", Aufrufe, Ergebnis) — ein zweites, fast gleiches Regelwerk
+   dafür wäre genau die Art Doppelung, die diese Seite groß gemacht hat. */
+.kebab { position: relative; flex: none; }
+.kebab > summary {
   list-style: none; cursor: pointer; user-select: none;
   display: grid; place-items: center;
   width: 40px; height: 40px;
@@ -560,20 +592,44 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   background: var(--card); color: var(--ink-soft); font-size: 1.3rem; font-weight: 700;
   line-height: 1;
 }
-.row .kebab > summary::-webkit-details-marker { display: none; }
-.row .kebab[open] > summary { border-color: var(--accent); color: var(--accent); }
-.row .kebab-menu {
+.kebab > summary::-webkit-details-marker { display: none; }
+.kebab[open] > summary { border-color: var(--accent); color: var(--accent); }
+.kebab-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
   display: flex; flex-direction: column; gap: 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
 }
-.row .kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
-.row .kebab-menu .kebab-label {
+/* Die Feldkachel steckt im Körper ihres Panels, und der ist so hoch, wie
+   `fitCourts()` ihn lässt (`.panel { overflow: hidden }`, `.panel-body`
+   rollt). Ein absolut positioniertes Menü wäre an dessen Kante
+   abgeschnitten; bei sechs Einträgen ist es zudem höher als jede Kachel und
+   höher als eine kompakte Felderspalte. Es hängt deshalb am
+   Ansichtsfenster, `platziereKachelMenue()` im Skript setzt Ort und
+   Aufklapprichtung. Die Spielzeile braucht das nicht: Ihre Einträge sind
+   kurz, und ihr Panel-Körper rollt mit dem geöffneten Menü mit. */
+.card .kebab-menu {
+  position: fixed; right: auto; top: auto;
+  min-width: 13rem; max-height: 70vh; overflow-y: auto;
+}
+.kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
+.kebab-menu .kebab-label {
   font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--ink-faint);
 }
-.row .kebab-menu .kebab-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kebab-menu .kebab-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Untereinander stehende, voll beschriftete Aktionsknöpfe — im Menü ist
+   Platz, den Zeile und Kachel selbst nicht mehr hergeben. Genutzt von den
+   Nachruf-Knöpfen der Zeile UND allen Kachel-Aktionen. */
+.kebab-menu .kebab-actions { display: flex; flex-direction: column; gap: 6px; }
+.kebab-menu .kebab-actions button {
+  font: inherit; font-weight: 650; padding: 8px 12px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+  text-align: left;
+}
+.kebab-menu .kebab-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.kebab-menu .kebab-actions button:disabled { opacity: .5; cursor: default; }
 /* Auto-Vergabe-Ausnahme: jetzt beschriftet (im Menü ist Platz), nicht mehr
    nur ein Icon-Quadrat wie vorher auf der Zeile selbst. */
 .row .auto-excl {
@@ -588,17 +644,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   border-color: var(--warn); background: #fff7ed; color: var(--warn);
 }
 
-/* Nachruf: drei Knöpfe im Menü, jetzt mit vollem Text statt gekürzt auf
-   8rem — im Kebab ist genug Platz, das war vorher auf der Zeile selbst
-   nicht der Fall. */
-.row .recall { display: flex; flex-direction: column; gap: 6px; }
-.row .recall button {
-  font: inherit; font-weight: 650; padding: 8px 12px; min-height: 40px;
-  border: 1px solid var(--line); border-radius: 8px;
-  background: var(--card); color: var(--ink-soft); cursor: pointer;
-  text-align: left;
-}
-.row .recall button:hover { border-color: var(--warn); color: var(--warn); }
+/* Nachruf: drei Knöpfe im Menü, mit vollem Text statt gekürzt auf 8rem —
+   im Kebab ist genug Platz, das war vorher auf der Zeile selbst nicht der
+   Fall. Form und Maße kommen von `.kebab-actions` (oben, geteilt mit der
+   Feldkachel); hier nur die abweichende Warn-Färbung beim Überfahren — ein
+   Nachruf ist eine Eskalation, keine Routine-Aktion. */
+.kebab-menu .recall button:hover { border-color: var(--warn); color: var(--warn); }
 
 /* Spielort ohne Feld. Unauffällig, solange nichts gesetzt ist — es ist eine
    Ausnahme-Handlung, kein Pflichtfeld. Steht ein Ort von Hand fest, sagt der
@@ -612,18 +663,6 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
 .row .hallwahl.gesetzt { border-color: var(--accent); color: var(--accent); font-weight: 650; }
-
-/* Der Aufruf-Knopf am Feld. Er steht in der Fußzeile neben der Uhr — dort,
-   wo die Turnierleitung ohnehin hinschaut, um zu sehen, ob etwas fällig
-   ist. */
-.callbtn {
-  font: inherit; font-size: .8rem; font-weight: 700;
-  padding: 8px 12px; min-height: 42px;
-  border: 1px solid var(--warn); border-radius: 8px;
-  background: var(--card); color: var(--warn); cursor: pointer;
-}
-.callbtn:hover { background: var(--warn); color: #fff; }
-.callbtn:disabled { opacity: .5; cursor: default; }
 
 /* Walkover-Vorschläge: nach einer Aufgabe entscheidet die Turnierleitung,
    welche Folgespiele kampflos gehen. */
@@ -713,16 +752,16 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .fin-row button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
-   Alle neun Abschnitte (Felder, Walkover, Zähltafel, Schiedsrichter, vier
-   Warteliste-Untergruppen, Beendet) laufen über EINEN Mechanismus statt
-   neun leicht unterschiedlichen Sonderfällen: eine einheitliche Kopfzeile
-   (Titel, Zähler, Ein-/Ausblend-Schalter), Sichtbarkeit/Reihenfolge/Höhe
-   aus dem AKTIVEN PROFIL statt aus `<details open>`/`hidden`-Attributen
-   (die einen Redraw nicht überleben — genau der Kritikpunkt der Spec).
-   „Felder" bekommt dieselbe Kopfzeile, ist aber strukturell weiterhin die
-   fixierte Ankerposition außerhalb von `#panel-stack` (eigene `<section>`,
-   kein Reorder-Griff) — siehe Kommentar bei `renderPanelStack()`. */
-#panel-stack { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+   Alle sechs Abschnitte (Felder, Aufgaben, Zähltafel, Schiedsrichter,
+   Spiele, Beendete Spiele) laufen über EINEN Mechanismus statt sechs
+   leicht unterschiedlichen Sonderfällen: eine einheitliche Kopfzeile
+   (Titel, Zähler, Ein-/Ausblend-Schalter), Sichtbarkeit/Reihenfolge/Höhe/
+   Spalte aus dem AKTIVEN PROFIL statt aus `<details open>`/`hidden`-
+   Attributen (die einen Redraw nicht überleben — genau der Kritikpunkt der
+   Spec). Seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) gilt
+   das ohne Ausnahme auch für „Felder": Der frühere Sonderstatus als
+   fixierte Ankerposition ist entfallen, das Panel trägt einen ganz
+   normalen Reorder-Griff und eine Spaltenzuordnung wie jedes andere. */
 .panel { display: flex; flex-direction: column; min-height: var(--panel-min); overflow: hidden; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
@@ -735,16 +774,22 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   text-transform: uppercase; letter-spacing: .06em;
 }
 .panel-count { font-size: .8rem; font-weight: 600; color: var(--ink-faint); }
-/* Sichtbarkeits-Schalter: Auge-Sinnbild statt Text, sonst wirkt die
-   Kopfzeile bei neun Panels überladen — Beschriftung bleibt für
-   Vorlesehilfen und als Tooltip erhalten (wie beim Vorbereitungs-Knopf). */
-.panel-vis {
+/* Zwei Kopfzeilen-Schalter mit identischer Form, aber getrennter Bedeutung
+   (ADR 0026, Plan D): das Auge blendet das Panel GANZ aus, der Pfeil klappt
+   nur seinen Inhalt ein. Beides Sinnbilder statt Text, sonst wirkt die
+   Kopfzeile überladen — Beschriftung bleibt für Vorlesehilfen und als
+   Tooltip erhalten (wie beim Vorbereitungs-Knopf). */
+.panel-vis, .panel-col {
   flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0;
   border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
   background: var(--card); color: var(--ink-soft);
 }
-.panel-vis:hover { border-color: var(--accent); color: var(--accent); }
+.panel-vis:hover, .panel-col:hover { border-color: var(--accent); color: var(--accent); }
 .panel-vis[aria-pressed="false"] { color: var(--ink-faint); }
+/* Gedrückt = zugeklappt. Anders als beim Auge bleibt der Pfeil kräftig
+   gefärbt: Ein zugeklapptes Panel ist ein Zustand, den man sofort wieder
+   auflösen können muss, kein gedämpfter Randfall. */
+.panel-col[aria-pressed="true"] { border-color: var(--accent); background: #eff6ff; color: var(--accent); }
 /* Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
    Item-Drag-Listen (Queue-Zeilen, Schiedsrichter-Zeilen, Feldkacheln,
    `.drag-griff`) — Akzeptanzkriterium „Verwechslungsgefahr zwischen
@@ -763,10 +808,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .panel-griff:hover { color: var(--ink-soft); background: #f1f5f9; }
 .panel-griff:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .panel.dragging-item { box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
-/* Panel-Rand: generalisiertes `#steg`-Muster (siehe dort) auf beliebig
-   viele Panel-Grenzen statt nur Felder↔Liste — nur zwischen zwei
-   tatsächlich SICHTBAREN Panels im DOM (ausgeblendete Panels werden gar
-   nicht erst gerendert, siehe `renderPanelStack()`), damit sich der Rand
+/* Panel-Rand: derselbe Steg-Mechanismus wie der Spalten-Steg
+   (`.col-steg`, `wireStegs()` im Skript), nur waagerecht — zwischen zwei
+   tatsächlich SICHTBAREN Panels EINER Spalte (ausgeblendete Panels werden
+   gar nicht erst gerendert, siehe `renderPanels()`), damit sich der Rand
    automatisch an den nächsten sichtbaren Nachbarn bindet, ohne eigene
    Sonderlogik dafür zu brauchen. */
 .panel-steg {
@@ -777,14 +822,23 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .panel-steg::after { content: ""; border-radius: 999px; background: var(--line); width: 44px; height: 4px; }
 .panel-steg:hover::after, .panel-steg.zieht::after { background: var(--ink-faint); }
 .panel-steg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.section + .section { margin-top: 16px; }
-/* Hallen-Abschnitte innerhalb „Spielbereit" (Spec
-   `spielliste-manuelle-reihenfolge`) — nur sichtbar, wenn ohne Hallenfilter
-   mehr als eine Halle Spiele beisteuert. */
-.section h3 {
-  margin: 14px 0 6px; font-size: .8rem; font-weight: 700; color: var(--ink-soft);
+/* ── Zugeklapptes Panel (ADR 0026, Plan D) ─────────────────────────────
+   Zweite, von der Sichtbarkeit UNABHÄNGIGE Dimension: ausgeblendet = gar
+   nicht im DOM, zugeklappt = Kopfzeile da, Inhalt weg. Ein zugeklapptes
+   Panel darf im Steg-Verteilungsmodell KEINE Höhe beanspruchen, sonst
+   entstünde unter seiner Kopfzeile ein leerer Block — `flex: none` statt
+   des `flex-grow` aus `heightFr` (siehe `applyPanelHeights()`), und die
+   Mindesthöhe `--panel-min` (die für ein Panel MIT Inhalt gilt) fällt
+   ebenfalls weg. */
+.panel.panel-collapsed { flex: none; min-height: 0; }
+/* Vorschau im Kopf eines zugeklappten Panels („nächster: …" bzw. das
+   nächste Spiel) — sie ist der Grund, warum Zuklappen mehr ist als
+   Ausblenden: Man behält die eine Zeile, auf die es ankommt. Einzeilig mit
+   Auslassung statt Umbruch: Die Kopfzeile darf nicht wachsen. */
+.panel-preview {
+  flex: 1 1 8rem; min-width: 0; font-size: .82rem; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.section h3:first-of-type { margin-top: 0; }
 .note { font-size: .82rem; color: var(--ink-soft); margin: 6px 0 0; }
 .note.warn { color: var(--warn); font-weight: 600; }
 
@@ -899,6 +953,14 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   padding: 13px 10px;
   margin: -13px -2px -13px -6px;
 }
+.card-top .kebab {
+  /* Wie der Zieh-Griff daneben: Die 40px-Trefffläche bleibt, ihr Beitrag
+     zur Zeilenhöhe wird per Minus-Rand zurückgerechnet — sonst wäre die
+     Kopfzeile jeder Kachel plötzlich 40px hoch, und bei 26 Feldern kostet
+     das eine ganze Kachelreihe. */
+  align-self: center;
+  margin: -7px -4px -7px 0;
+}
 .card-top .drag-griff {
   /* An den rechten Rand der Kopfzeile der Kachel drücken (neben Name/
      Abzeichen) statt frei zu positionieren — so weicht er variabel vielen
@@ -912,15 +974,14 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
    Tablet springt zusätzlich die Lupe auf. Während eines laufenden Zugs gilt
    es für die ganze Seite — der Zeiger wandert ja über alles. */
-.row.pick, .card, .action-bar, .halls, h2, .callbtn, .prep, .recall {
+.row.pick, .card, .action-bar, .halls, h2, .prep, .kebab-menu {
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 
 /* Ohne Verbindung: Alles, was schreiben würde, sichtbar zurücknehmen. */
 body.offline .prep,
-body.offline .recall button,
-body.offline .callbtn,
+body.offline .kebab-menu button,
 body.offline .wo .actions button,
 body.offline .sk #sk-list button,
 body.offline #sk-add button,
@@ -999,11 +1060,10 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────────
    Kleiner 📈-Knopf an Feldkachel/Beendet-Zeile, Overlay mit je Satz
    einem SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
-.graphbtn, .fin-row [data-fin-graph], .offbtn {
+.graphbtn, .fin-row [data-fin-graph] {
   border: 1px solid var(--line); background: var(--card);
   border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: .85rem;
 }
-.offbtn { margin-left: 6px; font-size: .78rem; padding: 1px 6px; }
 /* Pflege-Ansicht im Overlay: Beschriftung über dem Feld, wie im Setup. */
 .off-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; font-size: .85rem; }
 .off-field input, .off-field textarea, .off-field select {
@@ -1104,7 +1164,6 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
   padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--card);
 }
-.prof-panels li.prof-panel-anchor { background: #f8fafc; }
 /* Kästchen UND Name in einem `label` — die ganze Zeile ist antippbar,
    nicht nur das kleine Kästchen (Touch-Ergonomie ≥ 40px). */
 .prof-panels .prof-panel-label {
@@ -1112,7 +1171,18 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
   min-height: 40px; cursor: pointer;
 }
 .prof-panels .prof-panel-name { font-weight: 600; font-size: .88rem; }
-.prof-panels .prof-panel-hint { font-size: .74rem; color: var(--ink-faint); }
+/* Spaltenzuordnung je Panel (Plan tl-liste-vereinfachen F) — nur sichtbar,
+   wenn das Profil überhaupt mehr als eine Spalte hat. Beschriftung und
+   Auswahl in EINEM `label`, wie die Sichtbarkeits-Zeile daneben. */
+.prof-panels .prof-panel-col {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  min-height: 40px; font-size: .78rem; color: var(--ink-faint); cursor: pointer;
+}
+.prof-panels .prof-panel-col select {
+  font: inherit; font-size: .85rem; color: var(--ink);
+  min-height: 40px; padding: 4px 6px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+}
 /* Dieselbe visuelle Sprache wie das Live-Panel-System — derselbe Griff,
    dieselbe Reorder-Logik (`enableReorderDrag`, gemeinsam genutzt). */
 .prof-check {
@@ -1159,34 +1229,15 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     <button type="button" id="action-free" hidden>Vom Feld nehmen</button>
     <button type="button" id="action-cancel">Abbrechen</button>
   </div>
-  <main>
-    <!-- „Felder" bleibt die einzige strukturell fixierte Ankerposition
-         (Spec tl-web-panelsystem) — eigene Section außerhalb von
-         `#panel-stack`, kein Reorder-Griff, aber dieselbe einheitliche
-         Kopfzeile (Titel/Zähler/Ein-Ausblend-Schalter) wie die anderen
-         acht Panels. `renderPanelStack()` befüllt `#courts-head`. -->
-    <section id="courts-section">
-      <div id="courts-head"></div>
-      <div id="courts"></div>
-    </section>
-    <!-- Trennsteg: Aufteilung Felder/Spielliste per Ziehen — nebeneinander
-         die Breite, gestapelt die Höhe. Doppeltipp stellt die Automatik
-         wieder her. Ein DIV zwischen den Sections stört die
-         :first-of-type/:last-of-type-Selektoren nicht (die zählen je
-         Element-Typ). Unverändert gegenüber vorher — das neue Panel-System
-         reorganisiert nur INNERHALB der Listen-Spalte, siehe
-         `docs/features/tl-web-panelsystem.md`. -->
-    <div id="steg" role="separator" aria-label="Aufteilung zwischen Feldern und Spielliste ziehen"
-         title="Ziehen: Aufteilung ändern · Doppeltipp: automatische Aufteilung"></div>
-    <section>
-      <!-- Die acht übrigen Panels (Walkover, Zähltafel, Schiedsrichter, vier
-           Warteliste-Untergruppen, Beendet) werden vollständig dynamisch
-           aus dem aktiven Profil gebaut — Reihenfolge, Sichtbarkeit und
-           Höhe kommen aus `panels[]`, nicht mehr aus statischem Markup mit
-           `<details>`/`hidden` (Spec-Kritik: überlebt keinen Redraw). -->
-      <div id="panel-stack"></div>
-    </section>
-  </main>
+  <!-- Der ganze Arbeitsbereich wird dynamisch aus dem aktiven Profil
+       gebaut (Plan tl-liste-vereinfachen F): ein bis drei Spalten
+       (`.tl-column`), dazwischen Spalten-Stege, in jeder Spalte die ihr
+       zugeordneten Panels samt Höhen-Stegen. Kein statisches Markup mehr —
+       weder für „Felder" (die frühere fixierte Ankerposition) noch für die
+       übrigen Panels: Sichtbarkeit, Reihenfolge, Höhe, Klappzustand UND
+       Spalte kommen aus `panels[]`/`columns`, und nichts davon überlebte
+       als `<details>`/`hidden`-Attribut den 2-Sekunden-Redraw. -->
+  <main id="cols"></main>
 </div>
 
 <!-- Außerhalb von #app, wie der Toast: Weder #courts noch #queue noch
@@ -1402,20 +1453,24 @@ const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="tr
 // VERBINDLICH — keine geräte-lokale Override-Ebene mehr darüber (Spec
 // Nicht-Ziele: „wer abweichende Einstellungen will, wechselt/erstellt ein
 // eigenes Profil").
+// Sechs Panels statt neun (ADR 0026): Die vier Wartelisten-Untergruppen
+// („In Vorbereitung gerufen"/„Spielbereit"/„Noch nicht bereit"/„Ohne
+// Hallenzuordnung") sind zu EINEM Panel „Spiele" verschmolzen — sie zerlegten
+// dieselbe Menge ein zweites Mal, zusammen mit der Hallen-Gruppierung entstanden
+// bis zu acht Blöcke für die eine Frage „was kommt als Nächstes?".
+// Alte Profile brauchen KEINE Migration: `normalizedPanels()` filtert gegen
+// diese Whitelist (die vier alten Schlüssel fliegen raus) und ergänzt Fehlendes
+// sichtbar am Ende (`queue` kommt so dazu).
 const PANEL_KEYS = [
-  "courts", "walkovers", "scorekeepers", "officials",
-  "queue_called", "queue_ready", "queue_waiting", "queue_no_hall", "finished",
+  "courts", "walkovers", "scorekeepers", "officials", "queue", "finished",
 ];
 const PANEL_TITLES = {
   courts: "Felder",
   walkovers: "Aufgaben",
   scorekeepers: "Zähltafel-Warteschlange",
   officials: "Schiedsrichter",
-  queue_called: "In Vorbereitung gerufen",
-  queue_ready: "Spielbereit",
-  queue_waiting: "Noch nicht bereit",
-  queue_no_hall: "Ohne Hallenzuordnung",
-  finished: "Beendet",
+  queue: "Spiele",
+  finished: "Beendete Spiele",
 };
 
 // Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
@@ -1438,6 +1493,19 @@ const AUGE_ZU = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="tr
   <path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c7 0 10.5 7 10.5 7a17 17 0 0 1-3.4 4.3M6.7 6.7C3.9 8.6 1.5 12 1.5 12s3.5 7 10.5 7c1.4 0 2.7-.27 3.9-.73"/>
   <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
 </svg>`;
+// Auf-/Zuklappen (ADR 0026, Plan D): Pfeil nach unten = aufgeklappt (der
+// Inhalt hängt darunter), Pfeil nach rechts = zugeklappt (der Inhalt steckt
+// hinter der Kopfzeile). Bewusst ein anderes Sinnbild-Feld als Auge
+// (Sichtbarkeit) und Balken (Panel verschieben) — drei Schalter in einer
+// Kopfzeile dürfen sich nicht ähneln.
+const CHEVRON_AUF = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M5 9l7 7 7-7"/>
+</svg>`;
+const CHEVRON_ZU = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M9 5l7 7-7 7"/>
+</svg>`;
 
 /** Eingebautes Standardprofil (Spec: heutige Default-Werte). Wird NIE dem
  *  Server gemeldet, solange niemand es aktiv anlegt/ändert — bleibt
@@ -1447,11 +1515,25 @@ function builtInProfile() {
   return {
     id: "",
     name: "Standard",
-    panels: PANEL_KEYS.map((key) => ({ key, visible: true, heightFr: 1 })),
+    // Zwei Spalten mit „Felder" links und allem Übrigen rechts — genau das
+    // Bild, das die Seite vor dem Mehrspalten-Layout hatte („Spielliste
+    // rechts"). Hier bewusst AUSGESCHRIEBEN statt über die
+    // `listPosition`-Ableitung: Die gilt Bestandsprofilen aus der Zeit vor
+    // `columns`; das eingebaute Standardprofil soll seine Aufteilung selbst
+    // sagen, nicht aus einem Altfeld herleiten müssen.
+    panels: PANEL_KEYS.map((key) => ({
+      key, visible: true, heightFr: 1, collapsed: false,
+      column: key === "courts" ? 1 : 2,
+    })),
+    columns: 2,
+    columnWidths: [],
     display: {
       showNumbers: true, showNations: false,
       showClubNames: false, showClubLogos: false,
       showDiscipline: true, showRound: true, showGroup: true,
+      // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
+      // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
+      // wieder liest, soll dort unverändert aussehen.
       listPosition: "right",
     },
     updatedAtMs: 0,
@@ -1463,21 +1545,98 @@ function builtInProfile() {
 function cloneProfile(p) {
   return {
     id: p.id, name: p.name, updatedAtMs: p.updatedAtMs,
-    panels: (p.panels || []).map((x) => ({ key: x.key, visible: x.visible, heightFr: x.heightFr })),
+    panels: (p.panels || []).map((x) => ({
+      key: x.key, visible: x.visible, heightFr: x.heightFr, collapsed: !!x.collapsed,
+      column: Number(x.column) || 0,
+    })),
+    columns: Number(p.columns) || 0,
+    columnWidths: (p.columnWidths || []).map(Number),
     display: { ...p.display },
   };
 }
 
 /** `profile.panels`, ergänzt um fehlende Panel-Schlüssel (künftige Panels,
  *  oder ein Profil von vor deren Einführung) — fehlende werden sichtbar
- *  ans Ende angehängt, nie mehr als die neun bekannten Schlüssel behalten. */
+ *  ans Ende angehängt, nie mehr als die sechs bekannten Schlüssel behalten.
+ *  Zugleich die Migration alter Profile (ADR 0026): Die vier entfallenen
+ *  Wartelisten-Schlüssel stehen nicht mehr in `PANEL_KEYS` und fallen hier
+ *  heraus, `queue` kommt sichtbar dazu. `collapsed` fehlt in Profilen von
+ *  vor Plan D — `!!` macht daraus „aufgeklappt", die harmlose Lesart. */
 function normalizedPanels(profile) {
-  const bekannt = (profile.panels || []).filter((p) => PANEL_KEYS.includes(p.key));
+  const bekannt = (profile.panels || [])
+    .filter((p) => PANEL_KEYS.includes(p.key))
+    .map((p) => ({ ...p, collapsed: !!p.collapsed, column: Number(p.column) || 0 }));
   const vorhanden = new Set(bekannt.map((p) => p.key));
   for (const key of PANEL_KEYS) {
-    if (!vorhanden.has(key)) bekannt.push({ key, visible: true, heightFr: 1 });
+    if (!vorhanden.has(key)) {
+      bekannt.push({ key, visible: true, heightFr: 1, collapsed: false, column: 0 });
+    }
   }
   return bekannt;
+}
+
+/** Höchste anbietbare Spaltenzahl — feste Presets (1/2/3), kein freies
+ *  Dashboard (Plan tl-liste-vereinfachen F). */
+const MAX_SPALTEN = 3;
+
+/**
+ * Die vollständige, aufgelöste Layout-Aufteilung eines Profils:
+ * Spaltenzahl, Spaltenbreiten und die Panels mit einer garantiert gültigen
+ * Spaltennummer (1…`columns`).
+ *
+ * **Hier — und NUR hier — sitzt die Ableitung aus `listPosition`.** Ein
+ * Profil aus der Zeit vor dem Mehrspalten-Layout hat `columns === 0`; dann
+ * gilt „Spielliste rechts" = zwei Spalten mit Felder links und allem
+ * Übrigen rechts, „Spielliste darunter" = eine Spalte. Bestandsprofile
+ * sehen dadurch unverändert aus, ohne dass `listPosition` aus Config oder
+ * Wire entfernt werden müsste.
+ *
+ * Die Ableitung steht bewusst **clientseitig**: Der Host kennt weder
+ * Panel-Schlüssel noch ihre Bedeutung — er reicht Zahlen durch (siehe
+ * `tablet/tl.rs::profile_save`). Sie serverseitig zu spiegeln hieße, die
+ * Regel an zwei Orten zu führen, die auseinanderlaufen können; und weil
+ * `profileContentEquals()` und `mutateActiveProfile()` durch DIESELBE
+ * Funktion gehen, vergleicht und schreibt die Seite immer denselben
+ * aufgelösten Stand. Die erste Änderung an einem Bestandsprofil
+ * materialisiert die Ableitung einmalig (siehe `mutateActiveProfile()`),
+ * danach steht die Aufteilung ausgeschrieben im Profil.
+ */
+function normalizedLayout(profile) {
+  const panels = normalizedPanels(profile);
+  const roh = Math.round(Number(profile.columns) || 0);
+  if (roh >= 1) {
+    const columns = Math.min(MAX_SPALTEN, roh);
+    return {
+      columns,
+      // Eine Spalte jenseits der Spaltenzahl (Profil von 3 auf 2 Spalten
+      // verkleinert) rutscht in die letzte — ein Panel darf nie in eine
+      // Spalte fallen, die es nicht gibt, und damit unsichtbar werden.
+      panels: panels.map((p) => ({
+        ...p, column: Math.min(Math.max(Math.round(p.column) || 1, 1), columns),
+      })),
+      widths: normalizedColumnWidths(profile.columnWidths, columns),
+    };
+  }
+  const unten = (profile.display || {}).listPosition === "bottom";
+  const columns = unten ? 1 : 2;
+  return {
+    columns,
+    panels: panels.map((p) => ({
+      ...p, column: unten || p.key === "courts" ? 1 : 2,
+    })),
+    widths: normalizedColumnWidths(profile.columnWidths, columns),
+  };
+}
+
+/** Spaltenbreiten auf genau `columns` brauchbare Gewichte bringen: falsche
+ *  Länge oder unbrauchbare Zahlen (0, negativ, NaN — z. B. aus einem
+ *  handgeschriebenen Profil) heißen „gleichmäßig". Analog zur Klammerung
+ *  der Panel-Höhen; die harte Untergrenze in Pixeln setzt zusätzlich das
+ *  CSS (`--spalte-min`). */
+function normalizedColumnWidths(widths, columns) {
+  const arr = (widths || []).map(Number);
+  const gueltig = arr.length === columns && arr.every((w) => Number.isFinite(w) && w > 0);
+  return gueltig ? arr : Array(columns).fill(1);
 }
 
 /**
@@ -1509,11 +1668,23 @@ let pendingInFlight = 0;
  *  also nie im Voraus und kann nicht darauf warten. */
 function profileContentEquals(a, b) {
   if (!a || !b) return false;
-  const fachlich = (p) => JSON.stringify({
-    name: p.name || "",
-    panels: normalizedPanels(p).map((x) => [x.key, !!x.visible, Number(x.heightFr) || 1]),
-    display: { ...builtInProfile().display, ...(p.display || {}) },
-  });
+  const fachlich = (p) => {
+    // Über `normalizedLayout()` verglichen, nicht über die Rohwerte: Ein
+    // Bestandsprofil (`columns: 0`) und die daraus materialisierte Fassung
+    // (`columns: 2`) sehen identisch aus und sollen deshalb auch als gleich
+    // gelten. Fehlt hier ein Feld, springt die eigene, optimistische
+    // Änderung beim nächsten Poll sichtbar zurück — genau der Fehler, der
+    // beim Panel-System schon einmal als Critical gemeldet wurde.
+    const l = normalizedLayout(p);
+    return JSON.stringify({
+      name: p.name || "",
+      panels: l.panels.map((x) =>
+        [x.key, !!x.visible, Number(x.heightFr) || 1, !!x.collapsed, x.column]),
+      columns: l.columns,
+      columnWidths: l.widths,
+      display: { ...builtInProfile().display, ...(p.display || {}) },
+    });
+  };
   return fachlich(a) === fachlich(b);
 }
 
@@ -1552,18 +1723,13 @@ function zeigeDisziplinAktiv() { return !!activeDisplay().showDiscipline; }
 function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
 
-/** Listen-Position aus dem aktiven Profil auf die bestehende `body`-Klasse
- *  anwenden — dieselbe CSS-Regel wie vorher (`body.liste-unten`), nur die
- *  Quelle ist jetzt das Profil statt `localStorage`. */
-function applyListPosition() {
-  const unten = activeDisplay().listPosition === "bottom";
-  const zuvor = document.body.classList.contains("liste-unten");
-  document.body.classList.toggle("liste-unten", unten);
-  // Nebeneinander und gestapelt messen die Felderbox unterschiedlich — ein
-  // Wechsel muss die Kompaktstufe neu beurteilen lassen (wie zuvor beim
-  // manuellen Umschalten im Anzeige-Menü).
-  if (unten !== zuvor) scheduleFitCourts();
-}
+// `applyListPosition()` gibt es nicht mehr: „Spielliste rechts/darunter"
+// ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) nur noch
+// eines von drei Spalten-Presets. Das Feld `display.listPosition` bleibt in
+// Config und Wire erhalten und wird für Bestandsprofile weiterhin gelesen —
+// aber ausschließlich in `normalizedLayout()`, wo aus ihm die Spaltenzahl
+// abgeleitet wird. Eine zweite, davon unabhängige `body`-Klasse wäre genau
+// die Doppelspurigkeit, die dieser Umbau beseitigt.
 
 /** Frische, client-seitig vergebene Profil-Kennung — siehe ausführliche
  *  Begründung bei `mutateActiveProfile()`. */
@@ -1596,7 +1762,15 @@ function genProfileId() {
 async function mutateActiveProfile(mutator, okMessage) {
   const basis = pendingProfile || resolveActiveProfile();
   const kopie = cloneProfile(basis);
-  kopie.panels = normalizedPanels(kopie);
+  // Die Ableitung aus `listPosition` EINMALIG festschreiben: Ab der ersten
+  // Änderung trägt das Profil seine Aufteilung ausgeschrieben (Spaltenzahl,
+  // Breiten, Spalte je Panel), statt sie bei jeder Anzeige neu herzuleiten.
+  // Danach ist `columns` die einzige Wahrheit — `listPosition` fasst
+  // niemand mehr an.
+  const layout = normalizedLayout(kopie);
+  kopie.panels = layout.panels;
+  kopie.columns = layout.columns;
+  kopie.columnWidths = layout.widths;
   mutator(kopie);
   kopie.updatedAtMs = Date.now();
   const warBuiltIn = !kopie.id;
@@ -1895,6 +2069,28 @@ async function togglePrepCall(match) {
 }
 
 
+/**
+ * Kurzform eines Hallennamens für die Spielliste (ADR 0026).
+ *
+ * Seit die Liste nicht mehr nach Hallen gruppiert ist, trägt JEDE Zeile ihre
+ * Halle selbst — und dafür ist kein Platz für „Kyritzer Sporthalle". So kurz
+ * wie möglich, aber eindeutig: „Kyritzer"/„Luckenwalder" werden zu „Ky"/„Lu",
+ * zwei Hallen mit gleichem Anfang bekommen so viele Buchstaben, wie sie zum
+ * Unterscheiden brauchen. Eine Abkürzung, unter der zwei Hallen gleich
+ * aussehen, wäre schlimmer als ein langer Name — deshalb im Zweifel der
+ * volle Name. (Wiederbelebt aus `68c3052`; der volle Name steht in jeder
+ * Zeile zusätzlich im `title`.)
+ */
+function hallenKuerzel(name) {
+  const alle = (state.halls || []).map((h) => h.name);
+  for (let n = 2; n <= 12; n++) {
+    const kurz = (s) => s.trim().slice(0, n);
+    const menge = new Set(alle.map(kurz));
+    if (menge.size === alle.length) return kurz(name);
+  }
+  return name;
+}
+
 /** Die BTP-Kennung zu einem Hallennamen; `null`, wenn unbekannt. */
 function hallIdFor(hall) {
   return state.halls.find((h) => h.name === hall)?.id ?? null;
@@ -1949,6 +2145,27 @@ function openResultDialog(ctx) {
   const rows = Math.max(ctx.sets.length, Math.min(ctx.bestOf || 3, 2));
   $("res-sets").innerHTML = Array.from({ length: rows }, (_, i) => resSetRow(i, ctx.sets[i])).join("");
   $("res-dlg").showModal();
+}
+
+/**
+ * Ergebnis-Dialog für ein Spiel aus der Spielliste — eines also, das (noch)
+ * auf keinem Feld steht und für das es folglich keinen Live-Satzstand gibt.
+ *
+ * Ein Ort für zwei Zugänge: das Aktionsband oben (Spiel wählen → „Ergebnis
+ * eintragen") und der gleichnamige Eintrag im ⋮-Menü der Zeile (ADR 0026).
+ * Bewusst gemeinsam statt zweimal gebaut — sonst driften Titelzeile,
+ * Spalten-Beschriftung und `bestOf` zwischen beiden Wegen auseinander.
+ */
+function openQueueResultDialog(m) {
+  const t1 = (m.team1 || []).join(" / "), t2 = (m.team2 || []).join(" / ");
+  openResultDialog({
+    matchId: m.match_id,
+    label: `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${t1} vs. ${t2}`,
+    sets: [],
+    bestOf: 3,
+    overwrite: false,
+    team1: t1, team2: t2,
+  });
 }
 
 /** Eine Satzzeile: zwei Zahlenfelder, leer oder mit dem Live-Stand vorbelegt. */
@@ -2102,6 +2319,10 @@ let etag = "";
 
 function setHall(hall) {
   hallFilter = hall;
+  // Andere Halle = andere Liste: Das Nachlade-Fenster beginnt wieder vorn.
+  // Ohne das behielte eine schmale Hallenliste die 200 Zeilen, die vorher
+  // über alle Hallen nachgeladen wurden.
+  queueShown = QUEUE_PAGE;
   localStorage.setItem("bts-tl-halle", hall);
   const url = new URL(location.href);
   if (hall) url.searchParams.set("halle", hall); else url.searchParams.delete("halle");
@@ -2600,18 +2821,14 @@ function courtCard(c, cellStyle) {
     ? `<div class="meta">Bedienung: ${esc(c.scorekeeper.join(" / "))}</div>` : "";
 
   // Schiedsrichter/Aufschlagrichter (Spec schiedsrichter-management): Namen
-  // plus Konflikt-KATEGORIE. Der Auswahl-Knopf öffnet die Einteilung; er
-  // erscheint nur bei laufendem Spiel und eingeschaltetem SR-Betrieb.
+  // plus Konflikt-KATEGORIE. Die beiden Knöpfe („einteilen"/„ansagen")
+  // stehen seit ADR 0026 im ⋯-Menü der Kachel — hier bleibt die reine
+  // Information stehen.
   const schiris = state.officials_managed && c.match_id
     ? `<div class="meta">
          ${(c.sr || []).length ? `SR: ${esc(c.sr.join(" / "))}` : "SR: –"}
          ${(c.ar || []).length ? ` · AR: ${esc(c.ar.join(" / "))}` : ""}
          ${c.official_warn ? `<span class="badge badge-warn" title="Konflikt">${esc(c.official_warn)}</span>` : ""}
-         <button type="button" class="offbtn" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
-                 title="Schiedsrichter einteilen">einteilen</button>
-         ${(c.sr || []).length || (c.ar || []).length
-           ? `<button type="button" class="offbtn" data-off-say="${c.court_id}"
-                 title="Schiedsrichter ansagen">ansagen</button>` : ""}
        </div>`
     : "";
 
@@ -2627,12 +2844,7 @@ function courtCard(c, cellStyle) {
   // Aufruf", während er den zweiten anbietet, widersprächen sich zwei
   // Anzeigen auf demselben Bildschirm. Der Turnier-PC rechnet genauso.
   const naechste = Math.min(Math.max(erfolgt + 1, stage), 3);
-  const nachruf = c.match_id && !isPlaying(c) && gesprochen < 3
-    ? `<button type="button" class="callbtn" data-call="${c.court_id}" data-match="${c.match_id}"
-               data-made="${gesprochen}"
-               title="Ansage in der Halle auslösen">${
-                 naechste >= 3 ? "Letzter Aufruf" : `${naechste}. Aufruf`}</button>`
-    : "";
+  const aufrufText = naechste >= 3 ? "Letzter Aufruf" : `${naechste}. Aufruf`;
   // Was schon gerufen wurde, steht als Tatsache da — sonst tippen zwei
   // Turnierleitungen nacheinander denselben Aufruf.
   const gerufen = c.match_id && gesprochen > 1
@@ -2648,12 +2860,95 @@ function courtCard(c, cellStyle) {
     ? `<button type="button" class="graphbtn" data-graph="${c.match_id}"
                title="Punktverlauf anzeigen">📈</button>` : "";
 
+  // ── ⋯-Menü der Kachel (ADR 0026, Plan E) ─────────────────────────────
+  // Die Kachel trug bis zu vier eigene Knöpfe („einteilen", „ansagen",
+  // Aufruf, Punktverlauf) plus Satzstand und Uhr — bei 26 Feldern auf einem
+  // Tablet ist das eine Wand aus Bedienelementen. Sichtbar bleiben Paarung,
+  // Satzstand, Uhr, Statusabzeichen, Punktverlauf-Knopf und Zieh-Griff;
+  // alles Handelnde zieht hierher. Dasselbe Kebab-Muster wie die Spielzeile,
+  // inklusive Offen-Zustand über den Redraw (`openKebabCourtId`).
+  const kachelAktionen = [];
+  if (state.officials_managed && c.match_id) {
+    kachelAktionen.push(`<button type="button" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
+        title="Schiedsrichter einteilen">Schiedsrichter einteilen</button>`);
+    if ((c.sr || []).length || (c.ar || []).length) {
+      kachelAktionen.push(`<button type="button" data-off-say="${c.court_id}"
+          title="Schiedsrichter ansagen">Schiedsrichter ansagen</button>`);
+    }
+  }
+  if (c.match_id && !isPlaying(c) && gesprochen < 3) {
+    // Drei Wege, denselben Aufruf auszulösen: für beide Parteien (bisheriges
+    // Verhalten, ohne `side` gesendet) oder gezielt für eine — in der Regel
+    // fehlt nur eine, und der ganze Saal noch einmal auszurufen nervt alle
+    // anderen. Die Wire-Form der Partei entspricht exakt dem
+    // Vorbereitungs-Nachruf (`PrepCallSide`: "both"/"team1"/"team2"), die
+    // Aufruf-STUFE zählt weiterhin allein der Turnier-PC.
+    kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
+        data-made="${gesprochen}" title="Ansage in der Halle auslösen">${esc(aufrufText)}</button>`);
+    kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
+        data-made="${gesprochen}" data-call-side="team1"
+        title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team1))}</button>`);
+    kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
+        data-made="${gesprochen}" data-call-side="team2"
+        title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
+  }
+  if (c.match_id) {
+    kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
+        title="Endstand eintragen">✎ Ergebnis eintragen</button>`);
+  }
+  const kebabOffen = openKebabCourtId === c.court_id;
+  const kebab = kachelAktionen.length
+    ? `<details class="kebab" data-kebab-court="${c.court_id}"${kebabOffen ? " open" : ""}>
+         <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋯</summary>
+         <div class="kebab-menu">
+           <div class="kebab-group">
+             <span class="kebab-label">${esc(c.court)}</span>
+             <div class="kebab-actions">${kachelAktionen.join("")}</div>
+           </div>
+         </div>
+       </details>`
+    : "";
+
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
-    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}</div>
+    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}${kebab}</div>
     ${body}${bediener}${schiris}
-    <div class="card-foot">${foot}${graph}${nachruf}</div>
+    <div class="card-foot">${foot}${graph}</div>
   </article>`;
+}
+
+/** Welche Feldkachel ihr ⋯-Menü gerade offen hat — über das Neuzeichnen
+ *  hinweg gemerkt, exakt wie `openKebabMatchId` bei der Spielzeile: Der
+ *  Poll-Takt liegt bei 2 s, und ein natives `<details>` überlebt kein
+ *  `innerHTML`-Ersetzen. */
+let openKebabCourtId = null;
+
+/**
+ * Setzt das ⋯-Menü einer Feldkachel ans Ansichtsfenster (siehe die
+ * CSS-Begründung bei `.card .kebab-menu`): unter den Auslöser, wenn darunter
+ * Platz ist, sonst darüber; waagerecht rechtsbündig am Auslöser, aber nie
+ * über den Fensterrand hinaus. Ohne diese Rechnung wäre das Menü einer
+ * Kachel in der untersten Reihe schlicht nicht sichtbar.
+ */
+function platziereKachelMenue(det) {
+  const menu = det.querySelector(".kebab-menu");
+  const anker = det.querySelector("summary");
+  if (!menu || !anker) return;
+  // Erst an eine bekannte Stelle setzen, dann messen: Die eigene Breite
+  // hängt am Inhalt, und ein Restwert vom letzten Öffnen verfälschte sie.
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const a = anker.getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  const rand = 8;
+  const passtDrunter = window.innerHeight - a.bottom >= m.height + rand;
+  const top = passtDrunter ? a.bottom + 6 : Math.max(rand, a.top - m.height - 6);
+  const left = Math.min(
+    Math.max(rand, a.right - m.width),
+    Math.max(rand, window.innerWidth - m.width - rand),
+  );
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
 }
 
 /**
@@ -2672,19 +2967,79 @@ function wireCourts(box) {
       ev.stopPropagation();
       const courtId = Number(btn.dataset.call);
       const matchId = Number(btn.dataset.match);
+      // Ohne `side` = beide Parteien = bisheriges Verhalten. Das Feld wird
+      // deshalb nur gesetzt, wenn wirklich eine Partei gemeint ist — ein
+      // älterer Turnier-PC, der `side` noch nicht kennt, ruft dann eben
+      // beide, statt gar nicht zu rufen (Serde ignoriert unbekannte Felder).
+      const side = btn.dataset.callSide || null;
       btn.disabled = true;
       // Die Vorgangskennung trägt den Stand, den diese Kachel kennt — kein
       // Zeitfenster. Ein Doppeltipp vor dem nächsten Neuzeichnen ist damit
       // dieselbe Kennung und wird als Wiederholung erkannt; ein bewusster
       // zweiter Aufruf danach hat einen neuen Stand und geht durch. Ein
       // Zeitfenster verschluckte den zweiten Aufruf — und ein Aufruf ist
-      // seinem Wesen nach wiederholbar.
+      // seinem Wesen nach wiederholbar. Die Partei gehört mit in die
+      // Kennung: „erst A rufen, dann B" sind zwei verschiedene Absichten
+      // auf demselben Stand.
       send(
-        `call-${courtId}-${matchId}-${btn.dataset.made}`,
-        { action: "announce_court_call", courtId, matchId },
+        `call-${courtId}-${matchId}-${side || "both"}-${btn.dataset.made}`,
+        side
+          ? { action: "announce_court_call", courtId, matchId, side }
+          : { action: "announce_court_call", courtId, matchId },
         "Aufruf ausgelöst.",
       );
     });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Ergebnis eintragen, direkt vom Feld — bisher nur über „Spiel wählen →
+  // Band oben" erreichbar. Vorbelegt mit dem Live-Satzstand der Kachel,
+  // genau wie der Weg über das Band (`start()`), damit ein Nachtrag nicht
+  // bei null anfängt.
+  box.querySelectorAll("button[data-court-result]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const court = state.courts.find((x) => String(x.court_id) === btn.dataset.courtResult);
+      if (!court || !court.match_id) return;
+      const t1 = (court.team1 || []).join(" / "), t2 = (court.team2 || []).join(" / ");
+      openResultDialog({
+        matchId: court.match_id,
+        label: `${court.court}: ${t1} vs. ${t2}`,
+        sets: court.sets || [],
+        bestOf: court.best_of,
+        overwrite: false,
+        team1: t1, team2: t2,
+      });
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Das ⋯-Menü der Kachel: Weder Öffnen/Schließen noch ein Tipp im Menü
+  // darf zusätzlich das Spiel auswählen oder einen Zug starten (Muster der
+  // Spielzeile, siehe `wireQueue`).
+  box.querySelectorAll(".kebab[data-kebab-court]").forEach((det) => {
+    const courtId = Number(det.dataset.kebabCourt);
+    det.addEventListener("click", (ev) => ev.stopPropagation());
+    det.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    det.addEventListener("toggle", () => {
+      if (det.open) {
+        openKebabCourtId = courtId;
+        // Nur EIN offenes Menü gleichzeitig — sonst häufen sich bei
+        // mehreren angetippten Kacheln die Kästen übereinander.
+        box.querySelectorAll(".kebab[open]").forEach((other) => {
+          if (other !== det) other.open = false;
+        });
+        platziereKachelMenue(det);
+      } else if (openKebabCourtId === courtId) {
+        openKebabCourtId = null;
+      }
+    });
+    // Ein aus dem Markup heraus offenes `<details open>` (der über den
+    // Redraw gerettete Zustand) löst KEIN `toggle` aus — die Platzierung
+    // muss deshalb hier ausdrücklich nachgeholt werden. Nebeneffekt, den
+    // wir wollen: Sie läuft damit bei jedem Neuzeichnen mit, das Menü folgt
+    // seiner Kachel, wenn die Kompaktstufe wechselt.
+    if (det.open) platziereKachelMenue(det);
   });
 
   // Graph-Knopf wie der Aufruf-Knopf: gestopptes Weiterreichen, sonst
@@ -2774,10 +3129,15 @@ function courtsGridHtml(hall, list) {
 }
 
 function renderCourts() {
-  const box = $("courts");
   if (!state) return;
   const courts = state.courts.filter((c) => !hallFilter || c.location === hallFilter);
   setPanelCount("courts", courts.length);
+  // Seit dem Mehrspalten-Layout ist „Felder" ein gewöhnliches Panel: Ist es
+  // ausgeblendet oder zugeklappt, gibt es die Kachelbox gar nicht — den
+  // Zähler im Kopf soll sie trotzdem vorher gesetzt haben (er steht auch
+  // zugeklappt da).
+  const box = $("courts");
+  if (!box) return;
   if (!courts.length) {
     box.innerHTML = `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`;
   } else if (state.multi_hall && !hallFilter) {
@@ -2804,128 +3164,74 @@ function renderCourts() {
 }
 
 /**
- * Passt die Größe der Feld-Kacheln an den verfügbaren Platz an — Ziel:
- * IMMER alle Felder auf einen Blick, nie ein abgeschnittenes Feld
- * (Wunsch vom 10.08.2026 nach dem Turniertest: „alle Felder auf einen
- * Blick — die Liste läuft, die Felder nicht"). Läuft gebündelt über
- * `requestAnimationFrame` nach jedem Neuzeichnen der Felder und bei jeder
- * Größenänderung (`scheduleFitCourts`, unten).
+ * Passt die Größe der Feld-Kacheln an den Platz an, den das Panel „Felder"
+ * gerade hat — Ziel: IMMER alle Felder auf einen Blick, nie ein
+ * abgeschnittenes Feld (Wunsch vom 10.08.2026 nach dem Turniertest: „alle
+ * Felder auf einen Blick — die Liste läuft, die Felder nicht"). Läuft
+ * gebündelt über `requestAnimationFrame` nach jedem Neuzeichnen der Felder
+ * und bei jeder Größenänderung (`scheduleFitCourts`, unten).
+ *
+ * **Gemessen wird die Felderbox, nicht das Fenster** — deshalb ist es egal,
+ * in welcher Spalte „Felder" steht, wie breit sie ist und wie viele Panels
+ * über oder unter ihm liegen (Plan tl-liste-vereinfachen F). Der frühere
+ * Sonderweg (Inline-Deckel auf einer fixierten `<section>`, eigene
+ * Fallunterscheidung „gestapelt/nebeneinander", `--liste-min`-Reserve für
+ * die Liste daneben) ist damit ersatzlos entfallen: Wie viel Höhe das Panel
+ * bekommt, entscheidet jetzt allein das Flex-Modell seiner Spalte, also die
+ * `heightFr`-Verteilung und die Panel-Ränder — dieselbe Regel wie für jedes
+ * andere Panel.
  *
  * Stufenweise, aber OHNE Rückkopplung: Vor jedem Durchlauf geht es zurück
  * auf die Ausgangsstufe — sonst bliebe eine einmal gewählte Kompaktstufe
  * hängen, auch wenn inzwischen (Hallenfilter, weniger Felder, mehr Platz)
- * wieder alles ohne sie hineinpasst. Von dort aus je EINE Messung pro
- * Stufe (normal → `kacheln-kompakt` → `kacheln-mini`) — kein Nachjustieren
- * in einer Schleife, kein `ResizeObserver`, der sich durch die eigene
+ * wieder alles ohne sie hineinpasst. Von dort aus je EINE Messung pro Stufe
+ * (normal → `kacheln-kompakt` → `kacheln-mini`) — kein Nachjustieren in
+ * einer Schleife, kein `ResizeObserver`, der sich durch die eigene
  * Klassenänderung selbst erneut auslösen könnte. Passt selbst die kleinste
- * Stufe nicht (winziges Telefon, sehr viele Felder), wird die Felderbox
- * als letzter Ausweg selbst rollbar (`.courts-scroll`) — besser als
- * Kacheln unsichtbar abzuschneiden.
- *
- * Gestapelt (Telefon, „Spielliste darunter"): Statt eines festen Anteils
- * (früherer Stand: starre 64 %) bekommen die Felder BEDARFSGERECHT genau so
- * viel Höhe, wie sie bei der gewählten Kompaktstufe tatsächlich brauchen —
- * die Liste darunter bekommt den ganzen Rest, mindestens aber `--liste-min`
- * (CSS-Variable, `main > section:last-of-type` erzwingt das über
- * `min-height`). Ein starrer Anteil verschenkte bei wenigen Feldern Platz an
- * die Liste; schlimmer noch: Er zwang die Felder bei VIELEN Feldern in die
- * `.courts-scroll`-Notlösung, obwohl der Bildschirm (z. B. Desktop-Fenster
- * im Unten-Modus) reichlich Höhe für alle Kacheln ohne Kompromiss geboten
- * hätte. Die Obergrenze während der Stufenwahl ist deshalb NICHT die volle
- * `main`-Höhe, sondern schon `main`-Höhe minus dem Listen-Mindestmaß — erst
- * wenn selbst „mini" darüber hinausragt, greift die eigene Bildlaufleiste.
- * Nebeneinander (Zeilen-Layout, ≥1100px, „Spielliste rechts") bleibt es bei
- * der vollen `main`-Höhe (CSS `align-items: stretch`, kein JS-Deckel nötig).
+ * Stufe nicht (winziges Telefon, sehr viele Felder), rollt der Panel-Körper
+ * — das kann er ohnehin (`.panel-body { overflow-y: auto }`), es braucht
+ * dafür keine eigene Klasse mehr.
  */
 function fitCourts() {
-  const main = document.querySelector("main");
-  const section = document.querySelector("main > section:first-of-type");
-  const listSection = document.querySelector("main > section:last-of-type");
+  const panel = document.querySelector('.panel[data-panel="courts"]');
   const box = $("courts");
-  if (!main || !section || !listSection || !box) return;
-  // „Felder" per Profil ausgeblendet (Spec tl-web-panelsystem) — nichts zu
-  // messen, die Listen-Spalte bekommt über die normale Flex-Regel ohnehin
-  // den ganzen Platz (siehe `renderCourtsHead()`, das `section.hidden`
-  // setzt; `[hidden]` nimmt das Element vollständig aus dem Flex-Layout).
-  if (section.hidden) return;
+  // Kein Panel (ausgeblendet), kein Körper (zugeklappt) oder keine
+  // Kachelbox: nichts zu messen. Alle drei Fälle nehmen das Panel komplett
+  // aus dem Höhenmodell — es bleibt kein Inline-Deckel zurück, den man
+  // aufräumen müsste (das Element ist ja weg).
+  const koerper = panel && panel.querySelector(".panel-body");
+  if (!panel || !koerper || !box) return;
   box.classList.remove("kacheln-kompakt", "kacheln-mini");
-  section.classList.remove("courts-scroll");
-  // Immer zuerst zurücksetzen: Ein von einem früheren Durchlauf (z. B. im
-  // Zeilen-Layout) übrig gebliebener Inline-Deckel würde sonst eine eigene
-  // CSS-Regel (`max-height: none` im ≥1100px-Zeilen-Layout) überstimmen —
-  // Inline-Style gewinnt immer gegen eine Klassenregel, unabhängig vom
-  // Media-Query.
-  section.style.maxHeight = "";
-  section.style.minHeight = "";
-  const gestapelt = getComputedStyle(main).flexDirection === "column";
-  // Dicke des Trennstegs — die Lücke zwischen den beiden Bereichen.
-  const steg = $("steg");
-  const luecke = (gestapelt ? steg?.offsetHeight : steg?.offsetWidth) || 16;
-  // Handgezogene Listen-BREITE (nur nebeneinander): als feste Basis an die
-  // Liste, die Felder nehmen den Rest. Geklammert, damit nach einem
-  // Fenster-Resize weder die Liste unter ihre 320px noch die Felderspalte
-  // unter eine Kachelbreite rutscht.
-  if (!gestapelt) {
-    const breite = gespeicherteAufteilung(LISTE_BREITE_KEY);
-    if (breite) {
-      const mainStil = getComputedStyle(main);
-      const innenbreite = main.clientWidth
-        - (parseFloat(mainStil.paddingLeft) || 0)
-        - (parseFloat(mainStil.paddingRight) || 0);
-      const max = Math.max(LISTE_MIN_BREITE, innenbreite - luecke - FELDER_MIN);
-      listSection.style.flexBasis =
-        Math.min(Math.max(breite, LISTE_MIN_BREITE), max) + "px";
-      listSection.style.flexGrow = "0";
-    } else {
-      listSection.style.flexBasis = "";
-      listSection.style.flexGrow = "";
-    }
-  } else {
-    // Gestapelt gilt wieder das CSS (`flex: 1 1 0`) — ein Breiten-Rest aus
-    // dem Zeilen-Layout darf hier nicht nachwirken.
-    listSection.style.flexBasis = "";
-    listSection.style.flexGrow = "";
-  }
-  const manuelleHoehe = gestapelt ? gespeicherteAufteilung(LISTE_HOEHE_KEY) : 0;
-  if (gestapelt) {
-    // Bedarfsgerechte Obergrenze: verfügbare `main`-Höhe (Innenmaß, ohne
-    // Polster/Lücke) minus dem, was die Liste mindestens behält.
-    // `getComputedStyle(listSection).minHeight` liest den AUFGELÖSTEN
-    // Pixelwert von `min-height: var(--liste-min)` — die Rem-Zahl steht
-    // deshalb nur EINMAL im CSS, nicht zusätzlich noch einmal im Skript.
-    const listenMin = parseFloat(getComputedStyle(listSection).minHeight) || 0;
-    const mainStil = getComputedStyle(main);
-    const innenhoehe = main.clientHeight
-      - (parseFloat(mainStil.paddingTop) || 0)
-      - (parseFloat(mainStil.paddingBottom) || 0);
-    if (manuelleHoehe) {
-      // Handgezogene Listen-HÖHE: Die Grenze steht fest, wo sie gezogen
-      // wurde — Felderbox exakt bis zum Steg (`min` = `max`), die Liste
-      // füllt den Rest über ihr `flex: 1 1 0`. Geklammert: Liste nie
-      // unter ihr Mindestmaß, Felder nie unter eine Kachelreihe.
-      const liste = Math.min(
-        Math.max(manuelleHoehe, listenMin),
-        Math.max(listenMin, innenhoehe - luecke - FELDER_MIN),
-      );
-      const deckel = Math.max(0, innenhoehe - luecke - liste);
-      section.style.maxHeight = deckel + "px";
-      section.style.minHeight = deckel + "px";
-    } else {
-      const deckel = Math.max(0, innenhoehe - luecke - listenMin);
-      section.style.maxHeight = deckel + "px";
-    }
-  }
+  // Bedarfs-Deckel eines früheren Durchlaufs zurücknehmen, bevor gemessen
+  // wird — sonst maße man den eigenen Deckel statt des verfügbaren Platzes.
+  panel.style.maxHeight = "";
   // +1 Px Toleranz gegen Rundungsfehler bei gebrochenen Pixelwerten.
-  const passt = () => section.scrollHeight <= section.clientHeight + 1;
-  // NACH der Stufenwahl auf das tatsächlich benötigte Maß einkürzen (nur
-  // gestapelt, nur Automatik — eine von Hand gezogene Grenze bleibt exakt
-  // stehen) — EINE weitere Messung desselben, bereits gewählten
-  // Zustands, KEIN erneuter Eintritt in die Stufenschleife oben:
-  // `scrollHeight` hängt an der aktiven Kompaktklasse, nicht an dieser
-  // Kappung selbst (die kappt nur `clientHeight`, nie den gemessenen
-  // Inhalt) — deshalb keine Rückkopplung, keine Oszillationsgefahr.
+  const passt = () => koerper.scrollHeight <= koerper.clientHeight + 1;
+  // Hat jemand die Höhe dieses Panels von Hand gezogen? Dann bleibt sie
+  // exakt stehen — dieselbe Unterscheidung wie früher zwischen Automatik
+  // und handgezogener Listenhöhe, nur liegt das Maß jetzt im Profil
+  // (`heightFr`) statt in `localStorage`. Ein Doppeltipp auf einen
+  // Panel-Rand setzt alle Höhen auf 1 zurück und schaltet damit die
+  // Automatik wieder ein.
+  const eigenerAnteil = normalizedLayout(resolveActiveProfile())
+    .panels.find((p) => p.key === "courts");
+  const automatik = !eigenerAnteil || (Number(eigenerAnteil.heightFr) || 1) === 1;
+  /**
+   * Ungenutzte Höhe zurückgeben: Braucht die Kachelbox weniger, als ihr
+   * `heightFr`-Anteil hergibt, deckelt ein Inline-`max-height` das Panel auf
+   * den tatsächlichen Bedarf — die überschüssige Höhe verteilt das
+   * Flex-Modell von selbst an die übrigen Panels derselben Spalte (Flexbox
+   * behandelt eine `max-height`-Verletzung genau so). Ohne das stünde unter
+   * den Kacheln ein leerer Block, während die Liste darunter rollt.
+   * Keine Rückkopplung: Der Deckel kürzt nur `clientHeight`, nie den
+   * gemessenen `scrollHeight` — und beim nächsten Durchlauf fällt er oben
+   * ohnehin zuerst wieder weg.
+   */
   const uebernehmeBedarf = () => {
-    if (gestapelt && !manuelleHoehe) section.style.maxHeight = Math.min(section.scrollHeight, section.clientHeight) + "px";
+    if (!automatik) return;
+    const kopf = panel.querySelector(".panel-head");
+    panel.style.maxHeight =
+      ((kopf ? kopf.offsetHeight : 0) + koerper.scrollHeight) + "px";
   };
   if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
@@ -2933,11 +3239,9 @@ function fitCourts() {
   box.classList.remove("kacheln-kompakt");
   box.classList.add("kacheln-mini");
   if (passt()) { uebernehmeBedarf(); return; }
-  // Selbst „mini" ragt über den Deckel hinaus: Die Felder rollen jetzt
-  // selbst — der Deckel (`main`-Höhe minus Listen-Mindestmaß) bleibt dabei
-  // stehen, `uebernehmeBedarf()` wird bewusst NICHT aufgerufen (sie würde
-  // auf das — hier zu große — `scrollHeight` einkürzen wollen).
-  section.classList.add("courts-scroll");
+  // Selbst „mini" passt nicht: Der Panel-Körper rollt (das tut er ohnehin),
+  // und der Bedarfs-Deckel bleibt bewusst AUS — er würde auf ein
+  // `scrollHeight` kürzen wollen, das hier gerade zu groß ist.
 }
 
 // Mehrfach angestoßen (z. B. mehrere Render-Aufrufe im selben Zug, dazu
@@ -2952,127 +3256,54 @@ function scheduleFitCourts() {
   requestAnimationFrame(() => { fitScheduled = false; fitCourts(); });
 }
 
-// ── Trennsteg: Aufteilung Felder/Spielliste von Hand ziehen ───────────
-// Je Gerät gespeichert (localStorage, `bts-tl-*`-Muster wie die übrigen
-// Anzeige-Einstellungen), getrennt je Anordnung: nebeneinander die BREITE
-// der Liste, gestapelt ihre HÖHE. Ohne Wert gilt die Automatik
-// (`fitCourts()` bedarfsgerecht); angewendet und geklammert wird in
-// `fitCourts()` selbst — ein Ort, an dem alle Maße zusammenlaufen.
-const LISTE_BREITE_KEY = "bts-tl-liste-breite";
-const LISTE_HOEHE_KEY = "bts-tl-liste-hoehe";
-/** Untergrenze der Liste im Zeilen-Layout — dieselben 320px wie im CSS. */
-const LISTE_MIN_BREITE = 320;
-/** Untergrenze der Felder: eine Kachel (230px-Raster) bzw. eine Reihe. */
-const FELDER_MIN = 240;
-
-/** Gespeichertes Maß einer Richtung; 0 = Automatik. */
-function gespeicherteAufteilung(key) {
-  const wert = parseFloat(localStorage.getItem(key));
-  return Number.isFinite(wert) && wert > 0 ? wert : 0;
-}
-
-/** Verdrahtet den Trennsteg (#steg): Ziehen ändert die Aufteilung,
- *  Doppeltipp/-klick stellt die Automatik der aktuellen Anordnung wieder
- *  her. Pointer-Capture statt Fenster-Listener: Die Geste beginnt GEZIELT
- *  am Steg (`touch-action: none` dort im CSS), damit kein natives
- *  Scrollen dazwischenfunkt — dieselbe Technik wie beim Zieh-Griff. */
-function enableSteg() {
-  const steg = $("steg");
-  const main = document.querySelector("main");
-  const list = document.querySelector("main > section:last-of-type");
-  if (!steg || !main || !list) return;
-  steg.addEventListener("pointerdown", (down) => {
-    // Nur der Hauptzeiger zieht — ein zweiter Finger mitten im Zug bleibt
-    // folgenlos, statt die Grenze springen zu lassen.
-    if (!down.isPrimary) return;
-    down.preventDefault();
-    steg.setPointerCapture(down.pointerId);
-    steg.classList.add("zieht");
-    document.body.classList.add("dragging");
-    const gestapelt = getComputedStyle(main).flexDirection === "column";
-    const start = gestapelt ? down.clientY : down.clientX;
-    const rect = list.getBoundingClientRect();
-    const startMass = gestapelt ? rect.height : rect.width;
-    const key = gestapelt ? LISTE_HOEHE_KEY : LISTE_BREITE_KEY;
-    // Erst ab einer echten Bewegung zählt die Geste als Zug: Ein bloßer
-    // Tipp auf den Steg darf die Automatik NICHT auf „manuell" umstellen —
-    // und der Doppeltipp-Reset unten braucht die Unterscheidung ebenso.
-    let bewegt = false;
-    const move = (ev) => {
-      // Steg Richtung Felder geschoben = Liste wächst. Geklammert wird
-      // beim Anwenden in fitCourts(), nicht hier — eine Regel, ein Ort.
-      const delta = start - (gestapelt ? ev.clientY : ev.clientX);
-      if (!bewegt && Math.abs(delta) < 3) return;
-      bewegt = true;
-      localStorage.setItem(key, String(Math.round(startMass + delta)));
-      scheduleFitCourts();
-    };
-    const done = () => {
-      steg.removeEventListener("pointermove", move);
-      steg.removeEventListener("pointerup", done);
-      steg.removeEventListener("pointercancel", done);
-      steg.classList.remove("zieht");
-      document.body.classList.remove("dragging");
-      if (!bewegt) return;
-      // Den tatsächlich angewendeten (geklammerten) Stand zurückschreiben,
-      // damit kein Wert jenseits der Grenzen gespeichert bleibt und der
-      // nächste Zug vom sichtbaren Maß ausgeht.
-      requestAnimationFrame(() => {
-        // Ein Doppeltipp kann inzwischen auf Automatik zurückgestellt
-        // haben — dann darf dieser Nachzügler den Wert nicht wiederbeleben.
-        if (localStorage.getItem(key) === null) return;
-        const r = list.getBoundingClientRect();
-        localStorage.setItem(key, String(Math.round(gestapelt ? r.height : r.width)));
-      });
-    };
-    // Dank Pointer-Capture kommen move/up am Steg an, auch wenn der Finger
-    // längst über der Liste oder den Kacheln steht.
-    steg.addEventListener("pointermove", move);
-    steg.addEventListener("pointerup", done);
-    steg.addEventListener("pointercancel", done);
-  });
-  steg.addEventListener("dblclick", () => {
-    // Zurück zur Automatik — nur die Richtung der AKTUELLEN Anordnung:
-    // Ein in der anderen Anordnung gezogenes Maß bleibt dort gültig.
-    const gestapelt = getComputedStyle(main).flexDirection === "column";
-    localStorage.removeItem(gestapelt ? LISTE_HOEHE_KEY : LISTE_BREITE_KEY);
-    scheduleFitCourts();
-  });
-}
+// Den früheren Trennsteg (`#steg`, Aufteilung Felder ↔ Spielliste, je
+// Gerät in `localStorage`) gibt es nicht mehr. Seine Aufgabe — eine
+// Layout-Grenze mit dem Finger verschieben — erledigt seit dem
+// Mehrspalten-Layout (Plan tl-liste-vereinfachen F) DERSELBE Mechanismus,
+// der schon die Panel-Höhen verteilt: `wireStegs()` weiter unten, einmal
+// waagerecht (`.panel-steg`, Höhe zweier Panels einer Spalte) und einmal
+// senkrecht (`.col-steg`, Breite zweier Spalten). Zwei halb parallele
+// Ziehmechanismen wären genau der Wildwuchs, den dieser Umbau beseitigt.
+// Die gezogenen Maße liegen damit auch nicht mehr geräte-lokal, sondern im
+// Profil (`heightFr`/`columnWidths`) — das Profil ist laut Spec
+// verbindlich, eine `localStorage`-Ebene darüber wäre eine verbotene
+// zweite Wahrheit.
 
 /**
- * Eine Queue-Zeile zeigt ohne geöffnetes Kontextmenü höchstens SECHS
- * sichtbare Elemente (Spec tl-web-panelsystem, Schritt 11 — vorher bis zu
- * zehn). Einteilung nach Bedienhäufigkeit:
+ * Eine Zeile der einen Spielliste (ADR 0026). Sie zeigt ohne geöffnetes
+ * Kontextmenü höchstens SECHS sichtbare Elemente (Spec tl-web-panelsystem;
+ * die Rechnung steht ausführlich im CSS bei `.row .who-block`):
  *
- * PRIMÄR (immer sichtbar): Griff (nur „Spielbereit"), Nummer+Name+Meta
- * (EIN Block, `.who-block`), der wichtigste Status — „gerufen seit" ODER
- * „blockiert weil" (nie beides: eine Zeile ist laut Datenmodell entweder
- * gerufen, blockiert oder keins von beiden), bis zu zwei Badges (Auto-
- * Vergabe-Ausnahme/manuell einsortiert, EIN gemeinsamer Wrapper), der
- * Vorbereitungs-Ruf-Knopf (vermutlich die häufigste Einzelaktion an einer
- * Zeile) und das Kebab-Menü selbst. Macht im ungünstigsten Fall (Griff +
- * Nummer/Name/Meta + Status + Badges + Ruf + Kebab) sechs Elemente.
+ * PRIMÄR (immer sichtbar): Zieh-Griff (jede noch nicht gerufene Zeile),
+ * Spielnummer, Name+Meta (EIN Block, `.who-block`), der Statusblock (EIN
+ * Wrapper `.row-status` mit Hallen-Kürzel, Bereitschafts-Status und den
+ * beiden Abzeichen), der Vorbereitungs-Ruf-Knopf (vermutlich die häufigste
+ * Einzelaktion an einer Zeile) und das Kebab-Menü selbst.
  *
- * HINTER DEM KEBAB (⋮, seltener gebraucht): die Auto-Vergabe-Ausnahme
- * (Umschalter, nicht die Anzeige-Badge — die bleibt primär sichtbar),
- * alle drei Nachruf-Knöpfe (braucht man nur, wenn jemand nicht kommt) und
- * der Spielort-Wähler (nur im Mehr-Hallen-Turnier ohne Disziplin-Regel
- * überhaupt vorhanden — ohnehin die Ausnahme).
+ * HINTER DEM KEBAB (⋮, seltener gebraucht): „nach oben schieben" und
+ * „Ergebnis eintragen", die Auto-Vergabe-Ausnahme (Umschalter, nicht die
+ * Anzeige-Badge — die bleibt primär sichtbar), alle drei Nachruf-Knöpfe
+ * (braucht man nur, wenn jemand nicht kommt) und der Spielort-Wähler (nur
+ * im Mehr-Hallen-Turnier ohne Disziplin-Regel überhaupt vorhanden).
+ *
+ * `topMatchId` ist die Kennung der ersten UMSORTIERBAREN Zeile der gerade
+ * gezeigten Liste — Ziel des Menüpunkts „nach oben schieben".
  */
-function queueRow(m, draggable = false) {
+function queueRow(m, topMatchId) {
   const parts = [];
   // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
   // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
-  // Ablehnung. Vorgezogen (war weiter unten), weil der Zieh-Griff dieselbe
-  // Bedingung braucht: Eine blockierte Zeile ist so wenig ziehbar wie
-  // antippbar.
+  // Ablehnung.
   const pickable = !m.blocked;
-  // `draggable` gilt nur für die „Spielbereit"-Zeilen (Spec
-  // `spielliste-manuelle-reihenfolge`) — gerufene, wartende und hallenlose
-  // Zeilen bekommen keinen Griff: Der Präfix wirkt nur innerhalb der noch
-  // nicht gerufenen Spiele (Blocker 1 der Klärung).
-  if (pickable && draggable) {
+  // Der Zieh-Griff hängt allein daran, dass das Spiel noch NICHT gerufen
+  // ist: Der manuelle Präfix wirkt nur innerhalb der nicht gerufenen Spiele
+  // (`assign::ready_queue`), ein Zug an einer gerufenen Zeile wäre
+  // serverseitig ein stilles No-Op. Blockierte Zeilen sind seit ADR 0026
+  // ausdrücklich ziehbar — Spielbereitschaft ist kein Sortierkriterium
+  // mehr, und wer vorausplant, muss auch ein noch pausierendes Spiel
+  // einsortieren können.
+  const sortierbar = !m.prep_call;
+  if (sortierbar) {
     // Zieh-Griff: eigenes Element statt der ganzen Zeile als Ziehfläche
     // (siehe CSS-Erklärung bei `.drag-griff` und `enableReorderDrag` im
     // Skript). Fokussierbar mit Pfeiltasten-Fallback (wie beim
@@ -3095,28 +3326,52 @@ function queueRow(m, draggable = false) {
       <span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club)}</span>
       <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
     </span>`);
+  // ── Statusblock: EIN Flex-Kind, beliebig viele Marken darin ──────────
+  // Hier landet alles, was früher eine eigene Abschnitts-Überschrift war
+  // (ADR 0026): die Halle (früher Gruppen-Überschrift) und die
+  // Bereitschaftslage (früher eines von vier Panels). Eingefärbt
+  // ausschließlich über das bestehende Drei-Stufen-System — kein vierter
+  // Farbtopf. „Spielbereit" bekommt bewusst KEINE Marke: Das ist der
+  // Normalfall, und in einer Liste mit hundert Zeilen wäre eine Marke an
+  // fast jeder Zeile keine Information mehr.
+  const status = [];
+  if (state.multi_hall) {
+    if (m.hall) {
+      status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}">${esc(hallenKuerzel(m.hall))}</span>`);
+    } else {
+      // Ohne Hallenzuordnung: Warnung, nicht Information — so ein Spiel
+      // wird von der automatischen Vergabe in keiner Halle angefasst und
+      // blockiert am Ende den Zeitplan.
+      status.push(`<span class="badge badge-warn" title="Kein Spielort bekannt — die automatische Vergabe lässt dieses Spiel in beiden Hallen liegen. Spielort im ⋮-Menü setzen.">ohne Halle</span>`);
+    }
+  }
   if (m.prep_call) {
-    parts.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">
-      gerufen seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
+    // Info-Stufe: gerufen ist eine Zustandsmeldung, kein Handlungsdruck —
+    // der entsteht erst, wenn niemand kommt, und dann zählt die Uhr
+    // daneben. Marke und Uhr sind zwei Kinder EINES Wrappers und zählen
+    // deshalb zusammen als ein Zeilen-Element.
+    status.push(`<span class="badge badge-info">gerufen</span>`);
+    status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
   }
   if (m.blocked) {
     const who = (m.blocked.players || []).join(" und ");
-    parts.push(`<span class="why">${m.blocked.reason === "playing"
+    status.push(`<span class="badge badge-warn">nicht bereit</span>`);
+    status.push(`<span class="why">${m.blocked.reason === "playing"
       ? `${esc(who)} spielt gerade`
       : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
   }
-  // Die wichtigsten 1-2 Badges, EIN gemeinsamer Wrapper (Auto-Vergabe-
-  // Ausnahme, Spec `feldvergabe-ausnahme`; manuell einsortiert, Spec
-  // `spielliste-manuelle-reihenfolge`) — jetzt über die geteilte
-  // Drei-Stufen-Klasse eingefärbt (Schritt 10) statt eigener Klassen.
-  const badges = [];
+  // Die beiden bestehenden Abzeichen (Auto-Vergabe-Ausnahme, Spec
+  // `feldvergabe-ausnahme`; manuell einsortiert, Spec
+  // `spielliste-manuelle-reihenfolge`) — seit Schritt 10 über die geteilte
+  // Drei-Stufen-Klasse eingefärbt, seit ADR 0026 im selben Wrapper wie der
+  // übrige Status.
   if (m.excluded_from_auto_assign) {
-    badges.push(`<span class="badge badge-warn" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
+    status.push(`<span class="badge badge-warn" title="Von der automatischen Feldvergabe ausgenommen — manuelles Zuweisen geht weiterhin">⏸ Auto-Vergabe aus</span>`);
   }
   if (m.manual) {
-    badges.push(`<span class="badge badge-info" title="Manuell in die Reihenfolge dieser Halle einsortiert">☰ Manuell einsortiert</span>`);
+    status.push(`<span class="badge badge-info" title="Manuell in die Spielreihenfolge einsortiert">↕️</span>`);
   }
-  if (badges.length) parts.push(`<span class="row-badges">${badges.join("")}</span>`);
+  if (status.length) parts.push(`<span class="row-status">${status.join("")}</span>`);
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
   // frei ist. Deshalb ein eigener Knopf statt einer Geste, und bewusst
@@ -3133,6 +3388,30 @@ function queueRow(m, draggable = false) {
 
   // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
   const kebabGroups = [];
+  // „Nach oben schieben" (ADR 0026): der tastatur- und touchfreundliche Weg
+  // für den häufigsten Zug, ohne über eine womöglich hundert Zeilen lange
+  // Liste ziehen zu müssen. Kein neuer Wire-Vertrag nötig — es ist ein
+  // gewöhnliches `queue_reorder` vor die erste umsortierbare Zeile.
+  // Steht das Spiel schon dort (oder ist es gerufen und damit gar nicht
+  // Teil der Reihenfolge), erscheint der Eintrag gar nicht erst: Ein
+  // sichtbarer Menüpunkt, der nichts tut, ist schlimmer als keiner —
+  // niemand weiß, ob die Aktion misslang oder überflüssig war.
+  const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
+  const zeilenAktionen = [];
+  if (kannHoch) {
+    zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
+        title="An den Anfang der Spielliste schieben">↑ Nach oben schieben</button>`);
+  }
+  // „Ergebnis eintragen" für ein Spiel, das nie auf einem Feld stand
+  // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
+  // Aktionsband oben — gemeinsamer Weg über `openQueueResultDialog()`,
+  // kein zweiter Aufbau desselben Formulars.
+  zeilenAktionen.push(`<button type="button" data-queue-result="${m.match_id}"
+      title="Endstand ohne Feld nachtragen">✎ Ergebnis eintragen</button>`);
+  kebabGroups.push(`<div class="kebab-group">
+      <span class="kebab-label">Spiel</span>
+      <div class="kebab-actions">${zeilenAktionen.join("")}</div>
+    </div>`);
   // Auto-Vergabe-Ausnahme: seltener gebraucht als der Vorbereitungs-Ruf,
   // deshalb hier statt als zweiter Icon-Knopf auf der Zeile.
   const exclTitel = m.excluded_from_auto_assign
@@ -3180,7 +3459,7 @@ function queueRow(m, draggable = false) {
     const stand = m.prep_call.recalls || 0;
     kebabGroups.push(`<div class="kebab-group">
         <span class="kebab-label">Nachruf</span>
-        <div class="recall">
+        <div class="recall kebab-actions">
           <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide Parteien</button>
           <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
           <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
@@ -3238,6 +3517,32 @@ function wireQueue(box) {
         openKebabMatchId = null;
       }
     });
+  });
+  // „Nach oben schieben": derselbe Wire-Aufruf wie ein Zug bis ganz nach
+  // oben (`queue_reorder` vor die erste umsortierbare Zeile) — kein
+  // Sonderweg, damit beide Bedienarten dieselbe Wirkung haben.
+  box.querySelectorAll("button[data-queue-top]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.queueTop);
+      const before = queueTopMatchId();
+      if (before == null || before === matchId) return;
+      send(
+        `queue-reorder-${matchId}-${before}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "queue_reorder", matchId, beforeMatchId: before },
+        "Nach oben geschoben.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  box.querySelectorAll("button[data-queue-result]").forEach((btn) => {
+    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
+    if (!match) return;
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openQueueResultDialog(match);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   box.querySelectorAll("button[data-auto-excl]").forEach((btn) => {
     const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
@@ -3661,23 +3966,31 @@ let reorderDragPending = false;
 /**
  * `list`: Container, dessen direkte Kind-Elemente mit `[data-id]` die
  * sortierbaren Zeilen sind (jede braucht innen einen Griff, standardmäßig
- * `.drag-griff`). `onReorder(id, beforeId)`: nur aufgerufen, wenn sich die
- * Reihenfolge beim Loslassen tatsächlich geändert hat; `id`/`beforeId`
- * sind die `data-id`-Werte als String, `beforeId === null` heißt „ans
- * Ende". `griffSelector` (Default `.drag-griff`) generalisiert dasselbe
- * Muster auf das Panel-Reorder (Spec tl-web-panelsystem): dort ist der
- * Griff `.panel-griff` — bewusst ein ANDERES Sinnbild, damit „ganzes Panel
- * verschieben" nie mit „eine Zeile verschieben" verwechselt wird, aber
- * dieselbe erprobte Zeigegesten-/Tastatur-Logik dahinter.
+ * `.drag-griff`). `onReorder(id, beforeId, zielListe)`: nur aufgerufen,
+ * wenn sich die Reihenfolge beim Loslassen tatsächlich geändert hat;
+ * `id`/`beforeId` sind die `data-id`-Werte als String, `beforeId === null`
+ * heißt „ans Ende". `griffSelector` (Default `.drag-griff`) generalisiert
+ * dasselbe Muster auf das Panel-Reorder (Spec tl-web-panelsystem): dort ist
+ * der Griff `.panel-griff` — bewusst ein ANDERES Sinnbild, damit „ganzes
+ * Panel verschieben" nie mit „eine Zeile verschieben" verwechselt wird,
+ * aber dieselbe erprobte Zeigegesten-/Tastatur-Logik dahinter.
+ *
+ * `geschwister()` (optional) liefert ALLE Container, in die dasselbe
+ * Element fallen darf — gebraucht seit dem Mehrspalten-Layout (Plan
+ * tl-liste-vereinfachen F): Ein Panel muss auch in eine ANDERE Spalte
+ * gezogen werden können, nicht nur innerhalb seiner eigenen. Ohne die
+ * Angabe bleibt es beim bisherigen Verhalten (nur die eigene Liste), das
+ * für Spielliste, Schiedsrichter und den Profil-Editor genau richtig ist.
+ * `zielListe` sagt dem Rückruf, wo das Element gelandet ist.
  */
-function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff") {
+function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff", geschwister = null) {
   Array.from(list.children).forEach((li) => {
     if (!li.dataset.id) return;
     const griff = li.querySelector(griffSelector);
     griff?.addEventListener("pointerdown", (down) => {
       if (down.pointerType !== "touch" && down.button !== 0) return;
       if (reorderDragPending) return;
-      startReorderDrag(list, li, down, onReorder);
+      startReorderDrag(list, li, down, onReorder, geschwister);
     });
     // Tastatur-/Screenreader-Weg (Code-Review-Fund 14.08.2026): ohne die
     // frühere Pfeil-Bedienung bräuchte es sonst gar keinen Nicht-Zieh-Weg
@@ -3689,25 +4002,59 @@ function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff") {
       const items = Array.from(list.children).filter((el) => el.dataset.id);
       const i = items.indexOf(li);
       if (i === -1) return;
+      // Der Tastaturweg bleibt bewusst INNERHALB der eigenen Liste: Ein
+      // Spaltenwechsel per Pfeiltaste hätte keine erkennbare Richtung
+      // („links/rechts" gibt es im gestapelten Layout gar nicht). Wer die
+      // Spalte ohne Zeigegerät ändern will, tut das im Profil-Editor, der
+      // dafür eine ausdrückliche Auswahl je Panel hat.
       if (ev.key === "ArrowUp") {
         if (i === 0) return;
-        onReorder(li.dataset.id, items[i - 1].dataset.id);
+        onReorder(li.dataset.id, items[i - 1].dataset.id, list);
       } else {
         if (i >= items.length - 1) return;
         const beforeId = i + 2 < items.length ? items[i + 2].dataset.id : null;
-        onReorder(li.dataset.id, beforeId);
+        onReorder(li.dataset.id, beforeId, list);
       }
     });
   });
 }
 
-function startReorderDrag(list, li, down, onReorder) {
+/**
+ * Nächster scrollbarer Vorfahre (den Container selbst eingeschlossen) —
+ * generisch statt an einen Panel-Klassennamen gebunden, weil
+ * `enableReorderDrag` an ganz verschiedenen Containern hängt (Spielliste,
+ * Schiedsrichter-Liste, Spalten-Stapel, Profil-Dialog). Der Zieh-Container
+ * selbst (z. B. `#queue-list`) trägt oft KEIN eigenes `overflow` — der
+ * tatsächliche Rahmen, der die Geste sichtbar begrenzt und scrollen soll,
+ * ist `.panel-body`, ein VORFAHRE davon. Ohne diese Suche würde sowohl die
+ * „Maus noch im Panel"-Grenze als auch das Auto-Scrollen am falschen
+ * (ungeklippten) Element ansetzen.
+ */
+function findScrollAncestor(el) {
+  let node = el;
+  while (node && node !== document.documentElement) {
+    if (getComputedStyle(node).overflowY === "auto"
+      || getComputedStyle(node).overflowY === "scroll") return node;
+    node = node.parentElement;
+  }
+  return el;
+}
+
+function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   reorderDragPending = true;
   const pointerId = down.pointerId;
   const isTouch = down.pointerType === "touch";
-  const items = () => Array.from(list.children).filter((el) => el.dataset.id);
-  const before = items();
+  /** Alle Container, in die das Element fallen darf — ohne Angabe nur der
+   *  eigene (bisheriges Verhalten). */
+  const listen = () => (geschwister ? geschwister() : [list]);
+  const items = (l) => Array.from(l.children).filter((el) => el.dataset.id);
+  const originalParent = li.parentElement;
+  // Einmal berechnet, nicht bei jedem `move()` — `getComputedStyle` bei
+  // 60 Ereignissen pro Sekunde wäre unnötige Arbeit für einen Wert, der sich
+  // während des Zugs nicht ändert.
+  const scrollBox = findScrollAncestor(originalParent);
   const originalNext = li.nextElementSibling;
+  const before = items(originalParent);
   li.classList.add("dragging-item");
   document.body.classList.add("dragging");
   document.getSelection()?.removeAllRanges();
@@ -3721,16 +4068,63 @@ function startReorderDrag(list, li, down, onReorder) {
     window.addEventListener("touchmove", blockScroll, { passive: false });
   }
 
+  /** In welchen Container zeigt der Finger gerade? Erst der echte Treffer,
+   *  sonst der nächstgelegene — der Finger darf über den Rand einer Spalte
+   *  hinausragen (kurze Spalte, Rand des Fensters), ohne dass das Panel
+   *  zurückspringt. Bei nur einem Container fällt beides zusammen. */
+  function zielListe(ev) {
+    const alle = listen();
+    if (alle.length === 1) return alle[0];
+    for (const l of alle) {
+      const r = l.getBoundingClientRect();
+      if (ev.clientX >= r.left && ev.clientX <= r.right
+        && ev.clientY >= r.top && ev.clientY <= r.bottom) return l;
+    }
+    let beste = li.parentElement, kleinste = Infinity;
+    for (const l of alle) {
+      const r = l.getBoundingClientRect();
+      const dx = Math.max(r.left - ev.clientX, 0, ev.clientX - r.right);
+      const dy = Math.max(r.top - ev.clientY, 0, ev.clientY - r.bottom);
+      const d = dx + dy;
+      if (d < kleinste) { kleinste = d; beste = l; }
+    }
+    return beste;
+  }
+
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
-    const siblings = items().filter((el) => el !== li);
+    // Umsortierung nur, wenn die Maus im sichtbaren Bereich des scrollbaren
+    // Panels bleibt (`scrollBox`, nicht der ungeklippte Zieh-Container) —
+    // sonst könnte ein Zug zu den Feldkacheln unbeabsichtigt die Reihenfolge
+    // ändern (ADR 0027: Umsortier-Griff nur im eigenen Panel aktiv).
+    const r = scrollBox.getBoundingClientRect();
+    const mouseInPanel = ev.clientX >= r.left && ev.clientX <= r.right
+      && ev.clientY >= r.top && ev.clientY <= r.bottom;
+    if (!mouseInPanel) return;
+
+    // Auto-Scroll während des Drag-Vorgangs: Wenn die Maus am oberen oder
+    // unteren Rand des sichtbaren Panels ist, wird `scrollBox` (das
+    // tatsächlich scrollende Element, siehe `findScrollAncestor`)
+    // automatisch gescrollt, damit Zeilen außerhalb des sichtbaren Bereichs
+    // erreicht werden können.
+    const SCROLL_MARGIN = 40; // px vom oberen/unteren Rand
+    const SCROLL_SPEED = 8; // px pro move-Event
+    if (ev.clientY < r.top + SCROLL_MARGIN) {
+      scrollBox.scrollTop = Math.max(0, scrollBox.scrollTop - SCROLL_SPEED);
+    } else if (ev.clientY > r.bottom - SCROLL_MARGIN) {
+      const maxScroll = scrollBox.scrollHeight - scrollBox.clientHeight;
+      scrollBox.scrollTop = Math.min(maxScroll, scrollBox.scrollTop + SCROLL_SPEED);
+    }
+
+    const ziel = zielListe(ev);
+    const siblings = items(ziel).filter((el) => el !== li);
     let target = null;
     for (const el of siblings) {
       const r = el.getBoundingClientRect();
       if (ev.clientY < r.top + r.height / 2) { target = el; break; }
     }
-    if (target) list.insertBefore(li, target);
-    else list.appendChild(li);
+    if (target) ziel.insertBefore(li, target);
+    else ziel.appendChild(li);
   }
 
   function teardown(ev, cancelled) {
@@ -3747,15 +4141,26 @@ function startReorderDrag(list, li, down, onReorder) {
     suppressNextClick = true;
     setTimeout(() => { suppressNextClick = false; }, 0);
     if (cancelled) {
-      list.insertBefore(li, originalNext);
+      originalParent.insertBefore(li, originalNext);
       return;
     }
-    const after = items();
-    const changed = after.some((el, i) => el !== before[i]);
+    // Der Container kann sich geändert haben (Zug in eine andere Spalte) —
+    // dann ist die Reihenfolge auf jeden Fall eine andere, auch wenn der
+    // Platz INNERHALB der neuen Liste zufällig derselbe wäre.
+    const ziel = li.parentElement;
+    const after = items(ziel);
+    const changed = ziel !== originalParent || after.some((el, i) => el !== before[i]);
     if (!changed) return;
     const i = after.indexOf(li);
     const beforeId = i + 1 < after.length ? after[i + 1].dataset.id : null;
-    onReorder(li.dataset.id, beforeId);
+    onReorder(li.dataset.id, beforeId, ziel);
+    // Auswahl löschen: Nach einem Umsortier-Zug soll kein Spiel mehr zum
+    // Umhängen ausgewählt sein (Muster wie in `assignTo()` nach erfolgreicher
+    // Zuweisung). Sonst würde die alte Auswahl störend in der neu aufgebauten
+    // Liste sichtbar bleiben.
+    picked = null;
+    renderActionBar();
+    renderQueue();
   }
   const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
   const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
@@ -3765,13 +4170,14 @@ function startReorderDrag(list, li, down, onReorder) {
 }
 
 // ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
-// Alle neun Abschnitte laufen über EINEN Mechanismus: eine einheitliche
-// Kopfzeile (`panelHeadHtml`), Sichtbarkeit/Reihenfolge aus dem aktiven
-// Profil (`renderPanelStack`), Höhe über generalisierte Steg-Griffe
-// (`wirePanelStegs`, Vorbild `enableSteg`). „Felder" bekommt dieselbe
-// Kopfzeile über `renderCourtsHead()`, bleibt aber strukturell außerhalb
-// von `#panel-stack` (eigene, fixierte Ankerposition, siehe HTML-Kommentar
-// dort) — kein Reorder-Griff, kein Steg-Nachbar.
+// Alle sechs Abschnitte laufen über EINEN Mechanismus: eine einheitliche
+// Kopfzeile (`panelHeadHtml`), Sichtbarkeit/Reihenfolge/Spalte aus dem
+// aktiven Profil (`renderPanels`), Höhen und Spaltenbreiten über EINEN
+// Steg-Griff-Mechanismus (`wireStegs`, waagerecht wie senkrecht).
+// „Felder" ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F)
+// ein Panel wie jedes andere: eigener Reorder-Griff, eigene Spalte, eigene
+// Steg-Nachbarn — der frühere Sonderstatus als fixierte Ankerposition
+// außerhalb des Panel-Stapels ist entfallen.
 
 /** Ist ein Panel bei DIESER Installation überhaupt vorhanden — unabhängig
  *  von der Sichtbarkeits-Einstellung im Profil? Die beiden optionalen
@@ -3786,22 +4192,37 @@ function panelAvailable(key) {
 
 /** Aktualisiert NUR den Zähler eines bereits gezeichneten Panels — läuft
  *  bei JEDEM Poll (jede `render*()`-Funktion ruft das für ihr Panel auf),
- *  unabhängig davon, ob `renderPanelStack()` das Gerüst neu gebaut hat.
+ *  unabhängig davon, ob `renderPanels()` das Gerüst neu gebaut hat.
  *  Fehlt das Element (Panel gerade ausgeblendet), passiert einfach nichts. */
 function setPanelCount(key, n) {
   const el = document.getElementById(`panel-count-${key}`);
   if (el) el.textContent = `(${n})`;
 }
 
+/** Wie `setPanelCount()`, nur für die Vorschauzeile eines ZUGEKLAPPTEN
+ *  Panels (ADR 0026, Plan D): „Schiedsrichter" zeigt den nächsten
+ *  Schiedsrichter, „Spiele" das nächste Spiel. Aufgeklappt gibt es das
+ *  Element nicht — dann passiert hier nichts, genau wie beim Zähler eines
+ *  ausgeblendeten Panels. */
+function setPanelPreview(key, text) {
+  const el = document.getElementById(`panel-preview-${key}`);
+  if (el) el.textContent = text || "";
+}
+
 /**
  * Einheitliche Panel-Kopfzeile (Spec tl-web-panelsystem, Akzeptanzkriterium
- * „Titel, Zähler, Ein-/Ausblend-Schalter"). `draggable` fügt den
- * Panel-Reorder-Griff hinzu (nie für „Felder" — die fixierte
- * Ankerposition). `extra` hängt zusätzliches Markup VOR den Sichtbarkeits-
- * Schalter (genutzt für den Reihenfolge-zurücksetzen-Knopf bei
- * „Spielbereit").
+ * „Titel, Zähler, Ein-/Ausblend-Schalter"; seit ADR 0026 zusätzlich der
+ * Auf-/Zuklapp-Schalter). `draggable` fügt den Panel-Reorder-Griff hinzu
+ * (nie für „Felder" — die fixierte Ankerposition). `extra` hängt
+ * zusätzliches Markup VOR die beiden Schalter (genutzt für den
+ * Reihenfolge-zurücksetzen-Knopf bei „Spiele").
+ *
+ * Sichtbarkeit und Klappzustand sind zwei UNABHÄNGIGE Dimensionen:
+ * ausgeblendet = das Panel ist gar nicht da; zugeklappt = die Kopfzeile
+ * bleibt, samt Zähler und (bei „Schiedsrichter"/„Spiele") einer Vorschau
+ * auf das jeweils Nächste.
  */
-function panelHeadHtml(key, visible, draggable, extra = "") {
+function panelHeadHtml(key, visible, draggable, extra = "", collapsed = false) {
   const titel = PANEL_TITLES[key];
   // `key` ist zwar durch `normalizedPanels()` schon auf die feste
   // `PANEL_KEYS`-Liste gefiltert, bevor irgendetwas hier ankommt — trotzdem
@@ -3813,12 +4234,24 @@ function panelHeadHtml(key, visible, draggable, extra = "") {
       title="Panel verschieben oder mit Pfeiltasten umsortieren"
       aria-label="${esc(titel)}-Panel in der Reihenfolge verschieben — ziehen oder Pfeiltasten">${PANEL_GRIFF}</span>` : "";
   const visTitel = visible ? "Panel ausblenden" : "Panel einblenden";
+  const colTitel = collapsed ? "Panel aufklappen" : "Panel zuklappen";
+  // Vorschau nur, wo sie etwas Nützliches sagen kann, und nur zugeklappt.
+  // Sie ersetzt dann den Abstandhalter: Zwei wachsende Elemente in einer
+  // Zeile teilten sich den Platz und die Vorschau bekäme die Hälfte.
+  const mitVorschau = collapsed && (key === "officials" || key === "queue");
+  const vorschau = mitVorschau
+    ? `<span class="panel-preview" id="panel-preview-${k}"></span>`
+    : `<span class="panel-spacer"></span>`;
   return `<header class="panel-head" data-panel="${k}">
       ${griff}
       <span class="panel-title">${esc(titel)}</span>
       <span class="panel-count" id="panel-count-${k}"></span>
-      <span class="panel-spacer"></span>
+      ${vorschau}
       ${extra}
+      <button type="button" class="panel-col" data-panel-col="${k}"
+        aria-pressed="${collapsed ? "true" : "false"}" title="${colTitel}" aria-label="${colTitel}">
+        ${collapsed ? CHEVRON_ZU : CHEVRON_AUF}
+      </button>
       <button type="button" class="panel-vis" data-panel-vis="${k}"
         aria-pressed="${visible ? "true" : "false"}" title="${visTitel}" aria-label="${visTitel}">
         ${visible ? AUGE_AUF : AUGE_ZU}
@@ -3832,6 +4265,11 @@ function panelHeadHtml(key, visible, draggable, extra = "") {
  *  unverändert weiterarbeiten. Nur die äußere Verpackung ist neu. */
 function panelBodySkeleton(key) {
   switch (key) {
+    case "courts":
+      // Seit dem Mehrspalten-Layout hat auch „Felder" einen ganz normalen
+      // Panel-Körper — vorher stand die Kachelbox in einer eigenen,
+      // fixierten `<section>` direkt im Markup.
+      return `<div id="courts"></div>`;
     case "walkovers":
       return `<div id="walkovers"></div>`;
     case "scorekeepers":
@@ -3845,14 +4283,18 @@ function panelBodySkeleton(key) {
       return `
         <p class="meta" id="off-next"></p>
         <ol id="off-list"></ol>`;
-    case "queue_called":
-      return `<div class="queue" id="queue-called"></div>`;
-    case "queue_ready":
-      return `<div id="queue-ready"></div>`;
-    case "queue_waiting":
-      return `<div class="queue" id="queue-waiting"></div>`;
-    case "queue_no_hall":
-      return `<div class="queue" id="queue-no-hall"></div>`;
+    case "queue":
+      // Drei Geschwister statt eines Containers (ADR 0026): `#queue-list`
+      // trägt AUSSCHLIESSLICH Zeilen — es ist die Zieh-Liste, und
+      // `enableReorderDrag` deutet jedes direkte Kind als möglichen
+      // Nachbarn. Nachlade-Marke und Fußnoten stehen deshalb daneben, nicht
+      // darin. Die Marke ist leer und unsichtbar; sie existiert nur, damit
+      // der `IntersectionObserver` etwas hat, dessen Sichtbarwerden er
+      // melden kann (`beobachteQueueEnde`).
+      return `
+        <div class="queue" id="queue-list"></div>
+        <div id="queue-sentinel" aria-hidden="true"></div>
+        <div id="queue-foot"></div>`;
     case "finished":
       return `<div id="fin-list"></div>`;
     default:
@@ -3860,9 +4302,11 @@ function panelBodySkeleton(key) {
   }
 }
 
-/** Verdrahtet die Sichtbarkeits-Schalter aller Panel-Kopfzeilen innerhalb
- *  von `container` (Panel-Stack ODER die „Felder"-Kopfzeile). */
-function wirePanelVis(container) {
+/** Verdrahtet die beiden Kopfzeilen-Schalter (Sichtbarkeit, Auf-/Zuklappen)
+ *  aller Panel-Kopfzeilen innerhalb von `container` (Panel-Stack ODER die
+ *  „Felder"-Kopfzeile). Beide Zustände liegen im aktiven Profil und
+ *  überstehen damit den Reload — genau wie die Reihenfolge und die Höhen. */
+function wirePanelHead(container) {
   container.querySelectorAll("[data-panel-vis]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -3873,37 +4317,91 @@ function wirePanelVis(container) {
       }, null);
     });
   });
+  container.querySelectorAll("[data-panel-col]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const key = btn.dataset.panelCol;
+      mutateActiveProfile((p) => {
+        const setting = p.panels.find((x) => x.key === key);
+        if (setting) setting.collapsed = !setting.collapsed;
+      }, null);
+    });
+  });
 }
 
 /**
- * Generalisiertes `#steg`-Muster (Vorbild `enableSteg()`) auf beliebig
- * viele Panel-Grenzen: Jeder `.panel-steg` sitzt zwischen zwei direkten
- * Geschwister-`.panel`-Elementen im DOM — und weil `renderPanelStack()`
- * ausgeblendete Panels gar nicht erst rendert, ist der jeweils vorherige/
- * nächste Geschwisterknoten IMMER ein sichtbares Panel. Die
- * „bindet sich automatisch an den nächsten sichtbaren Nachbarn"-Regel
- * (Akzeptanzkriterium) braucht dadurch keine eigene Sonderlogik.
+ * **Ein** Steg-Mechanismus für beide Achsen (Plan tl-liste-vereinfachen F).
  *
- * Höhen laufen über `flex-grow` (angewendet in `applyPanelHeights()`);
- * beim Ziehen wird das Verhältnis der beiden Nachbarn ausgehend von ihren
- * PIXEL-Höhen umgerechnet (Splitter-Standardmuster) — `heightFr` selbst
- * ist eine relative Gewichtung, kein Pixelmaß, deshalb keine 1:1-Übernahme
- * des Pixel-Deltas wie beim alten Felder/Liste-Steg.
+ * `achse === "hoehe"`: `.panel-steg` zwischen zwei `.panel`-Geschwistern
+ * EINER Spalte — verteilt `heightFr`.
+ * `achse === "breite"`: `.col-steg` zwischen zwei `.tl-column`-Geschwistern
+ * in `main` — verteilt `columnWidths`.
+ *
+ * Beides ist dieselbe Geste auf demselben Flex-Modell, nur um 90° gedreht;
+ * der frühere Felder↔Liste-Steg war ein zweiter, halb paralleler
+ * Ziehmechanismus mit eigener `localStorage`-Persistenz und ist ersatzlos
+ * in dieser Funktion aufgegangen.
+ *
+ * Der jeweils vorherige/nächste Geschwisterknoten ist IMMER ein sichtbarer
+ * Nachbar, weil weder ausgeblendete Panels noch leere Spalten überhaupt
+ * gerendert werden (siehe `renderPanels()`) — die „bindet sich automatisch
+ * an den nächsten sichtbaren Nachbarn"-Regel (Akzeptanzkriterium) braucht
+ * deshalb keine eigene Sonderlogik.
+ *
+ * Beim Ziehen wird das Verhältnis der beiden Nachbarn aus ihren PIXEL-Maßen
+ * umgerechnet (Splitter-Standardmuster) — `heightFr`/`columnWidths` sind
+ * relative Gewichtungen, keine Pixelmaße.
  */
-/** Läuft gerade ein Panel-Rand-Zug? Solange NICHT über `applyPanelHeights()`
- *  neu einpassen — sonst überschriebe der Poll-Takt (alle 2s) die noch
- *  ungespeicherten, live gezogenen `flexGrow`-Werte mit dem zuletzt
- *  GESPEICHERTEN Stand und die Grenze zuckte unter dem Finger zurück
- *  (Muster `reorderDragPending`, dasselbe Problem wie bei Queue-/
+/** Läuft gerade ein Steg-Zug? Solange NICHT über `applyPanelHeights()`/
+ *  `applyColumnWidths()` neu einpassen — sonst überschriebe der Poll-Takt
+ *  (alle 2s) die noch ungespeicherten, live gezogenen `flexGrow`-Werte mit
+ *  dem zuletzt GESPEICHERTEN Stand und die Grenze zuckte unter dem Finger
+ *  zurück (Muster `reorderDragPending`, dasselbe Problem wie bei Queue-/
  *  Schiedsrichter-Umsortierung). */
 let panelStegDragging = false;
 
-function wirePanelStegs(stack) {
-  stack.querySelectorAll(".panel-steg").forEach((steg) => {
+function wireStegs(container, achse) {
+  const senkrecht = achse === "hoehe";
+  const stegWahl = senkrecht ? ".panel-steg" : ".col-steg";
+  const nachbarKlasse = senkrecht ? "panel" : "tl-column";
+  container.querySelectorAll(`:scope > ${stegWahl}`).forEach((steg) => {
     const prev = steg.previousElementSibling;
     const next = steg.nextElementSibling;
-    if (!prev || !next || !prev.classList.contains("panel") || !next.classList.contains("panel")) return;
-    const panelMinPx = () => parseFloat(getComputedStyle(prev).minHeight) || 40;
+    if (!prev || !next
+      || !prev.classList.contains(nachbarKlasse) || !next.classList.contains(nachbarKlasse)) return;
+    // Grenzt ein Panel-Rand an ein ZUGEKLAPPTES Panel, gibt es nichts zu
+    // verteilen: Das zugeklappte hat keine Inhaltshöhe (`flex: none`), ein
+    // Zug würde ihm eine zuweisen und damit genau den leeren Block
+    // erzeugen, den das Zuklappen vermeidet. Der Rand bleibt als sichtbare
+    // Trennung stehen, nur ohne Griff — und wird auch nicht per Tastatur
+    // erreichbar. (Spalten kennen kein Zuklappen, dort entfällt das.)
+    if (senkrecht
+      && (prev.classList.contains("panel-collapsed") || next.classList.contains("panel-collapsed"))) {
+      steg.style.cursor = "default";
+      return;
+    }
+    /** Untergrenze in Pixeln — aufgelöst aus `--panel-min`/`--spalte-min`,
+     *  damit die Zahl nur EINMAL im CSS steht. */
+    const minPx = () => parseFloat(
+      senkrecht ? getComputedStyle(prev).minHeight : getComputedStyle(prev).minWidth,
+    ) || 40;
+    /** Der gezogene Stand landet im Profil. Höhen schreiben GENAU die
+     *  beiden Nachbarn (ein zugeklapptes Panel behält seinen gespeicherten
+     *  Anteil, obwohl sein `flexGrow` gerade 0 ist), Breiten schreiben die
+     *  ganze, auf die Spaltenzahl normierte Liste. */
+    const speichere = (frA, frB) => mutateActiveProfile((p) => {
+      if (senkrecht) {
+        const a = p.panels.find((x) => x.key === prev.dataset.panel);
+        const b = p.panels.find((x) => x.key === next.dataset.panel);
+        if (a) a.heightFr = frA;
+        if (b) b.heightFr = frB;
+        return;
+      }
+      const breiten = normalizedColumnWidths(p.columnWidths, p.columns).slice();
+      breiten[Number(prev.dataset.col) - 1] = frA;
+      breiten[Number(next.dataset.col) - 1] = frB;
+      p.columnWidths = breiten;
+    }, null);
     let bewegt = false;
     steg.addEventListener("pointerdown", (down) => {
       if (!down.isPrimary) return;
@@ -3913,18 +4411,19 @@ function wirePanelStegs(stack) {
       document.body.classList.add("dragging");
       panelStegDragging = true;
       const rA = prev.getBoundingClientRect(), rB = next.getBoundingClientRect();
-      const summe = rA.height + rB.height;
+      const massA = senkrecht ? rA.height : rA.width;
+      const summe = massA + (senkrecht ? rB.height : rB.width);
       const frA = parseFloat(prev.style.flexGrow) || 1;
       const frB = parseFloat(next.style.flexGrow) || 1;
       const frSumme = frA + frB;
-      const startY = down.clientY;
+      const start = senkrecht ? down.clientY : down.clientX;
       bewegt = false;
-      const min = panelMinPx();
+      const min = minPx();
       const move = (ev) => {
-        const delta = ev.clientY - startY;
+        const delta = (senkrecht ? ev.clientY : ev.clientX) - start;
         if (!bewegt && Math.abs(delta) < 3) return;
         bewegt = true;
-        const neuA = Math.min(Math.max(rA.height + delta, min), Math.max(min, summe - min));
+        const neuA = Math.min(Math.max(massA + delta, min), Math.max(min, summe - min));
         const neuFrA = frSumme * (neuA / summe);
         prev.style.flexGrow = String(neuFrA);
         next.style.flexGrow = String(Math.max(0.05, frSumme - neuFrA));
@@ -3937,14 +4436,7 @@ function wirePanelStegs(stack) {
         document.body.classList.remove("dragging");
         panelStegDragging = false;
         if (!bewegt) return;
-        const neuFrA = parseFloat(prev.style.flexGrow);
-        const neuFrB = parseFloat(next.style.flexGrow);
-        mutateActiveProfile((p) => {
-          const a = p.panels.find((x) => x.key === prev.dataset.panel);
-          const b = p.panels.find((x) => x.key === next.dataset.panel);
-          if (a) a.heightFr = neuFrA;
-          if (b) b.heightFr = neuFrB;
-        }, null);
+        speichere(parseFloat(prev.style.flexGrow), parseFloat(next.style.flexGrow));
       };
       steg.addEventListener("pointermove", move);
       steg.addEventListener("pointerup", done);
@@ -3952,249 +4444,405 @@ function wirePanelStegs(stack) {
     });
     // Doppeltipp/Doppelklick: gleichmäßige Verteilung wiederherstellen —
     // dasselbe Verhalten wie beim alten Felder/Liste-Steg, nur jetzt für
-    // ALLE Panel-Höhen des aktiven Profils auf einmal (Akzeptanzkriterium:
-    // „stellt die automatische Verteilung zurück").
+    // ALLE Höhen bzw. ALLE Spaltenbreiten des aktiven Profils auf einmal
+    // (Akzeptanzkriterium: „stellt die automatische Verteilung zurück").
     steg.addEventListener("dblclick", () => {
-      mutateActiveProfile((p) => { p.panels.forEach((x) => { x.heightFr = 1; }); }, "Höhen gleichmäßig verteilt.");
+      mutateActiveProfile((p) => {
+        // Leer heißt „gleichmäßig" (`normalizedColumnWidths`) — kein
+        // ausgerechnetes Array nötig.
+        if (senkrecht) p.panels.forEach((x) => { x.heightFr = 1; });
+        else p.columnWidths = [];
+      }, senkrecht ? "Höhen gleichmäßig verteilt." : "Spalten gleichmäßig verteilt.");
     });
-    // Pfeiltasten-Fallback (Akzeptanzkriterium: für JEDE neue Drag-
-    // Interaktion, auch Panel-Rand-Resize).
+    // Pfeiltasten-Fallback (Akzeptanzkriterium: für JEDE Drag-Interaktion).
+    const vor = senkrecht ? "ArrowUp" : "ArrowLeft";
+    const zurueck = senkrecht ? "ArrowDown" : "ArrowRight";
+    const name = (el) => (senkrecht
+      ? PANEL_TITLES[el.dataset.panel] || ""
+      : `Spalte ${el.dataset.col}`);
     steg.setAttribute("tabindex", "0");
     steg.setAttribute("role", "separator");
-    steg.setAttribute("aria-label", `Höhe zwischen ${esc(PANEL_TITLES[prev.dataset.panel] || "")} und ${esc(PANEL_TITLES[next.dataset.panel] || "")} ziehen`);
+    steg.setAttribute("aria-label",
+      `${senkrecht ? "Höhe" : "Breite"} zwischen ${esc(name(prev))} und ${esc(name(next))} ziehen`);
     steg.addEventListener("keydown", (ev) => {
-      if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+      if (ev.key !== vor && ev.key !== zurueck) return;
       ev.preventDefault();
-      mutateActiveProfile((p) => {
-        const a = p.panels.find((x) => x.key === prev.dataset.panel);
-        const b = p.panels.find((x) => x.key === next.dataset.panel);
-        if (!a || !b) return;
-        const summe = (a.heightFr || 1) + (b.heightFr || 1);
-        const schritt = 0.1;
-        let neuA = (a.heightFr || 1) + (ev.key === "ArrowUp" ? schritt : -schritt);
-        neuA = Math.min(Math.max(neuA, 0.2), summe - 0.2);
-        a.heightFr = neuA;
-        b.heightFr = summe - neuA;
-      }, null);
+      // Auf der Gewichtung gerechnet statt auf Pixeln: Die Tastatur kennt
+      // keine Zeigerposition, und 0.2 als Untergrenze hält beide Nachbarn
+      // sichtbar — dasselbe Ziel wie `minPx()` beim Ziehen.
+      const frA = parseFloat(prev.style.flexGrow) || 1;
+      const frB = parseFloat(next.style.flexGrow) || 1;
+      const summe = frA + frB;
+      let neuA = frA + (ev.key === vor ? 0.1 : -0.1);
+      neuA = Math.min(Math.max(neuA, 0.2), summe - 0.2);
+      speichere(neuA, summe - neuA);
     });
   });
 }
 
-/** `flex-grow` aller sichtbaren Panels aus dem aktiven Profil anwenden —
- *  unabhängig davon, ob das Gerüst gerade neu gebaut wurde (läuft bei
- *  JEDEM `renderPanelStack()`-Aufruf, damit ein reiner Höhen-Wechsel ohne
- *  Sichtbarkeits-/Reihenfolge-Änderung nicht das ganze Gerüst neu bauen
- *  muss — das würde offene Kebab-Menüs und Scroll-Positionen zerstören). */
-function applyPanelHeights(stack, panels) {
+/** `flex-grow` aller sichtbaren Panels EINER Spalte aus dem aktiven Profil
+ *  anwenden — unabhängig davon, ob das Gerüst gerade neu gebaut wurde
+ *  (läuft bei JEDEM `renderPanels()`-Aufruf, damit ein reiner Höhen-Wechsel
+ *  ohne Sichtbarkeits-/Reihenfolge-Änderung nicht das ganze Gerüst neu
+ *  bauen muss — das würde offene Kebab-Menüs und Scroll-Positionen
+ *  zerstören). */
+function applyPanelHeights(spalte, panels) {
   const byKey = new Map(panels.map((p) => [p.key, p]));
-  stack.querySelectorAll(":scope > .panel").forEach((el) => {
+  spalte.querySelectorAll(":scope > .panel").forEach((el) => {
     const setting = byKey.get(el.dataset.panel);
+    // Ein zugeklapptes Panel nimmt am Verteilungsmodell NICHT teil (ADR
+    // 0026, Plan D): Sein `heightFr` bliebe sonst als Anteil reserviert und
+    // hinterließe unter der Kopfzeile genau den leeren Block, den das
+    // Zuklappen loswerden soll. `flexGrow: 0` statt eines eigenen
+    // Rechenwegs — die übrigen Panels teilen sich den Rest dadurch von
+    // selbst im bisherigen Verhältnis. Der gespeicherte `heightFr` bleibt
+    // unangetastet und gilt sofort wieder, sobald aufgeklappt wird.
+    if (el.classList.contains("panel-collapsed")) { el.style.flexGrow = "0"; return; }
     el.style.flexGrow = String((setting && setting.heightFr) || 1);
   });
 }
 
+/** Dasselbe für die Spaltenbreiten (Plan tl-liste-vereinfachen F). Eine
+ *  leere Spalte gibt es im DOM gar nicht — die verbliebenen teilen sich den
+ *  Platz dadurch von selbst, ohne leeren Streifen zu hinterlassen. */
+function applyColumnWidths(main, widths) {
+  main.querySelectorAll(":scope > .tl-column").forEach((el) => {
+    el.style.flexGrow = String(widths[Number(el.dataset.col) - 1] || 1);
+  });
+}
+
 /**
- * Baut `#panel-stack` (die acht Nicht-„Felder"-Panels) aus dem aktiven
- * Profil. Das DOM-Gerüst wird NUR neu gezeichnet, wenn sich Sichtbarkeit
- * ODER Reihenfolge ODER die Verfügbarkeit (Zähltafel/Schiedsrichter erst
- * gerade ein-/ausgeschaltet) wirklich geändert haben — sonst rissen alle
- * zwei Sekunden (Poll-Takt) ein offenes Kebab-Menü, eine Scroll-Position
- * oder ein laufender Zug ab (Muster `renderWalkovers`/`renderOfficials`:
- * „nur bei echter Änderung neu bauen"). Ein reiner Höhen-Wechsel läuft
- * separat über `applyPanelHeights()`, ausdrücklich AUSSERHALB der
+ * Ein Panel an eine neue Stelle setzen — Reihenfolge UND Spalte in einem
+ * Zug (das Ergebnis einer Ziehgeste über Spaltengrenzen hinweg). Verändert
+ * `panels` in place.
+ *
+ * `beforeId` = Schlüssel des Panels, VOR das gesetzt wird; `null` heißt
+ * „ans Ende der Zielspalte" — ausdrücklich nicht „ans Ende der ganzen
+ * Liste": Die Panel-Reihenfolge ist EIN flaches Array über alle Spalten,
+ * „unten in Spalte 1" steht darin also vor „oben in Spalte 2". Ohne diese
+ * Unterscheidung landete ein ans Spaltenende gezogenes Panel hinter allen
+ * Panels aller folgenden Spalten und wäre beim nächsten Spaltenwechsel an
+ * einer überraschenden Stelle.
+ *
+ * Eigene, reine Funktion (statt einer Closure im Zug-Rückruf), damit genau
+ * dieser Fall ohne Zeigegerät prüfbar bleibt.
+ */
+function movePanel(panels, id, beforeId, spalte) {
+  const from = panels.findIndex((x) => x.key === id);
+  if (from === -1) return panels;
+  const [moved] = panels.splice(from, 1);
+  moved.column = spalte;
+  const to = beforeId ? panels.findIndex((x) => x.key === beforeId) : -1;
+  if (to !== -1) { panels.splice(to, 0, moved); return panels; }
+  let letzte = -1;
+  panels.forEach((x, i) => { if (x.column === spalte) letzte = i; });
+  panels.splice(letzte + 1, 0, moved);
+  return panels;
+}
+
+/**
+ * Baut den kompletten Arbeitsbereich (`main`) aus dem aktiven Profil: ein
+ * bis drei Spalten, in jeder die ihr zugeordneten sichtbaren Panels, dazu
+ * die Stege dazwischen.
+ *
+ * Das DOM-Gerüst wird NUR neu gezeichnet, wenn sich Spaltenzahl,
+ * Spaltenzuordnung, Sichtbarkeit, Reihenfolge, Klappzustand ODER die
+ * Verfügbarkeit (Zähltafel/Schiedsrichter erst gerade ein-/ausgeschaltet)
+ * wirklich geändert haben — sonst rissen alle zwei Sekunden (Poll-Takt) ein
+ * offenes Kebab-Menü, eine Scroll-Position oder ein laufender Zug ab
+ * (Muster `renderWalkovers`/`renderOfficials`: „nur bei echter Änderung neu
+ * bauen"). Reine Höhen-/Breiten-Wechsel laufen separat über
+ * `applyPanelHeights()`/`applyColumnWidths()`, ausdrücklich AUSSERHALB der
  * Signatur — sonst baute jeder Steg-Zug das Gerüst neu.
  */
-function renderPanelStack() {
-  const stack = $("panel-stack");
-  if (!stack || !state) return;
-  // Während eines laufenden Rand-Zugs NICHT neu einpassen (siehe
+function renderPanels() {
+  const main = $("cols");
+  if (!main || !state) return;
+  // Während eines laufenden Steg-Zugs NICHT neu einpassen (siehe
   // `panelStegDragging`-Kommentar) — der Zug selbst schreibt beim
   // Loslassen (`mutateActiveProfile`), das löst denselben Poll-getriebenen
   // Re-Render aus; dann ist er wieder erlaubt.
   if (panelStegDragging) return;
-  const profile = resolveActiveProfile();
-  const panels = normalizedPanels(profile);
-  const sichtbar = panels.filter((p) => p.key !== "courts" && p.visible && panelAvailable(p.key));
-  const signatur = sichtbar.map((p) => p.key).join(",");
-  if (stack.dataset.shape !== signatur) {
-    stack.dataset.shape = signatur;
-    const teile = [];
-    sichtbar.forEach((p, i) => {
-      if (i > 0) teile.push(`<div class="panel-steg" role="separator" tabindex="-1"
-        title="Ziehen: Höhe ändern · Doppeltipp: gleichmäßig verteilen"></div>`);
-      const extra = p.key === "queue_ready"
-        ? `<button type="button" id="queue-reset" class="reset-order" hidden
-             title="Verwirft die manuelle Sortierung ALLER Hallen — danach gilt wieder BTPs eigene Reihenfolge">
-             Reihenfolge zurücksetzen</button>`
+  const layout = normalizedLayout(resolveActiveProfile());
+  const sichtbar = layout.panels.filter((p) => p.visible && panelAvailable(p.key));
+  // Nur Spalten, in denen wirklich etwas steht — eine leere Spalte
+  // hinterließe sonst einen leeren Streifen (Akzeptanzkriterium). Preis
+  // dafür: In eine noch leere Spalte lässt sich nichts HINEINZIEHEN (es
+  // gibt kein Ziel im DOM); dafür gibt es die ausdrückliche Spaltenauswahl
+  // je Panel im Profil-Editor.
+  const spalten = [];
+  for (let i = 1; i <= layout.columns; i += 1) {
+    const drin = sichtbar.filter((p) => p.column === i);
+    if (drin.length) spalten.push({ nr: i, panels: drin });
+  }
+  const signatur = `${layout.columns}|` + spalten
+    .map((s) => `${s.nr}:${s.panels.map((p) => (p.collapsed ? `${p.key}~zu` : p.key)).join("+")}`)
+    .join("|");
+  if (main.dataset.shape !== signatur) {
+    main.dataset.shape = signatur;
+    main.innerHTML = spalten.map((s, i) => {
+      const stegDavor = i > 0
+        ? `<div class="col-steg" role="separator" tabindex="-1"
+             title="Ziehen: Spaltenbreite ändern · Doppeltipp: gleichmäßig verteilen"></div>`
         : "";
-      teile.push(`<section class="panel" data-panel="${esc(p.key)}" data-id="${esc(p.key)}">
-          ${panelHeadHtml(p.key, true, true, extra)}
-          <div class="panel-body">${panelBodySkeleton(p.key)}</div>
-        </section>`);
+      const inhalt = s.panels.map((p, j) => {
+        const stegOben = j > 0
+          ? `<div class="panel-steg" role="separator" tabindex="-1"
+               title="Ziehen: Höhe ändern · Doppeltipp: gleichmäßig verteilen"></div>`
+          : "";
+        // Zugeklappt bleibt der Reset-Knopf weg: Der Kopf trägt dann schon
+        // Titel, Zähler, Vorschau und zwei Schalter — und wer die
+        // Reihenfolge zurücksetzen will, schaut ohnehin auf die Liste.
+        const extra = p.key === "queue" && !p.collapsed
+          ? `<button type="button" id="queue-reset" class="reset-order" hidden
+               title="Verwirft die manuelle Spielreihenfolge des ganzen Turniers — danach gilt wieder BTPs eigene Reihenfolge">
+               Reihenfolge zurücksetzen</button>`
+          : "";
+        // Zugeklappt: nur die Kopfzeile, kein `.panel-body`. Die Klasse macht
+        // das Panel im Flex-Modell höhenlos (CSS `.panel.panel-collapsed`).
+        return stegOben + `<section class="panel${p.collapsed ? " panel-collapsed" : ""}"
+            data-panel="${esc(p.key)}" data-id="${esc(p.key)}">
+            ${panelHeadHtml(p.key, true, true, extra, p.collapsed)}
+            ${p.collapsed ? "" : `<div class="panel-body">${panelBodySkeleton(p.key)}</div>`}
+          </section>`;
+      }).join("");
+      return `${stegDavor}<div class="tl-column" data-col="${s.nr}">${inhalt}</div>`;
+    }).join("");
+    wirePanelHead(main);
+    const spaltenEl = () => Array.from(main.querySelectorAll(":scope > .tl-column"));
+    spaltenEl().forEach((el) => {
+      // Panel-Reorder: innerhalb der Spalte UND über Spaltengrenzen hinweg
+      // (`spaltenEl` als Zielmenge). Landet das Panel in einer anderen
+      // Spalte, ändert derselbe Zug zusätzlich seine `column` — eine Geste,
+      // zwei Wirkungen, kein zweiter Bedienweg.
+      enableReorderDrag(el, (id, beforeId, ziel) => {
+        const spalte = Number(ziel.dataset.col) || 1;
+        mutateActiveProfile(
+          (p) => { movePanel(p.panels, id, beforeId, spalte); },
+          "Panel verschoben.",
+        );
+      }, ".panel-griff", spaltenEl);
+      wireStegs(el, "hoehe");
     });
-    stack.innerHTML = teile.join("");
-    wirePanelVis(stack);
-    enableReorderDrag(stack, (id, beforeId) => {
-      mutateActiveProfile((p) => {
-        const arr = p.panels;
-        const from = arr.findIndex((x) => x.key === id);
-        if (from === -1) return;
-        const [moved] = arr.splice(from, 1);
-        const to = beforeId ? arr.findIndex((x) => x.key === beforeId) : -1;
-        if (to === -1) arr.push(moved); else arr.splice(to, 0, moved);
-      }, "Panel-Reihenfolge geändert.");
-    }, ".panel-griff");
-    wirePanelStegs(stack);
+    wireStegs(main, "breite");
     // `#queue-reset`/`#sk-add` existieren erst seit diesem Aufbau — anders
     // als früher (fest im Markup) müssen sie HIER verdrahtet werden, nicht
     // in `start()` (das läuft VOR dem ersten Zustand, die Elemente gäbe es
     // noch gar nicht). Genau einmal je Neubau, kein Mehrfach-Zuhörer bei
     // unverändertem Gerüst — `renderQueue()`/`renderScorekeepers()` selbst
     // ersetzen nur die inneren Listen, nie diese Container.
-    stack.querySelector("#queue-reset")?.addEventListener("click", resetQueueOrder);
-    stack.querySelector("#sk-add")?.addEventListener("submit", addScorekeeper);
+    main.querySelector("#queue-reset")?.addEventListener("click", resetQueueOrder);
+    main.querySelector("#sk-add")?.addEventListener("submit", addScorekeeper);
     // Die frisch angelegten Container-IDs sind hier noch leer — `render()`
-    // ruft `renderPanelStack()` bewusst VOR den einzelnen `render*()`-
+    // ruft `renderPanels()` bewusst VOR den einzelnen `render*()`-
     // Funktionen auf, die füllen sie im selben Durchlauf. Kein erneuter
     // Aufruf hier nötig (und keiner, der eine Signatur-Prüfung umgehen
     // könnte, die z. B. `renderWalkovers()` gegen Checkbox-Reset absichert).
   }
-  applyPanelHeights(stack, panels);
-}
-
-/** Kopfzeile + Sichtbarkeit von „Felder" — bleibt strukturell außerhalb
- *  von `#panel-stack` (fixierte Ankerposition), bekommt aber dieselbe
- *  einheitliche Kopfzeile wie die anderen acht Panels. */
-function renderCourtsHead() {
-  const el = $("courts-head");
-  const section = $("courts-section");
-  const steg = $("steg");
-  if (!el || !section || !state) return;
-  const panels = normalizedPanels(resolveActiveProfile());
-  const setting = panels.find((p) => p.key === "courts") || { visible: true };
-  section.hidden = !setting.visible;
-  if (steg) steg.hidden = !setting.visible;
-  el.innerHTML = panelHeadHtml("courts", setting.visible, false);
-  wirePanelVis(el);
+  applyColumnWidths(main, layout.widths);
+  main.querySelectorAll(":scope > .tl-column")
+    .forEach((el) => applyPanelHeights(el, layout.panels));
 }
 
 /**
- * Manuelle Reihenfolge (Spec `spielliste-manuelle-reihenfolge`): ein Zug
- * darf Match-IDs nur innerhalb DERSELBEN Halle relativ zueinander verschieben
- * — sonst löste `assign::hall_for_match` serverseitig ein stilles No-Op aus
- * (siehe ADR 0023, Risiko „Zug über Hallengrenzen"). Bei aktivem Hallenfilter
- * ist `ready` schon einhallig; ohne Filter im Mehr-Hallen-Turnier wird VOR
- * dem Rendern nach `m.hall` gruppiert, jede Gruppe bekommt einen eigenen
- * Zieh-Container. So kann die Geste im Browser gar nicht erst über eine
- * Hallengrenze hinweg starten.
+ * Die eine Spielliste (ADR 0026) — alle angesetzten Spiele, in genau der
+ * Reihenfolge, die der Turnier-PC liefert.
+ *
+ * **Bewusst ohne clientseitiges Nachsortieren.** Die Sortierung ist
+ * serverseitig verbindlich (`assign::sort_key_with_manual_order`): `!called`
+ * ist die erste Tupel-Komponente, gerufene Spiele stehen damit immer oben
+ * angepinnt, alles Übrige folgt dem manuellen Präfix bzw. BTPs eigener
+ * Reihenfolge. Würde die Seite hier ein zweites Mal sortieren, zeigten
+ * Turnierleitung und automatische Vergabe zwei verschiedene Abfolgen — genau
+ * die Inkonsistenz, gegen die ADR 0023 den gemeinsamen Sortier-Helfer
+ * eingeführt hat.
+ *
+ * Gefiltert wird nur nach Halle: Ein Spiel OHNE Hallenzuordnung bleibt auch
+ * bei gesetztem Filter sichtbar — es wird sonst nirgends vergeben und
+ * blockiert am Ende den Zeitplan (Verhalten des früheren Panels „Ohne
+ * Hallenzuordnung", jetzt als Zeilen-Status in derselben Liste).
  */
-function groupByHall(list) {
-  if (!state.multi_hall || hallFilter) return [[hallFilter || "", list]];
-  const byHall = new Map();
-  for (const m of list) {
-    const key = m.hall || "";
-    if (!byHall.has(key)) byHall.set(key, []);
-    byHall.get(key).push(m);
-  }
-  return [...byHall.entries()].sort(([a], [b]) => a.localeCompare(b, "de"));
+function visibleQueue() {
+  if (!state) return [];
+  return state.queue.filter((m) => !hallFilter || m.hall === hallFilter || !m.hall);
 }
 
+/** Kennung der ersten UMSORTIERBAREN Zeile der gerade gezeigten Liste — das
+ *  Ziel von „nach oben schieben". Gerufene Spiele stehen zwar oben, gehören
+ *  aber nicht zur manuellen Reihenfolge (`assign::ready_queue` lässt sie
+ *  aus); vor sie zu ziehen wäre serverseitig ein stilles No-Op. */
+function queueTopMatchId() {
+  const erste = visibleQueue().find((m) => !m.prep_call);
+  return erste ? erste.match_id : null;
+}
+
+// ── Nachladen beim Scrollen (ADR 0026) ────────────────────────────────
+// Die Liste zeigt ALLE angesetzten Spiele — nichts wird weggelassen, nichts
+// gekürzt. Gegen die Länge (mehrere hundert Zeilen sind in großen Turnieren
+// normal) hilft nicht Weglassen, sondern schrittweises Nachladen: erst
+// `QUEUE_PAGE` Zeilen zeichnen, beim Erreichen des Listenendes die nächsten.
+// `queueShown` lebt bewusst AUSSERHALB von `renderQueue()` — genau wie
+// `openKebabMatchId` muss der Wert den 2-Sekunden-Redraw überleben, sonst
+// spränge die Liste alle zwei Sekunden auf die ersten 40 Zeilen zurück und
+// nähme die Scroll-Position mit.
+const QUEUE_PAGE = 40;
+let queueShown = QUEUE_PAGE;
+
 /**
- * Die Warteliste in ihre vier Panel-Untergruppen aufgeteilt (Spec
- * tl-web-panelsystem: „In Vorbereitung gerufen"/„Spielbereit"/„Noch nicht
- * bereit"/„Ohne Hallenzuordnung" sind seit dem Panel-System vier
- * eigenständige, einzeln aus-/einblendbare Panels statt Unterabschnitte
- * EINES Abschnitts). `renderQueue()` zeichnet daraus alle vier Panels und
- * meldet je Panel den Zähler über `setPanelCount()` — eine Einteilung, vier
- * Abschnitte, kein zweiter Rechenweg.
+ * Beobachtet das Ende der Liste und lädt nach, sobald es in Sicht kommt.
+ *
+ * Bei JEDEM Zeichnen neu aufgesetzt statt einmalig: Ein Beobachter meldet
+ * sich nur bei einem WECHSEL von „nicht sichtbar" zu „sichtbar". Bleibt das
+ * Listenende nach dem Nachladen weiterhin sichtbar (hohes Panel, kurze
+ * Nachlade-Schritte), käme nie eine zweite Meldung — die Liste bliebe
+ * stehen, obwohl unten noch Platz ist. Ein frischer Beobachter meldet
+ * dagegen den aktuellen Stand sofort noch einmal und lädt so lange nach, bis
+ * das Ende wirklich unten aus dem Bild gewandert oder alles gezeigt ist.
  */
-function queueBuckets() {
-  if (!state) return { called: [], ready: [], waiting: [], noHall: [] };
-  // Bei aktivem Hallenfilter bleiben Spiele ohne Hallenzuordnung sichtbar —
-  // ein weggefiltertes Spiel wird nicht vergeben und blockiert am Ende den
-  // Zeitplan.
-  const inHall = (m) => !hallFilter || m.hall === hallFilter;
-  const noHall = state.queue.filter((m) => hallFilter && !m.hall);
-  const mine = state.queue.filter(inHall);
-  return {
-    called: mine.filter((m) => m.prep_call),
-    ready: mine.filter((m) => !m.prep_call && !m.blocked),
-    waiting: mine.filter((m) => !m.prep_call && m.blocked),
-    noHall,
-  };
+let queueObserver = null;
+function beobachteQueueEnde(gesamt) {
+  if (queueObserver) { queueObserver.disconnect(); queueObserver = null; }
+  const sentinel = $("queue-sentinel");
+  const wurzel = sentinel && sentinel.closest(".panel-body");
+  if (!sentinel || !wurzel || queueShown >= gesamt) return;
+  queueObserver = new IntersectionObserver((eintraege) => {
+    if (!eintraege.some((e) => e.isIntersecting)) return;
+    if (queueShown >= visibleQueue().length) return;
+    queueShown += QUEUE_PAGE;
+    renderQueue();
+  }, { root: wurzel, rootMargin: "300px" });
+  queueObserver.observe(sentinel);
 }
 
 function renderQueue() {
   if (!state) return;
+  const liste = visibleQueue();
+  setPanelCount("queue", liste.length);
+  // Vorschau für den zugeklappten Zustand: das nächste Spiel. VOR dem
+  // Ausstieg unten — der Kopf ist auch dann da, wenn es keinen Inhalt gibt.
+  const naechstes = liste[0];
+  setPanelPreview("queue", naechstes
+    ? `${naechstes.match_num != null ? `Nr. ${naechstes.match_num} · ` : ""}`
+      + `${(naechstes.team1 || []).join(" / ")} vs. ${(naechstes.team2 || []).join(" / ")}`
+    : "keine Spiele");
+
+  const box = $("queue-list");
+  if (!box) {
+    // Panel gerade ausgeblendet oder zugeklappt. Den Beobachter dabei
+    // abräumen — er hinge sonst an einem längst entfernten Knoten und
+    // meldete nie wieder etwas, auch nicht nach dem Wiederaufklappen.
+    if (queueObserver) { queueObserver.disconnect(); queueObserver = null; }
+    return;
+  }
   // Während eines laufenden Zugs NICHT neu bauen (Muster `renderOfficials`,
   // Code-Review-Fund 14.08.2026 dort übernommen) — sonst risse `innerHTML`
   // die gerade gezogene Zeile aus dem DOM.
   if (reorderDragPending) return;
-  const { called, ready, waiting, noHall } = queueBuckets();
-  setPanelCount("queue_called", called.length);
-  setPanelCount("queue_ready", ready.length);
-  setPanelCount("queue_waiting", waiting.length);
-  setPanelCount("queue_no_hall", noHall.length);
 
-  const calledBox = $("queue-called");
-  if (calledBox) {
-    calledBox.innerHTML = called.length
-      ? called.map((m) => queueRow(m)).join("")
-      : `<p class="note">Niemand in Vorbereitung gerufen.</p>`;
-    wireQueue(calledBox);
+  // Nie schrumpfen, aber auch nie über das Vorhandene hinaus zählen: Werden
+  // Spiele vergeben, rutscht die Liste kürzer — das Fenster darf dann nicht
+  // als „hundert nachgeladen" stehen bleiben, sonst wächst es beim nächsten
+  // Zuwachs sprunghaft mit.
+  queueShown = Math.max(QUEUE_PAGE, Math.min(queueShown, Math.max(liste.length, QUEUE_PAGE)));
+  const fenster = liste.slice(0, queueShown);
+  const top = queueTopMatchId();
+  box.innerHTML = fenster.length
+    ? fenster.map((m) => queueRow(m, top)).join("")
+    : `<p class="note">Kein angesetztes Spiel${hallFilter ? " in dieser Halle" : ""}.</p>`;
+  wireQueue(box);
+  // EIN Zieh-Container für die ganze Liste (ADR 0026) — vorher einer je
+  // Halle, weil ein Zug nicht über eine Hallengrenze wirken durfte. Die
+  // Reihenfolge ist jetzt global, also ist auch die Ziehfläche global.
+  enableReorderDrag(box, (id, beforeId) => {
+    const matchId = Number(id);
+    const ziel = queueReorderTarget(beforeId);
+    if (ziel === matchId) { renderQueue(); return; }
+    send(
+      `queue-reorder-${matchId}-${ziel ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+      { action: "queue_reorder", matchId, beforeMatchId: ziel },
+      "Reihenfolge geändert.",
+    );
+  });
+
+  // Fuß der Liste: das Nachlade-Ziel und — falls der Turnier-PC selbst
+  // gekürzt hat (Cloud-Weg, sehr große Turniere) — der ehrliche Hinweis
+  // darauf. Beides außerhalb von `#queue-list`, damit der Zieh-Container
+  // ausschließlich Zeilen enthält.
+  const fuss = $("queue-foot");
+  if (fuss) {
+    const rest = liste.length - fenster.length;
+    const gekappt = gekuerzteSpiele();
+    fuss.innerHTML =
+      (rest > 0
+        ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Spiel${rest === 1 ? "" : "e"} — beim Scrollen laden sie nach.</p>`
+        : "")
+      + (gekappt !== 0
+        ? `<p class="note warn">Der Turnier-PC hat die Liste gekürzt${gekappt > 0 ? ` (${gekappt} Spiele fehlen am Ende)` : ""} — im Hallennetz steht die volle Liste.</p>`
+        : "");
   }
+  beobachteQueueEnde(liste.length);
 
-  const readyBox = $("queue-ready");
-  if (readyBox) {
-    if (ready.length) {
-      const gruppen = groupByHall(ready);
-      const zeigeUeberschriften = gruppen.length > 1;
-      readyBox.innerHTML = gruppen.map(([hall, list]) => `
-          ${zeigeUeberschriften ? `<h3>${esc(hall || "Ohne Hallenzuordnung")}</h3>` : ""}
-          <div class="queue" data-hall="${esc(hall)}">${list.map((m) => queueRow(m, true)).join("")}</div>
-        `).join("");
-    } else {
-      readyBox.innerHTML = `<p class="note">Kein Spiel spielbereit${hallFilter ? " in dieser Halle" : ""}.</p>`;
-    }
-    if (state.truncated_halls && state.truncated_halls.length) {
-      const names = state.truncated_halls.map((h) => h || "ohne Hallenzuordnung").join(", ");
-      readyBox.insertAdjacentHTML("beforeend",
-        `<p class="note warn">Die Liste ist gekürzt (${esc(names)}) — weitere Spiele stehen weiter hinten an.</p>`);
-    }
-    wireQueue(readyBox);
-    readyBox.querySelectorAll(".queue[data-hall]").forEach((container) => {
-      enableReorderDrag(container, (id, beforeId) => send(
-        `queue-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-        { action: "queue_reorder", matchId: Number(id), beforeMatchId: beforeId === null ? null : Number(beforeId) },
-        "Reihenfolge geändert.",
-      ));
-    });
-  }
-
-  const waitingBox = $("queue-waiting");
-  if (waitingBox) {
-    waitingBox.innerHTML = waiting.length
-      ? waiting.map((m) => queueRow(m)).join("")
-      : `<p class="note">Niemand wartet noch.</p>`;
-    wireQueue(waitingBox);
-  }
-
-  const noHallBox = $("queue-no-hall");
-  if (noHallBox) {
-    noHallBox.innerHTML = noHall.length
-      ? noHall.map((m) => queueRow(m)).join("")
-      : `<p class="note">Kein Spiel ohne Hallenzuordnung.</p>`;
-    wireQueue(noHallBox);
-  }
-
-  // Reset-Knopf (im Kopf des „Spielbereit"-Panels) nur zeigen, solange
-  // irgendein Spiel manuell einsortiert ist — sonst gäbe es nichts
-  // zurückzusetzen.
+  // Reset-Knopf (im Kopf des Spiele-Panels) nur zeigen, solange irgendein
+  // Spiel manuell einsortiert ist — sonst gäbe es nichts zurückzusetzen.
   const resetBtn = $("queue-reset");
   if (resetBtn) resetBtn.hidden = !state.queue.some((m) => m.manual);
 }
 
-/** Verwirft die manuelle Reihenfolge ALLER Hallen (globaler Reset-Knopf). */
+/**
+ * Übersetzt das Ziel einer Ziehgeste in das `beforeMatchId` des
+ * Wire-Aufrufs. Zwei Fälle, in denen das, was man SIEHT, nicht das ist, was
+ * „davor" serverseitig bedeutet:
+ *
+ * 1. **Ans Ende einer nur teilweise geladenen Liste.** Die Geste meint das
+ *    Ende dessen, was auf dem Bildschirm steht — `null` (= ans echte Ende
+ *    der Gesamtliste) zöge dagegen ALLE noch nicht geladenen Spiele mit in
+ *    den manuellen Präfix, die niemand gesehen hat. Solange noch etwas
+ *    nachzuladen ist, wird deshalb „vor das erste noch nicht geladene Spiel"
+ *    daraus. Erst wenn die ganze Liste geladen ist, heißt „ans Ende"
+ *    tatsächlich `null`.
+ * 2. **Vor eine gerufene Zeile.** Gerufene Spiele sind oben angepinnt,
+ *    gehören aber nicht zur manuellen Reihenfolge — der Turnier-PC kennt sie
+ *    dort nicht und verwürfe den Zug stillschweigend. Die Geste meint
+ *    offensichtlich „ganz nach vorn", also vor die erste umsortierbare
+ *    Zeile.
+ */
+function queueReorderTarget(beforeId) {
+  const liste = visibleQueue();
+  if (beforeId === null || beforeId === undefined) {
+    if (queueShown >= liste.length) return null; // alles geladen: echtes Ende
+    const naechstes = liste.slice(queueShown).find((m) => !m.prep_call);
+    return naechstes ? naechstes.match_id : null;
+  }
+  const ziel = Number(beforeId);
+  const zielMatch = liste.find((m) => m.match_id === ziel);
+  if (zielMatch && zielMatch.prep_call) return queueTopMatchId();
+  return ziel;
+}
+
+/**
+ * Wie viele wartende Spiele hat der Turnier-PC selbst weggelassen?
+ *
+ * `queue_truncated` (ADR 0026) ist die Zahl der gekappten Spiele; `0` heißt
+ * „vollständig". Sie ersetzt das frühere `truncated_halls` (Namen der
+ * betroffenen Hallen) — mit einer turnierweiten Kappung gibt es keine
+ * betroffene Halle mehr, sondern nur noch ein Ende, das fehlt.
+ *
+ * Das alte Feld wird trotzdem noch gelesen: Im Cloud-Betrieb liefert der
+ * **Relay** diese Seite aus, der Zustand kommt aber vom Turnier-PC — beide
+ * werden unabhängig voneinander aktualisiert (`docs/cloud-relay.md`). Eine
+ * neue Seite an einem älteren Host würde sonst schweigen, obwohl gekürzt
+ * wurde. Die Stückzahl kennt sie in dem Fall nicht; `-1` steht für
+ * „gekürzt, Umfang unbekannt".
+ */
+function gekuerzteSpiele() {
+  if (!state) return 0;
+  if (typeof state.queue_truncated === "number") return state.queue_truncated;
+  if (Array.isArray(state.truncated_halls) && state.truncated_halls.length) return -1;
+  return 0;
+}
+
+/** Verwirft die manuelle Reihenfolge des ganzen Turniers — es gibt seit
+ *  ADR 0026 nur noch eine, kein Reset je Halle mehr. */
 function resetQueueOrder() {
   send(
     `queue-order-reset-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
@@ -4435,13 +5083,16 @@ function renderOfficials() {
   if (!state.officials_managed) return; // Panel gar nicht verfügbar (Turnier spielt ohne Schiedsrichter-Verwaltung).
   const list = state.officials || [];
   setPanelCount("officials", list.length);
-  const box = $("off-list");
-  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
-  // Auch bei eingeklappter/ausgeblendeter Liste im Kopf sichtbar: wer als
-  // Nächstes zugeteilt würde (erster weder pausierter noch schon im Dienst
-  // befindlicher Eintrag) — ohne Konflikt-Prüfung, die braucht ein
-  // konkretes Spiel als Bezug.
+  // Wer als Nächstes zugeteilt würde (erster weder pausierter noch schon im
+  // Dienst befindlicher Eintrag) — ohne Konflikt-Prüfung, die braucht ein
+  // konkretes Spiel als Bezug. Diese eine Zeile ist zugleich die Vorschau im
+  // Kopf des ZUGEKLAPPTEN Panels (ADR 0026, Plan D): Sie stand schon immer
+  // im Panel-Inhalt, wird jetzt zusätzlich hochgezogen. Deshalb VOR dem
+  // Ausstieg unten — die Kopfzeile gibt es auch ohne Inhalt.
   const next = list.find((o) => !o.paused && !o.on_duty_court_id);
+  setPanelPreview("officials", next ? `nächster: ${next.name}` : "niemand frei");
+  const box = $("off-list");
+  if (!box) return; // Panel gerade ausgeblendet oder zugeklappt.
   const naechsterEl = $("off-next");
   if (naechsterEl) naechsterEl.textContent = next ? `nächster: ${next.name}` : "";
   // Während eines laufenden Zugs die Liste NICHT neu bauen (Code-Review-Fund
@@ -4826,45 +5477,86 @@ function openProfileEditor(existing) {
   const basis = existing ? cloneProfile(existing) : {
     id: genProfileId(), name: "", updatedAtMs: 0,
     panels: builtInProfile().panels.map((p) => ({ ...p })),
+    columns: builtInProfile().columns,
+    columnWidths: [],
     display: { ...builtInProfile().display },
   };
-  basis.panels = normalizedPanels(basis);
+  // Die Aufteilung gleich beim Öffnen auflösen: Ein Bestandsprofil
+  // (`columns: 0`) soll im Editor nicht „keine Spalte" zeigen, sondern das,
+  // was es tatsächlich darstellt (aus `listPosition` abgeleitet).
+  const layout = normalizedLayout(basis);
+  basis.panels = layout.panels;
+  basis.columns = layout.columns;
+  basis.columnWidths = layout.widths;
   profilesEditCtx = { kopie: basis, isNew: !existing };
   renderProfilesOverlay();
+}
+
+/** Die im Editor sichtbaren Eingaben in die Arbeitskopie übernehmen.
+ *  Eigene Funktion, weil der Editor nicht nur beim Speichern, sondern auch
+ *  beim Umschalten der Spaltenzahl neu gezeichnet wird — ohne das ginge ein
+ *  gerade getippter Name dabei verloren. */
+function uebernehmeEditorFelder() {
+  const { kopie } = profilesEditCtx;
+  kopie.name = $("prof-edit-name").value;
+  kopie.display = {
+    ...kopie.display,
+    showNumbers: $("prof-show-numbers").checked,
+    showNations: $("prof-show-nations").checked,
+    showClubNames: $("prof-show-club-names").checked,
+    showClubLogos: $("prof-show-club-logos").checked,
+    showDiscipline: $("prof-show-discipline").checked,
+    showRound: $("prof-show-round").checked,
+    showGroup: $("prof-show-group").checked,
+    // `listPosition` steht bewusst NICHT mehr im Editor (Plan
+    // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
+    // unverändert weitergereicht — eine ältere App-Version liest daraus
+    // weiterhin ihr Zwei-Bereiche-Layout.
+  };
 }
 
 function renderProfileEditor() {
   const { kopie, isNew } = profilesEditCtx;
   $("profiles-title").textContent = isNew ? "Profil anlegen" : "Profil bearbeiten";
+  const spalten = Math.min(Math.max(Math.round(Number(kopie.columns) || 1), 1), MAX_SPALTEN);
   const panelLi = (p) => {
-    const anker = p.key === "courts";
-    // „Felder" ist die einzige fixierte Ankerposition (Spec) — im Editor
-    // deshalb ohne Zieh-Griff UND bewusst OHNE `data-id`: `enableReorderDrag`
-    // zählt nur Kinder mit `data-id` als Ziehziele/-ziele, die Anker-Zeile
-    // nimmt an Zug-Zielsuche und Tastatur-Umsortierung dadurch gar nicht
-    // erst teil — sie könnte sonst kurzzeitig mitten in der Geste über die
-    // Ankerzeile hinweg verschoben werden, obwohl deren Position fix ist.
-    return `<li class="${anker ? "prof-panel-anchor" : ""}"${anker ? "" : ` data-id="${esc(p.key)}"`}>
-        ${anker ? "" : `<span class="drag-griff panel-griff" tabindex="0" role="button"
+    // Seit dem Mehrspalten-Layout hat JEDES Panel einen Zieh-Griff und eine
+    // Spaltenauswahl — „Felder" hatte hier vorher als fixierte
+    // Ankerposition beides nicht.
+    const wahl = spalten > 1
+      ? `<label class="prof-panel-col">Spalte
+           <select data-panel-col-key="${esc(p.key)}">
+             ${Array.from({ length: spalten }, (_, i) =>
+               `<option value="${i + 1}"${p.column === i + 1 ? " selected" : ""}>${i + 1}</option>`).join("")}
+           </select>
+         </label>`
+      : "";
+    return `<li data-id="${esc(p.key)}">
+        <span class="drag-griff panel-griff" tabindex="0" role="button"
             title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
-            aria-label="${esc(PANEL_TITLES[p.key])} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">${PANEL_GRIFF}</span>`}
+            aria-label="${esc(PANEL_TITLES[p.key])} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">${PANEL_GRIFF}</span>
         <label class="prof-panel-label">
           <input type="checkbox" class="prof-check" data-panel-key="${esc(p.key)}" ${p.visible ? "checked" : ""} />
           <span class="prof-panel-name">${esc(PANEL_TITLES[p.key])}</span>
         </label>
-        ${anker ? `<span class="prof-panel-hint">fest oben/links</span>` : ""}
+        ${wahl}
       </li>`;
   };
-  const courtsP = kopie.panels.find((p) => p.key === "courts");
-  const andere = kopie.panels.filter((p) => p.key !== "courts");
   const d = kopie.display;
   $("profiles-body").innerHTML = `
     <label class="prof-field">Name
       <input type="text" id="prof-edit-name" value="${esc(kopie.name)}" maxlength="60" required />
     </label>
+    <fieldset>
+      <legend>Spalten</legend>
+      <p class="prof-empty-hint">Wie viele Spalten die Seite nebeneinander zeigt. Auf schmalen
+        Geräten (Tablet im Hochformat, Telefon) stehen die Spalten immer untereinander.</p>
+      ${Array.from({ length: MAX_SPALTEN }, (_, i) =>
+        `<label class="radio-row"><input type="radio" name="prof-cols" id="prof-cols-${i + 1}"
+           ${spalten === i + 1 ? "checked" : ""} /> ${i + 1}</label>`).join("")}
+    </fieldset>
     <ul class="prof-panels" id="prof-panels-list">
-      ${panelLi(courtsP)}
-      ${andere.map(panelLi).join("")}
+      ${kopie.panels.map(panelLi).join("")}
     </ul>
     <fieldset>
       <legend>Anzeige</legend>
@@ -4875,11 +5567,6 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-discipline" ${d.showDiscipline ? "checked" : ""} /> Disziplin/Klasse zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-round" ${d.showRound ? "checked" : ""} /> Runde zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
-    </fieldset>
-    <fieldset>
-      <legend>Spielliste</legend>
-      <label class="radio-row"><input type="radio" name="prof-list-pos" id="prof-list-right" ${d.listPosition !== "bottom" ? "checked" : ""} /> rechts</label>
-      <label class="radio-row"><input type="radio" name="prof-list-pos" id="prof-list-bottom" ${d.listPosition === "bottom" ? "checked" : ""} /> darunter</label>
     </fieldset>
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>
@@ -4907,21 +5594,36 @@ function wireProfileEditorEvents() {
       if (setting) setting.visible = cb.checked;
     });
   });
+  // Spaltenzuordnung je Panel — dieselbe Bedienlogik wie die
+  // Sichtbarkeits-Häkchen daneben: sofort in die Arbeitskopie, gespeichert
+  // wird erst mit „Speichern".
+  $("prof-panels-list").querySelectorAll("[data-panel-col-key]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const setting = kopie.panels.find((p) => p.key === sel.dataset.panelColKey);
+      if (setting) setting.column = Number(sel.value) || 1;
+    });
+  });
+  for (let i = 1; i <= MAX_SPALTEN; i += 1) {
+    $(`prof-cols-${i}`).addEventListener("change", () => {
+      // Erst die übrigen Eingaben sichern (der Editor wird gleich neu
+      // gezeichnet, damit die Spaltenauswahl je Panel die neue Anzahl
+      // anbietet), dann die Aufteilung neu klammern: Ein Panel, dessen
+      // Spalte es nicht mehr gibt, rutscht in die letzte statt zu
+      // verschwinden (`normalizedLayout`).
+      uebernehmeEditorFelder();
+      kopie.columns = i;
+      const layout = normalizedLayout(kopie);
+      kopie.panels = layout.panels;
+      kopie.columnWidths = layout.widths;
+      renderProfilesOverlay();
+    });
+  }
   $("prof-edit-cancel").addEventListener("click", () => { profilesEditCtx = null; renderProfilesOverlay(); });
   $("prof-edit-save").addEventListener("click", async () => {
-    const name = $("prof-edit-name").value.trim();
+    uebernehmeEditorFelder();
+    const name = kopie.name.trim();
     if (!name) { toast("Bitte einen Namen eingeben.", true); return; }
     kopie.name = name;
-    kopie.display = {
-      showNumbers: $("prof-show-numbers").checked,
-      showNations: $("prof-show-nations").checked,
-      showClubNames: $("prof-show-club-names").checked,
-      showClubLogos: $("prof-show-club-logos").checked,
-      showDiscipline: $("prof-show-discipline").checked,
-      showRound: $("prof-show-round").checked,
-      showGroup: $("prof-show-group").checked,
-      listPosition: $("prof-list-bottom").checked ? "bottom" : "right",
-    };
     kopie.updatedAtMs = Date.now();
     const warEigenesAktivesProfil = kopie.id && kopie.id === resolveActiveProfile().id;
     // Ausgangsstand VOR dem Schreiben festhalten — sonst sähe die
@@ -5171,17 +5873,17 @@ function render() {
   // „Ergebnis eintragen" und „Feld freigeben" das laufende Spiel.
   if (picked && !pickIsStillValid()) picked = null;
   $("tournament").textContent = state.tournament || "";
-  applyListPosition();
   renderConnection();
   renderHalls();
   renderAutoToggle();
   renderActionBar();
-  renderCourtsHead();
+  // Erst das Gerüst (Spalten, Sichtbarkeit/Reihenfolge/Höhe aus dem aktiven
+  // Profil), DANACH die einzelnen Panel-Inhalte — die brauchen die frisch
+  // gebauten (oder unverändert weiterbestehenden) Container-IDs. Seit dem
+  // Mehrspalten-Layout gilt das auch für „Felder": Ohne den Aufbau gäbe es
+  // `#courts` gar nicht.
+  renderPanels();
   renderCourts();
-  // Erst das Gerüst (Sichtbarkeit/Reihenfolge/Höhe aus dem aktiven Profil),
-  // DANACH die einzelnen Panel-Inhalte — die brauchen die frisch gebauten
-  // (oder unverändert weiterbestehenden) Container-IDs.
-  renderPanelStack();
   renderWalkovers();
   renderScorekeepers();
   renderOfficials();
@@ -5205,9 +5907,11 @@ function tickClocks() {
     if (zeit) zeit.textContent = elapsed(since);
     el.className = `clock num stage${stage}`;
   });
+  // Nur die Dauer, ohne das Wort „gerufen": Das steht seit ADR 0026 als
+  // Abzeichen direkt davor (`.row-status`), zweimal wäre es Rauschen.
   document.querySelectorAll(".called[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
-    if (since) el.textContent = "gerufen seit " + elapsed(since);
+    if (since) el.textContent = "seit " + elapsed(since);
   });
   document.querySelectorAll(".sk-wait[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
@@ -5254,19 +5958,11 @@ function start() {
       });
       return;
     }
-    // Warteliste: kein Feld, also auch keine „steht dort nicht mehr"-Prüfung
+    // Spielliste: kein Feld, also auch keine „steht dort nicht mehr"-Prüfung
     // über pickedCourt() — hier zählt nur, ob das Spiel noch ansteht.
+    // Derselbe Weg wie der Menüpunkt „Ergebnis eintragen" an der Zeile.
     if (!pickIsStillValid()) { pickVanished(); return; }
-    const m = picked.match;
-    const t1 = (m.team1 || []).join(" / "), t2 = (m.team2 || []).join(" / ");
-    openResultDialog({
-      matchId: m.match_id,
-      label: `${[klasse(m.discipline, m.class_label), m.draw_name, m.round_name].filter(Boolean).join(" · ")} — ${t1} vs. ${t2}`,
-      sets: [],
-      bestOf: 3,
-      overwrite: false,
-      team1: t1, team2: t2,
-    });
+    openQueueResultDialog(picked.match);
   });
   // Das Dialog-Formular steht fest im Markup und wird nie neu gezeichnet
   // (siehe die Anmerkung über dem `<dialog>`) — die Verdrahtung gehört
@@ -5288,7 +5984,7 @@ function start() {
   // tl-web-panelsystem: Panel-Inhalte werden dynamisch aus dem aktiven
   // Profil gebaut) — beide existieren beim Start der Seite noch gar
   // nicht. Ihre Verdrahtung passiert deshalb einmalig direkt in
-  // `renderPanelStack()`, wenn das jeweilige Panel-Gerüst gebaut wird,
+  // `renderPanels()`, wenn das jeweilige Panel-Gerüst gebaut wird,
   // nicht hier.
   $("toast-close").addEventListener("click", hideToast);
   // Punktverlauf-Overlay: schließen per ×, Klick auf den Hintergrund
@@ -5302,14 +5998,15 @@ function start() {
     if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeProfilesOverlay(); }
   });
   // Anzeige-Einstellungen (Spielnummer/Nationen/Vereine/Disziplin/Runde/
-  // Gruppe/Listen-Position) sind seit dem Panel-System Teil des aktiven
-  // Profils (`activeDisplay()`) statt loser `localStorage`-Häkchen —
-  // `applyListPosition()` wendet die Listen-Position bei jedem `render()`
-  // an, die übrigen Werte lesen `queueRow()`/`pairOf()` direkt aus dem
-  // Profil. Nichts hier zu verdrahten; die Profil-Verwaltung selbst
-  // (Öffnen/Schließen/Editor) ist weiter oben bereits verdrahtet.
+  // Gruppe) sind seit dem Panel-System Teil des aktiven Profils
+  // (`activeDisplay()`) statt loser `localStorage`-Häkchen —
+  // `queueRow()`/`pairOf()` lesen sie direkt aus dem Profil. Auch die
+  // Aufteilung der Fläche (Spalten, Breiten, Höhen) kommt seit dem
+  // Mehrspalten-Layout ausschließlich von dort, verdrahtet in
+  // `renderPanels()`/`wireStegs()`. Nichts hier zu verdrahten; die
+  // Profil-Verwaltung selbst (Öffnen/Schließen/Editor) ist weiter oben
+  // bereits verdrahtet.
 
-  enableSteg();
   messeKopf();
   scheduleFitCourts();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
