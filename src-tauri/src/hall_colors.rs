@@ -103,11 +103,7 @@ pub fn paint(
         return;
     }
     for court in courts {
-        let schluessel = court.location.trim().to_lowercase();
-        court.hall_color = farben
-            .iter()
-            .find(|(h, _)| h.to_lowercase() == schluessel)
-            .map(|(_, farbe)| farbe.clone());
+        court.hall_color = farbe_fuer(&farben, &court.location);
     }
 }
 
@@ -152,14 +148,25 @@ pub fn view(cfg: &AppConfig, halls: &[String]) -> HallColorsView {
     }
 }
 
+/// Farbe einer Halle aus einer bereits aufgelösten Liste (getrimmter,
+/// case-insensitiver Abgleich) — DER gemeinsame Lookup aller
+/// Befüllstellen (Review 2026-08-16: vorher fünffach handgerollt).
+pub fn farbe_fuer(farben: &[(String, String)], hall: &str) -> Option<String> {
+    let schluessel = hall.trim().to_lowercase();
+    if schluessel.is_empty() {
+        return None;
+    }
+    farben
+        .iter()
+        .find(|(h, _)| h.to_lowercase() == schluessel)
+        .map(|(_, farbe)| farbe.clone())
+}
+
 /// Farbe EINER Halle (getrimmter, case-insensitiver Abgleich) — `None` bei
-/// Ein-Hallen-Turnieren oder unbekannter Halle.
+/// Ein-Hallen-Turnieren oder unbekannter Halle. Löst die ganze Liste auf;
+/// für Schleifen [`effective_hall_colors`] + [`farbe_fuer`] verwenden.
 pub fn color_for(cfg: &AppConfig, halls: &[String], hall: &str) -> Option<String> {
-    let gesucht = hall.trim().to_lowercase();
-    effective_hall_colors(cfg, halls)
-        .into_iter()
-        .find(|(h, _)| h.to_lowercase() == gesucht)
-        .map(|(_, farbe)| farbe)
+    farbe_fuer(&effective_hall_colors(cfg, halls), hall)
 }
 
 #[cfg(test)]

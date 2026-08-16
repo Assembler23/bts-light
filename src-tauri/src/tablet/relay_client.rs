@@ -881,11 +881,7 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
     let farben =
         crate::hall_colors::effective_hall_colors(&ctx.app_config(), &ctx.tablet.hall_names());
     for c in &mut courts {
-        let schluessel = c.hall.trim().to_lowercase();
-        c.hall_color = farben
-            .iter()
-            .find(|(h, _)| h.to_lowercase() == schluessel)
-            .map(|(_, farbe)| farbe.clone());
+        c.hall_color = crate::hall_colors::farbe_fuer(&farben, &c.hall);
     }
     // Auch bei (noch) leerer Feldliste senden, wenn es eine Azure-Config zu
     // vererben gibt — sonst hinge die Vererbung daran, dass BTP schon ein
@@ -947,13 +943,7 @@ fn build_prepared_list(
                 .and_then(|lid| snapshot.locations.iter().find(|l| l.id == lid))
                 .map(|l| l.name.clone())
                 .unwrap_or_default();
-            let hall_color = {
-                let schluessel = hall.trim().to_lowercase();
-                hallen_farben
-                    .iter()
-                    .find(|(h, _)| h.to_lowercase() == schluessel)
-                    .map(|(_, farbe)| farbe.clone())
-            };
+            let hall_color = crate::hall_colors::farbe_fuer(&hallen_farben, &hall);
             Some(PreparedMatch {
                 match_id: m.id,
                 hall,

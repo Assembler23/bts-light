@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::btp::model::{BtpMatch, BtpSnapshot, Discipline, MatchResult, MatchStatus};
 use crate::config::AppConfig;
+use crate::hall_colors::farbe_fuer;
 use crate::tablet::queue_order::QueueOrderStore;
 
 /// Kontext für die manuelle Spielreihenfolge (Spec
@@ -195,18 +196,6 @@ fn to_tset_match(m: &BtpMatch) -> TsetMatch {
 fn hallen_farben(snapshot: &BtpSnapshot, cfg: &AppConfig) -> Vec<(String, String)> {
     let hallen: Vec<String> = snapshot.locations.iter().map(|l| l.name.clone()).collect();
     crate::hall_colors::effective_hall_colors(cfg, &hallen)
-}
-
-/// Farbe einer Halle aus der aufgelösten Liste (case-insensitiv).
-fn farbe_fuer(farben: &[(String, String)], hall: &str) -> Option<String> {
-    let schluessel = hall.trim().to_lowercase();
-    if schluessel.is_empty() {
-        return None;
-    }
-    farben
-        .iter()
-        .find(|(h, _)| h.to_lowercase() == schluessel)
-        .map(|(_, farbe)| farbe.clone())
 }
 
 /// Payload-Wert für die Ergebnisart; `None` bei regulärem Ausgang.

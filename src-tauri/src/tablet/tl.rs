@@ -2682,11 +2682,7 @@ pub(crate) fn build_state_limited(
     let hall_names: Vec<String> = halls.iter().map(|h| h.name.clone()).collect();
     let hallen_farben = crate::hall_colors::effective_hall_colors(config, &hall_names);
     for h in &mut halls {
-        let schluessel = h.name.to_lowercase();
-        h.color = hallen_farben
-            .iter()
-            .find(|(name, _)| name.to_lowercase() == schluessel)
-            .map(|(_, farbe)| farbe.clone());
+        h.color = crate::hall_colors::farbe_fuer(&hallen_farben, &h.name);
     }
 
     // Nur wenn diese Installation Zähltafelbediener verwaltet, geht die

@@ -1028,13 +1028,6 @@ async fn info_preparation_state(
     // Hallen-Farben (Spec hallen-farben) einmal je Antwort auflösen.
     let hallen_farben =
         crate::hall_colors::effective_hall_colors(&ctx.app_config(), &ctx.tablet.hall_names());
-    let farbe_fuer = |hall: &str| -> Option<String> {
-        let schluessel = hall.trim().to_lowercase();
-        hallen_farben
-            .iter()
-            .find(|(h, _)| h.to_lowercase() == schluessel)
-            .map(|(_, farbe)| farbe.clone())
-    };
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
     // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
@@ -1077,7 +1070,7 @@ async fn info_preparation_state(
     let candidates: Vec<serde_json::Value> = ordered
         .into_iter()
         .map(|(_, m, hall)| {
-            let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
+            let call_info = calls.iter().find(|c| c.match_id == m.id).map(|c| {
                 let call_hall = c
                     .location_id
                     .and_then(|lid| {
@@ -1088,9 +1081,22 @@ async fn info_preparation_state(
                             .map(|l| l.name.clone())
                     })
                     .unwrap_or_default();
+                (call_hall, c.called_at_ms)
+            });
+            // Die Farbe gehört zur ANGEZEIGTEN Halle (Review 2026-08-16):
+            // preparation.html rendert den Punkt neben `call.hall` — bei
+            // einem Aufruf muss dessen Halle die Farbe stellen (wie der
+            // Cloud-Weg über build_prepared_list), sonst widersprächen
+            // sich LAN- und Cloud-TV, sobald Kaskaden- und Aufruf-Halle
+            // auseinanderfallen. Ohne Aufruf gilt die Kaskaden-Halle.
+            let anzeige_halle = match &call_info {
+                Some((call_hall, _)) if !call_hall.is_empty() => call_hall.clone(),
+                _ => hall.clone(),
+            };
+            let call = call_info.map(|(call_hall, called_at_ms)| {
                 serde_json::json!({
                     "hall": call_hall,
-                    "called_at_ms": c.called_at_ms,
+                    "called_at_ms": called_at_ms,
                 })
             });
             let manual = ctx.tablet.queue_order_store().rank(m.id).is_some();
@@ -1104,7 +1110,7 @@ async fn info_preparation_state(
                 "draw_id": m.draw_id,
                 "call": call,
                 "hall": hall,
-                "hall_color": farbe_fuer(&hall),
+                "hall_color": crate::hall_colors::farbe_fuer(&hallen_farben, &anzeige_halle),
                 "manual": manual,
             })
         })
