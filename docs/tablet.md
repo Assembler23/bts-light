@@ -152,8 +152,16 @@ Aufstellung:
 
 - **Offizielle Pausen** (BWF): Bei 11 Punkten im Satz blendet das Tablet
   eine 60-Sekunden-Pause ein, zwischen den Sätzen eine 2-Minuten-Pause –
-  je mit Countdown. „Weiterspielen" beendet die Pause früher; bei 0 geht
-  es automatisch weiter. Während der Pause ist die Zähltafel gesperrt.
+  je mit Countdown. Während der Pause ist die Zähltafel gesperrt.
+  **Seit v0.9.207 endet die Pause nicht mehr automatisch bei 0**
+  (ADR [0028](adr/0028-pause-haelt-bis-weiterspielen.md), Spec
+  `spielzeiten-prognose` E9): Nach Ablauf zählt die Anzeige rot hoch
+  („überzogen +0:37"), bis der Schiedsrichter „Weiterspielen" tippt — die
+  Turnierleitung sieht die Überziehung feldgenau in TL-Web. Auch ein
+  Reload/eine Geräte-Übernahme behält eine (auch überzogene) Pause bei.
+  Der Pausen-Beginn (`startedAt`, Server-Zeit) reist im gespiegelten
+  Spielzustand mit; die Behandlungspause erscheint in TL-Web als
+  „Behandlung seit …".
 - **Spieldauer**: läuft als MM:SS in der Kopfzeile ab Matchstart.
 - **Court-Grafik**: zeigt Aufschläger (markiert mit einem **Federball**,
   dessen Korken in Flugrichtung zum diagonal gegenüberliegenden

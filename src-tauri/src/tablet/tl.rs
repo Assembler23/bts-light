@@ -2102,8 +2102,16 @@ pub struct TlWalkoverMatch {
 pub struct TlPause {
     /// Art der Pause, wie das Zähltablett sie meldet.
     pub kind: String,
-    /// Ende der Pause in Server-Zeit.
-    pub ends_at_ms: u64,
+    /// Ende der Pause in Server-Zeit. `None` bei der Behandlungspause
+    /// (kein Countdown) — die fiel vor Spec `spielzeiten-prognose` (E10)
+    /// beim Parse komplett raus und war unsichtbar. Nach Ablauf hält das
+    /// Tablet die Pause (E9, ADR 0028) — die Seite zeigt dann „überzogen".
+    #[serde(default)]
+    pub ends_at_ms: Option<u64>,
+    /// Beginn der Pause in Server-Zeit — fürs „seit …" der Behandlungs-
+    /// pause. `None` bei alten Tablet-Ständen (Auto-Update-Fenster).
+    #[serde(default)]
+    pub started_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -3210,13 +3218,16 @@ fn court_view(
     clearing: Option<i64>,
     schalter: crate::tablet::officials::CourtSwitches,
 ) -> TlCourt {
-    // Aus dem rohen Tablet-JSON nur die zwei bekannten Angaben übernehmen.
+    // Aus dem rohen Tablet-JSON nur die bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
-    // erreichbaren Seite.
+    // erreichbaren Seite. `endsAt` ist bei der Behandlungspause null (E10)
+    // und `startedAt` bei alten Tablets nicht vorhanden — beides optional,
+    // die Pause selbst kommt trotzdem an.
     let pause = c.pause.as_ref().and_then(|v| {
         Some(TlPause {
             kind: v.get("kind")?.as_str()?.to_string(),
-            ends_at_ms: v.get("endsAt")?.as_u64()?,
+            ends_at_ms: v.get("endsAt").and_then(serde_json::Value::as_u64),
+            started_at_ms: v.get("startedAt").and_then(serde_json::Value::as_u64),
         })
     });
     TlCourt {
@@ -6173,19 +6184,68 @@ mod tests {
         tablet.attach_tablet(1);
         tablet.set_court_state(
             1,
-            r#"{"pause":{"kind":"game","endsAt":1700000000000,"heimlich":"streng geheim"}}"#
+            r#"{"pause":{"kind":"game","endsAt":1700000000000,"startedAt":1699999880000,"heimlich":"streng geheim"}}"#
                 .to_string(),
         );
 
         let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
         let pause = s.courts[0].pause.as_ref().expect("Pause vorhanden");
         assert_eq!(pause.kind, "game");
-        assert_eq!(pause.ends_at_ms, 1_700_000_000_000);
+        assert_eq!(pause.ends_at_ms, Some(1_700_000_000_000));
+        assert_eq!(pause.started_at_ms, Some(1_699_999_880_000));
         let json = serde_json::to_string(&s).unwrap();
         assert!(
             !json.contains("heimlich"),
             "unbekannte Felder des Tabletts dürfen nicht weiterwandern: {json}"
         );
+    }
+
+    /// Spec `spielzeiten-prognose` (E10): Die Behandlungspause hat kein
+    /// `endsAt` — sie fiel beim typisierten Parse bisher KOMPLETT raus und
+    /// war für die Turnierleitung unsichtbar. Jetzt kommt sie an (ohne
+    /// Countdown, mit Beginn für die „seit …"-Anzeige).
+    #[test]
+    fn eine_behandlungspause_ohne_endzeit_erreicht_die_turnierleitung() {
+        let tablet = TabletState::default();
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![running], Vec::new()));
+        tablet.attach_tablet(1);
+        tablet.set_court_state(
+            1,
+            r#"{"pause":{"kind":"injury","endsAt":null,"startedAt":900000}}"#.to_string(),
+        );
+
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let pause = s.courts[0]
+            .pause
+            .as_ref()
+            .expect("Behandlungspause sichtbar");
+        assert_eq!(pause.kind, "injury");
+        assert_eq!(pause.ends_at_ms, None);
+        assert_eq!(pause.started_at_ms, Some(900_000));
+    }
+
+    /// Altes Tablet (ohne `startedAt`): die Pause kommt weiter an — nur
+    /// eben ohne Beginn (Auto-Update-Fenster, sanfte Degradation).
+    #[test]
+    fn eine_pause_ohne_startzeit_kommt_weiter_an() {
+        let tablet = TabletState::default();
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![running], Vec::new()));
+        tablet.attach_tablet(1);
+        tablet.set_court_state(
+            1,
+            r#"{"pause":{"kind":"eleven","endsAt":1700000000000}}"#.to_string(),
+        );
+
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let pause = s.courts[0].pause.as_ref().expect("Pause vorhanden");
+        assert_eq!(pause.ends_at_ms, Some(1_700_000_000_000));
+        assert_eq!(pause.started_at_ms, None);
     }
 
     /// Sammelt alle Feldnamen eines JSON-Baums.
@@ -6276,6 +6336,9 @@ mod tests {
             "pause",
             "kind",
             "ends_at_ms",
+            // Pausen-Beginn (Spec spielzeiten-prognose, E10): reine
+            // Uhrzeit fürs „Behandlung seit …" — kein Personenbezug.
+            "started_at_ms",
             "scorekeeper",
             "scorekeeper_assigned",
             "locked",
