@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.210
+
+- **Hallen-Farben** (Spec
+  [features/hallen-farben.md](features/hallen-farben.md), ADR
+  [0031](adr/0031-hallen-farben-eigener-config-store.md)/[0032](adr/0032-hallen-farben-deterministische-auto-palette.md)/[0033](adr/0033-hallen-farben-hex-auf-dem-draht.md)):
+  Bei Mehr-Hallen-Turnieren trägt jede Halle eine Farbe als kleine Marke
+  neben jeder Hallen-Nennung — Felderübersicht und Vorbereitungs-Panel der
+  Desktop-App, TL-Web (Hallen-Filter, Feld-Gruppen, Wartelisten- und
+  Beendet-Zeilen inkl. „·A", Spielort-Wähler), Monitor-/Übersichts-/
+  Vorbereitungs-Seiten (LAN und Cloud) und der badhub-Push
+  (`hall_color` in `tset`-Courts und -Aufrufen; die badhub-Anzeige folgt
+  als eigener badhub-PR). Farben kommen automatisch aus einer kuratierten
+  10-Ton-Palette (deterministisch, Zustandsfarben ausgespart) und lassen
+  sich je Halle im Hallen-Editor der Felderübersicht übersteuern
+  („Automatisch" setzt zurück). Kürzel/Name bleiben überall stehen —
+  die Farbe ist nie einziger Informationsträger. Ein-Hallen-Turniere
+  bleiben unverändert. Cloud: Relay-Deploy vor App-Release (optionale
+  Felder, alte Gegenstellen degradieren farblos).
+- TL-Web-Beendet-Zeilen nennen jetzt ihre Halle (Kürzel + Marke); die
+  Vorbereitungs-Seite kann die Kopfzeile je `?halle=`-Filter einfärben.
+
 ## v0.9.209
 
 - **Vollständiger Spielplan an badhub** (`sched`, Spec
