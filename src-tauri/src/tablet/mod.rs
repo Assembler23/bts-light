@@ -5,6 +5,7 @@ pub mod assets;
 pub mod assign;
 pub mod club_logos;
 pub mod exclusion;
+pub mod match_times;
 pub mod mdns;
 pub mod monitor;
 pub mod officials;

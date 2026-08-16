@@ -563,10 +563,16 @@ Update {
   `Courts`-Block (Court ohne MatchID = frei) — genau wie im Original-BTS
   (letilo-bts `btp_proto.js`). `CourtID: 0` zu schreiben (so der frühere
   Stand) löschte die Feld-Info am Match (Tilo-Feedback 18.07.2026).
-- **`Duration`** kommt aus dem Aufruf-Zeitstempel (`on_court_since`,
-  1. Aufruf des Matches auf dem Feld) bis zum Ergebnis-Eingang, in ganzen
-  Minuten; 0, wenn der Startzeitpunkt nicht bekannt ist (z. B. App-Neustart
-  mitten im Spiel).
+- **`Duration`** ist die **Bruttozeit** (Spec
+  [`features/spielzeiten-prognose.md`](features/spielzeiten-prognose.md)):
+  erste Feldzuweisung des Matches bis zum Ergebnis-Eingang, in ganzen
+  Minuten. Quelle ist seit ADR 0027 der persistente Zeiten-Store
+  (`match-times.json`) — die Dauer überlebt damit App-Neustart und
+  Feldwechsel; `on_court_since` (RAM) bleibt nur Fallback, solange der
+  erste Sync-Poll noch nicht gestempelt hat. Auch das manuelle
+  Backend-Ergebnis und die TL-Web-Wertung senden so eine echte Dauer
+  (früher 0). 0 nur noch, wenn wirklich kein Startzeitpunkt bekannt ist —
+  und **bewusst immer 0 beim Walkover** (kampflos wurde nicht gespielt).
 - **`Players`-Block = Spielende-Uhrzeit:** BTP kennt kein „Spielende" am
   Match — Tilos Mechanismus setzt je Spieler `LastTimeOnCourt` (lokale
   Uhrzeit) und `CheckedIn: false` (wieder einplanbar). Entfällt beim

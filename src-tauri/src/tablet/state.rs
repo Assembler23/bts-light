@@ -486,6 +486,13 @@ pub struct TabletState {
     /// und Desktop müssen denselben Stand sehen; die BTP-Reihenfolge selbst
     /// bleibt unangetastet (R2).
     queue_order: crate::tablet::queue_order::QueueOrderStore,
+    /// Spielzeiten-Messung je Match (Spec `spielzeiten-prognose`, ADR 0027):
+    /// erste Feldzuweisung, erster Punkt, Spielende — turniergebunden
+    /// persistiert (`match-times.json`). Er hängt hier, weil Sync-Loop,
+    /// Ergebnis-Pfade (LAN/Cloud/TL-Web/Desktop) und die TL-Anzeige
+    /// denselben Stand sehen müssen; `on_court_since` bleibt reiner
+    /// RAM-Zubringer für den Aufruf-Timer.
+    match_times: crate::tablet::match_times::MatchTimesStore,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -835,6 +842,9 @@ impl TabletState {
             .set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
+        // Spielzeiten-Messung ebenso turniergebunden (Spec
+        // `spielzeiten-prognose`, Muster ADR 0022).
+        self.match_times.set_tournament(&snapshot.tournament_name);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -961,6 +971,17 @@ impl TabletState {
     /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
     pub fn set_queue_order_path(&self, path: std::path::PathBuf) {
         self.queue_order.set_path(path);
+    }
+
+    /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
+    /// Sync-Loop, Ergebnis-Pfaden und TL-Web.
+    pub fn match_times_store(&self) -> &crate::tablet::match_times::MatchTimesStore {
+        &self.match_times
+    }
+
+    /// Ablage-Datei der Spielzeiten-Messung setzen (beim App-Start).
+    pub fn set_match_times_path(&self, path: std::path::PathBuf) {
+        self.match_times.set_path(path);
     }
 
     /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**

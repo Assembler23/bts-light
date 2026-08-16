@@ -345,6 +345,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Spielzeiten-Protokollierung & Startzeit-Prognose** — Brutto-/Nettozeit
+  je Match host-seitig messen (persistenter Store `match-times.json`),
+  BTP-`Duration`-0-Pfade füllen, Startzeit-Prognose je Klasse×Disziplin
+  (Median, Vollmodell-Simulation) und Satzpausen-Countdown inkl.
+  Überziehung in TL-Web; Tablet hält Pausen bis zum aktiven Weiterspielen.
+  Drei Etappen (A Zeiten/BTP, B Prognose/Anzeige, C Pausen).
+  Spec: [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md) ·
+  ADR 0027 (Stempel host-seitig) · ADR 0028 (Pause hält bis Weiterspielen).
 - **Schiedsrichtermanagement** — BTP-Schiedsrichterliste in BTS Light:
   SR/AR je Spiel zuweisen (Client + TL-Web, auch bei laufendem Spiel),
   Konflikt-Warnungen (Verein/Sperr-Spieler, nie blockierend), automatische

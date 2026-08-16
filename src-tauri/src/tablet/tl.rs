@@ -965,6 +965,8 @@ pub(crate) fn walkover_updates(
             sets: Vec::new(),
             // Sieger ist die jeweils NICHT aufgebende Mannschaft.
             team1_won: !c.retired_is_team1,
+            // Bewusst 0 (Spec `spielzeiten-prognose`, E1): kampflos wurde
+            // nicht gespielt — hier keine Dauer aus dem Zeiten-Store füllen.
             duration_mins: 0,
             score_status: 1, // 1 = kampflos
             free_court_id: None,
@@ -1295,16 +1297,34 @@ async fn execute_result_action(
     let updates = match action {
         A::EnterResult { match_id, .. } => {
             let snap = ctx.tablet.snapshot_clone()?;
-            let on_court_since = snap
-                .matches
-                .iter()
-                .find(|m| m.id == *match_id)
-                .and_then(|m| m.court_id)
-                .and_then(|cid| ctx.tablet.on_court_since_ms(cid, *match_id));
+            // Bruttostart aus dem Zeiten-Store (Spec `spielzeiten-prognose`,
+            // E1): neustartfest; on_court_since bleibt Fallback. Damit
+            // sendet auch die TL-Web-Wertung eine echte Duration statt 0.
+            let on_court_since = ctx
+                .tablet
+                .match_times_store()
+                .first_assigned_ms(*match_id)
+                .or_else(|| {
+                    snap.matches
+                        .iter()
+                        .find(|m| m.id == *match_id)
+                        .and_then(|m| m.court_id)
+                        .and_then(|cid| ctx.tablet.on_court_since_ms(cid, *match_id))
+                });
             let officials = ctx.tablet.officials_for_result(*match_id);
             match plan_result_action(&snap, on_court_since, now_ms, action, officials) {
-                Ok(u) => u,
-                Err(rejected) => return Some(rejected),
+                Ok(u) => {
+                    // Spielende stempeln (E3): Eingangszeitpunkt der
+                    // TL-Web-Wertung — NICHT-regulär (E11): tablet-lose
+                    // Ergebnisse liefern keinen Statistik-Messwert.
+                    ctx.tablet
+                        .match_times_store()
+                        .stamp_finished(*match_id, false, now_ms);
+                    u
+                }
+                Err(rejected) => {
+                    return Some(rejected);
+                }
             }
         }
         A::ConfirmWalkover {

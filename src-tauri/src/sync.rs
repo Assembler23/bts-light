@@ -530,6 +530,32 @@ impl SyncEngine {
     /// Reihenfolge ist global, ein Wechsel der Halle ändert an der Abfolge
     /// nichts. Deshalb braucht diese Stelle weder Konfiguration noch
     /// Hallen-Auflösung. Kein BTP-Write, rein lokal.
+    /// Spielzeiten-Messung je Poll abgleichen (Spec `spielzeiten-prognose`,
+    /// E4): Alle OnCourt-Matches werden — nur wenn noch kein Stempel steht —
+    /// mit ihrer ersten Feldzuweisung gestempelt; Matches, die BTP wieder als
+    /// `Scheduled` ohne Feld führt, zählen Richtung bestätigter Abnahme
+    /// (Reset nach [`match_times::DEASSIGN_CONFIRM_POLLS`] Polls). Finished
+    /// steht in keinem der beiden Sets und setzt den Zähler nur zurück.
+    /// Kein BTP-Write, rein lokal; die Reset-Logik selbst ist im Store
+    /// getestet.
+    fn reconcile_match_times(&self, tablet: &TabletState, snapshot: &BtpSnapshot, now: u64) {
+        let assigned: Vec<(i64, &str, &str)> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt && m.court_id.is_some())
+            .map(|m| (m.id, m.class_label.as_str(), m.discipline.as_str()))
+            .collect();
+        let deassigned: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Scheduled && m.court_id.is_none())
+            .map(|m| m.id)
+            .collect();
+        tablet
+            .match_times_store()
+            .reconcile(&assigned, &deassigned, now);
+    }
+
     fn reconcile_queue_order(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
         let keep: HashSet<i64> = snapshot
             .matches
@@ -1257,6 +1283,11 @@ impl SyncEngine {
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
         tablet.reconcile_on_court(&oncourt_now, now_ms());
+        // Spielzeiten-Messung (Spec `spielzeiten-prognose`, E4): der
+        // persistente Erst-Stempel je Match — bewusst NACH
+        // reconcile_on_court aus demselben Snapshot, damit beide Uhren
+        // dieselbe Zuweisung sehen.
+        self.reconcile_match_times(tablet, &snapshot, now_ms());
         // Automatische Feldvergabe: freie, lange genug freie, nicht gesperrte
         // Felder mit dem nächsten spielbereiten Match belegen (schreibt nach
         // BTP). Aus dem aktuellen Snapshot bestimmt – kollidiert so nicht mit
@@ -1808,6 +1839,46 @@ mod tests {
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         engine.reconcile_queue_order(&tablet, &snap);
         assert_eq!(tablet.queue_order_store().rank(8), None);
+    }
+
+    #[test]
+    fn spielzeiten_stempel_folgen_dem_snapshot() {
+        // Spec `spielzeiten-prognose` (E4): OnCourt stempelt genau einmal;
+        // Finished zählt nie als Feldabnahme; erst drei aufeinanderfolgende
+        // Snapshots „Scheduled ohne Feld" verwerfen den Stempel.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+
+        let snap = snap_with(
+            Vec::new(),
+            vec![
+                oncourt_named(7, 1, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        engine.reconcile_match_times(&tablet, &snap, 1_000);
+        assert_eq!(tablet.match_times_store().first_assigned_ms(7), Some(1_000));
+        assert_eq!(
+            tablet.match_times_store().first_assigned_ms(8),
+            None,
+            "wartendes Spiel bekommt keinen Stempel"
+        );
+
+        // Finished zählt nie als Abnahme — auch nach drei Polls.
+        let snap = snap_with(Vec::new(), vec![finished_named(7, 9_000, "A", "B")], Vec::new());
+        for t in [2_000, 3_000, 4_000] {
+            engine.reconcile_match_times(&tablet, &snap, t);
+        }
+        assert_eq!(tablet.match_times_store().first_assigned_ms(7), Some(1_000));
+
+        // Zurück auf „Scheduled ohne Feld": nach drei Polls ist der
+        // Stempel weg (bestätigte Abnahme, Spiel wird neu angesetzt).
+        let snap = snap_with(Vec::new(), vec![ready_named(7, None, "A", "B")], Vec::new());
+        for t in [5_000, 6_000, 7_000] {
+            engine.reconcile_match_times(&tablet, &snap, t);
+        }
+        assert_eq!(tablet.match_times_store().first_assigned_ms(7), None);
     }
 
     #[test]

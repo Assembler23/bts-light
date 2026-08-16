@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.206
+
+- **Spielzeiten-Messung, Etappe A** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  ADR [0027](adr/0027-spielzeit-stempel-hostseitig.md)): Der Host misst je
+  Match Bruttostart (erste Feldzuweisung), Nettostart (erster Punkt) und
+  Spielende — persistiert turniergebunden in `match-times.json`
+  (ADR-0022-Muster), immun gegen Feldwechsel und App-Neustart, Reset nur
+  bei bestätigter Feldabnahme durch BTP (3 Polls).
+- **BTP-`Duration` neustartfest und auf allen Pfaden.** Die Spieldauer
+  kommt jetzt aus dem Zeiten-Store: Ein Tablet-Ergebnis nach App-Neustart
+  mitten im Spiel sendet nicht mehr 0; das manuelle Backend-Ergebnis, die
+  Disqualifikation und die TL-Web-Wertung senden erstmals eine echte
+  Dauer. Walkover bleibt bewusst `Duration: 0` (kampflos wurde nicht
+  gespielt). Details: [btp_protocol.md](btp_protocol.md).
+
 ## v0.9.204
 
 - **Spielliste vereinfacht: hallenübergreifende Reihenfolge, eine Liste**

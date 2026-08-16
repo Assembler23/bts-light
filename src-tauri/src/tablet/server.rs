@@ -1651,16 +1651,26 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             return ResultResponse::err(e);
         }
     }
-    // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
-    // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
-    // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
-    // (z. B. App-Neustart mitten im Spiel).
+    // Spieldauer = Bruttozeit (Spec `spielzeiten-prognose`, E1): erste
+    // Feldzuweisung → Ergebnis-Eingang, in ganzen Minuten wie beim
+    // Original-BTS. Quelle ist der persistierte Zeiten-Store (überlebt
+    // App-Neustart und Feldwechsel); `on_court_since` bleibt Fallback,
+    // solange der Sync-Poll den Store noch nicht gestempelt hat.
     let end_ms = now_ms();
     let duration_mins = ctx
         .tablet
-        .on_court_since_ms(body.court_id, m.id)
+        .match_times_store()
+        .first_assigned_ms(m.id)
+        .or_else(|| ctx.tablet.on_court_since_ms(body.court_id, m.id))
         .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
         .unwrap_or(0);
+    // Spielende stempeln (E3): genau einmal, beim ersten Host-Eingang —
+    // eine spätere Korrektur ändert weder Zeit noch Einstufung. Regulär
+    // (E11, Messwert für die Prognose) ist nur der ausgespielte Tablet-Weg
+    // (ScoreStatus 0, kein Walkover/keine Aufgabe).
+    ctx.tablet
+        .match_times_store()
+        .stamp_finished(m.id, score_status == 0, end_ms);
     // Spieler-BTP-IDs beider Teams — bekommen im selben Request das
     // Spielende (`LastTimeOnCourt` + `CheckedIn: false`).
     let player_ids: Vec<i64> = m
@@ -2518,6 +2528,14 @@ pub(crate) async fn handle_score(
         sets.push((score_a, score_b));
     }
     ctx.tablet.record_score(court_id, m.id, sets.clone());
+    // Nettostart (Spec `spielzeiten-prognose`, E2/ADR 0027): der erste beim
+    // Host eingehende Stand > 0 stempelt — host-seitig, eine Uhr für LAN,
+    // Cloud und Zähltafel. Steht hinter Finalisiert-Gate und Stale-Filter:
+    // ein verworfener Score stempelt nicht. Ein Undo zurück auf 0:0 löscht
+    // den Stempel bewusst nicht (der erste Punkt ist gefallen).
+    if sets.iter().any(|&(a, b)| a > 0 || b > 0) {
+        ctx.tablet.match_times_store().stamp_first_point(m.id, now_ms());
+    }
 
     let mut live = m;
     live.sets = sets;
@@ -2709,6 +2727,13 @@ mod tests {
                 host: "127.0.0.1".into(),
                 port,
                 password: None,
+            },
+            // Toter Port statt echtem badhub: Tests, die bis zum
+            // Liveticker-Push laufen (handle_score), bleiben hermetisch.
+            badhub: crate::config::BadhubConfig {
+                url: "http://127.0.0.1:1/".into(),
+                password: String::new(),
+                live_url: String::new(),
             },
             ..Default::default()
         };
@@ -2996,6 +3021,120 @@ mod tests {
             vec![(10, 8)],
             "Stand des aktuellen Matches bleibt unangetastet"
         );
+    }
+
+    /// Spec `spielzeiten-prognose` (E2): Der Host stempelt den Nettostart
+    /// beim ERSTEN eingehenden Punktestand > 0 — genau einmal; 0:0 und
+    /// Folgestände ändern nichts.
+    #[tokio::test]
+    async fn handle_score_stempelt_den_ersten_punkt_genau_einmal() {
+        let ctx = make_ctx(1); // tote Ports — kein BTP, kein badhub
+        handle_score(101, 0, 0, &[], 42, &ctx).await; // 0:0 stempelt nicht
+        assert!(ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .is_none_or(|e| e.first_point_ms.is_none()));
+
+        handle_score(101, 1, 0, &[], 42, &ctx).await; // erster Punkt
+        let first = ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .and_then(|e| e.first_point_ms);
+        assert!(first.is_some(), "erster Stand > 0 stempelt");
+
+        handle_score(101, 5, 3, &[], 42, &ctx).await; // Folgestand
+        assert_eq!(
+            ctx.tablet
+                .match_times_store()
+                .entry(42)
+                .and_then(|e| e.first_point_ms),
+            first,
+            "Folgestände ändern den Stempel nicht"
+        );
+    }
+
+    /// Spec `spielzeiten-prognose` (E2): Verworfene Scores (Stale-Filter,
+    /// Finalisiert-Gate) stempeln keinen ersten Punkt.
+    #[tokio::test]
+    async fn ein_verworfener_score_stempelt_keinen_ersten_punkt() {
+        let ctx = make_ctx(1);
+        // Stale: Tablet zählt Match 7, Feld hat Match 42.
+        handle_score(101, 5, 3, &[], 7, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+        assert!(ctx.tablet.match_times_store().entry(7).is_none());
+
+        // Finalisiert-Gate: Match 42 ist in BTP fertig eingegeben.
+        ctx.tablet.mark_finalized(101, 42);
+        handle_score(101, 5, 3, &[], 42, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+    }
+
+    /// Spec `spielzeiten-prognose` (E1): Nach einem App-Neustart mitten im
+    /// Spiel liefert der persistierte Erst-Stempel die BTP-`Duration` —
+    /// wo bisher 0 stand (`on_court_since` lebt nur im RAM).
+    #[tokio::test]
+    async fn process_result_nimmt_die_dauer_aus_dem_zeiten_store() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Neustart-Lage: kein on_court_since, aber der Store kennt die
+        // erste Feldzuweisung von vor 10 Minuten.
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(600_000),
+        );
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        let fields = match_fields(&reqs[0]);
+        assert_eq!(int(&fields, "Duration"), Some(10));
+    }
+
+    /// Spec `spielzeiten-prognose` (E3/E11): Der Tablet-Pfad stempelt das
+    /// Spielende beim Host-Eingang — regulär nur bei ScoreStatus 0.
+    #[tokio::test]
+    async fn process_result_stempelt_das_ende_als_regulaer() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert!(e.finished_ms.is_some());
+        assert!(e.regular, "regulär ausgespielt → Messwert");
+    }
+
+    /// Spec `spielzeiten-prognose` (E3): Eine Ergebniskorrektur überschreibt
+    /// den Ende-Stempel nicht; E11: eine Aufgabe zählt nicht als regulär.
+    #[tokio::test]
+    async fn process_result_ueberschreibt_den_ende_stempel_nicht() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Das Ende steht schon (z. B. frühere Wertung) …
+        ctx.tablet.match_times_store().stamp_finished(42, false, 123);
+        // … eine Korrektur mit anderem Ergebnis ändert daran nichts.
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert_eq!(e.finished_ms, Some(123));
+        assert!(!e.regular, "die Erst-Einstufung bleibt");
+    }
+
+    /// Spec `spielzeiten-prognose` (E11): Aufgabe (retired) stempelt das
+    /// Ende, zählt aber nicht als regulärer Messwert.
+    #[tokio::test]
+    async fn process_result_aufgabe_ist_kein_regulaerer_messwert() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let mut body = body_with(&[(21, 10), (5, 2)]);
+        body.retired = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert!(e.finished_ms.is_some());
+        assert!(!e.regular, "Aufgabe → kein Messwert für die Statistik");
     }
 
     /// A2 / ADR 0017: `ownership_active` spiegelt exakt den Legacy-Schalter.
