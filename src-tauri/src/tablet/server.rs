@@ -1486,6 +1486,15 @@ fn manual_finish_fields(
     on_court_since: Option<u64>,
     now: u64,
 ) -> (Option<i64>, Vec<i64>, i64, Option<u64>) {
+    // Die Dauer hängt NICHT am Feld (Review 2026-08-16): auch ein bereits
+    // freigegebenes Spiel trägt seine gemessene Bruttozeit (der Aufrufer
+    // reicht sie aus dem Zeiten-Store herein). Nur Feldfreigabe,
+    // Auschecken und Endzeit je Spieler brauchen ein Feld. Unplausible
+    // Dauern (über Nacht geparkt) gelten als unbekannt.
+    let dur = on_court_since
+        .map(|since| (now.saturating_sub(since) / 60_000) as i64)
+        .filter(|d| *d <= crate::tablet::match_times::MAX_PLAUSIBLE_BRUTTO_MIN)
+        .unwrap_or(0);
     match m.court_id {
         Some(cid) => {
             let ids: Vec<i64> = m
@@ -1495,12 +1504,9 @@ fn manual_finish_fields(
                 .map(|p| p.id)
                 .filter(|&id| id != 0)
                 .collect();
-            let dur = on_court_since
-                .map(|since| (now.saturating_sub(since) / 60_000) as i64)
-                .unwrap_or(0);
             (Some(cid), ids, dur, Some(now))
         }
-        None => (None, Vec::new(), 0, None),
+        None => (None, Vec::new(), dur, None),
     }
 }
 
@@ -1654,16 +1660,26 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     // Spieldauer = Bruttozeit (Spec `spielzeiten-prognose`, E1): erste
     // Feldzuweisung → Ergebnis-Eingang, in ganzen Minuten wie beim
     // Original-BTS. Quelle ist der persistierte Zeiten-Store (überlebt
-    // App-Neustart und Feldwechsel); `on_court_since` bleibt Fallback,
-    // solange der Sync-Poll den Store noch nicht gestempelt hat.
-    let end_ms = now_ms();
-    let duration_mins = ctx
+    // App-Neustart und Feldwechsel). Eine KORREKTUR rechnet mit dem
+    // ursprünglichen Ende (E3-Stempel) statt mit „jetzt" — sonst
+    // überschriebe sie eine korrekte Duration mit Stunden. Kampflos (E1)
+    // bleibt 0, und jenseits der Plausibilitätsgrenze (über Nacht
+    // geparktes Feld) gilt die Dauer als unbekannt.
+    let end_ms = ctx
         .tablet
         .match_times_store()
-        .first_assigned_ms(m.id)
-        .or_else(|| ctx.tablet.on_court_since_ms(body.court_id, m.id))
-        .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
-        .unwrap_or(0);
+        .entry(m.id)
+        .and_then(|e| e.finished_ms)
+        .unwrap_or_else(now_ms);
+    let duration_mins = if score_status == 1 {
+        0
+    } else {
+        ctx.tablet
+            .brutto_start_ms(m.id, Some(body.court_id))
+            .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
+            .filter(|d| *d <= crate::tablet::match_times::MAX_PLAUSIBLE_BRUTTO_MIN)
+            .unwrap_or(0)
+    };
     // Spielende stempeln (E3): genau einmal, beim ersten Host-Eingang —
     // eine spätere Korrektur ändert weder Zeit noch Einstufung. Regulär
     // (E11, Messwert für die Prognose) ist nur der ausgespielte Tablet-Weg
@@ -3135,6 +3151,89 @@ mod tests {
         let e = ctx.tablet.match_times_store().entry(42).unwrap();
         assert!(e.finished_ms.is_some());
         assert!(!e.regular, "Aufgabe → kein Messwert für die Statistik");
+    }
+
+    /// Review-Befund 2026-08-16: Ein manuelles Ergebnis für ein Spiel, das
+    /// nicht (mehr) auf einem Feld steht, muss die Dauer trotzdem tragen —
+    /// nur Feldfreigabe, Auschecken und Endzeit hängen am Feld.
+    #[test]
+    fn ein_manuelles_ergebnis_ohne_feld_traegt_trotzdem_die_dauer() {
+        let mut m = match_on_court();
+        m.court_id = None;
+        m.court = None;
+        let u = build_manual_result_update(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            1_000 + 40 * 60_000,
+            None,
+        )
+        .unwrap();
+        assert_eq!(u.duration_mins, 40);
+        assert_eq!(u.free_court_id, None, "kein Feld freizugeben");
+        assert_eq!(u.end_ts_ms, None, "kein Spielende je Spieler ohne Feld");
+        assert!(u.player_ids.is_empty());
+    }
+
+    /// Spec `spielzeiten-prognose` (E1): Auch ein über das TABLET gemeldeter
+    /// Walkover sendet `Duration: 0` — kampflos wurde nicht gespielt.
+    #[tokio::test]
+    async fn process_result_walkover_sendet_dauer_null() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(2_400_000),
+        );
+        let mut body = body_with(&[]);
+        body.walkover = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(0));
+    }
+
+    /// Review-Befund 2026-08-16: Eine Korrektur rechnet mit dem
+    /// URSPRÜNGLICHEN Ende (E3-Stempel), nicht mit „jetzt" — sonst
+    /// überschriebe sie eine korrekte BTP-Duration mit Stunden.
+    #[tokio::test]
+    async fn eine_korrektur_rechnet_mit_dem_urspruenglichen_ende() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let start = now_ms().saturating_sub(7_200_000); // vor 2 h zugewiesen
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            start,
+        );
+        // Ursprüngliches Ende nach 40 Minuten.
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, true, start + 40 * 60_000);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(40));
+    }
+
+    /// Review-Befund 2026-08-16: Ein über Nacht auf dem Feld „geparktes"
+    /// Spiel (Mehrtages-Turnier) darf keine absurde Duration nach BTP
+    /// melden — jenseits der Plausibilitätsgrenze gilt „unbekannt" (0).
+    #[tokio::test]
+    async fn eine_unplausible_dauer_geht_als_unbekannt_nach_btp() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(16 * 3_600_000), // gestern Abend
+        );
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(0));
     }
 
     /// A2 / ADR 0017: `ownership_active` spiegelt exakt den Legacy-Schalter.

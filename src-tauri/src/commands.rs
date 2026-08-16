@@ -1550,17 +1550,20 @@ pub async fn enter_result(
     let end_ms = now_ms();
     // Bruttostart aus dem Zeiten-Store (Spec `spielzeiten-prognose`, E1):
     // neustartfest; on_court_since bleibt Fallback. Damit sendet auch die
-    // Backend-Wertung eine echte Duration statt 0.
-    let on_court_since = tablet
+    // Backend-Wertung eine echte Duration statt 0. Als Ende zählt bei
+    // einer Korrektur der ursprüngliche E3-Stempel, nicht „jetzt".
+    let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
+    let btp_end_ms = tablet
         .match_times_store()
-        .first_assigned_ms(m.id)
-        .or_else(|| m.court_id.and_then(|cid| tablet.on_court_since_ms(cid, m.id)));
+        .entry(m.id)
+        .and_then(|e| e.finished_ms)
+        .unwrap_or(end_ms);
     let officials = tablet.officials_for_result(m.id);
     let update = crate::tablet::server::build_manual_result_update(
         m,
         sets,
         on_court_since,
-        end_ms,
+        btp_end_ms,
         officials,
     )?;
     let mid = update.btp_match_id;
@@ -1620,19 +1623,21 @@ pub async fn disqualify_match(
         .find(|m| m.id == match_id)
         .ok_or("Spiel nicht gefunden.")?;
     let end_ms = now_ms();
-    // Bruttostart aus dem Zeiten-Store (Spec `spielzeiten-prognose`, E1) —
-    // wie bei `enter_result`.
-    let on_court_since = tablet
+    // Bruttostart/Ende aus dem Zeiten-Store (Spec `spielzeiten-prognose`,
+    // E1/E3) — wie bei `enter_result`.
+    let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
+    let btp_end_ms = tablet
         .match_times_store()
-        .first_assigned_ms(m.id)
-        .or_else(|| m.court_id.and_then(|cid| tablet.on_court_since_ms(cid, m.id)));
+        .entry(m.id)
+        .and_then(|e| e.finished_ms)
+        .unwrap_or(end_ms);
     let officials = tablet.officials_for_result(m.id);
     let update = crate::tablet::server::build_manual_dq_update(
         m,
         loser_team,
         sets,
         on_court_since,
-        end_ms,
+        btp_end_ms,
         officials,
     )?;
     let mid = update.btp_match_id;

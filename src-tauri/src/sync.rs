@@ -520,16 +520,6 @@ impl SyncEngine {
         tablet.retain_auto_assign_exclusions(&keep);
     }
 
-    /// Aufräumen der manuellen Spielreihenfolge (Spec
-    /// `spielliste-manuelle-reihenfolge`, ADR 0026): Ein Match bleibt in
-    /// der Reihenfolge, solange es spielbereit und noch nicht zugewiesen
-    /// ist. Wird es zugewiesen/beendet oder verschwindet es aus dem
-    /// Snapshot, steht es nicht mehr im `keep`-Set und fällt heraus.
-    ///
-    /// Ein **Hallenwechsel** räumt seit ADR 0026 nichts mehr auf — die
-    /// Reihenfolge ist global, ein Wechsel der Halle ändert an der Abfolge
-    /// nichts. Deshalb braucht diese Stelle weder Konfiguration noch
-    /// Hallen-Auflösung. Kein BTP-Write, rein lokal.
     /// Spielzeiten-Messung je Poll abgleichen (Spec `spielzeiten-prognose`,
     /// E4): Alle OnCourt-Matches werden — nur wenn noch kein Stempel steht —
     /// mit ihrer ersten Feldzuweisung gestempelt; Matches, die BTP wieder als
@@ -556,6 +546,16 @@ impl SyncEngine {
             .reconcile(&assigned, &deassigned, now);
     }
 
+    /// Aufräumen der manuellen Spielreihenfolge (Spec
+    /// `spielliste-manuelle-reihenfolge`, ADR 0026): Ein Match bleibt in
+    /// der Reihenfolge, solange es spielbereit und noch nicht zugewiesen
+    /// ist. Wird es zugewiesen/beendet oder verschwindet es aus dem
+    /// Snapshot, steht es nicht mehr im `keep`-Set und fällt heraus.
+    ///
+    /// Ein **Hallenwechsel** räumt seit ADR 0026 nichts mehr auf — die
+    /// Reihenfolge ist global, ein Wechsel der Halle ändert an der Abfolge
+    /// nichts. Deshalb braucht diese Stelle weder Konfiguration noch
+    /// Hallen-Auflösung. Kein BTP-Write, rein lokal.
     fn reconcile_queue_order(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
         let keep: HashSet<i64> = snapshot
             .matches

@@ -264,6 +264,30 @@ impl Default for CallTimerConfig {
     }
 }
 
+/// Startzeit-Prognose in der Turnierleitungs-Oberfläche (Spec
+/// `docs/features/spielzeiten-prognose.md`, E7). Standardmäßig **an** —
+/// reine Anzeige ohne Schreibpfad; wer sie nicht will, schaltet sie im
+/// Setup ab.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PredictionConfig {
+    /// Prognostizierte Startzeiten in TL-Web anzeigen?
+    pub enabled: bool,
+    /// Angenommene Bruttodauer eines Spiels (Minuten), solange weder die
+    /// Gruppe (Klasse × Disziplin) noch Klasse oder Turnier mindestens
+    /// drei Messwerte haben.
+    pub default_duration_mins: f64,
+}
+
+impl Default for PredictionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_duration_mins: 25.0,
+        }
+    }
+}
+
 /// Zähltafelbediener-Verwaltung (ADR 0007, Phase 1). Opt-in — standardmäßig
 /// aus, damit Turniere ohne dieses Konzept unverändert laufen.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -525,6 +549,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub call_timer: CallTimerConfig,
+    /// Startzeit-Prognose (Spec `spielzeiten-prognose`). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub prediction: PredictionConfig,
     /// Zähltafelbediener-Verwaltung (ADR 0007). `#[serde(default)]` hält
     /// ältere Konfigurationsdateien lesbar.
     #[serde(default)]
@@ -984,6 +1012,26 @@ mod tests {
     }
 
     #[test]
+    fn prediction_config_defaults_and_roundtrip() {
+        // Alte Configs ohne `prediction`-Block laden mit Defaults (Spec
+        // `spielzeiten-prognose`, E7): Prognose an, 25 Minuten Startwert.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert!(cfg.prediction.enabled);
+        assert_eq!(cfg.prediction.default_duration_mins, 25.0);
+        // … und geänderte Werte überleben den Roundtrip.
+        let mut cfg = cfg;
+        cfg.prediction.enabled = false;
+        cfg.prediction.default_duration_mins = 18.0;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.prediction, cfg.prediction);
+    }
+
+    #[test]
     fn hall_layouts_survive_a_config_roundtrip_and_default_empty() {
         // Alte Configs ohne das Feld laden weiter (serde default) — `btp` und
         // `badhub` sind Pflichtfelder ohne Default, deshalb minimal statt "{}"
@@ -1363,6 +1411,10 @@ mod tests {
                 second_call_minutes: 1.5,
                 third_call_minutes: 3.0,
                 not_started_minutes: 6.0,
+            },
+            prediction: PredictionConfig {
+                enabled: false,
+                default_duration_mins: 18.0,
             },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,

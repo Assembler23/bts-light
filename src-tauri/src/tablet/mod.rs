@@ -9,6 +9,7 @@ pub mod match_times;
 pub mod mdns;
 pub mod monitor;
 pub mod officials;
+pub mod predict;
 pub mod queue_order;
 pub mod relay_client;
 pub mod server;

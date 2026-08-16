@@ -984,6 +984,18 @@ impl TabletState {
         self.match_times.set_path(path);
     }
 
+    /// Bruttostart eines Matches für die BTP-`Duration` (Spec
+    /// `spielzeiten-prognose`, E1): der persistierte Erst-Stempel, mit
+    /// `on_court_since` (RAM) als Zubringer-Fallback, solange der Sync-Poll
+    /// noch nicht gestempelt hat. **Der** gemeinsame Weg aller
+    /// Ergebnis-Pfade — vier verschiedene Schreibweisen derselben Kaskade
+    /// wären der sichere Weg, eine davon zu vergessen.
+    pub(crate) fn brutto_start_ms(&self, match_id: i64, court_id: Option<i64>) -> Option<u64> {
+        self.match_times
+            .first_assigned_ms(match_id)
+            .or_else(|| court_id.and_then(|cid| self.on_court_since_ms(cid, match_id)))
+    }
+
     /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**
     /// geschrieben werden soll (ADR 0021): `(Official1ID, Official2ID)`,
     /// `0` = kein Dienst.

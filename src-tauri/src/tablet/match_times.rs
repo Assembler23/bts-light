@@ -31,6 +31,12 @@ use serde::{Deserialize, Serialize};
 /// eine Feldabnahme als echt gilt (Muster `EMPTY_CONFIRM_POLLS`, sync.rs).
 pub const DEASSIGN_CONFIRM_POLLS: u32 = 3;
 
+/// Plausibilitätsgrenze der Bruttozeit in Minuten (6 h). Ein Spiel, das
+/// über Nacht auf dem Feld „geparkt" war (Mehrtages-Turnier), meldet sonst
+/// absurde Dauern nach BTP bzw. vergiftet den Prognose-Median — jenseits
+/// dieser Grenze gilt die Dauer als unbekannt.
+pub const MAX_PLAUSIBLE_BRUTTO_MIN: i64 = 360;
+
 /// Zeiten eines Matches. Alle Stempel Unix-ms, Host-Uhr.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MatchTimeEntry {
@@ -56,8 +62,10 @@ pub struct MatchTimeEntry {
     /// solche Spiele liefern Messwerte für die Prognose-Statistik.
     #[serde(default)]
     pub regular: bool,
-    /// E4-Reset-Zähler: aufeinanderfolgende Snapshots ohne Feld.
-    #[serde(default)]
+    /// E4-Reset-Zähler: aufeinanderfolgende Snapshots ohne Feld. Reiner
+    /// Entprell-Zustand — bewusst NICHT persistiert (`skip`), sonst würde
+    /// ein App-Neustart mitten im Flackern die 3-Poll-Garantie brechen.
+    #[serde(skip)]
     pub off_court_polls: u32,
 }
 
@@ -84,7 +92,15 @@ enum Ladung {
 struct Inner {
     file: MatchTimesFile,
     loaded: bool,
+    /// Fehlgeschlagene Ladeversuche (nur Lese-, nicht Parse-Fehler). Nach
+    /// [`MAX_LOAD_ATTEMPTS`] beginnt der Store leer — best effort, sonst
+    /// bliebe er bei dauerhaft gesperrter Datei für immer ungebunden und
+    /// kein Stempel überlebte einen Neustart.
+    load_attempts: u32,
 }
+
+/// Wie oft ein unlesbarer Bestand geschont wird, bevor leer begonnen wird.
+const MAX_LOAD_ATTEMPTS: u32 = 3;
 
 /// Der Spielzeiten-Speicher. Lebt im
 /// [`TabletState`](super::state::TabletState), damit Sync-Loop,
@@ -127,7 +143,18 @@ impl MatchTimesStore {
                         }
                     }
                     Ladung::Leer => inner.loaded = true,
-                    Ladung::Unlesbar => return,
+                    Ladung::Unlesbar => {
+                        inner.load_attempts += 1;
+                        if inner.load_attempts < MAX_LOAD_ATTEMPTS {
+                            return;
+                        }
+                        // Genug gewartet — leer beginnen (best effort),
+                        // damit die Messung turniergebunden weiterläuft.
+                        tracing::warn!(
+                            "match-times.json bleibt unlesbar – beginne leer"
+                        );
+                        inner.loaded = true;
+                    }
                 }
             }
             inner.file = MatchTimesFile {
@@ -155,51 +182,53 @@ impl MatchTimesStore {
         deassigned: &HashSet<i64>,
         now: u64,
     ) {
-        let changed = {
+        // Persistiert wird nur bei STEMPEL-Änderungen — der Abnahme-Zähler
+        // ist RAM-Entprellung (siehe `off_court_polls`) und darf weder die
+        // Datei je Poll neu schreiben noch je persistiert werden.
+        let stamped = {
             let mut inner = self.inner.lock().unwrap();
-            let mut changed = false;
+            let mut stamped = false;
             for &(match_id, class_label, discipline) in assigned {
                 let e = inner.file.entries.entry(match_id).or_default();
-                if e.off_court_polls != 0 {
-                    e.off_court_polls = 0;
-                    changed = true;
-                }
+                e.off_court_polls = 0;
                 if e.first_assigned_ms.is_none() {
                     e.first_assigned_ms = Some(now);
                     e.class_label = class_label.to_string();
                     e.discipline = discipline.to_string();
-                    changed = true;
+                    stamped = true;
                 }
             }
             // Abnahme-Zähler: nur Matches mit Stempel, die der Snapshot
             // ausdrücklich als „Scheduled ohne Feld" führt, zählen hoch.
             // Alles andere (wieder zugewiesen, Finished, verschwunden)
-            // setzt zurück — im Zweifel Stempel behalten (ADR 0022:
-            // „im Zweifel verwerfen statt falsch zuordnen" gilt der
-            // TURNIER-Bindung; innerhalb des Turniers gilt E4).
+            // setzt zurück — im Zweifel Stempel behalten.
             let assigned_ids: HashSet<i64> = assigned.iter().map(|(id, _, _)| *id).collect();
+            let mut verworfen: Vec<i64> = Vec::new();
             for (id, e) in inner.file.entries.iter_mut() {
                 if e.first_assigned_ms.is_none() || assigned_ids.contains(id) {
                     continue;
                 }
                 if deassigned.contains(id) {
                     e.off_court_polls += 1;
-                    changed = true;
                     if e.off_court_polls >= DEASSIGN_CONFIRM_POLLS {
-                        // Bestätigte Feldabnahme: frisch messen, sobald
-                        // BTP das Spiel erneut ansetzt (E4-Reset).
-                        e.first_assigned_ms = None;
-                        e.first_point_ms = None;
-                        e.off_court_polls = 0;
+                        verworfen.push(*id);
                     }
-                } else if e.off_court_polls != 0 {
+                } else {
                     e.off_court_polls = 0;
-                    changed = true;
                 }
             }
-            changed
+            for id in verworfen {
+                // Bestätigte Feldabnahme (E4-Reset): der GANZE Eintrag
+                // fällt — auch Ende und Einstufung. Ein in BTP
+                // zurückgesetztes Spiel misst bei Neuansetzung komplett
+                // frisch; ein halb geräumter Eintrag könnte nie wieder
+                // ein korrektes Ende stempeln (Review 2026-08-16).
+                inner.file.entries.remove(&id);
+                stamped = true;
+            }
+            stamped
         };
-        if changed {
+        if stamped {
             self.persist();
         }
     }
@@ -250,6 +279,13 @@ impl MatchTimesStore {
             .entries
             .get(&match_id)
             .and_then(|e| e.first_assigned_ms)
+    }
+
+    /// Alle Zeiteinträge (Kopie) — Rohmaterial der Statistik
+    /// (`predict::time_stats`). Klein genug zum Klonen: ein Turnier hat
+    /// wenige hundert Matches.
+    pub fn entries(&self) -> HashMap<i64, MatchTimeEntry> {
+        self.inner.lock().unwrap().file.entries.clone()
     }
 
     /// Kompletter Zeiteintrag eines Matches (für Anzeige und Tests).
@@ -370,16 +406,73 @@ mod tests {
     }
 
     #[test]
-    fn drei_polls_ohne_feld_verwerfen_zuweisung_und_punktstempel() {
+    fn drei_polls_ohne_feld_verwerfen_den_ganzen_eintrag() {
+        // Review-Befund 2026-08-16: Der Reset muss auch `finished_ms` und
+        // `regular` räumen — sonst kann ein irrtümlich gewertetes, in BTP
+        // zurückgesetztes Spiel nie wieder ein korrektes Ende stempeln und
+        // vergiftet mit negativer Dauer den Median.
         let store = MatchTimesStore::default();
         store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
         store.stamp_first_point(7, 2_000);
+        store.stamp_finished(7, true, 9_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
+        store.reconcile(&[], &weg, 10_000);
+        store.reconcile(&[], &weg, 11_000);
+        store.reconcile(&[], &weg, 12_000);
+        assert_eq!(store.entry(7), None, "kompletter Eintrag verworfen");
+
+        // Die Neuansetzung misst frisch — inklusive neuem Ende.
+        store.reconcile(&[(7, "A", "HE")], &keine(), 20_000);
+        store.stamp_finished(7, true, 50_000);
+        let e = store.entry(7).unwrap();
+        assert_eq!(e.first_assigned_ms, Some(20_000));
+        assert_eq!(e.finished_ms, Some(50_000));
+    }
+
+    #[test]
+    fn ein_neustart_mitten_im_flackern_loescht_keinen_stempel() {
+        // Review-Befund 2026-08-16: Der Abnahme-Zähler ist Entprell-Zustand
+        // und darf NICHT persistiert werden — sonst reicht nach einem
+        // App-Neustart ein einziger Flacker-Poll für den Reset.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        let weg: HashSet<i64> = [7].into_iter().collect();
+        store.reconcile(&[], &weg, 2_000);
         store.reconcile(&[], &weg, 3_000);
-        store.reconcile(&[], &weg, 4_000);
-        store.reconcile(&[], &weg, 5_000);
-        assert_eq!(store.first_assigned_ms(7), None);
-        assert_eq!(store.entry(7).unwrap().first_point_ms, None);
+
+        // Neustart: der Zähler beginnt wieder bei 0 …
+        let neu = store_mit_datei(dir.path());
+        neu.reconcile(&[], &weg, 4_000);
+        neu.reconcile(&[], &weg, 5_000);
+        assert_eq!(neu.first_assigned_ms(7), Some(1_000), "2 Polls reichen nie");
+        // … erst drei volle Polls nach dem Neustart räumen.
+        neu.reconcile(&[], &weg, 6_000);
+        assert_eq!(neu.entry(7), None);
+    }
+
+    #[test]
+    fn eine_dauerhaft_unlesbare_datei_blockiert_die_messung_nicht_ewig() {
+        // Review-Befund 2026-08-16: Bleibt die Datei unlesbar (Virenscanner,
+        // Sync-Client), darf der Store nicht auf ewig ungebunden bleiben —
+        // nach einer begrenzten Zahl Versuche beginnt er leer (best effort),
+        // damit Stempel wieder turniergebunden (und persistierbar) sind.
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("match-times.json");
+        std::fs::create_dir(&pfad).unwrap();
+
+        let store = MatchTimesStore::default();
+        store.set_path(pfad.clone());
+        store.set_tournament("Cup A");
+        store.set_tournament("Cup A");
+        assert_eq!(store.tournament(), "", "erste Versuche warten ab");
+        store.set_tournament("Cup A");
+        assert_eq!(
+            store.tournament(),
+            "Cup A",
+            "nach dem letzten Versuch beginnt der Store leer"
+        );
+        assert!(pfad.is_dir(), "der vorhandene Stand wird nicht gelöscht");
     }
 
     #[test]
