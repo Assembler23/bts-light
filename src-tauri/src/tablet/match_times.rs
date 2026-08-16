@@ -170,9 +170,7 @@ impl MatchTimesStore {
                         }
                         // Genug gewartet — leer beginnen (best effort),
                         // damit die Messung turniergebunden weiterläuft.
-                        tracing::warn!(
-                            "match-times.json bleibt unlesbar – beginne leer"
-                        );
+                        tracing::warn!("match-times.json bleibt unlesbar – beginne leer");
                         inner.loaded = true;
                     }
                 }
@@ -279,9 +277,8 @@ impl MatchTimesStore {
             let mut inner = self.inner.lock().unwrap();
             let mut cleared = false;
             for (id, e) in inner.file.entries.iter_mut() {
-                let conflict = e.finished_ms.is_some()
-                    && on_court.contains(id)
-                    && !retry_pending.contains(id);
+                let conflict =
+                    e.finished_ms.is_some() && on_court.contains(id) && !retry_pending.contains(id);
                 if !conflict {
                     e.finished_conflict_polls = 0;
                     continue;
@@ -682,7 +679,10 @@ mod tests {
 
     #[test]
     fn die_plausibilitaets_regel_gilt_ueberall_gleich() {
-        assert_eq!(plausible_duration_mins(1_000, 1_000 + 40 * 60_000), Some(40));
+        assert_eq!(
+            plausible_duration_mins(1_000, 1_000 + 40 * 60_000),
+            Some(40)
+        );
         assert_eq!(plausible_duration_mins(1_000, 1_000), Some(0));
         assert_eq!(
             plausible_duration_mins(0, (MAX_PLAUSIBLE_BRUTTO_MIN as u64) * 60_000),

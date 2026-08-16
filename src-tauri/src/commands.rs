@@ -1567,7 +1567,9 @@ pub async fn enter_result(
     // Spielende stempeln (E3): auch die Backend-Wertung hält den
     // Eingangszeitpunkt fest — aber als NICHT-regulär (E11): tablet-lose
     // Ergebnisse liefern keinen Messwert für die Prognose-Statistik.
-    tablet.match_times_store().stamp_finished(mid, false, end_ms);
+    tablet
+        .match_times_store()
+        .stamp_finished(mid, false, end_ms);
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
@@ -1636,7 +1638,9 @@ pub async fn disqualify_match(
     let free_court_id = update.free_court_id;
     // Spielende stempeln (E3/E11): Eingangszeitpunkt festhalten, aber eine
     // Disqualifikation ist kein regulärer Messwert.
-    tablet.match_times_store().stamp_finished(mid, false, end_ms);
+    tablet
+        .match_times_store()
+        .stamp_finished(mid, false, end_ms);
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {

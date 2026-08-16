@@ -549,7 +549,10 @@ mod tests {
             queue: vec![spiel(1, "", 20, &["a", "b"])],
         };
         let p = predict_starts(&input);
-        assert_eq!(p[&1].start_min, 1_030, "max(Feld frei + Puffer, Pause vorbei)");
+        assert_eq!(
+            p[&1].start_min, 1_030,
+            "max(Feld frei + Puffer, Pause vorbei)"
+        );
     }
 
     #[test]
@@ -616,8 +619,7 @@ mod tests {
         let p = predict_starts(&input);
         assert_eq!(p[&2].start_min, 1_002, "das bereite Spiel zieht vor");
         assert_eq!(
-            p[&1].start_min,
-            1_040,
+            p[&1].start_min, 1_040,
             "das blockierte startet nach seiner Pause (Feld ab 1029 frei)"
         );
     }

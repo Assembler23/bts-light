@@ -2383,9 +2383,7 @@ pub(crate) fn build_state_limited(
         Some(stats) => {
             let default_mins = config.prediction.default_duration_mins;
             let now_min = now_ms / 60_000;
-            let rest_min = effective_rest_minutes(&snap, config)
-                .unwrap_or(0)
-                .max(0) as u64;
+            let rest_min = effective_rest_minutes(&snap, config).unwrap_or(0).max(0) as u64;
             let buffer_min = predict::effective_buffer_min(
                 config.auto_assign.enabled,
                 config.auto_assign.wait_minutes,
@@ -2604,29 +2602,29 @@ pub(crate) fn build_state_limited(
         .map(|m| {
             let zeiten = finished_times(tablet, m.id);
             TlFinished {
-            match_id: m.id,
-            match_num: m.match_num.unwrap_or(0),
-            draw_name: m.draw_name.clone(),
-            round_name: m.round_name.clone(),
-            class_label: m.class_label.clone(),
-            discipline: m.discipline.as_str().to_string(),
-            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
-            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
-            winner: m.winner.unwrap_or(0),
-            sets: m.sets.clone(),
-            result: match m.result {
-                crate::btp::model::MatchResult::Normal => "normal",
-                crate::btp::model::MatchResult::Walkover => "walkover",
-                crate::btp::model::MatchResult::Retired => "retired",
-                crate::btp::model::MatchResult::Disqualified => "disqualified",
+                match_id: m.id,
+                match_num: m.match_num.unwrap_or(0),
+                draw_name: m.draw_name.clone(),
+                round_name: m.round_name.clone(),
+                class_label: m.class_label.clone(),
+                discipline: m.discipline.as_str().to_string(),
+                team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+                team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+                winner: m.winner.unwrap_or(0),
+                sets: m.sets.clone(),
+                result: match m.result {
+                    crate::btp::model::MatchResult::Normal => "normal",
+                    crate::btp::model::MatchResult::Walkover => "walkover",
+                    crate::btp::model::MatchResult::Retired => "retired",
+                    crate::btp::model::MatchResult::Disqualified => "disqualified",
+                }
+                .to_string(),
+                court: m.court.clone().unwrap_or_default(),
+                finished_at_ms: m.finished_at,
+                has_timeline: tablet.timeline_store().has_timeline(m.id),
+                brutto_mins: zeiten.map(|(b, _)| b),
+                netto_mins: zeiten.and_then(|(_, n)| n),
             }
-            .to_string(),
-            court: m.court.clone().unwrap_or_default(),
-            finished_at_ms: m.finished_at,
-            has_timeline: tablet.timeline_store().has_timeline(m.id),
-            brutto_mins: zeiten.map(|(b, _)| b),
-            netto_mins: zeiten.and_then(|(_, n)| n),
-        }
         })
         .collect();
 
@@ -3762,7 +3760,10 @@ mod tests {
         let tablet = TabletState::default();
         let a = tablet.cached_time_stats();
         let b = tablet.cached_time_stats();
-        assert!(std::sync::Arc::ptr_eq(&a, &b), "unverändert → derselbe Cache");
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "unverändert → derselbe Cache"
+        );
         tablet.match_times_store().reconcile(
             &[(7, "A", "HE")],
             &std::collections::HashSet::new(),

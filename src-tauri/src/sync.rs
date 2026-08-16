@@ -1915,7 +1915,11 @@ mod tests {
         );
 
         // Finished zählt nie als Abnahme — auch nach drei Polls.
-        let snap = snap_with(Vec::new(), vec![finished_named(7, 9_000, "A", "B")], Vec::new());
+        let snap = snap_with(
+            Vec::new(),
+            vec![finished_named(7, 9_000, "A", "B")],
+            Vec::new(),
+        );
         for t in [2_000, 3_000, 4_000] {
             engine.reconcile_match_times(&tablet, &snap, t);
         }

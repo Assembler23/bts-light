@@ -1007,7 +1007,11 @@ impl TabletState {
 
     /// Zuletzt publizierte Prognose eines Matches (fürs Diagnose-Log).
     pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
-        self.predicted_starts.read().unwrap().get(&match_id).copied()
+        self.predicted_starts
+            .read()
+            .unwrap()
+            .get(&match_id)
+            .copied()
     }
 
     /// Prognose eines Matches herausnehmen (genau eine Log-Zeile je

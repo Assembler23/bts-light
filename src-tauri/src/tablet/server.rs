@@ -2547,7 +2547,9 @@ pub(crate) async fn handle_score(
     // neuen Feld-Match den Nettostart stempeln (Review 2026-08-16, F2).
     // Solche Seiten liefern dann eben keinen Netto-Messwert.
     if match_id != 0 && sets.iter().any(|&(a, b)| a > 0 || b > 0) {
-        ctx.tablet.match_times_store().stamp_first_point(m.id, now_ms());
+        ctx.tablet
+            .match_times_store()
+            .stamp_first_point(m.id, now_ms());
     }
 
     let mut live = m;
@@ -3140,7 +3142,9 @@ mod tests {
         let (port, _recorded) = spawn_mock_btp().await;
         let ctx = make_ctx(port);
         // Das Ende steht schon (z. B. frühere Wertung) …
-        ctx.tablet.match_times_store().stamp_finished(42, false, 123);
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, false, 123);
         // … eine Korrektur mit anderem Ergebnis ändert daran nichts.
         let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
         assert!(resp.ok, "{:?}", resp.error);
