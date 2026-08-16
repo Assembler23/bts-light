@@ -293,9 +293,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   („dran ca. hh:mm") + Panel „Spielzeiten" in TL-Web, SetupWizard-Abschnitt.
   Spec: [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md) ·
   Bedienung: [spielzeiten-prognose.md](spielzeiten-prognose.md).
-  **Offen:** Etappe C (Pausen-Countdown/Überziehung, Tablet hält Pause —
-  ADR 0028), Feldtest am Testturnier (Erfolgsmaß E12: ±10 min bei ≥70 %,
-  Auswertung über die „Prognose-Kontrolle"-Zeilen im Diagnose-Log).
+  Etappe C (v0.9.207): Pausen-Countdown + Überziehung in TL-Web, Tablet
+  hält die Pause bis „Weiterspielen" (ADR 0028), Behandlungspause sichtbar.
+  **Offen:** Feldtest am Testturnier (Erfolgsmaß E12: ±10 min bei ≥70 %,
+  Auswertung über die „Prognose-Kontrolle"-Zeilen im Diagnose-Log);
+  Relay-Deploy verteilt tablet.html/tl.html automatisch beim main-Merge.
 
 - **TL-Web Panelsystem** — Grundfassung released mit v0.9.203 (PR #218,
   gemergt, Relay-Deploy gelaufen). **Zweite Runde umgesetzt 15.08.2026,
