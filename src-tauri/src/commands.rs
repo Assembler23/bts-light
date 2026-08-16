@@ -1553,11 +1553,7 @@ pub async fn enter_result(
     // Backend-Wertung eine echte Duration statt 0. Als Ende zählt bei
     // einer Korrektur der ursprüngliche E3-Stempel, nicht „jetzt".
     let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
-    let btp_end_ms = tablet
-        .match_times_store()
-        .entry(m.id)
-        .and_then(|e| e.finished_ms)
-        .unwrap_or(end_ms);
+    let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
     let officials = tablet.officials_for_result(m.id);
     let update = crate::tablet::server::build_manual_result_update(
         m,
@@ -1626,11 +1622,7 @@ pub async fn disqualify_match(
     // Bruttostart/Ende aus dem Zeiten-Store (Spec `spielzeiten-prognose`,
     // E1/E3) — wie bei `enter_result`.
     let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
-    let btp_end_ms = tablet
-        .match_times_store()
-        .entry(m.id)
-        .and_then(|e| e.finished_ms)
-        .unwrap_or(end_ms);
+    let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
     let officials = tablet.officials_for_result(m.id);
     let update = crate::tablet::server::build_manual_dq_update(
         m,

@@ -1492,8 +1492,7 @@ fn manual_finish_fields(
     // Auschecken und Endzeit je Spieler brauchen ein Feld. Unplausible
     // Dauern (über Nacht geparkt) gelten als unbekannt.
     let dur = on_court_since
-        .map(|since| (now.saturating_sub(since) / 60_000) as i64)
-        .filter(|d| *d <= crate::tablet::match_times::MAX_PLAUSIBLE_BRUTTO_MIN)
+        .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, now))
         .unwrap_or(0);
     match m.court_id {
         Some(cid) => {
@@ -1665,19 +1664,13 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     // überschriebe sie eine korrekte Duration mit Stunden. Kampflos (E1)
     // bleibt 0, und jenseits der Plausibilitätsgrenze (über Nacht
     // geparktes Feld) gilt die Dauer als unbekannt.
-    let end_ms = ctx
-        .tablet
-        .match_times_store()
-        .entry(m.id)
-        .and_then(|e| e.finished_ms)
-        .unwrap_or_else(now_ms);
+    let end_ms = ctx.tablet.result_end_ms(m.id, now_ms());
     let duration_mins = if score_status == 1 {
         0
     } else {
         ctx.tablet
             .brutto_start_ms(m.id, Some(body.court_id))
-            .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
-            .filter(|d| *d <= crate::tablet::match_times::MAX_PLAUSIBLE_BRUTTO_MIN)
+            .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, end_ms))
             .unwrap_or(0)
     };
     // Spielende stempeln (E3): genau einmal, beim ersten Host-Eingang —
@@ -2549,7 +2542,11 @@ pub(crate) async fn handle_score(
     // Cloud und Zähltafel. Steht hinter Finalisiert-Gate und Stale-Filter:
     // ein verworfener Score stempelt nicht. Ein Undo zurück auf 0:0 löscht
     // den Stempel bewusst nicht (der erste Punkt ist gefallen).
-    if sets.iter().any(|&(a, b)| a > 0 || b > 0) {
+    // `match_id != 0`: Legacy-Scores alter Tablet-Seiten passieren beide
+    // Gates ungeprüft — ein Nachzügler des Vorspiels dürfte sonst dem
+    // neuen Feld-Match den Nettostart stempeln (Review 2026-08-16, F2).
+    // Solche Seiten liefern dann eben keinen Netto-Messwert.
+    if match_id != 0 && sets.iter().any(|&(a, b)| a > 0 || b > 0) {
         ctx.tablet.match_times_store().stamp_first_point(m.id, now_ms());
     }
 
@@ -3085,6 +3082,21 @@ mod tests {
         ctx.tablet.mark_finalized(101, 42);
         handle_score(101, 5, 3, &[], 42, &ctx).await;
         assert!(ctx.tablet.match_times_store().entry(42).is_none());
+    }
+
+    /// Review 2026-08-16 (F2): Eine alte Tablet-Seite sendet matchId 0 und
+    /// passiert Finalisiert-Gate und Stale-Filter ungeprüft — so ein
+    /// Nachzügler-Score des Vorspiels darf dem NEUEN Feld-Match keinen
+    /// Nettostart stempeln (er wäre nie korrigierbar und verfälschte den
+    /// Klassen-Median massiv).
+    #[tokio::test]
+    async fn ein_legacy_score_ohne_match_id_stempelt_keinen_ersten_punkt() {
+        let ctx = make_ctx(1);
+        handle_score(101, 15, 12, &[], 0, &ctx).await;
+        assert!(
+            ctx.tablet.match_times_store().entry(42).is_none(),
+            "matchId 0 ist nicht zuordenbar — kein Stempel"
+        );
     }
 
     /// Spec `spielzeiten-prognose` (E1): Nach einem App-Neustart mitten im

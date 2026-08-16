@@ -1323,12 +1323,7 @@ async fn execute_result_action(
                 .find(|m| m.id == *match_id)
                 .and_then(|m| m.court_id);
             let on_court_since = ctx.tablet.brutto_start_ms(*match_id, court_id);
-            let btp_end_ms = ctx
-                .tablet
-                .match_times_store()
-                .entry(*match_id)
-                .and_then(|e| e.finished_ms)
-                .unwrap_or(now_ms);
+            let btp_end_ms = ctx.tablet.result_end_ms(*match_id, now_ms);
             let officials = ctx.tablet.officials_for_result(*match_id);
             match plan_result_action(&snap, on_court_since, btp_end_ms, action, officials) {
                 Ok(u) => {
@@ -2224,6 +2219,25 @@ pub struct TlTimeStatsRow {
     pub diff_mins: i64,
 }
 
+/// Ist-Zeiten eines beendeten Spiels für die Beendet-Zeile:
+/// `(brutto, netto)` in Minuten. Dieselbe Plausibilitätsregel wie
+/// BTP-`Duration` und Statistik (Review 2026-08-16, F7) — ein über Nacht
+/// geparktes Spiel zeigt sonst genau hier den Absurdwert, den der Deckel
+/// überall sonst unterdrückt. Netto ist auf Brutto geklemmt: Erreicht der
+/// erste Score den Host vor dem ersten Sync-Poll, läge der Punktstempel
+/// sonst VOR dem Zuweisungsstempel („40 min (netto 43)").
+fn finished_times(tablet: &TabletState, match_id: i64) -> Option<(i64, Option<i64>)> {
+    let e = tablet.match_times_store().entry(match_id)?;
+    let finished = e.finished_ms?;
+    let brutto =
+        crate::tablet::match_times::plausible_duration_mins(e.first_assigned_ms?, finished)?;
+    let netto = e
+        .first_point_ms
+        .and_then(|fp| crate::tablet::match_times::plausible_duration_mins(fp, finished))
+        .map(|n| n.min(brutto));
+    Some((brutto, netto))
+}
+
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
@@ -2364,7 +2378,7 @@ pub(crate) fn build_state_limited(
     let stats = config
         .prediction
         .enabled
-        .then(|| predict::time_stats(&tablet.match_times_store().entries()));
+        .then(|| tablet.cached_time_stats());
     let predictions: std::collections::HashMap<i64, predict::Prediction> = match &stats {
         Some(stats) => {
             let default_mins = config.prediction.default_duration_mins;
@@ -2376,13 +2390,16 @@ pub(crate) fn build_state_limited(
                 config.auto_assign.enabled,
                 config.auto_assign.wait_minutes,
             );
-            // Felder: gesperrte bleiben draußen; belegte werden frei nach
-            // max(0, Gruppenwert − verstrichen). Die Spieler laufender
+            // Felder: gesperrte kommen nicht in die Vergabe-Rotation —
+            // ihre SPIELER sind aber trotzdem gebunden (Review 2026-08-16,
+            // F5: wer auf einem gesperrten Feld mitten im Spiel steht, ist
+            // nicht „gleich dran"). Belegte Felder werden frei nach
+            // max(0, Gruppenwert − verstrichen); die Spieler laufender
             // Spiele sind ab dann (+ Mindestpause) wieder einsatzbereit.
             let mut sim_courts: Vec<predict::PredictCourt> = Vec::new();
             let mut player_ready: std::collections::HashMap<String, u64> =
                 std::collections::HashMap::new();
-            for c in courts.iter().filter(|c| !c.locked) {
+            for c in courts.iter() {
                 let free_at_min = if c.match_id != 0 {
                     let (dur, _) =
                         stats.group_duration(&c.class_label, &c.discipline, default_mins);
@@ -2403,10 +2420,12 @@ pub(crate) fn build_state_limited(
                         }
                     }
                 }
-                sim_courts.push(predict::PredictCourt {
-                    hall: c.location.clone(),
-                    free_at_min,
-                });
+                if !c.locked {
+                    sim_courts.push(predict::PredictCourt {
+                        hall: c.location.clone(),
+                        free_at_min,
+                    });
+                }
             }
             // Bestehende Mindestpausen-Blocker (Spieler ruht noch nach
             // seinem letzten Spiel) als Bereitschafts-Untergrenze.
@@ -2449,8 +2468,9 @@ pub(crate) fn build_state_limited(
             });
             // Fürs Diagnose-Log merken (Prognose-Kontrolle, E12): Beim
             // echten Aufruf vergleicht der Sync-Loop Prognose und
-            // Wirklichkeit.
-            tablet.set_predicted_starts(
+            // Wirklichkeit. Gemergt, nicht ersetzt — die Relay-Leiter baut
+            // denselben Zustand mit kleineren Wartelisten (F6).
+            tablet.merge_predicted_starts(
                 predictions
                     .iter()
                     .map(|(id, p)| (*id, p.start_min * 60_000))
@@ -2581,7 +2601,9 @@ pub(crate) fn build_state_limited(
     let finished: Vec<TlFinished> = finished_matches
         .into_iter()
         .take(finished_limit)
-        .map(|m| TlFinished {
+        .map(|m| {
+            let zeiten = finished_times(tablet, m.id);
+            TlFinished {
             match_id: m.id,
             match_num: m.match_num.unwrap_or(0),
             draw_name: m.draw_name.clone(),
@@ -2602,18 +2624,9 @@ pub(crate) fn build_state_limited(
             court: m.court.clone().unwrap_or_default(),
             finished_at_ms: m.finished_at,
             has_timeline: tablet.timeline_store().has_timeline(m.id),
-            brutto_mins: {
-                let e = tablet.match_times_store().entry(m.id);
-                e.as_ref().and_then(|e| {
-                    Some((e.finished_ms?.saturating_sub(e.first_assigned_ms?) / 60_000) as i64)
-                })
-            },
-            netto_mins: {
-                let e = tablet.match_times_store().entry(m.id);
-                e.as_ref().and_then(|e| {
-                    Some((e.finished_ms?.saturating_sub(e.first_point_ms?) / 60_000) as i64)
-                })
-            },
+            brutto_mins: zeiten.map(|(b, _)| b),
+            netto_mins: zeiten.and_then(|(_, n)| n),
+        }
         })
         .collect();
 
@@ -3695,6 +3708,71 @@ mod tests {
         // wartende A-Herreneinzel bekommt den Gruppen-Median (30).
         assert!(!s.queue[0].predicted_uncertain);
         assert_eq!(s.queue[0].predicted_start_ms, Some((60 + 2) * 60_000));
+    }
+
+    #[test]
+    fn spieler_auf_gesperrtem_feld_sind_fuer_die_prognose_gebunden() {
+        // Review 2026-08-16 (F5): Ein gesperrtes Feld kommt nicht in die
+        // Vergabe-Rotation — aber wer dort mitten im Spiel steht, ist
+        // trotzdem gebunden. Sonst hieße es „gleich dran", obwohl das
+        // laufende Spiel erst enden muss.
+        let tablet = TabletState::default();
+        let mut running = a_match(7); // Müller vs. Schmidt …
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        let waiting = a_match(2); // … die auch hier spielen (Fixture-Namen)
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![running, waiting],
+            Vec::new(),
+        ));
+        tablet.set_court_locked(1, true);
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+        // Feld 2 wäre ab now+2 frei — aber die Spieler stehen auf dem
+        // gesperrten Feld 1 (Restzeit = Default 25 min, keine Messwerte).
+        assert_eq!(s.queue[0].predicted_start_ms, Some((60 + 25) * 60_000));
+    }
+
+    #[test]
+    fn das_prognose_gedaechtnis_mergt_statt_zu_ersetzen() {
+        // Review 2026-08-16 (F6): Die Relay-Größenleiter baut denselben
+        // Zustand mit kleineren Wartelisten — ein Ersetzen ließe nur die
+        // Matches der kleinsten Stufe übrig und die E12-Kontrolle bliebe
+        // für alle dahinter stumm.
+        let tablet = TabletState::default();
+        tablet.merge_predicted_starts([(1, 100), (2, 200)].into_iter().collect());
+        tablet.merge_predicted_starts([(2, 250)].into_iter().collect()); // 5er-Stufe
+        assert_eq!(tablet.predicted_start_ms(1), Some(100));
+        assert_eq!(tablet.predicted_start_ms(2), Some(250));
+        assert_eq!(tablet.take_predicted_start(1), Some(100));
+        assert_eq!(
+            tablet.predicted_start_ms(1),
+            None,
+            "genau eine Log-Zeile je Aufruf"
+        );
+        tablet.retain_predicted_starts(&std::collections::HashSet::new());
+        assert_eq!(tablet.predicted_start_ms(2), None);
+    }
+
+    #[test]
+    fn die_statistik_wird_je_messwert_generation_nur_einmal_gerechnet() {
+        // Review 2026-08-16 (F8): Der TL-Zustand entsteht alle ~2 s je
+        // Gerät — die Statistik darf nur neu rechnen, wenn sich am
+        // Zeiten-Store wirklich etwas geändert hat.
+        let tablet = TabletState::default();
+        let a = tablet.cached_time_stats();
+        let b = tablet.cached_time_stats();
+        assert!(std::sync::Arc::ptr_eq(&a, &b), "unverändert → derselbe Cache");
+        tablet.match_times_store().reconcile(
+            &[(7, "A", "HE")],
+            &std::collections::HashSet::new(),
+            1_000,
+        );
+        let c = tablet.cached_time_stats();
+        assert!(
+            !std::sync::Arc::ptr_eq(&a, &c),
+            "neue Messwert-Generation → neu gerechnet"
+        );
     }
 
     #[test]

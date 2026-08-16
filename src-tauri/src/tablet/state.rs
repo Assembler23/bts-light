@@ -497,6 +497,9 @@ pub struct TabletState {
     /// Diagnose-Gedächtnis für den Prognose/Wirklichkeit-Vergleich (E12),
     /// gepflegt von `tl::build_state_limited`.
     predicted_starts: RwLock<HashMap<i64, u64>>,
+    /// (Messwert-Generation, Statistik): Cache für `cached_time_stats` —
+    /// neu gerechnet nur, wenn sich am Zeiten-Store etwas geändert hat.
+    time_stats_cache: Mutex<Option<(u64, std::sync::Arc<crate::tablet::predict::TimeStats>)>>,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -991,13 +994,68 @@ impl TabletState {
     /// Zuletzt publizierte Startzeit-Prognosen merken (Match-ID → Unix-ms) —
     /// nur fürs Diagnose-Log: Beim echten Aufruf vergleicht der Sync-Loop
     /// Prognose und Wirklichkeit (Erfolgsmaß E12, ±10 min / 70 %).
-    pub(crate) fn set_predicted_starts(&self, map: std::collections::HashMap<i64, u64>) {
-        *self.predicted_starts.write().unwrap() = map;
+    ///
+    /// **Gemergt statt ersetzt** (Review 2026-08-16, F6): Die Relay-
+    /// Größenleiter baut denselben Zustand mit kleineren Wartelisten —
+    /// ein Ersetzen ließe nur die Matches der kleinsten Stufe übrig und
+    /// die Prognose-Kontrolle bliebe für alle dahinter stumm. Aufgeräumt
+    /// wird über [`Self::take_predicted_start`] (geloggt) und
+    /// [`Self::retain_predicted_starts`] (aus dem Turnier verschwunden).
+    pub(crate) fn merge_predicted_starts(&self, map: std::collections::HashMap<i64, u64>) {
+        self.predicted_starts.write().unwrap().extend(map);
     }
 
     /// Zuletzt publizierte Prognose eines Matches (fürs Diagnose-Log).
     pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
         self.predicted_starts.read().unwrap().get(&match_id).copied()
+    }
+
+    /// Prognose eines Matches herausnehmen (genau eine Log-Zeile je
+    /// Aufruf — der Eintrag ist danach verbraucht).
+    pub(crate) fn take_predicted_start(&self, match_id: i64) -> Option<u64> {
+        self.predicted_starts.write().unwrap().remove(&match_id)
+    }
+
+    /// Prognosen von Matches vergessen, die nicht mehr warten (beendet,
+    /// kampflos, aus dem Snapshot verschwunden) — sonst wüchse das
+    /// Gedächtnis über das Turnier hinweg.
+    pub(crate) fn retain_predicted_starts(&self, keep: &std::collections::HashSet<i64>) {
+        self.predicted_starts
+            .write()
+            .unwrap()
+            .retain(|id, _| keep.contains(id));
+    }
+
+    /// Endzeitpunkt eines Ergebnisses für die BTP-`Duration` (Spec
+    /// `spielzeiten-prognose`, E3): der ursprüngliche Ende-Stempel, falls
+    /// vorhanden (eine Korrektur rechnet nicht mit „jetzt"), sonst `now`.
+    /// **Der** gemeinsame Weg aller Ergebnis-Pfade — Gegenstück zu
+    /// [`Self::brutto_start_ms`] (Review 2026-08-16, F9).
+    pub(crate) fn result_end_ms(&self, match_id: i64, now: u64) -> u64 {
+        self.match_times
+            .entry(match_id)
+            .and_then(|e| e.finished_ms)
+            .unwrap_or(now)
+    }
+
+    /// Median-Statistik der Spielzeiten — je Messwert-Generation genau
+    /// einmal gerechnet (Review 2026-08-16, F8): Der TL-Zustand wird alle
+    /// ~2 s je Gerät gebaut (Relay-Leiter: mehrfach je Push); ohne Cache
+    /// klonte und sortierte jeder Aufruf die komplette Zeiten-Map, obwohl
+    /// sich Messwerte nur beim Stempeln ändern.
+    pub(crate) fn cached_time_stats(&self) -> std::sync::Arc<crate::tablet::predict::TimeStats> {
+        let generation = self.match_times.generation();
+        let mut cache = self.time_stats_cache.lock().unwrap();
+        if let Some((g, stats)) = cache.as_ref() {
+            if *g == generation {
+                return stats.clone();
+            }
+        }
+        let stats = std::sync::Arc::new(crate::tablet::predict::time_stats(
+            &self.match_times.entries(),
+        ));
+        *cache = Some((generation, stats.clone()));
+        stats
     }
 
     /// Bruttostart eines Matches für die BTP-`Duration` (Spec

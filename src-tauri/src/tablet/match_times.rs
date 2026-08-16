@@ -37,6 +37,15 @@ pub const DEASSIGN_CONFIRM_POLLS: u32 = 3;
 /// dieser Grenze gilt die Dauer als unbekannt.
 pub const MAX_PLAUSIBLE_BRUTTO_MIN: i64 = 360;
 
+/// **Die** Plausibilitätsregel für alle Dauer-Berechnungen (BTP-`Duration`,
+/// Statistik, Ist-Zeiten der Beendet-Liste): ganze Minuten, jenseits von
+/// [`MAX_PLAUSIBLE_BRUTTO_MIN`] „unbekannt" (`None`). Eine Stelle statt
+/// dreier handgerollter Kopien (Review 2026-08-16, F10).
+pub fn plausible_duration_mins(start_ms: u64, end_ms: u64) -> Option<i64> {
+    let mins = (end_ms.saturating_sub(start_ms) / 60_000) as i64;
+    (mins <= MAX_PLAUSIBLE_BRUTTO_MIN).then_some(mins)
+}
+
 /// Zeiten eines Matches. Alle Stempel Unix-ms, Host-Uhr.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MatchTimeEntry {
@@ -67,6 +76,12 @@ pub struct MatchTimeEntry {
     /// ein App-Neustart mitten im Flackern die 3-Poll-Garantie brechen.
     #[serde(skip)]
     pub off_court_polls: u32,
+    /// Zähler für „BTP führt das Match noch als laufend, obwohl hier ein
+    /// Ende gestempelt ist" — nach [`DEASSIGN_CONFIRM_POLLS`] Polls gilt
+    /// das Ergebnis als in BTP gelöscht und der Ende-Stempel wird geräumt
+    /// (Review 2026-08-16, F3). Entprell-Zustand wie `off_court_polls`.
+    #[serde(skip)]
+    pub finished_conflict_polls: u32,
 }
 
 /// Dateiform. Im Kopf steht das Turnier — passt es beim Start nicht zum
@@ -110,6 +125,11 @@ pub struct MatchTimesStore {
     path: RwLock<Option<PathBuf>>,
     inner: Mutex<Inner>,
     persist_lock: Mutex<()>,
+    /// Zählt bei jeder ECHTEN Stempel-Änderung hoch — der TimeStats-Cache
+    /// in `tl::build_state_limited` rechnet nur neu, wenn sich hier etwas
+    /// getan hat (Review 2026-08-16, F8), statt je Poll die ganze Map zu
+    /// klonen und zu sortieren.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl MatchTimesStore {
@@ -162,6 +182,7 @@ impl MatchTimesStore {
                 ..Default::default()
             };
         }
+        self.bump_generation();
         self.persist();
     }
 
@@ -234,9 +255,61 @@ impl MatchTimesStore {
             (stamped, fresh)
         };
         if stamped {
+            self.bump_generation();
             self.persist();
         }
         fresh
+    }
+
+    /// Je Sync-Poll: Ende-Stempel gegen die BTP-Wahrheit halten (Review
+    /// 2026-08-16, F3). `on_court` = Match-IDs, die BTP gerade als laufend
+    /// führt; `retry_pending` = Ergebnisse, die noch in der Nachschub-Queue
+    /// liegen (ADR 0018 — BTP kennt sie nur noch nicht, das ist KEIN
+    /// Löschfall). Führt BTP ein Match mit Ende-Stempel über
+    /// [`DEASSIGN_CONFIRM_POLLS`] Polls als laufend, wurde das Ergebnis in
+    /// BTP gelöscht (das Spiel läuft weiter) — Ende und Einstufung werden
+    /// geräumt, damit das ECHTE Ende wieder stempeln kann und keine
+    /// vergiftete Messung im Median landet. Bruttostart/Nettostart bleiben.
+    pub fn reconcile_finished_conflicts(
+        &self,
+        on_court: &HashSet<i64>,
+        retry_pending: &HashSet<i64>,
+    ) {
+        let cleared = {
+            let mut inner = self.inner.lock().unwrap();
+            let mut cleared = false;
+            for (id, e) in inner.file.entries.iter_mut() {
+                let conflict = e.finished_ms.is_some()
+                    && on_court.contains(id)
+                    && !retry_pending.contains(id);
+                if !conflict {
+                    e.finished_conflict_polls = 0;
+                    continue;
+                }
+                e.finished_conflict_polls += 1;
+                if e.finished_conflict_polls >= DEASSIGN_CONFIRM_POLLS {
+                    e.finished_ms = None;
+                    e.regular = false;
+                    e.finished_conflict_polls = 0;
+                    cleared = true;
+                }
+            }
+            cleared
+        };
+        if cleared {
+            self.bump_generation();
+            self.persist();
+        }
+    }
+
+    /// Stand der Messwerte — steigt bei jeder echten Stempel-Änderung.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn bump_generation(&self) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 
     /// E2: ersten Punkt stempeln (nur wenn noch keiner steht).
@@ -252,6 +325,7 @@ impl MatchTimesStore {
             }
         };
         if changed {
+            self.bump_generation();
             self.persist();
         }
     }
@@ -272,6 +346,7 @@ impl MatchTimesStore {
             }
         };
         if changed {
+            self.bump_generation();
             self.persist();
         }
     }
@@ -543,6 +618,81 @@ mod tests {
         let e = store.entry(7).unwrap();
         assert_eq!(e.finished_ms, Some(9_000));
         assert!(e.regular);
+    }
+
+    #[test]
+    fn ein_geloeschtes_ergebnis_raeumt_den_ende_stempel_nach_drei_polls() {
+        // Review-Befund 2026-08-16 (F3): Löscht die TL ein irrtümliches
+        // Ergebnis in BTP, während das Spiel auf dem Feld WEITERLÄUFT,
+        // greift der E4-Reset nie (das Match wird nie „Scheduled ohne
+        // Feld") — der stale Ende-Stempel würde die echte End-Duration
+        // verfälschen und die vergiftete Messung in den Median tragen.
+        let store = MatchTimesStore::default();
+        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.stamp_finished(7, true, 9_000);
+
+        let on_court: HashSet<i64> = [7].into_iter().collect();
+        // Zwei Polls „läuft noch in BTP" sind Schwebe (Write unterwegs) …
+        store.reconcile_finished_conflicts(&on_court, &keine());
+        store.reconcile_finished_conflicts(&on_court, &keine());
+        assert_eq!(store.entry(7).unwrap().finished_ms, Some(9_000));
+        // … der dritte bestätigt: BTP kennt kein Ergebnis mehr.
+        store.reconcile_finished_conflicts(&on_court, &keine());
+        let e = store.entry(7).unwrap();
+        assert_eq!(e.finished_ms, None, "staler Ende-Stempel geräumt");
+        assert!(!e.regular);
+        assert_eq!(e.first_assigned_ms, Some(1_000), "Bruttostart bleibt");
+
+        // Das echte Ende stempelt danach wieder frisch.
+        store.stamp_finished(7, true, 30_000);
+        assert_eq!(store.entry(7).unwrap().finished_ms, Some(30_000));
+    }
+
+    #[test]
+    fn ein_ergebnis_in_der_nachschub_queue_zaehlt_nicht_als_konflikt() {
+        // ADR 0018: Ein Ergebnis kann minutenlang in der Retry-Queue
+        // liegen, während BTP das Match noch als laufend führt — das ist
+        // KEIN gelöschtes Ergebnis und darf den Stempel nicht räumen.
+        let store = MatchTimesStore::default();
+        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.stamp_finished(7, true, 9_000);
+
+        let on_court: HashSet<i64> = [7].into_iter().collect();
+        let queued: HashSet<i64> = [7].into_iter().collect();
+        for _ in 0..5 {
+            store.reconcile_finished_conflicts(&on_court, &queued);
+        }
+        assert_eq!(store.entry(7).unwrap().finished_ms, Some(9_000));
+    }
+
+    #[test]
+    fn die_generation_steigt_nur_bei_echten_stempel_aenderungen() {
+        // Grundlage des TimeStats-Caches (Review F8): Nur wenn sich an den
+        // Messwerten etwas ändert, muss die Statistik neu gerechnet werden.
+        let store = MatchTimesStore::default();
+        let g0 = store.generation();
+        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        let g1 = store.generation();
+        assert_ne!(g0, g1, "Erststempel ändert die Generation");
+        store.reconcile(&[(7, "A", "HE")], &keine(), 2_000);
+        assert_eq!(store.generation(), g1, "unveränderter Poll nicht");
+        store.stamp_finished(7, true, 9_000);
+        assert_ne!(store.generation(), g1);
+    }
+
+    #[test]
+    fn die_plausibilitaets_regel_gilt_ueberall_gleich() {
+        assert_eq!(plausible_duration_mins(1_000, 1_000 + 40 * 60_000), Some(40));
+        assert_eq!(plausible_duration_mins(1_000, 1_000), Some(0));
+        assert_eq!(
+            plausible_duration_mins(0, (MAX_PLAUSIBLE_BRUTTO_MIN as u64) * 60_000),
+            Some(MAX_PLAUSIBLE_BRUTTO_MIN)
+        );
+        assert_eq!(
+            plausible_duration_mins(0, (MAX_PLAUSIBLE_BRUTTO_MIN as u64 + 1) * 60_000),
+            None,
+            "über Nacht geparkt → unbekannt"
+        );
     }
 
     #[test]

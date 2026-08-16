@@ -134,16 +134,20 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
             let assigned = e.first_assigned_ms?;
             let first_point = e.first_point_ms?;
             let finished = e.finished_ms?;
+            // Plausibilitätsregel wie überall (BTP-Duration, Beendet-Liste):
+            // über Nacht geparkte Spiele vergiften den Median nicht. Netto
+            // auf Brutto geklemmt — ein Score, der den Host vor dem ersten
+            // Sync-Poll erreicht, stempelt sonst „netto > brutto".
+            let brutto_min =
+                crate::tablet::match_times::plausible_duration_mins(assigned, finished)? as u64;
+            let netto_min = (finished.saturating_sub(first_point) / 60_000).min(brutto_min);
             Some(Measurement {
                 class_label: e.class_label.trim().to_string(),
                 discipline: e.discipline.trim().to_string(),
-                brutto_min: finished.saturating_sub(assigned) / 60_000,
-                netto_min: finished.saturating_sub(first_point) / 60_000,
+                brutto_min,
+                netto_min,
             })
         })
-        // Plausibilitätsgrenze (Review 2026-08-16): über Nacht geparkte
-        // Spiele messen Stunden — die vergiften den Median nicht.
-        .filter(|m| m.brutto_min <= crate::tablet::match_times::MAX_PLAUSIBLE_BRUTTO_MIN as u64)
         .collect();
     // Deterministische Reihenfolge, unabhängig von der HashMap-Iteration.
     measurements.sort_by(|a, b| {
@@ -351,6 +355,7 @@ mod tests {
             discipline: disc.to_string(),
             regular,
             off_court_polls: 0,
+            finished_conflict_polls: 0,
         }
     }
 
