@@ -431,6 +431,22 @@ eines frei ist. Und ein automatisch vorverteiltes Spiel wird **ohne
 Vorbereitungs-Aufruf** vergeben — wer weiterhin Ansagen will, ruft wie
 gewohnt (der Aufruf übernimmt dann die Halle).
 
+### Hallen-Farben (Mehr-Hallen)
+
+> Spec: [features/hallen-farben.md](features/hallen-farben.md) ·
+> ADR [0031](adr/0031-hallen-farben-eigener-config-store.md)/[0032](adr/0032-hallen-farben-deterministische-auto-palette.md)/[0033](adr/0033-hallen-farben-hex-auf-dem-draht.md)
+
+Bei Mehr-Hallen-Turnieren trägt jede Halle eine kleine **Farbmarke** neben
+jeder Nennung: am Hallen-Filter, an den Hallen-Überschriften der
+Feld-Gruppen, im Hallen-Kürzel der Wartelisten-Zeilen (auch bei „·A"-
+Vorverteilung), an den Beendet-Zeilen und im Spielort-Wähler des ⋮-Menüs.
+Die Farben vergibt der Turnier-PC automatisch (gleiche Farbe auf allen
+Geräten, Monitoren und dem Aushang); ändern lässt sich die Farbe je Halle
+auf der **Felderübersicht** der Desktop-App (Zahnrad am Gruppenkopf).
+Kürzel und Name bleiben immer stehen — die Farbe ist eine Zusatz-Kennung,
+nie die einzige Information. An einem alten Turnier-PC ohne das Feature
+bleibt die Seite schlicht farblos.
+
 ### Startzeit-Prognose & Spielzeiten
 
 > Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·

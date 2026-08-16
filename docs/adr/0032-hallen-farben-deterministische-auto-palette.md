@@ -15,7 +15,8 @@ mitten im Turnier die Farben.
 
 Die Auto-Palette wird **deterministisch über die getrimmte,
 case-insensitiv alphabetisch sortierte Hallenliste** vergeben
-(`palette[i % 10]`, Muster `distinct_halls`). Persistierte Overrides
+(`palette[i % 10]`; Sortierung wie `distinct_halls`, das Dedup ist hier
+zusätzlich getrimmt und case-insensitiv). Persistierte Overrides
 gewinnen immer und beeinflussen die Auto-Vergabe der übrigen Hallen
 bewusst **nicht** (keine Umsortierung durch fremde Übersteuerung).
 Bei weniger als zwei Hallen liefert der Resolver nichts — das Feature ist

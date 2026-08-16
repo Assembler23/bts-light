@@ -522,10 +522,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Dringlichkeit, sondern eine Ortsangabe, und ein vierter Farbtopf ist
    ausdrücklich unerwünscht. Deshalb dieselbe stumme Chip-Optik wie das
    Nations-Kürzel (`.nat`). Voller Hallenname im `title`. */
-.row .hall-kuerzel {
+.row .hall-kuerzel, .fin-row .hall-kuerzel {
   flex: none; padding: 1px 6px; border-radius: 6px;
   background: #f1f5f9; color: var(--ink-soft);
   font-size: .72rem; font-weight: 700; letter-spacing: .02em;
+}
+/* Hallen-Farbmarke (Spec hallen-farben): reine Orts-Kennung neben
+   Kürzel/Name — bewusst KEINE Umfärbung des Chips und kein Abzeichen der
+   Drei-Stufen-Familie; der Text bleibt immer stehen (Farbe ist nie
+   einziger Informationsträger). */
+.hall-marke {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  flex: none; margin-right: .35em; vertical-align: 0;
 }
 /* Nachlade-Marke am Listenende (ADR 0026): unsichtbar, aber ausdrücklich
    EINEN Pixel hoch — ein Element ohne Fläche ist für den
@@ -2130,6 +2138,26 @@ function hallIdFor(hall) {
 }
 
 /**
+ * Hallen-Farbe aus dem Zustand (Spec hallen-farben); "" bei unbekannter
+ * Halle, Ein-Hallen-Turnier oder altem Host ohne `color`-Feld — die Seite
+ * bleibt dann schlicht farblos (Feature-Detection statt toter Elemente).
+ */
+function hallFarbe(name) {
+  if (!state || !name) return "";
+  const gesucht = String(name).trim().toLowerCase();
+  const h = (state.halls || []).find((x) => x.name.toLowerCase() === gesucht);
+  return (h && h.color) || "";
+}
+
+/** Die kleine Farbmarke vor Kürzel/Name; "" ohne Farbe. */
+function hallMarke(name) {
+  const farbe = hallFarbe(name);
+  return farbe
+    ? `<span class="hall-marke" style="background:${esc(farbe)}" aria-hidden="true"></span>`
+    : "";
+}
+
+/**
  * Endstand nachtragen, wenn niemand gezählt hat — als Formular mit
  * Satzfeldern statt Freitext, und auch für Spiele, die nie auf einem Feld
  * standen (Warteliste): Die Zähltafel ist nicht die einzige Quelle für
@@ -2649,7 +2677,7 @@ function renderHalls() {
   if (!state || !state.multi_hall) { box.innerHTML = ""; return; }
   const options = ["", ...state.halls.map((h) => h.name)];
   box.innerHTML = options.map((h) =>
-    `<button type="button" data-hall="${esc(h)}" aria-pressed="${h === hallFilter}">${h ? esc(h) : "Alle Hallen"}</button>`
+    `<button type="button" data-hall="${esc(h)}" aria-pressed="${h === hallFilter}">${h ? hallMarke(h) + esc(h) : "Alle Hallen"}</button>`
   ).join("");
   box.querySelectorAll("button").forEach((b) =>
     b.addEventListener("click", () => setHall(b.dataset.hall)));
@@ -3217,7 +3245,7 @@ function renderCourts() {
       groups.get(key).push(c);
     }
     box.innerHTML = [...groups.entries()].map(([hall, list]) =>
-      `<div class="hall-group"><h3>${hall ? esc(hall) : "Ohne Halle"}</h3>
+      `<div class="hall-group"><h3>${hall ? hallMarke(hall) + esc(hall) : "Ohne Halle"}</h3>
        ${courtsGridHtml(hall, list)}</div>`).join("");
   } else {
     box.innerHTML = courtsGridHtml(hallFilter || "", courts);
@@ -3404,7 +3432,7 @@ function queueRow(m, topMatchId) {
   const status = [];
   if (state.multi_hall) {
     if (m.hall) {
-      status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}${m.hall_source === "auto" ? " — automatisch vorverteilt" : ""}">${esc(hallenKuerzel(m.hall))}${m.hall_source === "auto" ? "·A" : ""}</span>`);
+      status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}${m.hall_source === "auto" ? " — automatisch vorverteilt" : ""}">${hallMarke(m.hall)}${esc(hallenKuerzel(m.hall))}${m.hall_source === "auto" ? "·A" : ""}</span>`);
     } else {
       // Ohne Hallenzuordnung: Warnung, nicht Information — so ein Spiel
       // wird von der automatischen Vergabe in keiner Halle angefasst und
@@ -3523,7 +3551,7 @@ function queueRow(m, topMatchId) {
     // Grenze ehrlich benannt: Der Wähler wirkt in bts-light, Vergabe und
     // Liveticker, aber BTP verwirft den Spielort still (gemessen 10.08.2026).
     kebabGroups.push(`<div class="kebab-group">
-        <span class="kebab-label">Spielort (BTP übernimmt ihn nicht)</span>
+        <span class="kebab-label">${hallMarke(m.hall)}Spielort (BTP übernimmt ihn nicht)</span>
         <div class="kebab-row">
           <select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
             data-hall-for="${m.match_id}" aria-label="Spielort">${optionen.join("")}</select>
@@ -5919,9 +5947,14 @@ function renderFinished() {
     const zeiten = f.brutto_mins != null
       ? `${f.brutto_mins} min${f.netto_mins != null ? ` (netto ${f.netto_mins})` : ""}`
       : "";
+    // Hallen-Kürzel + Farbmarke (Spec hallen-farben): nur wenn der Host
+    // die Halle liefert (Mehr-Hallen-Turnier, Spiel lief auf einem Feld).
+    const halle = f.hall
+      ? `<span class="hall-kuerzel" title="${esc(f.hall)}">${hallMarke(f.hall)}${esc(hallenKuerzel(f.hall))}</span> `
+      : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
       <span class="fin-pair">${esc(siegerZuerst(f))}</span>
-      <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
+      <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>

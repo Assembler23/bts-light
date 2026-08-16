@@ -993,8 +993,13 @@ impl AppConfig {
         if !crate::hall_colors::HALL_PALETTE.contains(&color.as_str()) {
             return Err("Die Farbe muss ein Ton aus der Palette sein.".to_string());
         }
+        // Voller `to_lowercase`-Vergleich statt `eq_ignore_ascii_case`:
+        // Hallennamen tragen Umlaute („Süd"), und der Lese-Resolver
+        // (`hall_colors::effective_hall_colors`) schlüsselt genauso —
+        // sonst ersetzte „süd" die Zeile „SÜD" nie (Review 2026-08-16).
+        let schluessel = hall.to_lowercase();
         self.hall_colors
-            .retain(|c| !c.hall.trim().eq_ignore_ascii_case(hall));
+            .retain(|c| c.hall.trim().to_lowercase() != schluessel);
         self.hall_colors.push(HallColorConfig {
             hall: hall.to_string(),
             color,
@@ -1003,12 +1008,12 @@ impl AppConfig {
     }
 
     /// Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette.
-    /// `true`, wenn es eine gab (Matching wie `remove_hall_layout`).
+    /// `true`, wenn es eine gab (Matching wie `upsert_hall_color`).
     pub fn remove_hall_color(&mut self, hall: &str) -> bool {
-        let hall = hall.trim();
+        let schluessel = hall.trim().to_lowercase();
         let vorher = self.hall_colors.len();
         self.hall_colors
-            .retain(|c| !c.hall.trim().eq_ignore_ascii_case(hall));
+            .retain(|c| c.hall.trim().to_lowercase() != schluessel);
         self.hall_colors.len() != vorher
     }
 }
@@ -2071,6 +2076,21 @@ mod hall_color_tests {
         let mut cfg = AppConfig::default();
         let err = cfg.upsert_hall_color("   ", HALL_PALETTE[0]).unwrap_err();
         assert!(err.contains("Halle"), "deutsche Fehlermeldung: {err}");
+    }
+
+    #[test]
+    fn umlaut_hall_names_replace_case_insensitive() {
+        // Review 2026-08-16: `eq_ignore_ascii_case` kennt keine Umlaute —
+        // „SÜD" und „süd" müssen trotzdem dieselbe Zeile treffen, sonst
+        // wirkt die neu gewählte Farbe nie (der Resolver nimmt die alte
+        // Zeile) und remove ließe die aktive Übersteuerung stehen.
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("SÜD", HALL_PALETTE[0]).unwrap();
+        cfg.upsert_hall_color("süd", HALL_PALETTE[1]).unwrap();
+        assert_eq!(cfg.hall_colors.len(), 1, "keine Umlaut-Dublette");
+        assert_eq!(cfg.hall_colors[0].color, HALL_PALETTE[1]);
+        assert!(cfg.remove_hall_color("Süd"));
+        assert!(cfg.hall_colors.is_empty());
     }
 
     #[test]

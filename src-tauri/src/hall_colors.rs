@@ -61,10 +61,27 @@ pub fn effective_hall_colors(cfg: &AppConfig, halls: &[String]) -> Vec<(String, 
                 .iter()
                 .find(|c| c.hall.trim().to_lowercase() == schluessel)
                 .map(|c| c.color.clone())
+                // Format-Wächter (Review 2026-08-16): Die Deserialisierung
+                // ist ein zweiter, unvalidierter Schreibpunkt (config.json
+                // von Hand, Identitäts-Bündel) — Konsumenten rendern den
+                // Wert direkt in HTML/CSS. Nur die Form wird geprüft, nicht
+                // die Palettenzugehörigkeit (ADR 0033: alte Overrides
+                // bleiben gültig, wenn ein Ton aus der Palette fällt).
+                .filter(|farbe| ist_hex_farbe(farbe))
                 .unwrap_or_else(|| HALL_PALETTE[i % HALL_PALETTE.len()].to_string());
             (anzeige, farbe)
         })
         .collect()
+}
+
+/// Strikte Form `#rrggbb` (lowercase — so normalisiert der einzige legale
+/// Schreibpunkt `upsert_hall_color`). Alles andere gilt als manipuliert.
+fn ist_hex_farbe(farbe: &str) -> bool {
+    farbe.len() == 7
+        && farbe.starts_with('#')
+        && farbe[1..]
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 /// Hängt die effektiven Hallen-Farben an eine Felder-Übersicht. Die
@@ -267,6 +284,46 @@ mod tests {
                 "{hex} (h={h:.0}) liegt im Violett-Bereich"
             );
         }
+    }
+
+    #[test]
+    fn a_tampered_override_outside_hex_form_falls_back_to_auto() {
+        // Review 2026-08-16: Die Deserialisierung ist ein zweiter,
+        // unvalidierter Schreibpunkt (config.json von Hand, Identitäts-
+        // Bündel). Konsumenten rendern den Wert direkt in HTML/CSS —
+        // alles außer `#rrggbb` fällt deshalb auf die Auto-Palette zurück.
+        let mut cfg = AppConfig::default();
+        cfg.hall_colors.push(crate::config::HallColorConfig {
+            hall: "Nord".to_string(),
+            color: "#fff\" onmouseover=alert(1)".to_string(),
+        });
+        let farben = effective_hall_colors(&cfg, &halls(&["Mitte", "Nord"]));
+        assert_eq!(
+            farben[1],
+            ("Nord".to_string(), HALL_PALETTE[1].to_string()),
+            "manipulierter Wert wirkt nicht"
+        );
+    }
+
+    #[test]
+    fn empty_hall_names_do_not_count_towards_the_gate() {
+        // Ein Feld ohne auflösbare Halle liefert "" — das ist keine Halle
+        // und darf das Zwei-Hallen-Gate nicht öffnen.
+        let cfg = AppConfig::default();
+        assert!(effective_hall_colors(&cfg, &halls(&["Nord", "  ", ""])).is_empty());
+    }
+
+    #[test]
+    fn a_stale_override_for_a_vanished_hall_does_not_shift_the_auto_colors() {
+        // ADR 0032: Eine gespeicherte Übersteuerung für eine Halle, die es
+        // (im aktuellen Turnier) nicht gibt, wird ignoriert und verschiebt
+        // die Auto-Vergabe der echten Hallen nicht.
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Verschwunden", HALL_PALETTE[0])
+            .unwrap();
+        let farben = effective_hall_colors(&cfg, &halls(&["Mitte", "Nord"]));
+        assert_eq!(farben[0].1, HALL_PALETTE[0]);
+        assert_eq!(farben[1].1, HALL_PALETTE[1]);
     }
 
     #[test]

@@ -2160,6 +2160,11 @@ pub struct TlHall {
     /// BTP-Kennung des Standorts — nötig für den Vorbereitungs-Aufruf.
     pub id: i64,
     pub name: String,
+    /// Effektive Hallen-Farbe (Hex, Spec hallen-farben) — `None` bei
+    /// Ein-Hallen-Turnieren und an alten Hosts (Serde-Default hält alte
+    /// Zustände lesbar).
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 /// Raster-Anordnung der Felder einer Halle, wie sie am Turnier-PC hinterlegt
@@ -2313,6 +2318,11 @@ pub struct TlFinished {
     /// Gemessene Nettozeit (erster Punkt → Ergebnis) in ganzen Minuten.
     #[serde(default)]
     pub netto_mins: Option<i64>,
+    /// Halle, in der es lief (Spec hallen-farben: Kürzel + Marke an der
+    /// Beendet-Zeile); leer bei Papier-Ergebnissen ohne Feld und bei
+    /// Ein-Hallen-Turnieren. Serde-Default hält alte Hosts lesbar.
+    #[serde(default)]
+    pub hall: String,
 }
 
 /// Auswertung der gemessenen Spielzeiten (Spec `spielzeiten-prognose`):
@@ -2662,10 +2672,22 @@ pub(crate) fn build_state_limited(
         .map(|l| TlHall {
             id: l.id,
             name: l.name.trim().to_string(),
+            color: None,
         })
         .collect();
     halls.sort_by_key(|h| h.name.to_lowercase());
     halls.dedup_by(|a, b| a.name == b.name);
+    // Hallen-Farben (Spec hallen-farben): der Resolver liefert bei < 2
+    // Hallen nichts — Ein-Hallen-Turniere bleiben farblos.
+    let hall_names: Vec<String> = halls.iter().map(|h| h.name.clone()).collect();
+    let hallen_farben = crate::hall_colors::effective_hall_colors(config, &hall_names);
+    for h in &mut halls {
+        let schluessel = h.name.to_lowercase();
+        h.color = hallen_farben
+            .iter()
+            .find(|(name, _)| name.to_lowercase() == schluessel)
+            .map(|(_, farbe)| farbe.clone());
+    }
 
     // Nur wenn diese Installation Zähltafelbediener verwaltet, geht die
     // Warteschlange überhaupt raus — sonst zeigte ein Gerät einen
@@ -2748,6 +2770,12 @@ pub(crate) fn build_state_limited(
                 has_timeline: tablet.timeline_store().has_timeline(m.id),
                 brutto_mins: zeiten.map(|(b, _)| b),
                 netto_mins: zeiten.and_then(|(_, n)| n),
+                // Leer bei Ein-Hallen-Turnieren und ohne Feld — genau wie
+                // `location` in der Felder-Übersicht.
+                hall: m
+                    .court_id
+                    .map(|cid| snap.court_location_name(cid))
+                    .unwrap_or_default(),
             }
         })
         .collect();
@@ -3722,6 +3750,123 @@ mod tests {
         // Die Kennung muss mit, sonst könnte ein Vorbereitungs-Aufruf keine
         // Halle benennen.
         assert_eq!(s.halls[1].id, 2);
+    }
+
+    #[test]
+    fn the_state_carries_hall_colors_only_for_multi_hall() {
+        // Spec hallen-farben: Die Seite bekommt je Halle die effektive
+        // Farbe — Auto-Palette folgt der alphabetischen Hallen-Sortierung.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, Some(1)), a_court(2, Some(2))],
+            Vec::new(),
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle B".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle A".to_string(),
+                },
+            ],
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        assert_eq!(s.halls[0].name, "Halle A");
+        assert_eq!(
+            s.halls[0].color.as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[0])
+        );
+        assert_eq!(
+            s.halls[1].color.as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[1])
+        );
+
+        // Ein-Hallen-Turnier: die Halle wird gelistet, aber ohne Farbe.
+        let einzel = TabletState::default();
+        einzel.set_snapshot(snap(
+            vec![a_court(1, Some(1))],
+            Vec::new(),
+            vec![BtpLocation {
+                id: 1,
+                name: "Einzige".to_string(),
+            }],
+        ));
+        let s1 = build_state(&einzel, &AppConfig::default(), 1_000, 1);
+        assert_eq!(s1.halls.len(), 1);
+        assert_eq!(s1.halls[0].color, None);
+    }
+
+    #[test]
+    fn an_overridden_hall_color_reaches_the_page() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Halle A", crate::hall_colors::HALL_PALETTE[8])
+            .unwrap();
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, Some(1)), a_court(2, Some(2))],
+            Vec::new(),
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        ));
+        let s = build_state(&tablet, &cfg, 1_000, 1);
+        assert_eq!(
+            s.halls[0].color.as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[8]),
+            "die Übersteuerung gewinnt"
+        );
+    }
+
+    #[test]
+    fn tl_hall_color_defaults_to_none_for_old_hosts() {
+        // Ein alter Host kennt das Feld nicht — die Seite muss den Eintrag
+        // trotzdem parsen (Serde-Default) und bleibt dann farblos.
+        let h: TlHall = serde_json::from_str(r#"{"id":1,"name":"Halle A"}"#).unwrap();
+        assert_eq!(h.color, None);
+    }
+
+    #[test]
+    fn finished_rows_carry_their_hall_name() {
+        // Die Beendet-Zeile soll Hallen-Kürzel + Marke tragen können —
+        // Papier-Ergebnisse ohne Feld bleiben ohne Halle.
+        let mut gespielt = a_match(1);
+        gespielt.status = MatchStatus::Finished;
+        gespielt.winner = Some(1);
+        gespielt.court_id = Some(2);
+        gespielt.finished_at = Some(100);
+        let mut papier = a_match(2);
+        papier.status = MatchStatus::Finished;
+        papier.winner = Some(2);
+        papier.finished_at = Some(200);
+
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, Some(1)), a_court(2, Some(2))],
+            vec![gespielt, papier],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        let von_feld = s.finished.iter().find(|f| f.match_id == 1).unwrap();
+        assert_eq!(von_feld.hall, "Halle B");
+        let ohne_feld = s.finished.iter().find(|f| f.match_id == 2).unwrap();
+        assert_eq!(ohne_feld.hall, "", "Papier-Ergebnis bleibt ohne Halle");
     }
 
     #[test]
@@ -6421,6 +6566,10 @@ mod tests {
             "tournament",
             "multi_hall",
             "halls",
+            // Hallen-Farbe (Spec hallen-farben): reiner Hex-Anzeigewert je
+            // Halle — kein Personenbezug. Der Beendet-Hallenname reist als
+            // ohnehin erlaubtes "hall".
+            "color",
             "rest_minutes",
             "auto_assign",
             "call_timer",
