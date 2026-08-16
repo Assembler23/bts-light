@@ -1325,7 +1325,14 @@ mod tests {
             ],
         );
         assert_eq!(
-            hall_for_match(&AppConfig::default(), &s, &m, Some("Luckenwalder"), None, None),
+            hall_for_match(
+                &AppConfig::default(),
+                &s,
+                &m,
+                Some("Luckenwalder"),
+                None,
+                None
+            ),
             ("Luckenwalder".to_string(), HallSource::Manual)
         );
     }

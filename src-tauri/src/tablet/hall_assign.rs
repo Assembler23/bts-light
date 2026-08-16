@@ -146,8 +146,7 @@ impl AutoHallStore {
                 if hall.trim().is_empty() {
                     continue;
                 }
-                if let std::collections::hash_map::Entry::Vacant(e) =
-                    inner.file.entries.entry(*id)
+                if let std::collections::hash_map::Entry::Vacant(e) = inner.file.entries.entry(*id)
                 {
                     e.insert(hall.trim().to_string());
                     changed = true;
@@ -445,9 +444,7 @@ mod tests {
     }
 
     fn zuteilung(neu: &[(i64, String)], id: i64) -> Option<&str> {
-        neu.iter()
-            .find(|(m, _)| *m == id)
-            .map(|(_, h)| h.as_str())
+        neu.iter().find(|(m, _)| *m == id).map(|(_, h)| h.as_str())
     }
 
     // ── Verteil-Funktion (E6/B5) ────────────────────────────────────────
@@ -470,10 +467,7 @@ mod tests {
         // 5:4:3 Felder, 10 Plätze → Quoten 4/3/3 (größter Rest: C bekommt
         // den letzten Sitz, nicht die größte Halle).
         let window: Vec<PrefillSlot> = (1..=10).map(|i| slot(i, None, false)).collect();
-        let neu = distribute(
-            &window,
-            &halls(&[("A", 5), ("B", 4), ("C", 3)]),
-        );
+        let neu = distribute(&window, &halls(&[("A", 5), ("B", 4), ("C", 3)]));
         let count = |h: &str| neu.iter().filter(|(_, x)| x == h).count();
         assert_eq!(count("A"), 4);
         assert_eq!(count("B"), 3);
@@ -529,7 +523,11 @@ mod tests {
         let neu = distribute(&window, &halls(&[("Halle A", 1), ("Halle B", 1)]));
         assert_eq!(zuteilung(&neu, 1), None);
         assert_eq!(zuteilung(&neu, 2), None, "gerufen ohne Halle: kein Eintrag");
-        assert_eq!(zuteilung(&neu, 3), Some("Halle B"), "A ist durch Slot 1 belegt");
+        assert_eq!(
+            zuteilung(&neu, 3),
+            Some("Halle B"),
+            "A ist durch Slot 1 belegt"
+        );
     }
 
     #[test]

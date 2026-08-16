@@ -2189,7 +2189,10 @@ mod tests {
             .insert_many(&[(7, "Halle A".into()), (99, "Halle A".into())]);
         let snap = snap_with(
             vec![court(1, Some(1)), court(3, Some(2))],
-            vec![ready_named(7, None, "A", "B"), ready_named(8, None, "C", "D")],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
             zwei_hallen(),
         );
         engine.reconcile_auto_halls(&AppConfig::default(), &snap, &tablet);
@@ -2217,7 +2220,10 @@ mod tests {
         cfg.hall_prefill.window = 2;
         let snap = snap_with(
             vec![court(1, Some(1)), court(3, Some(2))],
-            vec![ready_named(7, None, "A", "B"), ready_named(8, None, "C", "D")],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
             zwei_hallen(),
         );
         engine.reconcile_auto_halls(&cfg, &snap, &tablet);
@@ -2247,11 +2253,12 @@ mod tests {
             .auto_hall_store()
             .insert_many(&[(7, "Halle A".into())]);
         let mut cfg = AppConfig::default();
-        cfg.discipline_hall_rules.push(crate::config::DisciplineHallRule {
-            discipline: "mens_singles".to_string(),
-            draw_name: String::new(),
-            hall: "Halle B".to_string(),
-        });
+        cfg.discipline_hall_rules
+            .push(crate::config::DisciplineHallRule {
+                discipline: "mens_singles".to_string(),
+                draw_name: String::new(),
+                hall: "Halle B".to_string(),
+            });
         let snap = snap_with(
             vec![court(1, Some(1)), court(3, Some(2))],
             vec![ready_named(7, None, "A", "B")],
@@ -2310,7 +2317,10 @@ mod tests {
         cfg.auto_assign.active_hall = "Halle A".to_string();
         let snap = snap_with(
             vec![court(1, Some(1)), court(3, Some(2))],
-            vec![ready_named(7, None, "A", "B"), ready_named(8, None, "C", "D")],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
             zwei_hallen(),
         );
         engine.reconcile_auto_halls(&cfg, &snap, &tablet);
