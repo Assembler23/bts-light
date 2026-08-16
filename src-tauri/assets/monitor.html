@@ -835,10 +835,15 @@
       var nowMs = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
         ? state.serverNowMs
         : Date.now();
-      var secs = Math.max(0, Math.round((pause.endsAt - nowMs) / 1000));
+      // Seit ADR 0028 endet die Pause NICHT mehr automatisch bei 0 — das
+      // Tablet hält sie, bis weitergespielt wird. Statt eines eingefrorenen
+      // „0:00" zählt der TV die Überziehung mit „+m:ss" hoch (wie das
+      // Tablet-Overlay und die TL-Sicht).
+      var rest = Math.round((pause.endsAt - nowMs) / 1000);
+      var secs = Math.abs(rest);
       var mm = Math.floor(secs / 60);
       var ss = secs % 60;
-      text = mm + ":" + (ss < 10 ? "0" + ss : ss);
+      text = (rest < 0 ? "+" : "") + mm + ":" + (ss < 10 ? "0" + ss : ss);
     } else {
       // Behandlungspause ohne Countdown.
       text = "——";
