@@ -390,6 +390,18 @@ erst beim Öffnen der Pflege gezielt und mit dem Geräte-Zugang abgerufen
 Relay auf badhub.de die neuen Aktionen kennt (Deploy vor dem Client-Release);
 im Hallennetz sofort.
 
+### Pausen am Feld
+
+Läuft auf einem Feld eine BWF-Pause (60 s bei 11 Punkten, 120 s Satzpause),
+zeigt die Feldkachel **„Pause 1:23"** mit laufendem Countdown. Nach Ablauf
+wechselt die Marke auf rotes **„überzogen +0:41"** und zählt hoch, bis am
+Tablet weitergespielt wird — das Tablet hält die Pause seit v0.9.207
+bewusst, statt sie automatisch zu beenden (ADR
+[0028](adr/0028-pause-haelt-bis-weiterspielen.md)). Eine Behandlungspause
+erscheint als **„Behandlung seit 3 min"** (ohne Countdown). Ein Tablet mit
+älterer Seite beendet die Pause weiter automatisch bei 0 — dann verschwindet
+die Marke einfach, „überzogen" erscheint nie fälschlich.
+
 ### Startzeit-Prognose & Spielzeiten
 
 > Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·

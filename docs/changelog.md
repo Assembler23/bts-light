@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.207
+
+- **Satzpausen enden erst mit „Weiterspielen"** (Spec
+  `spielzeiten-prognose` E9, ADR
+  [0028](adr/0028-pause-haelt-bis-weiterspielen.md)): Das Tablet beendet
+  die BWF-Pausen (60 s/120 s) nicht mehr automatisch bei 0 — nach Ablauf
+  zählt das Overlay rot hoch („überzogen +0:37"), bis der Schiedsrichter
+  weiterspielt; auch Reload/Übernahme behalten die Pause. Diagnose-Log
+  meldet `break_overrun`.
+- **Pausen in der TL-Sicht**: Die Feldkachel zeigt den Pausen-Countdown,
+  nach Ablauf rot „überzogen +m:ss"; Behandlungspausen erscheinen erstmals
+  („Behandlung seit …" — sie fielen bisher beim Parse heraus). Cloud-Seiten
+  brauchen den Relay-Deploy (tablet.html + tl.html einkompiliert).
+
 ## v0.9.206
 
 - **Startzeit-Prognose in TL-Web** (Spec

@@ -2791,7 +2791,7 @@ function courtCard(c, cellStyle) {
   if (c.locked) badges.push('<span class="badge badge-alarm">gesperrt</span>');
   if (c.injury) badges.push('<span class="badge badge-alarm">Verletzung</span>');
   if (c.official_call) badges.push('<span class="badge badge-alarm">TL gerufen</span>');
-  if (c.pause) badges.push('<span class="badge badge-warn">Pause</span>');
+  if (c.pause) badges.push(pauseBadge(c.pause));
   if (c.match_id && !c.tablet_connected) badges.push('<span class="badge badge-warn">kein Tablet</span>');
 
   // Satz-/Matchball: nur für die Turnierleitung, nie auf den Hallen-TVs
@@ -2934,6 +2934,40 @@ function courtCard(c, cellStyle) {
     ${body}${bediener}${schiris}
     <div class="card-foot">${foot}${graph}</div>
   </article>`;
+}
+
+/** Pausen-Text mit Countdown bzw. Überziehung (Spec spielzeiten-prognose,
+ *  E9): Vor Ablauf zählt „Pause m:ss" runter; danach hält das Tablet die
+ *  Pause (ADR 0028) und hier zählt rot „überzogen +m:ss" hoch, bis am Feld
+ *  weitergespielt wird. Gegen die Server-Uhr gerechnet, wie alle Uhren
+ *  dieser Seite. */
+function pauseText(endsAt) {
+  const rest = Math.round((endsAt - serverNow()) / 1000);
+  const s = Math.abs(rest);
+  const mmss = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return rest < 0 ? `überzogen +${mmss}` : `Pause ${mmss}`;
+}
+
+/** Pausen-Abzeichen einer Feldkachel (Spec spielzeiten-prognose, E9/E10):
+ *  BWF-Pause mit Countdown (Warn-Stufe) bzw. Überziehung (Alarm-Stufe);
+ *  Behandlungspause als „Behandlung seit …" ohne Countdown. Ein altes
+ *  Tablet ohne `started_at_ms`/`ends_at_ms` degradiert zum schlichten
+ *  „Pause"-Badge von früher. Die Sekunden tickt `tickClocks()` weiter. */
+function pauseBadge(p) {
+  if (p.kind === "injury") {
+    const seit = p.started_at_ms
+      ? ` seit <span class="zeit num" data-pause-started="${p.started_at_ms}">${elapsed(p.started_at_ms)}</span>`
+      : "";
+    return `<span class="badge badge-warn pause-chip"
+      title="Behandlungspause läuft">Behandlung${seit}</span>`;
+  }
+  if (!p.ends_at_ms) return '<span class="badge badge-warn">Pause</span>';
+  const over = p.ends_at_ms - serverNow() <= 0;
+  return `<span class="badge ${over ? "badge-alarm" : "badge-warn"} pause-chip num"
+    data-pause-ends="${p.ends_at_ms}"
+    title="${over
+      ? "Pause überzogen — auf dem Tablet weiterspielen"
+      : "Satz-/Spielpause läuft"}">${pauseText(p.ends_at_ms)}</span>`;
 }
 
 /** Welche Feldkachel ihr ⋯-Menü gerade offen hat — über das Neuzeichnen
@@ -5998,6 +6032,22 @@ function tickClocks() {
   });
   document.querySelectorAll(".sk-wait[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
+    if (since) el.textContent = elapsed(since);
+  });
+  // Pausen-Countdown/Überziehung (Spec spielzeiten-prognose, E9): tickt
+  // sekündlich weiter, der Wechsel auf Rot passiert genau bei 0 — nicht
+  // erst beim nächsten Poll.
+  document.querySelectorAll(".pause-chip[data-pause-ends]").forEach((el) => {
+    const ends = Number(el.dataset.pauseEnds);
+    if (!ends) return;
+    el.textContent = pauseText(ends);
+    const over = ends - serverNow() <= 0;
+    el.classList.toggle("badge-alarm", over);
+    el.classList.toggle("badge-warn", !over);
+    if (over) el.title = "Pause überzogen — auf dem Tablet weiterspielen";
+  });
+  document.querySelectorAll(".pause-chip [data-pause-started]").forEach((el) => {
+    const since = Number(el.dataset.pauseStarted);
     if (since) el.textContent = elapsed(since);
   });
   // Der Sprung von „gerufen" auf „überfällig" hängt allein an der Uhr — er
