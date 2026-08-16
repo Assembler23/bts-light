@@ -1868,7 +1868,10 @@ mod tests {
         // selben Zyklus darf nicht zwei Nachrichten erzeugen.
         let mut takt = SchedTakt::neu();
         assert!(takt.faellig(100_000));
-        assert!(!takt.faellig(100_000), "dieselbe Zeit sendet kein zweites Mal");
+        assert!(
+            !takt.faellig(100_000),
+            "dieselbe Zeit sendet kein zweites Mal"
+        );
     }
 
     use super::*;

@@ -1030,9 +1030,6 @@ impl TabletState {
         self.predicted_starts.write().unwrap().extend(map);
     }
 
-    /// Zuletzt publizierte Prognose eines Matches — nur die Tests lesen
-    /// hier; die Produktion konsumiert über [`Self::take_predicted_start`].
-    #[cfg(test)]
     /// Alle bekannten Prognosen als Kopie — für den `sched`-Versand an badhub.
     ///
     /// Bewusst eine Momentaufnahme statt eines Lock-Durchgriffs: der Aufrufer
@@ -1042,6 +1039,9 @@ impl TabletState {
         self.predicted_starts.read().unwrap().clone()
     }
 
+    /// Zuletzt publizierte Prognose eines Matches — nur die Tests lesen
+    /// hier; die Produktion konsumiert über [`Self::take_predicted_start`].
+    #[cfg(test)]
     pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
         self.predicted_starts
             .read()
