@@ -620,6 +620,14 @@ pub struct AppConfig {
     /// leer = Fließ-Darstellung ohne festes Raster.
     #[serde(default)]
     pub hall_layouts: Vec<HallLayoutConfig>,
+    /// Farb-Übersteuerungen je Halle (Spec hallen-farben, ADR 0031). Bewusst
+    /// eine EIGENE namensbasierte Zuordnung neben `hall_layouts` — eine Halle
+    /// kann eine Farbe ohne Raster haben (und umgekehrt). Leer = alle Hallen
+    /// bekommen ihre Farbe aus der Auto-Palette (`hall_colors::HALL_PALETTE`,
+    /// ADR 0032). `#[serde(default)]` hält ältere Konfigurationsdateien
+    /// lesbar.
+    #[serde(default)]
+    pub hall_colors: Vec<HallColorConfig>,
     /// A2 / ADR 0017 (Reconnect-Wahrheit): Rückfall auf das alte
     /// rev-Zähler-Verhalten. `false` (Default) = NEUES Ownership-Verhalten
     /// aktiv — nach einem Tablet-Reconnect entscheidet der Slot-Halter, wessen
@@ -669,6 +677,16 @@ pub struct HallLayoutConfig {
     /// ausschließlich die reihenweise Zählung, also `false`.
     #[serde(default)]
     pub vertical: bool,
+}
+
+/// Farb-Übersteuerung einer Halle (Spec hallen-farben, ADR 0031/0033).
+/// `color` ist immer ein Palettenton als lowercase `#rrggbb` — validiert
+/// am einzigen Schreibpunkt `upsert_hall_color`, damit der Draht überall
+/// den Hex-Wert selbst tragen kann.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HallColorConfig {
+    pub hall: String,
+    pub color: String,
 }
 
 /// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0012).
@@ -959,6 +977,39 @@ impl AppConfig {
         self.hall_layouts
             .retain(|l| !l.hall.trim().eq_ignore_ascii_case(hall));
         self.hall_layouts.len() != vorher
+    }
+
+    /// Übersteuert die Farbe einer Halle (oder ersetzt die Übersteuerung).
+    /// Gleiche Matching-Regeln wie `upsert_hall_layout`: getrimmt gespeichert,
+    /// case-insensitiv ersetzt. Nur Palettentöne sind zulässig — das ist der
+    /// EINZIGE Punkt mit Palettenzwang (ADR 0033), der Draht trägt danach
+    /// den Hex-Wert selbst.
+    pub fn upsert_hall_color(&mut self, hall: &str, color: &str) -> Result<(), String> {
+        let hall = hall.trim();
+        if hall.is_empty() {
+            return Err("Halle darf nicht leer sein.".to_string());
+        }
+        let color = color.trim().to_lowercase();
+        if !crate::hall_colors::HALL_PALETTE.contains(&color.as_str()) {
+            return Err("Die Farbe muss ein Ton aus der Palette sein.".to_string());
+        }
+        self.hall_colors
+            .retain(|c| !c.hall.trim().eq_ignore_ascii_case(hall));
+        self.hall_colors.push(HallColorConfig {
+            hall: hall.to_string(),
+            color,
+        });
+        Ok(())
+    }
+
+    /// Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette.
+    /// `true`, wenn es eine gab (Matching wie `remove_hall_layout`).
+    pub fn remove_hall_color(&mut self, hall: &str) -> bool {
+        let hall = hall.trim();
+        let vorher = self.hall_colors.len();
+        self.hall_colors
+            .retain(|c| !c.hall.trim().eq_ignore_ascii_case(hall));
+        self.hall_colors.len() != vorher
     }
 }
 
@@ -1529,6 +1580,10 @@ mod tests {
                 serpentine: true,
                 vertical: true,
             }],
+            hall_colors: vec![HallColorConfig {
+                hall: "Halle A".to_string(),
+                color: crate::hall_colors::HALL_PALETTE[0].to_string(),
+            }],
             display: DisplayConfig {
                 show_club_names: true,
                 show_club_logos: true,
@@ -1940,5 +1995,93 @@ mod hall_layout_tests {
         cfg.upsert_hall_layout(layout("Halle 1", 2)).unwrap();
         assert!(!cfg.remove_hall_layout("Halle 2"));
         assert_eq!(cfg.hall_layouts.len(), 1, "unbekannte Halle ändert nichts");
+    }
+}
+
+#[cfg(test)]
+mod hall_color_tests {
+    use super::*;
+    use crate::hall_colors::HALL_PALETTE;
+
+    #[test]
+    fn hall_colors_survive_a_config_roundtrip_and_default_empty() {
+        // Alte Configs ohne das Feld müssen lesbar bleiben (Auto-Update!) —
+        // und gespeicherte Übersteuerungen den Neustart überleben.
+        let mut json: serde_json::Value =
+            serde_json::to_value(AppConfig::default()).expect("Default serialisiert");
+        json.as_object_mut()
+            .unwrap()
+            .remove("hall_colors")
+            .expect("Feld existiert im neuen Schema");
+        let alt: AppConfig = serde_json::from_value(json).expect("alte Config lädt");
+        assert!(
+            alt.hall_colors.is_empty(),
+            "Default ist leer = Auto-Palette"
+        );
+
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Nord", HALL_PALETTE[3]).unwrap();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.hall_colors, cfg.hall_colors);
+    }
+
+    #[test]
+    fn upsert_hall_color_trims_and_replaces_case_insensitive() {
+        // "Halle 1 " und "halle 1" müssen dieselbe Zeile treffen — sonst
+        // entstünde ein Duplikat und remove fände die Zeile nie wieder
+        // (dasselbe Muster wie upsert_hall_layout).
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Halle 1", HALL_PALETTE[0]).unwrap();
+        cfg.upsert_hall_color("  halle 1  ", HALL_PALETTE[4])
+            .unwrap();
+        assert_eq!(cfg.hall_colors.len(), 1, "keine Dublette");
+        assert_eq!(
+            cfg.hall_colors[0].color, HALL_PALETTE[4],
+            "neuer Stand gewinnt"
+        );
+        assert_eq!(cfg.hall_colors[0].hall, "halle 1", "getrimmt gespeichert");
+    }
+
+    #[test]
+    fn upsert_hall_color_rejects_a_tone_outside_the_palette() {
+        // Der Palettenzwang gilt am einzigen Schreibpunkt (ADR 0033) — auch
+        // ein gültiges Hex außerhalb der Palette wird abgelehnt.
+        let mut cfg = AppConfig::default();
+        let err = cfg.upsert_hall_color("Nord", "#123456").unwrap_err();
+        assert!(err.contains("Palette"), "deutsche Fehlermeldung: {err}");
+        assert!(cfg.hall_colors.is_empty(), "nichts gespeichert");
+        let err = cfg.upsert_hall_color("Nord", "rot").unwrap_err();
+        assert!(err.contains("Palette"), "auch kein freier Name: {err}");
+    }
+
+    #[test]
+    fn upsert_hall_color_accepts_palette_tones_case_insensitive() {
+        // tl.html/React reichen den Ton durch — eine Großschreibung aus
+        // fremder Quelle darf nicht an der Validierung scheitern, gespeichert
+        // wird normalisiert lowercase (ADR 0033).
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Nord", &HALL_PALETTE[1].to_uppercase())
+            .unwrap();
+        assert_eq!(cfg.hall_colors[0].color, HALL_PALETTE[1]);
+    }
+
+    #[test]
+    fn upsert_hall_color_rejects_an_empty_hall_name() {
+        let mut cfg = AppConfig::default();
+        let err = cfg.upsert_hall_color("   ", HALL_PALETTE[0]).unwrap_err();
+        assert!(err.contains("Halle"), "deutsche Fehlermeldung: {err}");
+    }
+
+    #[test]
+    fn remove_hall_color_matches_trimmed_case_insensitive() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Halle 1", HALL_PALETTE[0]).unwrap();
+        assert!(cfg.remove_hall_color("  HALLE 1 "));
+        assert!(cfg.hall_colors.is_empty());
+        assert!(
+            !cfg.remove_hall_color("Halle 1"),
+            "zweites Entfernen: false"
+        );
     }
 }

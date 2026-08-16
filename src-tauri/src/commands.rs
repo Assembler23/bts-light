@@ -273,6 +273,9 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // der Assistent kennt das Feld nicht (serde-Default = aus) und würde
     // sie mit jedem Speichern stumm abschalten.
     incoming.hall_prefill = current.hall_prefill.clone();
+    // Die Hallen-Farben werden auf der Felderübersicht gepflegt (Spec
+    // hallen-farben) — auch sie kennt der Assistent nicht.
+    incoming.hall_colors = current.hall_colors.clone();
     incoming
 }
 
@@ -377,6 +380,12 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     // altem Bündel die hier schon eingerichteten Raster stillschweigend wegwischen.
     if imported.hall_layouts.is_empty() {
         imported.hall_layouts = current.hall_layouts.clone();
+    }
+    // Hallen-Farben: derselbe Fall — ein Bündel von vor dem Feature trägt
+    // ein leeres Feld, das die hier gewählten Übersteuerungen nicht
+    // stillschweigend wegwischen darf.
+    if imported.hall_colors.is_empty() {
+        imported.hall_colors = current.hall_colors.clone();
     }
     // Derselbe Fall wie bei den Rastern (Task 9/11): Ein Bündel aus einer
     // Version vor diesem Feature — oder eins von einer Installation ohne
@@ -3915,6 +3924,34 @@ mod tests {
         let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
         let ergebnis = keep_host_managed_fields(incoming, &current);
         assert_eq!(ergebnis.hall_layouts, current.hall_layouts);
+    }
+
+    #[test]
+    fn the_wizard_cannot_wipe_the_hall_colors() {
+        // Die Hallen-Farben werden auf der Felderübersicht gepflegt, nicht im
+        // Assistenten — dessen Speichern darf die Übersteuerungen nicht
+        // zurücksetzen (dieselbe Falle wie bei hall_layouts).
+        let mut current = AppConfig::default();
+        current
+            .upsert_hall_color("Nord", crate::hall_colors::HALL_PALETTE[2])
+            .unwrap();
+        let incoming = AppConfig::default(); // Wizard-Stand ohne Farben
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert_eq!(ergebnis.hall_colors, current.hall_colors);
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_hall_colors_when_bundle_has_none() {
+        // Ein Identitäts-Bündel aus einer Version vor den Hallen-Farben trägt
+        // ein leeres Feld — das heißt „unbekannt", nicht „absichtlich
+        // gelöscht" (dasselbe Muster wie hall_layouts).
+        let mut current = AppConfig::default();
+        current
+            .upsert_hall_color("Nord", crate::hall_colors::HALL_PALETTE[5])
+            .unwrap();
+        let bundle = AppConfig::default();
+        let ergebnis = apply_imported_identity(bundle, &current);
+        assert_eq!(ergebnis.hall_colors, current.hall_colors);
     }
 
     #[test]

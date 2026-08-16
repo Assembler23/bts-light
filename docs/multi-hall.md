@@ -72,6 +72,14 @@ eine `LocationID`. Hat das Turnier **≥ 2 Hallen**, gilt:
   — dieselbe Anordnung wie in der Halle, statt Formularreihenfolge.
   Host-Einstellung je Halle, wirkt in beiden Oberflächen gleich. Details:
   [features/feld-raster.md](features/feld-raster.md).
+- **Hallen-Farben:** Jede Halle trägt eine Farbe als kleine Marke neben
+  jeder Hallen-Nennung — automatisch aus einer kuratierten 10-Ton-Palette
+  (`hall_colors.rs`, deterministisch über die alphabetisch sortierte
+  Hallenliste, ADR 0032), je Halle übersteuerbar auf der Felderübersicht
+  (eigenes Config-Feld `hall_colors`, ADR 0031; vom SetupWizard-Speichern
+  geschützt). Auf dem Draht reist immer der Hex-Wert (ADR 0033). Die
+  Farbe ist nie einziger Informationsträger — Kürzel/Name bleiben stehen.
+  Details: [features/hallen-farben.md](features/hallen-farben.md).
 
 Bei **Ein-Hallen-Turnieren** ist die Halle leer und nichts gruppiert —
 alle Ansichten bleiben byte-für-byte wie vorher.
