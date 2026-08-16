@@ -127,7 +127,12 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
         "Desktop zeigt eine andere Reihenfolge als TL-Web"
     );
 
-    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let ctx = LivetickerContext::new(
+        &config,
+        tablet.manual_halls(),
+        tablet.auto_hall_store().halls(),
+        tablet.queue_order_store(),
+    );
     let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
         .event
         .upcoming_matches
@@ -203,7 +208,12 @@ fn tl_web_desktop_and_liveticker_agree_across_two_halls() {
         "Desktop zeigt eine andere Reihenfolge als TL-Web"
     );
 
-    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let ctx = LivetickerContext::new(
+        &config,
+        tablet.manual_halls(),
+        tablet.auto_hall_store().halls(),
+        tablet.queue_order_store(),
+    );
     let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
         .event
         .upcoming_matches
@@ -245,7 +255,12 @@ fn all_three_views_fall_back_to_the_btp_schedule_without_a_prefix() {
         .iter()
         .map(|c| c.match_id)
         .collect();
-    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let ctx = LivetickerContext::new(
+        &config,
+        tablet.manual_halls(),
+        tablet.auto_hall_store().halls(),
+        tablet.queue_order_store(),
+    );
     let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
         .event
         .upcoming_matches

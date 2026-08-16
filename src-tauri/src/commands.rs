@@ -223,6 +223,15 @@ fn tablet_match_times_path(app: &AppHandle) -> std::path::PathBuf {
         .join("match-times.json")
 }
 
+/// Pfad der automatisch vorverteilten Hallen (Spec `hallen-vorverteilung`,
+/// ADR 0029). Turniergebunden wie die anderen ADR-0022-Stores.
+fn tablet_auto_halls_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("auto-halls.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -260,6 +269,10 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht im
     // Assistenten — dessen Speichern darf sie nicht zurücksetzen.
     incoming.hall_layouts = current.hall_layouts.clone();
+    // Die Hallen-Vorverteilung wird ausschließlich in TL-Web geschaltet —
+    // der Assistent kennt das Feld nicht (serde-Default = aus) und würde
+    // sie mit jedem Speichern stumm abschalten.
+    incoming.hall_prefill = current.hall_prefill.clone();
     incoming
 }
 
@@ -873,6 +886,8 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
     // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
     tablet.set_match_times_path(tablet_match_times_path(&app));
+    // Auto-Hallen (Spec `hallen-vorverteilung`, ADR 0029): ebenso.
+    tablet.set_auto_halls_path(tablet_auto_halls_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -1898,6 +1913,7 @@ pub fn preparation_candidates_for(
     };
     let calls = tablet.preparation_calls();
     let manual_halls = tablet.manual_halls();
+    let auto_halls = tablet.auto_hall_store().halls();
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`)
     // — **derselbe** gemeinsame Helfer wie an den anderen vier Sortier-
@@ -1928,6 +1944,7 @@ pub fn preparation_candidates_for(
                 m,
                 manual_hall,
                 called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
                 call.is_some(),
                 tablet.queue_order_store(),
             );
@@ -2885,6 +2902,9 @@ pub fn call_preparation(state: State<'_, AppState>, match_ids: Vec<i64>, locatio
                 location_id,
                 called_at_ms: now,
             });
+        // Der Aufruf räumt eine automatisch vorverteilte Halle (E3, Spec
+        // `hallen-vorverteilung`) — wie im TL-Web-Pfad.
+        state.tablet.auto_hall_store().remove(match_id);
     }
 }
 
@@ -3895,6 +3915,21 @@ mod tests {
         let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
         let ergebnis = keep_host_managed_fields(incoming, &current);
         assert_eq!(ergebnis.hall_layouts, current.hall_layouts);
+    }
+
+    #[test]
+    fn the_wizard_cannot_wipe_the_hall_prefill() {
+        // Die Hallen-Vorverteilung wird ausschließlich in TL-Web geschaltet
+        // (Spec hallen-vorverteilung E-TLW) — der Assistent kennt das Feld
+        // nicht und schickt beim Speichern den serde-Default (aus, 0).
+        // Ohne Schutz wäre jedes Wizard-Speichern ein stilles Abschalten.
+        let mut current = AppConfig::default();
+        current.hall_prefill.enabled = true;
+        current.hall_prefill.window = 7;
+        let incoming = AppConfig::default(); // Wizard-Stand ohne hall_prefill
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert!(ergebnis.hall_prefill.enabled);
+        assert_eq!(ergebnis.hall_prefill.window, 7);
     }
 
     #[test]

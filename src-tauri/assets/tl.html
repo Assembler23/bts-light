@@ -768,6 +768,20 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    aber mit Uhr-Sinnbild — sie beantwortet „wann bin ich dran?". */
 .badge.predicted { white-space: nowrap; }
 
+/* ── Hallen-Vorverteilung (Spec hallen-vorverteilung) ───────────────────
+   Kompakter Bedien-Cluster im Kopf des Spiele-Panels: Schalter, x-Feld,
+   Räumen-Knopf — dieselbe unaufdringliche Optik wie „Reihenfolge
+   zurücksetzen" daneben. */
+.prefill-box { display: inline-flex; align-items: center; gap: 6px; }
+.prefill-x {
+  width: 4.2rem; font: inherit; font-size: .8rem; padding: 3px 6px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+}
+.prefill-box button[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--accent); background: #eff6ff;
+}
+.prefill-box button:disabled, .prefill-x:disabled { opacity: .5; cursor: not-allowed; }
+
 /* ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
    Alle sechs Abschnitte (Felder, Aufgaben, Zähltafel, Schiedsrichter,
    Spiele, Beendete Spiele) laufen über EINEN Mechanismus statt sechs
@@ -3390,7 +3404,7 @@ function queueRow(m, topMatchId) {
   const status = [];
   if (state.multi_hall) {
     if (m.hall) {
-      status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}">${esc(hallenKuerzel(m.hall))}</span>`);
+      status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}${m.hall_source === "auto" ? " — automatisch vorverteilt" : ""}">${esc(hallenKuerzel(m.hall))}${m.hall_source === "auto" ? "·A" : ""}</span>`);
     } else {
       // Ohne Hallenzuordnung: Warnung, nicht Information — so ein Spiel
       // wird von der automatischen Vergabe in keiner Halle angefasst und
@@ -4668,7 +4682,15 @@ function renderPanels() {
         const extra = p.key === "queue" && !p.collapsed
           ? `<button type="button" id="queue-reset" class="reset-order" hidden
                title="Verwirft die manuelle Spielreihenfolge des ganzen Turniers — danach gilt wieder BTPs eigene Reihenfolge">
-               Reihenfolge zurücksetzen</button>`
+               Reihenfolge zurücksetzen</button>
+             <span class="prefill-box" id="prefill-box" hidden>
+               <button type="button" id="prefill-toggle" class="reset-order"></button>
+               <input type="number" id="prefill-window" class="prefill-x" min="0" max="120"
+                 title="Fenstergröße x — so viele Spiele stehen im Voraus fest; 0 = automatisch (Feldzahl)">
+               <button type="button" id="prefill-clear" class="reset-order"
+                 title="Räumt NUR die automatisch verteilten Hallen — Hand, Regel und Aufruf bleiben">
+                 Auto-Hallen räumen</button>
+             </span>`
           : "";
         // Zugeklappt: nur die Kopfzeile, kein `.panel-body`. Die Klasse macht
         // das Panel im Flex-Modell höhenlos (CSS `.panel.panel-collapsed`).
@@ -4705,6 +4727,12 @@ function renderPanels() {
     // ersetzen nur die inneren Listen, nie diese Container.
     main.querySelector("#queue-reset")?.addEventListener("click", resetQueueOrder);
     main.querySelector("#sk-add")?.addEventListener("submit", addScorekeeper);
+    // Hallen-Vorverteilung (Spec hallen-vorverteilung): Schalter, x und
+    // Räumen-Knopf leben im Kopf des Spiele-Panels — wie #queue-reset erst
+    // seit diesem Aufbau vorhanden, deshalb HIER verdrahtet.
+    main.querySelector("#prefill-toggle")?.addEventListener("click", togglePrefill);
+    main.querySelector("#prefill-clear")?.addEventListener("click", clearAutoHalls);
+    main.querySelector("#prefill-window")?.addEventListener("change", sendPrefillWindow);
     // Die frisch angelegten Container-IDs sind hier noch leer — `render()`
     // ruft `renderPanels()` bewusst VOR den einzelnen `render*()`-
     // Funktionen auf, die füllen sie im selben Durchlauf. Kein erneuter
@@ -4790,6 +4818,7 @@ function renderQueue() {
   if (!state) return;
   const liste = visibleQueue();
   setPanelCount("queue", liste.length);
+  renderHallPrefill();
   // Vorschau für den zugeklappten Zustand: das nächste Spiel. VOR dem
   // Ausstieg unten — der Kopf ist auch dann da, wenn es keinen Inhalt gibt.
   const naechstes = liste[0];
@@ -5977,6 +6006,76 @@ async function toggleAuto() {
     `auto-${on}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
     { action: "set_auto_assign", enabled: on },
     on ? "Automatische Vergabe läuft wieder." : "Automatische Vergabe ist angehalten.",
+  );
+}
+
+// ── Hallen-Vorverteilung (Spec hallen-vorverteilung) ───────────────────
+// Zeichnet Schalter + x + Räumen-Knopf im Kopf des Spiele-Panels. Nur bei
+// Mehr-Hallen-Turnieren UND wenn der Host das Feature liefert
+// (`state.hall_prefill` — Feature-Detection: ein alter Host zeigt so nie
+// tote Bedienelemente). Bei gesetzter Tages-Halle (E2) ausgegraut.
+function renderHallPrefill() {
+  const box = $("prefill-box");
+  if (!box) return; // Panel gerade zugeklappt/ausgeblendet
+  const hp = state.hall_prefill;
+  if (!hp || !state.multi_hall) { box.hidden = true; return; }
+  box.hidden = false;
+  const toggle = $("prefill-toggle");
+  const input = $("prefill-window");
+  const clear = $("prefill-clear");
+  toggle.textContent = hp.enabled
+    ? `Vorverteilung an (${hp.effective_window})`
+    : "Vorverteilung aus";
+  toggle.setAttribute("aria-pressed", String(!!hp.enabled));
+  toggle.title = hp.blocked_by_active_hall
+    ? "Die aktive Halle der Feldvergabe ist gesetzt — Vorverteilung und Tages-Halle schließen sich aus."
+    : hp.enabled
+      ? `Die nächsten ${hp.effective_window} Spiele bekommen automatisch eine Halle im Verhältnis der Felder`
+      : "Verteilt die nächsten Spiele automatisch auf die Hallen (Verhältnis der Felder)";
+  // Die Tages-Halle blockt nur das EINSCHALTEN (so auch der Host-Guard) —
+  // Ausschalten muss immer möglich bleiben, sonst poppte die Verteilung
+  // beim Entfernen der Tages-Halle unerwartet wieder an (Review 2026-08-16).
+  toggle.disabled = hp.blocked_by_active_hall && !hp.enabled;
+  input.disabled = hp.blocked_by_active_hall && !hp.enabled;
+  // Den Wert nie unter den Fingern wegschreiben.
+  if (document.activeElement !== input) input.value = hp.window || "";
+  input.placeholder = `auto (${hp.effective_window})`;
+  clear.disabled = false;
+}
+
+async function togglePrefill() {
+  const hp = state.hall_prefill;
+  if (!hp) return;
+  const on = !hp.enabled;
+  // Runden ist Pflicht: `window` ist auf der Wire-Ebene eine Ganzzahl —
+  // ein Dezimalwert (das number-Feld lässt „4.5" zu) ließe die ganze
+  // Aktion am Parser abprallen (Review 2026-08-16).
+  const raw = Math.round(Number($("prefill-window")?.value));
+  const w = Number.isFinite(raw) && raw >= 0 ? Math.min(raw, 120) : hp.window;
+  await send(
+    `prefill-${on}-${w}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "set_hall_prefill", enabled: on, window: w },
+    on ? "Hallen-Vorverteilung läuft." : "Hallen-Vorverteilung ist aus — verteilte Hallen bleiben stehen.",
+  );
+}
+
+async function sendPrefillWindow() {
+  const hp = state.hall_prefill;
+  if (!hp) return;
+  const raw = Math.round(Number($("prefill-window")?.value));
+  const w = Number.isFinite(raw) && raw >= 0 ? Math.min(raw, 120) : 0;
+  await send(
+    `prefill-x-${w}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "set_hall_prefill", enabled: hp.enabled, window: w },
+    "Fenstergröße übernommen.",
+  );
+}
+
+async function clearAutoHalls() {
+  await send(
+    `prefill-clear-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "clear_auto_halls" },
+    "Automatisch verteilte Hallen geräumt — Hand, Regel und Aufruf bleiben.",
   );
 }
 

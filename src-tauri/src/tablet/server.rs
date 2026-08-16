@@ -1006,6 +1006,7 @@ async fn info_preparation_state(
     };
     let calls = ctx.tablet.preparation_calls();
     let manual_halls = ctx.tablet.manual_halls();
+    let auto_halls = ctx.tablet.auto_hall_store().halls();
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
     // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
@@ -1036,6 +1037,7 @@ async fn info_preparation_state(
                 m,
                 manual_hall,
                 called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
                 call.is_some(),
                 ctx.tablet.queue_order_store(),
             );
@@ -1664,7 +1666,19 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     // überschriebe sie eine korrekte Duration mit Stunden. Kampflos (E1)
     // bleibt 0, und jenseits der Plausibilitätsgrenze (über Nacht
     // geparktes Feld) gilt die Dauer als unbekannt.
-    let end_ms = ctx.tablet.result_end_ms(m.id, now_ms());
+    // Korrektur-Anker nur bei REGULÄREM Erst-Stempel (Review 2026-08-16,
+    // Runde 3): Ein irrtümlicher Backend-/TL-Web-Stempel (regular=false)
+    // darf dem echten Tablet-Ergebnis nicht sein altes Ende unterschieben —
+    // sonst gingen Duration 0 und eine rückdatierte LastTimeOnCourt nach
+    // BTP. Eine Korrektur eines ECHTEN Tablet-Endes rechnet weiter mit dem
+    // Original (E3).
+    let end_ms = ctx
+        .tablet
+        .match_times_store()
+        .entry(m.id)
+        .filter(|e| e.regular)
+        .and_then(|e| e.finished_ms)
+        .unwrap_or_else(now_ms);
     let duration_mins = if score_status == 1 {
         0
     } else {
@@ -3232,6 +3246,37 @@ mod tests {
         assert!(resp.ok, "{:?}", resp.error);
         let reqs = recorded.lock().unwrap();
         assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(40));
+    }
+
+    /// Review-Befund 2026-08-16 (bestätigt, Runde 3): Eine irrtümliche
+    /// NICHT-reguläre Wertung (Backend/TL-Web, z. B. fürs falsche Spiel
+    /// während einer Störung) darf dem später eintreffenden ECHTEN
+    /// Tablet-Ergebnis nicht ihr altes Ende unterschieben — sonst gingen
+    /// `Duration: 0` und eine rückdatierte `LastTimeOnCourt` nach BTP
+    /// (Phantom-Mindestpause). Der Tablet-Pfad vertraut deshalb nur einem
+    /// REGULÄREN Erst-Stempel als Korrektur-Anker.
+    #[tokio::test]
+    async fn eine_fremde_backend_wertung_datiert_das_tablet_ende_nicht_zurueck() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let start = now_ms().saturating_sub(40 * 60_000);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            start,
+        );
+        // Irrtümlicher manueller Stempel, eine Stunde VOR dem Bruttostart.
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, false, start.saturating_sub(3_600_000));
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(
+            int(&match_fields(&reqs[0]), "Duration"),
+            Some(40),
+            "Ende = jetzt — der fremde Stempel zählt nicht"
+        );
     }
 
     /// Review-Befund 2026-08-16: Ein über Nacht auf dem Feld „geparktes"

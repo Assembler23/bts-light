@@ -28,6 +28,9 @@ pub struct LivetickerContext<'a> {
     /// Von Hand gesetzte Hallen (`TabletState::manual_halls`) — bereits als
     /// eigenständige, geklonte `HashMap` geliefert, kein Lifetime-Problem.
     pub manual_halls: HashMap<i64, String>,
+    /// Automatisch vorverteilte Hallen (Spec `hallen-vorverteilung`) —
+    /// gleiche Lieferform wie `manual_halls`.
+    pub auto_halls: HashMap<i64, String>,
     pub order: &'a QueueOrderStore,
 }
 
@@ -35,11 +38,13 @@ impl<'a> LivetickerContext<'a> {
     pub fn new(
         config: &'a AppConfig,
         manual_halls: HashMap<i64, String>,
+        auto_halls: HashMap<i64, String>,
         order: &'a QueueOrderStore,
     ) -> Self {
         Self {
             config,
             manual_halls,
+            auto_halls,
             order,
         }
     }
@@ -51,6 +56,7 @@ impl<'a> LivetickerContext<'a> {
         Self {
             config,
             manual_halls: HashMap::new(),
+            auto_halls: HashMap::new(),
             order: EMPTY_ORDER.get_or_init(QueueOrderStore::default),
         }
     }
@@ -239,12 +245,14 @@ fn upcoming(snapshot: &BtpSnapshot, ctx: &LivetickerContext) -> Vec<TsetMatch> {
     scheduled.sort_by_key(|m| {
         let manual_hall = ctx.manual_halls.get(&m.id).map(String::as_str);
         let called_hall = m.preparation_hall.as_deref();
+        let auto_hall = ctx.auto_halls.get(&m.id).map(String::as_str);
         let (_, _, key) = crate::tablet::assign::resolve_and_sort_key(
             ctx.config,
             snapshot,
             m,
             manual_hall,
             called_hall,
+            auto_hall,
             m.preparation_call_ts.is_some(),
             ctx.order,
         );
@@ -808,7 +816,7 @@ mod tests {
         let order = QueueOrderStore::default();
         // 7 (später angesetzt) manuell vor 1 (früher angesetzt) ziehen.
         order.reorder(&[1, 7], 7, Some(1));
-        let ctx = LivetickerContext::new(&config, HashMap::new(), &order);
+        let ctx = LivetickerContext::new(&config, HashMap::new(), HashMap::new(), &order);
 
         let ids: Vec<String> = build_tset(&snapshot, 1, &ctx)
             .event

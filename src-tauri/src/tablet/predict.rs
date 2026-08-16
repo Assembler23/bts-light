@@ -34,9 +34,23 @@ pub struct Measurement {
 }
 
 /// Median-Statistik über die Messwerte eines Turniers.
+///
+/// Alle Mediane werden **einmal beim Bau** vorberechnet (Review
+/// 2026-08-16, bestätigt): `group_duration` läuft je Feld und je
+/// Wartelisten-Spiel bei jedem TL-State-Bau — ohne Vorberechnung wären
+/// das lineare Scans samt Sortierung über alle Messwerte, zigfach pro
+/// 2-Sekunden-Poll. Der Bau selbst passiert nur je Messwert-Generation
+/// (`TabletState::cached_time_stats`).
 #[derive(Debug, Clone, Default)]
 pub struct TimeStats {
-    measurements: Vec<Measurement>,
+    /// (Klasse, Disziplin) → (Anzahl, Brutto-Median).
+    group_brutto: HashMap<(String, String), (usize, u64)>,
+    /// Klasse → (Anzahl, Brutto-Median).
+    class_brutto: HashMap<String, (usize, u64)>,
+    /// Turnierweiter Brutto-Median, sobald [`MIN_SAMPLES`] erreicht sind.
+    tournament_brutto: Option<u64>,
+    /// Vorberechnete Auswertungszeilen (je Klasse × Disziplin).
+    rows: Vec<StatsRow>,
 }
 
 /// Eine Zeile der Auswertung (je Klasse × Disziplin), Mediane in Minuten.
@@ -158,57 +172,90 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
             b.netto_min,
         ))
     });
-    TimeStats { measurements }
+
+    // Mediane einmal vorberechnen (siehe Struct-Kommentar).
+    let mut group_werte: HashMap<(String, String), Vec<u64>> = HashMap::new();
+    let mut class_werte: HashMap<String, Vec<u64>> = HashMap::new();
+    let mut alle: Vec<u64> = Vec::new();
+    for m in &measurements {
+        group_werte
+            .entry((m.class_label.clone(), m.discipline.clone()))
+            .or_default()
+            .push(m.brutto_min);
+        class_werte
+            .entry(m.class_label.clone())
+            .or_default()
+            .push(m.brutto_min);
+        alle.push(m.brutto_min);
+    }
+    let group_brutto = group_werte
+        .into_iter()
+        .filter_map(|(k, v)| median_min(&v).map(|med| (k, (v.len(), med))))
+        .collect();
+    let class_brutto = class_werte
+        .into_iter()
+        .filter_map(|(k, v)| median_min(&v).map(|med| (k, (v.len(), med))))
+        .collect();
+    let tournament_brutto = if alle.len() >= MIN_SAMPLES {
+        median_min(&alle)
+    } else {
+        None
+    };
+
+    let mut groups: Vec<(String, String)> = measurements
+        .iter()
+        .map(|m| (m.class_label.clone(), m.discipline.clone()))
+        .collect();
+    groups.dedup();
+    let rows = groups
+        .into_iter()
+        .map(|(class, disc)| {
+            let (mut brutto, mut netto, mut diff) = (Vec::new(), Vec::new(), Vec::new());
+            for m in measurements
+                .iter()
+                .filter(|m| m.class_label == class && m.discipline == disc)
+            {
+                brutto.push(m.brutto_min);
+                netto.push(m.netto_min);
+                diff.push(m.brutto_min.saturating_sub(m.netto_min));
+            }
+            StatsRow {
+                class_label: class,
+                discipline: disc,
+                count: brutto.len(),
+                brutto_min: median_min(&brutto).unwrap_or(0),
+                netto_min: median_min(&netto).unwrap_or(0),
+                diff_min: median_min(&diff).unwrap_or(0),
+            }
+        })
+        .collect();
+
+    TimeStats {
+        group_brutto,
+        class_brutto,
+        tournament_brutto,
+        rows,
+    }
 }
 
 impl TimeStats {
     /// Auswertungszeilen je Klasse × Disziplin (Median Brutto/Netto/
-    /// Differenz, Anzahl), sortiert nach Klasse, dann Disziplin.
+    /// Differenz, Anzahl), sortiert nach Klasse, dann Disziplin —
+    /// vorberechnet beim Bau.
     pub fn rows(&self) -> Vec<StatsRow> {
-        let mut groups: Vec<(&str, &str)> = self
-            .measurements
-            .iter()
-            .map(|m| (m.class_label.as_str(), m.discipline.as_str()))
-            .collect();
-        groups.dedup();
-        groups
-            .into_iter()
-            .map(|(class, disc)| {
-                let (mut brutto, mut netto, mut diff) = (Vec::new(), Vec::new(), Vec::new());
-                for m in self
-                    .measurements
-                    .iter()
-                    .filter(|m| m.class_label == class && m.discipline == disc)
-                {
-                    brutto.push(m.brutto_min);
-                    netto.push(m.netto_min);
-                    diff.push(m.brutto_min.saturating_sub(m.netto_min));
-                }
-                StatsRow {
-                    class_label: class.to_string(),
-                    discipline: disc.to_string(),
-                    count: brutto.len(),
-                    brutto_min: median_min(&brutto).unwrap_or(0),
-                    netto_min: median_min(&netto).unwrap_or(0),
-                    diff_min: median_min(&diff).unwrap_or(0),
-                }
-            })
-            .collect()
+        self.rows.clone()
     }
 
     /// Turnierweiter Brutto-Median (ab [`MIN_SAMPLES`] Messwerten).
     pub fn tournament_brutto_min(&self) -> Option<u64> {
-        if self.measurements.len() < MIN_SAMPLES {
-            return None;
-        }
-        let brutto: Vec<u64> = self.measurements.iter().map(|m| m.brutto_min).collect();
-        median_min(&brutto)
+        self.tournament_brutto
     }
 
     /// Erwartete Bruttodauer eines Spiels mit Fallback-Kette (E5–E7):
     /// Klasse×Disziplin (≥3) → Klasse (≥3) → Turnier (≥3) → Default.
     /// Leeres `class_label` springt direkt auf die Turnierstufe.
     /// `true` = nur der Default steht dahinter (Anzeige „~hh:mm").
+    /// Reine Map-Zugriffe auf die vorberechneten Mediane.
     pub fn group_duration(
         &self,
         class_label: &str,
@@ -217,27 +264,22 @@ impl TimeStats {
     ) -> (u64, bool) {
         let class = class_label.trim();
         let disc = discipline.trim();
-        let stufe = |filter: &dyn Fn(&&Measurement) -> bool| -> Option<u64> {
-            let brutto: Vec<u64> = self
-                .measurements
-                .iter()
-                .filter(filter)
-                .map(|m| m.brutto_min)
-                .collect();
-            if brutto.len() < MIN_SAMPLES {
-                return None;
-            }
-            median_min(&brutto)
-        };
         if !class.is_empty() {
-            if let Some(v) = stufe(&|m| m.class_label == class && m.discipline == disc) {
-                return (v, false);
+            if let Some((n, v)) = self
+                .group_brutto
+                .get(&(class.to_string(), disc.to_string()))
+            {
+                if *n >= MIN_SAMPLES {
+                    return (*v, false);
+                }
             }
-            if let Some(v) = stufe(&|m| m.class_label == class) {
-                return (v, false);
+            if let Some((n, v)) = self.class_brutto.get(class) {
+                if *n >= MIN_SAMPLES {
+                    return (*v, false);
+                }
             }
         }
-        if let Some(v) = self.tournament_brutto_min() {
+        if let Some(v) = self.tournament_brutto {
             return (v, false);
         }
         let default = if default_mins.is_finite() && default_mins > 0.0 {

@@ -209,6 +209,15 @@ JSON, der Relay bleibt unverändert; alte `tl.html`-Stände ignorieren sie.
 Cloud-Geräte sehen die neue Anzeige erst nach einem **Relay-Deploy**
 (`tl.html` ist einkompiliert) — Deploy vor dem Client-Release.
 
+**Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
+`TlAction`-Varianten `set_hall_prefill { enabled, window }` und
+`clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter
+Relay lehnt sie ab → auch hier Relay-Deploy vor dem Client-Release. Das
+zusätzliche `TlState`-Feld `hall_prefill` und der neue
+`hall_source`-Wire-Wert `"auto"` sind additiv; alte Seiten tolerieren
+beide (Feature-Detection über das State-Feld — eine neue Seite an einem
+alten Host zeigt die Bedienelemente gar nicht).
+
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
 Turnier im Sekundentakt, in einer ruhigen Phase minutenlang gar nicht —

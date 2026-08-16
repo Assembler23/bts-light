@@ -151,10 +151,11 @@ pub fn resolve_and_sort_key(
     m: &BtpMatch,
     manual_hall: Option<&str>,
     called_hall: Option<&str>,
+    auto_hall: Option<&str>,
     called: bool,
     order: &QueueOrderStore,
 ) -> (String, HallSource, ManualOrderSortKey) {
-    let (hall, source) = hall_for_match(config, snap, m, manual_hall, called_hall);
+    let (hall, source) = hall_for_match(config, snap, m, manual_hall, called_hall, auto_hall);
     // Der Rang kommt aus EINER globalen Reihenfolge (ADR 0026) — die Halle
     // wird hier nur noch aufgelöst, weil die Aufrufer sie für die Anzeige
     // brauchen, nicht mehr für den Nachschlag.
@@ -188,6 +189,7 @@ pub fn ready_queue(
     config: &AppConfig,
     snap: &BtpSnapshot,
     manual_halls: &HashMap<i64, String>,
+    auto_halls: &HashMap<i64, String>,
     called_match_ids: &HashSet<i64>,
     order: &QueueOrderStore,
 ) -> Vec<i64> {
@@ -202,7 +204,9 @@ pub fn ready_queue(
         })
         .map(|m| {
             let manual = manual_halls.get(&m.id).map(String::as_str);
-            let (_, _, key) = resolve_and_sort_key(config, snap, m, manual, None, false, order);
+            let auto = auto_halls.get(&m.id).map(String::as_str);
+            let (_, _, key) =
+                resolve_and_sort_key(config, snap, m, manual, None, auto, false, order);
             (key, m.id)
         })
         .collect();
@@ -227,6 +231,11 @@ pub enum HallSource {
     Btp,
     /// Aus dem Vorbereitungs-Aufruf (Tagesentscheidung).
     Call,
+    /// Von der **automatischen Hallen-Vorverteilung** gesetzt (Spec
+    /// `hallen-vorverteilung`, ADR 0029) — die schwächste echte Quelle:
+    /// jede andere Zuordnung schlägt sie, und Aufruf oder Hand-Eingriff
+    /// räumen den Auto-Eintrag sogar aktiv.
+    Auto,
     /// Nicht bekannt.
     None,
 }
@@ -235,7 +244,12 @@ pub enum HallSource {
 /// wir das?
 ///
 /// Kaskade: Disziplin-Regel → **von Hand gesetzt** → **BTP** →
-/// Vorbereitungs-Aufruf → unbekannt.
+/// Vorbereitungs-Aufruf → **automatische Vorverteilung** → unbekannt.
+///
+/// Die **Auto-Stufe** (Spec `hallen-vorverteilung`) steht bewusst ganz
+/// hinten: Die Automatik füllt nur Spiele, die sonst gar keine Halle
+/// hätten — wird später ein BTP-Ort nachgepflegt oder gerufen, gewinnt
+/// das (der Aufruf räumt den Auto-Eintrag zusätzlich aktiv, E3).
 ///
 /// - Die **Regel** gewinnt, weil sie eine Turnier-Festlegung ist und auch die
 ///   Vergabe bindet (`hall_allows_match`); ein widersprechender Ort stellte
@@ -259,6 +273,7 @@ pub fn hall_for_match(
     m: &BtpMatch,
     manual_hall: Option<&str>,
     called_hall: Option<&str>,
+    auto_hall: Option<&str>,
 ) -> (String, HallSource) {
     if let Some(hall) = config.allowed_hall_for(m.discipline.as_str(), &m.draw_name) {
         return (canonical_hall(snap, hall), HallSource::Rule);
@@ -280,8 +295,11 @@ pub fn hall_for_match(
             return (name, HallSource::Btp);
         }
     }
-    match gesetzt(called_hall) {
-        Some(hall) => (canonical_hall(snap, hall), HallSource::Call),
+    if let Some(hall) = gesetzt(called_hall) {
+        return (canonical_hall(snap, hall), HallSource::Call);
+    }
+    match gesetzt(auto_hall) {
+        Some(hall) => (canonical_hall(snap, hall), HallSource::Auto),
         None => (String::new(), HallSource::None),
     }
 }
@@ -1182,7 +1200,7 @@ mod tests {
         });
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&cfg, &empty_snap(), &m, None, None),
+            hall_for_match(&cfg, &empty_snap(), &m, None, None, None),
             ("Halle A".to_string(), HallSource::Rule)
         );
     }
@@ -1197,7 +1215,8 @@ mod tests {
                 &empty_snap(),
                 &m,
                 None,
-                Some("Halle B")
+                Some("Halle B"),
+                None
             ),
             ("Halle B".to_string(), HallSource::Call)
         );
@@ -1216,7 +1235,7 @@ mod tests {
         });
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&cfg, &empty_snap(), &m, None, Some("Halle B")),
+            hall_for_match(&cfg, &empty_snap(), &m, None, Some("Halle B"), None),
             ("Halle A".to_string(), HallSource::Rule)
         );
     }
@@ -1280,7 +1299,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            hall_for_match(&AppConfig::default(), &s, &m, None, None),
+            hall_for_match(&AppConfig::default(), &s, &m, None, None, None),
             ("Luckenwalder".to_string(), HallSource::Btp)
         );
     }
@@ -1306,7 +1325,14 @@ mod tests {
             ],
         );
         assert_eq!(
-            hall_for_match(&AppConfig::default(), &s, &m, Some("Luckenwalder"), None),
+            hall_for_match(
+                &AppConfig::default(),
+                &s,
+                &m,
+                Some("Luckenwalder"),
+                None,
+                None
+            ),
             ("Luckenwalder".to_string(), HallSource::Manual)
         );
     }
@@ -1324,6 +1350,7 @@ mod tests {
                 &m,
                 Some("Halle C"),
                 Some("Halle B"),
+                None,
             ),
             ("Halle C".to_string(), HallSource::Manual)
         );
@@ -1342,7 +1369,7 @@ mod tests {
         });
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&cfg, &empty_snap(), &m, Some("Halle C"), None),
+            hall_for_match(&cfg, &empty_snap(), &m, Some("Halle C"), None, None),
             ("Halle A".to_string(), HallSource::Rule)
         );
     }
@@ -1354,8 +1381,76 @@ mod tests {
         // aus dem gefilterten Bild fallen — es würde sonst nie vergeben.
         let m = a_match(7);
         assert_eq!(
-            hall_for_match(&AppConfig::default(), &empty_snap(), &m, None, None),
+            hall_for_match(&AppConfig::default(), &empty_snap(), &m, None, None, None),
             (String::new(), HallSource::None)
+        );
+    }
+
+    #[test]
+    fn die_auto_halle_greift_als_letzte_stufe_und_wird_kanonisiert() {
+        // Spec `hallen-vorverteilung`: Die Vorverteilung füllt nur Spiele,
+        // die sonst GAR keine Halle hätten — und liefert die
+        // BTP-Schreibweise (Kanonisierung wie bei der Hand-Halle).
+        let m = a_match(7);
+        let s = snap(
+            Vec::new(),
+            vec![m.clone()],
+            vec![BtpLocation {
+                id: 1,
+                name: "Halle B".to_string(),
+            }],
+        );
+        assert_eq!(
+            hall_for_match(&AppConfig::default(), &s, &m, None, None, Some("halle b")),
+            ("Halle B".to_string(), HallSource::Auto)
+        );
+    }
+
+    #[test]
+    fn der_aufruf_schlaegt_die_auto_halle() {
+        // E3 als Kaskaden-Vorrang (zusätzlich räumt der Aufruf den
+        // Auto-Eintrag aktiv — hier geht es nur um die Auflösung).
+        let m = a_match(7);
+        assert_eq!(
+            hall_for_match(
+                &AppConfig::default(),
+                &empty_snap(),
+                &m,
+                None,
+                Some("Halle A"),
+                Some("Halle B"),
+            ),
+            ("Halle A".to_string(), HallSource::Call)
+        );
+    }
+
+    #[test]
+    fn btp_schlaegt_die_auto_halle() {
+        // Wird der Spielort in BTP nachgepflegt, gewinnt der Turnierplan
+        // über die Tages-Automatik.
+        let mut m = a_match(7);
+        m.location_id = Some(2);
+        let s = snap(
+            Vec::new(),
+            vec![m.clone()],
+            vec![BtpLocation {
+                id: 2,
+                name: "Luckenwalder".to_string(),
+            }],
+        );
+        assert_eq!(
+            hall_for_match(&AppConfig::default(), &s, &m, None, None, Some("Kyritzer")),
+            ("Luckenwalder".to_string(), HallSource::Btp)
+        );
+    }
+
+    #[test]
+    fn die_auto_herkunft_reist_als_auto_ueber_die_leitung() {
+        // Alte tl.html-Stände prüfen nur bekannte Werte und tolerieren
+        // "auto" — der Wire-Wert ist damit Teil des Vertrags.
+        assert_eq!(
+            serde_json::to_string(&HallSource::Auto).unwrap(),
+            "\"auto\""
         );
     }
 
@@ -1515,9 +1610,9 @@ mod tests {
         order.reorder(&[1, 4], 4, Some(1)); // Match 4 vor Match 1 ziehen
 
         let (hall_vorgezogen, _, key_vorgezogen) =
-            resolve_and_sort_key(&config, &s, &vorgezogen, None, None, false, &order);
+            resolve_and_sort_key(&config, &s, &vorgezogen, None, None, None, false, &order);
         let (_, _, key_frueh) =
-            resolve_and_sort_key(&config, &s, &frueh, None, None, false, &order);
+            resolve_and_sort_key(&config, &s, &frueh, None, None, None, false, &order);
         assert_eq!(hall_vorgezogen, "", "Halle wird mit zurückgegeben");
         assert!(
             key_vorgezogen < key_frueh,
@@ -1543,9 +1638,9 @@ mod tests {
         order.reorder(&[1, 2], 2, Some(1));
 
         let (hall_a, _, key_a) =
-            resolve_and_sort_key(&config, &s, &a, Some("Halle A"), None, false, &order);
+            resolve_and_sort_key(&config, &s, &a, Some("Halle A"), None, None, false, &order);
         let (hall_b, _, key_b) =
-            resolve_and_sort_key(&config, &s, &b, Some("Halle B"), None, false, &order);
+            resolve_and_sort_key(&config, &s, &b, Some("Halle B"), None, None, false, &order);
         assert_eq!(hall_a, "Halle A");
         assert_eq!(hall_b, "Halle B");
         assert!(key_b < key_a, "der Präfix kennt keine Hallengrenze mehr");
@@ -1573,11 +1668,11 @@ mod tests {
         let manual: HashMap<i64, String> = HashMap::new();
         let called: HashSet<i64> = [3].into_iter().collect();
 
-        let liste = ready_queue(&config, &s, &manual, &called, &order);
+        let liste = ready_queue(&config, &s, &manual, &HashMap::new(), &called, &order);
         assert_eq!(liste, vec![1, 2], "gerufenes Spiel 3 taucht nicht auf");
 
         order.reorder(&liste, 2, Some(1));
-        let liste2 = ready_queue(&config, &s, &manual, &called, &order);
+        let liste2 = ready_queue(&config, &s, &manual, &HashMap::new(), &called, &order);
         assert_eq!(liste2, vec![2, 1], "Präfix wirkt in der effektiven Liste");
     }
 
@@ -1605,7 +1700,7 @@ mod tests {
         let called: HashSet<i64> = HashSet::new();
 
         assert_eq!(
-            ready_queue(&config, &s, &manual, &called, &order),
+            ready_queue(&config, &s, &manual, &HashMap::new(), &called, &order),
             vec![1, 2, 3]
         );
     }

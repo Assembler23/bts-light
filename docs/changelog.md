@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.208
+
+- **Automatische Hallen-Vorverteilung** (Spec
+  [features/hallen-vorverteilung.md](features/hallen-vorverteilung.md),
+  ADR [0029](adr/0029-hallen-vorverteilung-eigener-store.md)/[0030](adr/0030-halle-bindet-die-feldvergabe.md)):
+  Bei Mehr-Hallen-Turnieren verteilt die Automatik die vordersten x Spiele
+  der Warteliste auf die Hallen — im Verhältnis der entsperrten Felder,
+  gemischt (2:1 → A, A, B, …) und fortlaufend nachgefüllt. Spieler sehen
+  ihre Halle früh (Hallen-Kürzel „·A" in TL-Web, Hallen-Monitore, badhub
+  `display=next&halle=…`). Bedienung im Kopf des Spiele-Panels (Schalter,
+  x, „Auto-Hallen räumen"); Hand-Eingriff und Vorbereitungs-Aufruf
+  übersteuern die Automatik; Tages-Halle und Vorverteilung schließen sich
+  aus. Neuer turniergebundener Store `auto-halls.json`.
+- **⚠ Verhaltensänderung (ADR 0030):** Eine gesetzte Halle (Regel, Hand
+  oder Auto) **bindet** jetzt die automatische Feldvergabe — bisher waren
+  Hand-Hallen reine Anzeige. Auto-vorverteilte Spiele werden ohne
+  Vorbereitungs-Aufruf vergeben. Cloud: Relay-Deploy nötig (neue
+  TL-Aktionen + Seite).
+
 ## v0.9.207
 
 - **Satzpausen enden erst mit „Weiterspielen"** (Spec

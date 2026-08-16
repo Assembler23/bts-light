@@ -1326,6 +1326,21 @@ pub enum TlAction {
     /// bewusst ohne Teil-Reset, weder je Halle noch je Spiel (Nicht-Ziel
     /// der Spec).
     QueueOrderReset,
+    /// Automatische Hallen-Vorverteilung schalten (Spec
+    /// `hallen-vorverteilung`, ADR 0029/0030). Schalter und Fenstergröße
+    /// reisen **atomar** — die Seite kennt beim Umschalten das aktuelle x,
+    /// ein Zwischenzustand „an mit altem x" kann nicht entstehen. Der Host
+    /// validiert (klemmt `window`, lehnt Einschalten bei gesetzter aktiver
+    /// Halle ab) und persistiert in der Config.
+    SetHallPrefill {
+        enabled: bool,
+        /// Fenstergröße x; 0 = automatisch (Gesamtzahl der Spielfelder).
+        window: u32,
+    },
+    /// Alle **automatisch** verteilten Hallen räumen (E10) — bewusst eine
+    /// eigene, destruktive Aktion und nie Nebeneffekt eines Set. Hand-,
+    /// Regel- und Aufruf-Hallen bleiben unberührt.
+    ClearAutoHalls,
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -3159,6 +3174,11 @@ mod tests {
                 before_match_id: Some(4712),
             },
             TlAction::QueueOrderReset,
+            TlAction::SetHallPrefill {
+                enabled: true,
+                window: 18,
+            },
+            TlAction::ClearAutoHalls,
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,

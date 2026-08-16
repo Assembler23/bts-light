@@ -493,6 +493,11 @@ pub struct TabletState {
     /// denselben Stand sehen müssen; `on_court_since` bleibt reiner
     /// RAM-Zubringer für den Aufruf-Timer.
     match_times: crate::tablet::match_times::MatchTimesStore,
+    /// Automatisch vorverteilte Hallen (Spec `hallen-vorverteilung`,
+    /// ADR 0029): turniergebunden persistiert (`auto-halls.json`). Hier,
+    /// weil Sync-Loop (verteilt), TL-Web (Badge, Räumen) und die Kaskade
+    /// denselben Stand sehen müssen.
+    auto_halls: crate::tablet::hall_assign::AutoHallStore,
     /// Match-ID → zuletzt publizierte Startzeit-Prognose (Unix-ms) — reines
     /// Diagnose-Gedächtnis für den Prognose/Wirklichkeit-Vergleich (E12),
     /// gepflegt von `tl::build_state_limited`.
@@ -852,6 +857,8 @@ impl TabletState {
         // Spielzeiten-Messung ebenso turniergebunden (Spec
         // `spielzeiten-prognose`, Muster ADR 0022).
         self.match_times.set_tournament(&snapshot.tournament_name);
+        // Auto-Hallen ebenso turniergebunden (Spec `hallen-vorverteilung`).
+        self.auto_halls.set_tournament(&snapshot.tournament_name);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -929,13 +936,20 @@ impl TabletState {
             return false;
         }
         let manual = self.manual_halls();
+        let auto = self.auto_halls.halls();
         let called: HashSet<i64> = self
             .preparation_calls()
             .iter()
             .map(|c| c.match_id)
             .collect();
-        let effective =
-            crate::tablet::assign::ready_queue(config, &snap, &manual, &called, &self.queue_order);
+        let effective = crate::tablet::assign::ready_queue(
+            config,
+            &snap,
+            &manual,
+            &auto,
+            &called,
+            &self.queue_order,
+        );
         // TL-Web zeigt nur die ersten `QUEUE_LIMIT` Spiele
         // (`tl::build_state_limited`) — der neue Präfix darf serverseitig nie
         // mehr Spiele umfassen, als die ziehende Oberfläche überhaupt zeigen
@@ -989,6 +1003,17 @@ impl TabletState {
     /// Ablage-Datei der Spielzeiten-Messung setzen (beim App-Start).
     pub fn set_match_times_path(&self, path: std::path::PathBuf) {
         self.match_times.set_path(path);
+    }
+
+    /// Der Speicher der automatisch vorverteilten Hallen (Spec
+    /// `hallen-vorverteilung`) — geteilt von Sync-Loop, TL-Web und Kaskade.
+    pub fn auto_hall_store(&self) -> &crate::tablet::hall_assign::AutoHallStore {
+        &self.auto_halls
+    }
+
+    /// Ablage-Datei der Auto-Hallen setzen (beim App-Start).
+    pub fn set_auto_halls_path(&self, path: std::path::PathBuf) {
+        self.auto_halls.set_path(path);
     }
 
     /// Zuletzt publizierte Startzeit-Prognosen merken (Match-ID → Unix-ms) —
@@ -2708,6 +2733,30 @@ impl TabletState {
                 continue;
             }
             // In BTPs Schreibweise, damit der Filter greift.
+            let name = snapshot
+                .locations
+                .iter()
+                .find(|l| l.name.trim().eq_ignore_ascii_case(hall.trim()))
+                .map(|l| l.name.trim().to_string())
+                .unwrap_or_else(|| hall.trim().to_string());
+            m.preparation_hall = Some(name);
+        }
+        drop(manual);
+
+        // Automatisch vorverteilte Hallen als DRITTE Stufe einstempeln
+        // (Spec `hallen-vorverteilung`, E7) — gleiche Regeln wie die
+        // Hand-Hallen darüber (kein Aufruf-Zeitstempel, nur Scheduled,
+        // BTP-Schreibweise), und durch die Block-Reihenfolge gilt der
+        // Vorrang Aufruf > Hand > Auto von selbst. Damit sehen Spieler
+        // ihre Halle früh im Liveticker (`display=next&halle=…`) und auf
+        // den Hallen-Monitoren — genau der Zweck der Vorverteilung.
+        for (match_id, hall) in self.auto_halls.halls() {
+            let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == match_id) else {
+                continue;
+            };
+            if m.preparation_hall.is_some() || m.status != MatchStatus::Scheduled {
+                continue;
+            }
             let name = snapshot
                 .locations
                 .iter()
@@ -4457,6 +4506,46 @@ mod tests {
         assert_eq!(
             m.preparation_call_ts, None,
             "einen Ort zu setzen ist kein Aufruf - sonst meldete der Monitor einen Aufruf, den es nie gab"
+        );
+    }
+
+    #[test]
+    fn eine_auto_verteilte_halle_erreicht_den_liveticker() {
+        // Spec `hallen-vorverteilung` (E7): Die automatisch vorverteilte
+        // Halle ist der Spieler-Kanal des Features — sie muss den
+        // Hallenfilter des Livetickers erreichen wie eine Hand-Halle,
+        // ohne als „aufgerufen" zu gelten. Hand schlägt Auto.
+        use crate::btp::model::BtpLocation;
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![
+                match_on(4, None, MatchStatus::Scheduled),
+                match_on(5, None, MatchStatus::Scheduled),
+            ],
+            vec![(101, "Court 1")],
+        );
+        snap.locations = vec![BtpLocation {
+            id: 7,
+            name: "Halle A".to_string(),
+        }];
+        st.auto_hall_store()
+            .insert_many(&[(4, "halle a".into()), (5, "halle a".into())]);
+        st.set_manual_hall(5, "Halle B");
+
+        st.apply_preparation_calls(&mut snap);
+
+        let m4 = snap.matches.iter().find(|m| m.id == 4).unwrap();
+        assert_eq!(
+            m4.preparation_hall.as_deref(),
+            Some("Halle A"),
+            "Auto-Halle in BTPs Schreibweise"
+        );
+        assert_eq!(m4.preparation_call_ts, None, "kein Aufruf");
+        let m5 = snap.matches.iter().find(|m| m.id == 5).unwrap();
+        assert_eq!(
+            m5.preparation_hall.as_deref(),
+            Some("Halle B"),
+            "die Hand-Halle behält Vorrang vor der Auto-Halle"
         );
     }
 

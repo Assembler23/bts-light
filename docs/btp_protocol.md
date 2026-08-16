@@ -224,10 +224,19 @@ Unterschied zum Turnier oben: Wird die Spalte gepflegt, steht sie als
 `Match.LocationID` im Mitschnitt; wird sie es nicht, fehlt sie ganz.
 
 Für solche Turniere muss die Halle eines wartenden Spiels abgeleitet werden
-— aus der Disziplin/Klasse→Halle-Regel, einer Handzuweisung der
-Turnierleitung oder dem Vorbereitungs-Aufruf (`assign::hall_for_match`).
+(`assign::hall_for_match`), Kaskade: **Disziplin/Klasse→Halle-Regel → Hand →
+BTP-`LocationID` → Vorbereitungs-Aufruf → automatische Vorverteilung →
+unbekannt** (die Auto-Stufe kommt aus Spec
+[`features/hallen-vorverteilung.md`](features/hallen-vorverteilung.md) und
+füllt nur Spiele, die sonst gar keine Halle hätten).
 Ein Test in `btp_capture.rs` hält fest, dass es solche Turniere gibt, damit
 die abgeleitete Kaskade nicht als überflüssig verschwindet.
+
+Seit ADR 0030 **bindet** die aufgelöste Halle die automatische Feldvergabe:
+Im Mehr-Hallen-Betrieb bekommt ein Spiel mit Regel-, Hand- oder Auto-Halle
+nur Felder seiner Halle; AUTO-vorverteilte Spiele werden zudem ohne
+Vorbereitungs-Aufruf vergeben (die Vorverteilung ersetzt die
+Aufruf-Pflicht). BTP-Ort und Aufruf-Halle binden bewusst nicht hart.
 
 **Das Messwerkzeug** dafür liegt in `tests/btp_location_probe.rs`: Es zählt
 gegen ein laufendes BTP, welche Felder an Matches vorkommen, und zeigt

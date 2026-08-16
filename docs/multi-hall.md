@@ -402,3 +402,16 @@ Architektur: Die Besetzung hängt am Spiel (nicht am Feld), die Anzeige geht
 eingeschlossen —, und die Ansage wird in der Halle des Felds gesprochen
 (`AnnounceJobKind::Officials`). Die feldweisen Schalter sind an der CourtID
 geschlüsselt und damit hallenübergreifend eindeutig.
+
+## Automatische Hallen-Vorverteilung
+
+Die [Hallen-Vorverteilung](features/hallen-vorverteilung.md) macht die
+Hallen-Dimension planbar: Die vordersten x Spiele der globalen Warteliste
+bekommen automatisch eine Halle im Verhältnis der entsperrten Felder
+(gemischt, fortlaufend nachgefüllt; ADR 0029). Die Zuordnung ist seit
+ADR 0030 ein **Versprechen**: Regel-, Hand- und Auto-Hallen binden die
+automatische Feldvergabe, Auto-Spiele werden ohne Vorbereitungs-Aufruf in
+ihrer Halle vergeben. Spieler sehen die Halle früh auf den
+Hallen-Monitoren und im badhub-Aushang (`display=next&halle=…`); das
+konkrete Feld folgt wie bisher erst kurz vor dem Spiel. Vorverteilung und
+aktive Tages-Halle schließen sich aus.
