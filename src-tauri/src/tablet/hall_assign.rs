@@ -291,10 +291,275 @@ impl AutoHallStore {
     }
 }
 
+/// Wirksame Fenstergröße (B4): `window == 0` heißt „automatisch" =
+/// Gesamtzahl der Spielfelder; geklemmt auf 1..=120 (Wartelisten-Limit,
+/// `tl::QUEUE_LIMIT`). Geteilt von Sync-Loop und TL-Anzeige.
+pub fn effective_window(configured: u32, total_courts: usize) -> usize {
+    let basis = if configured == 0 {
+        total_courts
+    } else {
+        configured as usize
+    };
+    basis.clamp(1, 120)
+}
+
+/// Ein Platz im Vorverteilungs-Fenster (die vordersten x Spiele der
+/// globalen Warteliste), wie ihn der Sync-Loop aufbereitet.
+#[derive(Debug, Clone)]
+pub struct PrefillSlot {
+    pub match_id: i64,
+    /// Bereits aufgelöste Halle (egal welcher Herkunft, kanonisiert);
+    /// `None` = ohne Halle — nur solche Plätze füllt die Automatik.
+    pub hall: Option<String>,
+    /// Gerufene zählen auf die Quote, bekommen aber nie einen Eintrag (E8).
+    pub called: bool,
+}
+
+/// Verteilt die Lücken des Fensters auf die Hallen (Spec
+/// `hallen-vorverteilung`, E6/B5) — **rein und deterministisch**.
+///
+/// `halls`: `(Name, entsperrte Feldzahl)` in BTP-Locations-Reihenfolge
+/// (deterministischer Gleichstands-Brecher). Hallen mit 0 Feldern gehen
+/// leer aus (A4/E11).
+///
+/// Verfahren: (1) Quoten je Halle über die Fenstergröße nach **größtem
+/// Rest** aus den Feldzahlen. (2) Bereits zugeordnete Plätze (auch
+/// gerufene) werden angerechnet; Überschuss erschöpft nur die Quote der
+/// eigenen Halle. (3) Lücken in Listenreihenfolge per
+/// **Höchstzahl-Verfahren** (`felder/(vergeben+1)`, Gleichstand →
+/// Hallen-Reihenfolge) — das ergibt das gemischte Muster (2:1 ⇒
+/// A, A, B, A, A, B) statt Blöcken. Sind alle Quoten erschöpft (massiver
+/// Überschuss), füllt das Höchstzahl-Verfahren ohne Deckel weiter, damit
+/// keine Lücke offen bleibt.
+///
+/// Rückgabe: nur die NEUEN Paare für vorher leere, nicht gerufene Plätze.
+/// Zusammen mit dem Insert-only-Store ist der Lauf idempotent (ADR 0029).
+pub fn distribute(window: &[PrefillSlot], halls: &[(String, usize)]) -> Vec<(i64, String)> {
+    let n = window.len();
+    let aktive: Vec<(&str, usize)> = halls
+        .iter()
+        .filter(|(_, felder)| *felder > 0)
+        .map(|(h, felder)| (h.as_str(), *felder))
+        .collect();
+    if n == 0 || aktive.is_empty() {
+        return Vec::new();
+    }
+    let total: usize = aktive.iter().map(|(_, f)| f).sum();
+
+    // (1) Quoten nach größtem Rest über die Fenstergröße.
+    let mut quota: Vec<usize> = aktive.iter().map(|(_, f)| n * f / total).collect();
+    let mut rests: Vec<(usize, usize)> = aktive
+        .iter()
+        .enumerate()
+        .map(|(i, (_, f))| (i, (n * f) % total))
+        .collect();
+    // Größter Rest zuerst; Gleichstand → Hallen-Reihenfolge.
+    rests.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut uebrig = n - quota.iter().sum::<usize>();
+    for (i, _) in rests {
+        if uebrig == 0 {
+            break;
+        }
+        quota[i] += 1;
+        uebrig -= 1;
+    }
+
+    // (2) Anrechnung vorhandener Zuordnungen (Vergleich wie die Vergabe:
+    // ohne Groß-/Kleinschreibung). Überschuss erschöpft nur die eigene
+    // Quote — `assigned` darf über `quota` hinauswachsen.
+    let index_of = |hall: &str| {
+        aktive
+            .iter()
+            .position(|(h, _)| h.trim().eq_ignore_ascii_case(hall.trim()))
+    };
+    let mut assigned: Vec<usize> = vec![0; aktive.len()];
+    for s in window {
+        if let Some(h) = s.hall.as_deref() {
+            if let Some(i) = index_of(h) {
+                assigned[i] += 1;
+            }
+        }
+    }
+
+    // (3) Lücken in Listenreihenfolge per Höchstzahl-Verfahren — erst
+    // unterhalb der Quoten, bei Total-Erschöpfung (massiver Überschuss)
+    // ohne Deckel, damit keine Lücke offen bleibt.
+    let mut out = Vec::new();
+    for s in window {
+        if s.hall.is_some() || s.called {
+            continue;
+        }
+        let pick = hoechstzahl(&aktive, &assigned, Some(&quota))
+            .or_else(|| hoechstzahl(&aktive, &assigned, None));
+        let Some(i) = pick else { break };
+        out.push((s.match_id, aktive[i].0.to_string()));
+        assigned[i] += 1;
+    }
+    out
+}
+
+/// Halle mit dem größten Höchstzahl-Wert `felder / (vergeben + 1)` —
+/// Gleichstand entscheidet die Listenreihenfolge. Mit `quota` werden
+/// erschöpfte Hallen übersprungen. Bruchfrei per Kreuzmultiplikation.
+fn hoechstzahl(
+    aktive: &[(&str, usize)],
+    assigned: &[usize],
+    quota: Option<&[usize]>,
+) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for i in 0..aktive.len() {
+        if let Some(q) = quota {
+            if assigned[i] >= q[i] {
+                continue;
+            }
+        }
+        match best {
+            None => best = Some(i),
+            Some(b) => {
+                let links = aktive[i].1 * (assigned[b] + 1);
+                let rechts = aktive[b].1 * (assigned[i] + 1);
+                if links > rechts {
+                    best = Some(i);
+                }
+            }
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+
+    fn slot(id: i64, hall: Option<&str>, called: bool) -> PrefillSlot {
+        PrefillSlot {
+            match_id: id,
+            hall: hall.map(str::to_string),
+            called,
+        }
+    }
+
+    fn halls(spec: &[(&str, usize)]) -> Vec<(String, usize)> {
+        spec.iter().map(|(h, f)| (h.to_string(), *f)).collect()
+    }
+
+    fn zuteilung(neu: &[(i64, String)], id: i64) -> Option<&str> {
+        neu.iter()
+            .find(|(m, _)| *m == id)
+            .map(|(_, h)| h.as_str())
+    }
+
+    // ── Verteil-Funktion (E6/B5) ────────────────────────────────────────
+
+    #[test]
+    fn das_misch_muster_verzahnt_die_hallen() {
+        // B5-Anker (Nutzer-Beispiel): 2:1 Felder → A, A, B, A, A, B —
+        // keine Blöcke.
+        let window: Vec<PrefillSlot> = (1..=6).map(|i| slot(i, None, false)).collect();
+        let neu = distribute(&window, &halls(&[("Halle A", 2), ("Halle B", 1)]));
+        let muster: Vec<&str> = (1..=6).map(|i| zuteilung(&neu, i).unwrap()).collect();
+        assert_eq!(
+            muster,
+            vec!["Halle A", "Halle A", "Halle B", "Halle A", "Halle A", "Halle B"]
+        );
+    }
+
+    #[test]
+    fn die_quoten_folgen_dem_groessten_rest() {
+        // 5:4:3 Felder, 10 Plätze → Quoten 4/3/3 (größter Rest: C bekommt
+        // den letzten Sitz, nicht die größte Halle).
+        let window: Vec<PrefillSlot> = (1..=10).map(|i| slot(i, None, false)).collect();
+        let neu = distribute(
+            &window,
+            &halls(&[("A", 5), ("B", 4), ("C", 3)]),
+        );
+        let count = |h: &str| neu.iter().filter(|(_, x)| x == h).count();
+        assert_eq!(count("A"), 4);
+        assert_eq!(count("B"), 3);
+        assert_eq!(count("C"), 3);
+    }
+
+    #[test]
+    fn vorhandene_hallen_werden_angerechnet() {
+        // B1: Regel-/Hand-/Aufruf-Hallen im Fenster zählen auf die Quote —
+        // 2:1 über 6 Plätze, 2 davon schon in A ⇒ nur noch 2×A und 2×B neu.
+        let window = vec![
+            slot(1, Some("Halle A"), false),
+            slot(2, None, false),
+            slot(3, Some("Halle A"), false),
+            slot(4, None, false),
+            slot(5, None, false),
+            slot(6, None, false),
+        ];
+        let neu = distribute(&window, &halls(&[("Halle A", 2), ("Halle B", 1)]));
+        assert_eq!(neu.len(), 4);
+        let count = |h: &str| neu.iter().filter(|(_, x)| x == h).count();
+        assert_eq!(count("Halle A"), 2);
+        assert_eq!(count("Halle B"), 2);
+    }
+
+    #[test]
+    fn ueberschuss_einer_halle_nimmt_anderen_nichts_weg() {
+        // 4 von 6 Plätzen schon in B (weit über Bs Quote von 2): Die zwei
+        // Lücken gehen beide nach A — Bs Überschuss erschöpft nur B.
+        let window = vec![
+            slot(1, Some("Halle B"), false),
+            slot(2, Some("Halle B"), false),
+            slot(3, Some("Halle B"), false),
+            slot(4, Some("Halle B"), false),
+            slot(5, None, false),
+            slot(6, None, false),
+        ];
+        let neu = distribute(&window, &halls(&[("Halle A", 2), ("Halle B", 1)]));
+        assert_eq!(neu.len(), 2);
+        assert_eq!(zuteilung(&neu, 5), Some("Halle A"));
+        assert_eq!(zuteilung(&neu, 6), Some("Halle A"));
+    }
+
+    #[test]
+    fn gerufene_zaehlen_bekommen_aber_nichts() {
+        // E8: Ein gerufenes Spiel mit Halle belegt seine Quote; ein
+        // gerufenes ohne Halle bleibt unangetastet (der Aufruf regelt es).
+        let window = vec![
+            slot(1, Some("Halle A"), true),
+            slot(2, None, true),
+            slot(3, None, false),
+        ];
+        let neu = distribute(&window, &halls(&[("Halle A", 1), ("Halle B", 1)]));
+        assert_eq!(zuteilung(&neu, 1), None);
+        assert_eq!(zuteilung(&neu, 2), None, "gerufen ohne Halle: kein Eintrag");
+        assert_eq!(zuteilung(&neu, 3), Some("Halle B"), "A ist durch Slot 1 belegt");
+    }
+
+    #[test]
+    fn eine_halle_ohne_entsperrte_felder_geht_leer_aus() {
+        let window: Vec<PrefillSlot> = (1..=4).map(|i| slot(i, None, false)).collect();
+        let neu = distribute(&window, &halls(&[("Halle A", 2), ("Halle B", 0)]));
+        assert!(neu.iter().all(|(_, h)| h == "Halle A"));
+        assert_eq!(neu.len(), 4);
+    }
+
+    #[test]
+    fn der_lauf_ist_idempotent() {
+        // ADR 0029: Ergebnis einspielen ⇒ zweiter Lauf liefert nichts.
+        let mut window: Vec<PrefillSlot> = (1..=6).map(|i| slot(i, None, false)).collect();
+        let neu = distribute(&window, &halls(&[("Halle A", 2), ("Halle B", 1)]));
+        for (id, hall) in &neu {
+            window[(*id - 1) as usize].hall = Some(hall.clone());
+        }
+        let zweiter = distribute(&window, &halls(&[("Halle A", 2), ("Halle B", 1)]));
+        assert!(zweiter.is_empty());
+    }
+
+    #[test]
+    fn gleichstand_entscheidet_die_hallen_reihenfolge() {
+        // 1:1 Felder, 2 Plätze → erst A (Listenreihenfolge), dann B.
+        let window: Vec<PrefillSlot> = (1..=2).map(|i| slot(i, None, false)).collect();
+        let neu = distribute(&window, &halls(&[("Halle A", 1), ("Halle B", 1)]));
+        assert_eq!(zuteilung(&neu, 1), Some("Halle A"));
+        assert_eq!(zuteilung(&neu, 2), Some("Halle B"));
+    }
 
     fn store_mit_datei(dir: &Path) -> AutoHallStore {
         let store = AutoHallStore::default();

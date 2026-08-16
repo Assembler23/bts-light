@@ -2898,6 +2898,9 @@ pub fn call_preparation(state: State<'_, AppState>, match_ids: Vec<i64>, locatio
                 location_id,
                 called_at_ms: now,
             });
+        // Der Aufruf räumt eine automatisch vorverteilte Halle (E3, Spec
+        // `hallen-vorverteilung`) — wie im TL-Web-Pfad.
+        state.tablet.auto_hall_store().remove(match_id);
     }
 }
 

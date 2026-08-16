@@ -605,6 +605,144 @@ impl SyncEngine {
     /// Reihenfolge ist global, ein Wechsel der Halle ändert an der Abfolge
     /// nichts. Deshalb braucht diese Stelle weder Konfiguration noch
     /// Hallen-Auflösung. Kein BTP-Write, rein lokal.
+    /// Automatische Hallen-Vorverteilung je Poll (Spec
+    /// `hallen-vorverteilung`, ADR 0029/0030). Läuft nur auf dem Master
+    /// (Aufrufer steht im `!slave_mode`-Block, unmittelbar vor der
+    /// Auto-Vergabe — so sieht die Vergabe die frischen Hallen im selben
+    /// Poll).
+    ///
+    /// **Aufräumen läuft immer** (auch bei Schalter aus): verschwundene/
+    /// vergebene/beendete Spiele (retain), gerufene (E3-Netz — die
+    /// Aufruf-Pfade räumen zusätzlich sofort) und Zuordnungen auf Hallen
+    /// ohne entsperrte Felder (E12, im selben Lauf neu verteilt).
+    /// **Verteilt wird nur**, wenn der Schalter an ist, das Turnier mehrere
+    /// Hallen hat und keine aktive Halle gesetzt ist (E2 — die beiden Modi
+    /// schließen sich aus).
+    fn reconcile_auto_halls(
+        &self,
+        config: &AppConfig,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) {
+        let store = tablet.auto_hall_store();
+        store.set_tournament(&snapshot.tournament_name);
+
+        let calls = tablet.preparation_calls();
+        let called: HashSet<i64> = calls.iter().map(|c| c.match_id).collect();
+        let keep: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| {
+                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+            })
+            .filter(|m| !called.contains(&m.id))
+            .map(|m| m.id)
+            .collect();
+        store.retain(&keep);
+
+        // Entsperrte Felder je Halle, in BTP-Locations-Reihenfolge
+        // (deterministischer Gleichstands-Brecher der Verteilung). Felder
+        // ohne `location_id` zählen in kein Verhältnis.
+        let locked: HashSet<i64> = tablet.locked_courts().into_iter().collect();
+        let felder_je_halle: Vec<(String, usize)> = snapshot
+            .locations
+            .iter()
+            .filter(|l| !l.name.trim().is_empty())
+            .map(|l| {
+                let felder = snapshot
+                    .court_infos
+                    .iter()
+                    .filter(|c| c.location_id == Some(l.id) && !locked.contains(&c.id))
+                    .count();
+                (l.name.trim().to_string(), felder)
+            })
+            .collect();
+        let vorhanden: HashSet<String> = felder_je_halle
+            .iter()
+            .filter(|(_, f)| *f > 0)
+            .map(|(h, _)| h.clone())
+            .collect();
+        store.remove_where_hall_not_in(&vorhanden);
+
+        if !config.hall_prefill.enabled || !snapshot.is_multi_hall() {
+            return;
+        }
+        let active = config.auto_assign.active_hall.trim();
+        if !active.is_empty()
+            && snapshot
+                .locations
+                .iter()
+                .any(|l| l.name.trim().eq_ignore_ascii_case(active))
+        {
+            return; // E2: Tages-Halle gesetzt → Modi schließen sich aus.
+        }
+
+        // Fenster: die vordersten x der globalen Warteliste — dieselbe
+        // Sortierung wie überall (`resolve_and_sort_key`), gerufene stehen
+        // vorn und zählen auf die Quote (E8).
+        let manual_halls = tablet.manual_halls();
+        let auto_halls = store.halls();
+        let mut ordered: Vec<(
+            crate::tablet::assign::ManualOrderSortKey,
+            i64,
+            Option<String>,
+        )> = snapshot
+            .matches
+            .iter()
+            .filter(|m| {
+                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+            })
+            .map(|m| {
+                let call = calls.iter().find(|c| c.match_id == m.id);
+                let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                    snapshot
+                        .locations
+                        .iter()
+                        .find(|l| l.id == lid)
+                        .map(|l| l.name.as_str())
+                });
+                let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                    config,
+                    snapshot,
+                    m,
+                    manual_halls.get(&m.id).map(String::as_str),
+                    called_hall,
+                    auto_halls.get(&m.id).map(String::as_str),
+                    call.is_some(),
+                    tablet.queue_order_store(),
+                );
+                (key, m.id, (!hall.is_empty()).then_some(hall))
+            })
+            .collect();
+        ordered.sort_by_key(|(key, _, _)| *key);
+
+        let x = crate::tablet::hall_assign::effective_window(
+            config.hall_prefill.window,
+            snapshot.court_infos.len(),
+        );
+        let window: Vec<crate::tablet::hall_assign::PrefillSlot> = ordered
+            .into_iter()
+            .take(x)
+            .map(|(_, id, hall)| crate::tablet::hall_assign::PrefillSlot {
+                match_id: id,
+                hall,
+                called: called.contains(&id),
+            })
+            .collect();
+        let neu = crate::tablet::hall_assign::distribute(&window, &felder_je_halle);
+        if !neu.is_empty() {
+            tracing::info!(
+                "Hallen-Vorverteilung: {} Spiel(e) neu zugeteilt ({})",
+                neu.len(),
+                neu.iter()
+                    .map(|(id, h)| format!("{id}→{h}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        store.insert_many(&neu);
+    }
+
     fn reconcile_queue_order(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
         let keep: HashSet<i64> = snapshot
             .matches
@@ -1394,6 +1532,10 @@ impl SyncEngine {
             // hier frisch freigegebenes Feld erscheint dort noch belegt und
             // wird frühestens im nächsten Poll neu vergeben.
             self.flush_btp_retries(config, tablet, &snapshot).await;
+            // Hallen-Vorverteilung (Spec `hallen-vorverteilung`) — bewusst
+            // VOR der Auto-Vergabe: Die Vergabe sieht die frisch verteilten
+            // Hallen im selben Poll (Auto ersetzt dort die Aufruf-Pflicht).
+            self.reconcile_auto_halls(config, &snapshot, tablet);
             let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
             if !auto_courts.is_empty() {
                 match crate::tablet::server::write_courts_to_btp(
@@ -1945,6 +2087,127 @@ mod tests {
                 name: "Halle B".to_string(),
             },
         ]
+    }
+
+    #[test]
+    fn die_vorverteilung_fuellt_das_fenster_im_feld_verhaeltnis() {
+        // Spec `hallen-vorverteilung` (E6/B5): 2:1 entsperrte Felder,
+        // x = 6 → die vordersten sechs Spiele ohne Halle bekommen
+        // A, A, B, A, A, B; dahinter bleibt es leer. Zweiter Lauf: nichts.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut cfg = AppConfig::default();
+        cfg.hall_prefill.enabled = true;
+        cfg.hall_prefill.window = 6;
+        let matches: Vec<BtpMatch> = (1..=8)
+            .map(|i| ready_named(i, None, &format!("S{i}"), &format!("T{i}")))
+            .collect();
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(2, Some(1)), court(3, Some(2))],
+            matches,
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&cfg, &snap, &tablet);
+        let store = tablet.auto_hall_store();
+        assert_eq!(store.hall(1).as_deref(), Some("Halle A"));
+        assert_eq!(store.hall(2).as_deref(), Some("Halle A"));
+        assert_eq!(store.hall(3).as_deref(), Some("Halle B"));
+        assert_eq!(store.hall(4).as_deref(), Some("Halle A"));
+        assert_eq!(store.hall(6).as_deref(), Some("Halle B"));
+        assert_eq!(store.hall(7), None, "hinter dem Fenster");
+
+        let g = store.generation();
+        engine.reconcile_auto_halls(&cfg, &snap, &tablet);
+        assert_eq!(store.generation(), g, "idempotent — keine Revisions-Flut");
+    }
+
+    #[test]
+    fn schalter_aus_verteilt_nichts_raeumt_aber_auf() {
+        // B2/E10: Ausschalten lässt Verteiltes stehen — aber verschwundene
+        // Spiele werden weiter aufgeräumt.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle A".into()), (99, "Halle A".into())]);
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![ready_named(7, None, "A", "B"), ready_named(8, None, "C", "D")],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&AppConfig::default(), &snap, &tablet);
+        let store = tablet.auto_hall_store();
+        assert_eq!(store.hall(7).as_deref(), Some("Halle A"), "Bestand bleibt");
+        assert_eq!(store.hall(99), None, "verschwundenes Spiel geräumt");
+        assert_eq!(store.hall(8), None, "Schalter aus: nichts Neues");
+    }
+
+    #[test]
+    fn eine_aktive_halle_stoppt_die_verteilung() {
+        // E2: Tages-Halle gesetzt → keine Vorverteilung.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut cfg = AppConfig::default();
+        cfg.hall_prefill.enabled = true;
+        cfg.auto_assign.active_hall = "Halle A".to_string();
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![ready_named(7, None, "A", "B")],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&cfg, &snap, &tablet);
+        assert_eq!(tablet.auto_hall_store().hall(7), None);
+    }
+
+    #[test]
+    fn ein_aufruf_raeumt_den_auto_eintrag() {
+        // E3 (Sicherheitsnetz im Reconcile): Ein gerufenes Spiel verliert
+        // seine Auto-Halle — der Aufruf ist die frischere Entscheidung.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle B".into())]);
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id: 7,
+            location_id: Some(1),
+            called_at_ms: 1_000,
+        });
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![ready_named(7, None, "A", "B")],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&AppConfig::default(), &snap, &tablet);
+        assert_eq!(tablet.auto_hall_store().hall(7), None);
+    }
+
+    #[test]
+    fn eine_verschwundene_halle_wird_im_selben_lauf_neu_verteilt() {
+        // E12: Zuordnung auf eine Halle ohne Felder → verwerfen und im
+        // selben Lauf neu verteilen.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle C".into())]);
+        let mut cfg = AppConfig::default();
+        cfg.hall_prefill.enabled = true;
+        cfg.hall_prefill.window = 2;
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![ready_named(7, None, "A", "B")],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&cfg, &snap, &tablet);
+        let hall = tablet.auto_hall_store().hall(7);
+        assert!(
+            hall.as_deref() == Some("Halle A") || hall.as_deref() == Some("Halle B"),
+            "neu verteilt statt Geisterhalle: {hall:?}"
+        );
     }
 
     #[test]

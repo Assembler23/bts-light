@@ -402,6 +402,35 @@ erscheint als **„Behandlung seit 3 min"** (ohne Countdown). Ein Tablet mit
 älterer Seite beendet die Pause weiter automatisch bei 0 — dann verschwindet
 die Marke einfach, „überzogen" erscheint nie fälschlich.
 
+### Automatische Hallen-Vorverteilung (Mehr-Hallen)
+
+> Spec: [features/hallen-vorverteilung.md](features/hallen-vorverteilung.md) ·
+> ADR [0029](adr/0029-hallen-vorverteilung-eigener-store.md)/[0030](adr/0030-halle-bindet-die-feldvergabe.md)
+
+Im Kopf des Panels **„Spiele"** (nur bei Mehr-Hallen-Turnieren): Der
+Schalter **„Vorverteilung an (N)"** gibt den vordersten **x** Spielen der
+Liste automatisch eine Halle — im Verhältnis der entsperrten Felder je
+Halle und gemischt (bei 2:1 also A, A, B, A, A, B). Das x-Feld daneben
+setzt die Fenstergröße (leer/0 = automatisch: Gesamtzahl der Felder).
+Endet ein Spiel oder kommen neue hinzu, füllt die Automatik nach. Die
+Zuordnung erscheint als Hallen-Kürzel mit **„·A"** an der Zeile, auf den
+Hallen-Monitoren und im badhub-Aushang (`display=next&halle=…`) — Spieler
+können also früh in ihre Halle gehen, das Feld folgt kurz vorher.
+
+Regeln: Die Automatik füllt nur Spiele **ohne** Halle (Regel/Hand/Aufruf
+bleiben und zählen aufs Verhältnis an); einmal verteilt heißt fest — nur
+du änderst (Hallenwähler im ⋮-Menü ersetzt die Auto-Halle; ein
+Vorbereitungs-Aufruf ebenso). **„Auto-Hallen räumen"** nimmt ausschließlich
+die automatischen Zuordnungen zurück. Bei gesetzter **Tages-Halle** ist die
+Vorverteilung ausgegraut — die beiden Modi schließen sich aus.
+
+**Wichtig — Verhaltensänderung seit v0.9.208 (ADR 0030):** Eine gesetzte
+Halle (Regel, Hand oder Auto) **bindet** jetzt die automatische
+Feldvergabe: Das Spiel bekommt nur Felder seiner Halle, auch wenn woanders
+eines frei ist. Und ein automatisch vorverteiltes Spiel wird **ohne
+Vorbereitungs-Aufruf** vergeben — wer weiterhin Ansagen will, ruft wie
+gewohnt (der Aufruf übernimmt dann die Halle).
+
 ### Startzeit-Prognose & Spielzeiten
 
 > Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·

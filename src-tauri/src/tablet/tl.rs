@@ -306,6 +306,11 @@ pub(crate) fn apply_state_action(
                     location_id: *location_id,
                     called_at_ms: now_ms,
                 });
+                // Der Aufruf ist die frischere Entscheidung als die
+                // automatische Vorverteilung — er räumt deren Eintrag (E3,
+                // Spec `hallen-vorverteilung`); der Sync-Reconcile ist nur
+                // das Sicherheitsnetz.
+                tablet.auto_hall_store().remove(*match_id);
             }
             Ok(TlResponse::ok(0))
         }
@@ -337,6 +342,11 @@ pub(crate) fn apply_state_action(
                 }
             }
             tablet.set_manual_hall(*match_id, hall);
+            // Jeder Hand-Eingriff (auch die Rücknahme, leerer Name) räumt
+            // eine Auto-Zuordnung — sonst käme nach der Rücknahme die alte
+            // Auto-Halle aus der Kaskade zurück, statt dass frisch verteilt
+            // wird (B2: die TL entscheidet, die Automatik füllt nur nach).
+            tablet.auto_hall_store().remove(*match_id);
             Ok(TlResponse::ok(0))
         }
         A::ExcludeFromAutoAssign { match_id, excluded } => {
@@ -1135,6 +1145,17 @@ pub(crate) async fn execute(
     let Some(snap) = ctx.tablet.snapshot_clone() else {
         return TlResponse::err(C::NotAllowed, "Es ist noch kein Turnier geladen.");
     };
+    // Hallen-Vorverteilung: config-ändernde Aktion wie die Profile
+    // (`mutate_app_config`), aber turnierabhängig — der E2-Guard (aktive
+    // Halle) braucht den Snapshot, deshalb HINTER dem Snapshot-Gate.
+    if let Some(response) = execute_hall_prefill_action(ctx, &config, &snap, &action) {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
+
     // Wertungen: eigener Weg, weil sie Ergebnisse schreiben statt
     // Feldzuordnungen — mit der Nachschub-Queue, die auch der Tablet- und
     // der Desktop-Pfad benutzen. Fällt BTP kurz aus, reicht der Sync-Lauf
@@ -1285,6 +1306,64 @@ pub(crate) async fn execute(
             // erneuter Versuch soll es wirklich noch einmal versuchen.
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
+    }
+}
+
+/// Führt die Hallen-Vorverteilungs-Aktionen aus (Spec
+/// `hallen-vorverteilung`): `SetHallPrefill` ändert die Config (Weg über
+/// `mutate_app_config`, wie die Panel-Profile), `ClearAutoHalls` räumt den
+/// Auto-Store (E10). `None` heißt: keine Vorverteilungs-Aktion, an anderer
+/// Stelle weiterbehandeln.
+fn execute_hall_prefill_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    config: &AppConfig,
+    snap: &crate::btp::model::BtpSnapshot,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+    match action {
+        A::SetHallPrefill { enabled, window } => {
+            // E2-Guard host-seitig (die UI-Ausgrauung ist nur Komfort):
+            // Tages-Halle und Vorverteilung schließen sich aus.
+            if *enabled {
+                let active = config.auto_assign.active_hall.trim();
+                let aktiv = !active.is_empty()
+                    && snap
+                        .locations
+                        .iter()
+                        .any(|l| l.name.trim().eq_ignore_ascii_case(active));
+                if aktiv {
+                    return Some(TlResponse::err(
+                        C::NotAllowed,
+                        "Die aktive Halle der Feldvergabe ist gesetzt — Vorverteilung und \
+                         Tages-Halle schließen sich aus. Erst die aktive Halle zurücknehmen.",
+                    ));
+                }
+            }
+            // Klemme (Security-Gate für die neue Zahleneingabe): 0 bleibt
+            // der „automatisch"-Sentinel, alles andere 1..=120
+            // (Wartelisten-Limit).
+            let window = (*window).min(QUEUE_LIMIT as u32);
+            let enabled = *enabled;
+            Some(
+                match ctx.mutate_app_config(|cfg| {
+                    cfg.hall_prefill.enabled = enabled;
+                    cfg.hall_prefill.window = window;
+                    Ok(())
+                }) {
+                    Ok(()) => TlResponse::ok(0),
+                    Err(rejected) => rejected,
+                },
+            )
+        }
+        A::ClearAutoHalls => {
+            // E10: räumt NUR die Auto-Zuordnungen — Hand, Regel und Aufruf
+            // bleiben. Der nächste Sync-Lauf verteilt (bei aktivem
+            // Schalter) frisch.
+            ctx.tablet.auto_hall_store().clear_all();
+            Some(relay_proto::TlResponse::ok(0))
+        }
+        _ => None,
     }
 }
 
@@ -1534,6 +1613,8 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::ScorekeeperRemove { key } => format!("sk-remove:{key}"),
         A::ScorekeeperAdd { names } => format!("sk-add:{}", names.join(",")),
         A::SetAutoAssign { enabled } => format!("auto:{enabled}"),
+        A::SetHallPrefill { enabled, window } => format!("hall-prefill:{enabled}:{window}"),
+        A::ClearAutoHalls => "hall-prefill-clear".to_string(),
         A::OfficialAssign {
             match_id,
             official_id,
@@ -1640,6 +1721,11 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             _ => format!("Erneuter Aufruf Feld {court_id}"),
         },
         A::AnnouncePrepCall { .. } => "Erneuter Vorbereitungs-Aufruf".to_string(),
+        A::SetHallPrefill { enabled, window } => format!(
+            "Hallen-Vorverteilung {} (x={window})",
+            if *enabled { "an" } else { "aus" }
+        ),
+        A::ClearAutoHalls => "Auto-Hallen räumen".to_string(),
         A::EnterResult { match_id, .. } => format!("Ergebnis für Spiel {match_id}"),
         A::ConfirmWalkover { .. } => "Kampflose Wertung".to_string(),
         A::DismissWalkover { .. } => "Walkover-Vorschlag verwerfen".to_string(),
@@ -1777,6 +1863,11 @@ pub struct TlState {
     /// nicht auf allen.
     pub halls: Vec<TlHall>,
     pub auto_assign: TlAutoAssign,
+    /// Automatische Hallen-Vorverteilung (Spec `hallen-vorverteilung`).
+    /// `#[serde(default)]` hält ältere Gegenstellen kompatibel; fehlt das
+    /// Feld (alter Host), zeigt die Seite die Bedienung nicht.
+    #[serde(default)]
+    pub hall_prefill: Option<TlHallPrefill>,
     /// Schwellen des Aufruf-Timers, damit die Seite die Aufruf-Stufe
     /// genauso einfärbt wie die Desktop-Oberfläche.
     pub call_timer: TlCallTimer,
@@ -1880,6 +1971,23 @@ pub struct TlAutoAssign {
     pub wait_minutes: f64,
     /// Tages-Halle; leer = alle.
     pub active_hall: String,
+}
+
+/// Zustand der automatischen Hallen-Vorverteilung (Spec
+/// `hallen-vorverteilung`) — reine Konfigurations-/Betriebsangaben, keine
+/// Personendaten. Alte Hosts liefern das Feld nicht → die Seite blendet
+/// die Bedienelemente dann gar nicht ein (Feature-Detection).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlHallPrefill {
+    pub enabled: bool,
+    /// Konfiguriertes x (0 = automatisch).
+    pub window: u32,
+    /// Tatsächlich wirksames Fenster (aufgelöster 0-Sentinel + Klemme) —
+    /// erspart der Seite die Rechnung.
+    pub effective_window: u32,
+    /// Tages-Halle gesetzt (E2)? Dann ist die Vorverteilung blockiert und
+    /// die Seite graut die Bedienung mit Hinweis aus.
+    pub blocked_by_active_hall: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2288,6 +2396,7 @@ pub(crate) fn build_state_limited(
             multi_hall: false,
             halls: Vec::new(),
             auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
+            hall_prefill: Some(hall_prefill_view(config, 0, false)),
             call_timer: call_timer_view(config),
             rest_minutes: None,
             courts: Vec::new(),
@@ -2646,6 +2755,15 @@ pub(crate) fn build_state_limited(
         multi_hall: snap.is_multi_hall(),
         halls,
         auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
+        hall_prefill: Some(hall_prefill_view(config, snap.court_infos.len(), {
+            let active = config.auto_assign.active_hall.trim();
+            !active.is_empty()
+                && snap.is_multi_hall()
+                && snap
+                    .locations
+                    .iter()
+                    .any(|l| l.name.trim().eq_ignore_ascii_case(active))
+        })),
         call_timer: call_timer_view(config),
         // Genau der Wert, nach dem auch die Blockier-Zeiten in diesem
         // Datensatz gerechnet sind: Konfiguration schlägt BTP-Einstellung.
@@ -3051,6 +3169,26 @@ fn clearing_match(
         return None;
     }
     assign::court_occupied_by(snap, court_id)
+}
+
+/// Zustand der Hallen-Vorverteilung für die Anzeige (Spec
+/// `hallen-vorverteilung`). `total_courts`/`active_hall_known` kommen aus
+/// dem Snapshot — ohne Turnier gilt das Fenster als unaufgelöst (0 Felder
+/// ⇒ Klemme auf 1) und keine Tages-Halle als auflösbar.
+fn hall_prefill_view(
+    config: &AppConfig,
+    total_courts: usize,
+    active_hall_known: bool,
+) -> TlHallPrefill {
+    TlHallPrefill {
+        enabled: config.hall_prefill.enabled,
+        window: config.hall_prefill.window,
+        effective_window: crate::tablet::hall_assign::effective_window(
+            config.hall_prefill.window,
+            total_courts,
+        ) as u32,
+        blocked_by_active_hall: active_hall_known,
+    }
 }
 
 fn auto_assign_view(config: &AppConfig, paused: bool) -> TlAutoAssign {
@@ -6293,6 +6431,12 @@ mod tests {
             "configured",
             "wait_minutes",
             "active_hall",
+            // Hallen-Vorverteilung (Spec hallen-vorverteilung): reine
+            // Betriebs-/Konfigurationsangaben ohne Personenbezug.
+            "hall_prefill",
+            "window",
+            "effective_window",
+            "blocked_by_active_hall",
             "second_call_minutes",
             "third_call_minutes",
             "not_started_minutes",

@@ -288,6 +288,21 @@ impl Default for PredictionConfig {
     }
 }
 
+/// Automatische Hallen-Vorverteilung (Spec
+/// `docs/features/hallen-vorverteilung.md`, ADR 0029/0030). Opt-in —
+/// standardmäßig aus; nur bei Mehr-Hallen-Turnieren wirksam, und niemals
+/// zusammen mit einer gesetzten aktiven Halle (E2).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HallPrefillConfig {
+    /// Vorverteilung aktiv?
+    pub enabled: bool,
+    /// Fenstergröße x — wie viele Spiele im Voraus eine Halle bekommen.
+    /// 0 = automatisch (Gesamtzahl der Spielfelder, B4). Host klemmt auf
+    /// 1..=120 (Wartelisten-Limit).
+    pub window: u32,
+}
+
 /// Zähltafelbediener-Verwaltung (ADR 0007, Phase 1). Opt-in — standardmäßig
 /// aus, damit Turniere ohne dieses Konzept unverändert laufen.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -553,6 +568,11 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub prediction: PredictionConfig,
+    /// Automatische Hallen-Vorverteilung (Spec `hallen-vorverteilung`).
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar;
+    /// Default ist **aus**.
+    #[serde(default)]
+    pub hall_prefill: HallPrefillConfig,
     /// Zähltafelbediener-Verwaltung (ADR 0007). `#[serde(default)]` hält
     /// ältere Konfigurationsdateien lesbar.
     #[serde(default)]
@@ -1032,6 +1052,25 @@ mod tests {
     }
 
     #[test]
+    fn hall_prefill_defaults_and_roundtrip() {
+        // Alte Configs ohne `hall_prefill` laden mit Default AUS (Spec
+        // `hallen-vorverteilung`, B3); gesetzte Werte überleben.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert!(!cfg.hall_prefill.enabled);
+        assert_eq!(cfg.hall_prefill.window, 0, "0 = automatisch");
+        let mut cfg = cfg;
+        cfg.hall_prefill.enabled = true;
+        cfg.hall_prefill.window = 18;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.hall_prefill, cfg.hall_prefill);
+    }
+
+    #[test]
     fn hall_layouts_survive_a_config_roundtrip_and_default_empty() {
         // Alte Configs ohne das Feld laden weiter (serde default) — `btp` und
         // `badhub` sind Pflichtfelder ohne Default, deshalb minimal statt "{}"
@@ -1415,6 +1454,10 @@ mod tests {
             prediction: PredictionConfig {
                 enabled: false,
                 default_duration_mins: 18.0,
+            },
+            hall_prefill: HallPrefillConfig {
+                enabled: true,
+                window: 12,
             },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,
