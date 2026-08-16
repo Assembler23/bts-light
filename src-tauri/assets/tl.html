@@ -6032,8 +6032,11 @@ function renderHallPrefill() {
     : hp.enabled
       ? `Die nächsten ${hp.effective_window} Spiele bekommen automatisch eine Halle im Verhältnis der Felder`
       : "Verteilt die nächsten Spiele automatisch auf die Hallen (Verhältnis der Felder)";
-  toggle.disabled = hp.blocked_by_active_hall;
-  input.disabled = hp.blocked_by_active_hall;
+  // Die Tages-Halle blockt nur das EINSCHALTEN (so auch der Host-Guard) —
+  // Ausschalten muss immer möglich bleiben, sonst poppte die Verteilung
+  // beim Entfernen der Tages-Halle unerwartet wieder an (Review 2026-08-16).
+  toggle.disabled = hp.blocked_by_active_hall && !hp.enabled;
+  input.disabled = hp.blocked_by_active_hall && !hp.enabled;
   // Den Wert nie unter den Fingern wegschreiben.
   if (document.activeElement !== input) input.value = hp.window || "";
   input.placeholder = `auto (${hp.effective_window})`;
@@ -6044,7 +6047,10 @@ async function togglePrefill() {
   const hp = state.hall_prefill;
   if (!hp) return;
   const on = !hp.enabled;
-  const raw = Number($("prefill-window")?.value);
+  // Runden ist Pflicht: `window` ist auf der Wire-Ebene eine Ganzzahl —
+  // ein Dezimalwert (das number-Feld lässt „4.5" zu) ließe die ganze
+  // Aktion am Parser abprallen (Review 2026-08-16).
+  const raw = Math.round(Number($("prefill-window")?.value));
   const w = Number.isFinite(raw) && raw >= 0 ? Math.min(raw, 120) : hp.window;
   await send(
     `prefill-${on}-${w}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
@@ -6056,7 +6062,7 @@ async function togglePrefill() {
 async function sendPrefillWindow() {
   const hp = state.hall_prefill;
   if (!hp) return;
-  const raw = Number($("prefill-window")?.value);
+  const raw = Math.round(Number($("prefill-window")?.value));
   const w = Number.isFinite(raw) && raw >= 0 ? Math.min(raw, 120) : 0;
   await send(
     `prefill-x-${w}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,

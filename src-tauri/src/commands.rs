@@ -269,6 +269,10 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht im
     // Assistenten — dessen Speichern darf sie nicht zurücksetzen.
     incoming.hall_layouts = current.hall_layouts.clone();
+    // Die Hallen-Vorverteilung wird ausschließlich in TL-Web geschaltet —
+    // der Assistent kennt das Feld nicht (serde-Default = aus) und würde
+    // sie mit jedem Speichern stumm abschalten.
+    incoming.hall_prefill = current.hall_prefill.clone();
     incoming
 }
 
@@ -3911,6 +3915,21 @@ mod tests {
         let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
         let ergebnis = keep_host_managed_fields(incoming, &current);
         assert_eq!(ergebnis.hall_layouts, current.hall_layouts);
+    }
+
+    #[test]
+    fn the_wizard_cannot_wipe_the_hall_prefill() {
+        // Die Hallen-Vorverteilung wird ausschließlich in TL-Web geschaltet
+        // (Spec hallen-vorverteilung E-TLW) — der Assistent kennt das Feld
+        // nicht und schickt beim Speichern den serde-Default (aus, 0).
+        // Ohne Schutz wäre jedes Wizard-Speichern ein stilles Abschalten.
+        let mut current = AppConfig::default();
+        current.hall_prefill.enabled = true;
+        current.hall_prefill.window = 7;
+        let incoming = AppConfig::default(); // Wizard-Stand ohne hall_prefill
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert!(ergebnis.hall_prefill.enabled);
+        assert_eq!(ergebnis.hall_prefill.window, 7);
     }
 
     #[test]

@@ -462,6 +462,13 @@ davon an Monitore oder den Liveticker.
   abgelehnt — die Ablehnung erscheint im Dialog, nicht als Toast — was BTP
   beim Überschreiben mit dem Turnierbaum macht, ist noch nicht abschließend
   geklärt ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
+- **Eine Halle ohne bedienbare Felder hält ihre Spiele fest.** Seit ADR
+  0030 bindet eine gesetzte Halle (Regel, Hand oder Auto) die Feldvergabe.
+  Automatische Zuordnungen räumt die App selbst, wenn ihre Halle keine
+  Felder mehr hat — bei **Regel- oder Hand-Hallen** dagegen wartet das
+  Spiel still, bis dort wieder ein Feld frei/entsperrt ist. Abhilfe von
+  Hand: im Hallenwähler des ⋮-Menüs „–" wählen (Halle entfernen) oder eine
+  andere Halle setzen.
 - Über den **Cloud-Weg** ist die Warteliste turnierweit auf 40 Spiele
   gekürzt (im Hallennetz sind es 120; seit ADR 0026 gilt beide Grenzen
   hallenübergreifend, nicht mehr je Halle). Der Zustand geht bei jedem

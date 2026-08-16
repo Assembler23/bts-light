@@ -629,16 +629,54 @@ impl SyncEngine {
 
         let calls = tablet.preparation_calls();
         let called: HashSet<i64> = calls.iter().map(|c| c.match_id).collect();
+        // Behalten wird nach STATUS, nicht nach Teams (Review 2026-08-16):
+        // Eine Ergebnis-Korrektur kann BTP einen Abruf lang leere
+        // Teamlisten liefern lassen — der Eintrag darf davon nicht
+        // wegfliegen und beim Neu-Verteilen die Halle wechseln (B2). Die
+        // Team-Bedingung gilt weiter fürs FENSTER (unten), nur nicht fürs
+        // Räumen.
         let keep: HashSet<i64> = snapshot
             .matches
             .iter()
-            .filter(|m| {
-                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
-            })
+            .filter(|m| m.status == MatchStatus::Scheduled)
             .filter(|m| !called.contains(&m.id))
             .map(|m| m.id)
             .collect();
         store.retain(&keep);
+
+        let manual_halls = tablet.manual_halls();
+        // Von einer HÖHERRANGIGEN Quelle überschattete Auto-Einträge räumen
+        // (Review 2026-08-16): Entsteht nach der Vorverteilung eine
+        // Disziplin-Regel oder ein BTP-Ort, löst die Kaskade nicht mehr
+        // Auto auf — der stehen gebliebene Eintrag zeigte im
+        // Liveticker-Stempel (der Regel/BTP bewusst nicht kennt) eine
+        // andere Halle als TL-Web und Vergabe. Aufruf/Hand räumen zwar
+        // schon an der Aktions-Stelle — die Kaskaden-Prüfung hier deckt
+        // alle Quellen in einem Netz ab.
+        for (id, _) in store.halls() {
+            let Some(m) = snapshot.matches.iter().find(|m| m.id == id) else {
+                continue;
+            };
+            let call = calls.iter().find(|c| c.match_id == id);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _) = crate::tablet::assign::hall_for_match(
+                config,
+                snapshot,
+                m,
+                manual_halls.get(&id).map(String::as_str),
+                called_hall,
+                None, // bewusst OHNE Auto: löst hier trotzdem etwas auf ⇒ überschattet
+            );
+            if !hall.is_empty() {
+                store.remove(id);
+            }
+        }
 
         // Entsperrte Felder je Halle, in BTP-Locations-Reihenfolge
         // (deterministischer Gleichstands-Brecher der Verteilung). Felder
@@ -657,12 +695,23 @@ impl SyncEngine {
                 (l.name.trim().to_string(), felder)
             })
             .collect();
-        let vorhanden: HashSet<String> = felder_je_halle
+        // E12 räumt nur Zuordnungen auf Hallen, die es nicht mehr GIBT
+        // (kein einziges Feld) — eine vorübergehend komplett GESPERRTE
+        // Halle behält ihren Bestand (E11/B2, Review 2026-08-16) und
+        // bekommt lediglich nichts Neues (ihre Quote ist 0).
+        let existierend: HashSet<String> = snapshot
+            .locations
             .iter()
-            .filter(|(_, f)| *f > 0)
-            .map(|(h, _)| h.clone())
+            .filter(|l| !l.name.trim().is_empty())
+            .filter(|l| {
+                snapshot
+                    .court_infos
+                    .iter()
+                    .any(|c| c.location_id == Some(l.id))
+            })
+            .map(|l| l.name.trim().to_string())
             .collect();
-        store.remove_where_hall_not_in(&vorhanden);
+        store.remove_where_hall_not_in(&existierend);
 
         if !config.hall_prefill.enabled || !snapshot.is_multi_hall() {
             return;
@@ -688,7 +737,6 @@ impl SyncEngine {
         // Fenster: die vordersten x der globalen Warteliste — dieselbe
         // Sortierung wie überall (`resolve_and_sort_key`), gerufene stehen
         // vorn und zählen auf die Quote (E8).
-        let manual_halls = tablet.manual_halls();
         let auto_halls = store.halls();
         let mut ordered: Vec<(
             crate::tablet::assign::ManualOrderSortKey,
@@ -2149,6 +2197,99 @@ mod tests {
         assert_eq!(store.hall(7).as_deref(), Some("Halle A"), "Bestand bleibt");
         assert_eq!(store.hall(99), None, "verschwundenes Spiel geräumt");
         assert_eq!(store.hall(8), None, "Schalter aus: nichts Neues");
+    }
+
+    #[test]
+    fn eine_komplett_gesperrte_halle_behaelt_ihre_zuordnungen() {
+        // Review 2026-08-16 (bestätigt): E12 gilt nur für Hallen, die es
+        // nicht mehr GIBT — eine vorübergehend komplett gesperrte Halle
+        // (Mittagspause) darf den Bestand nicht räumen (E11/B2: „fest =
+        // fest"); sie bekommt nur nichts Neues.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle B".into())]);
+        tablet.set_court_locked(3, true); // das einzige B-Feld gesperrt
+        let mut cfg = AppConfig::default();
+        cfg.hall_prefill.enabled = true;
+        cfg.hall_prefill.window = 2;
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![ready_named(7, None, "A", "B"), ready_named(8, None, "C", "D")],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&cfg, &snap, &tablet);
+        assert_eq!(
+            tablet.auto_hall_store().hall(7).as_deref(),
+            Some("Halle B"),
+            "Bestand bleibt trotz Voll-Sperre"
+        );
+        assert_eq!(
+            tablet.auto_hall_store().hall(8).as_deref(),
+            Some("Halle A"),
+            "Neues geht nur in die bespielbare Halle"
+        );
+    }
+
+    #[test]
+    fn eine_spaeter_greifende_regel_verdraengt_die_auto_halle() {
+        // Review 2026-08-16 (bestätigt): Entsteht NACH der Vorverteilung
+        // eine höherrangige Quelle (Disziplin-Regel, BTP-Ort), muss der
+        // überschattete Auto-Eintrag weg — sonst zeigte der
+        // Liveticker-Stempel (Kaskade Aufruf > Hand > Auto, ohne
+        // Regel/BTP) eine andere Halle als TL-Web und Vergabe.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle A".into())]);
+        let mut cfg = AppConfig::default();
+        cfg.discipline_hall_rules.push(crate::config::DisciplineHallRule {
+            discipline: "mens_singles".to_string(),
+            draw_name: String::new(),
+            hall: "Halle B".to_string(),
+        });
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![ready_named(7, None, "A", "B")],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&cfg, &snap, &tablet);
+        assert_eq!(
+            tablet.auto_hall_store().hall(7),
+            None,
+            "die Regel überschattet — der Auto-Eintrag ist geräumt"
+        );
+    }
+
+    #[test]
+    fn transient_leere_teams_loeschen_keinen_auto_eintrag() {
+        // Review 2026-08-16 (plausibel): Bei einer Ergebnis-Korrektur kann
+        // BTP einen Abruf lang leere Teamlisten liefern — der Eintrag darf
+        // dann nicht wegfliegen und beim nächsten Poll in einer ANDEREN
+        // Halle landen (B2). Nur Status-Wechsel/Verschwinden räumen.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle B".into())]);
+        let mut flackernd = ready_named(7, None, "A", "B");
+        flackernd.team2 = Vec::new();
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(3, Some(2))],
+            vec![flackernd],
+            zwei_hallen(),
+        );
+        engine.reconcile_auto_halls(&AppConfig::default(), &snap, &tablet);
+        assert_eq!(
+            tablet.auto_hall_store().hall(7).as_deref(),
+            Some("Halle B"),
+            "Team-Flackern räumt nicht"
+        );
     }
 
     #[test]
