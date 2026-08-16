@@ -9,7 +9,7 @@ Die Hallenfarbe reist zu Gegenstellen mit **eigenem Release-Zyklus**: über
 das opake `TlState`-JSON (TL-Web), drei typisierte relay-proto-Frames
 (`CourtBrief`, `PreparedMatch`, `MonitorState` → Cloud-Monitore) und den
 badhub-`tset` (Aushang, Deploy nur durch Kollegen). Die Farbwahl selbst
-ist auf eine kuratierte ~10-Ton-Palette beschränkt.
+ist auf eine kuratierte 16-Ton-Palette beschränkt.
 
 ## Entscheidung
 
