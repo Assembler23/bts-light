@@ -286,7 +286,7 @@ mod tests {
             };
             let h = if h < 0.0 { h + 360.0 } else { h };
             assert!(
-                !(h < 15.0 || h > 345.0),
+                (15.0..=345.0).contains(&h),
                 "{hex} (h={h:.0}) liegt im Rot-Bereich"
             );
             assert!(
