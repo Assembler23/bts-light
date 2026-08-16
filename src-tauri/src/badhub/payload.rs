@@ -107,6 +107,11 @@ pub struct TsetCourt {
     /// Ein-Hallen-Turnieren – der Liveticker-Monitor gruppiert erst, wenn
     /// die Halle gesetzt ist.
     pub hall: String,
+    /// Hallen-Farbe (Hex `#rrggbb`, Spec hallen-farben) für den
+    /// `display=monitor`-Aushang. Fehlt bei Ein-Hallen-Turnieren komplett
+    /// im JSON — alte badhub-Parser sehen den bisherigen Payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
     /// Verweist auf `TsetMatch._id`.
     pub match_id: String,
 }
@@ -149,6 +154,11 @@ pub struct TsetMatch {
     /// Matches). Fehlt bei hallenunabhängigen Aufrufen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hall: Option<String>,
+    /// Hallen-Farbe zum `hall`-Feld (Hex, Spec hallen-farben) für den
+    /// `display=next`-Aushang. Fehlt ohne Halle und bei
+    /// Ein-Hallen-Turnieren.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
 }
 
 /// Stabile, turnierweit eindeutige Match-ID für den Badhub-Payload.
@@ -176,7 +186,27 @@ fn to_tset_match(m: &BtpMatch) -> TsetMatch {
         outcome: None,
         preparation_call_ts: None,
         hall: None,
+        hall_color: None,
     }
+}
+
+/// Effektive Hallen-Farben des Turniers (Spec hallen-farben) — leer bei
+/// Ein-Hallen-Turnieren, dann fehlen die Felder komplett im Payload.
+fn hallen_farben(snapshot: &BtpSnapshot, cfg: &AppConfig) -> Vec<(String, String)> {
+    let hallen: Vec<String> = snapshot.locations.iter().map(|l| l.name.clone()).collect();
+    crate::hall_colors::effective_hall_colors(cfg, &hallen)
+}
+
+/// Farbe einer Halle aus der aufgelösten Liste (case-insensitiv).
+fn farbe_fuer(farben: &[(String, String)], hall: &str) -> Option<String> {
+    let schluessel = hall.trim().to_lowercase();
+    if schluessel.is_empty() {
+        return None;
+    }
+    farben
+        .iter()
+        .find(|(h, _)| h.to_lowercase() == schluessel)
+        .map(|(_, farbe)| farbe.clone())
 }
 
 /// Payload-Wert für die Ergebnisart; `None` bei regulärem Ausgang.
@@ -259,7 +289,16 @@ fn upcoming(snapshot: &BtpSnapshot, ctx: &LivetickerContext) -> Vec<TsetMatch> {
         key
     });
     scheduled.truncate(UPCOMING_LIMIT);
-    scheduled.iter().map(|m| to_upcoming_match(m)).collect()
+    // Hallen-Farbe zum Aufruf (Spec hallen-farben) — einmal auflösen.
+    let farben = hallen_farben(snapshot, ctx.config);
+    scheduled
+        .iter()
+        .map(|m| {
+            let mut t = to_upcoming_match(m);
+            t.hall_color = t.hall.as_deref().and_then(|h| farbe_fuer(&farben, h));
+            t
+        })
+        .collect()
 }
 
 /// Vollständiger Spielplan für badhub (Nachricht `sched`).
@@ -456,18 +495,23 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, ctx: &LivetickerContext) -> 
         .filter(|m| m.status == MatchStatus::OnCourt)
         .collect();
 
+    let farben = hallen_farben(snapshot, ctx.config);
     let courts = on_court
         .iter()
         .filter_map(|m| {
-            m.court.as_ref().map(|c| TsetCourt {
-                num: c.clone(),
+            m.court.as_ref().map(|c| {
                 // Halle des Felds für den Liveticker-Hallen-Monitor; bei
                 // Ein-Hallen-Turnieren leer.
-                hall: m
+                let hall = m
                     .court_id
                     .map(|id| snapshot.court_location_name(id))
-                    .unwrap_or_default(),
-                match_id: match_id(m.id),
+                    .unwrap_or_default();
+                TsetCourt {
+                    num: c.clone(),
+                    hall_color: farbe_fuer(&farben, &hall),
+                    hall,
+                    match_id: match_id(m.id),
+                }
             })
         })
         .collect();
@@ -755,6 +799,101 @@ mod tests {
         assert_eq!(tset.event.courts.len(), 1);
         assert_eq!(tset.event.courts[0].num, "Feld 9");
         assert_eq!(tset.event.courts[0].match_id, "btp_1");
+    }
+
+    /// Zwei-Hallen-Fixture: Feld „1" (CourtID 101) in „Halle B", ein
+    /// laufendes Spiel darauf, ein gerufenes Spiel für „Halle A".
+    fn zwei_hallen_snapshot() -> BtpSnapshot {
+        let mut laufend = sample_match(1, MatchStatus::OnCourt, Some("1"));
+        laufend.court_id = Some(101);
+        let mut gerufen = sample_match(2, MatchStatus::Scheduled, None);
+        gerufen.preparation_call_ts = Some(NOW);
+        gerufen.preparation_hall = Some("Halle A".to_string());
+        BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: vec!["1".into()],
+            locations: vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+            court_infos: vec![BtpCourt {
+                id: 101,
+                name: "1".to_string(),
+                location_id: Some(2),
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: vec![laufend, gerufen],
+        }
+    }
+
+    #[test]
+    fn tset_courts_carry_their_hall_color_in_multi_hall() {
+        // Spec hallen-farben: display=monitor gruppiert nach Halle — die
+        // Farbe reist am Court mit (alphabetisch: „Halle B" → Ton 1).
+        let cfg = AppConfig::default();
+        let tset = build_tset(&zwei_hallen_snapshot(), 1, &LivetickerContext::bare(&cfg));
+        assert_eq!(tset.event.courts[0].hall, "Halle B");
+        assert_eq!(
+            tset.event.courts[0].hall_color.as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[1])
+        );
+    }
+
+    #[test]
+    fn tset_upcoming_matches_carry_the_hall_color_of_their_call() {
+        // display=next: das gerufene Spiel trägt die Farbe seiner Halle
+        // („Halle A" → Ton 0); ungerufene ohne Halle bleiben ohne Farbe.
+        let cfg = AppConfig::default();
+        let tset = build_tset(&zwei_hallen_snapshot(), 1, &LivetickerContext::bare(&cfg));
+        let gerufen = tset
+            .event
+            .upcoming_matches
+            .iter()
+            .find(|m| m.id == "btp_2")
+            .expect("gerufenes Spiel ist gelistet");
+        assert_eq!(gerufen.hall.as_deref(), Some("Halle A"));
+        assert_eq!(
+            gerufen.hall_color.as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[0])
+        );
+    }
+
+    #[test]
+    fn tset_omits_hall_color_for_single_hall_tournaments() {
+        // Ein-Hallen-Turnier: das Feld fehlt KOMPLETT im JSON
+        // (skip_serializing_if) — alte badhub-Parser sehen exakt den
+        // bisherigen Payload.
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: vec![
+                sample_match(1, MatchStatus::OnCourt, Some("Feld 9")),
+                sample_match(3, MatchStatus::Scheduled, None),
+            ],
+        };
+        let cfg = AppConfig::default();
+        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&cfg));
+        let json = serde_json::to_string(&tset).unwrap();
+        assert!(
+            !json.contains("hall_color"),
+            "kein hall_color im Ein-Hallen-Payload: {json}"
+        );
     }
 
     #[test]
