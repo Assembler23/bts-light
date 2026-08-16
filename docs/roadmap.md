@@ -367,6 +367,17 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Hallen-Farben** — jede Halle eines Mehr-Hallen-Turniers bekommt eine
+  Farbe (Auto-Palette, deterministisch alphabetisch; Übersteuerung per
+  Palettenton auf der Felderübersicht), sichtbar als Marke neben jeder
+  Hallen-Nennung: Desktop, TL-Web, Monitor-Seiten (LAN + Cloud) und
+  badhub-Aushang (display=next + display=monitor; badhub-Anzeige als
+  Folge-PR im badhub-Repo). Farbe nie einziger Informationsträger;
+  Ein-Hallen-Turniere bleiben unberührt.
+  Spec: [features/hallen-farben.md](features/hallen-farben.md) ·
+  ADR [0031](adr/0031-hallen-farben-eigener-config-store.md) ·
+  [0032](adr/0032-hallen-farben-deterministische-auto-palette.md) ·
+  [0033](adr/0033-hallen-farben-hex-auf-dem-draht.md).
 - **Schiedsrichtermanagement** — BTP-Schiedsrichterliste in BTS Light:
   SR/AR je Spiel zuweisen (Client + TL-Web, auch bei laufendem Spiel),
   Konflikt-Warnungen (Verein/Sperr-Spieler, nie blockierend), automatische

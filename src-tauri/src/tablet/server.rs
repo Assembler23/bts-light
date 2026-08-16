@@ -588,10 +588,15 @@ async fn health(
     Query(q): Query<DeviceHeartbeat>,
 ) -> Json<serde_json::Value> {
     note_heartbeat(&ctx, &q);
-    let ct = &ctx.app_config().call_timer;
+    let cfg = ctx.app_config();
+    let ct = &cfg.call_timer;
+    // Hallen-Farben (Spec hallen-farben) für die Multifeld-Übersicht —
+    // gleiche kanonische Hallenliste wie Desktop und TL-Web.
+    let mut courts = ctx.tablet.overview();
+    crate::hall_colors::paint(&mut courts, &cfg, &ctx.tablet.hall_names());
     Json(serde_json::json!({
         "ok": true,
-        "courts": ctx.tablet.overview(),
+        "courts": courts,
         // Server-Zeit, damit das Tablet seinen Uhr-Offset zum Server
         // bestimmen kann und Pausen-`endsAt` in Server-Zeit setzt — so
         // zeigen Tablet und TV denselben Countdown (sonst Drift durch
@@ -651,12 +656,24 @@ async fn monitor_state(
     let state = monitor::build_monitor_state(
         court_id,
         label,
+        hall_color_for(&ctx, court_id),
         court,
         &cfg.court_monitor,
         &cfg.call_timer,
         ads,
     );
     ([(header::CACHE_CONTROL, "no-store")], Json(state))
+}
+
+/// Effektive Hallen-Farbe des Felds (Spec hallen-farben) — über die
+/// kanonische Turnier-Hallenliste aufgelöst; `None` bei Ein-Hallen-
+/// Turnieren oder Feldern ohne Halle.
+fn hall_color_for(ctx: &ServerCtx, court_id: i64) -> Option<String> {
+    let hall = ctx.tablet.court_hall(court_id);
+    if hall.is_empty() {
+        return None;
+    }
+    crate::hall_colors::color_for(&ctx.app_config(), &ctx.tablet.hall_names(), &hall)
 }
 
 /// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
@@ -686,6 +703,7 @@ async fn monitor_device_state(
             monitor::build_monitor_state(
                 court_id,
                 label,
+                hall_color_for(&ctx, court_id),
                 court_data,
                 &cfg.court_monitor,
                 &cfg.call_timer,
@@ -1007,6 +1025,9 @@ async fn info_preparation_state(
     let calls = ctx.tablet.preparation_calls();
     let manual_halls = ctx.tablet.manual_halls();
     let auto_halls = ctx.tablet.auto_hall_store().halls();
+    // Hallen-Farben (Spec hallen-farben) einmal je Antwort auflösen.
+    let hallen_farben =
+        crate::hall_colors::effective_hall_colors(&ctx.app_config(), &ctx.tablet.hall_names());
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
     // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
@@ -1049,7 +1070,7 @@ async fn info_preparation_state(
     let candidates: Vec<serde_json::Value> = ordered
         .into_iter()
         .map(|(_, m, hall)| {
-            let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
+            let call_info = calls.iter().find(|c| c.match_id == m.id).map(|c| {
                 let call_hall = c
                     .location_id
                     .and_then(|lid| {
@@ -1060,9 +1081,22 @@ async fn info_preparation_state(
                             .map(|l| l.name.clone())
                     })
                     .unwrap_or_default();
+                (call_hall, c.called_at_ms)
+            });
+            // Die Farbe gehört zur ANGEZEIGTEN Halle (Review 2026-08-16):
+            // preparation.html rendert den Punkt neben `call.hall` — bei
+            // einem Aufruf muss dessen Halle die Farbe stellen (wie der
+            // Cloud-Weg über build_prepared_list), sonst widersprächen
+            // sich LAN- und Cloud-TV, sobald Kaskaden- und Aufruf-Halle
+            // auseinanderfallen. Ohne Aufruf gilt die Kaskaden-Halle.
+            let anzeige_halle = match &call_info {
+                Some((call_hall, _)) if !call_hall.is_empty() => call_hall.clone(),
+                _ => hall.clone(),
+            };
+            let call = call_info.map(|(call_hall, called_at_ms)| {
                 serde_json::json!({
                     "hall": call_hall,
-                    "called_at_ms": c.called_at_ms,
+                    "called_at_ms": called_at_ms,
                 })
             });
             let manual = ctx.tablet.queue_order_store().rank(m.id).is_some();
@@ -1076,6 +1110,7 @@ async fn info_preparation_state(
                 "draw_id": m.draw_id,
                 "call": call,
                 "hall": hall,
+                "hall_color": crate::hall_colors::farbe_fuer(&hallen_farben, &anzeige_halle),
                 "manual": manual,
             })
         })
@@ -2778,6 +2813,44 @@ mod tests {
             tmp,
             shared_config,
         )
+    }
+
+    #[test]
+    fn monitor_state_for_multi_hall_court_carries_its_hall_color() {
+        // Spec hallen-farben: Der LAN-Monitor bekommt die Farbe seines
+        // Felds über die kanonische Hallenliste — alphabetisch bekommt
+        // „Halle A" Ton 0, „Halle B" (mit Feld 101) Ton 1.
+        let ctx = make_ctx(1);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: Vec::new(),
+            courts: vec!["1".into()],
+            locations: vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".into(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".into(),
+                },
+            ],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "1".into(),
+                location_id: Some(2),
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        assert_eq!(
+            hall_color_for(&ctx, 101).as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[1])
+        );
+        assert_eq!(hall_color_for(&ctx, 999), None, "unbekanntes Feld");
     }
 
     /// Standard-Ergebnis-Body (Match 42 / Court 101) mit gegebenen Sätzen.

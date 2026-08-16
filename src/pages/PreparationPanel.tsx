@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowUpDown, GripVertical, Megaphone, RotateCcw, Volume2, X } from "lucide-react";
 import {
   callPreparation,
+  hallColorsView,
   preparationCandidates,
   queueOrderReset,
   queueReorder,
@@ -100,6 +101,25 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     () => candidates.filter((c) => c.call !== null),
     [candidates],
   );
+
+  // Hallenname → Farbe (Spec hallen-farben): einmal je Hallen-Topologie
+  // laden — Farbwechsel passieren auf der Felderübersicht, das nächste
+  // Öffnen/Umbauen dieses Panels zieht nach. Leer bei einer Halle.
+  // Schlüssel statt `locations` als Dependency: der 4-s-Poll liefert jedes
+  // Mal eine neue Array-Referenz, die Topologie ändert sich aber fast nie
+  // (Review 2026-08-16 — sonst ein IPC-Aufruf je Poll).
+  const [hallColor, setHallColor] = useState<Map<string, string>>(new Map());
+  const locKey = locations.map((l) => l.id).join(",");
+  useEffect(() => {
+    hallColorsView()
+      .then((v) =>
+        setHallColor(
+          new Map(v.halls.map((h) => [h.hall.trim().toLowerCase(), h.color])),
+        ),
+      )
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locKey]);
 
   // Hallenname → Kürzel für die Anzeige in der Spielzeile (ADR 0026: eine
   // Liste statt Hallen-Abschnitten, die Halle steht dafür an der Zeile).
@@ -348,9 +368,22 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                         (c.hall ? (
                           <span
                             title={c.hall}
-                            className="mr-1.5 rounded bg-slate-100 px-1 py-0.5 text-[11px]
-                                       font-semibold text-slate-500"
+                            className="mr-1.5 inline-flex items-center gap-1 rounded bg-slate-100 px-1 py-0.5
+                                       text-[11px] font-semibold text-slate-500"
                           >
+                            {/* Hallen-Farbmarke — Zusatz-Kennung, das
+                                Kürzel bleibt immer stehen. */}
+                            {hallColor.get(c.hall.trim().toLowerCase()) && (
+                              <span
+                                aria-hidden
+                                className="inline-block h-2 w-2 shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: hallColor.get(
+                                    c.hall.trim().toLowerCase(),
+                                  ),
+                                }}
+                              />
+                            )}
                             {hallShort.get(c.hall) ?? c.hall}
                           </span>
                         ) : (

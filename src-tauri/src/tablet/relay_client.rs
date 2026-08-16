@@ -861,7 +861,7 @@ fn push_freetext(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_fr
 /// veränderlich; periodisch (alle 30 s) genügt. Huckepack dabei: die Azure-TTS-
 /// Vererbung an Cloud-Ansage-Slaves (ADR 0003).
 fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
-    let courts: Vec<CourtBrief> = ctx
+    let mut courts: Vec<CourtBrief> = ctx
         .tablet
         .courts()
         .into_iter()
@@ -871,8 +871,18 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
             // Rohe Halle (BTP-Location) mitschicken – der Cloud-Ansage-Slave
             // filtert damit auf die Felder seiner Halle (Geräte-Anschluss).
             hall: ctx.tablet.court_hall(c.id),
+            hall_color: None,
         })
         .collect();
+    // Hallen-Farben (Spec hallen-farben): einmal über die kanonische
+    // Turnier-Hallenliste auflösen (nicht über die Court-Locations —
+    // Review 2026-08-16), an jede Zeile hängen; der Relay reicht sie an
+    // Cloud-Monitore/-Übersicht weiter.
+    let farben =
+        crate::hall_colors::effective_hall_colors(&ctx.app_config(), &ctx.tablet.hall_names());
+    for c in &mut courts {
+        c.hall_color = crate::hall_colors::farbe_fuer(&farben, &c.hall);
+    }
     // Auch bei (noch) leerer Feldliste senden, wenn es eine Azure-Config zu
     // vererben gibt — sonst hinge die Vererbung daran, dass BTP schon ein
     // Turnier geladen hat (Review-Befund). Der Relay übernimmt eine leere
@@ -900,7 +910,12 @@ fn push_courts(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>) {
 fn build_prepared_list(
     snapshot: &crate::btp::model::BtpSnapshot,
     calls: &[crate::tablet::state::PreparationCall],
+    cfg: &crate::config::AppConfig,
 ) -> Vec<PreparedMatch> {
+    // Hallen-Farben (Spec hallen-farben) einmal je Liste auflösen — die
+    // Hallenliste des Turniers kommt aus dem Snapshot.
+    let hallen: Vec<String> = snapshot.locations.iter().map(|l| l.name.clone()).collect();
+    let hallen_farben = crate::hall_colors::effective_hall_colors(cfg, &hallen);
     let players = |ps: &[crate::btp::model::BtpPlayer]| -> Vec<PlayerBrief> {
         ps.iter()
             .map(|p| PlayerBrief {
@@ -928,9 +943,11 @@ fn build_prepared_list(
                 .and_then(|lid| snapshot.locations.iter().find(|l| l.id == lid))
                 .map(|l| l.name.clone())
                 .unwrap_or_default();
+            let hall_color = crate::hall_colors::farbe_fuer(&hallen_farben, &hall);
             Some(PreparedMatch {
                 match_id: m.id,
                 hall,
+                hall_color,
                 discipline: m.discipline.as_str().to_string(),
                 class_label: m.class_label.clone(),
                 round_name: m.round_name.clone(),
@@ -954,7 +971,11 @@ fn push_prepared(
     let Some(snapshot) = ctx.tablet.snapshot_clone() else {
         return;
     };
-    let prepared = build_prepared_list(&snapshot, &ctx.tablet.preparation_calls());
+    let prepared = build_prepared_list(
+        &snapshot,
+        &ctx.tablet.preparation_calls(),
+        &ctx.app_config(),
+    );
     let fp = serde_json::to_string(&prepared).unwrap_or_default();
     if last_fp.as_deref() == Some(fp.as_str()) {
         return;
@@ -1306,12 +1327,47 @@ mod tests {
             },
         ];
 
-        let prepared = build_prepared_list(&snap, &calls);
+        let prepared = build_prepared_list(&snap, &calls, &crate::config::AppConfig::default());
         assert_eq!(prepared.len(), 1, "nur das eine ruf-bare Spiel");
         assert_eq!(prepared[0].match_id, 42);
         assert_eq!(prepared[0].hall, "Halle 2", "LocationID → Hallenname");
+        assert_eq!(
+            prepared[0].hall_color, None,
+            "eine Halle im Snapshot → farblos (Ein-Hallen-Gate)"
+        );
         assert_eq!(prepared[0].team_a.len(), 1);
         assert_eq!(prepared[0].team_b.len(), 1);
+    }
+
+    #[test]
+    fn build_prepared_list_carries_the_hall_color_in_multi_hall() {
+        // Spec hallen-farben: Der Cloud-Aushang bekommt die Farbe des
+        // Aufrufs mit — alphabetische Auto-Palette („Halle 1" → Ton 0,
+        // „Halle 2" → Ton 1).
+        use crate::btp::model::BtpLocation;
+        use crate::tablet::state::PreparationCall;
+
+        let mut snap = snapshot(vec![scheduled_match(42)]);
+        snap.locations = vec![
+            BtpLocation {
+                id: 4,
+                name: "Halle 1".into(),
+            },
+            BtpLocation {
+                id: 5,
+                name: "Halle 2".into(),
+            },
+        ];
+        let calls = vec![PreparationCall {
+            match_id: 42,
+            location_id: Some(5),
+            called_at_ms: 1_700_000_000_000,
+        }];
+        let prepared = build_prepared_list(&snap, &calls, &crate::config::AppConfig::default());
+        assert_eq!(
+            prepared[0].hall_color.as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[1])
+        );
     }
 
     /// Cloud-Feld-Diffing: erster Push meldet die Zuweisung, ein unveränderter

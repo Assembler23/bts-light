@@ -175,6 +175,7 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
 pub fn build_monitor_state(
     court_id: i64,
     court_label: String,
+    hall_color: Option<String>,
     court: MonitorCourt,
     config: &CourtMonitorConfig,
     call_timer: &crate::config::CallTimerConfig,
@@ -195,6 +196,7 @@ pub fn build_monitor_state(
     MonitorState {
         court_id,
         court_label,
+        hall_color,
         tournament_name: court.tournament_name,
         match_info,
         court_state: court.court_state,
@@ -331,6 +333,8 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
     MonitorState {
         court_id: 0,
         court_label: String::new(),
+        // Kopplungs-Seite: kein Feld, keine Halle.
+        hall_color: None,
         tournament_name: String::new(),
         match_info: None,
         court_state: None,

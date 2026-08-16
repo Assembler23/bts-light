@@ -3,6 +3,7 @@ pub mod badhub;
 pub mod btp;
 pub mod commands;
 pub mod config;
+pub mod hall_colors;
 pub mod log_upload;
 pub mod sync;
 pub mod tablet;
@@ -157,6 +158,9 @@ pub fn run() {
             commands::tl_web_set_enabled,
             commands::set_hall_layout,
             commands::remove_hall_layout,
+            commands::set_hall_color,
+            commands::remove_hall_color,
+            commands::hall_colors_view,
             commands::cloud_announce_state,
             commands::cloud_slaves,
             commands::pairing_code,

@@ -123,6 +123,21 @@ hält sie je Namespace (`Namespace.prepared`) und gibt sie in
 Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 [announcements.md](announcements.md).
 
+**Hallen-Farben (Spec [features/hallen-farben.md](features/hallen-farben.md),
+ADR 0033):** Drei bestehende Frames tragen ein **optionales** Farb-Feld als
+Hex-String (`#rrggbb`, `#[serde(default)]`/`skip_serializing_if`):
+`CourtBrief.hall_color` (im `HostFrame::Courts`-Push),
+`PreparedMatch.hallColor` und `MonitorState.hallColor`. Der Relay reicht
+die Werte unverändert an `overview_health` (JSON-Schlüssel `hall_color`,
+identisch zur LAN-`/health`), `preparation_state` und den Monitor-Zustand
+durch — **kein neuer Frame, kein Paletten-Spiegel**. Alte Hosts liefern
+das Feld nicht, alte Seiten ignorieren es: Jede Versions-Mischung
+degradiert zu „farblos", nie zu „kaputt". TL-Web bekommt die Farben
+separat über das opake `TlState`-JSON (`TlHall.color`).
+**Deploy-Reihenfolge:** Relay vor App-Release (läuft automatisch beim
+main-Merge); die Seiten prüfen die strikte `#rrggbb`-Form, bevor ein Wert
+in ein Style-Attribut gelangt.
+
 ### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
 
 > **Stand:** Der Weg steht in beiden Richtungen — im **LAN** (siehe

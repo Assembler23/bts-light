@@ -32,10 +32,13 @@ import {
   enterResult,
   finishedMatches,
   freeCourt,
+  hallColorsView,
   matchTimeline,
   noteCourtCall,
   preparationCandidates,
+  removeHallColor,
   removeHallLayout,
+  setHallColor,
   removeScorekeeper,
   scorekeeperQueue,
   setCourtLocked,
@@ -58,6 +61,7 @@ import type {
   DisciplineHallRule,
   FinishedMatchRow,
   MatchTimeline,
+  HallColorsView,
   HallLayoutConfig,
   LayoutOrigin,
   PreparationCandidate,
@@ -173,6 +177,9 @@ export function FieldOverviewPage({
   // Popover offen) + die Formularwerte. `""` ist ein gültiger Schlüssel
   // (Einzel-Halle-Turniere gruppieren unter dem leeren Hallennamen).
   const [editingHall, setEditingHall] = useState<string | null>(null);
+  // Palette + effektive Hallen-Farben für den Picker (Spec hallen-farben).
+  // Leer-Liste bei Ein-Hallen-Turnieren → Picker unsichtbar.
+  const [hallColors, setHallColors] = useState<HallColorsView | null>(null);
   const [layoutColumns, setLayoutColumns] = useState(4);
   const [layoutOrigin, setLayoutOrigin] = useState<LayoutOrigin>(
     "bottom_left",
@@ -243,6 +250,26 @@ export function FieldOverviewPage({
     }
   }
 
+  // Hallen-Farbe wählen bzw. auf „Automatisch" zurücksetzen (Spec
+  // hallen-farben). Popover bleibt offen — man will das Ergebnis der
+  // Farbwahl direkt am Gruppenkopf sehen und ggf. weiterklicken.
+  async function chooseHallColor(hall: string, color: string | null) {
+    setBusy(true);
+    setError("");
+    try {
+      const cfg = color
+        ? await setHallColor(hall, color)
+        : await removeHallColor(hall);
+      onConfigSaved(cfg);
+      setHallColors(await hallColorsView());
+      void refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const refresh = useCallback(async () => {
     try {
       const [info, prep, fin] = await Promise.all([
@@ -276,6 +303,20 @@ export function FieldOverviewPage({
       if (timer.current) window.clearInterval(timer.current);
     };
   }, [refresh]);
+
+  // Hallen-Farben nachladen, sobald sich die Hallenmenge ändert (Review
+  // 2026-08-16): Die Seite kann offen sein, BEVOR BTP verbindet — mit
+  // Mount-only bliebe der Picker dann leer, bis jemand den Tab wechselt.
+  // Der Schlüssel ist die sortierte Hallenmenge, nicht das courts-Array —
+  // sonst liefe der Effekt bei jedem 2,5-s-Poll.
+  const hallsKey = [...new Set(courts.map((c) => c.location))]
+    .sort()
+    .join(" ");
+  useEffect(() => {
+    hallColorsView()
+      .then(setHallColors)
+      .catch(() => {});
+  }, [hallsKey]);
 
   // Zähltafelbediener-Warteschlange separat pollen (nur wenn aktiviert).
   const refreshSk = useCallback(() => {
@@ -529,7 +570,16 @@ export function FieldOverviewPage({
           <section key={g.hall || "_"} className="flex flex-col gap-2">
             <div className="relative flex items-center gap-1">
               {multiHall && (
-                <h2 className="text-sm font-semibold text-slate-600">
+                <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-600">
+                  {/* Hallen-Farbmarke (Spec hallen-farben): reine Zusatz-
+                      Kennung, der Name bleibt immer stehen. */}
+                  {g.courts[0]?.hall_color && (
+                    <span
+                      aria-hidden
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: g.courts[0].hall_color }}
+                    />
+                  )}
                   {g.hall || "Ohne Halle"}
                 </h2>
               )}
@@ -617,6 +667,52 @@ export function FieldOverviewPage({
                       </span>
                     </label>
                   </div>
+                  {/* Hallen-Farbe (Spec hallen-farben): nur bei Mehr-Hallen-
+                      Turnieren — Ein-Hallen-Turniere bleiben farblos. */}
+                  {(() => {
+                    const info = hallColors?.halls.find(
+                      (h) =>
+                        h.hall.trim().toLowerCase() ===
+                        g.hall.trim().toLowerCase(),
+                    );
+                    if (!info || !hallColors) return null;
+                    return (
+                      <div className="mt-3 border-t border-slate-100 pt-2">
+                        <p className="text-xs font-semibold text-slate-700">
+                          Hallen-Farbe
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {hallColors.palette.map((tone) => (
+                            <button
+                              key={tone}
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void chooseHallColor(g.hall, tone)}
+                              title={tone}
+                              aria-label={`Farbe ${tone} wählen`}
+                              className={`h-6 w-6 rounded-full border disabled:opacity-50 ${
+                                info.color === tone
+                                  ? "border-slate-800 ring-2 ring-slate-400"
+                                  : "border-slate-300"
+                              }`}
+                              style={{ backgroundColor: tone }}
+                            />
+                          ))}
+                          {info.overridden && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void chooseHallColor(g.hall, null)}
+                              className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600
+                                         hover:bg-slate-200 disabled:opacity-50"
+                            >
+                              Automatisch
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="mt-3 flex justify-end gap-2">
                     {layout && (
                       <button

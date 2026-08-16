@@ -128,6 +128,16 @@ nach dem Vorbild von `finished_at`.
 - `TsetMatch` bekommt `preparation_call_ts` und `hall` mit
   `#[serde(skip_serializing_if = "Option::is_none")]`.
 - `to_upcoming_match` füllt sie aus dem gestempelten `BtpMatch`.
+- **`hall_color`** (Spec [features/hallen-farben.md](features/hallen-farben.md)):
+  `TsetMatch.hall_color` trägt die Hex-Farbe zur `hall` des Aufrufs,
+  `TsetCourt.hall_color` die des Felds — beide `skip_serializing_if`,
+  bei Ein-Hallen-Turnieren fehlen sie komplett (alte badhub-Parser sehen
+  den bisherigen Payload). Die badhub-Anzeige (display=next +
+  display=monitor) ist ein Folge-PR im badhub-Repo. **Latenz:** Ein
+  reiner Farbwechsel im Picker ändert den `BtpSnapshot` nicht und löst
+  deshalb keinen sofortigen Push aus — er erreicht badhub mit dem
+  nächsten strukturellen Diff oder spätestens dem Heartbeat (≤ 60 s;
+  dasselbe bewusst hingenommene Muster wie bei `manual_halls`).
 - `upcoming()` sortiert gerufene Matches **vor** den ungerufenen, damit
   ein Aufruf nie aus `UPCOMING_LIMIT = 15` herausfällt. Ohne Aufrufe
   degeneriert die Sortierung zur bisherigen Spielnummern-Reihenfolge.

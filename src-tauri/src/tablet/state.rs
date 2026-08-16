@@ -103,7 +103,9 @@ struct CourtSession {
 }
 
 /// Eine Court-Zeile für die Felder-Übersicht der Turnierleitung.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+/// `Default` existiert für Tests und den `paint`-Helfer — im Betrieb baut
+/// ausschließlich `overview_from` die Zeilen.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct CourtOverview {
     /// Stabile BTP-CourtID des Felds – die Identität. Feldnamen wiederholen
     /// sich bei Mehr-Hallen-Turnieren, die CourtID nicht.
@@ -114,6 +116,11 @@ pub struct CourtOverview {
     /// Gruppierung im Frontend. Leerer String bei Ein-Hallen-Turnieren
     /// oder wenn das Feld keiner auflösbaren Halle zugeordnet ist.
     pub location: String,
+    /// Effektive Hallen-Farbe (Hex, Spec hallen-farben) — von
+    /// `hall_colors::paint` an den Serving-Stellen gefüllt, weil dort die
+    /// Config greifbar ist. `None` bei Ein-Hallen-Turnieren oder Feldern
+    /// ohne Halle.
+    pub hall_color: Option<String>,
     /// BTP-Match-ID des aktuellen Spiels (0 = kein Match). Damit erkennt
     /// die Oberfläche, wenn ein Feld ein neues Spiel bekommt (Sprachansage).
     pub match_id: i64,
@@ -1674,6 +1681,26 @@ impl TabletState {
             .unwrap_or_default()
     }
 
+    /// Die Hallennamen des Turniers (BTP-`Locations`, getrimmt, ohne leere).
+    /// DIE kanonische Hallenliste der Hallen-Farben (Review 2026-08-16):
+    /// Desktop-`paint`, Farb-Picker und TL-Web müssen aus derselben Liste
+    /// auflösen — sonst trüge dieselbe Halle je Oberfläche verschiedene
+    /// Auto-Farben, sobald eine Location ohne Felder existiert.
+    pub fn hall_names(&self) -> Vec<String> {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| {
+                s.locations
+                    .iter()
+                    .map(|l| l.name.trim().to_string())
+                    .filter(|n| !n.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Das Match, das BTP gerade diesem Feld (per CourtID) zugewiesen hat.
     pub fn match_for_court(&self, court_id: i64) -> Option<BtpMatch> {
         let guard = self.snapshot.read().unwrap();
@@ -3070,6 +3097,9 @@ impl TabletState {
                     court: court.name.clone(),
                     // Hallenname nur bei Mehr-Hallen-Turnieren; sonst leer.
                     location: snap.court_location_name(court.id),
+                    // Farbe füllt `hall_colors::paint` an den Serving-Stellen
+                    // nach — hier fehlt die Config.
+                    hall_color: None,
                     has_timeline: m.is_some_and(|mm| self.timeline.has_timeline(mm.id)),
                     match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m

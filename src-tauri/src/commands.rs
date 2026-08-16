@@ -273,6 +273,9 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // der Assistent kennt das Feld nicht (serde-Default = aus) und würde
     // sie mit jedem Speichern stumm abschalten.
     incoming.hall_prefill = current.hall_prefill.clone();
+    // Die Hallen-Farben werden auf der Felderübersicht gepflegt (Spec
+    // hallen-farben) — auch sie kennt der Assistent nicht.
+    incoming.hall_colors = current.hall_colors.clone();
     incoming
 }
 
@@ -377,6 +380,12 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     // altem Bündel die hier schon eingerichteten Raster stillschweigend wegwischen.
     if imported.hall_layouts.is_empty() {
         imported.hall_layouts = current.hall_layouts.clone();
+    }
+    // Hallen-Farben: derselbe Fall — ein Bündel von vor dem Feature trägt
+    // ein leeres Feld, das die hier gewählten Übersteuerungen nicht
+    // stillschweigend wegwischen darf.
+    if imported.hall_colors.is_empty() {
+        imported.hall_colors = current.hall_colors.clone();
     }
     // Derselbe Fall wie bei den Rastern (Task 9/11): Ein Bündel aus einer
     // Version vor diesem Feature — oder eins von einer Installation ohne
@@ -1162,13 +1171,16 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         ConnectionMode::LanAndCloud => "lan+cloud",
     }
     .to_string();
+    let mut courts = state.tablet.overview();
+    // Hallen-Farben hier statt in `overview_from` — dort fehlt die Config.
+    crate::hall_colors::paint(&mut courts, &config, &state.tablet.hall_names());
     TabletInfo {
         server_host,
         mode,
         relay_base,
         lan_enabled,
         cloud_enabled,
-        courts: state.tablet.overview(),
+        courts,
     }
 }
 
@@ -2743,6 +2755,47 @@ pub fn remove_hall_layout(
     })
 }
 
+/// Übersteuert die Farbe einer Halle (Spec hallen-farben). Validierung
+/// (Palettenzwang, Trim, case-insensitiver Ersatz) steckt testbar in
+/// `AppConfig::upsert_hall_color` — der Command ist nur der dünne Wrapper.
+#[tauri::command]
+pub fn set_hall_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+    color: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.upsert_hall_color(&hall, &color)
+    })
+}
+
+/// Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette.
+#[tauri::command]
+pub fn remove_hall_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.remove_hall_color(&hall);
+        Ok(())
+    })
+}
+
+/// Palette + effektive Farbe je Halle für den Picker der Felderübersicht.
+/// Die Hallenliste ist die kanonische des Turniers (`hall_names`) — dieselbe
+/// Quelle wie `paint` und TL-Web (eine Wahrheit, R1; Review 2026-08-16).
+#[tauri::command]
+pub fn hall_colors_view(state: State<'_, AppState>) -> crate::hall_colors::HallColorsView {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    crate::hall_colors::view(&cfg, &state.tablet.hall_names())
+}
+
 /// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und
 /// liefert den neuen Stand.
 ///
@@ -3915,6 +3968,34 @@ mod tests {
         let incoming = AppConfig::default(); // Wizard-Stand ohne Layouts
         let ergebnis = keep_host_managed_fields(incoming, &current);
         assert_eq!(ergebnis.hall_layouts, current.hall_layouts);
+    }
+
+    #[test]
+    fn the_wizard_cannot_wipe_the_hall_colors() {
+        // Die Hallen-Farben werden auf der Felderübersicht gepflegt, nicht im
+        // Assistenten — dessen Speichern darf die Übersteuerungen nicht
+        // zurücksetzen (dieselbe Falle wie bei hall_layouts).
+        let mut current = AppConfig::default();
+        current
+            .upsert_hall_color("Nord", crate::hall_colors::HALL_PALETTE[2])
+            .unwrap();
+        let incoming = AppConfig::default(); // Wizard-Stand ohne Farben
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert_eq!(ergebnis.hall_colors, current.hall_colors);
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_hall_colors_when_bundle_has_none() {
+        // Ein Identitäts-Bündel aus einer Version vor den Hallen-Farben trägt
+        // ein leeres Feld — das heißt „unbekannt", nicht „absichtlich
+        // gelöscht" (dasselbe Muster wie hall_layouts).
+        let mut current = AppConfig::default();
+        current
+            .upsert_hall_color("Nord", crate::hall_colors::HALL_PALETTE[5])
+            .unwrap();
+        let bundle = AppConfig::default();
+        let ergebnis = apply_imported_identity(bundle, &current);
+        assert_eq!(ergebnis.hall_colors, current.hall_colors);
     }
 
     #[test]

@@ -462,11 +462,30 @@ main {
   // Eine Halle als Vollbild-Section: Kopf (Name [+ Zyklus „1 / N"]) + Grid.
   // Hallenname (+ Zyklus „1 / N" bei Rotation) in die Kopfzeile schreiben –
   // statt einer eigenen Zeile im Body (spart vertikalen Platz).
-  function setBarHall(name, idx, total) {
+  function setBarHall(name, idx, total, color) {
     var el = document.getElementById('bar-hall');
     if (!el) return;
-    if (!name) { el.textContent = ''; return; }
-    el.textContent = total > 1 ? (name + '  ' + (idx + 1) + ' / ' + total) : name;
+    el.textContent = '';
+    if (!name) return;
+    // Hallen-Farbmarke (Spec hallen-farben): kleiner Punkt vor dem Namen.
+    // Strikte #rrggbb-Form erzwingen — der Wert landet in einem Style.
+    if (color && /^#[0-9a-f]{6}$/.test(color)) {
+      var dot = document.createElement('span');
+      dot.setAttribute('aria-hidden', 'true');
+      dot.style.cssText = 'display:inline-block;width:.5em;height:.5em;border-radius:50%;margin-right:.4em;background:' + color;
+      el.appendChild(dot);
+    }
+    el.appendChild(document.createTextNode(
+      total > 1 ? (name + '  ' + (idx + 1) + ' / ' + total) : name));
+  }
+
+  // Farbe einer Hallen-Gruppe: vom ersten Feld, das eine trägt (alle Felder
+  // einer Halle tragen dieselbe; alte Hosts liefern keine → undefined).
+  function groupColor(g) {
+    for (var i = 0; i < g.courts.length; i++) {
+      if (g.courts[i].hall_color) return g.courts[i].hall_color;
+    }
+    return '';
   }
 
   function stopHallRotation() {
@@ -514,7 +533,7 @@ main {
     if (rotating) {
       var idx = hallIdx % groups.length;
       var g = groups[idx];
-      setBarHall(g.name, idx, groups.length); // Name + „1 / N" in die Kopfzeile
+      setBarHall(g.name, idx, groups.length, groupColor(g)); // Name + „1 / N" in die Kopfzeile
       board.appendChild(buildGrid(g));
       startHallRotation();
       return;
@@ -525,7 +544,7 @@ main {
     // Mehr-Gruppen-Fall (benannt + unbenannt) fällt auf gestapelte Grids zurück.
     stopHallRotation();
     if (groups.length === 1) {
-      setBarHall(groups[0].name || '');
+      setBarHall(groups[0].name || '', 0, 1, groupColor(groups[0]));
       board.appendChild(buildGrid(groups[0]));
     } else {
       setBarHall('');
