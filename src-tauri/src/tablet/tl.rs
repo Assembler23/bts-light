@@ -6218,7 +6218,10 @@ mod tests {
         );
 
         let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
-        let pause = s.courts[0].pause.as_ref().expect("Behandlungspause sichtbar");
+        let pause = s.courts[0]
+            .pause
+            .as_ref()
+            .expect("Behandlungspause sichtbar");
         assert_eq!(pause.kind, "injury");
         assert_eq!(pause.ends_at_ms, None);
         assert_eq!(pause.started_at_ms, Some(900_000));
