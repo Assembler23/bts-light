@@ -389,7 +389,9 @@ pub fn build_sched(
 
             SchedMatch {
                 id: match_id(m.id),
-                n: format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
+                n: format!("{} {}", m.draw_name, m.round_name)
+                    .trim()
+                    .to_string(),
                 status: match m.status {
                     MatchStatus::Finished => "finished",
                     MatchStatus::OnCourt => "oncourt",
@@ -400,7 +402,11 @@ pub fn build_sched(
                 p1: m.team2.iter().map(|p| p.name.clone()).collect(),
                 p1_member_ids: m.team2.iter().map(|p| p.member_id.clone()).collect(),
                 planned_ts: m.planned_time.and_then(planned_time_to_unix_ms),
-                predicted_start_ts: if wartend { predicted.get(&m.id).copied() } else { None },
+                predicted_start_ts: if wartend {
+                    predicted.get(&m.id).copied()
+                } else {
+                    None
+                },
                 queue_pos,
                 hall: if halle.is_empty() { None } else { Some(halle) },
                 court: if wartend { None } else { m.court.clone() },
@@ -1331,7 +1337,12 @@ mod tests {
         let snapshot = sched_snapshot(matches);
         let cfg = AppConfig::default();
 
-        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
 
         assert_eq!(msg.kind, "sched");
         assert_eq!(msg.event.matches.len(), 20, "sched darf NICHT kappen");
@@ -1354,7 +1365,12 @@ mod tests {
         let snapshot = sched_snapshot(vec![m]);
         let cfg = AppConfig::default();
 
-        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
 
         let ms = msg.event.matches[0].planned_ts.expect("planned_ts gesetzt");
         let zurueck = Local.timestamp_millis_opt(ms as i64).unwrap();
@@ -1372,7 +1388,12 @@ mod tests {
         let snapshot = sched_snapshot(vec![m]);
         let cfg = AppConfig::default();
 
-        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
 
         assert_eq!(msg.event.matches[0].status, "finished");
         assert_eq!(msg.event.matches[0].court.as_deref(), Some("Feld 05"));
@@ -1390,7 +1411,12 @@ mod tests {
         let snapshot = sched_snapshot(matches);
         let cfg = AppConfig::default();
 
-        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
 
         let positionen: Vec<Option<i64>> = msg.event.matches.iter().map(|m| m.queue_pos).collect();
         assert_eq!(positionen, vec![Some(0), Some(1), Some(2)]);
@@ -1418,7 +1444,10 @@ mod tests {
 
         let laufend = msg.event.matches.iter().find(|m| m.id == "btp_1").unwrap();
         let wartend = msg.event.matches.iter().find(|m| m.id == "btp_2").unwrap();
-        assert_eq!(laufend.predicted_start_ts, None, "laufendes Spiel braucht keine Prognose");
+        assert_eq!(
+            laufend.predicted_start_ts, None,
+            "laufendes Spiel braucht keine Prognose"
+        );
         assert_eq!(wartend.predicted_start_ts, Some(NOW + 900_000));
     }
 
@@ -1431,10 +1460,18 @@ mod tests {
         let snapshot = sched_snapshot(vec![sample_match(1, MatchStatus::Scheduled, None)]);
         let cfg = AppConfig::default();
 
-        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
         let json = serde_json::to_value(&msg).unwrap();
 
-        assert_eq!(json["event"]["matches"][0]["p1_member_ids"][0], serde_json::Value::Null);
+        assert_eq!(
+            json["event"]["matches"][0]["p1_member_ids"][0],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -1445,15 +1482,33 @@ mod tests {
         let snapshot = sched_snapshot(vec![sample_match(1, MatchStatus::Scheduled, None)]);
         let cfg = AppConfig::default();
 
-        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
         let json = serde_json::to_value(&msg).unwrap();
 
         assert_eq!(json["type"], "sched");
         let m = json["event"]["matches"][0].as_object().unwrap();
         let erwartet = [
-            "_id", "n", "status", "p0", "p0_member_ids", "p1", "p1_member_ids",
-            "planned_ts", "predicted_start_ts", "queue_pos", "hall", "court",
-            "sets", "team1_won", "end_ts", "outcome",
+            "_id",
+            "n",
+            "status",
+            "p0",
+            "p0_member_ids",
+            "p1",
+            "p1_member_ids",
+            "planned_ts",
+            "predicted_start_ts",
+            "queue_pos",
+            "hall",
+            "court",
+            "sets",
+            "team1_won",
+            "end_ts",
+            "outcome",
         ];
         for feld in erwartet {
             assert!(m.contains_key(feld), "Feld {feld} fehlt im sched-Payload");
