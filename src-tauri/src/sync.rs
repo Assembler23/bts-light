@@ -674,7 +674,15 @@ impl SyncEngine {
                 .iter()
                 .any(|l| l.name.trim().eq_ignore_ascii_case(active))
         {
-            return; // E2: Tages-Halle gesetzt → Modi schließen sich aus.
+            // E2: Tages-Halle gesetzt → Modi schließen sich aus. Der
+            // BESTAND wird dabei geräumt (Review 2026-08-16): Die Vergabe
+            // bedient nur noch die aktive Halle — ein stehen gebliebenes
+            // Auto-Versprechen auf eine andere Halle bände das Spiel an
+            // Felder, die nie vergeben werden (stilles Verhungern). Der
+            // Host-Guard verhindert nur das EINSCHALTEN bei aktiver Halle;
+            // die aktive Halle kann auch NACHTRÄGLICH aus dem Setup kommen.
+            store.clear_all();
+            return;
         }
 
         // Fenster: die vordersten x der globalen Warteliste — dieselbe
@@ -2144,20 +2152,33 @@ mod tests {
     }
 
     #[test]
-    fn eine_aktive_halle_stoppt_die_verteilung() {
-        // E2: Tages-Halle gesetzt → keine Vorverteilung.
+    fn eine_aktive_halle_stoppt_die_verteilung_und_raeumt_den_bestand() {
+        // E2: Tages-Halle gesetzt → keine Vorverteilung. Review-Befund
+        // 2026-08-16 (bestätigt): Auch BESTEHENDE Auto-Zuordnungen müssen
+        // dann weg — die Vergabe bedient nur noch die aktive Halle, ein
+        // nach „Halle B" versprochenes Spiel würde sonst still verhungern
+        // (Bindung ohne bedienbare Felder), bis jemand von Hand eingreift.
         let engine = SyncEngine::new();
         let tablet = TabletState::default();
+        tablet.auto_hall_store().set_tournament("T"); // wie der Snapshot
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle B".into())]);
         let mut cfg = AppConfig::default();
         cfg.hall_prefill.enabled = true;
         cfg.auto_assign.active_hall = "Halle A".to_string();
         let snap = snap_with(
             vec![court(1, Some(1)), court(3, Some(2))],
-            vec![ready_named(7, None, "A", "B")],
+            vec![ready_named(7, None, "A", "B"), ready_named(8, None, "C", "D")],
             zwei_hallen(),
         );
         engine.reconcile_auto_halls(&cfg, &snap, &tablet);
-        assert_eq!(tablet.auto_hall_store().hall(7), None);
+        assert_eq!(
+            tablet.auto_hall_store().hall(7),
+            None,
+            "stale Auto-Versprechen geräumt — Spiel 7 ist wieder frei vergebbar"
+        );
+        assert_eq!(tablet.auto_hall_store().hall(8), None, "nichts Neues");
     }
 
     #[test]

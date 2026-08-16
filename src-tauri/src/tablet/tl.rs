@@ -1324,10 +1324,14 @@ fn execute_hall_prefill_action(
     match action {
         A::SetHallPrefill { enabled, window } => {
             // E2-Guard host-seitig (die UI-Ausgrauung ist nur Komfort):
-            // Tages-Halle und Vorverteilung schließen sich aus.
+            // Tages-Halle und Vorverteilung schließen sich aus. Wie
+            // überall zählt die aktive Halle nur im Mehr-Hallen-Fall —
+            // sonst widerspräche der Guard der UI-Anzeige (Review
+            // 2026-08-16) und der Vergabe, die sie dann ebenso ignoriert.
             if *enabled {
                 let active = config.auto_assign.active_hall.trim();
-                let aktiv = !active.is_empty()
+                let aktiv = snap.is_multi_hall()
+                    && !active.is_empty()
                     && snap
                         .locations
                         .iter()
