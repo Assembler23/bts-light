@@ -493,6 +493,10 @@ pub struct TabletState {
     /// denselben Stand sehen müssen; `on_court_since` bleibt reiner
     /// RAM-Zubringer für den Aufruf-Timer.
     match_times: crate::tablet::match_times::MatchTimesStore,
+    /// Match-ID → zuletzt publizierte Startzeit-Prognose (Unix-ms) — reines
+    /// Diagnose-Gedächtnis für den Prognose/Wirklichkeit-Vergleich (E12),
+    /// gepflegt von `tl::build_state_limited`.
+    predicted_starts: RwLock<HashMap<i64, u64>>,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -982,6 +986,18 @@ impl TabletState {
     /// Ablage-Datei der Spielzeiten-Messung setzen (beim App-Start).
     pub fn set_match_times_path(&self, path: std::path::PathBuf) {
         self.match_times.set_path(path);
+    }
+
+    /// Zuletzt publizierte Startzeit-Prognosen merken (Match-ID → Unix-ms) —
+    /// nur fürs Diagnose-Log: Beim echten Aufruf vergleicht der Sync-Loop
+    /// Prognose und Wirklichkeit (Erfolgsmaß E12, ±10 min / 70 %).
+    pub(crate) fn set_predicted_starts(&self, map: std::collections::HashMap<i64, u64>) {
+        *self.predicted_starts.write().unwrap() = map;
+    }
+
+    /// Zuletzt publizierte Prognose eines Matches (fürs Diagnose-Log).
+    pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
+        self.predicted_starts.read().unwrap().get(&match_id).copied()
     }
 
     /// Bruttostart eines Matches für die BTP-`Duration` (Spec

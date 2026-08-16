@@ -176,18 +176,22 @@ impl MatchTimesStore {
     /// `(match_id, class_label, discipline)`; `deassigned` = Matches mit
     /// gesetztem Zuweisungs-Stempel, die der Snapshot als `Scheduled`
     /// **ohne** Feld führt (nicht Finished — Beendete zählen nie).
+    /// Liefert die in DIESEM Poll frisch gestempelten Match-IDs — der
+    /// Sync-Loop vergleicht sie fürs Diagnose-Log mit der zuletzt
+    /// publizierten Prognose (Erfolgsmaß E12).
     pub fn reconcile(
         &self,
         assigned: &[(i64, &str, &str)],
         deassigned: &HashSet<i64>,
         now: u64,
-    ) {
+    ) -> Vec<i64> {
         // Persistiert wird nur bei STEMPEL-Änderungen — der Abnahme-Zähler
         // ist RAM-Entprellung (siehe `off_court_polls`) und darf weder die
         // Datei je Poll neu schreiben noch je persistiert werden.
-        let stamped = {
+        let (stamped, fresh) = {
             let mut inner = self.inner.lock().unwrap();
             let mut stamped = false;
+            let mut fresh: Vec<i64> = Vec::new();
             for &(match_id, class_label, discipline) in assigned {
                 let e = inner.file.entries.entry(match_id).or_default();
                 e.off_court_polls = 0;
@@ -196,6 +200,7 @@ impl MatchTimesStore {
                     e.class_label = class_label.to_string();
                     e.discipline = discipline.to_string();
                     stamped = true;
+                    fresh.push(match_id);
                 }
             }
             // Abnahme-Zähler: nur Matches mit Stempel, die der Snapshot
@@ -226,11 +231,12 @@ impl MatchTimesStore {
                 inner.file.entries.remove(&id);
                 stamped = true;
             }
-            stamped
+            (stamped, fresh)
         };
         if stamped {
             self.persist();
         }
+        fresh
     }
 
     /// E2: ersten Punkt stempeln (nur wenn noch keiner steht).

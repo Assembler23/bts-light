@@ -287,6 +287,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Spielzeiten-Messung & Startzeit-Prognose (Etappen A+B, v0.9.206)** —
+  Brutto-/Nettozeit je Match host-seitig gemessen (`match-times.json`,
+  ADR 0027), BTP-`Duration` neustartfest und auf allen Pfaden, Prognose
+  („dran ca. hh:mm") + Panel „Spielzeiten" in TL-Web, SetupWizard-Abschnitt.
+  Spec: [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md) ·
+  Bedienung: [spielzeiten-prognose.md](spielzeiten-prognose.md).
+  **Offen:** Etappe C (Pausen-Countdown/Überziehung, Tablet hält Pause —
+  ADR 0028), Feldtest am Testturnier (Erfolgsmaß E12: ±10 min bei ≥70 %,
+  Auswertung über die „Prognose-Kontrolle"-Zeilen im Diagnose-Log).
+
 - **TL-Web Panelsystem** — Grundfassung released mit v0.9.203 (PR #218,
   gemergt, Relay-Deploy gelaufen). **Zweite Runde umgesetzt 15.08.2026,
   noch nicht released** (Version 0.9.204 vorbereitet): Die 6 Panels
@@ -345,14 +355,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Spielzeiten-Protokollierung & Startzeit-Prognose** — Brutto-/Nettozeit
-  je Match host-seitig messen (persistenter Store `match-times.json`),
-  BTP-`Duration`-0-Pfade füllen, Startzeit-Prognose je Klasse×Disziplin
-  (Median, Vollmodell-Simulation) und Satzpausen-Countdown inkl.
-  Überziehung in TL-Web; Tablet hält Pausen bis zum aktiven Weiterspielen.
-  Drei Etappen (A Zeiten/BTP, B Prognose/Anzeige, C Pausen).
-  Spec: [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md) ·
-  ADR 0027 (Stempel host-seitig) · ADR 0028 (Pause hält bis Weiterspielen).
 - **Schiedsrichtermanagement** — BTP-Schiedsrichterliste in BTS Light:
   SR/AR je Spiel zuweisen (Client + TL-Web, auch bei laufendem Spiel),
   Konflikt-Warnungen (Verein/Sperr-Spieler, nie blockierend), automatische

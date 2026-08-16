@@ -199,7 +199,15 @@ dem Turnierstand. Ein Fehler im Relay kann deshalb keine Wertung erfinden.
 keiner: Ein Gerät im Hallennetz und eines aus dem Internet meinten mit
 derselben Zahl verschiedene Stände. Der Fingerabdruck lässt Uhrzeit und
 Revision selbst außen vor — sonst zählte sie im Sekundentakt hoch, obwohl
-sich nichts geändert hat.
+sich nichts geändert hat. Seit der Startzeit-Prognose (Spec
+`spielzeiten-prognose`) gilt das auch für `predicted_start_ms` an den
+Wartelisten-Einträgen: Der Wert ist zeitabgeleitet und bewegt die Revision
+nicht; die Seite klemmt eine dadurch ältere Prognose selbst auf „gleich".
+Die neuen `TlState`-Felder (`predicted_*`, `brutto_mins`/`netto_mins`,
+`time_stats`) sind **additiv** — der Zustand reist weiterhin als opakes
+JSON, der Relay bleibt unverändert; alte `tl.html`-Stände ignorieren sie.
+Cloud-Geräte sehen die neue Anzeige erst nach einem **Relay-Deploy**
+(`tl.html` ist einkompiliert) — Deploy vor dem Client-Release.
 
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen

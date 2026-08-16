@@ -541,9 +541,21 @@ impl SyncEngine {
             .filter(|m| m.status == MatchStatus::Scheduled && m.court_id.is_none())
             .map(|m| m.id)
             .collect();
-        tablet
+        let fresh = tablet
             .match_times_store()
             .reconcile(&assigned, &deassigned, now);
+        // Prognose-Kontrolle (Erfolgsmaß E12): beim echten Aufruf die
+        // zuletzt publizierte Prognose danebenlegen — daraus lässt sich am
+        // Testturnier „±10 min bei ≥70 %" ohne Zusatz-Tooling auswerten.
+        for id in fresh {
+            if let Some(predicted) = tablet.predicted_start_ms(id) {
+                let diff_min = (now as i64 - predicted as i64) / 60_000;
+                tracing::info!(
+                    "Prognose-Kontrolle: Match {id} aufs Feld — prognostiziert war \
+                     {predicted}, tatsächlich {now} ({diff_min:+} min)"
+                );
+            }
+        }
     }
 
     /// Aufräumen der manuellen Spielreihenfolge (Spec

@@ -2439,14 +2439,24 @@ pub(crate) fn build_state_limited(
                         .collect(),
                 });
             }
-            predict::predict_starts(&predict::PredictInput {
+            let predictions = predict::predict_starts(&predict::PredictInput {
                 now_min,
                 buffer_min,
                 rest_min,
                 courts: sim_courts,
                 player_ready_min: player_ready,
                 queue: sim_queue,
-            })
+            });
+            // Fürs Diagnose-Log merken (Prognose-Kontrolle, E12): Beim
+            // echten Aufruf vergleicht der Sync-Loop Prognose und
+            // Wirklichkeit.
+            tablet.set_predicted_starts(
+                predictions
+                    .iter()
+                    .map(|(id, p)| (*id, p.start_min * 60_000))
+                    .collect(),
+            );
+            predictions
         }
         None => std::collections::HashMap::new(),
     };

@@ -92,6 +92,15 @@ export interface CallTimerConfig {
   not_started_minutes: number;
 }
 
+/** Startzeit-Prognose in der TL-Sicht (Rust: config::PredictionConfig,
+ *  Spec spielzeiten-prognose). */
+export interface PredictionConfig {
+  /** Prognostizierte Startzeiten in TL-Web anzeigen? */
+  enabled: boolean;
+  /** Angenommene Bruttodauer (Minuten), solange Messwerte fehlen. */
+  default_duration_mins: number;
+}
+
 /** Zähltafelbediener-Verwaltung (Rust: config::ScorekeeperConfig, ADR 0007). */
 export interface ScorekeeperConfig {
   enabled: boolean;
@@ -530,6 +539,8 @@ export interface AppConfig {
   court_monitor: CourtMonitorConfig;
   /** Einstellungen des Aufruf-Timers (1./2./3. Aufruf). */
   call_timer: CallTimerConfig;
+  /** Startzeit-Prognose in der TL-Sicht (Spec spielzeiten-prognose). */
+  prediction: PredictionConfig;
   /** Zähltafelbediener-Verwaltung (ADR 0007). */
   scorekeeper: ScorekeeperConfig;
   /** Einstellungen der automatischen Feldvergabe. */
