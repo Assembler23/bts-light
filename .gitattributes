@@ -1,0 +1,32 @@
+# Zeilenenden.
+#
+# Alle Git-Objekte in diesem Repo sind bereits LF-only (stichprobenartig über
+# `git cat-file -p HEAD:<pfad>` geprüft — 0 CR-Bytes in jeder Stichprobe, u. a.
+# Cargo.toml, package.json, sync.rs, README.md, changelog.md). Die CI läuft auf
+# Ubuntu-Runnern. Der einzige Ort, an dem CRLF entsteht, ist
+# `core.autocrlf=true` in Git for Windows (System-Voreinstellung) beim
+# Checkout — nicht das Repo selbst.
+#
+# Auswirkung ohne diese Datei: `git status` meldet Dateien dauerhaft als
+# geändert, obwohl ihr Diff 0 Zeichen groß ist (nur Zeilenenden). Das ist nicht
+# bloß Kosmetik — ein solcher Phantom-Diff blockiert `git pull --ff-only` und
+# lässt sich nur durch Verwerfen auflösen, was bei echten Änderungen in
+# derselben Datei gefährlich wäre. Beobachtet am 2026-08-16 an
+# `src-tauri/Cargo.toml` und `Cargo.lock`.
+#
+# text=auto überlässt Git die Binär-Erkennung (Bilder, .ico, .bin bleiben
+# unangetastet); eol=lf erzwingt für alles andere LF, auf jedem Betriebssystem.
+# Da die Objekte schon LF sind, ändert das committete Blobs nicht — nur wie sie
+# beim Checkout auf die Platte kommen.
+#
+# WICHTIG bei bestehenden Arbeitsbäumen: Diese Datei greift erst beim nächsten
+# Checkout. Wer sein Verzeichnis vor ihrer Einführung ausgecheckt hat, muss es
+# einmalig neu ausschreiben lassen — bei SAUBEREM Arbeitsbaum:
+#
+#     git status --short          # muss leer sein
+#     git rm --cached -r . -q
+#     git reset --hard
+#
+# Wer die Regel je ändert: mit `git add --renormalize .` gegenprüfen, dass sich
+# außer beabsichtigten Dateien nichts bewegt.
+* text=auto eol=lf
