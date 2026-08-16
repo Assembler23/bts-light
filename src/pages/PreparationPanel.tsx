@@ -105,7 +105,11 @@ export function PreparationPanel({ announce, azureTts }: Props) {
   // Hallenname → Farbe (Spec hallen-farben): einmal je Hallen-Topologie
   // laden — Farbwechsel passieren auf der Felderübersicht, das nächste
   // Öffnen/Umbauen dieses Panels zieht nach. Leer bei einer Halle.
+  // Schlüssel statt `locations` als Dependency: der 4-s-Poll liefert jedes
+  // Mal eine neue Array-Referenz, die Topologie ändert sich aber fast nie
+  // (Review 2026-08-16 — sonst ein IPC-Aufruf je Poll).
   const [hallColor, setHallColor] = useState<Map<string, string>>(new Map());
+  const locKey = locations.map((l) => l.id).join(",");
   useEffect(() => {
     hallColorsView()
       .then((v) =>
@@ -114,7 +118,8 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         ),
       )
       .catch(() => {});
-  }, [locations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locKey]);
 
   // Hallenname → Kürzel für die Anzeige in der Spielzeile (ADR 0026: eine
   // Liste statt Hallen-Abschnitten, die Halle steht dafür an der Zeile).

@@ -2146,7 +2146,12 @@ function hallFarbe(name) {
   if (!state || !name) return "";
   const gesucht = String(name).trim().toLowerCase();
   const h = (state.halls || []).find((x) => x.name.toLowerCase() === gesucht);
-  return (h && h.color) || "";
+  const farbe = (h && h.color) || "";
+  // Selbstverteidigung der Seite (Review 2026-08-16): Der Wert landet in
+  // einem style-Attribut — esc() verhindert dort nur den Attribut-Ausbruch,
+  // nicht CSS-Injektion. Deshalb dieselbe strikte Form wie am Host
+  // (ist_hex_farbe): alles außer #rrggbb wird farblos.
+  return /^#[0-9a-f]{6}$/.test(farbe) ? farbe : "";
 }
 
 /** Die kleine Farbmarke vor Kürzel/Name; "" ohne Farbe. */

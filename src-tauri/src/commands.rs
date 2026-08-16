@@ -1173,7 +1173,7 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
     .to_string();
     let mut courts = state.tablet.overview();
     // Hallen-Farben hier statt in `overview_from` — dort fehlt die Config.
-    crate::hall_colors::paint(&mut courts, &config);
+    crate::hall_colors::paint(&mut courts, &config, &state.tablet.hall_names());
     TabletInfo {
         server_host,
         mode,
@@ -2784,8 +2784,8 @@ pub fn remove_hall_color(
 }
 
 /// Palette + effektive Farbe je Halle für den Picker der Felderübersicht.
-/// Die Hallenliste kommt aus der aktuellen Felder-Übersicht — dieselbe
-/// Quelle, nach der auch `paint` färbt (eine Wahrheit, R1).
+/// Die Hallenliste ist die kanonische des Turniers (`hall_names`) — dieselbe
+/// Quelle wie `paint` und TL-Web (eine Wahrheit, R1; Review 2026-08-16).
 #[tauri::command]
 pub fn hall_colors_view(state: State<'_, AppState>) -> crate::hall_colors::HallColorsView {
     let cfg = state
@@ -2793,13 +2793,7 @@ pub fn hall_colors_view(state: State<'_, AppState>) -> crate::hall_colors::HallC
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
-    let halls: Vec<String> = state
-        .tablet
-        .overview()
-        .into_iter()
-        .map(|c| c.location)
-        .collect();
-    crate::hall_colors::view(&cfg, &halls)
+    crate::hall_colors::view(&cfg, &state.tablet.hall_names())
 }
 
 /// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und

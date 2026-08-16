@@ -1102,6 +1102,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
     MonitorState {
         court_id,
         court_label,
+        hall_color: None,
         tournament_name: String::new(),
         match_info: None,
         court_state: None,
@@ -1155,6 +1156,13 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
             .get(&court_id)
             .cloned()
             .unwrap_or_default(),
+        // Hallen-Farbe aus der gepushten Feld-Liste (Spec hallen-farben) —
+        // alte Hosts liefern das Feld nicht, dann bleibt es farblos.
+        hall_color: namespace
+            .courts
+            .iter()
+            .find(|c| c.id == court_id)
+            .and_then(|c| c.hall_color.clone()),
         tournament_name: monitor
             .map(|m| m.tournament_name.clone())
             .unwrap_or_default(),
@@ -1407,6 +1415,11 @@ async fn overview_health(
                             "court_id": c.id,
                             "court": c.label,
                             "location": c.hall,
+                            // Hallen-Farbe (Spec hallen-farben): gleicher
+                            // JSON-Schlüssel wie die LAN-/health-Antwort
+                            // (CourtOverview.hall_color) — overview.html
+                            // liest beide Wege identisch.
+                            "hall_color": c.hall_color,
                             "match_id": m.map(|m| m.match_id).unwrap_or(0),
                             "match_name": m.map(|m| m.event_label.clone()).unwrap_or_default(),
                             "team1": m.map(|m| names(&m.team_a)).unwrap_or_default(),
@@ -1488,6 +1501,9 @@ async fn preparation_state(
                             "team1": pm.team_a.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                             "team2": pm.team_b.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                             "call": { "hall": pm.hall, "called_at_ms": pm.called_at_ms },
+                            // Hallen-Farbe (Spec hallen-farben): gleicher
+                            // Schlüssel wie die LAN-Antwort.
+                            "hall_color": pm.hall_color,
                         })
                     })
                     .collect()
@@ -4744,12 +4760,14 @@ mod tests {
                     id: 101,
                     label: "1".into(),
                     hall: "Halle 1".into(),
+                    hall_color: Some("#f59e0b".into()),
                 },
                 // Feld ohne Match → leere Anzeige, aber gelistet.
                 relay_proto::CourtBrief {
                     id: 102,
                     label: "2".into(),
                     hall: "Halle 1".into(),
+                    hall_color: None,
                 },
             ];
             ns.court_matches.insert(101, brief(7));
@@ -4783,6 +4801,9 @@ mod tests {
         assert_eq!(c0["court_id"], serde_json::json!(101));
         assert_eq!(c0["court"], serde_json::json!("1"));
         assert_eq!(c0["location"], serde_json::json!("Halle 1"));
+        // Hallen-Farbe (Spec hallen-farben): reist aus der Host-Feldliste
+        // durch — gleicher Schlüssel wie die LAN-/health-Antwort.
+        assert_eq!(c0["hall_color"], serde_json::json!("#f59e0b"));
         assert_eq!(c0["match_id"], serde_json::json!(7));
         assert_eq!(c0["team1"], serde_json::json!(["Anna"]));
         // Länderflaggen: Nationalitäten parallel zu den Namen (aus PlayerBrief).
@@ -4797,6 +4818,10 @@ mod tests {
         assert_eq!(c1["court_id"], serde_json::json!(102));
         assert_eq!(c1["match_id"], serde_json::json!(0));
         assert!(c1["on_court_since_ms"].is_null());
+        assert!(
+            c1["hall_color"].is_null(),
+            "alter Host ohne Farbe → farblos"
+        );
         // Aufruf-Timer in camelCase, wie die LAN-`/health` ihn liefert.
         assert_eq!(v["callTimer"]["enabled"], serde_json::json!(true));
         assert_eq!(v["callTimer"]["secondCallMinutes"], serde_json::json!(2.0));
@@ -5861,6 +5886,7 @@ mod tests {
         relay_proto::PreparedMatch {
             match_id,
             hall: hall.into(),
+            hall_color: None,
             discipline: "mens_singles".into(),
             class_label: "A".into(),
             round_name: "G1".into(),
@@ -5941,11 +5967,15 @@ mod tests {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let (host, _hrx) = mpsc::unbounded_channel();
         register_host(&broker, NS, &host).await;
+        // Spiel 42 trägt eine Hallen-Farbe (Spec hallen-farben), 43 kommt
+        // wie von einem alten Host ohne — beide müssen sauber durchreisen.
+        let mut p42 = prepared(42, "Halle 1");
+        p42.hall_color = Some("#0ea5e9".into());
         handle_host_frame(
             &broker,
             NS,
             HostFrame::Prepared {
-                prepared: vec![prepared(42, "Halle 1"), prepared(43, "Halle 2")],
+                prepared: vec![p42, prepared(43, "Halle 2")],
             },
             &host,
         )
@@ -5964,12 +5994,35 @@ mod tests {
         // Jeder Kandidat ist „aufgerufen" (call gesetzt) und trägt die Halle.
         assert_eq!(cands[0]["call"]["hall"], serde_json::json!("Halle 1"));
         assert!(!cands[0]["team1"].as_array().unwrap().is_empty());
+        // Hallen-Farbe: gesetzt reist durch, fehlend bleibt null (alter Host).
+        assert_eq!(cands[0]["hall_color"], serde_json::json!("#0ea5e9"));
+        assert!(cands[1]["hall_color"].is_null());
 
         // Unbekannter Namespace → 404 (die Seite zeigt dann „keine Verbindung").
         let miss = preparation_state(State(broker.clone()), Path("nope".into()))
             .await
             .into_response();
         assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn cloud_monitor_state_inherits_hall_color_from_the_court_list() {
+        // Spec hallen-farben: Der Cloud-Monitor bekommt die Farbe aus der
+        // vom Host gepushten Feld-Liste — kein eigener Frame nötig.
+        let mut ns = Namespace::new();
+        ns.courts = vec![relay_proto::CourtBrief {
+            id: 101,
+            label: "1".into(),
+            hall: "Halle 1".into(),
+            hall_color: Some("#14b8a6".into()),
+        }];
+        let state = build_monitor_state(&ns, 101);
+        assert_eq!(state.hall_color.as_deref(), Some("#14b8a6"));
+        assert_eq!(
+            build_monitor_state(&ns, 999).hall_color,
+            None,
+            "unbekanntes Feld bleibt farblos"
+        );
     }
 
     /// Der Hallenfilter der Ansage-Antwort zeigt jeder Halle nur ihre eigenen

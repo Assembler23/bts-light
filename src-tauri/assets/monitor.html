@@ -680,7 +680,18 @@
     var cfg = state.config || {};
     var cs = parseCourtState(state.courtState);
 
-    els.courtLabel.textContent = state.courtLabel || COURT_LABEL;
+    els.courtLabel.textContent = "";
+    // Hallen-Farbmarke (Spec hallen-farben) vor dem Feld-Label — strikte
+    // #rrggbb-Form, der Wert landet in einem Style. Alte Hosts/Relays
+    // liefern kein hallColor → Label wie bisher.
+    if (state.hallColor && /^#[0-9a-f]{6}$/.test(state.hallColor)) {
+      var hallenDot = document.createElement("span");
+      hallenDot.setAttribute("aria-hidden", "true");
+      hallenDot.style.cssText = "display:inline-block;width:.45em;height:.45em;border-radius:50%;margin-right:.3em;vertical-align:.06em;background:" + state.hallColor;
+      els.courtLabel.appendChild(hallenDot);
+    }
+    els.courtLabel.appendChild(
+      document.createTextNode(state.courtLabel || COURT_LABEL));
 
     // Spieldauer in der Kopfzeile (Stoppuhr + Minuten), wenn aktiviert und
     // der Tablet-Zustand einen Spielbeginn kennt. Ohne zaehlendes Tablet

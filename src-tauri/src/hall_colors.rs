@@ -84,14 +84,21 @@ fn ist_hex_farbe(farbe: &str) -> bool {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
-/// Hängt die effektiven Hallen-Farben an eine Felder-Übersicht. Die
-/// Hallenliste kommt aus den Courts selbst (`location` je Feld) — bei
-/// Ein-Hallen-Turnieren bleibt jedes `hall_color` `None` (Gate in
+/// Hängt die effektiven Hallen-Farben an eine Felder-Übersicht. `halls`
+/// ist die **kanonische** Hallenliste des Turniers
+/// ([`crate::tablet::state::TabletState::hall_names`], Review 2026-08-16) —
+/// NICHT die Court-Locations: Eine Location ohne Felder muss die
+/// Auto-Vergabe genauso verschieben wie überall sonst, sonst trüge
+/// dieselbe Halle je Oberfläche verschiedene Farben. Bei Ein-Hallen-
+/// Turnieren bleibt jedes `hall_color` `None` (Gate in
 /// [`effective_hall_colors`]). Bewusst NICHT in `overview_from`, damit
 /// `TabletState` die Config nicht kennen muss.
-pub fn paint(courts: &mut [crate::tablet::state::CourtOverview], cfg: &AppConfig) {
-    let halls: Vec<String> = courts.iter().map(|c| c.location.clone()).collect();
-    let farben = effective_hall_colors(cfg, &halls);
+pub fn paint(
+    courts: &mut [crate::tablet::state::CourtOverview],
+    cfg: &AppConfig,
+    halls: &[String],
+) {
+    let farben = effective_hall_colors(cfg, halls);
     if farben.is_empty() {
         return;
     }
@@ -334,7 +341,7 @@ mod tests {
             court_in("Mitte"),
             court_in(""), // Feld ohne auflösbare Halle
         ];
-        paint(&mut courts, &cfg);
+        paint(&mut courts, &cfg, &halls(&["Nord", "Mitte"]));
         assert_eq!(courts[0].hall_color.as_deref(), Some(HALL_PALETTE[1]));
         assert_eq!(courts[1].hall_color.as_deref(), Some(HALL_PALETTE[0]));
         assert_eq!(courts[2].hall_color, None, "ohne Halle keine Farbe");
@@ -344,8 +351,20 @@ mod tests {
     fn paint_leaves_single_hall_overviews_untouched() {
         let cfg = AppConfig::default();
         let mut courts = vec![court_in("Einzige"), court_in("Einzige")];
-        paint(&mut courts, &cfg);
+        paint(&mut courts, &cfg, &halls(&["Einzige"]));
         assert!(courts.iter().all(|c| c.hall_color.is_none()));
+    }
+
+    #[test]
+    fn paint_uses_the_tournament_hall_list_not_the_courts() {
+        // Review 2026-08-16: Eine Location ohne Felder („Aula") muss die
+        // Auto-Vergabe genauso verschieben wie in TL-Web — sonst trüge
+        // „Mitte" am Desktop palette[1], auf der TL-Seite aber palette[2].
+        let cfg = AppConfig::default();
+        let mut courts = vec![court_in("Mitte"), court_in("Nord")];
+        paint(&mut courts, &cfg, &halls(&["Aula", "Mitte", "Nord"]));
+        assert_eq!(courts[0].hall_color.as_deref(), Some(HALL_PALETTE[1]));
+        assert_eq!(courts[1].hall_color.as_deref(), Some(HALL_PALETTE[2]));
     }
 
     #[test]

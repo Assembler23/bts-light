@@ -418,6 +418,11 @@ pub struct MonitorState {
     /// Feldname (Anzeige), z. B. „1" oder „Feld 3".
     #[serde(rename = "courtLabel")]
     pub court_label: String,
+    /// Effektive Hallen-Farbe des Felds (Hex, Spec hallen-farben) — der
+    /// Monitor zeigt sie als Marke neben dem Feld-Label. `None` bei
+    /// Ein-Hallen-Turnieren und von alten Hosts/Relays.
+    #[serde(rename = "hallColor", default, skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
     #[serde(rename = "tournamentName", default)]
     pub tournament_name: String,
     /// Aktuelles Match, oder `null` wenn das Feld frei ist (→ Werbemodus).
@@ -1011,6 +1016,11 @@ pub struct CourtBrief {
     /// Hosts/Relays ohne dieses Feld lesbar.
     #[serde(default)]
     pub hall: String,
+    /// Effektive Hallen-Farbe (Hex `#rrggbb`, Spec hallen-farben, ADR 0033).
+    /// `None` bei Ein-Hallen-Turnieren und von alten Hosts — Relay und
+    /// Seiten fallen dann auf farblos zurück.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
 }
 
 /// Die eindeutigen, nicht-leeren Hallennamen einer Feldliste – alphabetisch
@@ -1937,6 +1947,10 @@ pub struct PreparedMatch {
     /// Hallenfilterung am Relay (Slave sieht nur seine Halle).
     #[serde(default)]
     pub hall: String,
+    /// Effektive Hallen-Farbe des Aufrufs (Hex, Spec hallen-farben) —
+    /// `None` ohne Halle, bei Ein-Hallen-Turnieren und von alten Hosts.
+    #[serde(rename = "hallColor", default, skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
     /// Disziplin als snake_case-Schlüssel (`mens_singles`, …; leer = unbekannt)
     /// – der Slave lokalisiert die Ansage selbst.
     #[serde(default)]
@@ -2568,6 +2582,7 @@ mod tests {
             prepared: vec![PreparedMatch {
                 match_id: 42,
                 hall: "Halle 2".into(),
+                hall_color: Some("#0ea5e9".into()),
                 discipline: "mens_singles".into(),
                 class_label: "A".into(),
                 round_name: "G1".into(),
@@ -2740,6 +2755,7 @@ mod tests {
             id: 401,
             label: "Halle 2 · 1".into(),
             hall: "Halle 2".into(),
+            hall_color: None,
         });
         // Älterer Host/Relay ohne `hall` bleibt lesbar (Default = leer).
         let old = r#"{"id":7,"label":"Feld 3"}"#;
@@ -2750,7 +2766,67 @@ mod tests {
                 id: 7,
                 label: "Feld 3".into(),
                 hall: String::new(),
+                hall_color: None,
             }
+        );
+    }
+
+    #[test]
+    fn court_brief_hall_color_roundtrips_and_defaults_none() {
+        // Spec hallen-farben: neues optionales Feld hält den Roundtrip …
+        roundtrip(&CourtBrief {
+            id: 401,
+            label: "Halle 2 · 1".into(),
+            hall: "Halle 2".into(),
+            hall_color: Some("#f59e0b".into()),
+        });
+        // … und ein alter Host ohne das Feld bleibt lesbar (farblos), ohne
+        // dass `None` überhaupt auf den Draht geht (skip_serializing_if).
+        let old = r#"{"id":7,"label":"Feld 3","hall":"Halle 1"}"#;
+        let brief: CourtBrief = serde_json::from_str(old).unwrap();
+        assert_eq!(brief.hall_color, None);
+        let json = serde_json::to_string(&brief).unwrap();
+        assert!(!json.contains("hall_color"), "None reist nicht mit: {json}");
+    }
+
+    #[test]
+    fn prepared_match_hall_color_defaults_none() {
+        let old = r#"{"matchId":42,"hall":"Halle 2","teamA":[],"teamB":[],"calledAtMs":0}"#;
+        let p: PreparedMatch = serde_json::from_str(old).unwrap();
+        assert_eq!(p.hall_color, None, "alter Host → farblos");
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("hallColor"), "None reist nicht mit: {json}");
+    }
+
+    #[test]
+    fn monitor_state_hall_color_defaults_none() {
+        // Frame eines alten Hosts/Relays simulieren: aktueller Zustand,
+        // aber ohne das neue Feld.
+        let mut json = serde_json::to_value(MonitorState {
+            court_id: 3,
+            court_label: "Feld 3".into(),
+            hall_color: Some("#f59e0b".into()),
+            tournament_name: String::new(),
+            match_info: None,
+            court_state: None,
+            config: MonitorConfig::default(),
+            ads: Vec::new(),
+            command: None,
+            device_code: String::new(),
+            unassigned: false,
+            redirect_to: None,
+            server_now_ms: 0,
+            on_court_since_ms: None,
+            call_timer: CallTimerView::default(),
+        })
+        .unwrap();
+        json.as_object_mut().unwrap().remove("hallColor").unwrap();
+        let s: MonitorState = serde_json::from_value(json).unwrap();
+        assert_eq!(s.hall_color, None, "alter Host/Relay → farblos");
+        let wieder = serde_json::to_string(&s).unwrap();
+        assert!(
+            !wieder.contains("hallColor"),
+            "None reist nicht mit: {wieder}"
         );
     }
 
@@ -2761,22 +2837,26 @@ mod tests {
                 id: 101,
                 label: "Halle 1 · 1".into(),
                 hall: "Halle 1".into(),
+                hall_color: None,
             },
             CourtBrief {
                 id: 401,
                 label: "Halle 2 · 1".into(),
                 hall: "Halle 2".into(),
+                hall_color: None,
             },
             CourtBrief {
                 id: 102,
                 label: "Halle 1 · 2".into(),
                 hall: "Halle 1".into(),
+                hall_color: None,
             },
             // Leere Halle (unbekannt) wird ausgelassen.
             CourtBrief {
                 id: 9,
                 label: "Feld 9".into(),
                 hall: String::new(),
+                hall_color: None,
             },
         ];
         assert_eq!(
@@ -2791,6 +2871,7 @@ mod tests {
         let state = MonitorState {
             court_id: 3,
             court_label: "Feld 3".into(),
+            hall_color: Some("#14b8a6".into()),
             tournament_name: "Test-Cup".into(),
             match_info: Some(MonitorMatch {
                 match_id: 14,

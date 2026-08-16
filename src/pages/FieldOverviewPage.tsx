@@ -304,14 +304,19 @@ export function FieldOverviewPage({
     };
   }, [refresh]);
 
-  // Hallen-Farben einmal beim Öffnen laden — sie ändern sich nur durch den
-  // Picker selbst (chooseHallColor lädt dann nach) oder Turnierwechsel
-  // (dann wird die Seite ohnehin neu aufgebaut).
+  // Hallen-Farben nachladen, sobald sich die Hallenmenge ändert (Review
+  // 2026-08-16): Die Seite kann offen sein, BEVOR BTP verbindet — mit
+  // Mount-only bliebe der Picker dann leer, bis jemand den Tab wechselt.
+  // Der Schlüssel ist die sortierte Hallenmenge, nicht das courts-Array —
+  // sonst liefe der Effekt bei jedem 2,5-s-Poll.
+  const hallsKey = [...new Set(courts.map((c) => c.location))]
+    .sort()
+    .join(" ");
   useEffect(() => {
     hallColorsView()
       .then(setHallColors)
       .catch(() => {});
-  }, []);
+  }, [hallsKey]);
 
   // Zähltafelbediener-Warteschlange separat pollen (nur wenn aktiviert).
   const refreshSk = useCallback(() => {

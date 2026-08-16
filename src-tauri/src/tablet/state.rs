@@ -1681,6 +1681,26 @@ impl TabletState {
             .unwrap_or_default()
     }
 
+    /// Die Hallennamen des Turniers (BTP-`Locations`, getrimmt, ohne leere).
+    /// DIE kanonische Hallenliste der Hallen-Farben (Review 2026-08-16):
+    /// Desktop-`paint`, Farb-Picker und TL-Web müssen aus derselben Liste
+    /// auflösen — sonst trüge dieselbe Halle je Oberfläche verschiedene
+    /// Auto-Farben, sobald eine Location ohne Felder existiert.
+    pub fn hall_names(&self) -> Vec<String> {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| {
+                s.locations
+                    .iter()
+                    .map(|l| l.name.trim().to_string())
+                    .filter(|n| !n.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Das Match, das BTP gerade diesem Feld (per CourtID) zugewiesen hat.
     pub fn match_for_court(&self, court_id: i64) -> Option<BtpMatch> {
         let guard = self.snapshot.read().unwrap();

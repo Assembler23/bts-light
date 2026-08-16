@@ -311,6 +311,20 @@ Hälfte) bleibt korrekt.
 
 Eingeführt in v0.9.15.
 
+## Hallen-Farbmarke (Mehr-Hallen)
+
+> Spec: [features/hallen-farben.md](features/hallen-farben.md)
+
+Bei Mehr-Hallen-Turnieren tragen die Anzeigen eine kleine Farbmarke in
+der Farbe ihrer Halle: `monitor.html` vor dem Feld-Label („● Halle 2 · 6"),
+`overview.html` in der Kopfzeile neben dem Hallennamen (auch in der
+Hallen-Rotation), `preparation.html` an den Hallen-Chips der Zeilen und —
+bei `?halle=`-Filter — in der Kopfzeile. Die Farbe kommt vom Turnier-PC
+(`hall_color`/`hallColor` in den bestehenden Zuständen, LAN wie Cloud);
+Name/Label bleiben immer stehen. Alte Hosts/Relays liefern das Feld
+nicht — die Seiten bleiben dann schlicht farblos. Jede Seite erzwingt die
+strikte `#rrggbb`-Form, bevor der Wert in ein Style-Attribut gelangt.
+
 ## Spielernamen (Broadcast-Stil)
 
 Namen werden zweizeilig dargestellt: Vorname(n) klein darüber, Nachname

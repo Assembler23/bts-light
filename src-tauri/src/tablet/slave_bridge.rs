@@ -158,6 +158,8 @@ mod tests {
             id,
             label: label.into(),
             hall: hall.into(),
+            // Reist per Serde-Default durch die Brücke — hier irrelevant.
+            hall_color: None,
         }
     }
 
