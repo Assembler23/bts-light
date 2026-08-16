@@ -4,6 +4,34 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.206
+
+- **Startzeit-Prognose in TL-Web** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  Bedienung [spielzeiten-prognose.md](spielzeiten-prognose.md)): Jedes
+  wartende Spiel zeigt den voraussichtlichen Aufruf („🕐 14:32", „~" =
+  noch ohne Messwerte, „gleich" = als Nächstes dran) — simuliert aus den
+  Median-Spielzeiten je Klasse × Disziplin, Feldern, Reihenfolge,
+  Hallen-Regeln, Spieler-Mindestpausen und 2 min Übergangspuffer. Neues
+  Panel **„Spielzeiten"** mit Brutto/Netto/Anlaufzeit-Medianen je Gruppe;
+  beendete Spiele tragen ihre Ist-Zeiten. Neuer SetupWizard-Abschnitt
+  „Startzeit-Prognose" (an/aus, Startwert 25 min). Die Prognose bewegt die
+  TL-Revision nicht (zeitabgeleitet); Cloud-Seiten brauchen den
+  Relay-Deploy.
+- **Spielzeiten-Messung, Etappe A** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  ADR [0027](adr/0027-spielzeit-stempel-hostseitig.md)): Der Host misst je
+  Match Bruttostart (erste Feldzuweisung), Nettostart (erster Punkt) und
+  Spielende — persistiert turniergebunden in `match-times.json`
+  (ADR-0022-Muster), immun gegen Feldwechsel und App-Neustart, Reset nur
+  bei bestätigter Feldabnahme durch BTP (3 Polls).
+- **BTP-`Duration` neustartfest und auf allen Pfaden.** Die Spieldauer
+  kommt jetzt aus dem Zeiten-Store: Ein Tablet-Ergebnis nach App-Neustart
+  mitten im Spiel sendet nicht mehr 0; das manuelle Backend-Ergebnis, die
+  Disqualifikation und die TL-Web-Wertung senden erstmals eine echte
+  Dauer. Walkover bleibt bewusst `Duration: 0` (kampflos wurde nicht
+  gespielt). Details: [btp_protocol.md](btp_protocol.md).
+
 ## v0.9.204
 
 - **Spielliste vereinfacht: hallenübergreifende Reihenfolge, eine Liste**

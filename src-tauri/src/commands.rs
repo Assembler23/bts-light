@@ -213,6 +213,16 @@ fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
         .join("queue-order.json")
 }
 
+/// Pfad der Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster
+/// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur
+/// für ein Turnier.
+fn tablet_match_times_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("match-times.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -860,6 +870,9 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
     tablet.set_queue_order_path(tablet_queue_order_path(&app));
+    // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
+    // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
+    tablet.set_match_times_path(tablet_match_times_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -1464,6 +1477,8 @@ pub async fn confirm_walkover(
             sets: Vec::new(),
             // Sieger ist die jeweils NICHT aufgebende Mannschaft.
             team1_won: !cand.retired_is_team1,
+            // Bewusst 0 (Spec `spielzeiten-prognose`, E1): kampflos wurde
+            // nicht gespielt — hier keine Dauer aus dem Zeiten-Store füllen.
             duration_mins: 0,
             score_status: 1, // 1 = Walkover
             // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben,
@@ -1533,19 +1548,28 @@ pub async fn enter_result(
     // Poll-Staleness-Grundlage wie assign_court/free_court/confirm_walkover
     // (R2); der `winner.is_some()`-Guard deckt den bereits-gewertet-Fall ab.
     let end_ms = now_ms();
-    let on_court_since = m
-        .court_id
-        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
+    // Bruttostart aus dem Zeiten-Store (Spec `spielzeiten-prognose`, E1):
+    // neustartfest; on_court_since bleibt Fallback. Damit sendet auch die
+    // Backend-Wertung eine echte Duration statt 0. Als Ende zählt bei
+    // einer Korrektur der ursprüngliche E3-Stempel, nicht „jetzt".
+    let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
+    let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
     let officials = tablet.officials_for_result(m.id);
     let update = crate::tablet::server::build_manual_result_update(
         m,
         sets,
         on_court_since,
-        end_ms,
+        btp_end_ms,
         officials,
     )?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
+    // Spielende stempeln (E3): auch die Backend-Wertung hält den
+    // Eingangszeitpunkt fest — aber als NICHT-regulär (E11): tablet-lose
+    // Ergebnisse liefern keinen Messwert für die Prognose-Statistik.
+    tablet
+        .match_times_store()
+        .stamp_finished(mid, false, end_ms);
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
@@ -1597,20 +1621,26 @@ pub async fn disqualify_match(
         .find(|m| m.id == match_id)
         .ok_or("Spiel nicht gefunden.")?;
     let end_ms = now_ms();
-    let on_court_since = m
-        .court_id
-        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
+    // Bruttostart/Ende aus dem Zeiten-Store (Spec `spielzeiten-prognose`,
+    // E1/E3) — wie bei `enter_result`.
+    let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
+    let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
     let officials = tablet.officials_for_result(m.id);
     let update = crate::tablet::server::build_manual_dq_update(
         m,
         loser_team,
         sets,
         on_court_since,
-        end_ms,
+        btp_end_ms,
         officials,
     )?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
+    // Spielende stempeln (E3/E11): Eingangszeitpunkt festhalten, aber eine
+    // Disqualifikation ist kein regulärer Messwert.
+    tablet
+        .match_times_store()
+        .stamp_finished(mid, false, end_ms);
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {

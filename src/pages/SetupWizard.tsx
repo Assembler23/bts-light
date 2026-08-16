@@ -328,6 +328,13 @@ export function SetupWizard({
   const [ctNotStarted, setCtNotStarted] = useState(
     String(ct?.not_started_minutes ?? 5),
   );
+  // Startzeit-Prognose (Spec spielzeiten-prognose): Anzeige in TL-Web +
+  // Startwert, solange noch keine Spielzeiten gemessen sind.
+  const pred = initialConfig.prediction;
+  const [predEnabled, setPredEnabled] = useState(pred?.enabled ?? true);
+  const [predDefault, setPredDefault] = useState(
+    String(pred?.default_duration_mins ?? 25),
+  );
   // Zähltafelbediener-Verwaltung (ADR 0007): Verlierer-Warteschlange führen.
   const [skEnabled, setSkEnabled] = useState(
     initialConfig.scorekeeper?.enabled ?? false,
@@ -497,6 +504,12 @@ export function SetupWizard({
             Number(ctNotStarted) > 0 ? Number(ctNotStarted) : 5,
         };
       })(),
+      // Startzeit-Prognose: ungültige/leere Dauer → Standard 25 Minuten.
+      prediction: {
+        enabled: predEnabled,
+        default_duration_mins:
+          Number(predDefault) > 0 ? Number(predDefault) : 25,
+      },
       scorekeeper: {
         enabled: skEnabled,
         break_seconds: initialConfig.scorekeeper?.break_seconds ?? 300,
@@ -1158,6 +1171,40 @@ export function SetupWizard({
             Zeit ist noch kein einziger Punkt gefallen.
           </p>
         </div>
+      </section>
+
+      {/* Startzeit-Prognose (Spec spielzeiten-prognose) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Timer}>Startzeit-Prognose</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Die Turnierleitungs-Oberfläche zeigt an jedem wartenden Spiel, wann
+          es voraussichtlich aufgerufen wird — berechnet aus den gemessenen
+          Spielzeiten dieses Turniers (je Klasse und Disziplin), den freien
+          Feldern und der Spielreihenfolge.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={predEnabled}
+            onChange={(e) => setPredEnabled(e.currentTarget.checked)}
+          />
+          Prognose anzeigen
+        </label>
+        {predEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <Field
+              label="Angenommene Spieldauer ohne Messwerte (Minuten)"
+              value={predDefault}
+              onChange={setPredDefault}
+              type="number"
+            />
+            <p className="text-xs text-slate-500">
+              Gilt nur, solange eine Klasse noch keine drei gemessenen Spiele
+              hat — solche Prognosen zeigt die Spielliste als „~hh:mm".
+              Danach rechnet bts-light automatisch mit den echten Zeiten.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem

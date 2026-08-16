@@ -520,6 +520,81 @@ impl SyncEngine {
         tablet.retain_auto_assign_exclusions(&keep);
     }
 
+    /// Spielzeiten-Messung je Poll abgleichen (Spec `spielzeiten-prognose`,
+    /// E4): Alle OnCourt-Matches werden — nur wenn noch kein Stempel steht —
+    /// mit ihrer ersten Feldzuweisung gestempelt; Matches, die BTP wieder als
+    /// `Scheduled` ohne Feld führt, zählen Richtung bestätigter Abnahme
+    /// (Reset nach [`match_times::DEASSIGN_CONFIRM_POLLS`] Polls). Finished
+    /// steht in keinem der beiden Sets und setzt den Zähler nur zurück.
+    /// Kein BTP-Write, rein lokal; die Reset-Logik selbst ist im Store
+    /// getestet.
+    fn reconcile_match_times(&self, tablet: &TabletState, snapshot: &BtpSnapshot, now: u64) {
+        // Store ans Turnier binden, BEVOR gestempelt wird (Review 2026-08-16,
+        // F4): `set_snapshot` läuft erst später im Poll — ohne die Bindung
+        // landeten die Stempel des ERSTEN Polls im ungebundenen Store und
+        // würden beim Laden verworfen; beim Turnierwechsel stempelte der
+        // Wechsel-Poll noch in den alten Stand. Idempotent, `set_snapshot`
+        // ruft dasselbe gleich nochmal.
+        tablet
+            .match_times_store()
+            .set_tournament(&snapshot.tournament_name);
+        let assigned: Vec<(i64, &str, &str)> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt && m.court_id.is_some())
+            .map(|m| (m.id, m.class_label.as_str(), m.discipline.as_str()))
+            .collect();
+        let deassigned: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Scheduled && m.court_id.is_none())
+            .map(|m| m.id)
+            .collect();
+        // Ende-Stempel gegen die BTP-Wahrheit halten (Review 2026-08-16,
+        // F3): Führt BTP ein Match mit Ende-Stempel weiter als laufend —
+        // und liegt sein Ergebnis nicht bloß in der Nachschub-Queue
+        // (ADR 0018) —, wurde das Ergebnis in BTP gelöscht; der Stempel
+        // muss weg, sonst rechnet das echte Ende mit der falschen Zeit.
+        let on_court: HashSet<i64> = assigned.iter().map(|(id, _, _)| *id).collect();
+        let retry_pending: HashSet<i64> = tablet
+            .btp_retries()
+            .iter()
+            .map(|e| e.update.btp_match_id)
+            .collect();
+        tablet
+            .match_times_store()
+            .reconcile_finished_conflicts(&on_court, &retry_pending);
+        let fresh = tablet
+            .match_times_store()
+            .reconcile(&assigned, &deassigned, now);
+        // Prognose-Kontrolle (Erfolgsmaß E12): beim echten Aufruf die
+        // zuletzt publizierte Prognose danebenlegen — daraus lässt sich am
+        // Testturnier „±10 min bei ≥70 %" ohne Zusatz-Tooling auswerten.
+        for id in fresh {
+            // `take`: genau eine Log-Zeile je Aufruf, danach ist der
+            // Eintrag verbraucht (F6).
+            if let Some(predicted) = tablet.take_predicted_start(id) {
+                let diff_min = (now as i64 - predicted as i64) / 60_000;
+                tracing::info!(
+                    "Prognose-Kontrolle: Match {id} aufs Feld — prognostiziert war \
+                     {predicted}, tatsächlich {now} ({diff_min:+} min)"
+                );
+            }
+        }
+        // Prognosen von Spielen vergessen, die es nicht mehr aufs Feld
+        // schaffen (beendet, kampflos, verschwunden) — sonst wüchse das
+        // Gedächtnis übers Turnier. Bewusst großzügig (alles außer
+        // Finished bleibt): ein Scheduled-Match mit frisch geschriebenem
+        // Feld ist einen Poll lang weder wartend noch OnCourt.
+        let keep: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status != MatchStatus::Finished)
+            .map(|m| m.id)
+            .collect();
+        tablet.retain_predicted_starts(&keep);
+    }
+
     /// Aufräumen der manuellen Spielreihenfolge (Spec
     /// `spielliste-manuelle-reihenfolge`, ADR 0026): Ein Match bleibt in
     /// der Reihenfolge, solange es spielbereit und noch nicht zugewiesen
@@ -1257,6 +1332,11 @@ impl SyncEngine {
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
         tablet.reconcile_on_court(&oncourt_now, now_ms());
+        // Spielzeiten-Messung (Spec `spielzeiten-prognose`, E4): der
+        // persistente Erst-Stempel je Match — bewusst NACH
+        // reconcile_on_court aus demselben Snapshot, damit beide Uhren
+        // dieselbe Zuweisung sehen.
+        self.reconcile_match_times(tablet, &snapshot, now_ms());
         // Automatische Feldvergabe: freie, lange genug freie, nicht gesperrte
         // Felder mit dem nächsten spielbereiten Match belegen (schreibt nach
         // BTP). Aus dem aktuellen Snapshot bestimmt – kollidiert so nicht mit
@@ -1808,6 +1888,88 @@ mod tests {
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         engine.reconcile_queue_order(&tablet, &snap);
         assert_eq!(tablet.queue_order_store().rank(8), None);
+    }
+
+    #[test]
+    fn spielzeiten_stempel_folgen_dem_snapshot() {
+        // Spec `spielzeiten-prognose` (E4): OnCourt stempelt genau einmal;
+        // Finished zählt nie als Feldabnahme; erst drei aufeinanderfolgende
+        // Snapshots „Scheduled ohne Feld" verwerfen den Stempel.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+
+        let snap = snap_with(
+            Vec::new(),
+            vec![
+                oncourt_named(7, 1, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        engine.reconcile_match_times(&tablet, &snap, 1_000);
+        assert_eq!(tablet.match_times_store().first_assigned_ms(7), Some(1_000));
+        assert_eq!(
+            tablet.match_times_store().first_assigned_ms(8),
+            None,
+            "wartendes Spiel bekommt keinen Stempel"
+        );
+
+        // Finished zählt nie als Abnahme — auch nach drei Polls.
+        let snap = snap_with(
+            Vec::new(),
+            vec![finished_named(7, 9_000, "A", "B")],
+            Vec::new(),
+        );
+        for t in [2_000, 3_000, 4_000] {
+            engine.reconcile_match_times(&tablet, &snap, t);
+        }
+        assert_eq!(tablet.match_times_store().first_assigned_ms(7), Some(1_000));
+
+        // Zurück auf „Scheduled ohne Feld": nach drei Polls ist der
+        // Stempel weg (bestätigte Abnahme, Spiel wird neu angesetzt).
+        let snap = snap_with(Vec::new(), vec![ready_named(7, None, "A", "B")], Vec::new());
+        for t in [5_000, 6_000, 7_000] {
+            engine.reconcile_match_times(&tablet, &snap, t);
+        }
+        assert_eq!(tablet.match_times_store().first_assigned_ms(7), None);
+    }
+
+    #[test]
+    fn der_erste_poll_bindet_den_zeiten_store_vor_dem_stempeln() {
+        // Review 2026-08-16 (F4): reconcile_match_times läuft VOR
+        // set_snapshot — der Stempel des ersten Polls muss die spätere
+        // Turnier-Bindung überleben, statt als „fremdes Turnier" verworfen
+        // zu werden.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(Vec::new(), vec![oncourt_named(7, 1, "A", "B")], Vec::new());
+        engine.reconcile_match_times(&tablet, &snap, 1_000);
+        assert_eq!(tablet.match_times_store().tournament(), "T");
+        tablet.set_snapshot(snap);
+        assert_eq!(
+            tablet.match_times_store().first_assigned_ms(7),
+            Some(1_000),
+            "Bindung stand schon beim Stempeln"
+        );
+    }
+
+    #[test]
+    fn ein_in_btp_geloeschtes_ergebnis_raeumt_den_ende_stempel() {
+        // Review 2026-08-16 (F3, Sync-Verdrahtung): Spiel läuft laut BTP
+        // weiter, obwohl ein Ende gestempelt ist (Ergebnis in BTP
+        // gelöscht) → nach 3 Polls ist der Stempel weg, der Bruttostart
+        // bleibt.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(Vec::new(), vec![oncourt_named(7, 1, "A", "B")], Vec::new());
+        engine.reconcile_match_times(&tablet, &snap, 1_000);
+        tablet.match_times_store().stamp_finished(7, true, 9_000);
+        for t in [2_000, 3_000, 4_000] {
+            engine.reconcile_match_times(&tablet, &snap, t);
+        }
+        let e = tablet.match_times_store().entry(7).unwrap();
+        assert_eq!(e.finished_ms, None);
+        assert_eq!(e.first_assigned_ms, Some(1_000));
     }
 
     #[test]

@@ -486,6 +486,20 @@ pub struct TabletState {
     /// und Desktop müssen denselben Stand sehen; die BTP-Reihenfolge selbst
     /// bleibt unangetastet (R2).
     queue_order: crate::tablet::queue_order::QueueOrderStore,
+    /// Spielzeiten-Messung je Match (Spec `spielzeiten-prognose`, ADR 0027):
+    /// erste Feldzuweisung, erster Punkt, Spielende — turniergebunden
+    /// persistiert (`match-times.json`). Er hängt hier, weil Sync-Loop,
+    /// Ergebnis-Pfade (LAN/Cloud/TL-Web/Desktop) und die TL-Anzeige
+    /// denselben Stand sehen müssen; `on_court_since` bleibt reiner
+    /// RAM-Zubringer für den Aufruf-Timer.
+    match_times: crate::tablet::match_times::MatchTimesStore,
+    /// Match-ID → zuletzt publizierte Startzeit-Prognose (Unix-ms) — reines
+    /// Diagnose-Gedächtnis für den Prognose/Wirklichkeit-Vergleich (E12),
+    /// gepflegt von `tl::build_state_limited`.
+    predicted_starts: RwLock<HashMap<i64, u64>>,
+    /// (Messwert-Generation, Statistik): Cache für `cached_time_stats` —
+    /// neu gerechnet nur, wenn sich am Zeiten-Store etwas geändert hat.
+    time_stats_cache: Mutex<Option<(u64, std::sync::Arc<crate::tablet::predict::TimeStats>)>>,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -835,6 +849,9 @@ impl TabletState {
             .set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
+        // Spielzeiten-Messung ebenso turniergebunden (Spec
+        // `spielzeiten-prognose`, Muster ADR 0022).
+        self.match_times.set_tournament(&snapshot.tournament_name);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -961,6 +978,102 @@ impl TabletState {
     /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
     pub fn set_queue_order_path(&self, path: std::path::PathBuf) {
         self.queue_order.set_path(path);
+    }
+
+    /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
+    /// Sync-Loop, Ergebnis-Pfaden und TL-Web.
+    pub fn match_times_store(&self) -> &crate::tablet::match_times::MatchTimesStore {
+        &self.match_times
+    }
+
+    /// Ablage-Datei der Spielzeiten-Messung setzen (beim App-Start).
+    pub fn set_match_times_path(&self, path: std::path::PathBuf) {
+        self.match_times.set_path(path);
+    }
+
+    /// Zuletzt publizierte Startzeit-Prognosen merken (Match-ID → Unix-ms) —
+    /// nur fürs Diagnose-Log: Beim echten Aufruf vergleicht der Sync-Loop
+    /// Prognose und Wirklichkeit (Erfolgsmaß E12, ±10 min / 70 %).
+    ///
+    /// **Gemergt statt ersetzt** (Review 2026-08-16, F6): Die Relay-
+    /// Größenleiter baut denselben Zustand mit kleineren Wartelisten —
+    /// ein Ersetzen ließe nur die Matches der kleinsten Stufe übrig und
+    /// die Prognose-Kontrolle bliebe für alle dahinter stumm. Aufgeräumt
+    /// wird über [`Self::take_predicted_start`] (geloggt) und
+    /// [`Self::retain_predicted_starts`] (aus dem Turnier verschwunden).
+    pub(crate) fn merge_predicted_starts(&self, map: std::collections::HashMap<i64, u64>) {
+        self.predicted_starts.write().unwrap().extend(map);
+    }
+
+    /// Zuletzt publizierte Prognose eines Matches — nur die Tests lesen
+    /// hier; die Produktion konsumiert über [`Self::take_predicted_start`].
+    #[cfg(test)]
+    pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
+        self.predicted_starts
+            .read()
+            .unwrap()
+            .get(&match_id)
+            .copied()
+    }
+
+    /// Prognose eines Matches herausnehmen (genau eine Log-Zeile je
+    /// Aufruf — der Eintrag ist danach verbraucht).
+    pub(crate) fn take_predicted_start(&self, match_id: i64) -> Option<u64> {
+        self.predicted_starts.write().unwrap().remove(&match_id)
+    }
+
+    /// Prognosen von Matches vergessen, die nicht mehr warten (beendet,
+    /// kampflos, aus dem Snapshot verschwunden) — sonst wüchse das
+    /// Gedächtnis über das Turnier hinweg.
+    pub(crate) fn retain_predicted_starts(&self, keep: &std::collections::HashSet<i64>) {
+        self.predicted_starts
+            .write()
+            .unwrap()
+            .retain(|id, _| keep.contains(id));
+    }
+
+    /// Endzeitpunkt eines Ergebnisses für die BTP-`Duration` (Spec
+    /// `spielzeiten-prognose`, E3): der ursprüngliche Ende-Stempel, falls
+    /// vorhanden (eine Korrektur rechnet nicht mit „jetzt"), sonst `now`.
+    /// **Der** gemeinsame Weg aller Ergebnis-Pfade — Gegenstück zu
+    /// [`Self::brutto_start_ms`] (Review 2026-08-16, F9).
+    pub(crate) fn result_end_ms(&self, match_id: i64, now: u64) -> u64 {
+        self.match_times
+            .entry(match_id)
+            .and_then(|e| e.finished_ms)
+            .unwrap_or(now)
+    }
+
+    /// Median-Statistik der Spielzeiten — je Messwert-Generation genau
+    /// einmal gerechnet (Review 2026-08-16, F8): Der TL-Zustand wird alle
+    /// ~2 s je Gerät gebaut (Relay-Leiter: mehrfach je Push); ohne Cache
+    /// klonte und sortierte jeder Aufruf die komplette Zeiten-Map, obwohl
+    /// sich Messwerte nur beim Stempeln ändern.
+    pub(crate) fn cached_time_stats(&self) -> std::sync::Arc<crate::tablet::predict::TimeStats> {
+        let generation = self.match_times.generation();
+        let mut cache = self.time_stats_cache.lock().unwrap();
+        if let Some((g, stats)) = cache.as_ref() {
+            if *g == generation {
+                return stats.clone();
+            }
+        }
+        let stats = std::sync::Arc::new(crate::tablet::predict::time_stats(
+            &self.match_times.entries(),
+        ));
+        *cache = Some((generation, stats.clone()));
+        stats
+    }
+
+    /// Bruttostart eines Matches für die BTP-`Duration` (Spec
+    /// `spielzeiten-prognose`, E1): der persistierte Erst-Stempel, mit
+    /// `on_court_since` (RAM) als Zubringer-Fallback, solange der Sync-Poll
+    /// noch nicht gestempelt hat. **Der** gemeinsame Weg aller
+    /// Ergebnis-Pfade — vier verschiedene Schreibweisen derselben Kaskade
+    /// wären der sichere Weg, eine davon zu vergessen.
+    pub(crate) fn brutto_start_ms(&self, match_id: i64, court_id: Option<i64>) -> Option<u64> {
+        self.match_times
+            .first_assigned_ms(match_id)
+            .or_else(|| court_id.and_then(|cid| self.on_court_since_ms(cid, match_id)))
     }
 
     /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**

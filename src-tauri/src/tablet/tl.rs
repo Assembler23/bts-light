@@ -17,6 +17,7 @@
 
 use crate::config::AppConfig;
 use crate::tablet::assign::{self, Blocked, HallSource, PlayerAvailability};
+use crate::tablet::predict;
 use crate::tablet::state::TabletState;
 
 /// Erkennt das Gerät hinter einem mitgeschickten Zugang.
@@ -713,7 +714,20 @@ pub(crate) fn state_for_relay(
 fn state_fingerprint(state: &mut TlState) -> String {
     let zeit = state.server_now_ms;
     state.server_now_ms = 0;
+    // Die Startzeit-Prognose ist zeitabgeleitet (ein freies Feld „startet
+    // ab jetzt") — sie darf die Revision nicht bewegen, sonst zählte rev
+    // im Minutentakt hoch, obwohl sich am Brett nichts geändert hat, und
+    // jede TL-Aktion liefe auf „überholtem Stand". Die Seite klemmt eine
+    // dadurch ältere Prognose selbst auf „jetzt" (max(Prognose, Uhr));
+    // frisch gerechnet wird sie bei jeder echten Änderung ohnehin.
+    let predicted: Vec<Option<u64>> = state.queue.iter().map(|m| m.predicted_start_ms).collect();
+    for m in state.queue.iter_mut() {
+        m.predicted_start_ms = None;
+    }
     let fp = serde_json::to_string(&state).unwrap_or_default();
+    for (m, p) in state.queue.iter_mut().zip(predicted) {
+        m.predicted_start_ms = p;
+    }
     state.server_now_ms = zeit;
     fp
 }
@@ -965,6 +979,8 @@ pub(crate) fn walkover_updates(
             sets: Vec::new(),
             // Sieger ist die jeweils NICHT aufgebende Mannschaft.
             team1_won: !c.retired_is_team1,
+            // Bewusst 0 (Spec `spielzeiten-prognose`, E1): kampflos wurde
+            // nicht gespielt — hier keine Dauer aus dem Zeiten-Store füllen.
             duration_mins: 0,
             score_status: 1, // 1 = kampflos
             free_court_id: None,
@@ -1295,16 +1311,33 @@ async fn execute_result_action(
     let updates = match action {
         A::EnterResult { match_id, .. } => {
             let snap = ctx.tablet.snapshot_clone()?;
-            let on_court_since = snap
+            // Bruttostart aus dem Zeiten-Store (Spec `spielzeiten-prognose`,
+            // E1): neustartfest; on_court_since bleibt Fallback. Damit
+            // sendet auch die TL-Web-Wertung eine echte Duration statt 0.
+            // Als Ende zählt bei einer Korrektur der ursprüngliche
+            // E3-Stempel, nicht „jetzt" — sonst überschriebe die Korrektur
+            // eine korrekte Duration mit Stunden.
+            let court_id = snap
                 .matches
                 .iter()
                 .find(|m| m.id == *match_id)
-                .and_then(|m| m.court_id)
-                .and_then(|cid| ctx.tablet.on_court_since_ms(cid, *match_id));
+                .and_then(|m| m.court_id);
+            let on_court_since = ctx.tablet.brutto_start_ms(*match_id, court_id);
+            let btp_end_ms = ctx.tablet.result_end_ms(*match_id, now_ms);
             let officials = ctx.tablet.officials_for_result(*match_id);
-            match plan_result_action(&snap, on_court_since, now_ms, action, officials) {
-                Ok(u) => u,
-                Err(rejected) => return Some(rejected),
+            match plan_result_action(&snap, on_court_since, btp_end_ms, action, officials) {
+                Ok(u) => {
+                    // Spielende stempeln (E3): Eingangszeitpunkt der
+                    // TL-Web-Wertung — NICHT-regulär (E11): tablet-lose
+                    // Ergebnisse liefern keinen Statistik-Messwert.
+                    ctx.tablet
+                        .match_times_store()
+                        .stamp_finished(*match_id, false, now_ms);
+                    u
+                }
+                Err(rejected) => {
+                    return Some(rejected);
+                }
             }
         }
         A::ConfirmWalkover {
@@ -1783,6 +1816,11 @@ pub struct TlState {
     /// und `result`-Abbildung wie `finished_matches` in commands.rs (die
     /// Desktop-Tabelle), damit beide Ansichten dasselbe erzählen.
     pub finished: Vec<TlFinished>,
+    /// Auswertung der gemessenen Spielzeiten (Spec `spielzeiten-prognose`).
+    /// `None`, solange die Prognose ausgeschaltet ist — die Seite zeigt das
+    /// Panel dann gar nicht.
+    #[serde(default)]
+    pub time_stats: Option<TlTimeStats>,
     /// Raster-Anordnung je Halle (Host-Einstellung, `AppConfig.hall_layouts`).
     /// Hallen ohne Eintrag bekommen kein Element hier — die Seite zeigt sie
     /// dann in der bisherigen Fließ-Darstellung.
@@ -1993,6 +2031,15 @@ pub struct TlMatch {
     /// der Reihenfolge dieser Liste selbst.
     #[serde(default)]
     pub manual: bool,
+    /// Voraussichtlicher Aufruf (Spec `spielzeiten-prognose`, E8), Unix-ms,
+    /// **minutengerundet** (Rev-Churn-Wächter). `None` = keine Prognose
+    /// (Prognose aus, ausgenommenes Spiel oder kein erlaubtes Feld).
+    #[serde(default)]
+    pub predicted_start_ms: Option<u64>,
+    /// Steht hinter der Prognose nur der Config-Default (keine Messwerte)?
+    /// Die Seite zeigt dann „~hh:mm" statt „hh:mm" (E7).
+    #[serde(default)]
+    pub predicted_uncertain: bool,
 }
 
 /// Eine Halle des Turniers.
@@ -2139,6 +2186,56 @@ pub struct TlFinished {
     /// Verlauf, die Beendet-Zeile bietet den Klick dann nicht an.
     #[serde(default)]
     pub has_timeline: bool,
+    /// Gemessene Bruttozeit (Feldzuweisung → Ergebnis) in ganzen Minuten
+    /// (Spec `spielzeiten-prognose`); `None`, wenn nicht gemessen.
+    #[serde(default)]
+    pub brutto_mins: Option<i64>,
+    /// Gemessene Nettozeit (erster Punkt → Ergebnis) in ganzen Minuten.
+    #[serde(default)]
+    pub netto_mins: Option<i64>,
+}
+
+/// Auswertung der gemessenen Spielzeiten (Spec `spielzeiten-prognose`):
+/// Mediane je Klasse × Disziplin. Nur Zahlen und Kürzel — keine
+/// Personendaten (Datenschutz-Wächter prüft mit).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlTimeStats {
+    pub rows: Vec<TlTimeStatsRow>,
+    /// Turnierweiter Brutto-Median (ab 3 Messwerten), Minuten.
+    pub tournament_brutto_mins: Option<i64>,
+    /// Konfigurierter Startwert (Minuten) — die Seite erklärt damit die
+    /// „~"-Kennzeichnung.
+    pub default_mins: i64,
+}
+
+/// Eine Zeile der Spielzeiten-Auswertung. Alle Werte Mediane in Minuten.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlTimeStatsRow {
+    pub class_label: String,
+    pub discipline: String,
+    pub count: usize,
+    pub brutto_mins: i64,
+    pub netto_mins: i64,
+    pub diff_mins: i64,
+}
+
+/// Ist-Zeiten eines beendeten Spiels für die Beendet-Zeile:
+/// `(brutto, netto)` in Minuten. Dieselbe Plausibilitätsregel wie
+/// BTP-`Duration` und Statistik (Review 2026-08-16, F7) — ein über Nacht
+/// geparktes Spiel zeigt sonst genau hier den Absurdwert, den der Deckel
+/// überall sonst unterdrückt. Netto ist auf Brutto geklemmt: Erreicht der
+/// erste Score den Host vor dem ersten Sync-Poll, läge der Punktstempel
+/// sonst VOR dem Zuweisungsstempel („40 min (netto 43)").
+fn finished_times(tablet: &TabletState, match_id: i64) -> Option<(i64, Option<i64>)> {
+    let e = tablet.match_times_store().entry(match_id)?;
+    let finished = e.finished_ms?;
+    let brutto =
+        crate::tablet::match_times::plausible_duration_mins(e.first_assigned_ms?, finished)?;
+    let netto = e
+        .first_point_ms
+        .and_then(|fp| crate::tablet::match_times::plausible_duration_mins(fp, finished))
+        .map(|n| n.min(brutto));
+    Some((brutto, netto))
 }
 
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
@@ -2192,6 +2289,7 @@ pub(crate) fn build_state_limited(
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
             finished: Vec::new(),
+            time_stats: None,
             // Die Raster-Einstellung ist Host-Konfiguration, kein
             // Turnierstand — sie gilt auch, solange BTP noch nichts
             // geliefert hat.
@@ -2271,6 +2369,116 @@ pub(crate) fn build_state_limited(
         .collect();
     ordered.sort_by_key(|(key, _, _, _)| *key);
 
+    // Startzeit-Prognose (Spec `spielzeiten-prognose`, E5–E8): Statistik
+    // aus dem Zeiten-Store + deterministische Simulation der Warteliste —
+    // hier und nicht im Sync-Loop, damit Prognose, Felder und Liste aus
+    // DEMSELBEN Snapshot stammen und LAN wie Cloud identisch anzeigen (R3).
+    // Alles minutengranular, damit der Fingerprint unten nicht jede
+    // Sekunde kippt (Rev-Churn-Wächter).
+    let stats = config
+        .prediction
+        .enabled
+        .then(|| tablet.cached_time_stats());
+    let predictions: std::collections::HashMap<i64, predict::Prediction> = match &stats {
+        Some(stats) => {
+            let default_mins = config.prediction.default_duration_mins;
+            let now_min = now_ms / 60_000;
+            let rest_min = effective_rest_minutes(&snap, config).unwrap_or(0).max(0) as u64;
+            let buffer_min = predict::effective_buffer_min(
+                config.auto_assign.enabled,
+                config.auto_assign.wait_minutes,
+            );
+            // Felder: gesperrte kommen nicht in die Vergabe-Rotation —
+            // ihre SPIELER sind aber trotzdem gebunden (Review 2026-08-16,
+            // F5: wer auf einem gesperrten Feld mitten im Spiel steht, ist
+            // nicht „gleich dran"). Belegte Felder werden frei nach
+            // max(0, Gruppenwert − verstrichen); die Spieler laufender
+            // Spiele sind ab dann (+ Mindestpause) wieder einsatzbereit.
+            let mut sim_courts: Vec<predict::PredictCourt> = Vec::new();
+            let mut player_ready: std::collections::HashMap<String, u64> =
+                std::collections::HashMap::new();
+            for c in courts.iter() {
+                let free_at_min = if c.match_id != 0 {
+                    let (dur, _) =
+                        stats.group_duration(&c.class_label, &c.discipline, default_mins);
+                    let since = tablet
+                        .brutto_start_ms(c.match_id, Some(c.court_id))
+                        .or(c.on_court_since_ms);
+                    let elapsed = since
+                        .map(|s| now_min.saturating_sub(s / 60_000))
+                        .unwrap_or(0);
+                    now_min + dur.saturating_sub(elapsed)
+                } else {
+                    now_min
+                };
+                if c.match_id != 0 {
+                    if let Some(m) = snap.matches.iter().find(|mm| mm.id == c.match_id) {
+                        for p in m.team1.iter().chain(m.team2.iter()) {
+                            player_ready.insert(assign::player_key(p), free_at_min + rest_min);
+                        }
+                    }
+                }
+                if !c.locked {
+                    sim_courts.push(predict::PredictCourt {
+                        hall: c.location.clone(),
+                        free_at_min,
+                    });
+                }
+            }
+            // Bestehende Mindestpausen-Blocker (Spieler ruht noch nach
+            // seinem letzten Spiel) als Bereitschafts-Untergrenze.
+            let mut sim_queue: Vec<predict::PredictMatch> = Vec::new();
+            for (_, m, hall, _) in ordered.iter().take(queue_limit) {
+                if let Some(Blocked::Pause { until_ms, .. }) = availability.blocked(m, now_ms) {
+                    let until_min = until_ms / 60_000;
+                    for p in m.team1.iter().chain(m.team2.iter()) {
+                        let e = player_ready.entry(assign::player_key(p)).or_insert(0);
+                        *e = (*e).max(until_min);
+                    }
+                }
+                // Ausgenommene Spiele überspringt die Vergabe wirklich —
+                // sie belegen kein Feld und bekommen keine Prognose.
+                if tablet.auto_assign_excluded(m.id) {
+                    continue;
+                }
+                let (duration_min, uncertain) =
+                    stats.group_duration(&m.class_label, m.discipline.as_str(), default_mins);
+                sim_queue.push(predict::PredictMatch {
+                    match_id: m.id,
+                    hall: hall.clone(),
+                    duration_min,
+                    uncertain,
+                    players: m
+                        .team1
+                        .iter()
+                        .chain(m.team2.iter())
+                        .map(assign::player_key)
+                        .collect(),
+                });
+            }
+            let predictions = predict::predict_starts(&predict::PredictInput {
+                now_min,
+                buffer_min,
+                rest_min,
+                courts: sim_courts,
+                player_ready_min: player_ready,
+                queue: sim_queue,
+            });
+            // Fürs Diagnose-Log merken (Prognose-Kontrolle, E12): Beim
+            // echten Aufruf vergleicht der Sync-Loop Prognose und
+            // Wirklichkeit. Gemergt, nicht ersetzt — die Relay-Leiter baut
+            // denselben Zustand mit kleineren Wartelisten (F6).
+            tablet.merge_predicted_starts(
+                predictions
+                    .iter()
+                    .map(|(id, p)| (*id, p.start_min * 60_000))
+                    .collect(),
+            );
+            predictions
+        }
+        None => std::collections::HashMap::new(),
+    };
+
     // Turnierweit kappen, nicht je Halle (ADR 0026) — die Liste ist eine
     // einzige Abfolge, also gibt es auch nur eine Grenze.
     let queue_truncated = ordered.len().saturating_sub(queue_limit);
@@ -2318,6 +2526,8 @@ pub(crate) fn build_state_limited(
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
             manual: manually_ordered,
+            predicted_start_ms: predictions.get(&m.id).map(|p| p.start_min * 60_000),
+            predicted_uncertain: predictions.get(&m.id).is_some_and(|p| p.uncertain),
         });
     }
 
@@ -2389,27 +2599,32 @@ pub(crate) fn build_state_limited(
     let finished: Vec<TlFinished> = finished_matches
         .into_iter()
         .take(finished_limit)
-        .map(|m| TlFinished {
-            match_id: m.id,
-            match_num: m.match_num.unwrap_or(0),
-            draw_name: m.draw_name.clone(),
-            round_name: m.round_name.clone(),
-            class_label: m.class_label.clone(),
-            discipline: m.discipline.as_str().to_string(),
-            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
-            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
-            winner: m.winner.unwrap_or(0),
-            sets: m.sets.clone(),
-            result: match m.result {
-                crate::btp::model::MatchResult::Normal => "normal",
-                crate::btp::model::MatchResult::Walkover => "walkover",
-                crate::btp::model::MatchResult::Retired => "retired",
-                crate::btp::model::MatchResult::Disqualified => "disqualified",
+        .map(|m| {
+            let zeiten = finished_times(tablet, m.id);
+            TlFinished {
+                match_id: m.id,
+                match_num: m.match_num.unwrap_or(0),
+                draw_name: m.draw_name.clone(),
+                round_name: m.round_name.clone(),
+                class_label: m.class_label.clone(),
+                discipline: m.discipline.as_str().to_string(),
+                team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+                team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+                winner: m.winner.unwrap_or(0),
+                sets: m.sets.clone(),
+                result: match m.result {
+                    crate::btp::model::MatchResult::Normal => "normal",
+                    crate::btp::model::MatchResult::Walkover => "walkover",
+                    crate::btp::model::MatchResult::Retired => "retired",
+                    crate::btp::model::MatchResult::Disqualified => "disqualified",
+                }
+                .to_string(),
+                court: m.court.clone().unwrap_or_default(),
+                finished_at_ms: m.finished_at,
+                has_timeline: tablet.timeline_store().has_timeline(m.id),
+                brutto_mins: zeiten.map(|(b, _)| b),
+                netto_mins: zeiten.and_then(|(_, n)| n),
             }
-            .to_string(),
-            court: m.court.clone().unwrap_or_default(),
-            finished_at_ms: m.finished_at,
-            has_timeline: tablet.timeline_store().has_timeline(m.id),
         })
         .collect();
 
@@ -2461,6 +2676,22 @@ pub(crate) fn build_state_limited(
         scorekeeper_managed,
         scorekeepers,
         finished,
+        time_stats: stats.as_ref().map(|stats| TlTimeStats {
+            rows: stats
+                .rows()
+                .into_iter()
+                .map(|r| TlTimeStatsRow {
+                    class_label: r.class_label,
+                    discipline: r.discipline,
+                    count: r.count,
+                    brutto_mins: r.brutto_min as i64,
+                    netto_mins: r.netto_min as i64,
+                    diff_mins: r.diff_min as i64,
+                })
+                .collect(),
+            tournament_brutto_mins: stats.tournament_brutto_min().map(|v| v as i64),
+            default_mins: config.prediction.default_duration_mins.round() as i64,
+        }),
         layouts: layouts_view(config),
         show_club_names: config.display.show_club_names,
         show_club_logos: config.display.show_club_logos,
@@ -3373,6 +3604,192 @@ mod tests {
         assert_eq!(s.courts[0].court_id, 1);
         assert_eq!(s.courts[0].match_id, 7);
         assert_eq!(s.courts[0].team1, vec!["Müller".to_string()]);
+    }
+
+    #[test]
+    fn die_prognose_haengt_minutengerundet_an_den_wartenden_spielen() {
+        // Spec `spielzeiten-prognose` (E7/E8): ohne Messwerte gilt der
+        // Config-Default (25 min) als unsicher; ein freies Feld + 2 min
+        // Puffer ⇒ Spiel 1 „dran" bei now+2, Spiel 2 wartet aufs Feld.
+        let tablet = TabletState::default();
+        let mut m2 = a_match(2);
+        m2.team1 = vec![player("Weber")];
+        m2.team2 = vec![player("Fischer")];
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![a_match(1), m2],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+        assert_eq!(s.queue[0].predicted_start_ms, Some((60 + 2) * 60_000));
+        assert!(
+            s.queue[0].predicted_uncertain,
+            "ohne Messwerte steht nur der Default dahinter"
+        );
+        assert_eq!(
+            s.queue[1].predicted_start_ms,
+            Some((60 + 2 + 25 + 2) * 60_000),
+            "Spiel 2 wartet, bis das Feld frei wird"
+        );
+        assert_eq!(
+            s.queue[0].predicted_start_ms.unwrap() % 60_000,
+            0,
+            "minutengerundet (Rev-Churn-Wächter)"
+        );
+    }
+
+    #[test]
+    fn ausgeschaltete_prognose_liefert_weder_zeiten_noch_statistik() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![a_match(1)], Vec::new()));
+        let mut cfg = AppConfig::default();
+        cfg.prediction.enabled = false;
+        let s = build_state(&tablet, &cfg, 3_600_000, 7);
+        assert_eq!(s.queue[0].predicted_start_ms, None);
+        assert!(s.time_stats.is_none());
+    }
+
+    #[test]
+    fn statistik_und_ist_zeiten_kommen_aus_dem_zeiten_store() {
+        // Drei regulär gemessene A-Herreneinzel: Brutto 20/30/40 (Median
+        // 30), Netto je 5 min kürzer (Median 25). Match 3 ist zugleich das
+        // beendete Spiel im Snapshot → seine Beendet-Zeile trägt die
+        // Ist-Zeiten.
+        let tablet = TabletState::default();
+        // Snapshot ZUERST: er bindet den Zeiten-Store ans Turnier — Stempel
+        // vor der Bindung würden beim (Turnier-)Wechsel verworfen.
+        let mut done = a_match(3);
+        done.status = MatchStatus::Finished;
+        done.winner = Some(1);
+        done.finished_at = Some(2_000_000);
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![a_match(1), done],
+            Vec::new(),
+        ));
+        let store_seed = |id: i64, brutto_min: u64| {
+            let start = 1_000_000;
+            tablet.match_times_store().reconcile(
+                &[(id, "A", "mens_singles")],
+                &std::collections::HashSet::new(),
+                start,
+            );
+            tablet
+                .match_times_store()
+                .stamp_first_point(id, start + 5 * 60_000);
+            tablet
+                .match_times_store()
+                .stamp_finished(id, true, start + brutto_min * 60_000);
+        };
+        store_seed(101, 20);
+        store_seed(102, 30);
+        store_seed(3, 40);
+
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+
+        let stats = s.time_stats.expect("Prognose an ⇒ Statistik da");
+        assert_eq!(stats.default_mins, 25);
+        assert_eq!(stats.rows.len(), 1);
+        assert_eq!(stats.rows[0].class_label, "A");
+        assert_eq!(stats.rows[0].discipline, "mens_singles");
+        assert_eq!(stats.rows[0].count, 3);
+        assert_eq!(stats.rows[0].brutto_mins, 30);
+        assert_eq!(stats.rows[0].netto_mins, 25);
+        assert_eq!(stats.rows[0].diff_mins, 5);
+        assert_eq!(stats.tournament_brutto_mins, Some(30));
+
+        assert_eq!(s.finished[0].match_id, 3);
+        assert_eq!(s.finished[0].brutto_mins, Some(40));
+        assert_eq!(s.finished[0].netto_mins, Some(35));
+
+        // Und mit Messwerten ist die Prognose nicht mehr unsicher: das
+        // wartende A-Herreneinzel bekommt den Gruppen-Median (30).
+        assert!(!s.queue[0].predicted_uncertain);
+        assert_eq!(s.queue[0].predicted_start_ms, Some((60 + 2) * 60_000));
+    }
+
+    #[test]
+    fn spieler_auf_gesperrtem_feld_sind_fuer_die_prognose_gebunden() {
+        // Review 2026-08-16 (F5): Ein gesperrtes Feld kommt nicht in die
+        // Vergabe-Rotation — aber wer dort mitten im Spiel steht, ist
+        // trotzdem gebunden. Sonst hieße es „gleich dran", obwohl das
+        // laufende Spiel erst enden muss.
+        let tablet = TabletState::default();
+        let mut running = a_match(7); // Müller vs. Schmidt …
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        let waiting = a_match(2); // … die auch hier spielen (Fixture-Namen)
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![running, waiting],
+            Vec::new(),
+        ));
+        tablet.set_court_locked(1, true);
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+        // Feld 2 wäre ab now+2 frei — aber die Spieler stehen auf dem
+        // gesperrten Feld 1 (Restzeit = Default 25 min, keine Messwerte).
+        assert_eq!(s.queue[0].predicted_start_ms, Some((60 + 25) * 60_000));
+    }
+
+    #[test]
+    fn das_prognose_gedaechtnis_mergt_statt_zu_ersetzen() {
+        // Review 2026-08-16 (F6): Die Relay-Größenleiter baut denselben
+        // Zustand mit kleineren Wartelisten — ein Ersetzen ließe nur die
+        // Matches der kleinsten Stufe übrig und die E12-Kontrolle bliebe
+        // für alle dahinter stumm.
+        let tablet = TabletState::default();
+        tablet.merge_predicted_starts([(1, 100), (2, 200)].into_iter().collect());
+        tablet.merge_predicted_starts([(2, 250)].into_iter().collect()); // 5er-Stufe
+        assert_eq!(tablet.predicted_start_ms(1), Some(100));
+        assert_eq!(tablet.predicted_start_ms(2), Some(250));
+        assert_eq!(tablet.take_predicted_start(1), Some(100));
+        assert_eq!(
+            tablet.predicted_start_ms(1),
+            None,
+            "genau eine Log-Zeile je Aufruf"
+        );
+        tablet.retain_predicted_starts(&std::collections::HashSet::new());
+        assert_eq!(tablet.predicted_start_ms(2), None);
+    }
+
+    #[test]
+    fn die_statistik_wird_je_messwert_generation_nur_einmal_gerechnet() {
+        // Review 2026-08-16 (F8): Der TL-Zustand entsteht alle ~2 s je
+        // Gerät — die Statistik darf nur neu rechnen, wenn sich am
+        // Zeiten-Store wirklich etwas geändert hat.
+        let tablet = TabletState::default();
+        let a = tablet.cached_time_stats();
+        let b = tablet.cached_time_stats();
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "unverändert → derselbe Cache"
+        );
+        tablet.match_times_store().reconcile(
+            &[(7, "A", "HE")],
+            &std::collections::HashSet::new(),
+            1_000,
+        );
+        let c = tablet.cached_time_stats();
+        assert!(
+            !std::sync::Arc::ptr_eq(&a, &c),
+            "neue Messwert-Generation → neu gerechnet"
+        );
+    }
+
+    #[test]
+    fn der_fingerprint_bleibt_innerhalb_einer_minute_stabil() {
+        // Rev-Churn-Wächter: Zwei Bauten in derselben Minute dürfen sich
+        // nur in `server_now_ms` unterscheiden — sonst zählte die Revision
+        // jeden Poll hoch und jede TL-Aktion liefe auf „überholter Stand".
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![a_match(1), a_match(2)],
+            Vec::new(),
+        ));
+        let mut a = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+        let mut b = build_state(&tablet, &AppConfig::default(), 3_650_000, 7);
+        assert_eq!(state_fingerprint(&mut a), state_fingerprint(&mut b));
     }
 
     #[test]
@@ -5929,6 +6346,20 @@ mod tests {
             "winner",
             "result",
             "finished_at_ms",
+            // Spielzeiten & Prognose (Spec spielzeiten-prognose): alles
+            // reine Zeiten/Zähler je MATCH — Uhrzeiten, Minuten-Mediane,
+            // Anzahl Messungen, Klassen-/Disziplin-Kürzel (oben erlaubt).
+            // Kein Personenbezug über die ohnehin gezeigten Namen hinaus.
+            "predicted_start_ms",
+            "predicted_uncertain",
+            "brutto_mins",
+            "netto_mins",
+            "time_stats",
+            "rows",
+            "count",
+            "diff_mins",
+            "tournament_brutto_mins",
+            "default_mins",
             // Raster-Anordnung je Halle: reine Geometrie-Konfiguration vom
             // Turnier-PC, keine Personendaten.
             "layouts",

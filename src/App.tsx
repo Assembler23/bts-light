@@ -96,6 +96,12 @@ function defaultConfig(): AppConfig {
       third_call_minutes: 4,
       not_started_minutes: 5,
     },
+    // Startzeit-Prognose: standardmäßig an (wie der Rust-Default) — reine
+    // Anzeige in TL-Web, kein Schreibpfad.
+    prediction: {
+      enabled: true,
+      default_duration_mins: 25,
+    },
     scorekeeper: {
       enabled: false,
       break_seconds: 300,

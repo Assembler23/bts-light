@@ -390,6 +390,23 @@ erst beim Öffnen der Pflege gezielt und mit dem Geräte-Zugang abgerufen
 Relay auf badhub.de die neuen Aktionen kennt (Deploy vor dem Client-Release);
 im Hallennetz sofort.
 
+### Startzeit-Prognose & Spielzeiten
+
+> Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·
+> Spec [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md)
+
+Jedes wartende Spiel in der Liste trägt den **voraussichtlichen Aufruf**
+(„🕐 14:32"), simuliert aus den gemessenen Spielzeiten dieses Turniers
+(Median je Klasse × Disziplin), den Feldern, der Reihenfolge, Hallen-Regeln
+und Spieler-Mindestpausen. **„~14:32"** heißt: noch keine Messwerte, es gilt
+der Startwert aus dem SetupWizard („Startzeit-Prognose", Standard 25 min);
+**„gleich"** heißt: als Nächstes dran. Ausgenommene Spiele bekommen keine
+Prognose. Das Panel **„Spielzeiten"** zeigt die Auswertung: je Klasse und
+Disziplin die Mediane von Brutto (Feldzuweisung → Ende), Netto (1. Punkt →
+Ende) und Anlaufzeit, dazu die Zahl der Messungen; beendete Spiele tragen
+ihre Ist-Zeiten in der Beendet-Zeile. Alles reine Anzeige — es geht nichts
+davon an Monitore oder den Liveticker.
+
 ## Grenzen, die im Betrieb auffallen
 
 - **Acht Geräte gleichzeitig.** Das neunte wird abgewiesen; ein

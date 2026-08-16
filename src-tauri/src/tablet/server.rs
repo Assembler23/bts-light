@@ -1486,6 +1486,14 @@ fn manual_finish_fields(
     on_court_since: Option<u64>,
     now: u64,
 ) -> (Option<i64>, Vec<i64>, i64, Option<u64>) {
+    // Die Dauer hängt NICHT am Feld (Review 2026-08-16): auch ein bereits
+    // freigegebenes Spiel trägt seine gemessene Bruttozeit (der Aufrufer
+    // reicht sie aus dem Zeiten-Store herein). Nur Feldfreigabe,
+    // Auschecken und Endzeit je Spieler brauchen ein Feld. Unplausible
+    // Dauern (über Nacht geparkt) gelten als unbekannt.
+    let dur = on_court_since
+        .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, now))
+        .unwrap_or(0);
     match m.court_id {
         Some(cid) => {
             let ids: Vec<i64> = m
@@ -1495,12 +1503,9 @@ fn manual_finish_fields(
                 .map(|p| p.id)
                 .filter(|&id| id != 0)
                 .collect();
-            let dur = on_court_since
-                .map(|since| (now.saturating_sub(since) / 60_000) as i64)
-                .unwrap_or(0);
             (Some(cid), ids, dur, Some(now))
         }
-        None => (None, Vec::new(), 0, None),
+        None => (None, Vec::new(), dur, None),
     }
 }
 
@@ -1651,16 +1656,30 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             return ResultResponse::err(e);
         }
     }
-    // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
-    // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
-    // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
-    // (z. B. App-Neustart mitten im Spiel).
-    let end_ms = now_ms();
-    let duration_mins = ctx
-        .tablet
-        .on_court_since_ms(body.court_id, m.id)
-        .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
-        .unwrap_or(0);
+    // Spieldauer = Bruttozeit (Spec `spielzeiten-prognose`, E1): erste
+    // Feldzuweisung → Ergebnis-Eingang, in ganzen Minuten wie beim
+    // Original-BTS. Quelle ist der persistierte Zeiten-Store (überlebt
+    // App-Neustart und Feldwechsel). Eine KORREKTUR rechnet mit dem
+    // ursprünglichen Ende (E3-Stempel) statt mit „jetzt" — sonst
+    // überschriebe sie eine korrekte Duration mit Stunden. Kampflos (E1)
+    // bleibt 0, und jenseits der Plausibilitätsgrenze (über Nacht
+    // geparktes Feld) gilt die Dauer als unbekannt.
+    let end_ms = ctx.tablet.result_end_ms(m.id, now_ms());
+    let duration_mins = if score_status == 1 {
+        0
+    } else {
+        ctx.tablet
+            .brutto_start_ms(m.id, Some(body.court_id))
+            .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, end_ms))
+            .unwrap_or(0)
+    };
+    // Spielende stempeln (E3): genau einmal, beim ersten Host-Eingang —
+    // eine spätere Korrektur ändert weder Zeit noch Einstufung. Regulär
+    // (E11, Messwert für die Prognose) ist nur der ausgespielte Tablet-Weg
+    // (ScoreStatus 0, kein Walkover/keine Aufgabe).
+    ctx.tablet
+        .match_times_store()
+        .stamp_finished(m.id, score_status == 0, end_ms);
     // Spieler-BTP-IDs beider Teams — bekommen im selben Request das
     // Spielende (`LastTimeOnCourt` + `CheckedIn: false`).
     let player_ids: Vec<i64> = m
@@ -2518,6 +2537,20 @@ pub(crate) async fn handle_score(
         sets.push((score_a, score_b));
     }
     ctx.tablet.record_score(court_id, m.id, sets.clone());
+    // Nettostart (Spec `spielzeiten-prognose`, E2/ADR 0027): der erste beim
+    // Host eingehende Stand > 0 stempelt — host-seitig, eine Uhr für LAN,
+    // Cloud und Zähltafel. Steht hinter Finalisiert-Gate und Stale-Filter:
+    // ein verworfener Score stempelt nicht. Ein Undo zurück auf 0:0 löscht
+    // den Stempel bewusst nicht (der erste Punkt ist gefallen).
+    // `match_id != 0`: Legacy-Scores alter Tablet-Seiten passieren beide
+    // Gates ungeprüft — ein Nachzügler des Vorspiels dürfte sonst dem
+    // neuen Feld-Match den Nettostart stempeln (Review 2026-08-16, F2).
+    // Solche Seiten liefern dann eben keinen Netto-Messwert.
+    if match_id != 0 && sets.iter().any(|&(a, b)| a > 0 || b > 0) {
+        ctx.tablet
+            .match_times_store()
+            .stamp_first_point(m.id, now_ms());
+    }
 
     let mut live = m;
     live.sets = sets;
@@ -2709,6 +2742,13 @@ mod tests {
                 host: "127.0.0.1".into(),
                 port,
                 password: None,
+            },
+            // Toter Port statt echtem badhub: Tests, die bis zum
+            // Liveticker-Push laufen (handle_score), bleiben hermetisch.
+            badhub: crate::config::BadhubConfig {
+                url: "http://127.0.0.1:1/".into(),
+                password: String::new(),
+                live_url: String::new(),
             },
             ..Default::default()
         };
@@ -2996,6 +3036,220 @@ mod tests {
             vec![(10, 8)],
             "Stand des aktuellen Matches bleibt unangetastet"
         );
+    }
+
+    /// Spec `spielzeiten-prognose` (E2): Der Host stempelt den Nettostart
+    /// beim ERSTEN eingehenden Punktestand > 0 — genau einmal; 0:0 und
+    /// Folgestände ändern nichts.
+    #[tokio::test]
+    async fn handle_score_stempelt_den_ersten_punkt_genau_einmal() {
+        let ctx = make_ctx(1); // tote Ports — kein BTP, kein badhub
+        handle_score(101, 0, 0, &[], 42, &ctx).await; // 0:0 stempelt nicht
+        assert!(ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .is_none_or(|e| e.first_point_ms.is_none()));
+
+        handle_score(101, 1, 0, &[], 42, &ctx).await; // erster Punkt
+        let first = ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .and_then(|e| e.first_point_ms);
+        assert!(first.is_some(), "erster Stand > 0 stempelt");
+
+        handle_score(101, 5, 3, &[], 42, &ctx).await; // Folgestand
+        assert_eq!(
+            ctx.tablet
+                .match_times_store()
+                .entry(42)
+                .and_then(|e| e.first_point_ms),
+            first,
+            "Folgestände ändern den Stempel nicht"
+        );
+    }
+
+    /// Spec `spielzeiten-prognose` (E2): Verworfene Scores (Stale-Filter,
+    /// Finalisiert-Gate) stempeln keinen ersten Punkt.
+    #[tokio::test]
+    async fn ein_verworfener_score_stempelt_keinen_ersten_punkt() {
+        let ctx = make_ctx(1);
+        // Stale: Tablet zählt Match 7, Feld hat Match 42.
+        handle_score(101, 5, 3, &[], 7, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+        assert!(ctx.tablet.match_times_store().entry(7).is_none());
+
+        // Finalisiert-Gate: Match 42 ist in BTP fertig eingegeben.
+        ctx.tablet.mark_finalized(101, 42);
+        handle_score(101, 5, 3, &[], 42, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+    }
+
+    /// Review 2026-08-16 (F2): Eine alte Tablet-Seite sendet matchId 0 und
+    /// passiert Finalisiert-Gate und Stale-Filter ungeprüft — so ein
+    /// Nachzügler-Score des Vorspiels darf dem NEUEN Feld-Match keinen
+    /// Nettostart stempeln (er wäre nie korrigierbar und verfälschte den
+    /// Klassen-Median massiv).
+    #[tokio::test]
+    async fn ein_legacy_score_ohne_match_id_stempelt_keinen_ersten_punkt() {
+        let ctx = make_ctx(1);
+        handle_score(101, 15, 12, &[], 0, &ctx).await;
+        assert!(
+            ctx.tablet.match_times_store().entry(42).is_none(),
+            "matchId 0 ist nicht zuordenbar — kein Stempel"
+        );
+    }
+
+    /// Spec `spielzeiten-prognose` (E1): Nach einem App-Neustart mitten im
+    /// Spiel liefert der persistierte Erst-Stempel die BTP-`Duration` —
+    /// wo bisher 0 stand (`on_court_since` lebt nur im RAM).
+    #[tokio::test]
+    async fn process_result_nimmt_die_dauer_aus_dem_zeiten_store() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Neustart-Lage: kein on_court_since, aber der Store kennt die
+        // erste Feldzuweisung von vor 10 Minuten.
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(600_000),
+        );
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        let fields = match_fields(&reqs[0]);
+        assert_eq!(int(&fields, "Duration"), Some(10));
+    }
+
+    /// Spec `spielzeiten-prognose` (E3/E11): Der Tablet-Pfad stempelt das
+    /// Spielende beim Host-Eingang — regulär nur bei ScoreStatus 0.
+    #[tokio::test]
+    async fn process_result_stempelt_das_ende_als_regulaer() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert!(e.finished_ms.is_some());
+        assert!(e.regular, "regulär ausgespielt → Messwert");
+    }
+
+    /// Spec `spielzeiten-prognose` (E3): Eine Ergebniskorrektur überschreibt
+    /// den Ende-Stempel nicht; E11: eine Aufgabe zählt nicht als regulär.
+    #[tokio::test]
+    async fn process_result_ueberschreibt_den_ende_stempel_nicht() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Das Ende steht schon (z. B. frühere Wertung) …
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, false, 123);
+        // … eine Korrektur mit anderem Ergebnis ändert daran nichts.
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert_eq!(e.finished_ms, Some(123));
+        assert!(!e.regular, "die Erst-Einstufung bleibt");
+    }
+
+    /// Spec `spielzeiten-prognose` (E11): Aufgabe (retired) stempelt das
+    /// Ende, zählt aber nicht als regulärer Messwert.
+    #[tokio::test]
+    async fn process_result_aufgabe_ist_kein_regulaerer_messwert() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let mut body = body_with(&[(21, 10), (5, 2)]);
+        body.retired = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert!(e.finished_ms.is_some());
+        assert!(!e.regular, "Aufgabe → kein Messwert für die Statistik");
+    }
+
+    /// Review-Befund 2026-08-16: Ein manuelles Ergebnis für ein Spiel, das
+    /// nicht (mehr) auf einem Feld steht, muss die Dauer trotzdem tragen —
+    /// nur Feldfreigabe, Auschecken und Endzeit hängen am Feld.
+    #[test]
+    fn ein_manuelles_ergebnis_ohne_feld_traegt_trotzdem_die_dauer() {
+        let mut m = match_on_court();
+        m.court_id = None;
+        m.court = None;
+        let u = build_manual_result_update(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            1_000 + 40 * 60_000,
+            None,
+        )
+        .unwrap();
+        assert_eq!(u.duration_mins, 40);
+        assert_eq!(u.free_court_id, None, "kein Feld freizugeben");
+        assert_eq!(u.end_ts_ms, None, "kein Spielende je Spieler ohne Feld");
+        assert!(u.player_ids.is_empty());
+    }
+
+    /// Spec `spielzeiten-prognose` (E1): Auch ein über das TABLET gemeldeter
+    /// Walkover sendet `Duration: 0` — kampflos wurde nicht gespielt.
+    #[tokio::test]
+    async fn process_result_walkover_sendet_dauer_null() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(2_400_000),
+        );
+        let mut body = body_with(&[]);
+        body.walkover = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(0));
+    }
+
+    /// Review-Befund 2026-08-16: Eine Korrektur rechnet mit dem
+    /// URSPRÜNGLICHEN Ende (E3-Stempel), nicht mit „jetzt" — sonst
+    /// überschriebe sie eine korrekte BTP-Duration mit Stunden.
+    #[tokio::test]
+    async fn eine_korrektur_rechnet_mit_dem_urspruenglichen_ende() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let start = now_ms().saturating_sub(7_200_000); // vor 2 h zugewiesen
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            start,
+        );
+        // Ursprüngliches Ende nach 40 Minuten.
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, true, start + 40 * 60_000);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(40));
+    }
+
+    /// Review-Befund 2026-08-16: Ein über Nacht auf dem Feld „geparktes"
+    /// Spiel (Mehrtages-Turnier) darf keine absurde Duration nach BTP
+    /// melden — jenseits der Plausibilitätsgrenze gilt „unbekannt" (0).
+    #[tokio::test]
+    async fn eine_unplausible_dauer_geht_als_unbekannt_nach_btp() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(16 * 3_600_000), // gestern Abend
+        );
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(0));
     }
 
     /// A2 / ADR 0017: `ownership_active` spiegelt exakt den Legacy-Schalter.

@@ -751,6 +751,23 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .fin-row button:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ── Spielzeiten-Panel (Spec spielzeiten-prognose) ──────────────────────
+   Kompakte Median-Tabelle je Klasse × Disziplin. Zahlen rechtsbündig,
+   Kopfzeile bleibt beim Rollen stehen (die Liste kann bei vielen Klassen
+   länger werden als das Panel hoch ist). */
+.times-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.times-table th, .times-table td {
+  padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left;
+}
+.times-table th {
+  position: sticky; top: 0; background: var(--card);
+  font-size: .75rem; font-weight: 600; color: var(--ink-faint);
+}
+.times-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Prognose-Marke in der Spielliste: dieselbe Info-Stufe wie „gerufen",
+   aber mit Uhr-Sinnbild — sie beantwortet „wann bin ich dran?". */
+.badge.predicted { white-space: nowrap; }
+
 /* ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
    Alle sechs Abschnitte (Felder, Aufgaben, Zähltafel, Schiedsrichter,
    Spiele, Beendete Spiele) laufen über EINEN Mechanismus statt sechs
@@ -1463,6 +1480,7 @@ const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="tr
 // sichtbar am Ende (`queue` kommt so dazu).
 const PANEL_KEYS = [
   "courts", "walkovers", "scorekeepers", "officials", "queue", "finished",
+  "times",
 ];
 const PANEL_TITLES = {
   courts: "Felder",
@@ -1471,6 +1489,7 @@ const PANEL_TITLES = {
   officials: "Schiedsrichter",
   queue: "Spiele",
   finished: "Beendete Spiele",
+  times: "Spielzeiten",
 };
 
 // Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
@@ -3345,6 +3364,20 @@ function queueRow(m, topMatchId) {
       status.push(`<span class="badge badge-warn" title="Kein Spielort bekannt — die automatische Vergabe lässt dieses Spiel in beiden Hallen liegen. Spielort im ⋮-Menü setzen.">ohne Halle</span>`);
     }
   }
+  if (m.predicted_start_ms && !m.prep_call) {
+    // Startzeit-Prognose (Spec spielzeiten-prognose, E8): voraussichtlicher
+    // Aufruf, minutengerundet vom Host simuliert. Eine Prognose in der
+    // Vergangenheit (Stand seit Minuten unverändert — sie bewegt bewusst
+    // nicht die Revision) heißt schlicht „gleich dran". „~" kennzeichnet
+    // Werte, hinter denen nur der Startwert steht (E7), nicht Messwerte.
+    const gleich = m.predicted_start_ms - serverNow() < 60000;
+    const wann = gleich
+      ? "gleich"
+      : new Date(m.predicted_start_ms)
+        .toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    status.push(`<span class="badge badge-info predicted num"
+      title="Voraussichtlicher Aufruf — Prognose aus den bisherigen Spielzeiten${m.predicted_uncertain ? " (noch ohne Messwerte: Startwert aus den Einstellungen)" : ""}">${UHR}${m.predicted_uncertain && !gleich ? "~" : ""}${wann}</span>`);
+  }
   if (m.prep_call) {
     // Info-Stufe: gerufen ist eine Zustandsmeldung, kein Handlungsdruck —
     // der entsteht erst, wenn niemand kommt, und dann zählt die Uhr
@@ -4187,6 +4220,9 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
 function panelAvailable(key) {
   if (key === "scorekeepers") return !!(state && state.scorekeeper_managed);
   if (key === "officials") return !!(state && state.officials_managed);
+  // Spielzeiten-Auswertung (Spec spielzeiten-prognose): nur wenn der Host
+  // sie liefert — also Prognose eingeschaltet UND Host neu genug.
+  if (key === "times") return !!(state && state.time_stats);
   return true;
 }
 
@@ -4297,6 +4333,8 @@ function panelBodySkeleton(key) {
         <div id="queue-foot"></div>`;
     case "finished":
       return `<div id="fin-list"></div>`;
+    case "times":
+      return `<div id="times-box"></div>`;
     default:
       return "";
   }
@@ -5752,6 +5790,45 @@ function closeTimeline() {
   if (graphTimer) { clearInterval(graphTimer); graphTimer = null; }
 }
 
+/** Spielzeiten-Auswertung (Spec spielzeiten-prognose): Mediane je Klasse ×
+ *  Disziplin aus den regulär gemessenen Spielen — Brutto (Feldzuweisung →
+ *  Ende), Netto (1. Punkt → Ende) und die Anlaufzeit dazwischen. Reine
+ *  Anzeige; das Panel existiert nur, wenn der Host `time_stats` liefert
+ *  (`panelAvailable`). */
+function renderTimes() {
+  const stats = state.time_stats;
+  setPanelCount("times", stats && stats.rows ? stats.rows.length : 0);
+  const box = $("times-box");
+  if (!box || !stats) return;
+  setPanelPreview("times", stats.rows.length
+    ? `${stats.rows.length} Gruppe(n) gemessen`
+    : "noch keine Messwerte");
+  const fuss = `<p class="meta">${stats.tournament_brutto_mins != null
+    ? `Turnier gesamt (Brutto-Median): ${stats.tournament_brutto_mins} min · `
+    : ""}Startwert ohne Messwerte: ${stats.default_mins} min — solche Prognosen zeigt die Spielliste als „~hh:mm".</p>`;
+  if (!stats.rows.length) {
+    box.innerHTML = `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`;
+    return;
+  }
+  const zeilen = stats.rows.map((r) => `<tr>
+      <td>${esc(klasse(r.discipline, r.class_label) || "ohne Klasse")}</td>
+      <td class="num">${r.count}</td>
+      <td class="num">${r.brutto_mins} min</td>
+      <td class="num">${r.netto_mins} min</td>
+      <td class="num">${r.diff_mins} min</td>
+    </tr>`).join("");
+  box.innerHTML = `<table class="times-table">
+      <thead><tr>
+        <th>Klasse</th>
+        <th class="num" title="Anzahl regulär gemessener Spiele">Spiele</th>
+        <th class="num" title="Median: Feldzuweisung bis Spielende">Brutto</th>
+        <th class="num" title="Median: erster Punkt bis Spielende">Netto</th>
+        <th class="num" title="Median: Anlaufzeit von der Feldzuweisung bis zum ersten Punkt">Anlauf</th>
+      </tr></thead>
+      <tbody>${zeilen}</tbody>
+    </table>${fuss}`;
+}
+
 function renderFinished() {
   const list = state.finished || [];
   setPanelCount("finished", list.length);
@@ -5774,9 +5851,14 @@ function renderFinished() {
       ? `<button type="button" data-fin-graph="${f.match_id}"
            title="Punktverlauf anzeigen" aria-label="Punktverlauf anzeigen">📈</button>`
       : "";
+    // Ist-Zeiten (Spec spielzeiten-prognose): Brutto = Feldzuweisung→Ende,
+    // Netto = 1. Punkt→Ende. Nur gemessene Spiele tragen sie.
+    const zeiten = f.brutto_mins != null
+      ? `${f.brutto_mins} min${f.netto_mins != null ? ` (netto ${f.netto_mins})` : ""}`
+      : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
       <span class="fin-pair">${esc(siegerZuerst(f))}</span>
-      <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court].filter(Boolean).join(" · "))}</span>
+      <span class="fin-meta">${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
@@ -5889,6 +5971,7 @@ function render() {
   renderOfficials();
   renderQueue();
   renderFinished();
+  renderTimes();
 }
 
 /** Nur die Uhren neu setzen — nicht die ganze Seite, sonst flackert sie
