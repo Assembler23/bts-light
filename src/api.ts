@@ -11,6 +11,7 @@ import type {
   FinishedMatchRow,
   MatchTimeline,
   FreetextItem,
+  HallColorsView,
   HallLayoutConfig,
   MonitorDeviceInfo,
   MonitorTarget,
@@ -308,6 +309,22 @@ export const setHallLayout = (layout: HallLayoutConfig): Promise<AppConfig> =>
  *  liefert die neue Konfiguration. */
 export const removeHallLayout = (hall: string): Promise<AppConfig> =>
   invoke("remove_hall_layout", { hall });
+
+/** Übersteuert die Farbe einer Halle (Palettenton, Spec hallen-farben);
+ *  liefert die neue Konfiguration. */
+export const setHallColor = (
+  hall: string,
+  color: string,
+): Promise<AppConfig> => invoke("set_hall_color", { hall, color });
+
+/** Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette;
+ *  liefert die neue Konfiguration. */
+export const removeHallColor = (hall: string): Promise<AppConfig> =>
+  invoke("remove_hall_color", { hall });
+
+/** Palette + effektive Farbe je Halle für den Picker der Felderübersicht. */
+export const hallColorsView = (): Promise<HallColorsView> =>
+  invoke("hall_colors_view");
 
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (

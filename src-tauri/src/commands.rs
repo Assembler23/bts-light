@@ -1171,13 +1171,16 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         ConnectionMode::LanAndCloud => "lan+cloud",
     }
     .to_string();
+    let mut courts = state.tablet.overview();
+    // Hallen-Farben hier statt in `overview_from` — dort fehlt die Config.
+    crate::hall_colors::paint(&mut courts, &config);
     TabletInfo {
         server_host,
         mode,
         relay_base,
         lan_enabled,
         cloud_enabled,
-        courts: state.tablet.overview(),
+        courts,
     }
 }
 
@@ -2750,6 +2753,53 @@ pub fn remove_hall_layout(
         cfg.remove_hall_layout(&hall);
         Ok(())
     })
+}
+
+/// Übersteuert die Farbe einer Halle (Spec hallen-farben). Validierung
+/// (Palettenzwang, Trim, case-insensitiver Ersatz) steckt testbar in
+/// `AppConfig::upsert_hall_color` — der Command ist nur der dünne Wrapper.
+#[tauri::command]
+pub fn set_hall_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+    color: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.upsert_hall_color(&hall, &color)
+    })
+}
+
+/// Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette.
+#[tauri::command]
+pub fn remove_hall_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.remove_hall_color(&hall);
+        Ok(())
+    })
+}
+
+/// Palette + effektive Farbe je Halle für den Picker der Felderübersicht.
+/// Die Hallenliste kommt aus der aktuellen Felder-Übersicht — dieselbe
+/// Quelle, nach der auch `paint` färbt (eine Wahrheit, R1).
+#[tauri::command]
+pub fn hall_colors_view(state: State<'_, AppState>) -> crate::hall_colors::HallColorsView {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let halls: Vec<String> = state
+        .tablet
+        .overview()
+        .into_iter()
+        .map(|c| c.location)
+        .collect();
+    crate::hall_colors::view(&cfg, &halls)
 }
 
 /// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und

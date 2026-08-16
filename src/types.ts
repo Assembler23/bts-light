@@ -596,6 +596,23 @@ export interface HallLayoutConfig {
   vertical: boolean;
 }
 
+/** Palette + effektive Farbe je Halle für den Picker der Felderübersicht
+ *  (Rust: `hall_colors::HallColorsView`, Spec hallen-farben). */
+export interface HallColorsView {
+  /** Die kuratierten ~10 Palettentöne (Hex, lowercase). */
+  palette: string[];
+  /** Je Halle die effektive Farbe; leer bei Ein-Hallen-Turnieren. */
+  halls: HallColorInfo[];
+}
+
+export interface HallColorInfo {
+  hall: string;
+  color: string;
+  /** true = persistierte Übersteuerung (der Picker bietet „Automatisch"
+   *  als Rückweg an). */
+  overridden: boolean;
+}
+
 /** Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011). */
 export interface TlDevice {
   /** Stabile Kennung – erscheint im Protokoll, damit nachvollziehbar bleibt,
@@ -671,6 +688,9 @@ export interface CourtOverview {
   /** Hallenname (BTP-Location) des Felds – Grundlage der hallenweisen
    *  Gruppierung. Leer bei Ein-Hallen-Turnieren. */
   location: string;
+  /** Effektive Hallen-Farbe (Hex, Spec hallen-farben) — null bei
+   *  Ein-Hallen-Turnieren oder Feldern ohne Halle. */
+  hall_color: string | null;
   /** BTP-Match-ID des aktuellen Spiels (0 = kein Match). */
   match_id: number;
   /** Gibt es zum laufenden Spiel einen Punktverlauf? Nur dann erscheint

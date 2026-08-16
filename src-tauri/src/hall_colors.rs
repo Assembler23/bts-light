@@ -67,6 +67,67 @@ pub fn effective_hall_colors(cfg: &AppConfig, halls: &[String]) -> Vec<(String, 
         .collect()
 }
 
+/// Hängt die effektiven Hallen-Farben an eine Felder-Übersicht. Die
+/// Hallenliste kommt aus den Courts selbst (`location` je Feld) — bei
+/// Ein-Hallen-Turnieren bleibt jedes `hall_color` `None` (Gate in
+/// [`effective_hall_colors`]). Bewusst NICHT in `overview_from`, damit
+/// `TabletState` die Config nicht kennen muss.
+pub fn paint(courts: &mut [crate::tablet::state::CourtOverview], cfg: &AppConfig) {
+    let halls: Vec<String> = courts.iter().map(|c| c.location.clone()).collect();
+    let farben = effective_hall_colors(cfg, &halls);
+    if farben.is_empty() {
+        return;
+    }
+    for court in courts {
+        let schluessel = court.location.trim().to_lowercase();
+        court.hall_color = farben
+            .iter()
+            .find(|(h, _)| h.to_lowercase() == schluessel)
+            .map(|(_, farbe)| farbe.clone());
+    }
+}
+
+/// Der eine Blick für die Bedien-Oberfläche (Felderübersicht): Palette +
+/// je Halle die effektive Farbe und ob sie übersteuert ist.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct HallColorsView {
+    pub palette: Vec<String>,
+    pub halls: Vec<HallColorInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct HallColorInfo {
+    pub hall: String,
+    pub color: String,
+    /// `true`, wenn die Farbe aus einer persistierten Übersteuerung stammt
+    /// (dann zeigt der Picker „Automatisch" als Rückweg an).
+    pub overridden: bool,
+}
+
+/// Baut die [`HallColorsView`] aus Config + aktueller Hallenliste — pur und
+/// damit testbar; der Tauri-Command ist nur der Sammler der Hallenliste.
+pub fn view(cfg: &AppConfig, halls: &[String]) -> HallColorsView {
+    let halls = effective_hall_colors(cfg, halls)
+        .into_iter()
+        .map(|(hall, color)| {
+            let schluessel = hall.trim().to_lowercase();
+            let overridden = cfg
+                .hall_colors
+                .iter()
+                .any(|c| c.hall.trim().to_lowercase() == schluessel);
+            HallColorInfo {
+                hall,
+                color,
+                overridden,
+            }
+        })
+        .collect();
+    HallColorsView {
+        palette: HALL_PALETTE.iter().map(|t| t.to_string()).collect(),
+        halls,
+    }
+}
+
 /// Farbe EINER Halle (getrimmter, case-insensitiver Abgleich) — `None` bei
 /// Ein-Hallen-Turnieren oder unbekannter Halle.
 pub fn color_for(cfg: &AppConfig, halls: &[String], hall: &str) -> Option<String> {
@@ -205,6 +266,58 @@ mod tests {
                 !(250.0..=310.0).contains(&h),
                 "{hex} (h={h:.0}) liegt im Violett-Bereich"
             );
+        }
+    }
+
+    #[test]
+    fn paint_attaches_effective_colors_to_the_overview() {
+        let cfg = AppConfig::default();
+        let mut courts = vec![
+            court_in("Nord"),
+            court_in("Mitte"),
+            court_in(""), // Feld ohne auflösbare Halle
+        ];
+        paint(&mut courts, &cfg);
+        assert_eq!(courts[0].hall_color.as_deref(), Some(HALL_PALETTE[1]));
+        assert_eq!(courts[1].hall_color.as_deref(), Some(HALL_PALETTE[0]));
+        assert_eq!(courts[2].hall_color, None, "ohne Halle keine Farbe");
+    }
+
+    #[test]
+    fn paint_leaves_single_hall_overviews_untouched() {
+        let cfg = AppConfig::default();
+        let mut courts = vec![court_in("Einzige"), court_in("Einzige")];
+        paint(&mut courts, &cfg);
+        assert!(courts.iter().all(|c| c.hall_color.is_none()));
+    }
+
+    #[test]
+    fn hall_colors_view_reports_palette_override_flag_and_effective_color() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Nord", HALL_PALETTE[6]).unwrap();
+        let v = view(&cfg, &halls(&["Nord", "Mitte"]));
+        assert_eq!(v.palette, HALL_PALETTE.map(String::from).to_vec());
+        assert_eq!(v.halls.len(), 2);
+        assert_eq!(v.halls[0].hall, "Mitte");
+        assert_eq!(v.halls[0].color, HALL_PALETTE[0]);
+        assert!(!v.halls[0].overridden);
+        assert_eq!(v.halls[1].hall, "Nord");
+        assert_eq!(v.halls[1].color, HALL_PALETTE[6]);
+        assert!(v.halls[1].overridden);
+    }
+
+    #[test]
+    fn hall_colors_view_is_empty_for_a_single_hall() {
+        let cfg = AppConfig::default();
+        let v = view(&cfg, &halls(&["Einzige"]));
+        assert!(v.halls.is_empty(), "Ein-Hallen-Turnier: Picker unsichtbar");
+        assert!(!v.palette.is_empty(), "Palette reist trotzdem mit");
+    }
+
+    fn court_in(halle: &str) -> crate::tablet::state::CourtOverview {
+        crate::tablet::state::CourtOverview {
+            location: halle.to_string(),
+            ..Default::default()
         }
     }
 

@@ -80,6 +80,12 @@ eine `LocationID`. Hat das Turnier **≥ 2 Hallen**, gilt:
   geschützt). Auf dem Draht reist immer der Hex-Wert (ADR 0033). Die
   Farbe ist nie einziger Informationsträger — Kürzel/Name bleiben stehen.
   Details: [features/hallen-farben.md](features/hallen-farben.md).
+  **Bedienung:** Zahnrad am Hallen-Gruppenkopf der Felderübersicht →
+  Abschnitt „Hallen-Farbe" im Popover: Palettenton anklicken = Halle
+  übersteuern, „Automatisch" = zurück zur Auto-Vergabe. Marken erscheinen
+  am Gruppenkopf der Felderübersicht und am Hallen-Kürzel im
+  Vorbereitungs-Panel; TL-Web, Monitore und badhub-Aushang folgen in den
+  weiteren Etappen der Spec.
 
 Bei **Ein-Hallen-Turnieren** ist die Halle leer und nichts gruppiert —
 alle Ansichten bleiben byte-für-byte wie vorher.
