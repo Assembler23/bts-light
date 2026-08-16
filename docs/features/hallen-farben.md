@@ -21,9 +21,10 @@ Jede Halle eines Mehr-Hallen-Turniers trägt eine Farbe, die **überall
 identisch** neben der Hallen-Nennung erscheint — als kleine Farbmarke
 (Streifen/Punkt), nie als Ersatz für Kürzel oder Name.
 
-- **Auto-Palette:** bts-light vergibt ohne Zutun ~10 kuratierte, auf hellem
+- **Auto-Palette:** bts-light vergibt ohne Zutun kuratierte, auf hellem
   und dunklem Grund lesbare Töne, deterministisch über die alphabetisch
-  sortierte Hallenliste (ADR 0032).
+  sortierte Hallenliste (ADR 0032). **Nachtrag 16.08.2026:** Palette von
+  10 auf 16 Töne erweitert (Nutzerwunsch, u. a. ein kräftiges Rot).
 - **Übersteuerung:** Die Turnierleitung wählt je Halle per Klick einen
   anderen Palettenton auf der Felderübersicht; „Automatisch" setzt zurück.
 - **Erfolgskriterium (Feldtest):** Bei ≥ 2 Hallen benennt ein Helfer ohne
@@ -139,8 +140,10 @@ identisch** neben der Hallen-Nennung erscheint — als kleine Farbmarke
 - [ ] Die Beendet-Zeilen in TL-Web tragen Hallen-Kürzel + Marke; bei
   Papier-Ergebnissen ohne Feld bleibt die Zeile ohne Halle und ohne Marke.
 - [ ] Zustandsfarben und Abzeichen-Skala sind unverändert: kein
-  Palettenton liegt im Rot-/Grün-/Violett-Bereich der Feldzustände, die
-  Marke ist ein eigenes Element neben Chip/Streifen.
+  Palettenton liegt im Grün-/Violett-Bereich der Feldzustände, die
+  Marke ist ein eigenes Element neben Chip/Streifen. (**Rot** ist seit dem
+  Nutzer-Entscheid vom 16.08.2026 bewusst erlaubt — die Marke ist ein
+  Punkt neben dem Kürzel, nie der Zustands-Streifen des Felds.)
 
 ## Tests
 
@@ -182,8 +185,8 @@ TDD je Etappe (Auswahl, vollständige Liste im How-To):
 
 ## Offene Fragen / Annahmen
 
-- Annahme: ~10 Palettentöne reichen — mehr als 10 Hallen bekommen Töne
-  doppelt (`i % 10`); real sind 2–4 Hallen.
+- Annahme: 16 Palettentöne reichen — mehr als 16 Hallen bekommen Töne
+  doppelt (`i % 16`); real sind 2–4 Hallen.
 - Annahme: badhub-Parser ignoriert unbekannte `tset`-Felder (bisheriges
   Verhalten bei Schema-Erweiterungen, z. B. `preparation_call_ts`).
 

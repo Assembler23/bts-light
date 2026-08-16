@@ -16,7 +16,9 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Vorbereitungs-Seiten (LAN und Cloud) und der badhub-Push
   (`hall_color` in `tset`-Courts und -Aufrufen; die badhub-Anzeige folgt
   als eigener badhub-PR). Farben kommen automatisch aus einer kuratierten
-  10-Ton-Palette (deterministisch, Zustandsfarben ausgespart) und lassen
+  16-Ton-Palette (deterministisch; Grün/Violett der Feldzustände bleiben
+  ausgespart, ein kräftiges Rot ist auf Nutzerwunsch dabei — die Marke ist
+  nie der Zustands-Streifen) und lassen
   sich je Halle im Hallen-Editor der Felderübersicht übersteuern
   („Automatisch" setzt zurück). Kürzel/Name bleiben überall stehen —
   die Farbe ist nie einziger Informationsträger. Ein-Hallen-Turniere

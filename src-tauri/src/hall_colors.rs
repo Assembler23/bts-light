@@ -8,12 +8,15 @@
 
 use crate::config::AppConfig;
 
-/// Die kuratierte Palette: ~10 Töne, als kleine Farbmarke auf hellem UND
-/// dunklem Grund erkennbar. Bewusst ausgespart sind die Farbtonbereiche der
-/// Feld-Zustandsfarben (Rot = überfällig, Grün = läuft, Violett = beendet),
-/// damit eine Hallen-Marke nie wie ein Feldzustand liest. Die ersten Töne
-/// sind maximal unterscheidbar — real haben Turniere 2–4 Hallen.
-pub const HALL_PALETTE: [&str; 10] = [
+/// Die kuratierte Palette: 16 Töne, als kleine Farbmarke auf hellem UND
+/// dunklem Grund erkennbar. Ausgespart bleiben die Farbtonbereiche von
+/// Grün (= läuft) und Violett (= beendet) — dort läse auch ein kleiner
+/// Punkt sofort wie ein Feldzustand. **Rot ist seit dem Nutzer-Entscheid
+/// vom 16.08.2026 bewusst dabei** (Spec-Nachtrag): Die Marke ist ein
+/// Punkt neben dem Kürzel, nie der Zustands-Streifen des Felds. Die
+/// ersten Töne sind maximal unterscheidbar — real haben Turniere 2–4
+/// Hallen; die hinteren Töne sind Auswahl für die Übersteuerung.
+pub const HALL_PALETTE: [&str; 16] = [
     "#f59e0b", // Bernstein
     "#0ea5e9", // Himmelblau
     "#ec4899", // Pink
@@ -24,6 +27,12 @@ pub const HALL_PALETTE: [&str; 10] = [
     "#a16207", // Ocker
     "#06b6d4", // Cyan
     "#64748b", // Schiefer
+    "#dc2626", // Rot
+    "#f43f5e", // Himbeere
+    "#9f1239", // Bordeaux
+    "#84cc16", // Limette
+    "#713f12", // Braun
+    "#065f46", // Tannengrün
 ];
 
 /// Effektive Farbe je Halle: persistierte Übersteuerung gewinnt, sonst
@@ -256,39 +265,66 @@ mod tests {
     #[test]
     fn more_halls_than_palette_tones_wrap_around() {
         let cfg = AppConfig::default();
-        let viele: Vec<String> = (0..12).map(|i| format!("Halle {i:02}")).collect();
+        let n = HALL_PALETTE.len();
+        let viele: Vec<String> = (0..n + 2).map(|i| format!("Halle {i:02}")).collect();
         let farben = effective_hall_colors(&cfg, &viele);
-        assert_eq!(farben.len(), 12);
-        assert_eq!(farben[10].1, HALL_PALETTE[0], "elfte Halle beginnt vorn");
+        assert_eq!(farben.len(), n + 2);
+        assert_eq!(
+            farben[n].1, HALL_PALETTE[0],
+            "nach dem Ende beginnt es vorn"
+        );
+    }
+
+    #[test]
+    fn palette_offers_sixteen_tones_including_a_red() {
+        // Nutzerwunsch 16.08.2026: mehr Auswahl, ausdrücklich inklusive
+        // eines kräftigen Rots — die Marke ist ein kleiner Punkt neben dem
+        // Kürzel, nie der Zustands-Streifen des Felds (bewusster Entscheid
+        // gegen die ursprüngliche Rot-Aussparung, Spec-Nachtrag).
+        assert_eq!(HALL_PALETTE.len(), 16);
+        let hat_rot = HALL_PALETTE.iter().any(|hex| {
+            let h = farbton(hex);
+            !(15.0..=345.0).contains(&h)
+        });
+        assert!(hat_rot, "ein Rot-Ton gehört jetzt zur Palette");
+    }
+
+    /// Farbton (0–360°) eines `#rrggbb`-Werts — Test-Helfer.
+    fn farbton(hex: &str) -> f32 {
+        let (r, g, b) = (
+            u8::from_str_radix(&hex[1..3], 16).unwrap() as f32,
+            u8::from_str_radix(&hex[3..5], 16).unwrap() as f32,
+            u8::from_str_radix(&hex[5..7], 16).unwrap() as f32,
+        );
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let d = max - min;
+        assert!(d > 0.0, "{hex}: Grau wäre keine erkennbare Marke");
+        let h = if max == r {
+            60.0 * (((g - b) / d) % 6.0)
+        } else if max == g {
+            60.0 * ((b - r) / d + 2.0)
+        } else {
+            60.0 * ((r - g) / d + 4.0)
+        };
+        if h < 0.0 {
+            h + 360.0
+        } else {
+            h
+        }
     }
 
     #[test]
     fn palette_avoids_state_color_hues() {
-        // Struktureller Wächter: kein Palettenton darf im Farbtonbereich der
-        // Feld-Zustandsfarben liegen (Rot = überfällig, Grün = läuft,
-        // Violett = beendet) — sonst liest eine Hallen-Marke wie ein Zustand.
+        // Struktureller Wächter: kein Palettenton darf im Farbtonbereich
+        // von Grün (= läuft) oder Violett (= beendet) liegen — sonst liest
+        // eine Hallen-Marke wie ein Feldzustand. Rot ist seit dem
+        // Nutzer-Entscheid vom 16.08.2026 bewusst ERLAUBT (die Marke ist
+        // ein Punkt neben dem Kürzel, nie der Zustands-Streifen);
+        // Grün/Violett bleiben draußen, weil dort auch kleine Flächen
+        // sofort als „läuft"/„fertig" gelesen werden.
         for hex in HALL_PALETTE {
-            let (r, g, b) = (
-                u8::from_str_radix(&hex[1..3], 16).unwrap() as f32,
-                u8::from_str_radix(&hex[3..5], 16).unwrap() as f32,
-                u8::from_str_radix(&hex[5..7], 16).unwrap() as f32,
-            );
-            let max = r.max(g).max(b);
-            let min = r.min(g).min(b);
-            let d = max - min;
-            assert!(d > 0.0, "{hex}: Grau wäre keine erkennbare Marke");
-            let h = if max == r {
-                60.0 * (((g - b) / d) % 6.0)
-            } else if max == g {
-                60.0 * ((b - r) / d + 2.0)
-            } else {
-                60.0 * ((r - g) / d + 4.0)
-            };
-            let h = if h < 0.0 { h + 360.0 } else { h };
-            assert!(
-                (15.0..=345.0).contains(&h),
-                "{hex} (h={h:.0}) liegt im Rot-Bereich"
-            );
+            let h = farbton(hex);
             assert!(
                 !(100.0..=160.0).contains(&h),
                 "{hex} (h={h:.0}) liegt im Grün-Bereich"
