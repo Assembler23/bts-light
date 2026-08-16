@@ -2340,9 +2340,11 @@ pub(crate) fn build_state_limited(
         })
     };
 
-    // Die von Hand gesetzten Hallen einmal holen, nicht je Spiel — sonst
-    // sperrte der Aufbau der Liste hundertfach.
+    // Die von Hand gesetzten und automatisch vorverteilten Hallen einmal
+    // holen, nicht je Spiel — sonst sperrte der Aufbau der Liste
+    // hundertfach.
     let manual = tablet.manual_halls();
+    let auto = tablet.auto_hall_store().halls();
 
     let availability = PlayerAvailability::from_snapshot(&snap, config);
 
@@ -2369,6 +2371,7 @@ pub(crate) fn build_state_limited(
                 m,
                 manual_hall,
                 called_hall_str,
+                auto.get(&m.id).map(String::as_str),
                 call.is_some(),
                 tablet.queue_order_store(),
             );

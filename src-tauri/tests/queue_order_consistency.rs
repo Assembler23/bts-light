@@ -1,21 +1,21 @@
-//! Cross-Site-Regressionstest der manuellen Spielreihenfolge (Spec
+﻿//! Cross-Site-Regressionstest der manuellen Spielreihenfolge (Spec
 //! `docs/features/spielliste-manuelle-reihenfolge.md`, ADR 0023 Blocker 4,
 //! seit ADR 0026 mit **einer globalen** Reihenfolge statt einer je Halle).
 //!
-//! `docs/btp_protocol.md` warnt ausdrücklich davor, dass die Sortier-Logik
-//! an mehreren Stellen dupliziert leicht auseinanderlaufen kann — „sonst
-//! zeigt jede Ansicht eine andere ‚nächste Begegnung', und niemand weiß
-//! mehr, welche stimmt". Dieser Test hält TL-Web (`tablet::tl::build_state`),
+//! `docs/btp_protocol.md` warnt ausdrÃ¼cklich davor, dass die Sortier-Logik
+//! an mehreren Stellen dupliziert leicht auseinanderlaufen kann â€” â€žsonst
+//! zeigt jede Ansicht eine andere â€šnÃ¤chste Begegnung', und niemand weiÃŸ
+//! mehr, welche stimmt". Dieser Test hÃ¤lt TL-Web (`tablet::tl::build_state`),
 //! Desktop (`commands::preparation_candidates_for`) und den Liveticker
-//! (`badhub::payload::build_tset`) für **dieselben** Testdaten gegeneinander
-//! fest: alle drei müssen bei aktivem manuellen Präfix exakt dieselbe
+//! (`badhub::payload::build_tset`) fÃ¼r **dieselben** Testdaten gegeneinander
+//! fest: alle drei mÃ¼ssen bei aktivem manuellen PrÃ¤fix exakt dieselbe
 //! Match-Reihenfolge liefern.
 //!
 //! Nicht Teil dieses Tests: `sync::auto_assign` (privat, eigener Test
 //! `auto_assign_prefers_a_manually_advanced_match_over_the_earlier_schedule`
 //! in `sync.rs` deckt denselben gemeinsamen Helfer bereits ab) und
 //! `tablet::server::info_preparation_state` (HTTP-Handler, strukturell
-//! identisch zu `preparation_candidates_for` — dieselben zwei Aufrufe von
+//! identisch zu `preparation_candidates_for` â€” dieselben zwei Aufrufe von
 //! `assign::hall_for_match`/`resolve_and_sort_key`, per Code-Review
 //! sichergestellt statt per Axum-Testaufbau).
 
@@ -96,7 +96,7 @@ fn snapshot_with_locations(matches: Vec<BtpMatch>, locations: Vec<BtpLocation>) 
 #[test]
 fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
     // BTP-Zeitplan: 1 vor 2 vor 3. Match 3 wird manuell vor Match 1
-    // gezogen — der neue Präfix ist [1, 3] (siehe queue_order.rs-Doku: das
+    // gezogen â€” der neue PrÃ¤fix ist [1, 3] (siehe queue_order.rs-Doku: das
     // Zielmatch braucht keinen eigenen Rang, es folgt automatisch).
     let matches = vec![
         a_match(1, 1, 202_608_071_200),
@@ -115,7 +115,7 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
         .iter()
         .map(|m| m.match_id)
         .collect();
-    assert_eq!(tl_ids, vec![3, 1, 2], "TL-Web: Präfix schlägt Ansetzung");
+    assert_eq!(tl_ids, vec![3, 1, 2], "TL-Web: PrÃ¤fix schlÃ¤gt Ansetzung");
 
     let desktop_ids: Vec<i64> = preparation_candidates_for(&tablet, &config)
         .candidates
@@ -127,7 +127,7 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
         "Desktop zeigt eine andere Reihenfolge als TL-Web"
     );
 
-    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.auto_hall_store().halls(), tablet.queue_order_store());
     let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
         .event
         .upcoming_matches
@@ -148,9 +148,9 @@ fn tl_web_desktop_and_liveticker_agree_on_the_manual_prefix() {
 fn tl_web_desktop_and_liveticker_agree_across_two_halls() {
     // Der Fall, den ADR 0026 neu erlaubt und den der Test bis dahin nicht
     // abdeckte (`locations` war leer, also lief alles in der Halle ""):
-    // Ein Zug wirkt jetzt über die Hallengrenze hinweg. Match 4 (Halle B,
-    // spät angesetzt) wird vor Match 1 (Halle A, früh angesetzt) gezogen —
-    // alle drei Ansichten müssen danach dieselbe Abfolge zeigen.
+    // Ein Zug wirkt jetzt Ã¼ber die Hallengrenze hinweg. Match 4 (Halle B,
+    // spÃ¤t angesetzt) wird vor Match 1 (Halle A, frÃ¼h angesetzt) gezogen â€”
+    // alle drei Ansichten mÃ¼ssen danach dieselbe Abfolge zeigen.
     let mut m1 = a_match(1, 1, 202_608_071_200);
     m1.location_id = Some(1); // Halle A
     let mut m2 = a_match(2, 2, 202_608_071_300);
@@ -186,9 +186,9 @@ fn tl_web_desktop_and_liveticker_agree_across_two_halls() {
     assert_eq!(
         tl_ids,
         vec![4, 1, 2, 3],
-        "TL-Web: der Zug wirkt über die Hallengrenze"
+        "TL-Web: der Zug wirkt Ã¼ber die Hallengrenze"
     );
-    // Und die Halle bleibt dabei korrekt aufgelöst — sie ist jetzt reine
+    // Und die Halle bleibt dabei korrekt aufgelÃ¶st â€” sie ist jetzt reine
     // Anzeige, kein Sortierkriterium mehr.
     let halls: Vec<&str> = tl_queue.iter().map(|m| m.hall.as_str()).collect();
     assert_eq!(halls, vec!["Halle B", "Halle A", "Halle B", "Halle A"]);
@@ -203,7 +203,7 @@ fn tl_web_desktop_and_liveticker_agree_across_two_halls() {
         "Desktop zeigt eine andere Reihenfolge als TL-Web"
     );
 
-    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.auto_hall_store().halls(), tablet.queue_order_store());
     let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
         .event
         .upcoming_matches
@@ -222,8 +222,8 @@ fn tl_web_desktop_and_liveticker_agree_across_two_halls() {
 
 #[test]
 fn all_three_views_fall_back_to_the_btp_schedule_without_a_prefix() {
-    // Rückwärtskompatibilität: ohne jeden manuellen Zug bleibt es bei der
-    // reinen BTP-Ansetzungsreihenfolge — an allen drei Stellen gleich.
+    // RÃ¼ckwÃ¤rtskompatibilitÃ¤t: ohne jeden manuellen Zug bleibt es bei der
+    // reinen BTP-Ansetzungsreihenfolge â€” an allen drei Stellen gleich.
     let matches = vec![
         a_match(1, 1, 202_608_071_200),
         a_match(2, 2, 202_608_071_300),
@@ -245,7 +245,7 @@ fn all_three_views_fall_back_to_the_btp_schedule_without_a_prefix() {
         .iter()
         .map(|c| c.match_id)
         .collect();
-    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.queue_order_store());
+    let ctx = LivetickerContext::new(&config, tablet.manual_halls(), tablet.auto_hall_store().halls(), tablet.queue_order_store());
     let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
         .event
         .upcoming_matches

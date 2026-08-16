@@ -223,6 +223,15 @@ fn tablet_match_times_path(app: &AppHandle) -> std::path::PathBuf {
         .join("match-times.json")
 }
 
+/// Pfad der automatisch vorverteilten Hallen (Spec `hallen-vorverteilung`,
+/// ADR 0029). Turniergebunden wie die anderen ADR-0022-Stores.
+fn tablet_auto_halls_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("auto-halls.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -873,6 +882,8 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
     // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
     tablet.set_match_times_path(tablet_match_times_path(&app));
+    // Auto-Hallen (Spec `hallen-vorverteilung`, ADR 0029): ebenso.
+    tablet.set_auto_halls_path(tablet_auto_halls_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -1898,6 +1909,7 @@ pub fn preparation_candidates_for(
     };
     let calls = tablet.preparation_calls();
     let manual_halls = tablet.manual_halls();
+    let auto_halls = tablet.auto_hall_store().halls();
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`)
     // — **derselbe** gemeinsame Helfer wie an den anderen vier Sortier-
@@ -1928,6 +1940,7 @@ pub fn preparation_candidates_for(
                 m,
                 manual_hall,
                 called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
                 call.is_some(),
                 tablet.queue_order_store(),
             );

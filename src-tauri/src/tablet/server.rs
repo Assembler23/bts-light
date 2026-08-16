@@ -1006,6 +1006,7 @@ async fn info_preparation_state(
     };
     let calls = ctx.tablet.preparation_calls();
     let manual_halls = ctx.tablet.manual_halls();
+    let auto_halls = ctx.tablet.auto_hall_store().halls();
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
     // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
@@ -1036,6 +1037,7 @@ async fn info_preparation_state(
                 m,
                 manual_hall,
                 called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
                 call.is_some(),
                 ctx.tablet.queue_order_store(),
             );

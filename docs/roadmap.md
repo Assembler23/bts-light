@@ -287,6 +287,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Automatische Hallen-Vorverteilung** — die vordersten x Spiele bekommen
+  automatisch eine Halle im Verhältnis der entsperrten Felder (gemischt,
+  fortlaufend nachgefüllt); Halle bindet die Feldvergabe, Auto-Spiele
+  brauchen keinen Aufruf mehr; Spieler sehen die Halle früh (Monitore,
+  badhub `display=next&halle=…`).
+  Spec: [features/hallen-vorverteilung.md](features/hallen-vorverteilung.md) ·
+  ADR [0029](adr/0029-hallen-vorverteilung-eigener-store.md) ·
+  ADR [0030](adr/0030-halle-bindet-die-feldvergabe.md).
+  **Offen:** Feldtest am Mehr-Hallen-Turnier.
+
 - **Spielzeiten-Messung & Startzeit-Prognose (Etappen A+B, v0.9.206)** —
   Brutto-/Nettozeit je Match host-seitig gemessen (`match-times.json`,
   ADR 0027), BTP-`Duration` neustartfest und auf allen Pfaden, Prognose

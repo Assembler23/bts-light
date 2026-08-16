@@ -1112,6 +1112,7 @@ impl SyncEngine {
         // geteilt — zeigte die Liste eine andere als die Automatik benutzt,
         // verlöre die Turnierleitung das Vertrauen in beide.
         let manual_halls = tablet.manual_halls();
+        let auto_halls = tablet.auto_hall_store().halls();
         ready.sort_by_key(|m| {
             let call = call_for(m.id);
             let manual_hall = manual_halls.get(&m.id).map(String::as_str);
@@ -1128,6 +1129,7 @@ impl SyncEngine {
                 m,
                 manual_hall,
                 called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
                 call.is_some(),
                 tablet.queue_order_store(),
             );
@@ -1411,6 +1413,7 @@ impl SyncEngine {
         let queue_ctx = crate::badhub::payload::LivetickerContext::new(
             config,
             tablet.manual_halls(),
+            tablet.auto_hall_store().halls(),
             tablet.queue_order_store(),
         );
         // Heartbeat: Ist regulär nichts zu senden, aber seit dem letzten
