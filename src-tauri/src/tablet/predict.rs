@@ -252,33 +252,69 @@ impl TimeStats {
 /// bekommen keine Prognose). Spiele ohne erlaubtes Feld bekommen keinen
 /// Eintrag.
 pub fn predict_starts(input: &PredictInput) -> HashMap<i64, Prediction> {
-    let mut free_at: Vec<u64> = input
+    // Ereignis-Schleife statt starrem Reihenfolge-Durchlauf (Review
+    // 2026-08-16, bestätigter Befund): Die echte Auto-Vergabe belegt ein
+    // frei werdendes Feld mit dem ERSTEN BEREITEN Spiel der Liste — ein
+    // blockiertes überspringt sie (`sync.rs::auto_assign`). Ein
+    // Reihenfolge-Durchlauf ließe das blockierte Spiel das Feld
+    // „auf Verdacht" reservieren und verschöbe alles dahinter.
+    // `None` = Feld für die restlichen Spiele unbrauchbar (Hallenregel).
+    let mut free_at: Vec<Option<u64>> = input
         .courts
         .iter()
-        .map(|c| c.free_at_min.max(input.now_min))
+        .map(|c| Some(c.free_at_min.max(input.now_min)))
         .collect();
     let mut ready = input.player_ready_min.clone();
+    let mut pending: Vec<&PredictMatch> = input.queue.iter().collect();
     let mut out = HashMap::new();
 
-    for m in &input.queue {
-        // Frühestes erlaubtes Feld (leere Spiel-Halle = jede Halle).
-        let hall = m.hall.trim();
-        let best = input
-            .courts
+    while !pending.is_empty() {
+        // Nächstes Ereignis: das Feld, das am frühesten frei wird.
+        let Some((idx, t_free)) = free_at
             .iter()
             .enumerate()
-            .filter(|(_, c)| hall.is_empty() || c.hall.trim() == hall)
-            .min_by_key(|&(i, _)| free_at[i]);
-        let Some((idx, _)) = best else {
-            continue; // kein erlaubtes Feld → keine Prognose
+            .filter_map(|(i, f)| f.map(|v| (i, v)))
+            .min_by_key(|&(i, v)| (v, i))
+        else {
+            break; // kein nutzbares Feld mehr → Rest ohne Prognose
         };
-        let players_ready = m
-            .players
-            .iter()
-            .filter_map(|p| ready.get(p).copied())
-            .max()
-            .unwrap_or(input.now_min);
-        let start = (free_at[idx] + input.buffer_min).max(players_ready);
+        let court_hall = input.courts[idx].hall.trim();
+        let t0 = t_free + input.buffer_min;
+
+        // Erster BEREITER Kandidat in Listen-Reihenfolge gewinnt das Feld;
+        // ist keiner bereit, wartet das Feld auf den, der am frühesten
+        // bereit wird (Reihenfolge als Gleichstands-Regel).
+        let mut best: Option<(usize, u64)> = None;
+        let mut passt_keiner = true;
+        for (pos, m) in pending.iter().enumerate() {
+            let hall = m.hall.trim();
+            if !(hall.is_empty() || court_hall == hall) {
+                continue;
+            }
+            passt_keiner = false;
+            let players_ready = m
+                .players
+                .iter()
+                .filter_map(|p| ready.get(p).copied())
+                .max()
+                .unwrap_or(input.now_min);
+            let start = t0.max(players_ready);
+            if players_ready <= t0 {
+                best = Some((pos, start));
+                break;
+            }
+            if best.is_none_or(|(_, s)| start < s) {
+                best = Some((pos, start));
+            }
+        }
+        if passt_keiner {
+            // Für dieses Feld gibt es kein erlaubtes Spiel mehr — aus der
+            // Rotation nehmen, sonst drehte die Schleife ewig darauf.
+            free_at[idx] = None;
+            continue;
+        }
+        let (pos, start) = best.expect("passt_keiner deckt den None-Fall ab");
+        let m = pending.remove(pos);
         out.insert(
             m.match_id,
             Prediction {
@@ -287,7 +323,7 @@ pub fn predict_starts(input: &PredictInput) -> HashMap<i64, Prediction> {
             },
         );
         let ende = start + m.duration_min;
-        free_at[idx] = ende;
+        free_at[idx] = Some(ende);
         for p in &m.players {
             ready.insert(p.clone(), ende + input.rest_min);
         }
@@ -553,6 +589,32 @@ mod tests {
         // Spieler a: fertig 1032, + 20 Ruhe = bereit 1052 — obwohl Feld 2
         // schon ab 1002 frei wäre.
         assert_eq!(p[&2].start_min, 1_052);
+    }
+
+    #[test]
+    fn ein_blockiertes_spiel_reserviert_kein_feld() {
+        // Review 2026-08-16 (bestätigt): Die ECHTE Auto-Vergabe überspringt
+        // ein pausierendes Spiel und gibt das freie Feld dem nächsten
+        // bereiten (sync.rs::auto_assign). Die Simulation muss das genauso
+        // spielen — sonst hält Spiel A das Feld 40 Minuten „auf Verdacht"
+        // und jede Prognose dahinter ist um Dutzende Minuten zu spät.
+        let mut ready = HashMap::new();
+        ready.insert("a".to_string(), 1_040); // Spieler a pausiert bis 1040
+        let input = PredictInput {
+            now_min: 1_000,
+            buffer_min: 2,
+            rest_min: 0,
+            courts: vec![feld("", 1_000)],
+            player_ready_min: ready,
+            queue: vec![spiel(1, "", 25, &["a"]), spiel(2, "", 25, &["b"])],
+        };
+        let p = predict_starts(&input);
+        assert_eq!(p[&2].start_min, 1_002, "das bereite Spiel zieht vor");
+        assert_eq!(
+            p[&1].start_min,
+            1_040,
+            "das blockierte startet nach seiner Pause (Feld ab 1029 frei)"
+        );
     }
 
     #[test]
