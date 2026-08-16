@@ -1033,6 +1033,15 @@ impl TabletState {
     /// Zuletzt publizierte Prognose eines Matches — nur die Tests lesen
     /// hier; die Produktion konsumiert über [`Self::take_predicted_start`].
     #[cfg(test)]
+    /// Alle bekannten Prognosen als Kopie — für den `sched`-Versand an badhub.
+    ///
+    /// Bewusst eine Momentaufnahme statt eines Lock-Durchgriffs: der Aufrufer
+    /// baut daraus eine Nachricht und soll dafür nicht den Schreib-Lock der
+    /// Prognose-Berechnung blockieren.
+    pub(crate) fn predicted_starts_snapshot(&self) -> std::collections::HashMap<i64, u64> {
+        self.predicted_starts.read().unwrap().clone()
+    }
+
     pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
         self.predicted_starts
             .read()

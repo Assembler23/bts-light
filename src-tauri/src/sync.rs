@@ -122,6 +122,10 @@ pub struct SyncEngine {
     /// einem kurzen Aussetzer während eines badhub-Deploys stammen, und ein
     /// Turnier läuft über mehrere Tage.
     checkin_unsupported_since: Option<Instant>,
+    /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
+    sched_takt: SchedTakt,
+    /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
+    sched_unsupported_since: Option<Instant>,
 }
 
 /// Wie lange nach einem 404/400 des Check-In-Endpunkts pausiert wird, bevor
@@ -334,6 +338,8 @@ impl SyncEngine {
             highlight_written: HashSet::new(),
             last_roster: None,
             checkin_unsupported_since: None,
+            sched_takt: SchedTakt::neu(),
+            sched_unsupported_since: None,
         }
     }
 
@@ -404,6 +410,57 @@ impl SyncEngine {
                 // last_roster bleibt unverändert → der nächste Zyklus versucht
                 // es erneut mit der vollständigen Liste.
                 tracing::warn!("Meldeliste konnte nicht gesendet werden: {e}");
+            }
+        }
+    }
+
+    /// Sendet den vollständigen Spielplan (`sched`), höchstens minütlich.
+    ///
+    /// Wie der Check-In-Roster **additiv mit eigenem Fehlerpfad**: Der
+    /// Spielplan ist eine Zusatzinformation für die Spielerseite — geht er
+    /// schief, muss der Liveticker trotzdem laufen. Fehler ändern den
+    /// [`SyncOutcome`] deshalb nicht.
+    async fn send_sched(
+        &mut self,
+        config: &AppConfig,
+        http: &reqwest::Client,
+        snapshot: &BtpSnapshot,
+        ctx: &crate::badhub::payload::LivetickerContext<'_>,
+        predicted: std::collections::HashMap<i64, u64>,
+        jetzt_ms: u64,
+    ) {
+        if self
+            .sched_unsupported_since
+            .is_some_and(|t| t.elapsed() < CHECKIN_UNSUPPORTED_RETRY)
+        {
+            return;
+        }
+        if !self.sched_takt.faellig(jetzt_ms) {
+            return;
+        }
+
+        let sched = crate::badhub::payload::build_sched(snapshot, ctx, &predicted, self.rid);
+        let anzahl = sched.event.matches.len();
+
+        match push::push_sched(http, &config.badhub.url, &config.badhub.password, &sched).await {
+            Ok(()) => {
+                tracing::debug!(spiele = anzahl, "Spielplan an badhub gesendet");
+                self.sched_unsupported_since = None;
+            }
+            // Ältere badhub-Version: Nachrichtentyp unbekannt. Nicht jeden
+            // Zyklus erneut anklopfen — aber auch nicht für immer aufgeben
+            // (dieselbe Begründung wie beim Check-In-Roster).
+            Err(push::PushError::Status(404)) | Err(push::PushError::Status(400)) => {
+                if self.sched_unsupported_since.is_none() {
+                    tracing::info!(
+                        "badhub kennt den Spielplan-Kanal noch nicht — naechster Versuch in {} Minuten",
+                        CHECKIN_UNSUPPORTED_RETRY.as_secs() / 60
+                    );
+                }
+                self.sched_unsupported_since = Some(Instant::now());
+            }
+            Err(e) => {
+                tracing::warn!("Spielplan konnte nicht gesendet werden: {e}");
             }
         }
     }
@@ -1689,6 +1746,21 @@ impl SyncEngine {
         if let Some(roster) = roster {
             self.send_checkin_roster(config, http, roster).await;
         }
+        // Und zuletzt der vollständige Spielplan (höchstens minütlich, eigener
+        // Fehlerpfad). Die Reihenfolge ist dieselbe Abwägung wie beim Roster:
+        // der Liveticker ist die zeitkritische Funktion, alles Additive kommt
+        // danach — ein hängender Endpunkt darf die Ergebnisübertragung nicht
+        // um seinen Timeout verzögern.
+        let jetzt_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+        self.send_sched(
+            config,
+            http,
+            &snapshot,
+            &queue_ctx,
+            tablet.predicted_starts_snapshot(),
+            jetzt_ms,
+        )
+        .await;
         match push_result {
             Ok(()) => {
                 let outcome = match update {
@@ -1732,8 +1804,73 @@ impl SyncEngine {
     }
 }
 
+/// Taktgeber für den `sched`-Versand (vollständiger Spielplan an badhub).
+///
+/// Der `tset` geht bei jedem Poll raus. `sched` darf das nicht mitmachen,
+/// sonst wäre der getrennte Kanal sinnlos — er existiert gerade, damit der
+/// Liveticker nicht mehrere hundert Spiele mitschleppen muss.
+///
+/// **Warum ein Zeittakt und keine Änderungserkennung** (anders als beim
+/// Check-In-Roster): Der Spielplan selbst ändert sich selten, die enthaltene
+/// Startzeit-Prognose aber mit jedem beendeten Spiel. Eine Änderungserkennung
+/// würde deshalb faktisch bei jedem Poll auslösen. 60 Sekunden liegen
+/// unterhalb der Prognosegüte von ±10 Minuten (Spec `spielzeiten-prognose`,
+/// E12) und sind damit nicht wahrnehmbar.
+#[derive(Debug, Default)]
+pub struct SchedTakt {
+    letzter_versand_ms: Option<u64>,
+}
+
+/// Mindestabstand zwischen zwei `sched`-Nachrichten.
+const SCHED_INTERVALL_MS: u64 = 60_000;
+
+impl SchedTakt {
+    pub fn neu() -> Self {
+        Self::default()
+    }
+
+    /// `true` = jetzt senden. Stempelt dabei den Versandzeitpunkt, ist also
+    /// bewusst **nicht** seiteneffektfrei: zweimaliges Fragen im selben
+    /// Zyklus darf keine zwei Nachrichten erzeugen.
+    pub fn faellig(&mut self, jetzt_ms: u64) -> bool {
+        let faellig = match self.letzter_versand_ms {
+            None => true,
+            Some(t) => jetzt_ms.saturating_sub(t) >= SCHED_INTERVALL_MS,
+        };
+        if faellig {
+            self.letzter_versand_ms = Some(jetzt_ms);
+        }
+        faellig
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    // ── sched-Takt ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn sched_wird_hoechstens_minuetlich_gesendet() {
+        // Der tset geht bei jedem Poll raus (5 s). Würde sched mitziehen, wäre
+        // der getrennte Kanal sinnlos - er existiert gerade, damit der
+        // Liveticker nicht mehrere hundert Spiele mitschleppen muss.
+        let mut takt = SchedTakt::neu();
+        assert!(takt.faellig(0), "der erste Zyklus sendet");
+        assert!(!takt.faellig(5_000), "nach 5 s nicht");
+        assert!(!takt.faellig(59_999), "kurz vor der Minute nicht");
+        assert!(takt.faellig(60_000), "nach 60 s wieder");
+        assert!(!takt.faellig(60_001), "und danach wieder Ruhe");
+    }
+
+    #[test]
+    fn sched_takt_stempelt_nur_beim_senden() {
+        // faellig() ist bewusst nicht seiteneffektfrei: zweimaliges Fragen im
+        // selben Zyklus darf nicht zwei Nachrichten erzeugen.
+        let mut takt = SchedTakt::neu();
+        assert!(takt.faellig(100_000));
+        assert!(!takt.faellig(100_000), "dieselbe Zeit sendet kein zweites Mal");
+    }
+
     use super::*;
     use crate::btp::model::{BtpMatch, BtpPlayer, Discipline, MatchResult, MatchStatus};
 

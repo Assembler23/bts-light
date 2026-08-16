@@ -262,6 +262,186 @@ fn upcoming(snapshot: &BtpSnapshot, ctx: &LivetickerContext) -> Vec<TsetMatch> {
     scheduled.iter().map(|m| to_upcoming_match(m)).collect()
 }
 
+/// Vollständiger Spielplan für badhub (Nachricht `sched`).
+///
+/// Zweiter Kanal neben `tset`, bewusst getrennt: der `tset` geht bei jeder
+/// Liveticker-Änderung raus und trägt bereits das Base64-Turnierlogo. Ihn um
+/// mehrere hundert Spiele zu erweitern, würde den Liveticker für alle
+/// langsamer machen, damit eine Spielerseite vollständig ist.
+///
+/// Spezifikation im badhub-Repo:
+/// `docs/superpowers/specs/2026-08-16-spieler-live-vollstaendiger-spielplan-design.md`
+#[derive(Debug, Serialize, PartialEq)]
+pub struct SchedMessage {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub rid: u64,
+    pub event: SchedEvent,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct SchedEvent {
+    pub tournament_name: String,
+    /// ALLE Spiele mit Teilnehmern — keine Kappung. Das ist der Zweck des Kanals.
+    pub matches: Vec<SchedMatch>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct SchedMatch {
+    #[serde(rename = "_id")]
+    pub id: String,
+    pub n: String,
+    /// `scheduled` · `oncourt` · `finished`.
+    pub status: &'static str,
+    pub p0: Vec<String>,
+    pub p0_member_ids: Vec<Option<String>>,
+    pub p1: Vec<String>,
+    pub p1_member_ids: Vec<Option<String>>,
+    /// BTP `PlannedTime` als **Unix-ms**, nicht als YYYYMMDDHHMM: der
+    /// Empfänger soll keine Zeitzone interpretieren müssen.
+    pub planned_ts: Option<u64>,
+    /// Prognose aus `tablet::predict`, nur bei `scheduled`.
+    pub predicted_start_ts: Option<u64>,
+    /// Position INNERHALB der Halle, 0-basiert, aus `resolve_and_sort_key`.
+    pub queue_pos: Option<i64>,
+    pub hall: Option<String>,
+    /// Bei `scheduled` immer `None` — das Feld steht erst beim Aufruf fest.
+    pub court: Option<String>,
+    pub sets: Vec<[i64; 2]>,
+    pub team1_won: Option<bool>,
+    pub end_ts: Option<u64>,
+    pub outcome: Option<&'static str>,
+}
+
+/// BTP `PlannedTime` (`YYYYMMDDHHMM`) → Unix-ms.
+///
+/// Die Zahl ist **lokale Wandzeit**, keine UTC — sie kommt aus einem
+/// Turnierplan, den jemand in einer Halle aufgestellt hat, und der Rechner
+/// steht am selben Ort (dasselbe `Local`-Muster wie `btp/proto.rs`). Ohne die
+/// Zonen-Zuordnung läge im Sommer jede Anwurfzeit zwei Stunden daneben.
+///
+/// `None` bei unplausibler Zahl und bei mehrdeutiger Wandzeit (Zeitumstellung):
+/// dann lieber keine Zeit senden als eine falsche — badhub zeigt das Feld
+/// einfach nicht an.
+fn planned_time_to_unix_ms(pt: i64) -> Option<u64> {
+    use chrono::{Local, NaiveDate, TimeZone};
+
+    let minute = (pt % 100) as u32;
+    let rest = pt / 100;
+    let stunde = (rest % 100) as u32;
+    let rest = rest / 100;
+    let tag = (rest % 100) as u32;
+    let rest = rest / 100;
+    let monat = (rest % 100) as u32;
+    let jahr = (rest / 100) as i32;
+
+    let naiv = NaiveDate::from_ymd_opt(jahr, monat, tag)?.and_hms_opt(stunde, minute, 0)?;
+
+    Local
+        .from_local_datetime(&naiv)
+        .single()
+        .map(|dt| dt.timestamp_millis() as u64)
+}
+
+/// Baut die `sched`-Nachricht: **alle** Spiele mit Teilnehmern, ohne Kappung.
+///
+/// `predicted` kommt aus `TabletState::predicted_starts_snapshot()` und wird
+/// nur für wartende Spiele durchgereicht — bei einem laufenden oder beendeten
+/// Spiel ist „wann bin ich dran" sinnlos, und ein stehengebliebener Wert wäre
+/// schlimmer als keiner.
+pub fn build_sched(
+    snapshot: &BtpSnapshot,
+    ctx: &LivetickerContext,
+    predicted: &HashMap<i64, u64>,
+    rid: u64,
+) -> SchedMessage {
+    // Nur Spiele mit Teilnehmern: leere Platzhalter einer noch nicht
+    // ausgelosten Runde helfen auf einer Spielerseite niemandem.
+    let mut relevant: Vec<&BtpMatch> = snapshot
+        .matches
+        .iter()
+        .filter(|m| !m.team1.is_empty() || !m.team2.is_empty())
+        .collect();
+
+    // **Dieselbe Reihenfolge wie überall sonst** (`assign::resolve_and_sort_key`,
+    // ADR 0023) — siehe die ausführliche Begründung in `upcoming()`. Eine
+    // eigene Sortierung für badhub würde Zuschauer ans falsche Feld schicken.
+    relevant.sort_by_key(|m| sortier_schluessel(snapshot, ctx, m).1);
+
+    // queue_pos zählt INNERHALB der Halle: „in 3 Spielen" beantwortet die
+    // Frage „wie viele Spiele laufen vor mir auf meinen Feldern", nicht „wie
+    // viele im ganzen Turnier".
+    let mut je_halle: HashMap<String, i64> = HashMap::new();
+
+    let matches = relevant
+        .iter()
+        .map(|m| {
+            let wartend = m.status == MatchStatus::Scheduled;
+            let halle = sortier_schluessel(snapshot, ctx, m).0;
+            let queue_pos = if wartend {
+                let zaehler = je_halle.entry(halle.clone()).or_insert(0);
+                let pos = *zaehler;
+                *zaehler += 1;
+                Some(pos)
+            } else {
+                None
+            };
+
+            SchedMatch {
+                id: match_id(m.id),
+                n: format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
+                status: match m.status {
+                    MatchStatus::Finished => "finished",
+                    MatchStatus::OnCourt => "oncourt",
+                    _ => "scheduled",
+                },
+                p0: m.team1.iter().map(|p| p.name.clone()).collect(),
+                p0_member_ids: m.team1.iter().map(|p| p.member_id.clone()).collect(),
+                p1: m.team2.iter().map(|p| p.name.clone()).collect(),
+                p1_member_ids: m.team2.iter().map(|p| p.member_id.clone()).collect(),
+                planned_ts: m.planned_time.and_then(planned_time_to_unix_ms),
+                predicted_start_ts: if wartend { predicted.get(&m.id).copied() } else { None },
+                queue_pos,
+                hall: if halle.is_empty() { None } else { Some(halle) },
+                court: if wartend { None } else { m.court.clone() },
+                sets: m.sets.iter().map(|&(a, b)| [a, b]).collect(),
+                team1_won: m.winner.map(|w| w == 1),
+                end_ts: m.finished_at,
+                outcome: outcome_str(m.result),
+            }
+        })
+        .collect();
+
+    SchedMessage {
+        kind: "sched",
+        rid,
+        event: SchedEvent {
+            tournament_name: snapshot.tournament_name.clone(),
+            matches,
+        },
+    }
+}
+
+/// (Halle, Sortierschlüssel) eines Matches — ein Aufruf für beides, damit
+/// Reihenfolge und Hallenzuordnung nicht auseinanderlaufen können.
+fn sortier_schluessel(
+    snapshot: &BtpSnapshot,
+    ctx: &LivetickerContext,
+    m: &BtpMatch,
+) -> (String, crate::tablet::assign::ManualOrderSortKey) {
+    let (halle, _quelle, key) = crate::tablet::assign::resolve_and_sort_key(
+        ctx.config,
+        snapshot,
+        m,
+        ctx.manual_halls.get(&m.id).map(String::as_str),
+        m.preparation_hall.as_deref(),
+        ctx.auto_halls.get(&m.id).map(String::as_str),
+        m.preparation_call_ts.is_some(),
+        ctx.order,
+    );
+    (halle, key)
+}
+
 /// Baut die `tset`-Nachricht aus einem Snapshot.
 pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, ctx: &LivetickerContext) -> TsetMessage {
     let on_court: Vec<&BtpMatch> = snapshot
@@ -1119,5 +1299,165 @@ mod tests {
         let msg = build_checkin_roster(&snapshot, "G", 1);
         assert!(msg.classes.is_empty());
         assert!(msg.entries.is_empty());
+    }
+
+    // ── sched: vollständiger Spielplan für badhub ────────────────────────────
+    //
+    // Spezifikation (badhub-Repo):
+    // docs/superpowers/specs/2026-08-16-spieler-live-vollstaendiger-spielplan-design.md
+
+    fn sched_snapshot(matches: Vec<BtpMatch>) -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "Sched-Turnier".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches,
+        }
+    }
+
+    #[test]
+    fn build_sched_kappt_nicht() {
+        // Der Grund für den ganzen zweiten Kanal: `upcoming()` kappt bei
+        // UPCOMING_LIMIT = 15 Spielen des GESAMTEN Turniers. Wessen Spiel
+        // weiter hinten liegt, taucht dort nie auf. sched darf das nicht.
+        let matches: Vec<BtpMatch> = (1..=20)
+            .map(|i| sample_match(i, MatchStatus::Scheduled, None))
+            .collect();
+        let snapshot = sched_snapshot(matches);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+
+        assert_eq!(msg.kind, "sched");
+        assert_eq!(msg.event.matches.len(), 20, "sched darf NICHT kappen");
+    }
+
+    #[test]
+    fn build_sched_rechnet_planned_time_in_unix_ms() {
+        // BTP liefert YYYYMMDDHHMM als sortierbaren i64 in LOKALER Wandzeit
+        // (der Turnier-Laptop steht am Turnierort). Über die Leitung geht
+        // Unix-ms, damit badhub keine Zeitzone interpretieren muss.
+        //
+        // Geprüft wird die RUNDREISE, nicht ein absoluter Millisekundenwert:
+        // ein fester Wert wäre nur auf einem Rechner in der Zeitzone des
+        // Autors grün und auf einem UTC-CI-Runner rot - aus einem Grund, der
+        // nichts mit dem Code zu tun hat.
+        use chrono::{Local, TimeZone};
+
+        let mut m = sample_match(1, MatchStatus::Scheduled, None);
+        m.planned_time = Some(202_608_161_430); // 2026-08-16 14:30 lokal
+        let snapshot = sched_snapshot(vec![m]);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+
+        let ms = msg.event.matches[0].planned_ts.expect("planned_ts gesetzt");
+        let zurueck = Local.timestamp_millis_opt(ms as i64).unwrap();
+        assert_eq!(zurueck.format("%Y%m%d%H%M").to_string(), "202608161430");
+    }
+
+    #[test]
+    fn build_sched_liefert_court_auch_bei_beendeten() {
+        // Im tset fehlt das Feld bei recent_finished_matches - dort ist das
+        // Absicht (Monitor-Ansicht). Für die Spielerhistorie ist es genau die
+        // Information, die fehlte.
+        let mut m = sample_match(1, MatchStatus::Finished, Some("Feld 05"));
+        m.winner = Some(1);
+        m.finished_at = Some(NOW);
+        let snapshot = sched_snapshot(vec![m]);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+
+        assert_eq!(msg.event.matches[0].status, "finished");
+        assert_eq!(msg.event.matches[0].court.as_deref(), Some("Feld 05"));
+        assert_eq!(msg.event.matches[0].team1_won, Some(true));
+        assert_eq!(msg.event.matches[0].end_ts, Some(NOW));
+    }
+
+    #[test]
+    fn build_sched_gibt_wartenden_kein_feld_aber_eine_position() {
+        // Das Feld steht erst beim Aufruf fest - eine Angabe wäre geraten.
+        // Die Position dagegen ist bekannt und der Kern der Anzeige.
+        let matches: Vec<BtpMatch> = (1..=3)
+            .map(|i| sample_match(i, MatchStatus::Scheduled, Some("Feld 1")))
+            .collect();
+        let snapshot = sched_snapshot(matches);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+
+        let positionen: Vec<Option<i64>> = msg.event.matches.iter().map(|m| m.queue_pos).collect();
+        assert_eq!(positionen, vec![Some(0), Some(1), Some(2)]);
+        assert!(
+            msg.event.matches.iter().all(|m| m.court.is_none()),
+            "wartende Spiele tragen kein Feld"
+        );
+    }
+
+    #[test]
+    fn build_sched_reicht_die_prognose_nur_fuer_wartende_durch() {
+        // predicted_start_ts beantwortet "wann bin ich dran" - bei einem
+        // laufenden oder beendeten Spiel ist die Frage sinnlos, und ein
+        // stehengebliebener Wert wäre schlimmer als keiner.
+        let mut laufend = sample_match(1, MatchStatus::OnCourt, Some("Feld 1"));
+        laufend.planned_time = None;
+        let wartend = sample_match(2, MatchStatus::Scheduled, None);
+        let snapshot = sched_snapshot(vec![laufend, wartend]);
+        let cfg = AppConfig::default();
+        let mut prognosen = HashMap::new();
+        prognosen.insert(1_i64, NOW + 60_000);
+        prognosen.insert(2_i64, NOW + 900_000);
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &prognosen, 1);
+
+        let laufend = msg.event.matches.iter().find(|m| m.id == "btp_1").unwrap();
+        let wartend = msg.event.matches.iter().find(|m| m.id == "btp_2").unwrap();
+        assert_eq!(laufend.predicted_start_ts, None, "laufendes Spiel braucht keine Prognose");
+        assert_eq!(wartend.predicted_start_ts, Some(NOW + 900_000));
+    }
+
+    #[test]
+    fn build_sched_schickt_gaeste_als_null_nicht_als_leerstring() {
+        // sample_match() gibt Team 2 bewusst keine member_id. Serde macht aus
+        // Option::None ein JSON-null - die Gegenstelle muss das als "Gast"
+        // lesen, nicht als leere Lizenznummer. Steht hier fest, weil die
+        // badhub-Fixture denselben Fall abbilden muss.
+        let snapshot = sched_snapshot(vec![sample_match(1, MatchStatus::Scheduled, None)]);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let json = serde_json::to_value(&msg).unwrap();
+
+        assert_eq!(json["event"]["matches"][0]["p1_member_ids"][0], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn build_sched_haelt_den_feldvertrag_mit_badhub() {
+        // Die Gegenstelle liest tests/fixtures/sched_golden.json im
+        // badhub-Repo. Weicht die Serialisierung ab, bricht der Spielplan
+        // dort lautlos - badhub ignoriert unbekannte Felder.
+        let snapshot = sched_snapshot(vec![sample_match(1, MatchStatus::Scheduled, None)]);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(&snapshot, &LivetickerContext::bare(&cfg), &HashMap::new(), 1);
+        let json = serde_json::to_value(&msg).unwrap();
+
+        assert_eq!(json["type"], "sched");
+        let m = json["event"]["matches"][0].as_object().unwrap();
+        let erwartet = [
+            "_id", "n", "status", "p0", "p0_member_ids", "p1", "p1_member_ids",
+            "planned_ts", "predicted_start_ts", "queue_pos", "hall", "court",
+            "sets", "team1_won", "end_ts", "outcome",
+        ];
+        for feld in erwartet {
+            assert!(m.contains_key(feld), "Feld {feld} fehlt im sched-Payload");
+        }
+        assert_eq!(m.len(), erwartet.len(), "unbekanntes Feld im sched-Payload");
     }
 }
