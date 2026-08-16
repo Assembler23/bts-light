@@ -40,7 +40,17 @@ Kappung. Je Spiel:
 | `queue_pos` | `resolve_and_sort_key` | 0-basiert, **innerhalb der Halle** |
 | `hall` | `resolve_and_sort_key` | leer bei Ein-Hallen-Turnieren |
 | `court` | `BtpMatch::court` | bei `scheduled` immer `null` |
+| `hall_color` | `hall_colors::farbe_fuer` | dieselbe Quelle wie im `tset` |
+| `discipline` | `BtpMatch::discipline` | `mens_singles`, `womens_doubles`, … |
+| `class_label` | `BtpMatch::class_label` | „A", „B", „U15"; `null`, wenn keins erkennbar |
 | `sets`, `team1_won`, `end_ts`, `outcome` | wie im `tset` | |
+
+**Warum `discipline` und `class_label` mitmüssen (seit v0.9.211):** `n` ist
+`draw_name + round_name` — und `draw_name` ist bei Gruppenturnieren die
+AUSLOSUNGSGRUPPE („Gruppe 1"), nicht die Klasse. badhub zeigte deshalb nur
+„Gruppe 1 G1" und konnte die Disziplin nicht ableiten, egal was es tat. Beide
+Felder lagen hier längst vor und wurden nur nicht gesendet. Zusammen ergeben
+sie „HE A".
 
 **Die Reihenfolge ist die aus ADR 0023** — dieselbe, die die Turnierleitung
 sieht. Eine eigene Sortierung für badhub würde Zuschauer ans falsche Feld

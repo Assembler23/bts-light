@@ -335,6 +335,19 @@ pub struct SchedMatch {
     pub hall: Option<String>,
     /// Bei `scheduled` immer `None` — das Feld steht erst beim Aufruf fest.
     pub court: Option<String>,
+    /// Farbmarke der Halle (`#rrggbb`), gleiche Quelle wie im `tset`.
+    /// badhub zeigt damit dieselbe Marke wie im Liveticker.
+    pub hall_color: Option<String>,
+    /// Disziplin als stabiler Schlüssel (`mens_singles`, `womens_doubles`, …).
+    ///
+    /// **Warum das nötig ist:** `n` ist `draw_name + round_name` — und
+    /// `draw_name` ist bei Gruppenturnieren die AUSLOSUNGSGRUPPE
+    /// ("Gruppe 1"), nicht die Klasse. badhub konnte daraus die Disziplin
+    /// nicht ableiten, egal was es tat.
+    pub discipline: &'static str,
+    /// Klassenkürzel ("A", "B", "U15"); `None`, wenn keins erkennbar ist.
+    /// Zusammen mit `discipline` ergibt das "HE A".
+    pub class_label: Option<String>,
     pub sets: Vec<[i64; 2]>,
     pub team1_won: Option<bool>,
     pub end_ts: Option<u64>,
@@ -400,12 +413,20 @@ pub fn build_sched(
     // Frage „wie viele Spiele laufen vor mir auf meinen Feldern", nicht „wie
     // viele im ganzen Turnier".
     let mut je_halle: HashMap<String, i64> = HashMap::new();
+    let farben = hallen_farben(snapshot, ctx.config);
 
     let matches = relevant
         .iter()
         .map(|m| {
             let wartend = m.status == MatchStatus::Scheduled;
             let halle = sortier_schluessel(snapshot, ctx, m).0;
+            // Dieselbe Farbquelle wie im tset - eine zweite Zuordnung waere
+            // eine zweite Wahrheit, und badhub zeigt beide Marken nebeneinander.
+            let halle_farbe = if halle.is_empty() {
+                None
+            } else {
+                farbe_fuer(&farben, &halle)
+            };
             let queue_pos = if wartend {
                 let zaehler = je_halle.entry(halle.clone()).or_insert(0);
                 let pos = *zaehler;
@@ -438,6 +459,13 @@ pub fn build_sched(
                 queue_pos,
                 hall: if halle.is_empty() { None } else { Some(halle) },
                 court: if wartend { None } else { m.court.clone() },
+                hall_color: halle_farbe.clone(),
+                discipline: m.discipline.as_str(),
+                class_label: if m.class_label.is_empty() {
+                    None
+                } else {
+                    Some(m.class_label.clone())
+                },
                 sets: m.sets.iter().map(|&(a, b)| [a, b]).collect(),
                 team1_won: m.winner.map(|w| w == 1),
                 end_ts: m.finished_at,
@@ -1603,6 +1631,30 @@ mod tests {
     }
 
     #[test]
+    fn build_sched_traegt_disziplin_klasse_und_hallenfarbe() {
+        // badhub zeigte bisher nur "Gruppe 1 G1" - das ist draw_name +
+        // round_name, und draw_name ist bei Gruppenturnieren die
+        // AUSLOSUNGSGRUPPE, nicht die Klasse. Die Disziplin ("HE") und das
+        // Klassenkuerzel ("A") liegen hier vor, wurden aber nie gesendet;
+        // badhub konnte sie deshalb nicht anzeigen, egal was es tat.
+        let mut m = sample_match(1, MatchStatus::Scheduled, None);
+        m.discipline = Discipline::MensSingles;
+        m.class_label = "A".to_string();
+        let snapshot = sched_snapshot(vec![m]);
+        let cfg = AppConfig::default();
+
+        let msg = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            1,
+        );
+
+        assert_eq!(msg.event.matches[0].discipline, "mens_singles");
+        assert_eq!(msg.event.matches[0].class_label.as_deref(), Some("A"));
+    }
+
+    #[test]
     fn build_sched_haelt_den_feldvertrag_mit_badhub() {
         // Die Gegenstelle liest tests/fixtures/sched_golden.json im
         // badhub-Repo. Weicht die Serialisierung ab, bricht der Spielplan
@@ -1633,6 +1685,9 @@ mod tests {
             "queue_pos",
             "hall",
             "court",
+            "hall_color",
+            "discipline",
+            "class_label",
             "sets",
             "team1_won",
             "end_ts",

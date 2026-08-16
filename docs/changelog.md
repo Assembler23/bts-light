@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.211
+
+- **Disziplin, Klassenkürzel und Hallenfarbe im `sched`-Payload**: badhubs
+  Spielerseite zeigte bisher nur „Gruppe 1 G1" — das ist `draw_name +
+  round_name`, und `draw_name` ist bei Gruppenturnieren die
+  Auslosungsgruppe, nicht die Klasse. Die Disziplin („HE") und das
+  Klassenkürzel („A") lagen hier längst vor, wurden aber nie gesendet;
+  badhub konnte sie deshalb nicht anzeigen, egal was es tat. Dazu die
+  Farbmarke der Halle aus derselben Quelle wie im `tset`, damit Liveticker
+  und Spielerseite dieselbe Marke zeigen.
+
 ## v0.9.210
 
 - **Hallen-Farben** (Spec
