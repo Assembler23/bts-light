@@ -1113,28 +1113,42 @@ impl SyncEngine {
         // verlöre die Turnierleitung das Vertrauen in beide.
         let manual_halls = tablet.manual_halls();
         let auto_halls = tablet.auto_hall_store().halls();
-        ready.sort_by_key(|m| {
-            let call = call_for(m.id);
-            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
-            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
-                snapshot
-                    .locations
-                    .iter()
-                    .find(|l| l.id == lid)
-                    .map(|l| l.name.as_str())
-            });
-            let (_, _, key) = crate::tablet::assign::resolve_and_sort_key(
-                config,
-                snapshot,
-                m,
-                manual_hall,
-                called_hall,
-                auto_halls.get(&m.id).map(String::as_str),
-                call.is_some(),
-                tablet.queue_order_store(),
-            );
-            key
-        });
+        // Halle je Match EINMAL auflösen: Seit ADR 0030 braucht die Vergabe
+        // sie als Constraint, nicht nur zum Sortieren — je Feld×Match neu
+        // aufzulösen wäre quadratisch.
+        let resolved: HashMap<
+            i64,
+            (
+                String,
+                crate::tablet::assign::HallSource,
+                crate::tablet::assign::ManualOrderSortKey,
+            ),
+        > = ready
+            .iter()
+            .map(|m| {
+                let call = call_for(m.id);
+                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+                let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                    snapshot
+                        .locations
+                        .iter()
+                        .find(|l| l.id == lid)
+                        .map(|l| l.name.as_str())
+                });
+                let (hall, source, key) = crate::tablet::assign::resolve_and_sort_key(
+                    config,
+                    snapshot,
+                    m,
+                    manual_hall,
+                    called_hall,
+                    auto_halls.get(&m.id).map(String::as_str),
+                    call.is_some(),
+                    tablet.queue_order_store(),
+                );
+                (m.id, (hall, source, key))
+            })
+            .collect();
+        ready.sort_by_key(|m| resolved[&m.id].2);
 
         // ── Spieler-Verfügbarkeit ────────────────────────────────────────
         // Wer gerade spielt und wer noch pausiert, liegt in `tablet::assign`
@@ -1200,14 +1214,41 @@ impl SyncEngine {
                 if !config.hall_allows_match(m.discipline.as_str(), &m.draw_name, &court_hall) {
                     return false;
                 }
+                // Die aufgelöste Halle BINDET (Spec `hallen-vorverteilung`,
+                // ADR 0030): Ein Spiel mit Regel-, Hand- oder Auto-Halle
+                // bekommt nur Felder SEINER Halle — sonst wäre die dem
+                // Spieler gezeigte Halle eine Falschauskunft. Nur im
+                // Mehr-Hallen-Betrieb: In Ein-Hallen-Turnieren ist
+                // `court_hall` leer, ein gesetzter Name würde sonst JEDE
+                // Vergabe blockieren. BTP-Ort und Aufruf binden bewusst
+                // nicht hart (der Aufruf wirkt unten wie bisher).
+                use crate::tablet::assign::HallSource as Quelle;
+                let (hall, source) = resolved
+                    .get(&m.id)
+                    .map(|(h, s, _)| (h.as_str(), *s))
+                    .unwrap_or(("", Quelle::None));
+                if multi_hall
+                    && !hall.is_empty()
+                    && matches!(source, Quelle::Rule | Quelle::Manual | Quelle::Auto)
+                    && !court_hall.eq_ignore_ascii_case(hall)
+                {
+                    return false;
+                }
                 if require_call {
                     // Mehr-Hallen ohne aktive Halle: nur für diese Halle
-                    // gerufene Matches.
-                    call_for(m.id)
-                        .and_then(|c| c.location_id)
-                        .zip(court.location_id)
-                        .map(|(a, b)| a == b)
-                        .unwrap_or(false)
+                    // gerufene Matches — ODER ein AUTO-vorverteiltes Spiel in
+                    // seiner Halle (ADR 0030): Die Vorverteilung ersetzt den
+                    // Aufruf als Vergabe-Voraussetzung; das frühe
+                    // Hallen-Signal (Monitor/badhub) tritt an seine Stelle.
+                    let auto_statt_aufruf = matches!(source, Quelle::Auto)
+                        && !hall.is_empty()
+                        && court_hall.eq_ignore_ascii_case(hall);
+                    auto_statt_aufruf
+                        || call_for(m.id)
+                            .and_then(|c| c.location_id)
+                            .zip(court.location_id)
+                            .map(|(a, b)| a == b)
+                            .unwrap_or(false)
                 } else {
                     // Ein-Hallen oder aktive Halle gesetzt: jedes spielbereite
                     // Match (Reihenfolge regelt die Zeit-Sortierung).
@@ -1891,6 +1932,87 @@ mod tests {
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         engine.reconcile_queue_order(&tablet, &snap);
         assert_eq!(tablet.queue_order_store().rank(8), None);
+    }
+
+    fn zwei_hallen() -> Vec<crate::btp::model::BtpLocation> {
+        vec![
+            crate::btp::model::BtpLocation {
+                id: 1,
+                name: "Halle A".to_string(),
+            },
+            crate::btp::model::BtpLocation {
+                id: 2,
+                name: "Halle B".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn eine_hand_halle_bindet_die_automatische_vergabe() {
+        // ADR 0030: Ein Spiel mit Hand-Halle B bekommt kein Feld in Halle A
+        // — auch wenn dort eines frei ist und die aktive Halle A wäre.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.set_manual_hall(7, "Halle B");
+        let snap = snap_with(
+            vec![court(1, Some(1))],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            zwei_hallen(),
+        );
+        let mut cfg = cfg_auto(true, 0.0);
+        cfg.auto_assign.active_hall = "Halle A".to_string();
+        let (courts, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(8),
+            "das hallen-gebundene Spiel 7 wird übersprungen"
+        );
+    }
+
+    #[test]
+    fn eine_auto_halle_ersetzt_den_aufruf_und_bindet() {
+        // ADR 0030: Im Aufruf-Pflicht-Modus (Mehr-Hallen ohne aktive Halle)
+        // wird ein AUTO-vorverteiltes Spiel ohne Aufruf vergeben — aber nur
+        // in SEINER Halle; ein Spiel ohne Halle braucht weiter den Aufruf.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet
+            .auto_hall_store()
+            .insert_many(&[(7, "Halle B".into())]);
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            zwei_hallen(),
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1, "nur das vorverteilte Spiel geht aufs Feld");
+        assert_eq!(courts[0].court_id, 2, "und zwar in SEINE Halle B");
+        assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn im_ein_hallen_turnier_blockiert_ein_hallenname_nichts() {
+        // Der multi_hall-Guard: Bei Ein-Hallen-Turnieren ist der
+        // Feld-Hallenname leer — ein (versehentlich) gesetzter Hallenname
+        // am Spiel darf die Vergabe nicht lahmlegen.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.set_manual_hall(7, "Halle X");
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![ready_named(7, None, "A", "B")],
+            Vec::new(),
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(7));
     }
 
     #[test]
