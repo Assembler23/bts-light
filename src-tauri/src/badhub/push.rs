@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use crate::badhub::diff::Update;
-use crate::badhub::payload::{CheckinBrandingMessage, CheckinRosterMessage};
+use crate::badhub::payload::{CheckinBrandingMessage, CheckinRosterMessage, SchedMessage};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -77,6 +77,33 @@ pub async fn push_checkin_roster(
 ) -> Result<(), PushError> {
     let body =
         serde_json::to_vec(roster).expect("centry_list-Serialisierung kann nicht fehlschlagen");
+
+    let response = client
+        .post(url)
+        .bearer_auth(password)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await?;
+
+    match response.status().as_u16() {
+        200 => Ok(()),
+        401 | 403 => Err(PushError::Unauthorized),
+        other => Err(PushError::Status(other)),
+    }
+}
+
+/// Sendet den vollständigen Spielplan (`sched`) an badhub.
+///
+/// Gleicher Endpunkt, gleiche Bearer-Auth wie `tset`/`centry_list` — ein
+/// zweiter Endpunkt wäre eine zweite Fehlerquelle.
+pub async fn push_sched(
+    client: &reqwest::Client,
+    url: &str,
+    password: &str,
+    sched: &SchedMessage,
+) -> Result<(), PushError> {
+    let body = serde_json::to_vec(sched).expect("sched-Serialisierung kann nicht fehlschlagen");
 
     let response = client
         .post(url)

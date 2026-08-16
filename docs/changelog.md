@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.209
+
+- **Vollständiger Spielplan an badhub** (`sched`, Spec
+  [features/spielplan-an-badhub.md](features/spielplan-an-badhub.md)):
+  Neben dem `tset` geht jetzt höchstens minütlich ein zweiter Payload mit
+  **allen** Spielen des Turniers an badhub — je Spiel angesetzte Zeit
+  (BTP `PlannedTime` als Unix-ms), prognostizierte Startzeit aus der
+  Spielzeiten-Messung, Warteschlangen-Position innerhalb der Halle sowie
+  Halle und Feld. Damit zeigt badhubs Spielerseite
+  `/spieler/{lizenz}/live` einem Teilnehmer seinen ganzen Turniertag statt
+  nur des nächsten Spiels. Grund: der `tset` kappt bei 15 kommenden Spielen
+  des gesamten Turniers — wessen Spiel weiter hinten liegt, tauchte dort
+  nie auf.
+- Der Liveticker bleibt unverändert: `sched` läuft getrennt und mit eigenem
+  Fehlerpfad. Kennt badhub den Nachrichtentyp noch nicht (400/404), pausiert
+  der Versand, statt jeden Zyklus anzuklopfen.
+
 ## v0.9.208
 
 - **Automatische Hallen-Vorverteilung** (Spec
