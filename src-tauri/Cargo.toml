@@ -42,7 +42,7 @@ tauri-plugin-single-instance = "2.4.2"
 tauri-plugin-dialog = "2"
 include_dir = "0.7"
 base64 = "0.23"
-mdns-sd = "0.20"
+mdns-sd = "0.21"
 # Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
 # transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
