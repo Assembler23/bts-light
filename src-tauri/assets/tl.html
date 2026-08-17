@@ -3363,9 +3363,19 @@ function wireCourts(box) {
   scopeAll(box, ".card[data-court]").forEach((el) => {
     const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
     if (!court) return;
+    // Klick-Handler lösen zur KLICK-Zeit aus `state` auf (Muster
+    // `data-prep` in `wireQueue`): Seit dem Keyed-Abgleich überleben
+    // Listener viele Renders. Nur die Zieh-Nutzlast (`enableDrag`) behält
+    // das Wiring-Zeit-Objekt — ändert sich Sichtbares an der Kachel,
+    // wird sie ohnehin ersetzt und neu verdrahtet.
+    const frisch = () => state.courts.find((c) => String(c.court_id) === el.dataset.court);
 
     if (picked) {
-      const go = () => { if (!suppressNextClick) assignTo(court); };
+      const go = () => {
+        if (suppressNextClick) return;
+        const c = frisch();
+        if (c) assignTo(c);
+      };
       el.addEventListener("click", go);
       el.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
@@ -3374,24 +3384,28 @@ function wireCourts(box) {
     }
     // Ohne Auswahl: ein laufendes Spiel lässt sich von hier aufnehmen.
     if (!court.match_id) return;
-    const asMatch = {
-      match_id: court.match_id,
-      team1: court.team1,
-      team2: court.team2,
+    const alsMatch = (c) => ({
+      match_id: c.match_id,
+      team1: c.team1,
+      team2: c.team2,
       draw_name: "",
-      round_name: court.round_name,
-      discipline: court.discipline,
-      class_label: court.class_label,
+      round_name: c.round_name,
+      discipline: c.discipline,
+      class_label: c.class_label,
       // Ein laufendes Spiel bleibt in seiner Halle — das Zielfeld wird
       // danach beurteilt.
-      hall: court.location,
+      hall: c.location,
+    });
+    const go = () => {
+      if (suppressNextClick) return;
+      const c = frisch();
+      if (c && c.match_id) pick(alsMatch(c), c.court_id);
     };
-    const go = () => { if (!suppressNextClick) pick(asMatch, court.court_id); };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
-    enableDrag(el, asMatch, court.court_id);
+    enableDrag(el, alsMatch(court), court.court_id);
   });
 }
 
@@ -3583,6 +3597,10 @@ function renderCourts() {
     );
   }
   scheduleFitCourts();
+  // Frisch gebaute Kacheln tragen leere Uhrfelder — vor dem nächsten
+  // Anstrich füllen, auch wenn dieser Aufruf NICHT aus `render()` kam
+  // (pick/assign/Drag rufen renderCourts direkt; Review 17.08.2026).
+  scheduleTickClocks();
 }
 
 /**
@@ -3675,7 +3693,15 @@ let fitScheduled = false;
 function scheduleFitCourts() {
   if (fitScheduled) return;
   fitScheduled = true;
-  requestAnimationFrame(() => { fitScheduled = false; fitCourts(); });
+  requestAnimationFrame(() => {
+    fitScheduled = false;
+    fitCourts();
+    // Offene ⋯-Menüs nachführen: Ein Kompaktstufen-Wechsel oder eine
+    // umsortierte Liste verschiebt Auslöser OHNE Scroll-Ereignis — seit
+    // dem Keyed-Abgleich läuft die Platzierung nicht mehr bei jedem
+    // Render über die Verdrahtung mit (Review-Fund 17.08.2026).
+    folgeOffenenKebabs();
+  });
 }
 
 // Den früheren Trennsteg (`#steg`, Aufteilung Felder ↔ Spielliste, je
@@ -5312,6 +5338,10 @@ function renderQueue() {
         : ""));
   }
   beobachteQueueEnde(liste.length);
+  // Frisch gebaute Zeilen tragen leere Zeitfelder („gerufen seit",
+  // Eieruhr) — vor dem nächsten Anstrich füllen, auch beim Nachladen
+  // per Scroll (ruft renderQueue direkt; Review 17.08.2026).
+  scheduleTickClocks();
 
   // Reset-Knopf (im Kopf des Spiele-Panels) nur zeigen, solange irgendein
   // Spiel manuell einsortiert ist — sonst gäbe es nichts zurückzusetzen.
@@ -5648,8 +5678,22 @@ function renderOfficials() {
       <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
         title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
     </li>`).join("") : `<li class="meta">keine Schiedsrichter eingetragen</li>`;
-  // Unverändert → Liste (samt Listener und Zieh-Griffen) stehen lassen.
-  if (!setzeHtmlWennNeu(box, html)) return;
+  // Unverändert → Liste (samt Listener und Zieh-Griffen) stehen lassen —
+  // ABER nur, wenn auch die DOM-Reihenfolge noch stimmt: Ein
+  // fehlgeschlagener Zug (Write abgelehnt oder Verbindung weg) hat die
+  // <li> physisch verschoben; der HTML-String wäre trotzdem gleich, und
+  // die Anzeige zeigte dauerhaft eine Reihenfolge, die der Host nie
+  // übernommen hat (Review-Fund 17.08.2026 — die Spielliste heilt sich
+  // über den Keyed-Abgleich selbst, diese Liste braucht die Prüfung).
+  if (!setzeHtmlWennNeu(box, html)) {
+    const sollIds = list.map((o) => String(o.id)).join(",");
+    const istIds = Array.from(box.children)
+      .map((li) => li.dataset.id || "")
+      .filter(Boolean)
+      .join(",");
+    if (istIds === sollIds) return;
+    box.innerHTML = html;
+  }
   scopeAll(box, "[data-off-pause]").forEach((b) =>
     b.addEventListener("click", () => send(
       `off-pause-${b.dataset.offPause}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
@@ -6430,9 +6474,11 @@ function renderFinished() {
   }).join("") : `<p class="note">Noch kein Spiel beendet.</p>`;
   // Unverändert → Liste samt Listenern stehen lassen (Stufe 1).
   if (!setzeHtmlWennNeu(box, html)) return;
+  // Klick-Zeit-Auflösung aus `state.finished` statt der eingefangenen
+  // Liste — die Listener überleben seit Stufe 1 viele Renders.
   scopeAll(box, "[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
-      const f = list.find((x) => String(x.match_id) === b.dataset.finGraph);
+      const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finGraph);
       if (!f) return;
       openTimeline(
         f.match_id,
@@ -6444,7 +6490,7 @@ function renderFinished() {
   // die alten Zuhörer an längst entfernten Knoten.
   scopeAll(box, "[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
-      const f = list.find((x) => String(x.match_id) === b.dataset.finFix);
+      const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finFix);
       if (!f) return;
       openResultDialog({
         matchId: f.match_id,
@@ -6614,9 +6660,9 @@ function render() {
   renderTimes();
   renderCheckin();
   // Die Uhrfelder starten seit dem Keyed-Abgleich leer (eingebettete
-  // Sekundenwerte machten jedes HTML „anders") — sofort füllen, nicht
-  // erst beim nächsten Sekunden-Tick.
-  tickClocks();
+  // Sekundenwerte machten jedes HTML „anders") — vor dem nächsten
+  // Anstrich füllen, nicht erst beim nächsten Sekunden-Tick.
+  scheduleTickClocks();
   if (renderMessen) {
     console.log(`[tl] render: ${(performance.now() - messStart).toFixed(1)} ms`);
   }
@@ -6629,9 +6675,29 @@ const renderMessen = (() => {
 })();
 
 /** Nur die Uhren neu setzen — nicht die ganze Seite, sonst flackert sie
-    jede Sekunde und man verliert die Scroll-Position. */
+    jede Sekunde und man verliert die Scroll-Position. Läuft sekündlich
+    UND direkt nach jedem (Teil-)Render, der Uhrfelder neu baut — der
+    Sekundentakt überspringt sich deshalb, wenn gerade getickt wurde
+    (Review 17.08.2026: kein Doppellauf direkt nach dem Poll). */
+let letzterUhrTick = 0;
+/** Uhren-Tick gebündelt über rAF (Muster `scheduleFitCourts`): Felder,
+ *  Liste und Render-Ende melden je einmal an, gefüllt wird VOR dem
+ *  nächsten Anstrich genau einmal — dokumentweit. */
+let uhrTickGeplant = false;
+function scheduleTickClocks() {
+  if (uhrTickGeplant) return;
+  uhrTickGeplant = true;
+  requestAnimationFrame(() => {
+    uhrTickGeplant = false;
+    tickClocks();
+    // Und offene ⋯-Menüs nachführen: Umsortierte/entfallene Zeilen
+    // verschieben Auslöser ohne Scroll-Ereignis (Review 17.08.2026).
+    folgeOffenenKebabs();
+  });
+}
 function tickClocks() {
   if (!state) return;
+  letzterUhrTick = performance.now();
   document.querySelectorAll(".clock[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
     if (!since) return;
@@ -6781,7 +6847,10 @@ function start() {
   window.addEventListener("resize", scheduleFitCourts);
   window.addEventListener("orientationchange", scheduleFitCourts);
   poll();
-  setInterval(tickClocks, 1000);
+  setInterval(() => {
+    if (performance.now() - letzterUhrTick < 900) return;
+    tickClocks();
+  }, 1000);
   // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den
   // Turnier-PC nicht alle zwei Sekunden fragen.
   let timer = setInterval(poll, 2000);
