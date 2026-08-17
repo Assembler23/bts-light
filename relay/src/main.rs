@@ -26,7 +26,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use include_dir::{include_dir, Dir};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use relay_proto::{
@@ -279,6 +279,13 @@ struct Namespace {
     monitor_subs_all: Vec<Tx>,
     /// Pro-Court monoton steigende Nudge-Sequenz (Client verwirft Veraltetes).
     monitor_seq: HashMap<i64, u64>,
+    /// TL-Push-Abonnenten (`/tl-ws`, Spec tl-web-push): Sende-Enden der
+    /// Turnierleitungs-Seiten, die auf einen Anstoß warten. Bekommen bei
+    /// jeder neuen TL-Revision `{"rev":n}` — nie Daten, die holt die Seite
+    /// über ihre bestehende `GET /tl/api/state` (eine Wahrheit für
+    /// Auth/ETag/Kürzung, Muster ADR 0016). Namespace-lokal wie die
+    /// Monitor-Abos.
+    tl_subs: Vec<Tx>,
     /// A2 / ADR 0017 (Reconnect-Wahrheit): der Legacy-rev-Schalter des Hosts,
     /// vom Host über `HostFrame::Courts` durchgereicht. `false` (Default) =
     /// Ownership aktiv → der Relay meldet `ownership_active=true` im
@@ -303,6 +310,13 @@ struct MonitorNudge {
 /// wenige TVs; darüber hinausgehende Verbindungen fallen still auf ihren
 /// Poll-Fallback zurück (kein Regress).
 const MAX_MONITOR_SUBS: usize = 256;
+
+/// Obergrenze der TL-Push-Abonnenten je Namespace (Spec tl-web-push):
+/// das Doppelte des 8-Geräte-Caps — Reserve für Reconnect-Überlappung,
+/// aber kein offenes Scheunentor. Darüber bleibt die Verbindung still und
+/// die Seite bedient sich aus ihrem Poll-Fallback. Derselbe Wert wie am
+/// LAN-Server (`MAX_TL_PUSH_SUBS`).
+const MAX_TL_SUBS: usize = 16;
 
 impl Namespace {
     fn new() -> Self {
@@ -338,6 +352,7 @@ impl Namespace {
             monitor_subs: HashMap::new(),
             monitor_subs_all: Vec::new(),
             monitor_seq: HashMap::new(),
+            tl_subs: Vec::new(),
             reconnect_legacy_rev: false,
         }
     }
@@ -347,8 +362,18 @@ impl Namespace {
     /// ohne Host gibt es nichts anzuzeigen, und der Host lädt ihn nach
     /// einem Reconnect binnen 30 s erneut hoch. Ihn zu behalten würde nur
     /// Speicher belegen, falls ein Host endgültig weg ist.
+    /// TL-Push-Zuhörer zählen mit: Sonst räumte ein kurzer Host-Abriss
+    /// den Namespace weg, während eine TL-Seite noch daran hängt — ihr
+    /// Sende-Ende läge dann in der verworfenen Fassung, der Kanal bliebe
+    /// technisch offen und bekäme nie wieder einen Anstoß, während die
+    /// Seite sich für „live" hielte (Review-Fund 18.08.2026). Anders als
+    /// Monitore können TL-Zuhörer keinen Namespace erzeugen (`tl_ws_conn`
+    /// legt keinen an), es entsteht also kein Zombie-Namespace.
     fn is_empty(&self) -> bool {
-        self.host.is_none() && self.tablets.is_empty() && self.pending.is_empty()
+        self.host.is_none()
+            && self.tablets.is_empty()
+            && self.pending.is_empty()
+            && self.tl_subs.is_empty()
     }
 }
 
@@ -552,6 +577,12 @@ async fn main() {
                 "/tl/api/officials/{official_id}",
                 get(tl_official_detail_route),
             )
+            // TL-Push (Spec tl-web-push): Anstoß-Kanal `{"rev":n}`, damit
+            // die Seite nicht mehr alle zwei Sekunden fragen muss. Ohne
+            // Namespace in der Adresse wie die übrigen TL-Routen; der
+            // Zugang kommt im ERSTEN FRAME (WebSockets tragen keine
+            // Header, und in die URL gehört er nie).
+            .route("/tl-ws", get(tl_ws_route))
             // Flaggen für die TL-Seite: Sie hängt ohne Namespace unter
             // `/tl` und findet ihre Flaggen deshalb unter `/flags/…` —
             // Begründung am Handler.
@@ -1938,6 +1969,144 @@ fn notify_monitor(namespace: &mut Namespace, court_id: i64) {
     namespace
         .monitor_subs_all
         .retain(|t| t.send(nudge.clone()).is_ok());
+}
+
+/// Erste Nachricht des Clients auf `/tl-ws`: der Zugang.
+#[derive(Deserialize)]
+struct TlWsAuth {
+    #[serde(default)]
+    token: String,
+}
+
+/// TL-Push-Kanal (Spec tl-web-push). Der Zugang kommt im ersten Frame
+/// (`{"token":…}`) statt im Kopf oder Pfad: WebSockets aus dem Browser
+/// tragen keine Header, und ein Zugang im Pfad landete in
+/// nginx-Zugriffsprotokollen. Vor erfolgreicher Prüfung sendet der Relay
+/// nichts — auch keinen Grund.
+async fn tl_ws_route(ws: WebSocketUpgrade, State(broker): State<Broker>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| tl_ws_conn(socket, broker))
+}
+
+/// Wie viele Verbindungen gerade auf ihren Zugangs-Frame warten. Der
+/// Relay steht im Internet: Ohne Deckel könnte jeder beliebig viele
+/// Verbindungen öffnen und je einen Task samt Socket binden, ohne je
+/// einen Zugang zu zeigen (Review-Fund 18.08.2026). Die Grenze ist
+/// bewusst großzügig — sie soll Missbrauch bremsen, nicht ein Turnier
+/// beim gleichzeitigen Neuladen aller Geräte behindern.
+static TL_WS_VORAUTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const MAX_TL_WS_VORAUTH: usize = 64;
+
+/// Zählt eine wartende Vor-Auth-Verbindung und gibt den Platz beim
+/// Verlassen des Gültigkeitsbereichs sicher wieder frei — auch bei
+/// vorzeitigem `return`.
+struct VorAuthPlatz;
+
+impl Drop for VorAuthPlatz {
+    fn drop(&mut self) {
+        TL_WS_VORAUTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
+    if TL_WS_VORAUTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= MAX_TL_WS_VORAUTH {
+        TL_WS_VORAUTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    let platz = VorAuthPlatz;
+    // Fünf Sekunden reichen für einen Frame, den der Client unmittelbar
+    // nach `open` sendet — je kürzer, desto weniger lässt sich hier
+    // festhalten.
+    let erste = tokio::time::timeout(Duration::from_secs(5), socket.recv()).await;
+    let token = match erste {
+        Ok(Some(Ok(Message::Text(text)))) => {
+            // Wie im HTTP-Pfad auf 256 Zeichen gekappt (`bearer`).
+            let roh: String = text.chars().take(4096).collect();
+            serde_json::from_str::<TlWsAuth>(&roh)
+                .map(|a| a.token.chars().take(256).collect::<String>())
+                .unwrap_or_default()
+        }
+        _ => String::new(),
+    };
+    // Zugang prüfen wie die HTTP-Routen: Ein unbekannter oder ein Zugang
+    // ohne verbundenen Host bekommt keinen Kanal. Der Unterschied
+    // „Host weg" vs. „unbekannt" spielt hier keine Rolle — beide Male
+    // bleibt die Seite bei ihrem Poll, der die Lage sauber meldet
+    // (503 vs. 401).
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        _ => {
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+    };
+    // Ab hier ist der Zugang geprüft — der Vor-Auth-Platz wird frei.
+    drop(platz);
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    // Abo eintragen; über dem Deckel bleibt die Verbindung ungenutzt und
+    // die Seite bedient sich aus ihrem Poll-Fallback.
+    {
+        let mut map = broker.namespaces.lock().await;
+        // Kein `await`, solange die Broker-Sperre steht: Ein Client, der
+        // sein Empfangsfenster zuhält, blockierte damit ALLE Turniere auf
+        // diesem Relay (Review-Fund 18.08.2026) — deshalb erst die Sperre
+        // fallen lassen, dann schließen.
+        let Some(namespace) = map.get_mut(&ns) else {
+            drop(map);
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        };
+        if namespace.tl_subs.len() >= MAX_TL_SUBS {
+            drop(map);
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+        namespace.tl_subs.push(tx.clone());
+        // Aktuellen Stand sofort melden: Eine Revision, die während des
+        // Verbindens durchrutschte, läge sonst bis zum Fallback-Poll.
+        if let Some((rev, _)) = namespace.tl_state.as_ref() {
+            let _ = tx.send(Message::Text(format!("{{\"rev\":{rev}}}").into()));
+        }
+    }
+    let mut ping = tokio::time::interval(HEARTBEAT);
+    loop {
+        tokio::select! {
+            outgoing = rx.recv() => {
+                match outgoing {
+                    Some(m) => { if socket.send(m).await.is_err() { break } }
+                    None => break,
+                }
+            }
+            incoming = socket.recv() => {
+                // Nach der Auth sendet die Seite nichts Fachliches; wir
+                // lesen nur, um Close/Fehler zu bemerken.
+                match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {}
+                }
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
+            }
+        }
+    }
+    // Verbindungsende: Abo austragen (per `same_channel`, nur das eigene).
+    let mut map = broker.namespaces.lock().await;
+    if let Some(namespace) = map.get_mut(&ns) {
+        namespace.tl_subs.retain(|t| !t.same_channel(&tx));
+        if namespace.is_empty() {
+            map.remove(&ns);
+        }
+    }
+}
+
+/// Weckt die TL-Push-Abonnenten eines Turniers (Spec tl-web-push):
+/// `{"rev":n}` — nur die Nummer, nie Daten. Tote Sender werden
+/// ausgesiebt. Namespace-lokal wie [`notify_monitor`]; der Aufrufer hält
+/// den Namespace bereits.
+fn notify_tl(namespace: &mut Namespace, rev: u64) {
+    let nudge = Message::Text(format!("{{\"rev\":{rev}}}").into());
+    namespace.tl_subs.retain(|t| t.send(nudge.clone()).is_ok());
 }
 
 /// Ergebnis eines Tablet-Verbindungsversuchs an einem Feld.
@@ -3526,6 +3695,11 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             }
         }
         HostFrame::TlState { rev, json } => {
+            // Neue Revision → TL-Push-Abonnenten anstoßen (Spec
+            // tl-web-push). VOR der Größenprüfung gemerkt, aber erst nach
+            // dem Ablegen gesendet: Ein Nudge auf einen verworfenen Stand
+            // schickte die Seiten nur in ein 503 statt in einen Abruf.
+            let neue_rev = namespace.tl_state.as_ref().map(|(r, _)| *r) != Some(rev);
             if json.len() > MAX_STATE_LEN {
                 // Zu groß: nicht ablegen — der Relay trägt viele Turniere,
                 // und ein Zustand, der aus dem Ruder läuft, darf sie nicht
@@ -3542,6 +3716,9 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 namespace.tl_state = None;
             } else {
                 namespace.tl_state = Some((rev, json));
+                if neue_rev {
+                    notify_tl(namespace, rev);
+                }
             }
         }
         HostFrame::TlAck { req_id, response } => {
@@ -3756,6 +3933,48 @@ mod tests {
         assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 1);
         assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 2);
         assert_eq!(nudge_of(rx2.try_recv().unwrap()).1, 1);
+    }
+
+    #[test]
+    fn tl_nudge_reaches_all_subscribers_and_prunes_dead_ones() {
+        // TL-Push (Spec tl-web-push): Der Anstoß trägt NUR die Revision —
+        // nie Turnierdaten; die holt die Seite über ihre Poll-Route. Tote
+        // Abonnenten (Tab zu) siebt der nächste Nudge aus.
+        let mut ns = Namespace::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, rx2) = mpsc::unbounded_channel();
+        ns.tl_subs.push(tx1);
+        ns.tl_subs.push(tx2);
+        drop(rx2);
+
+        notify_tl(&mut ns, 42);
+
+        match rx1.try_recv().unwrap() {
+            Message::Text(t) => assert_eq!(t.as_str(), "{\"rev\":42}"),
+            andere => panic!("unerwartete Nachricht: {andere:?}"),
+        }
+        assert_eq!(ns.tl_subs.len(), 1, "toter Abonnent ausgesiebt");
+    }
+
+    #[test]
+    fn tl_state_frame_nudges_only_on_a_new_revision() {
+        // Der Host pusht alle zwei Sekunden; ein unveränderter Stand darf
+        // die Geräte NICHT zu einem Abruf schicken (sonst wäre der Push
+        // nur ein zweiter Poll-Auslöser).
+        let mut ns = Namespace::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        ns.tl_subs.push(tx);
+
+        // Erste Ablage: neue Revision → Nudge.
+        ns.tl_state = Some((7, "{}".into()));
+        notify_tl(&mut ns, 7);
+        assert!(rx.try_recv().is_ok());
+
+        // Gleiche Revision noch einmal: Der Aufrufer erkennt das an
+        // `tl_state` und nudgt gar nicht erst.
+        let neue_rev = ns.tl_state.as_ref().map(|(r, _)| *r) != Some(7);
+        assert!(!neue_rev, "gleiche Revision ist keine Änderung");
+        assert!(rx.try_recv().is_err(), "kein zweiter Nudge");
     }
 
     #[test]
