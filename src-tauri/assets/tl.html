@@ -1681,9 +1681,14 @@ function normalizedPanels(profile) {
     .filter((p) => PANEL_KEYS.includes(p.key))
     .map((p) => ({ ...p, collapsed: !!p.collapsed, column: Number(p.column) || 0 }));
   const vorhanden = new Set(bekannt.map((p) => p.key));
+  // Neue Panels landen in der LETZTEN belegten Spalte, nicht über den
+  // 0→1-Klammergriff in Spalte 1: Die ist in fast jedem Mehrspalten-Profil
+  // die Felder-Spalte, und ein per Update materialisierendes Panel würde
+  // dort alle Feldkacheln schrumpfen (Review 17.08.2026).
+  const letzteSpalte = Math.max(1, ...bekannt.map((p) => Number(p.column) || 1));
   for (const key of PANEL_KEYS) {
     if (!vorhanden.has(key)) {
-      bekannt.push({ key, visible: true, heightFr: 1, collapsed: false, column: 0 });
+      bekannt.push({ key, visible: true, heightFr: 1, collapsed: false, column: letzteSpalte });
     }
   }
   return bekannt;
@@ -6152,38 +6157,51 @@ function renderTimes() {
  *  Durchgelaufene Schlüsse bleiben ausgegraut sichtbar, damit man sieht,
  *  was schon durch ist. Reine Anzeige; das Panel existiert nur, wenn der
  *  Host `checkin_times` liefert (`panelAvailable`). */
+/** „Durch" = das Anmeldefenster der Klasse ist zu (geschlossen oder schon
+ *  im Spielbetrieb) — EIN Prädikat für Zeilen-Färbung und Vorschau,
+ *  nicht zweimal mit gedrehter Polarität (Review 17.08.2026). */
+function checkinDurch(z) {
+  return z.window_state === "closed" || z.window_state === "live";
+}
+
 function renderCheckin() {
   const zeiten = state.checkin_times;
   if (!Array.isArray(zeiten)) return;
   setPanelCount("checkin", zeiten.length);
   const box = $("checkin-box");
   if (!box) return;
-  const offen = zeiten.filter((z) => z.state !== "closed" && z.state !== "live").length;
+  // Gezählt werden KLASSEN, also heißt es auch so — „Anmeldungen" sind im
+  // Projekt Spieler-Meldungen (Review 17.08.2026).
+  const offen = zeiten.filter((z) => !checkinDurch(z)).length;
   setPanelPreview("checkin", zeiten.length
-    ? (offen ? `${offen} Anmeldung(en) noch nicht durch` : "alle Anmeldeschlüsse durch")
+    ? (offen === 1 ? "1 Anmeldeschluss noch offen"
+      : offen ? `${offen} Anmeldeschlüsse noch offen`
+      : "alle Anmeldeschlüsse durch")
     : "heute keine Anfangszeiten");
+  // Stale-Marke vom Host: badhub seit mehr als fünf Minuten nicht
+  // erreicht — der Stand bleibt stehen, wird aber nicht als live verkauft.
+  const stale = state.checkin_stale
+    ? `<p class="note">⚠ badhub gerade nicht erreichbar — Stand möglicherweise veraltet.</p>`
+    : "";
   if (!zeiten.length) {
-    box.innerHTML = `<p class="note">Heute keine Klassen mit Anfangszeit.</p>`;
+    box.innerHTML = `${stale}<p class="note">Heute keine Klassen mit Anfangszeit.</p>`;
     return;
   }
   const zeilen = zeiten.map((z) => {
-    // „durch" = das Anmeldefenster ist zu (geschlossen oder schon im
-    // Spielbetrieb) — die Zeile bleibt sichtbar, tritt aber zurück.
-    const durch = z.state === "closed" || z.state === "live";
-    const voll = z.entries > 0 && z.checked_in >= z.entries;
-    return `<tr${durch ? ' class="durch"' : ""}>
+    const voll = z.entry_count > 0 && z.checked_in_count >= z.entry_count;
+    return `<tr${checkinDurch(z) ? ' class="durch"' : ""}>
         <td class="num">${esc(z.starts_hm)}</td>
         <td>${esc(z.name || z.discipline || "")}</td>
-        <td class="num">${z.closes_hm ? esc(z.closes_hm) : "–"}</td>
-        <td class="num${voll ? " voll" : ""}" title="eingecheckt / gemeldet">${Number(z.checked_in)}/${Number(z.entries)}</td>
+        <td class="num">${esc(z.closes_hm)}</td>
+        <td class="num${voll ? " voll" : ""}" title="eingecheckt / gemeldet (ohne Abgemeldete)">${Number(z.checked_in_count)}/${Number(z.entry_count)}</td>
       </tr>`;
   }).join("");
-  box.innerHTML = `<table class="times-table checkin-table">
+  box.innerHTML = `${stale}<table class="times-table checkin-table">
       <thead><tr>
         <th class="num">Beginn</th>
         <th>Klasse</th>
-        <th class="num" title="Anmeldeschluss">Schluss</th>
-        <th class="num" title="eingecheckt / gemeldet">Stand</th>
+        <th class="num" title="Anmeldeschluss (ohne eigenen gilt der Beginn)">Schluss</th>
+        <th class="num" title="eingecheckt / gemeldet (ohne Abgemeldete)">Stand</th>
       </tr></thead>
       <tbody>${zeilen}</tbody>
     </table>`;

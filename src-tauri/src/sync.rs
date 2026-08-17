@@ -126,11 +126,6 @@ pub struct SyncEngine {
     sched_takt: SchedTakt,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
     sched_unsupported_since: Option<Instant>,
-    /// Taktgeber für den Check-In-**Lese**-Abruf (TL-Panel „Anfangszeiten",
-    /// Feldtest 17.08.2026) — dieselbe Minuten-Drossel wie der Spielplan,
-    /// nur in Gegenrichtung: badhub wird höchstens minütlich nach dem
-    /// Klassenstand gefragt.
-    checkin_lese_takt: SchedTakt,
 }
 
 /// Wie lange nach einem 404/400 des Check-In-Endpunkts pausiert wird, bevor
@@ -345,67 +340,6 @@ impl SyncEngine {
             checkin_unsupported_since: None,
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
-            checkin_lese_takt: SchedTakt::neu(),
-        }
-    }
-
-    /// Check-In-Klassenstand für das TL-Panel „Anfangszeiten" abrufen und im
-    /// [`TabletState`] ablegen (Feldtest 17.08.2026).
-    ///
-    /// Höchstens minütlich ([`SchedTakt`]) und als LETZTER Schritt des
-    /// Zyklus — dieselbe Abwägung wie bei Roster und Spielplan: der
-    /// Liveticker ist die zeitkritische Funktion, ein hängender
-    /// Check-In-Endpunkt darf ihn nicht um seinen Timeout verzögern.
-    /// Fehlerpfade nach [`checkin_state::fetch_state`]-Semantik: Offline
-    /// lässt den letzten Stand stehen (transiente Aussetzer sollen das
-    /// Panel nicht leeren), Unsupported/Rejected räumen ihn — die Seite
-    /// zeigt das Panel dann nicht mehr.
-    async fn fetch_checkin_times(
-        &mut self,
-        config: &AppConfig,
-        tablet: &TabletState,
-        jetzt_ms: u64,
-    ) {
-        use crate::badhub::checkin_state::{self, Availability};
-        if !config.checkin.is_ready() {
-            tablet.set_checkin_classes(None);
-            return;
-        }
-        if !self.checkin_lese_takt.faellig(jetzt_ms) {
-            return;
-        }
-        let Some(origin) = crate::commands::badhub_origin(&config.badhub.url) else {
-            return;
-        };
-        // Eigener Client wie in den Check-In-Commands: kürzerer Timeout als
-        // der Liveticker-Client, und der Abruf ist der letzte Schritt des
-        // Zyklus — er blockiert nichts hinter sich.
-        let client = checkin_state::build_client();
-        let view = checkin_state::fetch_state(
-            &client,
-            &origin,
-            &config.badhub.password,
-            &config.checkin.tournament_uuid,
-        )
-        .await;
-        match view.availability {
-            Availability::Ready => {
-                // Spielerlisten sofort abstreifen: Der TL-Zustand zeigt
-                // Zeitplan und Zähler, nie Namen (Datensparsamkeit).
-                let ohne_spieler = view
-                    .classes
-                    .into_iter()
-                    .map(|mut c| {
-                        c.players = Vec::new();
-                        c
-                    })
-                    .collect();
-                tablet.set_checkin_classes(Some(ohne_spieler));
-            }
-            Availability::Offline => {}
-            Availability::Unsupported | Availability::Rejected => {
-                tablet.set_checkin_classes(None);
-            }
         }
     }
 
@@ -1827,10 +1761,6 @@ impl SyncEngine {
             jetzt_ms,
         )
         .await;
-        // Ganz zum Schluss der Check-In-Lese-Abruf fürs TL-Panel
-        // „Anfangszeiten" — additiv wie Roster und Spielplan, hinter allem
-        // Zeitkritischen.
-        self.fetch_checkin_times(config, tablet, jetzt_ms).await;
         match push_result {
             Ok(()) => {
                 let outcome = match update {
@@ -1911,6 +1841,106 @@ impl SchedTakt {
             self.letzter_versand_ms = Some(jetzt_ms);
         }
         faellig
+    }
+}
+
+/// Zustand des Check-In-**Lese**-Wegs fürs TL-Panel „Anfangszeiten"
+/// (Feldtest 17.08.2026): Minuten-Drossel, Ablehnungs-Backoff und der
+/// gehaltene HTTP-Client. Lebt AUSSERHALB der [`SyncEngine`] und läuft
+/// als eigener, gespawnter Tick neben dem Zyklus (`commands.rs`): So
+/// verzögert ein hängender Check-In-Endpunkt den Liveticker um keine
+/// Millisekunde, und der Abruf (samt Räum-Pfad) läuft auch, wenn BTP
+/// gerade nicht erreichbar ist — vorher saß er hinter den
+/// BTP-Frühausstiegen von `run_once` (Review 17.08.2026).
+pub struct CheckinLese {
+    takt: SchedTakt,
+    /// badhub hat abgelehnt (401/403 = Passwort, 400/404 = altes badhub)?
+    /// Dann nicht minütlich weiterhämmern, sondern wie Roster/Spielplan
+    /// [`CHECKIN_UNSUPPORTED_RETRY`] pausieren.
+    gesperrt_seit: Option<Instant>,
+    /// Einmal gebaut, gehalten — kein frischer Client je Minute.
+    client: reqwest::Client,
+}
+
+impl CheckinLese {
+    pub fn neu() -> Self {
+        Self {
+            takt: SchedTakt::neu(),
+            gesperrt_seit: None,
+            client: crate::badhub::checkin_state::build_client(),
+        }
+    }
+}
+
+/// Ein Tick des Check-In-Lese-Wegs — wird jeden Sync-Zyklus gespawnt und
+/// entscheidet selbst, ob etwas zu tun ist (Gates, Drossel, Backoff).
+/// Fehlerpfade nach [`checkin_state::fetch_state`]-Semantik: Offline lässt
+/// den letzten Stand stehen (die Stale-Marke des TL-Zustands sagt der
+/// Seite, dass er altert), Ablehnung räumt ihn — die Seite zeigt das
+/// Panel dann nicht mehr.
+pub async fn checkin_lese_tick(
+    lese: &std::sync::Mutex<CheckinLese>,
+    config: &AppConfig,
+    tablet: &TabletState,
+) {
+    use crate::badhub::checkin_state::{self, Availability};
+    // Einziger Konsument ist die TL-Web-Seite — ohne sie holte der Host
+    // minütlich volle Klassenstände samt Spielerlisten, die nichts je
+    // anzeigen kann (Review 17.08.2026).
+    if !config.tl_web.enabled || !config.checkin.is_ready() {
+        tablet.set_checkin_classes(None);
+        return;
+    }
+    // Sperr-/Takt-Prüfung unter dem Lock, der Abruf selbst ohne — ein
+    // langsamer Endpunkt darf höchstens den nächsten Tick warten lassen,
+    // nie den Sync-Zyklus.
+    let client = {
+        let mut g = lese.lock().unwrap();
+        if g.gesperrt_seit
+            .is_some_and(|t| t.elapsed() < CHECKIN_UNSUPPORTED_RETRY)
+        {
+            return;
+        }
+        let jetzt_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+        if !g.takt.faellig(jetzt_ms) {
+            return;
+        }
+        g.client.clone()
+    };
+    let Some(origin) = crate::commands::badhub_origin(&config.badhub.url) else {
+        return;
+    };
+    // Getrimmt wie im Desktop-Pfad (`commands.rs`): `is_ready()` prüft
+    // ebenfalls getrimmt — eine GUID mit Leerzeichen aus der Zwischenablage
+    // ergäbe sonst still eine 404-URL (Review-Fund 17.08.2026).
+    let uuid = config.checkin.tournament_uuid.trim();
+    let view = checkin_state::fetch_state(&client, &origin, &config.badhub.password, uuid).await;
+    match view.availability {
+        Availability::Ready => {
+            lese.lock().unwrap().gesperrt_seit = None;
+            tracing::debug!(
+                klassen = view.classes.len(),
+                "Check-In-Zeitplan für TL-Web geholt"
+            );
+            tablet.set_checkin_classes(Some(checkin_state::tl_ablage(view.classes)));
+        }
+        Availability::Offline => {
+            tracing::debug!("Check-In-Zeitplan nicht erreichbar: {}", view.message);
+        }
+        Availability::Unsupported | Availability::Rejected => {
+            {
+                let mut g = lese.lock().unwrap();
+                if g.gesperrt_seit.is_none() {
+                    tracing::info!(
+                        "badhub lehnt den Check-In-Zeitplan ab ({}) — nächster Versuch in {} Minuten",
+                        view.message,
+                        CHECKIN_UNSUPPORTED_RETRY.as_secs() / 60
+                    );
+                }
+                g.gesperrt_seit = Some(Instant::now());
+            }
+            tablet.set_checkin_classes(None);
+        }
     }
 }
 

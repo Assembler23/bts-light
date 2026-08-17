@@ -920,7 +920,22 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let handle = tauri::async_runtime::spawn(async move {
         let http = push::build_client();
         let mut engine = SyncEngine::new();
+        // Check-In-Lese-Weg fürs TL-Panel „Anfangszeiten": als eigener,
+        // je Zyklus gespawnter Tick statt Teil von `run_once` — er drosselt
+        // sich selbst auf höchstens minütlich, hängt nicht hinter den
+        // BTP-Frühausstiegen und kann den Liveticker-Takt nicht strecken
+        // (Review 17.08.2026; Details an `sync::CheckinLese`).
+        let checkin_lese =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::sync::CheckinLese::neu()));
         loop {
+            {
+                let lese = checkin_lese.clone();
+                let cfg = sync_config.clone();
+                let tab = sync_tablet.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::sync::checkin_lese_tick(&lese, &cfg, &tab).await;
+                });
+            }
             let outcome = engine.run_once(&sync_config, &http, &sync_tablet).await;
             let mut status = status_from(&outcome);
             status.running = true;

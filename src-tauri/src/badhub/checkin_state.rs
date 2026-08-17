@@ -181,9 +181,7 @@ pub fn deadline_text(class: &CheckinClass, now: chrono::NaiveDateTime) -> Option
     // Verglichen wird deshalb mit der lokalen Uhr dieses Rechners — beide
     // stehen in derselben Halle.
     let closes = class.closes_at.as_deref().or(class.starts_at.as_deref())?;
-    let ziel = chrono::NaiveDateTime::parse_from_str(closes.trim(), "%Y-%m-%d %H:%M:%S")
-        .or_else(|_| chrono::NaiveDateTime::parse_from_str(closes.trim(), "%Y-%m-%dT%H:%M:%S"))
-        .ok()?;
+    let ziel = parse_badhub_zeit(closes)?;
 
     let minuten = (ziel - now).num_minutes();
     if minuten < 1 {
@@ -287,6 +285,37 @@ struct TournamentInfo {
 struct WriteResponse {
     #[serde(default)]
     message: String,
+}
+
+/// badhub-Zeitangabe parsen: Berlin-Wandzeit ohne Zonen-Anhang, mit
+/// Leerzeichen ODER `T` als Trenner (ADR-0005 dort). **Der** eine Parser
+/// für alle Verbraucher — Ansage-Countdown (`deadline_text`) und TL-Panel
+/// „Anfangszeiten" (`tablet/tl.rs`) — damit die Formatkette nicht doppelt
+/// im Repo steht (Review 17.08.2026).
+pub(crate) fn parse_badhub_zeit(s: &str) -> Option<chrono::NaiveDateTime> {
+    chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%dT%H:%M:%S"))
+        .ok()
+}
+
+/// Bereitet den badhub-Klassenstand für die Ablage im [`TabletState`] auf
+/// (TL-Panel „Anfangszeiten"): Spielerlisten werden abgestreift — der
+/// TL-Zustand zeigt Zeitplan und Zähler, nie Namen (Datensparsamkeit) —
+/// und `gemeldet` rechnet die Abgemeldeten heraus, wie es die
+/// Desktop-Check-In-Seite auch tut (badhubs TL-Zählung schließt sie
+/// bewusst ein; ohne den Abzug würde eine Klasse mit einem Abgemeldeten
+/// nie „vollzählig", Review 17.08.2026). Der Abzug MUSS vor dem
+/// Abstreifen passieren — danach ist er nicht mehr berechenbar.
+pub(crate) fn tl_ablage(classes: Vec<CheckinClass>) -> Vec<CheckinClass> {
+    classes
+        .into_iter()
+        .map(|mut c| {
+            let abgemeldet = c.players.iter().filter(|p| p.is_withdrawn()).count() as i64;
+            c.gemeldet = (c.gemeldet - abgemeldet).max(0);
+            c.players = Vec::new();
+            c
+        })
+        .collect()
 }
 
 /// HTTP-Client für den Check-In-Kanal.
@@ -519,6 +548,59 @@ mod tests {
     }
 
     const UUID: &str = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+
+    #[test]
+    fn die_tl_ablage_streift_spieler_ab_und_zieht_abgemeldete_ab() {
+        // TL-Panel „Anfangszeiten" (Review 17.08.2026): Der abgelegte
+        // Stand darf keine Spielerlisten tragen (Datensparsamkeit), und
+        // `gemeldet` muss die Abgemeldeten herausrechnen — badhubs
+        // TL-Zählung schließt sie bewusst ein, die Desktop-Seite rechnet
+        // sie genauso heraus (`CheckinPanel.tsx`). Sonst würde eine Klasse
+        // mit einem Abgemeldeten nie „vollzählig".
+        let spieler = |state: &str| CheckinPlayer {
+            player_id: 1,
+            entry_id: 0,
+            first: "Max".into(),
+            last: "Muster".into(),
+            club: None,
+            nationality: None,
+            state: state.into(),
+            source: None,
+            locked: false,
+            checked_in_at: None,
+        };
+        let klasse = CheckinClass {
+            event_id: 1,
+            name: "U15 HE-A".into(),
+            discipline: "HE".into(),
+            starts_at: None,
+            closes_at: None,
+            opens_at: None,
+            state: "open".into(),
+            is_live: false,
+            gemeldet: 16,
+            eingecheckt: 15,
+            players: vec![spieler("checked_in"), spieler("withdrawn"), spieler("open")],
+        };
+        let ablage = tl_ablage(vec![klasse]);
+        assert_eq!(ablage.len(), 1);
+        assert!(
+            ablage[0].players.is_empty(),
+            "keine Spielerlisten in der Ablage"
+        );
+        assert_eq!(ablage[0].gemeldet, 15, "der Abgemeldete zählt nicht mehr");
+        assert_eq!(ablage[0].eingecheckt, 15, "eingecheckt bleibt unberührt");
+    }
+
+    #[test]
+    fn beide_badhub_zeitformate_werden_geparst() {
+        // Ein Parser für alle Verbraucher (Ansage-Countdown UND
+        // TL-Panel) — vorher stand dieselbe Formatkette zweimal im Repo
+        // (Review 17.08.2026).
+        assert!(parse_badhub_zeit("2026-08-17 09:00:00").is_some());
+        assert!(parse_badhub_zeit(" 2026-08-17T09:00:00 ").is_some());
+        assert!(parse_badhub_zeit("morgen früh").is_none());
+    }
 
     #[test]
     fn url_wird_unter_der_basis_gebaut() {

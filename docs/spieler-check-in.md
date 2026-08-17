@@ -209,16 +209,23 @@ ihrem Zustand.
 
 **TL-Web-Panel „Anfangszeiten"** (seit 17.08.2026): Der heutige Zeitplan
 aus demselben `GET …/tl/stand` steht auch der Turnierleitungs-Seite zur
-Verfügung — je Klasse Anfangszeit, Anmeldeschluss, Fensterzustand und die
-Zähler, **ohne Spielerlisten** (der Sync-Zyklus streift sie vor dem
-Ablegen ab; Namen bleiben der Desktop-Seite vorbehalten). Dafür ruft der
-**Turnier-PC-Kern** den Stand höchstens minütlich am Ende des
-Sync-Zyklus ab (`sync.rs` `fetch_checkin_times`, RAM-Zwischenstand in
-`tablet/state.rs` `checkin_classes`; die „kein Cache"-Regel AK-C13
-betrifft Persistenz) — bislang fragte nur die offene Desktop-Seite.
-Ablehnung durch badhub (401/404) räumt den Stand, das Panel
-verschwindet; ein Offline-Aussetzer lässt den letzten Stand stehen.
-Bedienung: [turnierleitung-web.md](turnierleitung-web.md).
+Verfügung — je Klasse Anfangszeit, Anmeldeschluss (ohne eigenen gilt die
+Anfangszeit, wie beim Ansage-Countdown) und die Zähler, **ohne
+Spielerlisten**: `checkin_state::tl_ablage` streift sie vor dem Ablegen
+ab und rechnet dabei — wie die Desktop-Seite — die Abgemeldeten aus
+`gemeldet` heraus; Namen bleiben der Desktop-Seite vorbehalten. Dafür
+ruft der **Turnier-PC-Kern** den Stand höchstens minütlich ab — als
+eigener, vom Liveticker-Zyklus entkoppelter Tick (`sync.rs`
+`CheckinLese`/`checkin_lese_tick`, gespawnt in `commands.rs`; er kann
+den Liveticker nie verzögern und läuft auch bei BTP-Ausfall).
+RAM-Zwischenstand in `tablet/state.rs` `checkin_classes` (die
+„kein Cache"-Regel AK-C13 betrifft Persistenz) — bislang fragte nur die
+offene Desktop-Seite. Nur aktiv, wenn **TL-Web eingeschaltet** ist.
+Ablehnung durch badhub (401/403/400/404) räumt den Stand und pausiert
+30 Minuten (wie Roster/Spielplan); ein Offline-Aussetzer lässt den
+letzten Stand stehen, ab fünf Minuten markiert `TlState.checkin_stale`
+ihn als möglicherweise veraltet. Bedienung:
+[turnierleitung-web.md](turnierleitung-web.md).
 
 **Doppel stehen als eine Zeile je Meldung** („A / B"): Zwei Spieler mit
 derselben `entry_id` werden zusammengefasst

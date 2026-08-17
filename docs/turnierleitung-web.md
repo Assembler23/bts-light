@@ -234,8 +234,11 @@ Details zum Datenmodell und zur Vergleichsregel für Hallennamen:
 
 ### Panels: was auf dieser Seite steht
 
-Die Seite besteht aus sechs **Panels** — Felder, Aufgaben (Walkover),
-Zähltafel-Warteschlange, Schiedsrichter, Spiele und „Beendete Spiele".
+Die Seite besteht aus bis zu acht **Panels** — Felder, Aufgaben
+(Walkover), Zähltafel-Warteschlange, Schiedsrichter, Spiele, „Beendete
+Spiele", „Spielzeiten" (nur mit Prognose) und „Anfangszeiten" (nur mit
+eingerichtetem Check-In). Neue Panels erscheinen in Bestandsprofilen
+automatisch in der letzten Spalte.
 Jedes trägt dieselbe Kopfzeile: Titel, Anzahl, ein **Auge** zum Aus- und
 Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
 
@@ -502,12 +505,17 @@ Ist der **Hallen-Check-In** eingerichtet
 ([spieler-check-in.md](spieler-check-in.md)), gibt es das Panel
 **„Anfangszeiten"**: der heutige Check-In-Zeitplan, wie ihn badhubs
 öffentliche `…/zeitplan`-Seite zeigt — je Klasse **Anfangszeit**,
-**Anmeldeschluss** und der Stand **„eingecheckt/gemeldet"** (grün, wenn
-alle da sind). Sortiert nach Anfangszeit; durchgelaufene Schlüsse bleiben
-ausgegraut stehen, damit man sieht, was schon durch ist. Bewusst **nur
-Zähler, keine Namen** — wer wissen will, *wer* fehlt, nimmt die
-Check-In-Seite der Desktop-App. Der Turnier-PC fragt badhub dafür
-höchstens minütlich; kurze Internet-Aussetzer leeren das Panel nicht.
+**Anmeldeschluss** (ohne eigenen gilt die Anfangszeit, wie bei der
+Lautsprecher-Ansage) und der Stand **„eingecheckt/gemeldet"** (ohne
+Abgemeldete, grün wenn alle da sind — dieselbe Rechnung wie die
+Desktop-Check-In-Seite). Sortiert nach Anfangszeit; durchgelaufene
+Schlüsse bleiben ausgegraut stehen, damit man sieht, was schon durch
+ist. Bewusst **nur Zähler, keine Namen** — wer wissen will, *wer* fehlt,
+nimmt die Check-In-Seite der Desktop-App. Der Turnier-PC fragt badhub
+dafür höchstens minütlich, unabhängig vom Liveticker-Takt; kurze
+Internet-Aussetzer leeren das Panel nicht — dauert der Aussetzer länger
+als fünf Minuten, sagt eine ⚠-Zeile ehrlich, dass der Stand alt sein
+kann.
 
 ## Grenzen, die im Betrieb auffallen
 

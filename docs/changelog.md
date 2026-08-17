@@ -12,10 +12,17 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   („12/16", grün wenn vollzählig) — nach Anfangszeit sortiert,
   durchgelaufene Schlüsse bleiben ausgegraut sichtbar. Bewusst nur
   Zähler, nie Spielernamen (die hat die Desktop-Check-In-Seite). Der
-  Turnier-PC fragt badhub dafür höchstens minütlich am Ende des
-  Sync-Zyklus (`/tl/stand`, additiv wie Roster und Spielplan); das Panel
-  erscheint nur, wenn der Check-In eingerichtet ist und badhub
-  antwortet. Kurze Aussetzer leeren das Panel nicht.
+  Turnier-PC fragt badhub dafür höchstens minütlich (`/tl/stand`) über
+  einen eigenen, vom Liveticker entkoppelten Tick; das Panel erscheint
+  nur, wenn Check-In **und** TL-Web eingerichtet sind und badhub
+  antwortet. Kurze Aussetzer leeren das Panel nicht; nach fünf Minuten
+  ohne Abruf erscheint eine ⚠-Veraltet-Zeile. Die Zähler rechnen
+  Abgemeldete heraus (wie die Desktop-Seite); ohne eigenen
+  Anmeldeschluss gilt die Anfangszeit (wie die Ansage); Ablehnungen
+  pausieren 30 Minuten statt minütlich anzuklopfen; neue Panels landen
+  in Bestandsprofilen in der letzten Spalte statt in der Felder-Spalte;
+  die Relay-Kürzungsleiter opfert das Panel notfalls, bevor der
+  Cloud-Zustand zu groß würde.
 
 ## v0.9.217
 

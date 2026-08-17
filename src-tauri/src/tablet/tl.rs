@@ -696,16 +696,26 @@ pub(crate) fn state_for_relay(
     // Vierzig Spiele der GEMEINSAMEN Abfolge sind genau das, was oben
     // steht, egal in welcher Halle sie laufen.
     const STUFEN: [usize; 4] = [40, 20, 10, 5];
-    let mut letzte = String::new();
-    let mut letzte_rev = 0;
     for limit in STUFEN {
         let mut state = build_state_limited(tablet, config, now_ms, 0, limit);
         state.rev = tablet.tl_revision(&state_fingerprint(&mut state));
-        letzte_rev = state.rev;
-        letzte = serde_json::to_string(&state).unwrap_or_default();
-        if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
-            return (letzte, letzte_rev);
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+            return (json, state.rev);
         }
+    }
+    // Vorletzte Rettung: das additive Anfangszeiten-Panel opfern —
+    // Warteliste und Felder sind der Kern, der Check-In-Zeitplan ist
+    // Beiwerk. Neue Listen müssen mitgekürzt werden (Plan
+    // tl-web-ausbau; Review 17.08.2026), sonst kippte ein rein
+    // additives Panel den gesamten Cloud-Zustand über die Relay-Grenze.
+    let mut state = build_state_limited(tablet, config, now_ms, 0, STUFEN[STUFEN.len() - 1]);
+    state.checkin_times = None;
+    state.rev = tablet.tl_revision(&state_fingerprint(&mut state));
+    let letzte_rev = state.rev;
+    let letzte = serde_json::to_string(&state).unwrap_or_default();
+    if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
+        return (letzte, letzte_rev);
     }
     // Selbst die kürzeste Stufe passt nicht — dann liegt es nicht an der
     // Warteliste. Lieber den zu großen Stand schicken und den Relay
@@ -775,15 +785,23 @@ pub struct TlCheckinTime {
     pub discipline: String,
     /// Anfangszeit als „HH:MM" (Berlin-Wandzeit von badhub).
     pub starts_hm: String,
-    /// Anmeldeschluss als „HH:MM"; leer, wenn keiner gepflegt ist.
+    /// Anmeldeschluss als „HH:MM". Ohne gepflegten Anmeldeschluss gilt die
+    /// Anfangszeit — dieselbe Semantik wie der Ansage-Countdown
+    /// (`checkin_state::deadline_text`), sonst widersprächen sich Panel
+    /// und Lautsprecher in derselben Halle (Review 17.08.2026).
     pub closes_hm: String,
     /// badhub-Fensterzustand (`unscheduled|pending|open|closed|live`) —
     /// serverseitig in Europe/Berlin berechnet, die Seite färbt nur.
-    pub state: String,
-    /// Gemeldete Spieler der Klasse.
-    pub entries: i64,
+    /// Bewusst NICHT `state` genannt: Die Feldnamen-Whitelist des
+    /// Wächter-Tests ist flach, ein generischer Name würde dort künftige
+    /// gleichnamige Felder ungeprüft passieren lassen.
+    pub window_state: String,
+    /// Gemeldete Spieler der Klasse (ohne Abgemeldete —
+    /// `checkin_state::tl_ablage`). Spezifischer Name aus demselben
+    /// Whitelist-Grund wie `window_state`.
+    pub entry_count: i64,
     /// Davon eingecheckt.
-    pub checked_in: i64,
+    pub checked_in_count: i64,
 }
 
 /// Die Zeilen des „Anfangszeiten"-Panels: nur Klassen des übergebenen
@@ -797,40 +815,52 @@ fn checkin_times_heute(
     classes: &[crate::badhub::checkin_state::CheckinClass],
     heute: chrono::NaiveDate,
 ) -> Vec<TlCheckinTime> {
-    let parse = |s: &str| {
-        chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M:%S")
-            .or_else(|_| chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%dT%H:%M:%S"))
-            .ok()
-    };
+    use crate::badhub::checkin_state::parse_badhub_zeit;
     let mut zeilen: Vec<(chrono::NaiveDateTime, TlCheckinTime)> = classes
         .iter()
         .filter_map(|c| {
-            let start = parse(c.starts_at.as_deref()?)?;
+            let start = parse_badhub_zeit(c.starts_at.as_deref()?)?;
             if start.date() != heute {
                 return None;
             }
-            let closes_hm = c
+            // Ohne gepflegten Anmeldeschluss gilt die Anfangszeit — wie
+            // beim Ansage-Countdown (`deadline_text`).
+            let closes = c
                 .closes_at
                 .as_deref()
-                .and_then(parse)
-                .map(|t| t.format("%H:%M").to_string())
-                .unwrap_or_default();
+                .and_then(parse_badhub_zeit)
+                .unwrap_or(start);
             Some((
                 start,
                 TlCheckinTime {
                     name: c.name.clone(),
                     discipline: c.discipline.clone(),
                     starts_hm: start.format("%H:%M").to_string(),
-                    closes_hm,
-                    state: c.state.clone(),
-                    entries: c.gemeldet,
-                    checked_in: c.eingecheckt,
+                    closes_hm: closes.format("%H:%M").to_string(),
+                    window_state: c.state.clone(),
+                    entry_count: c.gemeldet,
+                    checked_in_count: c.eingecheckt,
                 },
             ))
         })
         .collect();
     zeilen.sort_by_key(|(start, _)| *start);
     zeilen.into_iter().map(|(_, zeile)| zeile).collect()
+}
+
+/// Das „heute" des Anfangszeiten-Panels, abgeleitet aus dem injizierten
+/// `now_ms` statt aus einem eigenen Uhr-Aufruf — `build_state` bleibt so
+/// aus (tablet, config, now_ms) reproduzierbar (Review 17.08.2026).
+/// Umgerechnet in die lokale Zeitzone des Turnier-PCs: badhub liefert
+/// Berlin-Wandzeit, und der Rechner steht in derselben Halle (dieselbe
+/// Abwägung wie `checkin_state::deadline_text`).
+fn heutiges_datum(now_ms: u64) -> chrono::NaiveDate {
+    use chrono::TimeZone;
+    chrono::Local
+        .timestamp_millis_opt(now_ms as i64)
+        .single()
+        .map(|t| t.date_naive())
+        .unwrap_or_else(|| chrono::Local::now().date_naive())
 }
 
 /// Führt irgendein Panel-Profil „Aufrufe unbegrenzt"?
@@ -2032,6 +2062,12 @@ pub struct TlState {
     /// Gegenstellen.
     #[serde(default)]
     pub checkin_times: Option<Vec<TlCheckinTime>>,
+    /// Stale-Marke zum Anfangszeiten-Panel: `true`, wenn der letzte
+    /// erfolgreiche badhub-Abruf länger als fünf Minuten her ist (ein
+    /// Offline-Aussetzer lässt den Stand bewusst stehen — aber die Seite
+    /// soll ihn nicht als live verkaufen, Review 17.08.2026).
+    #[serde(default)]
+    pub checkin_stale: bool,
     /// Raster-Anordnung je Halle (Host-Einstellung, `AppConfig.hall_layouts`).
     /// Hallen ohne Eintrag bekommen kein Element hier — die Seite zeigt sie
     /// dann in der bisherigen Fließ-Darstellung.
@@ -2586,6 +2622,7 @@ pub(crate) fn build_state_limited(
             finished: Vec::new(),
             time_stats: None,
             checkin_times: None,
+            checkin_stale: false,
             // Die Raster-Einstellung ist Host-Konfiguration, kein
             // Turnierstand — sie gilt auch, solange BTP noch nichts
             // geliefert hat.
@@ -2678,6 +2715,9 @@ pub(crate) fn build_state_limited(
         .prediction
         .enabled
         .then(|| tablet.cached_time_stats());
+    // Einmal aus dem Store holen, beide Felder (Zeilen + Stale-Marke)
+    // bedienen — nicht zweimal klonen (Review 17.08.2026).
+    let checkin = tablet.checkin_classes();
     let predictions: std::collections::HashMap<i64, predict::Prediction> = match &stats {
         Some(stats) => {
             let default_mins = config.prediction.default_duration_mins;
@@ -3046,13 +3086,17 @@ pub(crate) fn build_state_limited(
             tournament_brutto_mins: stats.tournament_brutto_min().map(|v| v as i64),
             default_mins: config.prediction.default_duration_mins.round() as i64,
         }),
-        // „Heute" nach der lokalen Uhr des Turnier-PCs — badhub liefert
-        // Berlin-Wandzeit, und der Rechner steht in derselben Halle
-        // (dieselbe Abwägung wie `checkin_state::deadline_text`). Der
+        // „Heute" aus dem injizierten now_ms (`heutiges_datum`) — der
         // Tageswechsel bewegt den Fingerprint genau einmal um Mitternacht.
-        checkin_times: tablet
-            .checkin_classes()
-            .map(|classes| checkin_times_heute(&classes, chrono::Local::now().date_naive())),
+        checkin_times: checkin
+            .as_ref()
+            .map(|(_, classes)| checkin_times_heute(classes, heutiges_datum(now_ms))),
+        // Stale ab fünf Minuten ohne erfolgreichen Abruf: deutlich über
+        // dem Minuten-Lese-Takt, also nie im Normalbetrieb — und die
+        // Marke kippt genau einmal, kein Rev-Churn.
+        checkin_stale: checkin
+            .as_ref()
+            .is_some_and(|(geholt, _)| geholt.elapsed() > std::time::Duration::from_secs(5 * 60)),
         layouts: layouts_view(config),
         show_club_names: config.display.show_club_names,
         show_club_logos: config.display.show_club_logos,
@@ -5943,12 +5987,13 @@ mod tests {
         assert_eq!(zeilen[1].name, "Nachmittag");
         assert_eq!(zeilen[1].starts_hm, "13:30");
         assert_eq!(
-            zeilen[1].closes_hm, "",
-            "ohne Anmeldeschluss bleibt es leer"
+            zeilen[1].closes_hm, "13:30",
+            "ohne Anmeldeschluss gilt die Anfangszeit — wie beim \
+             Ansage-Countdown (deadline_text)"
         );
-        assert_eq!(zeilen[0].entries, 16);
-        assert_eq!(zeilen[0].checked_in, 12);
-        assert_eq!(zeilen[0].state, "open");
+        assert_eq!(zeilen[0].entry_count, 16);
+        assert_eq!(zeilen[0].checked_in_count, 12);
+        assert_eq!(zeilen[0].window_state, "open");
     }
 
     /// Konfiguration, in der ein Profil „Aufrufe unbegrenzt" führt.
@@ -7229,14 +7274,18 @@ mod tests {
             // Panel „Anfangszeiten" (Feldtest 17.08.2026): Check-In-Zeitplan
             // des Tages je Klasse — Klassenname, Zeiten, badhub-Fensterzustand
             // und die Zähler eingecheckt/gemeldet. Bewusst OHNE Spielerlisten
-            // (die streift der Sync-Zyklus vor dem Ablegen ab), also kein
-            // Personenbezug.
+            // (die streift `checkin_state::tl_ablage` vor dem Ablegen ab),
+            // also kein Personenbezug. Die Feldnamen sind absichtlich
+            // spezifisch (`window_state` statt `state`, `entry_count` statt
+            // `entries`): Diese Whitelist ist flach — generische Namen
+            // ließen künftige gleichnamige Felder ungeprüft passieren.
             "checkin_times",
+            "checkin_stale",
             "starts_hm",
             "closes_hm",
-            "state",
-            "entries",
-            "checked_in",
+            "window_state",
+            "entry_count",
+            "checked_in_count",
             // Zahl der gesprochenen Aufrufe (mit „Aufrufe unbegrenzt"
             // nach oben offen) — keine Angabe zu Personen.
             "call_stage",
@@ -7428,21 +7477,23 @@ mod tests {
             serpentine: false,
             vertical: false,
         });
-        // Ebenso ein Check-In-Klassenstand mit HEUTIGER Anfangszeit: Ohne
-        // ihn bliebe `checkin_times` `null`, und der Wächter sähe die
-        // `TlCheckinTime`-Felder nie. Das Datum kommt von der lokalen Uhr,
-        // weil `build_state` „heute" genauso bestimmt.
+        // Ebenso ein Check-In-Klassenstand mit Anfangszeit am „heute" des
+        // Test-now (1_000_000 ms — `build_state` unten bekommt genau
+        // diesen Wert, `heutiges_datum` leitet das Datum daraus ab; kein
+        // Uhr-Aufruf, kein Mitternachts-Flakern): Ohne den Eintrag bliebe
+        // `checkin_times` `null`, und der Wächter sähe die
+        // `TlCheckinTime`-Felder nie.
         tablet.set_checkin_classes(Some(vec![crate::badhub::checkin_state::CheckinClass {
             event_id: 7,
             name: "U15 HE-A".into(),
             discipline: "HE".into(),
             starts_at: Some(format!(
                 "{} 09:00:00",
-                chrono::Local::now().format("%Y-%m-%d")
+                heutiges_datum(1_000_000).format("%Y-%m-%d")
             )),
             closes_at: Some(format!(
                 "{} 08:30:00",
-                chrono::Local::now().format("%Y-%m-%d")
+                heutiges_datum(1_000_000).format("%Y-%m-%d")
             )),
             opens_at: None,
             state: "open".into(),
@@ -7676,10 +7727,55 @@ mod tests {
             updated_at_ms: 1_000,
             ..Default::default()
         });
+        // Auch hier ein Check-In-Klassenstand (Panel „Anfangszeiten"):
+        // Der Wert-Wächter unten soll strukturell mitprüfen, dass die
+        // Ablage wirklich nur Zeitplan und Zähler trägt — die
+        // Spielerlisten streift `checkin_state::tl_ablage` ab, und genau
+        // dieses Fixture merkte es, wenn das jemand entfernte.
+        tablet.set_checkin_classes(Some(crate::badhub::checkin_state::tl_ablage(vec![
+            crate::badhub::checkin_state::CheckinClass {
+                event_id: 7,
+                name: "U15 HE-A".into(),
+                discipline: "HE".into(),
+                starts_at: Some(format!(
+                    "{} 09:00:00",
+                    heutiges_datum(1_000_000).format("%Y-%m-%d")
+                )),
+                closes_at: None,
+                opens_at: None,
+                state: "open".into(),
+                is_live: false,
+                gemeldet: 16,
+                eingecheckt: 12,
+                players: vec![crate::badhub::checkin_state::CheckinPlayer {
+                    player_id: 1,
+                    entry_id: 0,
+                    first: "Geheim".into(),
+                    last: "Bleibtdrin".into(),
+                    club: None,
+                    nationality: None,
+                    state: "open".into(),
+                    source: None,
+                    locked: false,
+                    checked_in_at: None,
+                }],
+            },
+        ])));
         let s = build_state(&tablet, &config, 1_000_000, 7);
         assert!(
             !s.finished.is_empty(),
             "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten"
+        );
+        assert!(
+            s.checkin_times.as_ref().is_some_and(|z| !z.is_empty()),
+            "Fixture-Fehler: das Fixture muss eine heutige Check-In-Klasse enthalten"
+        );
+        // Der Fixture-Spielername darf NIRGENDS im Zustand auftauchen —
+        // die Ablage trägt nur Zeitplan und Zähler.
+        let roh = serde_json::to_string(&s).unwrap();
+        assert!(
+            !roh.contains("Bleibtdrin"),
+            "Check-In-Spielernamen dürfen den TL-Zustand nie erreichen"
         );
         assert!(
             !s.scorekeepers.is_empty(),
