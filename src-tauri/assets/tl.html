@@ -2786,7 +2786,7 @@ function renderHalls() {
   box.innerHTML = options.map((h) =>
     `<button type="button" data-hall="${esc(h)}" aria-pressed="${h === hallFilter}">${h ? hallMarke(h) + esc(h) : "Alle Hallen"}</button>`
   ).join("");
-  box.querySelectorAll("button").forEach((b) =>
+  scopeAll(box, "button").forEach((b) =>
     b.addEventListener("click", () => setHall(b.dataset.hall)));
 }
 
@@ -2992,7 +2992,7 @@ function courtCard(c, cellStyle) {
             ${rest}
             <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
                   title="${isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit"}">
-              ${UHR}<span class="zeit">${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}</span>
+              ${UHR}<span class="zeit">${c.on_court_since_ms ? "" : "–"}</span>
               ${clockLabel ? `<small>${esc(clockLabel)}</small>` : ""}
             </span>`;
   } else if (c.clearing) {
@@ -3129,8 +3129,12 @@ function pauseText(endsAt) {
  *  „Pause"-Badge von früher. Die Sekunden tickt `tickClocks()` weiter. */
 function pauseBadge(p) {
   if (p.kind === "injury") {
+    // Zeitfeld startet leer — `tickClocks()` (läuft direkt nach jedem
+    // Render) füllt es. Ein eingebetteter Sekundenwert machte das
+    // Kachel-HTML bei jedem Abgleich „anders" und hebelte den
+    // Keyed-Abgleich aus.
     const seit = p.started_at_ms
-      ? ` seit <span class="zeit num" data-pause-started="${p.started_at_ms}">${elapsed(p.started_at_ms)}</span>`
+      ? ` seit <span class="zeit num" data-pause-started="${p.started_at_ms}"></span>`
       : "";
     return `<span class="badge badge-warn pause-chip"
       title="Behandlungspause läuft">Behandlung${seit}</span>`;
@@ -3141,7 +3145,7 @@ function pauseBadge(p) {
     data-pause-ends="${p.ends_at_ms}"
     title="${over
       ? "Pause überzogen — auf dem Tablet weiterspielen"
-      : "Satz-/Spielpause läuft"}">${pauseText(p.ends_at_ms)}</span>`;
+      : "Satz-/Spielpause läuft"}"></span>`;
 }
 
 /** Welche Feldkachel ihr ⋯-Menü gerade offen hat — über das Neuzeichnen
@@ -3221,7 +3225,7 @@ function wireCourts(box) {
   // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
   // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
   // Finger in den Umhäng-Zustand.
-  box.querySelectorAll("button[data-call]").forEach((btn) => {
+  scopeAll(box, "button[data-call]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const courtId = Number(btn.dataset.call);
@@ -3260,7 +3264,7 @@ function wireCourts(box) {
   // Band oben" erreichbar. Vorbelegt mit dem Live-Satzstand der Kachel,
   // genau wie der Weg über das Band (`start()`), damit ein Nachtrag nicht
   // bei null anfängt.
-  box.querySelectorAll("button[data-court-result]").forEach((btn) => {
+  scopeAll(box, "button[data-court-result]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const court = state.courts.find((x) => String(x.court_id) === btn.dataset.courtResult);
@@ -3281,7 +3285,7 @@ function wireCourts(box) {
   // Das ⋯-Menü der Kachel: Weder Öffnen/Schließen noch ein Tipp im Menü
   // darf zusätzlich das Spiel auswählen oder einen Zug starten (Muster der
   // Spielzeile, siehe `wireQueue`).
-  box.querySelectorAll(".kebab[data-kebab-court]").forEach((det) => {
+  scopeAll(box, ".kebab[data-kebab-court]").forEach((det) => {
     const courtId = Number(det.dataset.kebabCourt);
     det.addEventListener("click", (ev) => ev.stopPropagation());
     det.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -3289,8 +3293,10 @@ function wireCourts(box) {
       if (det.open) {
         openKebabCourtId = courtId;
         // Nur EIN offenes Menü gleichzeitig — sonst häufen sich bei
-        // mehreren angetippten Kacheln die Kästen übereinander.
-        box.querySelectorAll(".kebab[open]").forEach((other) => {
+        // mehreren angetippten Kacheln die Kästen übereinander. Seit dem
+        // Keyed-Abgleich läuft die Verdrahtung je Kachel, deshalb sucht
+        // der Aufräumer über die GANZE Felderbox, nicht im Scope.
+        document.querySelectorAll("#courts .kebab[open]").forEach((other) => {
           if (other !== det) other.open = false;
         });
         platziereKebabMenue(det);
@@ -3313,7 +3319,7 @@ function wireCourts(box) {
   // schwebte es dank `position: fixed` hinter dem Graph-Overlay weiter
   // und läge nach dessen Schließen noch über fremden Kacheln
   // (Review-Fund 17.08.2026).
-  box.querySelectorAll("button[data-graph]").forEach((btn) => {
+  scopeAll(box, "button[data-graph]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const det = btn.closest(".kebab");
@@ -3329,7 +3335,7 @@ function wireCourts(box) {
   // sonst wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
   // Ansage-Knopf: eine nachträgliche Zuweisung sagt nie von selbst an
   // (Spec Nr. 8) — gesprochen wird in der Halle, nicht auf diesem Gerät.
-  box.querySelectorAll("button[data-off-say]").forEach((btn) => {
+  scopeAll(box, "button[data-off-say]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const courtId = Number(btn.dataset.offSay);
@@ -3342,7 +3348,7 @@ function wireCourts(box) {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
 
-  box.querySelectorAll("button[data-off-court]").forEach((btn) => {
+  scopeAll(box, "button[data-off-court]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       openOfficialAssign(Number(btn.dataset.offCourt), Number(btn.dataset.offMatch));
@@ -3350,7 +3356,7 @@ function wireCourts(box) {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
 
-  box.querySelectorAll(".card[data-court]").forEach((el) => {
+  scopeAll(box, ".card[data-court]").forEach((el) => {
     const court = state.courts.find((c) => String(c.court_id) === el.dataset.court);
     if (!court) return;
 
@@ -3385,18 +3391,113 @@ function wireCourts(box) {
   });
 }
 
-// Eine Feldgruppe (eine Halle) rendern — mit Raster, wenn der Host eines
-// hinterlegt hat (Task 9/12), sonst wie bisher als Fließ-Darstellung.
-function courtsGridHtml(hall, list) {
-  const layout = findHallLayout(hall);
-  const pos = layout ? gridPositions(list.length, layout) : null;
-  const style = pos
-    ? ` style="grid-template-columns:repeat(${layout.columns}, minmax(0, 1fr))"`
-    : "";
-  const cards = list
-    .map((c, i) => courtCard(c, pos ? `grid-column:${pos[i].col + 1};grid-row:${pos[i].row + 1}` : ""))
-    .join("");
-  return `<div class="courts"${style}>${cards}</div>`;
+// ── Render-Sparsamkeit (Feldtest 17.08.2026: „Performance im Blick") ───
+// Zwei Stufen gegen das Alle-zwei-Sekunden-Neuzeichnen der ganzen Seite:
+//
+// STUFE 1 — Panel-Kurzschluss: Jede render*()-Funktion baut ihren
+// HTML-String ohnehin. `setzeHtmlWennNeu` merkt sich je Container den
+// zuletzt gesetzten String und überspringt `innerHTML` + Verdrahtung,
+// wenn er unverändert ist. Ein Punktgewinn zeichnet dann nur noch das
+// Felder-Panel neu; alle anderen behalten DOM, Listener, Scroll-Position.
+//
+// STUFE 2 — Keyed-Abgleich für die zwei heißesten Listen (Felder,
+// Spielliste): `reconcileKeyed` gleicht Container-Kinder je Schlüssel ab —
+// nur geänderte Kacheln/Zeilen werden ersetzt (und NUR die neu
+// verdrahtet), verschobene umgehängt, der Rest bleibt stehen. Offene
+// ⋯-Menüs und Fokus überleben damit von selbst; die bisherigen Retter
+// (`openKebabCourtId` & Co.) bleiben als doppelter Boden.
+//
+// Damit unveränderte Kacheln/Zeilen auch unverändert BLEIBEN, tragen die
+// HTML-Bauer keine sekündlich tickenden Zeittexte mehr — die Uhrfelder
+// starten leer und `tickClocks()` (läuft am Ende jedes `render()` und
+// weiter sekündlich) füllt sie sofort.
+//
+// Beide Stände hängen per WeakMap am Container-ELEMENT: Baut
+// `renderPanels()` das Panel-Gerüst neu, entsteht ein neues Element und
+// der Stand verfällt von allein.
+const panelHtmlStand = new WeakMap();
+function setzeHtmlWennNeu(el, html) {
+  if (panelHtmlStand.get(el) === html) return false;
+  panelHtmlStand.set(el, html);
+  el.innerHTML = html;
+  return true;
+}
+
+const keyedHtmlStand = new WeakMap();
+/** Kind eines Containers mit diesem Abgleich-Schlüssel — Suche über die
+ *  Kinderliste statt `querySelector`, weil Schlüssel (Hallennamen!) jedes
+ *  Zeichen enthalten dürfen. */
+function kindMitKey(box, key) {
+  for (const el of box.children) {
+    if (el.dataset.reconKey === key) return el;
+  }
+  return null;
+}
+
+/**
+ * Gleicht die Kinder von `box` mit `items` ab: `keyOf` liefert den
+ * stabilen Schlüssel, `htmlOf` das Soll-HTML des Elements, `wire`
+ * verdrahtet NUR neue/ersetzte Elemente (bestehende behalten ihre
+ * Listener — deshalb dürfen Handler nichts aus dem Bauzeitpunkt
+ * einfangen, was veraltet; sie lesen ihren Stand aus `state`).
+ */
+function reconcileKeyed(box, items, keyOf, htmlOf, wire) {
+  let stand = keyedHtmlStand.get(box);
+  if (!stand) { stand = new Map(); keyedHtmlStand.set(box, stand); }
+  const alte = new Map();
+  for (const el of Array.from(box.children)) {
+    const k = el.dataset.reconKey;
+    // Fremdkinder (z. B. der „Keine Felder"-Hinweis eines früheren
+    // Renders) fliegen raus — sie gehören nicht zum Abgleich.
+    if (k == null) { el.remove(); continue; }
+    alte.set(k, el);
+  }
+  const tmp = document.createElement("template");
+  const gebraucht = new Set();
+  let cursor = box.firstElementChild;
+  for (const item of items) {
+    const key = String(keyOf(item));
+    gebraucht.add(key);
+    const html = htmlOf(item);
+    let el = alte.get(key);
+    if (!el || stand.get(key) !== html) {
+      tmp.innerHTML = html;
+      const neu = tmp.content.firstElementChild;
+      neu.dataset.reconKey = key;
+      if (el) {
+        if (cursor === el) cursor = neu;
+        el.replaceWith(neu);
+      } else {
+        box.insertBefore(neu, cursor);
+      }
+      el = neu;
+      alte.set(key, el);
+      stand.set(key, html);
+      wire(el, item);
+    }
+    if (el === cursor) {
+      cursor = cursor.nextElementSibling;
+    } else {
+      box.insertBefore(el, cursor);
+    }
+  }
+  for (const [k, el] of alte) {
+    if (!gebraucht.has(k)) { el.remove(); stand.delete(k); }
+  }
+  for (const k of [...stand.keys()]) {
+    if (!gebraucht.has(k)) stand.delete(k);
+  }
+}
+
+/** `querySelectorAll` einschließlich des Scopes SELBST, wenn er passt —
+ *  die wire*()-Funktionen laufen seit dem Keyed-Abgleich auch mit einer
+ *  einzelnen Zeile/Kachel als Scope, und die matcht z. B. `.row.pick`
+ *  selbst statt als Nachfahre. Mit einem Container als Scope verhält
+ *  sich das exakt wie vorher. */
+function scopeAll(scope, sel) {
+  const treffer = Array.from(scope.querySelectorAll(sel));
+  if (scope.matches && scope.matches(sel)) treffer.unshift(scope);
+  return treffer;
 }
 
 function renderCourts() {
@@ -3410,27 +3511,64 @@ function renderCourts() {
   const box = $("courts");
   if (!box) return;
   if (!courts.length) {
-    box.innerHTML = `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`;
-  } else if (state.multi_hall && !hallFilter) {
-    // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
-    // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
-    const groups = new Map();
+    setzeHtmlWennNeu(box, `<p class="note">Keine Felder${hallFilter ? " in dieser Halle" : ""}.</p>`);
+    // Auch die leere Halle muss `fitCourts()` erreichen — sonst bliebe nach
+    // einem Hallenwechsel eine Mini-Kompaktstufe von vorher hängen.
+    scheduleFitCourts();
+    return;
+  }
+  // Nach Hallen gruppieren, solange kein Filter gesetzt ist — sonst wäre
+  // bei mehreren Hallen nicht erkennbar, wo ein Feld steht.
+  let gruppen;
+  if (state.multi_hall && !hallFilter) {
+    const map = new Map();
     for (const c of courts) {
       const key = c.location || "";
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(c);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(c);
     }
-    box.innerHTML = [...groups.entries()].map(([hall, list]) =>
-      `<div class="hall-group"><h3>${hall ? hallMarke(hall) + esc(hall) : "Ohne Halle"}</h3>
-       ${courtsGridHtml(hall, list)}</div>`).join("");
+    gruppen = [...map.entries()].map(([hall, list]) => ({ hall, list, kopf: true }));
   } else {
-    box.innerHTML = courtsGridHtml(hallFilter || "", courts);
+    gruppen = [{ hall: hallFilter || "", list: courts, kopf: false }];
   }
-  // Kein früher `return` mehr oben: Auch die leere Halle und der spätere
-  // Zweig müssen `fitCourts()` erreichen — sonst bliebe nach einem
-  // Hallenwechsel z. B. eine Mini-Kompaktstufe von vorher hängen, obwohl die
-  // neue, leere Auswahl das gar nicht mehr braucht.
-  if (courts.length) wireCourts(box);
+  const gruppenKey = (g) => `${g.kopf ? "H:" : "F:"}${g.hall}`;
+  // Außenebene: je Gruppe eine Hülle (Überschrift + LEERES Raster). Ihr
+  // HTML enthält bewusst keine Kacheln — die Hülle wird nur ersetzt, wenn
+  // Hallenname oder Raster-Spaltenzahl wechseln; die Kacheln darin pflegt
+  // die Innenebene für sich.
+  reconcileKeyed(box, gruppen, gruppenKey, (g) => {
+    const layout = findHallLayout(g.hall);
+    const style = layout
+      ? ` style="grid-template-columns:repeat(${layout.columns}, minmax(0, 1fr))"`
+      : "";
+    const grid = `<div class="courts"${style}></div>`;
+    return g.kopf
+      ? `<div class="hall-group"><h3>${g.hall ? hallMarke(g.hall) + esc(g.hall) : "Ohne Halle"}</h3>${grid}</div>`
+      : grid;
+  }, () => {});
+  // Innenebene: die Kacheln jeder Gruppe, je `court_id` abgeglichen — bei
+  // einem Punktgewinn wird genau EINE Kachel ersetzt und neu verdrahtet,
+  // die übrigen (samt offenem ⋯-Menü und Fokus) bleiben stehen.
+  for (const g of gruppen) {
+    const huelle = kindMitKey(box, gruppenKey(g));
+    if (!huelle) continue;
+    const grid = huelle.classList.contains("courts")
+      ? huelle
+      : huelle.querySelector(".courts");
+    if (!grid) continue;
+    const layout = findHallLayout(g.hall);
+    const pos = layout ? gridPositions(g.list.length, layout) : null;
+    reconcileKeyed(
+      grid,
+      g.list.map((c, i) => ({
+        c,
+        style: pos ? `grid-column:${pos[i].col + 1};grid-row:${pos[i].row + 1}` : "",
+      })),
+      (e) => e.c.court_id,
+      (e) => courtCard(e.c, e.style),
+      (el) => wireCourts(el),
+    );
+  }
   scheduleFitCourts();
 }
 
@@ -3654,15 +3792,17 @@ function queueRow(m, topMatchId) {
     // der entsteht erst, wenn niemand kommt, und dann zählt die Uhr
     // daneben. Marke und Uhr sind zwei Kinder EINES Wrappers und zählen
     // deshalb zusammen als ein Zeilen-Element.
+    // Zeittext startet leer, `tickClocks()` füllt ihn — eingebettete
+    // Sekundenwerte hebelten den Keyed-Abgleich der Zeilen aus.
     status.push(`<span class="badge badge-info">gerufen</span>`);
-    status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
+    status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}"></span>`);
   }
   if (m.blocked && m.blocked.reason === "pause") {
     // Mindestpause: Eieruhr + Rest-Countdown statt Badge und Satz — WER
     // pausiert, sagen die orange gefärbten Namen links daneben. Tickt
     // sekündlich in `tickClocks` (Muster der Gerufen-Uhr).
     status.push(`<span class="wartet num" data-until="${m.blocked.until_ms}"
-      title="${esc((m.blocked.players || []).join(" und "))} pausiert noch bis ${pauseBis}">${EIERUHR}<span class="zeit">${restzeit(m.blocked.until_ms)}</span></span>`);
+      title="${esc((m.blocked.players || []).join(" und "))} pausiert noch bis ${pauseBis}">${EIERUHR}<span class="zeit"></span></span>`);
   }
   // „Spielt gerade" bekommt gar keine Statusmarke mehr: Die rot gefärbten
   // Namen tragen die Aussage vollständig (Nutzer-Befund 17.08.2026).
@@ -3800,13 +3940,13 @@ function wireQueue(box) {
   // Feld ziehen) muss weiter funktionieren (Review-Fund 17.08.2026). Endet
   // so ein Zug über dem Namen, folgt noch ein Klick-Ereignis — das darf
   // dann auch nicht navigieren (`suppressNextClick`, Muster `enableDrag`).
-  box.querySelectorAll("a.sp-name").forEach((a) => {
+  scopeAll(box, "a.sp-name").forEach((a) => {
     a.addEventListener("click", (ev) => {
       ev.stopPropagation();
       if (suppressNextClick) ev.preventDefault();
     });
   });
-  box.querySelectorAll("button[data-prep]").forEach((btn) => {
+  scopeAll(box, "button[data-prep]").forEach((btn) => {
     const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
     if (!match) return;
     btn.addEventListener("click", (ev) => {
@@ -3818,7 +3958,7 @@ function wireQueue(box) {
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
-  box.querySelectorAll(".kebab").forEach((det) => {
+  scopeAll(box, ".kebab").forEach((det) => {
     const matchId = Number(det.dataset.kebab);
     // Weder Öffnen/Schließen noch ein Tipp im Menü darf die Zeile
     // zusätzlich auswählen oder einen Zug starten.
@@ -3828,8 +3968,10 @@ function wireQueue(box) {
       if (det.open) {
         openKebabMatchId = matchId;
         // Nur EIN offenes Menü gleichzeitig — sonst häufen sich bei
-        // mehreren angetippten Zeilen die Kästen übereinander.
-        box.querySelectorAll(".kebab[open]").forEach((other) => {
+        // mehreren angetippten Zeilen die Kästen übereinander. Seit dem
+        // Keyed-Abgleich läuft die Verdrahtung je Zeile, deshalb sucht
+        // der Aufräumer über die GANZE Liste, nicht im Scope.
+        document.querySelectorAll("#queue-list .kebab[open]").forEach((other) => {
           if (other !== det) other.open = false;
         });
         platziereKebabMenue(det);
@@ -3845,7 +3987,7 @@ function wireQueue(box) {
   // „Nach oben schieben": derselbe Wire-Aufruf wie ein Zug bis ganz nach
   // oben (`queue_reorder` vor die erste umsortierbare Zeile) — kein
   // Sonderweg, damit beide Bedienarten dieselbe Wirkung haben.
-  box.querySelectorAll("button[data-queue-top]").forEach((btn) => {
+  scopeAll(box, "button[data-queue-top]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const matchId = Number(btn.dataset.queueTop);
@@ -3859,7 +4001,7 @@ function wireQueue(box) {
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
-  box.querySelectorAll("button[data-queue-result]").forEach((btn) => {
+  scopeAll(box, "button[data-queue-result]").forEach((btn) => {
     const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
     if (!match) return;
     btn.addEventListener("click", (ev) => {
@@ -3868,7 +4010,7 @@ function wireQueue(box) {
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
-  box.querySelectorAll("button[data-auto-excl]").forEach((btn) => {
+  scopeAll(box, "button[data-auto-excl]").forEach((btn) => {
     const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
     if (!match) return;
     btn.addEventListener("click", (ev) => {
@@ -3883,7 +4025,7 @@ function wireQueue(box) {
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
-  box.querySelectorAll("select[data-hall-for]").forEach((sel) => {
+  scopeAll(box, "select[data-hall-for]").forEach((sel) => {
     // Der Wähler darf weder das Spiel auswählen noch einen Zug starten.
     sel.addEventListener("click", (ev) => ev.stopPropagation());
     sel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -3898,7 +4040,7 @@ function wireQueue(box) {
       );
     });
   });
-  box.querySelectorAll("button[data-recall]").forEach((btn) => {
+  scopeAll(box, "button[data-recall]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const matchId = Number(btn.dataset.recall);
@@ -3911,7 +4053,7 @@ function wireQueue(box) {
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
-  box.querySelectorAll(".row.pick[data-match]").forEach((el) => {
+  scopeAll(box, ".row.pick[data-match]").forEach((el) => {
     const match = state.queue.find((m) => String(m.match_id) === el.dataset.match);
     if (!match) return;
     const go = () => { if (!suppressNextClick) pick(match, null); };
@@ -4312,7 +4454,16 @@ let reorderDragPending = false;
  * `zielListe` sagt dem Rückruf, wo das Element gelandet ist.
  */
 function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff", geschwister = null) {
-  Array.from(list.children).forEach((li) => {
+  Array.from(list.children).forEach((li) =>
+    wireReorderGriff(list, li, onReorder, griffSelector, geschwister));
+}
+
+/** Die Griff-Verdrahtung EINER Zeile — herausgelöst aus
+ *  `enableReorderDrag`, damit der Keyed-Abgleich der Spielliste nur
+ *  neue/ersetzte Zeilen verdrahten kann, ohne allen bestehenden Zeilen
+ *  doppelte Listener anzuhängen. */
+function wireReorderGriff(list, li, onReorder, griffSelector = ".drag-griff", geschwister = null) {
+  {
     if (!li.dataset.id) return;
     const griff = li.querySelector(griffSelector);
     griff?.addEventListener("pointerdown", (down) => {
@@ -4344,7 +4495,7 @@ function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff", gesch
         onReorder(li.dataset.id, beforeId, list);
       }
     });
-  });
+  }
 }
 
 /**
@@ -5101,14 +5252,12 @@ function renderQueue() {
   queueShown = Math.max(QUEUE_PAGE, Math.min(queueShown, Math.max(liste.length, QUEUE_PAGE)));
   const fenster = liste.slice(0, queueShown);
   const top = queueTopMatchId();
-  box.innerHTML = fenster.length
-    ? fenster.map((m) => queueRow(m, top)).join("")
-    : `<p class="note">Kein angesetztes Spiel${hallFilter ? " in dieser Halle" : ""}.</p>`;
-  wireQueue(box);
-  // EIN Zieh-Container für die ganze Liste (ADR 0026) — vorher einer je
-  // Halle, weil ein Zug nicht über eine Hallengrenze wirken durfte. Die
-  // Reihenfolge ist jetzt global, also ist auch die Ziehfläche global.
-  enableReorderDrag(box, (id, beforeId) => {
+  // EIN Zieh-Container für die ganze Liste (ADR 0026) — die Reihenfolge
+  // ist global, also auch die Ziehfläche. Seit dem Keyed-Abgleich wird der
+  // Griff je Zeile verdrahtet (`wireReorderGriff`), nur für neue/ersetzte
+  // Zeilen — `enableReorderDrag` über alle Kinder hängte bestehenden
+  // Zeilen bei jedem Render doppelte Listener an.
+  const reorder = (id, beforeId) => {
     const matchId = Number(id);
     const ziel = queueReorderTarget(beforeId);
     if (ziel === matchId) { renderQueue(); return; }
@@ -5117,7 +5266,18 @@ function renderQueue() {
       { action: "queue_reorder", matchId, beforeMatchId: ziel },
       "Reihenfolge geändert.",
     );
-  });
+  };
+  if (!fenster.length) {
+    setzeHtmlWennNeu(box, `<p class="note">Kein angesetztes Spiel${hallFilter ? " in dieser Halle" : ""}.</p>`);
+  } else {
+    // Je `match_id` abgeglichen: Ein Punktgewinn anderswo lässt die Liste
+    // komplett stehen; ändert sich EINE Zeile (Aufruf, Prognose, Pause),
+    // wird genau die ersetzt und neu verdrahtet.
+    reconcileKeyed(box, fenster, (m) => m.match_id, (m) => queueRow(m, top), (row) => {
+      wireQueue(row);
+      wireReorderGriff(box, row, reorder);
+    });
+  }
 
   // Fuß der Liste: das Nachlade-Ziel und — falls der Turnier-PC selbst
   // gekürzt hat (Cloud-Weg, sehr große Turniere) — der ehrliche Hinweis
@@ -5127,13 +5287,13 @@ function renderQueue() {
   if (fuss) {
     const rest = liste.length - fenster.length;
     const gekappt = gekuerzteSpiele();
-    fuss.innerHTML =
+    setzeHtmlWennNeu(fuss,
       (rest > 0
         ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Spiel${rest === 1 ? "" : "e"} — beim Scrollen laden sie nach.</p>`
         : "")
       + (gekappt !== 0
         ? `<p class="note warn">Der Turnier-PC hat die Liste gekürzt${gekappt > 0 ? ` (${gekappt} Spiele fehlen am Ende)` : ""} — im Hallennetz steht die volle Liste.</p>`
-        : "");
+        : ""));
   }
   beobachteQueueEnde(liste.length);
 
@@ -5252,14 +5412,14 @@ function renderWalkovers() {
       </div>`).join("");
 
   // Abgewählte Spiele merken, damit sie ein Neuaufbau nicht wieder ankreuzt.
-  box.querySelectorAll(".wo input[type=checkbox]").forEach((cb) => {
+  scopeAll(box, ".wo input[type=checkbox]").forEach((cb) => {
     const key = cb.closest(".wo").dataset.wo + ":" + cb.value;
     cb.addEventListener("change", () => {
       if (cb.checked) woUnticked.delete(key); else woUnticked.add(key);
     });
   });
 
-  box.querySelectorAll("[data-confirm]").forEach((btn) => {
+  scopeAll(box, "[data-confirm]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const card = btn.closest(".wo");
       const ids = [...card.querySelectorAll("input:checked")].map((i) => Number(i.value));
@@ -5271,7 +5431,7 @@ function renderWalkovers() {
       );
     });
   });
-  box.querySelectorAll("[data-dismiss]").forEach((btn) => {
+  scopeAll(box, "[data-dismiss]").forEach((btn) => {
     btn.addEventListener("click", () => send(
       `wo-dismiss-${btn.dataset.dismiss}`,
       { action: "dismiss_walkover", proposalId: btn.dataset.dismiss },
@@ -5315,22 +5475,25 @@ function renderScorekeepers() {
   setPanelCount("scorekeepers", list.length);
   const box = $("sk-list");
   if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
-  box.innerHTML = list.length ? list.map((e, i) => `<li>
+  // Zeittext leer, `tickClocks()` füllt — und `setzeHtmlWennNeu` lässt
+  // die Liste (samt Listener) stehen, solange sich nichts geändert hat.
+  const html = list.length ? list.map((e, i) => `<li>
       <span class="sk-names">${esc(e.names.join(" / "))}</span>
-      <span class="sk-wait num" data-since="${e.enqueued_ms}" title="wartet seit">${e.enqueued_ms ? elapsed(e.enqueued_ms) : ""}</span>
+      <span class="sk-wait num" data-since="${e.enqueued_ms}" title="wartet seit"></span>
       ${i > 0 ? `<button type="button" data-sk-adv="${esc(e.key)}"
           title="an den Anfang der Warteschlange" aria-label="vorziehen">▲</button>` : ""}
       <button type="button" data-sk-del="${esc(e.key)}"
         title="aus der Warteschlange nehmen" aria-label="aus der Warteschlange nehmen">×</button>
     </li>`).join("") : `<li class="meta">niemand wartet</li>`;
-  box.querySelectorAll("[data-sk-adv]").forEach((b) =>
+  if (!setzeHtmlWennNeu(box, html)) return;
+  scopeAll(box, "[data-sk-adv]").forEach((b) =>
     b.addEventListener("click", () =>
       send(
         `sk-adv-${b.dataset.skAdv}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "scorekeeper_advance", key: b.dataset.skAdv },
         "Vorgezogen.",
       )));
-  box.querySelectorAll("[data-sk-del]").forEach((b) =>
+  scopeAll(box, "[data-sk-del]").forEach((b) =>
     b.addEventListener("click", () =>
       send(`sk-del-${b.dataset.skDel}`, { action: "scorekeeper_remove", key: b.dataset.skDel }, "Aus der Warteschlange entfernt.")));
 }
@@ -5458,7 +5621,7 @@ function renderOfficials() {
   // beim Loslassen (`onReorder`), das löst denselben Poll-getriebenen
   // Re-Render aus — dann ist er wieder erlaubt.
   if (reorderDragPending) return;
-  box.innerHTML = list.length ? list.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
+  const html = list.length ? list.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
       <span class="drag-griff" tabindex="0" role="button"
         title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
         aria-label="${esc(o.name)} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>
@@ -5469,13 +5632,15 @@ function renderOfficials() {
       <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
         title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
     </li>`).join("") : `<li class="meta">keine Schiedsrichter eingetragen</li>`;
-  box.querySelectorAll("[data-off-pause]").forEach((b) =>
+  // Unverändert → Liste (samt Listener und Zieh-Griffen) stehen lassen.
+  if (!setzeHtmlWennNeu(box, html)) return;
+  scopeAll(box, "[data-off-pause]").forEach((b) =>
     b.addEventListener("click", () => send(
       `off-pause-${b.dataset.offPause}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
       { action: "official_pause", officialId: Number(b.dataset.offPause), paused: !b.dataset.paused },
       b.dataset.paused ? "Wieder eingeteilt." : "Pausiert.",
     )));
-  box.querySelectorAll("[data-off-detail]").forEach((b) =>
+  scopeAll(box, "[data-off-detail]").forEach((b) =>
     b.addEventListener("click", () => openOfficialDetail(Number(b.dataset.offDetail))));
   enableReorderDrag(box, (id, beforeId) => send(
     `off-reorder-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
@@ -6128,7 +6293,7 @@ function renderTimes() {
     ? `Turnier gesamt (Brutto-Median): ${stats.tournament_brutto_mins} min · `
     : ""}Startwert ohne Messwerte: ${stats.default_mins} min — solche Prognosen zeigt die Spielliste als „~hh:mm".</p>`;
   if (!stats.rows.length) {
-    box.innerHTML = `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`;
+    setzeHtmlWennNeu(box, `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
     return;
   }
   const zeilen = stats.rows.map((r) => `<tr>
@@ -6138,7 +6303,7 @@ function renderTimes() {
       <td class="num">${r.netto_mins} min</td>
       <td class="num">${r.diff_mins} min</td>
     </tr>`).join("");
-  box.innerHTML = `<table class="times-table">
+  setzeHtmlWennNeu(box, `<table class="times-table">
       <thead><tr>
         <th>Klasse</th>
         <th class="num" title="Anzahl regulär gemessener Spiele">Spiele</th>
@@ -6147,7 +6312,7 @@ function renderTimes() {
         <th class="num" title="Median: Anlaufzeit von der Feldzuweisung bis zum ersten Punkt">Anlauf</th>
       </tr></thead>
       <tbody>${zeilen}</tbody>
-    </table>${fuss}`;
+    </table>${fuss}`);
 }
 
 /** Panel „Anfangszeiten" (Feldtest 17.08.2026): der heutige
@@ -6184,7 +6349,7 @@ function renderCheckin() {
     ? `<p class="note">⚠ badhub gerade nicht erreichbar — Stand möglicherweise veraltet.</p>`
     : "";
   if (!zeiten.length) {
-    box.innerHTML = `${stale}<p class="note">Heute keine Klassen mit Anfangszeit.</p>`;
+    setzeHtmlWennNeu(box, `${stale}<p class="note">Heute keine Klassen mit Anfangszeit.</p>`);
     return;
   }
   const zeilen = zeiten.map((z) => {
@@ -6196,7 +6361,7 @@ function renderCheckin() {
         <td class="num${voll ? " voll" : ""}" title="eingecheckt / gemeldet (ohne Abgemeldete)">${Number(z.checked_in_count)}/${Number(z.entry_count)}</td>
       </tr>`;
   }).join("");
-  box.innerHTML = `${stale}<table class="times-table checkin-table">
+  setzeHtmlWennNeu(box, `${stale}<table class="times-table checkin-table">
       <thead><tr>
         <th class="num">Beginn</th>
         <th>Klasse</th>
@@ -6204,7 +6369,7 @@ function renderCheckin() {
         <th class="num" title="eingecheckt / gemeldet (ohne Abgemeldete)">Stand</th>
       </tr></thead>
       <tbody>${zeilen}</tbody>
-    </table>`;
+    </table>`);
 }
 
 function renderFinished() {
@@ -6212,7 +6377,7 @@ function renderFinished() {
   setPanelCount("finished", list.length);
   const box = $("fin-list");
   if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
-  box.innerHTML = list.length ? list.map((f) => {
+  const html = list.length ? list.map((f) => {
     // Sieger zuerst gilt auch für die Satzstände: Sonst läse man bei einem
     // Sieger-2-Spiel "Meier – Müller 15:21 · 18:21" — als hätte der zuerst
     // genannte (der Sieger!) jeden Satz verloren.
@@ -6247,7 +6412,9 @@ function renderFinished() {
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
     </div>`;
   }).join("") : `<p class="note">Noch kein Spiel beendet.</p>`;
-  box.querySelectorAll("[data-fin-graph]").forEach((b) =>
+  // Unverändert → Liste samt Listenern stehen lassen (Stufe 1).
+  if (!setzeHtmlWennNeu(box, html)) return;
+  scopeAll(box, "[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = list.find((x) => String(x.match_id) === b.dataset.finGraph);
       if (!f) return;
@@ -6257,10 +6424,9 @@ function renderFinished() {
         f.sets || [],
       );
     }));
-  // Bei jedem Abruf neu verdrahten, wie bei der Zähltafel-Warteschlange:
-  // `#fin-list` wird alle zwei Sekunden per innerHTML ersetzt, alte
-  // Zuhörer hängen sonst an längst entfernten Knoten.
-  box.querySelectorAll("[data-fin-fix]").forEach((b) =>
+  // Neu verdrahten nur nach echtem Neuaufbau (Stufe 1 oben) — dann hängen
+  // die alten Zuhörer an längst entfernten Knoten.
+  scopeAll(box, "[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = list.find((x) => String(x.match_id) === b.dataset.finFix);
       if (!f) return;
@@ -6406,6 +6572,11 @@ function render() {
   // Feld „steht dort nicht mehr" — und dieser zweite Fall ist der
   // gefährliche: Ist auf dem Feld längst die nächste Begegnung, träfen
   // „Ergebnis eintragen" und „Feld freigeben" das laufende Spiel.
+  // Abschaltbare Messung (Feldtest-Paket „Performance im Blick"): in der
+  // Browser-Konsole `localStorage.tlRenderMessen = "1"` setzen, dann
+  // protokolliert jeder Render seine Dauer. Bewusst über localStorage
+  // statt Config — ein Diagnosewerkzeug, kein Feature.
+  const messStart = renderMessen ? performance.now() : 0;
   if (picked && !pickIsStillValid()) picked = null;
   $("tournament").textContent = state.tournament || "";
   renderConnection();
@@ -6426,7 +6597,20 @@ function render() {
   renderFinished();
   renderTimes();
   renderCheckin();
+  // Die Uhrfelder starten seit dem Keyed-Abgleich leer (eingebettete
+  // Sekundenwerte machten jedes HTML „anders") — sofort füllen, nicht
+  // erst beim nächsten Sekunden-Tick.
+  tickClocks();
+  if (renderMessen) {
+    console.log(`[tl] render: ${(performance.now() - messStart).toFixed(1)} ms`);
+  }
 }
+
+/** Messung eingeschaltet? Einmal beim Laden gelesen (localStorage-Zugriff
+ *  in jedem 2-s-Render wäre selbst wieder Arbeit). */
+const renderMessen = (() => {
+  try { return localStorage.getItem("tlRenderMessen") === "1"; } catch { return false; }
+})();
 
 /** Nur die Uhren neu setzen — nicht die ganze Seite, sonst flackert sie
     jede Sekunde und man verliert die Scroll-Position. */

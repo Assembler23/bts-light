@@ -517,6 +517,20 @@ Internet-Aussetzer leeren das Panel nicht — dauert der Aussetzer länger
 als fünf Minuten, sagt eine ⚠-Zeile ehrlich, dass der Stand alt sein
 kann.
 
+## Render-Sparsamkeit (seit 17.08.2026)
+
+Die Seite pollt weiter alle 2 s mit ETag-Kurzschluss, zeichnet bei einer
+echten Änderung aber nicht mehr alles neu: Jedes Panel überspringt den
+Neuaufbau, wenn sein Inhalt unverändert ist (`setzeHtmlWennNeu`), und die
+zwei heißesten Listen — Feldkacheln und Spielzeilen — werden je
+`court_id`/`match_id` **keyed abgeglichen** (`reconcileKeyed`): Ein
+Punktgewinn ersetzt genau eine Kachel, alles andere bleibt samt offenem
+⋯-Menü, Fokus und Scroll-Position stehen. Sekündliche Zeittexte stehen
+deshalb nicht mehr im erzeugten HTML; `tickClocks()` füllt sie nach jedem
+Render und weiter im Sekundentakt. Für Messungen:
+`localStorage.tlRenderMessen = "1"` in der Browser-Konsole protokolliert
+jede Render-Dauer.
+
 ## Grenzen, die im Betrieb auffallen
 
 - **Acht Geräte gleichzeitig.** Das neunte wird abgewiesen; ein
