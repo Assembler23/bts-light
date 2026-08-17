@@ -416,6 +416,13 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .clock.stage2 small { color: var(--warn); }
 .clock.stage3 small { color: var(--alarm); }
 
+/* Geschätzte Restzeit des laufenden Spiels (Spec spielzeiten-prognose,
+   Etappe D) — dieselbe Zahl-plus-Wort-Form wie Satzstand und Uhr, damit die
+   drei Fußzeilen-Zahlen auseinanderzuhalten sind. Die Tilde sagt
+   „Schätzung", nicht Messwert. */
+.restzeit { font-size: 1.05rem; font-weight: 700; color: var(--ink-soft); }
+.restzeit small { font-size: .7rem; font-weight: 600; color: var(--ink-faint); display: block; }
+
 /* ── Kompaktstufen der Feld-Kacheln ───────────────────────────────────
    Damit IMMER alle Felder auf einen Blick passen (Wunsch vom 10.08.2026):
    „alle Felder auf einen Blick — die Liste läuft, die Felder nicht".
@@ -431,7 +438,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-kompakt .court-name { font-size: 1rem; }
 #courts.kacheln-kompakt .badge { font-size: .62rem; padding: 1px 5px; }
 #courts.kacheln-kompakt .meta, #courts.kacheln-kompakt .pair { font-size: .8rem; }
-#courts.kacheln-kompakt .score, #courts.kacheln-kompakt .clock { font-size: .92rem; }
+#courts.kacheln-kompakt .score, #courts.kacheln-kompakt .clock, #courts.kacheln-kompakt .restzeit { font-size: .92rem; }
 /* Das Kebab der Kachel schrumpft mit — es sitzt in der Kopfzeile neben dem
    Zieh-Griff und würde die gesparte Höhe sonst gleich wieder auffressen.
    Sein MENÜ bleibt in voller Größe (nur der Auslöser schrumpft): Wer es
@@ -455,8 +462,8 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   font-size: .66rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #courts.kacheln-mini .pair { font-size: .68rem; }
-#courts.kacheln-mini .score, #courts.kacheln-mini .clock { font-size: .78rem; }
-#courts.kacheln-mini .score small, #courts.kacheln-mini .clock small { font-size: .56rem; }
+#courts.kacheln-mini .score, #courts.kacheln-mini .clock, #courts.kacheln-mini .restzeit { font-size: .78rem; }
+#courts.kacheln-mini .score small, #courts.kacheln-mini .clock small, #courts.kacheln-mini .restzeit small { font-size: .56rem; }
 /* 32px wie der frühere Aufruf-Knopf in dieser Stufe (`.callbtn`,
    `min-height: 32px`) — die bewusst in Kauf genommene Untergrenze der
    dichtesten Darstellung, nicht weiter unterboten. */
@@ -1572,6 +1579,7 @@ function builtInProfile() {
       showNumbers: true, showNations: false,
       showClubNames: false, showClubLogos: false,
       showDiscipline: true, showRound: true, showGroup: true,
+      showCourtRemaining: false,
       // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
@@ -1763,6 +1771,7 @@ function zeigeVereinslogosAktiv() { return !!activeDisplay().showClubLogos; }
 function zeigeDisziplinAktiv() { return !!activeDisplay().showDiscipline; }
 function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
+function zeigeRestzeitAktiv() { return !!activeDisplay().showCourtRemaining; }
 
 // `applyListPosition()` gibt es nicht mehr: „Spielliste rechts/darunter"
 // ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) nur noch
@@ -2870,7 +2879,18 @@ function courtCard(c, cellStyle) {
     const clockLabel =
       stage >= 3 ? "Letzter Aufruf" :
       stage >= 2 ? "2. Aufruf fällig" : "";
+    // Geschätzte Restzeit (Spec spielzeiten-prognose, Etappe D): eine vom
+    // Host aus Live-Stand und Medianen gerechnete Schätzung — hinter dem
+    // Profil-Schalter, weil nicht jede Turnierleitung eine dritte Zahl in
+    // der Fußzeile will. `remaining_min` fehlt an alten Hosts und bei
+    // ausgeschalteter Prognose → dann erscheint nichts.
+    const rest = zeigeRestzeitAktiv() && c.remaining_min != null
+      ? `<span class="restzeit num" title="geschätzte Restzeit des laufenden Spiels">
+           ~${Number(c.remaining_min)}<small>min Rest</small>
+         </span>`
+      : "";
     foot = `<span class="score num" title="Satzstand">${esc(sets)}</span>
+            ${rest}
             <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
                   title="${isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit"}">
               ${UHR}<span class="zeit">${c.on_court_since_ms ? elapsed(c.on_court_since_ms) : "–"}</span>
@@ -5642,6 +5662,7 @@ function uebernehmeEditorFelder() {
     showDiscipline: $("prof-show-discipline").checked,
     showRound: $("prof-show-round").checked,
     showGroup: $("prof-show-group").checked,
+    showCourtRemaining: $("prof-show-court-remaining").checked,
     // `listPosition` steht bewusst NICHT mehr im Editor (Plan
     // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
     // unverändert weitergereicht — eine ältere App-Version liest daraus
@@ -5701,6 +5722,7 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-discipline" ${d.showDiscipline ? "checked" : ""} /> Disziplin/Klasse zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-round" ${d.showRound ? "checked" : ""} /> Runde zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
     </fieldset>
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>

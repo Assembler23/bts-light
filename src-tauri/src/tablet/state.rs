@@ -1117,6 +1117,22 @@ impl TabletState {
             .or_else(|| court_id.and_then(|cid| self.on_court_since_ms(cid, match_id)))
     }
 
+    /// [`Self::brutto_start_ms`] plus Erster-Punkt-Stempel in EINEM
+    /// Store-Zugriff — für den TL-State-Bau, der beide je belegtem Feld
+    /// alle ~2 s liest (Review 2026-08-17). Die Fallback-Kaskade des
+    /// Bruttostarts lebt damit weiterhin nur HIER, nicht in tl.rs
+    /// nachbuchstabiert.
+    pub(crate) fn court_time_stamps(
+        &self,
+        match_id: i64,
+        court_id: Option<i64>,
+    ) -> (Option<u64>, Option<u64>) {
+        let (assigned, first_point) = self.match_times.stamps(match_id);
+        let start =
+            assigned.or_else(|| court_id.and_then(|cid| self.on_court_since_ms(cid, match_id)));
+        (start, first_point)
+    }
+
     /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**
     /// geschrieben werden soll (ADR 0021): `(Official1ID, Official2ID)`,
     /// `0` = kein Dienst.

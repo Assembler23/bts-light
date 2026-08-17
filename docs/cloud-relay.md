@@ -391,7 +391,12 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   ausschließlich `tl.html`. Serverseitig begrenzt sind lediglich die
   Längen (`MAX_TL_PROFILE_PANELS`, `MAX_TL_PROFILE_COLUMN_WIDTHS`), damit
   ein einzelner Aufruf den `TlState` nicht über `MAX_TL_STATE_LEN` treiben
-  kann (R4).
+  kann (R4). Seit Spec `spielzeiten-prognose` Etappe D trägt
+  `TlDisplaySettingsWire` zusätzlich `showCourtRemaining`
+  (`#[serde(default)]` — alte Browser-Profile ohne das Feld lesen sich als
+  „aus"); das zugehörige Anzeigedatum reist als `TlCourt.remaining_min`
+  im opaken `TlState`-JSON mit (Serde-Default, alte Gegenstellen
+  ignorieren es).
 - **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
   `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
   Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →

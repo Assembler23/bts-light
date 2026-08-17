@@ -229,5 +229,67 @@ Drei Etappen (= drei PRs), Details in
   kurzes security-reviewer-Gate (neues opakes Tablet-Feld `startedAt`,
   typisierter Parse als Mitigation).
 
+## Etappe D — Live-Restzeit aus dem Spielstand (Nachtrag, abgestimmt 2026-08-17)
+
+**Problem:** E8 schätzt die Restzeit belegter Felder als
+`max(0, Gruppenwert − verstrichene Bruttozeit)` — blind für den Stand. Ein
+Spiel bei 14:6 im dritten Satz gilt als lange belegt, ein zähes 0:0-Spiel als
+gleich frei; beide Fehler pflanzen sich durch die gesamte Warteliste fort.
+
+**Modell** (`predict::live_remaining_min`, reine Funktion): Für Felder, die
+**live zählen** (Gate: `tablet_connected` oder Erster-Punkt-Stempel des
+Matches), gilt `Restzeit = erwartete Restpunkte × Eigentempo`:
+
+1. **Eigentempo** = bisherige Nettozeit / gespielte Punkte, Bayes-geglättet
+   mit einem Prior aus dem Gruppen-Netto-Median (K = 10 virtuelle Punkte)
+   und geklemmt auf [0,5; 2] × Prior — ein eingefrorener Stand (Tablet tot)
+   lässt die Schätzung sonst davonlaufen.
+2. **Restpunkte** aus Satzstand + Zählsystem (`m.scoring`): laufender Satz
+   proportional zum Weg des Führenden zum Zielpunkt (min. 2, deckt
+   Verlängerung ab); künftige Sätze als **Erwartungswert** (Nachtrag
+   17.08.2026, Nutzer-Beispiele): Die **Punktstärke** `p` (Punktanteil von
+   Team A übers ganze Match, mit 20 virtuellen Punkten Richtung 50 %
+   geglättet) speist eine Wettrennen-Näherung (`p_race`,
+   Normalverteilung via logistischer Φ-Näherung, Konstante 1,702) für den
+   Ausgang des laufenden Satzes („A braucht noch na, B noch nb Punkte");
+   daraus per Rekursion (`expected_sets`) die erwartete Zahl weiterer
+   Sätze. Wirkung: 15:5-Erstsatz + 10:6-Führung → dritter Satz ≈ 2 %;
+   15:5 + 7:11-Rückstand → ≈ 80 %; 13:13 bei ausgeglichener Stärke →
+   ≈ 50 % (bei klarem Favoriten entsprechend weniger — die Stärke zählt
+   auch bei Gleichstand). Punkte je Satz aus den fertigen Sätzen DIESES
+   Matches, sonst `Zielpunkt × 1,65`. Je erwartetem weiteren Satz
+   + 2 min Satzpause.
+3. **0:0/kein Punkt:** Restzeit = Netto-Median + Rest-Anlauf
+   (`max(0, Differenz-Median − verstrichen)`) — das Feld bleibt die volle
+   Dauer belegt, statt langsam „freigerechnet" zu werden. Ein bereits
+   **entschiedenes** Spiel (alle nötigen Sätze durch, Ergebnis fehlt noch)
+   zählt 1 Minute. Ergebnis-Klemme insgesamt: [1; 2 × Brutto-Median].
+
+Ohne Live-Zählung (Papier-Anschreiben) bleibt das E8-Modell unverändert;
+BTP führt keine Live-Stände, das Gate schützt vor einem Modell ohne
+Datengrundlage. **Bewusste Folge** (Review 2026-08-17, akzeptiert): zwei
+Felder im selben realen Zustand (zugewiesen, 0:0, wartet lange) schätzen
+unterschiedlich — mit Tablet „volle Dauer steht noch aus" (genau die
+gewünschte 0:0-Semantik), ohne Tablet das alte Abschmelz-Modell; mehr
+Information ergibt eine andere Schätzung, und ein Verbinden/Trennen des
+Tablets darf den Wert springen lassen. `TimeStats::group_times` liefert
+Brutto- und Netto-Median **derselben** Fallback-Stufe (kein
+Stufen-Mischmasch; Anlauf = Brutto − Netto, am Verwendungsort gerechnet);
+ohne Messwerte zählt der Default komplett als Netto (Differenz 0). Die
+Konstanten (Tempo-Glättung K=10, Stärke-Glättung 20, 1,65×Zielpunkt,
+0,35 nur noch als Tempo-Prior, 2-min-Satzpause, Φ-Näherung 1,702) sind
+bewusst einfache, dokumentierte Setzungen — die E12-Prognose-Kontrolle im
+Diagnose-Log prüft sie am Feldtest.
+
+**Anzeige:** `TlCourt.remaining_min` (Minuten, `Option`, Serde-Default —
+alte Hosts/Zustände bleiben lesbar) trägt die Schätzung für **alle**
+belegten Felder (Live- wie Alt-Modell). `tl.html` zeigt sie in der
+Kachel-Fußzeile („~12 min Rest") hinter dem neuen Profil-Schalter
+`TlDisplaySettings.show_court_remaining` (Wire `showCourtRemaining`,
+`#[serde(default)]` für alte Browser-Profile; Default **aus**). R2/R5
+unberührt: reine Anzeige, kein neuer Schreibpfad, keine neuen
+Pflichtdaten. Cloud: Relay-Deploy vor Client-Release (tl.html
+einkompiliert), läuft beim main-Merge automatisch.
+
 Je Etappe: Version gemeinsam bumpen (Cargo.toml + tauri.conf.json +
 package.json), code-reviewer (Pflicht), Doku im selben Commit.

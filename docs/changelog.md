@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.212
+
+- **Startzeit-Prognose rechnet mit dem Live-Spielstand** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  Etappe D): Die Restzeit belegter Felder kommt jetzt aus Satzstand,
+  Zählsystem und dem gemessenen Eigentempo des laufenden Spiels — ein
+  Spiel bei 14:6 im dritten Satz gibt sein Feld in der Simulation gleich
+  frei, ein 0:0-Spiel hält es die volle erwartete Dauer. Ein möglicher
+  Entscheidungssatz zählt mit seiner Wahrscheinlichkeit (aus Satzstand
+  und Punktstärke: 15:5 + 10:6 vorn ⇒ dritter Satz fast ausgeschlossen,
+  15:5 + 7:11 hinten ⇒ sehr wahrscheinlich, 13:13 unter Gleichstarken
+  ⇒ etwa halber Satz). Alle Prognosen der Warteliste („dran ca. hh:mm")
+  werden dadurch deutlich genauer. Felder ohne Live-Zählung behalten das
+  bisherige Modell.
+- **Neu in TL-Web:** Profil-Schalter „Restzeit laufender Spiele zeigen"
+  (Standard: aus) — die Schätzung („~12 min Rest") in der Fußzeile jeder
+  belegten Feldkachel. Cloud: Relay-Deploy läuft beim Merge automatisch;
+  alte Hosts senden das Feld nicht, alte Seiten ignorieren es.
+
 ## v0.9.211
 
 - **Disziplin, Klassenkürzel und Hallenfarbe im `sched`-Payload**: badhubs

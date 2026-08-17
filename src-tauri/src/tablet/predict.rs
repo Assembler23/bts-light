@@ -43,12 +43,13 @@ pub struct Measurement {
 /// (`TabletState::cached_time_stats`).
 #[derive(Debug, Clone, Default)]
 pub struct TimeStats {
-    /// (Klasse, Disziplin) → (Anzahl, Brutto-Median).
-    group_brutto: HashMap<(String, String), (usize, u64)>,
-    /// Klasse → (Anzahl, Brutto-Median).
-    class_brutto: HashMap<String, (usize, u64)>,
-    /// Turnierweiter Brutto-Median, sobald [`MIN_SAMPLES`] erreicht sind.
-    tournament_brutto: Option<u64>,
+    /// (Klasse, Disziplin) → (Anzahl, Brutto-Median, Netto-Median).
+    group_medians: HashMap<(String, String), (usize, u64, u64)>,
+    /// Klasse → (Anzahl, Brutto-Median, Netto-Median).
+    class_medians: HashMap<String, (usize, u64, u64)>,
+    /// Turnierweite Mediane (Brutto, Netto), sobald [`MIN_SAMPLES`]
+    /// erreicht sind.
+    tournament_medians: Option<(u64, u64)>,
     /// Vorberechnete Auswertungszeilen (je Klasse × Disziplin).
     rows: Vec<StatsRow>,
 }
@@ -173,31 +174,38 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
         ))
     });
 
-    // Mediane einmal vorberechnen (siehe Struct-Kommentar).
-    let mut group_werte: HashMap<(String, String), Vec<u64>> = HashMap::new();
-    let mut class_werte: HashMap<String, Vec<u64>> = HashMap::new();
-    let mut alle: Vec<u64> = Vec::new();
+    // Mediane einmal vorberechnen (siehe Struct-Kommentar). Brutto und
+    // Netto laufen als Paar mit, damit die Live-Restzeitschätzung
+    // (Etappe D) dieselbe Fallback-Stufe für beide Werte nutzt.
+    let mut group_werte: HashMap<(String, String), Vec<(u64, u64)>> = HashMap::new();
+    let mut class_werte: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
+    let mut alle: Vec<(u64, u64)> = Vec::new();
     for m in &measurements {
         group_werte
             .entry((m.class_label.clone(), m.discipline.clone()))
             .or_default()
-            .push(m.brutto_min);
+            .push((m.brutto_min, m.netto_min));
         class_werte
             .entry(m.class_label.clone())
             .or_default()
-            .push(m.brutto_min);
-        alle.push(m.brutto_min);
+            .push((m.brutto_min, m.netto_min));
+        alle.push((m.brutto_min, m.netto_min));
     }
-    let group_brutto = group_werte
+    fn brutto_netto_medians(v: &[(u64, u64)]) -> Option<(u64, u64)> {
+        let brutto: Vec<u64> = v.iter().map(|x| x.0).collect();
+        let netto: Vec<u64> = v.iter().map(|x| x.1).collect();
+        Some((median_min(&brutto)?, median_min(&netto)?))
+    }
+    let group_medians: HashMap<(String, String), (usize, u64, u64)> = group_werte
         .into_iter()
-        .filter_map(|(k, v)| median_min(&v).map(|med| (k, (v.len(), med))))
+        .filter_map(|(k, v)| brutto_netto_medians(&v).map(|(b, n)| (k, (v.len(), b, n))))
         .collect();
-    let class_brutto = class_werte
+    let class_medians = class_werte
         .into_iter()
-        .filter_map(|(k, v)| median_min(&v).map(|med| (k, (v.len(), med))))
+        .filter_map(|(k, v)| brutto_netto_medians(&v).map(|(b, n)| (k, (v.len(), b, n))))
         .collect();
-    let tournament_brutto = if alle.len() >= MIN_SAMPLES {
-        median_min(&alle)
+    let tournament_medians = if alle.len() >= MIN_SAMPLES {
+        brutto_netto_medians(&alle)
     } else {
         None
     };
@@ -210,30 +218,35 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
     let rows = groups
         .into_iter()
         .map(|(class, disc)| {
-            let (mut brutto, mut netto, mut diff) = (Vec::new(), Vec::new(), Vec::new());
-            for m in measurements
+            // Brutto/Netto aus den EINMAL vorberechneten Gruppen-Medianen
+            // (Review 2026-08-17): Panel und Prognose müssen dieselben
+            // Zahlen zeigen — eine zweite Rechnung könnte auseinanderlaufen.
+            // Nur der Differenz-Median bleibt lokal: Median der
+            // Einzel-Differenzen ≠ Differenz der Mediane (bewusst so).
+            let (count, brutto_min, netto_min) = group_medians
+                .get(&(class.clone(), disc.clone()))
+                .copied()
+                .unwrap_or((0, 0, 0));
+            let diff: Vec<u64> = measurements
                 .iter()
                 .filter(|m| m.class_label == class && m.discipline == disc)
-            {
-                brutto.push(m.brutto_min);
-                netto.push(m.netto_min);
-                diff.push(m.brutto_min.saturating_sub(m.netto_min));
-            }
+                .map(|m| m.brutto_min.saturating_sub(m.netto_min))
+                .collect();
             StatsRow {
                 class_label: class,
                 discipline: disc,
-                count: brutto.len(),
-                brutto_min: median_min(&brutto).unwrap_or(0),
-                netto_min: median_min(&netto).unwrap_or(0),
+                count,
+                brutto_min,
+                netto_min,
                 diff_min: median_min(&diff).unwrap_or(0),
             }
         })
         .collect();
 
     TimeStats {
-        group_brutto,
-        class_brutto,
-        tournament_brutto,
+        group_medians,
+        class_medians,
+        tournament_medians,
         rows,
     }
 }
@@ -248,47 +261,292 @@ impl TimeStats {
 
     /// Turnierweiter Brutto-Median (ab [`MIN_SAMPLES`] Messwerten).
     pub fn tournament_brutto_min(&self) -> Option<u64> {
-        self.tournament_brutto
+        self.tournament_medians.map(|(b, _)| b)
     }
 
     /// Erwartete Bruttodauer eines Spiels mit Fallback-Kette (E5–E7):
     /// Klasse×Disziplin (≥3) → Klasse (≥3) → Turnier (≥3) → Default.
     /// Leeres `class_label` springt direkt auf die Turnierstufe.
     /// `true` = nur der Default steht dahinter (Anzeige „~hh:mm").
-    /// Reine Map-Zugriffe auf die vorberechneten Mediane.
     pub fn group_duration(
         &self,
         class_label: &str,
         discipline: &str,
         default_mins: f64,
     ) -> (u64, bool) {
+        let g = self.group_times(class_label, discipline, default_mins);
+        (g.brutto_min, g.uncertain)
+    }
+
+    /// Wie [`Self::group_duration`], aber mit Netto- und Differenz-Median
+    /// **derselben** Fallback-Stufe (Etappe D) — die Live-Restzeit darf
+    /// Brutto und Netto nicht aus verschiedenen Stufen mischen. Reine
+    /// Map-Zugriffe auf die vorberechneten Mediane.
+    pub fn group_times(
+        &self,
+        class_label: &str,
+        discipline: &str,
+        default_mins: f64,
+    ) -> GroupTimes {
         let class = class_label.trim();
         let disc = discipline.trim();
+        let stufe = |n: usize, brutto: u64, netto: u64| -> Option<GroupTimes> {
+            (n >= MIN_SAMPLES).then_some(GroupTimes::new(brutto, netto, false))
+        };
         if !class.is_empty() {
-            if let Some((n, v)) = self
-                .group_brutto
+            if let Some(&(n, b, nt)) = self
+                .group_medians
                 .get(&(class.to_string(), disc.to_string()))
             {
-                if *n >= MIN_SAMPLES {
-                    return (*v, false);
+                if let Some(g) = stufe(n, b, nt) {
+                    return g;
                 }
             }
-            if let Some((n, v)) = self.class_brutto.get(class) {
-                if *n >= MIN_SAMPLES {
-                    return (*v, false);
+            if let Some(&(n, b, nt)) = self.class_medians.get(class) {
+                if let Some(g) = stufe(n, b, nt) {
+                    return g;
                 }
             }
         }
-        if let Some(v) = self.tournament_brutto {
-            return (v, false);
+        if let Some((b, nt)) = self.tournament_medians {
+            return GroupTimes::new(b, nt, false);
         }
         let default = if default_mins.is_finite() && default_mins > 0.0 {
             default_mins.round() as u64
         } else {
             25
         };
-        (default, true)
+        GroupTimes::new(default, default, true)
     }
+}
+
+/// Gruppen-Zeitwerte für die Live-Restzeitschätzung (Etappe D): dieselbe
+/// Fallback-Kette wie [`TimeStats::group_duration`], aber mit dem
+/// Netto-Median dazu. Ohne belastbare Messwerte gilt der Default als reine
+/// Bruttodauer (Netto = Brutto) — das 0:0-Modell hält das Feld dann
+/// schlicht die volle Dauer. Die Anlaufzeit ist stets Brutto − Netto und
+/// wird am Verwendungsort gerechnet, nicht als drittes Feld mitgeschleppt
+/// (Review 2026-08-17: ein gespeichertes Derivat kann nur desynchronisieren).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroupTimes {
+    pub brutto_min: u64,
+    pub netto_min: u64,
+    pub uncertain: bool,
+}
+
+impl GroupTimes {
+    /// Der EINE Konstruktor aller Fallback-Stufen: klemmt Netto auf Brutto
+    /// (ein Score, der den Host vor dem ersten Sync-Poll erreicht, stempelte
+    /// sonst „netto > brutto").
+    fn new(brutto_min: u64, netto_min: u64, uncertain: bool) -> Self {
+        Self {
+            brutto_min,
+            netto_min: netto_min.min(brutto_min),
+            uncertain,
+        }
+    }
+}
+
+/// Eingaben der Live-Restzeitschätzung eines belegten Felds (Etappe D).
+/// Der Aufrufer (tl.rs) ruft sie nur, wenn das Feld wirklich live zählt
+/// (Tablet/Zähltafel verbunden oder Erster-Punkt-Stempel vorhanden).
+#[derive(Debug, Clone)]
+pub struct LiveRemainInput {
+    pub now_ms: u64,
+    /// Sätze in Spielreihenfolge, der letzte ist der laufende.
+    pub sets: Vec<(i64, i64)>,
+    /// Zählformat des Matches; 0 = unbekannt → Badminton-Normalfall 3/21.
+    pub best_of: i64,
+    pub target: i64,
+    pub cap: i64,
+    pub first_assigned_ms: Option<u64>,
+    pub first_point_ms: Option<u64>,
+    /// Gruppenwerte aus [`TimeStats::group_times`]; die Anlaufzeit ist
+    /// Brutto − Netto und wird hier gerechnet statt mitgereicht.
+    pub netto_median_min: u64,
+    pub brutto_median_min: u64,
+}
+
+/// Prior-Anteil eines dritten Satzes an der erwarteten Gesamtpunktzahl
+/// eines Matches — nur noch fürs **Tempo-Prior** (Sekunden je Punkt aus
+/// dem Netto-Median). Der tatsächliche Entscheidungssatz-Anteil kommt
+/// live aus [`p_race`]/[`expected_sets`].
+const PRIOR_EXTRA_SET_SHARE: f64 = 0.35;
+/// Glättung der Punktstärke Richtung 50 % (virtuelle Punkte): dämpft die
+/// ersten Ballwechsel, lässt aber einen 15:5-Erstsatz als Favoriten-Signal
+/// deutlich durchschlagen (Nutzer-Beispiele 17.08.2026).
+const STRENGTH_SMOOTHING_POINTS: f64 = 20.0;
+/// Logistische Näherung der Standardnormal-Verteilungsfunktion
+/// (Amemiya-Konstante) — Rust-std hat kein `erf`.
+const LOGISTIC_PHI: f64 = 1.702;
+/// Bayes-Glättung des Eigentempos: so viele „virtuelle" Punkte zum
+/// Prior-Tempo, damit die ersten Ballwechsel das Modell nicht verzerren.
+const PACE_SMOOTHING_POINTS: f64 = 10.0;
+/// Erwartete Gesamtpunkte eines Satzes relativ zum Zielpunkt (21 → ~35).
+const PTS_PER_SET_FACTOR: f64 = 1.65;
+/// Pauschale Satzpause je erwartetem weiteren Satz (Minuten).
+const SET_BREAK_MINS: f64 = 2.0;
+
+/// Satz fertig? Zielpunkt erreicht und 2 Vorsprung — oder am Deckel.
+/// Bewusst lokale Kopie der Server-Regel (`server::set_is_complete`):
+/// dieses Modul bleibt rein und ohne Server-Abhängigkeit.
+fn set_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
+    let (leader, trailer) = (a.max(b), a.min(b));
+    // Ein Satz ohne Führenden ist nie fertig — 30:30 kann nur ein kaputter
+    // oder manipulierter Score-Frame liefern (Review 2026-08-17) und darf
+    // niemandem gutgeschrieben werden.
+    leader > trailer && leader >= target && (leader - trailer >= 2 || (cap > 0 && leader >= cap))
+}
+
+/// Logistische Näherung der Standardnormal-Verteilungsfunktion Φ(z).
+fn phi(z: f64) -> f64 {
+    1.0 / (1.0 + (-LOGISTIC_PHI * z).exp())
+}
+
+/// Gewinnwahrscheinlichkeit eines Punkte-Wettrennens: A braucht noch `na`
+/// Punkte, B noch `nb`, A gewinnt jeden Ballwechsel mit `p`.
+/// Normal-Näherung über die erwartete Punktdifferenz am Horizont
+/// `na + nb` — genau das gewünschte Verhalten: 10:6 nach einem
+/// 15:5-Erstsatz ist praktisch durch, 7:11 kippt klar, 13:13 bei
+/// ausgeglichener Stärke ist ein Münzwurf.
+fn p_race(na: f64, nb: f64, p: f64) -> f64 {
+    let den = ((na + nb) * p * (1.0 - p)).sqrt();
+    if den <= f64::EPSILON {
+        return if p >= 0.5 { 1.0 } else { 0.0 };
+    }
+    phi((nb * p - na * (1.0 - p)) / den)
+}
+
+/// Erwartete Zahl **weiterer** Sätze aus Satzstand `a:b` (Sieger braucht
+/// `need`), wenn A jeden Satz mit Wahrscheinlichkeit `p` gewinnt.
+/// Rekursionstiefe ≤ 2×need−1 — für Best-of-3 drei Zustände.
+fn expected_sets(a: i64, b: i64, need: i64, p: f64) -> f64 {
+    if a >= need || b >= need {
+        0.0
+    } else {
+        1.0 + p * expected_sets(a + 1, b, need, p) + (1.0 - p) * expected_sets(a, b + 1, need, p)
+    }
+}
+
+/// Geschätzte Restzeit (Minuten, ≥ 1) eines laufenden Spiels aus dem
+/// Live-Stand (Etappe D). Idee: erwartete Restpunkte aus Satzstand und
+/// Zählsystem × gemessenes Eigentempo dieses Spiels. Ohne ersten Punkt
+/// hält das Feld die volle Nettodauer plus Rest-Anlauf — ein zäh
+/// startendes 0:0-Spiel wird nicht mehr „gleich frei" gerechnet.
+pub fn live_remaining_min(input: &LiveRemainInput) -> u64 {
+    let target = if input.target > 0 { input.target } else { 21 };
+    // `NumSets` kommt roh aus BTP (nur > 0 geprüft) und [`expected_sets`]
+    // ist eine Doppel-Rekursion mit ~C(2n, n) Aufrufen — ohne Klemme fröre
+    // ein kaputter Wert den ~2-s-TL-State-Bau ein (Review 2026-08-17).
+    // Mehr als Best-of-5 spielt kein Badminton-Format.
+    let best_of = if input.best_of > 0 {
+        input.best_of.min(5)
+    } else {
+        3
+    };
+    let need = best_of / 2 + 1;
+    let clamp_hi = 2 * input.brutto_median_min.max(1);
+    let points: i64 = input.sets.iter().map(|&(a, b)| a.max(0) + b.max(0)).sum();
+
+    // Noch kein Punkt: volle Nettodauer plus Rest-Anlauf (Brutto − Netto,
+    // minus bereits verstrichene Zeit seit der Feldzuweisung).
+    let first_point = match input.first_point_ms {
+        Some(fp) if points > 0 => fp,
+        _ => {
+            let elapsed_min = input
+                .first_assigned_ms
+                .map(|a| input.now_ms.saturating_sub(a) / 60_000)
+                .unwrap_or(0);
+            let anlauf = input
+                .brutto_median_min
+                .saturating_sub(input.netto_median_min);
+            let rest_anlauf = anlauf.saturating_sub(elapsed_min);
+            return (input.netto_median_min + rest_anlauf).clamp(1, clamp_hi);
+        }
+    };
+    // Kein stiller Fallback (Review 2026-08-17): points > 0 garantiert
+    // mindestens einen Satz — bräche ein Umbau diese Invariante, soll das
+    // in den Tests knallen statt eine plausibel falsche Zahl zu liefern.
+    let &(last_a, last_b) = input
+        .sets
+        .last()
+        .expect("points > 0 garantiert mindestens einen Satz");
+
+    // Abgeschlossene Sätze zählen; der letzte Eintrag ist der laufende.
+    let mut sets_a = 0i64;
+    let mut sets_b = 0i64;
+    let mut completed_pts: Vec<i64> = Vec::new();
+    for &(a, b) in &input.sets {
+        if set_complete(a, b, target, input.cap) {
+            if a > b {
+                sets_a += 1;
+            } else {
+                sets_b += 1;
+            }
+            completed_pts.push(a + b);
+        }
+    }
+    let last_complete = set_complete(last_a, last_b, target, input.cap);
+    if last_complete && sets_a.max(sets_b) >= need {
+        return 1; // entschieden — nur noch Ergebnis eintragen
+    }
+
+    // Eigentempo (Sekunden je Punkt): Nettozeit / gespielte Punkte, mit
+    // Prior geglättet und auf [0,5; 2] × Prior geklemmt — friert der
+    // Stand ein (Tablet tot), läuft die Schätzung sonst davon.
+    let target_f = target as f64;
+    let pts_per_set_prior = target_f * PTS_PER_SET_FACTOR;
+    let expected_match_pts = (need as f64 + PRIOR_EXTRA_SET_SHARE) * pts_per_set_prior;
+    let prior_pace = input.netto_median_min.max(1) as f64 * 60.0 / expected_match_pts;
+    // Nettozeit minutengranular (Rev-Churn-Wächter): Der TL-State entsteht
+    // alle ~2 s — sekundengenau schöbe jede Uhr-Sekunde das Tempo minimal
+    // und kippte die Aufrundung mitten in der Minute. Gleiche Minute und
+    // gleicher Stand ⇒ exakt gleiches Ergebnis.
+    let netto_elapsed_sec =
+        (input.now_ms / 60_000).saturating_sub(first_point / 60_000) as f64 * 60.0;
+    let pace = ((netto_elapsed_sec + prior_pace * PACE_SMOOTHING_POINTS)
+        / (points as f64 + PACE_SMOOTHING_POINTS))
+        .clamp(prior_pace * 0.5, prior_pace * 2.0);
+
+    // Punkte je Satz: fertige Sätze DIESES Matches, sonst Format-Prior.
+    let pts_per_set = if completed_pts.is_empty() {
+        pts_per_set_prior
+    } else {
+        completed_pts.iter().sum::<i64>() as f64 / completed_pts.len() as f64
+    };
+
+    // Restpunkte des laufenden Satzes: proportional zum Weg des Führenden
+    // zum Zielpunkt; solange der Satz läuft, mindestens 2 (Verlängerung).
+    let rest_current = if last_complete {
+        0.0
+    } else {
+        let leader = last_a.max(last_b) as f64;
+        (pts_per_set * (1.0 - leader / target_f)).max(2.0)
+    };
+
+    // Künftige Sätze als **Erwartungswert** (Nutzer-Wunsch 17.08.2026):
+    // Wie wahrscheinlich der laufende Satz an wen geht, sagt das
+    // Punkte-Wettrennen aus Satzstand und Punktstärke — ein 15:5-Erstsatz
+    // macht den Favoriten auch im zweiten Satz zum klaren Favoriten, ein
+    // 7:11-Rückstand kippt den Satz trotzdem. Danach zählt jeder mögliche
+    // weitere Satz mit seiner Wahrscheinlichkeit statt mit fester Quote.
+    let pts_a_total: i64 = input.sets.iter().map(|&(a, _)| a.max(0)).sum();
+    let p_pt = (pts_a_total as f64 + STRENGTH_SMOOTHING_POINTS / 2.0)
+        / (points as f64 + STRENGTH_SMOOTHING_POINTS);
+    let p_fresh = p_race(target_f, target_f, p_pt);
+    let expected_future = if last_complete {
+        expected_sets(sets_a, sets_b, need, p_fresh)
+    } else {
+        let na = (target - last_a).max(1) as f64;
+        let nb = (target - last_b).max(1) as f64;
+        let p_cur = p_race(na, nb, p_pt);
+        p_cur * expected_sets(sets_a + 1, sets_b, need, p_fresh)
+            + (1.0 - p_cur) * expected_sets(sets_a, sets_b + 1, need, p_fresh)
+    };
+
+    let total_min = (rest_current + expected_future * pts_per_set) * pace / 60.0
+        + SET_BREAK_MINS * expected_future;
+    (total_min.ceil() as u64).clamp(1, clamp_hi)
 }
 
 /// Vollmodell-Simulation (E8): spielt die Warteliste in Reihenfolge auf
@@ -664,6 +922,213 @@ mod tests {
             p[&1].start_min, 1_040,
             "das blockierte startet nach seiner Pause (Feld ab 1029 frei)"
         );
+    }
+
+    // ── Live-Restzeit (Etappe D) ────────────────────────────────────────
+
+    /// Gruppen-Zeitwerte wie im Fallback-Test oben, aber mit Netto/Differenz.
+    #[test]
+    fn group_times_liefert_netto_und_differenz_derselben_stufe() {
+        let stats = stats_aus(vec![
+            entry("A", "HE", 0, minuten(5), minuten(20), true),
+            entry("A", "HE", 0, minuten(5), minuten(30), true),
+            entry("A", "HE", 0, minuten(1), minuten(40), true),
+        ]);
+        // Brutto-Median 30, Netto-Median 25 (Anlauf = Differenz = 5).
+        assert_eq!(
+            stats.group_times("A", "HE", 25.0),
+            GroupTimes {
+                brutto_min: 30,
+                netto_min: 25,
+                uncertain: false
+            }
+        );
+        // Ohne Messwerte: Default zählt komplett als Netto.
+        let leer = stats_aus(vec![]);
+        assert_eq!(
+            leer.group_times("A", "HE", 25.0),
+            GroupTimes {
+                brutto_min: 25,
+                netto_min: 25,
+                uncertain: true
+            }
+        );
+    }
+
+    /// Standard-Zutaten der Live-Tests: Bo3 bis 21 (Deckel 30), Gruppen-
+    /// Mediane Netto 20 / Brutto 25 (Anlauf also 5), erster Punkt bei
+    /// Minute 1000, `elapsed_net_min` Minuten Nettozeit gespielt.
+    fn live(sets: &[(i64, i64)], elapsed_net_min: u64) -> LiveRemainInput {
+        LiveRemainInput {
+            now_ms: minuten(1_000 + elapsed_net_min),
+            sets: sets.to_vec(),
+            best_of: 3,
+            target: 21,
+            cap: 30,
+            first_assigned_ms: Some(minuten(995)),
+            first_point_ms: Some(minuten(1_000)),
+            netto_median_min: 20,
+            brutto_median_min: 25,
+        }
+    }
+
+    #[test]
+    fn endphase_im_dritten_satz_gibt_das_feld_gleich_frei() {
+        // 14:6 im dritten Satz nach 30 min: nur noch der Satzrest zählt —
+        // statt „Median − verstrichen" (liefe längst auf 0) kommen ~4 min
+        // heraus.
+        let input = live(&[(21, 15), (15, 21), (14, 6)], 30);
+        assert_eq!(live_remaining_min(&input), 4);
+    }
+
+    #[test]
+    fn ohne_ersten_punkt_haelt_das_feld_die_volle_dauer() {
+        // 0:0 drei Minuten nach Zuweisung: volle Nettodauer + Rest-Anlauf.
+        let mut input = live(&[(0, 0)], 0);
+        input.first_point_ms = None;
+        input.now_ms = minuten(998);
+        assert_eq!(live_remaining_min(&input), 22, "20 Netto + 2 Rest-Anlauf");
+        // Anlauf überzogen: es bleibt die volle Nettodauer.
+        input.now_ms = minuten(1_010);
+        assert_eq!(live_remaining_min(&input), 20);
+    }
+
+    #[test]
+    fn ein_moeglicher_entscheidungssatz_zaehlt_nach_wahrscheinlichkeit() {
+        // 21:10 gewonnen UND 11:8 vorn: Der Favorit macht sehr wahrscheinlich
+        // in zwei Sätzen zu — der dritte Satz zählt nur noch mit ~6 % hinein,
+        // das Feld ist praktisch nur noch den Satzrest belegt.
+        let vorn = live(&[(21, 10), (11, 8)], 15);
+        assert_eq!(live_remaining_min(&vorn), 5);
+        // Führt stattdessen der Satzverlierer 11:8, kippt das Bild: gut die
+        // Hälfte eines dritten Satzes kommt dazu (der Erstsatz-Sieger bleibt
+        // nach Punkten leicht favorisiert, den zweiten doch noch zu drehen).
+        let hinten = live(&[(21, 10), (8, 11)], 15);
+        assert_eq!(live_remaining_min(&hinten), 11);
+    }
+
+    #[test]
+    fn bei_gleichstand_zaehlt_etwa_der_halbe_entscheidungssatz() {
+        // 21:18er-Erstsatz (fast ausgeglichen) und 13:13 im zweiten: Ausgang
+        // offen — knapp der halbe dritte Satz wandert in die Schätzung.
+        let input = live(&[(21, 18), (13, 13)], 20);
+        assert_eq!(live_remaining_min(&input), 11);
+    }
+
+    #[test]
+    fn ein_eingefrorener_stand_klemmt_das_tempo() {
+        // Tablet tot bei 5:3, Uhr läuft 40 min weiter: ohne Klemme explodierte
+        // das Tempo (>140 s/Punkt) — gedeckelt auf 2× Prior bleiben ~40 min.
+        let input = live(&[(5, 3)], 40);
+        assert_eq!(live_remaining_min(&input), 40);
+    }
+
+    #[test]
+    fn verlaengerung_rechnet_mindestens_zwei_restpunkte() {
+        // 24:23 über dem Zielpunkt: rechnerisch wäre der Satzrest negativ —
+        // solange der Satz läuft, bleiben mindestens 2 Restpunkte stehen,
+        // und die Verlängerung ist praktisch ein Münzwurf (halber
+        // Entscheidungssatz obendrauf).
+        let input = live(&[(24, 23)], 15);
+        assert_eq!(live_remaining_min(&input), 20);
+    }
+
+    #[test]
+    fn das_zaehlsystem_des_matches_bestimmt_die_satzlaenge() {
+        // 15er-Format (Deckel 21): Sätze sind kürzer, die fertigen Sätze
+        // dieses Matches liefern die Punkte-je-Satz-Schätzung (25) — und der
+        // klare Favorit (15:10 + 10:5) drückt den Entscheidungssatz-Anteil
+        // auf ein paar Prozent.
+        let mut input = live(&[(15, 10), (10, 5)], 12);
+        input.target = 15;
+        input.cap = 21;
+        input.netto_median_min = 15;
+        input.brutto_median_min = 18;
+        assert_eq!(live_remaining_min(&input), 3);
+    }
+
+    #[test]
+    fn die_restzeit_ist_auf_das_doppelte_brutto_gedeckelt() {
+        // Wie der eingefrorene Stand (roh ~40 min), aber mit kleinem
+        // Brutto-Median: die Ergebnis-Klemme greift bei 2 × 15 = 30.
+        let mut input = live(&[(5, 3)], 40);
+        input.brutto_median_min = 15;
+        assert_eq!(live_remaining_min(&input), 30);
+    }
+
+    #[test]
+    fn innerhalb_einer_minute_bleibt_die_schaetzung_stabil() {
+        // Rev-Churn-Wächter: Der TL-State wird alle ~2 s gebaut — ohne
+        // Minuten-Quantisierung der Nettozeit schöbe jede Sekunde das Tempo
+        // minimal und kippte die Aufrundung mitten in der Minute (hier:
+        // 4,96 → 5,09 min bei +30 s). Gleiche Minute ⇒ gleiches Ergebnis.
+        let a = live(&[(21, 10), (11, 8)], 15);
+        let mut b = a.clone();
+        b.now_ms += 30_000;
+        assert_eq!(live_remaining_min(&a), live_remaining_min(&b));
+    }
+
+    #[test]
+    fn ein_gleichstand_ist_nie_ein_fertiger_satz() {
+        // 30:30 kann nur ein manipulierter/kaputter Score-Frame liefern
+        // (regulär endet der Satz bei 30:29 am Deckel) — er darf trotzdem
+        // niemandem als Satzgewinn gutgeschrieben werden, sondern zählt
+        // als laufende Verlängerung.
+        let input = live(&[(30, 30)], 10);
+        assert_eq!(live_remaining_min(&input), 13);
+    }
+
+    #[test]
+    fn ein_entschiedenes_spiel_ist_gleich_frei() {
+        // Beide Sätze durch, Ergebnis noch nicht eingetragen: das Feld wird
+        // in einer Minute frei — kein Zuschlag für unmögliche Sätze.
+        let input = live(&[(21, 5), (21, 7)], 25);
+        assert_eq!(live_remaining_min(&input), 1);
+    }
+
+    #[test]
+    fn ein_kaputtes_best_of_wird_geklemmt() {
+        // `NumSets` kommt roh aus BTP (nur > 0 geprüft) — `expected_sets`
+        // ist eine Doppel-Rekursion mit ~C(2n, n) Aufrufen, ein NumSets von
+        // 41 fröre den ~2-s-TL-State-Bau ein (Review 2026-08-17). Alles
+        // über Best-of-5 wird deshalb wie Best-of-5 gerechnet.
+        let mut kaputt = live(&[(11, 8)], 10);
+        kaputt.best_of = 41;
+        let mut bo5 = live(&[(11, 8)], 10);
+        bo5.best_of = 5;
+        assert_eq!(live_remaining_min(&kaputt), live_remaining_min(&bo5));
+    }
+
+    #[test]
+    fn die_satzregel_bleibt_mit_der_server_regel_im_gleichschritt() {
+        // Drift-Wächter (Review 2026-08-17): `set_complete` ist bewusst eine
+        // lokale Kopie von `server::set_is_complete` — plus Gleichstands-
+        // Wache (30:30 zählt hier nie). Über alle erreichbaren Stände der
+        // gängigen Formate müssen beide dasselbe sagen; ändert jemand die
+        // Server-Regel, schlägt dieser Test an.
+        for &(target, cap) in &[(21, 30), (15, 21), (11, 11), (11, 15)] {
+            for a in 0..=cap {
+                for b in 0..=cap {
+                    if a == b {
+                        continue; // Gleichstand: bewusste lokale Abweichung
+                    }
+                    assert_eq!(
+                        set_complete(a, b, target, cap),
+                        crate::tablet::server::set_is_complete(a, b, target, cap),
+                        "({a},{b}) bei {target}/{cap}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fehlendes_format_faellt_auf_bo3_bis_21() {
+        let mut input = live(&[(21, 15), (15, 21), (14, 6)], 30);
+        input.best_of = 0;
+        input.target = 0;
+        input.cap = 0;
+        assert_eq!(live_remaining_min(&input), 4, "wie der Normalfall");
     }
 
     #[test]

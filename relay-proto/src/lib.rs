@@ -1172,6 +1172,11 @@ pub struct TlDisplaySettingsWire {
     pub show_round: bool,
     #[serde(rename = "showGroup")]
     pub show_group: bool,
+    /// Geschätzte Restzeit laufender Spiele am Feld (Spec
+    /// `spielzeiten-prognose`, Etappe D). `#[serde(default)]`, weil alte
+    /// Browser-Stände Profile ohne dieses Feld speichern/senden.
+    #[serde(rename = "showCourtRemaining", default)]
+    pub show_court_remaining: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
 }
@@ -3552,12 +3557,33 @@ mod tests {
                 show_discipline: true,
                 show_round: true,
                 show_group: false,
+                show_court_remaining: true,
                 list_position: TlListPositionWire::Bottom,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
             updated_at_ms: 1_700_000_000_000,
         });
+    }
+
+    /// Etappe D (`spielzeiten-prognose`): `showCourtRemaining` reist im
+    /// Profil mit; ein altes Profil ohne das Feld liest sich als `false`
+    /// (Auto-Update-Sicherheit — Browser-Stände altern langsam).
+    #[test]
+    fn display_settings_court_remaining_roundtrip_and_default() {
+        let d = TlDisplaySettingsWire {
+            show_court_remaining: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""showCourtRemaining":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, d);
+
+        let legacy = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,"showClubLogos":false,"showDiscipline":false,"showRound":false,"showGroup":false,"listPosition":"right"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
+        assert!(!alt.show_court_remaining);
+        assert!(alt.show_numbers);
     }
 
     #[test]
