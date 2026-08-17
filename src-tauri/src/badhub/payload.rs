@@ -140,6 +140,18 @@ pub struct TsetMatch {
     /// Spielnummer (nur bei anstehenden Matches).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub match_num: Option<i64>,
+    /// Disziplin als stabiler Schlüssel (`mens_singles`, `womens_doubles`, …).
+    ///
+    /// **Warum auch im `tset`:** Der Liveticker liest `n` (= `draw_name +
+    /// round_name`), und `draw_name` ist bei Gruppenturnieren die
+    /// AUSLOSUNGSGRUPPE ("Gruppe 1") — die Disziplin kam dort nie an. Sie
+    /// ging bisher nur im `sched` raus, der die Spielerseite speist.
+    /// `None` bei `Discipline::Unknown`, dann bleibt das Feld wie bisher weg.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discipline: Option<&'static str>,
+    /// Klassenkürzel ("A", "B", "U15"); `None`, wenn keins erkennbar ist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class_label: Option<String>,
     /// Nicht-regulärer Ausgang: "walkover" | "retired" | "disqualified".
     /// Fehlt bei regulär ausgespielten Matches.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -184,6 +196,15 @@ fn to_tset_match(m: &BtpMatch) -> TsetMatch {
         end_ts: None,
         team1_won: None,
         match_num: None,
+        discipline: match m.discipline {
+            Discipline::Unknown => None,
+            d => Some(d.as_str()),
+        },
+        class_label: if m.class_label.is_empty() {
+            None
+        } else {
+            Some(m.class_label.clone())
+        },
         outcome: None,
         preparation_call_ts: None,
         hall: None,
@@ -1628,6 +1649,28 @@ mod tests {
             json["event"]["matches"][0]["p1_member_ids"][0],
             serde_json::Value::Null
         );
+    }
+
+    #[test]
+    fn tset_traegt_disziplin_und_klasse_fuer_den_liveticker() {
+        // Der Liveticker liest `n` (draw_name + round_name) und zeigte
+        // deshalb "Gruppe 1 G1" - die Disziplin kam dort nie an. Sie ging
+        // bisher nur im sched-Kanal raus, der die Spielerseite speist.
+        // Beide Felder sind optional (skip_serializing_if): ein alter
+        // Empfaenger sieht keinen Unterschied.
+        let mut m = sample_match(1, MatchStatus::OnCourt, Some("Feld 3"));
+        m.discipline = Discipline::WomensDoubles;
+        m.class_label = "B".to_string();
+        let snapshot = sched_snapshot(vec![m]);
+
+        let tset = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        );
+
+        assert_eq!(tset.event.matches[0].discipline, Some("womens_doubles"));
+        assert_eq!(tset.event.matches[0].class_label.as_deref(), Some("B"));
     }
 
     #[test]

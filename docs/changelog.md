@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## 0.9.213
+
+- **Disziplin und Klassenkürzel jetzt auch im `tset`**: Der Liveticker liest
+  `n` (= `draw_name + round_name`) und zeigte bei Gruppenturnieren deshalb
+  nur „Gruppe 1 G1" — die Disziplin kam dort nie an. Sie ging bisher nur im
+  `sched`-Kanal raus, der badhubs Spielerseite speist. Beide Felder sind
+  optional serialisiert: ein Empfänger, der sie nicht kennt, sieht keinen
+  Unterschied.
+
 ## v0.9.212
 
 - **Startzeit-Prognose rechnet mit dem Live-Spielstand** (Spec
