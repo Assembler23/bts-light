@@ -38,14 +38,33 @@
      3 × 16rem + 2 Stege + Polster bleibt darunter. Gelesen wird der
      aufgelöste Pixelwert wie bei `--panel-min`. */
   --spalte-min: 16rem;
+  /* Mindest-Trefffläche interaktiver Ziele: skaliert mit dem Geräte-Zoom,
+     unterschreitet aber NIE die zugesicherten 40/44px (Touch-Ergonomie,
+     Akzeptanzkriterium tl-web-panelsystem) — auch nicht auf der
+     85-%-Stufe. Einziger Ort dieser Zahlen, die Aufrufstellen nutzen
+     var() (Review 17.08.2026). */
+  --touch-min: max(2.5rem, 40px);
+  --touch-komf: max(2.75rem, 44px);
 }
 * { box-sizing: border-box; }
+html {
+  /* 100 % statt fester 16px: komponiert mit der Browser-/System-
+     Schriftgröße des Geräts (Barrierefreiheit) — der Geräte-Zoom legt
+     zusätzlich einen Prozentwert als Inline-Stil auf dieses Element
+     (`wendeGeraeteZoomAn`, Review-Fund 17.08.2026). */
+  font-size: 100%;
+}
 html, body {
   margin: 0; min-height: 100%; background: var(--bg); color: var(--ink);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 16px; line-height: 1.4;
+  line-height: 1.4;
   -webkit-text-size-adjust: 100%;
 }
+/* `1rem` statt fester px: ERBENDER Text — allen voran die Spielernamen,
+   der Kern des Schriftgrößen-Wunsches — muss den Geräte-Zoom mitmachen.
+   Eine feste px-Angabe hier nagelte ihn auf die Grundgröße fest
+   (Review-Fund 17.08.2026). */
+body { font-size: 1rem; }
 /* Zahlen, die sich im Sekundentakt ändern, dürfen nicht zappeln. */
 .num { font-variant-numeric: tabular-nums; }
 
@@ -99,7 +118,7 @@ header {
 .halls { display: flex; gap: 6px; flex-wrap: wrap; }
 .halls button {
   font: inherit; font-size: .9rem; font-weight: 600;
-  padding: 7px 13px; min-height: 2.5rem;
+  padding: 7px 13px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -115,7 +134,7 @@ header {
    `.anzeige summary`-Knopf, damit die Kopfzeile nicht unruhig wird. */
 .profiles-btn {
   font: inherit; font-size: .85rem; font-weight: 650; cursor: pointer;
-  padding: 7px 12px; min-height: 2.5rem; display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; min-height: var(--touch-min); display: flex; align-items: center; gap: 6px;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); color: var(--ink-soft);
 }
@@ -126,7 +145,7 @@ header {
    sie ihm die Felder um, und niemand versteht, warum. */
 .auto {
   font: inherit; font-size: .85rem; font-weight: 650;
-  padding: 7px 13px; min-height: 2.5rem;
+  padding: 7px 13px; min-height: var(--touch-min);
   border-radius: 999px; cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   display: flex; align-items: center; gap: 7px;
@@ -388,7 +407,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 /* Die Flagge: klein, mit feiner Kante (weiße Flaggenteile brauchen sie,
    sonst schwimmt das Bild im Weiß der Kachel). */
 .flagge {
-  flex: none; width: 20px; height: 14px; object-fit: cover;
+  flex: none; width: 1.25rem; height: .875rem; object-fit: cover;
   border: 1px solid var(--line); border-radius: 2px;
   vertical-align: -2px;
 }
@@ -482,9 +501,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-mini .pair { font-size: .68rem; }
 #courts.kacheln-mini .score, #courts.kacheln-mini .clock, #courts.kacheln-mini .restzeit { font-size: .78rem; }
 #courts.kacheln-mini .score small, #courts.kacheln-mini .clock small, #courts.kacheln-mini .restzeit small { font-size: .56rem; }
-/* 32px wie der frühere Aufruf-Knopf in dieser Stufe (`.callbtn`,
-   `min-height: 2rem`) — die bewusst in Kauf genommene Untergrenze der
-   dichtesten Darstellung, nicht weiter unterboten. */
+/* 2rem (bei Grundgröße = 32px) wie der frühere Aufruf-Knopf in dieser
+   Stufe (`.callbtn`, damals `min-height: 32px`) — die bewusst in Kauf
+   genommene Untergrenze der dichtesten Darstellung, nicht weiter
+   unterboten; skaliert seit dem Geräte-Zoom in rem mit. */
 #courts.kacheln-mini .kebab > summary { width: 2rem; height: 2rem; font-size: 1rem; }
 /* Kleinerer Griff (Vorgabe: „kleinere Grips") — NUR das Sinnbild schrumpft.
    Polsterung/Trefffläche bleiben bei den 8px der Grundregel
@@ -599,7 +619,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    verwechseln. */
 .row .prep {
   display: grid; place-items: center;
-  width: 2.5rem; height: 2.5rem; padding: 0;
+  width: var(--touch-min); height: var(--touch-min); padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -629,7 +649,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .kebab > summary {
   list-style: none; cursor: pointer; user-select: none;
   display: grid; place-items: center;
-  width: 2.5rem; height: 2.5rem;
+  width: var(--touch-min); height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); font-size: 1.3rem; font-weight: 700;
   line-height: 1;
@@ -669,7 +689,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Nachruf-Knöpfen der Zeile UND allen Kachel-Aktionen. */
 .kebab-menu .kebab-actions { display: flex; flex-direction: column; gap: 6px; }
 .kebab-menu .kebab-actions button {
-  font: inherit; font-weight: 650; padding: 8px 12px; min-height: 2.5rem;
+  font: inherit; font-weight: 650; padding: 8px 12px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
   text-align: left;
@@ -681,7 +701,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row .auto-excl {
   font: inherit; font-weight: 650; font-size: .85rem; cursor: pointer;
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; min-height: 2.5rem;
+  padding: 8px 12px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft);
 }
@@ -704,7 +724,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Menü ist Platz, den die Zeile selbst nicht mehr hergibt. */
 .row .hallwahl {
   font: inherit; font-size: .85rem; font-weight: 650;
-  min-height: 2.5rem; width: 100%; padding: 6px 8px;
+  min-height: var(--touch-min); width: 100%; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -717,10 +737,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   padding: 12px; display: flex; flex-direction: column; gap: 8px;
 }
 .wo h4 { margin: 0; font-size: .95rem; }
-.wo label { display: flex; align-items: center; gap: 8px; min-height: 2.5rem; font-size: .9rem; }
+.wo label { display: flex; align-items: center; gap: 8px; min-height: var(--touch-min); font-size: .9rem; }
 .wo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .wo button {
-  font: inherit; font-size: .85rem; font-weight: 650; padding: 8px 14px; min-height: 2.75rem;
+  font: inherit; font-size: .85rem; font-weight: 650; padding: 8px 14px; min-height: var(--touch-komf);
   border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
 }
 .wo button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -751,13 +771,13 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 #sk-list li {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: 8px 10px; min-height: 2.75rem;
+  padding: 8px 10px; min-height: var(--touch-komf);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .sk-names { font-weight: 600; flex: 1 1 8rem; min-width: 0; }
 .sk-wait { font-size: .82rem; color: var(--ink-soft); }
 #sk-list button {
-  font: inherit; font-weight: 700; min-width: 2.5rem; min-height: 2.5rem; padding: 0 10px;
+  font: inherit; font-weight: 700; min-width: var(--touch-min); min-height: var(--touch-min); padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -767,11 +787,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Sekunden vom nächsten Abruf gelöscht. */
 #sk-add { display: flex; gap: 8px; margin-top: 8px; }
 #sk-name {
-  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 2.5rem;
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 #sk-add button {
-  font: inherit; font-weight: 650; padding: 0 14px; min-height: 2.5rem;
+  font: inherit; font-weight: 650; padding: 0 14px; min-height: var(--touch-min);
   border-radius: 8px; border: 1px solid var(--line); background: var(--card);
   color: var(--ink-soft); cursor: pointer;
 }
@@ -783,7 +803,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #fin-list { display: flex; flex-direction: column; gap: 6px; }
 .fin-row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: 8px 10px; min-height: 2.75rem;
+  padding: 8px 10px; min-height: var(--touch-komf);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   font-size: .85rem;
 }
@@ -791,7 +811,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .fin-meta { color: var(--ink-soft); }
 .fin-score { color: var(--ink-soft); flex: 0 0 auto; }
 .fin-row button {
-  font: inherit; font-weight: 700; min-width: 2.5rem; min-height: 2.5rem; padding: 0 10px;
+  font: inherit; font-weight: 700; min-width: var(--touch-min); min-height: var(--touch-min); padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -848,7 +868,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
   flex: none; display: flex; align-items: center; gap: 8px;
-  padding: 6px 0; min-height: 2.75rem;
+  padding: 6px 0; min-height: var(--touch-komf);
 }
 .panel-spacer { flex: 1 1 auto; }
 .panel-title {
@@ -862,7 +882,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Kopfzeile überladen — Beschriftung bleibt für Vorlesehilfen und als
    Tooltip erhalten (wie beim Vorbereitungs-Knopf). */
 .panel-vis, .panel-col {
-  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; padding: 0;
+  flex: none; display: grid; place-items: center; width: var(--touch-min); height: var(--touch-min); padding: 0;
   border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
   background: var(--card); color: var(--ink-soft);
 }
@@ -883,9 +903,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .panel-griff {
   touch-action: none; cursor: grab; color: var(--ink-faint);
   display: grid; place-items: center; flex: none;
-  /* 18px-Symbol + 11px Polster ringsum = 40px Trefffläche (Touch-Ergonomie
-     ≥ 40px), per Minus-Rand aus dem Fluss zurückgerechnet wie `.row .drag-griff`. */
-  padding: 11px; margin: -11px 0 -11px -5px; border-radius: 6px;
+  /* Symbol + Polster ringsum ≈ 40px Trefffläche (Touch-Ergonomie ≥ 40px),
+     per Minus-Rand aus dem Fluss zurückgerechnet wie `.row .drag-griff`.
+     Polster in rem, damit die Fläche den Geräte-Zoom mitmacht. */
+  padding: .6875rem; margin: -.6875rem 0 -.6875rem -.3125rem; border-radius: 6px;
 }
 .panel-griff:hover { color: var(--ink-soft); background: #f1f5f9; }
 .panel-griff:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -899,7 +920,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .panel-steg {
   flex: none; touch-action: none; user-select: none; -webkit-user-select: none;
   display: flex; align-items: center; justify-content: center;
-  height: 16px; cursor: row-resize;
+  height: 1rem; cursor: row-resize;
 }
 .panel-steg::after { content: ""; border-radius: 999px; background: var(--line); width: 2.75rem; height: 4px; }
 .panel-steg:hover::after, .panel-steg.zieht::after { background: var(--ink-faint); }
@@ -958,7 +979,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .action-bar .what { font-weight: 650; flex: 1 1 12rem; min-width: 0; }
 .action-bar .hint { color: #cbd5e1; font-size: .9rem; }
 .action-bar button {
-  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 2.75rem;
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: var(--touch-komf);
   border-radius: 8px; border: 1px solid #475569;
   background: transparent; color: #fff; cursor: pointer;
 }
@@ -1032,8 +1053,8 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
      Fluss zurückrechnen — die übrigen Spalten (Nummer, Namen, Meta) rutschen
      dadurch nicht sichtbar nach rechts. */
   align-self: center;
-  padding: 13px 10px;
-  margin: -13px -2px -13px -6px;
+  padding: .8125rem .625rem;
+  margin: -.8125rem -.125rem -.8125rem -.375rem;
 }
 .card-top .kebab {
   /* Wie der Zieh-Griff daneben: Die 40px-Trefffläche bleibt, ihr Beitrag
@@ -1041,15 +1062,15 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
      Kopfzeile jeder Kachel plötzlich 40px hoch, und bei 26 Feldern kostet
      das eine ganze Kachelreihe. */
   align-self: center;
-  margin: -7px -4px -7px 0;
+  margin: -.4375rem -.25rem -.4375rem 0;
 }
 .card-top .drag-griff {
   /* An den rechten Rand der Kopfzeile der Kachel drücken (neben Name/
      Abzeichen) statt frei zu positionieren — so weicht er variabel vielen
      Abzeichen von selbst aus, statt sie an einer festen Ecke zu verdecken. */
   margin-left: auto;
-  padding: 8px;
-  margin-top: -8px; margin-right: -8px; margin-bottom: -8px;
+  padding: .5rem;
+  margin-top: -.5rem; margin-right: -.5rem; margin-bottom: -.5rem;
 }
 
 /* Was man zieht oder antippt, markiert man nicht: Ohne das hinterlässt jeder
@@ -1120,12 +1141,12 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .res-row label { flex: 0 0 4.2rem; font-weight: 600; font-size: .9rem; color: var(--ink-soft); }
 .res-row input {
   width: 4.4rem; font: inherit; font-variant-numeric: tabular-nums; text-align: center;
-  padding: 8px 6px; min-height: 2.75rem;
+  padding: 8px 6px; min-height: var(--touch-komf);
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 .res-row span { color: var(--ink-faint); }
 #res-add-set {
-  align-self: flex-start; font: inherit; font-weight: 650; padding: 8px 14px; min-height: 2.5rem;
+  align-self: flex-start; font: inherit; font-weight: 650; padding: 8px 14px; min-height: var(--touch-min);
   border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   cursor: pointer;
 }
@@ -1133,7 +1154,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .fehler { margin: 0; color: var(--alarm); font-weight: 600; font-size: .88rem; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .dlg-foot button {
-  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 2.75rem;
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: var(--touch-komf);
   border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   cursor: pointer;
 }
@@ -1219,7 +1240,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .prof-row .prof-tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .prof-row .prof-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .prof-row button, .prof-new button, .prof-editor button {
-  font: inherit; font-weight: 650; font-size: .82rem; padding: 7px 11px; min-height: 2.5rem;
+  font: inherit; font-weight: 650; font-size: .82rem; padding: 7px 11px; min-height: var(--touch-min);
   border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   cursor: pointer;
 }
@@ -1232,7 +1253,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .prof-row button.danger:hover { border-color: var(--alarm); color: var(--alarm); }
 .prof-new { display: flex; gap: 8px; margin-top: 4px; }
 .prof-new input {
-  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 2.5rem;
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 .prof-empty-hint { font-size: .85rem; color: var(--ink-soft); margin: 0 0 10px; }
@@ -1249,7 +1270,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 }
 .zoom-reihe { display: flex; gap: 6px; flex-wrap: wrap; }
 .zoom-reihe button {
-  font: inherit; font-weight: 650; padding: 8px 14px; min-height: 2.5rem;
+  font: inherit; font-weight: 650; padding: 8px 14px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -1260,7 +1281,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    — bündelt, was vorher auf drei Bedienstellen verstreut war (Spec-Ziel). */
 .prof-editor label.prof-field { display: flex; flex-direction: column; gap: 3px; font-size: .85rem; margin-bottom: 10px; }
 .prof-editor input[type="text"] {
-  font: inherit; padding: 8px 10px; min-height: 2.5rem;
+  font: inherit; padding: 8px 10px; min-height: var(--touch-min);
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 .prof-panels { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -1273,7 +1294,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    nicht nur das kleine Kästchen (Touch-Ergonomie ≥ 40px). */
 .prof-panels .prof-panel-label {
   flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
-  min-height: 2.5rem; cursor: pointer;
+  min-height: var(--touch-min); cursor: pointer;
 }
 .prof-panels .prof-panel-name { font-weight: 600; font-size: .88rem; }
 /* Spaltenzuordnung je Panel (Plan tl-liste-vereinfachen F) — nur sichtbar,
@@ -1281,11 +1302,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    Auswahl in EINEM `label`, wie die Sichtbarkeits-Zeile daneben. */
 .prof-panels .prof-panel-col {
   flex: none; display: flex; align-items: center; gap: 6px;
-  min-height: 2.5rem; font-size: .78rem; color: var(--ink-faint); cursor: pointer;
+  min-height: var(--touch-min); font-size: .78rem; color: var(--ink-faint); cursor: pointer;
 }
 .prof-panels .prof-panel-col select {
   font: inherit; font-size: .85rem; color: var(--ink);
-  min-height: 2.5rem; padding: 4px 6px;
+  min-height: var(--touch-min); padding: 4px 6px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card);
 }
 /* Dieselbe visuelle Sprache wie das Live-Panel-System — derselbe Griff,
@@ -1298,7 +1319,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    antippbar, nicht nur das kleine Kästchen selbst (Touch-Ergonomie
    ≥ 40px, Akzeptanzkriterium). */
 .prof-editor .checkbox-row, .prof-editor .radio-row {
-  display: flex; align-items: center; gap: 9px; padding: 8px 4px; min-height: 2.5rem;
+  display: flex; align-items: center; gap: 9px; padding: 8px 4px; min-height: var(--touch-min);
   font-size: .88rem; cursor: pointer;
 }
 .prof-editor fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
@@ -5957,13 +5978,25 @@ function geraeteZoom() {
   } catch { return 100; }
 }
 function wendeGeraeteZoomAn() {
-  document.documentElement.style.fontSize = `${(16 * geraeteZoom()) / 100}px`;
+  // Prozentwert statt fester px: komponiert mit der Browser-/System-
+  // Schriftgröße des Geräts (Barrierefreiheit) — bei 100 % bleibt der
+  // Inline-Stil weg und die CSS-Grundgröße gilt unverändert.
+  const zoom = geraeteZoom();
+  document.documentElement.style.fontSize = zoom === 100 ? "" : `${zoom}%`;
 }
 function setzeGeraeteZoom(prozent) {
+  if (prozent === geraeteZoom()) return;
   try { localStorage.setItem("tlZoom", String(prozent)); } catch { /* z. B. Privatmodus — Zoom gilt dann nur bis zum Neuladen */ }
   wendeGeraeteZoomAn();
+  // Kopf-/Band-Maße hängen an der Schriftgröße — sofort neu messen, nicht
+  // erst beim nächsten Poll (Review 17.08.2026).
+  messeKopf();
   scheduleFitCourts();
-  renderProfilesOverlay();
+  // Nur die vier Zoom-Knöpfe nachführen — ein Overlay-Neuaufbau risse
+  // eine gerade getippte Profilnamen-Eingabe samt Fokus weg
+  // (Review-Fund 17.08.2026).
+  document.querySelectorAll("#profiles-body [data-zoom]").forEach((b) =>
+    b.setAttribute("aria-pressed", String(Number(b.dataset.zoom) === prozent)));
 }
 
 function openProfilesOverlay() {
@@ -6023,8 +6056,8 @@ function renderProfilesList() {
     <div class="prof-geraet">
       <span class="prof-geraet-label">Schriftgröße — nur dieses Gerät</span>
       <div class="zoom-reihe" role="group" aria-label="Schriftgröße dieses Geräts">
-        ${ZOOM_STUFEN.map((s) => `<button type="button" data-zoom="${s}"
-            aria-pressed="${s === geraeteZoom()}">${s}&nbsp;%</button>`).join("")}
+        ${(() => { const aktiv = geraeteZoom(); return ZOOM_STUFEN.map((s) => `<button type="button" data-zoom="${s}"
+            aria-pressed="${s === aktiv}">${s}&nbsp;%</button>`).join(""); })()}
       </div>
       <p class="prof-empty-hint">Gilt nur für dieses Gerät (nicht Teil des Profils) —
         jedes Tablet stellt seine Größe selbst ein.</p>
@@ -6890,6 +6923,10 @@ function start() {
   // Profil-Verwaltung selbst (Öffnen/Schließen/Editor) ist weiter oben
   // bereits verdrahtet.
 
+  // Geräte-Zoom VOR der Kopf-Messung und dem ersten Render anwenden —
+  // `messeKopf()` misst schriftgrößen-abhängige Maße, und die Schrift
+  // soll nicht nach dem ersten Poll sichtbar umspringen.
+  wendeGeraeteZoomAn();
   messeKopf();
   scheduleFitCourts();
   // Die Kopfzeile bricht um, sobald das Fenster schmaler wird — dann stimmt
@@ -6902,9 +6939,6 @@ function start() {
   window.addEventListener("resize", messeKopf);
   window.addEventListener("resize", scheduleFitCourts);
   window.addEventListener("orientationchange", scheduleFitCourts);
-  // Geräte-Zoom VOR dem ersten Render anwenden — sonst spränge die
-  // Schrift nach dem ersten Poll sichtbar um.
-  wendeGeraeteZoomAn();
   poll();
   setInterval(() => {
     if (performance.now() - letzterUhrTick < 900) return;
