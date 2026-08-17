@@ -2348,7 +2348,8 @@ impl TabletState {
             .is_some_and(|s| s.sets.iter().any(|(a, b)| *a > 0 || *b > 0))
     }
 
-    /// Wie viele Aufrufe für dieses Spiel schon **gesprochen** wurden (0–3).
+    /// Wie viele Aufrufe für dieses Spiel schon **gesprochen** wurden
+    /// (0 = noch keiner; nach oben offen, siehe „Aufrufe unbegrenzt").
     ///
     /// `0` heißt: noch keiner. Das ist nicht dasselbe wie „Stufe 1" — auf dem
     /// Feld zu stehen ist noch kein gesprochener Aufruf, und der erste Druck
@@ -2371,7 +2372,9 @@ impl TabletState {
     /// Für die Turnierleitungs-Seite, die nur „noch einmal" weiß. Sie zeigt
     /// als erfolgte Stufe `max(1, calls_made)` und bietet die nächste an —
     /// die Rechnung hier muss dazu passen. `at_least` hebt auf die zeitlich
-    /// fällige Stufe an; über den dritten Aufruf hinaus wird nicht gezählt.
+    /// fällige Stufe an. Über den dritten Aufruf hinaus zählt der Zähler
+    /// ehrlich weiter — ob es einen vierten gibt, entscheidet die
+    /// Oberfläche (Option „Aufrufe unbegrenzt").
     ///
     /// `sides` ist die Parteien-Maske des Aufrufs
     /// ([`SIDE_BOTH`]/[`SIDE_TEAM1`]/[`SIDE_TEAM2`]). Die Stufe steigt nur,
@@ -2396,12 +2399,16 @@ impl TabletState {
         // Neue Runde, sobald sich die gerufenen Parteien mit den auf dieser
         // Stufe bereits gerufenen überschneiden — oder wenn überhaupt noch
         // nichts gerufen wurde (dann ist dieser Aufruf der zweite, denn auf
-        // dem Feld zu stehen war der erste).
+        // dem Feld zu stehen war der erste). Über den dritten hinaus zählt
+        // der Zähler ehrlich weiter (Option „Aufrufe unbegrenzt"): Ob es
+        // einen vierten überhaupt gibt, entscheidet allein die Oberfläche —
+        // ab Stufe 4 spricht das Ansage-Gerät die schlichte Feld-Ansage
+        // ohne Stufenwort (`AnnounceJobPlayer`).
         if entry.1 == 0 || entry.2 & sides != 0 {
-            entry.1 = (entry.1.max(1) + 1).min(3);
+            entry.1 = entry.1.max(1).saturating_add(1);
             entry.2 = 0;
         }
-        entry.1 = entry.1.max(at_least).min(3);
+        entry.1 = entry.1.max(at_least);
         entry.2 |= sides;
         entry.1
     }
@@ -2431,7 +2438,10 @@ impl TabletState {
         if entry.0 != match_id {
             *entry = (match_id, 0, 0);
         }
-        entry.1 = entry.1.max(stage).min(3);
+        // Kein Deckel bei 3: Steht der geteilte Zähler durch „Aufrufe
+        // unbegrenzt" schon höher, drückte `min(3)` ihn zurück — genau das
+        // verbietet der Satz unten.
+        entry.1 = entry.1.max(stage);
         entry.2 = SIDE_BOTH;
         entry.1
     }
@@ -4187,12 +4197,30 @@ mod tests {
             "der erneute Aufruf ist der 2."
         );
         assert_eq!(st.note_court_call(101, 7), 3);
+        assert_eq!(st.calls_made(101, 7), 3, "und jedes Gerät liest dieselbe 3");
+    }
+
+    #[test]
+    fn repeated_calls_keep_counting_beyond_the_third() {
+        // Option „Aufrufe unbegrenzt" (Feldtest 17.08.2026): Die TL-Seite
+        // darf beliebig oft rufen — der Zähler läuft dann ehrlich weiter,
+        // statt bei drei festzuhängen. Ab dem vierten Aufruf spricht das
+        // Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort
+        // (`AnnounceJobPlayer`): „Dritter und letzter Aufruf" noch einmal
+        // wäre gelogen.
+        let st = TabletState::default();
+        st.note_court_call(101, 7);
+        st.note_court_call(101, 7);
         assert_eq!(
             st.note_court_call(101, 7),
-            3,
-            "über den dritten hinaus wird nicht gezählt"
+            4,
+            "nach dem dritten kommt der vierte, kein Deckel"
         );
-        assert_eq!(st.calls_made(101, 7), 3, "und jedes Gerät liest dieselbe 3");
+        assert_eq!(st.note_court_call(101, 7), 5);
+        assert_eq!(st.calls_made(101, 7), 5, "jedes Gerät liest dieselbe 5");
+        // Eine zeitliche Untergrenze (Uhr, maximal 3) drückt den Zähler
+        // dabei nie wieder herunter.
+        assert_eq!(st.note_court_call_at_least(101, 7, 3, SIDE_BOTH), 6);
     }
 
     #[test]
@@ -4246,8 +4274,9 @@ mod tests {
         );
         assert_eq!(
             st.note_court_call_at_least(101, 7, 2, SIDE_BOTH),
-            3,
-            "und eine niedrigere Vorgabe dreht nicht zurück"
+            4,
+            "der erneute Druck ist der nächste Aufruf — die niedrigere \
+             Vorgabe der Uhr dreht ihn nicht auf 2 zurück"
         );
     }
 

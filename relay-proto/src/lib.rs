@@ -1177,6 +1177,12 @@ pub struct TlDisplaySettingsWire {
     /// Browser-Stände Profile ohne dieses Feld speichern/senden.
     #[serde(rename = "showCourtRemaining", default)]
     pub show_court_remaining: bool,
+    /// Aufrufe am Feld beliebig oft und auch bei laufendem Spiel anbieten
+    /// (Feldtest 17.08.2026). `#[serde(default)]` wie `showCourtRemaining`:
+    /// Alte Browser-Stände kennen das Feld nicht — dann bleibt der Deckel
+    /// bei drei Aufrufen, das bisherige Verhalten.
+    #[serde(rename = "unlimitedCourtCalls", default)]
+    pub unlimited_court_calls: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
 }
@@ -3558,6 +3564,7 @@ mod tests {
                 show_round: true,
                 show_group: false,
                 show_court_remaining: true,
+                unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
             },
             columns: 3,
@@ -3584,6 +3591,26 @@ mod tests {
         let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
         assert!(!alt.show_court_remaining);
         assert!(alt.show_numbers);
+    }
+
+    /// Option „Aufrufe unbegrenzt" (Feldtest 17.08.2026): reist als
+    /// `unlimitedCourtCalls` im Profil; ein alter Browser-Stand ohne das
+    /// Feld liest sich als `false` — das bisherige Verhalten (Deckel bei
+    /// drei Aufrufen) bleibt dann unverändert.
+    #[test]
+    fn display_settings_unlimited_court_calls_roundtrip_and_default() {
+        let d = TlDisplaySettingsWire {
+            unlimited_court_calls: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""unlimitedCourtCalls":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, d);
+
+        let legacy = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,"showClubLogos":false,"showDiscipline":false,"showRound":false,"showGroup":false,"listPosition":"right"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
+        assert!(!alt.unlimited_court_calls);
     }
 
     #[test]

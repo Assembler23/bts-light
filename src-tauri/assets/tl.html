@@ -1634,6 +1634,7 @@ function builtInProfile() {
       showClubNames: false, showClubLogos: false,
       showDiscipline: true, showRound: true, showGroup: true,
       showCourtRemaining: false,
+      unlimitedCourtCalls: false,
       // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
@@ -1826,6 +1827,7 @@ function zeigeDisziplinAktiv() { return !!activeDisplay().showDiscipline; }
 function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
 function zeigeRestzeitAktiv() { return !!activeDisplay().showCourtRemaining; }
+function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
 
 // `applyListPosition()` gibt es nicht mehr: „Spielliste rechts/darunter"
 // ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) nur noch
@@ -2994,9 +2996,12 @@ function courtCard(c, cellStyle) {
        </div>`
     : "";
 
-  // Erneut aufrufen: nur bei einem Spiel, das noch nicht angefangen hat, und
-  // nur solange es etwas zu zählen gibt. Nach dem dritten Aufruf entscheidet
-  // die Turnierleitung, nicht noch ein Knopf.
+  // Erneut aufrufen: im Regelfall nur bei einem Spiel, das noch nicht
+  // angefangen hat, und nur bis zum dritten Aufruf — danach entscheidet
+  // die Turnierleitung, nicht noch ein Knopf. Mit der Profil-Option
+  // „Aufrufe unbegrenzt" (Feldtest 17.08.2026) bleibt der Knopf dagegen
+  // immer da, auch bei laufendem Spiel; ab dem vierten Aufruf spricht das
+  // Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort.
   // `call_stage` zählt die **gesprochenen** Aufrufe (0 = noch keiner). Auf
   // dem Feld zu stehen gilt als erster Aufruf — deshalb hier die 1 als
   // Untergrenze der Anzeige.
@@ -3005,8 +3010,9 @@ function courtCard(c, cellStyle) {
   // Der Knopf bleibt nie hinter der Uhr zurück: Stünde daneben „Letzter
   // Aufruf", während er den zweiten anbietet, widersprächen sich zwei
   // Anzeigen auf demselben Bildschirm. Der Turnier-PC rechnet genauso.
-  const naechste = Math.min(Math.max(erfolgt + 1, stage), 3);
-  const aufrufText = naechste >= 3 ? "Letzter Aufruf" : `${naechste}. Aufruf`;
+  const naechste = Math.max(erfolgt + 1, stage);
+  const aufrufText = naechste === 3 ? "Letzter Aufruf"
+    : naechste > 3 ? "Erneut aufrufen" : `${naechste}. Aufruf`;
   // Was schon gerufen wurde, steht als Tatsache da — sonst tippen zwei
   // Turnierleitungen nacheinander denselben Aufruf.
   const gerufen = c.match_id && gesprochen > 1
@@ -3038,7 +3044,7 @@ function courtCard(c, cellStyle) {
           title="Schiedsrichter ansagen">Schiedsrichter ansagen</button>`);
     }
   }
-  if (c.match_id && !isPlaying(c) && gesprochen < 3) {
+  if (c.match_id && (aufrufeUnbegrenzt() || (!isPlaying(c) && gesprochen < 3))) {
     // Drei Wege, denselben Aufruf auszulösen: für beide Parteien (bisheriges
     // Verhalten, ohne `side` gesendet) oder gezielt für eine — in der Regel
     // fehlt nur eine, und der ganze Saal noch einmal auszurufen nervt alle
@@ -5814,6 +5820,7 @@ function uebernehmeEditorFelder() {
     showRound: $("prof-show-round").checked,
     showGroup: $("prof-show-group").checked,
     showCourtRemaining: $("prof-show-court-remaining").checked,
+    unlimitedCourtCalls: $("prof-unlimited-calls").checked,
     // `listPosition` steht bewusst NICHT mehr im Editor (Plan
     // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
     // unverändert weitergereicht — eine ältere App-Version liest daraus
@@ -5874,6 +5881,7 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-round" ${d.showRound ? "checked" : ""} /> Runde zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
+      <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
     </fieldset>
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>

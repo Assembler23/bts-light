@@ -182,6 +182,13 @@ bereits gerufenen Parteien der aktuellen Stufe
 aus der Desktop-Oberfläche (`reached_court_call`) gilt immer beiden
 Parteien und schließt die Runde ab.
 
+**Über den dritten Aufruf hinaus** (Profil-Option „Aufrufe unbegrenzt" in
+TL-Web, seit 17.08.2026) zählt der Turnier-PC ehrlich weiter (4, 5, …) —
+gesprochen wird ab Stufe 4 aber die **schlichte Feld-Ansage ohne
+Stufenwort** (`AnnounceJobPlayer` bildet `stage >= 4` auf `callStage: 1`
+ab): „Dritter und letzter Aufruf" noch einmal wäre gelogen, und eine
+„vierte" Stufe gibt es im Sprachbild der Halle nicht.
+
 **Vorgelesen** wird die Angabe am Ansage-Gerät: Der Auftrag trägt sie mit
 (`AnnounceJobKind::CourtCall.side`), `AnnounceJobPlayer` reicht sie an
 `announceCourt(..., side)` weiter, und das setzt — exakt wie der

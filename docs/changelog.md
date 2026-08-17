@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.216
+
+- **TL-Web: Profil-Option „Aufrufe unbegrenzt".** Neues Häkchen im
+  Anzeige-Abschnitt des Profil-Editors (Feldtest 17.08.2026): Der
+  Aufruf-Knopf am Feld bleibt damit immer verfügbar — auch bei laufendem
+  Spiel und über den dritten Aufruf hinaus („Erneut aufrufen"). Der
+  Turnier-PC zählt die Stufe jetzt ehrlich weiter (4, 5, …); ab dem
+  vierten Aufruf spricht das Ansage-Gerät die schlichte Feld-Ansage ohne
+  Stufenwort statt noch einmal „Dritter und letzter Aufruf". Ohne das
+  Häkchen bleibt alles beim Alten (Deckel bei drei, kein Aufruf bei
+  laufendem Spiel); alte Browser-Profile ohne das Feld lesen sich als
+  „aus" (`unlimitedCourtCalls`, `#[serde(default)]`).
+
 ## v0.9.215
 
 - **TL-Web: ⋮-Menü der Spielzeilen wird nicht mehr abgeschnitten.** Das

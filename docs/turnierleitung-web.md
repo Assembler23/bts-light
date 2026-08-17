@@ -57,7 +57,13 @@ LAN+Cloud voraus.
   als flüchtiger Toast, der weg wäre, während noch getippt wird.
 - **Aufrufen:** Der Knopf am Feld löst den zweiten bzw. dritten Aufruf aus.
   Die Stufe zählt der Turnier-PC — alle Geräte, auch die Desktop-App, zeigen
-  dieselbe Zahl.
+  dieselbe Zahl. Im Regelfall endet der Knopf nach dem dritten Aufruf und
+  verschwindet, sobald Punkte gefallen sind. Mit der Profil-Option
+  **„Aufrufe unbegrenzt"** (Anzeige-Abschnitt des Profil-Editors, seit
+  17.08.2026) bleibt er dagegen immer da — auch bei laufendem Spiel und
+  über den dritten Aufruf hinaus („Erneut aufrufen"). Ab dem vierten
+  Aufruf erklingt die schlichte Feld-Ansage ohne Stufenwort; „Dritter und
+  letzter Aufruf" wird nicht wiederholt.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.

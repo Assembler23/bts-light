@@ -3002,6 +3002,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_round: p.display.show_round,
             show_group: p.display.show_group,
             show_court_remaining: p.display.show_court_remaining,
+            unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
                 crate::config::TlListPosition::Bottom => relay_proto::TlListPositionWire::Bottom,
@@ -3044,6 +3045,7 @@ fn display_settings_from_wire(
         show_round: d.show_round,
         show_group: d.show_group,
         show_court_remaining: d.show_court_remaining,
+        unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
             relay_proto::TlListPositionWire::Bottom => crate::config::TlListPosition::Bottom,
@@ -7063,6 +7065,9 @@ mod tests {
             // Profil-Schalter für die Restzeit-Anzeige (Etappe D) — ein
             // Anzeige-Häkchen, kein Personenbezug.
             "showCourtRemaining",
+            // Profil-Schalter „Aufrufe unbegrenzt" (Feldtest 17.08.2026) —
+            // ebenfalls ein Anzeige-Häkchen, kein Personenbezug.
+            "unlimitedCourtCalls",
             "listPosition",
             "updatedAtMs",
         ];
@@ -7142,6 +7147,7 @@ mod tests {
                 show_round: true,
                 show_group: true,
                 show_court_remaining: true,
+                unlimited_court_calls: true,
                 list_position: crate::config::TlListPosition::Bottom,
             },
             updated_at_ms: 1_000,
