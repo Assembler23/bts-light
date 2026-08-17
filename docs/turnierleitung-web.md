@@ -365,7 +365,8 @@ zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
 
 ### Punktverlauf ansehen
 
-Der **📈-Knopf** an einer belegten Feldkachel und an Zeilen der
+Der **📈-Knopf** im ⋯-Menü einer belegten Feldkachel (seit 17.08.2026
+dort statt auf der Kachel — eine Fläche weniger) und an Zeilen der
 Beendet-Liste öffnet den **Punktverlauf** des Spiels: je Satz ein
 Liniendiagramm (x = Ballwechsel, y = Punkte, eine Linie je Partei).
 Bei laufenden Spielen wächst die Kurve mit. Der Knopf erscheint nur,

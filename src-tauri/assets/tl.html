@@ -1134,9 +1134,10 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────────
-   Kleiner 📈-Knopf an Feldkachel/Beendet-Zeile, Overlay mit je Satz
-   einem SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
-.graphbtn, .fin-row [data-fin-graph] {
+   Kleiner 📈-Knopf an der Beendet-Zeile (an der Feldkachel seit dem
+   Feldtest 17.08.2026 im ⋯-Menü), Overlay mit je Satz einem
+   SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
+.fin-row [data-fin-graph] {
   border: 1px solid var(--line); background: var(--card);
   border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: .85rem;
 }
@@ -3028,19 +3029,14 @@ function courtCard(c, cellStyle) {
   // Zusatz-Affordanz, Antippen der Kachel bleibt der barrierefreie Weg.
   const griff = c.match_id
     ? `<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>` : "";
-  // Punktverlauf-Graph (Spec punktverlauf-graph): nur wenn es wirklich
-  // einen Verlauf gibt (has_timeline) — kein Klick ins Leere.
-  const graph = c.match_id && c.has_timeline
-    ? `<button type="button" class="graphbtn" data-graph="${c.match_id}"
-               title="Punktverlauf anzeigen">📈</button>` : "";
-
   // ── ⋯-Menü der Kachel (ADR 0026, Plan E) ─────────────────────────────
   // Die Kachel trug bis zu vier eigene Knöpfe („einteilen", „ansagen",
   // Aufruf, Punktverlauf) plus Satzstand und Uhr — bei 26 Feldern auf einem
   // Tablet ist das eine Wand aus Bedienelementen. Sichtbar bleiben Paarung,
-  // Satzstand, Uhr, Statusabzeichen, Punktverlauf-Knopf und Zieh-Griff;
-  // alles Handelnde zieht hierher. Dasselbe Kebab-Muster wie die Spielzeile,
-  // inklusive Offen-Zustand über den Redraw (`openKebabCourtId`).
+  // Satzstand, Uhr, Statusabzeichen und Zieh-Griff; alles Handelnde zieht
+  // hierher — seit dem Feldtest 17.08.2026 auch der Punktverlauf-Knopf.
+  // Dasselbe Kebab-Muster wie die Spielzeile, inklusive Offen-Zustand über
+  // den Redraw (`openKebabCourtId`).
   const kachelAktionen = [];
   if (state.officials_managed && c.match_id) {
     kachelAktionen.push(`<button type="button" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
@@ -3072,6 +3068,13 @@ function courtCard(c, cellStyle) {
     kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
         title="Endstand eintragen">✎ Ergebnis eintragen</button>`);
   }
+  // Punktverlauf (Spec punktverlauf-graph): nur wenn es wirklich einen
+  // Verlauf gibt (has_timeline) — kein Klick ins Leere. Der Graph selbst
+  // bleibt lazy: geladen wird erst beim Klick, nie im Zustands-Push.
+  if (c.match_id && c.has_timeline) {
+    kachelAktionen.push(`<button type="button" data-graph="${c.match_id}"
+        title="Punktverlauf anzeigen">📈 Punktverlauf</button>`);
+  }
   const kebabOffen = openKebabCourtId === c.court_id;
   const kebab = kachelAktionen.length
     ? `<details class="kebab" data-kebab-court="${c.court_id}"${kebabOffen ? " open" : ""}>
@@ -3089,7 +3092,7 @@ function courtCard(c, cellStyle) {
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}${kebab}</div>
     ${body}${bediener}${schiris}
-    <div class="card-foot">${foot}${graph}</div>
+    <div class="card-foot">${foot}</div>
   </article>`;
 }
 
