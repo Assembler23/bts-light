@@ -4,6 +4,26 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.219
+
+- **TL-Web: Render-Sparsamkeit** (Feldtest 17.08.2026, „Performance im
+  Blick"). Bisher baute jede Zustandsänderung — auch ein einzelner
+  Punktgewinn — die komplette Seite per `innerHTML` neu, samt aller
+  Event-Listener. Jetzt zweistufig: (1) **Panel-Kurzschluss** — jedes
+  Panel überspringt Neuaufbau und Verdrahtung, wenn sein HTML unverändert
+  ist; ein Punktgewinn zeichnet nur noch das Felder-Panel. (2)
+  **Keyed-Abgleich** für die zwei heißesten Listen: Feldkacheln und
+  Spielzeilen werden je `court_id`/`match_id` abgeglichen — nur die
+  geänderte Kachel/Zeile wird ersetzt und neu verdrahtet, der Rest bleibt
+  samt offenem ⋯-Menü, Fokus und Scroll-Position stehen. Sekündlich
+  tickende Zeittexte stehen nicht mehr im erzeugten HTML (sie hebelten
+  den Abgleich aus) — `tickClocks()` füllt sie direkt nach jedem Render.
+  Diagnose: `localStorage.tlRenderMessen = "1"` protokolliert die
+  Render-Dauer in der Browser-Konsole. Nebenbei behoben: Die
+  Spielzeilen-Griffe bekamen bei jedem Neuzeichnen doppelte
+  Drag-Listener; neue Panels materialisieren wie gehabt, aber Listen
+  ohne Änderung verlieren ihre Listener nicht mehr.
+
 ## v0.9.218
 
 - **TL-Web: neues Panel „Anfangszeiten".** Der heutige Check-In-Zeitplan

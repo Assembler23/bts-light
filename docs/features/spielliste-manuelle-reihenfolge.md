@@ -82,6 +82,12 @@ Schiedsrichter-Rotation.
     `hall`/`manual`-Felder.
   - `assets/tl.html` — `enableReorderDrag` je Hallen-Abschnitt der
     Warteliste, Reset-Knopf, Markierung manuell einsortierter Spiele.
+    (Nachtrag 17.08.2026, Render-Sparsamkeit: Die Griff-Verdrahtung einer
+    einzelnen Zeile ist als `wireReorderGriff` herausgelöst;
+    `enableReorderDrag` bleibt der Sammel-Aufruf. Die Spielliste
+    verdrahtet seither je Zeile über den Keyed-Abgleich — Verhalten
+    unverändert, aber keine doppelten Drag-Listener mehr bei jedem
+    Neuzeichnen.)
 - **Architekturregeln (CLAUDE.md R1–R6):**
   - R1: Frontend löst ausschließlich über die neuen Tauri-Commands/
     `TlAction`-Varianten aus, kein direkter Store-Zugriff.
