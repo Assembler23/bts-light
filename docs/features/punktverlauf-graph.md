@@ -103,7 +103,8 @@ Kern:
       und überzählige Frames werden verworfen (Caps: Rallies je Satz,
       Sätze je Match, Sync-Größe).
 - [ ] **AK-4** TL-Web und Desktop zeigen den Graphen als Overlay: TL-Web
-      an Feldkachel (laufend) und Beendet-Zeile, Desktop an
+      im ⋯-Menü der Feldkachel (laufend; bis 17.08.2026 direkt auf der
+      Kachel — Feldtest: aufräumen) und an der Beendet-Zeile, Desktop an
       Felderübersicht und Beendet-Tabelle — **nur** wenn `has_timeline`
       gesetzt ist (kein Klick ins Leere bei Papier-Spielen).
 - [ ] **AK-5** Der Verlauf wird **on-demand** geladen (LAN-Route und

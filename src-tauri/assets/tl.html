@@ -655,7 +655,8 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
   max-height: 70vh; overflow-y: auto;
 }
-/* Kachel-Menüs etwas schmaler: sechs kurze Aktionsknöpfe, kein Wähler. */
+/* Kachel-Menüs etwas schmaler: bis zu sieben kurze Aktionsknöpfe
+   (inkl. „📈 Punktverlauf"), kein Wähler. */
 .card .kebab-menu { min-width: 13rem; }
 .kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
 .kebab-menu .kebab-label {
@@ -1055,7 +1056,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 
-/* Ohne Verbindung: Alles, was schreiben würde, sichtbar zurücknehmen. */
+/* Ohne Verbindung: Alles, was den Turnier-PC bräuchte, sichtbar
+   zurücknehmen — Schreib-Aktionen ebenso wie Lese-Abrufe (der
+   Punktverlauf wird per HTTP geladen und schlüge offline fehl). */
 body.offline .prep,
 body.offline .kebab-menu button,
 body.offline .wo .actions button,
@@ -3292,11 +3295,18 @@ function wireCourts(box) {
     if (det.open) platziereKebabMenue(det);
   });
 
-  // Graph-Knopf wie der Aufruf-Knopf: gestopptes Weiterreichen, sonst
-  // wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
+  // Graph-Knopf, seit dem Feldtest 17.08.2026 im ⋯-Menü: Das umschließende
+  // `<details class="kebab">` stoppt Klick und Zeigegesten-Start bereits
+  // für alle Menü-Einträge; die eigenen Stopper bleiben aus Gleichklang
+  // mit den Nachbar-Knöpfen stehen. Der Tipp schließt das Menü — sonst
+  // schwebte es dank `position: fixed` hinter dem Graph-Overlay weiter
+  // und läge nach dessen Schließen noch über fremden Kacheln
+  // (Review-Fund 17.08.2026).
   box.querySelectorAll("button[data-graph]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
+      const det = btn.closest(".kebab");
+      if (det) det.open = false;
       const c = state.courts.find((x) => String(x.match_id) === btn.dataset.graph);
       if (!c) return;
       openTimeline(c.match_id, `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`, null);
