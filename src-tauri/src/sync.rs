@@ -126,6 +126,11 @@ pub struct SyncEngine {
     sched_takt: SchedTakt,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
     sched_unsupported_since: Option<Instant>,
+    /// Taktgeber für den Check-In-**Lese**-Abruf (TL-Panel „Anfangszeiten",
+    /// Feldtest 17.08.2026) — dieselbe Minuten-Drossel wie der Spielplan,
+    /// nur in Gegenrichtung: badhub wird höchstens minütlich nach dem
+    /// Klassenstand gefragt.
+    checkin_lese_takt: SchedTakt,
 }
 
 /// Wie lange nach einem 404/400 des Check-In-Endpunkts pausiert wird, bevor
@@ -340,6 +345,67 @@ impl SyncEngine {
             checkin_unsupported_since: None,
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
+            checkin_lese_takt: SchedTakt::neu(),
+        }
+    }
+
+    /// Check-In-Klassenstand für das TL-Panel „Anfangszeiten" abrufen und im
+    /// [`TabletState`] ablegen (Feldtest 17.08.2026).
+    ///
+    /// Höchstens minütlich ([`SchedTakt`]) und als LETZTER Schritt des
+    /// Zyklus — dieselbe Abwägung wie bei Roster und Spielplan: der
+    /// Liveticker ist die zeitkritische Funktion, ein hängender
+    /// Check-In-Endpunkt darf ihn nicht um seinen Timeout verzögern.
+    /// Fehlerpfade nach [`checkin_state::fetch_state`]-Semantik: Offline
+    /// lässt den letzten Stand stehen (transiente Aussetzer sollen das
+    /// Panel nicht leeren), Unsupported/Rejected räumen ihn — die Seite
+    /// zeigt das Panel dann nicht mehr.
+    async fn fetch_checkin_times(
+        &mut self,
+        config: &AppConfig,
+        tablet: &TabletState,
+        jetzt_ms: u64,
+    ) {
+        use crate::badhub::checkin_state::{self, Availability};
+        if !config.checkin.is_ready() {
+            tablet.set_checkin_classes(None);
+            return;
+        }
+        if !self.checkin_lese_takt.faellig(jetzt_ms) {
+            return;
+        }
+        let Some(origin) = crate::commands::badhub_origin(&config.badhub.url) else {
+            return;
+        };
+        // Eigener Client wie in den Check-In-Commands: kürzerer Timeout als
+        // der Liveticker-Client, und der Abruf ist der letzte Schritt des
+        // Zyklus — er blockiert nichts hinter sich.
+        let client = checkin_state::build_client();
+        let view = checkin_state::fetch_state(
+            &client,
+            &origin,
+            &config.badhub.password,
+            &config.checkin.tournament_uuid,
+        )
+        .await;
+        match view.availability {
+            Availability::Ready => {
+                // Spielerlisten sofort abstreifen: Der TL-Zustand zeigt
+                // Zeitplan und Zähler, nie Namen (Datensparsamkeit).
+                let ohne_spieler = view
+                    .classes
+                    .into_iter()
+                    .map(|mut c| {
+                        c.players = Vec::new();
+                        c
+                    })
+                    .collect();
+                tablet.set_checkin_classes(Some(ohne_spieler));
+            }
+            Availability::Offline => {}
+            Availability::Unsupported | Availability::Rejected => {
+                tablet.set_checkin_classes(None);
+            }
         }
     }
 
@@ -1761,6 +1827,10 @@ impl SyncEngine {
             jetzt_ms,
         )
         .await;
+        // Ganz zum Schluss der Check-In-Lese-Abruf fürs TL-Panel
+        // „Anfangszeiten" — additiv wie Roster und Spielplan, hinter allem
+        // Zeitkritischen.
+        self.fetch_checkin_times(config, tablet, jetzt_ms).await;
         match push_result {
             Ok(()) => {
                 let outcome = match update {

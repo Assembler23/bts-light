@@ -496,6 +496,19 @@ Ende) und Anlaufzeit, dazu die Zahl der Messungen; beendete Spiele tragen
 ihre Ist-Zeiten in der Beendet-Zeile. Alles reine Anzeige — es geht nichts
 davon an Monitore oder den Liveticker.
 
+## Anfangszeiten (Check-In-Zeitplan, seit 17.08.2026)
+
+Ist der **Hallen-Check-In** eingerichtet
+([spieler-check-in.md](spieler-check-in.md)), gibt es das Panel
+**„Anfangszeiten"**: der heutige Check-In-Zeitplan, wie ihn badhubs
+öffentliche `…/zeitplan`-Seite zeigt — je Klasse **Anfangszeit**,
+**Anmeldeschluss** und der Stand **„eingecheckt/gemeldet"** (grün, wenn
+alle da sind). Sortiert nach Anfangszeit; durchgelaufene Schlüsse bleiben
+ausgegraut stehen, damit man sieht, was schon durch ist. Bewusst **nur
+Zähler, keine Namen** — wer wissen will, *wer* fehlt, nimmt die
+Check-In-Seite der Desktop-App. Der Turnier-PC fragt badhub dafür
+höchstens minütlich; kurze Internet-Aussetzer leeren das Panel nicht.
+
 ## Grenzen, die im Betrieb auffallen
 
 - **Acht Geräte gleichzeitig.** Das neunte wird abgewiesen; ein

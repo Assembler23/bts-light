@@ -810,6 +810,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   font-size: .75rem; font-weight: 600; color: var(--ink-faint);
 }
 .times-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Anfangszeiten-Panel (Feldtest 17.08.2026), teilt die Tabellen-Optik der
+   Spielzeiten: Durchgelaufene Anmeldeschlüsse bleiben sichtbar, treten
+   aber zurück; ein vollzähliger Check-In-Stand meldet Grün. */
+.checkin-table tr.durch td { color: var(--ink-faint); }
+.checkin-table td.voll { color: var(--ok); font-weight: 700; }
 /* Prognose-Marke in der Spielliste: dieselbe Info-Stufe wie „gerufen",
    aber mit Uhr-Sinnbild — sie beantwortet „wann bin ich dran?". */
 .badge.predicted { white-space: nowrap; }
@@ -1567,7 +1572,7 @@ const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="tr
 // sichtbar am Ende (`queue` kommt so dazu).
 const PANEL_KEYS = [
   "courts", "walkovers", "scorekeepers", "officials", "queue", "finished",
-  "times",
+  "times", "checkin",
 ];
 const PANEL_TITLES = {
   courts: "Felder",
@@ -1577,6 +1582,7 @@ const PANEL_TITLES = {
   queue: "Spiele",
   finished: "Beendete Spiele",
   times: "Spielzeiten",
+  checkin: "Anfangszeiten",
 };
 
 // Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
@@ -4507,6 +4513,11 @@ function panelAvailable(key) {
   // Spielzeiten-Auswertung (Spec spielzeiten-prognose): nur wenn der Host
   // sie liefert — also Prognose eingeschaltet UND Host neu genug.
   if (key === "times") return !!(state && state.time_stats);
+  // Check-In-Anfangszeiten (Feldtest 17.08.2026): nur wenn der Host das
+  // Feld liefert — also Check-In eingerichtet, badhub erreichbar UND Host
+  // neu genug. Eine leere Liste (heute keine Zeiten) zeigt das Panel mit
+  // Hinweis, `null` versteckt es.
+  if (key === "checkin") return !!(state && Array.isArray(state.checkin_times));
   return true;
 }
 
@@ -4619,6 +4630,8 @@ function panelBodySkeleton(key) {
       return `<div id="fin-list"></div>`;
     case "times":
       return `<div id="times-box"></div>`;
+    case "checkin":
+      return `<div id="checkin-box"></div>`;
     default:
       return "";
   }
@@ -6132,6 +6145,50 @@ function renderTimes() {
     </table>${fuss}`;
 }
 
+/** Panel „Anfangszeiten" (Feldtest 17.08.2026): der heutige
+ *  Check-In-Zeitplan — je Klasse Anfangszeit, Anmeldeschluss und der
+ *  Stand eingecheckt/gemeldet. Bewusst nur Zähler, nie Namen
+ *  (Datensparsamkeit — Namen hat die Desktop-Check-In-Seite).
+ *  Durchgelaufene Schlüsse bleiben ausgegraut sichtbar, damit man sieht,
+ *  was schon durch ist. Reine Anzeige; das Panel existiert nur, wenn der
+ *  Host `checkin_times` liefert (`panelAvailable`). */
+function renderCheckin() {
+  const zeiten = state.checkin_times;
+  if (!Array.isArray(zeiten)) return;
+  setPanelCount("checkin", zeiten.length);
+  const box = $("checkin-box");
+  if (!box) return;
+  const offen = zeiten.filter((z) => z.state !== "closed" && z.state !== "live").length;
+  setPanelPreview("checkin", zeiten.length
+    ? (offen ? `${offen} Anmeldung(en) noch nicht durch` : "alle Anmeldeschlüsse durch")
+    : "heute keine Anfangszeiten");
+  if (!zeiten.length) {
+    box.innerHTML = `<p class="note">Heute keine Klassen mit Anfangszeit.</p>`;
+    return;
+  }
+  const zeilen = zeiten.map((z) => {
+    // „durch" = das Anmeldefenster ist zu (geschlossen oder schon im
+    // Spielbetrieb) — die Zeile bleibt sichtbar, tritt aber zurück.
+    const durch = z.state === "closed" || z.state === "live";
+    const voll = z.entries > 0 && z.checked_in >= z.entries;
+    return `<tr${durch ? ' class="durch"' : ""}>
+        <td class="num">${esc(z.starts_hm)}</td>
+        <td>${esc(z.name || z.discipline || "")}</td>
+        <td class="num">${z.closes_hm ? esc(z.closes_hm) : "–"}</td>
+        <td class="num${voll ? " voll" : ""}" title="eingecheckt / gemeldet">${Number(z.checked_in)}/${Number(z.entries)}</td>
+      </tr>`;
+  }).join("");
+  box.innerHTML = `<table class="times-table checkin-table">
+      <thead><tr>
+        <th class="num">Beginn</th>
+        <th>Klasse</th>
+        <th class="num" title="Anmeldeschluss">Schluss</th>
+        <th class="num" title="eingecheckt / gemeldet">Stand</th>
+      </tr></thead>
+      <tbody>${zeilen}</tbody>
+    </table>`;
+}
+
 function renderFinished() {
   const list = state.finished || [];
   setPanelCount("finished", list.length);
@@ -6350,6 +6407,7 @@ function render() {
   renderQueue();
   renderFinished();
   renderTimes();
+  renderCheckin();
 }
 
 /** Nur die Uhren neu setzen — nicht die ganze Seite, sonst flackert sie

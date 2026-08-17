@@ -514,6 +514,15 @@ pub struct TabletState {
     /// (Messwert-Generation, Statistik): Cache für `cached_time_stats` —
     /// neu gerechnet nur, wenn sich am Zeiten-Store etwas geändert hat.
     time_stats_cache: Mutex<Option<(u64, std::sync::Arc<crate::tablet::predict::TimeStats>)>>,
+    /// Letzter Check-In-Klassenstand von badhub fürs TL-Panel
+    /// „Anfangszeiten" (Feldtest 17.08.2026) — **ohne** Spielerlisten, die
+    /// streift der Sync-Zyklus vor dem Ablegen ab (Datensparsamkeit; der
+    /// TL-Zustand zeigt Zeitplan und Zähler, nie Namen). Reiner
+    /// RAM-Zwischenstand, bewusst nicht persistiert — die
+    /// „kein Cache"-Regel des Check-Ins (AK-C13) betrifft Gespeichertes.
+    /// `None` = Check-In nicht eingerichtet oder von badhub abgelehnt →
+    /// die TL-Seite zeigt das Panel gar nicht.
+    checkin_classes: RwLock<Option<Vec<crate::badhub::checkin_state::CheckinClass>>>,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -1105,6 +1114,20 @@ impl TabletState {
         ));
         *cache = Some((generation, stats.clone()));
         stats
+    }
+
+    /// Check-In-Klassenstand fürs „Anfangszeiten"-Panel ablegen (Sync-Zyklus)
+    /// bzw. räumen (`None`, wenn der Check-In aus ist oder badhub ablehnt).
+    pub fn set_checkin_classes(
+        &self,
+        classes: Option<Vec<crate::badhub::checkin_state::CheckinClass>>,
+    ) {
+        *self.checkin_classes.write().unwrap() = classes;
+    }
+
+    /// Der abgelegte Check-In-Klassenstand — `None`, solange keiner da ist.
+    pub fn checkin_classes(&self) -> Option<Vec<crate::badhub::checkin_state::CheckinClass>> {
+        self.checkin_classes.read().unwrap().clone()
     }
 
     /// Bruttostart eines Matches für die BTP-`Duration` (Spec

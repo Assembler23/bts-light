@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.218
+
+- **TL-Web: neues Panel „Anfangszeiten".** Der heutige Check-In-Zeitplan
+  als Kachel (Feldtest 17.08.2026, Vorbild badhubs `…/zeitplan`-Seite):
+  je Klasse Anfangszeit, Anmeldeschluss und der Check-In-Stand
+  („12/16", grün wenn vollzählig) — nach Anfangszeit sortiert,
+  durchgelaufene Schlüsse bleiben ausgegraut sichtbar. Bewusst nur
+  Zähler, nie Spielernamen (die hat die Desktop-Check-In-Seite). Der
+  Turnier-PC fragt badhub dafür höchstens minütlich am Ende des
+  Sync-Zyklus (`/tl/stand`, additiv wie Roster und Spielplan); das Panel
+  erscheint nur, wenn der Check-In eingerichtet ist und badhub
+  antwortet. Kurze Aussetzer leeren das Panel nicht.
+
 ## v0.9.217
 
 - **TL-Web: Punktverlauf-Knopf ins ⋯-Menü der Feldkachel.** Der 📈-Knopf

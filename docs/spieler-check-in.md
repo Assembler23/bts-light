@@ -207,6 +207,19 @@ Seitenleisten-Punkt **Check-In**
 dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
 ihrem Zustand.
 
+**TL-Web-Panel „Anfangszeiten"** (seit 17.08.2026): Der heutige Zeitplan
+aus demselben `GET …/tl/stand` steht auch der Turnierleitungs-Seite zur
+Verfügung — je Klasse Anfangszeit, Anmeldeschluss, Fensterzustand und die
+Zähler, **ohne Spielerlisten** (der Sync-Zyklus streift sie vor dem
+Ablegen ab; Namen bleiben der Desktop-Seite vorbehalten). Dafür ruft der
+**Turnier-PC-Kern** den Stand höchstens minütlich am Ende des
+Sync-Zyklus ab (`sync.rs` `fetch_checkin_times`, RAM-Zwischenstand in
+`tablet/state.rs` `checkin_classes`; die „kein Cache"-Regel AK-C13
+betrifft Persistenz) — bislang fragte nur die offene Desktop-Seite.
+Ablehnung durch badhub (401/404) räumt den Stand, das Panel
+verschwindet; ein Offline-Aussetzer lässt den letzten Stand stehen.
+Bedienung: [turnierleitung-web.md](turnierleitung-web.md).
+
 **Doppel stehen als eine Zeile je Meldung** („A / B"): Zwei Spieler mit
 derselben `entry_id` werden zusammengefasst
 ([`io/checkinPairs.mjs`](../src/io/checkinPairs.mjs)), jede Hälfte behält

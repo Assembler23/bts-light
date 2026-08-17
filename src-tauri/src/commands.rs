@@ -483,7 +483,7 @@ struct PronunciationsResp {
 }
 
 /// Basis-Origin (`https://badhub.de`) aus der konfigurierten Badhub-URL.
-fn badhub_origin(url: &str) -> Option<String> {
+pub(crate) fn badhub_origin(url: &str) -> Option<String> {
     let base = reqwest::Url::parse(url)
         .ok()
         .map(|u| u.origin().ascii_serialization())?;
