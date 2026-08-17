@@ -2144,6 +2144,17 @@ pub struct TlMatch {
     /// Vereinsnamen, **parallel** zu den Namen. Siehe [`TlCourt::team1_club`].
     pub team1_club: Vec<String>,
     pub team2_club: Vec<String>,
+    /// Lizenznummern (BTP `MemberID`, z. B. „08-017991"), **parallel** zu
+    /// den Namen; leerer String, wo BTP keine führt. Link-Ziel der
+    /// badhub-Spielerseite (`badhub.de/spieler/<Nr>/live`). Datenschutz:
+    /// bewusst freigegeben (Nutzer-Entscheidung 17.08.2026) — die Nummer
+    /// ist der öffentliche URL-Schlüssel genau dieser Seite und steht hier
+    /// hinter dem Gerätezugang. Nur die Warteliste; laufende/beendete
+    /// Spiele tragen keinen Link und deshalb auch keine Nummer.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     /// In welche Halle das Spiel gehört, und woher wir das wissen.
     pub hall: String,
     pub hall_source: HallSource,
@@ -2267,21 +2278,48 @@ pub struct TlPrepCall {
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum TlBlocked {
     /// Mindestens ein Spieler steht gerade auf einem Feld.
-    Playing { players: Vec<String> },
+    Playing {
+        players: Vec<String>,
+        /// [`assign::player_key`]-Schlüssel **parallel** zu `players` —
+        /// die Seite färbt damit exakt den betroffenen Namen ein, statt
+        /// über den Namen zu raten (zwei gleichnamige Spieler einer
+        /// Paarung verschmölzen sonst; Review-Fund 17.08.2026). Alte
+        /// Hosts senden das Feld nicht, die Seite fällt dann auf den
+        /// Namensvergleich zurück.
+        #[serde(default)]
+        player_keys: Vec<String>,
+    },
     /// Mindestens ein Spieler ist noch in seiner Pause.
     Pause {
         /// Ab wann der Letzte wieder darf — damit der Helfer planen kann,
         /// statt zu raten.
         until_ms: u64,
         players: Vec<String>,
+        /// Siehe [`TlBlocked::Playing::player_keys`].
+        #[serde(default)]
+        player_keys: Vec<String>,
     },
 }
 
 impl From<Blocked> for TlBlocked {
     fn from(b: Blocked) -> Self {
         match b {
-            Blocked::Playing { players } => TlBlocked::Playing { players },
-            Blocked::Pause { until_ms, players } => TlBlocked::Pause { until_ms, players },
+            Blocked::Playing {
+                players,
+                player_keys,
+            } => TlBlocked::Playing {
+                players,
+                player_keys,
+            },
+            Blocked::Pause {
+                until_ms,
+                players,
+                player_keys,
+            } => TlBlocked::Pause {
+                until_ms,
+                players,
+                player_keys,
+            },
         }
     }
 }
@@ -2690,6 +2728,16 @@ pub(crate) fn build_state_limited(
                 .team2
                 .iter()
                 .map(|p| p.club.clone().unwrap_or_default())
+                .collect(),
+            team1_ids: m
+                .team1
+                .iter()
+                .map(|p| p.member_id.clone().unwrap_or_default())
+                .collect(),
+            team2_ids: m
+                .team2
+                .iter()
+                .map(|p| p.member_id.clone().unwrap_or_default())
                 .collect(),
             hall,
             hall_source,
@@ -3511,8 +3559,11 @@ mod tests {
         }
     }
 
-    /// Spieler mit Lizenznummer — nur für den Datensparsamkeits-Test, der
-    /// belegen muss, dass die Nummer den Host nicht verlässt.
+    /// Spieler mit Lizenznummer. Für den Datensparsamkeits-Test (die Nummer
+    /// verlässt den Host nur in den Wartelisten-Einträgen — als
+    /// badhub-Link-Ziel, Freigabe 17.08.2026 — und bleibt bei laufenden/
+    /// beendeten Spielen draußen) sowie überall dort, wo ein realistisches
+    /// Fixture die Nummern mitwiegen muss (Relay-Größen-Wächter).
     fn licensed_player(name: &str, license: &str) -> BtpPlayer {
         BtpPlayer {
             member_id: Some(license.to_string()),
@@ -3928,7 +3979,10 @@ mod tests {
         assert_eq!(
             s.queue[0].blocked,
             Some(TlBlocked::Playing {
-                players: vec!["Müller".to_string()]
+                players: vec!["Müller".to_string()],
+                // Ohne Lizenznummer fällt der Schlüssel auf den
+                // normalisierten Namen zurück (`assign::player_key`).
+                player_keys: vec!["müller".to_string()],
             })
         );
     }
@@ -4921,13 +4975,20 @@ mod tests {
         let mut matches = Vec::new();
         for id in 1..=400 {
             let mut m = a_match(id);
+            // Mit Lizenznummern: Seit die Warteliste `team1_ids` und
+            // `player_keys` trägt, wäre ein Fixture ohne Nummern ein zu
+            // kleiner Worst Case — der Wächter maß den Cloud-Zustand sonst
+            // um zehntausende Bytes zu klein (Review-Fund 17.08.2026).
             m.team1 = vec![
-                player("Maximiliane Charlotte von Hohenlohe-Waldenburg"),
-                player("Friederike Alexandra Schmidt-Blumenthal"),
+                licensed_player(
+                    "Maximiliane Charlotte von Hohenlohe-Waldenburg",
+                    "08-100001",
+                ),
+                licensed_player("Friederike Alexandra Schmidt-Blumenthal", "08-100002"),
             ];
             m.team2 = vec![
-                player("Konstantin Ferdinand Oppermann-Lindenau"),
-                player("Sebastian Aurelius Wittgenstein-Berleburg"),
+                licensed_player("Konstantin Ferdinand Oppermann-Lindenau", "08-100003"),
+                licensed_player("Sebastian Aurelius Wittgenstein-Berleburg", "08-100004"),
             ];
             m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
             m.round_name = "Achtelfinale der Trostrunde".to_string();
@@ -6423,6 +6484,30 @@ mod tests {
     }
 
     #[test]
+    fn member_ids_travel_next_to_the_names_in_the_queue() {
+        // Link-Ziel der badhub-Spielerseite (`badhub.de/spieler/<Nr>/live`) —
+        // die Seite verlinkt jeden Namen der Spielliste dorthin. Bewusste
+        // Datenschutz-Freigabe (Nutzer-Entscheidung 17.08.2026, wie Nation
+        // 09.08. und Verein 12.08.): Die Nummer ist der ÖFFENTLICHE
+        // URL-Schlüssel genau dieser badhub-Seite und steht hier hinter dem
+        // Gerätezugang. Parallel zu den Namen wie Nation/Verein; ohne
+        // Nummer bleibt ein leerer Platz (die Seite verlinkt dann nicht).
+        let tablet = TabletState::default();
+        let mut wartend = a_match(2);
+        wartend.team1 = vec![licensed_player("Weber", "08-017991")];
+        wartend.team2 = vec![player("Fischer")];
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![wartend], Vec::new()));
+
+        let s = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        assert_eq!(s.queue[0].team1_ids, vec!["08-017991"]);
+        assert_eq!(
+            s.queue[0].team2_ids,
+            vec![""],
+            "ohne Nummer ein leerer Platz — die Listen bleiben gleich lang"
+        );
+    }
+
+    #[test]
     fn every_match_carries_its_discipline() {
         // Turniere benennen ihre Auslosungen frei („Gruppe 6"). Steht dort
         // nicht zufällig „HE" drin, ist am Bildschirm nicht zu erkennen, ob
@@ -6823,6 +6908,13 @@ mod tests {
             // jedem Aushang; hier hinter dem Gerätezugang.
             "team1_club",
             "team2_club",
+            // Lizenznummer der Wartelisten-Spieler als Link-Ziel der
+            // badhub-Spielerseite (`/spieler/<Nr>/live`; Nutzer-Entscheidung
+            // 17.08.2026 — bewusste Freigabe wie Nation/Verein): Die Nummer
+            // ist der öffentliche URL-Schlüssel genau dieser Seite und steht
+            // hier hinter dem Gerätezugang. Geburtsjahr bleibt draußen.
+            "team1_ids",
+            "team2_ids",
             "sets",
             "tablet_connected",
             "injury",
@@ -6858,6 +6950,11 @@ mod tests {
             "blocked",
             "reason",
             "players",
+            // `player_key`-Schlüssel der blockierten Spieler (Lizenznummer
+            // bzw. normalisierter Name — beide für die Warteliste ohnehin
+            // freigegeben, siehe `team1_ids`): Die Seite färbt damit exakt
+            // den betroffenen Namen, statt gleichnamige zu verschmelzen.
+            "player_keys",
             "until_ms",
             // Spec `feldvergabe-ausnahme`: reines Bool-Flag „Auto-Vergabe
             // übergeht dieses Spiel gerade" — keine Angabe zu Personen.
@@ -7149,6 +7246,11 @@ mod tests {
         //
         // **Die Nation ist seit 09.08.2026 erlaubt**, **der Verein seit
         // 12.08.2026** — beide standen vorher hier auf der Verbotsliste.
+        // **Die Lizenznummer der WARTELISTEN-Spieler ist seit 17.08.2026
+        // erlaubt** (Nutzer-Entscheidung): Sie ist der öffentliche
+        // URL-Schlüssel der badhub-Spielerseite (`/spieler/<Nr>/live`), auf
+        // die die Spielliste verlinkt. Laufende und beendete Spiele bleiben
+        // ohne — dort gibt es keinen Link, also auch keinen Zweck.
         // Bewusst geändert: Die Turnierleitung braucht sie, um die richtige
         // Paarung ans Feld zu holen und Vereinskollegen auseinanderzuhalten.
         // Es bleibt beim ISO-Kürzel bzw. Vereinsnamen, die Anzeige ist
@@ -7290,6 +7392,15 @@ mod tests {
         assert!(
             json.contains("sc musterstadt"),
             "der zuschaltbare Vereinsname muss transportiert werden"
+        );
+        // Die Lizenznummer der Warteliste darf — sie ist das Link-Ziel der
+        // badhub-Spielerseite (Freigabe 17.08.2026, siehe Kopfkommentar).
+        // Die Verbotsliste oben stellt zugleich sicher, dass laufende
+        // (08-001234) und beendete Spiele (08-003333/08-004444) weiterhin
+        // OHNE Lizenznummer ausgeliefert werden.
+        assert!(
+            json.contains("08-009999"),
+            "die Warteliste braucht die Lizenznummer als badhub-Link-Ziel"
         );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.

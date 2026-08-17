@@ -141,9 +141,13 @@ Liveticker-Zwecks. Im Zweifel Feld weglassen.
 
 **Nationalität** (seit 09.08.2026) und **Verein** (seit 12.08.2026) sind
 bewusst zuschaltbare, **standardmäßig ausgeschaltete** Anzeige-Felder — beide
-stehen ohnehin auf Aushang/Meldeliste. Der Wächter-Test in `tablet/tl.rs`
-(`the_state_never_carries_personal_data_beyond_its_purpose`) hält Lizenznummer
-und Geburtsjahr weiterhin komplett draußen.
+stehen ohnehin auf Aushang/Meldeliste. Die **Lizenznummer** reist seit
+17.08.2026 in den **Wartelisten-Einträgen** des TL-Zustands mit
+(`team1_ids`/`team2_ids`) — einziger Zweck: Link auf die badhub-Spielerseite
+(`/spieler/<Nr>/live`), deren öffentlicher URL-Schlüssel sie ohnehin ist.
+Der Wächter-Test in `tablet/tl.rs`
+(`the_state_never_carries_personal_data_beyond_its_purpose`) hält sie bei
+laufenden/beendeten Spielen sowie das Geburtsjahr überall weiterhin draußen.
 
 ---
 

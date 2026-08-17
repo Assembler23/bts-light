@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.214
+
+- **TL-Web-Spielliste: Symbolik statt Hinweistexte.** Die Texte „nicht
+  bereit", „X spielt gerade", „pausiert noch bis …" und „ohne Halle" sind
+  weg — sie machten die Liste unübersichtlich. Stattdessen: Wer gerade auf
+  einem Feld steht, trägt einen **roten** Namens-Hintergrund
+  (`title="spielt gerade"`); wer noch in der Mindestpause ist, einen
+  **orangen**, daneben zählt eine **Eieruhr** die verbleibende Wartezeit
+  sekündlich herunter. Ein Spiel ohne Hallenzuordnung erkennt man am
+  fehlenden Hallen-Kürzel.
+- **Jeder Name der Spielliste verlinkt auf die badhub-Spielerseite**
+  (`badhub.de/spieler/<Nr>/live`, neuer Tab). Dafür reist die BTP-
+  Lizenznummer (`MemberID`) jetzt in den Wartelisten-Einträgen des
+  TL-Zustands mit — bewusste Datenschutz-Freigabe wie zuvor Nation und
+  Verein: Die Nummer ist der öffentliche URL-Schlüssel genau dieser
+  badhub-Seite und steht hier hinter dem Gerätezugang. Laufende und
+  beendete Spiele bleiben ohne Lizenznummer (Wächter-Test angepasst).
+  Die Namens-Färbung ordnet über `blocked.player_keys`
+  (Lizenznummer statt Namensvergleich) — zwei gleichnamige Spieler einer
+  Paarung färben nicht mehr gemeinsam.
+
 ## 0.9.213
 
 - **Disziplin und Klassenkürzel jetzt auch im `tset`**: Der Liveticker liest

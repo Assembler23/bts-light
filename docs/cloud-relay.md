@@ -224,6 +224,16 @@ JSON, der Relay bleibt unverändert; alte `tl.html`-Stände ignorieren sie.
 Cloud-Geräte sehen die neue Anzeige erst nach einem **Relay-Deploy**
 (`tl.html` ist einkompiliert) — Deploy vor dem Client-Release.
 
+**Spielliste ohne Hinweistexte** (17.08.2026): Drei weitere additive
+`TlState`-Felder an den Wartelisten-Einträgen — `team1_ids`/`team2_ids`
+(BTP-Lizenznummern, parallel zu den Namen; Link-Ziel der
+badhub-Spielerseite, bewusste Datenschutz-Freigabe wie Nation/Verein) und
+`blocked.player_keys` (`assign::player_key`-Schlüssel für die punktgenaue
+Namens-Färbung; eine neue Seite an einem alten Host fällt auf den
+Namensvergleich zurück). Der Zustand bleibt opakes JSON, der Relay
+unverändert — aber auch hier: **Relay-Deploy** nötig, damit Cloud-Geräte
+die neue Anzeige (Farb-Marken, Eieruhr, Links) bekommen.
+
 **Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
 `TlAction`-Varianten `set_hall_prefill { enabled, window }` und
 `clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter

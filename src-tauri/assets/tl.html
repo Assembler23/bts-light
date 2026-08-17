@@ -340,6 +340,24 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .paar .seite:last-child .spieler { align-items: flex-end; }
 .paar .seite:last-child .spieler-haupt { flex-direction: row-reverse; }
+/* Der Name selbst — als eigenes Element, damit Bereitschafts-Farbe und
+   badhub-Link am NAMEN hängen, nicht an Flagge/Wappen daneben. */
+.paar .sp-name { min-width: 0; overflow-wrap: break-word; }
+/* Bereitschaftslage als Hintergrundfarbe statt Hinweistext (17.08.2026):
+   Rot = steht gerade auf einem Feld, Orange = noch in der Mindestpause.
+   Farbtöpfe der Badge-Familie (`.badge-alarm`/`.badge-warn`), damit kein
+   vierter Farbtopf entsteht; Details im `title` des Namens.
+   `.sp-name` steht MIT im Selektor: Er hebt die Spezifität über die
+   Link-Grundregel `.paar a.sp-name { color: inherit }` unten — sonst
+   verlöre ausgerechnet der verlinkte (= lizenzierte, also fast jeder)
+   Name seine Signalfarbe (Review-Fund 17.08.2026). */
+.paar .sp-name.sp-spielt { background: #fee2e2; color: #991b1b; border-radius: 5px; padding: 0 4px; }
+.paar .sp-name.sp-pause { background: #ffedd5; color: #9a3412; border-radius: 5px; padding: 0 4px; }
+/* badhub-Spielerseiten-Link: erbt Farbe und Gewicht, damit die Liste ruhig
+   bleibt — dass er klickbar ist, zeigt erst die Berührung (Unterstreichung
+   beim Zeigen/Fokussieren, gepunktet als leiser Dauerhinweis). */
+.paar a.sp-name { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+.paar a.sp-name:hover, .paar a.sp-name:focus-visible { text-decoration: underline solid 1.5px; }
 /* Vereinsname unter dem Namen — klein und gedämpft, damit er den Namen nicht
    überstrahlt; das Wappen steht davor. */
 .paar .verein-unter {
@@ -482,7 +500,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    gerufene Spiele oben angepinnt (das macht bereits die Server-Sortierung),
    alles Übrige in der geplanten Abfolge. Was früher vier Abschnitte waren
    („gerufen"/„spielbereit"/„nicht bereit"/„ohne Hallenzuordnung"), steht
-   jetzt als Status an der Zeile — siehe `.row-status` unten. */
+   jetzt als Status an der Zeile — siehe `.row-status` unten. Die
+   Bereitschaftslage selbst steht seit 17.08.2026 NICHT mehr als Text da,
+   sondern als Farbe am Namen (rot = spielt gerade, orange = pausiert; siehe
+   `.sp-spielt`/`.sp-pause` bei der Paarung) plus Eieruhr-Countdown —
+   Hinweistexte machten die Liste unübersichtlich (Nutzer-Befund). */
 .queue { display: flex; flex-direction: column; gap: 8px; }
 .row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -506,10 +528,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    anderen"). Dieser Ausschluss existiert seit dem Umbau nicht mehr: Es gibt
    nur noch eine Liste, der Griff hängt allein daran, dass ein Spiel noch
    nicht gerufen ist — und eine nicht gerufene Zeile trägt sehr wohl einen
-   Status („nicht bereit", „ohne Halle"). Tragend ist stattdessen, dass ALLES
-   Status-Artige in EINEM Wrapper steckt: Hallen-Kürzel, Bereitschafts-Status
-   samt Begründungstext und die beiden Abzeichen (Auto-Vergabe-Ausnahme,
-   manuell einsortiert). Vorher waren Status und Abzeichen zwei Kinder.
+   Status (z. B. die Pausen-Eieruhr). Tragend ist stattdessen, dass ALLES
+   Status-Artige in EINEM Wrapper steckt: Hallen-Kürzel, Pausen-Eieruhr und
+   die beiden Abzeichen (Auto-Vergabe-Ausnahme, manuell einsortiert).
+   Vorher waren Status und Abzeichen zwei Kinder.
    Wer hier ein weiteres Element ergänzt, muss diese Rechnung neu machen. */
 .row .who-block { display: flex; flex-direction: column; gap: 1px; flex: 1 1 10rem; min-width: 0; }
 .row .who { font-weight: 600; }
@@ -519,11 +541,16 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Rechnung oben). Umbrechend, damit vier Marken auf einem Telefon die Zeile
    nicht sprengen. */
 .row .row-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
-/* Begründungstexte neben dem jeweiligen Abzeichen: „blockiert weil" bzw.
-   „seit wann gerufen". Farbe passend zur Stufe des Abzeichens daneben
-   (Warnung bzw. Info), damit Marke und Text als eine Aussage lesbar sind. */
-.row .why { font-size: .82rem; color: var(--warn); font-weight: 650; }
+/* „Seit wann gerufen" neben dem Gerufen-Abzeichen — Farbe passend zur
+   Info-Stufe, damit Marke und Zeit als eine Aussage lesbar sind. (Den
+   früheren Begründungstext `.why` — „X spielt gerade"/„pausiert noch bis"
+   — gibt es seit 17.08.2026 nicht mehr: Das sagt jetzt die Farbe am Namen,
+   die Restzeit die Eieruhr `.wartet`.) */
 .row .called { font-size: .82rem; color: var(--accent); font-weight: 650; }
+/* Pausen-Eieruhr: verbleibende Wartezeit nach dem letzten Spiel, tickt
+   sekündlich (`tickClocks`). Warn-Farbe wie die orangen Namen daneben —
+   Eieruhr und Namens-Färbung sind EINE Aussage. */
+.row .wartet { font-size: .82rem; color: var(--warn); font-weight: 650; white-space: nowrap; }
 /* Hallen-Kürzel (ADR 0026): ersetzt die frühere Hallen-Gruppierung der
    Liste. Bewusst KEIN Abzeichen der Drei-Stufen-Familie — es ist keine
    Dringlichkeit, sondern eine Ortsangabe, und ein vierter Farbtopf ist
@@ -1407,12 +1434,26 @@ function syncClock(serverNowMs) {
 }
 const serverNow = () => Date.now() + clockOffset;
 
-/** Verstrichene Zeit als „3:07" bzw. „1:02:11". Nie negativ. */
-function elapsed(sinceMs) {
-  const s = Math.max(0, Math.floor((serverNow() - sinceMs) / 1000));
+/** Sekunden als „3:07" bzw. „1:02:11" — der EINE Formatierer aller Uhren
+ *  dieser Seite, verstrichene wie verbleibende (Review-Fund 17.08.2026:
+ *  drei Kopien desselben m:ss-Bausteins drifteten auseinander). */
+function zeitspanne(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   const two = (n) => String(n).padStart(2, "0");
   return h > 0 ? `${h}:${two(m)}:${two(sec)}` : `${m}:${two(sec)}`;
+}
+
+/** Verstrichene Zeit seit `sinceMs`. Nie negativ. */
+function elapsed(sinceMs) {
+  return zeitspanne(Math.max(0, Math.floor((serverNow() - sinceMs) / 1000)));
+}
+
+/** Verbleibende Zeit bis `untilMs` — das Gegenstück zu `elapsed`, für die
+ *  Pausen-Eieruhr der Spielliste. Nie negativ; bei 0 bleibt „0:00" stehen,
+ *  bis der nächste Poll die Sperre aufhebt. Aufgerundet wie `pauseText`,
+ *  damit zwei Countdowns aufs selbe Ziel nie verschiedene Sekunden zeigen. */
+function restzeit(untilMs) {
+  return zeitspanne(Math.max(0, Math.ceil((untilMs - serverNow()) / 1000)));
 }
 
 /** Sind auf diesem Feld schon Punkte gefallen? Dann läuft das Spiel. */
@@ -1482,6 +1523,16 @@ const UHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
 // Sinnbild für den Vorbereitungs-Aufruf: ein Megafon. Als Inline-SVG, damit
 // es die Schriftfarbe erbt und auf jedem Gerät gleich aussieht — ein Emoji
 // wäre je nach System ein anderes Bild.
+// Sinnbild für die noch laufende Mindestpause: eine Eieruhr. Als
+// Inline-SVG wie Uhr und Megafon, damit sie die Schriftfarbe erbt und auf
+// jedem Gerät gleich aussieht.
+const EIERUHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2"
+  stroke-linecap="round" stroke-linejoin="round"
+  style="vertical-align:-1px;margin-right:3px;opacity:.85">
+  <path d="M6 3h12M6 21h12M8 3v3l4 4 4-4V3M8 21v-3l4-4 4 4v3"/>
+</svg>`;
+
 const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
   fill="none" stroke="currentColor" stroke-width="1.8"
   stroke-linecap="round" stroke-linejoin="round">
@@ -2592,11 +2643,19 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
  * in einer Zeile **unter** dem Spielernamen. Ist **nur das Logo** an (ohne
  * Name), steht es kompakt **vor** dem Namen, direkt hinter der Nation.
  */
-function pairOf(t1, t2, nat1, nat2, club1, club2) {
+/** Spieler-Schlüssel wie `assign::player_key` im Rust-Kern: Lizenznummer,
+ *  sonst Name — getrimmt und NUR ASCII-kleingeschrieben (Rust nutzt
+ *  `to_ascii_lowercase`; ein volles `toLowerCase()` wiche z. B. bei
+ *  „Özdemir" ab, und der Abgleich mit `blocked.player_keys` liefe leer). */
+function spielerKey(nummer, name) {
+  return (nummer || name || "").trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
   const zeigeVereinsnamen = zeigeVereinsnamenAktiv();
   const zeigeVereinslogos = zeigeVereinslogosAktiv();
   const nationenAn = zeigeNationen();
-  const seite = (namen, nationen, vereine) => {
+  const seite = (namen, nationen, vereine, nummern) => {
     const liste = (namen || []).length ? namen : ["?"];
     return liste.map((n, i) => {
       const land = nationenAn ? (nationen || [])[i] : "";
@@ -2605,7 +2664,21 @@ function pairOf(t1, t2, nat1, nat2, club1, club2) {
       const willLogo = zeigeVereinslogos && verein;
       // Nur-Logo (ohne Name) → inline vor den Namen, hinter die Nation.
       const inlineLogo = (willLogo && !willName) ? vereinsLogo(verein) : "";
-      const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${esc(n)}</span>`;
+      // Nur die Spielliste reicht `extra` herein: `lage` färbt den Namen
+      // nach Bereitschaft (rot = spielt gerade, orange = pausiert; der
+      // `title` sagt es in Worten), die Lizenznummer macht ihn zum Link
+      // auf die badhub-Spielerseite. Ohne Nummer bleibt es ein `<span>`.
+      // Der Abgleich läuft über den Spieler-SCHLÜSSEL, nicht den Namen —
+      // sonst färbten zwei gleichnamige Spieler einer Paarung gemeinsam.
+      const nummer = ((nummern || [])[i] || "").trim();
+      const lage = extra && extra.lage ? extra.lage(spielerKey(nummer, n)) : null;
+      const klassen = `sp-name${lage ? " " + lage.cls : ""}`;
+      const titel = lage ? ` title="${esc(lage.titel)}"` : "";
+      const nameHtml = nummer
+        ? `<a class="${klassen}"${titel} href="https://badhub.de/spieler/${encodeURIComponent(nummer)}/live"
+             target="_blank" rel="noopener">${esc(n)}</a>`
+        : `<span class="${klassen}"${titel}>${esc(n)}</span>`;
+      const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${nameHtml}</span>`;
       // Vereinsname → eigene Zeile unter dem Namen (Logo davor, falls an).
       const unter = willName
         ? `<span class="verein-unter" title="${esc(verein)}">${willLogo ? vereinsLogo(verein) : ""}<span class="verein-name">${esc(verein)}</span></span>`
@@ -2614,9 +2687,9 @@ function pairOf(t1, t2, nat1, nat2, club1, club2) {
     }).join("");
   };
   return `<span class="paar">
-    <span class="seite">${seite(t1, nat1, club1)}</span>
+    <span class="seite">${seite(t1, nat1, club1, extra && extra.ids1)}</span>
     <span class="vs">vs.</span>
-    <span class="seite">${seite(t2, nat2, club2)}</span>
+    <span class="seite">${seite(t2, nat2, club2, extra && extra.ids2)}</span>
   </span>`;
 }
 
@@ -3009,10 +3082,10 @@ function courtCard(c, cellStyle) {
  *  weitergespielt wird. Gegen die Server-Uhr gerechnet, wie alle Uhren
  *  dieser Seite. */
 function pauseText(endsAt) {
-  const rest = Math.round((endsAt - serverNow()) / 1000);
-  const s = Math.abs(rest);
-  const mmss = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  return rest < 0 ? `überzogen +${mmss}` : `Pause ${mmss}`;
+  // Aufgerundet wie `restzeit` — beide Countdowns aufs selbe Ziel zeigen
+  // so in jeder Sekunde dieselbe Zahl.
+  const rest = Math.ceil((endsAt - serverNow()) / 1000);
+  return rest < 0 ? `überzogen +${zeitspanne(-rest)}` : `Pause ${zeitspanne(rest)}`;
 }
 
 /** Pausen-Abzeichen einer Feldkachel (Spec spielzeiten-prognose, E9/E10):
@@ -3396,7 +3469,7 @@ function scheduleFitCourts() {
  *
  * PRIMÄR (immer sichtbar): Zieh-Griff (jede noch nicht gerufene Zeile),
  * Spielnummer, Name+Meta (EIN Block, `.who-block`), der Statusblock (EIN
- * Wrapper `.row-status` mit Hallen-Kürzel, Bereitschafts-Status und den
+ * Wrapper `.row-status` mit Hallen-Kürzel, Pausen-Eieruhr und den
  * beiden Abzeichen), der Vorbereitungs-Ruf-Knopf (vermutlich die häufigste
  * Einzelaktion an einer Zeile) und das Kebab-Menü selbst.
  *
@@ -3440,10 +3513,33 @@ function queueRow(m, topMatchId) {
   if (zeigeDisziplinAktiv()) metaHaeppchen.push(klasse(m.discipline, m.class_label));
   if (zeigeGruppeAktiv()) metaHaeppchen.push(m.draw_name);
   if (zeigeRundeAktiv()) metaHaeppchen.push(m.round_name);
+  // Bereitschaftslage als Farbe am NAMEN statt als Hinweistext (Nutzer-
+  // Befund 17.08.2026: Die Begründungstexte machten die Liste
+  // unübersichtlich). Rot = steht gerade auf einem Feld, Orange = noch in
+  // der Mindestpause; die Worte dazu stehen im `title` des Namens. Die
+  // Zuordnung läuft über `player_keys` (Lizenznummer bzw. normalisierter
+  // Name, exakt `assign::player_key`) — ein bloßer Namensvergleich färbte
+  // zwei gleichnamige Spieler einer Paarung gemeinsam. Alte Hosts ohne
+  // das Feld: Rückfall auf die Namen, das alte (unscharfe) Verhalten.
+  const belegt = new Set(
+    ((m.blocked
+      && (m.blocked.player_keys && m.blocked.player_keys.length
+        ? m.blocked.player_keys
+        : m.blocked.players)) || []).map((k) => spielerKey(k, "")));
+  const pauseBis = m.blocked && m.blocked.reason === "pause"
+    ? new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+    : "";
+  const lage = (key) => {
+    if (!belegt.has(key)) return null;
+    return m.blocked.reason === "playing"
+      ? { cls: "sp-spielt", titel: "spielt gerade" }
+      : { cls: "sp-pause", titel: `pausiert noch bis ${pauseBis}` };
+  };
   // Name + Meta als EIN Flex-Kind (vorher zwei) — zählt in der
   // 6-Elemente-Grenze nur einmal.
   parts.push(`<span class="who-block">
-      <span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club)}</span>
+      <span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club,
+        { ids1: m.team1_ids, ids2: m.team2_ids, lage })}</span>
       <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
     </span>`);
   // ── Statusblock: EIN Flex-Kind, beliebig viele Marken darin ──────────
@@ -3455,15 +3551,11 @@ function queueRow(m, topMatchId) {
   // Normalfall, und in einer Liste mit hundert Zeilen wäre eine Marke an
   // fast jeder Zeile keine Information mehr.
   const status = [];
-  if (state.multi_hall) {
-    if (m.hall) {
-      status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}${m.hall_source === "auto" ? " — automatisch vorverteilt" : ""}">${hallMarke(m.hall)}${esc(hallenKuerzel(m.hall))}${m.hall_source === "auto" ? "·A" : ""}</span>`);
-    } else {
-      // Ohne Hallenzuordnung: Warnung, nicht Information — so ein Spiel
-      // wird von der automatischen Vergabe in keiner Halle angefasst und
-      // blockiert am Ende den Zeitplan.
-      status.push(`<span class="badge badge-warn" title="Kein Spielort bekannt — die automatische Vergabe lässt dieses Spiel in beiden Hallen liegen. Spielort im ⋮-Menü setzen.">ohne Halle</span>`);
-    }
+  // Ohne Hallenzuordnung steht hier bewusst NICHTS mehr (bis 17.08.2026
+  // ein „ohne Halle"-Warn-Badge): Das fehlende Hallen-Kürzel selbst ist
+  // die Symbolik — Hinweistexte machten die Liste unübersichtlich.
+  if (state.multi_hall && m.hall) {
+    status.push(`<span class="hall-kuerzel" title="${esc(m.hall)}${m.hall_source === "auto" ? " — automatisch vorverteilt" : ""}">${hallMarke(m.hall)}${esc(hallenKuerzel(m.hall))}${m.hall_source === "auto" ? "·A" : ""}</span>`);
   }
   if (m.predicted_start_ms && !m.prep_call) {
     // Startzeit-Prognose (Spec spielzeiten-prognose, E8): voraussichtlicher
@@ -3487,13 +3579,15 @@ function queueRow(m, topMatchId) {
     status.push(`<span class="badge badge-info">gerufen</span>`);
     status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}">seit ${elapsed(m.prep_call.called_at_ms)}</span>`);
   }
-  if (m.blocked) {
-    const who = (m.blocked.players || []).join(" und ");
-    status.push(`<span class="badge badge-warn">nicht bereit</span>`);
-    status.push(`<span class="why">${m.blocked.reason === "playing"
-      ? `${esc(who)} spielt gerade`
-      : `${esc(who)} pausiert noch bis ${new Date(m.blocked.until_ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</span>`);
+  if (m.blocked && m.blocked.reason === "pause") {
+    // Mindestpause: Eieruhr + Rest-Countdown statt Badge und Satz — WER
+    // pausiert, sagen die orange gefärbten Namen links daneben. Tickt
+    // sekündlich in `tickClocks` (Muster der Gerufen-Uhr).
+    status.push(`<span class="wartet num" data-until="${m.blocked.until_ms}"
+      title="${esc((m.blocked.players || []).join(" und "))} pausiert noch bis ${pauseBis}">${EIERUHR}<span class="zeit">${restzeit(m.blocked.until_ms)}</span></span>`);
   }
+  // „Spielt gerade" bekommt gar keine Statusmarke mehr: Die rot gefärbten
+  // Namen tragen die Aussage vollständig (Nutzer-Befund 17.08.2026).
   // Die beiden bestehenden Abzeichen (Auto-Vergabe-Ausnahme, Spec
   // `feldvergabe-ausnahme`; manuell einsortiert, Spec
   // `spielliste-manuelle-reihenfolge`) — seit Schritt 10 über die geteilte
@@ -3621,6 +3715,19 @@ let openKebabMatchId = null;
 
 /** Verdrahtet die Zeilen der Warteliste. */
 function wireQueue(box) {
+  // Der badhub-Spieler-Link öffnet die Spielerseite in einem neuen Tab —
+  // ein Klick darauf darf das Spiel nicht ZUSÄTZLICH auswählen. Anders als
+  // beim Megafon-Knopf bleibt `pointerdown` aber unangetastet: Der Name ist
+  // die größte Trefffläche der Zeile, ein dort angesetzter ZUG (Maus aufs
+  // Feld ziehen) muss weiter funktionieren (Review-Fund 17.08.2026). Endet
+  // so ein Zug über dem Namen, folgt noch ein Klick-Ereignis — das darf
+  // dann auch nicht navigieren (`suppressNextClick`, Muster `enableDrag`).
+  box.querySelectorAll("a.sp-name").forEach((a) => {
+    a.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (suppressNextClick) ev.preventDefault();
+    });
+  });
   box.querySelectorAll("button[data-prep]").forEach((btn) => {
     const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
     if (!match) return;
@@ -3727,6 +3834,10 @@ function wireQueue(box) {
     const go = () => { if (!suppressNextClick) pick(match, null); };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
+      // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
+      // Link (badhub-Seite öffnen) — ohne diese Ausnahme finge die Zeile
+      // sie ab und wählte stattdessen das Spiel (Review-Fund 17.08.2026).
+      if (ev.target instanceof Element && ev.target.closest("a.sp-name")) return;
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
     enableDrag(el, match, null);
@@ -6192,6 +6303,14 @@ function tickClocks() {
   document.querySelectorAll(".sk-wait[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
     if (since) el.textContent = elapsed(since);
+  });
+  // Pausen-Eieruhr der Spielliste: der Rest-Countdown tickt sekündlich
+  // herunter. Gezielt ins Zeit-Feld schreiben (wie bei der Feld-Uhr) —
+  // vor der Zahl steht das Eieruhr-Sinnbild.
+  document.querySelectorAll(".wartet[data-until]").forEach((el) => {
+    const until = Number(el.dataset.until);
+    const zeit = el.querySelector(".zeit");
+    if (until && zeit) zeit.textContent = restzeit(until);
   });
   // Pausen-Countdown/Überziehung (Spec spielzeiten-prognose, E9): tickt
   // sekündlich weiter, der Wechsel auf Rot passiert genau bei 0 — nicht

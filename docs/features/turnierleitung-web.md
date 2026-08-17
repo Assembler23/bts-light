@@ -151,12 +151,16 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 - Kein Geburtsjahr — kommt in keiner View-Struct vor und darf nicht
   nachgerüstet werden.
-- **Keine `member_id`/Lizenznummer im Browser.** Die Spieleridentität
-  (`player_key`) bleibt am Host; TL-Web bekommt nur das *Ergebnis* der
-  Verfügbarkeitsprüfung (`blocked_reason`, `ready_at_ms`,
-  `blocking_players` als Namen).
-- **Keine Nationalitäten.** Die existieren allein für die automatische
-  Sprachwahl der Ansage — da TL-Web nicht spricht, entfallen sie.
+- ~~**Keine `member_id`/Lizenznummer im Browser.**~~ **Revidiert am
+  17.08.2026** (Nutzer-Entscheidung, wie zuvor Nation 09.08. und Verein
+  12.08.): Die **Wartelisten**-Einträge tragen die Lizenznummer
+  (`team1_ids`/`team2_ids`) als Link-Ziel der badhub-Spielerseite
+  (`/spieler/<Nr>/live` — die Nummer ist der **öffentliche** URL-Schlüssel
+  genau dieser Seite) sowie `blocked.player_keys` (Lizenznummer bzw.
+  normalisierter Name) für die punktgenaue Namens-Färbung. Laufende und
+  beendete Spiele bleiben ohne Lizenznummer — dort gibt es keinen Link.
+- ~~**Keine Nationalitäten.**~~ Revidiert am 09.08.2026 — als
+  zuschaltbares ISO-Kürzel neben dem Namen (Standard: aus).
 - **Kein Akkustand, keine `serving_*`-Felder** (nicht im Scope bzw. reine
   Zählhilfe).
 - Spielernamen und Zähltafelbediener-Namen laufen über eine aus dem
@@ -164,9 +168,11 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
   ist, die Zahl der Geräte begrenzt und vom Master ausgestellt. Der Relay
   hält sie nur im RAM, kappt sie, persistiert sie nicht und **loggt sie
   nie** — dieselbe Regel wie beim Azure-Key.
-- Ein **Datensparsamkeits-Test** prüft das serialisierte `TlState` gegen
-  `member_id`, Geburtsjahr und Nationalitäten und schlägt fehl, wenn jemand
-  ein solches Feld nachrüstet.
+- Ein **Datensparsamkeits-Test** prüft das serialisierte `TlState`: Das
+  Geburtsjahr bleibt überall draußen, die Lizenznummer bei laufenden und
+  beendeten Spielen (in der Warteliste ist sie seit 17.08.2026 als
+  badhub-Link-Ziel freigegeben, siehe oben; Nation seit 09.08., Verein
+  seit 12.08. als zuschaltbare Anzeige).
 
 **Abhängigkeiten**
 

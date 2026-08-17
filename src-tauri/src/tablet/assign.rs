@@ -328,12 +328,20 @@ fn canonical_hall(snap: &BtpSnapshot, name: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Blocked {
     /// Mindestens ein Spieler steht gerade auf einem Feld.
-    Playing { players: Vec<String> },
+    Playing {
+        players: Vec<String>,
+        /// [`player_key`]-Schlüssel **parallel** zu `players`: Die Anzeige
+        /// färbt einzelne Namen — über den bloßen Namen verschmölzen zwei
+        /// gleichnamige Spieler einer Paarung (Review-Fund 17.08.2026).
+        player_keys: Vec<String>,
+    },
     /// Mindestens ein Spieler ist noch in seiner Pause.
     Pause {
         /// Unix-ms, ab wann der Letzte wieder darf.
         until_ms: u64,
         players: Vec<String>,
+        /// Siehe [`Blocked::Playing::player_keys`].
+        player_keys: Vec<String>,
     },
 }
 
@@ -422,7 +430,7 @@ impl PlayerAvailability {
         // Spieler, die in einem ANDEREN Spiel auf dem Feld stehen. Das
         // eigene Spiel zählt nicht — sonst könnte ein laufendes Spiel nie
         // auf ein anderes Feld umgehängt werden.
-        let playing: Vec<String> = m
+        let playing: Vec<&BtpPlayer> = m
             .team1
             .iter()
             .chain(m.team2.iter())
@@ -431,23 +439,25 @@ impl PlayerAvailability {
                     .get(&player_key(p))
                     .is_some_and(|&in_match| in_match != m.id)
             })
-            .map(|p| p.name.clone())
             .collect();
         if !playing.is_empty() {
-            return Some(Blocked::Playing { players: playing });
+            return Some(Blocked::Playing {
+                players: playing.iter().map(|p| p.name.clone()).collect(),
+                player_keys: playing.iter().map(|p| player_key(p)).collect(),
+            });
         }
 
         if self.pause_ms == 0 {
             return None;
         }
         let mut until = 0u64;
-        let mut resting: Vec<String> = Vec::new();
+        let mut resting: Vec<&BtpPlayer> = Vec::new();
         for p in m.team1.iter().chain(m.team2.iter()) {
             if let Some(&end) = self.last_finish.get(&player_key(p)) {
                 let free_at = end.saturating_add(self.pause_ms);
                 if now_ms < free_at {
                     until = until.max(free_at);
-                    resting.push(p.name.clone());
+                    resting.push(p);
                 }
             }
         }
@@ -456,7 +466,8 @@ impl PlayerAvailability {
         } else {
             Some(Blocked::Pause {
                 until_ms: until,
-                players: resting,
+                players: resting.iter().map(|p| p.name.clone()).collect(),
+                player_keys: resting.iter().map(|p| player_key(p)).collect(),
             })
         }
     }
@@ -631,7 +642,7 @@ pub fn check_assign(
     // Pausenregel bleibt bewusst außen vor: Sie darf die Turnierleitung
     // übergehen, „steht gerade auf einem Feld" nicht.
     let availability = PlayerAvailability::from_snapshot(snap, config);
-    if let Some(Blocked::Playing { players }) = availability.blocked(m, 0) {
+    if let Some(Blocked::Playing { players, .. }) = availability.blocked(m, 0) {
         return Err(AssignError::PlayerOnCourt { players });
     }
 
@@ -1736,7 +1747,9 @@ mod tests {
         );
         let av = PlayerAvailability::from_snapshot(&s, &AppConfig::default());
         match av.blocked(&wanted, 1_000) {
-            Some(Blocked::Playing { players }) => assert_eq!(players, vec!["Müller".to_string()]),
+            Some(Blocked::Playing { players, .. }) => {
+                assert_eq!(players, vec!["Müller".to_string()])
+            }
             other => panic!("erwartet: spielt gerade, war: {other:?}"),
         }
     }
@@ -1779,7 +1792,9 @@ mod tests {
         let s = snap(Vec::new(), vec![done, wanted.clone()], Vec::new());
         let av = PlayerAvailability::from_snapshot(&s, &cfg);
         match av.blocked(&wanted, 200_000) {
-            Some(Blocked::Pause { until_ms, players }) => {
+            Some(Blocked::Pause {
+                until_ms, players, ..
+            }) => {
                 assert_eq!(until_ms, 700_000, "Spielende + Pausenlänge");
                 assert_eq!(players, vec!["Müller".to_string()]);
             }

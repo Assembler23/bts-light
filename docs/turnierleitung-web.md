@@ -70,6 +70,19 @@ LAN+Cloud voraus.
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
+- **Bereitschaft als Farbe statt Text** (seit 17.08.2026): Die früheren
+  Hinweistexte („nicht bereit", „X spielt gerade", „pausiert noch bis …",
+  „ohne Halle") machten die Liste unübersichtlich und sind weg. Stattdessen:
+  Ein Name mit **rotem** Hintergrund steht gerade auf einem Feld, einer mit
+  **orangem** Hintergrund ist noch in seiner Mindestpause — daneben zählt
+  eine **Eieruhr** die verbleibende Wartezeit sekündlich herunter. Wer es
+  in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
+  „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
+  Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Jeder Name ist ein Link** auf die Spielerseite von badhub
+  (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
+  Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne
+  Lizenznummer in BTP bleiben unverlinkt.
 - **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
   scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
