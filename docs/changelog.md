@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.215
+
+- **TL-Web: ⋮-Menü der Spielzeilen wird nicht mehr abgeschnitten.** Das
+  Menü einer Zeile am unteren Panel-Rand ragte nicht über die Panel-Kante
+  hinaus (die `overflow`-Klemmen der Panels schneiden auch hoch gestapelte
+  Kinder — ein höherer z-index hätte nichts geändert). Es hängt jetzt wie
+  das Kachel-Menü am Ansichtsfenster: `position: fixed` plus die geteilte
+  Platzierungsfunktion (`platziereKebabMenue`), die unter dem Auslöser
+  öffnet, wenn Platz ist, sonst darüber (Feldtest 17.08.2026).
+
 ## v0.9.214
 
 - **TL-Web-Spielliste: Symbolik statt Hinweistexte.** Die Texte „nicht

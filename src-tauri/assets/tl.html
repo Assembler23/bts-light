@@ -636,24 +636,24 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .kebab > summary::-webkit-details-marker { display: none; }
 .kebab[open] > summary { border-color: var(--accent); color: var(--accent); }
+/* Jedes Kebab-Menü hängt am Ansichtsfenster, nicht an seinem Auslöser:
+   Zeile wie Kachel stecken im Körper ihres Panels, und der klemmt
+   (`.panel { overflow: hidden }`, `.panel-body` rollt). Ein absolut
+   positioniertes Menü kann deshalb nie über die Panel-Kante hinaus über
+   das Nachbar-Panel ragen — an einer Zeile am unteren Panel-Rand war es
+   nur durch Scrollen erreichbar oder schlicht abgeschnitten (Feldtest
+   17.08.2026). z-index hülfe dagegen nicht, `overflow` schneidet auch
+   hoch gestapelte Kinder. `platziereKebabMenue()` im Skript setzt Ort
+   und Aufklapprichtung, bei jedem Neuzeichnen erneut. */
 .kebab-menu {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  position: fixed; z-index: 20;
   display: flex; flex-direction: column; gap: 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
+  max-height: 70vh; overflow-y: auto;
 }
-/* Die Feldkachel steckt im Körper ihres Panels, und der ist so hoch, wie
-   `fitCourts()` ihn lässt (`.panel { overflow: hidden }`, `.panel-body`
-   rollt). Ein absolut positioniertes Menü wäre an dessen Kante
-   abgeschnitten; bei sechs Einträgen ist es zudem höher als jede Kachel und
-   höher als eine kompakte Felderspalte. Es hängt deshalb am
-   Ansichtsfenster, `platziereKachelMenue()` im Skript setzt Ort und
-   Aufklapprichtung. Die Spielzeile braucht das nicht: Ihre Einträge sind
-   kurz, und ihr Panel-Körper rollt mit dem geöffneten Menü mit. */
-.card .kebab-menu {
-  position: fixed; right: auto; top: auto;
-  min-width: 13rem; max-height: 70vh; overflow-y: auto;
-}
+/* Kachel-Menüs etwas schmaler: sechs kurze Aktionsknöpfe, kein Wähler. */
+.card .kebab-menu { min-width: 13rem; }
 .kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
 .kebab-menu .kebab-label {
   font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
@@ -3117,13 +3117,14 @@ function pauseBadge(p) {
 let openKebabCourtId = null;
 
 /**
- * Setzt das ⋯-Menü einer Feldkachel ans Ansichtsfenster (siehe die
- * CSS-Begründung bei `.card .kebab-menu`): unter den Auslöser, wenn darunter
+ * Setzt ein ⋯-Menü (Feldkachel ODER Spielzeile) ans Ansichtsfenster (siehe
+ * die CSS-Begründung bei `.kebab-menu`): unter den Auslöser, wenn darunter
  * Platz ist, sonst darüber; waagerecht rechtsbündig am Auslöser, aber nie
  * über den Fensterrand hinaus. Ohne diese Rechnung wäre das Menü einer
- * Kachel in der untersten Reihe schlicht nicht sichtbar.
+ * Kachel in der untersten Reihe oder einer Zeile am unteren Panel-Rand
+ * schlicht nicht sichtbar.
  */
-function platziereKachelMenue(det) {
+function platziereKebabMenue(det) {
   const menu = det.querySelector(".kebab-menu");
   const anker = det.querySelector("summary");
   if (!menu || !anker) return;
@@ -3222,7 +3223,7 @@ function wireCourts(box) {
         box.querySelectorAll(".kebab[open]").forEach((other) => {
           if (other !== det) other.open = false;
         });
-        platziereKachelMenue(det);
+        platziereKebabMenue(det);
       } else if (openKebabCourtId === courtId) {
         openKebabCourtId = null;
       }
@@ -3232,7 +3233,7 @@ function wireCourts(box) {
     // muss deshalb hier ausdrücklich nachgeholt werden. Nebeneffekt, den
     // wir wollen: Sie läuft damit bei jedem Neuzeichnen mit, das Menü folgt
     // seiner Kachel, wenn die Kompaktstufe wechselt.
-    if (det.open) platziereKachelMenue(det);
+    if (det.open) platziereKebabMenue(det);
   });
 
   // Graph-Knopf wie der Aufruf-Knopf: gestopptes Weiterreichen, sonst
@@ -3754,10 +3755,15 @@ function wireQueue(box) {
         box.querySelectorAll(".kebab[open]").forEach((other) => {
           if (other !== det) other.open = false;
         });
+        platziereKebabMenue(det);
       } else if (openKebabMatchId === matchId) {
         openKebabMatchId = null;
       }
     });
+    // Über den Redraw gerettetes `<details open>` löst kein `toggle` aus —
+    // Platzierung nachholen, wie bei der Feldkachel (`wireCourts`). So folgt
+    // das Menü seiner Zeile auch, wenn die Liste sich umsortiert.
+    if (det.open) platziereKebabMenue(det);
   });
   // „Nach oben schieben": derselbe Wire-Aufruf wie ein Zug bis ganz nach
   // oben (`queue_reorder` vor die erste umsortierbare Zeile) — kein
