@@ -180,9 +180,11 @@ pub struct CourtOverview {
     /// steht. `None`, wenn kein Spiel auf dem Feld ist. Grundlage des
     /// Aufruf-Timers (hochzählende Uhr + 2./3. Aufruf).
     pub on_court_since_ms: Option<u64>,
-    /// Wie oft dieses Spiel schon aufgerufen wurde (1–3), gezählt am
-    /// Turnier-PC. Damit zeigen Desktop-Übersicht und Turnierleitungs-Seite
-    /// dieselbe Stufe — auch wenn die eine gerufen hat und die andere nicht.
+    /// Wie oft dieses Spiel schon aufgerufen wurde, gezählt am Turnier-PC
+    /// (0 = noch nie; mit „Aufrufe unbegrenzt" nach oben offen, sonst
+    /// maximal 3 — Konsumenten dürfen KEIN `min(…, 3)` daraufsetzen).
+    /// Damit zeigen Desktop-Übersicht und Turnierleitungs-Seite dieselbe
+    /// Stufe — auch wenn die eine gerufen hat und die andere nicht.
     pub call_stage: u8,
     /// Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap), damit die
     /// Felderübersicht Satz-/Matchball berechnen kann (Plan 16). 0 = kein
@@ -2372,9 +2374,14 @@ impl TabletState {
     /// Für die Turnierleitungs-Seite, die nur „noch einmal" weiß. Sie zeigt
     /// als erfolgte Stufe `max(1, calls_made)` und bietet die nächste an —
     /// die Rechnung hier muss dazu passen. `at_least` hebt auf die zeitlich
-    /// fällige Stufe an. Über den dritten Aufruf hinaus zählt der Zähler
-    /// ehrlich weiter — ob es einen vierten gibt, entscheidet die
-    /// Oberfläche (Option „Aufrufe unbegrenzt").
+    /// fällige Stufe an.
+    ///
+    /// `unlimited` (Option „Aufrufe unbegrenzt", Feldtest 17.08.2026):
+    /// `true` lässt den Zähler über den dritten Aufruf hinaus ehrlich
+    /// weiterlaufen (4, 5, …). `false` behält den alten Deckel bei 3 —
+    /// host-seitig, damit ein Turnier ohne die Option sich nicht allein
+    /// auf das Client-Gating verlassen muss (Review 17.08.2026);
+    /// zurückgedreht wird dabei trotzdem nie.
     ///
     /// `sides` ist die Parteien-Maske des Aufrufs
     /// ([`SIDE_BOTH`]/[`SIDE_TEAM1`]/[`SIDE_TEAM2`]). Die Stufe steigt nur,
@@ -2388,6 +2395,7 @@ impl TabletState {
         match_id: i64,
         at_least: u8,
         sides: u8,
+        unlimited: bool,
     ) -> u8 {
         let mut g = self.call_stages.write().unwrap();
         let entry = g.entry(court_id).or_insert((match_id, 0, 0));
@@ -2396,27 +2404,32 @@ impl TabletState {
         if entry.0 != match_id {
             *entry = (match_id, 0, 0);
         }
+        let vorher = entry.1;
         // Neue Runde, sobald sich die gerufenen Parteien mit den auf dieser
         // Stufe bereits gerufenen überschneiden — oder wenn überhaupt noch
         // nichts gerufen wurde (dann ist dieser Aufruf der zweite, denn auf
-        // dem Feld zu stehen war der erste). Über den dritten hinaus zählt
-        // der Zähler ehrlich weiter (Option „Aufrufe unbegrenzt"): Ob es
-        // einen vierten überhaupt gibt, entscheidet allein die Oberfläche —
-        // ab Stufe 4 spricht das Ansage-Gerät die schlichte Feld-Ansage
-        // ohne Stufenwort (`AnnounceJobPlayer`).
+        // dem Feld zu stehen war der erste). Ab Stufe 4 spricht das
+        // Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort
+        // (`AnnounceJobPlayer`).
         if entry.1 == 0 || entry.2 & sides != 0 {
             entry.1 = entry.1.max(1).saturating_add(1);
             entry.2 = 0;
         }
         entry.1 = entry.1.max(at_least);
+        if !unlimited {
+            // Ohne die Option gilt der alte Deckel bei 3 — aber nie unter
+            // einen Stand zurück, den ein Gerät MIT der Option schon
+            // erreicht hat (zwei Geräte, verschiedene Profile).
+            entry.1 = entry.1.min(vorher.max(3));
+        }
         entry.2 |= sides;
         entry.1
     }
 
     /// Wie [`Self::note_court_call_at_least`] ohne zeitliche Untergrenze,
     /// für beide Parteien.
-    pub fn note_court_call(&self, court_id: i64, match_id: i64) -> u8 {
-        self.note_court_call_at_least(court_id, match_id, 0, SIDE_BOTH)
+    pub fn note_court_call(&self, court_id: i64, match_id: i64, unlimited: bool) -> u8 {
+        self.note_court_call_at_least(court_id, match_id, 0, SIDE_BOTH, unlimited)
     }
 
     /// Hält fest, dass eine bestimmte Stufe **gesprochen wurde**.
@@ -4040,8 +4053,8 @@ mod tests {
         // Spiel „3. Aufruf erfolgt", und der Aufruf-Knopf verschwände
         // dauerhaft: Die Turnierleitung könnte es nicht mehr rufen.
         let st = TabletState::default();
-        st.note_court_call(101, 42);
-        st.note_court_call(101, 42);
+        st.note_court_call(101, 42, false);
+        st.note_court_call(101, 42, false);
         assert_eq!(st.calls_made(101, 42), 3);
 
         // Feld geräumt (Spiel 42 steht nirgends mehr).
@@ -4192,11 +4205,11 @@ mod tests {
         let st = TabletState::default();
         assert_eq!(st.calls_made(101, 7), 0, "noch kein Aufruf gesprochen");
         assert_eq!(
-            st.note_court_call(101, 7),
+            st.note_court_call(101, 7, false),
             2,
             "der erneute Aufruf ist der 2."
         );
-        assert_eq!(st.note_court_call(101, 7), 3);
+        assert_eq!(st.note_court_call(101, 7, false), 3);
         assert_eq!(st.calls_made(101, 7), 3, "und jedes Gerät liest dieselbe 3");
     }
 
@@ -4209,18 +4222,36 @@ mod tests {
         // (`AnnounceJobPlayer`): „Dritter und letzter Aufruf" noch einmal
         // wäre gelogen.
         let st = TabletState::default();
-        st.note_court_call(101, 7);
-        st.note_court_call(101, 7);
+        st.note_court_call(101, 7, true);
+        st.note_court_call(101, 7, true);
         assert_eq!(
-            st.note_court_call(101, 7),
+            st.note_court_call(101, 7, true),
             4,
             "nach dem dritten kommt der vierte, kein Deckel"
         );
-        assert_eq!(st.note_court_call(101, 7), 5);
+        assert_eq!(st.note_court_call(101, 7, true), 5);
         assert_eq!(st.calls_made(101, 7), 5, "jedes Gerät liest dieselbe 5");
         // Eine zeitliche Untergrenze (Uhr, maximal 3) drückt den Zähler
         // dabei nie wieder herunter.
-        assert_eq!(st.note_court_call_at_least(101, 7, 3, SIDE_BOTH), 6);
+        assert_eq!(st.note_court_call_at_least(101, 7, 3, SIDE_BOTH, true), 6);
+        // Ein Gerät OHNE die Option dreht den geteilten Zähler nicht
+        // zurück — treibt ihn aber auch nicht weiter über seinen Deckel
+        // hinaus (sein Client bietet jenseits von 3 ohnehin keinen Knopf).
+        assert_eq!(st.note_court_call(101, 7, false), 6);
+    }
+
+    #[test]
+    fn without_the_option_the_counter_keeps_its_cap_of_three() {
+        // Sicherheitsnetz aus dem Review 17.08.2026: Ohne „Aufrufe
+        // unbegrenzt" bleibt der alte Deckel host-seitig bestehen — ein
+        // Turnier ohne die Option darf sich nicht allein auf das
+        // Client-Gating verlassen (alte tl.html-Stände, schnelle
+        // Doppel-Tipps über Geschwister-Knöpfe).
+        let st = TabletState::default();
+        st.note_court_call(101, 7, false);
+        st.note_court_call(101, 7, false);
+        assert_eq!(st.note_court_call(101, 7, false), 3, "Deckel hält");
+        assert_eq!(st.calls_made(101, 7), 3);
     }
 
     #[test]
@@ -4236,7 +4267,7 @@ mod tests {
         );
         st.set_snapshot(snap.clone());
         assert_eq!(st.overview()[0].call_stage, 0, "noch nichts gesprochen");
-        st.note_court_call(101, 7);
+        st.note_court_call(101, 7, false);
         assert_eq!(st.overview()[0].call_stage, 2);
     }
 
@@ -4268,15 +4299,14 @@ mod tests {
         // gemeinsame Zählung anheben, aber nie zurückdrehen.
         let st = TabletState::default();
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 3, SIDE_BOTH),
+            st.note_court_call_at_least(101, 7, 3, SIDE_BOTH, false),
             3,
             "die Uhr war weiter"
         );
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 2, SIDE_BOTH),
-            4,
-            "der erneute Druck ist der nächste Aufruf — die niedrigere \
-             Vorgabe der Uhr dreht ihn nicht auf 2 zurück"
+            st.note_court_call_at_least(101, 7, 2, SIDE_BOTH, false),
+            3,
+            "und eine niedrigere Vorgabe dreht nicht zurück"
         );
     }
 
@@ -4288,19 +4318,19 @@ mod tests {
         // gerufen, nicht zweimal.
         let st = TabletState::default();
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1),
+            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false),
             2,
             "der erste Partei-Aufruf ist der zweite Aufruf"
         );
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2),
+            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2, false),
             2,
             "die andere Partei gehört zur selben Runde"
         );
         assert_eq!(st.calls_made(101, 7), 2, "alle Geräte lesen dieselbe 2");
 
         // Dieselbe Partei ein zweites Mal: das ist eine neue Runde.
-        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1), 3);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false), 3);
         assert_eq!(st.calls_made(101, 7), 3);
     }
 
@@ -4309,10 +4339,10 @@ mod tests {
         // Nach einem Aufruf an beide Parteien ist die Runde voll — der
         // nächste Aufruf, egal an wen, ist der dritte und letzte.
         let st = TabletState::default();
-        assert_eq!(st.note_court_call(101, 7), 2);
-        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2), 3);
+        assert_eq!(st.note_court_call(101, 7, false), 2);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2, false), 3);
         // Und die Gegenpartei schließt dieselbe (dritte) Runde ab.
-        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1), 3);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false), 3);
     }
 
     #[test]
@@ -4323,7 +4353,7 @@ mod tests {
         // eröffnen — sonst hörte die Halle zweimal „Zweiter Aufruf".
         let st = TabletState::default();
         assert_eq!(st.reached_court_call(101, 7, 2), 2);
-        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1), 3);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false), 3);
     }
 
     #[test]
@@ -4331,10 +4361,10 @@ mod tests {
         // Sonst erbte das nächste Spiel die Stufe seines Vorgängers und
         // stünde sofort als „dritter Aufruf" da.
         let st = TabletState::default();
-        st.note_court_call(101, 7);
-        st.note_court_call(101, 7);
+        st.note_court_call(101, 7, false);
+        st.note_court_call(101, 7, false);
         assert_eq!(st.calls_made(101, 8), 0, "anderes Spiel, neue Zählung");
-        assert_eq!(st.note_court_call(101, 8), 2);
+        assert_eq!(st.note_court_call(101, 8, false), 2);
         assert_eq!(st.calls_made(101, 7), 0, "und der Vorgänger ist vergessen");
     }
 

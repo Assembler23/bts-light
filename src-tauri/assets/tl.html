@@ -2954,9 +2954,15 @@ function courtCard(c, cellStyle) {
     // der Kachel — das Wort wiederholte nur, was der Streifen schon zeigt,
     // und kostete auf dem Tablet eine ganze Zeile je Feld. Ein fälliger
     // Aufruf ist dagegen eine Aufforderung und bleibt ausgeschrieben.
+    // „Fällig" heißt: noch nicht gesprochen. Hat die Halle die Stufe
+    // schon gehört (c.call_stage), wäre „Letzter Aufruf" eine stehen
+    // gebliebene Aufforderung — und widerspräche mit „Aufrufe
+    // unbegrenzt" dem Knopf „Erneut aufrufen" derselben Kachel
+    // (Review 17.08.2026).
+    const gesprochenUhr = c.call_stage || 0;
     const clockLabel =
-      stage >= 3 ? "Letzter Aufruf" :
-      stage >= 2 ? "2. Aufruf fällig" : "";
+      stage >= 3 && gesprochenUhr < 3 ? "Letzter Aufruf" :
+      stage >= 2 && gesprochenUhr < 2 ? "2. Aufruf fällig" : "";
     // Geschätzte Restzeit (Spec spielzeiten-prognose, Etappe D): eine vom
     // Host aus Live-Stand und Medianen gerechnete Schätzung — hinter dem
     // Profil-Schalter, weil nicht jede Turnierleitung eine dritte Zahl in
@@ -3044,7 +3050,9 @@ function courtCard(c, cellStyle) {
           title="Schiedsrichter ansagen">Schiedsrichter ansagen</button>`);
     }
   }
-  if (c.match_id && (aufrufeUnbegrenzt() || (!isPlaying(c) && gesprochen < 3))) {
+  // Billige Bedingung zuerst: `aufrufeUnbegrenzt()` läuft durch die
+  // Profil-Auflösung und soll im Normalfall gar nicht erst rechnen.
+  if (c.match_id && ((!isPlaying(c) && gesprochen < 3) || aufrufeUnbegrenzt())) {
     // Drei Wege, denselben Aufruf auszulösen: für beide Parteien (bisheriges
     // Verhalten, ohne `side` gesendet) oder gezielt für eine — in der Regel
     // fehlt nur eine, und der ganze Saal noch einmal auszurufen nervt alle
@@ -3214,9 +3222,14 @@ function wireCourts(box) {
       // Zeitfenster verschluckte den zweiten Aufruf — und ein Aufruf ist
       // seinem Wesen nach wiederholbar. Die Partei gehört mit in die
       // Kennung: „erst A rufen, dann B" sind zwei verschiedene Absichten
-      // auf demselben Stand.
+      // auf demselben Stand. Mit „Aufrufe unbegrenzt" bewegt eine
+      // Partei-Wiederholung die Stufe nicht mehr unbedingt — dann macht
+      // eine Zeitmarke die Kennung eindeutig, sonst spielte
+      // `remembered_result` die alte Antwort stumm ab (Review
+      // 17.08.2026); den Doppel-Tipp fängt das `disabled` oben ab.
+      const nonce = aufrufeUnbegrenzt() ? `-${Date.now()}` : "";
       send(
-        `call-${courtId}-${matchId}-${side || "both"}-${btn.dataset.made}`,
+        `call-${courtId}-${matchId}-${side || "both"}-${btn.dataset.made}${nonce}`,
         side
           ? { action: "announce_court_call", courtId, matchId, side }
           : { action: "announce_court_call", courtId, matchId },

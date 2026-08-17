@@ -187,7 +187,15 @@ TL-Web, seit 17.08.2026) zählt der Turnier-PC ehrlich weiter (4, 5, …) —
 gesprochen wird ab Stufe 4 aber die **schlichte Feld-Ansage ohne
 Stufenwort** (`AnnounceJobPlayer` bildet `stage >= 4` auf `callStage: 1`
 ab): „Dritter und letzter Aufruf" noch einmal wäre gelogen, und eine
-„vierte" Stufe gibt es im Sprachbild der Halle nicht.
+„vierte" Stufe gibt es im Sprachbild der Halle nicht. Die Klemme fällt
+nur, wenn irgendein TL-Web-Profil die Option führt — sonst hält der
+Turnier-PC den 3er-Deckel selbst (`tablet/tl.rs`
+`unlimited_court_calls`). Bei einem **laufenden** Spiel (Punkte gefallen)
+hebt der Host den Auftrag unabhängig von der Stufe auf `>= 4` — auch ein
+„zweiter" Aufruf mitten ins Spiel kommt ohne Stufenwort. Der Desktop-Knopf
+der Felderübersicht rechnet mit derselben Regel (`FieldOverviewPage`,
+Prop `unlimitedCalls`): ab Stufe 4 heißt er „Erneut aufrufen" und sagt
+ohne Stufenwort an.
 
 **Vorgelesen** wird die Angabe am Ansage-Gerät: Der Auftrag trägt sie mit
 (`AnnounceJobKind::CourtCall.side`), `AnnounceJobPlayer` reicht sie an

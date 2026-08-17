@@ -10,12 +10,15 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Anzeige-Abschnitt des Profil-Editors (Feldtest 17.08.2026): Der
   Aufruf-Knopf am Feld bleibt damit immer verfügbar — auch bei laufendem
   Spiel und über den dritten Aufruf hinaus („Erneut aufrufen"). Der
-  Turnier-PC zählt die Stufe jetzt ehrlich weiter (4, 5, …); ab dem
-  vierten Aufruf spricht das Ansage-Gerät die schlichte Feld-Ansage ohne
-  Stufenwort statt noch einmal „Dritter und letzter Aufruf". Ohne das
-  Häkchen bleibt alles beim Alten (Deckel bei drei, kein Aufruf bei
-  laufendem Spiel); alte Browser-Profile ohne das Feld lesen sich als
-  „aus" (`unlimitedCourtCalls`, `#[serde(default)]`).
+  Turnier-PC zählt die Stufe dann ehrlich weiter (4, 5, …); ab dem
+  vierten Aufruf — und bei laufenden Spielen grundsätzlich — spricht das
+  Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort statt noch
+  einmal „Dritter und letzter Aufruf". Führt **kein** Profil die Option,
+  hält der Turnier-PC den alten 3er-Deckel selbst — alles bleibt beim
+  Alten; alte Browser-Profile ohne das Feld lesen sich als „aus"
+  (`unlimitedCourtCalls`, `#[serde(default)]`). Der Aufruf-Knopf der
+  Desktop-Felderübersicht folgt derselben Regel, und der Uhr-Chip
+  („Letzter Aufruf") erlischt, sobald die Stufe gesprochen ist.
 
 ## v0.9.215
 

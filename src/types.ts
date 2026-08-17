@@ -635,6 +635,21 @@ export interface TlWebConfig {
   enabled: boolean;
   /** Gekoppelte Geräte. Eintrag entfernen = Zugang entziehen. */
   devices: TlDevice[];
+  /** Panel-Profile der TL-Web-Seite (Rust: `config::TlPanelProfile`).
+   *  Gepflegt wird ausschließlich in `tl.html` (ADR 0024) — hier nur die
+   *  Felder, die die Desktop-App selbst liest. */
+  profiles?: TlPanelProfileMirror[];
+}
+
+/** Schmaler Spiegel eines TL-Web-Panel-Profils für die Desktop-App. */
+export interface TlPanelProfileMirror {
+  id: string;
+  name: string;
+  display?: {
+    /** Aufrufe am Feld beliebig oft (Feldtest 17.08.2026) — die Desktop-
+     *  Felderübersicht richtet ihren Aufruf-Knopf danach aus. */
+    unlimited_court_calls?: boolean;
+  };
 }
 
 /** Turnierlogo (Base64) für badhubs #live-logo. */
@@ -746,9 +761,11 @@ export interface CourtOverview {
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
    *  steht; null = kein Spiel. Grundlage des Aufruf-Timers. */
   on_court_since_ms: number | null;
-  /** Wie oft dieses Spiel schon aufgerufen wurde (1–3), gezählt am
-   *  Turnier-PC. Damit zeigen diese Oberfläche und die Turnierleitungs-Seite
-   *  dieselbe Stufe — auch wenn die andere gerufen hat. */
+  /** Wie oft dieses Spiel schon aufgerufen wurde, gezählt am Turnier-PC
+   *  (0 = noch nie; mit „Aufrufe unbegrenzt" nach oben offen, sonst
+   *  maximal 3 — KEIN `Math.min(…, 3)` daraufsetzen). Damit zeigen diese
+   *  Oberfläche und die Turnierleitungs-Seite dieselbe Stufe — auch wenn
+   *  die andere gerufen hat. */
   call_stage: number;
   /** Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap) für die
    *  Satz-/Matchball-Anzeige (Plan 16); 0 = kein Match/unbekannt. */

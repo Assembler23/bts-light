@@ -1156,7 +1156,13 @@ pub enum TlListPositionWire {
 /// Turnierweite Anzeige-Optionen eines Panel-Profils (Spec
 /// tl-web-panelsystem) — dieselben Schalter, die vorher als lose
 /// `localStorage`-Werte in `tl.html` lebten.
+///
+/// Container-weites `#[serde(default)]` wie beim Config-Zwilling
+/// `TlDisplaySettings`: Ein Profil aus einem älteren Browser-Stand darf
+/// nie als Ganzes an einem fehlenden Häkchen-Feld scheitern — jedes
+/// fehlende Feld liest sich als „aus" (Review 17.08.2026).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TlDisplaySettingsWire {
     #[serde(rename = "showNumbers")]
     pub show_numbers: bool,

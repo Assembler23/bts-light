@@ -382,6 +382,10 @@ Entscheidung: [ADR 0026](../adr/0026-spielliste-eine-globale-reihenfolge-eine-li
   Aufruf-Stufe zählt weiterhin einmal je Feld (Zusage: alle Geräte zeigen
   dieselbe Zahl); eine Parteien-Maske der laufenden Runde verhindert
   Doppelzählung, wenn nacheinander beide Parteien gerufen werden.
+  (Nachtrag 17.08.2026: Mit der Anzeige-Option „Aufrufe unbegrenzt" —
+  `TlDisplaySettings.unlimited_court_calls` — zählt der Host über 3
+  hinaus; die Zusage „alle Geräte, eine Zahl" gilt unverändert, siehe
+  `docs/announcements.md`.)
 - **F — Mehrspalten-Layout**, siehe Akzeptanzkriterien oben und ADR 0025
   (Nachtrag dort). `TlPanelProfile.columns`/`column_widths`,
   `TlPanelSetting.column` — reisen auf demselben Weg wie der übrige

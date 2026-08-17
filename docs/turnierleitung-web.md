@@ -63,7 +63,11 @@ LAN+Cloud voraus.
   17.08.2026) bleibt er dagegen immer da — auch bei laufendem Spiel und
   über den dritten Aufruf hinaus („Erneut aufrufen"). Ab dem vierten
   Aufruf erklingt die schlichte Feld-Ansage ohne Stufenwort; „Dritter und
-  letzter Aufruf" wird nicht wiederholt.
+  letzter Aufruf" wird nicht wiederholt. Bei einem **laufenden** Spiel
+  (Punkte gefallen) spricht das Ansage-Gerät grundsätzlich ohne
+  Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
+  Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
+  Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.
