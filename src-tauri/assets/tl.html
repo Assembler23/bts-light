@@ -2522,17 +2522,33 @@ function setHall(hall) {
  *  sich zu EINEM Abruf bündeln statt sich gegenseitig zu überholen. Ein
  *  Anstoß während eines laufenden Abrufs setzt deshalb nur eine Marke,
  *  die am Ende genau einen Nachschlag auslöst. */
-let pollLaeuft = false;
-let pollNachholen = false;
-async function poll() {
-  if (pollLaeuft) { pollNachholen = true; return; }
-  pollLaeuft = true;
-  try {
-    return await pollEinmal();
-  } finally {
-    pollLaeuft = false;
-    if (pollNachholen) { pollNachholen = false; poll(); }
+let pollLaeuft = null;
+let pollNachfolge = null;
+function poll() {
+  // Läuft schon einer, hängt dieser Aufruf einen NACHFOLGE-Abruf an und
+  // gibt dessen Versprechen zurück. Zwei Dinge fallen damit zusammen:
+  //
+  // - Anstöße bündeln sich (alle Wartenden teilen sich einen Nachfolger,
+  //   statt sich gegenseitig zu überholen), und
+  // - wer `await poll()` schreibt, bekommt Daten, die NACH seinem Aufruf
+  //   geholt wurden. Gäbe man den laufenden Abruf zurück, zeichnete die
+  //   Profil-Verwaltung nach einem `send()` noch den alten Stand — ein
+  //   gerade gelöschtes Profil stünde weiter in der Liste (Review-Fund
+  //   18.08.2026).
+  if (pollLaeuft) {
+    if (!pollNachfolge) {
+      pollNachfolge = pollLaeuft.then(() => { pollNachfolge = null; return poll(); });
+    }
+    return pollNachfolge;
   }
+  pollLaeuft = (async () => {
+    try {
+      return await pollEinmal();
+    } finally {
+      pollLaeuft = null;
+    }
+  })();
+  return pollLaeuft;
 }
 
 async function pollEinmal() {
@@ -2676,9 +2692,18 @@ let pushSocket = null;
  *  und, wenn es den Kanal gar nicht gibt, auf einen sparsamen 60-s-Takt. */
 let pushFehler = 0;
 let pushTimer = null;
-/** Steht der Kanal? Danach richtet sich der Poll-Takt. */
+/** Steht der Kanal — und trägt er auch?
+ *
+ *  `readyState` allein genügt nicht: Bricht das WLAN weg (Roaming,
+ *  NAT-Timeout, stiller Funkloch-Abriss), bleibt die Verbindung im
+ *  Browser minutenlang „offen". Die Seite bliebe dann beim 30-s-Takt und
+ *  merkte den Ausfall erst nach einer Minute — mit „aktuell" im Kopf,
+ *  während der Feldplan einfriert (Review-Fund 18.08.2026). Deshalb
+ *  gilt der Kanal nur als tragend, solange auch die Abrufe durchkommen:
+ *  Schon EIN misslungener Abruf schaltet zurück auf den schnellen Takt,
+ *  und der bringt die Lage binnen zwei Sekunden ans Licht. */
 function pushAktiv() {
-  return !!pushSocket && pushSocket.readyState === WebSocket.OPEN;
+  return !!pushSocket && pushSocket.readyState === WebSocket.OPEN && failures === 0;
 }
 function tlWsUrl() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -2701,8 +2726,14 @@ function verbindePush() {
     // und in die Adresse gehört der Zugang nicht (Adressen landen in
     // Zugriffsprotokollen). Der Server antwortet auf einen falschen
     // Zugang mit dem Schließen der Verbindung — ohne Begründung.
+    //
+    // Den Fehlerzähler hier NICHT zurücksetzen: Ein abgewiesener Zugang
+    // und ein voller Zuhörer-Deckel öffnen erst und schließen danach —
+    // der Zähler stünde bei jedem Versuch wieder auf null und die Seite
+    // klopfte im Sekundentakt für den Rest des Tages an (Review-Fund
+    // 18.08.2026). Zurückgesetzt wird erst, wenn wirklich ein Anstoß
+    // ankam (siehe „message").
     sock.send(JSON.stringify({ token }));
-    pushFehler = 0;
     setzePollTakt();
   });
   sock.addEventListener("message", (ev) => {
@@ -2713,6 +2744,10 @@ function verbindePush() {
     let rev = 0;
     try { rev = Number(JSON.parse(ev.data).rev) || 0; } catch { return; }
     if (!rev) return;
+    // Erst ein echter Anstoß beweist, dass der Kanal trägt (der Server
+    // schickt die aktuelle Revision sofort nach erfolgreicher Prüfung) —
+    // deshalb hier der Rückstellpunkt des Backoffs.
+    pushFehler = 0;
     poll();
   });
   const weg = () => {
@@ -2801,6 +2836,11 @@ function renderConnection() {
     banner.classList.remove("show");
   }
   if (banner.classList.contains("show") !== warSichtbar) scheduleFitCourts();
+  // Der Poll-Takt hängt auch am Erfolg: Sobald ein Abruf misslingt, gilt
+  // der Push-Kanal als nicht mehr tragend (`pushAktiv`) und die Seite
+  // fragt wieder alle zwei Sekunden — sonst dauerte das Erkennen einer
+  // toten Leitung bis zu einer Minute (Review 18.08.2026).
+  setzePollTakt();
 }
 
 // ── Zeichnen ──────────────────────────────────────────────────────────

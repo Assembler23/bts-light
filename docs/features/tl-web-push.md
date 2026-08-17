@@ -87,7 +87,14 @@ LAN-Zustand **einmal zentral pro Änderung** statt je Gerät und Anfrage.
   nginx-Timeouts und tote Verbindungen im Griff. Client-Nachrichten
   nach der Auth werden ignoriert.
 - Fan-out-Deckel je Namespace/Host: 16 (2× Geräte-Cap — Reserve für
-  Reconnect-Überlappung); ältester fliegt, wie `subscribe_monitor`.
+  Reconnect-Überlappung). Abgewiesen wird der **neueste** Versuch (wie
+  `subscribe_monitor`); damit ein abgewiesenes Gerät nicht im
+  Sekundentakt weiterklopft, greift clientseitig der Backoff — er setzt
+  sich erst nach einem tatsächlich empfangenen Anstoß zurück, nicht
+  schon beim Öffnen der Verbindung.
+- Vor der Auth hält der Relay höchstens 64 Verbindungen gleichzeitig
+  (5-s-Frist) — er steht im Internet, und eine Verbindung ohne Zugang
+  darf keinen Platz binden.
 
 ### Host: zentraler Erkennungstakt + Antwort-Cache
 
@@ -129,11 +136,13 @@ nicht verbunden".
   (bzw. 10 s im Hintergrund, wie heute). `visibilitychange` sichtbar →
   sofort poll + Kanal sicherstellen; im Hintergrund darf der Browser
   den Kanal schließen, der Fallback deckt es.
-- Verbindungsanzeige: „live" verlangt künftig Kanal **oder** frischen
-  Poll-Erfolg — die heutige `failures`-Logik bleibt, nur die
-  Erwartungsfrequenz hängt am Modus (30-s-Takt darf nicht als
-  „Daten sind 28 s alt" alarmieren, solange der Kanal steht und keine
-  Rev verpasst ist).
+- Verbindungsanzeige: unverändert an `failures` — solange der Kanal
+  steht **und** die Abrufe durchkommen, meldet sie „aktuell". Der Kanal
+  gilt nur als tragend, wenn auch der letzte Abruf gelang: Schon **ein**
+  Fehlversuch schaltet zurück auf den 2-s-Takt, damit ein stiller
+  Abriss (WLAN-Roaming, NAT-Timeout — der Browser meldet die
+  Verbindung dann minutenlang weiter als „offen") binnen Sekunden
+  auffällt statt binnen einer Minute.
 - Kein `/tl-ws` erreichbar (alter Host, alter Relay, Firmen-Proxy ohne
   WS): geräuschloser Dauer-Fallback auf den heutigen Poll — ein
   einziger Wiederholungsversuch je 60 s, kein Konsolen-Rauschen.

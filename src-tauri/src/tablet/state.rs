@@ -618,6 +618,10 @@ pub struct TabletState {
     /// Beschleuniger, keine Wahrheit — ist er kalt oder abgestanden,
     /// rechnet der Handler wie eh und je selbst.
     tl_state_cache: RwLock<Option<TlStateCache>>,
+    /// Wann zuletzt ein TL-Gerät den Zustand abgerufen hat (Unix-ms) —
+    /// zusammen mit `tl_subs` die Antwort auf „sieht überhaupt jemand
+    /// zu?". `0` = noch nie.
+    tl_last_request_ms: AtomicU64,
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
@@ -2136,6 +2140,29 @@ impl TabletState {
     /// Erkennungstakt noch nichts abgelegt hat.
     pub fn tl_state_cache(&self) -> Option<TlStateCache> {
         self.tl_state_cache.read().unwrap().clone()
+    }
+
+    /// Hält fest, dass gerade ein TL-Gerät den Zustand abgerufen hat
+    /// (Spec tl-web-push): Der Erkennungstakt arbeitet nur, wenn wirklich
+    /// jemand zusieht.
+    pub fn note_tl_request(&self, now_ms: u64) {
+        self.tl_last_request_ms.store(now_ms, Ordering::Relaxed);
+    }
+
+    /// Sieht gerade jemand zu? `true`, wenn ein Push-Kanal offen ist oder
+    /// innerhalb der letzten Minute ein Zustand abgerufen wurde.
+    ///
+    /// Ohne diese Frage liefe der Erkennungstakt auch in einem Turnier
+    /// ohne ein einziges TL-Gerät sekündlich durch — mit Config-Lesen von
+    /// Platte, Snapshot-Kopie und voller Serialisierung (Review
+    /// 18.08.2026). Die Minute ist großzügig: Der Fallback-Poll einer
+    /// stillen Seite kommt alle 30 s.
+    pub fn tl_interest(&self, now_ms: u64) -> bool {
+        if !self.tl_subs.read().unwrap().is_empty() {
+            return true;
+        }
+        let letzte = self.tl_last_request_ms.load(Ordering::Relaxed);
+        letzte != 0 && now_ms.saturating_sub(letzte) <= 60_000
     }
 
     /// Beansprucht das Feld für ein Tablet und gibt dessen Token zurück.
@@ -4204,6 +4231,26 @@ mod tests {
         }
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         assert!(!st.subscribe_tl(&tx), "über dem Deckel wird abgelehnt");
+    }
+
+    #[test]
+    fn the_tl_takt_only_works_while_someone_is_watching() {
+        // Ohne offenen Push-Kanal und ohne frischen Abruf hat der
+        // Erkennungstakt nichts zu tun — sonst läse ein Turnier ganz ohne
+        // TL-Gerät sekündlich die Config von Platte und serialisierte den
+        // vollen Zustand (Review 18.08.2026).
+        let st = TabletState::default();
+        assert!(!st.tl_interest(100_000), "niemand da");
+        st.note_tl_request(100_000);
+        assert!(st.tl_interest(130_000), "Abruf vor 30 s zählt");
+        assert!(
+            !st.tl_interest(200_000),
+            "eine Minute nach dem letzten Abruf ist Ruhe"
+        );
+        // Ein offener Kanal zählt für sich, auch ohne jeden Abruf.
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        st.subscribe_tl(&tx);
+        assert!(st.tl_interest(999_000), "offener Kanal zählt");
     }
 
     #[test]

@@ -250,10 +250,26 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
     // LAN-Server — er versorgt dessen Antwort-Cache und `/tl-ws`-Nudges.
     // Im reinen Cloud-Modus läuft weder Server noch Takt; dort erkennt der
     // Relay-Client Änderungen selbst (TICK) und der Relay nudgt.
-    let takt = tokio::spawn(tl_push_takt(ctx_fuer_takt));
-    let ergebnis = axum::serve(listener, app).await;
-    takt.abort();
-    ergebnis
+    //
+    // Der Wächter ist Absicht: Das Stoppen der Übertragung bricht diese
+    // Funktion mitten in `axum::serve` ab (`handle.abort()` in
+    // `commands.rs`) — ein bloßes `takt.abort()` DANACH liefe nie, und ein
+    // fallengelassenes `JoinHandle` beendet in Tokio gar nichts, es löst
+    // die Aufgabe nur ab. Jedes Stoppen/Starten hinterließe damit einen
+    // weiteren Takt, der bis zum Programmende sekündlich weiterrechnet
+    // (Review-Fund 18.08.2026). `Drop` läuft auch beim Abbruch.
+    let _takt = TaktWaechter(tokio::spawn(tl_push_takt(ctx_fuer_takt)));
+    axum::serve(listener, app).await
+}
+
+/// Beendet den TL-Erkennungstakt, sobald der Server-Task endet — egal ob
+/// regulär oder per Abbruch.
+struct TaktWaechter(tokio::task::JoinHandle<()>);
+
+impl Drop for TaktWaechter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Zentraler TL-Erkennungstakt (Spec tl-web-push): baut den Zustand EINMAL
@@ -268,13 +284,22 @@ async fn tl_push_takt(ctx: Arc<ServerCtx>) {
     let mut letzte_rev = 0u64;
     loop {
         takt.tick().await;
+        let now = now_ms();
+        // Nur arbeiten, wenn jemand zusieht: kein offener Push-Kanal und
+        // seit einer Minute kein Abruf → gar nichts tun. Sonst läse ein
+        // Turnier ohne ein einziges TL-Gerät sekündlich die Config von
+        // Platte, klonte den BTP-Schnappschuss und serialisierte den
+        // vollen Zustand (Review-Fund 18.08.2026). Diese Prüfung ist ein
+        // Atomar-Lesen plus ein Blick in eine Liste.
+        if !ctx.tablet.tl_interest(now) {
+            continue;
+        }
         // Config je Takt frisch (wie der Relay-TICK): Ein- und Ausschalten
         // von TL-Web greift ohne Neustart.
         let config = ctx.app_config();
         if !config.tl_web.enabled {
             continue;
         }
-        let now = now_ms();
         let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &config, now);
         let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
         let rev = state.rev;
@@ -1253,6 +1278,9 @@ async fn tl_state(
     let Some(device) = tl_device(&ctx, &headers) else {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
     };
+    // „Es sieht jemand zu" — hält den Erkennungstakt am Laufen, auch wenn
+    // gerade kein Push-Kanal offen ist (Seite im Poll-Fallback).
+    ctx.tablet.note_tl_request(now_ms());
     // Antwort-Cache des Erkennungstakts (Spec tl-web-push): Der Takt baut
     // den Zustand einmal zentral pro Sekunde — die Anfragen aller Geräte
     // werden damit zu Cache-Reads statt je Anfrage Snapshot zu klonen und

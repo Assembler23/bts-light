@@ -696,12 +696,39 @@ pub(crate) fn state_for_relay(
     // Vierzig Spiele der GEMEINSAMEN Abfolge sind genau das, was oben
     // steht, egal in welcher Halle sie laufen.
     const STUFEN: [usize; 4] = [40, 20, 10, 5];
+    // EINMAL kanonisch bauen (volle Länge), dann nur noch zuschneiden.
+    //
+    // Zwei Gründe, beide wichtig (Review 18.08.2026):
+    //
+    // 1. **Die Revision darf nicht an der Transportgrenze hängen.** Sie
+    //    entsteht aus dem Fingerabdruck des gebauten Zustands; baute der
+    //    Relay-Weg mit 40 und der LAN-Weg mit 120 Einträgen, hätten
+    //    dieselben Turnierdaten zwei verschiedene Fingerabdrücke. Bei mehr
+    //    als 40 wartenden Spielen kippte der geteilte Zähler dann bei JEDEM
+    //    Takt hin und her — das Rev-Gate des Relays hätte nie gegriffen,
+    //    der volle Zustand wäre alle zwei Sekunden über Mobilfunk gegangen
+    //    und jede Seite im Sekundentakt zum Neuladen angestoßen worden.
+    // 2. **Kosten.** Vorher bis zu vier volle Neubauten je Tick (jeder mit
+    //    Snapshot-Kopie und Serialisierung); jetzt einer, danach nur noch
+    //    Zuschneiden und Serialisieren.
+    let mut state = build_state_with_rev(tablet, config, now_ms);
+    let rev = state.rev;
+    // Wie viele Spiele die volle Liste hatte — die Kürzungsmeldung muss
+    // beim Zuschneiden mitwachsen, sonst zählte sie nur die Kappung des
+    // LAN-Limits (120) und verschwiege die des Relay-Limits.
+    let voll = state.queue.len() + state.queue_truncated;
+    let json = serde_json::to_string(&state).unwrap_or_default();
+    if json.len() <= relay_proto::MAX_TL_STATE_LEN && state.queue.len() <= STUFEN[0] {
+        return (json, rev);
+    }
     for limit in STUFEN {
-        let mut state = build_state_limited(tablet, config, now_ms, 0, limit);
-        state.rev = tablet.tl_revision(&state_fingerprint(&mut state));
+        if state.queue.len() > limit {
+            state.queue.truncate(limit);
+            state.queue_truncated = voll.saturating_sub(limit);
+        }
         let json = serde_json::to_string(&state).unwrap_or_default();
         if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-            return (json, state.rev);
+            return (json, rev);
         }
     }
     // Vorletzte Rettung: das additive Anfangszeiten-Panel opfern —
@@ -709,10 +736,8 @@ pub(crate) fn state_for_relay(
     // Beiwerk. Neue Listen müssen mitgekürzt werden (Plan
     // tl-web-ausbau; Review 17.08.2026), sonst kippte ein rein
     // additives Panel den gesamten Cloud-Zustand über die Relay-Grenze.
-    let mut state = build_state_limited(tablet, config, now_ms, 0, STUFEN[STUFEN.len() - 1]);
     state.checkin_times = None;
-    state.rev = tablet.tl_revision(&state_fingerprint(&mut state));
-    let letzte_rev = state.rev;
+    let letzte_rev = rev;
     let letzte = serde_json::to_string(&state).unwrap_or_default();
     if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
         return (letzte, letzte_rev);
@@ -5267,6 +5292,63 @@ mod tests {
         assert!(
             danach.rev > erste.rev,
             "ein neues Spiel in der Liste ist eine neue Fassung"
+        );
+    }
+
+    #[test]
+    fn the_revision_does_not_depend_on_the_transport_limit() {
+        // Kernregression (Review 18.08.2026): Der LAN-Weg baut mit 120,
+        // der Relay-Weg kürzt auf 40. Hinge die Revision am gebauten
+        // Umfang, kippte der geteilte Zähler bei mehr als 40 wartenden
+        // Spielen mit JEDEM Takt hin und her — das Rev-Gate des Relays
+        // griffe nie, der volle Zustand ginge alle zwei Sekunden über
+        // Mobilfunk, und jede Seite würde im Sekundentakt zum Neuladen
+        // angestoßen. Also: gleicher Turnierstand ⇒ gleiche Revision,
+        // egal über welchen Weg.
+        let tablet = TabletState::default();
+        let mut matches = vec![match_on_court(1, 3)];
+        // Deutlich mehr als die Relay-Stufe (40) an wartenden Spielen.
+        for id in 100..=200 {
+            matches.push(a_match(id));
+        }
+        tablet.set_snapshot(snap(vec![a_court(3, None)], matches, Vec::new()));
+        let cfg = AppConfig::default();
+
+        let lan = build_state_with_rev(&tablet, &cfg, 1_000_000);
+        let (_json, relay_rev) = state_for_relay(&tablet, &cfg, 1_000_000);
+        assert_eq!(
+            lan.rev, relay_rev,
+            "derselbe Stand muss über beide Wege dieselbe Revision haben"
+        );
+        // Und ohne Änderung bleibt sie stehen — sonst wäre jedes Rev-Gate
+        // wirkungslos.
+        let (_json2, relay_rev2) = state_for_relay(&tablet, &cfg, 1_060_000);
+        assert_eq!(relay_rev, relay_rev2, "ohne Änderung keine neue Revision");
+        let lan2 = build_state_with_rev(&tablet, &cfg, 1_120_000);
+        assert_eq!(lan.rev, lan2.rev);
+    }
+
+    #[test]
+    fn the_relay_state_reports_everything_it_left_out() {
+        // Die Kürzungsmeldung muss BEIDE Kappungen zusammenzählen (LAN-
+        // Limit und Relay-Stufe) — sonst verschwiege sie der Turnierleitung
+        // genau die Spiele, die der Cloud-Weg zusätzlich weglässt.
+        let tablet = TabletState::default();
+        let mut matches = Vec::new();
+        for id in 100..=200 {
+            matches.push(a_match(id));
+        }
+        let gesamt = matches.len();
+        tablet.set_snapshot(snap(vec![a_court(3, None)], matches, Vec::new()));
+        let (json, _rev) = state_for_relay(&tablet, &AppConfig::default(), 1_000_000);
+        let state: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let gezeigt = state["queue"].as_array().unwrap().len();
+        let gekappt = state["queue_truncated"].as_u64().unwrap() as usize;
+        assert_eq!(gezeigt, 40, "der Relay-Weg zeigt höchstens 40");
+        assert_eq!(
+            gezeigt + gekappt,
+            gesamt,
+            "gezeigt + gemeldet muss die volle Liste ergeben"
         );
     }
 

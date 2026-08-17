@@ -362,8 +362,18 @@ impl Namespace {
     /// ohne Host gibt es nichts anzuzeigen, und der Host lädt ihn nach
     /// einem Reconnect binnen 30 s erneut hoch. Ihn zu behalten würde nur
     /// Speicher belegen, falls ein Host endgültig weg ist.
+    /// TL-Push-Zuhörer zählen mit: Sonst räumte ein kurzer Host-Abriss
+    /// den Namespace weg, während eine TL-Seite noch daran hängt — ihr
+    /// Sende-Ende läge dann in der verworfenen Fassung, der Kanal bliebe
+    /// technisch offen und bekäme nie wieder einen Anstoß, während die
+    /// Seite sich für „live" hielte (Review-Fund 18.08.2026). Anders als
+    /// Monitore können TL-Zuhörer keinen Namespace erzeugen (`tl_ws_conn`
+    /// legt keinen an), es entsteht also kein Zombie-Namespace.
     fn is_empty(&self) -> bool {
-        self.host.is_none() && self.tablets.is_empty() && self.pending.is_empty()
+        self.host.is_none()
+            && self.tablets.is_empty()
+            && self.pending.is_empty()
+            && self.tl_subs.is_empty()
     }
 }
 
@@ -1977,8 +1987,37 @@ async fn tl_ws_route(ws: WebSocketUpgrade, State(broker): State<Broker>) -> impl
     ws.on_upgrade(move |socket| tl_ws_conn(socket, broker))
 }
 
+/// Wie viele Verbindungen gerade auf ihren Zugangs-Frame warten. Der
+/// Relay steht im Internet: Ohne Deckel könnte jeder beliebig viele
+/// Verbindungen öffnen und je einen Task samt Socket binden, ohne je
+/// einen Zugang zu zeigen (Review-Fund 18.08.2026). Die Grenze ist
+/// bewusst großzügig — sie soll Missbrauch bremsen, nicht ein Turnier
+/// beim gleichzeitigen Neuladen aller Geräte behindern.
+static TL_WS_VORAUTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const MAX_TL_WS_VORAUTH: usize = 64;
+
+/// Zählt eine wartende Vor-Auth-Verbindung und gibt den Platz beim
+/// Verlassen des Gültigkeitsbereichs sicher wieder frei — auch bei
+/// vorzeitigem `return`.
+struct VorAuthPlatz;
+
+impl Drop for VorAuthPlatz {
+    fn drop(&mut self) {
+        TL_WS_VORAUTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
-    let erste = tokio::time::timeout(Duration::from_secs(10), socket.recv()).await;
+    if TL_WS_VORAUTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= MAX_TL_WS_VORAUTH {
+        TL_WS_VORAUTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    let platz = VorAuthPlatz;
+    // Fünf Sekunden reichen für einen Frame, den der Client unmittelbar
+    // nach `open` sendet — je kürzer, desto weniger lässt sich hier
+    // festhalten.
+    let erste = tokio::time::timeout(Duration::from_secs(5), socket.recv()).await;
     let token = match erste {
         Ok(Some(Ok(Message::Text(text)))) => {
             // Wie im HTTP-Pfad auf 256 Zeichen gekappt (`bearer`).
@@ -2001,12 +2040,19 @@ async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
             return;
         }
     };
+    // Ab hier ist der Zugang geprüft — der Vor-Auth-Platz wird frei.
+    drop(platz);
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     // Abo eintragen; über dem Deckel bleibt die Verbindung ungenutzt und
     // die Seite bedient sich aus ihrem Poll-Fallback.
     {
         let mut map = broker.namespaces.lock().await;
+        // Kein `await`, solange die Broker-Sperre steht: Ein Client, der
+        // sein Empfangsfenster zuhält, blockierte damit ALLE Turniere auf
+        // diesem Relay (Review-Fund 18.08.2026) — deshalb erst die Sperre
+        // fallen lassen, dann schließen.
         let Some(namespace) = map.get_mut(&ns) else {
+            drop(map);
             let _ = socket.send(Message::Close(None)).await;
             return;
         };
