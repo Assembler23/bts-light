@@ -3191,6 +3191,16 @@ function platziereKebabMenue(det) {
  *  Auslöser ganz aus dem Sichtfenster, schließt das Menü stattdessen.
  *  Capture-Phase, weil Scroll-Ereignisse der Panel-Körper nicht bubbeln;
  *  über rAF gebündelt wie `scheduleFitCourts`. */
+/** „Nur EIN offenes ⋯-Menü" — SEITENWEIT, nicht je Panel: Die Menüs
+ *  hängen alle am Ansichtsfenster; zwei offene überlagerten sich auch
+ *  über Panel-Grenzen hinweg (Kachel + Zeile gleichzeitig). Eine
+ *  Funktion für beide Verdrahtungen (Review 17.08.2026). */
+function schliesseAndereKebabs(det) {
+  document.querySelectorAll(".kebab[open]").forEach((other) => {
+    if (other !== det) other.open = false;
+  });
+}
+
 let kebabFolgePending = false;
 function folgeOffenenKebabs() {
   document.querySelectorAll(".kebab[open]").forEach((det) => {
@@ -3292,13 +3302,7 @@ function wireCourts(box) {
     det.addEventListener("toggle", () => {
       if (det.open) {
         openKebabCourtId = courtId;
-        // Nur EIN offenes Menü gleichzeitig — sonst häufen sich bei
-        // mehreren angetippten Kacheln die Kästen übereinander. Seit dem
-        // Keyed-Abgleich läuft die Verdrahtung je Kachel, deshalb sucht
-        // der Aufräumer über die GANZE Felderbox, nicht im Scope.
-        document.querySelectorAll("#courts .kebab[open]").forEach((other) => {
-          if (other !== det) other.open = false;
-        });
+        schliesseAndereKebabs(det);
         platziereKebabMenue(det);
       } else if (openKebabCourtId === courtId) {
         openKebabCourtId = null;
@@ -3442,6 +3446,13 @@ function kindMitKey(box, key) {
  * einfangen, was veraltet; sie lesen ihren Stand aus `state`).
  */
 function reconcileKeyed(box, items, keyOf, htmlOf, wire) {
+  // Derselbe Container läuft abwechselnd über beide Mechanismen (Liste ↔
+  // „leer"-Hinweis via `setzeHtmlWennNeu`). Der String-Stand MUSS hier
+  // verfallen: Sonst gliche der Leer-Hinweis nach einem
+  // gefüllt-leer-gefüllt-Zyklus dem gemerkten String, `setzeHtmlWennNeu`
+  // überspränge das Leeren, und alte Kacheln blieben stehen
+  // (Review-Fund 17.08.2026).
+  panelHtmlStand.delete(box);
   let stand = keyedHtmlStand.get(box);
   if (!stand) { stand = new Map(); keyedHtmlStand.set(box, stand); }
   const alte = new Map();
@@ -3482,8 +3493,10 @@ function reconcileKeyed(box, items, keyOf, htmlOf, wire) {
     }
   }
   for (const [k, el] of alte) {
-    if (!gebraucht.has(k)) { el.remove(); stand.delete(k); }
+    if (!gebraucht.has(k)) el.remove();
   }
+  // Ein Aufräumer für den String-Stand genügt — er deckt auch Schlüssel,
+  // deren Element längst weg ist (z. B. nach einem Leer-Hinweis).
   for (const k of [...stand.keys()]) {
     if (!gebraucht.has(k)) stand.delete(k);
   }
@@ -3947,13 +3960,15 @@ function wireQueue(box) {
     });
   });
   scopeAll(box, "button[data-prep]").forEach((btn) => {
-    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
-    if (!match) return;
     btn.addEventListener("click", (ev) => {
       // Nicht bis zur Zeile durchreichen — sonst wählte der Klick zusätzlich
       // das Spiel aus, und die Auswahl bliebe unbeabsichtigt stehen.
       ev.stopPropagation();
-      togglePrepCall(match);
+      // Zur KLICK-Zeit aus `state` auflösen, nicht beim Verdrahten
+      // einfangen: Seit dem Keyed-Abgleich überleben Listener viele
+      // Renders, ein eingefangenes Objekt wäre irgendwann veraltet.
+      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
+      if (match) togglePrepCall(match);
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -3967,13 +3982,7 @@ function wireQueue(box) {
     det.addEventListener("toggle", () => {
       if (det.open) {
         openKebabMatchId = matchId;
-        // Nur EIN offenes Menü gleichzeitig — sonst häufen sich bei
-        // mehreren angetippten Zeilen die Kästen übereinander. Seit dem
-        // Keyed-Abgleich läuft die Verdrahtung je Zeile, deshalb sucht
-        // der Aufräumer über die GANZE Liste, nicht im Scope.
-        document.querySelectorAll("#queue-list .kebab[open]").forEach((other) => {
-          if (other !== det) other.open = false;
-        });
+        schliesseAndereKebabs(det);
         platziereKebabMenue(det);
       } else if (openKebabMatchId === matchId) {
         openKebabMatchId = null;
@@ -4002,19 +4011,21 @@ function wireQueue(box) {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   scopeAll(box, "button[data-queue-result]").forEach((btn) => {
-    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
-    if (!match) return;
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      openQueueResultDialog(match);
+      // Klick-Zeit-Auflösung, siehe `data-prep`.
+      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
+      if (match) openQueueResultDialog(match);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   scopeAll(box, "button[data-auto-excl]").forEach((btn) => {
-    const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
-    if (!match) return;
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
+      // Klick-Zeit-Auflösung, siehe `data-prep` — sonst schaltete ein
+      // veraltetes Objekt die Ausnahme in die falsche Richtung.
+      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
+      if (!match) return;
       const matchId = match.match_id;
       const excluded = !match.excluded_from_auto_assign;
       send(
@@ -4056,7 +4067,14 @@ function wireQueue(box) {
   scopeAll(box, ".row.pick[data-match]").forEach((el) => {
     const match = state.queue.find((m) => String(m.match_id) === el.dataset.match);
     if (!match) return;
-    const go = () => { if (!suppressNextClick) pick(match, null); };
+    // Auch hier zur Klick-Zeit auflösen (`enableDrag` unten behält das
+    // Wiring-Zeit-Objekt als Zieh-Nutzlast — ändert sich Sichtbares an
+    // der Zeile, wird sie ohnehin ersetzt und neu verdrahtet).
+    const go = () => {
+      if (suppressNextClick) return;
+      const frisch = state.queue.find((m) => String(m.match_id) === el.dataset.match);
+      if (frisch) pick(frisch, null);
+    };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
       // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
@@ -4453,7 +4471,7 @@ let reorderDragPending = false;
  * für Spielliste, Schiedsrichter und den Profil-Editor genau richtig ist.
  * `zielListe` sagt dem Rückruf, wo das Element gelandet ist.
  */
-function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff", geschwister = null) {
+function enableReorderDrag(list, onReorder, griffSelector, geschwister) {
   Array.from(list.children).forEach((li) =>
     wireReorderGriff(list, li, onReorder, griffSelector, geschwister));
 }
@@ -4461,11 +4479,10 @@ function enableReorderDrag(list, onReorder, griffSelector = ".drag-griff", gesch
 /** Die Griff-Verdrahtung EINER Zeile — herausgelöst aus
  *  `enableReorderDrag`, damit der Keyed-Abgleich der Spielliste nur
  *  neue/ersetzte Zeilen verdrahten kann, ohne allen bestehenden Zeilen
- *  doppelte Listener anzuhängen. */
+ *  doppelte Listener anzuhängen. Die Vorgabewerte leben NUR hier. */
 function wireReorderGriff(list, li, onReorder, griffSelector = ".drag-griff", geschwister = null) {
-  {
-    if (!li.dataset.id) return;
-    const griff = li.querySelector(griffSelector);
+  if (!li.dataset.id) return;
+  const griff = li.querySelector(griffSelector);
     griff?.addEventListener("pointerdown", (down) => {
       if (down.pointerType !== "touch" && down.button !== 0) return;
       if (reorderDragPending) return;
@@ -4495,7 +4512,6 @@ function wireReorderGriff(list, li, onReorder, griffSelector = ".drag-griff", ge
         onReorder(li.dataset.id, beforeId, list);
       }
     });
-  }
 }
 
 /**
