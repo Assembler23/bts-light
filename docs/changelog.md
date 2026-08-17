@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.220
+
+- **TL-Web: Schriftgröße pro Gerät.** Im Profil-Overlay gibt es unten
+  einen geräte-lokalen Abschnitt „Schriftgröße — nur dieses Gerät"
+  (85/100/115/130 %, gespeichert in `localStorage`, bewusst NICHT im
+  geteilten Profil: jedes Tablet stellt seine Größe selbst ein). Der
+  Zoom wirkt auf die Root-Schriftgröße; dafür sind jetzt auch die
+  px-Trefflächen (Knopf-Mindesthöhen, Kebab-Flächen, Stege,
+  Logo-/Flaggen-Größen) auf rem umgestellt — alles skaliert mit, und
+  die Kompaktstufen der Feldkacheln passen sich über `fitCourts()` von
+  selbst an (Feldtest 17.08.2026, Punkt „Schriftgrößen optimieren").
+
 ## v0.9.219
 
 - **TL-Web: Render-Sparsamkeit** (Feldtest 17.08.2026, „Performance im
