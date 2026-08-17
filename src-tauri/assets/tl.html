@@ -655,7 +655,8 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
   max-height: 70vh; overflow-y: auto;
 }
-/* Kachel-Menüs etwas schmaler: sechs kurze Aktionsknöpfe, kein Wähler. */
+/* Kachel-Menüs etwas schmaler: bis zu sieben kurze Aktionsknöpfe
+   (inkl. „📈 Punktverlauf"), kein Wähler. */
 .card .kebab-menu { min-width: 13rem; }
 .kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
 .kebab-menu .kebab-label {
@@ -1055,7 +1056,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 
-/* Ohne Verbindung: Alles, was schreiben würde, sichtbar zurücknehmen. */
+/* Ohne Verbindung: Alles, was den Turnier-PC bräuchte, sichtbar
+   zurücknehmen — Schreib-Aktionen ebenso wie Lese-Abrufe (der
+   Punktverlauf wird per HTTP geladen und schlüge offline fehl). */
 body.offline .prep,
 body.offline .kebab-menu button,
 body.offline .wo .actions button,
@@ -1134,9 +1137,10 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────────
-   Kleiner 📈-Knopf an Feldkachel/Beendet-Zeile, Overlay mit je Satz
-   einem SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
-.graphbtn, .fin-row [data-fin-graph] {
+   Kleiner 📈-Knopf an der Beendet-Zeile (an der Feldkachel seit dem
+   Feldtest 17.08.2026 im ⋯-Menü), Overlay mit je Satz einem
+   SVG-Liniendiagramm — geladen on-demand, nie im Zustands-Push. */
+.fin-row [data-fin-graph] {
   border: 1px solid var(--line); background: var(--card);
   border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: .85rem;
 }
@@ -3028,19 +3032,14 @@ function courtCard(c, cellStyle) {
   // Zusatz-Affordanz, Antippen der Kachel bleibt der barrierefreie Weg.
   const griff = c.match_id
     ? `<span class="drag-griff" aria-hidden="true" title="Zum Ziehen greifen">⠿</span>` : "";
-  // Punktverlauf-Graph (Spec punktverlauf-graph): nur wenn es wirklich
-  // einen Verlauf gibt (has_timeline) — kein Klick ins Leere.
-  const graph = c.match_id && c.has_timeline
-    ? `<button type="button" class="graphbtn" data-graph="${c.match_id}"
-               title="Punktverlauf anzeigen">📈</button>` : "";
-
   // ── ⋯-Menü der Kachel (ADR 0026, Plan E) ─────────────────────────────
   // Die Kachel trug bis zu vier eigene Knöpfe („einteilen", „ansagen",
   // Aufruf, Punktverlauf) plus Satzstand und Uhr — bei 26 Feldern auf einem
   // Tablet ist das eine Wand aus Bedienelementen. Sichtbar bleiben Paarung,
-  // Satzstand, Uhr, Statusabzeichen, Punktverlauf-Knopf und Zieh-Griff;
-  // alles Handelnde zieht hierher. Dasselbe Kebab-Muster wie die Spielzeile,
-  // inklusive Offen-Zustand über den Redraw (`openKebabCourtId`).
+  // Satzstand, Uhr, Statusabzeichen und Zieh-Griff; alles Handelnde zieht
+  // hierher — seit dem Feldtest 17.08.2026 auch der Punktverlauf-Knopf.
+  // Dasselbe Kebab-Muster wie die Spielzeile, inklusive Offen-Zustand über
+  // den Redraw (`openKebabCourtId`).
   const kachelAktionen = [];
   if (state.officials_managed && c.match_id) {
     kachelAktionen.push(`<button type="button" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
@@ -3072,6 +3071,13 @@ function courtCard(c, cellStyle) {
     kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
         title="Endstand eintragen">✎ Ergebnis eintragen</button>`);
   }
+  // Punktverlauf (Spec punktverlauf-graph): nur wenn es wirklich einen
+  // Verlauf gibt (has_timeline) — kein Klick ins Leere. Der Graph selbst
+  // bleibt lazy: geladen wird erst beim Klick, nie im Zustands-Push.
+  if (c.match_id && c.has_timeline) {
+    kachelAktionen.push(`<button type="button" data-graph="${c.match_id}"
+        title="Punktverlauf anzeigen">📈 Punktverlauf</button>`);
+  }
   const kebabOffen = openKebabCourtId === c.court_id;
   const kebab = kachelAktionen.length
     ? `<details class="kebab" data-kebab-court="${c.court_id}"${kebabOffen ? " open" : ""}>
@@ -3089,7 +3095,7 @@ function courtCard(c, cellStyle) {
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
     <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}${kebab}</div>
     ${body}${bediener}${schiris}
-    <div class="card-foot">${foot}${graph}</div>
+    <div class="card-foot">${foot}</div>
   </article>`;
 }
 
@@ -3289,11 +3295,18 @@ function wireCourts(box) {
     if (det.open) platziereKebabMenue(det);
   });
 
-  // Graph-Knopf wie der Aufruf-Knopf: gestopptes Weiterreichen, sonst
-  // wählte derselbe Tipp zusätzlich das Spiel zum Umhängen.
+  // Graph-Knopf, seit dem Feldtest 17.08.2026 im ⋯-Menü: Das umschließende
+  // `<details class="kebab">` stoppt Klick und Zeigegesten-Start bereits
+  // für alle Menü-Einträge; die eigenen Stopper bleiben aus Gleichklang
+  // mit den Nachbar-Knöpfen stehen. Der Tipp schließt das Menü — sonst
+  // schwebte es dank `position: fixed` hinter dem Graph-Overlay weiter
+  // und läge nach dessen Schließen noch über fremden Kacheln
+  // (Review-Fund 17.08.2026).
   box.querySelectorAll("button[data-graph]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
+      const det = btn.closest(".kebab");
+      if (det) det.open = false;
       const c = state.courts.find((x) => String(x.match_id) === btn.dataset.graph);
       if (!c) return;
       openTimeline(c.match_id, `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`, null);

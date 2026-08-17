@@ -173,7 +173,8 @@ Spiele, Beendete Spiele.
 - [x] **(Nachtrag)** Das ⋮-Menü einer Spielzeile bietet zusätzlich „Nach
       oben schieben" und „Ergebnis eintragen"; die Feldkachel hat ein
       eigenes ⋯-Menü (einteilen, ansagen, Aufruf wiederholen, 2. Aufruf
-      Partei A/B, Ergebnis eintragen). Ein Aufruf je Partei zählt die
+      Partei A/B, Ergebnis eintragen; seit 17.08.2026 auch „📈
+      Punktverlauf"). Ein Aufruf je Partei zählt die
       Aufruf-Stufe nicht doppelt, wenn beide Parteien nacheinander gerufen
       werden.
 - [x] **(Nachtrag)** 1 bis 3 Spalten je Profil, Spalten-Zuordnung je

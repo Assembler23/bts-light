@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.217
+
+- **TL-Web: Punktverlauf-Knopf ins ⋯-Menü der Feldkachel.** Der 📈-Knopf
+  saß als letzte eigene Fläche in der Fußzeile der Kachel — jetzt steht
+  er als „📈 Punktverlauf" im Menü, wie alle anderen Kachel-Aktionen
+  (Feldtest 17.08.2026: weiter aufräumen). Verhalten unverändert: nur
+  sichtbar, wenn ein Verlauf existiert; geladen wird erst beim Klick.
+  Die Beendet-Liste behält ihren direkten 📈-Knopf.
+
 ## v0.9.216
 
 - **TL-Web: Profil-Option „Aufrufe unbegrenzt".** Neues Häkchen im
