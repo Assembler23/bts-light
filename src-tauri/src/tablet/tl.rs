@@ -450,13 +450,24 @@ pub(crate) fn apply_state_action(
                 *match_id,
                 faellig,
                 crate::tablet::state::side_mask(*side),
+                unlimited_court_calls(config),
             );
+            // Läuft das Spiel schon (Punkte gefallen), wäre „Zweiter/
+            // Dritter und letzter Aufruf" absurd — der Auftrag wird auf
+            // die Ab-4-Ansage gehoben, die das Ansage-Gerät ohne
+            // Stufenwort spricht (`AnnounceJobPlayer`). Der Zähler selbst
+            // bleibt ehrlich bei seiner Zahl.
+            let job_stage = if tablet.points_scored(*court_id, *match_id) {
+                stage.max(4)
+            } else {
+                stage
+            };
             tablet.publish_announce_job(
                 hall.clone(),
                 crate::tablet::state::AnnounceJobKind::CourtCall {
                     court_id: *court_id,
                     match_id: *match_id,
-                    stage,
+                    stage: job_stage,
                     side: side.unwrap_or(relay_proto::PrepCallSide::Both),
                 },
                 now_ms,
@@ -751,6 +762,21 @@ fn state_fingerprint(state: &mut TlState) -> String {
     }
     state.server_now_ms = zeit;
     fp
+}
+
+/// Führt irgendein Panel-Profil „Aufrufe unbegrenzt"?
+///
+/// Der Aufruf-Zähler ist turnier-global (ein Feld, eine Zahl) — die Option
+/// wird deshalb bewusst turnier-weit gelesen statt je handelndem Gerät:
+/// Sobald EIN Profil sie führt, will diese Turnierleitung über den dritten
+/// Aufruf hinauszählen; ohne sie hält der Host den alten 3er-Deckel selbst
+/// (Review 17.08.2026 — Client-Gating allein genügt nicht).
+fn unlimited_court_calls(config: &AppConfig) -> bool {
+    config
+        .tl_web
+        .profiles
+        .iter()
+        .any(|p| p.display.unlimited_court_calls)
 }
 
 /// Kurzform einer Partei als Schlüssel der Nachruf-Zählung.
@@ -2081,10 +2107,12 @@ pub struct TlCourt {
     /// `display.show_court_remaining`.
     #[serde(default)]
     pub remaining_min: Option<u64>,
-    /// Wie oft dieses Spiel schon aufgerufen wurde (1–3), **gezählt am
-    /// Turnier-PC**. Nicht zu verwechseln mit der Fälligkeit aus der Uhr:
-    /// Die sagt, wann der nächste Aufruf dran wäre, diese Zahl, wie viele
-    /// erfolgt sind. Nur so zeigen zwei Turnierleitungen dieselbe Stufe.
+    /// Wie oft dieses Spiel schon aufgerufen wurde, **gezählt am
+    /// Turnier-PC** (0 = noch nie; mit „Aufrufe unbegrenzt" nach oben
+    /// offen, sonst maximal 3 — kein `min(…, 3)` daraufsetzen). Nicht zu
+    /// verwechseln mit der Fälligkeit aus der Uhr: Die sagt, wann der
+    /// nächste Aufruf dran wäre, diese Zahl, wie viele erfolgt sind. Nur
+    /// so zeigen zwei Turnierleitungen dieselbe Stufe.
     pub call_stage: u8,
     /// Zählformat, damit die Seite Satz- und Matchball anzeigen kann.
     pub best_of: i64,
@@ -3002,6 +3030,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_round: p.display.show_round,
             show_group: p.display.show_group,
             show_court_remaining: p.display.show_court_remaining,
+            unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
                 crate::config::TlListPosition::Bottom => relay_proto::TlListPositionWire::Bottom,
@@ -3044,6 +3073,7 @@ fn display_settings_from_wire(
         show_round: d.show_round,
         show_group: d.show_group,
         show_court_remaining: d.show_court_remaining,
+        unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
             relay_proto::TlListPositionWire::Bottom => crate::config::TlListPosition::Bottom,
@@ -5127,7 +5157,7 @@ mod tests {
             "auf dem Feld stehen ist noch kein gesprochener Aufruf"
         );
 
-        tablet.note_court_call(3, 7);
+        tablet.note_court_call(3, 7, false);
         let after = build_state(&tablet, &cfg, 1_000_000, 2);
         let court = after.courts.iter().find(|c| c.court_id == 3).unwrap();
         assert_eq!(court.call_stage, 2);
@@ -5779,6 +5809,130 @@ mod tests {
         assert!(
             tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
             "Halle A geht der Aufruf nichts an"
+        );
+    }
+
+    /// Konfiguration, in der ein Profil „Aufrufe unbegrenzt" führt.
+    fn config_mit_unbegrenzten_aufrufen() -> AppConfig {
+        let mut config = AppConfig::default();
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p1".into(),
+            name: "TL".into(),
+            display: crate::config::TlDisplaySettings {
+                unlimited_court_calls: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        config
+    }
+
+    #[test]
+    fn without_the_option_the_court_call_keeps_its_cap_of_three() {
+        // Review 17.08.2026: Die 3er-Klemme darf nur fallen, wenn ein
+        // Profil „Aufrufe unbegrenzt" führt — sonst hinge die Invariante
+        // eines Turniers ohne die Option allein am Client-Gating.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        tablet.announce_jobs_since("", 0, 50_000);
+        for _ in 0..4 {
+            apply_state_action(
+                &tablet,
+                &AppConfig::default(),
+                50_000,
+                &relay_proto::TlAction::AnnounceCourtCall {
+                    court_id: 3,
+                    match_id: 7,
+                    side: None,
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(tablet.calls_made(3, 7), 3, "ohne Option hält der Deckel");
+    }
+
+    #[test]
+    fn with_the_option_the_fourth_call_counts_and_goes_out() {
+        // Option „Aufrufe unbegrenzt": Der vierte Aufruf zählt ehrlich
+        // weiter und geht als Stufe 4 hinaus — das Ansage-Gerät spricht
+        // ihn ohne Stufenwort (`AnnounceJobPlayer`, Stufe >= 4).
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        tablet.announce_jobs_since("", 0, 50_000);
+        let config = config_mit_unbegrenzten_aufrufen();
+        let mut letzte = 0;
+        for _ in 0..3 {
+            apply_state_action(
+                &tablet,
+                &config,
+                50_000,
+                &relay_proto::TlAction::AnnounceCourtCall {
+                    court_id: 3,
+                    match_id: 7,
+                    side: None,
+                },
+            )
+            .unwrap();
+            let jobs = tablet.announce_jobs_since("", letzte, 50_000);
+            letzte = jobs.last().unwrap().id;
+        }
+        assert_eq!(tablet.calls_made(3, 7), 4, "der Zähler bleibt ehrlich");
+        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        assert_eq!(
+            jobs.last().unwrap().kind,
+            crate::tablet::state::AnnounceJobKind::CourtCall {
+                court_id: 3,
+                match_id: 7,
+                stage: 4,
+                side: relay_proto::PrepCallSide::Both,
+            }
+        );
+    }
+
+    #[test]
+    fn a_call_to_a_running_match_is_spoken_without_a_stage_word() {
+        // Sind Punkte gefallen, wäre „Zweiter Aufruf" oder gar „Dritter
+        // und letzter Aufruf" (Walkover-Drohung!) mitten ins Spiel
+        // absurd. Der Auftrag wird deshalb auf Stufe >= 4 gehoben — die
+        // schlichte Feld-Ansage ohne Stufenwort. Der Zähler selbst zählt
+        // ehrlich weiter.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        tablet.record_score(3, 7, vec![(11, 7)]);
+        tablet.announce_jobs_since("", 0, 50_000);
+        apply_state_action(
+            &tablet,
+            &config_mit_unbegrenzten_aufrufen(),
+            50_000,
+            &relay_proto::TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(tablet.calls_made(3, 7), 2, "gezählt wird ehrlich");
+        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        assert_eq!(
+            jobs.last().unwrap().kind,
+            crate::tablet::state::AnnounceJobKind::CourtCall {
+                court_id: 3,
+                match_id: 7,
+                stage: 4,
+                side: relay_proto::PrepCallSide::Both,
+            }
         );
     }
 
@@ -6933,7 +7087,8 @@ mod tests {
             // Geschätzte Restminuten des laufenden Spiels (Etappe D) — eine
             // aus Satzstand und Medianen gerechnete Zahl, kein Personenbezug.
             "remaining_min",
-            // Zahl der gesprochenen Aufrufe (0–3) — keine Angabe zu Personen.
+            // Zahl der gesprochenen Aufrufe (mit „Aufrufe unbegrenzt"
+            // nach oben offen) — keine Angabe zu Personen.
             "call_stage",
             "recalls",
             "best_of",
@@ -7063,6 +7218,9 @@ mod tests {
             // Profil-Schalter für die Restzeit-Anzeige (Etappe D) — ein
             // Anzeige-Häkchen, kein Personenbezug.
             "showCourtRemaining",
+            // Profil-Schalter „Aufrufe unbegrenzt" (Feldtest 17.08.2026) —
+            // ebenfalls ein Anzeige-Häkchen, kein Personenbezug.
+            "unlimitedCourtCalls",
             "listPosition",
             "updatedAtMs",
         ];
@@ -7142,6 +7300,7 @@ mod tests {
                 show_round: true,
                 show_group: true,
                 show_court_remaining: true,
+                unlimited_court_calls: true,
                 list_position: crate::config::TlListPosition::Bottom,
             },
             updated_at_ms: 1_000,

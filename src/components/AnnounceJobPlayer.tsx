@@ -91,7 +91,11 @@ export function AnnounceJobPlayer({
         // Nichts mehr auf dem Feld oder inzwischen ein anderes Spiel: Der
         // Aufruf wäre falsch, also lieber gar keiner.
         if (!court || court.match_id !== job.matchId) return;
-        const stage = job.stage >= 3 ? 3 : 2;
+        // Ab dem vierten Aufruf (Option „Aufrufe unbegrenzt") die schlichte
+        // Feld-Ansage ohne Stufenwort — „Dritter und letzter Aufruf" noch
+        // einmal wäre gelogen, und eine „vierte" Stufe gibt es im Sprachbild
+        // der Halle nicht.
+        const stage = job.stage >= 4 ? 1 : job.stage >= 3 ? 3 : 2;
         // Auch der Feld-Aufruf trägt seit dem gezielten Nachruf je Partei
         // (Plan tl-liste-vereinfachen E1) eine Partei mit sich — wie der
         // Vorbereitungs-Aufruf darunter. Fehlt sie (Auftrag aus einer

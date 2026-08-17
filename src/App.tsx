@@ -384,6 +384,9 @@ function App() {
             azureTts={config.azure_tts}
             disciplineHallRules={config.discipline_hall_rules}
             manageScorekeepers={config.scorekeeper?.enabled ?? false}
+            unlimitedCalls={(config.tl_web?.profiles ?? []).some(
+              (p) => p.display?.unlimited_court_calls,
+            )}
             hallLayouts={config.hall_layouts}
             onConfigSaved={(c) => setConfig(c)}
           />

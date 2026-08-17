@@ -326,8 +326,11 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 **Aufrufe und Ansagen**
 
-- [x] Die Aufruf-Stufe (1./2./3.) ist auf **allen** Geräten gleich —
-      inklusive der Desktop-App; sie zählt am Host, nicht im Browser.
+- [x] Die Aufruf-Stufe ist auf **allen** Geräten gleich — inklusive der
+      Desktop-App; sie zählt am Host, nicht im Browser. (Ursprünglich
+      1./2./3.; seit der Profil-Option „Aufrufe unbegrenzt", 17.08.2026,
+      zählt der Host über 3 hinaus, sobald ein Profil die Option führt —
+      ab Stufe 4 spricht das Ansage-Gerät ohne Stufenwort.)
 - [~] Eine aus TL-Web ausgelöste Ansage wird **genau einmal** und auf
       **genau einem** Gerät je Halle gesprochen — mit demselben Text, Gong
       und derselben Stimme wie eine Ansage aus der Desktop-App, inklusive

@@ -406,7 +406,13 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   (`#[serde(default)]` — alte Browser-Profile ohne das Feld lesen sich als
   „aus"); das zugehörige Anzeigedatum reist als `TlCourt.remaining_min`
   im opaken `TlState`-JSON mit (Serde-Default, alte Gegenstellen
-  ignorieren es).
+  ignorieren es). Seit 17.08.2026 trägt `TlDisplaySettingsWire` außerdem
+  `unlimitedCourtCalls` (inzwischen Container-weites `#[serde(default)]`
+  wie beim Config-Zwilling: fehlende Häkchen-Felder lesen sich als „aus").
+  Der Turnier-PC zählt Aufruf-Stufen nur dann über 3 hinaus, wenn
+  irgendein Profil die Option führt (`tablet/tl.rs`
+  `unlimited_court_calls`) — ohne sie hält er den alten 3er-Deckel
+  selbst, das Client-Gating ist nicht die einzige Sicherung.
 - **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
   `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
   Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →

@@ -871,6 +871,10 @@ pub struct TlDisplaySettings {
     /// `spielzeiten-prognose`, Etappe D)? Default aus, wie die anderen
     /// Zusatzfelder.
     pub show_court_remaining: bool,
+    /// Aufrufe am Feld beliebig oft anbieten — auch über den dritten hinaus
+    /// und auch bei laufendem Spiel (Feldtest 17.08.2026). Default aus:
+    /// Dann endet der Knopf wie bisher nach dem dritten Aufruf.
+    pub unlimited_court_calls: bool,
     pub list_position: TlListPosition,
 }
 
@@ -1272,6 +1276,7 @@ mod tests {
                 show_round: true,
                 show_group: false,
                 show_court_remaining: true,
+                unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
             },
             columns: 3,

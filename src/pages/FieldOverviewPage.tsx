@@ -101,11 +101,17 @@ export function FieldOverviewPage({
   disciplineHallRules,
   manageScorekeepers,
   hallLayouts,
+  unlimitedCalls,
   onConfigSaved,
 }: {
   callTimer: CallTimerConfig;
   announce: AnnounceConfig;
   azureTts?: AzureTtsConfig;
+  /** Führt irgendein TL-Web-Profil „Aufrufe unbegrenzt"? Dann zählt der
+   *  Turnier-PC über 3 hinaus, und dieser Knopf bietet ab dem vierten
+   *  Aufruf die schlichte Ansage ohne Stufenwort an — dieselbe Regel wie
+   *  `unlimited_court_calls` in `tablet/tl.rs`. */
+  unlimitedCalls: boolean;
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): nicht erlaubte Felder werden
    *  ausgegraut; eine Vergabe dorthin wird abgewiesen (Backend erzwingt es). */
   disciplineHallRules: DisciplineHallRule[];
@@ -775,9 +781,16 @@ export function FieldOverviewPage({
                 // einer Karte in dieser Oberfläche: Sonst böte sie erneut den
                 // zweiten Aufruf an, während die Halle über die
                 // Turnierleitungs-Seite längst den dritten gehört hat.
-                const nextCallStage = Math.min(
-                  Math.max((c.call_stage || 1) + 1, timeStage),
-                  3,
+                // Mit „Aufrufe unbegrenzt" läuft die Stufe über 3 hinaus
+                // (der Zähler des Turnier-PCs tut es dann auch); gesprochen
+                // wird ab 4 die schlichte Ansage ohne Stufenwort — sonst
+                // spräche dieser Knopf „Dritter und letzter Aufruf" als
+                // vierten (Review 17.08.2026).
+                const nextCallStage = unlimitedCalls
+                  ? Math.max((c.call_stage || 1) + 1, timeStage)
+                  : Math.min(Math.max((c.call_stage || 1) + 1, timeStage), 3);
+                const spokenCallStage = (
+                  nextCallStage >= 4 ? 1 : nextCallStage
                 ) as 1 | 2 | 3;
                 const clickable = !c.locked && !occupied && !busy;
                 // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
@@ -978,7 +991,7 @@ export function FieldOverviewPage({
                                     c,
                                     announce,
                                     azureTts,
-                                    nextCallStage,
+                                    spokenCallStage,
                                   );
                                   void noteCourtCall(
                                     c.court_id,
@@ -990,12 +1003,16 @@ export function FieldOverviewPage({
                                 aria-label={`Feld ${c.court} ${
                                   nextCallStage === 1
                                     ? "aufrufen"
-                                    : `${nextCallStage}. Aufruf`
+                                    : nextCallStage >= 4
+                                      ? "erneut aufrufen"
+                                      : `${nextCallStage}. Aufruf`
                                 }`}
                                 title={
                                   nextCallStage === 1
                                     ? "Dieses Feld aufrufen (Ansage)"
-                                    : `${nextCallStage}. Aufruf ansagen (Gong, Feld, Disziplin, „${nextCallStage === 2 ? "Zweiter" : "Dritter und letzter"} Aufruf", Spieler)`
+                                    : nextCallStage >= 4
+                                      ? "Erneut aufrufen (Ansage ohne Stufenwort)"
+                                      : `${nextCallStage}. Aufruf ansagen (Gong, Feld, Disziplin, „${nextCallStage === 2 ? "Zweiter" : "Dritter und letzter"} Aufruf", Spieler)`
                                 }
                                 className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1
                                            text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
@@ -1003,7 +1020,9 @@ export function FieldOverviewPage({
                                 <Megaphone size={13} />{" "}
                                 {nextCallStage === 1
                                   ? "Aufrufen"
-                                  : `${nextCallStage}. Aufruf`}
+                                  : nextCallStage >= 4
+                                    ? "Erneut aufrufen"
+                                    : `${nextCallStage}. Aufruf`}
                               </button>
                             )}
                             <button
