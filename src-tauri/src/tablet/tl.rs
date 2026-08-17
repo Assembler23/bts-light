@@ -734,7 +734,18 @@ fn state_fingerprint(state: &mut TlState) -> String {
     for m in state.queue.iter_mut() {
         m.predicted_start_ms = None;
     }
+    // Die Restzeit belegter Felder (Etappe D) ist genauso zeitabgeleitet —
+    // sie schrumpft im Minutentakt und darf die Revision nicht bewegen
+    // (Review 2026-08-17). Echte Änderungen (neuer Stand, neues Spiel)
+    // bewegen den Fingerprint über Satzstand/Match-ID ohnehin.
+    let restzeiten: Vec<Option<u64>> = state.courts.iter().map(|c| c.remaining_min).collect();
+    for c in state.courts.iter_mut() {
+        c.remaining_min = None;
+    }
     let fp = serde_json::to_string(&state).unwrap_or_default();
+    for (c, r) in state.courts.iter_mut().zip(restzeiten) {
+        c.remaining_min = r;
+    }
     for (m, p) in state.queue.iter_mut().zip(predicted) {
         m.predicted_start_ms = p;
     }
@@ -2062,6 +2073,14 @@ pub struct TlCourt {
     /// Seit wann das Spiel auf dem Feld steht (= 1. Aufruf). Grundlage der
     /// hochzählenden Uhr und der Fälligkeitsanzeige.
     pub on_court_since_ms: Option<u64>,
+    /// Geschätzte Restzeit des laufenden Spiels in Minuten (Spec
+    /// `spielzeiten-prognose`, Etappe D): aus dem Live-Stand, wenn das Feld
+    /// zählt, sonst Gruppenwert minus verstrichene Zeit. `None` bei freiem
+    /// Feld, abgeschalteter Prognose oder altem Host (Serde-Default hält
+    /// alte Zustände lesbar). Anzeige hinter dem Schalter
+    /// `display.show_court_remaining`.
+    #[serde(default)]
+    pub remaining_min: Option<u64>,
     /// Wie oft dieses Spiel schon aufgerufen wurde (1–3), **gezählt am
     /// Turnier-PC**. Nicht zu verwechseln mit der Fälligkeit aus der Uhr:
     /// Die sagt, wann der nächste Aufruf dran wäre, diese Zahl, wie viele
@@ -2440,7 +2459,7 @@ pub(crate) fn build_state_limited(
     // Felder und Warteliste stammen aus **demselben** Schnappschuss. Zwei
     // getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen —
     // dann beschrieben Felder und Liste zwei verschiedene Turnierstände.
-    let courts: Vec<TlCourt> = tablet
+    let mut courts: Vec<TlCourt> = tablet
         .overview_from(&snap)
         .into_iter()
         .map(|c| {
@@ -2531,17 +2550,39 @@ pub(crate) fn build_state_limited(
             let mut sim_courts: Vec<predict::PredictCourt> = Vec::new();
             let mut player_ready: std::collections::HashMap<String, u64> =
                 std::collections::HashMap::new();
-            for c in courts.iter() {
+            for c in courts.iter_mut() {
                 let free_at_min = if c.match_id != 0 {
-                    let (dur, _) =
-                        stats.group_duration(&c.class_label, &c.discipline, default_mins);
-                    let since = tablet
-                        .brutto_start_ms(c.match_id, Some(c.court_id))
-                        .or(c.on_court_since_ms);
-                    let elapsed = since
-                        .map(|s| now_min.saturating_sub(s / 60_000))
-                        .unwrap_or(0);
-                    now_min + dur.saturating_sub(elapsed)
+                    let times = stats.group_times(&c.class_label, &c.discipline, default_mins);
+                    let (since, first_point) =
+                        tablet.court_time_stamps(c.match_id, Some(c.court_id));
+                    // Live-Restzeit (Etappe D), sobald das Feld wirklich
+                    // zählt (Tablet/Zähltafel verbunden oder es kamen schon
+                    // Punkte an) — sonst wie bisher Gruppenwert minus
+                    // verstrichene Zeit. BTP-Satzstände laufender Spiele
+                    // gibt es nicht, das Gate schützt also vor einem
+                    // Modell ohne Datengrundlage.
+                    let remaining = if c.tablet_connected || first_point.is_some() {
+                        predict::live_remaining_min(&predict::LiveRemainInput {
+                            now_ms,
+                            sets: c.sets.clone(),
+                            best_of: c.best_of,
+                            target: c.target_score,
+                            cap: c.cap_score,
+                            first_assigned_ms: since,
+                            first_point_ms: first_point,
+                            netto_median_min: times.netto_min,
+                            brutto_median_min: times.brutto_min,
+                        })
+                    } else {
+                        // „~0 min Rest" wäre eine verwirrende Anzeige —
+                        // Untergrenze 1 wie im Live-Modell.
+                        let elapsed = since
+                            .map(|s| now_min.saturating_sub(s / 60_000))
+                            .unwrap_or(0);
+                        times.brutto_min.saturating_sub(elapsed).max(1)
+                    };
+                    c.remaining_min = Some(remaining);
+                    now_min + remaining
                 } else {
                     now_min
                 };
@@ -2912,6 +2953,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_discipline: p.display.show_discipline,
             show_round: p.display.show_round,
             show_group: p.display.show_group,
+            show_court_remaining: p.display.show_court_remaining,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
                 crate::config::TlListPosition::Bottom => relay_proto::TlListPositionWire::Bottom,
@@ -2953,6 +2995,7 @@ fn display_settings_from_wire(
         show_discipline: d.show_discipline,
         show_round: d.show_round,
         show_group: d.show_group,
+        show_court_remaining: d.show_court_remaining,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
             relay_proto::TlListPositionWire::Bottom => crate::config::TlListPosition::Bottom,
@@ -3425,6 +3468,8 @@ fn court_view(
         scorekeeper_assigned: c.scorekeeper_assigned,
         locked: c.locked,
         on_court_since_ms: c.on_court_since_ms,
+        // Wird — falls die Prognose an ist — beim Simulation-Bau gefüllt.
+        remaining_min: None,
         best_of: c.best_of,
         target_score: c.target_score,
         cap_score: c.cap_score,
@@ -3936,6 +3981,134 @@ mod tests {
     }
 
     #[test]
+    fn die_live_restzeit_haelt_ein_zaehlendes_feld_die_volle_dauer() {
+        // Etappe D: Match 7 wird live gezählt (Erster-Punkt-Stempel), steht
+        // aber noch bei 0:0. Das Feld bleibt die volle Netto-Dauer belegt,
+        // statt mit „Median − verstrichen" langsam freigerechnet zu werden.
+        let tablet = TabletState::default();
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![player("Läufer")];
+        running.team2 = vec![player("Renner")];
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![running, a_match(1)],
+            Vec::new(),
+        ));
+        // Drei Messwerte: Brutto-Median 30, Netto 25, Differenz 5.
+        for (id, brutto_min) in [(101, 20), (102, 30), (103, 40)] {
+            let start = 1_000_000;
+            tablet.match_times_store().reconcile(
+                &[(id, "A", "mens_singles")],
+                &std::collections::HashSet::new(),
+                start,
+            );
+            tablet
+                .match_times_store()
+                .stamp_first_point(id, start + 5 * 60_000);
+            tablet
+                .match_times_store()
+                .stamp_finished(id, true, start + brutto_min * 60_000);
+        }
+        // Match 7: vor 5 min zugewiesen (Anlauf-Median genau verbraucht),
+        // erster Punkt gestempelt ⇒ Live-Modell greift.
+        tablet.match_times_store().reconcile(
+            &[(7, "A", "mens_singles")],
+            &std::collections::HashSet::new(),
+            55 * 60_000,
+        );
+        tablet.match_times_store().stamp_first_point(7, 56 * 60_000);
+
+        let s = build_state(&tablet, &AppConfig::default(), 60 * 60_000, 7);
+
+        assert_eq!(
+            s.courts[0].remaining_min,
+            Some(25),
+            "0:0 ⇒ volle Nettodauer, Anlauf schon verbraucht"
+        );
+        assert_eq!(
+            s.queue[0].predicted_start_ms,
+            Some((60 + 25 + 2) * 60_000),
+            "die Warteliste rechnet mit der Live-Restzeit"
+        );
+    }
+
+    #[test]
+    fn ohne_live_zaehlung_bleibt_das_alte_restzeit_modell() {
+        // Kein Tablet verbunden, kein erster Punkt: Restzeit = Gruppenwert
+        // minus verstrichene Zeit — wie vor Etappe D.
+        let tablet = TabletState::default();
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![running], Vec::new()));
+        for (id, brutto_min) in [(101, 20), (102, 30), (103, 40)] {
+            let start = 1_000_000;
+            tablet.match_times_store().reconcile(
+                &[(id, "A", "mens_singles")],
+                &std::collections::HashSet::new(),
+                start,
+            );
+            tablet
+                .match_times_store()
+                .stamp_first_point(id, start + 5 * 60_000);
+            tablet
+                .match_times_store()
+                .stamp_finished(id, true, start + brutto_min * 60_000);
+        }
+        // Vor 10 min zugewiesen, nie ein Punkt gemeldet.
+        tablet.match_times_store().reconcile(
+            &[(7, "A", "mens_singles")],
+            &std::collections::HashSet::new(),
+            50 * 60_000,
+        );
+
+        let s = build_state(&tablet, &AppConfig::default(), 60 * 60_000, 7);
+
+        assert_eq!(
+            s.courts[0].remaining_min,
+            Some(20),
+            "Brutto-Median 30 − 10 min verstrichen"
+        );
+    }
+
+    #[test]
+    fn ueberfaellige_spiele_zeigen_mindestens_eine_restminute() {
+        // Alt-Modell, Median längst überschritten: „~0 min Rest" wäre eine
+        // verwirrende Anzeige — die Untergrenze ist 1 Minute („gleich").
+        let tablet = TabletState::default();
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![running], Vec::new()));
+        for (id, brutto_min) in [(101, 20), (102, 30), (103, 40)] {
+            let start = 1_000_000;
+            tablet.match_times_store().reconcile(
+                &[(id, "A", "mens_singles")],
+                &std::collections::HashSet::new(),
+                start,
+            );
+            tablet
+                .match_times_store()
+                .stamp_first_point(id, start + 5 * 60_000);
+            tablet
+                .match_times_store()
+                .stamp_finished(id, true, start + brutto_min * 60_000);
+        }
+        // Vor 40 min zugewiesen (Median 30 längst vorbei), nie ein Punkt.
+        tablet.match_times_store().reconcile(
+            &[(7, "A", "mens_singles")],
+            &std::collections::HashSet::new(),
+            20 * 60_000,
+        );
+
+        let s = build_state(&tablet, &AppConfig::default(), 60 * 60_000, 7);
+
+        assert_eq!(s.courts[0].remaining_min, Some(1));
+    }
+
+    #[test]
     fn ausgeschaltete_prognose_liefert_weder_zeiten_noch_statistik() {
         let tablet = TabletState::default();
         tablet.set_snapshot(snap(vec![a_court(1, None)], vec![a_match(1)], Vec::new()));
@@ -4086,6 +4259,31 @@ mod tests {
         ));
         let mut a = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
         let mut b = build_state(&tablet, &AppConfig::default(), 3_650_000, 7);
+        assert_eq!(state_fingerprint(&mut a), state_fingerprint(&mut b));
+    }
+
+    #[test]
+    fn die_restzeit_bewegt_den_fingerprint_nicht() {
+        // Rev-Churn-Wächter für Etappe D (Review 2026-08-17): `remaining_min`
+        // ist zeitabgeleitet und schrumpft im Minutentakt — unmaskiert
+        // bekäme jedes Gerät je belegtem Feld einmal pro Minute den vollen
+        // Zustand statt eines 304, und der Relay pushte im selben Takt.
+        let tablet = TabletState::default();
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![running], Vec::new()));
+        tablet.match_times_store().reconcile(
+            &[(7, "A", "mens_singles")],
+            &std::collections::HashSet::new(),
+            50 * 60_000,
+        );
+        let mut a = build_state(&tablet, &AppConfig::default(), 60 * 60_000, 7);
+        let mut b = build_state(&tablet, &AppConfig::default(), 62 * 60_000, 7);
+        assert_ne!(
+            a.courts[0].remaining_min, b.courts[0].remaining_min,
+            "Fixture-Check: die Restzeit schrumpft über die zwei Minuten wirklich"
+        );
         assert_eq!(state_fingerprint(&mut a), state_fingerprint(&mut b));
     }
 
@@ -6640,6 +6838,9 @@ mod tests {
             "locked",
             "clearing",
             "on_court_since_ms",
+            // Geschätzte Restminuten des laufenden Spiels (Etappe D) — eine
+            // aus Satzstand und Medianen gerechnete Zahl, kein Personenbezug.
+            "remaining_min",
             // Zahl der gesprochenen Aufrufe (0–3) — keine Angabe zu Personen.
             "call_stage",
             "recalls",
@@ -6762,6 +6963,9 @@ mod tests {
             "showDiscipline",
             "showRound",
             "showGroup",
+            // Profil-Schalter für die Restzeit-Anzeige (Etappe D) — ein
+            // Anzeige-Häkchen, kein Personenbezug.
+            "showCourtRemaining",
             "listPosition",
             "updatedAtMs",
         ];
@@ -6840,6 +7044,7 @@ mod tests {
                 show_discipline: true,
                 show_round: true,
                 show_group: true,
+                show_court_remaining: true,
                 list_position: crate::config::TlListPosition::Bottom,
             },
             updated_at_ms: 1_000,

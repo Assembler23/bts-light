@@ -867,6 +867,10 @@ pub struct TlDisplaySettings {
     pub show_discipline: bool,
     pub show_round: bool,
     pub show_group: bool,
+    /// Geschätzte Restzeit laufender Spiele am Feld anzeigen (Spec
+    /// `spielzeiten-prognose`, Etappe D)? Default aus, wie die anderen
+    /// Zusatzfelder.
+    pub show_court_remaining: bool,
     pub list_position: TlListPosition,
 }
 
@@ -1267,6 +1271,7 @@ mod tests {
                 show_discipline: true,
                 show_round: true,
                 show_group: false,
+                show_court_remaining: true,
                 list_position: TlListPosition::Bottom,
             },
             columns: 3,

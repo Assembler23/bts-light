@@ -359,6 +359,21 @@ impl MatchTimesStore {
             .and_then(|e| e.first_assigned_ms)
     }
 
+    /// Bruttostart- und Erster-Punkt-Stempel eines Matches mit EINEM Lock
+    /// und ohne Entry-Klon (Review 2026-08-17): Der TL-State-Bau liest
+    /// beide je belegtem Feld alle ~2 Sekunden — `first_assigned_ms` +
+    /// `entry` wären zwei Sperren plus zwei String-Klone pro Lesung.
+    pub fn stamps(&self, match_id: i64) -> (Option<u64>, Option<u64>) {
+        self.inner
+            .lock()
+            .unwrap()
+            .file
+            .entries
+            .get(&match_id)
+            .map(|e| (e.first_assigned_ms, e.first_point_ms))
+            .unwrap_or((None, None))
+    }
+
     /// Alle Zeiteinträge (Kopie) — Rohmaterial der Statistik
     /// (`predict::time_stats`). Klein genug zum Klonen: ein Turnier hat
     /// wenige hundert Matches.

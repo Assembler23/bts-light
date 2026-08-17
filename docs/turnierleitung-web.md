@@ -302,6 +302,14 @@ Die Anzeige-Häkchen im Profil-Editor:
 - **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
   einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
   „Beendet" zeigen sie unverändert weiter.
+- **Restzeit laufender Spiele zeigen** (Standard: **aus**) — die geschätzte
+  Restzeit des laufenden Spiels („~12 min Rest") in der Fußzeile jeder
+  belegten Feldkachel, zwischen Satzstand und Aufruf-Uhr. Die Schätzung
+  rechnet der Turnier-PC aus Live-Satzstand und gemessenen Spielzeiten
+  (siehe [spielzeiten-prognose.md](spielzeiten-prognose.md), Etappe D);
+  ohne eingeschaltete Prognose erscheint nichts. Erfordert einen Host ab
+  v0.9.212 — ältere Hosts senden das Feld nicht, die Kachel bleibt dann
+  unverändert.
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.

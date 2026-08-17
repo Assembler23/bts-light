@@ -46,6 +46,36 @@ Spieler-Mindestpausen und 2 Minuten Übergangszeit je Feldwechsel.
 Einstellungen: SetupWizard → **„Startzeit-Prognose"** (Anzeige an/aus,
 Startwert in Minuten; Standard: an, 25 min).
 
+## Live-Restzeit laufender Spiele (Etappe D)
+
+Sobald ein Feld **live zählt** (Tablet oder Zähltafel verbunden bzw. schon
+Punkte gemeldet), schätzt der Host die Restzeit des laufenden Spiels aus dem
+**Satzstand** statt nur aus „Median minus verstrichene Zeit":
+
+- Ein Spiel bei **14:6 im dritten Satz** blockiert sein Feld nur noch wenige
+  Minuten — die Prognosen aller wartenden Spiele rücken entsprechend vor.
+- Ein Spiel, das **bei 0:0 steht**, hält sein Feld die volle erwartete
+  Nettodauer plus restliche Anlaufzeit — es wird nicht mehr „freigerechnet",
+  nur weil die Zuweisung schon eine Weile her ist.
+- Gerechnet wird mit dem **Eigentempo** des Spiels (gemessene Sekunden je
+  Punkt, anfangs mit dem Gruppen-Median geglättet) und dem Zählsystem des
+  Matches (Best-of, Zielpunkte, Deckel). Ein möglicher
+  **Entscheidungssatz** zählt mit seiner **Wahrscheinlichkeit** hinein,
+  geschätzt aus Satzstand und Punktstärke: Wer den ersten Satz 15:5
+  gewonnen hat und im zweiten 10:6 führt, macht fast sicher in zwei
+  Sätzen zu (dritter Satz ≈ 2 %); liegt derselbe Spieler 7:11 hinten,
+  wird der dritte Satz sehr wahrscheinlich (≈ 80 %); bei 13:13 zwischen
+  Gleichstarken zählt etwa der halbe Satz. Je erwartetem weiteren Satz
+  kommen 2 Minuten Satzpause dazu. Friert ein Stand ein (Tablet
+  ausgefallen), ist das Tempo auf das Doppelte des Normalwerts gedeckelt;
+  die Restzeit insgesamt auf das Doppelte des Brutto-Medians.
+
+Felder ohne Live-Zählung (Papier-Anschreiben) behalten das bisherige
+Modell. Die Warteliste profitiert automatisch; zusätzlich kann die Kachel
+jedes belegten Felds die Schätzung anzeigen („~12 min Rest"): TL-Web →
+Profil bearbeiten → Anzeige → **„Restzeit laufender Spiele zeigen"**
+(Standard: aus).
+
 ## Das Panel „Spielzeiten" (TL-Web)
 
 Ein eigenes Panel (über das Profil ein-/ausblendbar) zeigt je
