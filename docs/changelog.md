@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.221
+
+- **TL-Web wird geweckt, statt zu fragen** (Spec `tl-web-push`, ADR
+  0034). Neuer Anstoß-Kanal `/tl-ws` in LAN-Server **und** Relay: Er
+  trägt ausschließlich die Revisionsnummer (`{"rev":n}`) — die Daten
+  holt die Seite weiterhin über `GET /tl/api/state`, mit unveränderter
+  Auth, ETag-Logik, Kürzungsleiter und Profil-Header. Wirkung: Eine
+  Änderung ist in unter einer Sekunde sichtbar (statt bis zu zwei), und
+  ein Tablet fragt im ruhigen Betrieb nur noch alle 30 Sekunden nach
+  statt zweimal pro Sekunde. Der Zugang reist im **ersten Frame**
+  (WebSockets tragen keine Kopfzeilen, und in Adressen gehört er nicht).
+- **Turnier-PC rechnet den TL-Zustand zentral.** Ein Sekundentakt baut
+  ihn einmal, legt die fertige Antwort in einen Cache und nudgt bei
+  neuer Revision; die LAN-Anfragen aller Geräte werden damit zu
+  Cache-Reads. Bisher rechnete der PC je Gerät **und** Anfrage einen
+  vollen Snapshot-Clone plus zwei JSON-Serialisierungen — bei acht
+  Geräten rund acht Rechnungen pro Sekunde, jetzt eine.
+- **Kein Bruch:** Ohne erreichbaren Kanal (älterer Turnier-PC, älterer
+  Relay, Netz ohne WebSocket) verhält sich die Seite exakt wie zuvor
+  (2-Sekunden-Poll); nginx bleibt unangetastet.
+
 ## v0.9.220
 
 - **TL-Web: Schriftgröße pro Gerät.** Im Profil-Overlay gibt es unten

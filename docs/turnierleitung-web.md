@@ -523,6 +523,28 @@ Internet-Aussetzer leeren das Panel nicht — dauert der Aussetzer länger
 als fünf Minuten, sagt eine ⚠-Zeile ehrlich, dass der Stand alt sein
 kann.
 
+## Aktualisierung: Push statt Dauerfragen (seit 18.08.2026)
+
+Die Seite wird vom Turnier-PC **geweckt**, statt alle zwei Sekunden zu
+fragen: Ein schmaler Kanal meldet „es gibt einen neuen Stand", die Seite
+holt ihn daraufhin sofort über denselben Weg wie bisher. Sichtbar wird
+das als **kürzere Reaktionszeit** (unter einer Sekunde statt bis zu
+zwei) und als deutlich ruhigeres Netz — ein Tablet fragt im ruhigen
+Betrieb nur noch alle 30 Sekunden nach, statt zweimal pro Sekunde.
+
+Steht der Kanal nicht (älterer Turnier-PC, älterer Relay, Firmennetz
+ohne WebSocket), fällt die Seite **geräuschlos** auf das bisherige
+Verhalten zurück — alle zwei Sekunden fragen. Es gibt nichts
+einzustellen und nichts zu bemerken; auch die Verbindungsanzeige oben
+rechts bedeutet unverändert dasselbe.
+
+Technisch: `/tl-ws` trägt nur die Revisionsnummer, nie Turnierdaten
+(Spec [features/tl-web-push.md](features/tl-web-push.md), ADR 0034).
+Nebeneffekt am Turnier-PC: Er rechnet den Zustand jetzt **einmal
+zentral** je Sekunde statt einmal je Gerät und Anfrage — bei acht
+Geräten ist das der Unterschied zwischen acht Rechnungen pro Sekunde und
+einer.
+
 ## Render-Sparsamkeit (seit 17.08.2026)
 
 Die Seite pollt weiter alle 2 s mit ETag-Kurzschluss, zeichnet bei einer

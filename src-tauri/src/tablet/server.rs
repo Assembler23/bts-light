@@ -184,6 +184,7 @@ impl ServerCtx {
 /// Startet den Server auf `0.0.0.0:8088` und bedient ihn, bis der Task
 /// abgebrochen wird.
 pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
+    let ctx_fuer_takt = ctx.clone();
     let app = Router::new()
         // TV-Launcher: kurze Root-Adresse landet auf einem Auswahl-Menü
         // (Fernbedienung statt langer ?halle=-URLs). Kurz-Pfade leiten direkt.
@@ -228,6 +229,11 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // damit tl.html in beiden Modi identisch abruft.
         .route("/tl/api/timeline/{match_id}", get(tl_timeline))
         .route("/tl/api/officials/{official_id}", get(tl_official_detail))
+        // TL-Push (Spec tl-web-push): Anstoß-Kanal `{"rev":n}` — nie Daten,
+        // die holt die Seite über `/tl/api/state`. Auth im ersten Frame
+        // (Browser-WebSockets können keine Header setzen, und der Zugang
+        // gehört nie in eine URL). Siehe `tl_ws_upgrade`.
+        .route("/tl-ws", get(tl_ws_upgrade))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -240,7 +246,45 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", TABLET_PORT)).await?;
     tracing::info!("Tablet-Server lauscht auf http://{}", lan_host());
-    axum::serve(listener, app).await
+    // TL-Erkennungstakt (Spec tl-web-push): lebt und stirbt mit dem
+    // LAN-Server — er versorgt dessen Antwort-Cache und `/tl-ws`-Nudges.
+    // Im reinen Cloud-Modus läuft weder Server noch Takt; dort erkennt der
+    // Relay-Client Änderungen selbst (TICK) und der Relay nudgt.
+    let takt = tokio::spawn(tl_push_takt(ctx_fuer_takt));
+    let ergebnis = axum::serve(listener, app).await;
+    takt.abort();
+    ergebnis
+}
+
+/// Zentraler TL-Erkennungstakt (Spec tl-web-push): baut den Zustand EINMAL
+/// pro Sekunde, legt die fertige Antwort in den Cache und nudgt die
+/// `/tl-ws`-Zuhörer bei jeder neuen Revision. Ersetzt die frühere
+/// Je-Gerät-und-Anfrage-Rechnung (Snapshot-Clone + zwei Serialisierungen
+/// pro Poll) durch genau eine pro Takt — und macht Änderungen in unter
+/// einer Sekunde sichtbar statt erst beim nächsten 2-s-Poll.
+async fn tl_push_takt(ctx: Arc<ServerCtx>) {
+    let mut takt = tokio::time::interval(Duration::from_secs(1));
+    takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut letzte_rev = 0u64;
+    loop {
+        takt.tick().await;
+        // Config je Takt frisch (wie der Relay-TICK): Ein- und Ausschalten
+        // von TL-Web greift ohne Neustart.
+        let config = ctx.app_config();
+        if !config.tl_web.enabled {
+            continue;
+        }
+        let now = now_ms();
+        let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &config, now);
+        let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+        let rev = state.rev;
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        ctx.tablet.set_tl_state_cache(rev, etag, json, now);
+        if rev != letzte_rev {
+            letzte_rev = rev;
+            ctx.tablet.notify_tl(rev);
+        }
+    }
 }
 
 /// LAN-Adresse `<ip>:<port>` für Tablet-URLs und QR-Codes.
@@ -1209,18 +1253,35 @@ async fn tl_state(
     let Some(device) = tl_device(&ctx, &headers) else {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
     };
-    // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz und eines
-    // aus dem Internet müssen mit derselben Zahl denselben Stand meinen,
-    // sonst träfe die Altersprüfung am Turnier-PC zufällige Entscheidungen.
-    let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &ctx.app_config(), now_ms());
-    // Die Seite fragt alle zwei Sekunden und schickt ihre letzte Fassung mit.
-    // Hat sich nichts geändert, spart „unverändert" den ganzen Stand — auf
-    // demselben Rechner, der nebenher BTP und die Tablets bedient.
-    //
-    // Die Prozess-Kennung gehört mit hinein: Nach einem Neustart der App
-    // beginnt die Revision wieder bei 1, und ein Gerät mit gemerkter Fassung
-    // „1" bekäme sonst „unverändert" auf einen völlig anderen Turnierstand.
-    let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+    // Antwort-Cache des Erkennungstakts (Spec tl-web-push): Der Takt baut
+    // den Zustand einmal zentral pro Sekunde — die Anfragen aller Geräte
+    // werden damit zu Cache-Reads statt je Anfrage Snapshot zu klonen und
+    // zweimal zu serialisieren. Nur FRISCHE Einträge zählen (3 s: Takt 1 s
+    // plus Luft) — ist der Cache kalt oder alt (Takt läuft nicht, z. B.
+    // Übertragung gerade gestartet), rechnet der Handler wie eh und je
+    // selbst. Der Cache ist Beschleuniger, nicht Wahrheit.
+    let (etag, json) = match ctx.tablet.tl_state_cache() {
+        Some(cache) if now_ms().saturating_sub(cache.gebaut_ms) <= 3_000 => {
+            (cache.etag, cache.json)
+        }
+        _ => {
+            // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz
+            // und eines aus dem Internet müssen mit derselben Zahl
+            // denselben Stand meinen, sonst träfe die Altersprüfung am
+            // Turnier-PC zufällige Entscheidungen.
+            let state =
+                crate::tablet::tl::build_state_with_rev(&ctx.tablet, &ctx.app_config(), now_ms());
+            // Die Prozess-Kennung gehört in den ETag: Nach einem Neustart
+            // der App beginnt die Revision wieder bei 1, und ein Gerät mit
+            // gemerkter Fassung „1" bekäme sonst „unverändert" auf einen
+            // völlig anderen Turnierstand.
+            let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+            (etag, serde_json::to_string(&state).unwrap_or_default())
+        }
+    };
+    // Die Seite schickt ihre letzte Fassung mit. Hat sich nichts geändert,
+    // spart „unverändert" den ganzen Stand — auf demselben Rechner, der
+    // nebenher BTP und die Tablets bedient.
     let unveraendert = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
@@ -1228,7 +1289,15 @@ async fn tl_state(
     let mut response = if unveraendert {
         (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response()
     } else {
-        (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
+        (
+            StatusCode::OK,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CONTENT_TYPE, "application/json"),
+            ],
+            json,
+        )
+            .into_response()
     };
     // Frisch bei JEDER Antwort, auch bei 304 — konsistent mit dem
     // Cloud-Pfad (`relay::tl_state_route`). Leer (kein Profil gewählt) ist
@@ -2146,6 +2215,85 @@ async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Optio
     // Verbindungsende: Abo explizit austragen (nicht nur lazy beim nächsten
     // Nudge) — sonst hielte ein stiller Court tote Sender beliebig lange.
     ctx.tablet.unsubscribe_monitor(court, &tx);
+}
+
+/// TL-Push-Kanal (Spec tl-web-push): reine Anstöße `{"rev":n}` an die
+/// Turnierleitungs-Seite — die Daten holt sie über `/tl/api/state`
+/// (eine Wahrheit für Auth/ETag/Profile-Header, Muster ADR 0016).
+async fn tl_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(ctx): State<Arc<ServerCtx>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| tl_ws_socket(socket, ctx))
+}
+
+/// Erste Nachricht des Clients auf `/tl-ws`: der Zugang.
+#[derive(serde::Deserialize)]
+struct TlWsAuth {
+    #[serde(default)]
+    token: String,
+}
+
+async fn tl_ws_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
+    // In-Band-Auth: Die erste Nachricht muss binnen 10 s `{"token":…}`
+    // sein. Vor erfolgreicher Prüfung sendet der Server NICHTS — auch
+    // keinen Ablehnungsgrund. Warum in-band: Browser-WebSockets können
+    // keine Header setzen, und der Zugang gehört nie in eine URL (Pfade
+    // landen in Zugriffsprotokollen — dieselbe Regel wie bei den
+    // HTTP-Routen, siehe `tl_device`).
+    let erste = tokio::time::timeout(Duration::from_secs(10), socket.recv()).await;
+    let token = match erste {
+        Ok(Some(Ok(Message::Text(text)))) => serde_json::from_str::<TlWsAuth>(&text)
+            .map(|a| a.token)
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    if token.is_empty() || crate::tablet::tl::authorize(&ctx.app_config(), &token).is_none() {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Fan-out-Deckel wie beim Monitor-Nudge: Über der Grenze sauber
+    // schließen, die Seite bedient sich aus ihrem Poll-Fallback.
+    if !ctx.tablet.subscribe_tl(&tx) {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    // Den aktuellen Stand sofort melden: Eine Revision, die während des
+    // Verbindens durchrutschte, läge sonst bis zum 30-s-Fallback-Poll.
+    if let Some(cache) = ctx.tablet.tl_state_cache() {
+        let _ = tx.send(format!("{{\"rev\":{}}}", cache.rev));
+    }
+    let mut ping = tokio::time::interval(Duration::from_secs(15));
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            nudge = rx.recv() => {
+                match nudge {
+                    Some(json) => {
+                        if socket.send(Message::Text(Utf8Bytes::from(json))).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            incoming = socket.recv() => {
+                // Nach der Auth sendet die Seite nichts Fachliches; wir
+                // lesen nur, um Close/Fehler zu bemerken.
+                match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {}
+                }
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    ctx.tablet.unsubscribe_tl(&tx);
 }
 
 /// Sendet eine `ServerMsg` über den Tablet-Socket.

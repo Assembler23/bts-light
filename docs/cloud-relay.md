@@ -74,6 +74,7 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `POST /{ns}/pairing-code` | Telefon-Kopplungscode ausstellen (ADR 0004, nur bei verbundenem Host) |
 | `GET /pair/{code}` | Telefon-Code → Namespace auflösen (1 h TTL, Fehlversuchs-Limit) |
 | `GET /tl`, `GET /tl/api/state`, `POST /tl/api/command` | Turnierleitungs-Oberfläche — **ohne Namespace in der Adresse**, siehe unten |
+| `GET /tl-ws` | TL-Push-Anstoß (Spec `tl-web-push`, ADR 0034): sendet nur `{"rev":n}`, Zugang im **ersten Frame** |
 | `GET /health` | Status-Schnappschuss |
 
 ### Datenfluss
@@ -159,6 +160,34 @@ Monitoren: mehrere je Namespace (höchstens 8), **nicht** feldgebunden, und
 sie schreiben ausschließlich **über den Host**. Sie landen nie in der
 Tablet-Liste eines Namespace und übernehmen nie eine Court-Session — R4
 („ein aktives Tablet je Court") bleibt unberührt.
+
+**Anstoß statt Dauerfragen** (Spec
+[features/tl-web-push.md](features/tl-web-push.md), ADR 0034, seit
+v0.9.221): Neben den HTTP-Routen gibt es `GET /tl-ws`. Der Relay legt
+den vom Host gepushten `TlState` wie gehabt ab — und weckt dabei die
+Zuhörer dieses Namespace mit `{"rev":n}`, sobald die Revision **neu**
+ist. Der Kanal trägt **nie** Turnierdaten; die Seite holt sie über ihr
+bestehendes `GET /tl/api/state` (eine Wahrheit für Auth, ETag,
+Kürzungsleiter und `X-Tl-Active-Profile`). Eigenheiten:
+
+- **Zugang im ersten Frame** (`{"token":…}`, 10-s-Frist), nicht im Pfad
+  und nicht im Query: WebSockets tragen keine Kopfzeilen, und Adressen
+  landen in Zugriffsprotokollen. Vor erfolgreicher Prüfung antwortet der
+  Relay nichts — auch keinen Grund; unbekannter Zugang oder
+  abwesender Host schließen die Verbindung.
+- **Deckel 16 Zuhörer je Namespace** (`MAX_TL_SUBS`, doppelter
+  Geräte-Cap als Reconnect-Reserve). Darüber bleibt die Verbindung
+  ungenutzt, die Seite bedient sich aus ihrem Poll.
+- **Der 8-Geräte-Platz hängt weiter am Poll** (`claim_tl_slot`, TTL
+  60 s): Ein Kanal allein belegt keinen Platz, der 30-s-Fallback-Poll
+  der Seite hält ihn frisch.
+- Beim Verbinden schickt der Relay sofort die aktuelle Revision — eine
+  Änderung, die während des Verbindens durchrutschte, läge sonst bis
+  zum nächsten Fallback-Poll.
+- nginx bleibt unangetastet: Der Kanal läuft über die vorhandene
+  `Upgrade`-Konfiguration (`ops/nginx-bts-relay.conf`), kein
+  `proxy_buffering`-Eingriff nötig — genau der Grund, aus dem SSE hier
+  ausscheidet (ADR 0016/0034).
 
 Die geteilten Typen in `relay-proto`:
 

@@ -34,6 +34,12 @@ const MAX_MONITOR_DEVICES: usize = 128;
 /// Zuschauer-DoS (viele TVs/Tabs, die den Monitor-WS öffnen).
 const MAX_MONITOR_SUBS: usize = 256;
 
+/// Fan-out-Deckel der TL-Push-Abos (`/tl-ws`, Spec tl-web-push): das
+/// Doppelte des 8-Geräte-Caps — Reserve für Reconnect-Überlappung, aber
+/// kein offenes Scheunentor. Über der Grenze lehnt `subscribe_tl` ab und
+/// die Seite fällt still auf ihren Poll zurück (Muster Monitor-Nudge).
+const MAX_TL_PUSH_SUBS: usize = 16;
+
 /// Lebensdauer des Finalisiert-Merkers (A2 / ADR 0017, Regel b). Lang genug,
 /// dass ein kurz abgerissenes Tablet nach seiner Rückkehr noch „finalized"
 /// erfährt und das Hand-Ergebnis nicht überbügelt; kurz genug, dass der Merker
@@ -600,6 +606,18 @@ pub struct TabletState {
     /// (`overview.html`) will Signale ALLER Felder. Jeder `notify_monitor`
     /// weckt zusätzlich diese Liste.
     monitor_subs_all: RwLock<Vec<MonitorNudgeTx>>,
+    /// TL-Push-Abonnenten (`/tl-ws`, Spec tl-web-push): bekommen bei jeder
+    /// neuen TL-Revision den winzigen Anstoß `{"rev":n}` — nie Daten, die
+    /// holt die Seite über ihren bestehenden Poll-Pfad (eine Wahrheit für
+    /// Auth/ETag/Kürzung, Muster ADR 0016).
+    tl_subs: RwLock<Vec<MonitorNudgeTx>>,
+    /// Antwort-Cache des TL-Erkennungstakts (Spec tl-web-push): der
+    /// Sekundentakt baut den LAN-Zustand EINMAL zentral; die
+    /// `GET /tl/api/state`-Anfragen aller Geräte bedienen sich hier statt
+    /// je Anfrage Snapshot zu klonen und zweimal zu serialisieren. Reiner
+    /// Beschleuniger, keine Wahrheit — ist er kalt oder abgestanden,
+    /// rechnet der Handler wie eh und je selbst.
+    tl_state_cache: RwLock<Option<TlStateCache>>,
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
@@ -621,6 +639,18 @@ pub struct MonitorNudge {
 /// reicht ihn 1:1 auf seinen Socket. Unbounded, weil `notify_monitor` NIE
 /// blockieren darf (es läuft unter dem `record_score`-Lock).
 pub type MonitorNudgeTx = tokio::sync::mpsc::UnboundedSender<String>;
+
+/// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
+/// serialisierte Zustands-Antwort samt ETag, wie der LAN-Handler sie
+/// ausliefert. `gebaut_ms` entscheidet über Frische (Handler akzeptiert
+/// nur junge Einträge, sonst rechnet er selbst).
+#[derive(Debug, Clone)]
+pub struct TlStateCache {
+    pub rev: u64,
+    pub etag: String,
+    pub json: String,
+    pub gebaut_ms: u64,
+}
 /// Empfangs-Ende eines Monitor-Nudge-Kanals; der WS-Handler leert es auf
 /// seinen Socket. Fällt die Verbindung weg, wird das `Rx` fallengelassen und
 /// der zugehörige `Tx` beim nächsten `notify_monitor` ausgesiebt.
@@ -2056,6 +2086,56 @@ impl TabletState {
             .write()
             .unwrap()
             .retain(|tx| tx.send(nudge.clone()).is_ok());
+    }
+
+    /// Meldet eine TL-Seite als Push-Abonnenten an (`/tl-ws`, Spec
+    /// tl-web-push). `false` = Fan-out-Deckel erreicht — der Aufrufer
+    /// schließt die Verbindung, die Seite fällt still auf ihren Poll
+    /// zurück (Muster [`Self::subscribe_monitor`]).
+    pub fn subscribe_tl(&self, tx: &MonitorNudgeTx) -> bool {
+        let mut subs = self.tl_subs.write().unwrap();
+        if subs.len() >= MAX_TL_PUSH_SUBS {
+            return false;
+        }
+        subs.push(tx.clone());
+        true
+    }
+
+    /// Trägt eine TL-Push-Verbindung wieder aus (Verbindungsende) — per
+    /// `same_channel`, damit nur der eigene Sender verschwindet.
+    pub fn unsubscribe_tl(&self, tx: &MonitorNudgeTx) {
+        self.tl_subs
+            .write()
+            .unwrap()
+            .retain(|t| !t.same_channel(tx));
+    }
+
+    /// Weckt alle TL-Push-Abonnenten: `{"rev":n}` — nur die Nummer, nie
+    /// Daten. Tote Sender werden dabei ausgesiebt. Kein `.await`, der
+    /// Kanal ist unbounded (Muster [`Self::notify_monitor`]).
+    pub fn notify_tl(&self, rev: u64) {
+        let nudge = format!("{{\"rev\":{rev}}}");
+        self.tl_subs
+            .write()
+            .unwrap()
+            .retain(|tx| tx.send(nudge.clone()).is_ok());
+    }
+
+    /// Legt die zentral gebaute Zustands-Antwort ab (Erkennungstakt,
+    /// Spec tl-web-push).
+    pub fn set_tl_state_cache(&self, rev: u64, etag: String, json: String, gebaut_ms: u64) {
+        *self.tl_state_cache.write().unwrap() = Some(TlStateCache {
+            rev,
+            etag,
+            json,
+            gebaut_ms,
+        });
+    }
+
+    /// Die zuletzt zentral gebaute Zustands-Antwort — `None`, solange der
+    /// Erkennungstakt noch nichts abgelegt hat.
+    pub fn tl_state_cache(&self) -> Option<TlStateCache> {
+        self.tl_state_cache.read().unwrap().clone()
     }
 
     /// Beansprucht das Feld für ein Tablet und gibt dessen Token zurück.
@@ -4088,6 +4168,56 @@ mod tests {
         );
         // Die andere Partei zählt für sich — sie war ja vielleicht längst da.
         assert_eq!(st.note_prep_call(42, "team2"), 2);
+    }
+
+    #[test]
+    fn tl_push_nudges_reach_subscribers_and_dead_ones_are_dropped() {
+        // TL-Push (Spec tl-web-push): Der Anstoß-Kanal trägt nur die
+        // Revisionsnummer; tote Sender (Seite weg) werden beim nächsten
+        // Nudge ausgesiebt, ein ausgetragener bekommt nichts mehr.
+        let st = TabletState::default();
+        let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (tx2, rx2) = tokio::sync::mpsc::unbounded_channel::<String>();
+        assert!(st.subscribe_tl(&tx1));
+        assert!(st.subscribe_tl(&tx2));
+        drop(rx2); // Gerät weg — der Sender ist tot.
+        st.notify_tl(7);
+        assert_eq!(rx1.try_recv().unwrap(), "{\"rev\":7}");
+        st.unsubscribe_tl(&tx1);
+        st.notify_tl(8);
+        assert!(
+            rx1.try_recv().is_err(),
+            "ausgetragen heißt: keine Nudges mehr"
+        );
+    }
+
+    #[test]
+    fn tl_push_subscriptions_are_capped() {
+        // Fan-out-Deckel wie beim Monitor-Nudge: Über der Grenze wird das
+        // Abo abgelehnt und die Seite fällt still auf ihren Poll zurück.
+        let st = TabletState::default();
+        let mut halter = Vec::new();
+        for _ in 0..MAX_TL_PUSH_SUBS {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            assert!(st.subscribe_tl(&tx));
+            halter.push((tx, rx));
+        }
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        assert!(!st.subscribe_tl(&tx), "über dem Deckel wird abgelehnt");
+    }
+
+    #[test]
+    fn the_tl_state_cache_round_trips() {
+        // Antwort-Cache des Erkennungstakts (Spec tl-web-push): Was der
+        // Takt ablegt, liest der LAN-Handler unverändert zurück.
+        let st = TabletState::default();
+        assert!(st.tl_state_cache().is_none(), "kalt = kein Cache");
+        st.set_tl_state_cache(3, "\"tag-3\"".into(), "{}".into(), 1_000);
+        let c = st.tl_state_cache().expect("gerade abgelegt");
+        assert_eq!(
+            (c.rev, c.etag.as_str(), c.json.as_str(), c.gebaut_ms),
+            (3, "\"tag-3\"", "{}", 1_000)
+        );
     }
 
     #[test]

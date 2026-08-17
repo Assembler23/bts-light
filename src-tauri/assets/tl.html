@@ -2517,7 +2517,25 @@ function setHall(hall) {
   render();
 }
 
+/** Läuft gerade ein Abruf? Anstöße aus dem Push-Kanal können dicht
+ *  aufeinander folgen (Punkteregen auf mehreren Feldern) — sie sollen
+ *  sich zu EINEM Abruf bündeln statt sich gegenseitig zu überholen. Ein
+ *  Anstoß während eines laufenden Abrufs setzt deshalb nur eine Marke,
+ *  die am Ende genau einen Nachschlag auslöst. */
+let pollLaeuft = false;
+let pollNachholen = false;
 async function poll() {
+  if (pollLaeuft) { pollNachholen = true; return; }
+  pollLaeuft = true;
+  try {
+    return await pollEinmal();
+  } finally {
+    pollLaeuft = false;
+    if (pollNachholen) { pollNachholen = false; poll(); }
+  }
+}
+
+async function pollEinmal() {
   try {
     // Der Mitschnitt der letzten Fassung spart die Übertragung, solange sich
     // nichts geändert hat: Bei einer Seite, die alle zwei Sekunden fragt, ist
@@ -2641,7 +2659,104 @@ function hideGate() {
   }
 }
 
-/** Live / verzögert / offline — drei Lagen, nicht zwei. */
+// ── Push-Kanal (Spec tl-web-push) ─────────────────────────────────────
+// Statt alle zwei Sekunden zu fragen, lässt sich die Seite wecken: Der
+// Kanal `/tl-ws` schickt nur `{"rev":n}` — die Daten holt weiterhin
+// `poll()` über den bestehenden GET-Pfad (eine Wahrheit für Auth, ETag,
+// Kürzung und Profil-Header; Muster ADR 0016 / Court-Monitore). Steht
+// der Kanal, fragt der Intervall-Poll nur noch alle 30 s nach — das
+// hält zugleich den Geräteplatz im Relay frisch (TTL 60 s). Fällt er
+// weg oder gibt es ihn nicht (älterer Turnier-PC/Relay, Proxy ohne
+// WebSocket), läuft alles wie vorher mit 2 s weiter.
+const POLL_SCHNELL_MS = 2000;
+const POLL_LANGSAM_MS = 30000;
+const POLL_HINTERGRUND_MS = 10000;
+let pushSocket = null;
+/** Verbindungsversuche in Folge — staffelt den Wiederaufbau (1→2→5→10 s)
+ *  und, wenn es den Kanal gar nicht gibt, auf einen sparsamen 60-s-Takt. */
+let pushFehler = 0;
+let pushTimer = null;
+/** Steht der Kanal? Danach richtet sich der Poll-Takt. */
+function pushAktiv() {
+  return !!pushSocket && pushSocket.readyState === WebSocket.OPEN;
+}
+function tlWsUrl() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  // Neben der Seite selbst, nicht unter `/api`: `/tl` → `/tl-ws`
+  // (LAN wie Cloud, dort mit dem `/bts-relay`-Präfix davor).
+  return proto + "//" + location.host + location.pathname.replace(/\/+$/, "") + "-ws";
+}
+function verbindePush() {
+  if (!token || pushSocket) return;
+  let sock;
+  try {
+    sock = new WebSocket(tlWsUrl());
+  } catch {
+    planePushWiederaufbau();
+    return;
+  }
+  pushSocket = sock;
+  sock.addEventListener("open", () => {
+    // In-Band-Auth: WebSockets aus dem Browser tragen keine Kopfzeilen,
+    // und in die Adresse gehört der Zugang nicht (Adressen landen in
+    // Zugriffsprotokollen). Der Server antwortet auf einen falschen
+    // Zugang mit dem Schließen der Verbindung — ohne Begründung.
+    sock.send(JSON.stringify({ token }));
+    pushFehler = 0;
+    setzePollTakt();
+  });
+  sock.addEventListener("message", (ev) => {
+    // Der Anstoß trägt nur die Revision. Ist sie neu, holt der Poll den
+    // Stand; ist sie schon bekannt, antwortet der Server mit 304 — auch
+    // ein überflüssiger Anstoß kostet also fast nichts. Mehrere Anstöße
+    // in Folge fasst der laufende Abruf von selbst zusammen.
+    let rev = 0;
+    try { rev = Number(JSON.parse(ev.data).rev) || 0; } catch { return; }
+    if (!rev) return;
+    poll();
+  });
+  const weg = () => {
+    if (pushSocket === sock) {
+      pushSocket = null;
+      setzePollTakt();
+      planePushWiederaufbau();
+    }
+  };
+  sock.addEventListener("close", weg);
+  sock.addEventListener("error", weg);
+}
+function planePushWiederaufbau() {
+  if (pushTimer) return;
+  pushFehler++;
+  // 1 → 2 → 5 → 10 s, danach sparsam alle 60 s: Gibt es den Kanal gar
+  // nicht (alter Turnier-PC, Proxy ohne WebSocket), soll die Seite nicht
+  // dauernd erfolglos anklopfen — der Poll trägt sie ja vollständig.
+  const stufen = [1000, 2000, 5000, 10000];
+  const wartezeit = stufen[Math.min(pushFehler - 1, stufen.length - 1)] || 10000;
+  const dauer = pushFehler > 6 ? 60000 : wartezeit;
+  pushTimer = setTimeout(() => { pushTimer = null; verbindePush(); }, dauer);
+}
+/** Setzt den Intervall-Poll auf den Takt, der zur Lage passt. */
+let pollTimer = null;
+let pollTaktMs = 0;
+function setzePollTakt() {
+  const ms = document.hidden
+    ? POLL_HINTERGRUND_MS
+    : (pushAktiv() ? POLL_LANGSAM_MS : POLL_SCHNELL_MS);
+  if (ms === pollTaktMs && pollTimer) return;
+  pollTaktMs = ms;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, ms);
+}
+
+/** Live / verzögert / offline — drei Lagen, nicht zwei.
+ *
+ *  `failures` zählt fehlgeschlagene Abrufe, nicht verstrichene Zeit —
+ *  deshalb gilt die Staffelung unverändert für beide Takte: Im
+ *  Push-Betrieb (30-s-Poll) heißt „ein Fehlversuch" nur später, aber
+ *  genauso zuverlässig „verzögert". Ein stehender Kanal allein macht
+ *  die Seite nicht „aktuell" — gemeldet wird, was zuletzt wirklich
+ *  abgerufen wurde. */
 function connectionLevel() {
   if (failures === 0) return "live";
   if (failures === 1) return "delayed";
@@ -6944,15 +7059,22 @@ function start() {
     if (performance.now() - letzterUhrTick < 900) return;
     tickClocks();
   }, 1000);
-  // Im Hintergrund seltener abrufen: Ein Tablet in der Tasche muss den
-  // Turnier-PC nicht alle zwei Sekunden fragen.
-  let timer = setInterval(poll, 2000);
+  // Push-Kanal aufbauen (Spec tl-web-push) und den Intervall-Poll auf den
+  // passenden Takt stellen: 2 s ohne Kanal (wie bisher), 30 s mit Kanal,
+  // 10 s im Hintergrund. Gibt es den Kanal nicht, bleibt es beim
+  // bisherigen Verhalten — kein Unterschied gegen einen älteren
+  // Turnier-PC oder Relay.
+  verbindePush();
+  setzePollTakt();
   document.addEventListener("visibilitychange", () => {
-    clearInterval(timer);
-    timer = setInterval(poll, document.hidden ? 10000 : 2000);
-    // Beim Aufwecken sofort nachfragen, statt bis zum nächsten Takt einen
-    // veralteten Stand zu zeigen.
-    if (!document.hidden) poll();
+    setzePollTakt();
+    if (!document.hidden) {
+      // Beim Aufwecken sofort nachfragen, statt bis zum nächsten Takt
+      // einen veralteten Stand zu zeigen — und den Kanal wieder
+      // aufbauen, falls der Browser ihn im Hintergrund geschlossen hat.
+      poll();
+      verbindePush();
+    }
   });
 }
 
