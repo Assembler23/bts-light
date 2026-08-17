@@ -12,7 +12,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Kinder — ein höherer z-index hätte nichts geändert). Es hängt jetzt wie
   das Kachel-Menü am Ansichtsfenster: `position: fixed` plus die geteilte
   Platzierungsfunktion (`platziereKebabMenue`), die unter dem Auslöser
-  öffnet, wenn Platz ist, sonst darüber (Feldtest 17.08.2026).
+  öffnet, wenn Platz ist, sonst darüber (Feldtest 17.08.2026). Offene
+  Menüs folgen ihrem Auslöser beim Rollen und bei Größenwechseln nach
+  (`folgeOffenenKebabs`); rollt er aus dem Sichtfenster, schließt das
+  Menü. z-index jetzt über der Action-Bar, damit ein nach oben
+  aufgeklapptes Menü nicht unter ihr verschwindet.
 
 ## v0.9.214
 

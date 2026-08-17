@@ -644,9 +644,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    nur durch Scrollen erreichbar oder schlicht abgeschnitten (Feldtest
    17.08.2026). z-index hülfe dagegen nicht, `overflow` schneidet auch
    hoch gestapelte Kinder. `platziereKebabMenue()` im Skript setzt Ort
-   und Aufklapprichtung, bei jedem Neuzeichnen erneut. */
+   und Aufklapprichtung — bei jedem Neuzeichnen, beim Rollen des
+   Panel-Körpers und bei Fenstergrößen-Wechseln (`folgeOffenenKebabs`).
+   z-index über der Action-Bar (25): Ein nach oben aufgeklapptes Menü
+   kann jetzt bis in deren Region reichen. */
 .kebab-menu {
-  position: fixed; z-index: 20;
+  position: fixed; z-index: 30;
   display: flex; flex-direction: column; gap: 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
@@ -3144,6 +3147,37 @@ function platziereKebabMenue(det) {
   menu.style.top = `${top}px`;
   menu.style.left = `${left}px`;
 }
+
+/** Offene ⋯-Menüs folgen ihrem Auslöser: Sie hängen am Ansichtsfenster
+ *  (siehe `.kebab-menu`), Rollen eines Panel-Körpers bewegt aber den
+ *  Auslöser unter ihnen weg — ohne Nachführung schwebte das Menü über
+ *  einer fremden Zeile, und die trägt nur Gattungs-Beschriftungen
+ *  („Spiel", „Nachruf"): ein Klick träfe das falsche Spiel. Rollt der
+ *  Auslöser ganz aus dem Sichtfenster, schließt das Menü stattdessen.
+ *  Capture-Phase, weil Scroll-Ereignisse der Panel-Körper nicht bubbeln;
+ *  über rAF gebündelt wie `scheduleFitCourts`. */
+let kebabFolgePending = false;
+function folgeOffenenKebabs() {
+  document.querySelectorAll(".kebab[open]").forEach((det) => {
+    const anker = det.querySelector("summary");
+    if (!anker) return;
+    const a = anker.getBoundingClientRect();
+    if (a.bottom < 0 || a.top > window.innerHeight) {
+      det.open = false;
+      return;
+    }
+    platziereKebabMenue(det);
+  });
+}
+document.addEventListener("scroll", () => {
+  if (kebabFolgePending) return;
+  kebabFolgePending = true;
+  requestAnimationFrame(() => {
+    kebabFolgePending = false;
+    folgeOffenenKebabs();
+  });
+}, true);
+window.addEventListener("resize", folgeOffenenKebabs);
 
 /**
  * Verdrahtet die Feld-Kacheln.
