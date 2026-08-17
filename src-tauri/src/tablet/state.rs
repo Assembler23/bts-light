@@ -514,6 +514,23 @@ pub struct TabletState {
     /// (Messwert-Generation, Statistik): Cache für `cached_time_stats` —
     /// neu gerechnet nur, wenn sich am Zeiten-Store etwas geändert hat.
     time_stats_cache: Mutex<Option<(u64, std::sync::Arc<crate::tablet::predict::TimeStats>)>>,
+    /// Letzter Check-In-Klassenstand von badhub fürs TL-Panel
+    /// „Anfangszeiten" (Feldtest 17.08.2026) — **ohne** Spielerlisten, die
+    /// streift der Sync-Zyklus vor dem Ablegen ab (Datensparsamkeit; der
+    /// TL-Zustand zeigt Zeitplan und Zähler, nie Namen). Reiner
+    /// RAM-Zwischenstand, bewusst nicht persistiert — die
+    /// „kein Cache"-Regel des Check-Ins (AK-C13) betrifft Gespeichertes.
+    /// `None` = Check-In nicht eingerichtet oder von badhub abgelehnt →
+    /// die TL-Seite zeigt das Panel gar nicht. Der [`std::time::Instant`]
+    /// ist der Abrufzeitpunkt — daraus leitet `tl::build_state` die
+    /// Stale-Marke ab (ein Offline-Aussetzer lässt den Stand bewusst
+    /// stehen, aber nicht unmarkiert, Review 17.08.2026).
+    checkin_classes: RwLock<
+        Option<(
+            std::time::Instant,
+            Vec<crate::badhub::checkin_state::CheckinClass>,
+        )>,
+    >,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -1105,6 +1122,33 @@ impl TabletState {
         ));
         *cache = Some((generation, stats.clone()));
         stats
+    }
+
+    /// Check-In-Klassenstand fürs „Anfangszeiten"-Panel ablegen (Lese-Takt)
+    /// bzw. räumen (`None`, wenn der Check-In aus ist oder badhub ablehnt).
+    /// Stempelt den Abrufzeitpunkt für die Stale-Marke.
+    pub fn set_checkin_classes(
+        &self,
+        classes: Option<Vec<crate::badhub::checkin_state::CheckinClass>>,
+    ) {
+        if classes.is_none() && self.checkin_classes.read().unwrap().is_none() {
+            // Nichts zu räumen — kein Write-Lock im 5-Sekunden-Takt, nur
+            // weil der Check-In gar nicht eingerichtet ist (Review
+            // 17.08.2026).
+            return;
+        }
+        *self.checkin_classes.write().unwrap() = classes.map(|c| (std::time::Instant::now(), c));
+    }
+
+    /// Der abgelegte Check-In-Klassenstand samt Abrufzeitpunkt — `None`,
+    /// solange keiner da ist.
+    pub fn checkin_classes(
+        &self,
+    ) -> Option<(
+        std::time::Instant,
+        Vec<crate::badhub::checkin_state::CheckinClass>,
+    )> {
+        self.checkin_classes.read().unwrap().clone()
     }
 
     /// Bruttostart eines Matches für die BTP-`Duration` (Spec

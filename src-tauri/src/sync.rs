@@ -1844,6 +1844,106 @@ impl SchedTakt {
     }
 }
 
+/// Zustand des Check-In-**Lese**-Wegs fürs TL-Panel „Anfangszeiten"
+/// (Feldtest 17.08.2026): Minuten-Drossel, Ablehnungs-Backoff und der
+/// gehaltene HTTP-Client. Lebt AUSSERHALB der [`SyncEngine`] und läuft
+/// als eigener, gespawnter Tick neben dem Zyklus (`commands.rs`): So
+/// verzögert ein hängender Check-In-Endpunkt den Liveticker um keine
+/// Millisekunde, und der Abruf (samt Räum-Pfad) läuft auch, wenn BTP
+/// gerade nicht erreichbar ist — vorher saß er hinter den
+/// BTP-Frühausstiegen von `run_once` (Review 17.08.2026).
+pub struct CheckinLese {
+    takt: SchedTakt,
+    /// badhub hat abgelehnt (401/403 = Passwort, 400/404 = altes badhub)?
+    /// Dann nicht minütlich weiterhämmern, sondern wie Roster/Spielplan
+    /// [`CHECKIN_UNSUPPORTED_RETRY`] pausieren.
+    gesperrt_seit: Option<Instant>,
+    /// Einmal gebaut, gehalten — kein frischer Client je Minute.
+    client: reqwest::Client,
+}
+
+impl CheckinLese {
+    pub fn neu() -> Self {
+        Self {
+            takt: SchedTakt::neu(),
+            gesperrt_seit: None,
+            client: crate::badhub::checkin_state::build_client(),
+        }
+    }
+}
+
+/// Ein Tick des Check-In-Lese-Wegs — wird jeden Sync-Zyklus gespawnt und
+/// entscheidet selbst, ob etwas zu tun ist (Gates, Drossel, Backoff).
+/// Fehlerpfade nach [`checkin_state::fetch_state`]-Semantik: Offline lässt
+/// den letzten Stand stehen (die Stale-Marke des TL-Zustands sagt der
+/// Seite, dass er altert), Ablehnung räumt ihn — die Seite zeigt das
+/// Panel dann nicht mehr.
+pub async fn checkin_lese_tick(
+    lese: &std::sync::Mutex<CheckinLese>,
+    config: &AppConfig,
+    tablet: &TabletState,
+) {
+    use crate::badhub::checkin_state::{self, Availability};
+    // Einziger Konsument ist die TL-Web-Seite — ohne sie holte der Host
+    // minütlich volle Klassenstände samt Spielerlisten, die nichts je
+    // anzeigen kann (Review 17.08.2026).
+    if !config.tl_web.enabled || !config.checkin.is_ready() {
+        tablet.set_checkin_classes(None);
+        return;
+    }
+    // Sperr-/Takt-Prüfung unter dem Lock, der Abruf selbst ohne — ein
+    // langsamer Endpunkt darf höchstens den nächsten Tick warten lassen,
+    // nie den Sync-Zyklus.
+    let client = {
+        let mut g = lese.lock().unwrap();
+        if g.gesperrt_seit
+            .is_some_and(|t| t.elapsed() < CHECKIN_UNSUPPORTED_RETRY)
+        {
+            return;
+        }
+        let jetzt_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+        if !g.takt.faellig(jetzt_ms) {
+            return;
+        }
+        g.client.clone()
+    };
+    let Some(origin) = crate::commands::badhub_origin(&config.badhub.url) else {
+        return;
+    };
+    // Getrimmt wie im Desktop-Pfad (`commands.rs`): `is_ready()` prüft
+    // ebenfalls getrimmt — eine GUID mit Leerzeichen aus der Zwischenablage
+    // ergäbe sonst still eine 404-URL (Review-Fund 17.08.2026).
+    let uuid = config.checkin.tournament_uuid.trim();
+    let view = checkin_state::fetch_state(&client, &origin, &config.badhub.password, uuid).await;
+    match view.availability {
+        Availability::Ready => {
+            lese.lock().unwrap().gesperrt_seit = None;
+            tracing::debug!(
+                klassen = view.classes.len(),
+                "Check-In-Zeitplan für TL-Web geholt"
+            );
+            tablet.set_checkin_classes(Some(checkin_state::tl_ablage(view.classes)));
+        }
+        Availability::Offline => {
+            tracing::debug!("Check-In-Zeitplan nicht erreichbar: {}", view.message);
+        }
+        Availability::Unsupported | Availability::Rejected => {
+            {
+                let mut g = lese.lock().unwrap();
+                if g.gesperrt_seit.is_none() {
+                    tracing::info!(
+                        "badhub lehnt den Check-In-Zeitplan ab ({}) — nächster Versuch in {} Minuten",
+                        view.message,
+                        CHECKIN_UNSUPPORTED_RETRY.as_secs() / 60
+                    );
+                }
+                g.gesperrt_seit = Some(Instant::now());
+            }
+            tablet.set_checkin_classes(None);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 

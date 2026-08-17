@@ -412,7 +412,14 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   Der Turnier-PC zählt Aufruf-Stufen nur dann über 3 hinaus, wenn
   irgendein Profil die Option führt (`tablet/tl.rs`
   `unlimited_court_calls`) — ohne sie hält er den alten 3er-Deckel
-  selbst, das Client-Gating ist nicht die einzige Sicherung.
+  selbst, das Client-Gating ist nicht die einzige Sicherung. Seit
+  v0.9.218 trägt der opake `TlState` außerdem optional `checkin_times`
+  samt `checkin_stale`-Marke (Panel „Anfangszeiten": heutiger
+  Check-In-Zeitplan je Klasse mit Zählern, ohne Personendaten;
+  `#[serde(default)]`, alte Gegenstellen ignorieren es). Die
+  Relay-Kürzungsleiter (`state_for_relay`) kennt die Liste: Reichen alle
+  Warteliste-Stufen nicht, wird zuletzt das Anfangszeiten-Panel geopfert,
+  bevor der Zustand die Relay-Grenze reißen dürfte.
 - **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
   `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
   Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →
