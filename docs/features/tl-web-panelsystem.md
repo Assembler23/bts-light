@@ -85,6 +85,10 @@ Spiele, Beendete Spiele.
 - Keine automatische Migration bestehender `localStorage`-Anzeige-Werte —
   die neue Version startet mit einem eingebauten Standardprofil (heutige
   Default-Werte), TL richtet Profile einmalig neu ein.
+  (Nachtrag 17.08.2026: Der **Schriftgrößen-Zoom** (`tlZoom`) ist bewusst
+  wieder geräte-lokal in `localStorage` — er beschreibt nicht, WAS ein
+  Bildschirm zeigt, sondern wie groß genau dieses Display es braucht.
+  Nicht ins Profil migrieren.)
 - Kein Parallelbetrieb alt/neu, kein Umschalt-Flag — direkter Ersatz,
   abgesichert durch ein dediziertes Testturnier vor dem ersten echten
   Einsatz.

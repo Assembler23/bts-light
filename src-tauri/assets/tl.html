@@ -99,7 +99,7 @@ header {
 .halls { display: flex; gap: 6px; flex-wrap: wrap; }
 .halls button {
   font: inherit; font-size: .9rem; font-weight: 600;
-  padding: 7px 13px; min-height: 40px;
+  padding: 7px 13px; min-height: 2.5rem;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -115,7 +115,7 @@ header {
    `.anzeige summary`-Knopf, damit die Kopfzeile nicht unruhig wird. */
 .profiles-btn {
   font: inherit; font-size: .85rem; font-weight: 650; cursor: pointer;
-  padding: 7px 12px; min-height: 40px; display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; min-height: 2.5rem; display: flex; align-items: center; gap: 6px;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); color: var(--ink-soft);
 }
@@ -126,7 +126,7 @@ header {
    sie ihm die Felder um, und niemand versteht, warum. */
 .auto {
   font: inherit; font-size: .85rem; font-weight: 650;
-  padding: 7px 13px; min-height: 40px;
+  padding: 7px 13px; min-height: 2.5rem;
   border-radius: 999px; cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   display: flex; align-items: center; gap: 7px;
@@ -190,11 +190,11 @@ main {
 .col-steg {
   flex: none; touch-action: none; user-select: none; -webkit-user-select: none;
   display: flex; align-items: center; justify-content: center;
-  width: 16px; cursor: col-resize;
+  width: 1rem; cursor: col-resize;
 }
 .col-steg::after {
   content: ""; border-radius: 999px; background: var(--line);
-  width: 4px; height: 44px;
+  width: 4px; height: 2.75rem;
 }
 .col-steg:hover::after, .col-steg.zieht::after { background: var(--ink-faint); }
 .col-steg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -402,7 +402,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    die Zeile nicht dominieren darf. Das Wappen ist klein und quadratisch; der
    Name wird bei Enge gekürzt, damit er die Zeile nicht auseinanderdrückt. */
 .verein-logo {
-  flex: none; width: 16px; height: 16px; object-fit: contain;
+  flex: none; width: 1rem; height: 1rem; object-fit: contain;
   vertical-align: -3px;
 }
 .verein-name {
@@ -462,7 +462,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Sein MENÜ bleibt in voller Größe (nur der Auslöser schrumpft): Wer es
    öffnet, bedient danach beschriftete Knöpfe, und die müssen treffbar
    bleiben. */
-#courts.kacheln-kompakt .kebab > summary { width: 34px; height: 34px; font-size: 1.1rem; }
+#courts.kacheln-kompakt .kebab > summary { width: 2.125rem; height: 2.125rem; font-size: 1.1rem; }
 #courts.kacheln-kompakt .hall-group h3 { font-size: .82rem; margin-bottom: 5px; }
 #courts.kacheln-kompakt .hall-group + .hall-group { margin-top: 10px; }
 
@@ -483,9 +483,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #courts.kacheln-mini .score, #courts.kacheln-mini .clock, #courts.kacheln-mini .restzeit { font-size: .78rem; }
 #courts.kacheln-mini .score small, #courts.kacheln-mini .clock small, #courts.kacheln-mini .restzeit small { font-size: .56rem; }
 /* 32px wie der frühere Aufruf-Knopf in dieser Stufe (`.callbtn`,
-   `min-height: 32px`) — die bewusst in Kauf genommene Untergrenze der
+   `min-height: 2rem`) — die bewusst in Kauf genommene Untergrenze der
    dichtesten Darstellung, nicht weiter unterboten. */
-#courts.kacheln-mini .kebab > summary { width: 32px; height: 32px; font-size: 1rem; }
+#courts.kacheln-mini .kebab > summary { width: 2rem; height: 2rem; font-size: 1rem; }
 /* Kleinerer Griff (Vorgabe: „kleinere Grips") — NUR das Sinnbild schrumpft.
    Polsterung/Trefffläche bleiben bei den 8px der Grundregel
    (`.card-top .drag-griff` weiter unten; die negativen Ränder gleichen sie
@@ -599,7 +599,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    verwechseln. */
 .row .prep {
   display: grid; place-items: center;
-  width: 40px; height: 40px; padding: 0;
+  width: 2.5rem; height: 2.5rem; padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -629,7 +629,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .kebab > summary {
   list-style: none; cursor: pointer; user-select: none;
   display: grid; place-items: center;
-  width: 40px; height: 40px;
+  width: 2.5rem; height: 2.5rem;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); font-size: 1.3rem; font-weight: 700;
   line-height: 1;
@@ -669,7 +669,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Nachruf-Knöpfen der Zeile UND allen Kachel-Aktionen. */
 .kebab-menu .kebab-actions { display: flex; flex-direction: column; gap: 6px; }
 .kebab-menu .kebab-actions button {
-  font: inherit; font-weight: 650; padding: 8px 12px; min-height: 40px;
+  font: inherit; font-weight: 650; padding: 8px 12px; min-height: 2.5rem;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
   text-align: left;
@@ -681,7 +681,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row .auto-excl {
   font: inherit; font-weight: 650; font-size: .85rem; cursor: pointer;
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; min-height: 40px;
+  padding: 8px 12px; min-height: 2.5rem;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft);
 }
@@ -704,7 +704,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Menü ist Platz, den die Zeile selbst nicht mehr hergibt. */
 .row .hallwahl {
   font: inherit; font-size: .85rem; font-weight: 650;
-  min-height: 40px; width: 100%; padding: 6px 8px;
+  min-height: 2.5rem; width: 100%; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -717,10 +717,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   padding: 12px; display: flex; flex-direction: column; gap: 8px;
 }
 .wo h4 { margin: 0; font-size: .95rem; }
-.wo label { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: .9rem; }
+.wo label { display: flex; align-items: center; gap: 8px; min-height: 2.5rem; font-size: .9rem; }
 .wo .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .wo button {
-  font: inherit; font-size: .85rem; font-weight: 650; padding: 8px 14px; min-height: 44px;
+  font: inherit; font-size: .85rem; font-weight: 650; padding: 8px 14px; min-height: 2.75rem;
   border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
 }
 .wo button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -751,13 +751,13 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 #sk-list li {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: 8px 10px; min-height: 44px;
+  padding: 8px 10px; min-height: 2.75rem;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .sk-names { font-weight: 600; flex: 1 1 8rem; min-width: 0; }
 .sk-wait { font-size: .82rem; color: var(--ink-soft); }
 #sk-list button {
-  font: inherit; font-weight: 700; min-width: 40px; min-height: 40px; padding: 0 10px;
+  font: inherit; font-weight: 700; min-width: 2.5rem; min-height: 2.5rem; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -767,11 +767,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Sekunden vom nächsten Abruf gelöscht. */
 #sk-add { display: flex; gap: 8px; margin-top: 8px; }
 #sk-name {
-  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 40px;
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 2.5rem;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 #sk-add button {
-  font: inherit; font-weight: 650; padding: 0 14px; min-height: 40px;
+  font: inherit; font-weight: 650; padding: 0 14px; min-height: 2.5rem;
   border-radius: 8px; border: 1px solid var(--line); background: var(--card);
   color: var(--ink-soft); cursor: pointer;
 }
@@ -783,7 +783,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 #fin-list { display: flex; flex-direction: column; gap: 6px; }
 .fin-row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: 8px 10px; min-height: 44px;
+  padding: 8px 10px; min-height: 2.75rem;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   font-size: .85rem;
 }
@@ -791,7 +791,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .fin-meta { color: var(--ink-soft); }
 .fin-score { color: var(--ink-soft); flex: 0 0 auto; }
 .fin-row button {
-  font: inherit; font-weight: 700; min-width: 40px; min-height: 40px; padding: 0 10px;
+  font: inherit; font-weight: 700; min-width: 2.5rem; min-height: 2.5rem; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -848,7 +848,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
   flex: none; display: flex; align-items: center; gap: 8px;
-  padding: 6px 0; min-height: 44px;
+  padding: 6px 0; min-height: 2.75rem;
 }
 .panel-spacer { flex: 1 1 auto; }
 .panel-title {
@@ -862,7 +862,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Kopfzeile überladen — Beschriftung bleibt für Vorlesehilfen und als
    Tooltip erhalten (wie beim Vorbereitungs-Knopf). */
 .panel-vis, .panel-col {
-  flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0;
+  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; padding: 0;
   border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
   background: var(--card); color: var(--ink-soft);
 }
@@ -901,7 +901,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   display: flex; align-items: center; justify-content: center;
   height: 16px; cursor: row-resize;
 }
-.panel-steg::after { content: ""; border-radius: 999px; background: var(--line); width: 44px; height: 4px; }
+.panel-steg::after { content: ""; border-radius: 999px; background: var(--line); width: 2.75rem; height: 4px; }
 .panel-steg:hover::after, .panel-steg.zieht::after { background: var(--ink-faint); }
 .panel-steg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* ── Zugeklapptes Panel (ADR 0026, Plan D) ─────────────────────────────
@@ -958,7 +958,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .action-bar .what { font-weight: 650; flex: 1 1 12rem; min-width: 0; }
 .action-bar .hint { color: #cbd5e1; font-size: .9rem; }
 .action-bar button {
-  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 44px;
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 2.75rem;
   border-radius: 8px; border: 1px solid #475569;
   background: transparent; color: #fff; cursor: pointer;
 }
@@ -1120,12 +1120,12 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .res-row label { flex: 0 0 4.2rem; font-weight: 600; font-size: .9rem; color: var(--ink-soft); }
 .res-row input {
   width: 4.4rem; font: inherit; font-variant-numeric: tabular-nums; text-align: center;
-  padding: 8px 6px; min-height: 44px;
+  padding: 8px 6px; min-height: 2.75rem;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 .res-row span { color: var(--ink-faint); }
 #res-add-set {
-  align-self: flex-start; font: inherit; font-weight: 650; padding: 8px 14px; min-height: 40px;
+  align-self: flex-start; font: inherit; font-weight: 650; padding: 8px 14px; min-height: 2.5rem;
   border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   cursor: pointer;
 }
@@ -1133,7 +1133,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .fehler { margin: 0; color: var(--alarm); font-weight: 600; font-size: .88rem; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .dlg-foot button {
-  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 44px;
+  font: inherit; font-weight: 650; padding: 9px 16px; min-height: 2.75rem;
   border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   cursor: pointer;
 }
@@ -1219,7 +1219,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .prof-row .prof-tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .prof-row .prof-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .prof-row button, .prof-new button, .prof-editor button {
-  font: inherit; font-weight: 650; font-size: .82rem; padding: 7px 11px; min-height: 40px;
+  font: inherit; font-weight: 650; font-size: .82rem; padding: 7px 11px; min-height: 2.5rem;
   border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
   cursor: pointer;
 }
@@ -1232,15 +1232,35 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 .prof-row button.danger:hover { border-color: var(--alarm); color: var(--alarm); }
 .prof-new { display: flex; gap: 8px; margin-top: 4px; }
 .prof-new input {
-  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 40px;
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 8px 10px; min-height: 2.5rem;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 .prof-empty-hint { font-size: .85rem; color: var(--ink-soft); margin: 0 0 10px; }
+/* Geräte-lokaler Abschnitt der Profil-Liste (Schriftgrößen-Zoom): optisch
+   abgetrennt, weil er — anders als alles darüber — NICHT zum geteilten
+   Profil gehört, sondern nur zu diesem Gerät. */
+.prof-geraet {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.prof-geraet-label {
+  font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--ink-faint);
+}
+.zoom-reihe { display: flex; gap: 6px; flex-wrap: wrap; }
+.zoom-reihe button {
+  font: inherit; font-weight: 650; padding: 8px 14px; min-height: 2.5rem;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink-soft); cursor: pointer;
+}
+.zoom-reihe button[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--accent); font-weight: 700;
+}
 /* Editor: Name, Panel-Liste (Sichtbarkeit + Reihenfolge), Anzeige-Häkchen
    — bündelt, was vorher auf drei Bedienstellen verstreut war (Spec-Ziel). */
 .prof-editor label.prof-field { display: flex; flex-direction: column; gap: 3px; font-size: .85rem; margin-bottom: 10px; }
 .prof-editor input[type="text"] {
-  font: inherit; padding: 8px 10px; min-height: 40px;
+  font: inherit; padding: 8px 10px; min-height: 2.5rem;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink);
 }
 .prof-panels { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -1253,7 +1273,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    nicht nur das kleine Kästchen (Touch-Ergonomie ≥ 40px). */
 .prof-panels .prof-panel-label {
   flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
-  min-height: 40px; cursor: pointer;
+  min-height: 2.5rem; cursor: pointer;
 }
 .prof-panels .prof-panel-name { font-weight: 600; font-size: .88rem; }
 /* Spaltenzuordnung je Panel (Plan tl-liste-vereinfachen F) — nur sichtbar,
@@ -1261,11 +1281,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    Auswahl in EINEM `label`, wie die Sichtbarkeits-Zeile daneben. */
 .prof-panels .prof-panel-col {
   flex: none; display: flex; align-items: center; gap: 6px;
-  min-height: 40px; font-size: .78rem; color: var(--ink-faint); cursor: pointer;
+  min-height: 2.5rem; font-size: .78rem; color: var(--ink-faint); cursor: pointer;
 }
 .prof-panels .prof-panel-col select {
   font: inherit; font-size: .85rem; color: var(--ink);
-  min-height: 40px; padding: 4px 6px;
+  min-height: 2.5rem; padding: 4px 6px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card);
 }
 /* Dieselbe visuelle Sprache wie das Live-Panel-System — derselbe Griff,
@@ -1278,7 +1298,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
    antippbar, nicht nur das kleine Kästchen selbst (Touch-Ergonomie
    ≥ 40px, Akzeptanzkriterium). */
 .prof-editor .checkbox-row, .prof-editor .radio-row {
-  display: flex; align-items: center; gap: 9px; padding: 8px 4px; min-height: 40px;
+  display: flex; align-items: center; gap: 9px; padding: 8px 4px; min-height: 2.5rem;
   font-size: .88rem; cursor: pointer;
 }
 .prof-editor fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
@@ -5921,6 +5941,31 @@ $("off-close").addEventListener("click", () => {
 // Löschen/Standard setzen/Speichern), nicht bei jedem Fremd-Update.
 let profilesEditCtx = null;
 
+// ── Schriftgrößen-Zoom (Feldtest 17.08.2026, Punkt „Schriftgrößen") ────
+// PRO GERÄT in localStorage, bewusst NICHT im geteilten Panel-Profil:
+// Ein Profil beschreibt, WAS ein Bildschirm zeigt — wie groß die Schrift
+// auf genau diesem Tablet sein muss, hängt an dessen Display und
+// Betrachtungsabstand. Wirkt auf die Root-Schriftgröße; die Seite ist
+// rem-basiert (seit diesem Feature auch die Trefflächen), alles skaliert
+// mit, und `fitCourts()` misst echte Größen — die Kompaktstufen der
+// Feldkacheln stellen sich von selbst nach.
+const ZOOM_STUFEN = [85, 100, 115, 130];
+function geraeteZoom() {
+  try {
+    const wert = Number(localStorage.getItem("tlZoom"));
+    return ZOOM_STUFEN.includes(wert) ? wert : 100;
+  } catch { return 100; }
+}
+function wendeGeraeteZoomAn() {
+  document.documentElement.style.fontSize = `${(16 * geraeteZoom()) / 100}px`;
+}
+function setzeGeraeteZoom(prozent) {
+  try { localStorage.setItem("tlZoom", String(prozent)); } catch { /* z. B. Privatmodus — Zoom gilt dann nur bis zum Neuladen */ }
+  wendeGeraeteZoomAn();
+  scheduleFitCourts();
+  renderProfilesOverlay();
+}
+
 function openProfilesOverlay() {
   profilesEditCtx = null;
   $("profiles-overlay").hidden = false;
@@ -5974,11 +6019,22 @@ function renderProfilesList() {
     <form class="prof-new" id="prof-new-form">
       <input type="text" id="prof-new-name" placeholder="Name des neuen Profils" maxlength="60" required />
       <button type="submit" class="primary">Anlegen</button>
-    </form>`;
+    </form>
+    <div class="prof-geraet">
+      <span class="prof-geraet-label">Schriftgröße — nur dieses Gerät</span>
+      <div class="zoom-reihe" role="group" aria-label="Schriftgröße dieses Geräts">
+        ${ZOOM_STUFEN.map((s) => `<button type="button" data-zoom="${s}"
+            aria-pressed="${s === geraeteZoom()}">${s}&nbsp;%</button>`).join("")}
+      </div>
+      <p class="prof-empty-hint">Gilt nur für dieses Gerät (nicht Teil des Profils) —
+        jedes Tablet stellt seine Größe selbst ein.</p>
+    </div>`;
   wireProfilesListEvents();
 }
 
 function wireProfilesListEvents() {
+  $("profiles-body").querySelectorAll("[data-zoom]").forEach((b) =>
+    b.addEventListener("click", () => setzeGeraeteZoom(Number(b.dataset.zoom))));
   $("profiles-body").querySelectorAll("[data-prof-select]").forEach((b) =>
     b.addEventListener("click", () => profileSelectAction(b.dataset.profSelect)));
   const builtinBtn = $("prof-select-builtin");
@@ -6846,6 +6902,9 @@ function start() {
   window.addEventListener("resize", messeKopf);
   window.addEventListener("resize", scheduleFitCourts);
   window.addEventListener("orientationchange", scheduleFitCourts);
+  // Geräte-Zoom VOR dem ersten Render anwenden — sonst spränge die
+  // Schrift nach dem ersten Poll sichtbar um.
+  wendeGeraeteZoomAn();
   poll();
   setInterval(() => {
     if (performance.now() - letzterUhrTick < 900) return;

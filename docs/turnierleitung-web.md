@@ -317,6 +317,12 @@ am jeweiligen Gerät seins.
 - Ohne angelegtes Profil läuft die Seite auf einem eingebauten Standard
   (alle Panels sichtbar, Voreinstellungen wie unten). Die erste eigene
   Änderung macht daraus automatisch ein echtes Profil.
+- **Schriftgröße — nur dieses Gerät** (seit 17.08.2026): unten im selben
+  Overlay, vier Stufen 85/100/115/130 %. Bewusst **kein** Teil des
+  Profils — wie groß die Schrift sein muss, hängt am Display und
+  Betrachtungsabstand genau dieses Geräts. Die Wahl hängt am Gerät
+  (`localStorage`) und übersteht ein Neuladen; die Feldkacheln passen
+  ihre Kompaktstufe automatisch an.
 
 Die Anzeige-Häkchen im Profil-Editor:
 
