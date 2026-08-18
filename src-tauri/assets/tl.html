@@ -526,10 +526,20 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    `.sp-spielt`/`.sp-pause` bei der Paarung) plus Eieruhr-Countdown —
    Hinweistexte machten die Liste unübersichtlich (Nutzer-Befund). */
 .queue { display: flex; flex-direction: column; gap: 8px; }
+/* Zeilen außerhalb des sichtbaren Panel-Ausschnitts überspringt der
+   Browser bei Layout und Anstrich (`content-visibility`) — bei über
+   hundert Zeilen im Panel ist das auf einem Tablet der Unterschied
+   zwischen zähem und flüssigem Rollen. `contain-intrinsic-size` gibt
+   die angenommene Höhe einer noch nicht gemessenen Zeile vor, damit die
+   Bildlaufleiste nicht springt (Wert = Mindesthöhe der Zeile). Bewusst
+   NUR für Listenzeilen, NICHT für Feldkacheln: `fitCourts()` misst
+   deren echte Größe, und übersprungene Kacheln lieferten die
+   angenommene statt der tatsächlichen — die Kompaktstufe wäre falsch. */
 .row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px 12px; min-height: 56px;
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  content-visibility: auto; contain-intrinsic-size: auto 56px;
 }
 .row .no { font-weight: 700; color: var(--ink-faint); min-width: 2.2rem; }
 /* Name und Meta („Disziplin · Runde · Gruppe") zusammen EIN Flex-Kind —
@@ -806,6 +816,8 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   padding: 8px 10px; min-height: var(--touch-komf);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   font-size: .85rem;
+  /* Siehe `.row`: Was nicht im Ausschnitt steht, kostet kein Layout. */
+  content-visibility: auto; contain-intrinsic-size: auto 2.75rem;
 }
 .fin-pair { font-weight: 600; flex: 1 1 12rem; min-width: 0; }
 .fin-meta { color: var(--ink-soft); }
@@ -5021,7 +5033,13 @@ function panelBodySkeleton(key) {
         <div id="queue-sentinel" aria-hidden="true"></div>
         <div id="queue-foot"></div>`;
     case "finished":
-      return `<div id="fin-list"></div>`;
+      // Wie die Spielliste: Zeilen-Container, Nachlade-Marke und Fuß als
+      // Geschwister — `#fin-list` trägt AUSSCHLIESSLICH Zeilen, damit der
+      // Keyed-Abgleich nichts Fremdes vorfindet.
+      return `
+        <div id="fin-list"></div>
+        <div id="fin-sentinel" aria-hidden="true"></div>
+        <div id="fin-foot"></div>`;
     case "times":
       return `<div id="times-box"></div>`;
     case "checkin":
@@ -6676,12 +6694,33 @@ function renderCheckin() {
     </table>`);
 }
 
-function renderFinished() {
-  const list = state.finished || [];
-  setPanelCount("finished", list.length);
-  const box = $("fin-list");
-  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
-  const html = list.length ? list.map((f) => {
+// ── Nachladen der Beendet-Liste ───────────────────────────────────────
+// Dasselbe Muster wie die Spielliste (ADR 0026): Die Liste wächst über den
+// Turniertag auf mehrere hundert Zeilen und war die einzige ohne Fenster —
+// jedes Spielende baute sie komplett neu und verdrahtete sie neu, und der
+// DOM wuchs unbegrenzt mit. `finShown` lebt außerhalb der Render-Funktion,
+// damit der 2-Sekunden-Redraw das Fenster nicht zurücksetzt.
+const FIN_PAGE = 40;
+let finShown = FIN_PAGE;
+let finObserver = null;
+function beobachteFinEnde(gesamt) {
+  if (finObserver) { finObserver.disconnect(); finObserver = null; }
+  const sentinel = $("fin-sentinel");
+  const wurzel = sentinel && sentinel.closest(".panel-body");
+  if (!sentinel || !wurzel || finShown >= gesamt) return;
+  finObserver = new IntersectionObserver((eintraege) => {
+    if (!eintraege.some((e) => e.isIntersecting)) return;
+    const gesamtJetzt = (state.finished || []).length;
+    if (finShown >= gesamtJetzt) return;
+    finShown += FIN_PAGE;
+    renderFinished();
+  }, { root: wurzel, rootMargin: "300px" });
+  finObserver.observe(sentinel);
+}
+
+/** Eine Zeile der Beendet-Liste. */
+function finRow(f) {
+  {
     // Sieger zuerst gilt auch für die Satzstände: Sonst läse man bei einem
     // Sieger-2-Spiel "Meier – Müller 15:21 · 18:21" — als hätte der zuerst
     // genannte (der Sieger!) jeden Satz verloren.
@@ -6715,11 +6754,46 @@ function renderFinished() {
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
     </div>`;
-  }).join("") : `<p class="note">Noch kein Spiel beendet.</p>`;
-  // Unverändert → Liste samt Listenern stehen lassen (Stufe 1).
-  if (!setzeHtmlWennNeu(box, html)) return;
+  }
+}
+
+function renderFinished() {
+  const list = state.finished || [];
+  setPanelCount("finished", list.length);
+  const box = $("fin-list");
+  if (!box) {
+    // Panel ausgeblendet oder zugeklappt — den Beobachter dabei abräumen,
+    // er hinge sonst an einem längst entfernten Knoten (Muster
+    // `renderQueue`).
+    if (finObserver) { finObserver.disconnect(); finObserver = null; }
+    return;
+  }
+  // Fenster wie bei der Spielliste: nie kleiner als eine Seite, nie über
+  // das Vorhandene hinaus (sonst bliebe es nach dem Schrumpfen der Liste
+  // auf „hundert nachgeladen" stehen).
+  finShown = Math.max(FIN_PAGE, Math.min(finShown, Math.max(list.length, FIN_PAGE)));
+  const fenster = list.slice(0, finShown);
+  if (!fenster.length) {
+    setzeHtmlWennNeu(box, `<p class="note">Noch kein Spiel beendet.</p>`);
+  } else {
+    // Je `match_id` abgeglichen: Ein neues Ergebnis fügt EINE Zeile ein,
+    // statt die ganze Liste neu zu bauen und neu zu verdrahten.
+    reconcileKeyed(box, fenster, (f) => f.match_id, finRow, (el) => wireFinRow(el));
+  }
+  const fuss = $("fin-foot");
+  if (fuss) {
+    const rest = list.length - fenster.length;
+    setzeHtmlWennNeu(fuss, rest > 0
+      ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Ergebnis${rest === 1 ? "" : "se"} — beim Scrollen laden sie nach.</p>`
+      : "");
+  }
+  beobachteFinEnde(list.length);
+}
+
+/** Verdrahtet EINE Zeile der Beendet-Liste (neu/ersetzt). */
+function wireFinRow(box) {
   // Klick-Zeit-Auflösung aus `state.finished` statt der eingefangenen
-  // Liste — die Listener überleben seit Stufe 1 viele Renders.
+  // Liste — die Listener überleben seit dem Keyed-Abgleich viele Renders.
   scopeAll(box, "[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finGraph);
@@ -6730,8 +6804,6 @@ function renderFinished() {
         f.sets || [],
       );
     }));
-  // Neu verdrahten nur nach echtem Neuaufbau (Stufe 1 oben) — dann hängen
-  // die alten Zuhörer an längst entfernten Knoten.
   scopeAll(box, "[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finFix);
