@@ -1519,6 +1519,23 @@ pub enum TlAction {
         #[serde(rename = "courtId")]
         court_id: i64,
     },
+    /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+    /// besetztes Feld, auf dem noch kein Punkt gefallen ist (Spec
+    /// `tl-sicht-feinschliff`, Punkt 3).
+    ///
+    /// **Ausdrücklich kein Aufruf.** Der Host lässt `call_stages` dabei
+    /// unberührt: kein Stufenwort in der Ansage, kein Abzeichen an der
+    /// Kachel, keine Änderung an der Fälligkeit. Die Spieler stehen ja
+    /// längst am Feld — gerufen wurde vorher.
+    ///
+    /// `match_id` reist mit, damit die Ansage nicht mehr erklingt, wenn
+    /// inzwischen ein anderes Spiel auf dem Feld steht.
+    AnnounceStartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
 
     // ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ──────────
     /// Ein Profil anlegen oder überschreiben (Upsert nach `id`; leere `id`
@@ -3351,6 +3368,10 @@ mod tests {
                 operator: true,
             },
             TlAction::AnnounceOfficials { court_id: 5 },
+            TlAction::AnnounceStartPlay {
+                court_id: 5,
+                match_id: 77,
+            },
             // Panel-Profile (Spec tl-web-panelsystem)
             TlAction::ProfileSave {
                 profile: TlPanelProfileWire {

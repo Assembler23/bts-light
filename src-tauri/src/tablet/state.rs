@@ -780,6 +780,21 @@ pub enum AnnounceJobKind {
         /// erführen nie, dass es der letzte vor der kampflosen Wertung war.
         stage: u8,
     },
+    /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+    /// besetztes Feld, auf dem noch kein Punkt gefallen ist. **Kein
+    /// Aufruf:** Sie trägt keine Stufe, und der Host zählt bei ihr keine
+    /// (Spec `tl-sicht-feinschliff`, Punkt 3).
+    StartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Damit das Ansage-Gerät verstummt, wenn inzwischen ein anderes
+        /// Spiel auf dem Feld steht — wie beim Feld-Aufruf.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Auffang für Ansagearten, die dieser Stand noch nicht kennt.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Ein Ansage-Auftrag für die Geräte einer Halle.
@@ -796,6 +811,23 @@ pub struct AnnounceJob {
     pub created_at_ms: u64,
     #[serde(flatten)]
     pub kind: AnnounceJobKind,
+}
+
+/// Ansage-Aufträge aus einer HTTP-Antwort lesen, **ohne** an einer
+/// unbekannten Ansageart die ganze Charge zu verlieren.
+///
+/// Der Fall ist real: Im Auto-Update-Fenster steht ein Master mit neuerem
+/// Stand neben einem Ansage-Slave mit älterem. Erteilt der Master eine
+/// Ansageart, die der Slave nicht kennt, scheiterte ein typisiertes Lesen
+/// der **ganzen Liste** — die zweite Halle bliebe 60 Sekunden stumm, auch
+/// für ganz normale Aufrufe. Unbekannte Aufträge werden deshalb einzeln
+/// übersprungen ([`AnnounceJobKind::Unknown`]), die übrigen gesprochen.
+pub fn announce_jobs_aus_json(json: &str) -> Vec<AnnounceJob> {
+    serde_json::from_str::<Vec<AnnounceJob>>(json)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|job| job.kind != AnnounceJobKind::Unknown)
+        .collect()
 }
 
 /// Nach dieser Zeit wird ein Auftrag nicht mehr gesprochen.
@@ -6015,5 +6047,26 @@ mod tests {
         );
         let total: usize = st.monitor_subs.read().unwrap().values().map(Vec::len).sum();
         assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
+    }
+
+    #[test]
+    fn ein_unbekannter_auftragstyp_verwirft_nicht_die_ganze_charge() {
+        // Ein Master mit neuerem Stand erteilt eine Ansageart, die dieser
+        // Slave noch nicht kennt (Auto-Update-Fenster: zwei Rechner, einer
+        // aktualisiert). Wird die Liste als Ganzes typisiert gelesen,
+        // scheitert an dem einen unbekannten Eintrag die GESAMTE Antwort —
+        // die ferne Halle bliebe 60 Sekunden stumm, auch fuer voellig
+        // normale Aufrufe. Genau das darf nicht passieren.
+        let json = r#"[
+          {"id":1,"hall":"Halle A","createdAtMs":1000,"kind":"officials","courtId":3},
+          {"id":2,"hall":"Halle A","createdAtMs":1001,"kind":"was_ganz_neues","courtId":4},
+          {"id":3,"hall":"Halle A","createdAtMs":1002,"kind":"officials","courtId":5}
+        ]"#;
+
+        let jobs = announce_jobs_aus_json(json);
+
+        assert_eq!(jobs.len(), 2, "die beiden bekannten Auftraege ueberleben");
+        assert_eq!(jobs[0].id, 1);
+        assert_eq!(jobs[1].id, 3);
     }
 }

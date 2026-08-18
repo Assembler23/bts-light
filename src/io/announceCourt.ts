@@ -100,3 +100,44 @@ export function announceOfficials(
     },
   );
 }
+
+/**
+ * „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+ * besetztes Feld, auf dem noch kein Punkt gefallen ist (Spec
+ * `tl-sicht-feinschliff`, Punkt 3).
+ *
+ * Bewusst getrennt von [`announceCourt`]: Das ist **kein** Aufruf. Die
+ * Paarung wurde längst gerufen, die Spieler stehen am Feld — noch einmal
+ * „Feld 3. Herreneinzel A. Müller gegen Schmidt." hielte die Halle nur auf.
+ *
+ * Die Sprachwahl folgt den Nationen der Spieler dieses Felds, wie bei jeder
+ * anderen Feld-Ansage auch.
+ */
+export function announceStartPlay(
+  court: CourtOverview,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): void {
+  const lang = resolveAnnouncementLanguage(
+    [...court.team1_nationalities, ...court.team2_nationalities],
+    announce.language_mode,
+  );
+  void playAnnouncement(
+    {
+      courtLabel: court.court,
+      discipline: court.discipline,
+      teamANames: [],
+      teamBNames: [],
+      startPlayOnly: true,
+    },
+    lang,
+    {
+      rate: announce.rate,
+      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+      gong: announce.gong,
+      nameOverrides: announce.name_overrides,
+      nameOverridesEnabled: announce.name_overrides_enabled,
+      azure: azureOption(azureTts),
+    },
+  );
+}

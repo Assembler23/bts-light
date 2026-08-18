@@ -2363,9 +2363,13 @@ pub async fn pending_announce_jobs(
             Ok(r) if r.status().is_success() => r,
             _ => return Ok(Vec::new()),
         };
-        resp.json::<Vec<crate::tablet::state::AnnounceJob>>()
-            .await
-            .map_err(|e| e.to_string())
+        // Bewusst als Text lesen und tolerant auswerten: Ein Master mit
+        // neuerem Stand kann eine Ansageart erteilen, die dieser Slave noch
+        // nicht kennt. Typisiertes Lesen der ganzen Liste scheiterte daran
+        // komplett — die zweite Halle bliebe eine Minute stumm, auch für
+        // normale Aufrufe (siehe `announce_jobs_aus_json`).
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        Ok(crate::tablet::state::announce_jobs_aus_json(&text))
     } else {
         Ok(state.tablet.announce_jobs_since(&hall, since, now_ms()))
     }
