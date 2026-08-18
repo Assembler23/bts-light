@@ -1192,9 +1192,11 @@
     // oder Werbebild unter gleicher Adresse bliebe dann für immer stehen,
     // weil das <img> nie neu entsteht und der Browser die Adresse nie
     // wieder anfragt (Review-Fund 18.08.2026). Teuer ist das nicht mehr:
-    // Seit die Bild-Routen eine Kennung mitgeben und fünf Minuten
-    // zwischengespeichert werden dürfen, kostet ein Neuaufbau höchstens
-    // alle fünf Minuten eine Bestätigung von rund 200 Byte je Bild.
+    // Seit die Bild-Routen eine Kennung mitgeben, kostet ein Neuaufbau
+    // höchstens eine Bestätigung von rund 200 Byte je Bild — im Hallennetz
+    // einmal je fünf Minuten, in der Cloud (dort gilt für Werbebilder eine
+    // Minute, weil sie über ihre Position adressiert werden) etwa einmal je
+    // Durchlauf dieser Schleife.
     function paint(st) {
       var h = '';
       if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';

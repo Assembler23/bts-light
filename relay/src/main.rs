@@ -3218,10 +3218,14 @@ async fn tl_state_route(
     // lästig. Die Generation muss mit hinein, weil die Revision beim Neustart
     // des Turnier-PCs wieder klein beginnt.
     let etag = format!("\"{}-{rev}\"", namespace.tl_gen);
-    let unveraendert = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag);
+    // Dieselbe RFC-konforme Prüfung wie auf den Bild-Routen — und hier
+    // besonders wichtig: Vor genau dieser Route steht nginx, und gzippt es
+    // die Antwort, schwächt es die Marke ab (`W/`). Ein reiner
+    // Gleichheitstest hätte der Turnierleitungs-Seite dann bei **jedem**
+    // Takt den vollen Zustand geschickt statt der Bestätigung — und LAN und
+    // Cloud verhielten sich für dieselbe Seite unterschiedlich
+    // (Review-Fund 18.08.2026).
+    let unveraendert = marke_passt(&headers, &etag);
     let mut response = if unveraendert {
         (
             StatusCode::NOT_MODIFIED,

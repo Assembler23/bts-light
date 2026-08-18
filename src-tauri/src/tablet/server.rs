@@ -1594,14 +1594,6 @@ async fn ad_image(
 /// und kurz genug, dass ein ausgetauschtes Bild zeitnah durchschlägt.
 const AD_CACHE_CONTROL: &str = "public, max-age=300";
 
-/// Kennt der Abrufer die Marke bereits? Prüft `If-None-Match` so, wie es
-/// RFC 9110 vorsieht: eine **Liste** von Marken, `*` als Joker, und der
-/// Vergleich ist der schwache (das `W/`-Präfix zählt nicht mit).
-///
-/// Der naive Gleichheitstest wäre nicht falsch, aber still wirkungslos:
-/// Ein Zwischenspeicher auf dem Weg (nginx vor dem Relay) darf eine Marke
-/// abschwächen, und dann käme dauerhaft der volle Inhalt zurück statt der
-/// Bestätigung (Review-Fund 18.08.2026).
 /// Marke eines Bildes: Länge plus ein Streuwert über den Inhalt. Muss nur
 /// innerhalb eines Programmlaufs stabil sein und sich bei anderem Inhalt
 /// ändern — beides leistet der Standard-Streuer. Gleiches Format wie im
@@ -1613,6 +1605,14 @@ fn bild_marke(bytes: &[u8]) -> String {
     format!("\"img-{}-{:x}\"", bytes.len(), hasher.finish())
 }
 
+/// Kennt der Abrufer die Marke bereits? Prüft `If-None-Match` so, wie es
+/// RFC 9110 vorsieht: eine **Liste** von Marken, `*` als Joker, und der
+/// Vergleich ist der schwache (das `W/`-Präfix zählt nicht mit).
+///
+/// Der naive Gleichheitstest wäre nicht falsch, aber still wirkungslos:
+/// Ein Zwischenspeicher auf dem Weg (nginx vor dem Relay) darf eine Marke
+/// abschwächen, und dann käme dauerhaft der volle Inhalt zurück statt der
+/// Bestätigung (Review-Fund 18.08.2026).
 fn marke_bekannt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
     let Some(feld) = headers
         .get(header::IF_NONE_MATCH)
