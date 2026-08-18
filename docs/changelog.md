@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.226
+
+- **Ein entferntes Turnierlogo verschwindet auch im Liveticker.** Die
+  Logo-Felder reisen jetzt auch dann mit, wenn kein Logo gesetzt ist —
+  vorher blieben sie einfach weg. badhub bekommt für diese Felder gerade
+  den Vertrag „weggelassen heißt unverändert, leer heißt löschen"
+  (badhub-PR #473); ohne das ausdrücklich leere Feld ließe sich ein
+  einmal gesetztes Logo danach nicht mehr entfernen. Für den heutigen
+  Liveticker ändert sich nichts: Ein leeres Feld wirkt dort genauso wie
+  ein fehlendes.
+- Damit ist die Voraussetzung geschaffen, das Logo künftig **nur noch bei
+  Änderung** mitzuschicken. Heute reist es als Base64 in jedem vollen
+  Turnier-Stand mit — mindestens minütlich, bei vielen Feldern alle paar
+  Sekunden. Das kommt, sobald badhub den Vertrag ausgerollt hat.
+
 ## v0.9.225
 
 - **Werbebilder und Turnierlogo werden nicht mehr bei jedem Blick neu

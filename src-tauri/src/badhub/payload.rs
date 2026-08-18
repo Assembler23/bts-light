@@ -90,13 +90,20 @@ pub struct TsetEvent {
     /// Anstehende Matches (in Vorbereitung).
     pub upcoming_matches: Vec<TsetMatch>,
     /// Turnierlogo (Base64, ohne `data:`-Präfix) für badhubs `#live-logo`.
-    /// Wird in `sync` aus der Config injiziert; bei leerem Logo NICHT gesendet
-    /// (badhub blendet das Element dann aus). Gleiche Feldnamen wie Original-BTS.
-    #[serde(skip_serializing_if = "String::is_empty")]
+    /// Wird in `sync` aus der Config injiziert. Gleiche Feldnamen wie
+    /// Original-BTS.
+    ///
+    /// **Auch leer wird gesendet.** badhub kennt für diese Felder den
+    /// Vertrag „weglassen = unverändert, `""` = löschen" (wie beim
+    /// Check-In-Branding). Ein weggelassenes Feld heißt dort also nicht mehr
+    /// „kein Logo", sondern „nichts ändern" — ließen wir es weg, bekäme
+    /// niemand ein einmal gesetztes Logo je wieder aus dem Liveticker
+    /// heraus. Gegen ein badhub ohne diesen Vertrag ist das leere Feld
+    /// verhaltensgleich zum früheren Weglassen (`live.js` prüft auf einen
+    /// nicht-leeren Wert), der Schritt ist also unabhängig von der
+    /// Reihenfolge des Ausrollens.
     pub tournament_logo: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
     pub tournament_logo_mime: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
     pub tournament_logo_background_color: String,
 }
 
@@ -932,6 +939,44 @@ mod tests {
             !json.contains("hall_color"),
             "kein hall_color im Ein-Hallen-Payload: {json}"
         );
+    }
+
+    #[test]
+    fn ein_leeres_turnierlogo_reist_als_leeres_feld_mit() {
+        // Das Weglassen war früher der einzige Weg, badhub das Logo wieder
+        // abzugewöhnen — ein `tset` ersetzt dort den ganzen Snapshot, ein
+        // fehlendes Feld hieß also „weg". Seit badhub den Vertrag
+        // „weglassen = unverändert, `""` = löschen" kennt (PR #473), muss
+        // das Löschen ausdrücklich gesagt werden. Sonst bekäme niemand ein
+        // einmal gesetztes Logo je wieder aus dem Liveticker heraus.
+        //
+        // Gegen ein badhub OHNE diesen Vertrag verhält sich das identisch
+        // zu vorher (leeres Feld = kein Logo), der Schritt ist also
+        // unabhängig von der Reihenfolge des Ausrollens.
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: Vec::new(),
+        };
+        let cfg = AppConfig::default();
+        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&cfg));
+        let json = serde_json::to_string(&tset).unwrap();
+        for feld in [
+            "tournament_logo",
+            "tournament_logo_mime",
+            "tournament_logo_background_color",
+        ] {
+            assert!(
+                json.contains(&format!("\"{feld}\":\"\"")),
+                "{feld} muss auch leer mitreisen: {json}"
+            );
+        }
     }
 
     #[test]

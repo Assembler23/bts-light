@@ -1783,16 +1783,19 @@ impl SyncEngine {
         // badhubs `#live-logo` zeigt es dann an (gleiche Felder wie Original-BTS).
         // Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht es nicht,
         // da badhub den Logo-Stand aus dem zuletzt gemergten Snapshot behält.
-        // Bei leerem Logo bleiben die Felder leer und werden nicht serialisiert.
+        //
+        // Bei leerem Logo bleiben die Felder leer — und reisen **trotzdem**
+        // mit. Für badhub heißt `""` „löschen", ein fehlendes Feld dagegen
+        // „unverändert"; ohne das ausdrücklich leere Feld bekäme niemand ein
+        // einmal gesetztes Logo je wieder aus dem Liveticker heraus (siehe
+        // `TsetEvent`).
         if let Update::Full(msg) = &mut update {
             let logo = &config.tournament_logo;
-            if !logo.data.is_empty() {
-                msg.event.tournament_logo = logo.data.clone();
-                msg.event.tournament_logo_mime = logo.mime.clone();
-                msg.event
-                    .tournament_logo_background_color
-                    .clone_from(&logo.background_color);
-            }
+            msg.event.tournament_logo.clone_from(&logo.data);
+            msg.event.tournament_logo_mime.clone_from(&logo.mime);
+            msg.event
+                .tournament_logo_background_color
+                .clone_from(&logo.background_color);
         }
         let sent_something = !matches!(update, Update::None);
         let push_result =
