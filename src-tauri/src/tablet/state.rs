@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use relay_proto::{MonitorCommand, MonitorCommandKind, MonitorDeviceInfo};
 
 use crate::btp::model::{BtpCourt, BtpMatch, BtpSnapshot, Discipline, MatchStatus};
+use crate::tablet::perf;
 
 /// Aktuelle Unix-Zeit in Millisekunden.
 fn now_ms() -> u64 {
@@ -643,6 +644,11 @@ pub struct TabletState {
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
+    /// Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
+    /// Reine Messgrößen — sie beeinflussen nichts, sie beschreiben nur, was
+    /// die Anzeigen kosten. Ohne diese Vorher-Zahlen wird laut Spec keine
+    /// der folgenden Etappen begonnen.
+    perf: perf::PerfCounters,
 }
 
 /// Der Monitor-Nudge auf der Wire: `{"court":<id>,"seq":<n>}` (A1, ADR 0016).
@@ -2107,6 +2113,11 @@ impl TabletState {
                 .collect()
         };
         if let Ok(json) = serde_json::to_string(&data) {
+            // Messung (Spec monitor-livestand-push, S0): Dieser Vorgang
+            // läuft heute JE PUNKT und synchron im async-Handler — er ist
+            // der Posten, den S2 entprellt. Erst die Zahl, dann der Umbau.
+            let bytes = json.len() as u64;
+            let begonnen = std::time::Instant::now();
             // Atomar schreiben: erst in eine Temp-Datei, dann umbenennen –
             // so liegt nie eine halb geschriebene live-scores.json vor (ein
             // Absturz mitten im Schreiben würde sie sonst korrumpieren).
@@ -2114,6 +2125,8 @@ impl TabletState {
             if std::fs::write(&tmp, json).is_ok() {
                 let _ = std::fs::rename(&tmp, &path);
             }
+            self.perf
+                .note_persist(begonnen.elapsed().as_nanos() as u64, bytes);
         }
     }
 
@@ -2216,6 +2229,10 @@ impl TabletState {
     /// unbounded, `send` kehrt sofort zurück; das Halten des `record_score`-
     /// Locks ist damit unkritisch.
     pub fn notify_monitor(&self, court_id: i64) {
+        // Messung (S0): gezählt wird der ANSTOSS, nicht der Fan-out — die
+        // Zahl beantwortet „wie oft wird geweckt", die Frage nach „wie viele
+        // Anzeigen holen daraufhin was" beantworten die `health_*`-Zähler.
+        self.perf.note_nudge();
         let seq = {
             let mut seqs = self.monitor_seq.write().unwrap();
             let s = seqs.entry(court_id).or_insert(0);
@@ -2293,6 +2310,13 @@ impl TabletState {
     /// Erkennungstakt noch nichts abgelegt hat.
     pub fn tl_state_cache(&self) -> Option<TlStateCache> {
         self.tl_state_cache.read().unwrap().clone()
+    }
+
+    /// Die Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
+    /// Die Routen vermerken hier ihre Abrufe, der Sync-Loop liest sie für
+    /// die Log-Zeile.
+    pub fn perf(&self) -> &perf::PerfCounters {
+        &self.perf
     }
 
     /// Hält fest, dass gerade ein TL-Gerät den Zustand abgerufen hat
@@ -3389,11 +3413,24 @@ impl TabletState {
     }
 
     pub fn overview(&self) -> Vec<CourtOverview> {
+        // Messung (Spec monitor-livestand-push, S0): Diese Rechnung läuft
+        // heute bei JEDEM `/health` — je Feld ein linearer Scan über alle
+        // Matches plus ein JSON-Parse des Tablet-Zustands. Sie ist der
+        // Posten, den S1 mit einem Antwortcache einspart; gezählt wird der
+        // **Direktbau**, damit die Trefferquote danach eine Gegenprobe hat.
+        //
+        // Ein leerer Schnappschuss zählt bewusst nicht mit: Vor dem ersten
+        // BTP-Kontakt gibt es nichts zu bauen, und die Nullen würden das
+        // p95 der echten Bauten verwässern.
+        let begonnen = std::time::Instant::now();
         let guard = self.snapshot.read().unwrap();
         let Some(snap) = guard.as_ref() else {
             return Vec::new();
         };
-        self.overview_from(snap)
+        let courts = self.overview_from(snap);
+        self.perf
+            .note_overview_build(begonnen.elapsed().as_nanos() as u64);
+        courts
     }
 
     /// Wie [`Self::overview`], aber auf einem **übergebenen** Schnappschuss.
@@ -6198,5 +6235,62 @@ mod tests {
         // Brauchbares, aber auch kein Absturz.
         assert!(announce_jobs_aus_json("nicht mal JSON").is_empty());
         assert!(announce_jobs_aus_json(r#"{"kein":"array"}"#).is_empty());
+    }
+
+    // ── Perf-Messung der Anzeige-Strecke (Spec monitor-livestand-push, S0) ──
+
+    #[test]
+    fn ein_gezaehlter_punkt_vermerkt_schreibvorgang_und_nudge() {
+        // Die beiden Posten, die die Analyse als eigentliche Last benannt
+        // hat: der Vollschreibvorgang der live-scores.json JE PUNKT und der
+        // Nudge-Fan-out. Ohne diese Zahlen ließe sich nach S2/S3 nicht
+        // belegen, dass sie kleiner geworden sind.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_scores_path(dir.path().join("live-scores.json"));
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.record_score(101, 7, vec![(6, 3)]);
+        st.record_score(101, 7, vec![(7, 3)]);
+
+        let s = st.perf().snapshot();
+        assert_eq!(s.persist_calls, 3, "heute schreibt JEDER Punkt");
+        assert!(s.persist_bytes > 0, "die geschriebene Größe wird vermerkt");
+        assert!(s.persist_ns > 0, "die Schreibdauer wird vermerkt");
+        assert_eq!(s.nudges_sent, 3, "jeder Punkt weckt die Anzeigen");
+    }
+
+    #[test]
+    fn ein_punkt_ohne_persistenz_vermerkt_trotzdem_den_nudge() {
+        // Ohne gesetzten Pfad (Tests, Cloud-Slave) schreibt niemand — der
+        // Zähler darf dann auch nichts melden, der Nudge aber schon.
+        let st = TabletState::default();
+        st.record_score(101, 7, vec![(1, 0)]);
+        let s = st.perf().snapshot();
+        assert_eq!(s.persist_calls, 0);
+        assert_eq!(s.nudges_sent, 1);
+    }
+
+    #[test]
+    fn jeder_uebersichts_bau_wird_vermerkt() {
+        // `overview()` scannt je Feld alle Matches und parst je Feld JSON —
+        // die Rechnung, die S1 mit einem Antwortcache einspart. Gezählt wird
+        // sie hier, damit die Trefferquote später eine Gegenprobe hat.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert_eq!(st.perf().snapshot().overview_builds, 0);
+
+        let _ = st.overview();
+        let _ = st.overview();
+
+        let s = st.perf().snapshot();
+        assert_eq!(s.overview_builds, 2);
+        assert!(
+            s.overview_build_ns > 0,
+            "die Bau-Dauer wird vermerkt (Grundlage des p95)"
+        );
     }
 }
