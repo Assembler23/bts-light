@@ -3604,6 +3604,28 @@ function wireCourts(box) {
     // wird sie ohnehin ersetzt und neu verdrahtet.
     const frisch = () => state.courts.find((c) => String(c.court_id) === el.dataset.court);
 
+    // ── Spieler-Links (Spec tl-sicht-feinschliff A4.1) ──────────────────
+    // VOR der `picked`-Weiche, weil beide Zweige sie brauchen: Die Kachel
+    // wird bei jeder Auswahl neu gebaut (sie bekommt `target`) und dann
+    // über den jeweils gültigen Zweig verdrahtet. Stünde das unten, hätte
+    // eine Kachel genau so lange keine Link-Behandlung, wie ein Spiel zur
+    // Zuweisung ausgewählt ist — also mitten im häufigsten Arbeitsgang
+    // (Review 18.08.2026).
+    //
+    // Ein Klick auf den badhub-Link darf das Feld weder aufnehmen noch
+    // bezuweisen. `pointerdown` bleibt unangetastet: Der Name ist die
+    // größte Trefffläche der Kachel, ein dort angesetzter ZUG muss weiter
+    // funktionieren — endet er über dem Namen, fängt `suppressNextClick`
+    // die Navigation ab. Wortgleich zu `wireQueue`.
+    const istSpielerLink = (ev) =>
+      ev.target instanceof Element && !!ev.target.closest("a.sp-name");
+    scopeAll(el, "a.sp-name").forEach((a) => {
+      a.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (suppressNextClick) ev.preventDefault();
+      });
+    });
+
     if (picked) {
       const go = () => {
         if (suppressNextClick) return;
@@ -3612,6 +3634,9 @@ function wireCourts(box) {
       };
       el.addEventListener("click", go);
       el.addEventListener("keydown", (ev) => {
+        // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
+        // Link, nicht der Zuweisung.
+        if (istSpielerLink(ev)) return;
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
       });
       return;
@@ -3639,22 +3664,9 @@ function wireCourts(box) {
     el.addEventListener("keydown", (ev) => {
       // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
       // Link (badhub-Seite öffnen) — sonst finge die Kachel sie ab und
-      // nähme stattdessen das Spiel auf. Dieselbe Ausnahme wie in der
-      // Warteliste (`wireQueue`), seit die Kachel Links trägt.
-      if (ev.target instanceof Element && ev.target.closest("a.sp-name")) return;
+      // nähme stattdessen das Spiel auf.
+      if (istSpielerLink(ev)) return;
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
-    });
-    // Ein Klick auf den badhub-Link darf das Spiel nicht ZUSÄTZLICH
-    // aufnehmen. `pointerdown` bleibt unangetastet: Der Name ist die
-    // größte Trefffläche der Kachel, ein dort angesetzter ZUG (auf ein
-    // anderes Feld) muss weiter funktionieren — endet er über dem Namen,
-    // fängt `suppressNextClick` die Navigation ab. Wortgleich zu
-    // `wireQueue`, weil die Kachel dieselbe Zieh-Mechanik trägt.
-    scopeAll(el, "a.sp-name").forEach((a) => {
-      a.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (suppressNextClick) ev.preventDefault();
-      });
     });
     enableDrag(el, alsMatch(court), court.court_id);
   });
