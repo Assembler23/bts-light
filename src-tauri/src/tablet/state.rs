@@ -417,6 +417,20 @@ pub struct TabletState {
     /// Warteschlange gezogene Zähltafelbediener dieses Felds (ADR 0007,
     /// Scheibe 2). Wird geräumt, sobald das Feld frei ist / das Spiel wechselt.
     assigned_scorekeeper: RwLock<HashMap<i64, (i64, Vec<String>)>>,
+    /// Nachrufe an den Zähltafelbediener je Feld: `(Match-ID, Stufe)`.
+    /// Die Match-ID im Wert setzt den Zähler bei einem Spielwechsel von
+    /// selbst zurück — dasselbe Muster wie `call_stages`.
+    ///
+    /// Bewusst **getrennt** von `call_stages`: Der Bediener-Nachruf ist
+    /// kein Spieler-Aufruf. Liefen sie über denselben Zähler, zöge ein
+    /// Nachruf an die Bedienung die an der Kachel angezeigte Aufruf-Zahl
+    /// der Spieler hoch — und an der dritten hängt die kampflose Wertung.
+    ///
+    /// Der Stand wird **nicht** ausgeliefert (Nicht-Ziel N-7 der Spec): Er
+    /// bestimmt allein die Ansage-Stufe. Anders als beim Spieler-Aufruf
+    /// steht hinter dem letzten Nachruf keine Rechtsfolge, die man anzeigen
+    /// müsste.
+    scorekeeper_call_stages: RwLock<HashMap<i64, (i64, u8)>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
     /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
     /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
@@ -769,6 +783,22 @@ pub enum AnnounceJobKind {
     Officials {
         #[serde(rename = "courtId")]
         court_id: i64,
+    },
+    /// Nachruf für den Zähltafelbediener eines Felds („… bitte als
+    /// Tabletbedienung melden", ADR 0007). Eigene Ansageart statt eines
+    /// vierten Werts an `PrepCall.side`: Es ist ein anderer Satz, ein
+    /// anderer Adressat und ein eigener Zähler — die Spieler-Nachrufzahl
+    /// darf davon nicht hochgezogen werden (Spec `tl-sicht-feinschliff`,
+    /// Punkt 2).
+    ScorekeeperCall {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Damit das Ansage-Gerät verstummt, wenn inzwischen ein anderes
+        /// Spiel auf dem Feld steht — wie beim Feld-Aufruf.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        /// 1 = erster Nachruf, 2/3 mit Stufenwort davor.
+        stage: u8,
     },
     /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels.
     PrepCall {
@@ -1626,6 +1656,37 @@ impl TabletState {
         } else {
             (self.scorekeeper(court_id), false)
         }
+    }
+
+    /// Einen Nachruf an die Zähltafelbedienung eines Felds verbuchen und
+    /// die Stufe zurückgeben (1, 2, dann dauerhaft 3).
+    ///
+    /// Gedeckelt wie der Vorbereitungs-Nachruf: Über „Dritter und letzter
+    /// Aufruf" hinaus gibt es kein Sprachbild — und anders als beim
+    /// Spieler-Aufruf auch keinen Grund, weiterzuzählen.
+    pub fn note_scorekeeper_call(&self, court_id: i64, match_id: i64) -> u8 {
+        let mut g = self.scorekeeper_call_stages.write().unwrap();
+        let entry = g.entry(court_id).or_insert((match_id, 0));
+        // Anderes Spiel auf dem Feld: von vorn. Sonst erbte die neue
+        // Paarung die Nachrufe ihres Vorgängers.
+        if entry.0 != match_id {
+            *entry = (match_id, 0);
+        }
+        entry.1 = (entry.1 + 1).min(3);
+        entry.1
+    }
+
+    /// Wie oft die Bedienung dieses Felds für dieses Spiel schon nachgerufen
+    /// wurde (0 = noch nie). Nur für Tests und die Ansage-Stufe — der Wert
+    /// verlässt den Host nicht.
+    pub fn scorekeeper_calls_made(&self, court_id: i64, match_id: i64) -> u8 {
+        self.scorekeeper_call_stages
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .filter(|(id, _)| *id == match_id)
+            .map(|(_, stage)| *stage)
+            .unwrap_or(0)
     }
 
     /// Zugewiesener Zähltafelbediener eines Felds (Namen), falls vorhanden.

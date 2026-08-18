@@ -68,6 +68,11 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Bedienung nachrufen:** Ist dem Feld ein Zähltafelbediener zugewiesen,
+  ruft „Bedienung nachrufen" im ⋯-Menü der Kachel ihn aus
+  („Feld 3. Meier, bitte als Tabletbedienung melden."). Ab dem zweiten Mal
+  mit Stufenwort. Das ist **kein** Spieler-Aufruf: Die Aufruf-Zählung der
+  Spieler bleibt stehen. Ohne zugewiesene Bedienung gibt es den Knopf nicht.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.

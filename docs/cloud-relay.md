@@ -324,6 +324,17 @@ zusätzliche `TlState`-Feld `hall_prefill` und der neue
 beide (Feature-Detection über das State-Feld — eine neue Seite an einem
 alten Host zeigt die Bedienelemente gar nicht).
 
+**Nachruf an die Zähltafelbedienung** (Spec `tl-sicht-feinschliff` Punkt 2,
+v0.9.232): eine neue `TlAction`-Variante `announce_scorekeeper { courtId }`.
+Der Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**.
+Also auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Zählerstand bleibt bewusst am Host (er bestimmt allein die
+Ansage-Stufe).
+
+Dazu ein neuer **Ansage-Auftragstyp** `scorekeeper_call`, der wie alle
+Ansage-Aufträge nur vom Master zu den Ansage-Geräten seiner Halle reist,
+nicht über den Relay.
+
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
 Turnier im Sekundentakt, in einer ruhigen Phase minutenlang gar nicht —

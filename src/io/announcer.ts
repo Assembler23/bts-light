@@ -14,6 +14,7 @@ import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
+import { scorekeeperCallSegments } from "./scorekeeperCallText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -47,6 +48,11 @@ export interface AnnounceMatchInput {
   /** Nur die Besetzung ansagen (manueller Knopf „SR/AR ansagen"): Feld,
    *  Schiedsrichter, Aufschlagrichter — ohne Disziplin und Paarung. */
   officialsOnly?: boolean;
+  /** Nur die Zähltafelbedienung nachrufen („Feld 3. Meier, bitte als
+   *  Tabletbedienung melden."): Feld, ggf. Stufenwort, Namen aus
+   *  `scorekeeperNames` — ohne Disziplin und Paarung. Hat Vorrang vor
+   *  `officialsOnly`; beide zugleich ergäben keinen sinnvollen Satz. */
+  scorekeeperOnly?: boolean;
   /** Aufruf-Stufe: 1 = normaler (erster) Aufruf, 2 = „Zweiter Aufruf",
    *  3 = „Dritter und letzter Aufruf". Ab Stufe 2 wird das Label als eigenes
    *  Segment hinter Disziplin/Runde vor die Paarung gesetzt. Default 1. */
@@ -612,6 +618,17 @@ export function buildAnnouncementSegments(
   const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
+  // Nachruf an die Bedienung: Feld, Stufenwort, Namen — sonst nichts. Steht
+  // VOR dem Besetzungs-Gatter, weil beide Sonderansagen die reguläre
+  // Paarung überspringen (Spec `tl-sicht-feinschliff`, Punkt 2).
+  if (input.scorekeeperOnly) {
+    return scorekeeperCallSegments(
+      court,
+      input.scorekeeperNames ?? [],
+      (input.callStage ?? 1) as 1 | 2 | 3,
+      lang,
+    );
+  }
   // Manueller Knopf „SR/AR ansagen": nur Feld + Besetzung. Eine
   // nachträgliche Zuweisung soll nicht die ganze Paarung erneut aufrufen —
   // das Spiel läuft ja schon (Spec Nr. 8).
@@ -839,6 +856,22 @@ export function buildAnnouncementSsml(
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
 
   const parts: string[] = [`${court}.`];
+  // Dieselben Segmente wie im Web-Speech-Pfad (`scorekeeperCallSegments`),
+  // gebaut aus der ROHEN Feld-Phrase und danach escapt — `court` oben ist
+  // bereits escapt, das gäbe sonst eine doppelte Maskierung.
+  if (input.scorekeeperOnly) {
+    const teile = scorekeeperCallSegments(
+      resolveCourtPhrase(input.courtLabel, lang),
+      input.scorekeeperNames ?? [],
+      (input.callStage ?? 1) as 1 | 2 | 3,
+      lang,
+    ).map(xmlEscape);
+    const speakLangSk = lang === "de" ? "de-DE" : "en-US";
+    return (
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangSk}">` +
+      `<voice name="${xmlEscape(voice)}">${teile.join(" ")}</voice></speak>`
+    );
+  }
   if (input.officialsOnly) {
     for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
     const speakLangOnly = lang === "de" ? "de-DE" : "en-US";

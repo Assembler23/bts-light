@@ -3294,6 +3294,17 @@ function courtCard(c, cellStyle) {
           title="Schiedsrichter ansagen">Schiedsrichter ansagen</button>`);
     }
   }
+  // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
+  // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
+  // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
+  // Warteschlange, Feld mit abgeschalteter Bediener-Vergabe und global
+  // ausgeschaltete Verwaltung — in allen dreien weist der Turnier-PC gar
+  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe und steht
+  // deshalb getrennt von den Aufruf-Knöpfen.
+  if (state.scorekeeper_managed && c.match_id && c.scorekeeper_assigned) {
+    kachelAktionen.push(`<button type="button" data-sk-say="${c.court_id}"
+        title="Zähltafelbedienung nachrufen">Bedienung nachrufen</button>`);
+  }
   // Billige Bedingung zuerst: `aufrufeUnbegrenzt()` läuft durch die
   // Profil-Auflösung und soll im Normalfall gar nicht erst rechnen.
   if (c.match_id && ((!isPlaying(c) && gesprochen < 3) || aufrufeUnbegrenzt())) {
@@ -3581,6 +3592,26 @@ function wireCourts(box) {
         `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "announce_officials", courtId },
         "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Bediener-Nachruf: beliebig oft auslösbar wie die anderen Ansagen, aber
+  // gedeckelt bei Stufe 3 — der Turnier-PC zählt. Zeitstempel-Nonce statt
+  // des 20-s-Fensters (`OP_WINDOW_MS`), das eine BEWUSSTE Wiederholung
+  // stumm schluckte; gegen den Doppeltipp wirkt das kurze `disabled`.
+  scopeAll(box, "button[data-sk-say]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (btn.disabled) return;
+      btn.disabled = true;
+      setTimeout(() => { btn.disabled = false; }, 1000);
+      const courtId = Number(btn.dataset.skSay);
+      send(
+        `sk-say-${courtId}-${Date.now()}`,
+        { action: "announce_scorekeeper", courtId },
+        "Nachruf ausgelöst.",
       );
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
