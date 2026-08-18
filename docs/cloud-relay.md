@@ -288,6 +288,33 @@ Namensvergleich zurück). Der Zustand bleibt opakes JSON, der Relay
 unverändert — aber auch hier: **Relay-Deploy** nötig, damit Cloud-Geräte
 die neue Anzeige (Farb-Marken, Eieruhr, Links) bekommen.
 
+**Spielerlinks überall** (18.08.2026, Spec `tl-sicht-feinschliff` Punkt 4):
+`team1_ids`/`team2_ids` stehen zusätzlich an den **Feld-Kacheln**
+(`TlCourt`) und den **beendeten Spielen** (`TlFinished`) — beide additiv
+mit `#[serde(default)]`, der Relay bleibt unverändert, Relay-Deploy nur
+für die Anzeige nötig.
+
+**Größenwirkung — die Kürzungskaskade hat eine Stufe dazubekommen.** Bei 26
+Feldern und 30 Ergebnissen sind das bis zu 112 zusätzliche String-Arrays.
+Der Größen-Wächter maß den Fall bisher gar nicht: Sein Fixture kannte nur
+die Warteliste, keine belegten Felder, keine Ergebnisse — und keine
+**Vereinsnamen**, die unabhängig von `display.show_club_names` **immer**
+mitreisen. Mit realistischem Fixture (26 Felder, 30 Ergebnisse, 400
+wartende, Doppelpaarungen mit Verein und Lizenznummer, 40 Schiedsrichter,
+20 Zähltafelbediener) liegt der Stand bei **62 467 von 65 536 Bytes** —
+rund 5 % Reserve, Warteliste bereits auf unterster Stufe.
+
+Die Kaskade lautet deshalb jetzt: **`queue` (40/20/10/5) →
+`checkin_times` → `finished` (10/3)**. Die Ergebnisliste ist reine
+Rückschau; die Feldkacheln bleiben in jeder Stufe vollständig, weil sie
+das Bedienelement der Seite sind. Ohne die neue Stufe reißt ein
+40-Felder-Turnier die Grenze mit 73 942 Bytes — der Relay verwirft dann
+das ganze Frame samt Vorgänger, und die Cloud-Turnierleitung sieht **gar
+nichts** mehr. Wer den Zustand um eine weitere Liste erweitert (nächster
+Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
+und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
+zweite Erweiterung.
+
 **Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
 `TlAction`-Varianten `set_hall_prefill { enabled, window }` und
 `clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter
