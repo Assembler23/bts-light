@@ -107,6 +107,12 @@ jobs:
       - name: Check-In-Doppel (JS)
         run: node scripts/test-checkin-pairs.mjs
 
+      # Wortlaut der Spielbeginn-Ansage: mit dem Nutzer abgestimmt und in
+      # beiden Synthese-Pfaden identisch — ohne Paarung, ohne Stufenwort
+      # (sie ist kein Aufruf).
+      - name: Spielbeginn-Ansage (JS)
+        run: node scripts/test-start-play-text.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)

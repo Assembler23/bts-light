@@ -14,6 +14,7 @@ import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
+import { startPlaySegments } from "./startPlayText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -47,6 +48,12 @@ export interface AnnounceMatchInput {
   /** Nur die Besetzung ansagen (manueller Knopf „SR/AR ansagen"): Feld,
    *  Schiedsrichter, Aufschlagrichter — ohne Disziplin und Paarung. */
   officialsOnly?: boolean;
+  /** Nur zum Spielbeginn auffordern („Feld 3. Bitte mit dem Spielen
+   *  beginnen."): Feld + Aufforderung, ohne Paarung und ohne Stufenwort.
+   *  Sie ist kein Aufruf — gerufen wurde längst, die Spieler stehen da
+   *  (Spec `tl-sicht-feinschliff`, Punkt 3). Hat Vorrang vor
+   *  `officialsOnly`, beide zugleich ergäben keinen sinnvollen Satz. */
+  startPlayOnly?: boolean;
   /** Aufruf-Stufe: 1 = normaler (erster) Aufruf, 2 = „Zweiter Aufruf",
    *  3 = „Dritter und letzter Aufruf". Ab Stufe 2 wird das Label als eigenes
    *  Segment hinter Disziplin/Runde vor die Paarung gesetzt. Default 1. */
@@ -612,6 +619,13 @@ export function buildAnnouncementSegments(
   const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
+  // „Bitte mit dem Spielen beginnen": nur Feld + Aufforderung, ohne
+  // Paarung und ohne Stufenwort. Steht VOR dem Besetzungs-Gatter, weil
+  // beide Sonderansagen die reguläre Paarung überspringen und diese hier
+  // auch keine Namen anhängt (Spec `tl-sicht-feinschliff`, Punkt 3).
+  if (input.startPlayOnly) {
+    return startPlaySegments(court, lang);
+  }
   // Manueller Knopf „SR/AR ansagen": nur Feld + Besetzung. Eine
   // nachträgliche Zuweisung soll nicht die ganze Paarung erneut aufrufen —
   // das Spiel läuft ja schon (Spec Nr. 8).
@@ -839,6 +853,21 @@ export function buildAnnouncementSsml(
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
 
   const parts: string[] = [`${court}.`];
+  // Dieselben Segmente wie im Web-Speech-Pfad (`startPlaySegments`), damit
+  // beide Wege Wort für Wort dasselbe sagen. Gebaut wird aus der ROHEN
+  // Feld-Phrase und danach escapt — `court` oben ist bereits escapt, das
+  // gäbe sonst eine doppelte Maskierung.
+  if (input.startPlayOnly) {
+    const teile = startPlaySegments(
+      resolveCourtPhrase(input.courtLabel, lang),
+      lang,
+    ).map(xmlEscape);
+    const speakLangStart = lang === "de" ? "de-DE" : "en-US";
+    return (
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangStart}">` +
+      `<voice name="${xmlEscape(voice)}">${teile.join(" ")}</voice></speak>`
+    );
+  }
   if (input.officialsOnly) {
     for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
     const speakLangOnly = lang === "de" ? "de-DE" : "en-US";

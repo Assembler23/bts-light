@@ -324,6 +324,23 @@ zusätzliche `TlState`-Feld `hall_prefill` und der neue
 beide (Feature-Detection über das State-Feld — eine neue Seite an einem
 alten Host zeigt die Bedienelemente gar nicht).
 
+**Spielbeginn-Ansage** (Spec `tl-sicht-feinschliff` Punkt 3, v0.9.230): eine
+neue `TlAction`-Variante `announce_start_play { courtId, matchId }`. Der
+Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**, die
+Seite zeigt dann „Der Turnier-PC hat die Anfrage abgewiesen (422)". Also
+auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Knopf steht im ⋯-Menü und braucht kein neues `TlState`-Feld.
+
+Dazu ein neuer **Ansage-Auftragstyp** `start_play` (`AnnounceJobKind`,
+`tablet/state.rs`). Der reist **nicht** über den Relay, sondern nur vom
+Master zu den Ansage-Geräten seiner Halle — im LAN über
+`/info/announce/jobs`. Wichtig für den Mischbetrieb: Ein Ansage-Slave mit
+älterem Stand überspringt seit v0.9.230 unbekannte Auftragstypen einzeln,
+statt an einem die ganze Charge zu verlieren (siehe
+[announcements.md](announcements.md)). In einer per Relay angebundenen
+**fernen** Halle erklingt die Ansage weiterhin gar nicht — dort holt der
+Slave bewusst keine Aufträge ab.
+
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
 Turnier im Sekundentakt, in einer ruhigen Phase minutenlang gar nicht —

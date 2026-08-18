@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.230
+
+- **„Bitte anfangen" — neue Ansage für ein Feld, auf dem nichts passiert.**
+  Steht ein Spiel auf dem Feld, ohne dass ein Punkt fällt, löst der neue
+  Knopf im ⋯-Menü der Feld-Kachel die Ansage **„Feld 3. Bitte mit dem
+  Spielen beginnen."** aus (englisch: „Court 3. Please start playing.").
+  Bisher blieb der Turnierleitung nur hinzulaufen oder einen Aufruf zu
+  wiederholen — was die Aufruf-Zählung verfälschte.
+- **Die Ansage ist ausdrücklich kein Aufruf.** Sie zählt keine Stufe hoch,
+  lässt das Aufruf-Abzeichen stehen und darf beliebig oft wiederholt
+  werden. Die Zählung, an der die kampflose Wertung hängt, bleibt davon
+  unberührt.
+- **Ein Ansage-Rechner mit älterem Stand verstummt nicht mehr.** Kannte er
+  eine Ansageart nicht, verwarf er bisher die **gesamte** Auftragsliste —
+  die zweite Halle blieb eine Minute lang still, auch für ganz normale
+  Aufrufe. Jetzt überspringt er nur den unbekannten Auftrag. Das trifft
+  jeden Zwei-Rechner-Aufbau im Zeitfenster, in dem erst einer aktualisiert
+  ist.
+- Zweite Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 3 von 4).
+  ⚠️ **Relay-Deploy vor dem Client-Release** — die neue Aktion würde ein
+  altes Relay sonst abweisen. Der Deploy läuft automatisch beim Merge nach
+  `main`.
 ## v0.9.229
 
 - **Die Spielliste schiebt die anderen Panels nicht mehr weg.** Lädt sie

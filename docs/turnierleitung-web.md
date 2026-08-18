@@ -68,6 +68,12 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
+  fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**
+  Aufruf: Die Aufruf-Zählung bleibt stehen, das Abzeichen springt nicht,
+  und du kannst beliebig oft nachfassen. Der Knopf verschwindet, sobald
+  gezählt wird.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.

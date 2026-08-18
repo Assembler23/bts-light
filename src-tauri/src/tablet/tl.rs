@@ -629,6 +629,51 @@ pub(crate) fn apply_state_action(
             );
             Ok(announcement_response(tablet, &hall, now_ms))
         }
+        A::AnnounceStartPlay { court_id, match_id } => {
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Nur ein Feld, auf dem GENAU dieses Spiel steht. Zwischen dem
+            // Antippen am Tablet und dem Ankommen hier kann das Spiel vom
+            // Feld genommen oder getauscht worden sein — dann wäre die
+            // Aufforderung an die Falschen gerichtet.
+            let steht_dort = snap.matches.iter().any(|m| {
+                m.id == *match_id
+                    && m.court_id == Some(*court_id)
+                    && m.status == crate::btp::model::MatchStatus::OnCourt
+            });
+            if !steht_dort {
+                return Err(TlResponse::err(
+                    C::StaleView,
+                    "Auf diesem Feld steht dieses Spiel nicht (mehr).",
+                ));
+            }
+            let hall = snap
+                .court_infos
+                .iter()
+                .find(|c| c.id == *court_id)
+                .and_then(|c| c.location_id)
+                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            // **Kein** `due_call_stage`, **kein** `note_court_call_at_least`:
+            // Die Aufforderung ist kein Aufruf (Spec A3.3). Wer hier
+            // „konsistenzhalber" eine Stufe hochzählte, ließe das
+            // Aufruf-Abzeichen springen und brächte die Turnierleitung um
+            // die Zählung, an der die kampflose Wertung hängt.
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::StartPlay {
+                    court_id: *court_id,
+                    match_id: *match_id,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
         A::SetAutoAssign { enabled } => {
             // Laufzeit-Schalter, nicht die Grundeinstellung: Der Sync-Lauf
             // liest die Konfiguration nach dem Start nicht neu, eine
@@ -990,7 +1035,12 @@ fn announcement_response(tablet: &TabletState, hall: &str, now_ms: u64) -> relay
     } else {
         format!("In {hall} ist kein Ansage-Gerät verbunden")
     };
-    ok.with_warning(format!("{wo} — der Aufruf wurde nicht gesprochen."))
+    // „die Ansage", nicht „der Aufruf": Über diese Funktion laufen auch die
+    // Schiedsrichter- und die Spielbeginn-Ansage, und die sind ausdrücklich
+    // KEIN Aufruf (sie zählen keine Stufe hoch). Stünde dort „der Aufruf",
+    // widerspräche der Bildschirm der Bedienanleitung, und die
+    // Turnierleitung schlösse daraus, die Zählung sei bewegt worden.
+    ok.with_warning(format!("{wo} — die Ansage wurde nicht gesprochen."))
 }
 
 /// Warum eine Ergebnis-Korrektur gerade nicht geht.
@@ -1832,6 +1882,9 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             operator,
         } => format!("off-court:{court_id}:{sr}:{ar}:{operator}"),
         A::AnnounceOfficials { court_id } => format!("off-announce:{court_id}"),
+        A::AnnounceStartPlay { court_id, match_id } => {
+            format!("start-play:{court_id}:{match_id}")
+        }
         A::QueueReorder {
             match_id,
             before_match_id,
@@ -1939,6 +1992,9 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Feld-Schalter von Feld {court_id}")
         }
         A::AnnounceOfficials { court_id } => format!("Schiedsrichter-Ansage Feld {court_id}"),
+        A::AnnounceStartPlay { court_id, .. } => {
+            format!("Spielbeginn-Ansage Feld {court_id}")
+        }
         A::QueueReorder { match_id, .. } => format!("Spielliste umsortiert (Spiel {match_id})"),
         A::QueueOrderReset => "Manuelle Spielreihenfolge zurückgesetzt".to_string(),
         A::SetAutoAssign { enabled } => {
@@ -6607,6 +6663,163 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::CourtFree));
         assert_eq!(tablet.calls_made(3, 99), 0, "nichts hochgezählt");
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_laesst_call_stages_unberuehrt() {
+        // Der Kern von A3.3: Die Ansage ist KEIN Aufruf. Zählte sie mit,
+        // spränge das Aufruf-Abzeichen an der Kachel und die Turnierleitung
+        // glaubte, sie hätte schon zweimal gerufen — bis hin zur kampflosen
+        // Wertung, die am dritten Aufruf hängt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        assert_eq!(tablet.calls_made(3, 7), 0, "Ausgangslage: nie gerufen");
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+
+        assert!(done.ok);
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            0,
+            "die Spielbeginn-Ansage darf keine Aufruf-Stufe verbrauchen"
+        );
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_braucht_ein_spiel_auf_dem_feld() {
+        // Ohne Spiel gäbe es niemanden, der anfangen soll — ein Gong ins
+        // Leere. Und ein Spielwechsel zwischen Antippen und Ankommen darf
+        // nicht die falsche Paarung antreiben, deshalb muss auch die
+        // Match-ID passen.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None), a_court(4, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+
+        let leer = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 4,
+                match_id: 7,
+            },
+        );
+        assert!(leer.is_err(), "freies Feld: nichts anzusagen");
+
+        let falsches_spiel = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 3,
+                match_id: 99,
+            },
+        );
+        assert!(
+            falsches_spiel.is_err(),
+            "inzwischen steht ein anderes Spiel auf dem Feld"
+        );
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_ist_beliebig_oft_ausloesbar() {
+        // Anders als der Aufruf kennt sie keine Obergrenze: Wer nach fünf
+        // Minuten immer noch nicht spielt, wird eben noch einmal gebeten.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let aktion = relay_proto::TlAction::AnnounceStartPlay {
+            court_id: 3,
+            match_id: 7,
+        };
+
+        for durchgang in 1..=4 {
+            let done = apply_state_action(&tablet, &AppConfig::default(), 50_000, &aktion);
+            assert!(
+                done.is_ok(),
+                "Durchgang {durchgang} muss durchgehen — die Ansage kennt keine Stufe"
+            );
+        }
+        assert_eq!(
+            tablet.announce_jobs_since("", 0, 50_000).len(),
+            4,
+            "jede Auslösung erzeugt einen eigenen Auftrag"
+        );
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_geht_nur_in_die_halle_des_felds() {
+        // In einem Zwei-Hallen-Turnier darf die andere Halle nicht mithören
+        // — dort steht ein ganz anderes Feld 3.
+        let tablet = TabletState::default();
+        let mut schnappschuss = snap(
+            vec![a_court(3, Some(2))],
+            vec![match_on_court(7, 3)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        schnappschuss.court_infos.push(a_court(9, Some(1)));
+        tablet.set_snapshot(schnappschuss);
+
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1, "die Halle des Felds hört die Ansage");
+        // Und es ist wirklich DIESE Ansage. Ohne die Typ-Prüfung wären alle
+        // Tests hier auch dann grün, wenn der Arm versehentlich einen
+        // Schiedsrichter-Auftrag ablegte — die Halle hörte im Turnier die
+        // falsche Ansage (Review 18.08.2026).
+        assert!(
+            matches!(
+                jobs[0].kind,
+                crate::tablet::state::AnnounceJobKind::StartPlay {
+                    court_id: 3,
+                    match_id: 7
+                }
+            ),
+            "erwartet wurde ein StartPlay-Auftrag für Feld 3/Spiel 7, war: {:?}",
+            jobs[0].kind
+        );
+        assert!(
+            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            "die andere Halle nicht"
+        );
     }
 
     #[test]
