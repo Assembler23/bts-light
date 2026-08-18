@@ -24,6 +24,40 @@ use crate::tablet::state::TabletState;
 /// schließt und die Heartbeats ausbleiben.
 const HEARTBEAT_AFTER: Duration = Duration::from_secs(60);
 
+/// Legt das Turnierlogo aus der Konfiguration in einen vollen `tset`.
+///
+/// Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht das Logo
+/// nicht, weil badhub dort nur das Match-Element patcht und den übrigen
+/// Snapshot behält.
+///
+/// **Auch ein leeres Logo reist mit.** Für badhub heißt `""` „löschen", ein
+/// fehlendes Feld dagegen „unverändert" — ohne das ausdrücklich leere Feld
+/// bekäme niemand ein einmal gesetztes Logo je wieder aus dem Liveticker
+/// heraus.
+///
+/// Beim Löschen gehen **alle drei** Felder leer hinaus, auch die
+/// Hintergrundfarbe. Sie steht in der Konfiguration nämlich noch: „Logo
+/// entfernen" im Setup räumt sie nicht mit ab. Ginge sie so hinaus,
+/// verstünde badhub „Logo löschen, Farbe setzen" — ein halb gelöschter
+/// Zustand (Review-Fund 18.08.2026).
+fn logo_in_tset_legen(update: &mut Update, config: &AppConfig) {
+    let Update::Full(msg) = update else {
+        return;
+    };
+    let logo = &config.tournament_logo;
+    if logo.data.is_empty() {
+        msg.event.tournament_logo.clear();
+        msg.event.tournament_logo_mime.clear();
+        msg.event.tournament_logo_background_color.clear();
+    } else {
+        msg.event.tournament_logo.clone_from(&logo.data);
+        msg.event.tournament_logo_mime.clone_from(&logo.mime);
+        msg.event
+            .tournament_logo_background_color
+            .clone_from(&logo.background_color);
+    }
+}
+
 /// Aktuelle Zeit in Unix-Millisekunden.
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -1789,14 +1823,7 @@ impl SyncEngine {
         // „unverändert"; ohne das ausdrücklich leere Feld bekäme niemand ein
         // einmal gesetztes Logo je wieder aus dem Liveticker heraus (siehe
         // `TsetEvent`).
-        if let Update::Full(msg) = &mut update {
-            let logo = &config.tournament_logo;
-            msg.event.tournament_logo.clone_from(&logo.data);
-            msg.event.tournament_logo_mime.clone_from(&logo.mime);
-            msg.event
-                .tournament_logo_background_color
-                .clone_from(&logo.background_color);
-        }
+        logo_in_tset_legen(&mut update, config);
         let sent_something = !matches!(update, Update::None);
         let push_result =
             push::push_update(http, &config.badhub.url, &config.badhub.password, &update).await;
@@ -2038,6 +2065,66 @@ mod tests {
 
     use super::*;
     use crate::btp::model::{BtpMatch, BtpPlayer, Discipline, MatchResult, MatchStatus};
+
+    // ── Turnierlogo im vollen `tset` ────────────────────────────────────────
+
+    /// Baut einen vollen `tset` und legt das Logo der Konfiguration hinein —
+    /// genau der Weg, den ein echter Zyklus nimmt. `build_tset` allein taugt
+    /// dafür nicht: Es setzt die Logo-Felder hart auf leer und liest die
+    /// Konfiguration nie (Review-Fund 18.08.2026).
+    fn tset_event_mit_logo(logo: crate::config::LogoConfig) -> crate::badhub::payload::TsetEvent {
+        let config = AppConfig {
+            tournament_logo: logo,
+            ..Default::default()
+        };
+        let ctx = crate::badhub::payload::LivetickerContext::bare(&config);
+        let mut update = diff(None, &snapshot(), 1, &ctx);
+        logo_in_tset_legen(&mut update, &config);
+        match update {
+            Update::Full(msg) => msg.event,
+            other => panic!("ein Diff gegen None muss einen vollen tset ergeben: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ein_gesetztes_turnierlogo_landet_im_tset() {
+        // Der Gegenfall — den es bisher nirgends gab.
+        let event = tset_event_mit_logo(crate::config::LogoConfig {
+            data: "AAAA".into(),
+            mime: "image/png".into(),
+            background_color: "#112233".into(),
+        });
+        assert_eq!(event.tournament_logo, "AAAA");
+        assert_eq!(event.tournament_logo_mime, "image/png");
+        assert_eq!(event.tournament_logo_background_color, "#112233");
+    }
+
+    #[test]
+    fn ohne_logo_reisen_die_felder_leer_mit() {
+        // Leer statt weggelassen: Für badhub heißt `""` „löschen", ein
+        // fehlendes Feld dagegen „unverändert".
+        let event = tset_event_mit_logo(crate::config::LogoConfig::default());
+        assert_eq!(event.tournament_logo, "");
+        assert_eq!(event.tournament_logo_mime, "");
+    }
+
+    #[test]
+    fn beim_loeschen_bleibt_keine_hintergrundfarbe_stehen() {
+        // „Logo entfernen" im Setup räumt die Farbe nicht mit ab — sie steht
+        // danach noch in der Konfiguration. Ginge sie so hinaus, verstünde
+        // badhub „Logo löschen, Farbe setzen": ein halb gelöschter Zustand,
+        // und genau darauf baut der nächste Schritt auf (Logo nur bei
+        // Änderung senden). Review-Fund 18.08.2026.
+        let event = tset_event_mit_logo(crate::config::LogoConfig {
+            data: String::new(),
+            mime: String::new(),
+            background_color: "#112233".into(),
+        });
+        assert_eq!(
+            event.tournament_logo_background_color, "",
+            "Löschen heißt: alle drei Felder leer"
+        );
+    }
 
     fn snapshot() -> BtpSnapshot {
         BtpSnapshot {
