@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.222
+
+- **Turnier-PC liest die Konfiguration nicht mehr bei jeder Anfrage von
+  der Platte.** `config.json` wurde auf den heißesten Pfaden (jede
+  TL-Anfrage prüft damit den Zugang, jeder Monitor-Abruf seine
+  Einstellungen) jedes Mal gelesen **und neu geparst**. Jetzt entscheidet
+  ein Blick auf Änderungszeit und Größe der Datei: unverändert = gemerkte
+  Fassung. Semantik unverändert — jede geschriebene Änderung greift
+  weiterhin sofort (ein Widerruf also auch), ein unlesbarer
+  Zwischenstand meldet weiterhin einen Fehler statt „keine Geräte".
+- **Beendet-Liste wird abgeglichen statt neu gebaut.** Bisher baute
+  jedes Spielende die ganze Liste neu und verdrahtete sie neu; jetzt
+  fügt ein neues Ergebnis genau eine Zeile ein (Abgleich je Spiel, wie
+  bei Feldern und Spielliste). Ein Nachlade-Fenster braucht sie nicht —
+  der Turnier-PC liefert ohnehin höchstens 30 beendete Spiele.
+- **Zeilen der Beendet-Liste außerhalb des Sichtbereichs kosten kein
+  Layout mehr** (`content-visibility`). Bewusst nur dort: Die Spielzeile
+  enthält ihr fest positioniertes ⋮-Menü, das dadurch an der Zeilenkante
+  abgeschnitten würde, und bei den Feldkacheln misst die
+  Kachel-Anpassung die echte Größe.
+
 ## v0.9.221
 
 - **TL-Web wird geweckt, statt zu fragen** (Spec `tl-web-push`, ADR

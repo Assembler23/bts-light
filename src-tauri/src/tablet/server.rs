@@ -77,6 +77,17 @@ pub struct ServerCtx {
     /// dem veralteten In-Memory-Stand und löschte den Platten-Schreibvorgang
     /// wieder kommentarlos.)
     shared_config: Arc<std::sync::Mutex<AppConfig>>,
+    /// Zwischenstand des Config-Lesens: `(Änderungszeit, Größe, geparst)`.
+    ///
+    /// `app_config()` läuft auf den heißesten Pfaden — jede TL-Anfrage
+    /// prüft damit ihren Zugang, jeder Monitor-Abruf seine Einstellungen —
+    /// und las bisher **jedes Mal** `config.json` von der Platte und
+    /// parste sie neu. Jetzt entscheidet ein Blick auf Änderungszeit und
+    /// Größe: Ist die Datei unverändert, gibt es die gemerkte Fassung.
+    /// Die Semantik bleibt exakt dieselbe (jede geschriebene Änderung
+    /// wird erkannt, ein unlesbarer Stand meldet weiterhin einen Fehler) —
+    /// nur ohne das Lesen und Parsen (Review-Vorschlag 18.08.2026).
+    config_cache: std::sync::Mutex<Option<(std::time::SystemTime, u64, AppConfig)>>,
 }
 
 impl ServerCtx {
@@ -101,6 +112,7 @@ impl ServerCtx {
             assignments_path,
             log_dir,
             shared_config,
+            config_cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -111,7 +123,7 @@ impl ServerCtx {
     /// Lädt die aktuelle Court-Monitor-Konfiguration frisch von der Platte.
     /// Schlägt das Lesen fehl, gelten die Default-Werte.
     pub fn monitor_config(&self) -> CourtMonitorConfig {
-        AppConfig::load_from(&self.config_path)
+        self.app_config_result()
             .map(|c| c.court_monitor)
             .unwrap_or_default()
     }
@@ -119,7 +131,7 @@ impl ServerCtx {
     /// Gesamte App-Config frisch von der Platte (Default bei Fehler) – für
     /// Aufrufer, die mehrere Felder daraus brauchen, ohne doppelt zu lesen.
     pub fn app_config(&self) -> AppConfig {
-        AppConfig::load_from(&self.config_path).unwrap_or_default()
+        self.app_config_result().unwrap_or_default()
     }
 
     /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
@@ -132,7 +144,32 @@ impl ServerCtx {
     /// zugelassen", und alle Turnierleitungs-Geräte flögen für einen Takt
     /// hinaus.
     pub fn app_config_result(&self) -> Result<AppConfig, String> {
-        AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())
+        // Datei-Stempel statt Datei-Inhalt: Ändert sich weder Zeitpunkt
+        // noch Größe, ist es dieselbe Datei — dann genügt die gemerkte
+        // Fassung. Beides gemeinsam, weil eine Änderung innerhalb
+        // derselben Zeitstempel-Auflösung sonst durchrutschen könnte.
+        let meta = std::fs::metadata(&self.config_path).map_err(|e| e.to_string())?;
+        let stempel = (meta.modified().map_err(|e| e.to_string())?, meta.len());
+        {
+            let cache = self
+                .config_cache
+                .lock()
+                .expect("Config-Cache nicht vergiftet");
+            if let Some((zeit, groesse, config)) = cache.as_ref() {
+                if (*zeit, *groesse) == stempel {
+                    return Ok(config.clone());
+                }
+            }
+        }
+        // Fehler NICHT merken: Ein Lesen mitten im Neuschreiben der Datei
+        // (abgeschnitten, halb geschrieben) ist ein Augenblickszustand,
+        // kein Ergebnis — der nächste Aufruf soll es wieder versuchen.
+        let config = AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())?;
+        *self
+            .config_cache
+            .lock()
+            .expect("Config-Cache nicht vergiftet") = Some((stempel.0, stempel.1, config.clone()));
+        Ok(config)
     }
 
     /// Lässt `f` den **geteilten** In-Memory-Stand ändern (`shared_config`,
@@ -169,6 +206,15 @@ impl ServerCtx {
                 format!("Konfiguration nicht schreibbar: {e}"),
             )
         })?;
+        // Gemerkte Fassung verwerfen: Der Datei-Stempel ist zwar frisch,
+        // aber eine Änderung innerhalb derselben Zeitstempel-Auflösung
+        // (gleiche Größe, gleiche Zeit) würde sonst übersehen. Bei einem
+        // Schreibvorgang, den wir selbst auslösen, ist das billig zu
+        // vermeiden.
+        *self
+            .config_cache
+            .lock()
+            .expect("Config-Cache nicht vergiftet") = None;
         *guard = config;
         Ok(result)
     }

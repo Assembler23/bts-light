@@ -545,7 +545,17 @@ zentral** je Sekunde statt einmal je Gerät und Anfrage — bei acht
 Geräten ist das der Unterschied zwischen acht Rechnungen pro Sekunde und
 einer.
 
-## Render-Sparsamkeit (seit 17.08.2026)
+## Render-Sparsamkeit (seit 17.08.2026, erweitert 18.08.2026)
+
+Nachtrag: Die **Beendet-Liste** wird jetzt je Spiel abgeglichen — ein
+neues Ergebnis fügt eine Zeile ein, statt die Liste neu zu bauen (sie
+selbst bleibt kurz: der Turnier-PC liefert höchstens 30 beendete
+Spiele). Ihre Zeilen kosten außerhalb des sichtbaren Ausschnitts kein
+Layout mehr (`content-visibility`). Spielzeilen und Feldkacheln bleiben
+davon ausgenommen: Erstere tragen ihr fest positioniertes ⋮-Menü, das
+sonst an der Zeilenkante abgeschnitten würde, und bei den Kacheln wird
+die echte Größe gemessen.
+
 
 Die Seite pollt weiter alle 2 s mit ETag-Kurzschluss, zeichnet bei einer
 echten Änderung aber nicht mehr alles neu: Jedes Panel überspringt den

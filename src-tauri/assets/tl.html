@@ -526,6 +526,13 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    `.sp-spielt`/`.sp-pause` bei der Paarung) plus Eieruhr-Countdown —
    Hinweistexte machten die Liste unübersichtlich (Nutzer-Befund). */
 .queue { display: flex; flex-direction: column; gap: 8px; }
+/* KEIN `content-visibility` an der Spielzeile — bewusst, und das bleibt
+   so (Review-Fund 18.08.2026): Es zieht `contain: paint` nach sich, und
+   zwar dauerhaft, nicht nur außerhalb des Bildes. Damit würde die Zeile
+   zum Bezugsrahmen für ihr `position: fixed`-Kebab-Menü UND schnitte es
+   an ihrer eigenen Kante ab — exakt der Fehler, den der Feldtest am
+   17.08.2026 gemeldet hat (siehe `.kebab-menu`). Die Beendet-Zeile
+   verträgt es dagegen, sie enthält nichts fest Positioniertes. */
 .row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px 12px; min-height: 56px;
@@ -806,6 +813,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   padding: 8px 10px; min-height: var(--touch-komf);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   font-size: .85rem;
+  /* Was nicht im sichtbaren Panel-Ausschnitt steht, kostet weder Layout
+     noch Anstrich. `contain-intrinsic-size` gibt die angenommene Höhe
+     vor, damit die Bildlaufleiste nicht springt. Hier unbedenklich: Die
+     Beendet-Zeile enthält nichts fest Positioniertes (anders als die
+     Spielzeile mit ihrem Kebab-Menü, siehe dort). */
+  content-visibility: auto; contain-intrinsic-size: auto 2.75rem;
 }
 .fin-pair { font-weight: 600; flex: 1 1 12rem; min-width: 0; }
 .fin-meta { color: var(--ink-soft); }
@@ -6676,12 +6689,17 @@ function renderCheckin() {
     </table>`);
 }
 
-function renderFinished() {
-  const list = state.finished || [];
-  setPanelCount("finished", list.length);
-  const box = $("fin-list");
-  if (!box) return; // Panel gerade ausgeblendet — nichts zu zeichnen.
-  const html = list.length ? list.map((f) => {
+// Kein Nachlade-Fenster für die Beendet-Liste — und das ist kein
+// Versehen: Der Turnier-PC liefert ohnehin höchstens `FINISHED_LIMIT`
+// (30) beendete Spiele (`tablet/tl.rs`), die Liste kann hier also gar
+// nicht über den Turniertag wachsen. Ein Fenster wäre toter Code, der
+// eine Grenze verspricht, die schon woanders gezogen ist (Review-Fund
+// 18.08.2026). Was hier wirklich hilft, ist der Keyed-Abgleich unten:
+// Ein neues Ergebnis fügt EINE Zeile ein, statt die Liste neu zu bauen.
+
+/** Eine Zeile der Beendet-Liste. */
+function finRow(f) {
+  {
     // Sieger zuerst gilt auch für die Satzstände: Sonst läse man bei einem
     // Sieger-2-Spiel "Meier – Müller 15:21 · 18:21" — als hätte der zuerst
     // genannte (der Sieger!) jeden Satz verloren.
@@ -6715,11 +6733,27 @@ function renderFinished() {
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
         title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
     </div>`;
-  }).join("") : `<p class="note">Noch kein Spiel beendet.</p>`;
-  // Unverändert → Liste samt Listenern stehen lassen (Stufe 1).
-  if (!setzeHtmlWennNeu(box, html)) return;
+  }
+}
+
+function renderFinished() {
+  const list = state.finished || [];
+  setPanelCount("finished", list.length);
+  const box = $("fin-list");
+  if (!box) return; // Panel gerade ausgeblendet oder zugeklappt.
+  if (!list.length) {
+    setzeHtmlWennNeu(box, `<p class="note">Noch kein Spiel beendet.</p>`);
+    return;
+  }
+  // Je `match_id` abgeglichen: Ein neues Ergebnis fügt EINE Zeile ein,
+  // statt die ganze Liste neu zu bauen und neu zu verdrahten.
+  reconcileKeyed(box, list, (f) => f.match_id, finRow, (el) => wireFinRow(el));
+}
+
+/** Verdrahtet EINE Zeile der Beendet-Liste (neu/ersetzt). */
+function wireFinRow(box) {
   // Klick-Zeit-Auflösung aus `state.finished` statt der eingefangenen
-  // Liste — die Listener überleben seit Stufe 1 viele Renders.
+  // Liste — die Listener überleben seit dem Keyed-Abgleich viele Renders.
   scopeAll(box, "[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finGraph);
@@ -6730,8 +6764,6 @@ function renderFinished() {
         f.sets || [],
       );
     }));
-  // Neu verdrahten nur nach echtem Neuaufbau (Stufe 1 oben) — dann hängen
-  // die alten Zuhörer an längst entfernten Knoten.
   scopeAll(box, "[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finFix);
