@@ -199,5 +199,28 @@ Die Umstellung läuft in drei Schritten, deren Reihenfolge zwingend ist:
 2. **badhub-PR #473 (offen):** `liveticker_logo_uebernehmen()` gibt den
    Logo-Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — genau
    den, den `checkin_branding_apply()` für den Branding-Weg schon hat.
-3. **Danach:** bts-light schickt das Logo nur noch bei Änderung. Das ist die
-   eigentliche Ersparnis und erst nach dem Deploy von Schritt 2 gefahrlos.
+3. **v0.9.227 (gebaut, wartet auf Schritt 2):** bts-light schickt das Logo nur
+   noch bei Änderung. Das ist die eigentliche Ersparnis — und sie darf erst
+   nach dem Deploy von Schritt 2 ausgeliefert werden.
+
+### Wie Schritt 3 entscheidet
+
+Die Logo-Felder in `TsetEvent` sind `Option<String>` — nur so lassen sich die
+drei Zustände ausdrücken, die badhub unterscheidet:
+
+| Wert | Draht | Bedeutung |
+|---|---|---|
+| `None` | Feld fehlt | unverändert — badhub behält seinen Stand |
+| `Some("")` | `""` | löschen |
+| `Some(daten)` | Base64 | setzen |
+
+`SyncEngine::logo_in_tset_legen()` gibt das Logo mit, wenn es sich geändert
+hat, das **Turnier** gewechselt hat (badhub hält den Snapshot je Turnier),
+noch nie erfolgreich hinausging — oder die Auffrischungsfrist von zehn
+Minuten (`LOGO_AUFFRISCHUNG`) abgelaufen ist. Die Frist ist das
+Sicherheitsnetz gegen den einen Fall, den bts-light nicht sehen kann: einen
+verlorenen Snapshot auf badhub-Seite.
+
+Gestempelt wird die Marke **erst nach einem geglückten Push**
+(`logo_stempeln`). Andernfalls hielte bts-light das Logo für übertragen,
+obwohl es nie ankam, und ließe es ab dann weg.

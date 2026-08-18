@@ -24,38 +24,31 @@ use crate::tablet::state::TabletState;
 /// schließt und die Heartbeats ausbleiben.
 const HEARTBEAT_AFTER: Duration = Duration::from_secs(60);
 
-/// Legt das Turnierlogo aus der Konfiguration in einen vollen `tset`.
+/// Nach dieser Zeit reist das Turnierlogo auch dann wieder mit, wenn es
+/// sich nicht geändert hat.
 ///
-/// Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht das Logo
-/// nicht, weil badhub dort nur das Match-Element patcht und den übrigen
-/// Snapshot behält.
+/// Sicherheitsnetz gegen den einen Fall, den bts-light nicht sehen kann:
+/// Geht badhubs Snapshot verloren (Datenbank zurückgesetzt, Turnier neu
+/// angelegt, `tournament_key` neu vergeben), stünde der Liveticker sonst
+/// bis zum Neustart der App ohne Logo da. Zehn Minuten sind kurz genug,
+/// dass das niemandem auffällt, und lang genug, dass die Ersparnis bleibt:
+/// statt in jedem vollen `tset` (mindestens minütlich) geht das Logo
+/// höchstens sechsmal je Stunde hinaus.
+const LOGO_AUFFRISCHUNG: Duration = Duration::from_secs(600);
+
+/// Erkennungsmarke des Logo-Stands: Turnier **und** Bildinhalt.
 ///
-/// **Auch ein leeres Logo reist mit.** Für badhub heißt `""` „löschen", ein
-/// fehlendes Feld dagegen „unverändert" — ohne das ausdrücklich leere Feld
-/// bekäme niemand ein einmal gesetztes Logo je wieder aus dem Liveticker
-/// heraus.
-///
-/// Beim Löschen gehen **alle drei** Felder leer hinaus, auch die
-/// Hintergrundfarbe. Sie steht in der Konfiguration nämlich noch: „Logo
-/// entfernen" im Setup räumt sie nicht mit ab. Ginge sie so hinaus,
-/// verstünde badhub „Logo löschen, Farbe setzen" — ein halb gelöschter
-/// Zustand (Review-Fund 18.08.2026).
-fn logo_in_tset_legen(update: &mut Update, config: &AppConfig) {
-    let Update::Full(msg) = update else {
-        return;
-    };
-    let logo = &config.tournament_logo;
-    if logo.data.is_empty() {
-        msg.event.tournament_logo.clear();
-        msg.event.tournament_logo_mime.clear();
-        msg.event.tournament_logo_background_color.clear();
-    } else {
-        msg.event.tournament_logo.clone_from(&logo.data);
-        msg.event.tournament_logo_mime.clone_from(&logo.mime);
-        msg.event
-            .tournament_logo_background_color
-            .clone_from(&logo.background_color);
-    }
+/// Der Turniername gehört hinein, weil badhub den Snapshot je Turnier
+/// hält — ein Turnierwechsel heißt also „dort liegt noch kein Logo, das
+/// unverändert bleiben könnte".
+fn logo_marke(turnier: &str, logo: &crate::config::LogoConfig) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    turnier.hash(&mut hasher);
+    logo.data.hash(&mut hasher);
+    logo.mime.hash(&mut hasher);
+    logo.background_color.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
 }
 
 /// Aktuelle Zeit in Unix-Millisekunden.
@@ -105,6 +98,12 @@ pub struct SyncEngine {
     /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
     /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
     last_push_at: Option<Instant>,
+    /// Wann das Turnierlogo zuletzt **erfolgreich** an badhub ging, und mit
+    /// welcher Marke ([`logo_marke`]). Solange die Marke stimmt und die
+    /// Frist läuft, bleiben die Logo-Felder aus dem `tset` — badhub behält
+    /// dann seinen Stand. Erst nach einem geglückten Push gestempelt: Sonst
+    /// hielte bts-light das Logo für übertragen, obwohl es nie ankam.
+    logo_gesendet: Option<(Instant, String)>,
     /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
     /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
     last_topology: Option<(usize, usize, usize)>,
@@ -386,6 +385,7 @@ impl SyncEngine {
             rid: 1,
             finished_at: HashMap::new(),
             last_push_at: None,
+            logo_gesendet: None,
             last_topology: None,
             oncourt_prev: HashMap::new(),
             officials_oncourt_prev: HashMap::new(),
@@ -1131,6 +1131,58 @@ impl SyncEngine {
         true
     }
 
+    /// Legt das Turnierlogo in einen vollen `tset` — **nur wenn nötig**.
+    ///
+    /// Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht das
+    /// Logo nicht, weil badhub dort allein das Match-Element patcht.
+    ///
+    /// Mitgegeben wird es, wenn es sich geändert hat, das Turnier gewechselt
+    /// hat, noch nie erfolgreich hinausging — oder die Auffrischungsfrist
+    /// abgelaufen ist ([`LOGO_AUFFRISCHUNG`]). Sonst bleiben die Felder
+    /// **weg**, was für badhub „unverändert" heißt und den Löwenanteil der
+    /// Nutzlast spart (bis zu 2,7 MB je vollem `tset`).
+    ///
+    /// Beim Löschen gehen **alle drei** Felder leer hinaus, auch die
+    /// Hintergrundfarbe: Sie steht in der Konfiguration noch, weil „Logo
+    /// entfernen" im Setup sie nicht mit abräumt. Ginge sie so hinaus,
+    /// verstünde badhub „Logo löschen, Farbe setzen" — ein halb gelöschter
+    /// Zustand (Review-Fund 18.08.2026).
+    ///
+    /// Gibt die Marke zurück, die nach einem geglückten Push zu stempeln
+    /// ist (siehe [`Self::logo_stempeln`]) — oder `None`, wenn nichts
+    /// mitgegeben wurde.
+    fn logo_in_tset_legen(&self, update: &mut Update, config: &AppConfig) -> Option<String> {
+        let Update::Full(msg) = update else {
+            return None;
+        };
+        let logo = &config.tournament_logo;
+        let marke = logo_marke(&msg.event.tournament_name, logo);
+        let noetig = match &self.logo_gesendet {
+            Some((zeit, gemerkt)) => *gemerkt != marke || zeit.elapsed() >= LOGO_AUFFRISCHUNG,
+            None => true,
+        };
+        if !noetig {
+            return None;
+        }
+        if logo.data.is_empty() {
+            msg.event.tournament_logo = Some(String::new());
+            msg.event.tournament_logo_mime = Some(String::new());
+            msg.event.tournament_logo_background_color = Some(String::new());
+        } else {
+            msg.event.tournament_logo = Some(logo.data.clone());
+            msg.event.tournament_logo_mime = Some(logo.mime.clone());
+            msg.event.tournament_logo_background_color = Some(logo.background_color.clone());
+        }
+        Some(marke)
+    }
+
+    /// Stempelt die Logo-Marke nach einem **geglückten** Push.
+    fn logo_stempeln(&mut self, marke: Option<String>) {
+        if let Some(marke) = marke {
+            self.logo_gesendet = Some((Instant::now(), marke));
+        }
+    }
+
     /// Ist ein Heartbeat fällig? `true`, wenn noch nie gepusht wurde oder
     /// der letzte Push länger als [`HEARTBEAT_AFTER`] zurückliegt.
     fn heartbeat_due(&self) -> bool {
@@ -1850,16 +1902,9 @@ impl SyncEngine {
             other => other,
         };
         // Turnierlogo aus der Config in den vollen `tset`-Event injizieren –
-        // badhubs `#live-logo` zeigt es dann an (gleiche Felder wie Original-BTS).
-        // Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht es nicht,
-        // da badhub den Logo-Stand aus dem zuletzt gemergten Snapshot behält.
-        //
-        // Bei leerem Logo bleiben die Felder leer — und reisen **trotzdem**
-        // mit. Für badhub heißt `""` „löschen", ein fehlendes Feld dagegen
-        // „unverändert"; ohne das ausdrücklich leere Feld bekäme niemand ein
-        // einmal gesetztes Logo je wieder aus dem Liveticker heraus (siehe
-        // `TsetEvent`).
-        logo_in_tset_legen(&mut update, config);
+        // aber nur, wenn badhub es noch nicht hat (siehe die Methode). Die
+        // Marke wird erst nach einem geglückten Push gestempelt.
+        let logo_marke = self.logo_in_tset_legen(&mut update, config);
         let sent_something = !matches!(update, Update::None);
         let push_result =
             push::push_update(http, &config.badhub.url, &config.badhub.password, &update).await;
@@ -1896,6 +1941,8 @@ impl SyncEngine {
                 if sent_something {
                     self.last_push_at = Some(Instant::now());
                 }
+                // Erst jetzt: badhub hat das Logo nachweislich bekommen.
+                self.logo_stempeln(logo_marke);
                 self.on_success(snapshot);
                 outcome
             }
@@ -2108,58 +2155,172 @@ mod tests {
     /// genau der Weg, den ein echter Zyklus nimmt. `build_tset` allein taugt
     /// dafür nicht: Es setzt die Logo-Felder hart auf leer und liest die
     /// Konfiguration nie (Review-Fund 18.08.2026).
-    fn tset_event_mit_logo(logo: crate::config::LogoConfig) -> crate::badhub::payload::TsetEvent {
+    ///
+    /// Liefert den Event-Block und die Marke zurück, die der Zyklus nach
+    /// einem geglückten Push stempeln würde.
+    fn tset_zyklus(
+        engine: &mut SyncEngine,
+        logo: crate::config::LogoConfig,
+        turnier: &str,
+    ) -> (crate::badhub::payload::TsetEvent, Option<String>) {
         let config = AppConfig {
             tournament_logo: logo,
             ..Default::default()
         };
+        let mut snap = snapshot();
+        snap.tournament_name = turnier.to_string();
         let ctx = crate::badhub::payload::LivetickerContext::bare(&config);
-        let mut update = diff(None, &snapshot(), 1, &ctx);
-        logo_in_tset_legen(&mut update, &config);
+        let mut update = diff(None, &snap, 1, &ctx);
+        let marke = engine.logo_in_tset_legen(&mut update, &config);
         match update {
-            Update::Full(msg) => msg.event,
+            Update::Full(msg) => (msg.event, marke),
             other => panic!("ein Diff gegen None muss einen vollen tset ergeben: {other:?}"),
         }
     }
 
-    #[test]
-    fn ein_gesetztes_turnierlogo_landet_im_tset() {
-        // Der Gegenfall — den es bisher nirgends gab.
-        let event = tset_event_mit_logo(crate::config::LogoConfig {
-            data: "AAAA".into(),
+    /// Ein Zyklus, dessen Push geglückt ist (Marke wird gestempelt).
+    fn tset_zyklus_mit_erfolg(
+        engine: &mut SyncEngine,
+        logo: crate::config::LogoConfig,
+        turnier: &str,
+    ) -> crate::badhub::payload::TsetEvent {
+        let (event, marke) = tset_zyklus(engine, logo, turnier);
+        engine.logo_stempeln(marke);
+        event
+    }
+
+    fn logo(data: &str) -> crate::config::LogoConfig {
+        crate::config::LogoConfig {
+            data: data.into(),
             mime: "image/png".into(),
             background_color: "#112233".into(),
-        });
-        assert_eq!(event.tournament_logo, "AAAA");
-        assert_eq!(event.tournament_logo_mime, "image/png");
-        assert_eq!(event.tournament_logo_background_color, "#112233");
+        }
     }
 
     #[test]
-    fn ohne_logo_reisen_die_felder_leer_mit() {
-        // Leer statt weggelassen: Für badhub heißt `""` „löschen", ein
-        // fehlendes Feld dagegen „unverändert".
-        let event = tset_event_mit_logo(crate::config::LogoConfig::default());
-        assert_eq!(event.tournament_logo, "");
-        assert_eq!(event.tournament_logo_mime, "");
-    }
-
-    #[test]
-    fn beim_loeschen_bleibt_keine_hintergrundfarbe_stehen() {
-        // „Logo entfernen" im Setup räumt die Farbe nicht mit ab — sie steht
-        // danach noch in der Konfiguration. Ginge sie so hinaus, verstünde
-        // badhub „Logo löschen, Farbe setzen": ein halb gelöschter Zustand,
-        // und genau darauf baut der nächste Schritt auf (Logo nur bei
-        // Änderung senden). Review-Fund 18.08.2026.
-        let event = tset_event_mit_logo(crate::config::LogoConfig {
-            data: String::new(),
-            mime: String::new(),
-            background_color: "#112233".into(),
-        });
+    fn ein_gesetztes_turnierlogo_landet_im_ersten_tset() {
+        // Der Gegenfall — den es bisher nirgends gab.
+        let mut engine = SyncEngine::new();
+        let event = tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
+        assert_eq!(event.tournament_logo.as_deref(), Some("AAAA"));
+        assert_eq!(event.tournament_logo_mime.as_deref(), Some("image/png"));
         assert_eq!(
-            event.tournament_logo_background_color, "",
-            "Löschen heißt: alle drei Felder leer"
+            event.tournament_logo_background_color.as_deref(),
+            Some("#112233")
         );
+    }
+
+    #[test]
+    fn ein_unveraendertes_logo_reist_kein_zweites_mal_mit() {
+        // Der Kern der Ersparnis: Bis zu 2,7 MB Base64 in jedem vollen
+        // `tset` — mindestens minütlich, bei vielen Feldern alle paar
+        // Sekunden. badhub behält den Stand, wenn das Feld FEHLT.
+        let mut engine = SyncEngine::new();
+        tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
+        let (event, marke) = tset_zyklus(&mut engine, logo("AAAA"), "T");
+        assert!(
+            event.tournament_logo.is_none(),
+            "unverändert ⇒ Feld weglassen (heißt für badhub „unverändert\")"
+        );
+        assert!(event.tournament_logo_mime.is_none());
+        assert!(event.tournament_logo_background_color.is_none());
+        assert!(marke.is_none(), "ohne Mitgabe gibt es nichts zu stempeln");
+    }
+
+    #[test]
+    fn ein_geaendertes_logo_reist_wieder_mit() {
+        let mut engine = SyncEngine::new();
+        tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
+        let (event, _) = tset_zyklus(&mut engine, logo("BBBB"), "T");
+        assert_eq!(event.tournament_logo.as_deref(), Some("BBBB"));
+    }
+
+    #[test]
+    fn ein_entferntes_logo_reist_als_leeres_feld_mit() {
+        // Löschen muss ausdrücklich gesagt werden: `""`. Und zwar in allen
+        // drei Feldern — „Logo entfernen" im Setup räumt die Hintergrundfarbe
+        // nicht mit ab, sie stünde sonst als „Farbe ohne Logo" bei badhub.
+        let mut engine = SyncEngine::new();
+        tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
+        let (event, _) = tset_zyklus(
+            &mut engine,
+            crate::config::LogoConfig {
+                data: String::new(),
+                mime: String::new(),
+                background_color: "#112233".into(),
+            },
+            "T",
+        );
+        assert_eq!(event.tournament_logo.as_deref(), Some(""));
+        assert_eq!(event.tournament_logo_mime.as_deref(), Some(""));
+        assert_eq!(event.tournament_logo_background_color.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn ein_neues_turnier_bekommt_das_logo_erneut() {
+        // badhub hält den Snapshot je `tournament_key`. Ein Turnierwechsel
+        // heißt: dort liegt noch kein Logo, das „unverändert" bleiben könnte.
+        let mut engine = SyncEngine::new();
+        tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "Frühjahrs-Cup");
+        let (event, _) = tset_zyklus(&mut engine, logo("AAAA"), "Herbst-Cup");
+        assert_eq!(
+            event.tournament_logo.as_deref(),
+            Some("AAAA"),
+            "anderes Turnier ⇒ Logo erneut mitgeben"
+        );
+    }
+
+    #[test]
+    fn nach_der_auffrischungsfrist_reist_das_logo_erneut_mit() {
+        // Sicherheitsnetz: Geht badhubs Snapshot verloren (Datenbank
+        // zurückgesetzt, Turnier neu angelegt), stünde der Liveticker sonst
+        // bis zum Neustart der App ohne Logo da.
+        let mut engine = SyncEngine::new();
+        tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
+        let (event, _) = tset_zyklus(&mut engine, logo("AAAA"), "T");
+        assert!(event.tournament_logo.is_none(), "frisch gestempelt");
+
+        // Die Uhr zurückdrehen, statt zu warten.
+        if let Some((zeit, _)) = &mut engine.logo_gesendet {
+            *zeit = Instant::now()
+                .checked_sub(LOGO_AUFFRISCHUNG + Duration::from_secs(1))
+                .expect("Zeitpunkt liegt im darstellbaren Bereich");
+        }
+        let (event, _) = tset_zyklus(&mut engine, logo("AAAA"), "T");
+        assert_eq!(
+            event.tournament_logo.as_deref(),
+            Some("AAAA"),
+            "nach der Frist wieder mitgeben"
+        );
+    }
+
+    #[test]
+    fn ein_fehlgeschlagener_push_stempelt_die_marke_nicht() {
+        // Sonst hielte bts-light das Logo für übertragen, obwohl badhub es
+        // nie bekommen hat — und ließe es ab dann weg.
+        let mut engine = SyncEngine::new();
+        let (event, _marke) = tset_zyklus(&mut engine, logo("AAAA"), "T");
+        assert_eq!(event.tournament_logo.as_deref(), Some("AAAA"));
+        // Kein `logo_stempeln` — der Push ist fehlgeschlagen.
+        let (event, _) = tset_zyklus(&mut engine, logo("AAAA"), "T");
+        assert_eq!(
+            event.tournament_logo.as_deref(),
+            Some("AAAA"),
+            "nach einem Fehlschlag muss das Logo erneut mitreisen"
+        );
+    }
+
+    #[test]
+    fn ein_tupdate_traegt_nie_ein_logo() {
+        // Nur der volle `tset` hat einen Event-Block; ein `tupdate_match`
+        // patcht bei badhub allein das Match-Element.
+        let engine = SyncEngine::new();
+        let config = AppConfig {
+            tournament_logo: logo("AAAA"),
+            ..Default::default()
+        };
+        let mut update = Update::None;
+        assert!(engine.logo_in_tset_legen(&mut update, &config).is_none());
     }
 
     fn snapshot() -> BtpSnapshot {
