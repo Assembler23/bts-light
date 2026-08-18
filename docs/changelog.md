@@ -15,10 +15,19 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - Beides hatte dieselbe Ursache und ist behoben: Die Höhenverteilung
   richtet sich jetzt allein nach dem gezogenen Verhältnis, nicht mehr
   danach, wie viele Zeilen ein Panel gerade enthält.
-- Sichtbare Folge: Ein Panel mit wenig Inhalt behält seinen Anteil, auch
-  wenn darunter Platz frei bleibt. Wer das anders möchte, zieht den Steg —
-  das wirkt jetzt wieder zuverlässig. Das Panel „Felder" gibt ungenutzte
-  Höhe wie bisher automatisch an seine Nachbarn zurück.
+- **Das Panel „Felder" gibt ungenutzte Höhe jetzt wirklich ab.** Bei
+  wenigen Feldern blieb unter den Kacheln ein leerer Block stehen, statt
+  den Platz an die Spielliste weiterzureichen — die Automatik dafür rechnete
+  sich seit jeher selbst aus (sie maß den sichtbaren Ausschnitt statt der
+  Kacheln und kam damit immer auf die Höhe, die das Panel ohnehin schon
+  hatte).
+- **Und der Trennsteg über den Feldern lässt sich wieder ziehen.** Die
+  Bedarfs-Automatik nagelte das Panel fest: Man zog, nichts bewegte sich,
+  und beim Loslassen sprang es. Jetzt tritt die Automatik zurück, sobald
+  von Hand gezogen wird.
+- Sichtbare Folge der Umstellung: Ein Panel mit wenig Inhalt behält seinen
+  Anteil, auch wenn darunter Platz frei bleibt. Wer das anders möchte,
+  zieht den Steg — das wirkt jetzt wieder zuverlässig.
 
 ## v0.9.226
 

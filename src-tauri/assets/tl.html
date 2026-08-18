@@ -882,24 +882,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    18.08.2026: „Nachladen vergrößert die Box, danach lässt sie sich nicht
    mehr richtig ziehen").
 
-   Mit dem Vorgabewert `auto` ist die Flex-Basis eines Panels seine
-   INHALTSHÖHE. Die Spielliste lädt beim Scrollen nach (`QUEUE_PAGE`), ihr
-   Inhalt wächst also im Betrieb — und mit ihm ihre Basis. Zwei Folgen,
-   beide gemeldet:
+   Mit dem Vorgabewert `auto` wäre die Flex-Basis eines Panels seine
+   INHALTSHÖHE — und die Spielliste lädt beim Scrollen nach (`QUEUE_PAGE`),
+   wächst also im Betrieb. Sie verdrängte damit ihre Nachbarn bis auf
+   `--panel-min`, obwohl alle denselben `heightFr`-Anteil haben. Schlimmer:
+   Übersteigt die Summe der Basis-Höhen die Spaltenhöhe, bleibt kein freier
+   Raum — und `flex-grow`, das der Steg (`wireStegs`) beim Ziehen schreibt,
+   verteilt NUR freien Raum. Das Ziehen wurde dadurch wirkungslos.
 
-   1. Die Liste verdrängt ihre Nachbarn bis auf `--panel-min`, obwohl alle
-      denselben `heightFr`-Anteil haben. Gemessen mit den Regeln dieser
-      Datei (300px Spalte, „Felder" + „Spielliste", beide `flexGrow: 1`):
-      72px/228px statt 150px/150px — schon bei 40 Zeilen.
-   2. Übersteigt die Summe der Basis-Höhen die Spaltenhöhe, gibt es keinen
-      freien Raum mehr zu verteilen — und `flex-grow` verteilt NUR freien
-      Raum. Genau das schreibt der Steg (`wireStegs`) beim Ziehen. Er wird
-      damit wirkungslos: 3:1 gezogen blieb es bei 72px/228px, statt auf
-      225px/75px zu gehen.
-
-   Mit `flex-basis: 0` zählt allein die `heightFr`-Gewichtung, unabhängig
-   vom Inhalt — dieselbe Entscheidung, die `.tl-column` mit `flex: 1 1 0`
-   für die Spalten längst trifft. Zugeklappte Panels bleiben ausgenommen
+   Mit `flex-basis: 0` zählt allein die `heightFr`-Gewichtung — dieselbe
+   Entscheidung, die `.tl-column` mit `flex: 1 1 0` für die Spalten längst
+   trifft; die Panels waren beim Mehrspalten-Umbau nur nicht mitgezogen
+   worden. Zugeklappte Panels bleiben ausgenommen
    (`.panel.panel-collapsed { flex: none }` weiter unten ist spezifischer
    und setzt die Basis zurück auf `auto`): Sie sollen genau ihre Kopfzeile
    hoch sein, nicht `--panel-min`. */
@@ -3898,15 +3892,24 @@ function fitCourts() {
    * Flex-Modell von selbst an die übrigen Panels derselben Spalte (Flexbox
    * behandelt eine `max-height`-Verletzung genau so). Ohne das stünde unter
    * den Kacheln ein leerer Block, während die Liste darunter rollt.
-   * Keine Rückkopplung: Der Deckel kürzt nur `clientHeight`, nie den
-   * gemessenen `scrollHeight` — und beim nächsten Durchlauf fällt er oben
+   *
+   * Gemessen wird die **Kachelbox**, nicht der Scroll-Bereich des Körpers.
+   * Der Unterschied entscheidet, ob überhaupt etwas zurückgegeben wird:
+   * `scrollHeight` ist nach unten durch `clientHeight` geklammert, und
+   * hierher kommt man nur, wenn der Inhalt passt (`passt()`) — dann sind
+   * beide gleich, und der Deckel wäre exakt die aktuelle Höhe. Er gäbe also
+   * nie etwas ab (Review 18.08.2026: zwei Kacheln in einem 400-px-Stapel
+   * behielten 174 px statt 119 px, die Liste bekam nichts).
+   *
+   * Keine Rückkopplung: Die Kachelbox ordnet sich nach der BREITE, ihre
+   * Höhe hängt nicht am Deckel — und beim nächsten Durchlauf fällt er oben
    * ohnehin zuerst wieder weg.
    */
   const uebernehmeBedarf = () => {
     if (!automatik) return;
     const kopf = panel.querySelector(".panel-head");
     panel.style.maxHeight =
-      ((kopf ? kopf.offsetHeight : 0) + koerper.scrollHeight) + "px";
+      ((kopf ? kopf.offsetHeight : 0) + box.getBoundingClientRect().height) + "px";
   };
   if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
@@ -5178,6 +5181,16 @@ function wireStegs(container, achse) {
       steg.classList.add("zieht");
       document.body.classList.add("dragging");
       panelStegDragging = true;
+      // Bedarfs-Deckel der beiden Nachbarn räumen, BEVOR gemessen wird.
+      // `fitCourts()` deckelt „Felder" per Inline-`max-height` auf seinen
+      // Bedarf; ein Deckel schlägt aber jedes `flex-grow`, das dieser Zug
+      // gleich schreibt — das Panel bliebe unter dem Finger stehen und
+      // spränge erst beim Loslassen (Review 18.08.2026: 3:1 gezogen blieb
+      // es bei 174/174 statt 261/87). Der Zug IST die Ansage „ich verteile
+      // von Hand", also endet die Bedarfs-Automatik hier; gespeichert wird
+      // gleich ein `heightFr ≠ 1`, womit `fitCourts()` von selbst nicht
+      // mehr deckelt. Nur senkrecht — Spalten kennen keinen Deckel.
+      if (senkrecht) { prev.style.maxHeight = ""; next.style.maxHeight = ""; }
       const rA = prev.getBoundingClientRect(), rB = next.getBoundingClientRect();
       const massA = senkrecht ? rA.height : rA.width;
       const summe = massA + (senkrecht ? rB.height : rB.width);

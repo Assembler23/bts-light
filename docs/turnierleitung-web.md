@@ -261,9 +261,11 @@ Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
   Nachbarn, und der Steg ließ sich danach nicht mehr sinnvoll ziehen.
   Umgekehrt heißt das: Ein Panel mit wenig Inhalt behält seinen Anteil,
   auch wenn darunter Platz frei bleibt — wer das anders will, zieht den
-  Steg (das wirkt jetzt wieder zuverlässig). Das Panel „Felder" bildet
-  weiterhin die Ausnahme: Es gibt ungenutzte Höhe automatisch an die
-  übrigen Panels seiner Spalte zurück.
+  Steg (das wirkt jetzt wieder zuverlässig). Das Panel **„Felder"** bildet
+  die Ausnahme: Es gibt ungenutzte Höhe automatisch an die übrigen Panels
+  seiner Spalte zurück, solange du seine Höhe nicht selbst gezogen hast.
+  Ziehst du, tritt die Automatik zurück und dein Maß gilt; **Doppeltipp**
+  auf den Steg schaltet sie wieder ein.
 
 #### Spalten (1 bis 3)
 

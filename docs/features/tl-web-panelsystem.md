@@ -207,11 +207,24 @@ Spiele, Beendete Spiele.
       `--panel-min`. Zugleich Voraussetzung für das Kriterium darüber:
       `flex-grow` — das, was der Steg schreibt — verteilt **nur freien
       Raum**; übersteigt die Summe der Inhaltshöhen die Spalte, gibt es
-      keinen, und das Ziehen bleibt wirkungslos. Gemessen an den echten
-      Regeln der Datei (300 px Spalte, zwei Panels, gleiche Anteile):
-      vorher 72/192 px unabhängig vom gezogenen Verhältnis, nachher 132/132
-      px und 3:1 → 192/72 px. Zugeklappte Panels bleiben ausgenommen
-      (`.panel.panel-collapsed { flex: none }`).
+      keinen, und das Ziehen bleibt wirkungslos. Zugeklappte Panels bleiben
+      ausgenommen (`.panel.panel-collapsed { flex: none }`) und behalten
+      exakt ihre Kopfzeilenhöhe.
+- [x] **Ein Bedarfs-Deckel darf den Steg nicht blockieren** (18.08.2026,
+      aus demselben Bericht): `fitCourts()` deckelt „Felder" per
+      Inline-`max-height` auf seinen Bedarf. Zwei Dinge müssen dafür
+      stimmen, und beide stimmten nicht: Der Deckel muss die **Kachelbox**
+      messen, nicht `scrollHeight` des Panel-Körpers (der ist nach unten
+      durch `clientHeight` geklammert, der Deckel wäre also stets die
+      aktuelle Höhe und gäbe nie etwas ab) — und `wireStegs()` muss den
+      Deckel beim `pointerdown` räumen, weil `max-height` jedes
+      `flex-grow` schlägt und das Panel sonst unter dem Finger stehen
+      bleibt. Prüfvorgehen: `<style>`-Block aus `tl.html` extrahieren, eine
+      `.tl-column` mit zwei Panels und `.panel-steg` aufbauen, Höhen vor
+      und nach der Änderung messen. Für die Inline-Skripte/CSS der Assets
+      gibt es keinen automatisierten Harness — diese Messung ist der
+      Ersatz und bei Änderungen an `fitCourts()`/`wireStegs()` zu
+      wiederholen.
 - [ ] Ein Turnierleiter kann in `tl.html` ein Profil anlegen, benennen,
       bearbeiten, löschen und als Standard markieren.
 - [ ] Jedes Gerät wählt ein Profil; die Wahl ist an die Geräte-Identität
