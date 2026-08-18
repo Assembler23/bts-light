@@ -680,24 +680,28 @@ verliehen):
   Base64, bis 2,7 MB). Ein voller `tset` geht mindestens jede Minute als
   Lebenszeichen raus und zusätzlich immer dann, wenn der Diff bei
   mehreren geänderten Matches zum Vollstand degeneriert — bei vielen
-  Feldern also alle paar Sekunden. Weglassen ist **derzeit nicht
-  möglich**: Ein `tset` ersetzt bei badhub den kompletten
-  Snapshot-Datensatz (`liveticker_state.snapshot_json`), ein fehlendes
-  Feld löscht das Logo also, und der Liveticker blendet es beim nächsten
-  5-s-Poll aus — ebenso die Check-In-Seite, wenn dort kein eigenes
-  Branding-Logo hinterlegt ist (Recherche 18.08.2026). Voraussetzung für
-  einen Fix ist badhub-seitig, dass ein fehlendes Logo-Feld als
-  „unverändert" gilt und `""` als „löschen" — genau die Semantik, die
-  `checkin_branding_apply()` für den Branding-Weg schon umsetzt. Im
-  badhub-Repo liegt dazu die noch **nicht umgesetzte** Design-Spec
-  `docs/superpowers/specs/2026-08-18-turnierlogo-zentralisierung-design.md`
-  (Logo als inhaltsadressierte Datei, im Snapshot nur `tournament_logo_url`);
-  in ihrer jetzigen Fassung löst sie diesen Punkt allerdings **nicht** —
-  sie hält ausdrücklich fest, dass ein `tset` ohne Logo zu einer fehlenden
-  URL führt. Nötig wäre zusätzlich ein Rückfall im Lesepfad
-  (`liveQjson()`) auf die gespeicherte Datei. Reihenfolge beim Ausrollen:
-  **erst badhub deployen, dann** die bts-light-Version, die das Logo nur
-  noch bei Änderung mitschickt.
+  Feldern also alle paar Sekunden. Weglassen ging bisher nicht: Ein
+  `tset` ersetzt bei badhub den kompletten Snapshot-Datensatz
+  (`liveticker_state.snapshot_json`), ein fehlendes Feld löschte das Logo
+  also, und der Liveticker blendete es beim nächsten 5-s-Poll aus —
+  ebenso die Check-In-Seite, wenn dort kein eigenes Branding-Logo
+  hinterlegt ist (Recherche 18.08.2026).
+  **Umstellung in drei Schritten, Reihenfolge zwingend:**
+  1. ✅ **v0.9.226:** bts-light schickt die Logo-Felder auch leer mit
+     (`""` statt weglassen) — sonst wäre ein Logo nach Schritt 2 nicht
+     mehr löschbar. Gegen das heutige badhub verhaltensgleich, deshalb
+     gefahrlos vorab.
+  2. **badhub-PR #473** (offen): `liveticker_logo_uebernehmen()` gibt den
+     Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — den,
+     den `checkin_branding_apply()` schon hat. **Braucht einen Deploy.**
+  3. Danach: bts-light schickt das Logo nur noch bei Änderung.
+  Zu beachten: Im badhub-Repo liegt (lokal, ungepusht) der Umbau
+  `feat/turnierlogo-zentralisierung` — Logo als inhaltsadressierte Datei,
+  im Snapshot nur noch `tournament_logo_url`. Er löst diesen Punkt
+  **nicht** von allein (ein `tset` ohne Logo lässt die URL schlicht aus
+  dem Snapshot fallen) und kollidiert an derselben Codezeile mit #473;
+  beim Auflösen muss die Übernahme **oben** stehen, sonst holt sie den
+  Base64-Blob zurück.
 
 ## Schiedsrichtermanagement — umgesetzt (v0.9.201)
 
