@@ -750,14 +750,6 @@ pub(crate) fn state_for_relay(
     // Vorgänger, und die Cloud-Turnierleitung sähe GAR NICHTS mehr — auch
     // keine Felder.
     state.time_stats = None;
-    // Nächste Stufe: die Spielzeiten-Auswertung. Sie trägt seit der
-    // Achsen-Erweiterung (Spec `tl-sicht-feinschliff`, Punkt 1) VIER
-    // Zeilensätze statt einem und ist damit der größte rein informative
-    // Brocken im Zustand — Rückschau, keine Bedienung. Das Panel
-    // verschwindet dann ehrlich, statt den ganzen Stand über die Grenze zu
-    // kippen: Reißt sie, verwirft der Relay das komplette Frame samt
-    // Vorgänger, und die Cloud-Turnierleitung sähe GAR NICHTS mehr — auch
-    // keine Felder.
     let letzte_rev = rev;
     let letzte = serde_json::to_string(&state).unwrap_or_default();
     if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
@@ -2608,8 +2600,13 @@ pub struct TlTimeStatsRow {
     pub discipline: String,
     /// Nur auf der Hallen-Achse gefüllt; leer heißt dort „ohne Halle"
     /// (Messwerte von vor der Umstellung). Auf den anderen Achsen immer
-    /// leer. Serde-Default hält ältere Gegenstellen lesbar.
-    #[serde(default)]
+    /// leer — und dort wird das Feld deshalb **weggelassen**: Bei drei von
+    /// vier Achsen wäre es toter Ballast, und der Zustand ringt in großen
+    /// Turnieren um jedes Kilobyte (siehe Kürzungskaskade in
+    /// `state_for_relay`). Das geht nur, weil das Feld NEU ist — bei
+    /// `class_label`/`discipline` würde es alte Seiten brechen, die sie
+    /// unbedingt lesen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub hall: String,
     pub count: usize,
     pub brutto_mins: i64,
@@ -5479,9 +5476,10 @@ mod tests {
 
         let (json, _rev) = state_for_relay(&tablet, &cfg, 3_600_000);
         // Gemessen am 18.08.2026 mit genau diesem Fixture: Die Auswertung
-        // wiegt 16 130 Bytes (110/22/5/2 Zeilen). Ohne die Kürzungsstufe
-        // ginge der Zustand mit 71 412 von erlaubten 65 536 Bytes hinaus —
-        // der Relay verwürfe ihn samt Vorgänger. Mit ihr sind es 55 286.
+        // wiegt 14 760 Bytes (110/22/5/2 Zeilen). Ohne die Kürzungsstufe
+        // ginge der Zustand mit gut 70 000 von erlaubten 65 536 Bytes
+        // hinaus — der Relay verwürfe ihn samt Vorgänger. Mit ihr sind es
+        // 55 286.
         assert!(
             json.len() <= relay_proto::MAX_TL_STATE_LEN,
             "passt nicht: {} Bytes",

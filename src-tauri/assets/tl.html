@@ -6362,7 +6362,11 @@ function uebernehmeEditorFelder() {
     // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
     // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
     // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
-    timeStatsAxis: $("prof-time-axis") ? $("prof-time-axis").value : "group",
+    // Rückfall auf den bisherigen Wert, nicht auf die Vorgabe: Fehlte das
+    // Feld je (ausgeblendete Option), setzte „group" die gespeicherte Wahl
+    // still zurück — dieselbe Haltung wie beim durchgereichten
+    // `listPosition` darunter.
+    timeStatsAxis: $("prof-time-axis") ? $("prof-time-axis").value : (kopie.display.timeStatsAxis || "group"),
     // `listPosition` steht bewusst NICHT mehr im Editor (Plan
     // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
     // unverändert weitergereicht — eine ältere App-Version liest daraus
@@ -6426,9 +6430,17 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
       <label class="checkbox-row" style="gap:8px">
         <span>Spielzeiten gruppieren nach</span>
-        <select id="prof-time-axis">${ZEITEN_ACHSEN.map((a) =>
-          `<option value="${a.id}"${(d.timeStatsAxis || "group") === a.id ? " selected" : ""}>${esc(a.label)}</option>`
-        ).join("")}</select>
+        <select id="prof-time-axis">${ZEITEN_ACHSEN
+          // „Halle" nur bei Mehr-Hallen-Turnieren anbieten (A1.6): Sonst
+          // wäre die Auswertung eine einzige Zeile ohne Aussage. Ein Profil,
+          // das die Achse bereits trägt (anderes Turnier, andere Halle),
+          // behält seine Option — sonst kippte allein das Öffnen des
+          // Editors die gespeicherte Wahl still auf „Konkurrenz".
+          .filter((a) => a.id !== "hall"
+            || (state && state.multi_hall) || d.timeStatsAxis === "hall")
+          .map((a) =>
+            `<option value="${a.id}"${(d.timeStatsAxis || "group") === a.id ? " selected" : ""}>${esc(a.label)}</option>`
+          ).join("")}</select>
       </label>
     </fieldset>
     <div class="dlg-foot">
@@ -6667,6 +6679,13 @@ function renderTimes() {
   const box = $("times-box");
   if (!stats) { setPanelCount("times", 0); return; }
   const { id: achse, zeilen: rows } = zeitenAchse(stats);
+  // Fiel die gewählte Achse mangels Daten zurück, wird das GESAGT. Ohne
+  // den Hinweis stünde da kommentarlos eine andere Tabelle, und der
+  // Turnierleiter schlösse daraus, die Einstellung tue nichts.
+  const gewaehlt = aktiveZeitenAchse();
+  const rueckfall = achse !== gewaehlt
+    ? `<p class="note">Für „${esc((ZEITEN_ACHSEN.find((a) => a.id === gewaehlt) || {}).label || gewaehlt)}" liegen keine Messwerte vor — gezeigt wird „Konkurrenz".</p>`
+    : "";
   // Zähler und Vorschau folgen der AKTIVEN Achse (A1.4) — sonst stünde im
   // zugeklappten Kopf eine Zahl, die zur aufgeklappten Tabelle nicht passt.
   setPanelCount("times", rows.length);
@@ -6679,7 +6698,7 @@ function renderTimes() {
     ? `Turnier gesamt (Brutto-Median): ${stats.tournament_brutto_mins} min · `
     : ""}Startwert ohne Messwerte: ${stats.default_mins} min — solche Prognosen zeigt die Spielliste als „~hh:mm".</p>`;
   if (!rows.length) {
-    setzeHtmlWennNeu(box, `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
+    setzeHtmlWennNeu(box, `${rueckfall}<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
     return;
   }
   const zeilen = rows.map((r) => `<tr>
@@ -6689,7 +6708,7 @@ function renderTimes() {
       <td class="num">${r.netto_mins} min</td>
       <td class="num">${r.diff_mins} min</td>
     </tr>`).join("");
-  setzeHtmlWennNeu(box, `<table class="times-table">
+  setzeHtmlWennNeu(box, `${rueckfall}<table class="times-table">
       <thead><tr>
         <th>${esc(spalte)}</th>
         <th class="num" title="Anzahl regulär gemessener Spiele">Spiele</th>

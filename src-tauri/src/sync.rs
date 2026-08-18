@@ -656,16 +656,36 @@ impl SyncEngine {
         tablet
             .match_times_store()
             .set_tournament(&snapshot.tournament_name);
-        // Halle je Feld EINMAL auflösen (ADR 0036). `court_location_name`
-        // scannt sonst je Aufruf `court_infos` und `locations` linear —
-        // bei 26 belegten Feldern in jedem Poll. Die Namen werden hier
-        // geborgt, damit die Tupel unten ohne Allokation auskommen.
-        let hallen: std::collections::HashMap<i64, String> = snapshot
-            .court_infos
-            .iter()
-            .map(|c| (c.id, snapshot.court_location_name(c.id)))
-            .collect();
+        // Halle je Feld einmal auflösen (ADR 0036), und zwar wirklich
+        // linear: `court_location_name` würde das Feld selbst noch einmal
+        // in `court_infos` suchen — über alle Felder wäre das quadratisch
+        // (Review 18.08.2026). Stattdessen die Hallen einmal indizieren und
+        // dann je Feld nur die `location_id` nachschlagen. Alles geborgt,
+        // damit die Tupel unten ohne Allokation auskommen.
         let leer = String::new();
+        let orte: std::collections::HashMap<i64, &str> = snapshot
+            .locations
+            .iter()
+            .map(|l| (l.id, l.name.as_str()))
+            .collect();
+        // Ein-Hallen-Turniere führen die Halle nirgends (siehe
+        // `is_multi_hall`) — dort bleibt sie überall leer, wie auch
+        // `court_location_name` es täte.
+        let hallen: std::collections::HashMap<i64, &str> = if snapshot.is_multi_hall() {
+            snapshot
+                .court_infos
+                .iter()
+                .map(|c| {
+                    let name = c
+                        .location_id
+                        .and_then(|id| orte.get(&id).copied())
+                        .unwrap_or("");
+                    (c.id, name)
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
         let assigned: Vec<(i64, &str, &str, &str)> = snapshot
             .matches
             .iter()
@@ -673,9 +693,8 @@ impl SyncEngine {
             .map(|m| {
                 let halle = m
                     .court_id
-                    .and_then(|id| hallen.get(&id))
-                    .unwrap_or(&leer)
-                    .as_str();
+                    .and_then(|id| hallen.get(&id).copied())
+                    .unwrap_or(leer.as_str());
                 (m.id, m.class_label.as_str(), m.discipline.as_str(), halle)
             })
             .collect();

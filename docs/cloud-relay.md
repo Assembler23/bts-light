@@ -313,14 +313,20 @@ Client-Vorgang ohne Rückfrage.
 
 **Größenwirkung — die Kürzungskaskade hat eine weitere Stufe bekommen.** Die
 Auswertung wiegt bei einem großen Turnier mehr als die Warteliste: gemessen
-**16 130 Bytes** bei 110/22/5/2 Zeilen (22 Klassen × 5 Disziplinen, zwei
+**14 760 Bytes** bei 110/22/5/2 Zeilen (22 Klassen × 5 Disziplinen, zwei
 Hallen). Die Kaskade lautet deshalb jetzt **`queue` (40/20/10/5) →
 `checkin_times` → `time_stats`**. Ohne die letzte Stufe ginge ein solcher
-Zustand mit **71 412 von erlaubten 65 536 Bytes** hinaus — der Relay
+Zustand mit gut **70 000 von erlaubten 65 536 Bytes** hinaus — der Relay
 verwürfe ihn samt Vorgänger, und die Cloud-Turnierleitung sähe gar nichts
 mehr, auch keine Felder. Mit ihr sind es 55 286 Bytes; das Panel verschwindet
 dann ehrlich, statt den ganzen Stand zu kippen. Rückschau ist verzichtbar,
 Bedienung nicht.
+
+Das Feld `hall` reist dabei nur auf der Hallen-Achse mit
+(`skip_serializing_if`): Auf den anderen drei wäre es ein leerer String je
+Zeile — beim Messfixture allein 1 370 Bytes. Das geht nur, weil das Feld neu
+ist; `class_label`/`discipline` lassen sich nicht weglassen, alte Seiten
+lesen sie unbedingt.
 
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen

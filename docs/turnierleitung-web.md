@@ -500,8 +500,10 @@ Die Hallen-Auswertung beantwortet die Frage, wegen der man bei zwei Hallen
 überhaupt auf die Uhr schaut: Läuft eine Halle systematisch langsamer? Zwei
 Dinge dazu:
 
-- Bei **Ein-Hallen-Turnieren** gibt es die Hallen-Achse nicht — dort stünde
-  nur eine einzige Zeile.
+- Bei **Ein-Hallen-Turnieren** wird die Hallen-Achse gar nicht erst zur
+  Auswahl angeboten — dort stünde nur eine einzige Zeile. Trägt ein Profil
+  sie bereits (von einem anderen Turnier), bleibt die Auswahl erhalten und
+  das Panel sagt, dass es ersatzweise nach Konkurrenz gruppiert.
 - Die Halle wird beim **ersten Aufruf aufs Feld** festgehalten. Spiele, die
   vor dem Update auf v0.9.231 gemessen wurden, kennen ihre Halle nicht mehr
   und stehen in einer eigenen Zeile **„ohne Halle"**. Wer mitten im Turnier

@@ -815,6 +815,13 @@ pub enum TlListPosition {
 #[serde(rename_all = "snake_case")]
 pub enum TlTimeStatsAxis {
     /// Klasse × Disziplin („HE-A") — die ursprüngliche Ansicht.
+    ///
+    /// Bewusst **ohne** `#[serde(other)]`-Auffang: Serde verlangt den auf
+    /// der letzten Variante, und dieselbe Lücke hat der Nachbar
+    /// [`TlListPosition`] seit jeher. Folge: Rollt jemand von einer
+    /// künftigen Version mit einer fünften Achse zurück, scheitert das
+    /// Laden der `config.json`. Wenn das je auftritt, gehört der Auffang
+    /// an BEIDE Enums — nicht nur hier.
     Group,
     /// Nur die Klasse, über alle Disziplinen.
     Class,

@@ -93,6 +93,14 @@ ein Spiel zufällig zuletzt angefasst wurde.
   den PR-Text.
 - Bei Ein-Hallen-Turnieren ist das Feld immer leer; die Achse wird dort
   ausgeblendet statt eine sinnlose Ein-Zeilen-Tabelle zu zeigen.
+- **Eine einmal leer gestempelte Halle bleibt leer.** Trägt ein Feld beim
+  Erststempel (noch) keine `LocationID`, steht der Messwert dauerhaft unter
+  „ohne Halle" — auch wenn die Turnierleitung das in BTP eine Minute später
+  nachträgt. Ein Nachziehen nur für leere Werte wäre mit der
+  Feldwechsel-Immunität vereinbar (es überschriebe ja nichts), ist aber
+  bewusst nicht gebaut: Es brächte einen zweiten Schreibpfad in den
+  Erststempel, und der Fall ist selten. Wird er im Betrieb auffällig, ist
+  das die naheliegende Nachbesserung.
 
 ## Verweise
 
