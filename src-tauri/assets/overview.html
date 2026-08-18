@@ -755,6 +755,7 @@ main {
   (function sponsorBar() {
     var box = document.getElementById('sponsor-bar');
     if (!box) return;
+    // Ohne Abgleich auf Unverändertheit — Begründung siehe monitor.html.
     function paint(st) {
       var h = '';
       if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';

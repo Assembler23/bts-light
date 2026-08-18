@@ -75,7 +75,32 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /pair/{code}` | Telefon-Code → Namespace auflösen (1 h TTL, Fehlversuchs-Limit) |
 | `GET /tl`, `GET /tl/api/state`, `POST /tl/api/command` | Turnierleitungs-Oberfläche — **ohne Namespace in der Adresse**, siehe unten |
 | `GET /tl-ws` | TL-Push-Anstoß (Spec `tl-web-push`, ADR 0034): sendet nur `{"rev":n}`, Zugang im **ersten Frame** |
+| `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) |
+| `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
+| `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`) |
 | `GET /health` | Status-Schnappschuss |
+
+Die beiden Bild-Routen antworten mit einer Kennung (`ETag`) und dürfen
+zwischengespeichert werden — Werbebilder **eine** Minute, das Turnierlogo
+fünf. Ein unverändertes Bild kostet dann rund 200 Byte statt der vollen
+Nutzlast; vorher (`no-store`) zog jede Anzeige bei jedem Motivwechsel das
+ganze Bild erneut über die Internetleitung. Zwei Feinheiten, die hier
+anders liegen als im LAN:
+
+- Die Kennung wird beim **Hochladen** aus dem Bildinhalt berechnet, nicht
+  aus dem Upload-Vorgang. Der Host lädt sein Monitor-Bündel bei jedem
+  Verbindungsaufbau neu hoch — an den Upload gebunden entwertete jeder
+  Verbindungsabbruch sämtliche Bild-Zwischenspeicher der Geräte.
+- Werbebilder werden über ihre **Position** adressiert. Beim Löschen eines
+  Bildes rücken alle folgenden auf, die Adresse zeigt also plötzlich auf ein
+  anderes Motiv — daher die kurze Frist. Das Turnierlogo hat eine feste
+  Adresse je Namespace.
+
+Kennt der Abrufer die Kennung schon, entfällt zusätzlich das Kopieren der
+Bilddaten unter dem globalen Namespace-Mutex. `If-None-Match` wird nach
+RFC 9110 ausgewertet (Liste, `*`, schwacher Vergleich) — nginx davor darf
+eine Kennung abschwächen, ein reiner Gleichheitstest wäre dann still
+wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
 
 ### Datenfluss
 

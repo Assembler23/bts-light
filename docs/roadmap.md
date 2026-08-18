@@ -676,6 +676,28 @@ verliehen):
 - **`docs/ops/deployment.md` teils veraltet** (badhub-Repo): Der Abschnitt
   „Deploy: Produktion" beschreibt noch das KAS-`deploy_prod.sh`, obwohl
   Prod längst über `deploy_hetzner.sh` auf Hetzner läuft.
+- **Das Turnierlogo reist in jedem vollen `tset` mit** (`sync.rs`,
+  Base64, bis 2,7 MB). Ein voller `tset` geht mindestens jede Minute als
+  Lebenszeichen raus und zusätzlich immer dann, wenn der Diff bei
+  mehreren geänderten Matches zum Vollstand degeneriert — bei vielen
+  Feldern also alle paar Sekunden. Weglassen ist **derzeit nicht
+  möglich**: Ein `tset` ersetzt bei badhub den kompletten
+  Snapshot-Datensatz (`liveticker_state.snapshot_json`), ein fehlendes
+  Feld löscht das Logo also, und der Liveticker blendet es beim nächsten
+  5-s-Poll aus — ebenso die Check-In-Seite, wenn dort kein eigenes
+  Branding-Logo hinterlegt ist (Recherche 18.08.2026). Voraussetzung für
+  einen Fix ist badhub-seitig, dass ein fehlendes Logo-Feld als
+  „unverändert" gilt und `""` als „löschen" — genau die Semantik, die
+  `checkin_branding_apply()` für den Branding-Weg schon umsetzt. Im
+  badhub-Repo liegt dazu die noch **nicht umgesetzte** Design-Spec
+  `docs/superpowers/specs/2026-08-18-turnierlogo-zentralisierung-design.md`
+  (Logo als inhaltsadressierte Datei, im Snapshot nur `tournament_logo_url`);
+  in ihrer jetzigen Fassung löst sie diesen Punkt allerdings **nicht** —
+  sie hält ausdrücklich fest, dass ein `tset` ohne Logo zu einer fehlenden
+  URL führt. Nötig wäre zusätzlich ein Rückfall im Lesepfad
+  (`liveQjson()`) auf die gespeicherte Datei. Reihenfolge beim Ausrollen:
+  **erst badhub deployen, dann** die bts-light-Version, die das Logo nur
+  noch bei Änderung mitschickt.
 
 ## Schiedsrichtermanagement — umgesetzt (v0.9.201)
 

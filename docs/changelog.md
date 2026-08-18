@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.225
+
+- **Werbebilder und Turnierlogo werden nicht mehr bei jedem Blick neu
+  geladen.** Beide Bild-Routen (im Hallennetz wie über die Cloud) geben
+  jetzt eine Kennung mit und bestätigen ein unverändertes Bild mit rund
+  200 Byte, statt es erneut zu übertragen. Vorher waren sie ausdrücklich
+  vom Zwischenspeichern ausgenommen: Weil die Werbeanzeigen ihr Motiv
+  alle paar Sekunden wechseln, holte jedes Gerät dabei jedes Mal die
+  vollen Bilddaten — bei einem 1-MB-Motiv rund 360 MB je Stunde und
+  Anzeige, im Cloud-Betrieb über die Internetleitung.
+- **Ausgetauschte Bilder erscheinen weiterhin zeitnah:** im Hallennetz
+  binnen fünf Minuten, bei Werbebildern über die Cloud binnen einer
+  Minute. Die kürzere Frist hat einen Grund — über die Cloud werden
+  Werbebilder nach ihrer Position adressiert, und beim Löschen eines
+  Bildes rücken alle folgenden auf. Eine Anzeige zeigte sonst länger
+  nicht bloß ein altes, sondern ein falsches Motiv.
+- Die „Leisten-Sponsor"-Markierungen werden gemerkt statt bei jedem
+  Abruf von der Platte gelesen.
+
 ## v0.9.224
 
 - **Cloud-Tablets bekommen beim Wiederverbinden wieder den vollen

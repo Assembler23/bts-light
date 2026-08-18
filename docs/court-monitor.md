@@ -188,6 +188,61 @@ Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
 `onerror` es. Spec + Phasen (Cloud, badhub-Seiten):
 [features/werbung-leisten.md](features/werbung-leisten.md).
 
+## Zwischenspeichern der Bilder (seit v0.9.225)
+
+Werbebilder und Turnierlogo waren ausdrücklich vom Zwischenspeichern
+ausgenommen (`Cache-Control: no-store`). Weil die Werbeanzeige ihr Motiv
+alle `ad_interval_s` (Standard 10 s) wechselt, holte jedes Gerät dabei jedes
+Mal die vollen Bilddaten — bei einem 1-MB-Motiv rund 360 MB je Stunde und
+Anzeige, im Cloud-Betrieb über die Internetleitung.
+
+Beide Routen geben jetzt in **beiden** Betriebsarten eine Kennung (`ETag`)
+mit und dürfen zwischengespeichert werden. Nach Ablauf der Frist bestätigt
+der Server ein unverändertes Bild mit `304` (rund 200 Byte) statt es erneut
+zu senden.
+
+| Bild | Kennung aus | Frist |
+|---|---|---|
+| Werbebild (LAN, `/ads/{datei}`) | Größe + Änderungszeit der Datei — ohne sie zu lesen | 5 Min |
+| Werbebild (Cloud, `/{ns}/ads/{index}`) | Inhalt des hochgeladenen Bildes | **1 Min** |
+| Turnierlogo (LAN, `/info/logo`) | Inhalt der Base64-Daten | 5 Min |
+| Turnierlogo (Cloud, `/{ns}/info/logo`) | Inhalt des hochgeladenen Logos | 5 Min |
+
+Vier Entscheidungen, die dahinterstehen:
+
+- **Kein `immutable`.** Zwar vergibt der Upload eindeutige Namen
+  (`ad-<ms>.<endung>`), aber das `court-ads/`-Verzeichnis liegt offen: Wer
+  eine Datei von Hand hineinlegt und später ersetzt, bekäme sonst tagelang
+  das alte Bild.
+- **Cloud-Werbebilder nur eine Minute.** Im Hallennetz bindet der Dateiname
+  die Adresse an genau ein Bild, in der Cloud ist die Adresse der
+  Listen-**Index**. Löscht die Turnierleitung ein Werbebild, rücken alle
+  folgenden Indizes auf — eine Anzeige zeigte dann bis zum Ablauf der Frist
+  nicht bloß ein altes, sondern ein **falsches** Motiv. Bei Sponsoren ist
+  das etwas anderes als „veraltet". Das Turnierlogo hat eine feste Adresse
+  je Namespace und darf deshalb länger gelten.
+- **Die Cloud-Kennung hängt am Inhalt, nicht am Upload.** Der Host lädt sein
+  Monitor-Bündel bei jedem Verbindungsaufbau neu hoch; wären die Kennungen
+  an den Upload gebunden, entwertete jeder WLAN-Wackler sämtliche
+  Bild-Zwischenspeicher.
+- **Auch die Logo-Kennung hängt am Inhalt** und nicht an `(Länge, MIME)`.
+  Sie ist zugleich der Schlüssel des Dekodier-Zwischenstands: Zwei
+  verschiedene Logos gleicher Base64-Länge und gleichen Typs hätten sonst
+  auch frischen Anzeigen dauerhaft die alten Bytes geliefert.
+
+`If-None-Match` wird nach RFC 9110 ausgewertet — als Liste, mit `*` und mit
+schwachem Vergleich. Ein Zwischenspeicher auf dem Weg (nginx vor dem Relay)
+darf eine Marke abschwächen; ein reiner Gleichheitstest wäre dann still
+wirkungslos, und der ganze Gewinn wäre weg.
+
+**Die Sponsor-Leiste wird bewusst bei jedem Durchlauf neu gebaut**, ohne
+Abgleich auf Unverändertheit. Ein solcher Abgleich könnte nur die *Namen*
+der Bilder vergleichen, nicht ihren Inhalt — ein ausgetauschtes Logo oder
+Werbebild unter gleicher Adresse bliebe dann für immer stehen, weil das
+`<img>` nie neu entsteht und der Browser die Adresse nie wieder anfragt.
+Teuer ist der Neuaufbau nicht mehr: Mit Kennung und Cache-Frist kostet er
+höchstens einmal je Frist eine Bestätigung von rund 200 Byte je Bild.
+
 ## Last am Turnier-PC (seit v0.9.223)
 
 Jeder Monitor fragt im 250-ms-Takt nach — der WS-Anstoß senkt die
@@ -201,7 +256,8 @@ billig:
   Base64-Text von bis zu 2,7 MB).
 - Die **Werbebild-Liste** kommt aus einem Zwischenstand und wird nur neu
   eingelesen, wenn sich der Ordner geändert hat (vorher ein
-  Verzeichnis-Lesen je Abruf).
+  Verzeichnis-Lesen je Abruf). Dasselbe gilt seit v0.9.225 für die
+  „Leisten-Sponsor"-Markierungen (`court-ad-bar.json`).
 - Der gespiegelte **Spielstand** (`courtState`) geht ohne den
   Verlaufsspeicher des Tabletts an die Anzeigen: `history` (bis zu 50
   Zwischenstände, jeder mit einer Vollkopie des Ballwechsel-Protokolls)
