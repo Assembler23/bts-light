@@ -288,6 +288,18 @@ Namensvergleich zurück). Der Zustand bleibt opakes JSON, der Relay
 unverändert — aber auch hier: **Relay-Deploy** nötig, damit Cloud-Geräte
 die neue Anzeige (Farb-Marken, Eieruhr, Links) bekommen.
 
+**Spielerlinks überall** (18.08.2026, Spec `tl-sicht-feinschliff` Punkt 4):
+`team1_ids`/`team2_ids` stehen zusätzlich an den **Feld-Kacheln**
+(`TlCourt`) und den **beendeten Spielen** (`TlFinished`) — beide additiv
+mit `#[serde(default)]`, der Relay bleibt unverändert, Relay-Deploy nur
+für die Anzeige nötig. **Größenwirkung beachten:** Das sind bei 26 Feldern
+und 30 Ergebnissen bis zu 112 zusätzliche String-Arrays. Der
+Größen-Wächter misst diesen Fall seit 18.08.2026 mit und lag bei 57 343
+von 65 536 Bytes — rund 12 % Reserve. Die Kürzungskaskade
+(`state_for_relay`) erfasst weiterhin nur `queue` und `checkin_times`; wer
+den Zustand um eine **weitere Liste** erweitert, misst nach und nimmt sie
+in die Kaskade auf, bevor die Reserve aufgebraucht ist.
+
 **Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
 `TlAction`-Varianten `set_hall_prefill { enabled, window }` und
 `clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter

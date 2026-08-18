@@ -2217,6 +2217,15 @@ pub struct TlCourt {
     /// Nation (Entscheidung 12.08.2026), Default aus.
     pub team1_club: Vec<String>,
     pub team2_club: Vec<String>,
+    /// Lizenznummern (BTP `MemberID`), **parallel** zu `team1`/`team2`;
+    /// leerer String, wo BTP keine führt. Siehe [`TlMatch::team1_ids`] —
+    /// seit 18.08.2026 (Spec `tl-sicht-feinschliff`) auch am laufenden
+    /// Spiel, damit die Feldkachel auf dieselbe badhub-Spielerseite
+    /// verlinkt wie die Warteliste.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
@@ -2520,6 +2529,13 @@ pub struct TlFinished {
     pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
+    /// Lizenznummern, **parallel** zu `team1`/`team2`. Siehe
+    /// [`TlCourt::team1_ids`] — die Beendet-Liste ist die zweite Stelle, an
+    /// der die Turnierleitung während des Turniers nachschlägt.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     /// 1 oder 2 — wer gewonnen hat.
     pub winner: u8,
     pub sets: Vec<(i64, i64)>,
@@ -2667,13 +2683,23 @@ pub(crate) fn build_state_limited(
     // Felder und Warteliste stammen aus **demselben** Schnappschuss. Zwei
     // getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen —
     // dann beschrieben Felder und Liste zwei verschiedene Turnierstände.
+    // Match-ID → Spiel, einmal für den ganzen Bau. Die Feldkachel braucht
+    // den Spieler-Datensatz für die Lizenznummern (`CourtOverview` führt
+    // sie bewusst nicht mit — sie geht auch an Tablet und Court-Monitor),
+    // und der Prognose-Block weiter unten suchte bisher je belegtem Feld
+    // linear. Bei 26 Feldern alle zwei Sekunden je Gerät ist eine Map die
+    // billigere Antwort.
+    let match_by_id: std::collections::HashMap<i64, &crate::btp::model::BtpMatch> =
+        snap.matches.iter().map(|m| (m.id, m)).collect();
+
     let mut courts: Vec<TlCourt> = tablet
         .overview_from(&snap)
         .into_iter()
         .map(|c| {
             let clearing = clearing_match(&snap, c.court_id, c.match_id);
             let schalter = tablet.officials_store().court_switches(c.court_id);
-            court_view(c, clearing, schalter)
+            let spiel = match_by_id.get(&c.match_id).copied();
+            court_view(c, clearing, schalter, spiel)
         })
         .collect();
 
@@ -3014,6 +3040,8 @@ pub(crate) fn build_state_limited(
                 discipline: m.discipline.as_str().to_string(),
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
                 team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+                team1_ids: license_ids(&m.team1),
+                team2_ids: license_ids(&m.team2),
                 winner: m.winner.unwrap_or(0),
                 sets: m.sets.clone(),
                 result: match m.result {
@@ -3659,10 +3687,23 @@ fn officials_view(
 /// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
 /// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
 /// Vergabehilfe).
+/// Lizenznummern einer Mannschaft, **stellungsgleich** zu den Namen: Wo BTP
+/// keine Nummer führt, steht ein leerer String statt gar nichts — sonst
+/// rutschte im Doppel der Link auf den falschen Partner.
+fn license_ids(players: &[crate::btp::model::BtpPlayer]) -> Vec<String> {
+    players
+        .iter()
+        .map(|p| p.member_id.clone().unwrap_or_default())
+        .collect()
+}
+
 fn court_view(
     c: crate::tablet::state::CourtOverview,
     clearing: Option<i64>,
     schalter: crate::tablet::officials::CourtSwitches,
+    // Das Spiel auf dem Feld, nur für die Lizenznummern — `CourtOverview`
+    // führt sie bewusst nicht mit. `None` bei freiem Feld.
+    spiel: Option<&crate::btp::model::BtpMatch>,
 ) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
@@ -3694,6 +3735,8 @@ fn court_view(
         team2_nat: c.team2_nationalities,
         team1_club: c.team1_clubs,
         team2_club: c.team2_clubs,
+        team1_ids: spiel.map(|m| license_ids(&m.team1)).unwrap_or_default(),
+        team2_ids: spiel.map(|m| license_ids(&m.team2)).unwrap_or_default(),
         sets: c.sets,
         tablet_connected: c.tablet_connected,
         injury: c.injury,
@@ -5158,29 +5201,67 @@ mod tests {
             });
         }
         let tablet = TabletState::default();
-        let mut matches = Vec::new();
-        for id in 1..=400 {
-            let mut m = a_match(id);
-            // Mit Lizenznummern: Seit die Warteliste `team1_ids` und
-            // `player_keys` trägt, wäre ein Fixture ohne Nummern ein zu
-            // kleiner Worst Case — der Wächter maß den Cloud-Zustand sonst
-            // um zehntausende Bytes zu klein (Review-Fund 17.08.2026).
+        // Doppelpaarung mit Lizenznummern: Seit die Warteliste `team1_ids`
+        // und `player_keys` trägt, wäre ein Fixture ohne Nummern ein zu
+        // kleiner Worst Case — der Wächter maß den Cloud-Zustand sonst um
+        // zehntausende Bytes zu klein (Review-Fund 17.08.2026). Seit
+        // 18.08.2026 tragen auch **laufende und beendete** Spiele die
+        // Nummern (Spec `tl-sicht-feinschliff` Punkt 4), deshalb bekommt
+        // dieses Fixture unten zusätzlich 26 belegte Felder und 30 beendete
+        // Spiele — vorher maß der Wächter allein die Warteliste und hätte
+        // ein Wachstum in den anderen beiden Listen nie bemerkt.
+        let besetze = |m: &mut crate::btp::model::BtpMatch, n: i64| {
             m.team1 = vec![
                 licensed_player(
                     "Maximiliane Charlotte von Hohenlohe-Waldenburg",
-                    "08-100001",
+                    &format!("08-1{n:05}"),
                 ),
-                licensed_player("Friederike Alexandra Schmidt-Blumenthal", "08-100002"),
+                licensed_player(
+                    "Friederike Alexandra Schmidt-Blumenthal",
+                    &format!("08-2{n:05}"),
+                ),
             ];
             m.team2 = vec![
-                licensed_player("Konstantin Ferdinand Oppermann-Lindenau", "08-100003"),
-                licensed_player("Sebastian Aurelius Wittgenstein-Berleburg", "08-100004"),
+                licensed_player(
+                    "Konstantin Ferdinand Oppermann-Lindenau",
+                    &format!("08-3{n:05}"),
+                ),
+                licensed_player(
+                    "Sebastian Aurelius Wittgenstein-Berleburg",
+                    &format!("08-4{n:05}"),
+                ),
             ];
-            m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
             m.round_name = "Achtelfinale der Trostrunde".to_string();
+        };
+        let mut matches = Vec::new();
+        for id in 1..=400 {
+            let mut m = a_match(id);
+            besetze(&mut m, id);
+            m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
             matches.push(m);
         }
-        tablet.set_snapshot(snap(Vec::new(), matches, Vec::new()));
+        // 26 belegte Felder — die Feldkacheln tragen jetzt Nummern.
+        let mut courts = Vec::new();
+        for court_id in 1..=26 {
+            courts.push(a_court(court_id, None));
+            let mut m = a_match(1000 + court_id);
+            besetze(&mut m, 1000 + court_id);
+            m.status = crate::btp::model::MatchStatus::OnCourt;
+            m.court_id = Some(court_id);
+            m.court = Some(format!("Feld {court_id}"));
+            matches.push(m);
+        }
+        // 30 beendete Spiele — die Beendet-Liste ebenso (FINISHED_LIMIT).
+        for n in 1..=30 {
+            let mut m = a_match(2000 + n);
+            besetze(&mut m, 2000 + n);
+            m.status = crate::btp::model::MatchStatus::Finished;
+            m.winner = Some(1);
+            m.finished_at = Some(900_000 + n as u64);
+            m.sets = vec![(21, 19), (19, 21), (21, 18)];
+            matches.push(m);
+        }
+        tablet.set_snapshot(snap(courts, matches, Vec::new()));
 
         let (json, _rev) = state_for_relay(&tablet, &cfg, 1_000_000);
         assert!(
@@ -5188,10 +5269,24 @@ mod tests {
             "passt nicht: {} Bytes",
             json.len()
         );
+        // Gemessen am 18.08.2026 mit genau diesem Fixture: 57 343 von
+        // 65 536 Bytes, also rund 12 % Reserve. Wer den Zustand um eine
+        // weitere Liste erweitert (nächster Kandidat: die vierachsige
+        // Spielzeiten-Statistik), misst hier nach — und nimmt `time_stats`
+        // in die Kürzungskaskade auf, bevor die Reserve aufgebraucht ist.
         // Und die Kürzung wird gemeldet, statt Spiele stillschweigend
         // verschwinden zu lassen.
         let state: TlState = serde_json::from_str(&json).unwrap();
         assert!(state.queue_truncated > 0, "gekürzt, aber nicht gesagt");
+        // Die Felder überleben JEDE Kürzungsstufe: Sie sind das
+        // Bedienelement der Seite — eine Turnierleitung ohne Feldkacheln
+        // kann nichts mehr zuweisen, während sie ohne Statistik oder
+        // Ergebnisliste weiterarbeitet.
+        assert_eq!(
+            state.courts.len(),
+            26,
+            "die Feldkacheln dürfen nie der Kürzung zum Opfer fallen"
+        );
 
         // Ein kleines Turnier verliert nichts.
         let klein = TabletState::default();
@@ -7328,11 +7423,21 @@ mod tests {
             // jedem Aushang; hier hinter dem Gerätezugang.
             "team1_club",
             "team2_club",
-            // Lizenznummer der Wartelisten-Spieler als Link-Ziel der
-            // badhub-Spielerseite (`/spieler/<Nr>/live`; Nutzer-Entscheidung
-            // 17.08.2026 — bewusste Freigabe wie Nation/Verein): Die Nummer
-            // ist der öffentliche URL-Schlüssel genau dieser Seite und steht
-            // hier hinter dem Gerätezugang. Geburtsjahr bleibt draußen.
+            // Lizenznummer als Link-Ziel der badhub-Spielerseite
+            // (`/spieler/<Nr>/live`; Nutzer-Entscheidung 17.08.2026,
+            // ausgeweitet 18.08.2026 — bewusste Freigabe wie Nation/Verein):
+            // Die Nummer ist der öffentliche URL-Schlüssel genau dieser
+            // Seite und steht hier hinter dem Gerätezugang. Geburtsjahr
+            // bleibt draußen.
+            //
+            // **Diese Liste ist flach** — sie erlaubt einen Feldnamen für
+            // JEDE Struktur des Zustands. Als die Nummern am 18.08.2026 von
+            // der Warteliste auf laufende und beendete Spiele ausgeweitet
+            // wurden, hat dieser Wächter deshalb **nicht** angeschlagen; die
+            // Ausweitung fing allein
+            // `the_state_never_carries_personal_data_beyond_its_purpose`.
+            // Wer hier eine Struktur-genaue Prüfung braucht, muss sie dort
+            // führen, nicht hier.
             "team1_ids",
             "team2_ids",
             "sets",
@@ -7709,6 +7814,78 @@ mod tests {
     }
 
     #[test]
+    fn laufende_und_beendete_spiele_tragen_die_lizenznummer_als_linkziel() {
+        // Spec `tl-sicht-feinschliff` A4.1/A4.2: Die Turnierleitung schlägt
+        // Spieler während des Turniers auf der öffentlichen badhub-Seite
+        // nach — an der Feldkachel und in der Beendet-Liste genauso wie in
+        // der Warteliste, wo es das seit 17.08.2026 gibt. Ohne die Nummer im
+        // Zustand kann die Seite dort keinen Link bauen.
+        let mut running = a_match(1);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![licensed_player("Müller", "08-001234")];
+        running.team2 = vec![licensed_player("Schmidt", "08-005678")];
+        let mut finished = a_match(2);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![licensed_player("Winter", "08-003333")];
+        finished.team2 = vec![licensed_player("Sommer", "08-004444")];
+
+        let s = state_with(
+            snap(vec![a_court(1, None)], vec![running, finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let feld = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(feld.team1_ids, vec!["08-001234".to_string()]);
+        assert_eq!(feld.team2_ids, vec!["08-005678".to_string()]);
+
+        let beendet = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(beendet.team1_ids, vec!["08-003333".to_string()]);
+        assert_eq!(beendet.team2_ids, vec!["08-004444".to_string()]);
+    }
+
+    #[test]
+    fn ein_spieler_ohne_lizenznummer_bleibt_ohne_id() {
+        // Spec `tl-sicht-feinschliff` A4.3: Nicht jeder Spieler hat eine
+        // Lizenznummer (Gastspieler, Papier-Meldung). Die Liste bleibt
+        // **parallel** zu den Namen — sonst rutschte der Link eines Doppels
+        // auf den falschen Partner. Der Namenlose bekommt einen leeren
+        // Eintrag, keinen fehlenden.
+        let mut running = a_match(1);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![
+            player("Ohne Nummer"),
+            licensed_player("Mit Nummer", "08-007777"),
+        ];
+        let mut finished = a_match(2);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![player("Papier")];
+        finished.team2 = vec![player("Kampflos")];
+
+        let s = state_with(
+            snap(vec![a_court(1, None)], vec![running, finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let feld = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(
+            feld.team1_ids,
+            vec![String::new(), "08-007777".to_string()],
+            "die Nummern bleiben Stellung für Stellung parallel zu den Namen"
+        );
+        assert_eq!(feld.team1.len(), feld.team1_ids.len());
+
+        let beendet = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(beendet.team1_ids, vec![String::new()]);
+        assert_eq!(beendet.team2_ids, vec![String::new()]);
+    }
+
+    #[test]
     fn the_state_never_carries_personal_data_beyond_its_purpose() {
         // Diese Daten laufen über eine aus dem Internet erreichbare Seite.
         // Der Test schlägt fehl, sobald jemand ein Feld nachrüstet, das
@@ -7717,17 +7894,31 @@ mod tests {
         //
         // **Die Nation ist seit 09.08.2026 erlaubt**, **der Verein seit
         // 12.08.2026** — beide standen vorher hier auf der Verbotsliste.
-        // **Die Lizenznummer der WARTELISTEN-Spieler ist seit 17.08.2026
-        // erlaubt** (Nutzer-Entscheidung): Sie ist der öffentliche
-        // URL-Schlüssel der badhub-Spielerseite (`/spieler/<Nr>/live`), auf
-        // die die Spielliste verlinkt. Laufende und beendete Spiele bleiben
-        // ohne — dort gibt es keinen Link, also auch keinen Zweck.
         // Bewusst geändert: Die Turnierleitung braucht sie, um die richtige
         // Paarung ans Feld zu holen und Vereinskollegen auseinanderzuhalten.
         // Es bleibt beim ISO-Kürzel bzw. Vereinsnamen, die Anzeige ist
         // turnierweit zuschaltbar und standardmäßig aus — und dieselbe Angabe
         // steht ohnehin auf jeder Meldeliste und jedem Aushang, während sie
         // hier hinter dem Gerätezugang steht.
+        //
+        // **Die Lizenznummer war ab 17.08.2026 nur in der Warteliste
+        // erlaubt und ist seit 18.08.2026 überall im Zustand erlaubt**
+        // (Nutzer-Entscheidung, Spec `tl-sicht-feinschliff` Punkt 4). Der
+        // Zweck ist derselbe geblieben und gilt an allen drei Stellen:
+        // **Nachschlagen der Spielerhistorie auf der öffentlichen
+        // badhub-Seite während des Turniers.** Die Nummer IST der
+        // öffentliche URL-Schlüssel genau dieser Seite
+        // (`/spieler/<Nr>/live`) — sie preiszugeben heißt hier, einen
+        // ohnehin öffentlichen Schlüssel hinter dem Gerätezugang zu
+        // wiederholen. Die frühere Beschränkung auf die Warteliste war
+        // keine Datenschutz-Grenze, sondern schlicht die Stelle, an der
+        // zuerst verlinkt wurde.
+        //
+        // **Unverändert draußen bleiben** (Verbotsliste unten): Geburtsjahr
+        // überall, Check-In-Spielernamen, Sperrlisten und Stammverein der
+        // Schiedsrichter. Der Feldname `member` bleibt ebenfalls verboten —
+        // die Nummern reisen als `team1_ids`/`team2_ids`, nicht als roher
+        // BTP-Spieler-Datensatz.
         let mut running = a_match(1);
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
@@ -7874,11 +8065,9 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 
         for verboten in [
-            "08-001234", // die Lizenznummer aus dem Fixture
-            "08-003333", // Lizenznummer des beendeten Spiels
-            "08-004444", // Lizenznummer des beendeten Spiels (Gegenseite)
-            "member",    // Lizenznummer-Feld
-            "birth",     // Geburtsjahr — laut Projektregel nirgends
+            "member", // roher BTP-Spieler-Datensatz (die Nummern reisen
+            // als `team1_ids`/`team2_ids`, siehe Kopfkommentar)
+            "birth", // Geburtsjahr — laut Projektregel nirgends
             "geburt",
             "battery", // Akkustand: keine Geräte-Übersicht in diesem Feature
             "serving", // Aufschlag: Zählhilfe, keine Vergabehilfe
@@ -7909,15 +8098,22 @@ mod tests {
             json.contains("sc musterstadt"),
             "der zuschaltbare Vereinsname muss transportiert werden"
         );
-        // Die Lizenznummer der Warteliste darf — sie ist das Link-Ziel der
-        // badhub-Spielerseite (Freigabe 17.08.2026, siehe Kopfkommentar).
-        // Die Verbotsliste oben stellt zugleich sicher, dass laufende
-        // (08-001234) und beendete Spiele (08-003333/08-004444) weiterhin
-        // OHNE Lizenznummer ausgeliefert werden.
-        assert!(
-            json.contains("08-009999"),
-            "die Warteliste braucht die Lizenznummer als badhub-Link-Ziel"
-        );
+        // Die Lizenznummer darf an allen drei Stellen — sie ist das
+        // Link-Ziel der badhub-Spielerseite (Freigabe 18.08.2026, siehe
+        // Kopfkommentar). Positiv geprüft statt nur geduldet: Fiele eine der
+        // drei Stellen still weg, wäre der Link dort tot, und niemand
+        // merkte es.
+        for (nummer, stelle) in [
+            ("08-009999", "die Warteliste"),
+            ("08-001234", "das laufende Spiel"),
+            ("08-003333", "das beendete Spiel"),
+            ("08-004444", "das beendete Spiel (Gegenseite)"),
+        ] {
+            assert!(
+                json.contains(nummer),
+                "{stelle} braucht die Lizenznummer als badhub-Link-Ziel"
+            );
+        }
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
         assert!(json.contains("müller"));

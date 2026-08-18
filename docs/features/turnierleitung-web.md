@@ -152,13 +152,19 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - Kein Geburtsjahr — kommt in keiner View-Struct vor und darf nicht
   nachgerüstet werden.
 - ~~**Keine `member_id`/Lizenznummer im Browser.**~~ **Revidiert am
-  17.08.2026** (Nutzer-Entscheidung, wie zuvor Nation 09.08. und Verein
-  12.08.): Die **Wartelisten**-Einträge tragen die Lizenznummer
+  17.08.2026, ausgeweitet am 18.08.2026** (Nutzer-Entscheidung, wie zuvor
+  Nation 09.08. und Verein 12.08.): Wartelisten-Einträge, **laufende
+  Feld-Kacheln und beendete Spiele** tragen die Lizenznummer
   (`team1_ids`/`team2_ids`) als Link-Ziel der badhub-Spielerseite
   (`/spieler/<Nr>/live` — die Nummer ist der **öffentliche** URL-Schlüssel
-  genau dieser Seite) sowie `blocked.player_keys` (Lizenznummer bzw.
-  normalisierter Name) für die punktgenaue Namens-Färbung. Laufende und
-  beendete Spiele bleiben ohne Lizenznummer — dort gibt es keinen Link.
+  genau dieser Seite); die Warteliste zusätzlich `blocked.player_keys`
+  (Lizenznummer bzw. normalisierter Name) für die punktgenaue
+  Namens-Färbung. Aufgeschriebener Zweck an allen drei Stellen:
+  *Nachschlagen der Spielerhistorie auf der öffentlichen badhub-Seite
+  während des Turniers* (Spec `tl-sicht-feinschliff`, Punkt 4). Die
+  ursprüngliche Beschränkung auf die Warteliste war keine
+  Datenschutz-Grenze, sondern schlicht die Stelle, an der zuerst verlinkt
+  wurde. Spieler ohne Lizenznummer bleiben unverlinkt.
 - ~~**Keine Nationalitäten.**~~ Revidiert am 09.08.2026 — als
   zuschaltbares ISO-Kürzel neben dem Namen (Standard: aus).
 - **Kein Akkustand, keine `serving_*`-Felder** (nicht im Scope bzw. reine
@@ -168,11 +174,17 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
   ist, die Zahl der Geräte begrenzt und vom Master ausgestellt. Der Relay
   hält sie nur im RAM, kappt sie, persistiert sie nicht und **loggt sie
   nie** — dieselbe Regel wie beim Azure-Key.
-- Ein **Datensparsamkeits-Test** prüft das serialisierte `TlState`: Das
-  Geburtsjahr bleibt überall draußen, die Lizenznummer bei laufenden und
-  beendeten Spielen (in der Warteliste ist sie seit 17.08.2026 als
-  badhub-Link-Ziel freigegeben, siehe oben; Nation seit 09.08., Verein
-  seit 12.08. als zuschaltbare Anzeige).
+- Ein **Datensparsamkeits-Test** prüft das serialisierte `TlState`
+  (`the_state_never_carries_personal_data_beyond_its_purpose`): Das
+  Geburtsjahr bleibt überall draußen, ebenso Check-In-Spielernamen sowie
+  Sperrlisten und Stammverein der Schiedsrichter. Die Lizenznummern sind
+  seit 18.08.2026 an allen drei Stellen **positiv** geprüft — fiele eine
+  weg, wäre der Link dort tot, ohne dass es jemand merkte.
+  **Achtung beim Nachrüsten:** Der zweite Wächter
+  (`every_published_field_is_deliberately_allowed`) führt eine **flache**
+  Feldnamen-Liste und schlägt deshalb nicht an, wenn ein bereits erlaubter
+  Feldname in einer **weiteren** Struktur auftaucht — die Ausweitung vom
+  18.08.2026 fing allein der Datensparsamkeits-Test.
 
 **Abhängigkeiten**
 
