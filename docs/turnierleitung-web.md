@@ -490,6 +490,25 @@ bleibt die Seite schlicht farblos.
 
 ### Startzeit-Prognose & Spielzeiten
 
+**Gruppieren nach (seit v0.9.231).** Die Auswertung zeigt dieselben
+Messwerte wahlweise nach **Konkurrenz** (Klasse × Disziplin, z. B. „HE-A" —
+die Voreinstellung), nach **Klasse**, nach **Disziplin** oder nach **Halle**.
+Die Wahl steht im Profil-Editor unter „Spielzeiten gruppieren nach" und gilt
+damit für alle Geräte mit diesem Profil.
+
+Die Hallen-Auswertung beantwortet die Frage, wegen der man bei zwei Hallen
+überhaupt auf die Uhr schaut: Läuft eine Halle systematisch langsamer? Zwei
+Dinge dazu:
+
+- Bei **Ein-Hallen-Turnieren** gibt es die Hallen-Achse nicht — dort stünde
+  nur eine einzige Zeile.
+- Die Halle wird beim **ersten Aufruf aufs Feld** festgehalten. Spiele, die
+  vor dem Update auf v0.9.231 gemessen wurden, kennen ihre Halle nicht mehr
+  und stehen in einer eigenen Zeile **„ohne Halle"**. Wer mitten im Turnier
+  aktualisiert, fängt die Hallen-Auswertung also praktisch neu an; die
+  übrigen drei Achsen sind davon nicht betroffen.
+
+
 > Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·
 > Spec [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md)
 

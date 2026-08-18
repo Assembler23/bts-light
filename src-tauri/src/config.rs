@@ -807,6 +807,34 @@ pub enum TlListPosition {
     Bottom,
 }
 
+/// Nach welcher Achse das Panel „Spielzeiten" gruppiert (Spec
+/// `tl-sicht-feinschliff`, Punkt 1). Muster [`TlListPosition`]: Rust-Enum
+/// statt String, `rename_all = "snake_case"` liefert dieselbe Wire-Form wie
+/// `relay_proto::TlTimeStatsAxisWire`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlTimeStatsAxis {
+    /// Klasse × Disziplin („HE-A") — die ursprüngliche Ansicht.
+    Group,
+    /// Nur die Klasse, über alle Disziplinen.
+    Class,
+    /// Nur die Disziplin, über alle Klassen.
+    Discipline,
+    /// Nur die Halle. Bei Ein-Hallen-Turnieren nicht wählbar.
+    Hall,
+}
+
+impl Default for TlTimeStatsAxis {
+    /// **Zugleich die fachliche Vorgabe**, anders als bei
+    /// [`TlListPosition`]: Ein Profil, das die Einstellung noch nicht
+    /// kennt (jedes vor v0.9.231 gespeicherte), landet damit auf der
+    /// bisherigen Ansicht — für niemanden ändert sich etwas, der nichts
+    /// umstellt (Akzeptanzkriterium A1.2).
+    fn default() -> Self {
+        Self::Group
+    }
+}
+
 impl Default for TlListPosition {
     /// Reiner Serde-Nothilfe-Wert für ein einzelnes, unvollständig
     /// gespeichertes Profil (siehe `TlDisplaySettings`) — **nicht** die
@@ -877,6 +905,12 @@ pub struct TlDisplaySettings {
     /// Dann endet der Knopf wie bisher nach dem dritten Aufruf.
     pub unlimited_court_calls: bool,
     pub list_position: TlListPosition,
+    /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
+    /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
+    /// wird — dieselbe Regel, die das Panelsystem für alle Inhalts-Schalter
+    /// zieht (einzige Ausnahme dort ist der Schriftgrößen-Zoom, eine reine
+    /// Display-Eigenschaft).
+    pub time_stats_axis: TlTimeStatsAxis,
 }
 
 /// Ein benanntes Panel-Profil: Panel-Sichtbarkeit/-Reihenfolge/-Höhe +
@@ -1279,6 +1313,7 @@ mod tests {
                 show_court_remaining: true,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
+                time_stats_axis: Default::default(),
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
@@ -1581,6 +1616,7 @@ mod tests {
                     display: TlDisplaySettings {
                         show_numbers: true,
                         list_position: TlListPosition::Bottom,
+                        time_stats_axis: Default::default(),
                         ..Default::default()
                     },
                     columns: 2,

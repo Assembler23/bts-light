@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.231
+
+- **Die Spielzeiten lassen sich jetzt nach vier Achsen auswerten.** Das
+  Panel „Spielzeiten" zeigt dieselben gemessenen Dauern wahlweise nach
+  **Konkurrenz** (wie bisher, z. B. „HE-A"), nach **Klasse**, nach
+  **Disziplin** oder nach **Halle**. Umgestellt wird im Profil-Editor
+  („Spielzeiten gruppieren nach"); die Wahl gilt für alle Geräte mit
+  diesem Profil.
+- Damit ist endlich die Frage beantwortbar, wegen der man bei zwei Hallen
+  überhaupt auf die Uhr schaut: **Läuft eine Halle systematisch langsamer
+  als die andere?**
+- **An den Prognosen ändert sich nichts.** Die Auswertung ist reine
+  Rückschau; „dran ca. hh:mm" rechnet unverändert weiter.
+- Zwei Dinge zur Hallen-Auswertung: Bei Ein-Hallen-Turnieren gibt es sie
+  nicht, und Spiele, die **vor** diesem Update gemessen wurden, kennen ihre
+  Halle nicht mehr — sie stehen in einer Zeile „ohne Halle". Wer mitten im
+  Turnier aktualisiert, beginnt die Hallen-Auswertung also praktisch neu.
+  Die anderen drei Achsen sind davon nicht betroffen.
+- Bei sehr großen Turnieren über die Cloud-Verbindung wird die Auswertung
+  notfalls weggelassen, damit Felder und Spielliste vollständig ankommen.
+- Dritte Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 1 von 4),
+  ADR 0036.
+
 ## v0.9.226
 
 - **Ein entferntes Turnierlogo verschwindet auch im Liveticker.** Die

@@ -297,6 +297,31 @@ zusätzliche `TlState`-Feld `hall_prefill` und der neue
 beide (Feature-Detection über das State-Feld — eine neue Seite an einem
 alten Host zeigt die Bedienelemente gar nicht).
 
+**Spielzeiten-Auswertung mehrachsig** (Spec `tl-sicht-feinschliff` Punkt 1,
+v0.9.231): `TlState.time_stats` trägt zusätzlich `by_class`,
+`by_discipline` und `by_hall`, jede Zeile zusätzlich `hall`; das Profil trägt
+`timeStatsAxis`. Alles additiv mit `#[serde(default)]` — alte Seiten
+ignorieren die neuen Felder, ein altes Profil liest sich als `group` (die
+bisherige Ansicht). Der Relay bleibt unverändert; **Relay-Deploy** nur nötig,
+damit Cloud-Geräte die neue Anzeige bekommen.
+
+Alle vier Achsen reisen **gemeinsam** mit, obwohl je Gerät nur eine gezeigt
+wird: Der Zustand entsteht seit ADR 0034 einmal zentral für alle Geräte,
+während die Achsen-Wahl im Profil je Gerät liegt. Der Host könnte also gar
+nicht nur die gewählte liefern — das Umschalten ist dafür ein reiner
+Client-Vorgang ohne Rückfrage.
+
+**Größenwirkung — die Kürzungskaskade hat eine weitere Stufe bekommen.** Die
+Auswertung wiegt bei einem großen Turnier mehr als die Warteliste: gemessen
+**16 130 Bytes** bei 110/22/5/2 Zeilen (22 Klassen × 5 Disziplinen, zwei
+Hallen). Die Kaskade lautet deshalb jetzt **`queue` (40/20/10/5) →
+`checkin_times` → `time_stats`**. Ohne die letzte Stufe ginge ein solcher
+Zustand mit **71 412 von erlaubten 65 536 Bytes** hinaus — der Relay
+verwürfe ihn samt Vorgänger, und die Cloud-Turnierleitung sähe gar nichts
+mehr, auch keine Felder. Mit ihr sind es 55 286 Bytes; das Panel verschwindet
+dann ehrlich, statt den ganzen Stand zu kippen. Rückschau ist verzichtbar,
+Bedienung nicht.
+
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
 Turnier im Sekundentakt, in einer ruhigen Phase minutenlang gar nicht —
