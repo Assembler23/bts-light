@@ -8,6 +8,7 @@ import {
   announceCourt,
   announceOfficials,
   announceStartPlay,
+  announceScorekeeper,
 } from "../io/announceCourt";
 import {
   playPreparationAnnouncement,
@@ -127,6 +128,25 @@ export function AnnounceJobPlayer({
         const court = info?.courts.find((c) => c.court_id === job.courtId);
         if (!court || court.match_id !== job.matchId) return;
         announceStartPlay(court, cfg, azureRef.current);
+        return;
+      }
+
+      if (job.kind === "scorekeeper_call") {
+        // Der zugewiesene Bediener steht im aktuellen Feld-Stand; der
+        // Auftrag trägt die Namen bewusst nicht mit sich (Struktur statt
+        // Text). Wie beim Feld-Aufruf gegen den frischen Stand geprüft —
+        // steht dort inzwischen ein anderes Spiel, ist der Nachruf
+        // gegenstandslos.
+        const info = await tabletOverview().catch(() => null);
+        const court = info?.courts.find((c) => c.court_id === job.courtId);
+        if (!court || court.match_id !== job.matchId) return;
+        announceScorekeeper(
+          court,
+          court.scorekeeper ?? [],
+          (job.stage >= 3 ? 3 : job.stage >= 2 ? 2 : 1) as 1 | 2 | 3,
+          cfg,
+          azureRef.current,
+        );
         return;
       }
 

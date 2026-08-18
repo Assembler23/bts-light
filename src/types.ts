@@ -505,6 +505,17 @@ export type AnnounceJob = {
       courtId: number;
     }
   | {
+      /** Nachruf an die Zähltafelbedienung eines Felds („… bitte als
+       *  Tabletbedienung melden"). **Kein Spieler-Aufruf** — der Host führt
+       *  dafür einen eigenen Zähler, die Aufruf-Stufe der Spieler bleibt
+       *  stehen (Spec `tl-sicht-feinschliff` Punkt 2). */
+      kind: "scorekeeper_call";
+      courtId: number;
+      matchId: number;
+      /** 1, 2 oder 3 — gezählt am Turnier-PC. */
+      stage: number;
+    }
+  | {
       kind: "prep_call";
       matchId: number;
       side: "both" | "team1" | "team2";

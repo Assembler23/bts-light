@@ -3344,6 +3344,17 @@ function courtCard(c, cellStyle) {
         data-made="${gesprochen}" data-call-side="team2"
         title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
   }
+  // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
+  // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
+  // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
+  // Warteschlange, Feld mit abgeschalteter Bediener-Vergabe und global
+  // ausgeschaltete Verwaltung — in allen dreien weist der Turnier-PC gar
+  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe und steht
+  // deshalb getrennt von den Aufruf-Knöpfen.
+  if (state.scorekeeper_managed && c.match_id && c.scorekeeper_assigned) {
+    kachelAktionen.push(`<button type="button" data-sk-say="${c.court_id}"
+        title="Zähltafelbedienung nachrufen">Bedienung nachrufen</button>`);
+  }
   // „Bitte mit dem Spielen beginnen" (Spec tl-sicht-feinschliff, Punkt 3):
   // Die Spieler stehen am Feld, es fällt aber kein Punkt. Nur dann sinnvoll
   // — sobald gezählt wird, ist die Aufforderung gegenstandslos. Bewusst
@@ -3511,6 +3522,11 @@ window.addEventListener("resize", folgeOffenenKebabs);
  *  (siehe Kommentar an der Verdrahtung). */
 const spielbeginnZuletzt = new Map();
 
+/** Zeitpunkt des letzten Bediener-Nachrufs je Feld — die Doppeltipp-Sperre.
+ *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
+ *  (siehe Kommentar an der Verdrahtung). */
+const skNachrufZuletzt = new Map();
+
 function wireCourts(box) {
   // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
   // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
@@ -3656,6 +3672,33 @@ function wireCourts(box) {
         `startplay-${courtId}-${matchId}-${Date.now()}`,
         { action: "announce_start_play", courtId, matchId },
         "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Bediener-Nachruf: beliebig oft auslösbar wie die anderen Ansagen, aber
+  // gedeckelt bei Stufe 3 — der Turnier-PC zählt. Zeitstempel-Nonce statt
+  // des 20-s-Fensters (`OP_WINDOW_MS`), das eine BEWUSSTE Wiederholung
+  // stumm schluckte.
+  //
+  // Die Doppeltipp-Sperre liegt im Modul-Zustand, NICHT als `disabled` am
+  // Knopf: `send()` stößt in seinem `finally` einen Abruf an, und ein
+  // geänderter Zustand zeichnet die Kacheln neu — der frische Knopf wäre
+  // sofort wieder scharf, lange vor Ablauf der Sekunde. Im laufenden
+  // Turnier ändert sich fast jede Sekunde etwas, die Sperre wäre also
+  // genau dann wirkungslos, wenn sie gebraucht wird (Review 18.08.2026).
+  scopeAll(box, "button[data-sk-say]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.skSay);
+      const zuletzt = skNachrufZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      skNachrufZuletzt.set(courtId, Date.now());
+      send(
+        `sk-say-${courtId}-${Date.now()}`,
+        { action: "announce_scorekeeper", courtId },
+        "Nachruf ausgelöst.",
       );
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());

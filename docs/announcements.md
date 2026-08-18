@@ -127,6 +127,9 @@ den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
 | Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`) | `tablet/state.rs` |
 | Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
 | Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`) | `tablet/tl.rs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `scorekeeper_call`) | `tablet/state.rs` |
+| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceScorekeeper`) | `tablet/tl.rs` |
 | Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
 | Sprecher | [`AnnounceJobPlayer.tsx`](../src/components/AnnounceJobPlayer.tsx) |
 
@@ -194,6 +197,25 @@ dieselben Bausteine.
 
 Wie jede TL-Web-Ansage erklingt sie **nur in der Halle des Felds** und
 **nicht** in einer per Relay angebundenen fernen Halle (siehe „Cloud" oben).
+### Nachruf an die Zähltafelbedienung (seit v0.9.232)
+
+Kommt die zugewiesene Bedienung nicht ans Feld, ruft die Turnierleitung sie
+über „Bedienung nachrufen" im ⋯-Menü der Feld-Kachel:
+
+> 🔔 „**Feld 3. Meier / Kraus, bitte als Tabletbedienung melden.**"
+> Ab dem zweiten Mal mit „Zweiter Aufruf." bzw. „Dritter und letzter Aufruf."
+> davor.
+
+**Kein Spieler-Aufruf**, und das ist der Grund für die eigene Ansageart:
+Der Host führt einen **eigenen** Zähler; `call_stages` und
+`prep_call_stages` bleiben unberührt. Ohne die Trennung zöge ein Nachruf an
+die Bedienung die angezeigte Aufruf-Zahl der Spieler hoch. Der Zählerstand
+verlässt den Host nicht — er bestimmt allein die Ansage-Stufe.
+
+Sichtbar nur bei **zugewiesenem** Bediener. Die Namen laufen ohne
+Aussprache-Korrektur, wie bei „Tabletbedienung: …" am Ende der Feld-Ansage
+und bei den Schiedsrichtern: eine Zuständigkeits-Ansage, keine
+Spieler-Vorstellung. Details: [zaehltafelbediener.md](zaehltafelbediener.md).
 
 ### Aufruf je Partei — am Meeting Point und am Feld
 

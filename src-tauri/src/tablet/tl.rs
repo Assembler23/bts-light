@@ -428,14 +428,7 @@ pub(crate) fn apply_state_action(
                     "Dieses Spiel steht nicht mehr auf dem Feld — bitte neu laden.",
                 ));
             }
-            let hall = snap
-                .court_infos
-                .iter()
-                .find(|c| c.id == *court_id)
-                .and_then(|c| c.location_id)
-                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
+            let hall = hall_of_court(&snap, *court_id);
             // Die Uhr am Feld darf nicht weiter sein als der Aufruf: Steht
             // dort schon „Letzter Aufruf", wäre ein zweiter ein Rückschritt.
             let faellig = due_call_stage(tablet, config, *court_id, *match_id, now_ms);
@@ -612,14 +605,7 @@ pub(crate) fn apply_state_action(
                     "Diesem Feld ist niemand zugewiesen.",
                 ));
             }
-            let hall = snap
-                .court_infos
-                .iter()
-                .find(|c| c.id == *court_id)
-                .and_then(|c| c.location_id)
-                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
+            let hall = hall_of_court(&snap, *court_id);
             tablet.publish_announce_job(
                 hall.clone(),
                 crate::tablet::state::AnnounceJobKind::Officials {
@@ -651,14 +637,7 @@ pub(crate) fn apply_state_action(
                     "Auf diesem Feld steht dieses Spiel nicht (mehr).",
                 ));
             }
-            let hall = snap
-                .court_infos
-                .iter()
-                .find(|c| c.id == *court_id)
-                .and_then(|c| c.location_id)
-                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
+            let hall = hall_of_court(&snap, *court_id);
             // **Kein** `due_call_stage`, **kein** `note_court_call_at_least`:
             // Die Aufforderung ist kein Aufruf (Spec A3.3). Wer hier
             // „konsistenzhalber" eine Stufe hochzählte, ließe das
@@ -669,6 +648,59 @@ pub(crate) fn apply_state_action(
                 crate::tablet::state::AnnounceJobKind::StartPlay {
                     court_id: *court_id,
                     match_id: *match_id,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
+        A::AnnounceScorekeeper { court_id } => {
+            if !config.scorekeeper.enabled {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Die Zähltafelbediener-Verwaltung ist ausgeschaltet.",
+                ));
+            }
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Das Spiel, das gerade auf dem Feld steht — an ihm hängt die
+            // Bediener-Zuweisung, und es begrenzt den Zähler.
+            let Some(m) = snap.matches.iter().find(|m| {
+                m.court_id == Some(*court_id) && m.status == crate::btp::model::MatchStatus::OnCourt
+            }) else {
+                return Err(TlResponse::err(
+                    C::StaleView,
+                    "Auf diesem Feld läuft gerade kein Spiel.",
+                ));
+            };
+            // Ohne zugewiesenen Bediener gäbe es niemanden zu nennen — ein
+            // Gong ohne Inhalt. Die eine Prüfung deckt alle drei Fälle ab
+            // (A2.4): leere Warteschlange, Feld mit abgeschalteter Vergabe
+            // (`CourtSwitches::operator`) und global ausgeschaltete
+            // Verwaltung — in allen dreien weist der Sync-Lauf gar nicht
+            // erst zu.
+            let namen = tablet.assigned_scorekeeper(*court_id).unwrap_or_default();
+            if namen.is_empty() {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Diesem Feld ist keine Tabletbedienung zugewiesen.",
+                ));
+            }
+            let hall = hall_of_court(&snap, *court_id);
+            // Eigener Zähler — `call_stages`/`prep_call_stages` bleiben
+            // unberührt (A2.5). Ein Nachruf an die Bedienung ist kein
+            // Spieler-Aufruf; zöge er die Aufruf-Zahl hoch, glaubte die
+            // Turnierleitung, sie hätte schon zweimal gerufen.
+            let stage = tablet.note_scorekeeper_call(*court_id, m.id);
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::ScorekeeperCall {
+                    court_id: *court_id,
+                    match_id: m.id,
+                    stage,
                 },
                 now_ms,
             );
@@ -1028,6 +1060,24 @@ fn due_call_stage(
     } else {
         0
     }
+}
+
+/// Halle eines Felds als Name; leer, wenn das Feld keiner zugeordnet ist
+/// oder das Turnier nur eine Halle hat.
+///
+/// Eine Stelle statt vormals drei wörtlicher Kopien (Spec
+/// `tl-sicht-feinschliff`, Punkt 2 sah das Zusammenfassen vor): Jede
+/// Ansage-Aktion muss ihre Zielhalle auflösen, und ein Ansage-Auftrag in
+/// der falschen Halle ist ein Fehler, den niemand am Bildschirm sieht —
+/// er fällt erst auf, wenn die andere Halle etwas hört.
+fn hall_of_court(snap: &crate::btp::model::BtpSnapshot, court_id: i64) -> String {
+    snap.court_infos
+        .iter()
+        .find(|c| c.id == court_id)
+        .and_then(|c| c.location_id)
+        .and_then(|id| snap.locations.iter().find(|l| l.id == id))
+        .map(|l| l.name.clone())
+        .unwrap_or_default()
 }
 
 /// Die Antwort auf einen Ansage-Auftrag.
@@ -1895,6 +1945,7 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             operator,
         } => format!("off-court:{court_id}:{sr}:{ar}:{operator}"),
         A::AnnounceOfficials { court_id } => format!("off-announce:{court_id}"),
+        A::AnnounceScorekeeper { court_id } => format!("sk-announce:{court_id}"),
         A::AnnounceStartPlay { court_id, match_id } => {
             format!("start-play:{court_id}:{match_id}")
         }
@@ -2005,6 +2056,7 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Feld-Schalter von Feld {court_id}")
         }
         A::AnnounceOfficials { court_id } => format!("Schiedsrichter-Ansage Feld {court_id}"),
+        A::AnnounceScorekeeper { court_id } => format!("Bediener-Nachruf Feld {court_id}"),
         A::AnnounceStartPlay { court_id, .. } => {
             format!("Spielbeginn-Ansage Feld {court_id}")
         }
@@ -7170,6 +7222,139 @@ mod tests {
                 }
             ),
             "erwartet wurde ein StartPlay-Auftrag für Feld 3/Spiel 7, war: {:?}",
+            jobs[0].kind
+        );
+        assert!(
+            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            "die andere Halle nicht"
+        );
+    }
+
+    #[test]
+    fn der_bediener_nachruf_zaehlt_getrennt_von_den_spieler_aufrufen() {
+        // A2.5 und der ganze Grund für die eigene Ansageart: Zöge ein
+        // Nachruf an die Bedienung die Spieler-Aufrufzahl hoch, glaubte die
+        // Turnierleitung, sie hätte schon zweimal gerufen — und an der
+        // dritten Stufe hängt die kampflose Wertung.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        tablet.officials_store().set_enabled(false);
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        tablet.assign_scorekeeper_for_court(3, 7);
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+
+        let done = apply_state_action(
+            &tablet,
+            &cfg,
+            50_000,
+            &relay_proto::TlAction::AnnounceScorekeeper { court_id: 3 },
+        )
+        .unwrap();
+
+        assert!(done.ok);
+        assert_eq!(tablet.scorekeeper_calls_made(3, 7), 1, "eigener Zähler");
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            0,
+            "die Spieler-Aufrufzahl darf sich NICHT bewegen"
+        );
+        assert_eq!(
+            tablet.prep_calls_made(7),
+            0,
+            "und der Vorbereitungs-Nachruf auch nicht"
+        );
+    }
+
+    #[test]
+    fn ein_neues_spiel_setzt_den_bediener_zaehler_zurueck() {
+        // A2.6: Sonst erbte die neue Paarung die Nachrufe ihres Vorgängers
+        // und stünde sofort beim „Dritten und letzten".
+        let tablet = TabletState::default();
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 1);
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 2);
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 3);
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 3, "gedeckelt bei 3");
+        assert_eq!(
+            tablet.note_scorekeeper_call(3, 99),
+            1,
+            "anderes Spiel auf dem Feld: von vorn"
+        );
+    }
+
+    #[test]
+    fn ein_bediener_nachruf_ohne_zugewiesenen_bediener_wird_abgelehnt() {
+        // A2.4: Ohne Zuweisung gäbe es niemanden zu nennen — ein Gong ohne
+        // Inhalt. Die Seite zeigt den Knopf dann gar nicht erst; der Host
+        // lehnt trotzdem ab, weil er sich nie auf die Seite verlässt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+
+        let abgelehnt = apply_state_action(
+            &tablet,
+            &cfg,
+            50_000,
+            &relay_proto::TlAction::AnnounceScorekeeper { court_id: 3 },
+        );
+        assert!(abgelehnt.is_err(), "kein Bediener ⇒ keine Ansage");
+    }
+
+    #[test]
+    fn der_bediener_nachruf_legt_einen_auftrag_in_der_halle_des_felds_ab() {
+        // A2.2/A2.3: Die Ansage geht nur in die Halle des Felds, trägt die
+        // Stufe und nennt genau dieses Feld und Spiel.
+        let tablet = TabletState::default();
+        let mut schnappschuss = snap(
+            vec![a_court(3, Some(2))],
+            vec![match_on_court(7, 3)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        schnappschuss.court_infos.push(a_court(9, Some(1)));
+        tablet.set_snapshot(schnappschuss);
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        tablet.assign_scorekeeper_for_court(3, 7);
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+
+        apply_state_action(
+            &tablet,
+            &cfg,
+            50_000,
+            &relay_proto::TlAction::AnnounceScorekeeper { court_id: 3 },
+        )
+        .unwrap();
+
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1, "die Halle des Felds hört den Nachruf");
+        assert!(
+            matches!(
+                jobs[0].kind,
+                crate::tablet::state::AnnounceJobKind::ScorekeeperCall {
+                    court_id: 3,
+                    match_id: 7,
+                    stage: 1
+                }
+            ),
+            "erwartet wurde ein ScorekeeperCall Feld 3/Spiel 7/Stufe 1, war: {:?}",
             jobs[0].kind
         );
         assert!(

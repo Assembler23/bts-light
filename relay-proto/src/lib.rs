@@ -1540,6 +1540,18 @@ pub enum TlAction {
         #[serde(rename = "courtId")]
         court_id: i64,
     },
+    /// Den Zähltafelbediener eines Felds nachrufen („… bitte als
+    /// Tabletbedienung melden", ADR 0007 / Spec `tl-sicht-feinschliff`
+    /// Punkt 2).
+    ///
+    /// **Kein Spieler-Aufruf.** Der Host führt dafür einen eigenen Zähler;
+    /// `call_stages` und `prep_call_stages` bleiben unberührt, sonst zöge
+    /// ein Nachruf an die Bedienung die angezeigte Aufruf-Zahl der Spieler
+    /// hoch.
+    AnnounceScorekeeper {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
     /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
     /// besetztes Feld, auf dem noch kein Punkt gefallen ist (Spec
     /// `tl-sicht-feinschliff`, Punkt 3).
@@ -3389,6 +3401,7 @@ mod tests {
                 operator: true,
             },
             TlAction::AnnounceOfficials { court_id: 5 },
+            TlAction::AnnounceScorekeeper { court_id: 5 },
             TlAction::AnnounceStartPlay {
                 court_id: 5,
                 match_id: 77,

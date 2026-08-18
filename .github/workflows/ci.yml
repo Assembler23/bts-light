@@ -112,6 +112,10 @@ jobs:
       # (sie ist kein Aufruf).
       - name: Spielbeginn-Ansage (JS)
         run: node scripts/test-start-play-text.mjs
+      # Wortlaut des Zähltafelbediener-Nachrufs: in beiden Synthese-Pfaden
+      # identisch, Stufenwort ab dem zweiten Mal, ohne Adressat gar nichts.
+      - name: Bediener-Nachruf (JS)
+        run: node scripts/test-scorekeeper-call-text.mjs
 
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.

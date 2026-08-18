@@ -74,6 +74,11 @@ LAN+Cloud voraus.
   Aufruf: Die Aufruf-Zählung bleibt stehen, das Abzeichen springt nicht,
   und du kannst beliebig oft nachfassen. Der Knopf verschwindet, sobald
   gezählt wird.
+- **Bedienung nachrufen:** Ist dem Feld ein Zähltafelbediener zugewiesen,
+  ruft „Bedienung nachrufen" im ⋯-Menü der Kachel ihn aus
+  („Feld 3. Meier, bitte als Tabletbedienung melden."). Ab dem zweiten Mal
+  mit Stufenwort. Das ist **kein** Spieler-Aufruf: Die Aufruf-Zählung der
+  Spieler bleibt stehen. Ohne zugewiesene Bedienung gibt es den Knopf nicht.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.

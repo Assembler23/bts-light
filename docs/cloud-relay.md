@@ -370,6 +370,16 @@ statt an einem die ganze Charge zu verlieren (siehe
 [announcements.md](announcements.md)). In einer per Relay angebundenen
 **fernen** Halle erklingt die Ansage weiterhin gar nicht — dort holt der
 Slave bewusst keine Aufträge ab.
+**Nachruf an die Zähltafelbedienung** (Spec `tl-sicht-feinschliff` Punkt 2,
+v0.9.232): eine neue `TlAction`-Variante `announce_scorekeeper { courtId }`.
+Der Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**.
+Also auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Zählerstand bleibt bewusst am Host (er bestimmt allein die
+Ansage-Stufe).
+
+Dazu ein neuer **Ansage-Auftragstyp** `scorekeeper_call`, der wie alle
+Ansage-Aufträge nur vom Master zu den Ansage-Geräten seiner Halle reist,
+nicht über den Relay.
 
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
