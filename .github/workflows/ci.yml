@@ -112,6 +112,12 @@ jobs:
       - name: Release-Faellig-Regel (JS)
         run: node scripts/test-version-tagged.mjs
 
+      # Haelt fest, dass die Update-Notes die ganze Strecke seit dem letzten
+      # Tag abdecken — vorher sah der Nutzer nur den getaggten Eintrag, und
+      # bei neun gebuendelten Versionen fehlten acht.
+      - name: Update-Notes ueber die Release-Strecke (JS)
+        run: node scripts/test-release-notes.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check
