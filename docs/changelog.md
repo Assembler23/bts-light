@@ -26,6 +26,28 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   ⚠️ **Relay-Deploy vor dem Client-Release** — die neue Aktion würde ein
   altes Relay sonst abweisen. Der Deploy läuft automatisch beim Merge nach
   `main`.
+## v0.9.228
+
+- **Spielernamen sind jetzt überall anklickbar.** Auf der
+  Turnierleitungs-Seite führte bisher nur die Spielliste auf die
+  badhub-Spielerseite. Jetzt tun es auch die **Feld-Kacheln der laufenden
+  Spiele** und die Liste der **beendeten Spiele** — also genau die
+  Stellen, an denen man während des Turniers nachschlägt. Erkennbar wie
+  gewohnt an der gepunkteten Unterstreichung; wer in BTP keine
+  Lizenznummer hat, bleibt unverlinkt.
+- Ein Klick auf einen Namen in der Feld-Kachel öffnet **nur** die
+  Spielerseite und nimmt das Spiel nicht zusätzlich auf. Ein vom Namen
+  aus begonnener Zug auf ein anderes Feld funktioniert weiter.
+- **Große Turniere bleiben in der Cloud bedienbar.** Beim Prüfen der
+  Zusatzdaten fiel auf, dass der Turnierstand für die Cloud-Verbindung bei
+  vielen Feldern an seine Größengrenze stößt — dann hätte die
+  Turnierleitungs-Seite gar nichts mehr angezeigt. Jetzt kürzt der
+  Turnier-PC notfalls die **Ergebnisliste** (reine Rückschau, in BTP
+  vollständig vorhanden); Felder und Spielliste bleiben in jedem Fall
+  vollständig. Betrifft Turniere ab etwa 30 Feldern.
+- Erste Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 4 von 4).
+  ⚠️ Cloud-Geräte sehen die Links erst nach dem **Relay-Deploy** — der
+  läuft automatisch beim Merge nach `main`.
 
 ## v0.9.226
 
