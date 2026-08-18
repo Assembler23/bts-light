@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.227
+## v0.9.234
 
 - **Das Turnierlogo wird nur noch bei Änderung übertragen.** Bisher reiste
   es als Base64 — bis zu 2,7 MB — in **jedem** vollen Turnier-Stand mit,
@@ -19,6 +19,113 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   unverändert"). Ohne diesen Stand auf badhub-Seite würde ein
   weggelassenes Logo dort als „kein Logo" gelten und der Liveticker das
   Bild ausblenden.
+
+## v0.9.232
+
+- **Die Zähltafelbedienung lässt sich jetzt nachrufen.** Kommt sie nicht ans
+  Feld, blieb bisher nur, die **Spieler** noch einmal zu rufen — was die
+  Aufruf-Zählung verfälscht. Der neue Knopf „Bedienung nachrufen" im
+  ⋯-Menü der Feld-Kachel sagt stattdessen:
+  **„Feld 3. Meier, bitte als Tabletbedienung melden."** Ab dem zweiten Mal
+  mit „Zweiter Aufruf." bzw. „Dritter und letzter Aufruf." davor.
+- **Die Aufruf-Zählung der Spieler bleibt davon unberührt.** Der Turnier-PC
+  führt für die Bedienung einen eigenen Zähler; das Abzeichen an der Kachel
+  steht still.
+- Den Knopf gibt es nur, wenn dem Feld überhaupt eine Bedienung zugewiesen
+  ist. Ein Spielwechsel auf dem Feld setzt den Zähler zurück.
+- Damit ist der letzte offene Baustein aus ADR 0007 erledigt — und die Spec
+  `tl-sicht-feinschliff` vollständig umgesetzt (Punkt 2 von 4).
+
+## v0.9.231
+
+- **Die Spielzeiten lassen sich jetzt nach vier Achsen auswerten.** Das
+  Panel „Spielzeiten" zeigt dieselben gemessenen Dauern wahlweise nach
+  **Konkurrenz** (wie bisher, z. B. „HE-A"), nach **Klasse**, nach
+  **Disziplin** oder nach **Halle**. Umgestellt wird im Profil-Editor
+  („Spielzeiten gruppieren nach"); die Wahl gilt für alle Geräte mit
+  diesem Profil.
+- Damit ist endlich die Frage beantwortbar, wegen der man bei zwei Hallen
+  überhaupt auf die Uhr schaut: **Läuft eine Halle systematisch langsamer
+  als die andere?**
+- **An den Prognosen ändert sich nichts.** Die Auswertung ist reine
+  Rückschau; „dran ca. hh:mm" rechnet unverändert weiter.
+- Zwei Dinge zur Hallen-Auswertung: Bei Ein-Hallen-Turnieren gibt es sie
+  nicht, und Spiele, die **vor** diesem Update gemessen wurden, kennen ihre
+  Halle nicht mehr — sie stehen in einer Zeile „ohne Halle". Wer mitten im
+  Turnier aktualisiert, beginnt die Hallen-Auswertung also praktisch neu.
+  Die anderen drei Achsen sind davon nicht betroffen.
+- Bei sehr großen Turnieren über die Cloud-Verbindung wird die Auswertung
+  notfalls weggelassen, damit Felder und Spielliste vollständig ankommen.
+- Dritte Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 1 von 4),
+  ADR 0036.
+## v0.9.230
+
+- **„Bitte anfangen" — neue Ansage für ein Feld, auf dem nichts passiert.**
+  Steht ein Spiel auf dem Feld, ohne dass ein Punkt fällt, löst der neue
+  Knopf im ⋯-Menü der Feld-Kachel die Ansage **„Feld 3. Bitte mit dem
+  Spielen beginnen."** aus (englisch: „Court 3. Please start playing.").
+  Bisher blieb der Turnierleitung nur hinzulaufen oder einen Aufruf zu
+  wiederholen — was die Aufruf-Zählung verfälschte.
+- **Die Ansage ist ausdrücklich kein Aufruf.** Sie zählt keine Stufe hoch,
+  lässt das Aufruf-Abzeichen stehen und darf beliebig oft wiederholt
+  werden. Die Zählung, an der die kampflose Wertung hängt, bleibt davon
+  unberührt.
+- **Ein Ansage-Rechner mit älterem Stand verstummt nicht mehr.** Kannte er
+  eine Ansageart nicht, verwarf er bisher die **gesamte** Auftragsliste —
+  die zweite Halle blieb eine Minute lang still, auch für ganz normale
+  Aufrufe. Jetzt überspringt er nur den unbekannten Auftrag. Das trifft
+  jeden Zwei-Rechner-Aufbau im Zeitfenster, in dem erst einer aktualisiert
+  ist.
+- Zweite Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 3 von 4).
+  ⚠️ **Relay-Deploy vor dem Client-Release** — die neue Aktion würde ein
+  altes Relay sonst abweisen. Der Deploy läuft automatisch beim Merge nach
+  `main`.
+## v0.9.229
+
+- **Die Spielliste schiebt die anderen Panels nicht mehr weg.** Lädt sie
+  beim Herunterscrollen weitere Spiele nach, wuchs bisher auch ihre
+  **Box** mit — die Nachbar-Panels wurden dabei bis auf ihre Mindesthöhe
+  zusammengedrückt. Schlimmer noch: Danach ließ sich der Trennsteg
+  zwischen den Panels **gar nicht mehr sinnvoll ziehen**; die Aufteilung
+  blieb einfach stehen, egal wie weit man zog.
+- Beides hatte dieselbe Ursache und ist behoben: Die Höhenverteilung
+  richtet sich jetzt allein nach dem gezogenen Verhältnis, nicht mehr
+  danach, wie viele Zeilen ein Panel gerade enthält.
+- **Das Panel „Felder" gibt ungenutzte Höhe jetzt wirklich ab.** Bei
+  wenigen Feldern blieb unter den Kacheln ein leerer Block stehen, statt
+  den Platz an die Spielliste weiterzureichen — die Automatik dafür rechnete
+  sich seit jeher selbst aus (sie maß den sichtbaren Ausschnitt statt der
+  Kacheln und kam damit immer auf die Höhe, die das Panel ohnehin schon
+  hatte).
+- **Und der Trennsteg über den Feldern lässt sich wieder ziehen.** Die
+  Bedarfs-Automatik nagelte das Panel fest: Man zog, nichts bewegte sich,
+  und beim Loslassen sprang es. Jetzt tritt die Automatik zurück, sobald
+  von Hand gezogen wird.
+- Sichtbare Folge der Umstellung: Ein Panel mit wenig Inhalt behält seinen
+  Anteil, auch wenn darunter Platz frei bleibt. Wer das anders möchte,
+  zieht den Steg — das wirkt jetzt wieder zuverlässig.
+## v0.9.228
+
+- **Spielernamen sind jetzt überall anklickbar.** Auf der
+  Turnierleitungs-Seite führte bisher nur die Spielliste auf die
+  badhub-Spielerseite. Jetzt tun es auch die **Feld-Kacheln der laufenden
+  Spiele** und die Liste der **beendeten Spiele** — also genau die
+  Stellen, an denen man während des Turniers nachschlägt. Erkennbar wie
+  gewohnt an der gepunkteten Unterstreichung; wer in BTP keine
+  Lizenznummer hat, bleibt unverlinkt.
+- Ein Klick auf einen Namen in der Feld-Kachel öffnet **nur** die
+  Spielerseite und nimmt das Spiel nicht zusätzlich auf. Ein vom Namen
+  aus begonnener Zug auf ein anderes Feld funktioniert weiter.
+- **Große Turniere bleiben in der Cloud bedienbar.** Beim Prüfen der
+  Zusatzdaten fiel auf, dass der Turnierstand für die Cloud-Verbindung bei
+  vielen Feldern an seine Größengrenze stößt — dann hätte die
+  Turnierleitungs-Seite gar nichts mehr angezeigt. Jetzt kürzt der
+  Turnier-PC notfalls die **Ergebnisliste** (reine Rückschau, in BTP
+  vollständig vorhanden); Felder und Spielliste bleiben in jedem Fall
+  vollständig. Betrifft Turniere ab etwa 30 Feldern.
+- Erste Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 4 von 4).
+  ⚠️ Cloud-Geräte sehen die Links erst nach dem **Relay-Deploy** — der
+  läuft automatisch beim Merge nach `main`.
 
 ## v0.9.226
 

@@ -417,6 +417,20 @@ pub struct TabletState {
     /// Warteschlange gezogene Zähltafelbediener dieses Felds (ADR 0007,
     /// Scheibe 2). Wird geräumt, sobald das Feld frei ist / das Spiel wechselt.
     assigned_scorekeeper: RwLock<HashMap<i64, (i64, Vec<String>)>>,
+    /// Nachrufe an den Zähltafelbediener je Feld: `(Match-ID, Stufe)`.
+    /// Die Match-ID im Wert setzt den Zähler bei einem Spielwechsel von
+    /// selbst zurück — dasselbe Muster wie `call_stages`.
+    ///
+    /// Bewusst **getrennt** von `call_stages`: Der Bediener-Nachruf ist
+    /// kein Spieler-Aufruf. Liefen sie über denselben Zähler, zöge ein
+    /// Nachruf an die Bedienung die an der Kachel angezeigte Aufruf-Zahl
+    /// der Spieler hoch — und an der dritten hängt die kampflose Wertung.
+    ///
+    /// Der Stand wird **nicht** ausgeliefert (Nicht-Ziel N-7 der Spec): Er
+    /// bestimmt allein die Ansage-Stufe. Anders als beim Spieler-Aufruf
+    /// steht hinter dem letzten Nachruf keine Rechtsfolge, die man anzeigen
+    /// müsste.
+    scorekeeper_call_stages: RwLock<HashMap<i64, (i64, u8)>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
     /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
     /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
@@ -770,6 +784,22 @@ pub enum AnnounceJobKind {
         #[serde(rename = "courtId")]
         court_id: i64,
     },
+    /// Nachruf für den Zähltafelbediener eines Felds („… bitte als
+    /// Tabletbedienung melden", ADR 0007). Eigene Ansageart statt eines
+    /// vierten Werts an `PrepCall.side`: Es ist ein anderer Satz, ein
+    /// anderer Adressat und ein eigener Zähler — die Spieler-Nachrufzahl
+    /// darf davon nicht hochgezogen werden (Spec `tl-sicht-feinschliff`,
+    /// Punkt 2).
+    ScorekeeperCall {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Damit das Ansage-Gerät verstummt, wenn inzwischen ein anderes
+        /// Spiel auf dem Feld steht — wie beim Feld-Aufruf.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        /// 1 = erster Nachruf, 2/3 mit Stufenwort davor.
+        stage: u8,
+    },
     /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels.
     PrepCall {
         #[serde(rename = "matchId")]
@@ -780,6 +810,21 @@ pub enum AnnounceJobKind {
         /// erführen nie, dass es der letzte vor der kampflosen Wertung war.
         stage: u8,
     },
+    /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+    /// besetztes Feld, auf dem noch kein Punkt gefallen ist. **Kein
+    /// Aufruf:** Sie trägt keine Stufe, und der Host zählt bei ihr keine
+    /// (Spec `tl-sicht-feinschliff`, Punkt 3).
+    StartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Damit das Ansage-Gerät verstummt, wenn inzwischen ein anderes
+        /// Spiel auf dem Feld steht — wie beim Feld-Aufruf.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Auffang für Ansagearten, die dieser Stand noch nicht kennt.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Ein Ansage-Auftrag für die Geräte einer Halle.
@@ -796,6 +841,58 @@ pub struct AnnounceJob {
     pub created_at_ms: u64,
     #[serde(flatten)]
     pub kind: AnnounceJobKind,
+}
+
+/// Ansage-Aufträge aus einer HTTP-Antwort lesen, **ohne** an einem einzelnen
+/// Eintrag die ganze Charge zu verlieren.
+///
+/// Der Fall ist real: Im Auto-Update-Fenster steht ein Master mit neuerem
+/// Stand neben einem Ansage-Slave mit älterem. Ein typisiertes Lesen der
+/// **ganzen Liste** scheiterte dann an einem einzigen Eintrag — die zweite
+/// Halle bliebe 60 Sekunden stumm, auch für ganz normale Aufrufe.
+///
+/// Zwei Fehlerarten, und sie brauchen **zwei** Vorkehrungen:
+///
+/// 1. **Unbekannte Ansageart** (neuer `kind`-Wert) — fängt
+///    [`AnnounceJobKind::Unknown`] per `#[serde(other)]`.
+/// 2. **Bekannte Ansageart mit verändertem Rumpf** (ein neues Pflichtfeld,
+///    ein Enum-Wert, den dieser Stand nicht kennt) — dagegen hilft
+///    `#[serde(other)]` **nicht**, es greift nur beim Tag. Deshalb wird die
+///    Liste hier Element für Element ausgewertet und ein unlesbarer Eintrag
+///    einzeln verworfen. Genau so ist `CourtCall.side` einmal dazugekommen;
+///    es überlebte nur, weil jemand an einen Serde-Default gedacht hat —
+///    darauf soll sich der Schutz nicht verlassen müssen (Review
+///    18.08.2026).
+///
+/// Was übersprungen wurde, steht im Protokoll: Am Turniertag ist „die
+/// zweite Halle ruft nicht" sonst ein Symptom ohne jede Spur.
+pub fn announce_jobs_aus_json(json: &str) -> Vec<AnnounceJob> {
+    let roh: Vec<serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            // Abgeschnittene Antwort, HTML-Fehlerseite des Masters: Hier ist
+            // nichts zu retten, aber es darf nicht lautlos passieren.
+            tracing::warn!(
+                "Ansage-Aufträge nicht lesbar ({e}) — Anfang der Antwort: {:.120}",
+                json
+            );
+            return Vec::new();
+        }
+    };
+    let gesamt = roh.len();
+    let jobs: Vec<AnnounceJob> = roh
+        .into_iter()
+        .filter_map(|wert| serde_json::from_value::<AnnounceJob>(wert).ok())
+        .filter(|job| job.kind != AnnounceJobKind::Unknown)
+        .collect();
+    if jobs.len() < gesamt {
+        tracing::info!(
+            "{} von {gesamt} Ansage-Aufträgen übersprungen (unbekannt oder unlesbar) \
+             — vermutlich ein Turnier-PC mit neuerem Stand",
+            gesamt - jobs.len()
+        );
+    }
+    jobs
 }
 
 /// Nach dieser Zeit wird ein Auftrag nicht mehr gesprochen.
@@ -1626,6 +1723,37 @@ impl TabletState {
         } else {
             (self.scorekeeper(court_id), false)
         }
+    }
+
+    /// Einen Nachruf an die Zähltafelbedienung eines Felds verbuchen und
+    /// die Stufe zurückgeben (1, 2, dann dauerhaft 3).
+    ///
+    /// Gedeckelt wie der Vorbereitungs-Nachruf: Über „Dritter und letzter
+    /// Aufruf" hinaus gibt es kein Sprachbild — und anders als beim
+    /// Spieler-Aufruf auch keinen Grund, weiterzuzählen.
+    pub fn note_scorekeeper_call(&self, court_id: i64, match_id: i64) -> u8 {
+        let mut g = self.scorekeeper_call_stages.write().unwrap();
+        let entry = g.entry(court_id).or_insert((match_id, 0));
+        // Anderes Spiel auf dem Feld: von vorn. Sonst erbte die neue
+        // Paarung die Nachrufe ihres Vorgängers.
+        if entry.0 != match_id {
+            *entry = (match_id, 0);
+        }
+        entry.1 = (entry.1 + 1).min(3);
+        entry.1
+    }
+
+    /// Wie oft die Bedienung dieses Felds für dieses Spiel schon nachgerufen
+    /// wurde (0 = noch nie). Nur für Tests und die Ansage-Stufe — der Wert
+    /// verlässt den Host nicht.
+    pub fn scorekeeper_calls_made(&self, court_id: i64, match_id: i64) -> u8 {
+        self.scorekeeper_call_stages
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .filter(|(id, _)| *id == match_id)
+            .map(|(_, stage)| *stage)
+            .unwrap_or(0)
     }
 
     /// Zugewiesener Zähltafelbediener eines Felds (Namen), falls vorhanden.
@@ -6015,5 +6143,60 @@ mod tests {
         );
         let total: usize = st.monitor_subs.read().unwrap().values().map(Vec::len).sum();
         assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
+    }
+
+    #[test]
+    fn ein_unbekannter_auftragstyp_verwirft_nicht_die_ganze_charge() {
+        // Ein Master mit neuerem Stand erteilt eine Ansageart, die dieser
+        // Slave noch nicht kennt (Auto-Update-Fenster: zwei Rechner, einer
+        // aktualisiert). Wird die Liste als Ganzes typisiert gelesen,
+        // scheitert an dem einen unbekannten Eintrag die GESAMTE Antwort —
+        // die ferne Halle bliebe 60 Sekunden stumm, auch fuer voellig
+        // normale Aufrufe. Genau das darf nicht passieren.
+        let json = r#"[
+          {"id":1,"hall":"Halle A","createdAtMs":1000,"kind":"officials","courtId":3},
+          {"id":2,"hall":"Halle A","createdAtMs":1001,"kind":"was_ganz_neues","courtId":4},
+          {"id":3,"hall":"Halle A","createdAtMs":1002,"kind":"officials","courtId":5}
+        ]"#;
+
+        let jobs = announce_jobs_aus_json(json);
+
+        assert_eq!(jobs.len(), 2, "die beiden bekannten Auftraege ueberleben");
+        assert_eq!(jobs[0].id, 1);
+        assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn ein_kaputter_auftrag_verwirft_die_uebrigen_ebenso_wenig() {
+        // Die zweite Haelfte desselben Risikos, und die wahrscheinlichere
+        // (Review 18.08.2026): Nicht nur ein UNBEKANNTER Typ kann kommen,
+        // sondern auch ein bekannter mit veraendertem Rumpf — ein neues
+        // Pflichtfeld, ein Enum-Wert, den dieser Stand nicht kennt. Genau so
+        // ist `CourtCall.side` einmal entstanden; es ueberlebte nur, weil
+        // jemand an einen Serde-Default gedacht hat. Darauf darf sich der
+        // Schutz nicht verlassen: `#[serde(other)]` greift NUR beim Tag.
+        let json = r#"[
+          {"id":1,"hall":"Halle A","createdAtMs":1000,"kind":"officials","courtId":3},
+          {"id":2,"hall":"Halle A","createdAtMs":1001,"kind":"court_call","courtId":4},
+          {"id":3,"hall":"Halle A","createdAtMs":1002,"kind":"officials","courtId":5}
+        ]"#;
+
+        let jobs = announce_jobs_aus_json(json);
+
+        assert_eq!(
+            jobs.len(),
+            2,
+            "der Auftrag ohne matchId faellt weg, die uebrigen bleiben"
+        );
+        assert_eq!(jobs[0].id, 1);
+        assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn eine_voellig_kaputte_antwort_liefert_nichts_statt_zu_stuerzen() {
+        // Abgeschnittenes JSON, HTML-Fehlerseite des Masters: nichts
+        // Brauchbares, aber auch kein Absturz.
+        assert!(announce_jobs_aus_json("nicht mal JSON").is_empty());
+        assert!(announce_jobs_aus_json(r#"{"kein":"array"}"#).is_empty());
     }
 }

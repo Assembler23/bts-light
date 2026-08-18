@@ -428,14 +428,7 @@ pub(crate) fn apply_state_action(
                     "Dieses Spiel steht nicht mehr auf dem Feld — bitte neu laden.",
                 ));
             }
-            let hall = snap
-                .court_infos
-                .iter()
-                .find(|c| c.id == *court_id)
-                .and_then(|c| c.location_id)
-                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
+            let hall = hall_of_court(&snap, *court_id);
             // Die Uhr am Feld darf nicht weiter sein als der Aufruf: Steht
             // dort schon „Letzter Aufruf", wäre ein zweiter ein Rückschritt.
             let faellig = due_call_stage(tablet, config, *court_id, *match_id, now_ms);
@@ -612,18 +605,102 @@ pub(crate) fn apply_state_action(
                     "Diesem Feld ist niemand zugewiesen.",
                 ));
             }
-            let hall = snap
-                .court_infos
-                .iter()
-                .find(|c| c.id == *court_id)
-                .and_then(|c| c.location_id)
-                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
+            let hall = hall_of_court(&snap, *court_id);
             tablet.publish_announce_job(
                 hall.clone(),
                 crate::tablet::state::AnnounceJobKind::Officials {
                     court_id: *court_id,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
+        A::AnnounceStartPlay { court_id, match_id } => {
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Nur ein Feld, auf dem GENAU dieses Spiel steht. Zwischen dem
+            // Antippen am Tablet und dem Ankommen hier kann das Spiel vom
+            // Feld genommen oder getauscht worden sein — dann wäre die
+            // Aufforderung an die Falschen gerichtet.
+            let steht_dort = snap.matches.iter().any(|m| {
+                m.id == *match_id
+                    && m.court_id == Some(*court_id)
+                    && m.status == crate::btp::model::MatchStatus::OnCourt
+            });
+            if !steht_dort {
+                return Err(TlResponse::err(
+                    C::StaleView,
+                    "Auf diesem Feld steht dieses Spiel nicht (mehr).",
+                ));
+            }
+            let hall = hall_of_court(&snap, *court_id);
+            // **Kein** `due_call_stage`, **kein** `note_court_call_at_least`:
+            // Die Aufforderung ist kein Aufruf (Spec A3.3). Wer hier
+            // „konsistenzhalber" eine Stufe hochzählte, ließe das
+            // Aufruf-Abzeichen springen und brächte die Turnierleitung um
+            // die Zählung, an der die kampflose Wertung hängt.
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::StartPlay {
+                    court_id: *court_id,
+                    match_id: *match_id,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
+        A::AnnounceScorekeeper { court_id } => {
+            if !config.scorekeeper.enabled {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Die Zähltafelbediener-Verwaltung ist ausgeschaltet.",
+                ));
+            }
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Das Spiel, das gerade auf dem Feld steht — an ihm hängt die
+            // Bediener-Zuweisung, und es begrenzt den Zähler.
+            let Some(m) = snap.matches.iter().find(|m| {
+                m.court_id == Some(*court_id) && m.status == crate::btp::model::MatchStatus::OnCourt
+            }) else {
+                return Err(TlResponse::err(
+                    C::StaleView,
+                    "Auf diesem Feld läuft gerade kein Spiel.",
+                ));
+            };
+            // Ohne zugewiesenen Bediener gäbe es niemanden zu nennen — ein
+            // Gong ohne Inhalt. Die eine Prüfung deckt alle drei Fälle ab
+            // (A2.4): leere Warteschlange, Feld mit abgeschalteter Vergabe
+            // (`CourtSwitches::operator`) und global ausgeschaltete
+            // Verwaltung — in allen dreien weist der Sync-Lauf gar nicht
+            // erst zu.
+            let namen = tablet.assigned_scorekeeper(*court_id).unwrap_or_default();
+            if namen.is_empty() {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Diesem Feld ist keine Tabletbedienung zugewiesen.",
+                ));
+            }
+            let hall = hall_of_court(&snap, *court_id);
+            // Eigener Zähler — `call_stages`/`prep_call_stages` bleiben
+            // unberührt (A2.5). Ein Nachruf an die Bedienung ist kein
+            // Spieler-Aufruf; zöge er die Aufruf-Zahl hoch, glaubte die
+            // Turnierleitung, sie hätte schon zweimal gerufen.
+            let stage = tablet.note_scorekeeper_call(*court_id, m.id);
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::ScorekeeperCall {
+                    court_id: *court_id,
+                    match_id: m.id,
+                    stage,
                 },
                 now_ms,
             );
@@ -737,6 +814,40 @@ pub(crate) fn state_for_relay(
     // tl-web-ausbau; Review 17.08.2026), sonst kippte ein rein
     // additives Panel den gesamten Cloud-Zustand über die Relay-Grenze.
     state.checkin_times = None;
+    let json = serde_json::to_string(&state).unwrap_or_default();
+    if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+        return (json, rev);
+    }
+    // Vorletzte Stufe: die Spielzeiten-Auswertung. Sie trägt seit der
+    // Achsen-Erweiterung (Spec `tl-sicht-feinschliff`, Punkt 1) VIER
+    // Zeilensätze statt einem und ist damit der größte rein informative
+    // Brocken im Zustand. Das Panel verschwindet dann ehrlich, statt den
+    // ganzen Stand über die Grenze zu kippen: Reißt sie, verwirft der Relay
+    // das komplette Frame samt Vorgänger, und die Cloud-Turnierleitung
+    // sähe GAR NICHTS mehr — auch keine Felder.
+    state.time_stats = None;
+    let json = serde_json::to_string(&state).unwrap_or_default();
+    if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+        return (json, rev);
+    }
+    // Letzte Rettung vor der Aufgabe: die Ergebnisliste stutzen. Ebenfalls
+    // reine Rückschau — die Felder dagegen sind das Bedienelement der Seite
+    // und bleiben in JEDER Stufe unangetastet. Nötig geworden, seit die
+    // Liste Lizenznummern trägt (Punkt 4 derselben Spec).
+    //
+    // Reihenfolge nach Betriebswert (A0.1): queue → checkin_times →
+    // time_stats → finished. Die Auswertung fällt vor der Ergebnisliste,
+    // weil ein einzelnes Ergebnis am Feld öfter gebraucht wird als der
+    // Median einer Klasse.
+    for limit in [10usize, 3] {
+        if state.finished.len() > limit {
+            state.finished.truncate(limit);
+            let json = serde_json::to_string(&state).unwrap_or_default();
+            if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+                return (json, rev);
+            }
+        }
+    }
     let letzte_rev = rev;
     let letzte = serde_json::to_string(&state).unwrap_or_default();
     if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
@@ -951,6 +1062,24 @@ fn due_call_stage(
     }
 }
 
+/// Halle eines Felds als Name; leer, wenn das Feld keiner zugeordnet ist
+/// oder das Turnier nur eine Halle hat.
+///
+/// Eine Stelle statt vormals drei wörtlicher Kopien (Spec
+/// `tl-sicht-feinschliff`, Punkt 2 sah das Zusammenfassen vor): Jede
+/// Ansage-Aktion muss ihre Zielhalle auflösen, und ein Ansage-Auftrag in
+/// der falschen Halle ist ein Fehler, den niemand am Bildschirm sieht —
+/// er fällt erst auf, wenn die andere Halle etwas hört.
+fn hall_of_court(snap: &crate::btp::model::BtpSnapshot, court_id: i64) -> String {
+    snap.court_infos
+        .iter()
+        .find(|c| c.id == court_id)
+        .and_then(|c| c.location_id)
+        .and_then(|id| snap.locations.iter().find(|l| l.id == id))
+        .map(|l| l.name.clone())
+        .unwrap_or_default()
+}
+
 /// Die Antwort auf einen Ansage-Auftrag.
 ///
 /// Der Auftrag ist abgelegt und die Stufe gezählt — das gilt auch dann, wenn
@@ -969,7 +1098,12 @@ fn announcement_response(tablet: &TabletState, hall: &str, now_ms: u64) -> relay
     } else {
         format!("In {hall} ist kein Ansage-Gerät verbunden")
     };
-    ok.with_warning(format!("{wo} — der Aufruf wurde nicht gesprochen."))
+    // „die Ansage", nicht „der Aufruf": Über diese Funktion laufen auch die
+    // Schiedsrichter- und die Spielbeginn-Ansage, und die sind ausdrücklich
+    // KEIN Aufruf (sie zählen keine Stufe hoch). Stünde dort „der Aufruf",
+    // widerspräche der Bildschirm der Bedienanleitung, und die
+    // Turnierleitung schlösse daraus, die Zählung sei bewegt worden.
+    ok.with_warning(format!("{wo} — die Ansage wurde nicht gesprochen."))
 }
 
 /// Warum eine Ergebnis-Korrektur gerade nicht geht.
@@ -1811,6 +1945,10 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             operator,
         } => format!("off-court:{court_id}:{sr}:{ar}:{operator}"),
         A::AnnounceOfficials { court_id } => format!("off-announce:{court_id}"),
+        A::AnnounceScorekeeper { court_id } => format!("sk-announce:{court_id}"),
+        A::AnnounceStartPlay { court_id, match_id } => {
+            format!("start-play:{court_id}:{match_id}")
+        }
         A::QueueReorder {
             match_id,
             before_match_id,
@@ -1918,6 +2056,10 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Feld-Schalter von Feld {court_id}")
         }
         A::AnnounceOfficials { court_id } => format!("Schiedsrichter-Ansage Feld {court_id}"),
+        A::AnnounceScorekeeper { court_id } => format!("Bediener-Nachruf Feld {court_id}"),
+        A::AnnounceStartPlay { court_id, .. } => {
+            format!("Spielbeginn-Ansage Feld {court_id}")
+        }
         A::QueueReorder { match_id, .. } => format!("Spielliste umsortiert (Spiel {match_id})"),
         A::QueueOrderReset => "Manuelle Spielreihenfolge zurückgesetzt".to_string(),
         A::SetAutoAssign { enabled } => {
@@ -2217,6 +2359,15 @@ pub struct TlCourt {
     /// Nation (Entscheidung 12.08.2026), Default aus.
     pub team1_club: Vec<String>,
     pub team2_club: Vec<String>,
+    /// Lizenznummern (BTP `MemberID`), **parallel** zu `team1`/`team2`;
+    /// leerer String, wo BTP keine führt. Siehe [`TlMatch::team1_ids`] —
+    /// seit 18.08.2026 (Spec `tl-sicht-feinschliff`) auch am laufenden
+    /// Spiel, damit die Feldkachel auf dieselbe badhub-Spielerseite
+    /// verlinkt wie die Warteliste.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
@@ -2520,6 +2671,13 @@ pub struct TlFinished {
     pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
+    /// Lizenznummern, **parallel** zu `team1`/`team2`. Siehe
+    /// [`TlCourt::team1_ids`] — die Beendet-Liste ist die zweite Stelle, an
+    /// der die Turnierleitung während des Turniers nachschlägt.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     /// 1 oder 2 — wer gewonnen hat.
     pub winner: u8,
     pub sets: Vec<(i64, i64)>,
@@ -2555,7 +2713,24 @@ pub struct TlFinished {
 /// Personendaten (Datenschutz-Wächter prüft mit).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlTimeStats {
+    /// Auswertung je Klasse × Disziplin — die ursprüngliche und weiterhin
+    /// voreingestellte Achse.
     pub rows: Vec<TlTimeStatsRow>,
+    /// Dieselben Messwerte nach Klasse, nach Disziplin und nach Halle
+    /// geschnitten (Spec `tl-sicht-feinschliff`, Punkt 1). Alle vier reisen
+    /// **gemeinsam** mit: Der Zustand entsteht seit ADR 0034 einmal zentral
+    /// für alle Geräte, die Achsen-Wahl liegt aber im Profil je Gerät — der
+    /// Host kann also gar nicht nur die gewählte liefern. Das Umschalten
+    /// ist damit ein reiner Client-Vorgang ohne Rückfrage.
+    ///
+    /// `by_hall` ist bei Ein-Hallen-Turnieren **leer**; die Seite bietet
+    /// die Achse dann nicht an (A1.6).
+    #[serde(default)]
+    pub by_class: Vec<TlTimeStatsRow>,
+    #[serde(default)]
+    pub by_discipline: Vec<TlTimeStatsRow>,
+    #[serde(default)]
+    pub by_hall: Vec<TlTimeStatsRow>,
     /// Turnierweiter Brutto-Median (ab 3 Messwerten), Minuten.
     pub tournament_brutto_mins: Option<i64>,
     /// Konfigurierter Startwert (Minuten) — die Seite erklärt damit die
@@ -2568,6 +2743,16 @@ pub struct TlTimeStats {
 pub struct TlTimeStatsRow {
     pub class_label: String,
     pub discipline: String,
+    /// Nur auf der Hallen-Achse gefüllt; leer heißt dort „ohne Halle"
+    /// (Messwerte von vor der Umstellung). Auf den anderen Achsen immer
+    /// leer — und dort wird das Feld deshalb **weggelassen**: Bei drei von
+    /// vier Achsen wäre es toter Ballast, und der Zustand ringt in großen
+    /// Turnieren um jedes Kilobyte (siehe Kürzungskaskade in
+    /// `state_for_relay`). Das geht nur, weil das Feld NEU ist — bei
+    /// `class_label`/`discipline` würde es alte Seiten brechen, die sie
+    /// unbedingt lesen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hall: String,
     pub count: usize,
     pub brutto_mins: i64,
     pub netto_mins: i64,
@@ -2667,13 +2852,28 @@ pub(crate) fn build_state_limited(
     // Felder und Warteliste stammen aus **demselben** Schnappschuss. Zwei
     // getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen —
     // dann beschrieben Felder und Liste zwei verschiedene Turnierstände.
+    // Match-ID → Spiel, einmal für den ganzen Bau. Zwei Nutzer: Die
+    // Feldkachel braucht den Spieler-Datensatz für die Lizenznummern
+    // (`CourtOverview` führt sie bewusst nicht mit — sie geht auch an
+    // Tablet und Court-Monitor), und der Prognose-Block weiter unten
+    // suchte bisher je belegtem Feld linear über alle Spiele. Bei einem
+    // großen Turnier sind das ein Aufbau gegen bis zu 26 volle Scans.
+    let match_by_id: std::collections::HashMap<i64, &crate::btp::model::BtpMatch> =
+        snap.matches.iter().map(|m| (m.id, m)).collect();
+
     let mut courts: Vec<TlCourt> = tablet
         .overview_from(&snap)
         .into_iter()
         .map(|c| {
             let clearing = clearing_match(&snap, c.court_id, c.match_id);
             let schalter = tablet.officials_store().court_switches(c.court_id);
-            court_view(c, clearing, schalter)
+            // `match_id == 0` heißt „Feld frei" und ist keine Kennung —
+            // ohne die Wache bekäme jedes freie Feld die Nummern eines
+            // (theoretischen) Spiels mit der ID 0, bei leerer Namensliste.
+            let spiel = (c.match_id != 0)
+                .then(|| match_by_id.get(&c.match_id).copied())
+                .flatten();
+            court_view(c, clearing, schalter, spiel)
         })
         .collect();
 
@@ -2798,7 +2998,10 @@ pub(crate) fn build_state_limited(
                     now_min
                 };
                 if c.match_id != 0 {
-                    if let Some(m) = snap.matches.iter().find(|mm| mm.id == c.match_id) {
+                    // Über dieselbe Map wie die Feldkacheln oben: vorher
+                    // war das ein linearer Scan über alle Spiele JE
+                    // belegtem Feld (Review 18.08.2026).
+                    if let Some(m) = match_by_id.get(&c.match_id) {
                         for p in m.team1.iter().chain(m.team2.iter()) {
                             player_ready.insert(assign::player_key(p), free_at_min + rest_min);
                         }
@@ -2902,16 +3105,8 @@ pub(crate) fn build_state_limited(
                 .iter()
                 .map(|p| p.club.clone().unwrap_or_default())
                 .collect(),
-            team1_ids: m
-                .team1
-                .iter()
-                .map(|p| p.member_id.clone().unwrap_or_default())
-                .collect(),
-            team2_ids: m
-                .team2
-                .iter()
-                .map(|p| p.member_id.clone().unwrap_or_default())
-                .collect(),
+            team1_ids: license_ids(&m.team1),
+            team2_ids: license_ids(&m.team2),
             hall,
             hall_source,
             prep_call: call.map(|(hall, called_at_ms)| TlPrepCall {
@@ -3014,6 +3209,8 @@ pub(crate) fn build_state_limited(
                 discipline: m.discipline.as_str().to_string(),
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
                 team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+                team1_ids: license_ids(&m.team1),
+                team2_ids: license_ids(&m.team2),
                 winner: m.winner.unwrap_or(0),
                 sets: m.sets.clone(),
                 result: match m.result {
@@ -3096,18 +3293,16 @@ pub(crate) fn build_state_limited(
         scorekeepers,
         finished,
         time_stats: stats.as_ref().map(|stats| TlTimeStats {
-            rows: stats
-                .rows()
-                .into_iter()
-                .map(|r| TlTimeStatsRow {
-                    class_label: r.class_label,
-                    discipline: r.discipline,
-                    count: r.count,
-                    brutto_mins: r.brutto_min as i64,
-                    netto_mins: r.netto_min as i64,
-                    diff_mins: r.diff_min as i64,
-                })
-                .collect(),
+            rows: stats_zeilen(stats.rows()),
+            by_class: stats_zeilen(stats.rows_class()),
+            by_discipline: stats_zeilen(stats.rows_discipline()),
+            // Ein-Hallen-Turniere bekommen die Achse gar nicht erst — dort
+            // gäbe es genau eine Zeile „ohne Halle", und die sagt nichts.
+            by_hall: if snap.is_multi_hall() {
+                stats_zeilen(stats.rows_hall())
+            } else {
+                Vec::new()
+            },
             tournament_brutto_mins: stats.tournament_brutto_min().map(|v| v as i64),
             default_mins: config.prediction.default_duration_mins.round() as i64,
         }),
@@ -3191,6 +3386,14 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
                 crate::config::TlListPosition::Bottom => relay_proto::TlListPositionWire::Bottom,
             },
+            time_stats_axis: match p.display.time_stats_axis {
+                crate::config::TlTimeStatsAxis::Group => relay_proto::TlTimeStatsAxisWire::Group,
+                crate::config::TlTimeStatsAxis::Class => relay_proto::TlTimeStatsAxisWire::Class,
+                crate::config::TlTimeStatsAxis::Discipline => {
+                    relay_proto::TlTimeStatsAxisWire::Discipline
+                }
+                crate::config::TlTimeStatsAxis::Hall => relay_proto::TlTimeStatsAxisWire::Hall,
+            },
         },
         updated_at_ms: p.updated_at_ms,
     }
@@ -3233,6 +3436,14 @@ fn display_settings_from_wire(
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
             relay_proto::TlListPositionWire::Bottom => crate::config::TlListPosition::Bottom,
+        },
+        time_stats_axis: match d.time_stats_axis {
+            relay_proto::TlTimeStatsAxisWire::Group => crate::config::TlTimeStatsAxis::Group,
+            relay_proto::TlTimeStatsAxisWire::Class => crate::config::TlTimeStatsAxis::Class,
+            relay_proto::TlTimeStatsAxisWire::Discipline => {
+                crate::config::TlTimeStatsAxis::Discipline
+            }
+            relay_proto::TlTimeStatsAxisWire::Hall => crate::config::TlTimeStatsAxis::Hall,
         },
     }
 }
@@ -3653,16 +3864,53 @@ fn officials_view(
     out.into_iter().map(|(_, o)| o).collect()
 }
 
+/// Lizenznummern einer Mannschaft, **stellungsgleich** zu den Namen: Wo BTP
+/// keine Nummer führt, steht ein leerer String statt gar nichts — sonst
+/// rutschte im Doppel der Link auf den falschen Partner. Einzige Ableitung
+/// dieser Art im Zustand; Warteliste, Feldkachel und Beendet-Liste teilen
+/// sie sich, damit die Stellungsgleichheit nicht an drei Orten gepflegt
+/// werden muss.
+fn license_ids(players: &[crate::btp::model::BtpPlayer]) -> Vec<String> {
+    players
+        .iter()
+        .map(|p| p.member_id.clone().unwrap_or_default())
+        .collect()
+}
+
+/// Statistik-Zeilen in die Wire-Form. Eine Stelle für alle vier Achsen —
+/// sie unterscheiden sich nur darin, welche Schlüsselfelder gefüllt sind.
+fn stats_zeilen(rows: &[crate::tablet::predict::StatsRow]) -> Vec<TlTimeStatsRow> {
+    rows.iter()
+        .map(|r| TlTimeStatsRow {
+            class_label: r.class_label.clone(),
+            discipline: r.discipline.clone(),
+            hall: r.hall.clone(),
+            count: r.count,
+            brutto_mins: r.brutto_min as i64,
+            netto_mins: r.netto_min as i64,
+            diff_mins: r.diff_min as i64,
+        })
+        .collect()
+}
+
 /// Beschneidet die Feld-Übersicht auf das, was die Turnierleitung braucht.
 ///
-/// Bewusst **weggelassen**: Nationalitäten (nur für die Sprachwahl der
-/// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
-/// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
-/// Vergabehilfe).
+/// Bewusst **weggelassen**: Akkustand (keine Geräte-Übersicht in diesem
+/// Feature) und die Aufschlag-Anzeige (Zählhilfe, keine Vergabehilfe).
+///
+/// Mitgegeben, weil die Turnierleitung sie braucht: **Nationalitäten** und
+/// **Vereinsnamen** (zuschaltbare Anzeige, Freigaben 09./12.08.2026) sowie
+/// die **Lizenznummern** als badhub-Link-Ziel (Freigabe 17.08.2026,
+/// ausgeweitet 18.08.2026). Letztere kommen nicht aus `CourtOverview` —
+/// die geht auch an Tablet und Court-Monitor, wo die Nummer nichts zu
+/// suchen hat —, sondern aus dem BTP-Spiel des Felds.
 fn court_view(
     c: crate::tablet::state::CourtOverview,
     clearing: Option<i64>,
     schalter: crate::tablet::officials::CourtSwitches,
+    // Das Spiel auf dem Feld, nur für die Lizenznummern — `CourtOverview`
+    // führt sie bewusst nicht mit. `None` bei freiem Feld.
+    spiel: Option<&crate::btp::model::BtpMatch>,
 ) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
@@ -3694,6 +3942,8 @@ fn court_view(
         team2_nat: c.team2_nationalities,
         team1_club: c.team1_clubs,
         team2_club: c.team2_clubs,
+        team1_ids: spiel.map(|m| license_ids(&m.team1)).unwrap_or_default(),
+        team2_ids: spiel.map(|m| license_ids(&m.team2)).unwrap_or_default(),
         sets: c.sets,
         tablet_connected: c.tablet_connected,
         injury: c.injury,
@@ -3746,10 +3996,10 @@ mod tests {
     }
 
     /// Spieler mit Lizenznummer. Für den Datensparsamkeits-Test (die Nummer
-    /// verlässt den Host nur in den Wartelisten-Einträgen — als
-    /// badhub-Link-Ziel, Freigabe 17.08.2026 — und bleibt bei laufenden/
-    /// beendeten Spielen draußen) sowie überall dort, wo ein realistisches
-    /// Fixture die Nummern mitwiegen muss (Relay-Größen-Wächter).
+    /// reist als badhub-Link-Ziel in der Warteliste — Freigabe 17.08.2026 —
+    /// sowie an laufenden und beendeten Spielen, Ausweitung 18.08.2026)
+    /// sowie überall dort, wo ein realistisches Fixture die Nummern
+    /// mitwiegen muss (Relay-Größen-Wächter).
     fn licensed_player(name: &str, license: &str) -> BtpPlayer {
         BtpPlayer {
             member_id: Some(license.to_string()),
@@ -4240,7 +4490,7 @@ mod tests {
         for (id, brutto_min) in [(101, 20), (102, 30), (103, 40)] {
             let start = 1_000_000;
             tablet.match_times_store().reconcile(
-                &[(id, "A", "mens_singles")],
+                &[(id, "A", "mens_singles", "")],
                 &std::collections::HashSet::new(),
                 start,
             );
@@ -4254,7 +4504,7 @@ mod tests {
         // Match 7: vor 5 min zugewiesen (Anlauf-Median genau verbraucht),
         // erster Punkt gestempelt ⇒ Live-Modell greift.
         tablet.match_times_store().reconcile(
-            &[(7, "A", "mens_singles")],
+            &[(7, "A", "mens_singles", "")],
             &std::collections::HashSet::new(),
             55 * 60_000,
         );
@@ -4286,7 +4536,7 @@ mod tests {
         for (id, brutto_min) in [(101, 20), (102, 30), (103, 40)] {
             let start = 1_000_000;
             tablet.match_times_store().reconcile(
-                &[(id, "A", "mens_singles")],
+                &[(id, "A", "mens_singles", "")],
                 &std::collections::HashSet::new(),
                 start,
             );
@@ -4299,7 +4549,7 @@ mod tests {
         }
         // Vor 10 min zugewiesen, nie ein Punkt gemeldet.
         tablet.match_times_store().reconcile(
-            &[(7, "A", "mens_singles")],
+            &[(7, "A", "mens_singles", "")],
             &std::collections::HashSet::new(),
             50 * 60_000,
         );
@@ -4325,7 +4575,7 @@ mod tests {
         for (id, brutto_min) in [(101, 20), (102, 30), (103, 40)] {
             let start = 1_000_000;
             tablet.match_times_store().reconcile(
-                &[(id, "A", "mens_singles")],
+                &[(id, "A", "mens_singles", "")],
                 &std::collections::HashSet::new(),
                 start,
             );
@@ -4338,7 +4588,7 @@ mod tests {
         }
         // Vor 40 min zugewiesen (Median 30 längst vorbei), nie ein Punkt.
         tablet.match_times_store().reconcile(
-            &[(7, "A", "mens_singles")],
+            &[(7, "A", "mens_singles", "")],
             &std::collections::HashSet::new(),
             20 * 60_000,
         );
@@ -4380,7 +4630,7 @@ mod tests {
         let store_seed = |id: i64, brutto_min: u64| {
             let start = 1_000_000;
             tablet.match_times_store().reconcile(
-                &[(id, "A", "mens_singles")],
+                &[(id, "A", "mens_singles", "")],
                 &std::collections::HashSet::new(),
                 start,
             );
@@ -4475,7 +4725,7 @@ mod tests {
             "unverändert → derselbe Cache"
         );
         tablet.match_times_store().reconcile(
-            &[(7, "A", "HE")],
+            &[(7, "A", "HE", "")],
             &std::collections::HashSet::new(),
             1_000,
         );
@@ -4514,7 +4764,7 @@ mod tests {
         running.court_id = Some(1);
         tablet.set_snapshot(snap(vec![a_court(1, None)], vec![running], Vec::new()));
         tablet.match_times_store().reconcile(
-            &[(7, "A", "mens_singles")],
+            &[(7, "A", "mens_singles", "")],
             &std::collections::HashSet::new(),
             50 * 60_000,
         );
@@ -5141,14 +5391,146 @@ mod tests {
     }
 
     #[test]
-    fn a_board_too_big_for_the_relay_is_shortened_instead_of_lost() {
-        // Der Relay legt einen zu großen Zustand nicht ab — und der Host
-        // erfährt davon nichts. Ohne eigene Kürzung wäre die
-        // Cloud-Oberfläche in genau den Turnieren tot, in denen sie am
-        // meisten hülfe: je größer das Turnier, desto sicherer.
-        // Ein volles Zwei-Hallen-Turnier: Die Warteliste wird **je Halle**
-        // gekappt, also stehen bis zu 240 Spiele im Zustand — mit
-        // Doppelpaarungen und Namen, wie sie im Badminton vorkommen.
+    fn das_zeiten_panel_liefert_alle_vier_achsen() {
+        // A1.1: Die Seite bekommt alle vier Schnitte gemeinsam — der
+        // Zustand entsteht zentral für alle Geräte, die Achsen-Wahl liegt
+        // aber im Profil je Gerät (ADR 0034).
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, Some(1)), a_court(2, Some(2))],
+            vec![a_match(1)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        ));
+        let seed = |id: i64, klasse: &str, disc: &str, halle: &str, brutto: u64| {
+            let start = 1_000_000;
+            tablet.match_times_store().reconcile(
+                &[(id, klasse, disc, halle)],
+                &std::collections::HashSet::new(),
+                start,
+            );
+            tablet
+                .match_times_store()
+                .stamp_first_point(id, start + 5 * 60_000);
+            tablet
+                .match_times_store()
+                .stamp_finished(id, true, start + brutto * 60_000);
+        };
+        seed(101, "A", "mens_singles", "Halle A", 20);
+        seed(102, "A", "womens_doubles", "Halle B", 30);
+        seed(103, "B", "mens_singles", "Halle B", 40);
+
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+        let stats = s.time_stats.expect("Prognose an ⇒ Statistik da");
+
+        assert_eq!(stats.rows.len(), 3, "drei Klasse-x-Disziplin-Gruppen");
+        assert_eq!(stats.by_class.len(), 2, "A und B");
+        assert_eq!(stats.by_discipline.len(), 2, "HE und DD");
+        assert_eq!(stats.by_hall.len(), 2, "Halle A und Halle B");
+        // A1.5: Jede Achse zerlegt dieselben drei Messwerte.
+        for zeilen in [
+            &stats.rows,
+            &stats.by_class,
+            &stats.by_discipline,
+            &stats.by_hall,
+        ] {
+            assert_eq!(zeilen.iter().map(|z| z.count).sum::<usize>(), 3);
+        }
+        // Der Hallenname steht nur auf der Hallen-Achse.
+        assert!(stats.by_hall.iter().all(|z| !z.hall.is_empty()));
+        assert!(stats.rows.iter().all(|z| z.hall.is_empty()));
+    }
+
+    #[test]
+    fn ein_ein_hallen_turnier_liefert_keine_hallen_achse() {
+        // A1.6: Dort gäbe es genau eine Zeile „ohne Halle" — die sagt
+        // nichts, also wird die Achse gar nicht erst angeboten.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, Some(1))],
+            vec![a_match(1)],
+            vec![crate::btp::model::BtpLocation {
+                id: 1,
+                name: "Einzige Halle".to_string(),
+            }],
+        ));
+        let start = 1_000_000;
+        tablet.match_times_store().reconcile(
+            &[(101, "A", "mens_singles", "")],
+            &std::collections::HashSet::new(),
+            start,
+        );
+        tablet
+            .match_times_store()
+            .stamp_first_point(101, start + 5 * 60_000);
+        tablet
+            .match_times_store()
+            .stamp_finished(101, true, start + 20 * 60_000);
+
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+        let stats = s.time_stats.expect("Statistik da");
+        assert!(stats.by_hall.is_empty(), "keine Hallen-Achse");
+        assert_eq!(stats.rows.len(), 1, "die übrigen Achsen bleiben");
+        assert_eq!(stats.by_class.len(), 1);
+    }
+
+    #[test]
+    fn die_achse_reist_durch_profile_to_wire_und_zurueck() {
+        // A1.3: Die Wahl liegt im Profil und muss beide Grenzen überstehen.
+        for achse in [
+            crate::config::TlTimeStatsAxis::Group,
+            crate::config::TlTimeStatsAxis::Class,
+            crate::config::TlTimeStatsAxis::Discipline,
+            crate::config::TlTimeStatsAxis::Hall,
+        ] {
+            let profil = crate::config::TlPanelProfile {
+                id: "p1".to_string(),
+                name: "Test".to_string(),
+                display: crate::config::TlDisplaySettings {
+                    time_stats_axis: achse,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let wire = profile_to_wire(&profil);
+            let zurueck = display_settings_from_wire(&wire.display);
+            assert_eq!(
+                zurueck.time_stats_axis, achse,
+                "die Achse muss den Rundweg überstehen"
+            );
+        }
+    }
+
+    #[test]
+    fn ein_profil_ohne_achsen_feld_liest_sich_als_gruppe() {
+        // A1.2: Jedes vor v0.9.231 gespeicherte Profil kennt das Feld nicht
+        // — und muss auf der bisherigen Ansicht landen, nicht auf einer
+        // zufälligen.
+        let alt = r#"{"showNumbers":true,"listPosition":"right"}"#;
+        let d: relay_proto::TlDisplaySettingsWire =
+            serde_json::from_str(alt).expect("altes Profil bleibt lesbar");
+        assert_eq!(d.time_stats_axis, relay_proto::TlTimeStatsAxisWire::Group);
+        assert_eq!(
+            display_settings_from_wire(&d).time_stats_axis,
+            crate::config::TlTimeStatsAxis::Group
+        );
+    }
+
+    #[test]
+    fn die_spielzeiten_auswertung_faellt_vor_dem_ganzen_zustand() {
+        // Spec `tl-sicht-feinschliff` A0.1: Die Auswertung trägt seit der
+        // Achsen-Erweiterung VIER Zeilensätze. Passt der Zustand damit nicht
+        // mehr durch, wird SIE geopfert — nicht der ganze Stand. Ohne die
+        // Stufe verwürfe der Relay das komplette Frame samt Vorgänger, und
+        // die Cloud-Turnierleitung sähe gar nichts mehr, auch keine Felder.
         let mut cfg = AppConfig::default();
         for (draw, halle) in [("HE A", "Halle A"), ("HE B", "Halle B")] {
             cfg.discipline_hall_rules.push(DisciplineHallRule {
@@ -5161,10 +5543,6 @@ mod tests {
         let mut matches = Vec::new();
         for id in 1..=400 {
             let mut m = a_match(id);
-            // Mit Lizenznummern: Seit die Warteliste `team1_ids` und
-            // `player_keys` trägt, wäre ein Fixture ohne Nummern ein zu
-            // kleiner Worst Case — der Wächter maß den Cloud-Zustand sonst
-            // um zehntausende Bytes zu klein (Review-Fund 17.08.2026).
             m.team1 = vec![
                 licensed_player(
                     "Maximiliane Charlotte von Hohenlohe-Waldenburg",
@@ -5180,7 +5558,237 @@ mod tests {
             m.round_name = "Achtelfinale der Trostrunde".to_string();
             matches.push(m);
         }
-        tablet.set_snapshot(snap(Vec::new(), matches, Vec::new()));
+        // 40 belegte Felder und 30 Ergebnisse — ein großes Zwei-Hallen-
+        // Turnier. Ohne diese Grundlast bliebe die Auswertung der einzige
+        // Brocken, und der Test bewiese nur, dass sie allein nicht reicht.
+        let mut courts = Vec::new();
+        for court_id in 1..=40 {
+            courts.push(a_court(court_id, Some(if court_id <= 20 { 1 } else { 2 })));
+            let mut m = a_match(50_000 + court_id);
+            m.team1 = vec![
+                player("Maximiliane Charlotte von Hohenlohe-Waldenburg"),
+                player("Friederike Alexandra Schmidt-Blumenthal"),
+            ];
+            m.team2 = vec![
+                player("Konstantin Ferdinand Oppermann-Lindenau"),
+                player("Sebastian Aurelius Wittgenstein-Berleburg"),
+            ];
+            m.round_name = "Achtelfinale der Trostrunde".to_string();
+            m.status = MatchStatus::OnCourt;
+            m.court_id = Some(court_id);
+            m.court = Some(format!("Feld {court_id}"));
+            matches.push(m);
+        }
+        for n in 1..=30 {
+            let mut m = a_match(60_000 + n);
+            m.team1 = vec![
+                player("Maximiliane Charlotte von Hohenlohe-Waldenburg"),
+                player("Friederike Alexandra Schmidt-Blumenthal"),
+            ];
+            m.team2 = vec![
+                player("Konstantin Ferdinand Oppermann-Lindenau"),
+                player("Sebastian Aurelius Wittgenstein-Berleburg"),
+            ];
+            m.status = MatchStatus::Finished;
+            m.winner = Some(1);
+            m.finished_at = Some(3_000_000 + n as u64);
+            m.sets = vec![(21, 19), (19, 21), (21, 18)];
+            matches.push(m);
+        }
+        tablet.set_snapshot(snap(
+            courts,
+            matches,
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Sporthalle Nordwest".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Sporthalle Suedost".to_string(),
+                },
+            ],
+        ));
+
+        // Viele Messwerte über viele Gruppen — ein großes Turnier hat
+        // Dutzende Klassen-/Disziplin-/Hallen-Kombinationen, und jede wird
+        // in bis zu vier Achsen zu einer Zeile.
+        let mut id = 100_000;
+        for klasse in [
+            "A", "B", "C", "D", "E", "F", "G", "H", "U11", "U13", "U15", "U17", "U19", "O30",
+            "O40", "O50", "O60", "AK1", "AK2", "AK3", "AK4", "AK5",
+        ] {
+            for disc in [
+                "mens_singles",
+                "womens_singles",
+                "mens_doubles",
+                "womens_doubles",
+                "mixed_doubles",
+            ] {
+                for (n, halle) in ["Halle Nordwest", "Halle Suedost"].iter().enumerate() {
+                    id += 1;
+                    let start = 1_000_000;
+                    tablet.match_times_store().reconcile(
+                        &[(id, klasse, disc, halle)],
+                        &std::collections::HashSet::new(),
+                        start,
+                    );
+                    tablet
+                        .match_times_store()
+                        .stamp_first_point(id, start + 5 * 60_000);
+                    tablet.match_times_store().stamp_finished(
+                        id,
+                        true,
+                        start + (20 + n as u64) * 60_000,
+                    );
+                }
+            }
+        }
+        let voll = build_state(&tablet, &cfg, 3_600_000, 7);
+        let stats = voll.time_stats.as_ref().expect("Statistik ist da");
+        assert!(
+            stats.rows.len() + stats.by_class.len() + stats.by_discipline.len() >= 70,
+            "Fixture-Fehler: zu wenige Statistik-Zeilen ({} + {} + {})",
+            stats.rows.len(),
+            stats.by_class.len(),
+            stats.by_discipline.len()
+        );
+
+        let (json, _rev) = state_for_relay(&tablet, &cfg, 3_600_000);
+        // Gemessen am 18.08.2026 mit genau diesem Fixture: Die Auswertung
+        // wiegt 14 760 Bytes (110/22/5/2 Zeilen). Ohne die Kürzungsstufe
+        // ginge der Zustand mit gut 70 000 von erlaubten 65 536 Bytes
+        // hinaus — der Relay verwürfe ihn samt Vorgänger. Mit ihr sind es
+        // 55 286.
+        assert!(
+            json.len() <= relay_proto::MAX_TL_STATE_LEN,
+            "passt nicht: {} Bytes",
+            json.len()
+        );
+        let state: TlState = serde_json::from_str(&json).unwrap();
+        assert!(
+            state.time_stats.is_none(),
+            "die Auswertung muss geopfert worden sein"
+        );
+        // Und der Rest steht: Die Warteliste ist gekürzt, aber da.
+        assert!(!state.queue.is_empty(), "die Bedienung bleibt");
+        assert!(state.queue_truncated > 0, "gekürzt, aber gesagt");
+    }
+
+    /// Ein volles Turnier als Fixture für die Relay-Größen-Wächter.
+    ///
+    /// Der Zuschnitt ist über die Jahre gewachsen, weil jeder zu kleine
+    /// Worst Case den Cloud-Zustand zu klein maß:
+    /// - **Doppelpaarungen mit langen Namen und Lizenznummern** — seit die
+    ///   Warteliste `team1_ids`/`player_keys` trägt (Review 17.08.2026).
+    /// - **Belegte Felder und beendete Spiele** — seit auch sie die Nummern
+    ///   tragen (Spec `tl-sicht-feinschliff` Punkt 4); vorher maß der
+    ///   Wächter allein die Warteliste und hätte ein Wachstum in genau
+    ///   diesen beiden Listen nie bemerkt.
+    /// - **Vereinsnamen** — sie reisen **immer** mit, unabhängig von
+    ///   `display.show_club_names` (die Einstellung steuert nur die
+    ///   Anzeige). Ohne sie fehlten mehrere Kilobyte, also mehr als die
+    ///   gesamte Reserve (Security-Review 18.08.2026).
+    /// - **Schiedsrichter und Zähltafelbediener** — zwei weitere Listen im
+    ///   selben Zustand, die **nicht** in der Kürzungskaskade stehen.
+    fn volles_turnier(felder: i64, beendete: i64, wartende: i64) -> (TabletState, AppConfig) {
+        let mut cfg = AppConfig::default();
+        // Die Warteliste wird **je Halle** gekappt — mit zwei Hallen stehen
+        // entsprechend mehr Spiele im Zustand.
+        for (draw, halle) in [("HE A", "Halle A"), ("HE B", "Halle B")] {
+            cfg.discipline_hall_rules.push(DisciplineHallRule {
+                discipline: "mens_singles".to_string(),
+                draw_name: draw.to_string(),
+                hall: halle.to_string(),
+            });
+        }
+        cfg.scorekeeper.enabled = true;
+        let im_verein = |name: &str, lizenz: &str, verein: &str| {
+            let mut p = licensed_player(name, lizenz);
+            p.club = Some(verein.to_string());
+            p
+        };
+        let besetze = |m: &mut crate::btp::model::BtpMatch, n: i64| {
+            m.team1 = vec![
+                im_verein(
+                    "Maximiliane Charlotte von Hohenlohe-Waldenburg",
+                    &format!("08-1{n:05}"),
+                    "TSV Musterhausen-Oberdorf 1899 e.V.",
+                ),
+                im_verein(
+                    "Friederike Alexandra Schmidt-Blumenthal",
+                    &format!("08-2{n:05}"),
+                    "SG Niederkirchen-Waldrand von 1911",
+                ),
+            ];
+            m.team2 = vec![
+                im_verein(
+                    "Konstantin Ferdinand Oppermann-Lindenau",
+                    &format!("08-3{n:05}"),
+                    "Badminton-Club Seeblick-Hinterberg e.V.",
+                ),
+                im_verein(
+                    "Sebastian Aurelius Wittgenstein-Berleburg",
+                    &format!("08-4{n:05}"),
+                    "1. BV Grün-Weiß Talheim-Sonnenberg",
+                ),
+            ];
+            m.round_name = "Achtelfinale der Trostrunde".to_string();
+        };
+        let mut matches = Vec::new();
+        for id in 1..=wartende {
+            let mut m = a_match(id);
+            besetze(&mut m, id);
+            m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
+            matches.push(m);
+        }
+        let mut courts = Vec::new();
+        for court_id in 1..=felder {
+            courts.push(a_court(court_id, None));
+            let mut m = a_match(10_000 + court_id);
+            besetze(&mut m, 10_000 + court_id);
+            m.status = crate::btp::model::MatchStatus::OnCourt;
+            m.court_id = Some(court_id);
+            m.court = Some(format!("Feld {court_id}"));
+            matches.push(m);
+        }
+        for n in 1..=beendete {
+            let mut m = a_match(20_000 + n);
+            besetze(&mut m, 20_000 + n);
+            m.status = crate::btp::model::MatchStatus::Finished;
+            m.winner = Some(1);
+            m.finished_at = Some(900_000 + n as u64);
+            m.sets = vec![(21, 19), (19, 21), (21, 18)];
+            matches.push(m);
+        }
+        let mut schnappschuss = snap(courts, matches, Vec::new());
+        schnappschuss.officials = (1..=40)
+            .map(|id| crate::btp::model::BtpOfficial {
+                id,
+                name: format!("Wolfgang-Dietrich Oberschiedsrichter {id}"),
+                first: format!("Wolfgang-Dietrich {id}"),
+                nationality: Some("GER".to_string()),
+            })
+            .collect();
+        let tablet = TabletState::default();
+        tablet.set_snapshot(schnappschuss);
+        tablet.officials_store().set_enabled(true);
+        for n in 1..=20 {
+            tablet.add_scorekeeper_manual(
+                vec![format!("Bernadette Zähltafelbedienerin {n}")],
+                1_000 + n,
+            );
+        }
+        (tablet, cfg)
+    }
+
+    #[test]
+    fn a_board_too_big_for_the_relay_is_shortened_instead_of_lost() {
+        // Der Relay legt einen zu großen Zustand nicht ab — und der Host
+        // erfährt davon nichts. Ohne eigene Kürzung wäre die
+        // Cloud-Oberfläche in genau den Turnieren tot, in denen sie am
+        // meisten hülfe: je größer das Turnier, desto sicherer.
+        let (tablet, cfg) = volles_turnier(26, 30, 400);
 
         let (json, _rev) = state_for_relay(&tablet, &cfg, 1_000_000);
         assert!(
@@ -5188,10 +5796,35 @@ mod tests {
             "passt nicht: {} Bytes",
             json.len()
         );
+        // Gemessen am 18.08.2026 mit genau diesem Fixture: 62 467 von
+        // 65 536 Bytes, also nur noch rund 5 % Reserve — die Warteliste ist
+        // dabei schon auf ihre unterste Stufe gekürzt. Wer den Zustand um
+        // eine weitere Liste erweitert (nächster Kandidat: die vierachsige
+        // Spielzeiten-Statistik aus Punkt 1), misst hier nach und nimmt sie
+        // in die Kürzungskaskade auf — die Reserve trägt keine zweite
+        // Erweiterung mehr.
+        //
         // Und die Kürzung wird gemeldet, statt Spiele stillschweigend
         // verschwinden zu lassen.
         let state: TlState = serde_json::from_str(&json).unwrap();
         assert!(state.queue_truncated > 0, "gekürzt, aber nicht gesagt");
+        // Die Felder überleben JEDE Kürzungsstufe: Sie sind das
+        // Bedienelement der Seite — eine Turnierleitung ohne Feldkacheln
+        // kann nichts mehr zuweisen, während sie ohne Statistik oder
+        // Ergebnisliste weiterarbeitet.
+        assert_eq!(
+            state.courts.len(),
+            26,
+            "die Feldkacheln dürfen nie der Kürzung zum Opfer fallen"
+        );
+        // Und sie sind wirklich BELEGT: Ohne diese Prüfung könnte die
+        // Fixture-Bindung (Status, `court_id`) brechen, ohne dass ein Test
+        // rot wird — der Wächter mäße dann 26 leere Kacheln und die
+        // dokumentierte Reserve wäre falsch (Review 18.08.2026).
+        assert!(
+            state.courts.iter().all(|c| c.team1_ids.len() == 2),
+            "die Felder müssen mit Doppelpaarungen belegt sein, sonst misst der Wächter zu wenig"
+        );
 
         // Ein kleines Turnier verliert nichts.
         let klein = TabletState::default();
@@ -5200,6 +5833,40 @@ mod tests {
         let state: TlState = serde_json::from_str(&json).unwrap();
         assert_eq!(state.queue_truncated, 0);
         assert_eq!(state.queue.len(), 1);
+    }
+
+    #[test]
+    fn eine_ueberquellende_ergebnisliste_wird_gestutzt_statt_alles_zu_verlieren() {
+        // Letzte Stufe der Kürzungskaskade: Reicht selbst die kürzeste
+        // Warteliste nicht (mehr Felder als im Wächter oben), wird die
+        // Ergebnisliste gestutzt. Sie ist reine Rückschau — wer ein älteres
+        // Ergebnis sucht, schaut in BTP. Ohne diese Stufe ginge der Zustand
+        // über die Grenze, der Relay verwürfe das ganze Frame samt
+        // Vorgänger, und die Cloud-Turnierleitung sähe GAR NICHTS mehr:
+        // keine Felder, keine Liste, keine Bedienung.
+        let (tablet, cfg) = volles_turnier(40, 30, 400);
+
+        let (json, _rev) = state_for_relay(&tablet, &cfg, 1_000_000);
+        assert!(
+            json.len() <= relay_proto::MAX_TL_STATE_LEN,
+            "auch ein 40-Felder-Turnier muss durchpassen: {} Bytes",
+            json.len()
+        );
+        let state: TlState = serde_json::from_str(&json).unwrap();
+        assert!(
+            state.finished.len() < 30,
+            "die Ergebnisliste muss gestutzt worden sein, war {}",
+            state.finished.len()
+        );
+        // Aber nicht leergeräumt — die jüngsten Ergebnisse sind die, nach
+        // denen am Feld gefragt wird.
+        assert!(
+            !state.finished.is_empty(),
+            "die Ergebnisliste darf nicht ganz verschwinden"
+        );
+        // Und die Felder stehen auch hier vollständig.
+        assert_eq!(state.courts.len(), 40);
+        assert!(state.courts.iter().all(|c| c.team1_ids.len() == 2));
     }
 
     #[test]
@@ -5567,6 +6234,7 @@ mod tests {
             display: crate::config::TlDisplaySettings {
                 show_club_names: true,
                 list_position: crate::config::TlListPosition::Bottom,
+                time_stats_axis: Default::default(),
                 ..Default::default()
             },
             columns: 2,
@@ -6403,6 +7071,296 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.code, Some(relay_proto::TlErrorCode::CourtFree));
         assert_eq!(tablet.calls_made(3, 99), 0, "nichts hochgezählt");
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_laesst_call_stages_unberuehrt() {
+        // Der Kern von A3.3: Die Ansage ist KEIN Aufruf. Zählte sie mit,
+        // spränge das Aufruf-Abzeichen an der Kachel und die Turnierleitung
+        // glaubte, sie hätte schon zweimal gerufen — bis hin zur kampflosen
+        // Wertung, die am dritten Aufruf hängt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        assert_eq!(tablet.calls_made(3, 7), 0, "Ausgangslage: nie gerufen");
+
+        let done = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+
+        assert!(done.ok);
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            0,
+            "die Spielbeginn-Ansage darf keine Aufruf-Stufe verbrauchen"
+        );
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_braucht_ein_spiel_auf_dem_feld() {
+        // Ohne Spiel gäbe es niemanden, der anfangen soll — ein Gong ins
+        // Leere. Und ein Spielwechsel zwischen Antippen und Ankommen darf
+        // nicht die falsche Paarung antreiben, deshalb muss auch die
+        // Match-ID passen.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None), a_court(4, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+
+        let leer = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 4,
+                match_id: 7,
+            },
+        );
+        assert!(leer.is_err(), "freies Feld: nichts anzusagen");
+
+        let falsches_spiel = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 3,
+                match_id: 99,
+            },
+        );
+        assert!(
+            falsches_spiel.is_err(),
+            "inzwischen steht ein anderes Spiel auf dem Feld"
+        );
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_ist_beliebig_oft_ausloesbar() {
+        // Anders als der Aufruf kennt sie keine Obergrenze: Wer nach fünf
+        // Minuten immer noch nicht spielt, wird eben noch einmal gebeten.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let aktion = relay_proto::TlAction::AnnounceStartPlay {
+            court_id: 3,
+            match_id: 7,
+        };
+
+        for durchgang in 1..=4 {
+            let done = apply_state_action(&tablet, &AppConfig::default(), 50_000, &aktion);
+            assert!(
+                done.is_ok(),
+                "Durchgang {durchgang} muss durchgehen — die Ansage kennt keine Stufe"
+            );
+        }
+        assert_eq!(
+            tablet.announce_jobs_since("", 0, 50_000).len(),
+            4,
+            "jede Auslösung erzeugt einen eigenen Auftrag"
+        );
+    }
+
+    #[test]
+    fn die_spielbeginn_ansage_geht_nur_in_die_halle_des_felds() {
+        // In einem Zwei-Hallen-Turnier darf die andere Halle nicht mithören
+        // — dort steht ein ganz anderes Feld 3.
+        let tablet = TabletState::default();
+        let mut schnappschuss = snap(
+            vec![a_court(3, Some(2))],
+            vec![match_on_court(7, 3)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        schnappschuss.court_infos.push(a_court(9, Some(1)));
+        tablet.set_snapshot(schnappschuss);
+
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceStartPlay {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1, "die Halle des Felds hört die Ansage");
+        // Und es ist wirklich DIESE Ansage. Ohne die Typ-Prüfung wären alle
+        // Tests hier auch dann grün, wenn der Arm versehentlich einen
+        // Schiedsrichter-Auftrag ablegte — die Halle hörte im Turnier die
+        // falsche Ansage (Review 18.08.2026).
+        assert!(
+            matches!(
+                jobs[0].kind,
+                crate::tablet::state::AnnounceJobKind::StartPlay {
+                    court_id: 3,
+                    match_id: 7
+                }
+            ),
+            "erwartet wurde ein StartPlay-Auftrag für Feld 3/Spiel 7, war: {:?}",
+            jobs[0].kind
+        );
+        assert!(
+            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            "die andere Halle nicht"
+        );
+    }
+
+    #[test]
+    fn der_bediener_nachruf_zaehlt_getrennt_von_den_spieler_aufrufen() {
+        // A2.5 und der ganze Grund für die eigene Ansageart: Zöge ein
+        // Nachruf an die Bedienung die Spieler-Aufrufzahl hoch, glaubte die
+        // Turnierleitung, sie hätte schon zweimal gerufen — und an der
+        // dritten Stufe hängt die kampflose Wertung.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        tablet.officials_store().set_enabled(false);
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        tablet.assign_scorekeeper_for_court(3, 7);
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+
+        let done = apply_state_action(
+            &tablet,
+            &cfg,
+            50_000,
+            &relay_proto::TlAction::AnnounceScorekeeper { court_id: 3 },
+        )
+        .unwrap();
+
+        assert!(done.ok);
+        assert_eq!(tablet.scorekeeper_calls_made(3, 7), 1, "eigener Zähler");
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            0,
+            "die Spieler-Aufrufzahl darf sich NICHT bewegen"
+        );
+        assert_eq!(
+            tablet.prep_calls_made(7),
+            0,
+            "und der Vorbereitungs-Nachruf auch nicht"
+        );
+    }
+
+    #[test]
+    fn ein_neues_spiel_setzt_den_bediener_zaehler_zurueck() {
+        // A2.6: Sonst erbte die neue Paarung die Nachrufe ihres Vorgängers
+        // und stünde sofort beim „Dritten und letzten".
+        let tablet = TabletState::default();
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 1);
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 2);
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 3);
+        assert_eq!(tablet.note_scorekeeper_call(3, 7), 3, "gedeckelt bei 3");
+        assert_eq!(
+            tablet.note_scorekeeper_call(3, 99),
+            1,
+            "anderes Spiel auf dem Feld: von vorn"
+        );
+    }
+
+    #[test]
+    fn ein_bediener_nachruf_ohne_zugewiesenen_bediener_wird_abgelehnt() {
+        // A2.4: Ohne Zuweisung gäbe es niemanden zu nennen — ein Gong ohne
+        // Inhalt. Die Seite zeigt den Knopf dann gar nicht erst; der Host
+        // lehnt trotzdem ab, weil er sich nie auf die Seite verlässt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+
+        let abgelehnt = apply_state_action(
+            &tablet,
+            &cfg,
+            50_000,
+            &relay_proto::TlAction::AnnounceScorekeeper { court_id: 3 },
+        );
+        assert!(abgelehnt.is_err(), "kein Bediener ⇒ keine Ansage");
+    }
+
+    #[test]
+    fn der_bediener_nachruf_legt_einen_auftrag_in_der_halle_des_felds_ab() {
+        // A2.2/A2.3: Die Ansage geht nur in die Halle des Felds, trägt die
+        // Stufe und nennt genau dieses Feld und Spiel.
+        let tablet = TabletState::default();
+        let mut schnappschuss = snap(
+            vec![a_court(3, Some(2))],
+            vec![match_on_court(7, 3)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        schnappschuss.court_infos.push(a_court(9, Some(1)));
+        tablet.set_snapshot(schnappschuss);
+        tablet.add_scorekeeper_manual(vec!["Anna Alt".to_string()], 1_000);
+        tablet.assign_scorekeeper_for_court(3, 7);
+        let mut cfg = AppConfig::default();
+        cfg.scorekeeper.enabled = true;
+
+        apply_state_action(
+            &tablet,
+            &cfg,
+            50_000,
+            &relay_proto::TlAction::AnnounceScorekeeper { court_id: 3 },
+        )
+        .unwrap();
+
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1, "die Halle des Felds hört den Nachruf");
+        assert!(
+            matches!(
+                jobs[0].kind,
+                crate::tablet::state::AnnounceJobKind::ScorekeeperCall {
+                    court_id: 3,
+                    match_id: 7,
+                    stage: 1
+                }
+            ),
+            "erwartet wurde ein ScorekeeperCall Feld 3/Spiel 7/Stufe 1, war: {:?}",
+            jobs[0].kind
+        );
+        assert!(
+            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            "die andere Halle nicht"
+        );
     }
 
     #[test]
@@ -7328,11 +8286,21 @@ mod tests {
             // jedem Aushang; hier hinter dem Gerätezugang.
             "team1_club",
             "team2_club",
-            // Lizenznummer der Wartelisten-Spieler als Link-Ziel der
-            // badhub-Spielerseite (`/spieler/<Nr>/live`; Nutzer-Entscheidung
-            // 17.08.2026 — bewusste Freigabe wie Nation/Verein): Die Nummer
-            // ist der öffentliche URL-Schlüssel genau dieser Seite und steht
-            // hier hinter dem Gerätezugang. Geburtsjahr bleibt draußen.
+            // Lizenznummer als Link-Ziel der badhub-Spielerseite
+            // (`/spieler/<Nr>/live`; Nutzer-Entscheidung 17.08.2026,
+            // ausgeweitet 18.08.2026 — bewusste Freigabe wie Nation/Verein):
+            // Die Nummer ist der öffentliche URL-Schlüssel genau dieser
+            // Seite und steht hier hinter dem Gerätezugang. Geburtsjahr
+            // bleibt draußen.
+            //
+            // **Diese Liste ist flach** — sie erlaubt einen Feldnamen für
+            // JEDE Struktur des Zustands. Als die Nummern am 18.08.2026 von
+            // der Warteliste auf laufende und beendete Spiele ausgeweitet
+            // wurden, hat dieser Wächter deshalb **nicht** angeschlagen; die
+            // Ausweitung fing allein
+            // `the_state_never_carries_personal_data_beyond_its_purpose`.
+            // Wer hier eine Struktur-genaue Prüfung braucht, muss sie dort
+            // führen, nicht hier.
             "team1_ids",
             "team2_ids",
             "sets",
@@ -7449,6 +8417,16 @@ mod tests {
             "netto_mins",
             "time_stats",
             "rows",
+            // Die drei zusätzlichen Achsen der Spielzeiten-Auswertung
+            // (Spec `tl-sicht-feinschliff`, Punkt 1). Sie tragen genau
+            // dieselben Zahlen wie `rows`, nur anders gruppiert: Kürzel,
+            // Zähler und Minuten-Mediane — keine Personendaten. Die
+            // Hallen-Achse führt zusätzlich den BTP-Hallennamen, der in
+            // diesem Zustand ohnehin an jedem Feld und jedem
+            // Wartelisten-Eintrag steht.
+            "by_class",
+            "by_discipline",
+            "by_hall",
             "count",
             "diff_mins",
             "tournament_brutto_mins",
@@ -7503,6 +8481,10 @@ mod tests {
             // ebenfalls ein Anzeige-Häkchen, kein Personenbezug.
             "unlimitedCourtCalls",
             "listPosition",
+            // Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`)
+            // — reine Anzeige-Präferenz wie die Häkchen daneben, ein Wort
+            // aus vier festen Werten.
+            "timeStatsAxis",
             "updatedAtMs",
         ];
 
@@ -7608,6 +8590,7 @@ mod tests {
                 show_court_remaining: true,
                 unlimited_court_calls: true,
                 list_position: crate::config::TlListPosition::Bottom,
+                time_stats_axis: Default::default(),
             },
             updated_at_ms: 1_000,
             ..Default::default()
@@ -7709,6 +8692,152 @@ mod tests {
     }
 
     #[test]
+    fn laufende_und_beendete_spiele_tragen_die_lizenznummer_als_linkziel() {
+        // Spec `tl-sicht-feinschliff` A4.1/A4.2: Die Turnierleitung schlägt
+        // Spieler während des Turniers auf der öffentlichen badhub-Seite
+        // nach — an der Feldkachel und in der Beendet-Liste genauso wie in
+        // der Warteliste, wo es das seit 17.08.2026 gibt. Ohne die Nummer im
+        // Zustand kann die Seite dort keinen Link bauen.
+        let mut running = a_match(1);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![licensed_player("Müller", "08-001234")];
+        running.team2 = vec![licensed_player("Schmidt", "08-005678")];
+        let mut finished = a_match(2);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![licensed_player("Winter", "08-003333")];
+        finished.team2 = vec![licensed_player("Sommer", "08-004444")];
+
+        let s = state_with(
+            snap(vec![a_court(1, None)], vec![running, finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let feld = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(feld.team1_ids, vec!["08-001234".to_string()]);
+        assert_eq!(feld.team2_ids, vec!["08-005678".to_string()]);
+
+        let beendet = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(beendet.team1_ids, vec!["08-003333".to_string()]);
+        assert_eq!(beendet.team2_ids, vec!["08-004444".to_string()]);
+    }
+
+    #[test]
+    fn ein_spieler_ohne_lizenznummer_bleibt_ohne_id() {
+        // Spec `tl-sicht-feinschliff` A4.3: Nicht jeder Spieler hat eine
+        // Lizenznummer (Gastspieler, Papier-Meldung). Die Liste bleibt
+        // **parallel** zu den Namen — sonst rutschte der Link eines Doppels
+        // auf den falschen Partner. Der Namenlose bekommt einen leeren
+        // Eintrag, keinen fehlenden.
+        let mut running = a_match(1);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![
+            player("Ohne Nummer"),
+            licensed_player("Mit Nummer", "08-007777"),
+        ];
+        let mut finished = a_match(2);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![player("Papier")];
+        finished.team2 = vec![player("Kampflos")];
+
+        let s = state_with(
+            snap(vec![a_court(1, None)], vec![running, finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let feld = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(
+            feld.team1_ids,
+            vec![String::new(), "08-007777".to_string()],
+            "die Nummern bleiben Stellung für Stellung parallel zu den Namen"
+        );
+        assert_eq!(feld.team1.len(), feld.team1_ids.len());
+
+        let beendet = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(beendet.team1_ids, vec![String::new()]);
+        assert_eq!(beendet.team2_ids, vec![String::new()]);
+    }
+
+    #[test]
+    fn auch_die_beendet_liste_haelt_gemischte_nummern_stellungsgleich() {
+        // Derselbe Mischfall wie am laufenden Feld, aber in der
+        // Beendet-Liste: ein Doppel, bei dem nur einer eine Lizenznummer
+        // hat. Beide Wege bauen die Liste getrennt — ohne eigenen Test
+        // fiele eine Abweichung in genau einem von beiden nicht auf.
+        let mut finished = a_match(1);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(2);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![
+            licensed_player("Mit Nummer", "08-001111"),
+            player("Ohne Nummer"),
+        ];
+        finished.team2 = vec![player("Auch ohne"), licensed_player("Und mit", "08-002222")];
+
+        let s = state_with(
+            snap(Vec::new(), vec![finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let b = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(b.team1_ids, vec!["08-001111".to_string(), String::new()]);
+        assert_eq!(b.team2_ids, vec![String::new(), "08-002222".to_string()]);
+        assert_eq!(b.team1.len(), b.team1_ids.len());
+        assert_eq!(b.team2.len(), b.team2_ids.len());
+    }
+
+    #[test]
+    fn ein_freies_und_ein_abzuraeumendes_feld_tragen_keine_nummern() {
+        // Zwei Zustände ohne laufendes Spiel, die trotzdem eine Kachel
+        // erzeugen: das schlicht freie Feld und das Feld, das ein bereits
+        // beendetes Spiel noch hält, weil BTP es nicht abgeräumt hat
+        // (`clearing`). Beide dürfen keine Lizenznummern tragen — sonst
+        // stünde an einer Kachel ohne Namen ein Link auf eine fremde
+        // Spielerseite.
+        // Das „abzuräumende" Feld: BTP führt das Spiel noch am Feld
+        // (`court_id` gesetzt, kein Sieger, nicht `Finished`), aber es
+        // steht nicht mehr `OnCourt` — genau die Lücke, die `clearing`
+        // beschreibt. Wäre es als beendet markiert, gälte das Feld schlicht
+        // als frei.
+        let mut abgeraeumt = a_match(1);
+        abgeraeumt.status = MatchStatus::Scheduled;
+        abgeraeumt.court_id = Some(1);
+        abgeraeumt.team1 = vec![licensed_player("Winter", "08-003333")];
+        abgeraeumt.team2 = vec![licensed_player("Sommer", "08-004444")];
+
+        let s = state_with(
+            snap(
+                vec![a_court(1, None), a_court(2, None)],
+                vec![abgeraeumt],
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+
+        for court_id in [1, 2] {
+            let c = s
+                .courts
+                .iter()
+                .find(|c| c.court_id == court_id)
+                .unwrap_or_else(|| panic!("Feld {court_id}"));
+            assert_eq!(c.match_id, 0, "auf Feld {court_id} läuft nichts");
+            assert!(
+                c.team1_ids.is_empty() && c.team2_ids.is_empty(),
+                "Feld {court_id} ohne laufendes Spiel darf keine Nummern tragen"
+            );
+        }
+        // Gegenprobe, dass das Fixture wirkt: Feld 1 ist als „abzuräumen"
+        // erkannt, nicht einfach frei.
+        let eins = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(eins.clearing, Some(1), "Feld 1 hält das beendete Spiel");
+    }
+
+    #[test]
     fn the_state_never_carries_personal_data_beyond_its_purpose() {
         // Diese Daten laufen über eine aus dem Internet erreichbare Seite.
         // Der Test schlägt fehl, sobald jemand ein Feld nachrüstet, das
@@ -7717,17 +8846,31 @@ mod tests {
         //
         // **Die Nation ist seit 09.08.2026 erlaubt**, **der Verein seit
         // 12.08.2026** — beide standen vorher hier auf der Verbotsliste.
-        // **Die Lizenznummer der WARTELISTEN-Spieler ist seit 17.08.2026
-        // erlaubt** (Nutzer-Entscheidung): Sie ist der öffentliche
-        // URL-Schlüssel der badhub-Spielerseite (`/spieler/<Nr>/live`), auf
-        // die die Spielliste verlinkt. Laufende und beendete Spiele bleiben
-        // ohne — dort gibt es keinen Link, also auch keinen Zweck.
         // Bewusst geändert: Die Turnierleitung braucht sie, um die richtige
         // Paarung ans Feld zu holen und Vereinskollegen auseinanderzuhalten.
         // Es bleibt beim ISO-Kürzel bzw. Vereinsnamen, die Anzeige ist
         // turnierweit zuschaltbar und standardmäßig aus — und dieselbe Angabe
         // steht ohnehin auf jeder Meldeliste und jedem Aushang, während sie
         // hier hinter dem Gerätezugang steht.
+        //
+        // **Die Lizenznummer war ab 17.08.2026 nur in der Warteliste
+        // erlaubt und ist seit 18.08.2026 überall im Zustand erlaubt**
+        // (Nutzer-Entscheidung, Spec `tl-sicht-feinschliff` Punkt 4). Der
+        // Zweck ist derselbe geblieben und gilt an allen drei Stellen:
+        // **Nachschlagen der Spielerhistorie auf der öffentlichen
+        // badhub-Seite während des Turniers.** Die Nummer IST der
+        // öffentliche URL-Schlüssel genau dieser Seite
+        // (`/spieler/<Nr>/live`) — sie preiszugeben heißt hier, einen
+        // ohnehin öffentlichen Schlüssel hinter dem Gerätezugang zu
+        // wiederholen. Die frühere Beschränkung auf die Warteliste war
+        // keine Datenschutz-Grenze, sondern schlicht die Stelle, an der
+        // zuerst verlinkt wurde.
+        //
+        // **Unverändert draußen bleiben** (Verbotsliste unten): Geburtsjahr
+        // überall, Check-In-Spielernamen, Sperrlisten und Stammverein der
+        // Schiedsrichter. Der Feldname `member` bleibt ebenfalls verboten —
+        // die Nummern reisen als `team1_ids`/`team2_ids`, nicht als roher
+        // BTP-Spieler-Datensatz.
         let mut running = a_match(1);
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
@@ -7874,11 +9017,9 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 
         for verboten in [
-            "08-001234", // die Lizenznummer aus dem Fixture
-            "08-003333", // Lizenznummer des beendeten Spiels
-            "08-004444", // Lizenznummer des beendeten Spiels (Gegenseite)
-            "member",    // Lizenznummer-Feld
-            "birth",     // Geburtsjahr — laut Projektregel nirgends
+            "member", // roher BTP-Spieler-Datensatz (die Nummern reisen
+            // als `team1_ids`/`team2_ids`, siehe Kopfkommentar)
+            "birth", // Geburtsjahr — laut Projektregel nirgends
             "geburt",
             "battery", // Akkustand: keine Geräte-Übersicht in diesem Feature
             "serving", // Aufschlag: Zählhilfe, keine Vergabehilfe
@@ -7909,14 +9050,73 @@ mod tests {
             json.contains("sc musterstadt"),
             "der zuschaltbare Vereinsname muss transportiert werden"
         );
-        // Die Lizenznummer der Warteliste darf — sie ist das Link-Ziel der
-        // badhub-Spielerseite (Freigabe 17.08.2026, siehe Kopfkommentar).
-        // Die Verbotsliste oben stellt zugleich sicher, dass laufende
-        // (08-001234) und beendete Spiele (08-003333/08-004444) weiterhin
-        // OHNE Lizenznummer ausgeliefert werden.
-        assert!(
-            json.contains("08-009999"),
-            "die Warteliste braucht die Lizenznummer als badhub-Link-Ziel"
+        // Die Lizenznummer darf an allen drei Stellen — sie ist das
+        // Link-Ziel der badhub-Spielerseite (Freigabe 18.08.2026, siehe
+        // Kopfkommentar). Positiv geprüft statt nur geduldet: Fiele eine der
+        // drei Stellen still weg, wäre der Link dort tot, und niemand
+        // merkte es.
+        for (nummer, stelle) in [
+            ("08-009999", "die Warteliste"),
+            ("08-001234", "das laufende Spiel"),
+            ("08-003333", "das beendete Spiel"),
+            ("08-004444", "das beendete Spiel (Gegenseite)"),
+        ] {
+            assert!(
+                json.contains(nummer),
+                "{stelle} braucht die Lizenznummer als badhub-Link-Ziel"
+            );
+        }
+        // …und NUR an diesen drei Stellen. Das ist der Ersatz für die
+        // frühere Verbotsliste: Solange die Nummern verboten waren, fing
+        // ein simpler Textvergleich jede neue Struktur, die sie mitnahm.
+        // Seit sie erlaubt sind, muss die Prüfung strukturbezogen sein —
+        // sonst könnten sie unbemerkt auch in Vorbereitungs-Aufrufen,
+        // Walkover-Listen, Schiedsrichter-Einträgen oder im
+        // Anfangszeiten-Panel auftauchen (Security-Review 18.08.2026).
+        let baum: serde_json::Value = serde_json::to_value(&s).unwrap();
+        let mut fundorte: Vec<String> = Vec::new();
+        fn suche_ids(wert: &serde_json::Value, pfad: &str, fundorte: &mut Vec<String>) {
+            match wert {
+                serde_json::Value::Object(map) => {
+                    for (schluessel, unterwert) in map {
+                        if schluessel.ends_with("_ids") {
+                            fundorte.push(format!("{pfad}.{schluessel}"));
+                        }
+                        suche_ids(unterwert, &format!("{pfad}.{schluessel}"), fundorte);
+                    }
+                }
+                // Listenindex bewusst weglassen: Der Pfad soll die
+                // STRUKTUR benennen, nicht den zufälligen Eintrag.
+                serde_json::Value::Array(werte) => {
+                    for unterwert in werte {
+                        suche_ids(unterwert, &format!("{pfad}[]"), fundorte);
+                    }
+                }
+                _ => {}
+            }
+        }
+        suche_ids(&baum, "", &mut fundorte);
+        fundorte.sort();
+        fundorte.dedup();
+        let erlaubt = [
+            ".queue[].team1_ids",
+            ".queue[].team2_ids",
+            ".courts[].team1_ids",
+            ".courts[].team2_ids",
+            ".finished[].team1_ids",
+            ".finished[].team2_ids",
+        ];
+        for ort in &fundorte {
+            assert!(
+                erlaubt.contains(&ort.as_str()),
+                "Lizenznummern an einer nicht freigegebenen Stelle: {ort} \
+                 — Zweck (badhub-Link) prüfen und hier bewusst eintragen"
+            );
+        }
+        assert_eq!(
+            fundorte.len(),
+            erlaubt.len(),
+            "Fixture-Fehler: es müssen alle drei Stellen belegt sein, gefunden: {fundorte:?}"
         );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.

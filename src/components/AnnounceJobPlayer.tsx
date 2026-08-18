@@ -4,7 +4,12 @@ import {
   preparationCandidates,
   tabletOverview,
 } from "../api";
-import { announceCourt, announceOfficials } from "../io/announceCourt";
+import {
+  announceCourt,
+  announceOfficials,
+  announceStartPlay,
+  announceScorekeeper,
+} from "../io/announceCourt";
 import {
   playPreparationAnnouncement,
   resolveAnnouncementLanguage,
@@ -111,6 +116,47 @@ export function AnnounceJobPlayer({
         const court = info?.courts.find((c) => c.court_id === job.courtId);
         if (!court) return;
         announceOfficials(court, cfg, azureRef.current);
+        return;
+      }
+
+      if (job.kind === "start_play") {
+        // „Bitte mit dem Spielen beginnen": Feld und Aufforderung, sonst
+        // nichts. Wie beim Feld-Aufruf gegen den aktuellen Stand geprüft —
+        // steht inzwischen ein anderes Spiel dort, wäre die Aufforderung an
+        // die Falschen gerichtet.
+        const info = await tabletOverview().catch(() => null);
+        const court = info?.courts.find((c) => c.court_id === job.courtId);
+        if (!court || court.match_id !== job.matchId) return;
+        announceStartPlay(court, cfg, azureRef.current);
+        return;
+      }
+
+      if (job.kind === "scorekeeper_call") {
+        // Der zugewiesene Bediener steht im aktuellen Feld-Stand; der
+        // Auftrag trägt die Namen bewusst nicht mit sich (Struktur statt
+        // Text). Wie beim Feld-Aufruf gegen den frischen Stand geprüft —
+        // steht dort inzwischen ein anderes Spiel, ist der Nachruf
+        // gegenstandslos.
+        const info = await tabletOverview().catch(() => null);
+        const court = info?.courts.find((c) => c.court_id === job.courtId);
+        if (!court || court.match_id !== job.matchId) return;
+        announceScorekeeper(
+          court,
+          court.scorekeeper ?? [],
+          (job.stage >= 3 ? 3 : job.stage >= 2 ? 2 : 1) as 1 | 2 | 3,
+          cfg,
+          azureRef.current,
+        );
+        return;
+      }
+
+      if (job.kind !== "prep_call") {
+        // Ansageart aus einem neueren Turnier-PC, die dieser Stand nicht
+        // kennt: schweigen. Ohne diese Weiche fiele sie unten in den
+        // Vorbereitungs-Zweig und die Halle hörte einen FALSCHEN Aufruf —
+        // schlimmer als gar keiner. Die Aufträge selbst überstehen das
+        // schon (`announce_jobs_aus_json` überspringt Unbekanntes), hier
+        // geht es um die zweite Hälfte derselben Absicherung.
         return;
       }
 

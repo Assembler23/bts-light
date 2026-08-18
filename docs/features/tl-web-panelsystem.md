@@ -198,6 +198,40 @@ Spiele, Beendete Spiele.
 - [ ] Panel-Höhen sind gegen ein Mindestmaß geklammert (kein Panel wird auf
       0/negative Höhe gezogen); Doppeltipp auf einen Rand setzt die
       automatische Verteilung zurück.
+- [x] **Inhalts-Schalter gehören ins Profil, nicht ins Gerät** (bekräftigt
+      18.08.2026): Die Achse des Panels „Spielzeiten"
+      (`display.time_stats_axis`, Spec `tl-sicht-feinschliff`) beschreibt,
+      WAS gezeigt wird, und liegt deshalb im Profil — anders als der
+      Schriftgrößen-Zoom, der eine reine Display-Eigenschaft ist. Ein Profil
+      ohne das Feld liest sich als „Konkurrenz", also als die bisherige
+      Ansicht.
+- [x] **Die Höhenverteilung hängt allein an `height_fr`, nicht am Inhalt**
+      (nachgeschärft 18.08.2026 nach einem Fehlerbericht): Wächst der Inhalt
+      eines Panels — die Spielliste lädt beim Scrollen nach —, ändert das
+      seine Höhe nicht. Umsetzung: `.panel { flex-basis: 0 }` in `tl.html`;
+      mit dem Vorgabewert `auto` ist die Flex-Basis die Inhaltshöhe, und
+      dann verdrängt ein wachsendes Panel seine Nachbarn bis auf
+      `--panel-min`. Zugleich Voraussetzung für das Kriterium darüber:
+      `flex-grow` — das, was der Steg schreibt — verteilt **nur freien
+      Raum**; übersteigt die Summe der Inhaltshöhen die Spalte, gibt es
+      keinen, und das Ziehen bleibt wirkungslos. Zugeklappte Panels bleiben
+      ausgenommen (`.panel.panel-collapsed { flex: none }`) und behalten
+      exakt ihre Kopfzeilenhöhe.
+- [x] **Ein Bedarfs-Deckel darf den Steg nicht blockieren** (18.08.2026,
+      aus demselben Bericht): `fitCourts()` deckelt „Felder" per
+      Inline-`max-height` auf seinen Bedarf. Zwei Dinge müssen dafür
+      stimmen, und beide stimmten nicht: Der Deckel muss die **Kachelbox**
+      messen, nicht `scrollHeight` des Panel-Körpers (der ist nach unten
+      durch `clientHeight` geklammert, der Deckel wäre also stets die
+      aktuelle Höhe und gäbe nie etwas ab) — und `wireStegs()` muss den
+      Deckel beim `pointerdown` räumen, weil `max-height` jedes
+      `flex-grow` schlägt und das Panel sonst unter dem Finger stehen
+      bleibt. Prüfvorgehen: `<style>`-Block aus `tl.html` extrahieren, eine
+      `.tl-column` mit zwei Panels und `.panel-steg` aufbauen, Höhen vor
+      und nach der Änderung messen. Für die Inline-Skripte/CSS der Assets
+      gibt es keinen automatisierten Harness — diese Messung ist der
+      Ersatz und bei Änderungen an `fitCourts()`/`wireStegs()` zu
+      wiederholen.
 - [ ] Ein Turnierleiter kann in `tl.html` ein Profil anlegen, benennen,
       bearbeiten, löschen und als Standard markieren.
 - [ ] Jedes Gerät wählt ein Profil; die Wahl ist an die Geräte-Identität

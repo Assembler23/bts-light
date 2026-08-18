@@ -67,6 +67,17 @@ pub struct MatchTimeEntry {
     /// Disziplin-Kürzel („HE", „DD" …), wie `class_label` mitgestempelt.
     #[serde(default)]
     pub discipline: String,
+    /// Halle der **ersten** Feldzuweisung, wie `class_label` mitgestempelt
+    /// (ADR 0036). Leer bei Ein-Hallen-Turnieren und in Messwerten, die vor
+    /// v0.9.231 entstanden sind — die stehen in der Hallen-Auswertung dann
+    /// in einer eigenen Zeile „ohne Halle".
+    ///
+    /// Bewusst hier und nicht zur Anzeigezeit nachgeschlagen: Sobald BTP
+    /// ein beendetes Spiel vom Feld nimmt, ist die Zuordnung
+    /// Match → Feld → Halle nicht mehr auflösbar — und die Statistik ist
+    /// per Definition Rückschau über beendete Spiele.
+    #[serde(default)]
+    pub hall: String,
     /// E11: regulär über den Tablet-Pfad beendet (ScoreStatus 0) — nur
     /// solche Spiele liefern Messwerte für die Prognose-Statistik.
     #[serde(default)]
@@ -192,7 +203,7 @@ impl MatchTimesStore {
     /// Je Sync-Poll: Zuweisungen stempeln und Feldabnahmen zählen.
     ///
     /// `assigned` = alle OnCourt-Matches mit Feld als
-    /// `(match_id, class_label, discipline)`; `deassigned` = Matches mit
+    /// `(match_id, class_label, discipline, hall)`; `deassigned` = Matches mit
     /// gesetztem Zuweisungs-Stempel, die der Snapshot als `Scheduled`
     /// **ohne** Feld führt (nicht Finished — Beendete zählen nie).
     /// Liefert die in DIESEM Poll frisch gestempelten Match-IDs — der
@@ -200,7 +211,7 @@ impl MatchTimesStore {
     /// publizierten Prognose (Erfolgsmaß E12).
     pub fn reconcile(
         &self,
-        assigned: &[(i64, &str, &str)],
+        assigned: &[(i64, &str, &str, &str)],
         deassigned: &HashSet<i64>,
         now: u64,
     ) -> Vec<i64> {
@@ -211,13 +222,17 @@ impl MatchTimesStore {
             let mut inner = self.inner.lock().unwrap();
             let mut stamped = false;
             let mut fresh: Vec<i64> = Vec::new();
-            for &(match_id, class_label, discipline) in assigned {
+            for &(match_id, class_label, discipline, hall) in assigned {
                 let e = inner.file.entries.entry(match_id).or_default();
                 e.off_court_polls = 0;
                 if e.first_assigned_ms.is_none() {
                     e.first_assigned_ms = Some(now);
                     e.class_label = class_label.to_string();
                     e.discipline = discipline.to_string();
+                    // Nur im Erststempel-Zweig — die Halle ist damit genauso
+                    // immun gegen einen späteren Wechsel wie die Startzeit
+                    // (ADR 0036): Gemessen wird, wo das Spiel ANGEFANGEN hat.
+                    e.hall = hall.to_string();
                     stamped = true;
                     fresh.push(match_id);
                 }
@@ -226,7 +241,7 @@ impl MatchTimesStore {
             // ausdrücklich als „Scheduled ohne Feld" führt, zählen hoch.
             // Alles andere (wieder zugewiesen, Finished, verschwunden)
             // setzt zurück — im Zweifel Stempel behalten.
-            let assigned_ids: HashSet<i64> = assigned.iter().map(|(id, _, _)| *id).collect();
+            let assigned_ids: HashSet<i64> = assigned.iter().map(|(id, _, _, _)| *id).collect();
             let mut verworfen: Vec<i64> = Vec::new();
             for (id, e) in inner.file.entries.iter_mut() {
                 if e.first_assigned_ms.is_none() || assigned_ids.contains(id) {
@@ -455,7 +470,7 @@ mod tests {
     #[test]
     fn der_erststempel_setzt_zuweisung_klasse_und_disziplin() {
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         let e = store.entry(7).unwrap();
         assert_eq!(e.first_assigned_ms, Some(1_000));
         assert_eq!(e.class_label, "A");
@@ -464,12 +479,73 @@ mod tests {
     }
 
     #[test]
+    fn der_erststempel_haelt_auch_die_halle_fest() {
+        // Spec `tl-sicht-feinschliff` A1.7: Die Statistik soll nach Halle
+        // auswertbar sein. Die Halle kommt beim Erststempel mit, damit die
+        // Auswertung sie später nicht im Snapshot nachschlagen muss — dort
+        // ist sie weg, sobald BTP das Feld freigibt (ADR 0036).
+        let store = MatchTimesStore::default();
+        store.reconcile(&[(7, "A", "HE", "Halle B")], &keine(), 1_000);
+        assert_eq!(store.entry(7).unwrap().hall, "Halle B");
+    }
+
+    #[test]
+    fn ein_hallenwechsel_aendert_den_hallenstempel_nicht() {
+        // A1.7, Kehrseite: Der Stempel ist immun gegen einen späteren
+        // Wechsel — wie `first_assigned_ms`, `class_label` und
+        // `discipline`. Gemessen wird, wo das Spiel ANGEFANGEN hat.
+        let store = MatchTimesStore::default();
+        store.reconcile(&[(7, "A", "HE", "Halle B")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "Halle A")], &keine(), 5_000);
+        assert_eq!(store.entry(7).unwrap().hall, "Halle B");
+    }
+
+    #[test]
+    fn nach_dem_e4_reset_stempelt_die_neue_halle() {
+        // Wird die Zuweisung bestätigt zurückgenommen, fällt der ganze
+        // Eintrag (E4-Reset). Eine Neuansetzung misst komplett frisch —
+        // also auch mit der Halle, in der sie diesmal stattfindet.
+        let store = MatchTimesStore::default();
+        store.reconcile(&[(7, "A", "HE", "Halle B")], &keine(), 1_000);
+        let weg: HashSet<i64> = [7].into_iter().collect();
+        for t in [2_000, 3_000, 4_000, 5_000] {
+            store.reconcile(&[], &weg, t);
+        }
+        assert!(store.entry(7).is_none(), "Eintrag ist geräumt");
+
+        store.reconcile(&[(7, "A", "HE", "Halle A")], &keine(), 9_000);
+        assert_eq!(store.entry(7).unwrap().hall, "Halle A");
+    }
+
+    #[test]
+    fn ein_ein_hallen_turnier_stempelt_eine_leere_halle() {
+        // `court_location_name` gibt bei einem Ein-Hallen-Turnier bewusst
+        // einen leeren String zurück. Der Messwert trägt ihn genauso —
+        // die Hallen-Achse wird dort gar nicht erst angeboten (A1.6).
+        let store = MatchTimesStore::default();
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
+        assert_eq!(store.entry(7).unwrap().hall, "");
+    }
+
+    #[test]
+    fn ein_alter_stand_ohne_halle_bleibt_lesbar() {
+        // A1.9: Wer mitten im Turnier aktualisiert, hat eine
+        // `match-times.json` ohne `hall`. Sie muss weiter laden — die
+        // Messwerte davor tragen dann eben keine Halle (A1.8).
+        let alt =
+            r#"{"first_assigned_ms":1000,"class_label":"A","discipline":"HE","regular":true}"#;
+        let e: MatchTimeEntry = serde_json::from_str(alt).expect("alter Stand bleibt lesbar");
+        assert_eq!(e.first_assigned_ms, Some(1_000));
+        assert_eq!(e.hall, "", "ohne Angabe bleibt die Halle leer");
+    }
+
+    #[test]
     fn ein_feldwechsel_aendert_den_erststempel_nicht() {
         // Feldwechsel: das Match bleibt zugewiesen (anderes Feld ist für
         // den Store unsichtbar — es zählt nur „zugewiesen ja/nein").
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
-        store.reconcile(&[(7, "A", "HE")], &keine(), 5_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 5_000);
         assert_eq!(store.first_assigned_ms(7), Some(1_000));
     }
 
@@ -477,19 +553,19 @@ mod tests {
     fn ein_app_neustart_aendert_den_erststempel_nicht() {
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_datei(dir.path());
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
 
         // Neustart: neuer Store, gleiche Datei — der nächste Poll würde
         // mit der Neustart-Zeit stempeln wollen.
         let neu = store_mit_datei(dir.path());
-        neu.reconcile(&[(7, "A", "HE")], &keine(), 999_000);
+        neu.reconcile(&[(7, "A", "HE", "")], &keine(), 999_000);
         assert_eq!(neu.first_assigned_ms(7), Some(1_000));
     }
 
     #[test]
     fn ein_bis_zwei_polls_ohne_feld_sind_flackern_und_loeschen_nichts() {
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_first_point(7, 2_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
         store.reconcile(&[], &weg, 3_000);
@@ -505,7 +581,7 @@ mod tests {
         // zurückgesetztes Spiel nie wieder ein korrektes Ende stempeln und
         // vergiftet mit negativer Dauer den Median.
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_first_point(7, 2_000);
         store.stamp_finished(7, true, 9_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
@@ -515,7 +591,7 @@ mod tests {
         assert_eq!(store.entry(7), None, "kompletter Eintrag verworfen");
 
         // Die Neuansetzung misst frisch — inklusive neuem Ende.
-        store.reconcile(&[(7, "A", "HE")], &keine(), 20_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 20_000);
         store.stamp_finished(7, true, 50_000);
         let e = store.entry(7).unwrap();
         assert_eq!(e.first_assigned_ms, Some(20_000));
@@ -529,7 +605,7 @@ mod tests {
         // App-Neustart ein einziger Flacker-Poll für den Reset.
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_datei(dir.path());
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
         store.reconcile(&[], &weg, 2_000);
         store.reconcile(&[], &weg, 3_000);
@@ -571,24 +647,24 @@ mod tests {
     #[test]
     fn nach_dem_reset_stempelt_eine_erneute_zuweisung_frisch() {
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
         store.reconcile(&[], &weg, 3_000);
         store.reconcile(&[], &weg, 4_000);
         store.reconcile(&[], &weg, 5_000);
-        store.reconcile(&[(7, "A", "HE")], &keine(), 9_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 9_000);
         assert_eq!(store.first_assigned_ms(7), Some(9_000));
     }
 
     #[test]
     fn ein_wieder_erscheinen_setzt_den_abnahme_zaehler_zurueck() {
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
         store.reconcile(&[], &weg, 2_000);
         store.reconcile(&[], &weg, 3_000);
         // Wieder auf dem Feld: Zähler zurück auf 0 …
-        store.reconcile(&[(7, "A", "HE")], &keine(), 4_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 4_000);
         // … zwei weitere Polls ohne Feld reichen dann nicht für den Reset.
         store.reconcile(&[], &weg, 5_000);
         store.reconcile(&[], &weg, 6_000);
@@ -601,7 +677,7 @@ mod tests {
         // KEINEM der beiden Sets — der Zähler fällt auf 0 zurück, der
         // Stempel bleibt.
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         let weg: HashSet<i64> = [7].into_iter().collect();
         store.reconcile(&[], &weg, 2_000);
         store.reconcile(&[], &weg, 3_000);
@@ -614,7 +690,7 @@ mod tests {
     #[test]
     fn der_erste_punktestand_stempelt_nur_einmal() {
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_first_point(7, 2_000);
         store.stamp_first_point(7, 8_000);
         assert_eq!(store.entry(7).unwrap().first_point_ms, Some(2_000));
@@ -623,7 +699,7 @@ mod tests {
     #[test]
     fn das_spielende_stempelt_nur_einmal_und_haelt_regular_fest() {
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_finished(7, true, 9_000);
         // Eine spätere Korrektur (auch mit anderem regular) ändert nichts.
         store.stamp_finished(7, false, 20_000);
@@ -640,7 +716,7 @@ mod tests {
         // Feld") — der stale Ende-Stempel würde die echte End-Duration
         // verfälschen und die vergiftete Messung in den Median tragen.
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_finished(7, true, 9_000);
 
         let on_court: HashSet<i64> = [7].into_iter().collect();
@@ -666,7 +742,7 @@ mod tests {
         // liegen, während BTP das Match noch als laufend führt — das ist
         // KEIN gelöschtes Ergebnis und darf den Stempel nicht räumen.
         let store = MatchTimesStore::default();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_finished(7, true, 9_000);
 
         let on_court: HashSet<i64> = [7].into_iter().collect();
@@ -683,10 +759,10 @@ mod tests {
         // Messwerten etwas ändert, muss die Statistik neu gerechnet werden.
         let store = MatchTimesStore::default();
         let g0 = store.generation();
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         let g1 = store.generation();
         assert_ne!(g0, g1, "Erststempel ändert die Generation");
-        store.reconcile(&[(7, "A", "HE")], &keine(), 2_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 2_000);
         assert_eq!(store.generation(), g1, "unveränderter Poll nicht");
         store.stamp_finished(7, true, 9_000);
         assert_ne!(store.generation(), g1);
@@ -714,7 +790,7 @@ mod tests {
     fn der_stand_ueberlebt_einen_app_neustart() {
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_datei(dir.path());
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.stamp_first_point(7, 2_000);
         store.stamp_finished(7, true, 9_000);
 
@@ -731,7 +807,7 @@ mod tests {
     fn ein_turnierwechsel_verwirft_den_stand() {
         let dir = tempfile::tempdir().unwrap();
         let store = store_mit_datei(dir.path());
-        store.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        store.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
 
         store.set_tournament("Ganz anderes Turnier");
         assert_eq!(store.entry(7), None);
@@ -759,7 +835,7 @@ mod tests {
 
         std::fs::remove_dir(&pfad).unwrap();
         let vorlage = store_mit_datei(dir.path());
-        vorlage.reconcile(&[(7, "A", "HE")], &keine(), 1_000);
+        vorlage.reconcile(&[(7, "A", "HE", "")], &keine(), 1_000);
         store.set_tournament("Test BTS Light");
         assert_eq!(store.first_assigned_ms(7), Some(1_000));
     }

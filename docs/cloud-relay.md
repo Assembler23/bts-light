@@ -288,6 +288,33 @@ Namensvergleich zurück). Der Zustand bleibt opakes JSON, der Relay
 unverändert — aber auch hier: **Relay-Deploy** nötig, damit Cloud-Geräte
 die neue Anzeige (Farb-Marken, Eieruhr, Links) bekommen.
 
+**Spielerlinks überall** (18.08.2026, Spec `tl-sicht-feinschliff` Punkt 4):
+`team1_ids`/`team2_ids` stehen zusätzlich an den **Feld-Kacheln**
+(`TlCourt`) und den **beendeten Spielen** (`TlFinished`) — beide additiv
+mit `#[serde(default)]`, der Relay bleibt unverändert, Relay-Deploy nur
+für die Anzeige nötig.
+
+**Größenwirkung — die Kürzungskaskade hat eine Stufe dazubekommen.** Bei 26
+Feldern und 30 Ergebnissen sind das bis zu 112 zusätzliche String-Arrays.
+Der Größen-Wächter maß den Fall bisher gar nicht: Sein Fixture kannte nur
+die Warteliste, keine belegten Felder, keine Ergebnisse — und keine
+**Vereinsnamen**, die unabhängig von `display.show_club_names` **immer**
+mitreisen. Mit realistischem Fixture (26 Felder, 30 Ergebnisse, 400
+wartende, Doppelpaarungen mit Verein und Lizenznummer, 40 Schiedsrichter,
+20 Zähltafelbediener) liegt der Stand bei **62 467 von 65 536 Bytes** —
+rund 5 % Reserve, Warteliste bereits auf unterster Stufe.
+
+Die Kaskade lautet deshalb jetzt: **`queue` (40/20/10/5) →
+`checkin_times` → `finished` (10/3)**. Die Ergebnisliste ist reine
+Rückschau; die Feldkacheln bleiben in jeder Stufe vollständig, weil sie
+das Bedienelement der Seite sind. Ohne die neue Stufe reißt ein
+40-Felder-Turnier die Grenze mit 73 942 Bytes — der Relay verwirft dann
+das ganze Frame samt Vorgänger, und die Cloud-Turnierleitung sieht **gar
+nichts** mehr. Wer den Zustand um eine weitere Liste erweitert (nächster
+Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
+und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
+zweite Erweiterung.
+
 **Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
 `TlAction`-Varianten `set_hall_prefill { enabled, window }` und
 `clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter
@@ -296,6 +323,63 @@ zusätzliche `TlState`-Feld `hall_prefill` und der neue
 `hall_source`-Wire-Wert `"auto"` sind additiv; alte Seiten tolerieren
 beide (Feature-Detection über das State-Feld — eine neue Seite an einem
 alten Host zeigt die Bedienelemente gar nicht).
+
+**Spielzeiten-Auswertung mehrachsig** (Spec `tl-sicht-feinschliff` Punkt 1,
+v0.9.231): `TlState.time_stats` trägt zusätzlich `by_class`,
+`by_discipline` und `by_hall`, jede Zeile zusätzlich `hall`; das Profil trägt
+`timeStatsAxis`. Alles additiv mit `#[serde(default)]` — alte Seiten
+ignorieren die neuen Felder, ein altes Profil liest sich als `group` (die
+bisherige Ansicht). Der Relay bleibt unverändert; **Relay-Deploy** nur nötig,
+damit Cloud-Geräte die neue Anzeige bekommen.
+
+Alle vier Achsen reisen **gemeinsam** mit, obwohl je Gerät nur eine gezeigt
+wird: Der Zustand entsteht seit ADR 0034 einmal zentral für alle Geräte,
+während die Achsen-Wahl im Profil je Gerät liegt. Der Host könnte also gar
+nicht nur die gewählte liefern — das Umschalten ist dafür ein reiner
+Client-Vorgang ohne Rückfrage.
+
+**Größenwirkung — die Kürzungskaskade hat eine weitere Stufe bekommen.** Die
+Auswertung wiegt bei einem großen Turnier mehr als die Warteliste: gemessen
+**14 760 Bytes** bei 110/22/5/2 Zeilen (22 Klassen × 5 Disziplinen, zwei
+Hallen). Die Kaskade lautet deshalb jetzt **`queue` (40/20/10/5) →
+`checkin_times` → `time_stats`**. Ohne die letzte Stufe ginge ein solcher
+Zustand mit gut **70 000 von erlaubten 65 536 Bytes** hinaus — der Relay
+verwürfe ihn samt Vorgänger, und die Cloud-Turnierleitung sähe gar nichts
+mehr, auch keine Felder. Mit ihr sind es 55 286 Bytes; das Panel verschwindet
+dann ehrlich, statt den ganzen Stand zu kippen. Rückschau ist verzichtbar,
+Bedienung nicht.
+
+Das Feld `hall` reist dabei nur auf der Hallen-Achse mit
+(`skip_serializing_if`): Auf den anderen drei wäre es ein leerer String je
+Zeile — beim Messfixture allein 1 370 Bytes. Das geht nur, weil das Feld neu
+ist; `class_label`/`discipline` lassen sich nicht weglassen, alte Seiten
+lesen sie unbedingt.
+**Spielbeginn-Ansage** (Spec `tl-sicht-feinschliff` Punkt 3, v0.9.230): eine
+neue `TlAction`-Variante `announce_start_play { courtId, matchId }`. Der
+Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**, die
+Seite zeigt dann „Der Turnier-PC hat die Anfrage abgewiesen (422)". Also
+auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Knopf steht im ⋯-Menü und braucht kein neues `TlState`-Feld.
+
+Dazu ein neuer **Ansage-Auftragstyp** `start_play` (`AnnounceJobKind`,
+`tablet/state.rs`). Der reist **nicht** über den Relay, sondern nur vom
+Master zu den Ansage-Geräten seiner Halle — im LAN über
+`/info/announce/jobs`. Wichtig für den Mischbetrieb: Ein Ansage-Slave mit
+älterem Stand überspringt seit v0.9.230 unbekannte Auftragstypen einzeln,
+statt an einem die ganze Charge zu verlieren (siehe
+[announcements.md](announcements.md)). In einer per Relay angebundenen
+**fernen** Halle erklingt die Ansage weiterhin gar nicht — dort holt der
+Slave bewusst keine Aufträge ab.
+**Nachruf an die Zähltafelbedienung** (Spec `tl-sicht-feinschliff` Punkt 2,
+v0.9.232): eine neue `TlAction`-Variante `announce_scorekeeper { courtId }`.
+Der Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**.
+Also auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Zählerstand bleibt bewusst am Host (er bestimmt allein die
+Ansage-Stufe).
+
+Dazu ein neuer **Ansage-Auftragstyp** `scorekeeper_call`, der wie alle
+Ansage-Aufträge nur vom Master zu den Ansage-Geräten seiner Halle reist,
+nicht über den Relay.
 
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen

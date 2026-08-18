@@ -505,12 +505,32 @@ export type AnnounceJob = {
       courtId: number;
     }
   | {
+      /** Nachruf an die Zähltafelbedienung eines Felds („… bitte als
+       *  Tabletbedienung melden"). **Kein Spieler-Aufruf** — der Host führt
+       *  dafür einen eigenen Zähler, die Aufruf-Stufe der Spieler bleibt
+       *  stehen (Spec `tl-sicht-feinschliff` Punkt 2). */
+      kind: "scorekeeper_call";
+      courtId: number;
+      matchId: number;
+      /** 1, 2 oder 3 — gezählt am Turnier-PC. */
+      stage: number;
+    }
+  | {
       kind: "prep_call";
       matchId: number;
       side: "both" | "team1" | "team2";
       /** 2 oder 3 — gezählt am Turnier-PC, damit der Nachruf aus der Seite
        *  und der aus der Desktop-Oberfläche gleich staffeln. */
       stage: number;
+    }
+  | {
+      /** „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+       *  besetztes Feld, auf dem noch kein Punkt gefallen ist. Ausdrücklich
+       *  **kein** Aufruf: Sie zählt keine Aufruf-Stufe hoch (Spec
+       *  `tl-sicht-feinschliff` A3.3). */
+      kind: "start_play";
+      courtId: number;
+      matchId: number;
     }
 );
 

@@ -374,9 +374,14 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .paar .sp-name.sp-pause { background: #ffedd5; color: #9a3412; border-radius: 5px; padding: 0 4px; }
 /* badhub-Spielerseiten-Link: erbt Farbe und Gewicht, damit die Liste ruhig
    bleibt — dass er klickbar ist, zeigt erst die Berührung (Unterstreichung
-   beim Zeigen/Fokussieren, gepunktet als leiser Dauerhinweis). */
-.paar a.sp-name { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
-.paar a.sp-name:hover, .paar a.sp-name:focus-visible { text-decoration: underline solid 1.5px; }
+   beim Zeigen/Fokussieren, gepunktet als leiser Dauerhinweis).
+   `.fin-pair` steht seit 18.08.2026 mit im Selektor: Die Beendet-Zeile
+   verlinkt dieselben Namen, und ohne diese Regel fiele sie auf das
+   Browser-Blau samt voller Unterstreichung zurück — eine Ergebnisliste,
+   die schreit, statt zu berichten. */
+.paar a.sp-name, .fin-pair a.sp-name { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+.paar a.sp-name:hover, .paar a.sp-name:focus-visible,
+.fin-pair a.sp-name:hover, .fin-pair a.sp-name:focus-visible { text-decoration: underline solid 1.5px; }
 /* Vereinsname unter dem Namen — klein und gedämpft, damit er den Namen nicht
    überstrahlt; das Wappen steht davor. */
 .paar .verein-unter {
@@ -877,7 +882,27 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    das ohne Ausnahme auch für „Felder": Der frühere Sonderstatus als
    fixierte Ankerposition ist entfallen, das Panel trägt einen ganz
    normalen Reorder-Griff und eine Spaltenzuordnung wie jedes andere. */
-.panel { display: flex; flex-direction: column; min-height: var(--panel-min); overflow: hidden; }
+/* `flex-basis: 0` ist hier NICHT kosmetisch, sondern die Bedingung dafür,
+   dass die Höhenverteilung überhaupt funktioniert (Fehlerbericht
+   18.08.2026: „Nachladen vergrößert die Box, danach lässt sie sich nicht
+   mehr richtig ziehen").
+
+   Mit dem Vorgabewert `auto` wäre die Flex-Basis eines Panels seine
+   INHALTSHÖHE — und die Spielliste lädt beim Scrollen nach (`QUEUE_PAGE`),
+   wächst also im Betrieb. Sie verdrängte damit ihre Nachbarn bis auf
+   `--panel-min`, obwohl alle denselben `heightFr`-Anteil haben. Schlimmer:
+   Übersteigt die Summe der Basis-Höhen die Spaltenhöhe, bleibt kein freier
+   Raum — und `flex-grow`, das der Steg (`wireStegs`) beim Ziehen schreibt,
+   verteilt NUR freien Raum. Das Ziehen wurde dadurch wirkungslos.
+
+   Mit `flex-basis: 0` zählt allein die `heightFr`-Gewichtung — dieselbe
+   Entscheidung, die `.tl-column` mit `flex: 1 1 0` für die Spalten längst
+   trifft; die Panels waren beim Mehrspalten-Umbau nur nicht mitgezogen
+   worden. Zugeklappte Panels bleiben ausgenommen
+   (`.panel.panel-collapsed { flex: none }` weiter unten ist spezifischer
+   und setzt die Basis zurück auf `auto`): Sie sollen genau ihre Kopfzeile
+   hoch sein, nicht `--panel-min`. */
+.panel { display: flex; flex-direction: column; flex-basis: 0; min-height: var(--panel-min); overflow: hidden; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
   flex: none; display: flex; align-items: center; gap: 8px;
@@ -1703,6 +1728,11 @@ function builtInProfile() {
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
       listPosition: "right",
+      // Voreinstellung des Panels „Spielzeiten": die ursprüngliche Ansicht
+      // (Klasse x Disziplin). Ein Profil ohne das Feld landet über den
+      // Serde-Default auf demselben Wert — für niemanden ändert sich etwas,
+      // der nichts umstellt (A1.2).
+      timeStatsAxis: "group",
     },
     updatedAtMs: 0,
   };
@@ -1897,6 +1927,13 @@ function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
 function zeigeRestzeitAktiv() { return !!activeDisplay().showCourtRemaining; }
 function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
+/** Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`). Ein
+ *  unbekannter Wert fällt auf die ursprüngliche Ansicht zurück — ein Profil
+ *  aus einer NEUEREN App-Version darf diese Seite nicht ratlos machen. */
+function aktiveZeitenAchse() {
+  const gewaehlt = activeDisplay().timeStatsAxis;
+  return ZEITEN_ACHSEN.some((a) => a.id === gewaehlt) ? gewaehlt : "group";
+}
 
 // `applyListPosition()` gibt es nicht mehr: „Spielliste rechts/darunter"
 // ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) nur noch
@@ -2880,6 +2917,26 @@ function spielerKey(nummer, name) {
   return (nummer || name || "").trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
 }
 
+/**
+ * Ein Spielername als HTML: mit Lizenznummer ein Link auf die öffentliche
+ * badhub-Spielerseite, ohne Nummer schlichter Text.
+ *
+ * **Die einzige Stelle, die aus Name + Nummer Markup macht** — Name durch
+ * `esc()`, Nummer durch `encodeURIComponent()`. Beides kommt aus BTP, also
+ * aus einer Quelle, die diese Seite nicht kontrolliert; zwei Kopien dieser
+ * Logik wären zwei Gelegenheiten, eine der beiden Absicherungen zu
+ * vergessen. Nutzer sind `pairOf` (Spielliste + Feldkachel) und
+ * `siegerZuerstHtml` (Beendet-Liste).
+ */
+function spielerNameHtml(name, nummer, klassen, titel) {
+  const nr = (nummer || "").trim();
+  const attr = `class="${klassen}"${titel || ""}`;
+  return nr
+    ? `<a ${attr} href="https://badhub.de/spieler/${encodeURIComponent(nr)}/live"
+         target="_blank" rel="noopener">${esc(name)}</a>`
+    : `<span ${attr}>${esc(name)}</span>`;
+}
+
 function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
   const zeigeVereinsnamen = zeigeVereinsnamenAktiv();
   const zeigeVereinslogos = zeigeVereinslogosAktiv();
@@ -2893,20 +2950,19 @@ function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
       const willLogo = zeigeVereinslogos && verein;
       // Nur-Logo (ohne Name) → inline vor den Namen, hinter die Nation.
       const inlineLogo = (willLogo && !willName) ? vereinsLogo(verein) : "";
-      // Nur die Spielliste reicht `extra` herein: `lage` färbt den Namen
-      // nach Bereitschaft (rot = spielt gerade, orange = pausiert; der
-      // `title` sagt es in Worten), die Lizenznummer macht ihn zum Link
-      // auf die badhub-Spielerseite. Ohne Nummer bleibt es ein `<span>`.
+      // `extra` ist optional: `lage` färbt den Namen nach Bereitschaft
+      // (rot = spielt gerade, orange = pausiert; der `title` sagt es in
+      // Worten) — das reicht nur die Spielliste herein. Die Lizenznummer
+      // macht den Namen zum Link auf die badhub-Spielerseite; die geben
+      // seit 18.08.2026 Spielliste UND Feldkachel mit. Ohne Nummer bleibt
+      // es ein `<span>`.
       // Der Abgleich läuft über den Spieler-SCHLÜSSEL, nicht den Namen —
       // sonst färbten zwei gleichnamige Spieler einer Paarung gemeinsam.
       const nummer = ((nummern || [])[i] || "").trim();
       const lage = extra && extra.lage ? extra.lage(spielerKey(nummer, n)) : null;
       const klassen = `sp-name${lage ? " " + lage.cls : ""}`;
       const titel = lage ? ` title="${esc(lage.titel)}"` : "";
-      const nameHtml = nummer
-        ? `<a class="${klassen}"${titel} href="https://badhub.de/spieler/${encodeURIComponent(nummer)}/live"
-             target="_blank" rel="noopener">${esc(n)}</a>`
-        : `<span class="${klassen}"${titel}>${esc(n)}</span>`;
+      const nameHtml = spielerNameHtml(n, nummer, klassen, titel);
       const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${nameHtml}</span>`;
       // Vereinsname → eigene Zeile unter dem Namen (Logo davor, falls an).
       const unter = willName
@@ -3171,7 +3227,8 @@ function courtCard(c, cellStyle) {
             <div class="meta">Warte auf die Bestätigung vom Turnier-PC.</div>`;
   } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
-    body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat, c.team1_club, c.team2_club)}</div>
+    body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat, c.team1_club, c.team2_club,
+      { ids1: c.team1_ids, ids2: c.team2_ids })}</div>
             <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
     // Beschriftung nur noch, wenn sie etwas sagt, das man sonst nicht sieht.
     // „auf dem Feld seit" und „im Spiel seit" stehen inzwischen als Farbe an
@@ -3286,6 +3343,26 @@ function courtCard(c, cellStyle) {
     kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
         data-made="${gesprochen}" data-call-side="team2"
         title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
+  }
+  // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
+  // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
+  // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
+  // Warteschlange, Feld mit abgeschalteter Bediener-Vergabe und global
+  // ausgeschaltete Verwaltung — in allen dreien weist der Turnier-PC gar
+  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe und steht
+  // deshalb getrennt von den Aufruf-Knöpfen.
+  if (state.scorekeeper_managed && c.match_id && c.scorekeeper_assigned) {
+    kachelAktionen.push(`<button type="button" data-sk-say="${c.court_id}"
+        title="Zähltafelbedienung nachrufen">Bedienung nachrufen</button>`);
+  }
+  // „Bitte mit dem Spielen beginnen" (Spec tl-sicht-feinschliff, Punkt 3):
+  // Die Spieler stehen am Feld, es fällt aber kein Punkt. Nur dann sinnvoll
+  // — sobald gezählt wird, ist die Aufforderung gegenstandslos. Bewusst
+  // KEIN Aufruf: Die Stufe bleibt stehen, deshalb steht der Knopf auch
+  // getrennt von den Aufruf-Knöpfen darüber und hat keine `data-made`.
+  if (c.match_id && !isPlaying(c)) {
+    kachelAktionen.push(`<button type="button" data-startplay="${c.court_id}" data-match="${c.match_id}"
+        title="Ansage: Feld soll mit dem Spielen beginnen">Bitte anfangen</button>`);
   }
   if (c.match_id) {
     kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
@@ -3440,6 +3517,16 @@ window.addEventListener("resize", folgeOffenenKebabs);
  * ein belegtes Feld der **Griff** (antippen wählt das Spiel zum Umhängen,
  * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
  */
+/** Zeitpunkt der letzten Spielbeginn-Ansage je Feld — die Doppeltipp-Sperre.
+ *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
+ *  (siehe Kommentar an der Verdrahtung). */
+const spielbeginnZuletzt = new Map();
+
+/** Zeitpunkt des letzten Bediener-Nachrufs je Feld — die Doppeltipp-Sperre.
+ *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
+ *  (siehe Kommentar an der Verdrahtung). */
+const skNachrufZuletzt = new Map();
+
 function wireCourts(box) {
   // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
   // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
@@ -3561,6 +3648,62 @@ function wireCourts(box) {
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
 
+  // „Bitte anfangen": beliebig oft auslösbar (Spec A3.4) — wer nach fünf
+  // Minuten immer noch nicht spielt, wird eben erneut gebeten. Deshalb ein
+  // Zeitstempel-Nonce in der Vorgangs-Kennung statt des 20-s-Fensters
+  // (`OP_WINDOW_MS`): Das Fenster ist gegen versehentliche Doppel-Sendungen
+  // gedacht und schluckte eine BEWUSSTE Wiederholung stumm.
+  //
+  // Die Doppeltipp-Sperre liegt im Modul-Zustand, NICHT als `disabled` am
+  // Knopf: `send()` stößt in seinem `finally` einen Abruf an, und ein
+  // geänderter Zustand zeichnet die Kacheln neu — der frische Knopf wäre
+  // sofort wieder scharf, lange vor Ablauf der Sekunde. Im laufenden
+  // Turnier ändert sich fast jede Sekunde etwas, die Sperre wäre also
+  // genau dann wirkungslos, wenn sie gebraucht wird (Review 18.08.2026).
+  scopeAll(box, "button[data-startplay]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.startplay);
+      const matchId = Number(btn.dataset.match);
+      const zuletzt = spielbeginnZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      spielbeginnZuletzt.set(courtId, Date.now());
+      send(
+        `startplay-${courtId}-${matchId}-${Date.now()}`,
+        { action: "announce_start_play", courtId, matchId },
+        "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Bediener-Nachruf: beliebig oft auslösbar wie die anderen Ansagen, aber
+  // gedeckelt bei Stufe 3 — der Turnier-PC zählt. Zeitstempel-Nonce statt
+  // des 20-s-Fensters (`OP_WINDOW_MS`), das eine BEWUSSTE Wiederholung
+  // stumm schluckte.
+  //
+  // Die Doppeltipp-Sperre liegt im Modul-Zustand, NICHT als `disabled` am
+  // Knopf: `send()` stößt in seinem `finally` einen Abruf an, und ein
+  // geänderter Zustand zeichnet die Kacheln neu — der frische Knopf wäre
+  // sofort wieder scharf, lange vor Ablauf der Sekunde. Im laufenden
+  // Turnier ändert sich fast jede Sekunde etwas, die Sperre wäre also
+  // genau dann wirkungslos, wenn sie gebraucht wird (Review 18.08.2026).
+  scopeAll(box, "button[data-sk-say]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.skSay);
+      const zuletzt = skNachrufZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      skNachrufZuletzt.set(courtId, Date.now());
+      send(
+        `sk-say-${courtId}-${Date.now()}`,
+        { action: "announce_scorekeeper", courtId },
+        "Nachruf ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
   scopeAll(box, "button[data-off-court]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -3579,6 +3722,28 @@ function wireCourts(box) {
     // wird sie ohnehin ersetzt und neu verdrahtet.
     const frisch = () => state.courts.find((c) => String(c.court_id) === el.dataset.court);
 
+    // ── Spieler-Links (Spec tl-sicht-feinschliff A4.1) ──────────────────
+    // VOR der `picked`-Weiche, weil beide Zweige sie brauchen: Die Kachel
+    // wird bei jeder Auswahl neu gebaut (sie bekommt `target`) und dann
+    // über den jeweils gültigen Zweig verdrahtet. Stünde das unten, hätte
+    // eine Kachel genau so lange keine Link-Behandlung, wie ein Spiel zur
+    // Zuweisung ausgewählt ist — also mitten im häufigsten Arbeitsgang
+    // (Review 18.08.2026).
+    //
+    // Ein Klick auf den badhub-Link darf das Feld weder aufnehmen noch
+    // bezuweisen. `pointerdown` bleibt unangetastet: Der Name ist die
+    // größte Trefffläche der Kachel, ein dort angesetzter ZUG muss weiter
+    // funktionieren — endet er über dem Namen, fängt `suppressNextClick`
+    // die Navigation ab. Wortgleich zu `wireQueue`.
+    const istSpielerLink = (ev) =>
+      ev.target instanceof Element && !!ev.target.closest("a.sp-name");
+    scopeAll(el, "a.sp-name").forEach((a) => {
+      a.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (suppressNextClick) ev.preventDefault();
+      });
+    });
+
     if (picked) {
       const go = () => {
         if (suppressNextClick) return;
@@ -3587,6 +3752,9 @@ function wireCourts(box) {
       };
       el.addEventListener("click", go);
       el.addEventListener("keydown", (ev) => {
+        // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
+        // Link, nicht der Zuweisung.
+        if (istSpielerLink(ev)) return;
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
       });
       return;
@@ -3612,6 +3780,10 @@ function wireCourts(box) {
     };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
+      // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
+      // Link (badhub-Seite öffnen) — sonst finge die Kachel sie ab und
+      // nähme stattdessen das Spiel auf.
+      if (istSpielerLink(ev)) return;
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
     enableDrag(el, alsMatch(court), court.court_id);
@@ -3872,15 +4044,24 @@ function fitCourts() {
    * Flex-Modell von selbst an die übrigen Panels derselben Spalte (Flexbox
    * behandelt eine `max-height`-Verletzung genau so). Ohne das stünde unter
    * den Kacheln ein leerer Block, während die Liste darunter rollt.
-   * Keine Rückkopplung: Der Deckel kürzt nur `clientHeight`, nie den
-   * gemessenen `scrollHeight` — und beim nächsten Durchlauf fällt er oben
+   *
+   * Gemessen wird die **Kachelbox**, nicht der Scroll-Bereich des Körpers.
+   * Der Unterschied entscheidet, ob überhaupt etwas zurückgegeben wird:
+   * `scrollHeight` ist nach unten durch `clientHeight` geklammert, und
+   * hierher kommt man nur, wenn der Inhalt passt (`passt()`) — dann sind
+   * beide gleich, und der Deckel wäre exakt die aktuelle Höhe. Er gäbe also
+   * nie etwas ab (Review 18.08.2026: zwei Kacheln in einem 400-px-Stapel
+   * behielten 174 px statt 119 px, die Liste bekam nichts).
+   *
+   * Keine Rückkopplung: Die Kachelbox ordnet sich nach der BREITE, ihre
+   * Höhe hängt nicht am Deckel — und beim nächsten Durchlauf fällt er oben
    * ohnehin zuerst wieder weg.
    */
   const uebernehmeBedarf = () => {
     if (!automatik) return;
     const kopf = panel.querySelector(".panel-head");
     panel.style.maxHeight =
-      ((kopf ? kopf.offsetHeight : 0) + koerper.scrollHeight) + "px";
+      ((kopf ? kopf.offsetHeight : 0) + box.getBoundingClientRect().height) + "px";
   };
   if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
@@ -5152,6 +5333,16 @@ function wireStegs(container, achse) {
       steg.classList.add("zieht");
       document.body.classList.add("dragging");
       panelStegDragging = true;
+      // Bedarfs-Deckel der beiden Nachbarn räumen, BEVOR gemessen wird.
+      // `fitCourts()` deckelt „Felder" per Inline-`max-height` auf seinen
+      // Bedarf; ein Deckel schlägt aber jedes `flex-grow`, das dieser Zug
+      // gleich schreibt — das Panel bliebe unter dem Finger stehen und
+      // spränge erst beim Loslassen (Review 18.08.2026: 3:1 gezogen blieb
+      // es bei 174/174 statt 261/87). Der Zug IST die Ansage „ich verteile
+      // von Hand", also endet die Bedarfs-Automatik hier; gespeichert wird
+      // gleich ein `heightFr ≠ 1`, womit `fitCourts()` von selbst nicht
+      // mehr deckelt. Nur senkrecht — Spalten kennen keinen Deckel.
+      if (senkrecht) { prev.style.maxHeight = ""; next.style.maxHeight = ""; }
       const rA = prev.getBoundingClientRect(), rB = next.getBoundingClientRect();
       const massA = senkrecht ? rA.height : rA.width;
       const summe = massA + (senkrecht ? rB.height : rB.width);
@@ -5755,12 +5946,29 @@ function renderScorekeepers() {
 
 /**
  * Sieger-zuerst-Paarung für die Beendet-Liste — so liest man ein Ergebnis
- * vor. Gilt für die Zeilenanzeige UND den Dialog-Titel bei einer Korrektur,
- * NIE für das Draht-Format an den Turnier-PC (das bleibt roh Team1:Team2,
- * siehe `openResultDialog`-Kommentar).
+ * vor. Gilt NIE für das Draht-Format an den Turnier-PC (das bleibt roh
+ * Team1:Team2, siehe `openResultDialog`-Kommentar).
+ *
+ * Zwei Fassungen, seit die Namen Links tragen (18.08.2026): Der
+ * **Dialog-Titel** braucht reinen Text — er wird vom Aufrufer escapt und
+ * dürfte kein Markup enthalten. Die **Zeile** braucht Markup, damit der
+ * Name auf die badhub-Spielerseite verlinkt. Ein gemeinsamer Rückgabewert
+ * für beides ginge nur, indem eine der beiden Seiten HTML durchreicht, wo
+ * sie Text erwartet — genau die Verwechslung, die eine Lücke aufreißt.
  */
-function siegerZuerst(f) {
+function siegerZuerstText(f) {
   const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
+  return f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
+}
+
+/** Wie `siegerZuerstText`, aber mit den badhub-Links (Spec
+ *  `tl-sicht-feinschliff` A4.2). Escaping liegt in `spielerNameHtml` — die
+ *  Trennzeichen hier sind eigener, fester Text. */
+function siegerZuerstHtml(f) {
+  const seite = (namen, nummern) => ((namen || []).length ? namen : ["?"])
+    .map((n, i) => spielerNameHtml(n, (nummern || [])[i], "sp-name", ""))
+    .join(" / ");
+  const team1 = seite(f.team1, f.team1_ids), team2 = seite(f.team2, f.team2_ids);
   return f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
 }
 
@@ -6347,6 +6555,14 @@ function uebernehmeEditorFelder() {
     showGroup: $("prof-show-group").checked,
     showCourtRemaining: $("prof-show-court-remaining").checked,
     unlimitedCourtCalls: $("prof-unlimited-calls").checked,
+    // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
+    // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
+    // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
+    // Rückfall auf den bisherigen Wert, nicht auf die Vorgabe: Fehlte das
+    // Feld je (ausgeblendete Option), setzte „group" die gespeicherte Wahl
+    // still zurück — dieselbe Haltung wie beim durchgereichten
+    // `listPosition` darunter.
+    timeStatsAxis: $("prof-time-axis") ? $("prof-time-axis").value : (kopie.display.timeStatsAxis || "group"),
     // `listPosition` steht bewusst NICHT mehr im Editor (Plan
     // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
     // unverändert weitergereicht — eine ältere App-Version liest daraus
@@ -6408,6 +6624,20 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
+      <label class="checkbox-row" style="gap:8px">
+        <span>Spielzeiten gruppieren nach</span>
+        <select id="prof-time-axis">${ZEITEN_ACHSEN
+          // „Halle" nur bei Mehr-Hallen-Turnieren anbieten (A1.6): Sonst
+          // wäre die Auswertung eine einzige Zeile ohne Aussage. Ein Profil,
+          // das die Achse bereits trägt (anderes Turnier, andere Halle),
+          // behält seine Option — sonst kippte allein das Öffnen des
+          // Editors die gespeicherte Wahl still auf „Konkurrenz".
+          .filter((a) => a.id !== "hall"
+            || (state && state.multi_hall) || d.timeStatsAxis === "hall")
+          .map((a) =>
+            `<option value="${a.id}"${(d.timeStatsAxis || "group") === a.id ? " selected" : ""}>${esc(a.label)}</option>`
+          ).join("")}</select>
+      </label>
     </fieldset>
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>
@@ -6598,31 +6828,85 @@ function closeTimeline() {
  *  Ende), Netto (1. Punkt → Ende) und die Anlaufzeit dazwischen. Reine
  *  Anzeige; das Panel existiert nur, wenn der Host `time_stats` liefert
  *  (`panelAvailable`). */
+/**
+ * Panel „Spielzeiten" — dieselben Messwerte, vier Schnitte (Spec
+ * `tl-sicht-feinschliff`, Punkt 1).
+ *
+ * Der Host liefert alle vier gemeinsam; gewählt wird hier, weil der
+ * Turnier-PC den Zustand seit ADR 0034 einmal ZENTRAL für alle Geräte baut,
+ * die Achse aber im Profil je Gerät liegt. Umschalten ist damit ein reiner
+ * Client-Vorgang ohne Rückfrage beim Host.
+ */
+const ZEITEN_ACHSEN = [
+  { id: "group", label: "Konkurrenz", spalte: "Klasse" },
+  { id: "class", label: "Klasse", spalte: "Klasse" },
+  { id: "discipline", label: "Disziplin", spalte: "Disziplin" },
+  { id: "hall", label: "Halle", spalte: "Halle" },
+];
+
+/** Zeilen der aktiven Achse — mit Rückfall auf „Konkurrenz", wenn die
+ *  gewählte Achse gerade nichts hergibt (Hallen-Achse in einem
+ *  Ein-Hallen-Turnier: der Host liefert sie leer, A1.6). */
+function zeitenAchse(stats) {
+  const gewaehlt = aktiveZeitenAchse();
+  const listen = {
+    group: stats.rows || [],
+    class: stats.by_class || [],
+    discipline: stats.by_discipline || [],
+    hall: stats.by_hall || [],
+  };
+  if (gewaehlt !== "group" && !listen[gewaehlt].length) {
+    return { id: "group", zeilen: listen.group };
+  }
+  return { id: gewaehlt, zeilen: listen[gewaehlt] || [] };
+}
+
+/** Beschriftung einer Zeile je Achse. Der Host schickt nur die Kürzel —
+ *  zusammengesetzt wird hier, wie überall auf dieser Seite. */
+function zeitenZeilenLabel(achse, r) {
+  if (achse === "class") return r.class_label || "ohne Klasse";
+  if (achse === "discipline") return disziplin(r.discipline) || "ohne Disziplin";
+  if (achse === "hall") return r.hall || "ohne Halle";
+  return klasse(r.discipline, r.class_label) || "ohne Klasse";
+}
+
 function renderTimes() {
   const stats = state.time_stats;
-  setPanelCount("times", stats && stats.rows ? stats.rows.length : 0);
   const box = $("times-box");
-  if (!box || !stats) return;
-  setPanelPreview("times", stats.rows.length
-    ? `${stats.rows.length} Gruppe(n) gemessen`
+  if (!stats) { setPanelCount("times", 0); return; }
+  const { id: achse, zeilen: rows } = zeitenAchse(stats);
+  // Fiel die gewählte Achse mangels Daten zurück, wird das GESAGT. Ohne
+  // den Hinweis stünde da kommentarlos eine andere Tabelle, und der
+  // Turnierleiter schlösse daraus, die Einstellung tue nichts.
+  const gewaehlt = aktiveZeitenAchse();
+  const rueckfall = achse !== gewaehlt
+    ? `<p class="note">Für „${esc((ZEITEN_ACHSEN.find((a) => a.id === gewaehlt) || {}).label || gewaehlt)}" liegen keine Messwerte vor — gezeigt wird „Konkurrenz".</p>`
+    : "";
+  // Zähler und Vorschau folgen der AKTIVEN Achse (A1.4) — sonst stünde im
+  // zugeklappten Kopf eine Zahl, die zur aufgeklappten Tabelle nicht passt.
+  setPanelCount("times", rows.length);
+  if (!box) return;
+  setPanelPreview("times", rows.length
+    ? `${rows.length} ${achse === "hall" ? "Halle(n)" : "Gruppe(n)"} gemessen`
     : "noch keine Messwerte");
+  const spalte = (ZEITEN_ACHSEN.find((a) => a.id === achse) || ZEITEN_ACHSEN[0]).spalte;
   const fuss = `<p class="meta">${stats.tournament_brutto_mins != null
     ? `Turnier gesamt (Brutto-Median): ${stats.tournament_brutto_mins} min · `
     : ""}Startwert ohne Messwerte: ${stats.default_mins} min — solche Prognosen zeigt die Spielliste als „~hh:mm".</p>`;
-  if (!stats.rows.length) {
-    setzeHtmlWennNeu(box, `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
+  if (!rows.length) {
+    setzeHtmlWennNeu(box, `${rueckfall}<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
     return;
   }
-  const zeilen = stats.rows.map((r) => `<tr>
-      <td>${esc(klasse(r.discipline, r.class_label) || "ohne Klasse")}</td>
+  const zeilen = rows.map((r) => `<tr>
+      <td>${esc(zeitenZeilenLabel(achse, r))}</td>
       <td class="num">${r.count}</td>
       <td class="num">${r.brutto_mins} min</td>
       <td class="num">${r.netto_mins} min</td>
       <td class="num">${r.diff_mins} min</td>
     </tr>`).join("");
-  setzeHtmlWennNeu(box, `<table class="times-table">
+  setzeHtmlWennNeu(box, `${rueckfall}<table class="times-table">
       <thead><tr>
-        <th>Klasse</th>
+        <th>${esc(spalte)}</th>
         <th class="num" title="Anzahl regulär gemessener Spiele">Spiele</th>
         <th class="num" title="Median: Feldzuweisung bis Spielende">Brutto</th>
         <th class="num" title="Median: erster Punkt bis Spielende">Netto</th>
@@ -6727,7 +7011,7 @@ function finRow(f) {
       ? `<span class="hall-kuerzel" title="${esc(f.hall)}">${hallMarke(f.hall)}${esc(hallenKuerzel(f.hall))}</span> `
       : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
-      <span class="fin-pair">${esc(siegerZuerst(f))}</span>
+      <span class="fin-pair">${siegerZuerstHtml(f)}</span>
       <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
@@ -6770,7 +7054,7 @@ function wireFinRow(box) {
       if (!f) return;
       openResultDialog({
         matchId: f.match_id,
-        label: siegerZuerst(f), // Titel: Sieger zuerst, wie die Zeile.
+        label: siegerZuerstText(f), // Titel: Sieger zuerst, wie die Zeile.
         sets: f.sets || [],
         bestOf: 3,
         overwrite: true,

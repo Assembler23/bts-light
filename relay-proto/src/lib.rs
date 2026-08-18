@@ -1153,6 +1153,21 @@ pub enum TlListPositionWire {
     Bottom,
 }
 
+/// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`, Punkt 1).
+///
+/// `Group` ist der Vorgabewert und zugleich die fachliche Voreinstellung:
+/// Ein Profil aus einem älteren Browser-Stand kennt das Feld nicht und
+/// landet damit auf der bisherigen Ansicht (Klasse × Disziplin).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlTimeStatsAxisWire {
+    #[default]
+    Group,
+    Class,
+    Discipline,
+    Hall,
+}
+
 /// Turnierweite Anzeige-Optionen eines Panel-Profils (Spec
 /// tl-web-panelsystem) — dieselben Schalter, die vorher als lose
 /// `localStorage`-Werte in `tl.html` lebten.
@@ -1191,6 +1206,12 @@ pub struct TlDisplaySettingsWire {
     pub unlimited_court_calls: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
+    /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
+    /// `#[serde(default)]` wie die beiden Schalter darüber: Ein Profil aus
+    /// einem älteren Browser-Stand kennt das Feld nicht und bleibt damit
+    /// auf der bisherigen Ansicht.
+    #[serde(rename = "timeStatsAxis", default)]
+    pub time_stats_axis: TlTimeStatsAxisWire,
 }
 
 /// Ein benanntes Panel-Profil, wie es über die Wire-Grenze reist — sowohl als
@@ -1518,6 +1539,35 @@ pub enum TlAction {
     AnnounceOfficials {
         #[serde(rename = "courtId")]
         court_id: i64,
+    },
+    /// Den Zähltafelbediener eines Felds nachrufen („… bitte als
+    /// Tabletbedienung melden", ADR 0007 / Spec `tl-sicht-feinschliff`
+    /// Punkt 2).
+    ///
+    /// **Kein Spieler-Aufruf.** Der Host führt dafür einen eigenen Zähler;
+    /// `call_stages` und `prep_call_stages` bleiben unberührt, sonst zöge
+    /// ein Nachruf an die Bedienung die angezeigte Aufruf-Zahl der Spieler
+    /// hoch.
+    AnnounceScorekeeper {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
+    /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+    /// besetztes Feld, auf dem noch kein Punkt gefallen ist (Spec
+    /// `tl-sicht-feinschliff`, Punkt 3).
+    ///
+    /// **Ausdrücklich kein Aufruf.** Der Host lässt `call_stages` dabei
+    /// unberührt: kein Stufenwort in der Ansage, kein Abzeichen an der
+    /// Kachel, keine Änderung an der Fälligkeit. Die Spieler stehen ja
+    /// längst am Feld — gerufen wurde vorher.
+    ///
+    /// `match_id` reist mit, damit die Ansage nicht mehr erklingt, wenn
+    /// inzwischen ein anderes Spiel auf dem Feld steht.
+    AnnounceStartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
     },
 
     // ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ──────────
@@ -3351,6 +3401,11 @@ mod tests {
                 operator: true,
             },
             TlAction::AnnounceOfficials { court_id: 5 },
+            TlAction::AnnounceScorekeeper { court_id: 5 },
+            TlAction::AnnounceStartPlay {
+                court_id: 5,
+                match_id: 77,
+            },
             // Panel-Profile (Spec tl-web-panelsystem)
             TlAction::ProfileSave {
                 profile: TlPanelProfileWire {
@@ -3366,6 +3421,7 @@ mod tests {
                     display: TlDisplaySettingsWire {
                         show_numbers: true,
                         list_position: TlListPositionWire::Bottom,
+                        time_stats_axis: TlTimeStatsAxisWire::Group,
                         ..Default::default()
                     },
                     columns: 2,
@@ -3572,6 +3628,7 @@ mod tests {
                 show_court_remaining: true,
                 unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
+                time_stats_axis: TlTimeStatsAxisWire::Group,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],

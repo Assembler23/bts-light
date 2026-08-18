@@ -367,6 +367,44 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Monitor-Livestand per Push** — ein gezählter Punkt soll nur noch kosten,
+  was er wert ist. Heute weckt jeder Punkt jede Übersichts-Anzeige, die
+  daraufhin den Zustand **aller** Felder holt und ihr Board komplett neu
+  aufbaut (grob 1,6–8 MB/s WLAN bei 20 Feldern × 20 TVs für ~20 Byte
+  Information). Sieben Etappen, Reihenfolge durch eine Vorab-Messung
+  gesteuert: Perf-Zähler + Lastskript (S0), Antwortcache für `/health` (S1),
+  Entprellung von `persist_scores` — heute ein Vollschreibvorgang **je
+  Punkt** (S2), Zuweisungs-Nudge (S3, schließt die beiden offenen
+  A1-TODOs), `seq` in den Voll-Antworten als Ordnung zwischen Push und
+  Abruf (S4), Teil-Patch statt Board-Neuaufbau (S5), neue Definition von
+  „Push-Kanal ist gesund" mit sichtbarem Heartbeat und 4-s-Fallback
+  (S6, Config-Schalter, Default aus), schmaler Abruf `/health?court=<id>`
+  (S7). „Nutzlast im Nudge" ist bewusst **zurückgestellt** und wird nur bei
+  Verfehlen der Nachmess-Schwellen gebaut.
+  Spec: [features/monitor-livestand-push.md](features/monitor-livestand-push.md) ·
+  ADR [0035](adr/0035-monitor-livestand-ordnung.md).
+- **Feinschliff Turnierleitungssicht (18.08.2026)** — vier unabhängige
+  Punkte aus dem Turnierbetrieb: (1) die Spielzeiten-Statistik wird
+  **mehrachsig** (Klasse · Disziplin · Halle · Klasse×Disziplin), die Achse
+  ist eine Profil-Einstellung; die Halle wird dafür beim E4-Stempel im
+  Messwert festgehalten und bleibt **reine Anzeige** (Prognose unberührt).
+  (2) **Nachruf für Zähltafelbediener** am Feld-Aufruf („… bitte als
+  Tabletbedienung melden") — der seit ADR 0007 offene Baustein; der
+  Vorbereitungs-Aufruf bleibt bewusst außen vor. (3) Neue TL-Web-Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."**, die die Aufruf-Zählung
+  **nicht** anfasst. (4) **Spielerlinks** auch in laufenden Feld-Kacheln und
+  bei beendeten Spielen — hebt die Beschränkung der Lizenznummern auf die
+  Warteliste auf (beide Wächter-Tests werden angepasst und begründet).
+  Spec: [features/tl-sicht-feinschliff.md](features/tl-sicht-feinschliff.md) ·
+  ADR [0036](adr/0036-hallen-achse-im-messwert.md) (Punkt 1) ·
+  Nachtrag an ADR [0007](adr/0007-zaehltafelbediener.md) (Punkt 2).
+  **Umsetzung in vier PRs, Reihenfolge 4 → 3 → 1 → 2** (Nutzer-Vorgabe:
+  Spielerlinks und Spielbeginn-Ansage zuerst). Punkt 2 und 3 brauchen
+  **Relay-Deploy vor dem Client-Tag** (neue `TlAction` → altes Relay
+  antwortet 422); der Punkt-3-PR trägt zusätzlich die Absicherung, die
+  einen Ansage-Slave mit älterem Stand vor dem Verlust der ganzen
+  Auftragscharge schützt.
+
 - **Hallen-Farben** — jede Halle eines Mehr-Hallen-Turniers bekommt eine
   Farbe (Auto-Palette, deterministisch alphabetisch; Übersteuerung per
   Palettenton auf der Felderübersicht), sichtbar als Marke neben jeder

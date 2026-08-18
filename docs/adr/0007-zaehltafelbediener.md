@@ -103,3 +103,22 @@ eigenständiges Spieler-Update die Check-in-Bits nicht kaputtschreibt
   Spieler-Auscheck-Writes freigegeben (Change-Gate „Wie getestet?"). Tilos
   Sonderoptionen (VF-Gewinner, Doppel-Split, Landesverband) bleiben bis zu
   konkretem Bedarf außen vor.
+
+## Nachtrag 2026-08-18 — der Nachruf ist gebaut
+
+Der unter „Konsequenzen" als optional geführte Zweitaufruf-Knopf („… bitte
+als Tabletbedienung melden") ist mit v0.9.232 umgesetzt, als **eigene
+Ansageart** mit **eigenem Zähler** (Spec `tl-sicht-feinschliff`, Punkt 2).
+
+Zwei Entscheidungen, die diesen ADR ergänzen, ohne ihn zu ändern:
+
+- **Kein vierter Wert an `PrepCallSide`.** Das Enum ist geschlossen, und
+  `TlPrepCall.recalls` ist das Maximum über alle Parteien — ein
+  Bediener-Nachruf hätte die angezeigte Nachruf-Zahl der Spieler
+  hochgezogen. Der Satz ist ohnehin ein anderer.
+- **Das Zuweisungsmodell dieses ADRs bleibt unangetastet.** Der Nachruf
+  setzt am Feld-Aufruf an, wo der Bediener bereits feststeht. Ein Bediener
+  beim Vorbereitungs-Aufruf hätte eine Reservierung je Match gebraucht und
+  damit die Regel „bevorzugt der Verlierer des Vorspiels auf genau diesem
+  Feld" abgelöst — bewusst nicht getan.
+

@@ -68,6 +68,17 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
+  fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**
+  Aufruf: Die Aufruf-Zählung bleibt stehen, das Abzeichen springt nicht,
+  und du kannst beliebig oft nachfassen. Der Knopf verschwindet, sobald
+  gezählt wird.
+- **Bedienung nachrufen:** Ist dem Feld ein Zähltafelbediener zugewiesen,
+  ruft „Bedienung nachrufen" im ⋯-Menü der Kachel ihn aus
+  („Feld 3. Meier, bitte als Tabletbedienung melden."). Ab dem zweiten Mal
+  mit Stufenwort. Das ist **kein** Spieler-Aufruf: Die Aufruf-Zählung der
+  Spieler bleibt stehen. Ohne zugewiesene Bedienung gibt es den Knopf nicht.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.
@@ -92,7 +103,12 @@ LAN+Cloud voraus.
 - **Jeder Name ist ein Link** auf die Spielerseite von badhub
   (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
   Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne
-  Lizenznummer in BTP bleiben unverlinkt.
+  Lizenznummer in BTP bleiben unverlinkt. Seit 18.08.2026 gilt das an
+  **allen drei Stellen**: in der Spielliste, in den **Feld-Kacheln** der
+  laufenden Spiele und in der Liste der **beendeten Spiele**. Ein Klick
+  auf den Namen einer Feld-Kachel öffnet nur die Spielerseite — er nimmt
+  das Spiel **nicht** zusätzlich auf; ein vom Namen aus begonnener **Zug**
+  auf ein anderes Feld funktioniert weiterhin.
 - **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
   scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
@@ -255,6 +271,17 @@ Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
   wieder her. Kein Panel lässt sich auf null ziehen. Ist ein Panel
   dazwischen ausgeblendet, greift der Steg automatisch das nächste
   sichtbare.
+  **Die Verteilung hängt nur am gezogenen Verhältnis, nicht am Inhalt**
+  (seit v0.9.229): Wie viele Zeilen ein Panel gerade zeigt, ändert seine
+  Höhe nicht. Vorher wuchs die Spielliste beim Nachladen auf Kosten ihrer
+  Nachbarn, und der Steg ließ sich danach nicht mehr sinnvoll ziehen.
+  Umgekehrt heißt das: Ein Panel mit wenig Inhalt behält seinen Anteil,
+  auch wenn darunter Platz frei bleibt — wer das anders will, zieht den
+  Steg (das wirkt jetzt wieder zuverlässig). Das Panel **„Felder"** bildet
+  die Ausnahme: Es gibt ungenutzte Höhe automatisch an die übrigen Panels
+  seiner Spalte zurück, solange du seine Höhe nicht selbst gezogen hast.
+  Ziehst du, tritt die Automatik zurück und dein Maß gilt; **Doppeltipp**
+  auf den Steg schaltet sie wieder ein.
 
 #### Spalten (1 bis 3)
 
@@ -489,6 +516,27 @@ nie die einzige Information. An einem alten Turnier-PC ohne das Feature
 bleibt die Seite schlicht farblos.
 
 ### Startzeit-Prognose & Spielzeiten
+
+**Gruppieren nach (seit v0.9.231).** Die Auswertung zeigt dieselben
+Messwerte wahlweise nach **Konkurrenz** (Klasse × Disziplin, z. B. „HE-A" —
+die Voreinstellung), nach **Klasse**, nach **Disziplin** oder nach **Halle**.
+Die Wahl steht im Profil-Editor unter „Spielzeiten gruppieren nach" und gilt
+damit für alle Geräte mit diesem Profil.
+
+Die Hallen-Auswertung beantwortet die Frage, wegen der man bei zwei Hallen
+überhaupt auf die Uhr schaut: Läuft eine Halle systematisch langsamer? Zwei
+Dinge dazu:
+
+- Bei **Ein-Hallen-Turnieren** wird die Hallen-Achse gar nicht erst zur
+  Auswahl angeboten — dort stünde nur eine einzige Zeile. Trägt ein Profil
+  sie bereits (von einem anderen Turnier), bleibt die Auswahl erhalten und
+  das Panel sagt, dass es ersatzweise nach Konkurrenz gruppiert.
+- Die Halle wird beim **ersten Aufruf aufs Feld** festgehalten. Spiele, die
+  vor dem Update auf v0.9.231 gemessen wurden, kennen ihre Halle nicht mehr
+  und stehen in einer eigenen Zeile **„ohne Halle"**. Wer mitten im Turnier
+  aktualisiert, fängt die Hallen-Auswertung also praktisch neu an; die
+  übrigen drei Achsen sind davon nicht betroffen.
+
 
 > Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·
 > Spec [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md)

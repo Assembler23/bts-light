@@ -100,3 +100,103 @@ export function announceOfficials(
     },
   );
 }
+
+/**
+ * „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+ * besetztes Feld, auf dem noch kein Punkt gefallen ist (Spec
+ * `tl-sicht-feinschliff`, Punkt 3).
+ *
+ * Bewusst getrennt von [`announceCourt`]: Das ist **kein** Aufruf. Die
+ * Paarung wurde längst gerufen, die Spieler stehen am Feld — noch einmal
+ * „Feld 3. Herreneinzel A. Müller gegen Schmidt." hielte die Halle nur auf.
+ *
+ * Die Sprachwahl folgt den Nationen der Spieler dieses Felds, wie bei jeder
+ * anderen Feld-Ansage auch.
+ */
+export function announceStartPlay(
+  court: CourtOverview,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): void {
+  const lang = resolveAnnouncementLanguage(
+    [...court.team1_nationalities, ...court.team2_nationalities],
+    announce.language_mode,
+  );
+  void playAnnouncement(
+    {
+      courtLabel: court.court,
+      discipline: court.discipline,
+      teamANames: [],
+      teamBNames: [],
+      startPlayOnly: true,
+    },
+    lang,
+    {
+      rate: announce.rate,
+      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+      gong: announce.gong,
+      nameOverrides: announce.name_overrides,
+      nameOverridesEnabled: announce.name_overrides_enabled,
+      azure: azureOption(azureTts),
+    },
+  );
+}
+
+/**
+ * Nachruf an die Zähltafelbedienung eines Felds („Feld 3. Meier, bitte als
+ * Tabletbedienung melden.") — der seit ADR 0007 offene Baustein, Spec
+ * `tl-sicht-feinschliff` Punkt 2.
+ *
+ * Bewusst getrennt von [`announceCourt`]: Das ist **kein** Spieler-Aufruf.
+ * Die Aufruf-Stufe der Spieler bleibt stehen; der Turnier-PC führt für die
+ * Bedienung einen eigenen Zähler.
+ *
+ * Die Sprachwahl folgt den Nationen der **Spieler** dieses Felds — die
+ * Bediener-Namen tragen keine Nation. Dieselbe Regel wie bei
+ * [`announceOfficials`].
+ */
+export function announceScorekeeper(
+  court: CourtOverview,
+  names: string[],
+  stage: 1 | 2 | 3,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): void {
+  // NUR bei echter Zuweisung ansagen (ADR 0007) — dieselbe Prüfung wie in
+  // `announceCourt` oben und im Cloud-Ansage-Slave. Ohne sie fiele
+  // `court.scorekeeper` auf den reinen **pro-Feld-Hinweis** zurück: den
+  // Verlierer des zuletzt auf diesem Feld beendeten Spiels. Der wäre nie
+  // zugewiesen worden, und die Anlage riefe ihn trotzdem aus.
+  //
+  // Der Fall ist real, nicht theoretisch: Ein Ansage-Gerät baut seinen
+  // Feld-Stand LOKAL auf. Auf einem LAN-Ansage-Slave mit ausgeschalteter
+  // Bediener-Verwaltung — für einen reinen Ansage-PC der Normalfall —
+  // räumt der Sync-Lauf die Zuweisungen, füllt den pro-Feld-Hinweis aber
+  // weiter (Review 18.08.2026).
+  if (!court.scorekeeper_assigned) return;
+  if (names.length === 0) return;
+  const lang = resolveAnnouncementLanguage(
+    [...court.team1_nationalities, ...court.team2_nationalities],
+    announce.language_mode,
+  );
+  void playAnnouncement(
+    {
+      courtLabel: court.court,
+      discipline: court.discipline,
+      teamANames: [],
+      teamBNames: [],
+      scorekeeperNames: names,
+      callStage: stage,
+      scorekeeperOnly: true,
+    },
+    lang,
+    {
+      rate: announce.rate,
+      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+      gong: announce.gong,
+      nameOverrides: announce.name_overrides,
+      nameOverridesEnabled: announce.name_overrides_enabled,
+      azure: azureOption(azureTts),
+    },
+  );
+}

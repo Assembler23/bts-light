@@ -5,6 +5,25 @@
 > Technik BTP-Seite: [btp_protocol.md](btp_protocol.md) (Duration) ·
 > TL-Web-Bedienung: [turnierleitung-web.md](turnierleitung-web.md)
 
+## Vier Achsen der Auswertung (seit v0.9.231)
+
+Das Panel „Spielzeiten" in TL-Web zeigt dieselben Messwerte wahlweise nach
+**Konkurrenz** (Klasse × Disziplin — die Voreinstellung), **Klasse**,
+**Disziplin** oder **Halle**. Umgestellt wird im Profil-Editor; die Wahl
+gehört zum Profil, nicht zum Gerät.
+
+Wichtig für das Verständnis der Zahlen:
+
+- Alle vier Achsen zerlegen **dieselbe** Menge — die Summe der „Spiele"
+  ist auf jeder Achse gleich.
+- Die Auswertung ist **reine Anzeige**. Die Prognose („dran ca. hh:mm")
+  rechnet unverändert über Klasse × Disziplin → Klasse → Turnier → Startwert.
+  Eine neue Achse ändert an keiner Prognose etwas.
+- Die **Halle** wird beim ersten Aufruf aufs Feld festgehalten (ADR 0036).
+  Ein Spiel, das später die Halle wechselt, bleibt in seiner ersten. Spiele,
+  die vor v0.9.231 gemessen wurden, stehen unter „ohne Halle".
+- Bei Ein-Hallen-Turnieren wird die Hallen-Achse nicht angeboten.
+
 ## Was gemessen wird
 
 bts-light misst je Spiel drei Zeitpunkte — automatisch, ohne Bedienschritt:

@@ -258,3 +258,21 @@ Frontend-Spiegel:
   `renderNextMonitor` + `filterUpcomingByHall`.
 - `docs/features/liveticker_bts.md` (badhub-Repo) — Doku des
   `display=next`-Monitors und des `&halle=`-Filters.
+
+## Kein Zähltafelbediener im Vorbereitungs-Aufruf
+
+Der Aufruf in die Vorbereitung nennt **bewusst keinen** Zähltafelbediener
+(Stand 18.08.2026, Spec `features/tl-sicht-feinschliff.md` Punkt 2). Grund
+ist kein Versäumnis, sondern das Datenmodell: Der Bediener hängt am **Feld**,
+nicht am Match — zugewiesen wird er erst, wenn das Feld belegt wird
+(ADR 0007). Ein Vorbereitungs-Aufruf kennt aber nur die **Halle**, kein Feld.
+
+Erwogen und verworfen wurden: den Kopf der Warteschlange ohne Bindung
+anzusagen (es kann beim Feld-Aufruf jemand anderes werden — die
+Turnierleitung müsste das erklären) und eine Reservierung je Match (hätte die
+erprobte Regel „bevorzugt der Verlierer des Vorspiels auf genau diesem Feld"
+abgelöst).
+
+Der **Nachruf** an die Bedienung setzt deshalb am Feld-Aufruf an, wo sie
+feststeht: [zaehltafelbediener.md](zaehltafelbediener.md).
+
