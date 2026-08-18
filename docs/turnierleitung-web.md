@@ -68,6 +68,12 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
+  fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**
+  Aufruf: Die Aufruf-Zählung bleibt stehen, das Abzeichen springt nicht,
+  und du kannst beliebig oft nachfassen. Der Knopf verschwindet, sobald
+  gezählt wird.
 - **Bedienung nachrufen:** Ist dem Feld ein Zähltafelbediener zugewiesen,
   ruft „Bedienung nachrufen" im ⋯-Menü der Kachel ihn aus
   („Feld 3. Meier, bitte als Tabletbedienung melden."). Ab dem zweiten Mal
@@ -265,6 +271,17 @@ Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
   wieder her. Kein Panel lässt sich auf null ziehen. Ist ein Panel
   dazwischen ausgeblendet, greift der Steg automatisch das nächste
   sichtbare.
+  **Die Verteilung hängt nur am gezogenen Verhältnis, nicht am Inhalt**
+  (seit v0.9.229): Wie viele Zeilen ein Panel gerade zeigt, ändert seine
+  Höhe nicht. Vorher wuchs die Spielliste beim Nachladen auf Kosten ihrer
+  Nachbarn, und der Steg ließ sich danach nicht mehr sinnvoll ziehen.
+  Umgekehrt heißt das: Ein Panel mit wenig Inhalt behält seinen Anteil,
+  auch wenn darunter Platz frei bleibt — wer das anders will, zieht den
+  Steg (das wirkt jetzt wieder zuverlässig). Das Panel **„Felder"** bildet
+  die Ausnahme: Es gibt ungenutzte Höhe automatisch an die übrigen Panels
+  seiner Spalte zurück, solange du seine Höhe nicht selbst gezogen hast.
+  Ziehst du, tritt die Automatik zurück und dein Maß gilt; **Doppeltipp**
+  auf den Steg schaltet sie wieder ein.
 
 #### Spalten (1 bis 3)
 
@@ -499,6 +516,27 @@ nie die einzige Information. An einem alten Turnier-PC ohne das Feature
 bleibt die Seite schlicht farblos.
 
 ### Startzeit-Prognose & Spielzeiten
+
+**Gruppieren nach (seit v0.9.231).** Die Auswertung zeigt dieselben
+Messwerte wahlweise nach **Konkurrenz** (Klasse × Disziplin, z. B. „HE-A" —
+die Voreinstellung), nach **Klasse**, nach **Disziplin** oder nach **Halle**.
+Die Wahl steht im Profil-Editor unter „Spielzeiten gruppieren nach" und gilt
+damit für alle Geräte mit diesem Profil.
+
+Die Hallen-Auswertung beantwortet die Frage, wegen der man bei zwei Hallen
+überhaupt auf die Uhr schaut: Läuft eine Halle systematisch langsamer? Zwei
+Dinge dazu:
+
+- Bei **Ein-Hallen-Turnieren** wird die Hallen-Achse gar nicht erst zur
+  Auswahl angeboten — dort stünde nur eine einzige Zeile. Trägt ein Profil
+  sie bereits (von einem anderen Turnier), bleibt die Auswahl erhalten und
+  das Panel sagt, dass es ersatzweise nach Konkurrenz gruppiert.
+- Die Halle wird beim **ersten Aufruf aufs Feld** festgehalten. Spiele, die
+  vor dem Update auf v0.9.231 gemessen wurden, kennen ihre Halle nicht mehr
+  und stehen in einer eigenen Zeile **„ohne Halle"**. Wer mitten im Turnier
+  aktualisiert, fängt die Hallen-Auswertung also praktisch neu an; die
+  übrigen drei Achsen sind davon nicht betroffen.
+
 
 > Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·
 > Spec [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md)

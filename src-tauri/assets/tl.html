@@ -882,7 +882,27 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    das ohne Ausnahme auch für „Felder": Der frühere Sonderstatus als
    fixierte Ankerposition ist entfallen, das Panel trägt einen ganz
    normalen Reorder-Griff und eine Spaltenzuordnung wie jedes andere. */
-.panel { display: flex; flex-direction: column; min-height: var(--panel-min); overflow: hidden; }
+/* `flex-basis: 0` ist hier NICHT kosmetisch, sondern die Bedingung dafür,
+   dass die Höhenverteilung überhaupt funktioniert (Fehlerbericht
+   18.08.2026: „Nachladen vergrößert die Box, danach lässt sie sich nicht
+   mehr richtig ziehen").
+
+   Mit dem Vorgabewert `auto` wäre die Flex-Basis eines Panels seine
+   INHALTSHÖHE — und die Spielliste lädt beim Scrollen nach (`QUEUE_PAGE`),
+   wächst also im Betrieb. Sie verdrängte damit ihre Nachbarn bis auf
+   `--panel-min`, obwohl alle denselben `heightFr`-Anteil haben. Schlimmer:
+   Übersteigt die Summe der Basis-Höhen die Spaltenhöhe, bleibt kein freier
+   Raum — und `flex-grow`, das der Steg (`wireStegs`) beim Ziehen schreibt,
+   verteilt NUR freien Raum. Das Ziehen wurde dadurch wirkungslos.
+
+   Mit `flex-basis: 0` zählt allein die `heightFr`-Gewichtung — dieselbe
+   Entscheidung, die `.tl-column` mit `flex: 1 1 0` für die Spalten längst
+   trifft; die Panels waren beim Mehrspalten-Umbau nur nicht mitgezogen
+   worden. Zugeklappte Panels bleiben ausgenommen
+   (`.panel.panel-collapsed { flex: none }` weiter unten ist spezifischer
+   und setzt die Basis zurück auf `auto`): Sie sollen genau ihre Kopfzeile
+   hoch sein, nicht `--panel-min`. */
+.panel { display: flex; flex-direction: column; flex-basis: 0; min-height: var(--panel-min); overflow: hidden; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
   flex: none; display: flex; align-items: center; gap: 8px;
@@ -1708,6 +1728,11 @@ function builtInProfile() {
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
       listPosition: "right",
+      // Voreinstellung des Panels „Spielzeiten": die ursprüngliche Ansicht
+      // (Klasse x Disziplin). Ein Profil ohne das Feld landet über den
+      // Serde-Default auf demselben Wert — für niemanden ändert sich etwas,
+      // der nichts umstellt (A1.2).
+      timeStatsAxis: "group",
     },
     updatedAtMs: 0,
   };
@@ -1902,6 +1927,13 @@ function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
 function zeigeRestzeitAktiv() { return !!activeDisplay().showCourtRemaining; }
 function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
+/** Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`). Ein
+ *  unbekannter Wert fällt auf die ursprüngliche Ansicht zurück — ein Profil
+ *  aus einer NEUEREN App-Version darf diese Seite nicht ratlos machen. */
+function aktiveZeitenAchse() {
+  const gewaehlt = activeDisplay().timeStatsAxis;
+  return ZEITEN_ACHSEN.some((a) => a.id === gewaehlt) ? gewaehlt : "group";
+}
 
 // `applyListPosition()` gibt es nicht mehr: „Spielliste rechts/darunter"
 // ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) nur noch
@@ -3294,17 +3326,6 @@ function courtCard(c, cellStyle) {
           title="Schiedsrichter ansagen">Schiedsrichter ansagen</button>`);
     }
   }
-  // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
-  // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
-  // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
-  // Warteschlange, Feld mit abgeschalteter Bediener-Vergabe und global
-  // ausgeschaltete Verwaltung — in allen dreien weist der Turnier-PC gar
-  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe und steht
-  // deshalb getrennt von den Aufruf-Knöpfen.
-  if (state.scorekeeper_managed && c.match_id && c.scorekeeper_assigned) {
-    kachelAktionen.push(`<button type="button" data-sk-say="${c.court_id}"
-        title="Zähltafelbedienung nachrufen">Bedienung nachrufen</button>`);
-  }
   // Billige Bedingung zuerst: `aufrufeUnbegrenzt()` läuft durch die
   // Profil-Auflösung und soll im Normalfall gar nicht erst rechnen.
   if (c.match_id && ((!isPlaying(c) && gesprochen < 3) || aufrufeUnbegrenzt())) {
@@ -3322,6 +3343,26 @@ function courtCard(c, cellStyle) {
     kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
         data-made="${gesprochen}" data-call-side="team2"
         title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
+  }
+  // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
+  // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
+  // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
+  // Warteschlange, Feld mit abgeschalteter Bediener-Vergabe und global
+  // ausgeschaltete Verwaltung — in allen dreien weist der Turnier-PC gar
+  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe und steht
+  // deshalb getrennt von den Aufruf-Knöpfen.
+  if (state.scorekeeper_managed && c.match_id && c.scorekeeper_assigned) {
+    kachelAktionen.push(`<button type="button" data-sk-say="${c.court_id}"
+        title="Zähltafelbedienung nachrufen">Bedienung nachrufen</button>`);
+  }
+  // „Bitte mit dem Spielen beginnen" (Spec tl-sicht-feinschliff, Punkt 3):
+  // Die Spieler stehen am Feld, es fällt aber kein Punkt. Nur dann sinnvoll
+  // — sobald gezählt wird, ist die Aufforderung gegenstandslos. Bewusst
+  // KEIN Aufruf: Die Stufe bleibt stehen, deshalb steht der Knopf auch
+  // getrennt von den Aufruf-Knöpfen darüber und hat keine `data-made`.
+  if (c.match_id && !isPlaying(c)) {
+    kachelAktionen.push(`<button type="button" data-startplay="${c.court_id}" data-match="${c.match_id}"
+        title="Ansage: Feld soll mit dem Spielen beginnen">Bitte anfangen</button>`);
   }
   if (c.match_id) {
     kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
@@ -3476,6 +3517,11 @@ window.addEventListener("resize", folgeOffenenKebabs);
  * ein belegtes Feld der **Griff** (antippen wählt das Spiel zum Umhängen,
  * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
  */
+/** Zeitpunkt der letzten Spielbeginn-Ansage je Feld — die Doppeltipp-Sperre.
+ *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
+ *  (siehe Kommentar an der Verdrahtung). */
+const spielbeginnZuletzt = new Map();
+
 /** Zeitpunkt des letzten Bediener-Nachrufs je Feld — die Doppeltipp-Sperre.
  *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
  *  (siehe Kommentar an der Verdrahtung). */
@@ -3596,6 +3642,35 @@ function wireCourts(box) {
       send(
         `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "announce_officials", courtId },
+        "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // „Bitte anfangen": beliebig oft auslösbar (Spec A3.4) — wer nach fünf
+  // Minuten immer noch nicht spielt, wird eben erneut gebeten. Deshalb ein
+  // Zeitstempel-Nonce in der Vorgangs-Kennung statt des 20-s-Fensters
+  // (`OP_WINDOW_MS`): Das Fenster ist gegen versehentliche Doppel-Sendungen
+  // gedacht und schluckte eine BEWUSSTE Wiederholung stumm.
+  //
+  // Die Doppeltipp-Sperre liegt im Modul-Zustand, NICHT als `disabled` am
+  // Knopf: `send()` stößt in seinem `finally` einen Abruf an, und ein
+  // geänderter Zustand zeichnet die Kacheln neu — der frische Knopf wäre
+  // sofort wieder scharf, lange vor Ablauf der Sekunde. Im laufenden
+  // Turnier ändert sich fast jede Sekunde etwas, die Sperre wäre also
+  // genau dann wirkungslos, wenn sie gebraucht wird (Review 18.08.2026).
+  scopeAll(box, "button[data-startplay]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.startplay);
+      const matchId = Number(btn.dataset.match);
+      const zuletzt = spielbeginnZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      spielbeginnZuletzt.set(courtId, Date.now());
+      send(
+        `startplay-${courtId}-${matchId}-${Date.now()}`,
+        { action: "announce_start_play", courtId, matchId },
         "Ansage ausgelöst.",
       );
     });
@@ -3969,15 +4044,24 @@ function fitCourts() {
    * Flex-Modell von selbst an die übrigen Panels derselben Spalte (Flexbox
    * behandelt eine `max-height`-Verletzung genau so). Ohne das stünde unter
    * den Kacheln ein leerer Block, während die Liste darunter rollt.
-   * Keine Rückkopplung: Der Deckel kürzt nur `clientHeight`, nie den
-   * gemessenen `scrollHeight` — und beim nächsten Durchlauf fällt er oben
+   *
+   * Gemessen wird die **Kachelbox**, nicht der Scroll-Bereich des Körpers.
+   * Der Unterschied entscheidet, ob überhaupt etwas zurückgegeben wird:
+   * `scrollHeight` ist nach unten durch `clientHeight` geklammert, und
+   * hierher kommt man nur, wenn der Inhalt passt (`passt()`) — dann sind
+   * beide gleich, und der Deckel wäre exakt die aktuelle Höhe. Er gäbe also
+   * nie etwas ab (Review 18.08.2026: zwei Kacheln in einem 400-px-Stapel
+   * behielten 174 px statt 119 px, die Liste bekam nichts).
+   *
+   * Keine Rückkopplung: Die Kachelbox ordnet sich nach der BREITE, ihre
+   * Höhe hängt nicht am Deckel — und beim nächsten Durchlauf fällt er oben
    * ohnehin zuerst wieder weg.
    */
   const uebernehmeBedarf = () => {
     if (!automatik) return;
     const kopf = panel.querySelector(".panel-head");
     panel.style.maxHeight =
-      ((kopf ? kopf.offsetHeight : 0) + koerper.scrollHeight) + "px";
+      ((kopf ? kopf.offsetHeight : 0) + box.getBoundingClientRect().height) + "px";
   };
   if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
@@ -5249,6 +5333,16 @@ function wireStegs(container, achse) {
       steg.classList.add("zieht");
       document.body.classList.add("dragging");
       panelStegDragging = true;
+      // Bedarfs-Deckel der beiden Nachbarn räumen, BEVOR gemessen wird.
+      // `fitCourts()` deckelt „Felder" per Inline-`max-height` auf seinen
+      // Bedarf; ein Deckel schlägt aber jedes `flex-grow`, das dieser Zug
+      // gleich schreibt — das Panel bliebe unter dem Finger stehen und
+      // spränge erst beim Loslassen (Review 18.08.2026: 3:1 gezogen blieb
+      // es bei 174/174 statt 261/87). Der Zug IST die Ansage „ich verteile
+      // von Hand", also endet die Bedarfs-Automatik hier; gespeichert wird
+      // gleich ein `heightFr ≠ 1`, womit `fitCourts()` von selbst nicht
+      // mehr deckelt. Nur senkrecht — Spalten kennen keinen Deckel.
+      if (senkrecht) { prev.style.maxHeight = ""; next.style.maxHeight = ""; }
       const rA = prev.getBoundingClientRect(), rB = next.getBoundingClientRect();
       const massA = senkrecht ? rA.height : rA.width;
       const summe = massA + (senkrecht ? rB.height : rB.width);
@@ -6461,6 +6555,14 @@ function uebernehmeEditorFelder() {
     showGroup: $("prof-show-group").checked,
     showCourtRemaining: $("prof-show-court-remaining").checked,
     unlimitedCourtCalls: $("prof-unlimited-calls").checked,
+    // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
+    // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
+    // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
+    // Rückfall auf den bisherigen Wert, nicht auf die Vorgabe: Fehlte das
+    // Feld je (ausgeblendete Option), setzte „group" die gespeicherte Wahl
+    // still zurück — dieselbe Haltung wie beim durchgereichten
+    // `listPosition` darunter.
+    timeStatsAxis: $("prof-time-axis") ? $("prof-time-axis").value : (kopie.display.timeStatsAxis || "group"),
     // `listPosition` steht bewusst NICHT mehr im Editor (Plan
     // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
     // unverändert weitergereicht — eine ältere App-Version liest daraus
@@ -6522,6 +6624,20 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
+      <label class="checkbox-row" style="gap:8px">
+        <span>Spielzeiten gruppieren nach</span>
+        <select id="prof-time-axis">${ZEITEN_ACHSEN
+          // „Halle" nur bei Mehr-Hallen-Turnieren anbieten (A1.6): Sonst
+          // wäre die Auswertung eine einzige Zeile ohne Aussage. Ein Profil,
+          // das die Achse bereits trägt (anderes Turnier, andere Halle),
+          // behält seine Option — sonst kippte allein das Öffnen des
+          // Editors die gespeicherte Wahl still auf „Konkurrenz".
+          .filter((a) => a.id !== "hall"
+            || (state && state.multi_hall) || d.timeStatsAxis === "hall")
+          .map((a) =>
+            `<option value="${a.id}"${(d.timeStatsAxis || "group") === a.id ? " selected" : ""}>${esc(a.label)}</option>`
+          ).join("")}</select>
+      </label>
     </fieldset>
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>
@@ -6712,31 +6828,85 @@ function closeTimeline() {
  *  Ende), Netto (1. Punkt → Ende) und die Anlaufzeit dazwischen. Reine
  *  Anzeige; das Panel existiert nur, wenn der Host `time_stats` liefert
  *  (`panelAvailable`). */
+/**
+ * Panel „Spielzeiten" — dieselben Messwerte, vier Schnitte (Spec
+ * `tl-sicht-feinschliff`, Punkt 1).
+ *
+ * Der Host liefert alle vier gemeinsam; gewählt wird hier, weil der
+ * Turnier-PC den Zustand seit ADR 0034 einmal ZENTRAL für alle Geräte baut,
+ * die Achse aber im Profil je Gerät liegt. Umschalten ist damit ein reiner
+ * Client-Vorgang ohne Rückfrage beim Host.
+ */
+const ZEITEN_ACHSEN = [
+  { id: "group", label: "Konkurrenz", spalte: "Klasse" },
+  { id: "class", label: "Klasse", spalte: "Klasse" },
+  { id: "discipline", label: "Disziplin", spalte: "Disziplin" },
+  { id: "hall", label: "Halle", spalte: "Halle" },
+];
+
+/** Zeilen der aktiven Achse — mit Rückfall auf „Konkurrenz", wenn die
+ *  gewählte Achse gerade nichts hergibt (Hallen-Achse in einem
+ *  Ein-Hallen-Turnier: der Host liefert sie leer, A1.6). */
+function zeitenAchse(stats) {
+  const gewaehlt = aktiveZeitenAchse();
+  const listen = {
+    group: stats.rows || [],
+    class: stats.by_class || [],
+    discipline: stats.by_discipline || [],
+    hall: stats.by_hall || [],
+  };
+  if (gewaehlt !== "group" && !listen[gewaehlt].length) {
+    return { id: "group", zeilen: listen.group };
+  }
+  return { id: gewaehlt, zeilen: listen[gewaehlt] || [] };
+}
+
+/** Beschriftung einer Zeile je Achse. Der Host schickt nur die Kürzel —
+ *  zusammengesetzt wird hier, wie überall auf dieser Seite. */
+function zeitenZeilenLabel(achse, r) {
+  if (achse === "class") return r.class_label || "ohne Klasse";
+  if (achse === "discipline") return disziplin(r.discipline) || "ohne Disziplin";
+  if (achse === "hall") return r.hall || "ohne Halle";
+  return klasse(r.discipline, r.class_label) || "ohne Klasse";
+}
+
 function renderTimes() {
   const stats = state.time_stats;
-  setPanelCount("times", stats && stats.rows ? stats.rows.length : 0);
   const box = $("times-box");
-  if (!box || !stats) return;
-  setPanelPreview("times", stats.rows.length
-    ? `${stats.rows.length} Gruppe(n) gemessen`
+  if (!stats) { setPanelCount("times", 0); return; }
+  const { id: achse, zeilen: rows } = zeitenAchse(stats);
+  // Fiel die gewählte Achse mangels Daten zurück, wird das GESAGT. Ohne
+  // den Hinweis stünde da kommentarlos eine andere Tabelle, und der
+  // Turnierleiter schlösse daraus, die Einstellung tue nichts.
+  const gewaehlt = aktiveZeitenAchse();
+  const rueckfall = achse !== gewaehlt
+    ? `<p class="note">Für „${esc((ZEITEN_ACHSEN.find((a) => a.id === gewaehlt) || {}).label || gewaehlt)}" liegen keine Messwerte vor — gezeigt wird „Konkurrenz".</p>`
+    : "";
+  // Zähler und Vorschau folgen der AKTIVEN Achse (A1.4) — sonst stünde im
+  // zugeklappten Kopf eine Zahl, die zur aufgeklappten Tabelle nicht passt.
+  setPanelCount("times", rows.length);
+  if (!box) return;
+  setPanelPreview("times", rows.length
+    ? `${rows.length} ${achse === "hall" ? "Halle(n)" : "Gruppe(n)"} gemessen`
     : "noch keine Messwerte");
+  const spalte = (ZEITEN_ACHSEN.find((a) => a.id === achse) || ZEITEN_ACHSEN[0]).spalte;
   const fuss = `<p class="meta">${stats.tournament_brutto_mins != null
     ? `Turnier gesamt (Brutto-Median): ${stats.tournament_brutto_mins} min · `
     : ""}Startwert ohne Messwerte: ${stats.default_mins} min — solche Prognosen zeigt die Spielliste als „~hh:mm".</p>`;
-  if (!stats.rows.length) {
-    setzeHtmlWennNeu(box, `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
+  if (!rows.length) {
+    setzeHtmlWennNeu(box, `${rueckfall}<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
     return;
   }
-  const zeilen = stats.rows.map((r) => `<tr>
-      <td>${esc(klasse(r.discipline, r.class_label) || "ohne Klasse")}</td>
+  const zeilen = rows.map((r) => `<tr>
+      <td>${esc(zeitenZeilenLabel(achse, r))}</td>
       <td class="num">${r.count}</td>
       <td class="num">${r.brutto_mins} min</td>
       <td class="num">${r.netto_mins} min</td>
       <td class="num">${r.diff_mins} min</td>
     </tr>`).join("");
-  setzeHtmlWennNeu(box, `<table class="times-table">
+  setzeHtmlWennNeu(box, `${rueckfall}<table class="times-table">
       <thead><tr>
-        <th>Klasse</th>
+        <th>${esc(spalte)}</th>
         <th class="num" title="Anzahl regulär gemessener Spiele">Spiele</th>
         <th class="num" title="Median: Feldzuweisung bis Spielende">Brutto</th>
         <th class="num" title="Median: erster Punkt bis Spielende">Netto</th>

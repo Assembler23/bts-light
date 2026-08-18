@@ -29,6 +29,9 @@ pub const MIN_SAMPLES: usize = 3;
 pub struct Measurement {
     pub class_label: String,
     pub discipline: String,
+    /// Halle der ersten Feldzuweisung; leer bei Ein-Hallen-Turnieren und
+    /// bei Messwerten aus der Zeit vor ADR 0036.
+    pub hall: String,
     pub brutto_min: u64,
     pub netto_min: u64,
 }
@@ -52,13 +55,32 @@ pub struct TimeStats {
     tournament_medians: Option<(u64, u64)>,
     /// Vorberechnete Auswertungszeilen (je Klasse × Disziplin).
     rows: Vec<StatsRow>,
+    /// Dieselben Messwerte, nur anders geschnitten (Spec
+    /// `tl-sicht-feinschliff`, Punkt 1). Ebenfalls **beim Bau**
+    /// vorberechnet, also einmal je Messwert-Generation und nicht je
+    /// Poll — dieselbe Begründung wie oben.
+    ///
+    /// Sie speisen **ausschließlich die Anzeige**. Die Fallback-Kette der
+    /// Prognose (`group_medians` → `class_medians` → `tournament_medians`)
+    /// bleibt davon unberührt; das ist Nicht-Ziel N-3 der Spec und durch
+    /// `die_hallen_achse_aendert_die_prognose_kette_nicht` festgehalten.
+    rows_class: Vec<StatsRow>,
+    rows_discipline: Vec<StatsRow>,
+    rows_hall: Vec<StatsRow>,
 }
 
-/// Eine Zeile der Auswertung (je Klasse × Disziplin), Mediane in Minuten.
+/// Eine Zeile der Auswertung, Mediane in Minuten.
+///
+/// Dieselbe Form für alle vier Achsen: Je Achse tragen nur die Felder einen
+/// Wert, nach denen dort gruppiert wird — die übrigen bleiben leer. Ein
+/// fertig zusammengesetztes Label wäre kompakter, gäbe dem Host aber
+/// Anzeige-Fachlichkeit, die er sonst konsequent der Seite lässt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatsRow {
     pub class_label: String,
     pub discipline: String,
+    /// Nur auf der Hallen-Achse gefüllt; leer heißt dort „ohne Halle".
+    pub hall: String,
     pub count: usize,
     pub brutto_min: u64,
     pub netto_min: u64,
@@ -159,6 +181,10 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
             Some(Measurement {
                 class_label: e.class_label.trim().to_string(),
                 discipline: e.discipline.trim().to_string(),
+                // Getrimmt wie Klasse und Disziplin: Der Schlüssel ist der
+                // freie BTP-Hallenname, und ein Leerzeichen am Rand spaltete
+                // sonst eine Halle in zwei Zeilen (ADR 0036).
+                hall: e.hall.trim().to_string(),
                 brutto_min,
                 netto_min,
             })
@@ -235,6 +261,7 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
             StatsRow {
                 class_label: class,
                 discipline: disc,
+                hall: String::new(),
                 count,
                 brutto_min,
                 netto_min,
@@ -243,20 +270,100 @@ pub fn time_stats(entries: &HashMap<i64, MatchTimeEntry>) -> TimeStats {
         })
         .collect();
 
+    // Die drei zusätzlichen Achsen aus DENSELBEN Messwerten (Punkt 1 der
+    // Spec). Bewusst hier und nicht in der Fallback-Kette: Sie sind reine
+    // Anzeige (N-3).
+    let rows_class = zeilen_nach(&measurements, |m| {
+        (m.class_label.clone(), String::new(), String::new())
+    });
+    let rows_discipline = zeilen_nach(&measurements, |m| {
+        (String::new(), m.discipline.clone(), String::new())
+    });
+    let rows_hall = zeilen_nach(&measurements, |m| {
+        (String::new(), String::new(), m.hall.clone())
+    });
+
     TimeStats {
         group_medians,
         class_medians,
         tournament_medians,
         rows,
+        rows_class,
+        rows_discipline,
+        rows_hall,
     }
+}
+
+/// Auswertungszeilen für eine Achse: gruppiert die Messwerte nach dem
+/// Schlüssel `(Klasse, Disziplin, Halle)`, den `key` liefert, und rechnet je
+/// Gruppe dieselben vier Zahlen wie die Klasse×Disziplin-Achse.
+///
+/// Der Differenz-Median bleibt bewusst der Median der **Einzel**-Differenzen
+/// — er ist NICHT die Differenz der beiden Mediane (dasselbe wie oben bei
+/// `rows`, und aus demselben Grund).
+///
+/// Sortiert wird über den Schlüssel selbst, damit die Reihenfolge
+/// deterministisch ist; leere Schlüssel („ohne Halle") landen dabei oben.
+fn zeilen_nach(
+    measurements: &[Measurement],
+    key: impl Fn(&Measurement) -> (String, String, String),
+) -> Vec<StatsRow> {
+    let mut gruppen: HashMap<(String, String, String), Vec<(u64, u64)>> = HashMap::new();
+    for m in measurements {
+        gruppen
+            .entry(key(m))
+            .or_default()
+            .push((m.brutto_min, m.netto_min));
+    }
+    let mut schluessel: Vec<(String, String, String)> = gruppen.keys().cloned().collect();
+    schluessel.sort();
+    schluessel
+        .into_iter()
+        .map(|k| {
+            let werte = &gruppen[&k];
+            let brutto: Vec<u64> = werte.iter().map(|x| x.0).collect();
+            let netto: Vec<u64> = werte.iter().map(|x| x.1).collect();
+            let diff: Vec<u64> = werte.iter().map(|(b, n)| b.saturating_sub(*n)).collect();
+            StatsRow {
+                class_label: k.0,
+                discipline: k.1,
+                hall: k.2,
+                count: werte.len(),
+                brutto_min: median_min(&brutto).unwrap_or(0),
+                netto_min: median_min(&netto).unwrap_or(0),
+                diff_min: median_min(&diff).unwrap_or(0),
+            }
+        })
+        .collect()
 }
 
 impl TimeStats {
     /// Auswertungszeilen je Klasse × Disziplin (Median Brutto/Netto/
     /// Differenz, Anzahl), sortiert nach Klasse, dann Disziplin —
     /// vorberechnet beim Bau.
-    pub fn rows(&self) -> Vec<StatsRow> {
-        self.rows.clone()
+    ///
+    /// Als Slice statt Klon: Der TL-Zustand wird alle ein bis zwei Sekunden
+    /// gebaut, und mit vier Achsen wären das vier Klone je Bau (Review
+    /// 18.08.2026). Der Aufrufer mappt direkt in die Wire-Zeilen.
+    pub fn rows(&self) -> &[StatsRow] {
+        &self.rows
+    }
+
+    /// Auswertung nach **Klasse** (über alle Disziplinen und Hallen).
+    pub fn rows_class(&self) -> &[StatsRow] {
+        &self.rows_class
+    }
+
+    /// Auswertung nach **Disziplin** (über alle Klassen und Hallen).
+    pub fn rows_discipline(&self) -> &[StatsRow] {
+        &self.rows_discipline
+    }
+
+    /// Auswertung nach **Halle**. Messwerte ohne Halle stehen in einer
+    /// eigenen Zeile mit leerem Namen — sie dürfen keine echte Halle
+    /// verfälschen (A1.8).
+    pub fn rows_hall(&self) -> &[StatsRow] {
+        &self.rows_hall
     }
 
     /// Turnierweiter Brutto-Median (ab [`MIN_SAMPLES`] Messwerten).
@@ -653,6 +760,7 @@ mod tests {
             finished_ms: Some(finished),
             class_label: class.to_string(),
             discipline: disc.to_string(),
+            hall: String::new(),
             regular,
             off_court_polls: 0,
             finished_conflict_polls: 0,
@@ -670,6 +778,179 @@ mod tests {
             .map(|(i, e)| (i as i64, e))
             .collect();
         time_stats(&map)
+    }
+
+    /// Wie `entry`, aber mit Halle — für die Hallen-Achse (ADR 0036).
+    fn entry_in(
+        halle: &str,
+        class: &str,
+        disc: &str,
+        assigned: u64,
+        first_point: u64,
+        finished: u64,
+    ) -> MatchTimeEntry {
+        MatchTimeEntry {
+            hall: halle.to_string(),
+            ..entry(class, disc, assigned, first_point, finished, true)
+        }
+    }
+
+    // ── Die vier Achsen (Spec tl-sicht-feinschliff, Punkt 1) ────────────
+
+    #[test]
+    fn die_klassen_achse_fasst_alle_disziplinen_zusammen() {
+        // A1.1: „Wie lange dauern die A-Spiele?" — über alle Disziplinen.
+        let stats = stats_aus(vec![
+            entry("A", "HE", 0, minuten(5), minuten(20), true),
+            entry("A", "DD", 0, minuten(5), minuten(30), true),
+            entry("B", "HE", 0, minuten(5), minuten(40), true),
+        ]);
+
+        let zeilen = stats.rows_class();
+        assert_eq!(zeilen.len(), 2, "A und B");
+        assert_eq!(zeilen[0].class_label, "A");
+        assert_eq!(zeilen[0].count, 2, "beide A-Spiele, egal welche Disziplin");
+        assert_eq!(
+            zeilen[0].discipline, "",
+            "die Disziplin spielt hier keine Rolle"
+        );
+        assert_eq!(zeilen[1].class_label, "B");
+        assert_eq!(zeilen[1].count, 1);
+    }
+
+    #[test]
+    fn die_disziplin_achse_fasst_alle_klassen_zusammen() {
+        // A1.1: „Sind Doppel langsamer als Einzel?" — über alle Klassen.
+        let stats = stats_aus(vec![
+            entry("A", "HE", 0, minuten(5), minuten(20), true),
+            entry("B", "HE", 0, minuten(5), minuten(30), true),
+            entry("A", "DD", 0, minuten(5), minuten(40), true),
+        ]);
+
+        let zeilen = stats.rows_discipline();
+        assert_eq!(zeilen.len(), 2, "HE und DD");
+        assert_eq!(zeilen[0].discipline, "DD");
+        assert_eq!(zeilen[0].count, 1);
+        assert_eq!(
+            zeilen[0].class_label, "",
+            "die Klasse spielt hier keine Rolle"
+        );
+        assert_eq!(zeilen[1].discipline, "HE");
+        assert_eq!(zeilen[1].count, 2);
+    }
+
+    #[test]
+    fn die_hallen_achse_zaehlt_je_halle() {
+        // Die Frage, wegen der die Achse überhaupt gebaut wird: Läuft eine
+        // Halle systematisch langsamer als die andere?
+        let stats = stats_aus(vec![
+            entry_in("Halle A", "A", "HE", 0, minuten(5), minuten(20)),
+            entry_in("Halle A", "B", "DD", 0, minuten(5), minuten(30)),
+            entry_in("Halle B", "A", "HE", 0, minuten(5), minuten(50)),
+        ]);
+
+        let zeilen = stats.rows_hall();
+        assert_eq!(zeilen.len(), 2);
+        assert_eq!(zeilen[0].hall, "Halle A");
+        assert_eq!(zeilen[0].count, 2);
+        assert_eq!(zeilen[0].brutto_min, 25, "Median aus 20 und 30");
+        assert_eq!(zeilen[1].hall, "Halle B");
+        assert_eq!(zeilen[1].brutto_min, 50);
+    }
+
+    #[test]
+    fn messwerte_ohne_halle_stehen_in_einer_eigenen_zeile() {
+        // A1.8: Wer mitten im Turnier aktualisiert, hat Messwerte ohne
+        // Halle. Sie dürfen keine echte Halle verfälschen — also eigene
+        // Zeile, statt sie einer beliebigen zuzuschlagen.
+        let stats = stats_aus(vec![
+            entry_in("Halle A", "A", "HE", 0, minuten(5), minuten(20)),
+            entry("A", "HE", 0, minuten(5), minuten(60), true),
+        ]);
+
+        let zeilen = stats.rows_hall();
+        assert_eq!(zeilen.len(), 2);
+        let ohne: Vec<&StatsRow> = zeilen.iter().filter(|z| z.hall.is_empty()).collect();
+        assert_eq!(ohne.len(), 1, "genau eine Zeile ohne Halle");
+        assert_eq!(ohne[0].count, 1);
+        assert_eq!(ohne[0].brutto_min, 60);
+        let a: Vec<&StatsRow> = zeilen.iter().filter(|z| z.hall == "Halle A").collect();
+        assert_eq!(a[0].brutto_min, 20, "die echte Halle bleibt unverfälscht");
+    }
+
+    #[test]
+    fn die_vier_achsen_zaehlen_dieselben_messwerte() {
+        // A1.5: Jede Achse zerlegt dieselbe Menge — nur anders geschnitten.
+        // Stimmt eine Summe nicht, fehlt irgendwo ein Messwert oder wird
+        // einer doppelt gezählt.
+        let stats = stats_aus(vec![
+            entry_in("Halle A", "A", "HE", 0, minuten(5), minuten(20)),
+            entry_in("Halle A", "A", "DD", 0, minuten(5), minuten(30)),
+            entry_in("Halle B", "B", "HE", 0, minuten(5), minuten(40)),
+            entry_in("Halle B", "B", "HE", 0, minuten(5), minuten(50)),
+            entry("C", "MX", 0, minuten(5), minuten(60), true),
+        ]);
+
+        let summe = |zeilen: &[StatsRow]| zeilen.iter().map(|z| z.count).sum::<usize>();
+        assert_eq!(summe(stats.rows()), 5, "Klasse x Disziplin");
+        assert_eq!(summe(stats.rows_class()), 5, "nach Klasse");
+        assert_eq!(summe(stats.rows_discipline()), 5, "nach Disziplin");
+        assert_eq!(summe(stats.rows_hall()), 5, "nach Halle");
+    }
+
+    #[test]
+    fn die_hallen_achse_aendert_die_prognose_kette_nicht() {
+        // A1.10 / Nicht-Ziel N-3 — der wichtigste Test dieses Features:
+        // Die Statistik ist nicht nur Anzeige, dieselben Mediane speisen
+        // Wartelisten-Prognose und Live-Restzeit. Die neue Achse darf daran
+        // NICHTS ändern. Zwei Fixtures, identisch bis auf die Halle.
+        let ohne_hallen = stats_aus(vec![
+            entry("A", "HE", 0, minuten(5), minuten(20), true),
+            entry("A", "HE", 0, minuten(5), minuten(30), true),
+            entry("A", "HE", 0, minuten(1), minuten(40), true),
+            entry("B", "DD", 0, minuten(5), minuten(50), true),
+        ]);
+        let mit_hallen = stats_aus(vec![
+            entry_in("Halle A", "A", "HE", 0, minuten(5), minuten(20)),
+            entry_in("Halle B", "A", "HE", 0, minuten(5), minuten(30)),
+            entry_in("Halle A", "A", "HE", 0, minuten(1), minuten(40)),
+            entry_in("Halle B", "B", "DD", 0, minuten(5), minuten(50)),
+        ]);
+
+        for (class, disc) in [("A", "HE"), ("B", "DD"), ("C", "MX")] {
+            assert_eq!(
+                ohne_hallen.group_times(class, disc, 25.0),
+                mit_hallen.group_times(class, disc, 25.0),
+                "die Fallback-Kette darf sich fuer {class}/{disc} nicht bewegen"
+            );
+            assert_eq!(
+                ohne_hallen.group_duration(class, disc, 25.0),
+                mit_hallen.group_duration(class, disc, 25.0),
+            );
+        }
+        assert_eq!(
+            ohne_hallen.tournament_brutto_min(),
+            mit_hallen.tournament_brutto_min(),
+        );
+    }
+
+    #[test]
+    fn jede_achse_zeigt_auch_eine_einzelne_messung() {
+        // A1.4: Anders als die Prognose-Kette (die erst ab MIN_SAMPLES
+        // eigene Werte nutzt) zeigt die ANZEIGE jede Gruppe ab dem ersten
+        // Messwert — sonst bliebe das Panel am Turniermorgen leer.
+        let stats = stats_aus(vec![entry_in(
+            "Halle A",
+            "A",
+            "HE",
+            0,
+            minuten(5),
+            minuten(20),
+        )]);
+        assert_eq!(stats.rows().len(), 1);
+        assert_eq!(stats.rows_class().len(), 1);
+        assert_eq!(stats.rows_discipline().len(), 1);
+        assert_eq!(stats.rows_hall().len(), 1);
     }
 
     // ── Statistik ───────────────────────────────────────────────────────

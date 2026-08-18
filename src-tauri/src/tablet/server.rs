@@ -3807,7 +3807,7 @@ mod tests {
         // Neustart-Lage: kein on_court_since, aber der Store kennt die
         // erste Feldzuweisung von vor 10 Minuten.
         ctx.tablet.match_times_store().reconcile(
-            &[(42, "A", "HE")],
+            &[(42, "A", "HE", "")],
             &std::collections::HashSet::new(),
             now_ms().saturating_sub(600_000),
         );
@@ -3894,7 +3894,7 @@ mod tests {
         let (port, recorded) = spawn_mock_btp().await;
         let ctx = make_ctx(port);
         ctx.tablet.match_times_store().reconcile(
-            &[(42, "A", "HE")],
+            &[(42, "A", "HE", "")],
             &std::collections::HashSet::new(),
             now_ms().saturating_sub(2_400_000),
         );
@@ -3916,7 +3916,7 @@ mod tests {
         let ctx = make_ctx(port);
         let start = now_ms().saturating_sub(7_200_000); // vor 2 h zugewiesen
         ctx.tablet.match_times_store().reconcile(
-            &[(42, "A", "HE")],
+            &[(42, "A", "HE", "")],
             &std::collections::HashSet::new(),
             start,
         );
@@ -3943,7 +3943,7 @@ mod tests {
         let ctx = make_ctx(port);
         let start = now_ms().saturating_sub(40 * 60_000);
         ctx.tablet.match_times_store().reconcile(
-            &[(42, "A", "HE")],
+            &[(42, "A", "HE", "")],
             &std::collections::HashSet::new(),
             start,
         );
@@ -3969,7 +3969,7 @@ mod tests {
         let (port, recorded) = spawn_mock_btp().await;
         let ctx = make_ctx(port);
         ctx.tablet.match_times_store().reconcile(
-            &[(42, "A", "HE")],
+            &[(42, "A", "HE", "")],
             &std::collections::HashSet::new(),
             now_ms().saturating_sub(16 * 3_600_000), // gestern Abend
         );

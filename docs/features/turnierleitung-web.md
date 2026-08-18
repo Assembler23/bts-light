@@ -352,6 +352,18 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
       Aufruf-Stufe zählt hoch.
 - [x] Eine Ansage, die länger als 60 s nicht abgespielt werden konnte,
       verfällt und wird nicht nachträglich gesprochen.
+- [x] **Nicht jede Ansage ist ein Aufruf** (seit v0.9.230, Spec
+      `tl-sicht-feinschliff` Punkt 3): Neben den Aufrufen gibt es die
+      Schiedsrichter-Ansage und „Feld X. Bitte mit dem Spielen beginnen."
+      (`TlAction::AnnounceStartPlay`). Beide lassen `call_stages`
+      unberührt — keine Stufe, kein Abzeichen, keine Fälligkeit — und sind
+      daher beliebig oft auslösbar. Die Warnung „kein Ansage-Gerät
+      verbunden" spricht deshalb von *der Ansage*, nicht *dem Aufruf*.
+- [x] **Ein Ansage-Gerät mit älterem Stand verstummt nicht komplett**
+      (v0.9.230): Aufträge, die es nicht lesen kann — unbekannte Ansageart
+      oder bekannter Typ mit verändertem Rumpf —, überspringt es einzeln
+      und spricht die übrigen. Vorher scheiterte daran die ganze Charge.
+      Was übersprungen wurde, steht im Protokoll.
 
 **Ergebnis und Korrektur**
 

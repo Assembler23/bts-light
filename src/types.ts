@@ -523,6 +523,15 @@ export type AnnounceJob = {
        *  und der aus der Desktop-Oberfläche gleich staffeln. */
       stage: number;
     }
+  | {
+      /** „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+       *  besetztes Feld, auf dem noch kein Punkt gefallen ist. Ausdrücklich
+       *  **kein** Aufruf: Sie zählt keine Aufruf-Stufe hoch (Spec
+       *  `tl-sicht-feinschliff` A3.3). */
+      kind: "start_play";
+      courtId: number;
+      matchId: number;
+    }
 );
 
 export interface AppConfig {

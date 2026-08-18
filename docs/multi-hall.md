@@ -87,6 +87,14 @@ eine `LocationID`. Hat das Turnier **≥ 2 Hallen**, gilt:
   Vorbereitungs-Panel; TL-Web, Monitore und badhub-Aushang folgen in den
   weiteren Etappen der Spec.
 
+- **Spielzeiten je Halle** (seit v0.9.231): Das TL-Web-Panel „Spielzeiten"
+  wertet die gemessenen Dauern wahlweise **nach Halle** aus — die Frage,
+  wegen der man bei zwei Hallen überhaupt auf die Uhr schaut. Die Halle wird
+  beim ersten Aufruf aufs Feld im Messwert festgehalten (ADR 0036), nicht
+  zur Anzeigezeit nachgeschlagen: Sobald BTP ein beendetes Spiel vom Feld
+  nimmt, wäre sie nicht mehr auflösbar. Details:
+  [features/tl-sicht-feinschliff.md](features/tl-sicht-feinschliff.md).
+
 Bei **Ein-Hallen-Turnieren** ist die Halle leer und nichts gruppiert —
 alle Ansichten bleiben byte-für-byte wie vorher.
 
@@ -188,6 +196,13 @@ Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
 - **Architektur:** genau **ein Master** (mit BTP-Steuerung: Vergabe + Push);
   beliebig viele Slaves (read-only). Voraussetzung: der Slave erreicht den
   BTP-Rechner im selben Netz (LAN/WLAN).
+- **Mischbetrieb der Versionsstände** (seit v0.9.230): Im
+  Auto-Update-Fenster steht ein Master mit neuerem Stand neben einem Slave
+  mit älterem. Erteilt der Master eine Ansageart, die der Slave nicht
+  kennt, überspringt dieser den einen Auftrag und spricht die übrigen
+  normal. Vorher scheiterte daran die **ganze Charge** — die zweite Halle
+  blieb 60 Sekunden lang still, auch für gewöhnliche Aufrufe. Siehe
+  [announcements.md](announcements.md).
 
 ## Cloud-Ansage-Slave (B1a, v0.9.142)
 
