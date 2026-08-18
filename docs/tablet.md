@@ -124,12 +124,16 @@ Ergebnis verliert und den Schiri nicht blockiert:
   Platte** persistiert (`btp-retry.json`, turnier-gegated über den
   Turniernamen) und beim Start wieder geladen — so übersteht ein Ergebnis auch
   einen **Host-App-Neustart** (Durabilität: App-Neustart, nicht Stromausfall).
-  Ein Durchlauf hat seit v0.9.223 ein **Zeitbudget von 20 s**
+  Ein Durchlauf hat seit v0.9.223 ein **Startfenster von 20 s**
   (`BTP_RETRY_FLUSH_BUDGET`): Er läuft innerhalb des Poll-Zyklus und
   schreibt nacheinander — ohne Grenze hielten zwanzig gestaute
   Ergebnisse bei trägem BTP den ganzen Zyklus minutenlang an (Liveticker,
-  Auto-Vergabe, TL-Anzeige). Was nicht mehr in die 20 s passt, bleibt in
-  der Queue und kommt beim nächsten Flush dran.
+  Auto-Vergabe, TL-Anzeige). Nach 20 s wird **kein weiterer Write mehr
+  begonnen**; ein bereits laufender läuft aus (er kostet im Extremfall
+  ~30 s, zwei TCP-Verbindungen), der Rest bleibt in der Queue und kommt
+  beim nächsten Flush dran. Jeder Durchlauf beginnt eine Position weiter
+  in der Queue, damit ein zäher Eintrag am Anfang die hinteren nicht
+  dauerhaft blockiert.
 - **Cloud:** Der Relay wartet auf die `ResultAck` nur noch **8 s** (statt 20 s),
   damit `pending`-Slots bei zäher Leitung schneller frei werden; der Client retryt
   ohnehin (idempotent).

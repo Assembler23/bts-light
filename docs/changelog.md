@@ -20,9 +20,30 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Wiederholungs-Warteschlange arbeitete alle Einträge nacheinander im
   5-Sekunden-Zyklus ab; bei zwanzig gestauten Ergebnissen und trägem BTP
   standen Liveticker, automatische Feldvergabe und
-  Turnierleitungs-Anzeige minutenlang. Ein Durchlauf hat jetzt 20
-  Sekunden Zeit, der Rest folgt beim nächsten Versuch — verloren geht
-  nichts.
+  Turnierleitungs-Anzeige minutenlang. Jetzt werden nach 20 Sekunden
+  keine weiteren Writes mehr begonnen (ein laufender läuft aus), und
+  jeder Durchlauf beginnt eine Position weiter — so blockiert ein zäher
+  Eintrag die übrigen nicht. Der Rest folgt beim nächsten Versuch,
+  verloren geht nichts.
+- Der verzögerte Live-Score wird **vor dem Senden noch einmal geprüft**:
+  Ist das Spiel inzwischen beendet oder das Feld neu belegt, wird er
+  verworfen — sonst hätte ein spät eintreffender Stand ein bereits
+  korrigiertes Endergebnis im Liveticker überschreiben können.
+- **Court-Monitore kosten den Turnier-PC deutlich weniger.** Jeder Abruf
+  (bei zwanzig Anzeigen rund achtzig pro Sekunde) kopierte bisher
+  **zweimal** die komplette Konfiguration — darin das Turnierlogo als
+  Base64-Text, bis zu 2,7 MB — und las das Werbebild-Verzeichnis neu ein.
+  Jetzt wird die Konfiguration geteilt statt kopiert, einmal statt
+  zweimal gelesen, und die Bilderliste kommt aus einem Zwischenstand,
+  der nur bei Änderung des Ordners neu entsteht.
+- **Anzeigen bekommen den Spielstand ohne Wiedergabe-Ballast.** Der vom
+  Tablet gespiegelte Stand trägt dessen Verlaufsspeicher (bis zu 50
+  Zwischenstände, jeder mit einer Vollkopie des Ballwechsel-Protokolls) —
+  spät im Match zweistellige Kilobyte, die bei **jedem** Monitor-Abruf
+  durchs Hallen-WLAN gingen. Court-Monitore, Feld-Übersicht, Kombi,
+  Cloud-Spiegel und die Turnierleitungs-Seite bekommen jetzt eine
+  schlanke Fassung ohne `history`/`rallyLog`; das Tablet selbst erhält
+  beim Wiederverbinden weiterhin alles (sein Rückgängig-Gedächtnis).
 
 ## v0.9.222
 

@@ -388,6 +388,10 @@ pub struct TabletState {
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
     court_state: RwLock<HashMap<i64, String>>,
+    /// Derselbe Stand ohne `history`/`rallyLog` — die Fassung, die an
+    /// Anzeigen geht (siehe [`TabletState::display_court_state`]).
+    /// Einmal beim Eingang gerechnet statt bei jedem Abruf.
+    display_court_state: RwLock<HashMap<i64, String>>,
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
     /// „In Vorbereitung" gerufene Spiele (je Match-ID höchstens einer).
@@ -643,6 +647,27 @@ pub struct MonitorNudge {
 /// reicht ihn 1:1 auf seinen Socket. Unbounded, weil `notify_monitor` NIE
 /// blockieren darf (es läuft unter dem `record_score`-Lock).
 pub type MonitorNudgeTx = tokio::sync::mpsc::UnboundedSender<String>;
+
+/// Streicht aus einem Tablet-Stand die beiden schweren Wiedergabe-Felder
+/// (`history`, `rallyLog`) — alles Übrige bleibt.
+///
+/// **Bewusst eine Streichliste, keine Positivliste:** Welche Felder eine
+/// Anzeige liest, wächst mit jedem Feature (Aufschlag, Pause, Aufgabe,
+/// Startzeit …). Eine Positivliste hätte dem nächsten neuen Feld
+/// stillschweigend den Boden weggezogen; hier fällt nur weg, was
+/// nachweislich niemand anzeigt. Unparsbares bleibt unverändert — lieber
+/// zu viel schicken als einen Stand verlieren.
+fn schlanker_anzeige_stand(state: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(state) else {
+        return state.to_string();
+    };
+    let Some(obj) = v.as_object_mut() else {
+        return state.to_string();
+    };
+    obj.remove("history");
+    obj.remove("rallyLog");
+    serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
+}
 
 /// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
 /// serialisierte Zustands-Antwort samt ETag, wie der LAN-Handler sie
@@ -2295,7 +2320,16 @@ impl TabletState {
     }
 
     /// Spiegelt den Spielzustand des aktiven Tablets am Feld.
+    ///
+    /// Legt zwei Fassungen ab: den **vollen** Stand (für ein Tablet, das
+    /// sich wieder verbindet oder das Feld übernimmt — es braucht seinen
+    /// Wiedergabe-Verlauf) und einen **schlanken** für alle Anzeigen
+    /// (siehe [`Self::display_court_state`]).
     pub fn set_court_state(&self, court_id: i64, state: String) {
+        self.display_court_state
+            .write()
+            .unwrap()
+            .insert(court_id, schlanker_anzeige_stand(&state));
         self.court_state.write().unwrap().insert(court_id, state);
         // Aufschlag/Pause (`court_state`) ist am Court-Monitor sichtbar →
         // Anzeige anstoßen (A1, ADR 0016). Der Schreib-Guard ist mit dem
@@ -2306,6 +2340,24 @@ impl TabletState {
     /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
     pub fn court_state(&self, court_id: i64) -> Option<String> {
         self.court_state.read().unwrap().get(&court_id).cloned()
+    }
+
+    /// Derselbe Stand **ohne den Wiedergabe-Ballast** — für alles, was
+    /// anzeigt: Court-Monitore, Feld-Übersicht, Kombi, den
+    /// Cloud-Spiegel und die Turnierleitungs-Seite.
+    ///
+    /// Warum: Der volle Stand trägt `history` (bis zu 50 Zwischenstände,
+    /// jeder mit einer Vollkopie des Ballwechsel-Protokolls) und
+    /// `rallyLog`. Spät im Match sind das zweistellige Kilobyte — und die
+    /// gehen bei **jedem** Monitor-Abruf über das Hallen-WLAN, viermal je
+    /// Sekunde und Gerät. Keine Anzeige liest diese Felder; nur das
+    /// Tablet selbst braucht sie beim Wiederverbinden.
+    pub fn display_court_state(&self, court_id: i64) -> Option<String> {
+        self.display_court_state
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .cloned()
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
@@ -2782,6 +2834,19 @@ impl TabletState {
         if let Some(state) = mirrored {
             self.court_state.write().unwrap().insert(to_court_id, state);
         }
+        // Die Anzeige-Fassung zieht mit um — sonst zeigte das Zielfeld
+        // Aufschlag und Pause des Vorgängers (bzw. gar nichts).
+        let schlank = self
+            .display_court_state
+            .write()
+            .unwrap()
+            .remove(&from_court_id);
+        if let Some(state) = schlank {
+            self.display_court_state
+                .write()
+                .unwrap()
+                .insert(to_court_id, state);
+        }
         self.persist_scores();
         // Der Stand wandert von Quell- auf Zielfeld — BEIDE Anzeigen sind
         // betroffen (Quellfeld wird leer, Zielfeld zeigt den Stand). Sonst
@@ -2799,6 +2864,7 @@ impl TabletState {
         // nach Ergebnis-Submit aufgerufen (nicht beim Disconnect), daher bleibt
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
+        self.display_court_state.write().unwrap().remove(&court_id);
         // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
         // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
         // dieses Feld mit „hat gerade jemand anderes belegt" ab — obwohl es
@@ -3243,8 +3309,12 @@ impl TabletState {
                 // Tablet-court_state EINMAL lesen + parsen — so sind Aufschlag-
                 // und Pause-Info garantiert vom selben Stand abgeleitet (kein
                 // zweiter Lock, kein doppeltes Parsen).
+                // Die schlanke Fassung parsen, nicht die volle: Sie trägt
+                // dieselben Felder (Aufschlag, Pause), ist aber um den
+                // Wiedergabe-Verlauf erleichtert — und diese Stelle läuft
+                // je Feld bei JEDEM Übersichts-Abruf.
                 let court_state_json: Option<serde_json::Value> = self
-                    .court_state
+                    .display_court_state
                     .read()
                     .unwrap()
                     .get(&court.id)
@@ -3398,7 +3468,11 @@ impl TabletState {
         Some(ScoreMirror {
             match_id,
             sets,
-            state: self.court_state(court_id),
+            // Schlanke Fassung: Der Spiegel landet über den Relay auf
+            // Cloud-Monitoren — dieselben Anzeigen wie im Hallennetz,
+            // derselbe Bedarf (kein Wiedergabe-Verlauf). Spart zugleich
+            // Platz gegen die 64-KiB-Grenze des Relays.
+            state: self.display_court_state(court_id),
         })
     }
 
@@ -3436,7 +3510,9 @@ impl TabletState {
             tournament_name,
             current_match,
             sets,
-            court_state: self.court_state(court_id),
+            // Anzeige-Fassung: Court-Monitore lesen Aufschlag, Pause,
+            // Aufgabe und Startzeit — nie den Wiedergabe-Verlauf.
+            court_state: self.display_court_state(court_id),
             on_court_since_ms,
         }
     }
@@ -4195,6 +4271,50 @@ mod tests {
         );
         // Die andere Partei zählt für sich — sie war ja vielleicht längst da.
         assert_eq!(st.note_prep_call(42, "team2"), 2);
+    }
+
+    #[test]
+    fn the_display_state_drops_only_the_heavy_replay_fields() {
+        // Anzeigen (Court-Monitore, Übersicht, TL) brauchen den
+        // Wiedergabe-Ballast des Tabletts nicht: `history` (bis zu 50
+        // Stände, jeder mit einer Vollkopie des Ballwechsel-Protokolls)
+        // und `rallyLog` machen den Anzeige-Zustand spät im Match
+        // zweistellig kilobytegroß — und der geht bei jedem Abruf an
+        // jeden Monitor. Alles ANDERE bleibt bewusst drin: Ein
+        // Weglassen nach Positivliste risse jedem künftigen Feld den
+        // Boden weg, das eine Anzeige liest.
+        let st = TabletState::default();
+        st.set_court_state(
+            1,
+            r#"{"serving":{"team":"a"},"pause":null,"startedAt":7,
+                "history":[{"a":1,"rallyLog":["A","B"]}],"rallyLog":["A"],
+                "finished":false,"teamOnSide":{"a":"links"}}"#
+                .into(),
+        );
+        let schlank = st.display_court_state(1).expect("gerade gesetzt");
+        let v: serde_json::Value = serde_json::from_str(&schlank).unwrap();
+        assert!(v.get("history").is_none(), "Wiedergabe-Verlauf fällt weg");
+        assert!(
+            v.get("rallyLog").is_none(),
+            "Ballwechsel-Protokoll fällt weg"
+        );
+        assert_eq!(v["serving"]["team"], "a", "Aufschlag bleibt");
+        assert_eq!(v["startedAt"], 7, "Startzeit bleibt");
+        assert_eq!(v["finished"], false, "Ende-Kennzeichen bleibt");
+        assert!(v.get("teamOnSide").is_some(), "Seitenzuordnung bleibt");
+        assert!(
+            v.get("pause").is_some(),
+            "auch ein leeres Pausenfeld bleibt"
+        );
+
+        // Das Tablet bekommt beim Wiederverbinden weiterhin ALLES — sonst
+        // verlöre es sein Rückgängig-Gedächtnis.
+        let voll = st.court_state(1).expect("gerade gesetzt");
+        assert!(voll.contains("history"), "voller Stand bleibt vollständig");
+
+        // Unparsbares bleibt unangetastet (lieber unverändert als leer).
+        st.set_court_state(2, "kein json".into());
+        assert_eq!(st.display_court_state(2).as_deref(), Some("kein json"));
     }
 
     #[test]

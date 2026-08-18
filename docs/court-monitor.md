@@ -188,6 +188,28 @@ Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
 `onerror` es. Spec + Phasen (Cloud, badhub-Seiten):
 [features/werbung-leisten.md](features/werbung-leisten.md).
 
+## Last am Turnier-PC (seit v0.9.223)
+
+Jeder Monitor fragt im 250-ms-Takt nach — der WS-Anstoß senkt die
+Latenz, nicht die Zahl der Abrufe (das „frisch"-Fenster von 1,2 s greift
+bei realem Ballwechsel-Abstand selten). Bei zwanzig Anzeigen sind das
+rund achtzig Abrufe pro Sekunde. Drei Dinge machen die inzwischen
+billig:
+
+- Die **Konfiguration** wird geteilt statt kopiert und nur **einmal** je
+  Abruf gelesen (vorher zweimal, jedes Mal inklusive des Turnierlogos als
+  Base64-Text von bis zu 2,7 MB).
+- Die **Werbebild-Liste** kommt aus einem Zwischenstand und wird nur neu
+  eingelesen, wenn sich der Ordner geändert hat (vorher ein
+  Verzeichnis-Lesen je Abruf).
+- Der gespiegelte **Spielstand** (`courtState`) geht ohne den
+  Verlaufsspeicher des Tabletts an die Anzeigen: `history` (bis zu 50
+  Zwischenstände, jeder mit einer Vollkopie des Ballwechsel-Protokolls)
+  und `rallyLog` fallen weg — spät im Match zweistellige Kilobyte je
+  Abruf. Die Anzeigen lesen daraus ohnehin nur Aufschlag, Pause, Aufgabe
+  und Startzeit; das Tablet selbst bekommt beim Wiederverbinden
+  weiterhin den vollen Stand (sein Rückgängig-Gedächtnis).
+
 ## Endpunkte
 
 Alle Routen gibt es doppelt — vom LAN-Server **und** vom Relay, damit der

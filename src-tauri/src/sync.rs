@@ -122,6 +122,10 @@ pub struct SyncEngine {
     /// einem kurzen Aussetzer während eines badhub-Deploys stammen, und ein
     /// Turnier läuft über mehrere Tage.
     checkin_unsupported_since: Option<Instant>,
+    /// Ab welcher Position der nächste Nachschub-Durchlauf beginnt —
+    /// rotiert, damit das Zeitfenster nicht immer dieselben hinteren
+    /// Einträge abschneidet (siehe `flush_btp_retries`).
+    btp_retry_start: usize,
     /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
     sched_takt: SchedTakt,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
@@ -150,18 +154,23 @@ const EMPTY_CONFIRM_POLLS: u32 = 2;
 /// Sekundentakt mit Login+SENDUPDATE beharkt werden.
 const BTP_RETRY_FLUSH_EVERY: Duration = Duration::from_secs(30);
 
-/// Zeit-Deckel EINES Nachschub-Durchlaufs.
+/// **Startfenster** eines Nachschub-Durchlaufs: Nach dieser Zeit wird
+/// kein weiterer Write mehr begonnen.
 ///
-/// Der Durchlauf läuft **innerhalb** des Poll-Zyklus und schreibt seine
-/// Einträge nacheinander; ein Write kostet im schlechtesten Fall zwei
-/// TCP-Verbindungen mit je 5 s Verbindungs- und 10 s Lesefrist. Ohne
-/// Grenze hielte eine volle Warteschlange bei trägem BTP den ganzen
-/// Zyklus an — mit zwanzig gestauten Ergebnissen wären das Minuten, in
-/// denen Liveticker, automatische Feldvergabe und der
-/// Turnierleitungs-Zustand stillstehen (Analyse 18.08.2026). Nach dieser
-/// Zeit bricht der Durchlauf ab; die restlichen Einträge bleiben in der
-/// Warteschlange und kommen beim nächsten Flush dran — verloren geht
-/// nichts, nur der Rest des Zyklus läuft wieder an.
+/// Bewusst „Startfenster", nicht „Obergrenze": Geprüft wird vor jedem
+/// Write, ein bereits laufender wird nicht abgeschnitten. Der echte
+/// schlechteste Fall ist deshalb dieses Fenster **plus einen Write** —
+/// und ein Write kostet im Extremfall zwei TCP-Verbindungen mit je 5 s
+/// Verbindungs- und 10 s Lesefrist, also rund 30 s (Review-Präzisierung
+/// 18.08.2026).
+///
+/// Warum überhaupt: Der Durchlauf läuft **innerhalb** des Poll-Zyklus und
+/// schreibt nacheinander. Ohne Grenze hielte eine volle Warteschlange bei
+/// trägem BTP den ganzen Zyklus an — mit zwanzig gestauten Ergebnissen
+/// wären das viele Minuten, in denen Liveticker, automatische Feldvergabe
+/// und der Turnierleitungs-Zustand stillstehen. Die restlichen Einträge
+/// bleiben in der Warteschlange und kommen beim nächsten Flush dran;
+/// verloren geht nichts.
 const BTP_RETRY_FLUSH_BUDGET: Duration = Duration::from_secs(20);
 
 /// Spieler-Checkout-Fenster (Tilos 5-Minuten-Guard): Wird ein Ergebnis
@@ -352,6 +361,7 @@ impl SyncEngine {
             highlight_written: HashSet::new(),
             last_roster: None,
             checkin_unsupported_since: None,
+            btp_retry_start: 0,
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
         }
@@ -914,6 +924,17 @@ impl SyncEngine {
         let mut still_failing = 0usize;
         let begonnen = Instant::now();
         let gesamt = entries.len();
+        // Rotierender Einstieg (Review-Fund 18.08.2026): Das Zeitfenster
+        // unten schneidet den Durchlauf ab — bei stabiler Reihenfolge
+        // immer an derselben Stelle. Ein zäher Eintrag am Anfang ließe
+        // die hinteren dann nie an die Reihe kommen, und ihre
+        // Verfalls-Regeln (`prepare_btp_retry`) würden nie geprüft.
+        // Deshalb beginnt jeder Durchlauf eine Position weiter.
+        let mut entries = entries;
+        if gesamt > 1 {
+            entries.rotate_left(self.btp_retry_start % gesamt);
+            self.btp_retry_start = self.btp_retry_start.wrapping_add(1);
+        }
         for (erledigt, entry) in entries.into_iter().enumerate() {
             // Zeit-Deckel (siehe `BTP_RETRY_FLUSH_BUDGET`): Der Rest des
             // Zyklus — Liveticker, Auto-Vergabe, TL-Zustand — darf nicht
