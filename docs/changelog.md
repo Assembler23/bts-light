@@ -14,15 +14,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Fassung. Semantik unverändert — jede geschriebene Änderung greift
   weiterhin sofort (ein Widerruf also auch), ein unlesbarer
   Zwischenstand meldet weiterhin einen Fehler statt „keine Geräte".
-- **Beendet-Liste lädt nach, statt unbegrenzt zu wachsen.** Sie war die
-  einzige Liste ohne Fenster: Über den Turniertag wuchs sie auf mehrere
-  hundert Zeilen, und jedes Spielende baute sie komplett neu. Jetzt wie
-  die Spielliste — 40 Zeilen, Nachladen beim Scrollen, Abgleich je Spiel
-  (ein neues Ergebnis fügt genau eine Zeile ein).
-- **Zeilen außerhalb des Sichtbereichs kosten kein Layout mehr**
-  (`content-visibility`) — spürbar beim Rollen langer Listen auf
-  Tablets. Bewusst nur für Listenzeilen, nicht für Feldkacheln: deren
-  Größe misst die Kachel-Anpassung wirklich nach.
+- **Beendet-Liste wird abgeglichen statt neu gebaut.** Bisher baute
+  jedes Spielende die ganze Liste neu und verdrahtete sie neu; jetzt
+  fügt ein neues Ergebnis genau eine Zeile ein (Abgleich je Spiel, wie
+  bei Feldern und Spielliste). Ein Nachlade-Fenster braucht sie nicht —
+  der Turnier-PC liefert ohnehin höchstens 30 beendete Spiele.
+- **Zeilen der Beendet-Liste außerhalb des Sichtbereichs kosten kein
+  Layout mehr** (`content-visibility`). Bewusst nur dort: Die Spielzeile
+  enthält ihr fest positioniertes ⋮-Menü, das dadurch an der Zeilenkante
+  abgeschnitten würde, und bei den Feldkacheln misst die
+  Kachel-Anpassung die echte Größe.
 
 ## v0.9.221
 

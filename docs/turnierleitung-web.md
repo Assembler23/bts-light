@@ -547,12 +547,14 @@ einer.
 
 ## Render-Sparsamkeit (seit 17.08.2026, erweitert 18.08.2026)
 
-Nachtrag: Die **Beendet-Liste** lädt wie die Spielliste nach (40 Zeilen,
-Rest beim Scrollen) und wird je Spiel abgeglichen — vorher wuchs sie über
-den Turniertag unbegrenzt und wurde bei jedem Spielende komplett neu
-gebaut. Zeilen außerhalb des sichtbaren Panel-Ausschnitts kosten kein
-Layout mehr (`content-visibility`); Feldkacheln bleiben davon
-ausgenommen, weil ihre Größe wirklich gemessen wird.
+Nachtrag: Die **Beendet-Liste** wird jetzt je Spiel abgeglichen — ein
+neues Ergebnis fügt eine Zeile ein, statt die Liste neu zu bauen (sie
+selbst bleibt kurz: der Turnier-PC liefert höchstens 30 beendete
+Spiele). Ihre Zeilen kosten außerhalb des sichtbaren Ausschnitts kein
+Layout mehr (`content-visibility`). Spielzeilen und Feldkacheln bleiben
+davon ausgenommen: Erstere tragen ihr fest positioniertes ⋮-Menü, das
+sonst an der Zeilenkante abgeschnitten würde, und bei den Kacheln wird
+die echte Größe gemessen.
 
 
 Die Seite pollt weiter alle 2 s mit ETag-Kurzschluss, zeichnet bei einer
