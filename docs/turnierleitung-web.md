@@ -92,7 +92,12 @@ LAN+Cloud voraus.
 - **Jeder Name ist ein Link** auf die Spielerseite von badhub
   (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
   Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne
-  Lizenznummer in BTP bleiben unverlinkt.
+  Lizenznummer in BTP bleiben unverlinkt. Seit 18.08.2026 gilt das an
+  **allen drei Stellen**: in der Spielliste, in den **Feld-Kacheln** der
+  laufenden Spiele und in der Liste der **beendeten Spiele**. Ein Klick
+  auf den Namen einer Feld-Kachel öffnet nur die Spielerseite — er nimmt
+  das Spiel **nicht** zusätzlich auf; ein vom Namen aus begonnener **Zug**
+  auf ein anderes Feld funktioniert weiterhin.
 - **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
   scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
