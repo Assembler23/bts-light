@@ -882,7 +882,27 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    das ohne Ausnahme auch für „Felder": Der frühere Sonderstatus als
    fixierte Ankerposition ist entfallen, das Panel trägt einen ganz
    normalen Reorder-Griff und eine Spaltenzuordnung wie jedes andere. */
-.panel { display: flex; flex-direction: column; min-height: var(--panel-min); overflow: hidden; }
+/* `flex-basis: 0` ist hier NICHT kosmetisch, sondern die Bedingung dafür,
+   dass die Höhenverteilung überhaupt funktioniert (Fehlerbericht
+   18.08.2026: „Nachladen vergrößert die Box, danach lässt sie sich nicht
+   mehr richtig ziehen").
+
+   Mit dem Vorgabewert `auto` wäre die Flex-Basis eines Panels seine
+   INHALTSHÖHE — und die Spielliste lädt beim Scrollen nach (`QUEUE_PAGE`),
+   wächst also im Betrieb. Sie verdrängte damit ihre Nachbarn bis auf
+   `--panel-min`, obwohl alle denselben `heightFr`-Anteil haben. Schlimmer:
+   Übersteigt die Summe der Basis-Höhen die Spaltenhöhe, bleibt kein freier
+   Raum — und `flex-grow`, das der Steg (`wireStegs`) beim Ziehen schreibt,
+   verteilt NUR freien Raum. Das Ziehen wurde dadurch wirkungslos.
+
+   Mit `flex-basis: 0` zählt allein die `heightFr`-Gewichtung — dieselbe
+   Entscheidung, die `.tl-column` mit `flex: 1 1 0` für die Spalten längst
+   trifft; die Panels waren beim Mehrspalten-Umbau nur nicht mitgezogen
+   worden. Zugeklappte Panels bleiben ausgenommen
+   (`.panel.panel-collapsed { flex: none }` weiter unten ist spezifischer
+   und setzt die Basis zurück auf `auto`): Sie sollen genau ihre Kopfzeile
+   hoch sein, nicht `--panel-min`. */
+.panel { display: flex; flex-direction: column; flex-basis: 0; min-height: var(--panel-min); overflow: hidden; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
   flex: none; display: flex; align-items: center; gap: 8px;
@@ -3324,6 +3344,15 @@ function courtCard(c, cellStyle) {
         data-made="${gesprochen}" data-call-side="team2"
         title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
   }
+  // „Bitte mit dem Spielen beginnen" (Spec tl-sicht-feinschliff, Punkt 3):
+  // Die Spieler stehen am Feld, es fällt aber kein Punkt. Nur dann sinnvoll
+  // — sobald gezählt wird, ist die Aufforderung gegenstandslos. Bewusst
+  // KEIN Aufruf: Die Stufe bleibt stehen, deshalb steht der Knopf auch
+  // getrennt von den Aufruf-Knöpfen darüber und hat keine `data-made`.
+  if (c.match_id && !isPlaying(c)) {
+    kachelAktionen.push(`<button type="button" data-startplay="${c.court_id}" data-match="${c.match_id}"
+        title="Ansage: Feld soll mit dem Spielen beginnen">Bitte anfangen</button>`);
+  }
   if (c.match_id) {
     kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
         title="Endstand eintragen">✎ Ergebnis eintragen</button>`);
@@ -3477,6 +3506,11 @@ window.addEventListener("resize", folgeOffenenKebabs);
  * ein belegtes Feld der **Griff** (antippen wählt das Spiel zum Umhängen,
  * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
  */
+/** Zeitpunkt der letzten Spielbeginn-Ansage je Feld — die Doppeltipp-Sperre.
+ *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
+ *  (siehe Kommentar an der Verdrahtung). */
+const spielbeginnZuletzt = new Map();
+
 function wireCourts(box) {
   // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
   // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
@@ -3592,6 +3626,35 @@ function wireCourts(box) {
       send(
         `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "announce_officials", courtId },
+        "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // „Bitte anfangen": beliebig oft auslösbar (Spec A3.4) — wer nach fünf
+  // Minuten immer noch nicht spielt, wird eben erneut gebeten. Deshalb ein
+  // Zeitstempel-Nonce in der Vorgangs-Kennung statt des 20-s-Fensters
+  // (`OP_WINDOW_MS`): Das Fenster ist gegen versehentliche Doppel-Sendungen
+  // gedacht und schluckte eine BEWUSSTE Wiederholung stumm.
+  //
+  // Die Doppeltipp-Sperre liegt im Modul-Zustand, NICHT als `disabled` am
+  // Knopf: `send()` stößt in seinem `finally` einen Abruf an, und ein
+  // geänderter Zustand zeichnet die Kacheln neu — der frische Knopf wäre
+  // sofort wieder scharf, lange vor Ablauf der Sekunde. Im laufenden
+  // Turnier ändert sich fast jede Sekunde etwas, die Sperre wäre also
+  // genau dann wirkungslos, wenn sie gebraucht wird (Review 18.08.2026).
+  scopeAll(box, "button[data-startplay]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.startplay);
+      const matchId = Number(btn.dataset.match);
+      const zuletzt = spielbeginnZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      spielbeginnZuletzt.set(courtId, Date.now());
+      send(
+        `startplay-${courtId}-${matchId}-${Date.now()}`,
+        { action: "announce_start_play", courtId, matchId },
         "Ansage ausgelöst.",
       );
     });
@@ -3938,15 +4001,24 @@ function fitCourts() {
    * Flex-Modell von selbst an die übrigen Panels derselben Spalte (Flexbox
    * behandelt eine `max-height`-Verletzung genau so). Ohne das stünde unter
    * den Kacheln ein leerer Block, während die Liste darunter rollt.
-   * Keine Rückkopplung: Der Deckel kürzt nur `clientHeight`, nie den
-   * gemessenen `scrollHeight` — und beim nächsten Durchlauf fällt er oben
+   *
+   * Gemessen wird die **Kachelbox**, nicht der Scroll-Bereich des Körpers.
+   * Der Unterschied entscheidet, ob überhaupt etwas zurückgegeben wird:
+   * `scrollHeight` ist nach unten durch `clientHeight` geklammert, und
+   * hierher kommt man nur, wenn der Inhalt passt (`passt()`) — dann sind
+   * beide gleich, und der Deckel wäre exakt die aktuelle Höhe. Er gäbe also
+   * nie etwas ab (Review 18.08.2026: zwei Kacheln in einem 400-px-Stapel
+   * behielten 174 px statt 119 px, die Liste bekam nichts).
+   *
+   * Keine Rückkopplung: Die Kachelbox ordnet sich nach der BREITE, ihre
+   * Höhe hängt nicht am Deckel — und beim nächsten Durchlauf fällt er oben
    * ohnehin zuerst wieder weg.
    */
   const uebernehmeBedarf = () => {
     if (!automatik) return;
     const kopf = panel.querySelector(".panel-head");
     panel.style.maxHeight =
-      ((kopf ? kopf.offsetHeight : 0) + koerper.scrollHeight) + "px";
+      ((kopf ? kopf.offsetHeight : 0) + box.getBoundingClientRect().height) + "px";
   };
   if (passt()) { uebernehmeBedarf(); return; }
   box.classList.add("kacheln-kompakt");
@@ -5218,6 +5290,16 @@ function wireStegs(container, achse) {
       steg.classList.add("zieht");
       document.body.classList.add("dragging");
       panelStegDragging = true;
+      // Bedarfs-Deckel der beiden Nachbarn räumen, BEVOR gemessen wird.
+      // `fitCourts()` deckelt „Felder" per Inline-`max-height` auf seinen
+      // Bedarf; ein Deckel schlägt aber jedes `flex-grow`, das dieser Zug
+      // gleich schreibt — das Panel bliebe unter dem Finger stehen und
+      // spränge erst beim Loslassen (Review 18.08.2026: 3:1 gezogen blieb
+      // es bei 174/174 statt 261/87). Der Zug IST die Ansage „ich verteile
+      // von Hand", also endet die Bedarfs-Automatik hier; gespeichert wird
+      // gleich ein `heightFr ≠ 1`, womit `fitCourts()` von selbst nicht
+      // mehr deckelt. Nur senkrecht — Spalten kennen keinen Deckel.
+      if (senkrecht) { prev.style.maxHeight = ""; next.style.maxHeight = ""; }
       const rA = prev.getBoundingClientRect(), rB = next.getBoundingClientRect();
       const massA = senkrecht ? rA.height : rA.width;
       const summe = massA + (senkrecht ? rB.height : rB.width);

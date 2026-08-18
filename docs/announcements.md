@@ -124,9 +124,9 @@ den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
 
 | Baustein | Ort |
 |---|---|
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`) | `tablet/state.rs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`) | `tablet/state.rs` |
 | Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
-| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`) | `tablet/tl.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`) | `tablet/tl.rs` |
 | Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
 | Sprecher | [`AnnounceJobPlayer.tsx`](../src/components/AnnounceJobPlayer.tsx) |
 
@@ -150,10 +150,50 @@ Eigenschaften, die im Turnierbetrieb zählen:
   inzwischen ein anderes Spiel, schweigt der Sprecher lieber.
 - **Je Partei ansagbar.** Beide Aufruf-Aufträge tragen eine Partei
   (`side`: `both` / `team1` / `team2`) — siehe den nächsten Abschnitt.
+- **Eine unbekannte Ansageart bringt niemanden zum Schweigen.** Ein
+  Ansage-Slave mit älterem Stand (Auto-Update-Fenster: zwei Rechner, einer
+  aktualisiert) überspringt einen Auftragstyp, den er nicht kennt, und
+  spricht die übrigen normal. Vorher scheiterte an einem einzigen
+  unbekannten Eintrag die **ganze Charge**, und die zweite Halle blieb eine
+  Minute lang still — auch für gewöhnliche Aufrufe. Abgesichert an zwei
+  Stellen, die zusammengehören: `announce_jobs_aus_json` (`tablet/state.rs`)
+  überspringt Unbekanntes beim Lesen, und `AnnounceJobPlayer.tsx` schweigt
+  bei einer Art, die es nicht kennt, statt sie in den Vorbereitungs-Zweig
+  durchfallen zu lassen — dort spräche es sonst einen **falschen** Aufruf.
 - **Sind Ansagen ausgeschaltet, wird gar nicht erst abgefragt.** Sonst
   meldete sich das Gerät als Ansage-Gerät, ohne je zu sprechen — und die
   Turnierleitung bekäme ein beruhigendes „Aufruf ausgelöst", während in der
   Halle nichts passiert.
+
+### „Bitte mit dem Spielen beginnen" (seit v0.9.230)
+
+Ein Feld ist besetzt, die Spieler stehen da, es fällt kein Punkt. Die
+Turnierleitung sieht das an der roten Aufruf-Uhr — und kann es jetzt auch
+sagen, statt hinzulaufen oder einen Aufruf zu wiederholen.
+
+Der Knopf **„Bitte anfangen"** steht im ⋯-Menü der Feld-Kachel in TL-Web,
+sichtbar nur bei belegtem Feld, auf dem **noch kein Punkt** gefallen ist.
+Ansage-Bild:
+
+> 🔔 „**Feld 3. Bitte mit dem Spielen beginnen.**"
+> (englisch: „Court 3. Please start playing.")
+
+**Kein Aufruf.** Das ist der Kern dieser Ansage und in `tablet/tl.rs`
+ausdrücklich kommentiert: Sie zählt **keine** Aufruf-Stufe hoch, lässt das
+Aufruf-Abzeichen an der Kachel stehen und ändert nichts an der Fälligkeit.
+Zählte sie mit, glaubte die Turnierleitung, sie hätte schon zweimal
+gerufen — und die kampflose Wertung hängt am dritten Aufruf.
+
+Folgerichtig ohne Obergrenze: Wer nach fünf Minuten immer noch nicht
+spielt, wird eben erneut gebeten. Ohne Paarung (auf dem Feld steht genau
+eine) und ohne Stufenwort („Zweiter Aufruf. Bitte anfangen." wäre ein
+Widerspruch). Der Wortlaut liegt in
+[`src/io/startPlayText.mjs`](../src/io/startPlayText.mjs) und wird in der
+CI geprüft — beide Synthese-Pfade (Web Speech und Azure-SSML) nutzen
+dieselben Bausteine.
+
+Wie jede TL-Web-Ansage erklingt sie **nur in der Halle des Felds** und
+**nicht** in einer per Relay angebundenen fernen Halle (siehe „Cloud" oben).
 
 ### Aufruf je Partei — am Meeting Point und am Feld
 

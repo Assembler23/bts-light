@@ -26,6 +26,52 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   notfalls weggelassen, damit Felder und Spielliste vollständig ankommen.
 - Dritte Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 1 von 4),
   ADR 0036.
+## v0.9.230
+
+- **„Bitte anfangen" — neue Ansage für ein Feld, auf dem nichts passiert.**
+  Steht ein Spiel auf dem Feld, ohne dass ein Punkt fällt, löst der neue
+  Knopf im ⋯-Menü der Feld-Kachel die Ansage **„Feld 3. Bitte mit dem
+  Spielen beginnen."** aus (englisch: „Court 3. Please start playing.").
+  Bisher blieb der Turnierleitung nur hinzulaufen oder einen Aufruf zu
+  wiederholen — was die Aufruf-Zählung verfälschte.
+- **Die Ansage ist ausdrücklich kein Aufruf.** Sie zählt keine Stufe hoch,
+  lässt das Aufruf-Abzeichen stehen und darf beliebig oft wiederholt
+  werden. Die Zählung, an der die kampflose Wertung hängt, bleibt davon
+  unberührt.
+- **Ein Ansage-Rechner mit älterem Stand verstummt nicht mehr.** Kannte er
+  eine Ansageart nicht, verwarf er bisher die **gesamte** Auftragsliste —
+  die zweite Halle blieb eine Minute lang still, auch für ganz normale
+  Aufrufe. Jetzt überspringt er nur den unbekannten Auftrag. Das trifft
+  jeden Zwei-Rechner-Aufbau im Zeitfenster, in dem erst einer aktualisiert
+  ist.
+- Zweite Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 3 von 4).
+  ⚠️ **Relay-Deploy vor dem Client-Release** — die neue Aktion würde ein
+  altes Relay sonst abweisen. Der Deploy läuft automatisch beim Merge nach
+  `main`.
+## v0.9.229
+
+- **Die Spielliste schiebt die anderen Panels nicht mehr weg.** Lädt sie
+  beim Herunterscrollen weitere Spiele nach, wuchs bisher auch ihre
+  **Box** mit — die Nachbar-Panels wurden dabei bis auf ihre Mindesthöhe
+  zusammengedrückt. Schlimmer noch: Danach ließ sich der Trennsteg
+  zwischen den Panels **gar nicht mehr sinnvoll ziehen**; die Aufteilung
+  blieb einfach stehen, egal wie weit man zog.
+- Beides hatte dieselbe Ursache und ist behoben: Die Höhenverteilung
+  richtet sich jetzt allein nach dem gezogenen Verhältnis, nicht mehr
+  danach, wie viele Zeilen ein Panel gerade enthält.
+- **Das Panel „Felder" gibt ungenutzte Höhe jetzt wirklich ab.** Bei
+  wenigen Feldern blieb unter den Kacheln ein leerer Block stehen, statt
+  den Platz an die Spielliste weiterzureichen — die Automatik dafür rechnete
+  sich seit jeher selbst aus (sie maß den sichtbaren Ausschnitt statt der
+  Kacheln und kam damit immer auf die Höhe, die das Panel ohnehin schon
+  hatte).
+- **Und der Trennsteg über den Feldern lässt sich wieder ziehen.** Die
+  Bedarfs-Automatik nagelte das Panel fest: Man zog, nichts bewegte sich,
+  und beim Loslassen sprang es. Jetzt tritt die Automatik zurück, sobald
+  von Hand gezogen wird.
+- Sichtbare Folge der Umstellung: Ein Panel mit wenig Inhalt behält seinen
+  Anteil, auch wenn darunter Platz frei bleibt. Wer das anders möchte,
+  zieht den Steg — das wirkt jetzt wieder zuverlässig.
 ## v0.9.228
 
 - **Spielernamen sind jetzt überall anklickbar.** Auf der

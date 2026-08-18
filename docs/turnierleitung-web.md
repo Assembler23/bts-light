@@ -68,6 +68,12 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
+  fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**
+  Aufruf: Die Aufruf-Zählung bleibt stehen, das Abzeichen springt nicht,
+  und du kannst beliebig oft nachfassen. Der Knopf verschwindet, sobald
+  gezählt wird.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.
@@ -260,6 +266,17 @@ Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
   wieder her. Kein Panel lässt sich auf null ziehen. Ist ein Panel
   dazwischen ausgeblendet, greift der Steg automatisch das nächste
   sichtbare.
+  **Die Verteilung hängt nur am gezogenen Verhältnis, nicht am Inhalt**
+  (seit v0.9.229): Wie viele Zeilen ein Panel gerade zeigt, ändert seine
+  Höhe nicht. Vorher wuchs die Spielliste beim Nachladen auf Kosten ihrer
+  Nachbarn, und der Steg ließ sich danach nicht mehr sinnvoll ziehen.
+  Umgekehrt heißt das: Ein Panel mit wenig Inhalt behält seinen Anteil,
+  auch wenn darunter Platz frei bleibt — wer das anders will, zieht den
+  Steg (das wirkt jetzt wieder zuverlässig). Das Panel **„Felder"** bildet
+  die Ausnahme: Es gibt ungenutzte Höhe automatisch an die übrigen Panels
+  seiner Spalte zurück, solange du seine Höhe nicht selbst gezogen hast.
+  Ziehst du, tritt die Automatik zurück und dein Maß gilt; **Doppeltipp**
+  auf den Steg schaltet sie wieder ein.
 
 #### Spalten (1 bis 3)
 
