@@ -185,9 +185,19 @@ der Sponsor-Leiste, damit ihr Minuten-Takt nicht bei jedem Durchlauf neue
 [../court-monitor.md](../court-monitor.md).
 
 **Weiterhin offen:** Das Turnierlogo reist als Base64 in **jedem vollen
-`tset`** an badhub mit (`sync.rs`). Weglassen ist derzeit nicht möglich — ein
+`tset`** an badhub mit (`sync.rs`). Weglassen war bisher nicht möglich — ein
 `tset` ersetzt bei badhub den kompletten Snapshot-Datensatz, ein fehlendes
-Feld löscht das Logo also und blendet es im Liveticker sowie auf der
-Check-In-Seite aus. Erst wenn badhub fehlende Logo-Felder als „unverändert"
-behandelt (so, wie es `checkin_branding_apply` für den Branding-Weg bereits
-tut), darf bts-light es nur noch bei Änderung mitschicken.
+Feld löschte das Logo also und blendete es im Liveticker sowie auf der
+Check-In-Seite aus.
+
+Die Umstellung läuft in drei Schritten, deren Reihenfolge zwingend ist:
+
+1. **v0.9.226 (erledigt):** bts-light schickt die Logo-Felder auch dann mit,
+   wenn kein Logo gesetzt ist (`""` statt weglassen). Ohne das ließe sich ein
+   einmal gesetztes Logo nach Schritt 2 nicht mehr entfernen. Gegen das
+   heutige badhub verhaltensgleich zum Status quo, deshalb gefahrlos vorab.
+2. **badhub-PR #473 (offen):** `liveticker_logo_uebernehmen()` gibt den
+   Logo-Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — genau
+   den, den `checkin_branding_apply()` für den Branding-Weg schon hat.
+3. **Danach:** bts-light schickt das Logo nur noch bei Änderung. Das ist die
+   eigentliche Ersparnis und erst nach dem Deploy von Schritt 2 gefahrlos.

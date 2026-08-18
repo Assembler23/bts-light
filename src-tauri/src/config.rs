@@ -463,7 +463,8 @@ pub struct DisciplineHallRule {
 /// Turnierlogo für den badhub-Liveticker. BTP liefert kein Logo (verifiziert),
 /// deshalb lädt es der Operator in den Einstellungen hoch; bts-light schickt es
 /// im `tset`-Event mit, wo badhubs `#live-logo`-Element es anzeigt — genau wie
-/// das Original-BTS. Leere `data` ⇒ kein Logo (Felder werden dann nicht gesendet).
+/// das Original-BTS. Leere `data` ⇒ kein Logo; die Felder reisen dann **leer**
+/// mit (`""` heißt für badhub „löschen", ein fehlendes Feld „unverändert").
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct LogoConfig {

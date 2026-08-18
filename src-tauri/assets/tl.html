@@ -374,9 +374,14 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .paar .sp-name.sp-pause { background: #ffedd5; color: #9a3412; border-radius: 5px; padding: 0 4px; }
 /* badhub-Spielerseiten-Link: erbt Farbe und Gewicht, damit die Liste ruhig
    bleibt — dass er klickbar ist, zeigt erst die Berührung (Unterstreichung
-   beim Zeigen/Fokussieren, gepunktet als leiser Dauerhinweis). */
-.paar a.sp-name { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
-.paar a.sp-name:hover, .paar a.sp-name:focus-visible { text-decoration: underline solid 1.5px; }
+   beim Zeigen/Fokussieren, gepunktet als leiser Dauerhinweis).
+   `.fin-pair` steht seit 18.08.2026 mit im Selektor: Die Beendet-Zeile
+   verlinkt dieselben Namen, und ohne diese Regel fiele sie auf das
+   Browser-Blau samt voller Unterstreichung zurück — eine Ergebnisliste,
+   die schreit, statt zu berichten. */
+.paar a.sp-name, .fin-pair a.sp-name { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+.paar a.sp-name:hover, .paar a.sp-name:focus-visible,
+.fin-pair a.sp-name:hover, .fin-pair a.sp-name:focus-visible { text-decoration: underline solid 1.5px; }
 /* Vereinsname unter dem Namen — klein und gedämpft, damit er den Namen nicht
    überstrahlt; das Wappen steht davor. */
 .paar .verein-unter {
@@ -2880,6 +2885,26 @@ function spielerKey(nummer, name) {
   return (nummer || name || "").trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
 }
 
+/**
+ * Ein Spielername als HTML: mit Lizenznummer ein Link auf die öffentliche
+ * badhub-Spielerseite, ohne Nummer schlichter Text.
+ *
+ * **Die einzige Stelle, die aus Name + Nummer Markup macht** — Name durch
+ * `esc()`, Nummer durch `encodeURIComponent()`. Beides kommt aus BTP, also
+ * aus einer Quelle, die diese Seite nicht kontrolliert; zwei Kopien dieser
+ * Logik wären zwei Gelegenheiten, eine der beiden Absicherungen zu
+ * vergessen. Nutzer sind `pairOf` (Spielliste + Feldkachel) und
+ * `siegerZuerstHtml` (Beendet-Liste).
+ */
+function spielerNameHtml(name, nummer, klassen, titel) {
+  const nr = (nummer || "").trim();
+  const attr = `class="${klassen}"${titel || ""}`;
+  return nr
+    ? `<a ${attr} href="https://badhub.de/spieler/${encodeURIComponent(nr)}/live"
+         target="_blank" rel="noopener">${esc(name)}</a>`
+    : `<span ${attr}>${esc(name)}</span>`;
+}
+
 function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
   const zeigeVereinsnamen = zeigeVereinsnamenAktiv();
   const zeigeVereinslogos = zeigeVereinslogosAktiv();
@@ -2893,20 +2918,19 @@ function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
       const willLogo = zeigeVereinslogos && verein;
       // Nur-Logo (ohne Name) → inline vor den Namen, hinter die Nation.
       const inlineLogo = (willLogo && !willName) ? vereinsLogo(verein) : "";
-      // Nur die Spielliste reicht `extra` herein: `lage` färbt den Namen
-      // nach Bereitschaft (rot = spielt gerade, orange = pausiert; der
-      // `title` sagt es in Worten), die Lizenznummer macht ihn zum Link
-      // auf die badhub-Spielerseite. Ohne Nummer bleibt es ein `<span>`.
+      // `extra` ist optional: `lage` färbt den Namen nach Bereitschaft
+      // (rot = spielt gerade, orange = pausiert; der `title` sagt es in
+      // Worten) — das reicht nur die Spielliste herein. Die Lizenznummer
+      // macht den Namen zum Link auf die badhub-Spielerseite; die geben
+      // seit 18.08.2026 Spielliste UND Feldkachel mit. Ohne Nummer bleibt
+      // es ein `<span>`.
       // Der Abgleich läuft über den Spieler-SCHLÜSSEL, nicht den Namen —
       // sonst färbten zwei gleichnamige Spieler einer Paarung gemeinsam.
       const nummer = ((nummern || [])[i] || "").trim();
       const lage = extra && extra.lage ? extra.lage(spielerKey(nummer, n)) : null;
       const klassen = `sp-name${lage ? " " + lage.cls : ""}`;
       const titel = lage ? ` title="${esc(lage.titel)}"` : "";
-      const nameHtml = nummer
-        ? `<a class="${klassen}"${titel} href="https://badhub.de/spieler/${encodeURIComponent(nummer)}/live"
-             target="_blank" rel="noopener">${esc(n)}</a>`
-        : `<span class="${klassen}"${titel}>${esc(n)}</span>`;
+      const nameHtml = spielerNameHtml(n, nummer, klassen, titel);
       const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${nameHtml}</span>`;
       // Vereinsname → eigene Zeile unter dem Namen (Logo davor, falls an).
       const unter = willName
@@ -3171,7 +3195,8 @@ function courtCard(c, cellStyle) {
             <div class="meta">Warte auf die Bestätigung vom Turnier-PC.</div>`;
   } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
-    body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat, c.team1_club, c.team2_club)}</div>
+    body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat, c.team1_club, c.team2_club,
+      { ids1: c.team1_ids, ids2: c.team2_ids })}</div>
             <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
     // Beschriftung nur noch, wenn sie etwas sagt, das man sonst nicht sieht.
     // „auf dem Feld seit" und „im Spiel seit" stehen inzwischen als Farbe an
@@ -3579,6 +3604,28 @@ function wireCourts(box) {
     // wird sie ohnehin ersetzt und neu verdrahtet.
     const frisch = () => state.courts.find((c) => String(c.court_id) === el.dataset.court);
 
+    // ── Spieler-Links (Spec tl-sicht-feinschliff A4.1) ──────────────────
+    // VOR der `picked`-Weiche, weil beide Zweige sie brauchen: Die Kachel
+    // wird bei jeder Auswahl neu gebaut (sie bekommt `target`) und dann
+    // über den jeweils gültigen Zweig verdrahtet. Stünde das unten, hätte
+    // eine Kachel genau so lange keine Link-Behandlung, wie ein Spiel zur
+    // Zuweisung ausgewählt ist — also mitten im häufigsten Arbeitsgang
+    // (Review 18.08.2026).
+    //
+    // Ein Klick auf den badhub-Link darf das Feld weder aufnehmen noch
+    // bezuweisen. `pointerdown` bleibt unangetastet: Der Name ist die
+    // größte Trefffläche der Kachel, ein dort angesetzter ZUG muss weiter
+    // funktionieren — endet er über dem Namen, fängt `suppressNextClick`
+    // die Navigation ab. Wortgleich zu `wireQueue`.
+    const istSpielerLink = (ev) =>
+      ev.target instanceof Element && !!ev.target.closest("a.sp-name");
+    scopeAll(el, "a.sp-name").forEach((a) => {
+      a.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (suppressNextClick) ev.preventDefault();
+      });
+    });
+
     if (picked) {
       const go = () => {
         if (suppressNextClick) return;
@@ -3587,6 +3634,9 @@ function wireCourts(box) {
       };
       el.addEventListener("click", go);
       el.addEventListener("keydown", (ev) => {
+        // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
+        // Link, nicht der Zuweisung.
+        if (istSpielerLink(ev)) return;
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
       });
       return;
@@ -3612,6 +3662,10 @@ function wireCourts(box) {
     };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
+      // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
+      // Link (badhub-Seite öffnen) — sonst finge die Kachel sie ab und
+      // nähme stattdessen das Spiel auf.
+      if (istSpielerLink(ev)) return;
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
     enableDrag(el, alsMatch(court), court.court_id);
@@ -5755,12 +5809,29 @@ function renderScorekeepers() {
 
 /**
  * Sieger-zuerst-Paarung für die Beendet-Liste — so liest man ein Ergebnis
- * vor. Gilt für die Zeilenanzeige UND den Dialog-Titel bei einer Korrektur,
- * NIE für das Draht-Format an den Turnier-PC (das bleibt roh Team1:Team2,
- * siehe `openResultDialog`-Kommentar).
+ * vor. Gilt NIE für das Draht-Format an den Turnier-PC (das bleibt roh
+ * Team1:Team2, siehe `openResultDialog`-Kommentar).
+ *
+ * Zwei Fassungen, seit die Namen Links tragen (18.08.2026): Der
+ * **Dialog-Titel** braucht reinen Text — er wird vom Aufrufer escapt und
+ * dürfte kein Markup enthalten. Die **Zeile** braucht Markup, damit der
+ * Name auf die badhub-Spielerseite verlinkt. Ein gemeinsamer Rückgabewert
+ * für beides ginge nur, indem eine der beiden Seiten HTML durchreicht, wo
+ * sie Text erwartet — genau die Verwechslung, die eine Lücke aufreißt.
  */
-function siegerZuerst(f) {
+function siegerZuerstText(f) {
   const team1 = (f.team1 || []).join(" / "), team2 = (f.team2 || []).join(" / ");
+  return f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
+}
+
+/** Wie `siegerZuerstText`, aber mit den badhub-Links (Spec
+ *  `tl-sicht-feinschliff` A4.2). Escaping liegt in `spielerNameHtml` — die
+ *  Trennzeichen hier sind eigener, fester Text. */
+function siegerZuerstHtml(f) {
+  const seite = (namen, nummern) => ((namen || []).length ? namen : ["?"])
+    .map((n, i) => spielerNameHtml(n, (nummern || [])[i], "sp-name", ""))
+    .join(" / ");
+  const team1 = seite(f.team1, f.team1_ids), team2 = seite(f.team2, f.team2_ids);
   return f.winner === 2 ? `${team2} – ${team1}` : `${team1} – ${team2}`;
 }
 
@@ -6727,7 +6798,7 @@ function finRow(f) {
       ? `<span class="hall-kuerzel" title="${esc(f.hall)}">${hallMarke(f.hall)}${esc(hallenKuerzel(f.hall))}</span> `
       : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
-      <span class="fin-pair">${esc(siegerZuerst(f))}</span>
+      <span class="fin-pair">${siegerZuerstHtml(f)}</span>
       <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${graph}<button type="button" data-fin-fix="${f.match_id}"
@@ -6770,7 +6841,7 @@ function wireFinRow(box) {
       if (!f) return;
       openResultDialog({
         matchId: f.match_id,
-        label: siegerZuerst(f), // Titel: Sieger zuerst, wie die Zeile.
+        label: siegerZuerstText(f), // Titel: Sieger zuerst, wie die Zeile.
         sets: f.sets || [],
         bestOf: 3,
         overwrite: true,

@@ -383,6 +383,28 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Verfehlen der Nachmess-Schwellen gebaut.
   Spec: [features/monitor-livestand-push.md](features/monitor-livestand-push.md) ·
   ADR [0035](adr/0035-monitor-livestand-ordnung.md).
+- **Feinschliff Turnierleitungssicht (18.08.2026)** — vier unabhängige
+  Punkte aus dem Turnierbetrieb: (1) die Spielzeiten-Statistik wird
+  **mehrachsig** (Klasse · Disziplin · Halle · Klasse×Disziplin), die Achse
+  ist eine Profil-Einstellung; die Halle wird dafür beim E4-Stempel im
+  Messwert festgehalten und bleibt **reine Anzeige** (Prognose unberührt).
+  (2) **Nachruf für Zähltafelbediener** am Feld-Aufruf („… bitte als
+  Tabletbedienung melden") — der seit ADR 0007 offene Baustein; der
+  Vorbereitungs-Aufruf bleibt bewusst außen vor. (3) Neue TL-Web-Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."**, die die Aufruf-Zählung
+  **nicht** anfasst. (4) **Spielerlinks** auch in laufenden Feld-Kacheln und
+  bei beendeten Spielen — hebt die Beschränkung der Lizenznummern auf die
+  Warteliste auf (beide Wächter-Tests werden angepasst und begründet).
+  Spec: [features/tl-sicht-feinschliff.md](features/tl-sicht-feinschliff.md) ·
+  ADR [0036](adr/0036-hallen-achse-im-messwert.md) (Punkt 1) ·
+  Nachtrag an ADR [0007](adr/0007-zaehltafelbediener.md) (Punkt 2).
+  **Umsetzung in vier PRs, Reihenfolge 4 → 3 → 1 → 2** (Nutzer-Vorgabe:
+  Spielerlinks und Spielbeginn-Ansage zuerst). Punkt 2 und 3 brauchen
+  **Relay-Deploy vor dem Client-Tag** (neue `TlAction` → altes Relay
+  antwortet 422); der Punkt-3-PR trägt zusätzlich die Absicherung, die
+  einen Ansage-Slave mit älterem Stand vor dem Verlust der ganzen
+  Auftragscharge schützt.
+
 - **Hallen-Farben** — jede Halle eines Mehr-Hallen-Turniers bekommt eine
   Farbe (Auto-Palette, deterministisch alphabetisch; Übersteuerung per
   Palettenton auf der Felderübersicht), sichtbar als Marke neben jeder
@@ -696,24 +718,28 @@ verliehen):
   Base64, bis 2,7 MB). Ein voller `tset` geht mindestens jede Minute als
   Lebenszeichen raus und zusätzlich immer dann, wenn der Diff bei
   mehreren geänderten Matches zum Vollstand degeneriert — bei vielen
-  Feldern also alle paar Sekunden. Weglassen ist **derzeit nicht
-  möglich**: Ein `tset` ersetzt bei badhub den kompletten
-  Snapshot-Datensatz (`liveticker_state.snapshot_json`), ein fehlendes
-  Feld löscht das Logo also, und der Liveticker blendet es beim nächsten
-  5-s-Poll aus — ebenso die Check-In-Seite, wenn dort kein eigenes
-  Branding-Logo hinterlegt ist (Recherche 18.08.2026). Voraussetzung für
-  einen Fix ist badhub-seitig, dass ein fehlendes Logo-Feld als
-  „unverändert" gilt und `""` als „löschen" — genau die Semantik, die
-  `checkin_branding_apply()` für den Branding-Weg schon umsetzt. Im
-  badhub-Repo liegt dazu die noch **nicht umgesetzte** Design-Spec
-  `docs/superpowers/specs/2026-08-18-turnierlogo-zentralisierung-design.md`
-  (Logo als inhaltsadressierte Datei, im Snapshot nur `tournament_logo_url`);
-  in ihrer jetzigen Fassung löst sie diesen Punkt allerdings **nicht** —
-  sie hält ausdrücklich fest, dass ein `tset` ohne Logo zu einer fehlenden
-  URL führt. Nötig wäre zusätzlich ein Rückfall im Lesepfad
-  (`liveQjson()`) auf die gespeicherte Datei. Reihenfolge beim Ausrollen:
-  **erst badhub deployen, dann** die bts-light-Version, die das Logo nur
-  noch bei Änderung mitschickt.
+  Feldern also alle paar Sekunden. Weglassen ging bisher nicht: Ein
+  `tset` ersetzt bei badhub den kompletten Snapshot-Datensatz
+  (`liveticker_state.snapshot_json`), ein fehlendes Feld löschte das Logo
+  also, und der Liveticker blendete es beim nächsten 5-s-Poll aus —
+  ebenso die Check-In-Seite, wenn dort kein eigenes Branding-Logo
+  hinterlegt ist (Recherche 18.08.2026).
+  **Umstellung in drei Schritten, Reihenfolge zwingend:**
+  1. ✅ **v0.9.226:** bts-light schickt die Logo-Felder auch leer mit
+     (`""` statt weglassen) — sonst wäre ein Logo nach Schritt 2 nicht
+     mehr löschbar. Gegen das heutige badhub verhaltensgleich, deshalb
+     gefahrlos vorab.
+  2. **badhub-PR #473** (offen): `liveticker_logo_uebernehmen()` gibt den
+     Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — den,
+     den `checkin_branding_apply()` schon hat. **Braucht einen Deploy.**
+  3. Danach: bts-light schickt das Logo nur noch bei Änderung.
+  Zu beachten: Im badhub-Repo liegt (lokal, ungepusht) der Umbau
+  `feat/turnierlogo-zentralisierung` — Logo als inhaltsadressierte Datei,
+  im Snapshot nur noch `tournament_logo_url`. Er löst diesen Punkt
+  **nicht** von allein (ein `tset` ohne Logo lässt die URL schlicht aus
+  dem Snapshot fallen) und kollidiert an derselben Codezeile mit #473;
+  beim Auflösen muss die Übernahme **oben** stehen, sonst holt sie den
+  Base64-Blob zurück.
 
 ## Schiedsrichtermanagement — umgesetzt (v0.9.201)
 
