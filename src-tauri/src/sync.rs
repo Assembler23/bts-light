@@ -122,6 +122,10 @@ pub struct SyncEngine {
     /// einem kurzen Aussetzer während eines badhub-Deploys stammen, und ein
     /// Turnier läuft über mehrere Tage.
     checkin_unsupported_since: Option<Instant>,
+    /// Ab welcher Position der nächste Nachschub-Durchlauf beginnt —
+    /// rotiert, damit das Zeitfenster nicht immer dieselben hinteren
+    /// Einträge abschneidet (siehe `flush_btp_retries`).
+    btp_retry_start: usize,
     /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
     sched_takt: SchedTakt,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
@@ -149,6 +153,25 @@ const EMPTY_CONFIRM_POLLS: u32 = 2;
 /// der Poll-Zyklus läuft alle ~2 s, ein strauchelndes BTP soll nicht im
 /// Sekundentakt mit Login+SENDUPDATE beharkt werden.
 const BTP_RETRY_FLUSH_EVERY: Duration = Duration::from_secs(30);
+
+/// **Startfenster** eines Nachschub-Durchlaufs: Nach dieser Zeit wird
+/// kein weiterer Write mehr begonnen.
+///
+/// Bewusst „Startfenster", nicht „Obergrenze": Geprüft wird vor jedem
+/// Write, ein bereits laufender wird nicht abgeschnitten. Der echte
+/// schlechteste Fall ist deshalb dieses Fenster **plus einen Write** —
+/// und ein Write kostet im Extremfall zwei TCP-Verbindungen mit je 5 s
+/// Verbindungs- und 10 s Lesefrist, also rund 30 s (Review-Präzisierung
+/// 18.08.2026).
+///
+/// Warum überhaupt: Der Durchlauf läuft **innerhalb** des Poll-Zyklus und
+/// schreibt nacheinander. Ohne Grenze hielte eine volle Warteschlange bei
+/// trägem BTP den ganzen Zyklus an — mit zwanzig gestauten Ergebnissen
+/// wären das viele Minuten, in denen Liveticker, automatische Feldvergabe
+/// und der Turnierleitungs-Zustand stillstehen. Die restlichen Einträge
+/// bleiben in der Warteschlange und kommen beim nächsten Flush dran;
+/// verloren geht nichts.
+const BTP_RETRY_FLUSH_BUDGET: Duration = Duration::from_secs(20);
 
 /// Spieler-Checkout-Fenster (Tilos 5-Minuten-Guard): Wird ein Ergebnis
 /// später als 5 min nach Spielende nachgeschoben, bleibt der
@@ -338,6 +361,7 @@ impl SyncEngine {
             highlight_written: HashSet::new(),
             last_roster: None,
             checkin_unsupported_since: None,
+            btp_retry_start: 0,
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
         }
@@ -898,7 +922,32 @@ impl SyncEngine {
         self.last_btp_retry_flush = Some(Instant::now());
         let now = now_ms();
         let mut still_failing = 0usize;
-        for entry in entries {
+        let begonnen = Instant::now();
+        let gesamt = entries.len();
+        // Rotierender Einstieg (Review-Fund 18.08.2026): Das Zeitfenster
+        // unten schneidet den Durchlauf ab — bei stabiler Reihenfolge
+        // immer an derselben Stelle. Ein zäher Eintrag am Anfang ließe
+        // die hinteren dann nie an die Reihe kommen, und ihre
+        // Verfalls-Regeln (`prepare_btp_retry`) würden nie geprüft.
+        // Deshalb beginnt jeder Durchlauf eine Position weiter.
+        let mut entries = entries;
+        if gesamt > 1 {
+            entries.rotate_left(self.btp_retry_start % gesamt);
+            self.btp_retry_start = self.btp_retry_start.wrapping_add(1);
+        }
+        for (erledigt, entry) in entries.into_iter().enumerate() {
+            // Zeit-Deckel (siehe `BTP_RETRY_FLUSH_BUDGET`): Der Rest des
+            // Zyklus — Liveticker, Auto-Vergabe, TL-Zustand — darf nicht
+            // hinter einer langen Warteschlange verhungern. Die übrigen
+            // Einträge bleiben stehen und sind beim nächsten Flush dran.
+            if begonnen.elapsed() >= BTP_RETRY_FLUSH_BUDGET {
+                tracing::info!(
+                    "Nachschub-Durchlauf nach {erledigt}/{gesamt} Einträgen abgebrochen \
+                     (Zeitdeckel {} s) — Rest folgt beim nächsten Versuch",
+                    BTP_RETRY_FLUSH_BUDGET.as_secs()
+                );
+                break;
+            }
             let match_id = entry.update.btp_match_id;
             // Direkt vor dem Write erneut prüfen: Hat ein zwischenzeitlich
             // erfolgreicher Direkt-Write (Tablet-Retry) den Eintrag schon

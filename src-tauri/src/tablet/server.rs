@@ -77,6 +77,9 @@ pub struct ServerCtx {
     /// dem veralteten In-Memory-Stand und löschte den Platten-Schreibvorgang
     /// wieder kommentarlos.)
     shared_config: Arc<std::sync::Mutex<AppConfig>>,
+    /// Warteschlange der Live-Score-Pushes an badhub, je Feld serialisiert
+    /// und gebündelt — siehe [`ScorePushQueue`].
+    score_push: Arc<ScorePushQueue>,
     /// Zwischenstand des Config-Lesens: `(Änderungszeit, Größe, geparst)`.
     ///
     /// `app_config()` läuft auf den heißesten Pfaden — jede TL-Anfrage
@@ -87,10 +90,122 @@ pub struct ServerCtx {
     /// Die Semantik bleibt exakt dieselbe (jede geschriebene Änderung
     /// wird erkannt, ein unlesbarer Stand meldet weiterhin einen Fehler) —
     /// nur ohne das Lesen und Parsen (Review-Vorschlag 18.08.2026).
-    config_cache: std::sync::Mutex<Option<(std::time::SystemTime, u64, AppConfig)>>,
+    config_cache: std::sync::Mutex<Option<(std::time::SystemTime, u64, Arc<AppConfig>)>>,
+    /// Zwischenstand der Werbebild-Liste: `(Änderungszeit des Ordners,
+    /// Dateinamen)`. `list_ads` macht ein `read_dir` samt Sortieren —
+    /// auf den Monitor-Pfaden lief das bei **jedem** Abruf, bei zwanzig
+    /// Anzeigen also achtzigmal je Sekunde. Der Ordner ändert sich nur,
+    /// wenn jemand ein Bild hochlädt oder löscht (Review 18.08.2026).
+    ads_cache: std::sync::Mutex<Option<(std::time::SystemTime, Vec<String>)>>,
+}
+
+/// Die Live-Score-Pushes an badhub, **je Feld serialisiert und
+/// gebündelt** — und vor allem: **außerhalb** der Tablet-Verbindung.
+///
+/// Vorher lief der Push mitten in der WebSocket-Schleife des Tablets, mit
+/// 15 s Timeout. Der Server erwartet aber spätestens nach 10 s ein
+/// Lebenszeichen desselben Sockets (`STALE_AFTER`) — ein hängendes badhub
+/// ließ die Verbindung also auflaufen, der Server schloss sie **und gab
+/// das Feld frei**. Bei zwanzig Feldern hätte das alle zugleich getroffen
+/// (Analyse 18.08.2026). Der Push gehört deshalb hinter die Verbindung,
+/// nicht hinein.
+///
+/// Trotzdem kein blindes `spawn` je Punkt: Zwei Pushes desselben Felds
+/// dürfen sich nicht überholen (badhub zeigte sonst kurzzeitig den
+/// älteren Stand). Deshalb ist je Feld immer nur einer unterwegs, und
+/// während er läuft, sammelt sich nur der **neueste** Stand an — ein
+/// Punkteregen wird so zusätzlich zusammengefasst statt in eine
+/// Anfragen-Lawine übersetzt.
+#[derive(Default)]
+struct ScorePushQueue {
+    /// Beides unter EINEM Schloss, damit „nichts mehr da, ich höre auf"
+    /// und „ich stelle etwas ein" nicht ineinander rutschen können — sonst
+    /// bliebe ein zuletzt eingestellter Stand ungesendet liegen.
+    inner: std::sync::Mutex<ScorePushState>,
+}
+
+#[derive(Default)]
+struct ScorePushState {
+    /// Feld → neuester noch nicht gesendeter Stand, mit dem Spiel, zu dem
+    /// er gehört.
+    pending: HashMap<i64, (i64, crate::badhub::diff::Update)>,
+    /// Felder, für die gerade ein Push unterwegs ist.
+    busy: std::collections::HashSet<i64>,
+}
+
+impl ScorePushQueue {
+    /// Stellt einen Stand ein. `true` = für dieses Feld läuft noch kein
+    /// Arbeiter, der Aufrufer muss einen starten.
+    fn einstellen(
+        &self,
+        court_id: i64,
+        match_id: i64,
+        update: crate::badhub::diff::Update,
+    ) -> bool {
+        let mut g = self.inner.lock().expect("Score-Push-Mutex nicht vergiftet");
+        g.pending.insert(court_id, (match_id, update));
+        g.busy.insert(court_id)
+    }
+
+    /// Der nächste zu sendende Stand eines Felds — oder `None`, wenn
+    /// nichts mehr ansteht. Im `None`-Fall meldet sich der Arbeiter
+    /// **unter demselben Schloss** ab: Ein Stand, der genau jetzt
+    /// eingestellt wird, sieht uns dann nicht mehr als beschäftigt und
+    /// startet seinen eigenen Arbeiter — so bleibt kein Stand liegen.
+    fn naechster(&self, court_id: i64) -> Option<(i64, crate::badhub::diff::Update)> {
+        let mut g = self.inner.lock().expect("Score-Push-Mutex nicht vergiftet");
+        match g.pending.remove(&court_id) {
+            Some(eintrag) => Some(eintrag),
+            None => {
+                g.busy.remove(&court_id);
+                None
+            }
+        }
+    }
 }
 
 impl ServerCtx {
+    /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
+    fn queue_score_push(&self, court_id: i64, match_id: i64, update: crate::badhub::diff::Update) {
+        if !self.score_push.einstellen(court_id, match_id, update) {
+            // Für dieses Feld läuft schon einer — er nimmt den neuen
+            // Stand mit, sobald er fertig ist.
+            return;
+        }
+        let queue = self.score_push.clone();
+        let tablet = self.tablet.clone();
+        let http = self.http.clone();
+        let url = self.config.badhub.url.clone();
+        let password = self.config.badhub.password.clone();
+        tokio::spawn(async move {
+            while let Some((match_id, update)) = queue.naechster(court_id) {
+                // Veraltet-Prüfung DIREKT vor dem Senden (Review-Fund
+                // 18.08.2026): Zwischen Einstellen und Senden kann ein
+                // hängendes badhub Minuten liegen lassen. In der Zeit kann
+                // das Spiel enden und die Turnierleitung das Ergebnis
+                // **korrigiert** haben — ein nachträglich eintreffender
+                // Live-Stand überschriebe die Korrektur im Liveticker, und
+                // der Diff des Sync-Zyklus schickt ein beendetes Match nie
+                // wieder mit. Steht das Spiel nicht mehr auf dem Feld oder
+                // ist es in BTP finalisiert, wird der Stand verworfen.
+                if match_id != 0 {
+                    let noch_aktuell =
+                        tablet.match_for_court(court_id).map(|m| m.id) == Some(match_id);
+                    if !noch_aktuell || tablet.is_match_finalized(court_id, match_id) {
+                        tracing::info!(
+                            "Live-Score für Match {match_id} verworfen: nicht mehr aktuell \
+                             (Spiel beendet oder Feld neu belegt)"
+                        );
+                        continue;
+                    }
+                }
+                if let Err(e) = push::push_update(&http, &url, &password, &update).await {
+                    tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
+                }
+            }
+        });
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tablet: Arc<TabletState>,
@@ -113,6 +228,8 @@ impl ServerCtx {
             log_dir,
             shared_config,
             config_cache: std::sync::Mutex::new(None),
+            ads_cache: std::sync::Mutex::new(None),
+            score_push: Arc::new(ScorePushQueue::default()),
         }
     }
 
@@ -134,6 +251,65 @@ impl ServerCtx {
         self.app_config_result().unwrap_or_default()
     }
 
+    /// Wie [`Self::app_config`], aber **ohne Kopie** — für die heißen
+    /// Pfade.
+    ///
+    /// `AppConfig` trägt unter anderem das Turnierlogo als Base64-Text
+    /// (bis 2,7 MB). Auf den Monitor-Routen wurde es bei jedem Abruf
+    /// mitkopiert, teils zweimal — bei zwanzig Anzeigen mit ihrem
+    /// 250-ms-Takt ergab das hunderte Megabyte reines Kopieren pro
+    /// Sekunde (Analyse 18.08.2026). Wer nur lesen will, nimmt das
+    /// `Arc`.
+    pub fn app_config_arc(&self) -> Arc<AppConfig> {
+        self.app_config_arc_result().unwrap_or_default()
+    }
+
+    fn app_config_arc_result(&self) -> Result<Arc<AppConfig>, String> {
+        let meta = std::fs::metadata(&self.config_path).map_err(|e| e.to_string())?;
+        let stempel = (meta.modified().map_err(|e| e.to_string())?, meta.len());
+        {
+            let cache = self
+                .config_cache
+                .lock()
+                .expect("Config-Cache nicht vergiftet");
+            if let Some((zeit, groesse, config)) = cache.as_ref() {
+                if (*zeit, *groesse) == stempel {
+                    return Ok(config.clone());
+                }
+            }
+        }
+        let config = Arc::new(AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())?);
+        *self
+            .config_cache
+            .lock()
+            .expect("Config-Cache nicht vergiftet") = Some((stempel.0, stempel.1, config.clone()));
+        Ok(config)
+    }
+
+    /// Werbebilder des Court-Monitors — aus dem Zwischenstand, solange
+    /// sich der Ordner nicht geändert hat (siehe `ads_cache`).
+    fn ads(&self) -> Vec<String> {
+        let zeit = std::fs::metadata(&self.monitor_dir)
+            .and_then(|m| m.modified())
+            .ok();
+        if let Some(zeit) = zeit {
+            {
+                let cache = self.ads_cache.lock().expect("Ads-Cache nicht vergiftet");
+                if let Some((gemerkt, namen)) = cache.as_ref() {
+                    if *gemerkt == zeit {
+                        return namen.clone();
+                    }
+                }
+            }
+            let namen = monitor::list_ads(&self.monitor_dir);
+            *self.ads_cache.lock().expect("Ads-Cache nicht vergiftet") =
+                Some((zeit, namen.clone()));
+            return namen;
+        }
+        // Kein Zeitstempel lesbar (Ordner fehlt): wie bisher direkt lesen.
+        monitor::list_ads(&self.monitor_dir)
+    }
+
     /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
     ///
     /// Für Entscheidungen, bei denen „Datei gerade nicht lesbar" etwas ganz
@@ -148,28 +324,10 @@ impl ServerCtx {
         // noch Größe, ist es dieselbe Datei — dann genügt die gemerkte
         // Fassung. Beides gemeinsam, weil eine Änderung innerhalb
         // derselben Zeitstempel-Auflösung sonst durchrutschen könnte.
-        let meta = std::fs::metadata(&self.config_path).map_err(|e| e.to_string())?;
-        let stempel = (meta.modified().map_err(|e| e.to_string())?, meta.len());
-        {
-            let cache = self
-                .config_cache
-                .lock()
-                .expect("Config-Cache nicht vergiftet");
-            if let Some((zeit, groesse, config)) = cache.as_ref() {
-                if (*zeit, *groesse) == stempel {
-                    return Ok(config.clone());
-                }
-            }
-        }
-        // Fehler NICHT merken: Ein Lesen mitten im Neuschreiben der Datei
-        // (abgeschnitten, halb geschrieben) ist ein Augenblickszustand,
-        // kein Ergebnis — der nächste Aufruf soll es wieder versuchen.
-        let config = AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())?;
-        *self
-            .config_cache
-            .lock()
-            .expect("Config-Cache nicht vergiftet") = Some((stempel.0, stempel.1, config.clone()));
-        Ok(config)
+        // Der Datei-Stempel entscheidet (siehe `app_config_arc_result`);
+        // hier nur die Kopie für Aufrufer, die eine eigene Fassung
+        // brauchen.
+        self.app_config_arc_result().map(|c| (*c).clone())
     }
 
     /// Lässt `f` den **geteilten** In-Memory-Stand ändern (`shared_config`,
@@ -766,16 +924,18 @@ async fn monitor_state(
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
     let court = ctx.tablet.monitor_court(court_id);
-    let cfg = ctx.app_config();
-    let ads = monitor::list_ads(&ctx.monitor_dir);
+    // EIN Config-Zugriff für alles (vorher zwei, jeder mit voller Kopie
+    // inklusive Turnierlogo) und die Werbebild-Liste aus dem
+    // Zwischenstand statt per Verzeichnis-Lesen (Analyse 18.08.2026).
+    let cfg = ctx.app_config_arc();
     let state = monitor::build_monitor_state(
         court_id,
         label,
-        hall_color_for(&ctx, court_id),
+        hall_color_for(&ctx, &cfg, court_id),
         court,
         &cfg.court_monitor,
         &cfg.call_timer,
-        ads,
+        ctx.ads(),
     );
     ([(header::CACHE_CONTROL, "no-store")], Json(state))
 }
@@ -783,12 +943,12 @@ async fn monitor_state(
 /// Effektive Hallen-Farbe des Felds (Spec hallen-farben) — über die
 /// kanonische Turnier-Hallenliste aufgelöst; `None` bei Ein-Hallen-
 /// Turnieren oder Feldern ohne Halle.
-fn hall_color_for(ctx: &ServerCtx, court_id: i64) -> Option<String> {
+fn hall_color_for(ctx: &ServerCtx, config: &AppConfig, court_id: i64) -> Option<String> {
     let hall = ctx.tablet.court_hall(court_id);
     if hall.is_empty() {
         return None;
     }
-    crate::hall_colors::color_for(&ctx.app_config(), &ctx.tablet.hall_names(), &hall)
+    crate::hall_colors::color_for(config, &ctx.tablet.hall_names(), &hall)
 }
 
 /// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
@@ -813,16 +973,17 @@ async fn monitor_device_state(
         Some(relay_proto::MonitorTarget::Court { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
-            let cfg = ctx.app_config();
-            let ads = monitor::list_ads(&ctx.monitor_dir);
+            // Wie in `monitor_state`: eine Config ohne Kopie, Werbebilder
+            // aus dem Zwischenstand.
+            let cfg = ctx.app_config_arc();
             monitor::build_monitor_state(
                 court_id,
                 label,
-                hall_color_for(&ctx, court_id),
+                hall_color_for(&ctx, &cfg, court_id),
                 court_data,
                 &cfg.court_monitor,
                 &cfg.call_timer,
-                ads,
+                ctx.ads(),
             )
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
@@ -2826,16 +2987,12 @@ pub(crate) async fn handle_score(
     let mut live = m;
     live.sets = sets;
     let update = Update::Single(build_tupdate(&live, ctx.next_rid()));
-    if let Err(e) = push::push_update(
-        &ctx.http,
-        &ctx.config.badhub.url,
-        &ctx.config.badhub.password,
-        &update,
-    )
-    .await
-    {
-        tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
-    }
+    // Einstellen statt warten: Der Push läuft hinter der Verbindung, je
+    // Feld serialisiert und gebündelt (siehe `ScorePushQueue`). Vorher
+    // hing hier die Tablet-WebSocket bis zu 15 s an einem lahmen badhub —
+    // und wurde dabei vom eigenen Server als tot geschlossen, samt
+    // Freigabe des Felds.
+    ctx.queue_score_push(court_id, live.id, update);
 }
 
 #[cfg(test)]
@@ -3068,11 +3225,12 @@ mod tests {
             entries: Vec::new(),
             officials: Vec::new(),
         });
+        let cfg = ctx.app_config();
         assert_eq!(
-            hall_color_for(&ctx, 101).as_deref(),
+            hall_color_for(&ctx, &cfg, 101).as_deref(),
             Some(crate::hall_colors::HALL_PALETTE[1])
         );
-        assert_eq!(hall_color_for(&ctx, 999), None, "unbekanntes Feld");
+        assert_eq!(hall_color_for(&ctx, &cfg, 999), None, "unbekanntes Feld");
     }
 
     /// Standard-Ergebnis-Body (Match 42 / Court 101) mit gegebenen Sätzen.
@@ -3318,6 +3476,44 @@ mod tests {
         assert!(!match_decided(3, &[(21, 7), (15, 21)])); // 1:1 – Entscheidungssatz
         assert!(match_decided(3, &[(21, 7), (21, 15)])); // 2:0 – entschieden
         assert!(match_decided(3, &[(21, 7), (15, 21), (21, 18)])); // 2:1 – entschieden
+    }
+
+    #[test]
+    fn score_push_queue_serialises_per_court_and_keeps_only_the_newest() {
+        // Der Kern der Warteschlange (Spec-frei, reine Zustandslogik):
+        // je Feld genau EIN Arbeiter, und während er läuft, überlebt nur
+        // der neueste Stand — ein Punkteregen wird gebündelt statt in
+        // eine Anfragen-Lawine übersetzt.
+        let q = ScorePushQueue::default();
+        let update = |n: i64| {
+            crate::badhub::diff::Update::Single(build_tupdate(&match_on_court(), n as u64))
+        };
+
+        assert!(
+            q.einstellen(1, 42, update(1)),
+            "erster startet den Arbeiter"
+        );
+        assert!(
+            !q.einstellen(1, 42, update(2)),
+            "zweiter reiht sich beim laufenden Arbeiter ein"
+        );
+        assert!(
+            !q.einstellen(1, 42, update(3)),
+            "dritter ebenso — er ersetzt nur den wartenden Stand"
+        );
+        // Ein anderes Feld ist davon unberührt: eigener Arbeiter.
+        assert!(q.einstellen(2, 7, update(9)), "Feld 2 hat seinen eigenen");
+
+        // Der Arbeiter bekommt genau EINEN Stand — den zuletzt
+        // eingestellten (die dazwischen sind überholt).
+        let (match_id, _) = q.naechster(1).expect("ein Stand wartet");
+        assert_eq!(match_id, 42);
+        assert!(
+            q.naechster(1).is_none(),
+            "danach ist nichts mehr da — der Arbeiter meldet sich ab"
+        );
+        // Abgemeldet heißt: Der nächste Aufrufer startet wieder einen.
+        assert!(q.einstellen(1, 42, update(4)), "neuer Arbeiter nötig");
     }
 
     #[test]
