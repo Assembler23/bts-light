@@ -737,6 +737,27 @@ pub(crate) fn state_for_relay(
     // tl-web-ausbau; Review 17.08.2026), sonst kippte ein rein
     // additives Panel den gesamten Cloud-Zustand über die Relay-Grenze.
     state.checkin_times = None;
+    let json = serde_json::to_string(&state).unwrap_or_default();
+    if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+        return (json, rev);
+    }
+    // Letzte Rettung vor der Aufgabe: die Ergebnisliste stutzen. Sie ist
+    // reine Rückschau — wer ein älteres Ergebnis sucht, schaut in BTP; die
+    // Felder dagegen sind das Bedienelement der Seite und bleiben
+    // unangetastet. Nötig geworden, seit die Liste Lizenznummern trägt
+    // (Spec `tl-sicht-feinschliff` Punkt 4): Mit Vereinsnamen und
+    // Schiedsrichter-Betrieb zehrt ein 26-Felder-Turnier die Reserve fast
+    // auf, und `finished` war die einzige große Liste ohne Kürzungsstufe
+    // (Review 18.08.2026).
+    for limit in [10usize, 3] {
+        if state.finished.len() > limit {
+            state.finished.truncate(limit);
+            let json = serde_json::to_string(&state).unwrap_or_default();
+            if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+                return (json, rev);
+            }
+        }
+    }
     let letzte_rev = rev;
     let letzte = serde_json::to_string(&state).unwrap_or_default();
     if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
@@ -2217,6 +2238,15 @@ pub struct TlCourt {
     /// Nation (Entscheidung 12.08.2026), Default aus.
     pub team1_club: Vec<String>,
     pub team2_club: Vec<String>,
+    /// Lizenznummern (BTP `MemberID`), **parallel** zu `team1`/`team2`;
+    /// leerer String, wo BTP keine führt. Siehe [`TlMatch::team1_ids`] —
+    /// seit 18.08.2026 (Spec `tl-sicht-feinschliff`) auch am laufenden
+    /// Spiel, damit die Feldkachel auf dieselbe badhub-Spielerseite
+    /// verlinkt wie die Warteliste.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
@@ -2520,6 +2550,13 @@ pub struct TlFinished {
     pub discipline: String,
     pub team1: Vec<String>,
     pub team2: Vec<String>,
+    /// Lizenznummern, **parallel** zu `team1`/`team2`. Siehe
+    /// [`TlCourt::team1_ids`] — die Beendet-Liste ist die zweite Stelle, an
+    /// der die Turnierleitung während des Turniers nachschlägt.
+    #[serde(default)]
+    pub team1_ids: Vec<String>,
+    #[serde(default)]
+    pub team2_ids: Vec<String>,
     /// 1 oder 2 — wer gewonnen hat.
     pub winner: u8,
     pub sets: Vec<(i64, i64)>,
@@ -2667,13 +2704,28 @@ pub(crate) fn build_state_limited(
     // Felder und Warteliste stammen aus **demselben** Schnappschuss. Zwei
     // getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen —
     // dann beschrieben Felder und Liste zwei verschiedene Turnierstände.
+    // Match-ID → Spiel, einmal für den ganzen Bau. Zwei Nutzer: Die
+    // Feldkachel braucht den Spieler-Datensatz für die Lizenznummern
+    // (`CourtOverview` führt sie bewusst nicht mit — sie geht auch an
+    // Tablet und Court-Monitor), und der Prognose-Block weiter unten
+    // suchte bisher je belegtem Feld linear über alle Spiele. Bei einem
+    // großen Turnier sind das ein Aufbau gegen bis zu 26 volle Scans.
+    let match_by_id: std::collections::HashMap<i64, &crate::btp::model::BtpMatch> =
+        snap.matches.iter().map(|m| (m.id, m)).collect();
+
     let mut courts: Vec<TlCourt> = tablet
         .overview_from(&snap)
         .into_iter()
         .map(|c| {
             let clearing = clearing_match(&snap, c.court_id, c.match_id);
             let schalter = tablet.officials_store().court_switches(c.court_id);
-            court_view(c, clearing, schalter)
+            // `match_id == 0` heißt „Feld frei" und ist keine Kennung —
+            // ohne die Wache bekäme jedes freie Feld die Nummern eines
+            // (theoretischen) Spiels mit der ID 0, bei leerer Namensliste.
+            let spiel = (c.match_id != 0)
+                .then(|| match_by_id.get(&c.match_id).copied())
+                .flatten();
+            court_view(c, clearing, schalter, spiel)
         })
         .collect();
 
@@ -2798,7 +2850,10 @@ pub(crate) fn build_state_limited(
                     now_min
                 };
                 if c.match_id != 0 {
-                    if let Some(m) = snap.matches.iter().find(|mm| mm.id == c.match_id) {
+                    // Über dieselbe Map wie die Feldkacheln oben: vorher
+                    // war das ein linearer Scan über alle Spiele JE
+                    // belegtem Feld (Review 18.08.2026).
+                    if let Some(m) = match_by_id.get(&c.match_id) {
                         for p in m.team1.iter().chain(m.team2.iter()) {
                             player_ready.insert(assign::player_key(p), free_at_min + rest_min);
                         }
@@ -2902,16 +2957,8 @@ pub(crate) fn build_state_limited(
                 .iter()
                 .map(|p| p.club.clone().unwrap_or_default())
                 .collect(),
-            team1_ids: m
-                .team1
-                .iter()
-                .map(|p| p.member_id.clone().unwrap_or_default())
-                .collect(),
-            team2_ids: m
-                .team2
-                .iter()
-                .map(|p| p.member_id.clone().unwrap_or_default())
-                .collect(),
+            team1_ids: license_ids(&m.team1),
+            team2_ids: license_ids(&m.team2),
             hall,
             hall_source,
             prep_call: call.map(|(hall, called_at_ms)| TlPrepCall {
@@ -3014,6 +3061,8 @@ pub(crate) fn build_state_limited(
                 discipline: m.discipline.as_str().to_string(),
                 team1: m.team1.iter().map(|p| p.name.clone()).collect(),
                 team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+                team1_ids: license_ids(&m.team1),
+                team2_ids: license_ids(&m.team2),
                 winner: m.winner.unwrap_or(0),
                 sets: m.sets.clone(),
                 result: match m.result {
@@ -3653,16 +3702,37 @@ fn officials_view(
     out.into_iter().map(|(_, o)| o).collect()
 }
 
+/// Lizenznummern einer Mannschaft, **stellungsgleich** zu den Namen: Wo BTP
+/// keine Nummer führt, steht ein leerer String statt gar nichts — sonst
+/// rutschte im Doppel der Link auf den falschen Partner. Einzige Ableitung
+/// dieser Art im Zustand; Warteliste, Feldkachel und Beendet-Liste teilen
+/// sie sich, damit die Stellungsgleichheit nicht an drei Orten gepflegt
+/// werden muss.
+fn license_ids(players: &[crate::btp::model::BtpPlayer]) -> Vec<String> {
+    players
+        .iter()
+        .map(|p| p.member_id.clone().unwrap_or_default())
+        .collect()
+}
+
 /// Beschneidet die Feld-Übersicht auf das, was die Turnierleitung braucht.
 ///
-/// Bewusst **weggelassen**: Nationalitäten (nur für die Sprachwahl der
-/// Ansage, und diese Seite spricht nicht), Akkustand (keine Geräte-Übersicht
-/// in diesem Feature) und die Aufschlag-Anzeige (Zählhilfe, keine
-/// Vergabehilfe).
+/// Bewusst **weggelassen**: Akkustand (keine Geräte-Übersicht in diesem
+/// Feature) und die Aufschlag-Anzeige (Zählhilfe, keine Vergabehilfe).
+///
+/// Mitgegeben, weil die Turnierleitung sie braucht: **Nationalitäten** und
+/// **Vereinsnamen** (zuschaltbare Anzeige, Freigaben 09./12.08.2026) sowie
+/// die **Lizenznummern** als badhub-Link-Ziel (Freigabe 17.08.2026,
+/// ausgeweitet 18.08.2026). Letztere kommen nicht aus `CourtOverview` —
+/// die geht auch an Tablet und Court-Monitor, wo die Nummer nichts zu
+/// suchen hat —, sondern aus dem BTP-Spiel des Felds.
 fn court_view(
     c: crate::tablet::state::CourtOverview,
     clearing: Option<i64>,
     schalter: crate::tablet::officials::CourtSwitches,
+    // Das Spiel auf dem Feld, nur für die Lizenznummern — `CourtOverview`
+    // führt sie bewusst nicht mit. `None` bei freiem Feld.
+    spiel: Option<&crate::btp::model::BtpMatch>,
 ) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
@@ -3694,6 +3764,8 @@ fn court_view(
         team2_nat: c.team2_nationalities,
         team1_club: c.team1_clubs,
         team2_club: c.team2_clubs,
+        team1_ids: spiel.map(|m| license_ids(&m.team1)).unwrap_or_default(),
+        team2_ids: spiel.map(|m| license_ids(&m.team2)).unwrap_or_default(),
         sets: c.sets,
         tablet_connected: c.tablet_connected,
         injury: c.injury,
@@ -3746,10 +3818,10 @@ mod tests {
     }
 
     /// Spieler mit Lizenznummer. Für den Datensparsamkeits-Test (die Nummer
-    /// verlässt den Host nur in den Wartelisten-Einträgen — als
-    /// badhub-Link-Ziel, Freigabe 17.08.2026 — und bleibt bei laufenden/
-    /// beendeten Spielen draußen) sowie überall dort, wo ein realistisches
-    /// Fixture die Nummern mitwiegen muss (Relay-Größen-Wächter).
+    /// reist als badhub-Link-Ziel in der Warteliste — Freigabe 17.08.2026 —
+    /// sowie an laufenden und beendeten Spielen, Ausweitung 18.08.2026)
+    /// sowie überall dort, wo ein realistisches Fixture die Nummern
+    /// mitwiegen muss (Relay-Größen-Wächter).
     fn licensed_player(name: &str, license: &str) -> BtpPlayer {
         BtpPlayer {
             member_id: Some(license.to_string()),
@@ -5140,16 +5212,26 @@ mod tests {
         assert_eq!(correction_blocker(&snap, 7), None);
     }
 
-    #[test]
-    fn a_board_too_big_for_the_relay_is_shortened_instead_of_lost() {
-        // Der Relay legt einen zu großen Zustand nicht ab — und der Host
-        // erfährt davon nichts. Ohne eigene Kürzung wäre die
-        // Cloud-Oberfläche in genau den Turnieren tot, in denen sie am
-        // meisten hülfe: je größer das Turnier, desto sicherer.
-        // Ein volles Zwei-Hallen-Turnier: Die Warteliste wird **je Halle**
-        // gekappt, also stehen bis zu 240 Spiele im Zustand — mit
-        // Doppelpaarungen und Namen, wie sie im Badminton vorkommen.
+    /// Ein volles Turnier als Fixture für die Relay-Größen-Wächter.
+    ///
+    /// Der Zuschnitt ist über die Jahre gewachsen, weil jeder zu kleine
+    /// Worst Case den Cloud-Zustand zu klein maß:
+    /// - **Doppelpaarungen mit langen Namen und Lizenznummern** — seit die
+    ///   Warteliste `team1_ids`/`player_keys` trägt (Review 17.08.2026).
+    /// - **Belegte Felder und beendete Spiele** — seit auch sie die Nummern
+    ///   tragen (Spec `tl-sicht-feinschliff` Punkt 4); vorher maß der
+    ///   Wächter allein die Warteliste und hätte ein Wachstum in genau
+    ///   diesen beiden Listen nie bemerkt.
+    /// - **Vereinsnamen** — sie reisen **immer** mit, unabhängig von
+    ///   `display.show_club_names` (die Einstellung steuert nur die
+    ///   Anzeige). Ohne sie fehlten mehrere Kilobyte, also mehr als die
+    ///   gesamte Reserve (Security-Review 18.08.2026).
+    /// - **Schiedsrichter und Zähltafelbediener** — zwei weitere Listen im
+    ///   selben Zustand, die **nicht** in der Kürzungskaskade stehen.
+    fn volles_turnier(felder: i64, beendete: i64, wartende: i64) -> (TabletState, AppConfig) {
         let mut cfg = AppConfig::default();
+        // Die Warteliste wird **je Halle** gekappt — mit zwei Hallen stehen
+        // entsprechend mehr Spiele im Zustand.
         for (draw, halle) in [("HE A", "Halle A"), ("HE B", "Halle B")] {
             cfg.discipline_hall_rules.push(DisciplineHallRule {
                 discipline: "mens_singles".to_string(),
@@ -5157,30 +5239,93 @@ mod tests {
                 hall: halle.to_string(),
             });
         }
-        let tablet = TabletState::default();
-        let mut matches = Vec::new();
-        for id in 1..=400 {
-            let mut m = a_match(id);
-            // Mit Lizenznummern: Seit die Warteliste `team1_ids` und
-            // `player_keys` trägt, wäre ein Fixture ohne Nummern ein zu
-            // kleiner Worst Case — der Wächter maß den Cloud-Zustand sonst
-            // um zehntausende Bytes zu klein (Review-Fund 17.08.2026).
+        cfg.scorekeeper.enabled = true;
+        let im_verein = |name: &str, lizenz: &str, verein: &str| {
+            let mut p = licensed_player(name, lizenz);
+            p.club = Some(verein.to_string());
+            p
+        };
+        let besetze = |m: &mut crate::btp::model::BtpMatch, n: i64| {
             m.team1 = vec![
-                licensed_player(
+                im_verein(
                     "Maximiliane Charlotte von Hohenlohe-Waldenburg",
-                    "08-100001",
+                    &format!("08-1{n:05}"),
+                    "TSV Musterhausen-Oberdorf 1899 e.V.",
                 ),
-                licensed_player("Friederike Alexandra Schmidt-Blumenthal", "08-100002"),
+                im_verein(
+                    "Friederike Alexandra Schmidt-Blumenthal",
+                    &format!("08-2{n:05}"),
+                    "SG Niederkirchen-Waldrand von 1911",
+                ),
             ];
             m.team2 = vec![
-                licensed_player("Konstantin Ferdinand Oppermann-Lindenau", "08-100003"),
-                licensed_player("Sebastian Aurelius Wittgenstein-Berleburg", "08-100004"),
+                im_verein(
+                    "Konstantin Ferdinand Oppermann-Lindenau",
+                    &format!("08-3{n:05}"),
+                    "Badminton-Club Seeblick-Hinterberg e.V.",
+                ),
+                im_verein(
+                    "Sebastian Aurelius Wittgenstein-Berleburg",
+                    &format!("08-4{n:05}"),
+                    "1. BV Grün-Weiß Talheim-Sonnenberg",
+                ),
             ];
-            m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
             m.round_name = "Achtelfinale der Trostrunde".to_string();
+        };
+        let mut matches = Vec::new();
+        for id in 1..=wartende {
+            let mut m = a_match(id);
+            besetze(&mut m, id);
+            m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
             matches.push(m);
         }
-        tablet.set_snapshot(snap(Vec::new(), matches, Vec::new()));
+        let mut courts = Vec::new();
+        for court_id in 1..=felder {
+            courts.push(a_court(court_id, None));
+            let mut m = a_match(10_000 + court_id);
+            besetze(&mut m, 10_000 + court_id);
+            m.status = crate::btp::model::MatchStatus::OnCourt;
+            m.court_id = Some(court_id);
+            m.court = Some(format!("Feld {court_id}"));
+            matches.push(m);
+        }
+        for n in 1..=beendete {
+            let mut m = a_match(20_000 + n);
+            besetze(&mut m, 20_000 + n);
+            m.status = crate::btp::model::MatchStatus::Finished;
+            m.winner = Some(1);
+            m.finished_at = Some(900_000 + n as u64);
+            m.sets = vec![(21, 19), (19, 21), (21, 18)];
+            matches.push(m);
+        }
+        let mut schnappschuss = snap(courts, matches, Vec::new());
+        schnappschuss.officials = (1..=40)
+            .map(|id| crate::btp::model::BtpOfficial {
+                id,
+                name: format!("Wolfgang-Dietrich Oberschiedsrichter {id}"),
+                first: format!("Wolfgang-Dietrich {id}"),
+                nationality: Some("GER".to_string()),
+            })
+            .collect();
+        let tablet = TabletState::default();
+        tablet.set_snapshot(schnappschuss);
+        tablet.officials_store().set_enabled(true);
+        for n in 1..=20 {
+            tablet.add_scorekeeper_manual(
+                vec![format!("Bernadette Zähltafelbedienerin {n}")],
+                1_000 + n,
+            );
+        }
+        (tablet, cfg)
+    }
+
+    #[test]
+    fn a_board_too_big_for_the_relay_is_shortened_instead_of_lost() {
+        // Der Relay legt einen zu großen Zustand nicht ab — und der Host
+        // erfährt davon nichts. Ohne eigene Kürzung wäre die
+        // Cloud-Oberfläche in genau den Turnieren tot, in denen sie am
+        // meisten hülfe: je größer das Turnier, desto sicherer.
+        let (tablet, cfg) = volles_turnier(26, 30, 400);
 
         let (json, _rev) = state_for_relay(&tablet, &cfg, 1_000_000);
         assert!(
@@ -5188,10 +5333,35 @@ mod tests {
             "passt nicht: {} Bytes",
             json.len()
         );
+        // Gemessen am 18.08.2026 mit genau diesem Fixture: 62 467 von
+        // 65 536 Bytes, also nur noch rund 5 % Reserve — die Warteliste ist
+        // dabei schon auf ihre unterste Stufe gekürzt. Wer den Zustand um
+        // eine weitere Liste erweitert (nächster Kandidat: die vierachsige
+        // Spielzeiten-Statistik aus Punkt 1), misst hier nach und nimmt sie
+        // in die Kürzungskaskade auf — die Reserve trägt keine zweite
+        // Erweiterung mehr.
+        //
         // Und die Kürzung wird gemeldet, statt Spiele stillschweigend
         // verschwinden zu lassen.
         let state: TlState = serde_json::from_str(&json).unwrap();
         assert!(state.queue_truncated > 0, "gekürzt, aber nicht gesagt");
+        // Die Felder überleben JEDE Kürzungsstufe: Sie sind das
+        // Bedienelement der Seite — eine Turnierleitung ohne Feldkacheln
+        // kann nichts mehr zuweisen, während sie ohne Statistik oder
+        // Ergebnisliste weiterarbeitet.
+        assert_eq!(
+            state.courts.len(),
+            26,
+            "die Feldkacheln dürfen nie der Kürzung zum Opfer fallen"
+        );
+        // Und sie sind wirklich BELEGT: Ohne diese Prüfung könnte die
+        // Fixture-Bindung (Status, `court_id`) brechen, ohne dass ein Test
+        // rot wird — der Wächter mäße dann 26 leere Kacheln und die
+        // dokumentierte Reserve wäre falsch (Review 18.08.2026).
+        assert!(
+            state.courts.iter().all(|c| c.team1_ids.len() == 2),
+            "die Felder müssen mit Doppelpaarungen belegt sein, sonst misst der Wächter zu wenig"
+        );
 
         // Ein kleines Turnier verliert nichts.
         let klein = TabletState::default();
@@ -5200,6 +5370,40 @@ mod tests {
         let state: TlState = serde_json::from_str(&json).unwrap();
         assert_eq!(state.queue_truncated, 0);
         assert_eq!(state.queue.len(), 1);
+    }
+
+    #[test]
+    fn eine_ueberquellende_ergebnisliste_wird_gestutzt_statt_alles_zu_verlieren() {
+        // Letzte Stufe der Kürzungskaskade: Reicht selbst die kürzeste
+        // Warteliste nicht (mehr Felder als im Wächter oben), wird die
+        // Ergebnisliste gestutzt. Sie ist reine Rückschau — wer ein älteres
+        // Ergebnis sucht, schaut in BTP. Ohne diese Stufe ginge der Zustand
+        // über die Grenze, der Relay verwürfe das ganze Frame samt
+        // Vorgänger, und die Cloud-Turnierleitung sähe GAR NICHTS mehr:
+        // keine Felder, keine Liste, keine Bedienung.
+        let (tablet, cfg) = volles_turnier(40, 30, 400);
+
+        let (json, _rev) = state_for_relay(&tablet, &cfg, 1_000_000);
+        assert!(
+            json.len() <= relay_proto::MAX_TL_STATE_LEN,
+            "auch ein 40-Felder-Turnier muss durchpassen: {} Bytes",
+            json.len()
+        );
+        let state: TlState = serde_json::from_str(&json).unwrap();
+        assert!(
+            state.finished.len() < 30,
+            "die Ergebnisliste muss gestutzt worden sein, war {}",
+            state.finished.len()
+        );
+        // Aber nicht leergeräumt — die jüngsten Ergebnisse sind die, nach
+        // denen am Feld gefragt wird.
+        assert!(
+            !state.finished.is_empty(),
+            "die Ergebnisliste darf nicht ganz verschwinden"
+        );
+        // Und die Felder stehen auch hier vollständig.
+        assert_eq!(state.courts.len(), 40);
+        assert!(state.courts.iter().all(|c| c.team1_ids.len() == 2));
     }
 
     #[test]
@@ -7328,11 +7532,21 @@ mod tests {
             // jedem Aushang; hier hinter dem Gerätezugang.
             "team1_club",
             "team2_club",
-            // Lizenznummer der Wartelisten-Spieler als Link-Ziel der
-            // badhub-Spielerseite (`/spieler/<Nr>/live`; Nutzer-Entscheidung
-            // 17.08.2026 — bewusste Freigabe wie Nation/Verein): Die Nummer
-            // ist der öffentliche URL-Schlüssel genau dieser Seite und steht
-            // hier hinter dem Gerätezugang. Geburtsjahr bleibt draußen.
+            // Lizenznummer als Link-Ziel der badhub-Spielerseite
+            // (`/spieler/<Nr>/live`; Nutzer-Entscheidung 17.08.2026,
+            // ausgeweitet 18.08.2026 — bewusste Freigabe wie Nation/Verein):
+            // Die Nummer ist der öffentliche URL-Schlüssel genau dieser
+            // Seite und steht hier hinter dem Gerätezugang. Geburtsjahr
+            // bleibt draußen.
+            //
+            // **Diese Liste ist flach** — sie erlaubt einen Feldnamen für
+            // JEDE Struktur des Zustands. Als die Nummern am 18.08.2026 von
+            // der Warteliste auf laufende und beendete Spiele ausgeweitet
+            // wurden, hat dieser Wächter deshalb **nicht** angeschlagen; die
+            // Ausweitung fing allein
+            // `the_state_never_carries_personal_data_beyond_its_purpose`.
+            // Wer hier eine Struktur-genaue Prüfung braucht, muss sie dort
+            // führen, nicht hier.
             "team1_ids",
             "team2_ids",
             "sets",
@@ -7709,6 +7923,152 @@ mod tests {
     }
 
     #[test]
+    fn laufende_und_beendete_spiele_tragen_die_lizenznummer_als_linkziel() {
+        // Spec `tl-sicht-feinschliff` A4.1/A4.2: Die Turnierleitung schlägt
+        // Spieler während des Turniers auf der öffentlichen badhub-Seite
+        // nach — an der Feldkachel und in der Beendet-Liste genauso wie in
+        // der Warteliste, wo es das seit 17.08.2026 gibt. Ohne die Nummer im
+        // Zustand kann die Seite dort keinen Link bauen.
+        let mut running = a_match(1);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![licensed_player("Müller", "08-001234")];
+        running.team2 = vec![licensed_player("Schmidt", "08-005678")];
+        let mut finished = a_match(2);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![licensed_player("Winter", "08-003333")];
+        finished.team2 = vec![licensed_player("Sommer", "08-004444")];
+
+        let s = state_with(
+            snap(vec![a_court(1, None)], vec![running, finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let feld = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(feld.team1_ids, vec!["08-001234".to_string()]);
+        assert_eq!(feld.team2_ids, vec!["08-005678".to_string()]);
+
+        let beendet = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(beendet.team1_ids, vec!["08-003333".to_string()]);
+        assert_eq!(beendet.team2_ids, vec!["08-004444".to_string()]);
+    }
+
+    #[test]
+    fn ein_spieler_ohne_lizenznummer_bleibt_ohne_id() {
+        // Spec `tl-sicht-feinschliff` A4.3: Nicht jeder Spieler hat eine
+        // Lizenznummer (Gastspieler, Papier-Meldung). Die Liste bleibt
+        // **parallel** zu den Namen — sonst rutschte der Link eines Doppels
+        // auf den falschen Partner. Der Namenlose bekommt einen leeren
+        // Eintrag, keinen fehlenden.
+        let mut running = a_match(1);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.team1 = vec![
+            player("Ohne Nummer"),
+            licensed_player("Mit Nummer", "08-007777"),
+        ];
+        let mut finished = a_match(2);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(1);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![player("Papier")];
+        finished.team2 = vec![player("Kampflos")];
+
+        let s = state_with(
+            snap(vec![a_court(1, None)], vec![running, finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let feld = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(
+            feld.team1_ids,
+            vec![String::new(), "08-007777".to_string()],
+            "die Nummern bleiben Stellung für Stellung parallel zu den Namen"
+        );
+        assert_eq!(feld.team1.len(), feld.team1_ids.len());
+
+        let beendet = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(beendet.team1_ids, vec![String::new()]);
+        assert_eq!(beendet.team2_ids, vec![String::new()]);
+    }
+
+    #[test]
+    fn auch_die_beendet_liste_haelt_gemischte_nummern_stellungsgleich() {
+        // Derselbe Mischfall wie am laufenden Feld, aber in der
+        // Beendet-Liste: ein Doppel, bei dem nur einer eine Lizenznummer
+        // hat. Beide Wege bauen die Liste getrennt — ohne eigenen Test
+        // fiele eine Abweichung in genau einem von beiden nicht auf.
+        let mut finished = a_match(1);
+        finished.status = MatchStatus::Finished;
+        finished.winner = Some(2);
+        finished.finished_at = Some(500_000);
+        finished.team1 = vec![
+            licensed_player("Mit Nummer", "08-001111"),
+            player("Ohne Nummer"),
+        ];
+        finished.team2 = vec![player("Auch ohne"), licensed_player("Und mit", "08-002222")];
+
+        let s = state_with(
+            snap(Vec::new(), vec![finished], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let b = s.finished.first().expect("ein beendetes Spiel");
+        assert_eq!(b.team1_ids, vec!["08-001111".to_string(), String::new()]);
+        assert_eq!(b.team2_ids, vec![String::new(), "08-002222".to_string()]);
+        assert_eq!(b.team1.len(), b.team1_ids.len());
+        assert_eq!(b.team2.len(), b.team2_ids.len());
+    }
+
+    #[test]
+    fn ein_freies_und_ein_abzuraeumendes_feld_tragen_keine_nummern() {
+        // Zwei Zustände ohne laufendes Spiel, die trotzdem eine Kachel
+        // erzeugen: das schlicht freie Feld und das Feld, das ein bereits
+        // beendetes Spiel noch hält, weil BTP es nicht abgeräumt hat
+        // (`clearing`). Beide dürfen keine Lizenznummern tragen — sonst
+        // stünde an einer Kachel ohne Namen ein Link auf eine fremde
+        // Spielerseite.
+        // Das „abzuräumende" Feld: BTP führt das Spiel noch am Feld
+        // (`court_id` gesetzt, kein Sieger, nicht `Finished`), aber es
+        // steht nicht mehr `OnCourt` — genau die Lücke, die `clearing`
+        // beschreibt. Wäre es als beendet markiert, gälte das Feld schlicht
+        // als frei.
+        let mut abgeraeumt = a_match(1);
+        abgeraeumt.status = MatchStatus::Scheduled;
+        abgeraeumt.court_id = Some(1);
+        abgeraeumt.team1 = vec![licensed_player("Winter", "08-003333")];
+        abgeraeumt.team2 = vec![licensed_player("Sommer", "08-004444")];
+
+        let s = state_with(
+            snap(
+                vec![a_court(1, None), a_court(2, None)],
+                vec![abgeraeumt],
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+
+        for court_id in [1, 2] {
+            let c = s
+                .courts
+                .iter()
+                .find(|c| c.court_id == court_id)
+                .unwrap_or_else(|| panic!("Feld {court_id}"));
+            assert_eq!(c.match_id, 0, "auf Feld {court_id} läuft nichts");
+            assert!(
+                c.team1_ids.is_empty() && c.team2_ids.is_empty(),
+                "Feld {court_id} ohne laufendes Spiel darf keine Nummern tragen"
+            );
+        }
+        // Gegenprobe, dass das Fixture wirkt: Feld 1 ist als „abzuräumen"
+        // erkannt, nicht einfach frei.
+        let eins = s.courts.iter().find(|c| c.court_id == 1).expect("Feld 1");
+        assert_eq!(eins.clearing, Some(1), "Feld 1 hält das beendete Spiel");
+    }
+
+    #[test]
     fn the_state_never_carries_personal_data_beyond_its_purpose() {
         // Diese Daten laufen über eine aus dem Internet erreichbare Seite.
         // Der Test schlägt fehl, sobald jemand ein Feld nachrüstet, das
@@ -7717,17 +8077,31 @@ mod tests {
         //
         // **Die Nation ist seit 09.08.2026 erlaubt**, **der Verein seit
         // 12.08.2026** — beide standen vorher hier auf der Verbotsliste.
-        // **Die Lizenznummer der WARTELISTEN-Spieler ist seit 17.08.2026
-        // erlaubt** (Nutzer-Entscheidung): Sie ist der öffentliche
-        // URL-Schlüssel der badhub-Spielerseite (`/spieler/<Nr>/live`), auf
-        // die die Spielliste verlinkt. Laufende und beendete Spiele bleiben
-        // ohne — dort gibt es keinen Link, also auch keinen Zweck.
         // Bewusst geändert: Die Turnierleitung braucht sie, um die richtige
         // Paarung ans Feld zu holen und Vereinskollegen auseinanderzuhalten.
         // Es bleibt beim ISO-Kürzel bzw. Vereinsnamen, die Anzeige ist
         // turnierweit zuschaltbar und standardmäßig aus — und dieselbe Angabe
         // steht ohnehin auf jeder Meldeliste und jedem Aushang, während sie
         // hier hinter dem Gerätezugang steht.
+        //
+        // **Die Lizenznummer war ab 17.08.2026 nur in der Warteliste
+        // erlaubt und ist seit 18.08.2026 überall im Zustand erlaubt**
+        // (Nutzer-Entscheidung, Spec `tl-sicht-feinschliff` Punkt 4). Der
+        // Zweck ist derselbe geblieben und gilt an allen drei Stellen:
+        // **Nachschlagen der Spielerhistorie auf der öffentlichen
+        // badhub-Seite während des Turniers.** Die Nummer IST der
+        // öffentliche URL-Schlüssel genau dieser Seite
+        // (`/spieler/<Nr>/live`) — sie preiszugeben heißt hier, einen
+        // ohnehin öffentlichen Schlüssel hinter dem Gerätezugang zu
+        // wiederholen. Die frühere Beschränkung auf die Warteliste war
+        // keine Datenschutz-Grenze, sondern schlicht die Stelle, an der
+        // zuerst verlinkt wurde.
+        //
+        // **Unverändert draußen bleiben** (Verbotsliste unten): Geburtsjahr
+        // überall, Check-In-Spielernamen, Sperrlisten und Stammverein der
+        // Schiedsrichter. Der Feldname `member` bleibt ebenfalls verboten —
+        // die Nummern reisen als `team1_ids`/`team2_ids`, nicht als roher
+        // BTP-Spieler-Datensatz.
         let mut running = a_match(1);
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
@@ -7874,11 +8248,9 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap().to_lowercase();
 
         for verboten in [
-            "08-001234", // die Lizenznummer aus dem Fixture
-            "08-003333", // Lizenznummer des beendeten Spiels
-            "08-004444", // Lizenznummer des beendeten Spiels (Gegenseite)
-            "member",    // Lizenznummer-Feld
-            "birth",     // Geburtsjahr — laut Projektregel nirgends
+            "member", // roher BTP-Spieler-Datensatz (die Nummern reisen
+            // als `team1_ids`/`team2_ids`, siehe Kopfkommentar)
+            "birth", // Geburtsjahr — laut Projektregel nirgends
             "geburt",
             "battery", // Akkustand: keine Geräte-Übersicht in diesem Feature
             "serving", // Aufschlag: Zählhilfe, keine Vergabehilfe
@@ -7909,14 +8281,73 @@ mod tests {
             json.contains("sc musterstadt"),
             "der zuschaltbare Vereinsname muss transportiert werden"
         );
-        // Die Lizenznummer der Warteliste darf — sie ist das Link-Ziel der
-        // badhub-Spielerseite (Freigabe 17.08.2026, siehe Kopfkommentar).
-        // Die Verbotsliste oben stellt zugleich sicher, dass laufende
-        // (08-001234) und beendete Spiele (08-003333/08-004444) weiterhin
-        // OHNE Lizenznummer ausgeliefert werden.
-        assert!(
-            json.contains("08-009999"),
-            "die Warteliste braucht die Lizenznummer als badhub-Link-Ziel"
+        // Die Lizenznummer darf an allen drei Stellen — sie ist das
+        // Link-Ziel der badhub-Spielerseite (Freigabe 18.08.2026, siehe
+        // Kopfkommentar). Positiv geprüft statt nur geduldet: Fiele eine der
+        // drei Stellen still weg, wäre der Link dort tot, und niemand
+        // merkte es.
+        for (nummer, stelle) in [
+            ("08-009999", "die Warteliste"),
+            ("08-001234", "das laufende Spiel"),
+            ("08-003333", "das beendete Spiel"),
+            ("08-004444", "das beendete Spiel (Gegenseite)"),
+        ] {
+            assert!(
+                json.contains(nummer),
+                "{stelle} braucht die Lizenznummer als badhub-Link-Ziel"
+            );
+        }
+        // …und NUR an diesen drei Stellen. Das ist der Ersatz für die
+        // frühere Verbotsliste: Solange die Nummern verboten waren, fing
+        // ein simpler Textvergleich jede neue Struktur, die sie mitnahm.
+        // Seit sie erlaubt sind, muss die Prüfung strukturbezogen sein —
+        // sonst könnten sie unbemerkt auch in Vorbereitungs-Aufrufen,
+        // Walkover-Listen, Schiedsrichter-Einträgen oder im
+        // Anfangszeiten-Panel auftauchen (Security-Review 18.08.2026).
+        let baum: serde_json::Value = serde_json::to_value(&s).unwrap();
+        let mut fundorte: Vec<String> = Vec::new();
+        fn suche_ids(wert: &serde_json::Value, pfad: &str, fundorte: &mut Vec<String>) {
+            match wert {
+                serde_json::Value::Object(map) => {
+                    for (schluessel, unterwert) in map {
+                        if schluessel.ends_with("_ids") {
+                            fundorte.push(format!("{pfad}.{schluessel}"));
+                        }
+                        suche_ids(unterwert, &format!("{pfad}.{schluessel}"), fundorte);
+                    }
+                }
+                // Listenindex bewusst weglassen: Der Pfad soll die
+                // STRUKTUR benennen, nicht den zufälligen Eintrag.
+                serde_json::Value::Array(werte) => {
+                    for unterwert in werte {
+                        suche_ids(unterwert, &format!("{pfad}[]"), fundorte);
+                    }
+                }
+                _ => {}
+            }
+        }
+        suche_ids(&baum, "", &mut fundorte);
+        fundorte.sort();
+        fundorte.dedup();
+        let erlaubt = [
+            ".queue[].team1_ids",
+            ".queue[].team2_ids",
+            ".courts[].team1_ids",
+            ".courts[].team2_ids",
+            ".finished[].team1_ids",
+            ".finished[].team2_ids",
+        ];
+        for ort in &fundorte {
+            assert!(
+                erlaubt.contains(&ort.as_str()),
+                "Lizenznummern an einer nicht freigegebenen Stelle: {ort} \
+                 — Zweck (badhub-Link) prüfen und hier bewusst eintragen"
+            );
+        }
+        assert_eq!(
+            fundorte.len(),
+            erlaubt.len(),
+            "Fixture-Fehler: es müssen alle drei Stellen belegt sein, gefunden: {fundorte:?}"
         );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
