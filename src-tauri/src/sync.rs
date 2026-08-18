@@ -159,10 +159,13 @@ const BTP_RETRY_FLUSH_EVERY: Duration = Duration::from_secs(30);
 ///
 /// Bewusst „Startfenster", nicht „Obergrenze": Geprüft wird vor jedem
 /// Write, ein bereits laufender wird nicht abgeschnitten. Der echte
-/// schlechteste Fall ist deshalb dieses Fenster **plus einen Write** —
-/// und ein Write kostet im Extremfall zwei TCP-Verbindungen mit je 5 s
-/// Verbindungs- und 10 s Lesefrist, also rund 30 s (Review-Präzisierung
-/// 18.08.2026).
+/// schlechteste Fall ist deshalb dieses Fenster **plus bis zu zwei
+/// Writes** — der eigentliche und der Selbstheilungs-Rewrite, falls eine
+/// Korrektur dazwischenkam. Ein Write kostet im Extremfall zwei
+/// TCP-Verbindungen mit je 5 s Verbindungs- und 10 s Lesefrist, also rund
+/// 30 s; zusammen also grob eine Minute über dem Fenster
+/// (Review-Präzisierung 18.08.2026). Der Mindestabstand zum nächsten
+/// Durchlauf wird deshalb am **Ende** gestempelt.
 ///
 /// Warum überhaupt: Der Durchlauf läuft **innerhalb** des Poll-Zyklus und
 /// schreibt nacheinander. Ohne Grenze hielte eine volle Warteschlange bei
@@ -919,7 +922,6 @@ impl SyncEngine {
         {
             return;
         }
-        self.last_btp_retry_flush = Some(Instant::now());
         let now = now_ms();
         let mut still_failing = 0usize;
         let begonnen = Instant::now();
@@ -1001,6 +1003,14 @@ impl SyncEngine {
                 }
             }
         }
+        // Erst JETZT stempeln, nicht beim Betreten (Review-Fund
+        // 18.08.2026): Der Durchlauf selbst kann mit Startfenster und
+        // auslaufendem Write über eine Minute dauern. Stempelte er zu
+        // Beginn, wäre der Mindestabstand längst abgelaufen, sobald er
+        // fertig ist — der nächste Zyklus liefe sofort wieder hinein, und
+        // genau das Aushungern von Liveticker und Auto-Vergabe, das das
+        // Fenster verhindern soll, käme durch die Hintertür zurück.
+        self.last_btp_retry_flush = Some(Instant::now());
         if still_failing > 0 {
             tracing::info!("Nachschub-Queue: {still_failing} Eintrag/Einträge weiter erfolglos");
         }

@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.224
+
+- **Cloud-Tablets bekommen beim Wiederverbinden wieder den vollen
+  Stand.** In v0.9.223 ging an den Relay versehentlich die schlanke
+  Anzeige-Fassung — der Relay reicht diesen Stand aber nicht nur an
+  Monitore weiter, sondern auch als Wiederherstellung an ein
+  **Cloud-Tablet**, das sich neu verbindet oder ein Feld übernimmt. Ein
+  Ersatz-Tablet hätte mitten im Spiel ohne Rückgängig-Gedächtnis
+  dagestanden. (Betraf keine ausgelieferte Version.) Die Ersparnis für
+  Anzeigen bleibt im Hallennetz unverändert erhalten; ein Test hält den
+  Unterschied jetzt fest.
+- **Weitere heiße Routen kopieren die Konfiguration nicht mehr:** die
+  Feld-Übersicht (`/health`, 250-ms-Takt je Anzeige), die
+  Zugangsprüfung jeder Turnierleitungs-Anfrage, Werbe-Status,
+  Turnierlogo und Hallenfarben.
+- **Nachschub nach BTP:** Der Mindestabstand zwischen zwei Durchläufen
+  wird jetzt am **Ende** gemessen. Vorher konnte ein langer Durchlauf
+  den Abstand selbst aufbrauchen und der nächste Zyklus sofort wieder
+  hineinlaufen — genau das Aushungern, das die Grenze verhindern soll.
+- Eine leere Werbebild-Liste wird nicht mehr gemerkt: Sie kann auch aus
+  einem kurzzeitig fehlgeschlagenen Verzeichnis-Lesen stammen, und
+  gemerkt hieße „dieses Turnier hat keine Werbung" bis zum Neustart.
+
 ## v0.9.223
 
 - **Ein lahmes badhub kann keine Tablets mehr abwerfen.** Der
