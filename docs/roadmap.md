@@ -367,6 +367,22 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Monitor-Livestand per Push** — ein gezählter Punkt soll nur noch kosten,
+  was er wert ist. Heute weckt jeder Punkt jede Übersichts-Anzeige, die
+  daraufhin den Zustand **aller** Felder holt und ihr Board komplett neu
+  aufbaut (grob 1,6–8 MB/s WLAN bei 20 Feldern × 20 TVs für ~20 Byte
+  Information). Sieben Etappen, Reihenfolge durch eine Vorab-Messung
+  gesteuert: Perf-Zähler + Lastskript (S0), Antwortcache für `/health` (S1),
+  Entprellung von `persist_scores` — heute ein Vollschreibvorgang **je
+  Punkt** (S2), Zuweisungs-Nudge (S3, schließt die beiden offenen
+  A1-TODOs), `seq` in den Voll-Antworten als Ordnung zwischen Push und
+  Abruf (S4), Teil-Patch statt Board-Neuaufbau (S5), neue Definition von
+  „Push-Kanal ist gesund" mit sichtbarem Heartbeat und 4-s-Fallback
+  (S6, Config-Schalter, Default aus), schmaler Abruf `/health?court=<id>`
+  (S7). „Nutzlast im Nudge" ist bewusst **zurückgestellt** und wird nur bei
+  Verfehlen der Nachmess-Schwellen gebaut.
+  Spec: [features/monitor-livestand-push.md](features/monitor-livestand-push.md) ·
+  ADR [0035](adr/0035-monitor-livestand-ordnung.md).
 - **Hallen-Farben** — jede Halle eines Mehr-Hallen-Turniers bekommt eine
   Farbe (Auto-Palette, deterministisch alphabetisch; Übersteuerung per
   Palettenton auf der Felderübersicht), sichtbar als Marke neben jeder
