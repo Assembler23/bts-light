@@ -866,6 +866,10 @@ export function buildAnnouncementSsml(
       (input.callStage ?? 1) as 1 | 2 | 3,
       lang,
     ).map(xmlEscape);
+    // Nichts zu sagen (nur Leerraum-Namen): leeres SSML statt eines
+    // `<speak>`-Rahmens ohne Inhalt — den schickte der Azure-Pfad sonst
+    // ab, während der Web-Speech-Pfad sauber schweigt.
+    if (teile.length === 0) return "";
     const speakLangSk = lang === "de" ? "de-DE" : "en-US";
     return (
       `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangSk}">` +

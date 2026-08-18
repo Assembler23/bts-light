@@ -121,6 +121,18 @@ export function announceScorekeeper(
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
 ): void {
+  // NUR bei echter Zuweisung ansagen (ADR 0007) — dieselbe Prüfung wie in
+  // `announceCourt` oben und im Cloud-Ansage-Slave. Ohne sie fiele
+  // `court.scorekeeper` auf den reinen **pro-Feld-Hinweis** zurück: den
+  // Verlierer des zuletzt auf diesem Feld beendeten Spiels. Der wäre nie
+  // zugewiesen worden, und die Anlage riefe ihn trotzdem aus.
+  //
+  // Der Fall ist real, nicht theoretisch: Ein Ansage-Gerät baut seinen
+  // Feld-Stand LOKAL auf. Auf einem LAN-Ansage-Slave mit ausgeschalteter
+  // Bediener-Verwaltung — für einen reinen Ansage-PC der Normalfall —
+  // räumt der Sync-Lauf die Zuweisungen, füllt den pro-Feld-Hinweis aber
+  // weiter (Review 18.08.2026).
+  if (!court.scorekeeper_assigned) return;
   if (names.length === 0) return;
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],

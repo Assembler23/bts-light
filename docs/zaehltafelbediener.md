@@ -137,6 +137,10 @@ rufen gibt: leere Warteschlange, Feld mit abgeschalteter Bediener-Vergabe
 (`CourtSwitches::operator`) und global ausgeschaltete Verwaltung. In allen
 dreien weist der Sync-Lauf gar nicht erst zu.
 
+Eine Feinheit: Wird der Feld-Schalter **mitten im laufenden Spiel**
+abgeschaltet, bleibt die bereits erteilte Zuweisung (und damit der Knopf) bis
+zum Spielwechsel bestehen — die Person bedient ja tatsächlich gerade.
+
 **Bewusst nicht gebaut:** ein Bediener beim *Vorbereitungs*-Aufruf. Der
 Bediener hängt am **Feld**, nicht am Match — zugewiesen wird er erst, wenn
 das Feld belegt wird, und ein Vorbereitungs-Aufruf kennt nur die Halle. Eine

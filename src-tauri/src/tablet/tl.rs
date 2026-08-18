@@ -1011,14 +1011,6 @@ fn due_call_stage(
     }
 }
 
-/// Die Antwort auf einen Ansage-Auftrag.
-///
-/// Der Auftrag ist abgelegt und die Stufe gezählt — das gilt auch dann, wenn
-/// in der Halle gerade kein Gerät zuhört. Die Turnierleitung soll aber nicht
-/// glauben, es sei etwas erklungen: Sie steht im Zweifel im Büro und hört die
-/// Anlage gar nicht. Die Stufe trotzdem hochzuzählen ist die ehrlichere
-/// Variante — sonst stünde sie später auf einem anderen Stand als das, was
-/// die Halle gehört hat.
 /// Halle eines Felds als Name; leer, wenn das Feld keiner zugeordnet ist
 /// oder das Turnier nur eine Halle hat.
 ///
@@ -1037,6 +1029,14 @@ fn hall_of_court(snap: &crate::btp::model::BtpSnapshot, court_id: i64) -> String
         .unwrap_or_default()
 }
 
+/// Die Antwort auf einen Ansage-Auftrag.
+///
+/// Der Auftrag ist abgelegt und die Stufe gezählt — das gilt auch dann, wenn
+/// in der Halle gerade kein Gerät zuhört. Die Turnierleitung soll aber nicht
+/// glauben, es sei etwas erklungen: Sie steht im Zweifel im Büro und hört die
+/// Anlage gar nicht. Die Stufe trotzdem hochzuzählen ist die ehrlichere
+/// Variante — sonst stünde sie später auf einem anderen Stand als das, was
+/// die Halle gehört hat.
 fn announcement_response(tablet: &TabletState, hall: &str, now_ms: u64) -> relay_proto::TlResponse {
     let ok = relay_proto::TlResponse::ok(0);
     if tablet.has_announce_listener(hall, now_ms) {

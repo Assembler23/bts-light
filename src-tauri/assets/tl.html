@@ -3476,6 +3476,11 @@ window.addEventListener("resize", folgeOffenenKebabs);
  * ein belegtes Feld der **Griff** (antippen wählt das Spiel zum Umhängen,
  * ziehen ebenso). Mit Auswahl ist jede Kachel ein **Ziel**.
  */
+/** Zeitpunkt des letzten Bediener-Nachrufs je Feld — die Doppeltipp-Sperre.
+ *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
+ *  (siehe Kommentar an der Verdrahtung). */
+const skNachrufZuletzt = new Map();
+
 function wireCourts(box) {
   // Der Aufruf-Knopf zuerst und mit gestopptem Weiterreichen: Sonst wählte
   // derselbe Tipp zusätzlich das Spiel aus, und die Kachel spränge unter dem
@@ -3600,14 +3605,21 @@ function wireCourts(box) {
   // Bediener-Nachruf: beliebig oft auslösbar wie die anderen Ansagen, aber
   // gedeckelt bei Stufe 3 — der Turnier-PC zählt. Zeitstempel-Nonce statt
   // des 20-s-Fensters (`OP_WINDOW_MS`), das eine BEWUSSTE Wiederholung
-  // stumm schluckte; gegen den Doppeltipp wirkt das kurze `disabled`.
+  // stumm schluckte.
+  //
+  // Die Doppeltipp-Sperre liegt im Modul-Zustand, NICHT als `disabled` am
+  // Knopf: `send()` stößt in seinem `finally` einen Abruf an, und ein
+  // geänderter Zustand zeichnet die Kacheln neu — der frische Knopf wäre
+  // sofort wieder scharf, lange vor Ablauf der Sekunde. Im laufenden
+  // Turnier ändert sich fast jede Sekunde etwas, die Sperre wäre also
+  // genau dann wirkungslos, wenn sie gebraucht wird (Review 18.08.2026).
   scopeAll(box, "button[data-sk-say]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      if (btn.disabled) return;
-      btn.disabled = true;
-      setTimeout(() => { btn.disabled = false; }, 1000);
       const courtId = Number(btn.dataset.skSay);
+      const zuletzt = skNachrufZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      skNachrufZuletzt.set(courtId, Date.now());
       send(
         `sk-say-${courtId}-${Date.now()}`,
         { action: "announce_scorekeeper", courtId },

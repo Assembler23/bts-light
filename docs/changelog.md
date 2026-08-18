@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.232
+
+- **Die Zähltafelbedienung lässt sich jetzt nachrufen.** Kommt sie nicht ans
+  Feld, blieb bisher nur, die **Spieler** noch einmal zu rufen — was die
+  Aufruf-Zählung verfälscht. Der neue Knopf „Bedienung nachrufen" im
+  ⋯-Menü der Feld-Kachel sagt stattdessen:
+  **„Feld 3. Meier, bitte als Tabletbedienung melden."** Ab dem zweiten Mal
+  mit „Zweiter Aufruf." bzw. „Dritter und letzter Aufruf." davor.
+- **Die Aufruf-Zählung der Spieler bleibt davon unberührt.** Der Turnier-PC
+  führt für die Bedienung einen eigenen Zähler; das Abzeichen an der Kachel
+  steht still.
+- Den Knopf gibt es nur, wenn dem Feld überhaupt eine Bedienung zugewiesen
+  ist. Ein Spielwechsel auf dem Feld setzt den Zähler zurück.
+- Damit ist der letzte offene Baustein aus ADR 0007 erledigt — und die Spec
+  `tl-sicht-feinschliff` vollständig umgesetzt (Punkt 2 von 4).
+
 ## v0.9.228
 
 - **Spielernamen sind jetzt überall anklickbar.** Auf der
@@ -26,22 +42,6 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - Erste Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 4 von 4).
   ⚠️ Cloud-Geräte sehen die Links erst nach dem **Relay-Deploy** — der
   läuft automatisch beim Merge nach `main`.
-
-## v0.9.232
-
-- **Die Zähltafelbedienung lässt sich jetzt nachrufen.** Kommt sie nicht ans
-  Feld, blieb bisher nur, die **Spieler** noch einmal zu rufen — was die
-  Aufruf-Zählung verfälscht. Der neue Knopf „Bedienung nachrufen" im
-  ⋯-Menü der Feld-Kachel sagt stattdessen:
-  **„Feld 3. Meier, bitte als Tabletbedienung melden."** Ab dem zweiten Mal
-  mit „Zweiter Aufruf." bzw. „Dritter und letzter Aufruf." davor.
-- **Die Aufruf-Zählung der Spieler bleibt davon unberührt.** Der Turnier-PC
-  führt für die Bedienung einen eigenen Zähler; das Abzeichen an der Kachel
-  steht still.
-- Den Knopf gibt es nur, wenn dem Feld überhaupt eine Bedienung zugewiesen
-  ist. Ein Spielwechsel auf dem Feld setzt den Zähler zurück.
-- Damit ist der letzte offene Baustein aus ADR 0007 erledigt — und die Spec
-  `tl-sicht-feinschliff` vollständig umgesetzt (Punkt 2 von 4).
 
 ## v0.9.226
 

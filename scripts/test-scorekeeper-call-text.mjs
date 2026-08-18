@@ -41,6 +41,27 @@ eq("dritter Nachruf, englisch", scorekeeperCallSegments("Court 3", ["Meier"], 3,
   "Meier, please report as scoreboard operator.",
 ]);
 
+// Englisch Stufe 2 stand lange ungeprüft da — ein Tippfehler im englischen
+// Stufenwort wäre niemandem aufgefallen (Review 18.08.2026).
+eq("zweiter Nachruf, englisch", scorekeeperCallSegments("Court 3", ["Meier"], 2, "en"), [
+  "Court 3.",
+  "Second call.",
+  "Meier, please report as scoreboard operator.",
+]);
+
+// Ränder: Der Host deckelt bei 3 und beginnt bei 1, aber ein Auftrag aus
+// einer fremden Fassung soll nicht in ein Stufenwort laufen, das es nicht
+// gibt.
+eq("Stufe 0 wie Stufe 1", scorekeeperCallSegments("Feld 3", ["Meier"], 0, "de"), [
+  "Feld 3.",
+  "Meier, bitte als Tabletbedienung melden.",
+]);
+eq("Stufe 9 bleibt beim letzten Aufruf", scorekeeperCallSegments("Feld 3", ["Meier"], 9, "de"), [
+  "Feld 3.",
+  "Dritter und letzter Aufruf.",
+  "Meier, bitte als Tabletbedienung melden.",
+]);
+
 // Ein Doppel bedient zu zweit — beide Namen, mit „/" verbunden wie bei den
 // Schiedsrichtern.
 eq("zwei Namen", scorekeeperCallSegments("Feld 1", ["Anna Alt", "Bea Bach"], 1, "de"), [

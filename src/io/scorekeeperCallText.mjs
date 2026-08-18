@@ -1,9 +1,11 @@
 // Textbausteine des Zähltafelbediener-Nachrufs (Spec `tl-sicht-feinschliff`,
 // Punkt 2; der seit ADR 0007 offene Baustein).
 //
-// Eigene Datei wie `startPlayText.mjs` und aus demselben Grund: Der Wortlaut
-// muss in BEIDEN Synthese-Pfaden identisch sein — Web Speech baut Segmente,
-// Azure baut SSML —, und in `announcer.ts` gäbe es dafür keinen Test.
+// Eigene Datei aus demselben Grund wie `nameCorrection.mjs` und
+// `disciplineVoice.mjs`: Der Wortlaut muss in BEIDEN Synthese-Pfaden
+// identisch sein — Web Speech baut Segmente, Azure baut SSML —, und in
+// `announcer.ts` gäbe es dafür keinen Test. Hier liegt er an einer Stelle
+// und wird von `scripts/test-scorekeeper-call-text.mjs` in der CI geprüft.
 //
 // **Kein XML-Escaping hier.** Das macht der SSML-Bauer am Verwendungsort,
 // genau wie bei den Schiedsrichter-Segmenten.
