@@ -104,13 +104,13 @@ pub struct ServerCtx {
     /// Zwischenstand der „Leisten-Sponsor"-Markierungen, gemerkt an
     /// `(Änderungszeit, Größe)` der Datei. Sie wird nur beim Setzen eines
     /// Häkchens im Setup geschrieben, aber von jedem `/info/ad/state`
-    /// gelesen und geparst — bei zwanzig Anzeigen achtzigmal je Sekunde.
+    /// gelesen und geparst — das ist die Werbe-Seite im 5-Sekunden-Takt
+    /// plus die Sponsor-Leiste jeder Anzeige im Minuten-Takt.
     bar_cache: std::sync::Mutex<BarCache>,
 }
 
-/// Das dekodierte Turnierlogo, geschlüsselt nach `(Länge, MIME)` der
-/// Base64-Daten.
-type LogoCache = Option<((usize, String), Arc<Vec<u8>>)>;
+/// Das dekodierte Turnierlogo, geschlüsselt nach der Marke seines Inhalts.
+type LogoCache = Option<(String, Arc<Vec<u8>>)>;
 
 /// Die „Leisten-Sponsor"-Markierungen, geschlüsselt nach
 /// `(Änderungszeit, Größe)` ihrer Datei.
@@ -305,11 +305,12 @@ impl ServerCtx {
         Ok(config)
     }
 
-    /// Das dekodierte Turnierlogo — aus dem Zwischenstand, solange
-    /// Länge und Typ der Base64-Daten gleich bleiben (siehe `logo_cache`).
-    fn logo_bytes(&self, logo: &crate::config::LogoConfig) -> Option<Arc<Vec<u8>>> {
+    /// Das dekodierte Turnierlogo — aus dem Zwischenstand, solange die
+    /// Marke des Inhalts gleich bleibt (siehe `logo_cache`). `marke` ist
+    /// dieselbe, die die Route als `ETag` ausgibt.
+    fn logo_bytes(&self, logo: &crate::config::LogoConfig, marke: &str) -> Option<Arc<Vec<u8>>> {
         use base64::Engine;
-        let schluessel = (logo.data.len(), logo.mime.clone());
+        let schluessel = marke.to_string();
         {
             let cache = self.logo_cache.lock().expect("Logo-Cache nicht vergiftet");
             if let Some((gemerkt, bytes)) = cache.as_ref() {
@@ -1277,17 +1278,19 @@ async fn info_tournament_logo(
         )
             .into_response();
     }
-    // Kennung aus Länge und Typ der Base64-Daten: ändert sich das Logo,
-    // ändert sie sich mit. Damit kann eine Anzeige nach Ablauf der
+    // Kennung aus dem Inhalt: Damit kann eine Anzeige nach Ablauf der
     // Cache-Frist mit ~200 Byte bestätigt bekommen, dass ihr Bild noch
     // stimmt, statt megabyteweise dasselbe erneut zu laden — bei zwanzig
     // TVs macht das den Unterschied (Analyse 18.08.2026).
-    let etag = format!("\"logo-{}-{}\"", logo.data.len(), logo.mime);
-    if headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag)
-    {
+    //
+    // Bewusst über den Inhalt und nicht über `(Länge, MIME)`: Diese Marke
+    // ist zugleich der Schlüssel des Dekodier-Zwischenstands, und zwei
+    // verschiedene Logos gleicher Base64-Länge und gleichen Typs hätten
+    // sonst auch **frischen** Anzeigen dauerhaft die alten Bytes geliefert
+    // (Review-Fund 18.08.2026). Den Logo-Schreibpfad (`save_config`)
+    // erreicht der ServerCtx nicht, es gäbe also kein Netz darunter.
+    let etag = bild_marke(logo.data.as_bytes());
+    if marke_bekannt(&headers, &etag) {
         return (
             StatusCode::NOT_MODIFIED,
             [
@@ -1299,7 +1302,7 @@ async fn info_tournament_logo(
     }
     // Dekodiert zwischengespeichert: Ohne das rechnete jeder Abruf die
     // vollen Base64-Daten neu aus.
-    match ctx.logo_bytes(logo) {
+    match ctx.logo_bytes(logo, &etag) {
         Some(bytes) => {
             let mime = if logo.mime.is_empty() {
                 "image/png".to_string()
@@ -1547,21 +1550,20 @@ async fn ad_image(
     let pfad = ctx.monitor_dir.join(&file);
     let etag = match tokio::fs::metadata(&pfad).await {
         Ok(meta) => {
+            // Nanosekunden statt Millisekunden: Eine gleich große
+            // Ersetzung innerhalb derselben Millisekunde bliebe sonst
+            // unbemerkt (Review-Fund 18.08.2026), und feiner kostet nichts.
             let zeit = meta
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis())
+                .map(|d| d.as_nanos())
                 .unwrap_or(0);
             format!("\"ad-{}-{zeit}\"", meta.len())
         }
         Err(_) => return (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
     };
-    if headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag)
-    {
+    if marke_bekannt(&headers, &etag) {
         // Unverändert: ~200 Byte statt des ganzen Bildes, und die Datei
         // muss dafür nicht einmal gelesen werden.
         return (
@@ -1591,6 +1593,38 @@ async fn ad_image(
 /// Rotation der Anzeigen (Sekundentakt) ohne eine einzige Anfrage auskommt,
 /// und kurz genug, dass ein ausgetauschtes Bild zeitnah durchschlägt.
 const AD_CACHE_CONTROL: &str = "public, max-age=300";
+
+/// Kennt der Abrufer die Marke bereits? Prüft `If-None-Match` so, wie es
+/// RFC 9110 vorsieht: eine **Liste** von Marken, `*` als Joker, und der
+/// Vergleich ist der schwache (das `W/`-Präfix zählt nicht mit).
+///
+/// Der naive Gleichheitstest wäre nicht falsch, aber still wirkungslos:
+/// Ein Zwischenspeicher auf dem Weg (nginx vor dem Relay) darf eine Marke
+/// abschwächen, und dann käme dauerhaft der volle Inhalt zurück statt der
+/// Bestätigung (Review-Fund 18.08.2026).
+/// Marke eines Bildes: Länge plus ein Streuwert über den Inhalt. Muss nur
+/// innerhalb eines Programmlaufs stabil sein und sich bei anderem Inhalt
+/// ändern — beides leistet der Standard-Streuer. Gleiches Format wie im
+/// Relay (`bild_marke` dort), damit beide Betriebsarten gleich aussehen.
+fn bild_marke(bytes: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    format!("\"img-{}-{:x}\"", bytes.len(), hasher.finish())
+}
+
+fn marke_bekannt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
+    let Some(feld) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    let schwach = |m: &str| m.trim().trim_start_matches("W/").to_string();
+    let gesucht = schwach(etag);
+    feld.split(',')
+        .any(|m| m.trim() == "*" || schwach(m) == gesucht)
+}
 
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
 
@@ -1677,10 +1711,7 @@ async fn tl_state(
     // Die Seite schickt ihre letzte Fassung mit. Hat sich nichts geändert,
     // spart „unverändert" den ganzen Stand — auf demselben Rechner, der
     // nebenher BTP und die Tablets bedient.
-    let unveraendert = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag);
+    let unveraendert = marke_bekannt(&headers, &etag);
     let mut response = if unveraendert {
         (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response()
     } else {
@@ -4749,6 +4780,15 @@ mod tests {
         headers
     }
 
+    /// Wartet, bis die Datei-Änderungszeit garantiert weitergesprungen ist.
+    /// Windows aktualisiert sie nur im Takt des Systemtimers (~15,6 ms);
+    /// zwei gleich große Schreibvorgänge unmittelbar hintereinander wären
+    /// sonst nicht auseinanderzuhalten. In der Praxis liegen zwischen zwei
+    /// Änderungen Sekunden — im Test müssen wir es erzwingen.
+    fn zeit_tickt_weiter() {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
     #[tokio::test]
     async fn ein_unveraendertes_werbebild_wird_nur_bestaetigt_statt_geschickt() {
         // Die Anzeigen wechseln ihr Bild alle paar Sekunden. Ohne Marke lud
@@ -4789,6 +4829,9 @@ mod tests {
         // alte Marke nicht mehr passen (deshalb kein `immutable`).
         let (ctx, dir) = make_bild_ctx();
         let pfad = dir.path().join("sponsor.png");
+        // Bewusst GLEICH LANG ersetzt: Sonst genügte der Größenanteil der
+        // Marke, und der eigentlich tragende Teil — die Änderungszeit —
+        // bliebe ungeprüft (Review-Fund 18.08.2026).
         std::fs::write(&pfad, b"alt").unwrap();
         let erst = ad_image(
             State(ctx.clone()),
@@ -4805,7 +4848,8 @@ mod tests {
             .unwrap()
             .to_string();
 
-        std::fs::write(&pfad, b"neu, deutlich laenger als vorher").unwrap();
+        zeit_tickt_weiter();
+        std::fs::write(&pfad, b"neu").unwrap();
         let zweit = ad_image(
             State(ctx),
             Path("sponsor.png".to_string()),
@@ -4829,11 +4873,78 @@ mod tests {
         std::fs::write(&pfad, br#"["ad-1.png"]"#).unwrap();
         assert!(ctx.ad_bar().contains("ad-1.png"));
 
-        std::fs::write(&pfad, br#"["ad-1.png","ad-2.png"]"#).unwrap();
+        // Umhaken statt Hinzufügen: Die Datei bleibt **exakt gleich groß**,
+        // also trägt allein die Änderungszeit. Der realistische Fall — und
+        // der einzige, der den Zwischenstand wirklich prüft.
+        zeit_tickt_weiter();
+        std::fs::write(&pfad, br#"["ad-2.png"]"#).unwrap();
+        let leiste = ctx.ad_bar();
         assert!(
-            ctx.ad_bar().contains("ad-2.png"),
-            "Ein neu markiertes Bild muss sofort in der Leiste stehen"
+            leiste.contains("ad-2.png") && !leiste.contains("ad-1.png"),
+            "Ein umgehaktes Bild muss sofort in der Leiste stehen, das alte weg"
         );
+    }
+
+    #[tokio::test]
+    async fn ein_ausgetauschtes_turnierlogo_bekommt_eine_neue_marke() {
+        // Die Marke hing früher an (Base64-Länge, MIME) und war zugleich
+        // der Schlüssel des Dekodier-Zwischenstands: Zwei verschiedene
+        // Logos gleicher Länge und gleichen Typs hätten auch frischen
+        // Anzeigen dauerhaft das alte Bild geliefert.
+        let (ctx, _dir) = make_bild_ctx();
+        let setze = |daten: &'static str| {
+            ctx.mutate_app_config(|c| {
+                c.tournament_logo.data = daten.into();
+                c.tournament_logo.mime = "image/png".into();
+                Ok(())
+            })
+            .unwrap();
+        };
+        setze("aGFsbG8="); // "hallo"
+        let erst = info_tournament_logo(State(ctx.clone()), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let alte_marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        setze("d2VsdGU="); // "welte" — gleich lang, anderer Inhalt
+        let zweit = info_tournament_logo(State(ctx.clone()), if_none_match(&alte_marke))
+            .await
+            .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::OK,
+            "Ein gleich langes, aber anderes Logo muss neu ausgeliefert werden"
+        );
+        let bytes = axum::body::to_bytes(zweit.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            &bytes[..],
+            b"welte",
+            "Der Dekodier-Zwischenstand darf nicht das alte Logo festhalten"
+        );
+    }
+
+    #[tokio::test]
+    async fn eine_marken_liste_und_eine_geschwaechte_marke_werden_erkannt() {
+        // RFC 9110: `If-None-Match` darf eine Liste sein, `*` enthalten und
+        // schwache Marken (`W/"…"`) tragen. Ein Zwischenspeicher auf dem Weg
+        // darf eine Marke abschwächen — ein reiner Gleichheitstest wäre dann
+        // still wirkungslos (Review-Fund 18.08.2026).
+        let etag = "\"img-5-abc\"";
+        assert!(marke_bekannt(&if_none_match(etag), etag));
+        assert!(marke_bekannt(
+            &if_none_match(&format!("\"img-9-xyz\", {etag}")),
+            etag
+        ));
+        assert!(marke_bekannt(&if_none_match(&format!("W/{etag}")), etag));
+        assert!(marke_bekannt(&if_none_match("*"), etag));
+        assert!(!marke_bekannt(&if_none_match("\"img-9-xyz\""), etag));
+        assert!(!marke_bekannt(&axum::http::HeaderMap::new(), etag));
     }
 
     #[tokio::test]

@@ -174,16 +174,40 @@ fn bild_marke(bytes: &[u8]) -> String {
     format!("\"img-{}-{:x}\"", bytes.len(), hasher.finish())
 }
 
-/// Antwortet mit `304`, wenn der Abrufer die Marke schon hat.
+/// Kennt der Abrufer die Marke schon? Prüft `If-None-Match` nach RFC 9110:
+/// eine **Liste** von Marken, `*` als Joker, schwacher Vergleich (das
+/// `W/`-Präfix zählt nicht mit). Gerade hier wichtig: Vor dem Relay steht
+/// nginx, und ein Zwischenspeicher darf eine Marke abschwächen — ein
+/// naiver Gleichheitstest wäre dann still wirkungslos.
 fn marke_passt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
-    headers
+    let Some(feld) = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag)
+    else {
+        return false;
+    };
+    let schwach = |m: &str| m.trim().trim_start_matches("W/").to_string();
+    let gesucht = schwach(etag);
+    feld.split(',')
+        .any(|m| m.trim() == "*" || schwach(m) == gesucht)
 }
 
-/// Cache-Frist der Bild-Routen — wie im LAN-Server (`AD_CACHE_CONTROL`).
-const BILD_CACHE_CONTROL: &str = "public, max-age=300";
+/// Cache-Frist der Werbebilder in der Cloud — **kürzer** als im LAN
+/// (dort fünf Minuten).
+///
+/// Grund ist die Adressierung: Im Hallennetz bindet der Dateiname die
+/// Adresse an genau ein Bild, in der Cloud ist die Adresse der Listen-
+/// Index (`/{ns}/ads/0`). Löscht die Turnierleitung ein Werbebild, rücken
+/// alle folgenden Indizes auf — und eine Anzeige zeigte dann bis zum
+/// Ablauf der Frist nicht bloß ein altes, sondern ein **falsches** Motiv.
+/// Bei Sponsoren ist das etwas anderes als „veraltet" (Review-Fund
+/// 18.08.2026). Eine Minute bringt bei zehn Sekunden Motivwechsel
+/// weiterhin den ganz überwiegenden Teil der Ersparnis.
+const AD_CACHE_CONTROL: &str = "public, max-age=60";
+
+/// Cache-Frist des Turnierlogos. Es hat eine feste Adresse je Namespace,
+/// kann also so lange gecacht werden wie im LAN.
+const LOGO_CACHE_CONTROL: &str = "public, max-age=300";
 
 /// Court-Monitor-Datensatz eines Namespace: Anzeige-Konfiguration und
 /// Werbebilder, vom bts-light-Host hochgeladen.
@@ -1305,7 +1329,7 @@ async fn flag_route_global(Path(file): Path<String>) -> impl IntoResponse {
 
 /// Liefert ein hochgeladenes Werbebild eines Namespace (per Index).
 ///
-/// Mit Marke und kurzer Cache-Frist wie im LAN. Vorher stand hier
+/// Mit Marke und Cache-Frist ([`AD_CACHE_CONTROL`]). Vorher stand hier
 /// `no-store`: Weil die Anzeigen ihr Bild im Sekundentakt wechseln, zog
 /// jeder TV dabei jedes Mal das ganze Bild erneut über die Internetleitung
 /// (Analyse 18.08.2026).
@@ -1320,9 +1344,10 @@ async fn ad_image(
     let Ok(i) = idx.parse::<usize>() else {
         return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
     };
-    // Bytes unter dem Lock herauskopieren, dann den Lock fallen lassen –
-    // ein mehrere MB großes memcpy darf nicht den Namespace-Mutex halten.
-    // Kennt der Abrufer die Marke schon, bleibt sogar das Kopieren aus.
+    // Die Bytes werden unter dem Lock herauskopiert — ein mehrere MB
+    // großes memcpy am globalen Namespace-Mutex. Kennt der Abrufer die
+    // Marke schon, bleibt genau das aus, und der Lock ist nach einem
+    // String-Vergleich wieder frei.
     let ad = {
         let map = broker.namespaces.lock().await;
         let Some(ad) = map
@@ -1335,7 +1360,7 @@ async fn ad_image(
         let bytes = (!marke_passt(&headers, &ad.etag)).then(|| ad.bytes.clone());
         (ad.content_type.clone(), ad.etag.clone(), bytes)
     };
-    bild_antwort(ad.0, ad.1, ad.2)
+    bild_antwort(ad.0, ad.1, ad.2, AD_CACHE_CONTROL)
 }
 
 /// Baut die Antwort einer Bild-Route: `304` ohne Bytes, sonst das Bild —
@@ -1344,12 +1369,13 @@ fn bild_antwort(
     content_type: String,
     etag: String,
     bytes: Option<Vec<u8>>,
+    cache_control: &'static str,
 ) -> axum::response::Response {
     match bytes {
         Some(bytes) => (
             [
                 (header::CONTENT_TYPE, content_type),
-                (header::CACHE_CONTROL, BILD_CACHE_CONTROL.to_string()),
+                (header::CACHE_CONTROL, cache_control.to_string()),
                 (header::ETAG, etag),
             ],
             bytes,
@@ -1358,7 +1384,7 @@ fn bild_antwort(
         None => (
             StatusCode::NOT_MODIFIED,
             [
-                (header::CACHE_CONTROL, BILD_CACHE_CONTROL.to_string()),
+                (header::CACHE_CONTROL, cache_control.to_string()),
                 (header::ETAG, etag),
             ],
         )
@@ -1391,7 +1417,9 @@ async fn tournament_logo(
     match logo {
         // Das Logo hängt in der Kopfleiste jeder Anzeigeseite — mit Marke
         // bestätigt der Relay es nach Ablauf der Frist mit ~200 Byte.
-        Some((content_type, etag, bytes)) => bild_antwort(content_type, etag, bytes),
+        Some((content_type, etag, bytes)) => {
+            bild_antwort(content_type, etag, bytes, LOGO_CACHE_CONTROL)
+        }
         None => (
             [(header::CACHE_CONTROL, "public, max-age=60".to_string())],
             StatusCode::NOT_FOUND,
