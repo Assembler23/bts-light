@@ -93,18 +93,26 @@ pub struct TsetEvent {
     /// Wird in `sync` aus der Config injiziert. Gleiche Feldnamen wie
     /// Original-BTS.
     ///
-    /// **Auch leer wird gesendet.** badhub kennt für diese Felder den
-    /// Vertrag „weglassen = unverändert, `""` = löschen" (wie beim
-    /// Check-In-Branding). Ein weggelassenes Feld heißt dort also nicht mehr
-    /// „kein Logo", sondern „nichts ändern" — ließen wir es weg, bekäme
-    /// niemand ein einmal gesetztes Logo je wieder aus dem Liveticker
-    /// heraus. Gegen ein badhub ohne diesen Vertrag ist das leere Feld
-    /// verhaltensgleich zum früheren Weglassen (`live.js` prüft auf einen
-    /// nicht-leeren Wert), der Schritt ist also unabhängig von der
-    /// Reihenfolge des Ausrollens.
-    pub tournament_logo: String,
-    pub tournament_logo_mime: String,
-    pub tournament_logo_background_color: String,
+    /// **Drei Zustände, weil badhub drei unterscheidet** (Vertrag wie beim
+    /// Check-In-Branding, badhub-PR #473):
+    ///
+    /// | Wert | Draht | Bedeutung für badhub |
+    /// |---|---|---|
+    /// | `None` | Feld fehlt | unverändert — behalte, was du hast |
+    /// | `Some("")` | `""` | löschen |
+    /// | `Some(daten)` | Base64 | setzen |
+    ///
+    /// Genau dafür ist `Option` hier nötig: Ein einfacher `String` könnte
+    /// „unverändert" nicht ausdrücken, und ein leerer String hieße Löschen.
+    /// Das Weglassen ist die eigentliche Ersparnis — das Logo wiegt bis zu
+    /// 2,7 MB und ginge sonst in **jedem** vollen `tset` erneut hinaus,
+    /// mindestens minütlich als Lebenszeichen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_logo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_logo_mime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_logo_background_color: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -570,10 +578,11 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, ctx: &LivetickerContext) -> 
             recent_finished_matches: recent_finished(snapshot),
             upcoming_matches: upcoming(snapshot, ctx),
             // Logo wird erst im Sync-Loop aus der Config gefüllt (build_tset
-            // kennt die Config nicht) – hier leer lassen.
-            tournament_logo: String::new(),
-            tournament_logo_mime: String::new(),
-            tournament_logo_background_color: String::new(),
+            // kennt die Config nicht) – hier offen lassen. `None` heißt auf
+            // dem Draht „Feld fehlt", also „unverändert".
+            tournament_logo: None,
+            tournament_logo_mime: None,
+            tournament_logo_background_color: None,
         },
         rid,
     }
@@ -942,17 +951,12 @@ mod tests {
     }
 
     #[test]
-    fn ein_leeres_turnierlogo_reist_als_leeres_feld_mit() {
-        // Das Weglassen war früher der einzige Weg, badhub das Logo wieder
-        // abzugewöhnen — ein `tset` ersetzt dort den ganzen Snapshot, ein
-        // fehlendes Feld hieß also „weg". Seit badhub den Vertrag
-        // „weglassen = unverändert, `""` = löschen" kennt (PR #473), muss
-        // das Löschen ausdrücklich gesagt werden. Sonst bekäme niemand ein
-        // einmal gesetztes Logo je wieder aus dem Liveticker heraus.
-        //
-        // Gegen ein badhub OHNE diesen Vertrag verhält sich das identisch
-        // zu vorher (leeres Feld = kein Logo), der Schritt ist also
-        // unabhängig von der Reihenfolge des Ausrollens.
+    fn build_tset_laesst_die_logo_felder_offen() {
+        // `build_tset` kennt die Konfiguration nicht — die Logo-Entscheidung
+        // fällt erst im Sync-Zyklus (`logo_in_tset_legen`). Bis dahin müssen
+        // die Felder **fehlen**: Auf dem Draht heißt das „unverändert",
+        // während ein leerer String für badhub „löschen" bedeutete.
+        // Ein voller `tset` ohne Zutun des Zyklus darf also nichts löschen.
         let snapshot = BtpSnapshot {
             tournament_name: "T".to_string(),
             rest_minutes: None,
@@ -967,16 +971,10 @@ mod tests {
         let cfg = AppConfig::default();
         let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&cfg));
         let json = serde_json::to_string(&tset).unwrap();
-        for feld in [
-            "tournament_logo",
-            "tournament_logo_mime",
-            "tournament_logo_background_color",
-        ] {
-            assert!(
-                json.contains(&format!("\"{feld}\":\"\"")),
-                "{feld} muss auch leer mitreisen: {json}"
-            );
-        }
+        assert!(
+            !json.contains("tournament_logo"),
+            "ohne Zutun des Zyklus darf kein Logo-Feld im Payload stehen: {json}"
+        );
     }
 
     #[test]

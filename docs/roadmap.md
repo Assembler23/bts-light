@@ -694,7 +694,11 @@ verliehen):
   2. **badhub-PR #473** (offen): `liveticker_logo_uebernehmen()` gibt den
      Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — den,
      den `checkin_branding_apply()` schon hat. **Braucht einen Deploy.**
-  3. Danach: bts-light schickt das Logo nur noch bei Änderung.
+  3. ⚠️ **v0.9.227 gebaut, DARF ERST NACH SCHRITT 2 AUSGELIEFERT WERDEN:**
+     bts-light schickt das Logo nur noch bei Änderung (`Option`-Felder,
+     Marke aus Turnier + Bildinhalt, Auffrischung alle 10 Min, Stempel
+     erst nach geglücktem Push). Ohne den badhub-Deploy würde ein
+     weggelassenes Logo dort als „kein Logo" gelten.
   Zu beachten: Im badhub-Repo liegt (lokal, ungepusht) der Umbau
   `feat/turnierlogo-zentralisierung` — Logo als inhaltsadressierte Datei,
   im Snapshot nur noch `tournament_logo_url`. Er löst diesen Punkt
