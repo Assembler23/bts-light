@@ -302,8 +302,17 @@ impl ServerCtx {
                 }
             }
             let namen = monitor::list_ads(&self.monitor_dir);
-            *self.ads_cache.lock().expect("Ads-Cache nicht vergiftet") =
-                Some((zeit, namen.clone()));
+            // Eine LEERE Liste nicht merken: `list_ads` liefert sie auch
+            // dann, wenn das Verzeichnis-Lesen fehlschlug (Virenscanner,
+            // kurze Sperre). Gemerkt würde daraus „dieses Turnier hat
+            // keine Werbung", bis jemand ein Bild anfasst oder die App neu
+            // startet — vorher versuchte es jeder Abruf erneut. Dieselbe
+            // Abwägung wie beim Config-Zwischenstand: Fehler merkt man
+            // sich nicht (Review-Fund 18.08.2026).
+            if !namen.is_empty() {
+                *self.ads_cache.lock().expect("Ads-Cache nicht vergiftet") =
+                    Some((zeit, namen.clone()));
+            }
             return namen;
         }
         // Kein Zeitstempel lesbar (Ordner fehlt): wie bisher direkt lesen.
@@ -861,7 +870,12 @@ async fn health(
     Query(q): Query<DeviceHeartbeat>,
 ) -> Json<serde_json::Value> {
     note_heartbeat(&ctx, &q);
-    let cfg = ctx.app_config();
+    // Ohne Kopie: Diese Route ist der Zustands-Abruf der Feld-Übersicht
+    // und der Kombi-Anzeigen — sie kommt im 250-ms-Takt je Gerät und war
+    // damit die heißeste verbliebene Stelle, an der die ganze
+    // Konfiguration samt Turnierlogo kopiert wurde (Review-Fund
+    // 18.08.2026).
+    let cfg = ctx.app_config_arc();
     let ct = &cfg.call_timer;
     // Hallen-Farben (Spec hallen-farben) für die Multifeld-Übersicht —
     // gleiche kanonische Hallenliste wie Desktop und TL-Web.
@@ -996,7 +1010,7 @@ async fn monitor_device_state(
             // Kombi nebeneinander (Hochformat je Feld): globaler Schalter aus
             // den Court-Monitor-Einstellungen hängt `&dir=v` an die Kombi-URL.
             if matches!(target, relay_proto::MonitorTarget::CourtCombo { .. })
-                && ctx.app_config().court_monitor.combo_vertical
+                && ctx.app_config_arc().court_monitor.combo_vertical
             {
                 if let Some(p) = path.as_mut() {
                     p.push_str("&dir=v");
@@ -1153,16 +1167,16 @@ async fn info_ad_state(
     Query(q): Query<DeviceHeartbeat>,
 ) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
-    let ads = monitor::list_ads(&ctx.monitor_dir);
+    let ads = ctx.ads();
     // Die als „Leisten-Sponsor" markierten Bilder gesondert ausweisen — die
     // obere Leiste zeigt genau diese (neben dem Turnierlogo), ohne die
     // Vollbild-Rotation (`ads`) anzufassen. Nur existierende Dateien.
     let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
     let bar_ads: Vec<&String> = ads.iter().filter(|f| bar.contains(*f)).collect();
-    // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag daraus,
-    // sonst würde bei jedem Poll (~5 s je Anzeige) das base64-Logo doppelt
-    // geparst.
-    let config = ctx.app_config();
+    // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag
+    // daraus. Ohne Kopie: Hier wird nur gelesen, und die Fassung trägt
+    // das Base64-Logo mit.
+    let config = ctx.app_config_arc();
     let payload = serde_json::json!({
         "ads": ads,
         "barAds": bar_ads,
@@ -1185,7 +1199,8 @@ async fn info_ad_state(
 /// Logo praktisch einmal je Turnier gesetzt wird.
 async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
     use base64::Engine;
-    let logo = ctx.app_config().tournament_logo;
+    let config = ctx.app_config_arc();
+    let logo = &config.tournament_logo;
     if logo.data.is_empty() {
         return (
             [(header::CACHE_CONTROL, "public, max-age=60")],
@@ -1303,7 +1318,7 @@ async fn info_preparation_state(
     let auto_halls = ctx.tablet.auto_hall_store().halls();
     // Hallen-Farben (Spec hallen-farben) einmal je Antwort auflösen.
     let hallen_farben =
-        crate::hall_colors::effective_hall_colors(&ctx.app_config(), &ctx.tablet.hall_names());
+        crate::hall_colors::effective_hall_colors(&ctx.app_config_arc(), &ctx.tablet.hall_names());
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
     // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
@@ -1456,7 +1471,7 @@ fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
-    crate::tablet::tl::authorize(&ctx.app_config(), token)
+    crate::tablet::tl::authorize(&ctx.app_config_arc(), token)
 }
 
 /// Die Turnierleitungs-Oberfläche.
@@ -1504,8 +1519,11 @@ async fn tl_state(
             // und eines aus dem Internet müssen mit derselben Zahl
             // denselben Stand meinen, sonst träfe die Altersprüfung am
             // Turnier-PC zufällige Entscheidungen.
-            let state =
-                crate::tablet::tl::build_state_with_rev(&ctx.tablet, &ctx.app_config(), now_ms());
+            let state = crate::tablet::tl::build_state_with_rev(
+                &ctx.tablet,
+                &ctx.app_config_arc(),
+                now_ms(),
+            );
             // Die Prozess-Kennung gehört in den ETag: Nach einem Neustart
             // der App beginnt die Revision wieder bei 1, und ein Gerät mit
             // gemerkter Fassung „1" bekäme sonst „unverändert" auf einen
@@ -2483,7 +2501,7 @@ async fn tl_ws_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
             .unwrap_or_default(),
         _ => String::new(),
     };
-    if token.is_empty() || crate::tablet::tl::authorize(&ctx.app_config(), &token).is_none() {
+    if token.is_empty() || crate::tablet::tl::authorize(&ctx.app_config_arc(), &token).is_none() {
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
@@ -2878,7 +2896,7 @@ async fn push_match(
                         m,
                         sk,
                         ska,
-                        &ctx.app_config().display,
+                        &ctx.app_config_arc().display,
                         finalized,
                         ctx.tablet.match_officials(m),
                     )

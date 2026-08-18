@@ -3468,11 +3468,17 @@ impl TabletState {
         Some(ScoreMirror {
             match_id,
             sets,
-            // Schlanke Fassung: Der Spiegel landet über den Relay auf
-            // Cloud-Monitoren — dieselben Anzeigen wie im Hallennetz,
-            // derselbe Bedarf (kein Wiedergabe-Verlauf). Spart zugleich
-            // Platz gegen die 64-KiB-Grenze des Relays.
-            state: self.display_court_state(court_id),
+            // **Voller** Stand, nicht die Anzeige-Fassung: Der Relay legt
+            // diesen Spiegel unter `namespace.court_state` ab und schickt
+            // ihn beim (Neu-)Verbinden oder Übernehmen als `StateRestore`
+            // an ein **Cloud-Tablet** zurück — nicht nur an Anzeigen. Ohne
+            // `history`/`rallyLog` stünde ein Ersatz-Tablet mitten im Spiel
+            // ohne Rückgängig-Gedächtnis da, der Punktverlauf begänne neu,
+            // und bei 0:0 würde aus „↩" sogar „Aufstellung ändern"
+            // (Review-Fund 18.08.2026). Die Anzeige-Ersparnis holt der
+            // LAN-Weg (`monitor_court`); hier wiegt die Wiederherstellung
+            // schwerer als die Übertragungsgröße.
+            state: self.court_state(court_id),
         })
     }
 
@@ -4311,6 +4317,24 @@ mod tests {
         // verlöre es sein Rückgängig-Gedächtnis.
         let voll = st.court_state(1).expect("gerade gesetzt");
         assert!(voll.contains("history"), "voller Stand bleibt vollständig");
+
+        // Und das gilt AUCH über die Cloud: Der Spiegel an den Relay wird
+        // dort zum `StateRestore` eines Cloud-Tabletts — er muss den
+        // vollen Stand tragen, nicht die Anzeige-Fassung (Review-Fund
+        // 18.08.2026).
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(1), MatchStatus::OnCourt)],
+            vec![(1, "Court 1")],
+        ));
+        let spiegel = st
+            .score_mirror_of(1)
+            .and_then(|m| m.state)
+            .expect("Spiegel vorhanden");
+        assert!(
+            spiegel.contains("history"),
+            "der Cloud-Spiegel trägt den vollen Stand — ein Ersatz-Tablet \
+             stellt daraus sein Rückgängig-Gedächtnis wieder her"
+        );
 
         // Unparsbares bleibt unangetastet (lieber unverändert als leer).
         st.set_court_state(2, "kein json".into());
