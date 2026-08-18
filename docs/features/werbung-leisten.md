@@ -170,3 +170,24 @@ lokale DB. „Zeitplan" = Check-in-Anfangszeiten je Klasse (kein Match-Spielplan
   des Liveticker-Snapshots; Logo-Minimierung reduziert die laufende Last.
 - Cloud-Übersicht/Vorbereitung: ohne Protokoll-Ausbau nicht erreichbar — sauber
   als Nicht-Ziel markiert, kein stiller Teil-Zustand.
+
+## Nachtrag 18.08.2026 — Datenmenge im Betrieb (v0.9.225)
+
+Das oben genannte Risiko ist im Hallenbetrieb tatsächlich eingetreten, nur an
+anderer Stelle als erwartet: nicht im Liveticker-Snapshot, sondern in der
+laufenden Auslieferung an die Anzeigegeräte. Beide Bild-Routen standen auf
+`Cache-Control: no-store`, und weil die Vollbild-Werbung ihr Motiv alle zehn
+Sekunden wechselt, lud jedes Gerät dabei jedes Mal die vollen Bilddaten neu.
+Behoben durch Kennung (`ETag`) plus fünf Minuten Cache-Frist auf allen vier
+Routen (LAN und Cloud, Werbebild und Logo) sowie einen Änderungsabgleich in
+der Sponsor-Leiste, damit ihr Minuten-Takt nicht bei jedem Durchlauf neue
+`<img>` anlegt. Einzelheiten und die Begründung gegen `immutable`:
+[../court-monitor.md](../court-monitor.md).
+
+**Weiterhin offen:** Das Turnierlogo reist als Base64 in **jedem vollen
+`tset`** an badhub mit (`sync.rs`). Weglassen ist derzeit nicht möglich — ein
+`tset` ersetzt bei badhub den kompletten Snapshot-Datensatz, ein fehlendes
+Feld löscht das Logo also und blendet es im Liveticker sowie auf der
+Check-In-Seite aus. Erst wenn badhub fehlende Logo-Felder als „unverändert"
+behandelt (so, wie es `checkin_branding_apply` für den Branding-Weg bereits
+tut), darf bts-light es nur noch bei Änderung mitschicken.

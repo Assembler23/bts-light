@@ -1187,13 +1187,25 @@
     var box = document.getElementById('sponsor-bar');
     if (!box) return;
     function paint(st) {
+      // Nur neu bauen, wenn sich wirklich etwas geändert hat. Sonst legt
+      // jeder Poll neue <img> an, und jedes davon fragt sein Bild erneut
+      // ab — bei zwanzig Anzeigen unnötiger Verkehr und ein sichtbares
+      // Zucken der Leiste (Analyse 18.08.2026). Die Anzahl wird
+      // mitgeprüft: Hat ein `onerror` ein Bild entfernt, baut der nächste
+      // Poll die Leiste wie bisher neu auf.
+      var logo = !!(st && st.hasLogo);
+      var ads = (st && st.barAds) || [];
+      var marke = JSON.stringify([logo, ads]);
+      if (marke === letzteLeiste && box.children.length === (logo ? 1 : 0) + ads.length) return;
+      letzteLeiste = marke;
       var h = '';
-      if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
-      ((st && st.barAds) || []).forEach(function (f) {
+      if (logo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
+      ads.forEach(function (f) {
         h += '<img src="' + adUrl(f) + '" alt="" onerror="this.remove()">';
       });
       box.innerHTML = h;
     }
+    var letzteLeiste = '';
     function pollBar() {
       fetch(BASE + 'info/ad/state', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })

@@ -11,7 +11,7 @@
 //! ([`ServerCtx`], [`process_result`], [`handle_score`], [`match_brief`])
 //! ist `pub(crate)` und wird von beiden Modi geteilt.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -97,7 +97,24 @@ pub struct ServerCtx {
     /// Anzeigen also achtzigmal je Sekunde. Der Ordner ändert sich nur,
     /// wenn jemand ein Bild hochlädt oder löscht (Review 18.08.2026).
     ads_cache: std::sync::Mutex<Option<(std::time::SystemTime, Vec<String>)>>,
+    /// Das dekodierte Turnierlogo, gemerkt an `(Länge, MIME)` der
+    /// Base64-Daten: Sonst dekodierte jeder Abruf der Logo-Route die bis
+    /// zu 2,7 MB Base64 neu — bei zwanzig Anzeigen regelmäßig.
+    logo_cache: std::sync::Mutex<LogoCache>,
+    /// Zwischenstand der „Leisten-Sponsor"-Markierungen, gemerkt an
+    /// `(Änderungszeit, Größe)` der Datei. Sie wird nur beim Setzen eines
+    /// Häkchens im Setup geschrieben, aber von jedem `/info/ad/state`
+    /// gelesen und geparst — bei zwanzig Anzeigen achtzigmal je Sekunde.
+    bar_cache: std::sync::Mutex<BarCache>,
 }
+
+/// Das dekodierte Turnierlogo, geschlüsselt nach `(Länge, MIME)` der
+/// Base64-Daten.
+type LogoCache = Option<((usize, String), Arc<Vec<u8>>)>;
+
+/// Die „Leisten-Sponsor"-Markierungen, geschlüsselt nach
+/// `(Änderungszeit, Größe)` ihrer Datei.
+type BarCache = Option<((std::time::SystemTime, u64), Arc<HashSet<String>>)>;
 
 /// Die Live-Score-Pushes an badhub, **je Feld serialisiert und
 /// gebündelt** — und vor allem: **außerhalb** der Tablet-Verbindung.
@@ -229,6 +246,8 @@ impl ServerCtx {
             shared_config,
             config_cache: std::sync::Mutex::new(None),
             ads_cache: std::sync::Mutex::new(None),
+            logo_cache: std::sync::Mutex::new(None),
+            bar_cache: std::sync::Mutex::new(None),
             score_push: Arc::new(ScorePushQueue::default()),
         }
     }
@@ -286,6 +305,29 @@ impl ServerCtx {
         Ok(config)
     }
 
+    /// Das dekodierte Turnierlogo — aus dem Zwischenstand, solange
+    /// Länge und Typ der Base64-Daten gleich bleiben (siehe `logo_cache`).
+    fn logo_bytes(&self, logo: &crate::config::LogoConfig) -> Option<Arc<Vec<u8>>> {
+        use base64::Engine;
+        let schluessel = (logo.data.len(), logo.mime.clone());
+        {
+            let cache = self.logo_cache.lock().expect("Logo-Cache nicht vergiftet");
+            if let Some((gemerkt, bytes)) = cache.as_ref() {
+                if *gemerkt == schluessel {
+                    return Some(bytes.clone());
+                }
+            }
+        }
+        let bytes = Arc::new(
+            base64::engine::general_purpose::STANDARD
+                .decode(logo.data.as_bytes())
+                .ok()?,
+        );
+        *self.logo_cache.lock().expect("Logo-Cache nicht vergiftet") =
+            Some((schluessel, bytes.clone()));
+        Some(bytes)
+    }
+
     /// Werbebilder des Court-Monitors — aus dem Zwischenstand, solange
     /// sich der Ordner nicht geändert hat (siehe `ads_cache`).
     fn ads(&self) -> Vec<String> {
@@ -317,6 +359,31 @@ impl ServerCtx {
         }
         // Kein Zeitstempel lesbar (Ordner fehlt): wie bisher direkt lesen.
         monitor::list_ads(&self.monitor_dir)
+    }
+
+    /// Die als „Leisten-Sponsor" markierten Dateinamen — aus dem
+    /// Zwischenstand, solange die Datei unverändert ist (siehe `bar_cache`).
+    /// Fehlt die Datei (Normalfall ohne Sponsoren), bleibt es beim leeren
+    /// Ergebnis ohne Zwischenstand.
+    fn ad_bar(&self) -> Arc<HashSet<String>> {
+        let pfad = self.monitor_dir.join(monitor::AD_BAR_FILE);
+        let stempel = std::fs::metadata(&pfad)
+            .and_then(|m| Ok((m.modified()?, m.len())))
+            .ok();
+        let Some(stempel) = stempel else {
+            return Arc::new(HashSet::new());
+        };
+        {
+            let cache = self.bar_cache.lock().expect("Bar-Cache nicht vergiftet");
+            if let Some((gemerkt, namen)) = cache.as_ref() {
+                if *gemerkt == stempel {
+                    return namen.clone();
+                }
+            }
+        }
+        let namen = Arc::new(monitor::read_ad_bar(&pfad));
+        *self.bar_cache.lock().expect("Bar-Cache nicht vergiftet") = Some((stempel, namen.clone()));
+        namen
     }
 
     /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
@@ -1171,7 +1238,7 @@ async fn info_ad_state(
     // Die als „Leisten-Sponsor" markierten Bilder gesondert ausweisen — die
     // obere Leiste zeigt genau diese (neben dem Turnierlogo), ohne die
     // Vollbild-Rotation (`ads`) anzufassen. Nur existierende Dateien.
-    let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
+    let bar = ctx.ad_bar();
     let bar_ads: Vec<&String> = ads.iter().filter(|f| bar.contains(*f)).collect();
     // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag
     // daraus. Ohne Kopie: Hier wird nur gelesen, und die Fassung trägt
@@ -1197,8 +1264,10 @@ async fn info_ad_state(
 /// Logo binnen ~1 Min erscheint. Ein *Wechsel* eines bestehenden Logos schlägt
 /// entsprechend erst nach dem 200-Cache-Fenster durch — akzeptabel, weil das
 /// Logo praktisch einmal je Turnier gesetzt wird.
-async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
-    use base64::Engine;
+async fn info_tournament_logo(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
     let config = ctx.app_config_arc();
     let logo = &config.tournament_logo;
     if logo.data.is_empty() {
@@ -1208,8 +1277,30 @@ async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoRes
         )
             .into_response();
     }
-    match base64::engine::general_purpose::STANDARD.decode(logo.data.as_bytes()) {
-        Ok(bytes) => {
+    // Kennung aus Länge und Typ der Base64-Daten: ändert sich das Logo,
+    // ändert sie sich mit. Damit kann eine Anzeige nach Ablauf der
+    // Cache-Frist mit ~200 Byte bestätigt bekommen, dass ihr Bild noch
+    // stimmt, statt megabyteweise dasselbe erneut zu laden — bei zwanzig
+    // TVs macht das den Unterschied (Analyse 18.08.2026).
+    let etag = format!("\"logo-{}-{}\"", logo.data.len(), logo.mime);
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag)
+    {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, "public, max-age=300"),
+            ],
+        )
+            .into_response();
+    }
+    // Dekodiert zwischengespeichert: Ohne das rechnete jeder Abruf die
+    // vollen Base64-Daten neu aus.
+    match ctx.logo_bytes(logo) {
+        Some(bytes) => {
             let mime = if logo.mime.is_empty() {
                 "image/png".to_string()
             } else {
@@ -1219,12 +1310,15 @@ async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoRes
                 [
                     (header::CONTENT_TYPE, mime),
                     (header::CACHE_CONTROL, "public, max-age=300".to_string()),
+                    (header::ETAG, etag),
                 ],
-                bytes,
+                // Aus dem geteilten Zwischenstand in den Antwort-Body:
+                // eine Kopie statt einer Neu-Dekodierung.
+                bytes.as_ref().clone(),
             )
                 .into_response()
         }
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -1430,18 +1524,61 @@ async fn flag_route(Path(file): Path<String>) -> impl IntoResponse {
 }
 
 /// Liefert ein hochgeladenes Werbebild aus dem `court-ads`-Verzeichnis.
+///
+/// Mit Marke (`ETag`) und kurzer Cache-Frist. Vorher stand hier `no-store`,
+/// und weil die Anzeigen ihr Bild alle `ad_interval_s` (Standard 10 s)
+/// wechseln, lud jedes Gerät dabei jedes Mal die vollen Bilddaten neu — bei
+/// 1 MB rund 360 MB je Stunde und Gerät, im Cloud-Betrieb über die
+/// Internetleitung (Analyse 18.08.2026).
+///
+/// Bewusst **kein** `immutable`: Zwar vergibt `add_court_ad` eindeutige
+/// Namen (`ad-<ms>.<endung>`), aber das Verzeichnis liegt offen — wer eine
+/// Datei von Hand hineinlegt und später ersetzt, bekäme sonst tagelang das
+/// alte Bild. Die Marke aus Größe und Änderungszeit macht den Austausch
+/// billig sichtbar, ohne das Bild dafür zu lesen.
 async fn ad_image(
     State(ctx): State<Arc<ServerCtx>>,
     Path(file): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !monitor::is_safe_image_name(&file) {
         return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
     }
-    match tokio::fs::read(ctx.monitor_dir.join(&file)).await {
+    let pfad = ctx.monitor_dir.join(&file);
+    let etag = match tokio::fs::metadata(&pfad).await {
+        Ok(meta) => {
+            let zeit = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            format!("\"ad-{}-{zeit}\"", meta.len())
+        }
+        Err(_) => return (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
+    };
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag)
+    {
+        // Unverändert: ~200 Byte statt des ganzen Bildes, und die Datei
+        // muss dafür nicht einmal gelesen werden.
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, AD_CACHE_CONTROL),
+            ],
+        )
+            .into_response();
+    }
+    match tokio::fs::read(&pfad).await {
         Ok(bytes) => (
             [
-                (header::CONTENT_TYPE, monitor::image_mime(&file)),
-                (header::CACHE_CONTROL, "no-store"),
+                (header::CONTENT_TYPE, monitor::image_mime(&file).to_string()),
+                (header::CACHE_CONTROL, AD_CACHE_CONTROL.to_string()),
+                (header::ETAG, etag),
             ],
             bytes,
         )
@@ -1449,6 +1586,11 @@ async fn ad_image(
         Err(_) => (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
     }
 }
+
+/// Cache-Frist der Bild-Routen. Fünf Minuten sind lang genug, dass die
+/// Rotation der Anzeigen (Sekundentakt) ohne eine einzige Anfrage auskommt,
+/// und kurz genug, dass ein ausgetauschtes Bild zeitnah durchschlägt.
+const AD_CACHE_CONTROL: &str = "public, max-age=300";
 
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
 
@@ -4577,5 +4719,150 @@ mod tests {
             response.ok,
             "Profil-Aktionen dürfen nicht am Snapshot-Gate scheitern: {response:?}"
         );
+    }
+
+    // ─────────────────────── Bild-Auslieferung (Cache) ──────────────────────
+
+    /// Kontext mit **eigenem** Werbebild-Verzeichnis. `make_ctx` teilt sich
+    /// `temp_dir()` mit allen anderen Tests — für Bild-Tests, die Dateien
+    /// anlegen und ändern, wäre das ein Rennen.
+    fn make_bild_ctx() -> (Arc<ServerCtx>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = AppConfig::default();
+        let shared_config = Arc::new(std::sync::Mutex::new(config.clone()));
+        let ctx = ServerCtx::new(
+            Arc::new(TabletState::default()),
+            config,
+            reqwest::Client::new(),
+            dir.path().to_path_buf(),
+            dir.path().join("config.json"),
+            dir.path().join("assign.json"),
+            dir.path().to_path_buf(),
+            shared_config,
+        );
+        (Arc::new(ctx), dir)
+    }
+
+    fn if_none_match(marke: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::IF_NONE_MATCH, marke.parse().unwrap());
+        headers
+    }
+
+    #[tokio::test]
+    async fn ein_unveraendertes_werbebild_wird_nur_bestaetigt_statt_geschickt() {
+        // Die Anzeigen wechseln ihr Bild alle paar Sekunden. Ohne Marke lud
+        // jedes Gerät dabei jedes Mal die vollen Bilddaten neu.
+        let (ctx, dir) = make_bild_ctx();
+        std::fs::write(dir.path().join("ad-1.png"), b"bilddaten").unwrap();
+
+        let erst = ad_image(
+            State(ctx.clone()),
+            Path("ad-1.png".to_string()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Werbebilder brauchen eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = ad_image(
+            State(ctx),
+            Path("ad-1.png".to_string()),
+            if_none_match(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn ein_ausgetauschtes_werbebild_bekommt_eine_neue_marke() {
+        // Ein Turnierleiter kann eine Datei auch von Hand ins
+        // `court-ads`-Verzeichnis legen und später ersetzen — dann darf die
+        // alte Marke nicht mehr passen (deshalb kein `immutable`).
+        let (ctx, dir) = make_bild_ctx();
+        let pfad = dir.path().join("sponsor.png");
+        std::fs::write(&pfad, b"alt").unwrap();
+        let erst = ad_image(
+            State(ctx.clone()),
+            Path("sponsor.png".to_string()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let alte_marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        std::fs::write(&pfad, b"neu, deutlich laenger als vorher").unwrap();
+        let zweit = ad_image(
+            State(ctx),
+            Path("sponsor.png".to_string()),
+            if_none_match(&alte_marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::OK,
+            "Ein geändertes Bild muss neu ausgeliefert werden"
+        );
+    }
+
+    #[test]
+    fn der_gemerkte_leisten_marker_folgt_der_datei() {
+        // Der Zwischenstand darf eine Änderung nicht verschlucken: Wer im
+        // Setup ein Häkchen setzt, will es sofort in der Leiste sehen.
+        let (ctx, dir) = make_bild_ctx();
+        let pfad = dir.path().join(monitor::AD_BAR_FILE);
+        std::fs::write(&pfad, br#"["ad-1.png"]"#).unwrap();
+        assert!(ctx.ad_bar().contains("ad-1.png"));
+
+        std::fs::write(&pfad, br#"["ad-1.png","ad-2.png"]"#).unwrap();
+        assert!(
+            ctx.ad_bar().contains("ad-2.png"),
+            "Ein neu markiertes Bild muss sofort in der Leiste stehen"
+        );
+    }
+
+    #[tokio::test]
+    async fn das_turnierlogo_wird_beim_zweiten_abruf_nur_bestaetigt() {
+        // Das Logo hängt in der Kopfleiste JEDER Anzeigeseite und wurde
+        // bisher bei jedem Neuaufbau vollständig neu übertragen.
+        let (ctx, _dir) = make_bild_ctx();
+        ctx.mutate_app_config(|c| {
+            c.tournament_logo.data = "aGFsbG8=".into(); // "hallo"
+            c.tournament_logo.mime = "image/png".into();
+            Ok(())
+        })
+        .unwrap();
+
+        let erst = info_tournament_logo(State(ctx.clone()), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Das Logo braucht eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = info_tournament_logo(State(ctx), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
     }
 }

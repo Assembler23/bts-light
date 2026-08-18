@@ -366,13 +366,20 @@ main {
     var box = document.getElementById('sponsor-bar');
     if (!box) return;
     function paint(st) {
+      // Nur bei echter Änderung neu bauen — siehe monitor.html.
+      var logo = !!(st && st.hasLogo);
+      var ads = (st && st.barAds) || [];
+      var marke = JSON.stringify([logo, ads]);
+      if (marke === letzteLeiste && box.children.length === (logo ? 1 : 0) + ads.length) return;
+      letzteLeiste = marke;
       var h = '';
-      if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
-      ((st && st.barAds) || []).forEach(function (f) {
+      if (logo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
+      ads.forEach(function (f) {
         h += '<img src="' + BASE + 'ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
       });
       box.innerHTML = h;
     }
+    var letzteLeiste = '';
     function poll() {
       fetch(BASE + 'info/ad/state', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })

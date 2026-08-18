@@ -188,6 +188,43 @@ Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
 `onerror` es. Spec + Phasen (Cloud, badhub-Seiten):
 [features/werbung-leisten.md](features/werbung-leisten.md).
 
+Der Minuten-Takt, der `/info/ad/state` abfragt, baut die Leiste **nur bei
+echter Änderung** neu auf (seit v0.9.225). Vorher entstanden bei jedem
+Durchlauf neue `<img>`, die ihr Bild erneut anforderten. Mitgeprüft wird die
+Anzahl der Bilder in der Leiste — hat ein `onerror` eines entfernt, baut der
+nächste Durchlauf sie wie bisher neu auf.
+
+## Zwischenspeichern der Bilder (seit v0.9.225)
+
+Werbebilder und Turnierlogo waren ausdrücklich vom Zwischenspeichern
+ausgenommen (`Cache-Control: no-store`). Weil die Werbeanzeige ihr Motiv
+alle `ad_interval_s` (Standard 10 s) wechselt, holte jedes Gerät dabei jedes
+Mal die vollen Bilddaten — bei einem 1-MB-Motiv rund 360 MB je Stunde und
+Anzeige, im Cloud-Betrieb über die Internetleitung.
+
+Beide Routen geben jetzt in **beiden** Betriebsarten eine Kennung (`ETag`)
+mit und dürfen fünf Minuten zwischengespeichert werden. Nach Ablauf der
+Frist bestätigt der Server ein unverändertes Bild mit `304` (rund 200 Byte)
+statt es erneut zu senden.
+
+| Bild | Kennung aus | Bemerkung |
+|---|---|---|
+| Werbebild (LAN, `/ads/{datei}`) | Größe + Änderungszeit der Datei | Ohne die Datei zu lesen; ein `304` kostet nur den Blick auf die Dateiangaben |
+| Werbebild (Cloud, `/{ns}/ads/{index}`) | Inhalt des hochgeladenen Bildes | Beim Hochladen einmal berechnet |
+| Turnierlogo (LAN, `/info/logo`) | Länge + Typ der Base64-Daten | Die dekodierten Bytes liegen zusätzlich als Zwischenstand bereit |
+| Turnierlogo (Cloud, `/{ns}/info/logo`) | Inhalt des hochgeladenen Logos | — |
+
+Zwei bewusste Entscheidungen:
+
+- **Kein `immutable`.** Zwar vergibt der Upload eindeutige Namen
+  (`ad-<ms>.<endung>`), aber das `court-ads/`-Verzeichnis liegt offen: Wer
+  eine Datei von Hand hineinlegt und später ersetzt, bekäme sonst tagelang
+  das alte Bild.
+- **Die Cloud-Kennung hängt am Inhalt, nicht am Upload.** Der Host lädt sein
+  Monitor-Bündel bei jedem Verbindungsaufbau neu hoch; wären die Kennungen
+  an den Upload gebunden, entwertete jeder WLAN-Wackler sämtliche
+  Bild-Zwischenspeicher.
+
 ## Last am Turnier-PC (seit v0.9.223)
 
 Jeder Monitor fragt im 250-ms-Takt nach — der WS-Anstoß senkt die
@@ -201,7 +238,8 @@ billig:
   Base64-Text von bis zu 2,7 MB).
 - Die **Werbebild-Liste** kommt aus einem Zwischenstand und wird nur neu
   eingelesen, wenn sich der Ordner geändert hat (vorher ein
-  Verzeichnis-Lesen je Abruf).
+  Verzeichnis-Lesen je Abruf). Dasselbe gilt seit v0.9.225 für die
+  „Leisten-Sponsor"-Markierungen (`court-ad-bar.json`).
 - Der gespiegelte **Spielstand** (`courtState`) geht ohne den
   Verlaufsspeicher des Tabletts an die Anzeigen: `history` (bis zu 50
   Zwischenstände, jeder mit einer Vollkopie des Ballwechsel-Protokolls)

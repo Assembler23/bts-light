@@ -155,7 +155,35 @@ struct AdImage {
     /// soll (Sponsor-Leiste). Bestimmt, welche Indizes `/{ns}/info/ad/state`
     /// als `barAds` ausweist.
     in_bar: bool,
+    /// Marke für den Browser-Cache, aus dem Bildinhalt abgeleitet. Beim
+    /// Hochladen einmal berechnet — die Anzeigen bekommen damit ein
+    /// unverändertes Bild mit ~200 Byte bestätigt, statt es erneut über die
+    /// Internetleitung zu ziehen. Bewusst inhaltsbezogen und nicht an den
+    /// Upload gebunden: Ein Reconnect des Hosts lädt dieselben Bilder erneut
+    /// hoch, darf aber nicht sämtliche Caches entwerten.
+    etag: String,
 }
+
+/// Marke eines Bildes: Länge plus ein Streuwert über den Inhalt. Muss nur
+/// innerhalb eines Relay-Laufs stabil sein und sich bei anderem Inhalt
+/// ändern — beides leistet der Standard-Streuer.
+fn bild_marke(bytes: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    format!("\"img-{}-{:x}\"", bytes.len(), hasher.finish())
+}
+
+/// Antwortet mit `304`, wenn der Abrufer die Marke schon hat.
+fn marke_passt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag)
+}
+
+/// Cache-Frist der Bild-Routen — wie im LAN-Server (`AD_CACHE_CONTROL`).
+const BILD_CACHE_CONTROL: &str = "public, max-age=300";
 
 /// Court-Monitor-Datensatz eines Namespace: Anzeige-Konfiguration und
 /// Werbebilder, vom bts-light-Host hochgeladen.
@@ -1276,9 +1304,15 @@ async fn flag_route_global(Path(file): Path<String>) -> impl IntoResponse {
 }
 
 /// Liefert ein hochgeladenes Werbebild eines Namespace (per Index).
+///
+/// Mit Marke und kurzer Cache-Frist wie im LAN. Vorher stand hier
+/// `no-store`: Weil die Anzeigen ihr Bild im Sekundentakt wechseln, zog
+/// jeder TV dabei jedes Mal das ganze Bild erneut über die Internetleitung
+/// (Analyse 18.08.2026).
 async fn ad_image(
     State(broker): State<Broker>,
     Path((ns, idx)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
@@ -1288,23 +1322,47 @@ async fn ad_image(
     };
     // Bytes unter dem Lock herauskopieren, dann den Lock fallen lassen –
     // ein mehrere MB großes memcpy darf nicht den Namespace-Mutex halten.
+    // Kennt der Abrufer die Marke schon, bleibt sogar das Kopieren aus.
     let ad = {
         let map = broker.namespaces.lock().await;
-        map.get(&ns)
+        let Some(ad) = map
+            .get(&ns)
             .and_then(|n| n.monitor.as_ref())
             .and_then(|m| m.ads.get(i))
-            .map(|ad| (ad.content_type.clone(), ad.bytes.clone()))
+        else {
+            return (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response();
+        };
+        let bytes = (!marke_passt(&headers, &ad.etag)).then(|| ad.bytes.clone());
+        (ad.content_type.clone(), ad.etag.clone(), bytes)
     };
-    match ad {
-        Some((content_type, bytes)) => (
+    bild_antwort(ad.0, ad.1, ad.2)
+}
+
+/// Baut die Antwort einer Bild-Route: `304` ohne Bytes, sonst das Bild —
+/// beides mit Marke und Cache-Frist.
+fn bild_antwort(
+    content_type: String,
+    etag: String,
+    bytes: Option<Vec<u8>>,
+) -> axum::response::Response {
+    match bytes {
+        Some(bytes) => (
             [
                 (header::CONTENT_TYPE, content_type),
-                (header::CACHE_CONTROL, "no-store".to_string()),
+                (header::CACHE_CONTROL, BILD_CACHE_CONTROL.to_string()),
+                (header::ETAG, etag),
             ],
             bytes,
         )
             .into_response(),
-        None => (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
+        None => (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, BILD_CACHE_CONTROL.to_string()),
+                (header::ETAG, etag),
+            ],
+        )
+            .into_response(),
     }
 }
 
@@ -1315,6 +1373,7 @@ async fn ad_image(
 async fn tournament_logo(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
@@ -1324,17 +1383,15 @@ async fn tournament_logo(
         map.get(&ns)
             .and_then(|n| n.monitor.as_ref())
             .and_then(|m| m.logo.as_ref())
-            .map(|l| (l.content_type.clone(), l.bytes.clone()))
+            .map(|l| {
+                let bytes = (!marke_passt(&headers, &l.etag)).then(|| l.bytes.clone());
+                (l.content_type.clone(), l.etag.clone(), bytes)
+            })
     };
     match logo {
-        Some((content_type, bytes)) => (
-            [
-                (header::CONTENT_TYPE, content_type),
-                (header::CACHE_CONTROL, "public, max-age=300".to_string()),
-            ],
-            bytes,
-        )
-            .into_response(),
+        // Das Logo hängt in der Kopfleiste jeder Anzeigeseite — mit Marke
+        // bestätigt der Relay es nach Ablauf der Frist mit ~200 Byte.
+        Some((content_type, etag, bytes)) => bild_antwort(content_type, etag, bytes),
         None => (
             [(header::CACHE_CONTROL, "public, max-age=60".to_string())],
             StatusCode::NOT_FOUND,
@@ -1576,6 +1633,7 @@ async fn monitor_upload(
         }
         ads.push(AdImage {
             content_type: sanitize_content_type(&ad.content_type),
+            etag: bild_marke(&bytes),
             bytes,
             in_bar: ad.in_bar,
         });
@@ -1592,6 +1650,7 @@ async fn monitor_upload(
         }
         Some(AdImage {
             content_type: sanitize_content_type(&l.content_type),
+            etag: bild_marke(&bytes),
             bytes,
             in_bar: false,
         })
@@ -4865,18 +4924,166 @@ mod tests {
         assert_eq!(json["hasLogo"], serde_json::json!(true));
 
         // /{ns}/info/logo: liefert die Logo-Bytes.
-        let logo = tournament_logo(State(broker.clone()), Path(NS.into()))
-            .await
-            .into_response();
+        let logo = tournament_logo(
+            State(broker.clone()),
+            Path(NS.into()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(logo.status(), StatusCode::OK);
+        let logo_marke = logo
+            .headers()
+            .get(header::ETAG)
+            .expect("Das Logo braucht eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
         let logo_bytes = axum::body::to_bytes(logo.into_body(), 4096).await.unwrap();
         assert_eq!(&logo_bytes[..], b"logo-bytes");
 
+        // Zweiter Abruf mit derselben Marke → nur Bestätigung, keine Bytes.
+        let logo_wieder = tournament_logo(
+            State(broker.clone()),
+            Path(NS.into()),
+            if_none_match(&logo_marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(logo_wieder.status(), StatusCode::NOT_MODIFIED);
+
         // Unbekannter Namespace ohne Logo → 404 (sauberer onerror-Rückfall).
-        let miss = tournament_logo(State(broker.clone()), Path(NS2.into()))
-            .await
-            .into_response();
+        let miss = tournament_logo(
+            State(broker.clone()),
+            Path(NS2.into()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn if_none_match(marke: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::IF_NONE_MATCH, marke.parse().unwrap());
+        headers
+    }
+
+    #[tokio::test]
+    async fn ein_unveraendertes_werbebild_wird_ueber_die_cloud_nur_bestaetigt() {
+        // Über die Internetleitung wiegt das schwerer als im LAN: Die
+        // Anzeigen wechseln ihr Bild im Sekundentakt, und ohne Marke kam
+        // jedes Mal das ganze Bild neu.
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, NS, &host).await;
+
+        let hochladen = |daten: &'static [u8]| {
+            let broker = broker.clone();
+            async move {
+                let upload = relay_proto::MonitorUpload {
+                    config: relay_proto::MonitorConfig::default(),
+                    tournament_name: "Test-Cup".into(),
+                    ads: vec![relay_proto::AdUpload {
+                        content_type: "image/png".into(),
+                        data: b64(daten),
+                        in_bar: false,
+                    }],
+                    call_timer: relay_proto::CallTimerView::default(),
+                    logo: None,
+                };
+                monitor_upload(State(broker), Path(NS.into()), axum::Json(upload)).await;
+            }
+        };
+        hochladen(b"bild-eins").await;
+
+        let erst = ad_image(
+            State(broker.clone()),
+            Path((NS.into(), "0".into())),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Werbebilder brauchen eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = ad_image(
+            State(broker.clone()),
+            Path((NS.into(), "0".into())),
+            if_none_match(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+
+        // Ein neues Bild unter demselben Index muss die Marke wechseln —
+        // sonst bliebe der alte Sponsor auf allen Anzeigen stehen.
+        hochladen(b"bild-zwei, ein anderes").await;
+        let danach = ad_image(
+            State(broker),
+            Path((NS.into(), "0".into())),
+            if_none_match(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(danach.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn derselbe_upload_behaelt_seine_marke() {
+        // Der Host lädt sein Monitor-Bündel bei jedem Verbindungsaufbau neu
+        // hoch. Wären die Marken an den Upload gebunden statt an den Inhalt,
+        // entwertete jeder WLAN-Wackler sämtliche Bild-Caches.
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, NS, &host).await;
+
+        let upload = || relay_proto::MonitorUpload {
+            config: relay_proto::MonitorConfig::default(),
+            tournament_name: "Test-Cup".into(),
+            ads: vec![relay_proto::AdUpload {
+                content_type: "image/png".into(),
+                data: b64(b"unveraendertes-bild"),
+                in_bar: false,
+            }],
+            call_timer: relay_proto::CallTimerView::default(),
+            logo: None,
+        };
+        monitor_upload(State(broker.clone()), Path(NS.into()), axum::Json(upload())).await;
+        let erst = ad_image(
+            State(broker.clone()),
+            Path((NS.into(), "0".into())),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        monitor_upload(State(broker.clone()), Path(NS.into()), axum::Json(upload())).await;
+        let danach = ad_image(
+            State(broker),
+            Path((NS.into(), "0".into())),
+            if_none_match(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(danach.status(), StatusCode::NOT_MODIFIED);
     }
 
     #[tokio::test]
