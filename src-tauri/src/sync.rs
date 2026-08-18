@@ -656,11 +656,47 @@ impl SyncEngine {
         tablet
             .match_times_store()
             .set_tournament(&snapshot.tournament_name);
-        let assigned: Vec<(i64, &str, &str)> = snapshot
+        // Halle je Feld einmal auflösen (ADR 0036), und zwar wirklich
+        // linear: `court_location_name` würde das Feld selbst noch einmal
+        // in `court_infos` suchen — über alle Felder wäre das quadratisch
+        // (Review 18.08.2026). Stattdessen die Hallen einmal indizieren und
+        // dann je Feld nur die `location_id` nachschlagen. Alles geborgt,
+        // damit die Tupel unten ohne Allokation auskommen.
+        let leer = String::new();
+        let orte: std::collections::HashMap<i64, &str> = snapshot
+            .locations
+            .iter()
+            .map(|l| (l.id, l.name.as_str()))
+            .collect();
+        // Ein-Hallen-Turniere führen die Halle nirgends (siehe
+        // `is_multi_hall`) — dort bleibt sie überall leer, wie auch
+        // `court_location_name` es täte.
+        let hallen: std::collections::HashMap<i64, &str> = if snapshot.is_multi_hall() {
+            snapshot
+                .court_infos
+                .iter()
+                .map(|c| {
+                    let name = c
+                        .location_id
+                        .and_then(|id| orte.get(&id).copied())
+                        .unwrap_or("");
+                    (c.id, name)
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+        let assigned: Vec<(i64, &str, &str, &str)> = snapshot
             .matches
             .iter()
             .filter(|m| m.status == MatchStatus::OnCourt && m.court_id.is_some())
-            .map(|m| (m.id, m.class_label.as_str(), m.discipline.as_str()))
+            .map(|m| {
+                let halle = m
+                    .court_id
+                    .and_then(|id| hallen.get(&id).copied())
+                    .unwrap_or(leer.as_str());
+                (m.id, m.class_label.as_str(), m.discipline.as_str(), halle)
+            })
             .collect();
         let deassigned: HashSet<i64> = snapshot
             .matches
@@ -673,7 +709,7 @@ impl SyncEngine {
         // und liegt sein Ergebnis nicht bloß in der Nachschub-Queue
         // (ADR 0018) —, wurde das Ergebnis in BTP gelöscht; der Stempel
         // muss weg, sonst rechnet das echte Ende mit der falschen Zeit.
-        let on_court: HashSet<i64> = assigned.iter().map(|(id, _, _)| *id).collect();
+        let on_court: HashSet<i64> = assigned.iter().map(|(id, _, _, _)| *id).collect();
         let retry_pending: HashSet<i64> = tablet
             .btp_retries()
             .iter()
@@ -2837,6 +2873,54 @@ mod tests {
         let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
         assert_eq!(courts.len(), 1);
         assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn der_e4_stempel_traegt_die_halle_des_felds() {
+        // Spec `tl-sicht-feinschliff` A1.7 / ADR 0036: Die Halle kommt aus
+        // dem Snapshot in den Messwert — sonst wäre sie zur Auswertungszeit
+        // nicht mehr auflösbar, weil BTP beendete Spiele vom Feld nimmt.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![oncourt_named(7, 1, "A", "B"), oncourt_named(8, 2, "C", "D")],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+
+        engine.reconcile_match_times(&tablet, &snap, 1_000);
+
+        assert_eq!(tablet.match_times_store().entry(7).unwrap().hall, "Halle A");
+        assert_eq!(tablet.match_times_store().entry(8).unwrap().hall, "Halle B");
+    }
+
+    #[test]
+    fn ein_ein_hallen_turnier_stempelt_keine_halle() {
+        // Ohne zweite Halle gibt `court_location_name` bewusst einen leeren
+        // String zurück — die Hallen-Achse wird dort gar nicht angeboten.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, Some(1))],
+            vec![oncourt_named(7, 1, "A", "B")],
+            vec![BtpLocation {
+                id: 1,
+                name: "Einzige Halle".to_string(),
+            }],
+        );
+
+        engine.reconcile_match_times(&tablet, &snap, 1_000);
+
+        assert_eq!(tablet.match_times_store().entry(7).unwrap().hall, "");
     }
 
     #[test]

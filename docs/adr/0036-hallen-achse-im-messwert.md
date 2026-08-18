@@ -6,23 +6,22 @@
 ## Kontext
 
 Die Spielzeiten-Statistik (ADR 0027, `match-times.json`) misst je Match drei
-Stempel und wertet sie zu Medianen aus. Ausgewertet wird bisher **eine**
+Stempel und wertet sie zu Medianen aus. Ausgewertet wurde bisher **eine**
 Achse: Klasse × Disziplin. Die Turnierleitung eines Zwei-Hallen-Turniers will
 zusätzlich wissen, ob eine **Halle** systematisch langsamer läuft als die
 andere (Spec [`tl-sicht-feinschliff`](../features/tl-sicht-feinschliff.md),
 Punkt 1).
 
-Der Messwert `MatchTimeEntry` trägt heute `class_label` und `discipline` —
-beide werden beim **ersten Feldzuweisungs-Stempel** (E4) mitgeschrieben,
-damit die Statistik ohne Snapshot-Lookup rechnen kann. Eine Halle steht
-nirgends.
+Der Messwert `MatchTimeEntry` trug `class_label` und `discipline` — beide
+werden beim **ersten Feldzuweisungs-Stempel** (E4) mitgeschrieben, damit die
+Statistik ohne Snapshot-Lookup rechnen kann. Eine Halle stand nirgends.
 
-Damit stehen zwei Wege offen, die Halle in die Auswertung zu bekommen. Die
-Entscheidung ist nicht folgenlos: Sie bestimmt, welche Halle ein umgezogenes
-Spiel behält, ob alte Messwerte mitzählen und was ein Rollback kostet.
+Damit standen zwei Wege offen. Die Entscheidung ist nicht folgenlos: Sie
+bestimmt, welche Halle ein umgezogenes Spiel behält, ob alte Messwerte
+mitzählen und was ein Rollback kostet.
 
 Erschwerend kommt hinzu, dass es im System **drei** Hallen-Begriffe gibt: die
-Halle des Felds, die Halle des Vorbereitungs-Aufrufs und die Halle der
+Halle des Felds, die Halle des Vorbereitungs-Aufrufs und die der
 Auto-Vorverteilung (ADR 0029/0030). Genau einer davon wird gemessen, und das
 muss festgelegt sein.
 
@@ -32,9 +31,10 @@ muss festgelegt sein.
 zusätzliches Feld `hall` an `MatchTimeEntry`, mit `#[serde(default)]`.
 
 Gemessen wird die **Halle des Felds bei der ersten Feldzuweisung**, aufgelöst
-über `court.location_id → locations.name` aus dem BTP-Snapshot. Nicht die
-Halle des Vorbereitungs-Aufrufs und nicht die der Auto-Vorverteilung — die
-Statistik misst, wo **gespielt** wurde, nicht wohin gerufen wurde.
+über `BtpSnapshot::court_location_name` (`court.location_id → locations.name`).
+Nicht die Halle des Vorbereitungs-Aufrufs und nicht die der
+Auto-Vorverteilung — die Statistik misst, wo **gespielt** wurde, nicht wohin
+gerufen wurde.
 
 Der Stempel folgt damit demselben Vertrag wie `class_label` und `discipline`:
 einmal beim Erststempel gesetzt, danach **immun gegen Feldwechsel**. Wechselt
@@ -49,8 +49,8 @@ Die Hallen-Achse bleibt **reine Anzeige**: Die Prognose-Fallback-Kette
 
 **Halle zur Anzeigezeit aus dem BTP-Snapshot nachschlagen.** Verworfen.
 Sie wäre immer aktuell und bräuchte keine Schema-Änderung — aber sie ist
-genau dann weg, wenn man sie braucht: Sobald BTP ein beendetes Spiel vom
-Feld nimmt, ist die Zuordnung Match → Feld → Halle nicht mehr auflösbar. Die
+genau dann weg, wenn man sie braucht: Sobald BTP ein beendetes Spiel vom Feld
+nimmt, ist die Zuordnung Match → Feld → Halle nicht mehr auflösbar. Die
 Statistik ist per Definition Rückschau über beendete Spiele; ein Verfahren,
 das die Rückschau-Daten verliert, taugt dafür nicht. Der Nebeneffekt wäre
 zudem, dass dieselbe Auswertung an zwei Tagen verschiedene Ergebnisse
@@ -83,16 +83,24 @@ ein Spiel zufällig zuletzt angefasst wurde.
 - **Alte Messwerte tragen keine Halle.** Wird mitten im Turnier
   aktualisiert, sammeln sich die Spiele davor in einer Zeile „ohne Halle".
   Die Hallen-Achse startet faktisch neu.
-- **Ein umgezogenes Spiel bleibt in seiner alten Hallenzeile.** Das ist die
-  Kehrseite der Feldwechsel-Immunität und in der Praxis der seltenere Fall.
+- **Ein umgezogenes Spiel bleibt in seiner alten Hallenzeile.** Die Kehrseite
+  der Feldwechsel-Immunität und in der Praxis der seltenere Fall.
 - **Eine BTP-Umbenennung mitten im Turnier spaltet die Zeile** in zwei
   Hallen mit demselben Ort.
 - **Ein Rollback ist nicht verlustfrei.** Eine ältere App-Version liest die
   Datei weiter, ignoriert `hall` aber und schreibt sie **ohne** das Feld
-  zurück — alle bis dahin gestempelten Hallen sind dann verloren. Muss im
-  PR-Text stehen.
+  zurück — alle bis dahin gestempelten Hallen sind dann verloren. Gehört in
+  den PR-Text.
 - Bei Ein-Hallen-Turnieren ist das Feld immer leer; die Achse wird dort
   ausgeblendet statt eine sinnlose Ein-Zeilen-Tabelle zu zeigen.
+- **Eine einmal leer gestempelte Halle bleibt leer.** Trägt ein Feld beim
+  Erststempel (noch) keine `LocationID`, steht der Messwert dauerhaft unter
+  „ohne Halle" — auch wenn die Turnierleitung das in BTP eine Minute später
+  nachträgt. Ein Nachziehen nur für leere Werte wäre mit der
+  Feldwechsel-Immunität vereinbar (es überschriebe ja nichts), ist aber
+  bewusst nicht gebaut: Es brächte einen zweiten Schreibpfad in den
+  Erststempel, und der Fall ist selten. Wird er im Betrieb auffällig, ist
+  das die naheliegende Nachbesserung.
 
 ## Verweise
 

@@ -198,6 +198,13 @@ Spiele, Beendete Spiele.
 - [ ] Panel-Höhen sind gegen ein Mindestmaß geklammert (kein Panel wird auf
       0/negative Höhe gezogen); Doppeltipp auf einen Rand setzt die
       automatische Verteilung zurück.
+- [x] **Inhalts-Schalter gehören ins Profil, nicht ins Gerät** (bekräftigt
+      18.08.2026): Die Achse des Panels „Spielzeiten"
+      (`display.time_stats_axis`, Spec `tl-sicht-feinschliff`) beschreibt,
+      WAS gezeigt wird, und liegt deshalb im Profil — anders als der
+      Schriftgrößen-Zoom, der eine reine Display-Eigenschaft ist. Ein Profil
+      ohne das Feld liest sich als „Konkurrenz", also als die bisherige
+      Ansicht.
 - [x] **Die Höhenverteilung hängt allein an `height_fr`, nicht am Inhalt**
       (nachgeschärft 18.08.2026 nach einem Fehlerbericht): Wächst der Inhalt
       eines Panels — die Spielliste lädt beim Scrollen nach —, ändert das

@@ -1728,6 +1728,11 @@ function builtInProfile() {
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
       listPosition: "right",
+      // Voreinstellung des Panels „Spielzeiten": die ursprüngliche Ansicht
+      // (Klasse x Disziplin). Ein Profil ohne das Feld landet über den
+      // Serde-Default auf demselben Wert — für niemanden ändert sich etwas,
+      // der nichts umstellt (A1.2).
+      timeStatsAxis: "group",
     },
     updatedAtMs: 0,
   };
@@ -1922,6 +1927,13 @@ function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
 function zeigeRestzeitAktiv() { return !!activeDisplay().showCourtRemaining; }
 function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
+/** Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`). Ein
+ *  unbekannter Wert fällt auf die ursprüngliche Ansicht zurück — ein Profil
+ *  aus einer NEUEREN App-Version darf diese Seite nicht ratlos machen. */
+function aktiveZeitenAchse() {
+  const gewaehlt = activeDisplay().timeStatsAxis;
+  return ZEITEN_ACHSEN.some((a) => a.id === gewaehlt) ? gewaehlt : "group";
+}
 
 // `applyListPosition()` gibt es nicht mehr: „Spielliste rechts/darunter"
 // ist seit dem Mehrspalten-Layout (Plan tl-liste-vereinfachen F) nur noch
@@ -6500,6 +6512,14 @@ function uebernehmeEditorFelder() {
     showGroup: $("prof-show-group").checked,
     showCourtRemaining: $("prof-show-court-remaining").checked,
     unlimitedCourtCalls: $("prof-unlimited-calls").checked,
+    // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
+    // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
+    // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
+    // Rückfall auf den bisherigen Wert, nicht auf die Vorgabe: Fehlte das
+    // Feld je (ausgeblendete Option), setzte „group" die gespeicherte Wahl
+    // still zurück — dieselbe Haltung wie beim durchgereichten
+    // `listPosition` darunter.
+    timeStatsAxis: $("prof-time-axis") ? $("prof-time-axis").value : (kopie.display.timeStatsAxis || "group"),
     // `listPosition` steht bewusst NICHT mehr im Editor (Plan
     // tl-liste-vereinfachen F: abgelöst durch die Spaltenzahl), wird aber
     // unverändert weitergereicht — eine ältere App-Version liest daraus
@@ -6561,6 +6581,20 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
+      <label class="checkbox-row" style="gap:8px">
+        <span>Spielzeiten gruppieren nach</span>
+        <select id="prof-time-axis">${ZEITEN_ACHSEN
+          // „Halle" nur bei Mehr-Hallen-Turnieren anbieten (A1.6): Sonst
+          // wäre die Auswertung eine einzige Zeile ohne Aussage. Ein Profil,
+          // das die Achse bereits trägt (anderes Turnier, andere Halle),
+          // behält seine Option — sonst kippte allein das Öffnen des
+          // Editors die gespeicherte Wahl still auf „Konkurrenz".
+          .filter((a) => a.id !== "hall"
+            || (state && state.multi_hall) || d.timeStatsAxis === "hall")
+          .map((a) =>
+            `<option value="${a.id}"${(d.timeStatsAxis || "group") === a.id ? " selected" : ""}>${esc(a.label)}</option>`
+          ).join("")}</select>
+      </label>
     </fieldset>
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>
@@ -6751,31 +6785,85 @@ function closeTimeline() {
  *  Ende), Netto (1. Punkt → Ende) und die Anlaufzeit dazwischen. Reine
  *  Anzeige; das Panel existiert nur, wenn der Host `time_stats` liefert
  *  (`panelAvailable`). */
+/**
+ * Panel „Spielzeiten" — dieselben Messwerte, vier Schnitte (Spec
+ * `tl-sicht-feinschliff`, Punkt 1).
+ *
+ * Der Host liefert alle vier gemeinsam; gewählt wird hier, weil der
+ * Turnier-PC den Zustand seit ADR 0034 einmal ZENTRAL für alle Geräte baut,
+ * die Achse aber im Profil je Gerät liegt. Umschalten ist damit ein reiner
+ * Client-Vorgang ohne Rückfrage beim Host.
+ */
+const ZEITEN_ACHSEN = [
+  { id: "group", label: "Konkurrenz", spalte: "Klasse" },
+  { id: "class", label: "Klasse", spalte: "Klasse" },
+  { id: "discipline", label: "Disziplin", spalte: "Disziplin" },
+  { id: "hall", label: "Halle", spalte: "Halle" },
+];
+
+/** Zeilen der aktiven Achse — mit Rückfall auf „Konkurrenz", wenn die
+ *  gewählte Achse gerade nichts hergibt (Hallen-Achse in einem
+ *  Ein-Hallen-Turnier: der Host liefert sie leer, A1.6). */
+function zeitenAchse(stats) {
+  const gewaehlt = aktiveZeitenAchse();
+  const listen = {
+    group: stats.rows || [],
+    class: stats.by_class || [],
+    discipline: stats.by_discipline || [],
+    hall: stats.by_hall || [],
+  };
+  if (gewaehlt !== "group" && !listen[gewaehlt].length) {
+    return { id: "group", zeilen: listen.group };
+  }
+  return { id: gewaehlt, zeilen: listen[gewaehlt] || [] };
+}
+
+/** Beschriftung einer Zeile je Achse. Der Host schickt nur die Kürzel —
+ *  zusammengesetzt wird hier, wie überall auf dieser Seite. */
+function zeitenZeilenLabel(achse, r) {
+  if (achse === "class") return r.class_label || "ohne Klasse";
+  if (achse === "discipline") return disziplin(r.discipline) || "ohne Disziplin";
+  if (achse === "hall") return r.hall || "ohne Halle";
+  return klasse(r.discipline, r.class_label) || "ohne Klasse";
+}
+
 function renderTimes() {
   const stats = state.time_stats;
-  setPanelCount("times", stats && stats.rows ? stats.rows.length : 0);
   const box = $("times-box");
-  if (!box || !stats) return;
-  setPanelPreview("times", stats.rows.length
-    ? `${stats.rows.length} Gruppe(n) gemessen`
+  if (!stats) { setPanelCount("times", 0); return; }
+  const { id: achse, zeilen: rows } = zeitenAchse(stats);
+  // Fiel die gewählte Achse mangels Daten zurück, wird das GESAGT. Ohne
+  // den Hinweis stünde da kommentarlos eine andere Tabelle, und der
+  // Turnierleiter schlösse daraus, die Einstellung tue nichts.
+  const gewaehlt = aktiveZeitenAchse();
+  const rueckfall = achse !== gewaehlt
+    ? `<p class="note">Für „${esc((ZEITEN_ACHSEN.find((a) => a.id === gewaehlt) || {}).label || gewaehlt)}" liegen keine Messwerte vor — gezeigt wird „Konkurrenz".</p>`
+    : "";
+  // Zähler und Vorschau folgen der AKTIVEN Achse (A1.4) — sonst stünde im
+  // zugeklappten Kopf eine Zahl, die zur aufgeklappten Tabelle nicht passt.
+  setPanelCount("times", rows.length);
+  if (!box) return;
+  setPanelPreview("times", rows.length
+    ? `${rows.length} ${achse === "hall" ? "Halle(n)" : "Gruppe(n)"} gemessen`
     : "noch keine Messwerte");
+  const spalte = (ZEITEN_ACHSEN.find((a) => a.id === achse) || ZEITEN_ACHSEN[0]).spalte;
   const fuss = `<p class="meta">${stats.tournament_brutto_mins != null
     ? `Turnier gesamt (Brutto-Median): ${stats.tournament_brutto_mins} min · `
     : ""}Startwert ohne Messwerte: ${stats.default_mins} min — solche Prognosen zeigt die Spielliste als „~hh:mm".</p>`;
-  if (!stats.rows.length) {
-    setzeHtmlWennNeu(box, `<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
+  if (!rows.length) {
+    setzeHtmlWennNeu(box, `${rueckfall}<p class="note">Noch kein regulär beendetes Spiel gemessen.</p>${fuss}`);
     return;
   }
-  const zeilen = stats.rows.map((r) => `<tr>
-      <td>${esc(klasse(r.discipline, r.class_label) || "ohne Klasse")}</td>
+  const zeilen = rows.map((r) => `<tr>
+      <td>${esc(zeitenZeilenLabel(achse, r))}</td>
       <td class="num">${r.count}</td>
       <td class="num">${r.brutto_mins} min</td>
       <td class="num">${r.netto_mins} min</td>
       <td class="num">${r.diff_mins} min</td>
     </tr>`).join("");
-  setzeHtmlWennNeu(box, `<table class="times-table">
+  setzeHtmlWennNeu(box, `${rueckfall}<table class="times-table">
       <thead><tr>
-        <th>Klasse</th>
+        <th>${esc(spalte)}</th>
         <th class="num" title="Anzahl regulär gemessener Spiele">Spiele</th>
         <th class="num" title="Median: Feldzuweisung bis Spielende">Brutto</th>
         <th class="num" title="Median: erster Punkt bis Spielende">Netto</th>
