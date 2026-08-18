@@ -255,6 +255,15 @@ Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
   wieder her. Kein Panel lässt sich auf null ziehen. Ist ein Panel
   dazwischen ausgeblendet, greift der Steg automatisch das nächste
   sichtbare.
+  **Die Verteilung hängt nur am gezogenen Verhältnis, nicht am Inhalt**
+  (seit v0.9.229): Wie viele Zeilen ein Panel gerade zeigt, ändert seine
+  Höhe nicht. Vorher wuchs die Spielliste beim Nachladen auf Kosten ihrer
+  Nachbarn, und der Steg ließ sich danach nicht mehr sinnvoll ziehen.
+  Umgekehrt heißt das: Ein Panel mit wenig Inhalt behält seinen Anteil,
+  auch wenn darunter Platz frei bleibt — wer das anders will, zieht den
+  Steg (das wirkt jetzt wieder zuverlässig). Das Panel „Felder" bildet
+  weiterhin die Ausnahme: Es gibt ungenutzte Höhe automatisch an die
+  übrigen Panels seiner Spalte zurück.
 
 #### Spalten (1 bis 3)
 

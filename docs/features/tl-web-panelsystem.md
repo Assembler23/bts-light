@@ -198,6 +198,20 @@ Spiele, Beendete Spiele.
 - [ ] Panel-Höhen sind gegen ein Mindestmaß geklammert (kein Panel wird auf
       0/negative Höhe gezogen); Doppeltipp auf einen Rand setzt die
       automatische Verteilung zurück.
+- [x] **Die Höhenverteilung hängt allein an `height_fr`, nicht am Inhalt**
+      (nachgeschärft 18.08.2026 nach einem Fehlerbericht): Wächst der Inhalt
+      eines Panels — die Spielliste lädt beim Scrollen nach —, ändert das
+      seine Höhe nicht. Umsetzung: `.panel { flex-basis: 0 }` in `tl.html`;
+      mit dem Vorgabewert `auto` ist die Flex-Basis die Inhaltshöhe, und
+      dann verdrängt ein wachsendes Panel seine Nachbarn bis auf
+      `--panel-min`. Zugleich Voraussetzung für das Kriterium darüber:
+      `flex-grow` — das, was der Steg schreibt — verteilt **nur freien
+      Raum**; übersteigt die Summe der Inhaltshöhen die Spalte, gibt es
+      keinen, und das Ziehen bleibt wirkungslos. Gemessen an den echten
+      Regeln der Datei (300 px Spalte, zwei Panels, gleiche Anteile):
+      vorher 72/192 px unabhängig vom gezogenen Verhältnis, nachher 132/132
+      px und 3:1 → 192/72 px. Zugeklappte Panels bleiben ausgenommen
+      (`.panel.panel-collapsed { flex: none }`).
 - [ ] Ein Turnierleiter kann in `tl.html` ein Profil anlegen, benennen,
       bearbeiten, löschen und als Standard markieren.
 - [ ] Jedes Gerät wählt ein Profil; die Wahl ist an die Geräte-Identität

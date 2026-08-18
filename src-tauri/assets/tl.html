@@ -877,7 +877,33 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    das ohne Ausnahme auch für „Felder": Der frühere Sonderstatus als
    fixierte Ankerposition ist entfallen, das Panel trägt einen ganz
    normalen Reorder-Griff und eine Spaltenzuordnung wie jedes andere. */
-.panel { display: flex; flex-direction: column; min-height: var(--panel-min); overflow: hidden; }
+/* `flex-basis: 0` ist hier NICHT kosmetisch, sondern die Bedingung dafür,
+   dass die Höhenverteilung überhaupt funktioniert (Fehlerbericht
+   18.08.2026: „Nachladen vergrößert die Box, danach lässt sie sich nicht
+   mehr richtig ziehen").
+
+   Mit dem Vorgabewert `auto` ist die Flex-Basis eines Panels seine
+   INHALTSHÖHE. Die Spielliste lädt beim Scrollen nach (`QUEUE_PAGE`), ihr
+   Inhalt wächst also im Betrieb — und mit ihm ihre Basis. Zwei Folgen,
+   beide gemeldet:
+
+   1. Die Liste verdrängt ihre Nachbarn bis auf `--panel-min`, obwohl alle
+      denselben `heightFr`-Anteil haben. Gemessen mit den Regeln dieser
+      Datei (300px Spalte, „Felder" + „Spielliste", beide `flexGrow: 1`):
+      72px/228px statt 150px/150px — schon bei 40 Zeilen.
+   2. Übersteigt die Summe der Basis-Höhen die Spaltenhöhe, gibt es keinen
+      freien Raum mehr zu verteilen — und `flex-grow` verteilt NUR freien
+      Raum. Genau das schreibt der Steg (`wireStegs`) beim Ziehen. Er wird
+      damit wirkungslos: 3:1 gezogen blieb es bei 72px/228px, statt auf
+      225px/75px zu gehen.
+
+   Mit `flex-basis: 0` zählt allein die `heightFr`-Gewichtung, unabhängig
+   vom Inhalt — dieselbe Entscheidung, die `.tl-column` mit `flex: 1 1 0`
+   für die Spalten längst trifft. Zugeklappte Panels bleiben ausgenommen
+   (`.panel.panel-collapsed { flex: none }` weiter unten ist spezifischer
+   und setzt die Basis zurück auf `auto`): Sie sollen genau ihre Kopfzeile
+   hoch sein, nicht `--panel-min`. */
+.panel { display: flex; flex-direction: column; flex-basis: 0; min-height: var(--panel-min); overflow: hidden; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-head {
   flex: none; display: flex; align-items: center; gap: 8px;
