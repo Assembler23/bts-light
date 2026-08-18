@@ -813,21 +813,56 @@ pub struct AnnounceJob {
     pub kind: AnnounceJobKind,
 }
 
-/// Ansage-Aufträge aus einer HTTP-Antwort lesen, **ohne** an einer
-/// unbekannten Ansageart die ganze Charge zu verlieren.
+/// Ansage-Aufträge aus einer HTTP-Antwort lesen, **ohne** an einem einzelnen
+/// Eintrag die ganze Charge zu verlieren.
 ///
 /// Der Fall ist real: Im Auto-Update-Fenster steht ein Master mit neuerem
-/// Stand neben einem Ansage-Slave mit älterem. Erteilt der Master eine
-/// Ansageart, die der Slave nicht kennt, scheiterte ein typisiertes Lesen
-/// der **ganzen Liste** — die zweite Halle bliebe 60 Sekunden stumm, auch
-/// für ganz normale Aufrufe. Unbekannte Aufträge werden deshalb einzeln
-/// übersprungen ([`AnnounceJobKind::Unknown`]), die übrigen gesprochen.
+/// Stand neben einem Ansage-Slave mit älterem. Ein typisiertes Lesen der
+/// **ganzen Liste** scheiterte dann an einem einzigen Eintrag — die zweite
+/// Halle bliebe 60 Sekunden stumm, auch für ganz normale Aufrufe.
+///
+/// Zwei Fehlerarten, und sie brauchen **zwei** Vorkehrungen:
+///
+/// 1. **Unbekannte Ansageart** (neuer `kind`-Wert) — fängt
+///    [`AnnounceJobKind::Unknown`] per `#[serde(other)]`.
+/// 2. **Bekannte Ansageart mit verändertem Rumpf** (ein neues Pflichtfeld,
+///    ein Enum-Wert, den dieser Stand nicht kennt) — dagegen hilft
+///    `#[serde(other)]` **nicht**, es greift nur beim Tag. Deshalb wird die
+///    Liste hier Element für Element ausgewertet und ein unlesbarer Eintrag
+///    einzeln verworfen. Genau so ist `CourtCall.side` einmal dazugekommen;
+///    es überlebte nur, weil jemand an einen Serde-Default gedacht hat —
+///    darauf soll sich der Schutz nicht verlassen müssen (Review
+///    18.08.2026).
+///
+/// Was übersprungen wurde, steht im Protokoll: Am Turniertag ist „die
+/// zweite Halle ruft nicht" sonst ein Symptom ohne jede Spur.
 pub fn announce_jobs_aus_json(json: &str) -> Vec<AnnounceJob> {
-    serde_json::from_str::<Vec<AnnounceJob>>(json)
-        .unwrap_or_default()
+    let roh: Vec<serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            // Abgeschnittene Antwort, HTML-Fehlerseite des Masters: Hier ist
+            // nichts zu retten, aber es darf nicht lautlos passieren.
+            tracing::warn!(
+                "Ansage-Aufträge nicht lesbar ({e}) — Anfang der Antwort: {:.120}",
+                json
+            );
+            return Vec::new();
+        }
+    };
+    let gesamt = roh.len();
+    let jobs: Vec<AnnounceJob> = roh
         .into_iter()
+        .filter_map(|wert| serde_json::from_value::<AnnounceJob>(wert).ok())
         .filter(|job| job.kind != AnnounceJobKind::Unknown)
-        .collect()
+        .collect();
+    if jobs.len() < gesamt {
+        tracing::info!(
+            "{} von {gesamt} Ansage-Aufträgen übersprungen (unbekannt oder unlesbar) \
+             — vermutlich ein Turnier-PC mit neuerem Stand",
+            gesamt - jobs.len()
+        );
+    }
+    jobs
 }
 
 /// Nach dieser Zeit wird ein Auftrag nicht mehr gesprochen.
@@ -6068,5 +6103,39 @@ mod tests {
         assert_eq!(jobs.len(), 2, "die beiden bekannten Auftraege ueberleben");
         assert_eq!(jobs[0].id, 1);
         assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn ein_kaputter_auftrag_verwirft_die_uebrigen_ebenso_wenig() {
+        // Die zweite Haelfte desselben Risikos, und die wahrscheinlichere
+        // (Review 18.08.2026): Nicht nur ein UNBEKANNTER Typ kann kommen,
+        // sondern auch ein bekannter mit veraendertem Rumpf — ein neues
+        // Pflichtfeld, ein Enum-Wert, den dieser Stand nicht kennt. Genau so
+        // ist `CourtCall.side` einmal entstanden; es ueberlebte nur, weil
+        // jemand an einen Serde-Default gedacht hat. Darauf darf sich der
+        // Schutz nicht verlassen: `#[serde(other)]` greift NUR beim Tag.
+        let json = r#"[
+          {"id":1,"hall":"Halle A","createdAtMs":1000,"kind":"officials","courtId":3},
+          {"id":2,"hall":"Halle A","createdAtMs":1001,"kind":"court_call","courtId":4},
+          {"id":3,"hall":"Halle A","createdAtMs":1002,"kind":"officials","courtId":5}
+        ]"#;
+
+        let jobs = announce_jobs_aus_json(json);
+
+        assert_eq!(
+            jobs.len(),
+            2,
+            "der Auftrag ohne matchId faellt weg, die uebrigen bleiben"
+        );
+        assert_eq!(jobs[0].id, 1);
+        assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn eine_voellig_kaputte_antwort_liefert_nichts_statt_zu_stuerzen() {
+        // Abgeschnittenes JSON, HTML-Fehlerseite des Masters: nichts
+        // Brauchbares, aber auch kein Absturz.
+        assert!(announce_jobs_aus_json("nicht mal JSON").is_empty());
+        assert!(announce_jobs_aus_json(r#"{"kein":"array"}"#).is_empty());
     }
 }

@@ -1014,7 +1014,12 @@ fn announcement_response(tablet: &TabletState, hall: &str, now_ms: u64) -> relay
     } else {
         format!("In {hall} ist kein Ansage-Gerät verbunden")
     };
-    ok.with_warning(format!("{wo} — der Aufruf wurde nicht gesprochen."))
+    // „die Ansage", nicht „der Aufruf": Über diese Funktion laufen auch die
+    // Schiedsrichter- und die Spielbeginn-Ansage, und die sind ausdrücklich
+    // KEIN Aufruf (sie zählen keine Stufe hoch). Stünde dort „der Aufruf",
+    // widerspräche der Bildschirm der Bedienanleitung, und die
+    // Turnierleitung schlösse daraus, die Zählung sei bewegt worden.
+    ok.with_warning(format!("{wo} — die Ansage wurde nicht gesprochen."))
 }
 
 /// Warum eine Ergebnis-Korrektur gerade nicht geht.
@@ -6590,10 +6595,22 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            tablet.announce_jobs_since("Halle B", 0, 50_000).len(),
-            1,
-            "die Halle des Felds hört die Ansage"
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        assert_eq!(jobs.len(), 1, "die Halle des Felds hört die Ansage");
+        // Und es ist wirklich DIESE Ansage. Ohne die Typ-Prüfung wären alle
+        // Tests hier auch dann grün, wenn der Arm versehentlich einen
+        // Schiedsrichter-Auftrag ablegte — die Halle hörte im Turnier die
+        // falsche Ansage (Review 18.08.2026).
+        assert!(
+            matches!(
+                jobs[0].kind,
+                crate::tablet::state::AnnounceJobKind::StartPlay {
+                    court_id: 3,
+                    match_id: 7
+                }
+            ),
+            "erwartet wurde ein StartPlay-Auftrag für Feld 3/Spiel 7, war: {:?}",
+            jobs[0].kind
         );
         assert!(
             tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
