@@ -3563,7 +3563,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // des alten Spiels unter der neuen Match-ID einschleusen.
             if let Some(state) = state {
                 let embedded_ok =
-                    !relay_proto::state_sync_match_id(&state).is_some_and(|m| m != match_id);
+                    relay_proto::state_sync_match_id(&state).is_none_or(|m| m == match_id);
                 if state.len() <= MAX_STATE_LEN && embedded_ok {
                     namespace.court_state.insert(court_id, state);
                 }
