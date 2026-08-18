@@ -4,6 +4,26 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.223
+
+- **Ein lahmes badhub kann keine Tablets mehr abwerfen.** Der
+  Live-Score-Push lief bisher **innerhalb** der Tablet-Verbindung, mit
+  15 Sekunden Zeitlimit — der Server erwartet aber spätestens nach 10
+  Sekunden ein Lebenszeichen desselben Sockets und schloss ihn sonst
+  **samt Freigabe des Felds**. Bei einem hängenden badhub hätte das alle
+  Felder gleichzeitig getroffen. Der Push läuft jetzt hinter der
+  Verbindung: je Feld immer nur einer unterwegs (keine überholenden,
+  veralteten Stände), währenddessen sammelt sich nur der neueste Stand
+  an — ein Punkteregen wird dadurch zusätzlich zusammengefasst statt in
+  eine Anfragen-Lawine übersetzt.
+- **Der Nachschub nach BTP hält den Zyklus nicht mehr auf.** Die
+  Wiederholungs-Warteschlange arbeitete alle Einträge nacheinander im
+  5-Sekunden-Zyklus ab; bei zwanzig gestauten Ergebnissen und trägem BTP
+  standen Liveticker, automatische Feldvergabe und
+  Turnierleitungs-Anzeige minutenlang. Ein Durchlauf hat jetzt 20
+  Sekunden Zeit, der Rest folgt beim nächsten Versuch — verloren geht
+  nichts.
+
 ## v0.9.222
 
 - **Turnier-PC liest die Konfiguration nicht mehr bei jeder Anfrage von

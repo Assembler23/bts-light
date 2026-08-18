@@ -150,6 +150,20 @@ const EMPTY_CONFIRM_POLLS: u32 = 2;
 /// Sekundentakt mit Login+SENDUPDATE beharkt werden.
 const BTP_RETRY_FLUSH_EVERY: Duration = Duration::from_secs(30);
 
+/// Zeit-Deckel EINES Nachschub-Durchlaufs.
+///
+/// Der Durchlauf läuft **innerhalb** des Poll-Zyklus und schreibt seine
+/// Einträge nacheinander; ein Write kostet im schlechtesten Fall zwei
+/// TCP-Verbindungen mit je 5 s Verbindungs- und 10 s Lesefrist. Ohne
+/// Grenze hielte eine volle Warteschlange bei trägem BTP den ganzen
+/// Zyklus an — mit zwanzig gestauten Ergebnissen wären das Minuten, in
+/// denen Liveticker, automatische Feldvergabe und der
+/// Turnierleitungs-Zustand stillstehen (Analyse 18.08.2026). Nach dieser
+/// Zeit bricht der Durchlauf ab; die restlichen Einträge bleiben in der
+/// Warteschlange und kommen beim nächsten Flush dran — verloren geht
+/// nichts, nur der Rest des Zyklus läuft wieder an.
+const BTP_RETRY_FLUSH_BUDGET: Duration = Duration::from_secs(20);
+
 /// Spieler-Checkout-Fenster (Tilos 5-Minuten-Guard): Wird ein Ergebnis
 /// später als 5 min nach Spielende nachgeschoben, bleibt der
 /// Players-Block weg — sonst würde ein Replay die Spieler erneut
@@ -898,7 +912,21 @@ impl SyncEngine {
         self.last_btp_retry_flush = Some(Instant::now());
         let now = now_ms();
         let mut still_failing = 0usize;
-        for entry in entries {
+        let begonnen = Instant::now();
+        let gesamt = entries.len();
+        for (erledigt, entry) in entries.into_iter().enumerate() {
+            // Zeit-Deckel (siehe `BTP_RETRY_FLUSH_BUDGET`): Der Rest des
+            // Zyklus — Liveticker, Auto-Vergabe, TL-Zustand — darf nicht
+            // hinter einer langen Warteschlange verhungern. Die übrigen
+            // Einträge bleiben stehen und sind beim nächsten Flush dran.
+            if begonnen.elapsed() >= BTP_RETRY_FLUSH_BUDGET {
+                tracing::info!(
+                    "Nachschub-Durchlauf nach {erledigt}/{gesamt} Einträgen abgebrochen \
+                     (Zeitdeckel {} s) — Rest folgt beim nächsten Versuch",
+                    BTP_RETRY_FLUSH_BUDGET.as_secs()
+                );
+                break;
+            }
             let match_id = entry.update.btp_match_id;
             // Direkt vor dem Write erneut prüfen: Hat ein zwischenzeitlich
             // erfolgreicher Direkt-Write (Tablet-Retry) den Eintrag schon

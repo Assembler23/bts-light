@@ -77,6 +77,9 @@ pub struct ServerCtx {
     /// dem veralteten In-Memory-Stand und löschte den Platten-Schreibvorgang
     /// wieder kommentarlos.)
     shared_config: Arc<std::sync::Mutex<AppConfig>>,
+    /// Warteschlange der Live-Score-Pushes an badhub, je Feld serialisiert
+    /// und gebündelt — siehe [`ScorePushQueue`].
+    score_push: Arc<ScorePushQueue>,
     /// Zwischenstand des Config-Lesens: `(Änderungszeit, Größe, geparst)`.
     ///
     /// `app_config()` läuft auf den heißesten Pfaden — jede TL-Anfrage
@@ -90,7 +93,86 @@ pub struct ServerCtx {
     config_cache: std::sync::Mutex<Option<(std::time::SystemTime, u64, AppConfig)>>,
 }
 
+/// Die Live-Score-Pushes an badhub, **je Feld serialisiert und
+/// gebündelt** — und vor allem: **außerhalb** der Tablet-Verbindung.
+///
+/// Vorher lief der Push mitten in der WebSocket-Schleife des Tablets, mit
+/// 15 s Timeout. Der Server erwartet aber spätestens nach 10 s ein
+/// Lebenszeichen desselben Sockets (`STALE_AFTER`) — ein hängendes badhub
+/// ließ die Verbindung also auflaufen, der Server schloss sie **und gab
+/// das Feld frei**. Bei zwanzig Feldern hätte das alle zugleich getroffen
+/// (Analyse 18.08.2026). Der Push gehört deshalb hinter die Verbindung,
+/// nicht hinein.
+///
+/// Trotzdem kein blindes `spawn` je Punkt: Zwei Pushes desselben Felds
+/// dürfen sich nicht überholen (badhub zeigte sonst kurzzeitig den
+/// älteren Stand). Deshalb ist je Feld immer nur einer unterwegs, und
+/// während er läuft, sammelt sich nur der **neueste** Stand an — ein
+/// Punkteregen wird so zusätzlich zusammengefasst statt in eine
+/// Anfragen-Lawine übersetzt.
+#[derive(Default)]
+struct ScorePushQueue {
+    /// Beides unter EINEM Schloss, damit „nichts mehr da, ich höre auf"
+    /// und „ich stelle etwas ein" nicht ineinander rutschen können — sonst
+    /// bliebe ein zuletzt eingestellter Stand ungesendet liegen.
+    inner: std::sync::Mutex<ScorePushState>,
+}
+
+#[derive(Default)]
+struct ScorePushState {
+    /// Feld → neuester noch nicht gesendeter Stand.
+    pending: HashMap<i64, crate::badhub::diff::Update>,
+    /// Felder, für die gerade ein Push unterwegs ist.
+    busy: std::collections::HashSet<i64>,
+}
+
 impl ServerCtx {
+    /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
+    fn queue_score_push(&self, court_id: i64, update: crate::badhub::diff::Update) {
+        {
+            let mut g = self
+                .score_push
+                .inner
+                .lock()
+                .expect("Score-Push-Mutex nicht vergiftet");
+            g.pending.insert(court_id, update);
+            if g.busy.contains(&court_id) {
+                // Für dieses Feld läuft schon einer — er nimmt den neuen
+                // Stand mit, sobald er fertig ist.
+                return;
+            }
+            g.busy.insert(court_id);
+        }
+        let queue = self.score_push.clone();
+        let http = self.http.clone();
+        let url = self.config.badhub.url.clone();
+        let password = self.config.badhub.password.clone();
+        tokio::spawn(async move {
+            loop {
+                let naechster = {
+                    let mut g = queue
+                        .inner
+                        .lock()
+                        .expect("Score-Push-Mutex nicht vergiftet");
+                    match g.pending.remove(&court_id) {
+                        Some(u) => u,
+                        None => {
+                            // Unter demselben Schloss abmelden: Ein Stand,
+                            // der genau jetzt eingestellt wird, sieht uns
+                            // dann nicht mehr als beschäftigt und startet
+                            // seinen eigenen Arbeiter.
+                            g.busy.remove(&court_id);
+                            return;
+                        }
+                    }
+                };
+                if let Err(e) = push::push_update(&http, &url, &password, &naechster).await {
+                    tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
+                }
+            }
+        });
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tablet: Arc<TabletState>,
@@ -113,6 +195,7 @@ impl ServerCtx {
             log_dir,
             shared_config,
             config_cache: std::sync::Mutex::new(None),
+            score_push: Arc::new(ScorePushQueue::default()),
         }
     }
 
@@ -2826,16 +2909,12 @@ pub(crate) async fn handle_score(
     let mut live = m;
     live.sets = sets;
     let update = Update::Single(build_tupdate(&live, ctx.next_rid()));
-    if let Err(e) = push::push_update(
-        &ctx.http,
-        &ctx.config.badhub.url,
-        &ctx.config.badhub.password,
-        &update,
-    )
-    .await
-    {
-        tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
-    }
+    // Einstellen statt warten: Der Push läuft hinter der Verbindung, je
+    // Feld serialisiert und gebündelt (siehe `ScorePushQueue`). Vorher
+    // hing hier die Tablet-WebSocket bis zu 15 s an einem lahmen badhub —
+    // und wurde dabei vom eigenen Server als tot geschlossen, samt
+    // Freigabe des Felds.
+    ctx.queue_score_push(court_id, update);
 }
 
 #[cfg(test)]
