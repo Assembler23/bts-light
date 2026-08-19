@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.240
+
+- **Die Feld-Übersicht zeichnet bei einem Punkt nur noch die Ziffern neu.**
+  Bisher warf sie bei jedem eintreffenden Stand das komplette Bild weg und
+  baute alle Feldkacheln von vorn auf — bei zwanzig Feldern rund siebzig Mal
+  je Sekunde, für eine Änderung von zwei Ziffern. Das war der Grund, warum
+  die Anzeigen auf schwächeren Raspberry Pis ruckelten.
+- **Neu gebaut wird weiterhin, sobald sich mehr ändert als der Punktestand:**
+  neuer Satz, anderes Spiel, Feld wird frei oder belegt, Behandlungspause,
+  Turnierleitung gerufen, andere Feld-Reihenfolge, andere Halle oder
+  Hallen-Farbe, geänderte Namen — und beim Umschalten der Hallen-Anzeige.
+- **Spätestens alle 30 Sekunden** wird ohnehin einmal komplett neu gezeichnet.
+  Sollte sich also je etwas verschieben, richtet sich die Anzeige von selbst
+  wieder ein, statt bis zum nächsten Spielwechsel falsch zu bleiben.
+- Am Einzelfeld-Monitor ändert sich nichts — der hat nie ein ganzes Bild
+  weggeworfen.
+- Sechste von sieben Etappen der Spec `monitor-livestand-push`.
+
 ## v0.9.239
 
 - **Die Anzeigen können jetzt erkennen, welcher Stand neuer ist.** Jeder

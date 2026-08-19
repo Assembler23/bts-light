@@ -408,18 +408,38 @@ der schlimmere Fehler.
 Die Regel liegt als kanonisches Modul in `src/io/monitorSeq.mjs` mit eigenem CI-Schritt;
 beide Anzeige-Seiten tragen eine Inline-Kopie (die Assets durchlaufen keinen Build).
 
-**Render-Patch (S5)**
-- [ ] Eine reine Punktänderung patcht nur die betroffene Karte; das übrige Board wird nicht
+**Render-Patch (S5)** — umgesetzt v0.9.240
+- [x] Eine reine Punktänderung patcht nur die betroffene Karte; das übrige Board wird nicht
       angefasst (nachweisbar über eine unveränderte DOM-Referenz einer Nachbarkarte).
-- [ ] Nicht gepatcht, sondern voll gerendert wird bei: Satzwechsel, Match-Wechsel, geänderter
+      *(`patcheKarten` tauscht ausschließlich die beiden `.trow__sets`-Spalten der
+      betroffenen Karten; alle übrigen Knoten bleiben dieselben Objekte.)*
+- [x] Nicht gepatcht, sondern voll gerendert wird bei: Satzwechsel, Match-Wechsel, geänderter
       Feld-Menge oder -Reihenfolge, geänderter Halle oder Hallen-Farbe, gewechselter
       Sichtbarkeit des Aufruf-Chips, Wechsel von `isLive`/`injury`/`official_call`, sowie wenn
       die Karte gar nicht im DOM ist (Hallen-Rotation).
-- [ ] Bei Hallen-Rotation zeigt die Karte nach dem Umschalten den gepushten Stand
+      *(`istPatchbar` in `src/io/courtPatch.mjs` — je Bedingung ein Testfall, dazu
+      Feldname, Runden-/Gruppen-Beschriftung, Spielernamen und Nationen. `patcheKarten`
+      prüft zusätzlich `isConnected`. 32 Prüfungen, eigener CI-Schritt.)*
+- [x] Bei Hallen-Rotation zeigt die Karte nach dem Umschalten den gepushten Stand
       (`lastData` wurde fortgeschrieben), nicht den Stand vom letzten Voll-Render.
-- [ ] Spätestens alle 30 s läuft ein voller Render aus einem vollen Abruf.
-- [ ] In `monitor.html` wird nicht gepatcht, solange `redirectTo` gesetzt, die Werbeansicht
+      *(Der Patch-Zweig schreibt `lastData` selbst fort.)*
+- [x] Spätestens alle 30 s läuft ein voller Render aus einem vollen Abruf.
+      *(`VOLL_RENDER_SPAETESTENS_MS`; dazu erzwingen Hallen-Rotation und der
+      Sekundentakt der Aufruf-Uhr je einen Neubau — die Uhr steht im Kopf der Karte
+      und bliebe sonst stehen.)*
+- [x] In `monitor.html` wird nicht gepatcht, solange `redirectTo` gesetzt, die Werbeansicht
       aktiv, das Gerät unzugewiesen oder die Match-ID abweichend ist.
+      *(Strukturell erfüllt und bewusst **nicht** umgebaut: `monitor.html` wirft nie ein
+      Board weg — `renderMatch` setzt Texte an bestehenden Elementen und erzeugt auf
+      107 Zeilen sieben neue Knoten. Die genannten Sonderzustände verlassen `applyState`
+      **vor** `renderMatch`. Ein Teil-Patch brächte dort nichts: Der feste Court-Monitor
+      ist laut Analyse der billige Fall, der Schmerz liegt bei der Feld-Übersicht.)*
+
+**Die Zuständigkeitsgrenze ist bewusst streng.** Ein zu vorsichtiges „nein" kostet einen
+Neubau, den es vorher ohnehin bei jedem Abruf gab; ein zu großzügiges „ja" hinterlässt eine
+Karte, die dauerhaft etwas Falsches zeigt — und das fällt im Turnier niemandem auf, der es
+nicht weiß. Deshalb gehen auch Spielernamen und Nationen in den Vergleich ein, obwohl sie
+sich bei gleicher Match-ID nicht ändern *sollten*.
 
 **Gesundheit und Fallback (S6)**
 - [ ] Bei gesetztem `push_fallback_slow` und gesundem Kanal beträgt der Fallback-Takt 4 s.
