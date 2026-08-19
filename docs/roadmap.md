@@ -403,9 +403,23 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Nudge" wird damit **nicht** gebaut — ihr Auslösekriterium waren mehr als
   20 Requests/s je Übersichts-Gerät, gemessen sind 7,45/s.
 
-  **Offen:** die Pi-Zeile (`ovRenderMessen` auf einem echten Kiosk) und die
-  Cloud-Spalte der Messung; beide sind Feldtest, kein Code. Und der
-  Release-Tag — die App ist seit v0.9.226 nicht getaggt.
+  **S8** (v0.9.243) kam nach der Nachmessung dazu: Die Bestätigung „nichts
+  Neues" gab es nur im Hallennetz, in der Cloud lief jeder Abruf mit vollem
+  Rumpf (0,61 gegen 0,01 MB/s).
+
+  **Offen:** die Pi-Zeile (`ovRenderMessen` auf einem echten Kiosk) — Feldtest,
+  kein Code. Der Release-Tag (die App ist seit v0.9.226 nicht getaggt). Und
+  **S9**: Die Bestätigung am Relay spart Bytes, aber keine Rechenzeit — der
+  Projektionsbau läuft auch für sie, unter dem globalen Schloss über alle
+  Namespaces. Dafür fehlt dem Relay eine Revision, an der sich ein Cache
+  invalidieren ließe; ein reiner Zeit-Cache verzögerte den Anstoß-Weg.
+- **Cloud-Aufruf-Uhr driftet** (vorbestehend, gefunden 19.08.2026): Die
+  Übersicht rechnet `on_court_since_ms` (Stempel des **Turnier-PCs**, vom Host
+  hochgeladen) gegen `serverNowMs` (Uhr des **Relays**). Beide Uhren laufen auf
+  verschiedenen Rechnern; „Zeit seit Aufruf" driftet im Cloud-Betrieb um deren
+  Differenz. Sauber wäre, den Stempel beim Eintreffen auf die Relay-Uhr
+  umzurechnen oder den Versatz mitzuliefern.
+  Fundstelle: `relay/src/main.rs` `overview_health`.
 - **Monitor-Livestand per Push** — ein gezählter Punkt soll nur noch kosten,
   was er wert ist. Heute weckt jeder Punkt jede Übersichts-Anzeige, die
   daraufhin den Zustand **aller** Felder holt und ihr Board komplett neu
