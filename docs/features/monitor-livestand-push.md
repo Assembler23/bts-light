@@ -183,15 +183,41 @@ Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
 
 ## Vorher-Messung (S0)
 
-> **Messwerkzeug steht (v0.9.235), Zahlen fehlen noch.** Die Zähler, `/debug/perf`,
-> die 10-Sekunden-Zeile im Diagnose-Log, `scripts/last-monitor.mjs` und `ovRenderMessen`
-> sind gebaut und getestet. Was fehlt, ist der **Lauf an einem echten Turnier-PC mit
-> verbundenem BTP und belegten Feldern** — ohne den gibt es keine gültigen Match-IDs,
-> und der Server verwirft jeden gesendeten Stand (`handle_score`), womit weder
-> Schreibvorgang noch Nudge entstünden. Am Entwicklungsrechner ist diese Zeile
-> deshalb nicht zu füllen.
+**Erster Lauf: 19.08.2026**, v0.9.235, LAN, laufende Übertragung mit belegten Feldern
+(26 Felder, Antwortgröße 15,9 KB), 20 simulierte Feld-Übersichten, 61 s, `--trocken`.
 
-So wird gemessen (Ablauf für den Messlauf):
+| Kennzahl | Gemessen | Bemerkung |
+|---|---|---|
+| `/health`-Abrufe/s (20 Anzeigen) | **72,7/s** | 3,6/s je Anzeige — der 250-ms-Fallback, praktisch ungebremst |
+| `/health`-Bytes/s | **1,13 MB/s** | 69 MB in 61 s |
+| Antwortgröße | **15,9 KB** | Schätzung war 10–30 KB — trifft |
+| `overview`-Bauten/s | **74,0/s** | 4524 Bauten, davon 76 **nicht** von `/health` (Desktop, Kombi) |
+| `overview_build_ns` Ø / p95 / max | **1,20 ms / 4,19 ms / 16,7 ms** | je Abruf, jedes Mal neu |
+| `persist_scores` Ø | **20,0 ms** | je Punkt, **synchron im async-Handler** |
+| `health_push` / Latenz Punkt → Anzeige | — | Trockenlauf, siehe unten |
+
+**Was die Zahlen tragen — und was nicht:**
+
+- Die Kernaussage der Spec ist belegt: Zwanzig Anzeigen kosten **1,13 MB/s und 74
+  Vollberechnungen je Sekunde** für eine Information, die sich um wenige Byte ändert.
+  Der Antwortcache (S1) zielt genau auf die 74 Bauten, der schmale Abruf (S7) auf die
+  15,9 KB.
+- **`persist_scores` ist mit 20 ms je Punkt der teuerste Einzelposten** und läuft
+  synchron im async-Handler — die Annahme hinter S2 ist damit bestätigt, sogar
+  deutlicher als erwartet.
+- ⚠️ **Debug-Build.** Gemessen wurde ein `tauri dev`-Lauf; ein Release-Build ist bei
+  Rust typisch um ein Vielfaches schneller. Die **Zeiten** (1,20 ms Bau, 20 ms
+  Schreibvorgang) sind deshalb pessimistisch, die **Zählwerte** (Abrufe, Bytes,
+  Bauten) nicht — die hängen nicht am Optimierungsgrad. Die Nachmessung muss im
+  selben Modus laufen, sonst vergleicht sie zwei verschiedene Dinge.
+- ⚠️ **Trockenlauf, deshalb keine Push-Spalte.** Es war kein simuliertes Tablet
+  verbunden (das hätte Felder belegt und erfundene Stände in den öffentlichen
+  Liveticker geschrieben). Damit fehlen `health_push`, die Nudge-Rate und die
+  Latenz Punkt → Anzeige. Sie brauchen einen **Probeaufbau ohne Liveticker**.
+- ⚠️ **Loopback, kein WLAN.** Die 1,13 MB/s sind gerechnet, nicht im Hallen-Funk
+  gemessen; die Sättigung aus dem Zielbild bleibt offen.
+
+Ablauf für den nächsten (vollen) Messlauf:
 
 1. bts-light starten, BTP verbinden, Übertragung starten, Felder belegen lassen.
 2. `node scripts/last-monitor.mjs --base http://<turnier-pc>:8088/ --dauer 120`
@@ -203,14 +229,14 @@ So wird gemessen (Ablauf für den Messlauf):
 
 | Kennzahl | LAN vorher | Cloud vorher | Quelle |
 |---|---|---|---|
-| `/health`-Abrufe/s gesamt | | | LAN: `/debug/perf` · Cloud: **nur** Skript |
-| davon `push` / `poll` | | | LAN: `/debug/perf` · Cloud: — |
-| `/health`-Bytes/s | | | Skript (beide) |
-| `/court/{id}/state`-Abrufe/s | | | LAN: `court_state_*` · Cloud: **nur** Skript |
-| `overview_build_ns` p95 | | | `/debug/perf` (beide) |
-| `persist_calls`/s | | | `/debug/perf` (beide) |
-| Nudges/s | | | `nudges_sent` (beide) |
-| Latenz Punkt → Anzeige p50/p95 | | | Skript (beide) |
+| `/health`-Abrufe/s gesamt | **72,7** (20 Anz., Debug) | | LAN: `/debug/perf` · Cloud: **nur** Skript |
+| davon `push` / `poll` | 0 / 72,7 *(Trockenlauf)* | | LAN: `/debug/perf` · Cloud: — |
+| `/health`-Bytes/s | **1,13 MB/s** | | Skript (beide) |
+| `/court/{id}/state`-Abrufe/s | 0 *(keine Court-Monitore)* | | LAN: `court_state_*` · Cloud: **nur** Skript |
+| `overview_build_ns` p95 | **4,19 ms** (Ø 1,20, max 16,7) | | `/debug/perf` (beide) |
+| `persist_calls`/s | Ø **20,0 ms** je Vorgang | | `/debug/perf` (beide) |
+| Nudges/s | *(Trockenlauf)* | | `nudges_sent` (beide) |
+| Latenz Punkt → Anzeige p50/p95 | *(Trockenlauf)* | | Skript (beide) |
 | Pi: Renders/s, Ø, über 16 ms | | | `ovRenderMessen` |
 
 **Grenze der Host-Zähler im Cloud-Betrieb:** Dort bedient der Relay `/health` und
@@ -233,9 +259,11 @@ Ergibt der Lauf ein deutlich anderes Bild als die Schätzung (4–7 Punkte/s tur
 ## Akzeptanzkriterien
 
 **Messung (S0)**
-- [ ] Die Vorher-Messung liegt als Tabelle in dieser Spec vor, getrennt nach `health_push`,
+- [x] Die Vorher-Messung liegt als Tabelle in dieser Spec vor, getrennt nach `health_push`,
       `health_poll`, `overview_build_ns` p95, `persist_calls`/s, Bytes/s und Latenz p50/p95.
-      *(Tabelle steht, Zahlen brauchen den Turnier-PC — siehe oben.)*
+      *(Lauf vom 19.08.2026, LAN. Offen bleiben die vier Werte, die ein sendendes Tablet
+      brauchen — `health_push`, Nudge-Rate, Latenz — sowie die Cloud-Spalte und die
+      Pi-Zeile; sie brauchen einen Probeaufbau ohne Liveticker.)*
 - [x] Ein Abruf ohne `src`-Parameter (alte Seite) wird als `poll` gezählt, nie als `push`.
       *(`Quelle::aus_query`, Test `zaehler_ohne_src_zaehlt_als_poll`; auch `""` und
       Unbekanntes zählen als `poll`.)*
