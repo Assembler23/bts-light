@@ -153,9 +153,9 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    Sanktionsdaten wiegt das schwerer als beim Punktverlauf: eine Karte am
    falschen Spiel wäre eine Falschbeschuldigung im Archiv.
 
-   > **Stand:** Wire (E1), Store (E2) und Ingest samt Durchleitung (E3)
-   > stehen. Der Leseweg folgt in E5, die Erfassung am Tablet in E6 —
-   > bis dahin erzeugt niemand solche Frames.
+   > **Stand:** Wire (E1), Store (E2), Ingest samt Durchleitung (E3),
+   > Projektion (E4) und Leseweg (E5) stehen. Die Erfassung am Tablet
+   > folgt in E6 — bis dahin erzeugt niemand solche Frames.
    >
    > **Ausrollreihenfolge, ab hier verbindlich:** Ein noch nicht
    > aktualisierter Relay verwirft die neuen Tablet-Frames **still**.
@@ -271,6 +271,7 @@ dem Bildschirm hat, könnte sich damit jeder als Tablet ausgeben.
 | `GET /tl/api/state` | Der zuletzt gepushte Anzeige-Zustand, **unverändert** durchgereicht. Mit `ETag` aus **Host-Generation und Revision**: Ein Gerät, das denselben Stand schon hat, bekommt `304` — bei einer Seite, die alle zwei Sekunden fragt, ist das über Mobilfunk der Unterschied zwischen sparsam und lästig. Die Generation muss hinein, weil die Revision beim Neustart des Turnier-PCs wieder klein beginnt; ohne sie bekäme ein Gerät „unverändert" auf einen völlig anderen Turnierstand. Fehlt der Stand, ist die Antwort `503` und **nicht** ein leeres Turnier: Leer sähe aus wie „alle Felder frei". |
 | `POST /tl/api/command` | Kommando an den Turnier-PC, Antwort synchron über `reqId`/`TlAck` — dasselbe erprobte Muster wie die Ergebnismeldung vom Tablet, mit 20 s Zeitablauf. |
 | `GET /flags/{code}.svg` | Länderflaggen für die TL-Seite. Sie leitet die Flaggen-Basis aus ihrem eigenen Pfad ab (`/bts-relay/tl` → `/bts-relay/flags/`) — und hängt ohne Namespace in der Adresse, deshalb braucht sie diese ns-lose Route neben `/{ns}/flags/…` (Court-Monitor). Statische SVGs ohne Turnierbezug; ein Namespace hätte nichts abzusichern. |
+| `GET /tl/api/scoresheet/{ids}` | Schiedsrichterzettel als fertiges HTML, **on-demand** ([schiedsrichterzettel-druck](features/schiedsrichterzettel-druck.md), ADR 0039): Anfrage als `scoresheet_request` über die host-ws zum Turnier-PC, dessen `scoresheet_data`-Antwort zurück an den wartenden Abruf. `{ids}` ist eine Komma-Liste (Stapeldruck einer Runde), gedeckelt auf `MAX_SHEETS_PER_DOC` — der Deckel greift **vor** jeder Arbeit je Kennung. Der Relay hält **keine** Zettel vor: Sie tragen Namen **und** Sanktionsdaten. `found:false` → 404; keine Antwort (auch: älterer Host) → 503. |
 | `GET /tl/api/timeline/{match_id}` | Punktverlauf eines Spiels, **on-demand** ([punktverlauf.md](punktverlauf.md)): Anfrage als `timeline_request` über die host-ws zum Turnier-PC, dessen `timeline_data`-Antwort zurück an den wartenden Abruf — Muster TL-Kommando, der Relay hält keine Verläufe vor. `found:false` → 404 (Papier-Spiel); keine Antwort (auch: älterer Host) → 503 mit Versions-Hinweis. |
 
 Der Relay ist dabei **Briefträger, nicht Schiedsrichter**: Er kennt weder

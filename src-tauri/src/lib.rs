@@ -140,6 +140,7 @@ pub fn run() {
             commands::checkin_announcement,
             commands::finished_matches,
             commands::match_timeline,
+            commands::match_scoresheet_html,
             commands::officials_roster,
             commands::official_assign,
             commands::official_clear,

@@ -142,6 +142,14 @@ const MAX_NAMESPACES: usize = 2000;
 /// Obergrenze offener Ergebnis-Übermittlungen je Namespace.
 const MAX_PENDING_PER_NS: usize = 16;
 
+/// Höchstgröße eines durchgereichten Zettel-Dokuments.
+///
+/// Ein Zettel ist HTML, kein JSON-Verlauf — er wiegt ein Vielfaches. Der
+/// Deckel rechnet großzügig mit dem Stapel-Deckel und einem festen
+/// Rahmen; alles darüber wird zur ehrlichen Fehlanzeige statt zum
+/// Speicherfresser, wie bei `MAX_TIMELINE_LEN`.
+const MAX_SCORESHEET_HTML_LEN: usize = relay_proto::MAX_SHEETS_PER_DOC * 128 * 1024 + 64 * 1024;
+
 /// Maximale Größe eines gespiegelten Spielzustands (Schutz gegen Missbrauch).
 const MAX_STATE_LEN: usize = 64 * 1024;
 
@@ -309,6 +317,10 @@ struct Namespace {
     /// Antwort `(found, json)` — der Relay hält keine Verläufe vor (AK-5),
     /// er reicht nur durch.
     timeline_pending: HashMap<u64, oneshot::Sender<(bool, String)>>,
+    /// Wartende Zettel-Abrufe (ADR 0039) — eigene Karte neben dem
+    /// Punktverlauf, damit ein Zettel-Abruf keinen Verlaufs-Abruf
+    /// verdrängt und umgekehrt.
+    sheet_pending: HashMap<u64, oneshot::Sender<(bool, String)>>,
     /// Offene Schiedsrichter-Detailabrufe (Sperrlisten, Einsätze):
     /// `req_id` → wartender HTTP-Handler. Wie beim Punktverlauf reicht der
     /// Relay nur durch — diese Personendaten hält er **nie** vor.
@@ -398,6 +410,7 @@ impl Namespace {
             tl_state: None,
             tl_pending: HashMap::new(),
             timeline_pending: HashMap::new(),
+            sheet_pending: HashMap::new(),
             official_pending: HashMap::new(),
             tl_devices: HashMap::new(),
             tl_gen: 0,
@@ -631,6 +644,7 @@ async fn main() {
             // gleicher Pfad wie am LAN-Server, damit tl.html in beiden
             // Modi identisch abruft.
             .route("/tl/api/timeline/{match_id}", get(tl_timeline_route))
+            .route("/tl/api/scoresheet/{ids}", get(tl_scoresheet_route))
             .route(
                 "/tl/api/officials/{official_id}",
                 get(tl_official_detail_route),
@@ -3319,6 +3333,9 @@ fn forget_tl_access(namespace: &mut Namespace) {
     // 503, sonst kippte ein offenes Overlay beim Reconnect kurz auf
     // „Zu diesem Spiel liegt kein Punktverlauf vor" (Review 2026-08-11).
     namespace.timeline_pending.clear();
+    // Der Zettel-Abruf ebenso: Nach der Host-Trennung wartet niemand
+    // mehr auf eine Antwort, die nie kommt.
+    namespace.sheet_pending.clear();
     // Dito: fallen lassen statt leer beantworten — sonst zeigte eine offene
     // Pflege-Ansicht beim Reconnect kurz leere Sperrlisten und überschriebe
     // sie beim Speichern.
@@ -3552,6 +3569,139 @@ async fn tl_state_route(
 
 /// Punktverlauf eines Matches für ein Turnierleitungs-Gerät — **on-demand**
 /// durchgereicht (Spec punktverlauf-graph, AK-5): Anfrage per
+/// Schiedsrichterzettel eines oder mehrerer Spiele (ADR 0039) —
+/// **on-demand** durchgereicht wie der Punktverlauf: Anfrage per
+/// `ScoresheetRequest` an den Turnier-PC, Antwort (`ScoresheetData`)
+/// zurück an den wartenden Abruf.
+///
+/// Der Relay hält **keine** Zettel vor. Beim Punktverlauf ist das eine
+/// Frage des Mobilfunk-Budgets, hier zusätzlich eine des Datenschutzes:
+/// Ein Zettel trägt Namen **und** Sanktionsdaten. Nach einer Trennung des
+/// Hosts gibt es deshalb 503 und kein zwischengespeichertes Dokument.
+///
+/// `{ids}` ist eine Komma-Liste; der Deckel `MAX_SHEETS_PER_DOC` greift
+/// **vor** jeder weiteren Arbeit.
+async fn tl_scoresheet_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+    Path(ids): Path<String>,
+) -> axum::response::Response {
+    let token = bearer(&headers);
+    let now = now_ms();
+    let Some(match_ids) = parse_sheet_ids(&ids) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Ungültige oder zu viele Spiel-Kennungen.",
+        )
+            .into_response();
+    };
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        // Nicht 401 (siehe tl_state_route): ohne Turnier-PC weiß der Relay
+        // nichts über den Zugang.
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    let (ack_rx, req_id) = {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
+        let Some(host) = namespace.host.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if namespace.sheet_pending.len() >= MAX_PENDING_PER_NS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele offene Anfragen — bitte kurz warten.",
+            )
+                .into_response();
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.sheet_pending.insert(req_id, ack_tx);
+        if host
+            .send(text(&RelayFrame::ScoresheetRequest { req_id, match_ids }))
+            .is_err()
+        {
+            namespace.sheet_pending.remove(&req_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht erreichbar.",
+            )
+                .into_response();
+        }
+        (ack_rx, req_id)
+    };
+    match tokio::time::timeout(TL_TIMEOUT, ack_rx).await {
+        Ok(Ok((true, html))) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            html,
+        )
+            .into_response(),
+        Ok(Ok((false, _))) => (
+            StatusCode::NOT_FOUND,
+            "Zu diesem Spiel liegt keine Aufzeichnung vor.",
+        )
+            .into_response(),
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(&ns) {
+                namespace.sheet_pending.remove(&req_id);
+            }
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC hat nicht geantwortet — seine Version kennt \
+                 den Schiedsrichterzettel möglicherweise noch nicht.",
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Komma-Liste von Match-Kennungen; `None` = abweisen. Der Deckel steht
+/// vor jeder weiteren Arbeit.
+fn parse_sheet_ids(roh: &str) -> Option<Vec<i64>> {
+    let ids: Vec<i64> = roh
+        .split(',')
+        .map(|s| s.trim().parse::<i64>().ok())
+        .collect::<Option<Vec<i64>>>()?;
+    if ids.is_empty() || ids.len() > relay_proto::MAX_SHEETS_PER_DOC {
+        return None;
+    }
+    if ids.iter().any(|&id| id <= 0) {
+        return None;
+    }
+    Some(ids)
+}
+
 /// `TimelineRequest` an den Turnier-PC, Antwort (`TimelineData`) zurück an
 /// den wartenden Abruf. Der Relay hält keine Verläufe vor — Briefträger,
 /// nicht Speicher; genau deshalb bleibt das Mobilfunk-Budget unberührt.
@@ -4173,9 +4323,23 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             }
         }
         // Zettel-Antwort (ADR 0039), Geschwister der TimelineData-Antwort
-        // darüber: Leseweg und Pending-Map kommen in Etappe E5 der Spec
-        // schiedsrichterzettel-druck. Bis dahin wartet kein Abruf darauf.
-        HostFrame::ScoresheetData { .. } => {}
+        // darüber. Eigener Größen-Deckel: Ein Zettel ist HTML und damit
+        // deutlich größer als ein Verlauf — MAX_SHEET_LEN je Match, mal
+        // der Stapel-Deckel, plus Rahmen.
+        HostFrame::ScoresheetData {
+            req_id,
+            found,
+            html,
+        } => {
+            if let Some(pending) = namespace.sheet_pending.remove(&req_id) {
+                let zu_gross = html.len() > MAX_SCORESHEET_HTML_LEN;
+                let _ = pending.send(if zu_gross {
+                    (false, String::new())
+                } else {
+                    (found, html)
+                });
+            }
+        }
     }
     true
 }
@@ -6878,6 +7042,190 @@ mod tests {
                 match_id: 0,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn der_relay_haelt_keine_zettel_vor() {
+        // ADR 0039: Der Relay ist Briefträger, nicht Speicher. Beim
+        // Punktverlauf ist das eine Frage des Mobilfunk-Budgets — beim
+        // Zettel zusätzlich eine des Datenschutzes: Er trägt Namen UND
+        // Sanktionsdaten. Ohne Host gibt es 503 und kein Dokument.
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten = tokio::spawn(async move {
+            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+        });
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        let RelayFrame::ScoresheetRequest { req_id, match_ids } = frame else {
+            panic!("ScoresheetRequest erwartet, war: {frame:?}")
+        };
+        assert_eq!(match_ids, vec![42]);
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoresheetData {
+                req_id,
+                found: true,
+                html: "<!doctype html><html></html>".to_string(),
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(antwort.status(), StatusCode::OK);
+
+        // Host trennt sich — der nächste Abruf liefert 503 und KEIN
+        // zwischengespeichertes Dokument.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.host = None;
+        }
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let antwort =
+            tl_scoresheet_route(State(broker.clone()), headers, Path("42".to_string())).await;
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&body).contains("doctype"),
+            "kein zwischengespeichertes Dokument"
+        );
+    }
+
+    /// Die Statuscodes des Zettel-Abrufs, nach dem Vorbild von
+    /// `timeline_without_recording_yields_404_and_foreign_token_is_rejected`.
+    ///
+    /// Wichtig ist die Unterscheidung 401/503: **401 nur bei verbundenem
+    /// Host mit unbekanntem Token.** Ein fremder Bearer ohne
+    /// `tl_index`-Eintrag bekommt bewusst 503 — sonst kostete ein
+    /// Netzwackler jedem Gerät seine Kopplung.
+    #[tokio::test]
+    async fn zettel_ohne_aufzeichnung_gibt_404_und_fremder_token_wird_abgewiesen() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+
+        // Fremder Bearer, dem Relay unbekannt → 503, und der Host wird
+        // gar nicht erst behelligt.
+        let mut fremd = axum::http::HeaderMap::new();
+        fremd.insert(header::AUTHORIZATION, "Bearer fremd".parse().unwrap());
+        let antwort =
+            tl_scoresheet_route(State(broker.clone()), fremd, Path("42".to_string())).await;
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+
+        // Bekannter Zugang, aber der Host kennt keine Aufzeichnung → 404.
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten = tokio::spawn(async move {
+            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(txt) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::ScoresheetRequest { req_id, .. } =
+            serde_json::from_str(txt.as_str()).unwrap()
+        else {
+            panic!("ScoresheetRequest erwartet")
+        };
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoresheetData {
+                req_id,
+                found: false,
+                html: String::new(),
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(warten.await.unwrap().status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Ein überlanges Dokument wird zur ehrlichen Fehlanzeige statt zum
+    /// Speicherfresser — wie beim Punktverlauf.
+    #[tokio::test]
+    async fn ein_ueberlanger_zettel_wird_zur_fehlanzeige() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten = tokio::spawn(async move {
+            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(txt) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::ScoresheetRequest { req_id, .. } =
+            serde_json::from_str(txt.as_str()).unwrap()
+        else {
+            panic!("ScoresheetRequest erwartet")
+        };
+
+        let riesig = "x".repeat(MAX_SCORESHEET_HTML_LEN + 1);
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoresheetData {
+                req_id,
+                found: true,
+                html: riesig,
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(
+            antwort.status(),
+            StatusCode::NOT_FOUND,
+            "überlanges Dokument wird zur Fehlanzeige, nicht durchgereicht"
+        );
+    }
+
+    #[test]
+    fn zu_viele_kennungen_werden_vor_der_arbeit_abgewiesen() {
+        assert_eq!(parse_sheet_ids("42"), Some(vec![42]));
+        assert_eq!(parse_sheet_ids("41, 42,43"), Some(vec![41, 42, 43]));
+        // Genau am Deckel noch gut …
+        let genau: String = (1..=relay_proto::MAX_SHEETS_PER_DOC)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(parse_sheet_ids(&genau).is_some());
+        // … einer mehr wird abgewiesen, bevor irgendetwas gesucht wird.
+        let zu_viele: String = (1..=relay_proto::MAX_SHEETS_PER_DOC + 1)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(parse_sheet_ids(&zu_viele).is_none());
+        // Unfug ebenso.
+        assert!(parse_sheet_ids("").is_none());
+        assert!(parse_sheet_ids("0").is_none());
+        assert!(parse_sheet_ids("-5").is_none());
+        assert!(parse_sheet_ids("42,abc").is_none());
+        assert!(parse_sheet_ids("../../etc").is_none());
     }
 
     #[tokio::test]

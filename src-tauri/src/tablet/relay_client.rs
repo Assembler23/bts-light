@@ -586,9 +586,21 @@ async fn handle_frame(
                 ctx.tablet.sheet_store().apply_event_sync(match_id, events);
             }
         }
-        // Der Zettel-Abruf (ADR 0039) kommt in E5 — bis dahin gibt es
-        // keine Route, die ihn auslöst.
-        RelayFrame::ScoresheetRequest { .. } => {}
+        // Zettel-Abruf eines TL-Geräts (ADR 0039): Antwort direkt aus den
+        // Stores. Wie beim Punktverlauf ohne eigenen Task — der Join ist
+        // reine Rechenarbeit, kein BTP-Zugriff.
+        RelayFrame::ScoresheetRequest { req_id, match_ids } => {
+            let html = crate::tablet::scoresheet::html_fuer(
+                &ctx.tablet,
+                &ctx.display_config(),
+                &match_ids,
+            );
+            let _ = tx.send(text(&HostFrame::ScoresheetData {
+                req_id,
+                found: html.is_some(),
+                html: html.unwrap_or_default(),
+            }));
+        }
         RelayFrame::TimelineRequest { req_id, match_id } => {
             let json = ctx.tablet.timeline_store().timeline_json(match_id);
             let _ = tx.send(text(&HostFrame::TimelineData {

@@ -305,6 +305,160 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
     }
 }
 
+// ─────────────────── Dokumente aus den Quellen bauen ──────────────────
+
+/// Zettel für die genannten Matches zusammenstellen.
+///
+/// Join zur Laufzeit (ADR 0037): `TimelineStore` (Ballwechsel) +
+/// `SheetStore` (Ereignisse) + BTP-Snapshot (Namen) + `match_times`
+/// (Zeiten) + `court_officials` (Schiedsrichter).
+///
+/// **Datenschutz:** Namen und optional Verein/Nation wandern in den
+/// Zettel — das ist sein Zweck. Die Lizenznummer (`BtpPlayer::member_id`)
+/// und jedes Geburtsjahr bleiben draußen; sie werden hier nicht einmal
+/// gelesen.
+///
+/// Matches außerhalb des aktuellen Snapshots und solche ohne jede
+/// Aufzeichnung liefern **keinen** Zettel — der Abruf endet dann ehrlich
+/// mit 404 statt mit einem leeren Blatt.
+pub fn dokumente(
+    state: &super::state::TabletState,
+    display: &crate::config::DisplayConfig,
+    match_ids: &[i64],
+) -> Vec<SheetDoc> {
+    let Some(snap) = state.snapshot_clone() else {
+        return Vec::new();
+    };
+    // Der Verein steht nur auf dem Zettel, wenn er turnierweit
+    // zugeschaltet ist — dieselbe Schranke wie auf dem Tablet-Spielzettel.
+    // Die Nation bleibt außen vor: Sie hängt an der Monitor-Anzeige, und
+    // ein zweiter Schalter für dieselbe Zeile brächte nur Verwirrung.
+    let zeige_verein = display.show_club_names;
+
+    match_ids
+        .iter()
+        .take(relay_proto::MAX_SHEETS_PER_DOC)
+        .filter_map(|&id| {
+            let m = snap.matches.iter().find(|m| m.id == id)?;
+            let timeline = state.timeline_store().timeline(id).unwrap_or_default();
+            let sheet = state.sheet_store().sheet(id).unwrap_or_default();
+            // Ohne jede Aufzeichnung gibt es nichts zu drucken. Ein
+            // Papier-Ergebnis bekommt bewusst keinen Zettel (Nicht-Ziel
+            // der Spec) — ein halb ausgefüllter Bogen wäre irreführender
+            // als keiner.
+            if timeline.sets.iter().all(|s| s.points.is_empty()) && sheet.events.is_empty() {
+                return None;
+            }
+
+            let doppel = m.team1.len() > 1 || m.team2.len() > 1;
+            let zeile = |p: &crate::btp::model::BtpPlayer| SpielerZeile {
+                name: p.name.clone(),
+                zusatz: if zeige_verein {
+                    p.club.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                },
+            };
+
+            let zeiten = state.match_times_store().entry(id);
+            let (schiedsrichter, service_richter, _) = state.court_officials(Some(m), &snap);
+            let halle = m
+                .location_id
+                .and_then(|lid| snap.locations.iter().find(|l| l.id == lid))
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+
+            let start_ms = zeiten
+                .as_ref()
+                .and_then(|z| z.first_point_ms.or(z.first_assigned_ms));
+            let (beginn, ende, dauer) = match &zeiten {
+                Some(z) => {
+                    let start = z.first_point_ms.or(z.first_assigned_ms);
+                    (
+                        start.map(uhrzeit).unwrap_or_default(),
+                        z.finished_ms.map(uhrzeit).unwrap_or_default(),
+                        start
+                            .zip(z.finished_ms)
+                            .and_then(|(a, b)| super::match_times::plausible_duration_mins(a, b)),
+                    )
+                }
+                None => (String::new(), String::new(), None),
+            };
+
+            Some(SheetDoc {
+                turnier: snap.tournament_name.clone(),
+                disziplin: if m.class_label.is_empty() {
+                    m.draw_name.clone()
+                } else {
+                    format!("{} {}", m.draw_name, m.class_label)
+                },
+                runde: m.round_name.clone(),
+                spielnummer: m.match_num,
+                feld: m.court.clone().unwrap_or_default(),
+                halle,
+                // Das Datum kommt aus dem SPIEL, nicht aus der Uhr beim
+                // Drucken: Ein Zettel, der am Folgetag oder nach dem
+                // Turnier nachgedruckt wird, trüge sonst ein falsches
+                // Datum — auf einem Archivbeleg ein echter Fehler
+                // (Review-Befund E5). Ohne Zeitstempel bleibt das Feld
+                // leer statt zu raten.
+                datum: start_ms.map(datum).unwrap_or_default(),
+                beginn,
+                ende,
+                dauer_min: dauer,
+                schiedsrichter,
+                service_richter,
+                team_a: m.team1.iter().map(zeile).collect(),
+                team_b: m.team2.iter().map(zeile).collect(),
+                grid: sheet_grid(&timeline, &sheet.events, doppel),
+                saetze: m.sets.clone(),
+                sieger: match m.winner {
+                    Some(1) => m
+                        .team1
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(" / "),
+                    Some(2) => m
+                        .team2
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(" / "),
+                    _ => String::new(),
+                },
+                ergebnisart: match m.result {
+                    crate::btp::model::MatchResult::Normal => "regulär".into(),
+                    crate::btp::model::MatchResult::Walkover => "kampflos".into(),
+                    crate::btp::model::MatchResult::Retired => "Aufgabe".into(),
+                    crate::btp::model::MatchResult::Disqualified => "Disqualifikation".into(),
+                },
+            })
+        })
+        .collect()
+}
+
+/// Fertiges HTML für die genannten Matches — oder `None`, wenn zu keinem
+/// eine Aufzeichnung vorliegt.
+///
+/// **Der Deckel greift vor der Arbeit:** Mehr als
+/// [`relay_proto::MAX_SHEETS_PER_DOC`] Kennungen werden abgewiesen, bevor
+/// je Kennung irgendetwas zusammengesucht wird.
+pub fn html_fuer(
+    state: &super::state::TabletState,
+    display: &crate::config::DisplayConfig,
+    match_ids: &[i64],
+) -> Option<String> {
+    if match_ids.is_empty() || match_ids.len() > relay_proto::MAX_SHEETS_PER_DOC {
+        return None;
+    }
+    let docs = dokumente(state, display, match_ids);
+    if docs.is_empty() {
+        return None;
+    }
+    Some(render_html(&docs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,6 +644,30 @@ mod tests {
         assert_eq!((b.end_a, b.end_b), (8, 6));
     }
 
+    /// Doppel **und** Zwischenstand-Einstieg zusammen: Die Startparität
+    /// kommt dann aus `start_a`/`start_b` statt aus 0:0 — steht der
+    /// Aufschläger bei ungeradem Stand links, verschiebt sich die ganze
+    /// Rotation. (Lücke aus dem E4-Review.)
+    #[test]
+    fn doppel_mit_zwischenstand_startet_mit_richtiger_paritaet() {
+        // A steht bei 7 (ungerade) → der Aufschläger steht LINKS, sein
+        // Partner rechts; der Empfänger steht diagonal, also ebenfalls
+        // links.
+        let grid = sheet_grid(
+            &tl(vec![satz(7, 5, "AB")]),
+            &[aufschlag(1, 0, 0, 1, 0)],
+            true,
+        );
+        assert_eq!(grid.zeilen, 4);
+        let z = &grid.blocks[0].zellen;
+        // A punktet: derselbe Spieler schlägt weiter auf, Stand 8.
+        assert_eq!((z[0].row, z[0].wert), (zeile(0, 0), 8));
+        // B punktet → Aufschlagwechsel. B steht danach bei 6 (gerade),
+        // es schlägt auf, wer rechts steht. B0 begann links (Diagonale
+        // zum linksstehenden Aufschläger), also steht B1 rechts.
+        assert_eq!((z[1].row, z[1].wert), (zeile(1, 1), 6));
+    }
+
     /// Ein zurückgenommenes Ereignis erscheint **nicht** im Raster, aber
     /// durchgestrichen im Protokoll (ADR 0038).
     #[test]
@@ -520,6 +698,140 @@ mod tests {
         assert!(grid.protokoll.iter().all(|z| z.art != EventKind::Retract));
     }
 
+    // ── Renderer ──────────────────────────────────────────────────
+
+    fn doc_mit(name_a: &str, name_b: &str) -> SheetDoc {
+        SheetDoc {
+            turnier: "Test-Cup".into(),
+            disziplin: "Herreneinzel A".into(),
+            runde: "Viertelfinale".into(),
+            spielnummer: Some(42),
+            feld: "3".into(),
+            halle: "Halle Süd".into(),
+            datum: "19.08.2026".into(),
+            beginn: "10:15".into(),
+            ende: "10:47".into(),
+            dauer_min: Some(32),
+            schiedsrichter: vec!["S. Richter".into()],
+            service_richter: vec![],
+            team_a: vec![SpielerZeile {
+                name: name_a.into(),
+                zusatz: "SC Musterstadt".into(),
+            }],
+            team_b: vec![SpielerZeile {
+                name: name_b.into(),
+                zusatz: String::new(),
+            }],
+            grid: sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[], false),
+            saetze: vec![(21, 19), (21, 15)],
+            sieger: name_a.into(),
+            ergebnisart: "regulär".into(),
+        }
+    }
+
+    /// ADR 0039: `@page`, kein Skript, keine externe URL. Ohne Skript
+    /// bleibt das Dokument auch außerhalb des WebViews harmlos.
+    #[test]
+    fn dokument_ist_druckfertig_und_selbstgenuegsam() {
+        let html = render_html(&[doc_mit("A. Spieler", "B. Gegner")]);
+        assert!(html.contains("@page"), "kein @page");
+        assert!(html.contains("A4 landscape"), "kein A4 quer");
+        assert!(!html.contains("<script"), "Skript im Dokument");
+        assert!(!html.contains("http://"), "externe URL");
+        assert!(!html.contains("https://"), "externe URL");
+        assert!(!html.contains("//cdn"), "externe Ressource");
+        assert!(html.contains("Internes Turnier-Archiv"), "Vermerk fehlt");
+        assert!(html.contains("page-break-after"), "kein Seitenumbruch");
+    }
+
+    /// Erstmals im Projekt entsteht HTML aus BTP-Fremdeingaben. Ein Name
+    /// mit Markup darf nie als Markup ankommen.
+    #[test]
+    fn fremdeingaben_werden_escaped() {
+        let mut doc = doc_mit("<script>alert(1)</script>", "O'Brien & \"Sohn\"");
+        doc.turnier = "<img src=x onerror=alert(1)>".into();
+        doc.halle = "Halle <b>Süd</b>".into();
+        let html = render_html(&[doc]);
+        assert!(!html.contains("<script>alert"), "Skript durchgerutscht");
+        assert!(!html.contains("<img src=x"), "Bild-Tag durchgerutscht");
+        assert!(!html.contains("Halle <b>"), "Markup durchgerutscht");
+        assert!(html.contains("&lt;script&gt;alert"), "nicht escaped");
+        assert!(html.contains("&amp;"), "Ampersand nicht escaped");
+    }
+
+    /// Namen erscheinen (das ist der Zweck des Zettels), ein Geburtsjahr
+    /// nirgends.
+    #[test]
+    fn namen_ja_geburtsjahr_nein() {
+        let html = render_html(&[doc_mit("A. Spieler", "B. Gegner")]);
+        assert!(html.contains("A. Spieler"), "Name fehlt");
+        assert!(html.contains("SC Musterstadt"), "Verein fehlt");
+        for verboten in ["birth", "Geburt", "geboren", "licence", "Lizenz"] {
+            assert!(!html.contains(verboten), "'{verboten}' im Zettel");
+        }
+    }
+
+    /// Stapeldruck: drei Kennungen ergeben drei Abschnitte; über dem
+    /// Deckel wird nicht gedruckt, sondern abgewiesen.
+    #[test]
+    fn stapel_erzeugt_abschnitte_und_haelt_den_deckel() {
+        let drei = vec![doc_mit("A", "B"), doc_mit("C", "D"), doc_mit("E", "F")];
+        let html = render_html(&drei);
+        assert_eq!(html.matches("<section class=\"zettel\"").count(), 3);
+
+        let zu_viele: Vec<SheetDoc> = (0..relay_proto::MAX_SHEETS_PER_DOC + 5)
+            .map(|_| doc_mit("A", "B"))
+            .collect();
+        let html = render_html(&zu_viele);
+        assert_eq!(
+            html.matches("<section class=\"zettel\"").count(),
+            relay_proto::MAX_SHEETS_PER_DOC,
+            "Deckel greift auch im Renderer"
+        );
+    }
+
+    /// Ein unplausibler Zeitstempel wird zu „—" statt zu Unsinn — `ts_ms`
+    /// ist auf dem Draht bewusst ungedeckelt (E1-Review).
+    #[test]
+    fn unplausible_uhrzeit_wird_zum_gedankenstrich() {
+        assert_eq!(uhrzeit(u64::MAX), "—");
+        assert_ne!(uhrzeit(1_755_600_000_000), "—");
+    }
+
+    /// Das Datum kommt aus dem Spiel, nicht aus der Uhr beim Drucken —
+    /// sonst trüge ein Nachdruck nach dem Turnier ein falsches Datum
+    /// (Review-Befund E5).
+    #[test]
+    fn datum_kommt_aus_dem_spiel_nicht_vom_druckzeitpunkt() {
+        // 19.08.2026, 10:15 Ortszeit als Zeitstempel — der Test rechnet
+        // in derselben Zeitzone wie der Renderer, deshalb Hin- und
+        // Rückweg über chrono statt einer festen Zahl.
+        use chrono::TimeZone;
+        let dann = chrono::Local
+            .with_ymd_and_hms(2026, 8, 19, 10, 15, 0)
+            .unwrap();
+        let ts = dann.timestamp() as u64 * 1000;
+        assert_eq!(datum(ts), "19.08.2026");
+        assert_eq!(uhrzeit(ts), "10:15");
+        // Unplausibel → leer statt Unsinn (das Feld verschwindet dann
+        // aus dem Kopf, statt eine Lüge zu drucken).
+        assert_eq!(datum(u64::MAX), "");
+    }
+
+    /// Zurückgenommenes ist im Protokoll sichtbar durchgestrichen.
+    #[test]
+    fn zurueckgenommenes_ist_im_dokument_durchgestrichen() {
+        let karte = ev("cc", 1, 3, EventKind::CardRed, 0, 0);
+        let mut ruecknahme = ev("dd", 1, 3, EventKind::Retract, 0, 0);
+        ruecknahme.retracts = "cc".to_string();
+        let mut doc = doc_mit("A. Spieler", "B. Gegner");
+        doc.grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[karte, ruecknahme], false);
+
+        let html = render_html(&[doc]);
+        assert!(html.contains("zurueckgenommen"), "keine Streichung");
+        assert!(html.contains("Fehler (rot)"), "Art fehlt im Protokoll");
+    }
+
     /// Ein Match kann Ereignisse ohne jeden Ballwechsel haben (Karte vor
     /// dem ersten Aufschlag) — dann gibt es kein Raster, aber ein
     /// Protokoll.
@@ -531,4 +843,346 @@ mod tests {
         assert!(grid.blocks.is_empty());
         assert_eq!(grid.protokoll.len(), 1);
     }
+}
+
+// ─────────────────────────── Renderer ─────────────────────────────────
+
+/// Eine Spielerzeile in der Teamspalte links.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpielerZeile {
+    pub name: String,
+    /// Verein oder Nation — nur wenn turnierweit zugeschaltet.
+    pub zusatz: String,
+}
+
+/// Alles, was ein Zettel braucht. Der Join der Quellen ist zum Zeitpunkt
+/// der Erzeugung schon passiert; der Renderer rechnet nichts mehr.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SheetDoc {
+    pub turnier: String,
+    pub disziplin: String,
+    pub runde: String,
+    pub spielnummer: Option<i64>,
+    pub feld: String,
+    pub halle: String,
+    pub datum: String,
+    pub beginn: String,
+    pub ende: String,
+    pub dauer_min: Option<i64>,
+    pub schiedsrichter: Vec<String>,
+    pub service_richter: Vec<String>,
+    pub team_a: Vec<SpielerZeile>,
+    pub team_b: Vec<SpielerZeile>,
+    pub grid: Grid,
+    /// Gewertete Satzstände (aus BTP), für den Fuß.
+    pub saetze: Vec<(i64, i64)>,
+    pub sieger: String,
+    pub ergebnisart: String,
+}
+
+/// Art im Klartext für die Protokollzeile.
+fn art_klartext(art: EventKind) -> &'static str {
+    match art {
+        EventKind::ServeStart => "Aufschlagfolge",
+        EventKind::CardYellow => "Verwarnung (gelb)",
+        EventKind::CardRed => "Fehler (rot)",
+        EventKind::CardBlack => "Disqualifikation (schwarz)",
+        EventKind::InjuryStart => "Behandlung Beginn",
+        EventKind::InjuryEnd => "Behandlung Ende",
+        EventKind::Suspension => "Unterbrechung",
+        EventKind::Overrule => "Überstimmung",
+        EventKind::RefereeCall => "Oberschiedsrichter gerufen",
+        EventKind::Retired => "Aufgabe",
+        EventKind::Disqualified => "Disqualifikation",
+        EventKind::Retract => "Rücknahme",
+    }
+}
+
+fn phase_klartext(phase: Phase) -> &'static str {
+    match phase {
+        Phase::Play => "",
+        Phase::BreakEleven => " (Intervall)",
+        Phase::BreakGame => " (Satzpause)",
+        Phase::BreakInjury => " (Behandlungspause)",
+        Phase::PreMatch => " (vor dem Spiel)",
+        Phase::PostMatch => " (nach dem Spiel)",
+    }
+}
+
+/// Uhrzeit `HH:MM` aus einem Zeitstempel.
+///
+/// Ein unplausibler Wert wird zu „—" statt zu Unsinn: `ts_ms` ist auf dem
+/// Draht bewusst ungedeckelt (ein zu enger Deckel verwürfe ein legitimes
+/// spätes Ereignis mitten im Turnier), also fängt der Renderer ihn ab.
+fn uhrzeit(ts_ms: u64) -> String {
+    zeitstempel(ts_ms, "%H:%M")
+}
+
+/// Datum `TT.MM.JJJJ` aus einem Zeitstempel — leer, wenn unplausibel.
+fn datum(ts_ms: u64) -> String {
+    match zeitstempel(ts_ms, "%d.%m.%Y") {
+        s if s == "—" => String::new(),
+        s => s,
+    }
+}
+
+fn zeitstempel(ts_ms: u64, muster: &str) -> String {
+    use chrono::TimeZone;
+    let sekunden = (ts_ms / 1000) as i64;
+    match chrono::Local.timestamp_opt(sekunden, 0) {
+        chrono::LocalResult::Single(t) => t.format(muster).to_string(),
+        _ => "—".to_string(),
+    }
+}
+
+/// Höchstzahl Zettel je Dokument, defensiv auch hier — die Route weist
+/// zu viele Kennungen schon vor der Arbeit ab.
+fn deckel(docs: &[SheetDoc]) -> usize {
+    docs.len().min(relay_proto::MAX_SHEETS_PER_DOC)
+}
+
+fn e(s: &str) -> String {
+    relay_proto::html_escape(s)
+}
+
+/// Ein vollständiges, selbstgenügsames HTML-Dokument (ADR 0039).
+///
+/// **Genau ein Renderer, zwei Aufrufer, null Kopie** — das bewusste
+/// Gegenteil von `timelineSetSvg`, das dreifach existiert. Inline-CSS mit
+/// `@page`, **kein `<script>`**, keine externe URL: So bleibt das
+/// Dokument auch außerhalb des WebViews harmlos und unverändert
+/// darstellbar.
+///
+/// Jeder Fremdtext (Turnier-, Spieler-, Vereinsname aus BTP) läuft durch
+/// [`relay_proto::html_escape`]. Das ist die erste Stelle im Projekt, an
+/// der aus BTP-Fremdeingaben HTML entsteht.
+pub fn render_html(docs: &[SheetDoc]) -> String {
+    let anzahl = deckel(docs);
+    let mut out = String::with_capacity(8 * 1024);
+    out.push_str(
+        r#"<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<title>Schiedsrichterzettel</title>
+<style>
+@page { size: A4 landscape; margin: 8mm; }
+* { box-sizing: border-box; }
+body { font: 10pt/1.25 "Helvetica Neue", Arial, sans-serif; color: #000; background: #fff; margin: 0; }
+section.zettel { page-break-after: always; }
+section.zettel:last-child { page-break-after: auto; }
+.kopf { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5pt solid #000; padding-bottom: 2mm; margin-bottom: 3mm; }
+.kopf h1 { font-size: 13pt; margin: 0 0 1mm; }
+.kopf dl { display: grid; grid-template-columns: auto auto; gap: 0 3mm; margin: 0; font-size: 9pt; }
+.kopf dt { font-weight: 600; }
+.kopf dd { margin: 0; }
+.vermerk { border: 1pt solid #000; padding: 1mm 2mm; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.raster { display: flex; gap: 3mm; margin-bottom: 3mm; page-break-inside: avoid; }
+.teamspalte { min-width: 42mm; }
+.teamspalte .zeile { height: 7mm; display: flex; flex-direction: column; justify-content: center; border-bottom: .5pt solid #999; }
+.teamspalte .name { font-weight: 600; }
+.teamspalte .zusatz { font-size: 7.5pt; color: #333; }
+table.gitter { border-collapse: collapse; table-layout: fixed; }
+table.gitter td, table.gitter th { border: .4pt solid #666; width: 4.2mm; height: 7mm; text-align: center; font-size: 8pt; padding: 0; }
+table.gitter th { background: #eee; font-weight: 600; font-size: 6.5pt; }
+td.marker { font-weight: 700; }
+.satzkopf { font-weight: 600; font-size: 9pt; margin: 2mm 0 1mm; }
+.randmarker { font-size: 8pt; margin-top: 1mm; }
+table.protokoll { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 2mm; }
+table.protokoll th, table.protokoll td { border-bottom: .4pt solid #999; padding: .8mm 1mm; text-align: left; }
+tr.zurueckgenommen td { text-decoration: line-through; color: #555; }
+.fuss { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4mm; border-top: 1pt solid #000; padding-top: 2mm; font-size: 9pt; }
+.unterschriften { display: flex; gap: 8mm; }
+.unterschrift { width: 55mm; border-top: .5pt solid #000; padding-top: 1mm; font-size: 8pt; }
+.hinweis { font-size: 8pt; font-style: italic; margin: 1mm 0; }
+.erzeugt { font-size: 7.5pt; color: #444; }
+</style></head><body>
+"#,
+    );
+
+    for doc in docs.iter().take(anzahl) {
+        out.push_str("<section class=\"zettel\">\n");
+
+        // ── Kopf ──
+        out.push_str("<header class=\"kopf\"><div>");
+        out.push_str(&format!("<h1>{}</h1>", e(&doc.turnier)));
+        out.push_str("<dl>");
+        let mut kopfzeile = |k: &str, v: &str| {
+            if !v.is_empty() {
+                out.push_str(&format!("<dt>{}</dt><dd>{}</dd>", e(k), e(v)));
+            }
+        };
+        kopfzeile("Disziplin", &doc.disziplin);
+        kopfzeile("Runde", &doc.runde);
+        kopfzeile("Feld", &doc.feld);
+        kopfzeile("Halle", &doc.halle);
+        kopfzeile("Datum", &doc.datum);
+        kopfzeile("Beginn", &doc.beginn);
+        kopfzeile("Ende", &doc.ende);
+        kopfzeile("Schiedsrichter", &doc.schiedsrichter.join(", "));
+        kopfzeile("Service-Richter", &doc.service_richter.join(", "));
+        if let Some(nr) = doc.spielnummer {
+            out.push_str(&format!("<dt>Spiel-Nr.</dt><dd>{nr}</dd>"));
+        }
+        if let Some(min) = doc.dauer_min {
+            out.push_str(&format!("<dt>Dauer</dt><dd>{min} min</dd>"));
+        }
+        out.push_str("</dl></div>");
+        out.push_str(
+            "<div class=\"vermerk\">Internes Turnier-Archiv — kein amtlicher Beleg</div></header>\n",
+        );
+
+        if doc.grid.aufschlagfolge_fehlt {
+            out.push_str("<p class=\"hinweis\">Aufschlagfolge nicht aufgezeichnet — das Raster zeigt je Mannschaft eine Zeile.</p>\n");
+        }
+
+        // ── Raster je Satz ──
+        for block in &doc.grid.blocks {
+            out.push_str(&format!(
+                "<div class=\"satzkopf\">Satz {} — Endstand {}:{}</div>\n",
+                block.satz, block.end_a, block.end_b
+            ));
+            out.push_str("<div class=\"raster\"><div class=\"teamspalte\">");
+            let zeilen: Vec<SpielerZeile> = if doc.grid.zeilen == 4 {
+                doc.team_a
+                    .iter()
+                    .chain(doc.team_b.iter())
+                    .cloned()
+                    .collect()
+            } else {
+                // Zwei Zeilen (Einzel oder Degradation): je Mannschaft eine
+                // Zeile. Der Zusatz (Verein/Nation) darf dabei NICHT
+                // wegfallen — im Einzel wäre er sonst nie zu sehen.
+                [&doc.team_a, &doc.team_b]
+                    .into_iter()
+                    .map(|team| SpielerZeile {
+                        name: team
+                            .iter()
+                            .map(|s| s.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(" / "),
+                        zusatz: team
+                            .iter()
+                            .map(|s| s.zusatz.clone())
+                            .filter(|z| !z.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" / "),
+                    })
+                    .collect()
+            };
+            for z in &zeilen {
+                out.push_str(&format!(
+                    "<div class=\"zeile\"><span class=\"name\">{}</span>",
+                    e(&z.name)
+                ));
+                if !z.zusatz.is_empty() {
+                    out.push_str(&format!("<span class=\"zusatz\">{}</span>", e(&z.zusatz)));
+                }
+                out.push_str("</div>");
+            }
+            out.push_str("</div><div>");
+
+            // Zeilengruppen: 1–60, dann 61–120 („Fortsetzung").
+            let gruppen = block
+                .zellen
+                .iter()
+                .map(|z| z.gruppe)
+                .max()
+                .map(|g| g + 1)
+                .unwrap_or(1);
+            for gruppe in 0..gruppen {
+                out.push_str("<table class=\"gitter\"><tr>");
+                for i in 0..SPALTEN_JE_GRUPPE {
+                    out.push_str(&format!("<th>{}</th>", gruppe * SPALTEN_JE_GRUPPE + i + 1));
+                }
+                out.push_str("</tr>");
+                for row in 0..doc.grid.zeilen {
+                    out.push_str("<tr>");
+                    for i in 0..SPALTEN_JE_GRUPPE {
+                        let col = gruppe * SPALTEN_JE_GRUPPE + i + 1;
+                        match block
+                            .zellen
+                            .iter()
+                            .find(|z| z.row == row && z.col == col && z.gruppe == gruppe)
+                        {
+                            Some(z) => match z.marker {
+                                Some(m) => out.push_str(&format!(
+                                    "<td class=\"marker\">{}<sup>{}</sup></td>",
+                                    z.wert, m
+                                )),
+                                None => out.push_str(&format!("<td>{}</td>", z.wert)),
+                            },
+                            None => out.push_str("<td></td>"),
+                        }
+                    }
+                    out.push_str("</tr>");
+                }
+                out.push_str("</table>");
+            }
+            out.push_str("</div></div>");
+
+            if !block.rand_marker.is_empty() {
+                out.push_str("<div class=\"randmarker\">Ohne Ballwechsel: ");
+                let teile: Vec<String> = block
+                    .rand_marker
+                    .iter()
+                    .map(|m| format!("{} nach Ballwechsel {}", m.marker, m.nach_ballwechsel))
+                    .collect();
+                out.push_str(&e(&teile.join(" · ")));
+                out.push_str("</div>");
+            }
+        }
+
+        // ── Protokoll ──
+        if !doc.grid.protokoll.is_empty() {
+            out.push_str("<table class=\"protokoll\"><tr><th>Nr.</th><th>Uhrzeit</th><th>Satz</th><th>Stand</th><th>Art</th><th>Spieler</th></tr>");
+            for z in &doc.grid.protokoll {
+                let klasse = if z.zurueckgenommen {
+                    " class=\"zurueckgenommen\""
+                } else {
+                    ""
+                };
+                let mannschaft = if z.team == 0 { "A" } else { "B" };
+                let spieler = match doc.grid.zeilen {
+                    4 => format!("{mannschaft}{}", z.player + 1),
+                    _ => mannschaft.to_string(),
+                };
+                out.push_str(&format!(
+                    "<tr{klasse}><td>{}</td><td>{}</td><td>{}</td><td>{}:{}</td><td>{}{}</td><td>{}</td></tr>",
+                    z.nr,
+                    e(&uhrzeit(z.ts_ms)),
+                    z.satz,
+                    z.score_a,
+                    z.score_b,
+                    e(art_klartext(z.art)),
+                    e(phase_klartext(z.phase)),
+                    e(&spieler),
+                ));
+            }
+            out.push_str("</table>");
+        }
+
+        // ── Fuß ──
+        out.push_str("<footer class=\"fuss\"><div>");
+        if !doc.saetze.is_empty() {
+            let staende: Vec<String> = doc.saetze.iter().map(|(a, b)| format!("{a}:{b}")).collect();
+            out.push_str(&format!("<div>Endstand: {}</div>", e(&staende.join(" · "))));
+        }
+        if !doc.sieger.is_empty() {
+            out.push_str(&format!("<div>Sieger: {}</div>", e(&doc.sieger)));
+        }
+        if !doc.ergebnisart.is_empty() {
+            out.push_str(&format!("<div>Ergebnisart: {}</div>", e(&doc.ergebnisart)));
+        }
+        out.push_str("</div><div class=\"unterschriften\">");
+        out.push_str(
+            "<div class=\"unterschrift\">Schiedsrichter (ohne rechtliche Bedeutung)</div>",
+        );
+        out.push_str(
+            "<div class=\"unterschrift\">Turnierleitung (ohne rechtliche Bedeutung)</div>",
+        );
+        out.push_str("</div></footer>\n");
+        out.push_str("</section>\n");
+    }
+
+    out.push_str("</body></html>");
+    out
 }
