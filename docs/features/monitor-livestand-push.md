@@ -203,15 +203,23 @@ So wird gemessen (Ablauf für den Messlauf):
 
 | Kennzahl | LAN vorher | Cloud vorher | Quelle |
 |---|---|---|---|
-| `/health`-Abrufe/s gesamt | | | Skript / `health_push`+`health_poll` |
-| davon `push` / `poll` | | | `/debug/perf` |
-| `/health`-Bytes/s | | | Skript |
-| `/court/{id}/state`-Abrufe/s | | | `court_state_*` |
-| `overview_build_ns` p95 | | | `/debug/perf` |
-| `persist_calls`/s | | | `/debug/perf` |
-| Nudges/s | | | `nudges_sent` |
-| Latenz Punkt → Anzeige p50/p95 | | | Skript |
+| `/health`-Abrufe/s gesamt | | | LAN: `/debug/perf` · Cloud: **nur** Skript |
+| davon `push` / `poll` | | | LAN: `/debug/perf` · Cloud: — |
+| `/health`-Bytes/s | | | Skript (beide) |
+| `/court/{id}/state`-Abrufe/s | | | LAN: `court_state_*` · Cloud: **nur** Skript |
+| `overview_build_ns` p95 | | | `/debug/perf` (beide) |
+| `persist_calls`/s | | | `/debug/perf` (beide) |
+| Nudges/s | | | `nudges_sent` (beide) |
+| Latenz Punkt → Anzeige p50/p95 | | | Skript (beide) |
 | Pi: Renders/s, Ø, über 16 ms | | | `ovRenderMessen` |
+
+**Grenze der Host-Zähler im Cloud-Betrieb:** Dort bedient der Relay `/health` und
+`/court/{id}/state`, nicht der Turnier-PC — `health_*` und `court_state_*` bleiben
+strukturell null, während `nudges_sent`, `persist_calls` und `overview_builds` normal
+weiterzählen. Die Cloud-Spalte dieser beiden Zeilen füllt deshalb **nur** das Lastskript
+(Client-Sicht, gegen die Relay-Adresse gefahren). Den Relay selbst zu instrumentieren ist
+bewusst nicht Teil von S0; sollte sich die Cloud-Seite als der interessantere Fall
+erweisen, wäre das eine eigene kleine Etappe.
 
 Beim Ablesen zu beachten: `overview_builds` ist absichtlich **größer** als die Zahl der
 `/health`-Abrufe — `overview()` speist auch die Kombi-Anzeige (`/combo/state`), die

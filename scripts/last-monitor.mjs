@@ -9,6 +9,16 @@
 // Node 22) und **kein CI-Schritt**: Das hier braucht einen echten Server mit
 // echten Matches, keinen Testlauf.
 //
+// ⚠️ NIEMALS WÄHREND EINES ECHTEN TURNIERS FAHREN (ohne `--trocken`).
+//
+// Das Skript gibt sich als zählendes Tablet aus. Es **belegt damit Felder**
+// (ein echtes Tablet bekäme danach „Feld belegt") und seine erfundenen
+// Punktstände laufen den regulären Weg: in die `live-scores.json`, in die
+// Spielzeiten-Statistik und **in den öffentlichen Liveticker auf badhub.de**.
+// Gedacht ist es für einen Turnier-PC im Probeaufbau — echtes BTP, echte
+// Felder, aber kein laufendes Turnier. `--trocken` verbindet gar kein Tablet
+// und misst nur die Anzeige-Seite; das ist auch neben einem Turnier gefahrlos.
+//
 // Aufruf (bts-light muss laufen, BTP verbunden, Felder belegt):
 //
 //   node scripts/last-monitor.mjs --base http://192.168.1.5:8088/
@@ -20,7 +30,7 @@
 //   --court-monitore N   feste Court-Monitore        (Vorgabe: 0)
 //   --dauer N            Messdauer in Sekunden       (Vorgabe: 60)
 //   --punkte N           Punkte je Minute je Tablet  (Vorgabe: 12 = alle 5 s)
-//   --trocken            nur verbinden und lauschen, nichts senden
+//   --trocken            KEIN Tablet verbinden, nur die Anzeige-Seite messen
 //
 // Was gemessen wird: Abrufe und Bytes je Anzeigenart, die Latenz vom
 // gesendeten Punkt bis zu seinem Erscheinen in einer Übersichts-Antwort
@@ -68,6 +78,7 @@ const stat = {
   healthFehler: 0,
   courtAbrufe: 0,
   courtBytes: 0,
+  courtFehler: 0,
   nudges: 0,
   punkte: 0,
   latenzen: [],
@@ -219,7 +230,9 @@ function starteCourtMonitor(courtId) {
       stat.courtAbrufe++;
       stat.courtBytes += text.length;
     } catch {
-      stat.healthFehler++;
+      // Eigener Zähler: Ein klemmendes `/court/{id}/state` sähe sonst in der
+      // Zusammenfassung wie ein `/health`-Problem aus.
+      stat.courtFehler++;
     }
   }
 
@@ -290,7 +303,7 @@ function starteTablet(court, index) {
   }
 
   function punkt() {
-    if (!bereit || !ws || ws.readyState !== 1 || TROCKEN) return;
+    if (!bereit || !ws || ws.readyState !== 1) return;
     // Abwechselnd, damit kein Satz vorzeitig endet und der Stand realistisch
     // wächst; bei 20:20 zurück auf 0:0 (neuer Satz wäre eine andere Messung).
     if (a >= 19 && b >= 19) {
@@ -354,9 +367,23 @@ async function main() {
     process.exit(2);
   }
 
-  const tabletZahl = Math.min(TABLETS, belegt.length);
-  if (tabletZahl < TABLETS) {
+  // `--trocken` verbindet KEIN Tablet. Schon das `identify` würde das Feld
+  // beanspruchen (`claim_court`), ein echtes Tablet bekäme danach „Feld
+  // belegt" — und ein gesendeter Punkt liefe bis in den öffentlichen
+  // Liveticker. Trocken heißt deshalb: nur die Anzeige-Seite.
+  const tabletZahl = TROCKEN ? 0 : Math.min(TABLETS, belegt.length);
+  if (!TROCKEN && tabletZahl < TABLETS) {
     console.log(`Hinweis: nur ${tabletZahl} statt ${TABLETS} Tablets — so viele Felder sind belegt.`);
+  }
+  if (!TROCKEN) {
+    console.log(
+      "\n⚠️  ACHTUNG: Dieser Lauf gibt sich als zählendes Tablet aus. Er belegt Felder\n" +
+        "    und seine erfundenen Punktstände gehen den regulären Weg — bis in den\n" +
+        "    öffentlichen Liveticker auf badhub.de. Nur an einem Probeaufbau fahren,\n" +
+        "    NIE während eines echten Turniers. Abbruch mit Strg+C; `--trocken` misst\n" +
+        "    nur die Anzeige-Seite.\n",
+    );
+    await schlaf(5000);
   }
   for (let i = 0; i < tabletZahl; i++) starteTablet(belegt[i], i);
   for (let i = 0; i < UEBERSICHTEN; i++) starteUebersicht(i);
@@ -366,7 +393,7 @@ async function main() {
   console.log(
     `${tabletZahl} Tablets (${PUNKTE_PRO_MIN} Punkte/min je Tablet), ` +
       `${UEBERSICHTEN} Übersichten, ${Math.min(COURT_MONITORE, felder.length)} Court-Monitore, ` +
-      `${DAUER_S} s${TROCKEN ? " — TROCKEN, es wird nichts gesendet" : ""}.`,
+      `${DAUER_S} s${TROCKEN ? " — TROCKEN, kein Tablet verbunden" : ""}.`,
   );
 
   const begonnen = Date.now();
@@ -399,7 +426,7 @@ async function main() {
     `/court/{id}/state        ${stat.courtAbrufe} Abrufe (${(stat.courtAbrufe / s).toFixed(1)}/s), ` +
       `${mb(stat.courtBytes)} MB/s`,
   );
-  console.log(`Fehlgeschlagene Abrufe   ${stat.healthFehler}`);
+  console.log(`Fehlgeschlagen           ${stat.healthFehler} × /health, ${stat.courtFehler} × /court/{id}/state`);
   console.log(
     `Latenz Punkt → Anzeige   p50 ${perzentil(stat.latenzen, 50)} ms, ` +
       `p95 ${perzentil(stat.latenzen, 95)} ms (${stat.latenzen.length} Messwerte)`,

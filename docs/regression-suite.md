@@ -104,7 +104,10 @@ anpassen:
   Court-Monitore gegen einen **laufenden** Turnier-PC (LAN) bzw. gegen den
   Relay (Cloud) und meldet Abrufe, Bytes und die Latenz Punkt → Anzeige.
   Braucht **belegte Felder**: Ohne gültige Match-ID verwirft `handle_score`
-  den Stand, es entstünde weder Schreibvorgang noch Nudge. Vor **und** nach
+  den Stand, es entstünde weder Schreibvorgang noch Nudge. ⚠️ **Nur am
+  Probeaufbau, nie im echten Turnier** — das Skript belegt Felder und
+  seine erfundenen Stände laufen bis in den öffentlichen Liveticker;
+  `--trocken` verbindet kein Tablet und misst nur die Anzeige-Seite. Vor **und** nach
   jeder Etappe der Spec fahren; die Server-Sicht dazu liefern
   `GET /debug/perf` und die 10-Sekunden-Zeile im Diagnose-Log. Das
   Zählwerk selbst (`tablet/perf.rs`) ist mit elf Unit-Tests abgedeckt,

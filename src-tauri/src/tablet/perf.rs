@@ -10,6 +10,15 @@
 //! Turnieren zurück und über `/debug/perf` aus dem LAN heraus; ein
 //! Personenbezug hätte hier nichts zu suchen. Der Wächter-Test
 //! `debug_perf_enthaelt_keine_personendaten` macht das durchsetzbar.
+//!
+//! **Was diese Zähler im Cloud-Betrieb NICHT sehen:** Dort bedient der
+//! Relay `/health` und `/court/{id}/state`, nicht dieser Prozess —
+//! `health_*` und `court_state_*` bleiben deshalb bei null, während
+//! `nudges_sent`, `persist_calls` und `overview_builds` weiterlaufen. Eine
+//! Zeile ohne Abrufe heißt im Cloud-Modus also **nicht** „keine Anzeigen".
+//! Die Abruf-Seite der Cloud misst das Lastskript von außen
+//! (`scripts/last-monitor.mjs` gegen die Relay-Adresse); den Relay selbst
+//! zu instrumentieren ist bewusst nicht Teil dieser Etappe.
 
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -323,7 +332,7 @@ impl PerfSnapshot {
         format!(
             "Perf-Anzeigen ({:.0} s): /health {} push + {} poll = {:.1}/s, {:.2} MB/s · \
              /court/state {} push + {} poll, {:.2} MB/s · overview {} Bauten ({:.1}/s), \
-             p95 {:.2} ms, max {:.2} ms · live-scores {} Schreibvorgänge ({:.1}/s, \
+             p95 {:.2} ms / max {:.2} ms (seit Start) · live-scores {} Schreibvorgänge ({:.1}/s, \
              {:.2} MB/s, Ø {:.2} ms) · {} Nudges ({:.1}/s)",
             s,
             self.health_push,
@@ -481,6 +490,13 @@ mod tests {
         assert!(zeile.contains("MB/s"), "Bytes-Rate fehlt: {zeile}");
         assert!(zeile.contains("840 Bauten"), "Bauten fehlen: {zeile}");
         assert!(zeile.contains("p95"), "p95 fehlt: {zeile}");
+        // p95/max beschreiben den ganzen Lauf, nicht das Fenster (siehe
+        // `seit`). Ohne diese Beschriftung läse man einen frühen Ausreißer
+        // in JEDER Folgezeile als frisches Ereignis (Review 19.08.2026).
+        assert!(
+            zeile.contains("seit Start"),
+            "die nicht gefensterten Werte müssen als solche kenntlich sein: {zeile}"
+        );
         assert!(
             zeile.contains("210 Schreibvorgänge"),
             "Schreibvorgänge fehlen: {zeile}"

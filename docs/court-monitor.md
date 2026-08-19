@@ -298,6 +298,14 @@ Gegen den Relay läuft es unverändert, nur mit dessen Basis-Adresse.
 **Es braucht belegte Felder:** Ein Stand ohne passende Match-ID wird
 verworfen, dann entstünde weder Schreibvorgang noch Nudge.
 
+> ⚠️ **Nicht während eines echten Turniers.** Das Skript gibt sich als
+> zählendes Tablet aus: Es **belegt Felder** (ein echtes Tablet bekäme
+> danach „Feld belegt") und seine erfundenen Punktstände laufen den
+> regulären Weg — bis in den öffentlichen Liveticker auf badhub.de und in
+> die Spielzeiten-Statistik. Gedacht ist es für einen Probeaufbau. Der
+> Schalter `--trocken` verbindet **kein** Tablet und misst nur die
+> Anzeige-Seite; so ist es auch neben einem laufenden Turnier gefahrlos.
+
 **4. Render-Messung auf dem Pi.** In der Browser-Konsole der Übersicht
 `localStorage.ovRenderMessen = "1"` setzen; die Seite meldet dann alle zehn
 Sekunden, wie oft und wie lange sie gezeichnet hat und wie viele Renders

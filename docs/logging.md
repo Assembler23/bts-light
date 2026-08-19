@@ -38,10 +38,16 @@ p95 1.05 ms, max 4.19 ms · live-scores 210 Schreibvorgänge (21.0/s,
 Drei Dinge dazu:
 
 - **Sie steht im Sync-Takt, nicht im Server.** Der Sync-Loop läuft in
-  beiden Betriebsarten, der LAN-Server nicht — sonst fehlte die Messung
-  ausgerechnet im Cloud-Betrieb. Sie wird **vor** dem BTP-Abruf gezogen,
-  damit sie auch dann kommt, wenn BTP klemmt: Die Anzeigen laufen ja
-  weiter.
+  beiden Betriebsarten, der LAN-Server nicht. Sie wird **vor** dem
+  BTP-Abruf gezogen, damit sie auch dann kommt, wenn BTP klemmt: Die
+  Anzeigen laufen ja weiter.
+- **Im Cloud-Betrieb fehlt die Abruf-Seite.** Dort bedient der Relay
+  `/health` und `/court/{id}/state`, nicht der Turnier-PC — die beiden
+  Abruf-Zähler stehen dann auf null, während Nudges, Schreibvorgänge und
+  Übersichts-Bauten normal weiterzählen. Eine Zeile ohne Abrufe heißt im
+  Cloud-Modus also **nicht** „keine Anzeigen". Wer die Cloud-Abrufe
+  messen will, fährt `scripts/last-monitor.mjs` gegen die Relay-Adresse;
+  es zählt von außen mit.
 - **Stille schreibt nichts.** Hängt keine Anzeige am PC, entfällt die
   Zeile ganz statt lauter Nullen zu protokollieren.
 - **Nur Zahlen** — keine Namen, keine Match-IDs. Derselbe Stand steht im
