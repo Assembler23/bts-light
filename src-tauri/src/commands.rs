@@ -1686,6 +1686,8 @@ pub async fn enter_result(
             // bliebe `finished=false` und der Abweichungs-Hinweis (AK-8)
             // könnte nie erscheinen. Ohne Aufzeichnung ein No-op.
             tablet.timeline_store().finalize(mid, false);
+            // Der Zettel ebenso — sein Fuß nennt die Ergebnisart.
+            tablet.sheet_store().finalize(mid, false);
             tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
             Ok(())
         }
@@ -1755,6 +1757,7 @@ pub async fn disqualify_match(
             // Punktverlauf abschließen — DQ ist ein Sonderausgang mitten
             // im Satz (AK-13); ohne Aufzeichnung ein No-op.
             tablet.timeline_store().finalize(mid, true);
+            tablet.sheet_store().finalize(mid, true);
             tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
             Ok(())
         }

@@ -556,11 +556,39 @@ async fn handle_frame(
         // On-Demand-Abruf der TL-Oberfläche (AK-5): Antwort direkt aus dem
         // Store — winzige Payload, kein BTP-Zugriff, deshalb anders als
         // TlCommand ohne eigenen Task.
-        // Zettel (ADR 0037/0039): Ingest kommt in E3, der Leseweg in E5
-        // der Spec schiedsrichterzettel-druck.
-        RelayFrame::MatchEvent { .. }
-        | RelayFrame::MatchEventSync { .. }
-        | RelayFrame::ScoresheetRequest { .. } => {}
+        // Zettel-Ereignisse (ADR 0037): gleicher Filter wie beim
+        // Punktverlauf — der Frame muss zum aktuellen Court-Match passen.
+        // Die Halter-Prüfung übernimmt im Cloud-Modus der Relay (eine
+        // aktive Tablet-Session je Court, R4), wie beim Rally-Weg.
+        RelayFrame::MatchEvent {
+            court_id,
+            match_id,
+            event,
+        } => {
+            if ctx
+                .tablet
+                .match_for_court(court_id)
+                .is_some_and(|m| m.id == match_id)
+            {
+                ctx.tablet.sheet_store().apply_event(match_id, event);
+            }
+        }
+        RelayFrame::MatchEventSync {
+            court_id,
+            match_id,
+            events,
+        } => {
+            if ctx
+                .tablet
+                .match_for_court(court_id)
+                .is_some_and(|m| m.id == match_id)
+            {
+                ctx.tablet.sheet_store().apply_event_sync(match_id, events);
+            }
+        }
+        // Der Zettel-Abruf (ADR 0039) kommt in E5 — bis dahin gibt es
+        // keine Route, die ihn auslöst.
+        RelayFrame::ScoresheetRequest { .. } => {}
         RelayFrame::TimelineRequest { req_id, match_id } => {
             let json = ctx.tablet.timeline_store().timeline_json(match_id);
             let _ = tx.send(text(&HostFrame::TimelineData {
