@@ -60,12 +60,25 @@ export function istPatchbar(vorher, nachher, brettGleich, callTimer) {
   if (!vorher || !nachher) return false;
   if (vorher.court_id !== nachher.court_id) return false;
 
+  // Beschriftung, Halle und Farbe stehen im Kopf bzw. an der Gruppe — sie
+  // gelten für freie Karten genauso wie für belegte, deshalb **vor** dem
+  // Kurzschluss weiter unten.
+  if ((vorher.court || "") !== (nachher.court || "")) return false;
+  if ((vorher.location || "") !== (nachher.location || "")) return false;
+  if ((vorher.hall_color || "") !== (nachher.hall_color || "")) return false;
+
   // Match-Wechsel: andere Namen, andere Runde — die ganze Karte ist neu.
   if ((vorher.match_id || 0) !== (nachher.match_id || 0)) return false;
   // Ein leeres Feld hat gar keine Satz-Zeilen; der Übergang leer↔belegt
   // ändert den Aufbau.
   if (istLive(vorher) !== istLive(nachher)) return false;
-  if (!istLive(nachher)) return false;
+  // **Ein durchgehend freies Feld ist patchbar — es gibt nichts zu tun.**
+  // Zuerst stand hier ein `return false`, und das machte die ganze Etappe
+  // wirkungslos: Die Übersicht listet **alle** Felder, in jeder Halle ist
+  // ständig eines zwischen zwei Spielen, und ein einziges „nein" zwingt das
+  // ganze Brett in den Neubau (Review-Fund 19.08.2026). Der Aufrufer
+  // überspringt freie Felder beim Nachbessern.
+  if (!istLive(nachher)) return true;
 
   // Zustands-Marken sitzen als Klasse an der Karte und als Text im Kopf.
   if (!!vorher.injury !== !!nachher.injury) return false;
@@ -78,11 +91,8 @@ export function istPatchbar(vorher, nachher, brettGleich, callTimer) {
   // Aufruf-Uhr: Der erste gezählte Punkt lässt sie verschwinden.
   if (uhrSichtbar(vorher, callTimer) !== uhrSichtbar(nachher, callTimer)) return false;
 
-  // Beschriftung, Halle und Farbe stehen im Kopf bzw. an der Gruppe.
-  if ((vorher.court || "") !== (nachher.court || "")) return false;
+  // Runden-/Gruppen-Beschriftung steht nur an einer belegten Karte.
   if ((vorher.match_name || "") !== (nachher.match_name || "")) return false;
-  if ((vorher.location || "") !== (nachher.location || "")) return false;
-  if ((vorher.hall_color || "") !== (nachher.hall_color || "")) return false;
 
   // Namen und Nationen gehören zum Match. Sie sollten sich bei gleicher
   // Match-ID nicht ändern — aber „sollte" ist keine Zusicherung, und eine
@@ -104,13 +114,42 @@ function listeGleich(a, b) {
 }
 
 /**
- * Kennung der Brett-Anordnung: Felder in ihrer Reihenfolge samt Halle.
- * Ändert sie sich, stimmt das Raster nicht mehr und es wird neu gebaut.
+ * Kennung der **gezeigten** Anordnung: Felder in ihrer Reihenfolge samt
+ * Halle, dazu die aktuell gezeigte Halle und ein etwaiger Filter. Ändert sie
+ * sich, stimmt das Raster nicht mehr und es wird neu gebaut.
+ *
+ * Der Rotationsstand gehört dazu: Beim Umschalten der Halle sind die Felder
+ * dieselben, nur eine andere Gruppe steht auf dem Schirm — ohne ihn hielte
+ * der Patch das für „nichts geändert" und die Rotation bliebe stehen.
  *
  * @param {Array<object>} courts
+ * @param {number} hallIdx Laufender Rotationszähler der Anzeige.
+ * @param {string} hallFilter Fest eingestellte Halle (`?halle=`), sonst leer.
  * @returns {string}
  */
-export function brettSignatur(courts) {
+export function sichtSignatur(courts, hallIdx, hallFilter) {
   const list = Array.isArray(courts) ? courts : [];
-  return list.map((c) => `${c.court_id}:${c.location || ""}`).join("|");
+  const felder = list.map((c) => `${c.court_id}:${c.location || ""}`).join("|");
+  return `${felder}#${hallIdx || 0}#${hallFilter || ""}`;
+}
+
+/**
+ * Hat sich am Satzstand dieses Felds überhaupt etwas geändert? Nur dann muss
+ * seine Karte angefasst werden — sonst tauschte ein Punkt auf Feld 3 die
+ * Ziffern **aller** Felder aus und gäbe einen großen Teil der Ersparnis
+ * wieder her.
+ *
+ * @param {object} vorher
+ * @param {object} nachher
+ * @returns {boolean}
+ */
+export function satzstandGleich(vorher, nachher) {
+  const a = Array.isArray(vorher && vorher.sets) ? vorher.sets : [];
+  const b = Array.isArray(nachher && nachher.sets) ? nachher.sets : [];
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (satzWert(a[i], 0) !== satzWert(b[i], 0)) return false;
+    if (satzWert(a[i], 1) !== satzWert(b[i], 1)) return false;
+  }
+  return true;
 }

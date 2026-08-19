@@ -578,23 +578,44 @@ main {
   function istPatchbar(vorher, nachher, brettGleich, timer) {
     if (!brettGleich || !vorher || !nachher) return false;
     if (vorher.court_id !== nachher.court_id) return false;
+    // Beschriftung, Halle und Farbe gelten für freie wie belegte Karten.
+    if ((vorher.court || '') !== (nachher.court || '')) return false;
+    if ((vorher.location || '') !== (nachher.location || '')) return false;
+    if ((vorher.hall_color || '') !== (nachher.hall_color || '')) return false;
     if ((vorher.match_id || 0) !== (nachher.match_id || 0)) return false;
-    var liveV = !!(vorher.match_id && vorher.match_id > 0 && vorher.team1 && vorher.team1.length);
-    var liveN = !!(nachher.match_id && nachher.match_id > 0 && nachher.team1 && nachher.team1.length);
-    if (liveV !== liveN || !liveN) return false;
+    var liveV = istLiveFeld(vorher), liveN = istLiveFeld(nachher);
+    if (liveV !== liveN) return false;
+    // Ein durchgehend freies Feld ist patchbar — es gibt nichts zu tun.
+    // Stünde hier `false`, wäre die ganze Etappe wirkungslos: Die Übersicht
+    // listet ALLE Felder, in jeder Halle ist ständig eines zwischen zwei
+    // Spielen, und ein einziges „nein" zwingt das ganze Brett in den Neubau.
+    if (!liveN) return true;
     if (!!vorher.injury !== !!nachher.injury) return false;
     if (!!vorher.official_call !== !!nachher.official_call) return false;
     var satzZahl = function (c) { return Array.isArray(c.sets) ? c.sets.length : 0; };
     if (satzZahl(vorher) !== satzZahl(nachher)) return false;
     if (uhrSichtbar(vorher, timer) !== uhrSichtbar(nachher, timer)) return false;
-    if ((vorher.court || '') !== (nachher.court || '')) return false;
     if ((vorher.match_name || '') !== (nachher.match_name || '')) return false;
-    if ((vorher.location || '') !== (nachher.location || '')) return false;
-    if ((vorher.hall_color || '') !== (nachher.hall_color || '')) return false;
     if (!listeGleich(vorher.team1, nachher.team1)) return false;
     if (!listeGleich(vorher.team2, nachher.team2)) return false;
     if (!listeGleich(vorher.team1_nationalities, nachher.team1_nationalities)) return false;
     if (!listeGleich(vorher.team2_nationalities, nachher.team2_nationalities)) return false;
+    return true;
+  }
+  function istLiveFeld(c) {
+    return !!(c && c.match_id && c.match_id > 0 && c.team1 && c.team1.length);
+  }
+  /** Hat sich am Satzstand etwas geändert? Nur dann muss die Karte angefasst
+   *  werden — sonst tauschte ein Punkt auf Feld 3 die Ziffern ALLER Felder
+   *  aus und gäbe einen großen Teil der Ersparnis wieder her. */
+  function satzstandGleich(vorher, nachher) {
+    var a = Array.isArray(vorher && vorher.sets) ? vorher.sets : [];
+    var b = Array.isArray(nachher && nachher.sets) ? nachher.sets : [];
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (setVal(a[i], 0) !== setVal(b[i], 0)) return false;
+      if (setVal(a[i], 1) !== setVal(b[i], 1)) return false;
+    }
     return true;
   }
   function uhrSichtbar(c, timer) {
@@ -607,22 +628,35 @@ main {
     if (x.length !== y.length) return false;
     return x.every(function (v, i) { return v === y[i]; });
   }
-  /** Kennung der gezeigten Anordnung: Felder samt Halle, dazu die aktuell
-   *  gezeigte Halle und ein etwaiger Filter. Ohne Rotationsstand hielte der
-   *  Patch das Umschalten der Halle für „nichts geändert". */
+  /** Kennung der gezeigten Anordnung: Felder samt Halle, dazu der
+   *  Rotationsstand und ein etwaiger Filter. Ohne Rotationsstand hielte der
+   *  Patch das Umschalten der Halle für „nichts geändert".
+   *
+   *  Inline-Kopie von `sichtSignatur` in `src/io/courtPatch.mjs`; dort mit
+   *  Test (`scripts/test-court-patch.mjs`). Die Anzeige reicht ihre eigenen
+   *  Zustandsgrößen herein, statt sie im Modul vorauszusetzen. */
   function sichtSignatur(courts) {
     var list = Array.isArray(courts) ? courts : [];
-    return list.map(function (c) { return c.court_id + ':' + (c.location || ''); }).join('|')
-      + '#' + hallIdx + '#' + (hallFilter || '');
+    var felder = list.map(function (c) { return c.court_id + ':' + (c.location || ''); }).join('|');
+    return felder + '#' + (hallIdx || 0) + '#' + (hallFilter || '');
   }
 
-  /** Nur die Satzstände der genannten Felder erneuern. Gibt `false` zurück,
-   *  wenn eine Karte nicht (mehr) im Dokument steht — dann baut der Aufrufer
-   *  neu. */
-  function patcheKarten(courts) {
-    for (var i = 0; i < courts.length; i++) {
-      var c = courts[i];
-      var karte = kartenNachFeld[c.court_id];
+  /** Die Satzstände der **gezeigten** Felder erneuern, soweit sie sich
+   *  geändert haben. Gibt `false` zurück, wenn eine Karte nicht (mehr) im
+   *  Dokument steht — dann baut der Aufrufer neu.
+   *
+   *  Nur die gezeigten: Bei Hallen-Rotation und mit `?halle=` zeichnet die
+   *  Seite nur eine Gruppe, und über `MAX_COURTS` hinaus schneidet sie ab.
+   *  Liefe die Schleife über die volle Feld-Liste, fände sie für jedes nicht
+   *  gezeichnete Feld keine Karte und erzwänge dauerhaft den Neubau — genau
+   *  in den Turnieren, um die es hier geht (Review-Fund 19.08.2026). */
+  function patcheKarten(nachFeldNeu) {
+    var ids = Object.keys(kartenNachFeld);
+    for (var i = 0; i < ids.length; i++) {
+      var c = nachFeldNeu[ids[i]];
+      if (!c) return false;              // gezeigtes Feld fehlt jetzt → Neubau
+      if (!istLiveFeld(c)) continue;     // freie Karte hat keine Satz-Zeilen
+      var karte = kartenNachFeld[ids[i]];
       if (!karte || !karte.isConnected) return false;
       var zeilen = karte.querySelectorAll('.trow');
       if (zeilen.length !== 2) return false;
@@ -670,12 +704,21 @@ main {
       && JSON.stringify((alt && alt.callTimer) || null) === JSON.stringify(timer);
 
     if (!faellig && brettGleich) {
-      var nachFeld = {};
-      alteCourts.forEach(function (c) { nachFeld[c.court_id] = c; });
-      var allePatchbar = neueCourts.every(function (c) {
-        return istPatchbar(nachFeld[c.court_id], c, true, timer);
+      var alteNachFeld = {}, neueNachFeld = {};
+      alteCourts.forEach(function (c) { alteNachFeld[c.court_id] = c; });
+      neueCourts.forEach(function (c) { neueNachFeld[c.court_id] = c; });
+      // Geprüft wird nur, was auch auf dem Schirm steht — bei Rotation oder
+      // `?halle=` ist das eine Teilmenge.
+      var gezeigt = Object.keys(kartenNachFeld);
+      var allePatchbar = gezeigt.length > 0 && gezeigt.every(function (id) {
+        return istPatchbar(alteNachFeld[id], neueNachFeld[id], true, timer);
       });
-      if (allePatchbar && patcheKarten(neueCourts)) {
+      // Hat sich an keinem gezeigten Feld der Satzstand geändert, ist gar
+      // nichts zu tun (etwa ein Anstoß, der nur eine Meldung betraf).
+      var etwasNeu = gezeigt.some(function (id) {
+        return !satzstandGleich(alteNachFeld[id], neueNachFeld[id]);
+      });
+      if (allePatchbar && (!etwasNeu || patcheKarten(neueNachFeld))) {
         // `lastData` fortschreiben, auch wenn nicht neu gebaut wurde: Die
         // Hallen-Rotation und der Uhr-Takt zeichnen später aus diesen Daten.
         lastData = data;
@@ -683,9 +726,14 @@ main {
       }
     }
     letzterVollRender = jetzt;
-    letzteSicht = jetztSicht;
     kartenNachFeld = {};
     renderIntern(data);
+    // **Nach** dem Bauen: `renderIntern` kann `stopHallRotation()` aufrufen
+    // und dabei `hallIdx` zurücksetzen. Vorher gemerkt, beschriebe der
+    // Schlüssel eine Sicht, die so nie gezeichnet wurde — und der nächste
+    // unveränderte Abruf löste einen überflüssigen Neubau aus
+    // (Review-Fund 19.08.2026).
+    letzteSicht = sichtSignatur(neueCourts);
   }
 
   function renderIntern(data) {

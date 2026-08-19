@@ -1,7 +1,13 @@
 // Testet die Zuständigkeitsgrenze des Teil-Patches (src/io/courtPatch.mjs,
 // Spec monitor-livestand-push S5) — das echte Modul, dessen Inline-Kopie die
 // Feld-Übersicht trägt. Je Bedingung ein Fall.
-import { istPatchbar, brettSignatur, istLive, hatBegonnen } from "../src/io/courtPatch.mjs";
+import {
+  istPatchbar,
+  sichtSignatur,
+  satzstandGleich,
+  istLive,
+  hatBegonnen,
+} from "../src/io/courtPatch.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -50,6 +56,18 @@ ok("Satzwechsel", p(feld(), feld({ sets: [[21, 8], [1, 0]] })), false);
 ok("Match-Wechsel", p(feld(), feld({ match_id: 8 })), false);
 ok("Feld wird frei", p(feld(), feld({ match_id: 0, team1: [] })), false);
 ok("Feld wird belegt", p(feld({ match_id: 0, team1: [] }), feld()), false);
+
+// Ein durchgehend freies Feld ist patchbar — es gibt nichts zu tun. Stünde
+// hier `false`, wäre die ganze Etappe wirkungslos: Die Übersicht listet ALLE
+// Felder, in jeder Halle ist ständig eines zwischen zwei Spielen, und ein
+// einziges "nein" zwingt das ganze Brett in den Neubau.
+const frei = feld({ match_id: 0, team1: [], team2: [], sets: [] });
+ok("durchgehend freies Feld ist patchbar", p(frei, frei), true);
+ok(
+  "freies Feld mit gewechselter Halle nicht",
+  p(frei, Object.assign({}, frei, { location: "Halle B" })),
+  false,
+);
 ok("Behandlungspause beginnt", p(feld(), feld({ injury: true })), false);
 ok("Turnierleitung gerufen", p(feld(), feld({ official_call: true })), false);
 ok("Feldname geändert", p(feld(), feld({ court: "Feld 2" })), false);
@@ -101,27 +119,37 @@ ok("hatBegonnen: 0:0 ohne Aufschlag", hatBegonnen(feld({ sets: [[0, 0]], serving
 // Satzstände kommen im LAN als Paare, in der Cloud als Objekte.
 ok("hatBegonnen: Objekt-Form", hatBegonnen(feld({ sets: [{ a: 3, b: 2 }], serving_team: 0 })), true);
 
-// ── Brett-Signatur ────────────────────────────────────────────────────────
+// ── Nur geänderte Felder anfassen ─────────────────────────────────────────
+ok("gleicher Satzstand", satzstandGleich(feld(), feld()), true);
+ok("ein Punkt mehr", satzstandGleich(feld(), feld({ sets: [[12, 8]] })), false);
+ok("Punkt beim Gegner", satzstandGleich(feld(), feld({ sets: [[11, 9]] })), false);
+ok("Satz mehr", satzstandGleich(feld(), feld({ sets: [[11, 8], [0, 0]] })), false);
+ok("leer gegen leer", satzstandGleich(feld({ sets: [] }), feld({ sets: [] })), true);
+// LAN liefert Paare, die Cloud Objekte — beide Formen müssen vergleichbar sein.
+ok(
+  "Paar- und Objektform sind vergleichbar",
+  satzstandGleich(feld({ sets: [[11, 8]] }), feld({ sets: [{ a: 11, b: 8 }] })),
+  true,
+);
+
+// ── Sicht-Signatur ────────────────────────────────────────────────────────
+// Die Signatur, die auch wirklich ausgeliefert wird: Felder + Rotationsstand
+// + Filter. Ohne den Rotationsstand bliebe die Hallen-Rotation stehen.
 const brett = [
   { court_id: 101, location: "Halle A" },
   { court_id: 102, location: "Halle A" },
 ];
-ok("gleiche Anordnung", brettSignatur(brett) === brettSignatur(brett.slice()), true);
-ok(
-  "vertauschte Reihenfolge fällt auf",
-  brettSignatur(brett) === brettSignatur([brett[1], brett[0]]),
-  false,
-);
-ok(
-  "ein Feld weniger fällt auf",
-  brettSignatur(brett) === brettSignatur([brett[0]]),
-  false,
-);
+const sig = (c, idx, filter) => sichtSignatur(c, idx, filter);
+ok("gleiche Anordnung", sig(brett, 0, "") === sig(brett.slice(), 0, ""), true);
+ok("vertauschte Reihenfolge fällt auf", sig(brett, 0, "") === sig([brett[1], brett[0]], 0, ""), false);
+ok("ein Feld weniger fällt auf", sig(brett, 0, "") === sig([brett[0]], 0, ""), false);
 ok(
   "gewechselte Halle fällt auf",
-  brettSignatur(brett) === brettSignatur([{ court_id: 101, location: "Halle B" }, brett[1]]),
+  sig(brett, 0, "") === sig([{ court_id: 101, location: "Halle B" }, brett[1]], 0, ""),
   false,
 );
+ok("weitergedrehte Rotation fällt auf", sig(brett, 0, "") === sig(brett, 1, ""), false);
+ok("gesetzter Hallenfilter fällt auf", sig(brett, 0, "") === sig(brett, 0, "Halle A"), false);
 
 if (failures > 0) {
   console.error(`\n${failures} Fehler`);
