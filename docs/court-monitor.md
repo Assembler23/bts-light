@@ -266,6 +266,39 @@ billig:
   und Startzeit; das Tablet selbst bekommt beim Wiederverbinden
   weiterhin den vollen Stand (sein Rückgängig-Gedächtnis).
 
+## Antwortcache der Übersicht (seit v0.9.236)
+
+Die Route `/health` liefert allen Übersichts-Anzeigen den Zustand **aller**
+Felder. Berechnet wurde er bisher bei **jedem** Abruf neu — je Feld ein
+Durchlauf durch alle Spiele plus ein Auswerten des Tablet-Stands. Bei
+zwanzig Anzeigen im 250-ms-Takt waren das rund siebzig Berechnungen je
+Sekunde (gemessen, siehe Spec).
+
+Jetzt wird einmal gerechnet und das Ergebnis wiederverwendet. Es gilt,
+solange **beides** stimmt:
+
+- **die Revision** — sie steigt bei jedem Nudge (ein Feld hat sich
+  geändert), bei jedem neuen BTP-Stand und bei jedem Schreibvorgang an der
+  Konfiguration (dort stecken Hallen-Farben und Aufruf-Timer);
+- **die Hart-TTL von 250 ms** — das Sicherheitsnetz gegen eine
+  Änderungsquelle, an die niemand gedacht hat. Schlimmstenfalls ist eine
+  Anzeige eine Viertelsekunde alt, statt bis zum nächsten Ereignis falsch
+  zu bleiben.
+
+Ist der Zwischenstand kalt oder abgestanden, rechnet der Server wie vorher.
+**Er ist Beschleuniger, nicht Wahrheit.**
+
+Dazu bekommt jede Antwort eine Marke (`ETag`). Fragt eine Anzeige mit
+dieser Marke nach und hat sich nichts geändert, antwortet der Server mit
+einer leeren Bestätigung (HTTP 304) statt mit rund 16 KB. Der Relay kennt
+weder Marke noch Zwischenstand — im Cloud-Betrieb läuft alles wie bisher.
+
+Eine Folge davon steckt in der Anzeige selbst: Die Uhr „Zeit seit Aufruf"
+lief früher beiläufig mit, weil viermal je Sekunde ein voller Stand kam.
+Sie rechnet jetzt aus einem gemerkten Zeitversatz zur Server-Uhr und hat
+einen eigenen Sekundentakt, der nur läuft, solange überhaupt eine Uhr
+sichtbar ist.
+
 ## Messen, was die Anzeigen kosten (seit v0.9.235)
 
 Erste Etappe der Spec

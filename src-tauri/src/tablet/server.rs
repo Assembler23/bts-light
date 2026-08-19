@@ -5113,8 +5113,18 @@ mod tests {
         // Die Trennung ist der Kern der Vorher-Messung: Wie viel Last
         // erzeugt der Nudge-Weg, wie viel der Fallback-Takt?
         let ctx = Arc::new(make_ctx(1));
-        let _ = health(State(ctx.clone()), takt(Some("push")), axum::http::HeaderMap::new()).await;
-        let _ = health(State(ctx.clone()), takt(Some("poll")), axum::http::HeaderMap::new()).await;
+        let _ = health(
+            State(ctx.clone()),
+            takt(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = health(
+            State(ctx.clone()),
+            takt(Some("poll")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
         // Eine Seite aus einem älteren Stand kennt `src` nicht.
         let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
 
@@ -5308,7 +5318,12 @@ mod tests {
         // Die Ableseroute der Vorher-Messung: Sie gibt aus, was die Zähler
         // stehen haben — und ausschließlich Zahlen (Wächter in `perf.rs`).
         let ctx = Arc::new(make_ctx(1));
-        let _ = health(State(ctx.clone()), takt(Some("push")), axum::http::HeaderMap::new()).await;
+        let _ = health(
+            State(ctx.clone()),
+            takt(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
         let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
 
         let antwort = debug_perf(State(ctx.clone())).await.into_response();
