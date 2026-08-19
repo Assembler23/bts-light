@@ -14,6 +14,7 @@ pub mod perf;
 pub mod predict;
 pub mod queue_order;
 pub mod relay_client;
+pub mod scoresheet;
 pub mod server;
 pub mod sheet;
 pub mod slave_bridge;
