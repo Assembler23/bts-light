@@ -367,20 +367,23 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Ausgefüllte Schiedsrichterzettel drucken** — für jedes mit Tablet gezählte
-  Spiel ein ausgefüllter Zettel: Punktverlauf, Aufschlagfolge, Karten,
-  Verletzungen mit Beginn und Ende, Unterbrechungen, Zeiten. **Internes
-  Turnier-Archiv, kein amtlicher Beleg** (offizielle Turniere laufen weiter
-  über das Original-BTS). Der PIN-Schiri-Modus am Tablet erfasst schon heute
-  Karten — sie sterben aber im `localStorage`; das Feature verstetigt sie zum
-  Host. Ereignisse laufen als **eigener Strom neben** dem Punktverlauf, der
-  unverändert bleibt; gejoint wird erst beim Rendern. Gedruckt wird ein einmal
-  am Host erzeugtes HTML-Dokument im WebView — keine neue Abhängigkeit, keine
-  neue Tauri-Permission. Acht Etappen-PRs, Relay vor App.
+- **Ausgefüllte Schiedsrichterzettel drucken — VOLLSTÄNDIG umgesetzt** (E1–E8,
+  v0.9.244). **E1** Wire-Typen neben dem Punktverlauf, **E2** `SheetStore`
+  (append-only, vereinigt statt zu ersetzen), **E3** Ingest über LAN, Cloud und
+  Relay, **E4** Projektion auf das Zellenraster, **E5** ein Renderer und drei
+  Lesepfade, **E6** Erfassung am Tablet, **E7** Ausgabewege in Desktop und
+  TL-Web, **E8** Abschluss. Karten überleben jetzt einen Gerätewechsel und
+  landen auf einem druckbaren Blatt — **internes Turnier-Archiv, kein amtlicher
+  Beleg**. Bedienung: [schiedsrichterzettel.md](schiedsrichterzettel.md) ·
   Spec: [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md) ·
   ADR [0037](adr/0037-zettel-ereignisse-eigener-strom.md) ·
   [0038](adr/0038-ereignisse-append-only.md) ·
   [0039](adr/0039-zettel-html-im-webview.md).
+
+  **Offen und nur am Gerät prüfbar:** der Druck-Test unter Windows-WebView2 und
+  Android-Chrome sowie ein Turnier-Feldtest mit parallel geführtem Papierbogen.
+  Fällt das Seitenbild aus, ist ADR 0039 neu zu bewerten.
+
 - **Monitor-Livestand per Push — VOLLSTÄNDIG umgesetzt** (S0–S7, v0.9.235–242,
   PRs #256–#264). **S0** Messung (Zähler, 10-Sekunden-Log-Zeile,
   `GET /debug/perf` nur LAN, Lastskript `scripts/last-monitor.mjs`), **S1**

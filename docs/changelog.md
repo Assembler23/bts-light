@@ -4,6 +4,33 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.244
+
+- **Ausgefüllte Schiedsrichterzettel lassen sich drucken.** Für jedes mit Tablet
+  gezählte Spiel: Punktverlauf, Aufschlagfolge, Karten, Verletzungen,
+  Unterbrechungen, Überstimmungen und Zeiten auf einem A4-Blatt quer — am
+  Turnier-PC und auf der Turnierleitungs-Seite, einzeln oder als Stapel für eine
+  ganze Runde. Bedienung: [schiedsrichterzettel.md](schiedsrichterzettel.md).
+- **Karten überleben jetzt einen Gerätewechsel.** Bisher lagen sie nur im
+  Speicher des jeweiligen Tablets, erreichten den Turnier-PC nie und waren nach
+  dem Turnier verloren. Sie gehen weiterhin **nicht** zu badhub und **nicht** in
+  den Liveticker.
+- **Ein Undo nimmt jetzt auch die Karte zurück, nicht nur den Punkt.** Bisher
+  blieb eine rote Karte nach dem Zurücknehmen ihres Punktes stehen.
+  Zurückgenommenes verschwindet aber nicht spurlos: Es steht durchgestrichen im
+  Protokoll des Zettels.
+- **Die rote Karte ist nur noch wählbar, wenn ihr Punkt auch zählen kann.**
+  Vorher konnte er in einer Pause oder unmittelbar nach dem letzten Punkt still
+  verschluckt werden, während die Karte trotzdem protokolliert wurde.
+- **Vorgänge sind auch in Pausen erfassbar** — dort passieren die meisten
+  Verletzungs- und Unterbrechungs-Meldungen. Neu erfassbar: Behandlung
+  Beginn/Ende, Unterbrechung, Überstimmung, Oberschiedsrichter gerufen.
+- Ein per Walkover gewertetes Spiel wird jetzt auch im Punktverlauf und im
+  Zettel abgeschlossen — bisher tat das jeder Ergebnisweg **außer** diesem.
+
+> **Reihenfolge beim Ausrollen:** erst den Relay, dann die App. Ein alter Relay
+> verwirft die neuen Tablet-Frames still.
+
 ## v0.9.243
 
 - **Die Cloud-Anzeigen laden nicht mehr bei jedem Abruf den ganzen Stand

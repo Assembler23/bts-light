@@ -479,3 +479,11 @@ sie), nur aus BTP gespeist statt von Hand geschaltet.
 **Wenn sie nicht kommen:** Dann bleibt die Verfügbarkeit Pflege in BTS Light.
 Der heutige Pausen-Schalter deckt den Fall schon ab — er müsste dann nur
 einen Tagesbezug bekommen, damit man ihn nicht jeden Morgen neu setzt.
+
+## Der Schiedsrichter auf dem Zettel
+
+Der gedruckte Schiedsrichterzettel trägt im Kopf **Schiedsrichter und
+Service-Richter** des Spiels — aus derselben Quelle wie die Feldübersicht
+(`court_officials`). Sperrlisten und Stammverein stehen **nicht** darauf; sie
+bleiben der Pflege-Ansicht vorbehalten. Bedienung:
+[schiedsrichterzettel.md](schiedsrichterzettel.md).

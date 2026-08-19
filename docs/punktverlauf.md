@@ -110,3 +110,28 @@ Lücken, Undo-Sync, Fremd-Match, Neustart-Reload, Turnierwechsel,
 Zwischenstand, Aufgabe, Nachzügler, Slug) · `tablet/server.rs`
 (Finalisierung) · `tablet/tl.rs` (`has_timeline`-Wahrheit) · `relay/`
 (Durchleitung, Deckel, Anfrage↔Antwort, 404/503).
+
+## Zwei Projektionen, eine Erfassung
+
+Seit dem Schiedsrichterzettel (Spec
+[features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md),
+ADR 0037) gibt es **zwei** Lesesichten auf dasselbe Spiel:
+
+| | Punktverlauf-Graph | Schiedsrichterzettel |
+|---|---|---|
+| Quelle | `MatchTimeline` (Ballwechsel) | `MatchTimeline` **+** `MatchEvent` (Ereignisse) |
+| Datei | `punktverlauf/<slug>.json` | `zettel/<slug>.json` |
+| Sanktionsdaten | **nie** | ja (das ist sein Zweck) |
+| Abgleich vom Tablet | **ersetzt** (`rally_sync`) | **vereinigt** (`match_event_sync`) |
+
+**Der Punktverlauf bleibt unverändert.** `MatchTimeline`, `TimelineSet`, die
+Datei, die Graph-Route und `timelineSetSvg` sind nicht angefasst worden; ein
+Golden-String-Test (`graph_dto_bleibt_byte_gleich`) friert die Graph-Antwort ein.
+Wer sie ändert, bricht dort — nicht erst auf einer älteren `tl.html` im Turnier.
+
+Der Grund für die Trennung ist Datenschutz, nicht Geschmack: Karten sind
+personenbezogene Sanktionsdaten. In `MatchTimeline` gelegt, kippten sie die
+Begründung aus ADR 0015 („kein Personenbezug auf Platte, also keine
+Lösch-Pflichten") und vererbten dem späteren badhub-Push die Falle. Zusätzlich
+haben beide Ströme **getrennte Deckel** — ein Ereignis-Schwall kann den
+Punktverlauf strukturell nicht mehr verdrängen.
