@@ -167,6 +167,14 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
   Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
   jeweils erst nachdem ihr Zwischenstand steht.
+- **Die Übersicht wird einmal gerechnet, nicht je Anzeige** (im Hallennetz
+  seit v0.9.236, in der Cloud seit v0.9.245): Zwanzig Fernseher fragen viermal
+  je Sekunde nach; der Zustand entsteht trotzdem nur, wenn sich wirklich etwas
+  geändert hat — und spätestens nach einer Viertelsekunde ohnehin einmal neu,
+  falls eine Änderung übersehen wurde. Gemeldet wird an drei Stellen: bei
+  jedem Anstoß, bei einer neuen Feldliste und bei einem neuen
+  Monitor-Datensatz (Aufruf-Timer, Fallback-Schalter) — die beiden letzten
+  stoßen nicht an und brauchen deshalb eine eigene Meldung.
 - **Bestätigung „nichts Neues"** (im Hallennetz seit v0.9.236, in der Cloud
   seit v0.9.243): Hat sich seit dem letzten Abruf nichts geändert, antwortet
   der Server mit einer leeren Bestätigung statt mit dem vollen Stand. Die

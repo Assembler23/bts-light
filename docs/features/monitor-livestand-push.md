@@ -181,7 +181,7 @@ Marke über den ausgelieferten Inhalt, `If-None-Match` → 304. Ein Zwischenspei
 **nicht** nötig — der Relay hält seinen Zustand ohnehin im Speicher, die Ersparnis liegt
 allein in den nicht gesendeten Bytes.
 
-**S9 — Antwortcache auch am Relay.** *(Offen; aus dem Sicherheits-Review zu S8.)* Die
+**S9 — Antwortcache auch am Relay.** *(Umgesetzt v0.9.245; aus dem Sicherheits-Review zu S8.)* Die
 Bestätigung aus S8 ist nur **auf der Leitung** billig, nicht auf der CPU: Der
 Projektionsbau in `overview_health` läuft auch für sie, samt des globalen Schlosses über
 **alle** Namespaces. Vorher deckelte sich eine Flut selbst, weil der Angreifer je Anfrage
@@ -681,8 +681,37 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       „Härtung" daraus kein Existenz-Orakel macht.)*
 - [x] Die Wirkung ist am laufenden Relay belegt. *(Gegenprobe 20.08.2026: 0,61 → 0,01 MB/s,
       98 % Bestätigungen — gleichauf mit dem Hallennetz.)*
-- [ ] **Offen:** Die Bestätigung spart Bytes, aber keine Rechenzeit — der Projektionsbau
-      läuft auch für sie. Siehe Etappe **S9**.
+- [x] Die Bestätigung spart seit **S9** auch Rechenzeit. *(Siehe unten.)*
+
+**Antwortcache am Relay (S9)** — umgesetzt v0.9.245
+- [x] Zwei Abrufe ohne Änderung bauen die Übersicht nur einmal.
+      *(`zwei_abrufe_ohne_aenderung_bauen_die_uebersicht_nur_einmal`, gemessen am neuen
+      Zähler `overview_builds`.)*
+- [x] Was der Zwischenspeicher ausliefert, ist Zeichen für Zeichen der Direktbau.
+      *(Derselbe Test vergleicht `courts`, `seqs` und `callTimer`.)*
+- [x] Jede Änderung, die die Übersicht sichtbar macht, meldet sich.
+      *(`ein_anstoss_macht_den_zwischenspeicher_ungueltig` ·
+      `eine_neue_feldliste_macht_den_zwischenspeicher_ungueltig` ·
+      `ein_neuer_monitor_datensatz_macht_den_zwischenspeicher_ungueltig`. Die drei Wege:
+      `notify_monitor` für Anstöße, `HostFrame::Courts` für die Feldliste, `monitor_upload`
+      für Aufruf-Timer und Fallback-Schalter — die beiden letzten stoßen **nicht** an und
+      brauchen deshalb eine eigene Meldung.)*
+- [x] Die Hart-Frist von 250 ms erzwingt einen Neubau, auch wenn niemand etwas gemeldet hat.
+      *(`die_hart_frist_erzwingt_einen_neubau` — das Netz gegen eine Quelle, an die niemand
+      gedacht hat. Schlimmstenfalls ist die Anzeige eine Viertelsekunde alt, statt bis zum
+      nächsten Ereignis falsch zu bleiben.)*
+- [x] Der schmale Abruf (S7) überschreibt den Eintrag der vollen Antwort nicht.
+      *(`der_schmale_abruf_nutzt_den_zwischenspeicher_nicht` — er filtert schon vor dem Bau
+      auf ein Feld und ist ohnehin billiger; ihn mitzulagern hieße, je Feldnummer einen
+      eigenen Eintrag zu halten.)*
+- [x] Gemeldet wird **nach** dem Schreiben, nie davor. *(Sonst läse ein Abruf im Fenster
+      dazwischen die neue Revision, baute aus dem alten Zustand und legte ihn darunter ab —
+      bis zur Hart-Frist bekämen alle Anzeigen den überholten Stand. Dieselbe Falle wie im
+      Hallennetz, wo sie ein Review gefunden hat.)*
+- [x] Ein Anstoß zwischen Bau und Ablage verhindert die Ablage. *(Der Eintrag trägt die
+      Revision, die beim **Ablegen** gilt; ist sie inzwischen weitergezogen, verfällt er beim
+      nächsten Abruf sofort. Lieber ein überflüssiger Bau als ein festgehaltener alter
+      Stand.)*
 
 **Verträglichkeit (alle Etappen)**
 - [ ] Alter Relay + neue Seite: datenloser Nudge, kein Heartbeat, `?court=` ignoriert → die
@@ -712,6 +741,7 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
 | S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
+| S9 | `zwei_abrufe_ohne_aenderung_bauen_die_uebersicht_nur_einmal` · `ein_anstoss_macht_den_zwischenspeicher_ungueltig` · `eine_neue_feldliste_macht_den_zwischenspeicher_ungueltig` · `ein_neuer_monitor_datensatz_macht_den_zwischenspeicher_ungueltig` · `die_hart_frist_erzwingt_einen_neubau` · `der_schmale_abruf_nutzt_den_zwischenspeicher_nicht` |
 | S8 | `die_marke_verraet_nicht_ob_es_den_namespace_gibt` · `die_cloud_uebersicht_bestaetigt_unveraenderten_stand` · `ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen` · `der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke` |
 | S7 | Host: `health_mit_court_liefert_genau_ein_feld` · `health_ohne_court_bleibt_unveraendert` · `ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` · `der_schmale_abruf_hat_eine_eigene_marke` · `zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`. Relay: `cloud_health_mit_court_liefert_genau_ein_feld` · `cloud_health_mit_unbrauchbarem_court_leakt_nichts` · `cloud_health_mit_court_bleibt_im_eigenen_namespace` |
 

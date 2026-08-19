@@ -409,10 +409,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
   **Offen:** die Pi-Zeile (`ovRenderMessen` auf einem echten Kiosk) — Feldtest,
   kein Code. Der Release-Tag (die App ist seit v0.9.226 nicht getaggt). Und
-  **S9**: Die Bestätigung am Relay spart Bytes, aber keine Rechenzeit — der
-  Projektionsbau läuft auch für sie, unter dem globalen Schloss über alle
-  Namespaces. Dafür fehlt dem Relay eine Revision, an der sich ein Cache
-  invalidieren ließe; ein reiner Zeit-Cache verzögerte den Anstoß-Weg.
+  **S9** ist inzwischen umgesetzt (v0.9.245): Das Relay führt jetzt eine
+  Anzeige-Revision und legt die fertige Übersicht darunter ab — die
+  Bestätigung spart damit nicht mehr nur Bytes, sondern auch die Rechnung.
 - **Cloud-Aufruf-Uhr driftet** (vorbestehend, gefunden 19.08.2026): Die
   Übersicht rechnet `on_court_since_ms` (Stempel des **Turnier-PCs**, vom Host
   hochgeladen) gegen `serverNowMs` (Uhr des **Relays**). Beide Uhren laufen auf
