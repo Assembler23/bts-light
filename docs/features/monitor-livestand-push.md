@@ -643,6 +643,22 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 > nicht ein Feld-Selektor. Ob und wofür der schmale Abruf gebraucht wird, entscheidet die
 > Nachmessung; die Route kostet nichts, solange sie niemand ruft.
 
+**Bestätigung am Relay (S8)** — umgesetzt v0.9.243
+- [x] `GET /{ns}/health` trägt eine Marke und beantwortet einen unveränderten Stand mit
+      HTTP 304 ohne Nutzdaten. *(`die_cloud_uebersicht_bestaetigt_unveraenderten_stand`.)*
+- [x] Die Marke hängt am **ausgelieferten Inhalt**, nicht an den Ordnungszahlen.
+      *(`ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen` — sie steigen bei jedem
+      Anstoß, auch bei einem ohne sichtbare Folge; steckten sie in der Marke, wechselte sie
+      jedes Mal und die Bestätigung wäre wirkungslos. Dieselbe Überlegung wie im LAN, wo
+      `seqs` deshalb neben der Feld-Liste steht.)*
+- [x] Der schmale Abruf (S7) hat auch in der Cloud eine eigene Marke.
+      *(`der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke`.)*
+- [x] Ein geänderter Stand kommt durch — gleiche Marke nur bei gleichem Inhalt.
+      *(Dritter Teil des ersten Tests: Satzstand geändert → HTTP 200 mit neuer Marke.)*
+- [x] Kein Zwischenspeicher nötig. *(Der Relay hält seinen Zustand ohnehin im Speicher und
+      rechnet nur die Projektion; die Ersparnis liegt allein in den nicht gesendeten Bytes.
+      Ein Cache wäre zusätzliche Invalidierungs-Fläche ohne Gegenwert.)*
+
 **Verträglichkeit (alle Etappen)**
 - [ ] Alter Relay + neue Seite: datenloser Nudge, kein Heartbeat, `?court=` ignoriert → die
       Seite arbeitet wie heute weiter.
@@ -671,6 +687,7 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
 | S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
+| S8 | `die_cloud_uebersicht_bestaetigt_unveraenderten_stand` · `ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen` · `der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke` |
 | S7 | Host: `health_mit_court_liefert_genau_ein_feld` · `health_ohne_court_bleibt_unveraendert` · `ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` · `der_schmale_abruf_hat_eine_eigene_marke` · `zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`. Relay: `cloud_health_mit_court_liefert_genau_ein_feld` · `cloud_health_mit_unbrauchbarem_court_leakt_nichts` · `cloud_health_mit_court_bleibt_im_eigenen_namespace` |
 
 **Client-Tests.** Es gibt keinen JS-Testrahmen; das Haus-Muster ist: kanonische Fassung in

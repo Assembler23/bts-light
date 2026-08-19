@@ -167,6 +167,13 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
   Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
   jeweils erst nachdem ihr Zwischenstand steht.
+- **Bestätigung „nichts Neues"** (im Hallennetz seit v0.9.236, in der Cloud
+  seit v0.9.243): Hat sich seit dem letzten Abruf nichts geändert, antwortet
+  der Server mit einer leeren Bestätigung statt mit dem vollen Stand. Die
+  Anzeige zeigt einfach weiter, was sie hat. Im Leerlauf sind das über 99 %
+  der Abrufe. Die Marke hängt am **ausgelieferten Inhalt**, nicht an der
+  Ordnungszahl — sonst wechselte sie bei jedem Anstoß, auch bei einem ohne
+  sichtbare Folge, und die Bestätigung wäre wirkungslos.
 - **Schmaler Abruf je Feld** (seit v0.9.242, Spec `monitor-livestand-push` S7):
   `…/health?court=<CourtID>` liefert dieselbe Antwortform, aber nur dieses eine
   Feld — samt seiner Ordnungszahl und **ohne** die der Nachbarfelder. In LAN

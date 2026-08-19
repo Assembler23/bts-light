@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.243
+
+- **Die Cloud-Anzeigen laden nicht mehr bei jedem Abruf den ganzen Stand
+  herunter.** Hat sich nichts geändert, antwortet der Server jetzt auch dort
+  mit einer leeren Bestätigung — im Hallennetz war das schon seit v0.9.236 so.
+  Gemessen an einem Testturnier mit zwanzig Feldern: **0,61 MB/s vorher,
+  praktisch nichts nachher**, bei genau demselben Bild auf dem Bildschirm.
+- Das betrifft alle Turniere, die über die Cloud angebunden sind — also die,
+  die hinter einer Firmen-Firewall spielen.
+- Nachtrag zur Spec `monitor-livestand-push` (Etappe S8): Die Messung nach der
+  letzten Etappe hat gezeigt, dass diese Einsparung bisher nur im Hallennetz
+  ankam.
+
 ## v0.9.242
 
 - **Eine Anzeige kann jetzt den Stand eines einzelnen Feldes abrufen**, statt
