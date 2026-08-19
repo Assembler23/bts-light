@@ -7107,6 +7107,103 @@ mod tests {
         );
     }
 
+    /// Die Statuscodes des Zettel-Abrufs, nach dem Vorbild von
+    /// `timeline_without_recording_yields_404_and_foreign_token_is_rejected`.
+    ///
+    /// Wichtig ist die Unterscheidung 401/503: **401 nur bei verbundenem
+    /// Host mit unbekanntem Token.** Ein fremder Bearer ohne
+    /// `tl_index`-Eintrag bekommt bewusst 503 — sonst kostete ein
+    /// Netzwackler jedem Gerät seine Kopplung.
+    #[tokio::test]
+    async fn zettel_ohne_aufzeichnung_gibt_404_und_fremder_token_wird_abgewiesen() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+
+        // Fremder Bearer, dem Relay unbekannt → 503, und der Host wird
+        // gar nicht erst behelligt.
+        let mut fremd = axum::http::HeaderMap::new();
+        fremd.insert(header::AUTHORIZATION, "Bearer fremd".parse().unwrap());
+        let antwort =
+            tl_scoresheet_route(State(broker.clone()), fremd, Path("42".to_string())).await;
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+
+        // Bekannter Zugang, aber der Host kennt keine Aufzeichnung → 404.
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten = tokio::spawn(async move {
+            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(txt) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::ScoresheetRequest { req_id, .. } =
+            serde_json::from_str(txt.as_str()).unwrap()
+        else {
+            panic!("ScoresheetRequest erwartet")
+        };
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoresheetData {
+                req_id,
+                found: false,
+                html: String::new(),
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(warten.await.unwrap().status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Ein überlanges Dokument wird zur ehrlichen Fehlanzeige statt zum
+    /// Speicherfresser — wie beim Punktverlauf.
+    #[tokio::test]
+    async fn ein_ueberlanger_zettel_wird_zur_fehlanzeige() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
+        let warten = tokio::spawn(async move {
+            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(txt) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::ScoresheetRequest { req_id, .. } =
+            serde_json::from_str(txt.as_str()).unwrap()
+        else {
+            panic!("ScoresheetRequest erwartet")
+        };
+
+        let riesig = "x".repeat(MAX_SCORESHEET_HTML_LEN + 1);
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoresheetData {
+                req_id,
+                found: true,
+                html: riesig,
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(
+            antwort.status(),
+            StatusCode::NOT_FOUND,
+            "überlanges Dokument wird zur Fehlanzeige, nicht durchgereicht"
+        );
+    }
+
     #[test]
     fn zu_viele_kennungen_werden_vor_der_arbeit_abgewiesen() {
         assert_eq!(parse_sheet_ids("42"), Some(vec![42]));

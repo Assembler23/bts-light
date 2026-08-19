@@ -368,6 +368,9 @@ pub fn dokumente(
                 .map(|l| l.name.clone())
                 .unwrap_or_default();
 
+            let start_ms = zeiten
+                .as_ref()
+                .and_then(|z| z.first_point_ms.or(z.first_assigned_ms));
             let (beginn, ende, dauer) = match &zeiten {
                 Some(z) => {
                     let start = z.first_point_ms.or(z.first_assigned_ms);
@@ -393,7 +396,13 @@ pub fn dokumente(
                 spielnummer: m.match_num,
                 feld: m.court.clone().unwrap_or_default(),
                 halle,
-                datum: super::timeline::today(),
+                // Das Datum kommt aus dem SPIEL, nicht aus der Uhr beim
+                // Drucken: Ein Zettel, der am Folgetag oder nach dem
+                // Turnier nachgedruckt wird, trüge sonst ein falsches
+                // Datum — auf einem Archivbeleg ein echter Fehler
+                // (Review-Befund E5). Ohne Zeitstempel bleibt das Feld
+                // leer statt zu raten.
+                datum: start_ms.map(datum).unwrap_or_default(),
                 beginn,
                 ende,
                 dauer_min: dauer,
@@ -789,6 +798,26 @@ mod tests {
         assert_ne!(uhrzeit(1_755_600_000_000), "—");
     }
 
+    /// Das Datum kommt aus dem Spiel, nicht aus der Uhr beim Drucken —
+    /// sonst trüge ein Nachdruck nach dem Turnier ein falsches Datum
+    /// (Review-Befund E5).
+    #[test]
+    fn datum_kommt_aus_dem_spiel_nicht_vom_druckzeitpunkt() {
+        // 19.08.2026, 10:15 Ortszeit als Zeitstempel — der Test rechnet
+        // in derselben Zeitzone wie der Renderer, deshalb Hin- und
+        // Rückweg über chrono statt einer festen Zahl.
+        use chrono::TimeZone;
+        let dann = chrono::Local
+            .with_ymd_and_hms(2026, 8, 19, 10, 15, 0)
+            .unwrap();
+        let ts = dann.timestamp() as u64 * 1000;
+        assert_eq!(datum(ts), "19.08.2026");
+        assert_eq!(uhrzeit(ts), "10:15");
+        // Unplausibel → leer statt Unsinn (das Feld verschwindet dann
+        // aus dem Kopf, statt eine Lüge zu drucken).
+        assert_eq!(datum(u64::MAX), "");
+    }
+
     /// Zurückgenommenes ist im Protokoll sichtbar durchgestrichen.
     #[test]
     fn zurueckgenommenes_ist_im_dokument_durchgestrichen() {
@@ -886,10 +915,22 @@ fn phase_klartext(phase: Phase) -> &'static str {
 /// Draht bewusst ungedeckelt (ein zu enger Deckel verwürfe ein legitimes
 /// spätes Ereignis mitten im Turnier), also fängt der Renderer ihn ab.
 fn uhrzeit(ts_ms: u64) -> String {
+    zeitstempel(ts_ms, "%H:%M")
+}
+
+/// Datum `TT.MM.JJJJ` aus einem Zeitstempel — leer, wenn unplausibel.
+fn datum(ts_ms: u64) -> String {
+    match zeitstempel(ts_ms, "%d.%m.%Y") {
+        s if s == "—" => String::new(),
+        s => s,
+    }
+}
+
+fn zeitstempel(ts_ms: u64, muster: &str) -> String {
     use chrono::TimeZone;
     let sekunden = (ts_ms / 1000) as i64;
     match chrono::Local.timestamp_opt(sekunden, 0) {
-        chrono::LocalResult::Single(t) => t.format("%H:%M").to_string(),
+        chrono::LocalResult::Single(t) => t.format(muster).to_string(),
         _ => "—".to_string(),
     }
 }
