@@ -101,10 +101,12 @@ export function CloudAnnounceSlave({
                 className: c.class_label,
                 teamANames: c.team1,
                 teamBNames: c.team2,
-                // Zähltafelbediener nur bei echter Zuweisung ansagen (ADR 0007).
-                scorekeeperNames: c.scorekeeper_assigned
-                  ? c.scorekeeper
-                  : undefined,
+                // Bedienung am Schalter (ADR 0040), nicht mehr an der
+                // Herkunft des Namens. Schiedsrichter kann der Slave nicht
+                // ansagen: `CloudAnnounceCourt` führt keine SR/AR-Listen —
+                // dafür müsste der Master sie erst über den Draht schicken.
+                scorekeeperNames:
+                  cfg.announce_scorekeeper !== false ? c.scorekeeper : undefined,
               },
               announceLang,
               {

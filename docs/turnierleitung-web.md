@@ -123,7 +123,9 @@ LAN+Cloud voraus.
 - **Beendet:** ein eigenes Panel unter der Spielliste, neueste zuerst.
   Aufgabe, kampflos gewertete und disqualifizierte Spiele tragen eine eigene
   Kennzeichnung neben dem Satzstand. Über den Cloud-Weg ist auch diese Liste
-  ggf. gekürzt.
+  ggf. gekürzt. Jede Zeile hat seit v0.9.246 ein **⋮-Menü** mit
+  „Ergebnis korrigieren", „Punktverlauf" und „Zettel" — dieselbe
+  Zusammenstellung wie im ⋮-Menü der Feldkachel.
 - **Was zu sehen ist, bestimmst du:** Jeder Abschnitt der Seite ist ein
   **Panel**, das sich einzeln ausblenden, umsortieren und in der Höhe
   verteilen lässt — gespeichert in einem **Profil** je Gerät. Siehe
@@ -401,13 +403,23 @@ zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
 
 ### Punktverlauf ansehen
 
-Der **📈-Knopf** im ⋯-Menü einer belegten Feldkachel (seit 17.08.2026
-dort statt auf der Kachel — eine Fläche weniger) und an Zeilen der
-Beendet-Liste öffnet den **Punktverlauf** des Spiels: je Satz ein
+Der **📈-Knopf** im ⋮-Menü einer belegten Feldkachel (seit 17.08.2026
+dort statt auf der Kachel — eine Fläche weniger) und im ⋮-Menü der
+Beendet-Zeilen öffnet den **Punktverlauf** des Spiels: je Satz ein
 Liniendiagramm (x = Ballwechsel, y = Punkte, eine Linie je Partei).
 Bei laufenden Spielen wächst die Kurve mit. Der Knopf erscheint nur,
 wenn ein Tablet das Spiel gezählt hat — Papier-Ergebnisse haben keinen
 Verlauf. Details: [punktverlauf.md](punktverlauf.md).
+
+### Schiedsrichterzettel abrufen
+
+Der **🖨-Knopf** im ⋮-Menü öffnet den **Schiedsrichterzettel** — sowohl an
+einer belegten Feldkachel als auch (seit v0.9.246) an jeder Zeile der
+Beendet-Liste, wo er am meisten Sinn ergibt: Das Spiel ist abgeschlossen,
+der Zettel vollständig. Er erscheint als druckfertiges Dokument im Fenster,
+„Drucken" schickt ihn an den Drucker des Geräts. Er steht unter derselben
+Schranke wie der Punktverlauf: ohne Aufzeichnung kein Zettel. Details:
+[features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md).
 
 ### Aufteilung Felder/Spielliste ziehen
 

@@ -818,12 +818,16 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   padding: 8px 10px; min-height: var(--touch-komf);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   font-size: .85rem;
-  /* Was nicht im sichtbaren Panel-Ausschnitt steht, kostet weder Layout
-     noch Anstrich. `contain-intrinsic-size` gibt die angenommene Höhe
-     vor, damit die Bildlaufleiste nicht springt. Hier unbedenklich: Die
-     Beendet-Zeile enthält nichts fest Positioniertes (anders als die
-     Spielzeile mit ihrem Kebab-Menü, siehe dort). */
-  content-visibility: auto; contain-intrinsic-size: auto 2.75rem;
+  /* KEIN `content-visibility` mehr — es stand hier, solange die
+     Beendet-Zeile nichts fest Positioniertes enthielt. Seit sie ihr
+     eigenes Kebab-Menü trägt (Ergebnis · Punktverlauf · Zettel), gilt
+     genau die Falle der Spielzeile auch hier: `content-visibility` zieht
+     `contain: paint` nach sich, die Zeile würde zum Bezugsrahmen ihres
+     `position: fixed`-Menüs und schnitte es an der eigenen Kante ab
+     (Feldtest-Fehler 17.08.2026, siehe `.kebab-menu`).
+     Der Verzicht ist wohlfeil: Der Turnier-PC liefert höchstens
+     `FINISHED_LIMIT` (30) beendete Spiele, die Liste kann also gar nicht
+     über den Turniertag wachsen. */
 }
 .fin-pair { font-weight: 600; flex: 1 1 12rem; min-width: 0; }
 .fin-meta { color: var(--ink-soft); }
@@ -7080,12 +7084,28 @@ function finRow(f) {
     // abgeschlossenen Partie, kein Handlungsdruck mehr.
     const badge = ERGEBNIS_BADGE[f.result]
       ? `<span class="badge badge-info">${ERGEBNIS_BADGE[f.result]}</span>` : "";
-    // Punktverlauf nur anbieten, wo einer aufgezeichnet wurde — Papier-
-    // Ergebnisse haben keinen (has_timeline, Spec punktverlauf-graph).
-    const graph = f.has_timeline
-      ? `<button type="button" data-fin-graph="${f.match_id}"
-           title="Punktverlauf anzeigen" aria-label="Punktverlauf anzeigen">📈</button>`
-      : "";
+    // Alles Sekundäre einer beendeten Zeile in EINEM Kebab-Menü statt als
+    // Knopfreihe: Ergebnis korrigieren, Punktverlauf, Schiedsrichterzettel.
+    // Dieselbe Zusammenstellung wie im Kebab der Feldkachel — wer ein
+    // laufendes Spiel dort bedient, findet die Beendet-Zeile ohne Umlernen.
+    // Punktverlauf UND Zettel stehen unter derselben Schranke: Ohne
+    // Aufzeichnung (Papier-Ergebnis) gibt es beides nicht (has_timeline).
+    const eintraege = [
+      `<button type="button" data-fin-fix="${f.match_id}"
+         title="Endstand korrigieren">✎ Ergebnis korrigieren</button>`,
+    ];
+    if (f.has_timeline) {
+      eintraege.push(`<button type="button" data-fin-graph="${f.match_id}"
+         title="Punktverlauf anzeigen">📈 Punktverlauf</button>`);
+      eintraege.push(`<button type="button" data-fin-zettel="${f.match_id}"
+         title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
+    }
+    const kebab = `<details class="kebab" data-kebab-fin="${f.match_id}"${
+      openKebabFinishedId === f.match_id ? " open" : ""
+    }>
+        <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋮</summary>
+        <div class="kebab-menu"><div class="kebab-actions">${eintraege.join("")}</div></div>
+      </details>`;
     // Ist-Zeiten (Spec spielzeiten-prognose): Brutto = Feldzuweisung→Ende,
     // Netto = 1. Punkt→Ende. Nur gemessene Spiele tragen sie.
     const zeiten = f.brutto_mins != null
@@ -7100,8 +7120,7 @@ function finRow(f) {
       <span class="fin-pair">${siegerZuerstHtml(f)}</span>
       <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
-      ${graph}<button type="button" data-fin-fix="${f.match_id}"
-        title="Ergebnis korrigieren" aria-label="Ergebnis korrigieren">✎</button>
+      ${kebab}
     </div>`;
   }
 }
@@ -7120,8 +7139,36 @@ function renderFinished() {
   reconcileKeyed(box, list, (f) => f.match_id, finRow, (el) => wireFinRow(el));
 }
 
+/** Welche Beendet-Zeile ihr Kebab offen hat — eigener Merker neben
+ *  `openKebabMatchId`, aus demselben Grund: Ein natives `<details>`
+ *  überlebt kein Ersetzen seiner Zeile, und die Liste wird nachgeführt,
+ *  während das Menü offen steht. */
+let openKebabFinishedId = null;
+
 /** Verdrahtet EINE Zeile der Beendet-Liste (neu/ersetzt). */
 function wireFinRow(box) {
+  scopeAll(box, ".kebab").forEach((det) => {
+    const matchId = Number(det.dataset.kebabFin);
+    det.addEventListener("click", (ev) => ev.stopPropagation());
+    det.addEventListener("toggle", () => {
+      if (det.open) {
+        openKebabFinishedId = matchId;
+        schliesseAndereKebabs(det);
+        platziereKebabMenue(det);
+      } else if (openKebabFinishedId === matchId) {
+        openKebabFinishedId = null;
+      }
+    });
+    // Über den Redraw gerettetes `<details open>` löst kein `toggle` aus —
+    // Platzierung nachholen, wie bei Spielzeile und Feldkachel.
+    if (det.open) platziereKebabMenue(det);
+  });
+  scopeAll(box, "[data-fin-zettel]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finZettel);
+      if (!f) return;
+      openZettel([f.match_id], siegerZuerstText(f));
+    }));
   // Klick-Zeit-Auflösung aus `state.finished` statt der eingefangenen
   // Liste — die Listener überleben seit dem Keyed-Abgleich viele Renders.
   scopeAll(box, "[data-fin-graph]").forEach((b) =>

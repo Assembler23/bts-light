@@ -138,10 +138,18 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
               teamANames: court.team1,
               teamBNames: court.team2,
               roundName: court.round_name,
-              // Zähltafelbediener nur bei echter Zuweisung ansagen (ADR 0007).
-              scorekeeperNames: court.scorekeeper_assigned
-                ? court.scorekeeper
-                : undefined,
+              // Bedienung und Schiedsrichter hängen an ihren Schaltern
+              // (ADR 0040). Beide fehlten hier bisher ganz bzw. nur bei
+              // echter Zuweisung, während der manuelle Aufruf und jeder
+              // Nachruf sie über `announceCourt` längst mitgaben — dieselbe
+              // Belegung wurde also je nach Auslöser anders angesagt.
+              scorekeeperNames:
+                cfg.announce_scorekeeper !== false
+                  ? court.scorekeeper
+                  : undefined,
+              umpireNames: cfg.announce_umpire !== false ? court.sr : undefined,
+              serviceJudgeNames:
+                cfg.announce_umpire !== false ? court.ar : undefined,
             };
             // Strikt sequenziell über die globale Ansage-Warteschlange in
             // announcer.ts — kein Gong startet, während eine Ansage noch spricht.

@@ -169,6 +169,18 @@ A4 quer, Satzspiegel 281 × 194 mm.
 
 **Renderer und Ausgabe**
 - [ ] Das Dokument enthält `@page` mit `A4 landscape`, **kein** `<script>` und keine externe URL.
+- [x] **Das Blatt geht auf** (Nachtrag v0.9.246, Nutzer-Befund 20.08.2026): Raster +
+      Namensspalte + Abstand passen in die bedruckbare Breite. Die Maße sind Konstanten
+      (`SEITE_NUTZBAR_MM`, `ZELLE_BREITE_MM`, `NAMENSSPALTE_MM`, `RASTER_ABSTAND_MM`,
+      `ZEILE_HOEHE_MM`, `NAME_PT`, `ZUSATZ_PT`) und kein CSS-Text mehr — vorher ergaben
+      60 × 4,2 mm + 42 mm + 3 mm = **297 mm bei 281 mm Platz**, der Zettel lief also
+      16 mm über das Blatt hinaus. Zugleich brauchten Name (10 pt) + Zusatz (7,5 pt)
+      zusammen 7,7 mm in einer 7 mm hohen Zeile. Wächter: `raster_passt_auf_die_seite`,
+      `namen_bleiben_in_ihrer_zeilenhoehe`.
+- [x] **Ein langer Doppelname sprengt die Namensspalte nicht:** feste Breite
+      (`flex: 0 0`), `white-space: nowrap` + `text-overflow: ellipsis` — er wird gekürzt,
+      statt das Raster vom Blatt zu schieben. Wächter:
+      `lange_namen_sprengen_die_spalte_nicht`.
 - [ ] Ein Spielername mit `<script>` aus dem BTP-Snapshot wird escaped ausgegeben.
 - [ ] Namen erscheinen (Zweck), ein Geburtsjahr nirgends.
 - [ ] Abruf für ein Match ohne Aufzeichnung und für ein Match außerhalb des aktuellen
@@ -235,6 +247,14 @@ E7** — bis dahin ist alles unsichtbar additiv.
 
 E1 Wire · E2 `SheetStore` · E3 Ingest LAN + Cloud + Relay · E4 Projektion · E5 Renderer +
 Lesepfade · E6 Tablet-Erfassung · E7 Ausgabewege · E8 Advisories, Doku, ADRs, Version.
+
+**Nachtrag v0.9.246:** In TL-Web ist der Zettel jetzt auch an jeder Zeile der
+**Beendet-Liste** abrufbar — dort im ⋮-Menü zusammen mit „Ergebnis korrigieren" und
+„Punktverlauf", also derselben Zusammenstellung wie im ⋮-Menü der Feldkachel
+(Nutzer-Wunsch 20.08.2026). Die Beendet-Zeile hat dafür ihr `content-visibility`
+verloren: Es zieht `contain: paint` nach sich und schnitte das `position: fixed`-Menü
+an der Zeilenkante ab (dieselbe Falle wie bei der Spielzeile). Unkritisch, weil die
+Liste durch `FINISHED_LIMIT` (30) ohnehin nicht wachsen kann.
 
 **In E8 mitzuerledigen (Befunde aus dem Grill):** `confirm_walkover` ruft heute
 `timeline_store().finalize()` **nicht**, der TL-Web-Weg schon — wird geradegezogen; die schwarze

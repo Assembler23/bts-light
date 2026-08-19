@@ -278,7 +278,14 @@ Beide Ansage-Wege bauen sie aus **derselben** Funktion
 Azure-Pfad XML-escaped im SSML. Damit sagen sie Wort für Wort dasselbe.
 
 - **Feld-Ansage:** `announceCourt` gibt `court.sr`/`court.ar` mit; ohne
-  Zuweisung entfällt das Segment ersatzlos.
+  Zuweisung entfällt das Segment ersatzlos. Seit v0.9.246 gilt das auch für
+  die **automatische** Ansage neu belegter Felder (`MatchAnnouncer.tsx`) — sie
+  baute ihr `AnnounceMatchInput` selbst zusammen und ließ SR/AR bis dahin weg,
+  sodass dieselbe Belegung je nach Auslöser anders klang (Nutzer-Befund
+  20.08.2026). Der Schalter `announce.announce_umpire` (Default an,
+  [ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)) schaltet die Nennung
+  bei Bedarf ab. Am **Cloud-Ansage-Slave** ist sie weiterhin unmöglich:
+  `CloudAnnounceCourt` führt keine SR/AR-Listen.
 - **Manueller Knopf** (`announceOfficials`, `officialsOnly`): sagt nur Feld
   und Besetzung an — eine nachträgliche Zuweisung soll nicht die ganze
   Paarung erneut aufrufen, das Spiel läuft ja schon. Der Knopf sitzt im

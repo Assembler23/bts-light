@@ -2537,8 +2537,10 @@ pub struct CloudAnnounceCourt {
     pub team1_nationalities: Vec<String>,
     pub team2_nationalities: Vec<String>,
     pub match_id: i64,
-    /// Zähltafelbediener (ADR 0007) + ob er zugewiesen ist — der Slave sagt ihn
-    /// nur bei `scorekeeper_assigned` mit an.
+    /// Zähltafelbediener + ob er einem Aufruf zugewiesen ist (sonst ist es
+    /// der pro-Feld-Hinweis). Ob der Slave ihn ansagt, entscheidet seit
+    /// ADR 0040 der Schalter `announce.announce_scorekeeper`, nicht mehr die
+    /// Herkunft des Namens; `scorekeeper_assigned` bleibt für die Anzeige.
     pub scorekeeper: Vec<String>,
     pub scorekeeper_assigned: bool,
 }

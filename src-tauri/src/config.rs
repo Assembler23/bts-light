@@ -126,6 +126,22 @@ pub struct AnnounceConfig {
     /// (POST an badhub). Default aus. Das geteilte Wörterbuch wird unabhängig
     /// davon immer geladen.
     pub share_corrections: bool,
+    /// Zähltafelbedienung mit ansagen? Default an.
+    ///
+    /// Löst die feste Regel aus ADR 0007 ab, die **nur** den beim Aufruf
+    /// zugewiesenen Bediener ansagte und den älteren pro-Feld-Hinweis
+    /// („Verlierer des zuletzt hier beendeten Spiels") bewusst verschwieg.
+    /// Turniere, die nur mit dem pro-Feld-Hinweis arbeiten, hörten dadurch
+    /// nie eine Bedienungs-Ansage, obwohl die Bedienung auf dem Bildschirm
+    /// stand. Ist dieser Schalter an, wird angesagt, was am Feld steht —
+    /// zugewiesen oder Hinweis; ist er aus, bleibt die Bedienung stumm.
+    pub announce_scorekeeper: bool,
+    /// Schiedsrichter und Aufschlagrichter mit ansagen? Default an.
+    ///
+    /// Betrifft die Feldansage (automatisch wie manuell, inkl. Nachruf).
+    /// Der eigene Knopf „SR/AR ansagen" bleibt unberührt — wer ihn drückt,
+    /// will genau diese Ansage.
+    pub announce_umpire: bool,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -156,6 +172,12 @@ impl Default for AnnounceConfig {
             announce_hall: String::new(),
             saved_announcements: Vec::new(),
             share_corrections: false,
+            // Beide an: Wer eine Bedienung oder einen Schiedsrichter
+            // einträgt, erwartet, dass sie auch gerufen werden. Bestehende
+            // Installationen bekommen die Felder per `#[serde(default)]`
+            // still dazu — sie hören ab dem Update mehr, nicht weniger.
+            announce_scorekeeper: true,
+            announce_umpire: true,
         }
     }
 }
@@ -1547,6 +1569,8 @@ mod tests {
                 announce_hall: "Halle A".to_string(),
                 saved_announcements: vec!["Siegerehrung in 10 Minuten".to_string()],
                 share_corrections: true,
+                announce_scorekeeper: false,
+                announce_umpire: false,
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,
@@ -1689,6 +1713,33 @@ mod tests {
         assert!(
             loaded.announce.name_overrides_enabled,
             "fehlendes name_overrides_enabled muss true sein (Default-Impl)"
+        );
+    }
+
+    #[test]
+    fn announce_block_without_new_switches_defaults_to_on() {
+        // Upgrade-Pfad zu den Schaltern „Bedienung ansagen" / „Schiedsrichter
+        // ansagen": Der announce-Block einer bestehenden Installation kennt
+        // beide Felder nicht. Sie müssen auf true kommen (Default-Impl), nicht
+        // auf bool::default() — sonst verstummten nach dem Update genau die
+        // Ansagen, die der Schalter bringen soll.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "announce":{"enabled":true,"rate":0.9,"gong":true,"name_overrides":[]}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert!(
+            loaded.announce.announce_scorekeeper,
+            "fehlendes announce_scorekeeper muss true sein"
+        );
+        assert!(
+            loaded.announce.announce_umpire,
+            "fehlendes announce_umpire muss true sein"
         );
     }
 

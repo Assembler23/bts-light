@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.246
+
+- **Der Schiedsrichter wird jetzt auch bei der automatischen Feldansage genannt.**
+  Bisher hörte man ihn nur beim manuellen Aufruf und beim 2./3. Aufruf — die
+  automatische Ansage neu belegter Felder ließ Schiedsrichter und
+  Aufschlagrichter weg. Dieselbe Belegung klang dadurch je nach Auslöser anders.
+- **Die Zähltafelbedienung wird jetzt angesagt, auch wenn sie nicht zugewiesen
+  wurde.** Turniere, die nur mit dem pro-Feld-Hinweis („Verlierer des vorigen
+  Spiels") arbeiten, hörten vorher nie eine Bedienungs-Ansage, obwohl der Name
+  am Bildschirm stand.
+- **Beides ist jetzt abschaltbar** — zwei neue Häkchen in den
+  Ansage-Einstellungen: „Zähltafelbedienung mit ansagen" und „Schiedsrichter mit
+  ansagen" (beide ab Werk an). Die eigenen Knöpfe „SR/AR ansagen" und
+  „Bedienung nachrufen" bleiben davon unberührt.
+- **Der Schiedsrichterzettel passt wieder aufs Blatt.** Raster und Namensspalte
+  waren zusammen 16 mm breiter als die bedruckbare Fläche, und Name plus Verein
+  brauchten mehr Höhe als ihre Zeile — die Spielernamen wirkten dadurch zu groß.
+  Lange Doppelnamen werden jetzt gekürzt, statt das Raster vom Blatt zu
+  schieben.
+- **Der Zettel ist in der Turnierleitungs-Seite jetzt auch an beendeten Spielen
+  abrufbar** — dort im ⋮-Menü zusammen mit „Ergebnis korrigieren" und
+  „Punktverlauf", statt loser Knöpfe an der Zeile.
+
 ## v0.9.245
 
 - **Der Cloud-Server rechnet die Feld-Übersicht nur noch einmal aus, statt für
