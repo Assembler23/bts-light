@@ -311,8 +311,8 @@ vergleichbar mit der Vorher-Messung):
 |---|---|---|---|
 | `/health`-Abrufe/s | 75,4 | 76,7 | gleich — derselbe Client |
 | Antwortgröße | 16,3 KB | 8,1 KB | der Relay liefert weniger Felder je Eintrag |
-| davon „nichts Neues" | **99 %** | **0 %** | ⚠️ |
-| `/health`-Bytes/s | **0,01 MB/s** | **0,61 MB/s** | ⚠️ **60-fach** |
+| davon „nichts Neues" | **99 %** | **0 %** → **98 %** | ⚠️ vor S8 / nach S8 |
+| `/health`-Bytes/s | **0,01 MB/s** | **0,61 MB/s** → **0,01 MB/s** | ⚠️ **60-fach** / behoben |
 
 ⚠️ **Befund: Der Relay kennt keine Bestätigung „nichts Neues".** Das ist kein Fehler in der
 Umsetzung, sondern eine Lücke in dieser Spec — S1 beschreibt den Antwortcache ausdrücklich
@@ -321,6 +321,10 @@ viele Turniere gerade wegen der Firmen-Firewalls nutzen, bleibt die größte Ein
 ganzen Reihe damit ungenutzt: 0,61 statt 0,01 MB/s bei identischem Anzeigebild. Herzschlag
 (S6) und Anstöße kommen dort korrekt an, ebenso der schmale Abruf — live geprüft: 8,1 KB
 für alle Felder gegen **590 Byte** für eines. Konsequenz: eigene Etappe, siehe unten.
+
+**Gegenprobe nach S8 (20.08.2026, am laufenden Relay):** derselbe Lauf, 77,6 Abrufe/s,
+**98 % Bestätigungen, 0,01 MB/s** — die Cloud liegt jetzt gleichauf mit dem Hallennetz. Die
+Marke kommt live an (`"ov-7773-…"`); ein bedingter Abruf antwortet mit 304 und 0 Bytes.
 
 **Schmaler Abruf (S7) — 20 feste Feld-Monitore:**
 
@@ -675,6 +679,8 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       Sicherheits-Review: Der `None`-Arm speist dieselben Eingaben in die Marke wie ein
       leerer Namespace, beide tragen dieselbe. Der Test hält das fest, damit eine spätere
       „Härtung" daraus kein Existenz-Orakel macht.)*
+- [x] Die Wirkung ist am laufenden Relay belegt. *(Gegenprobe 20.08.2026: 0,61 → 0,01 MB/s,
+      98 % Bestätigungen — gleichauf mit dem Hallennetz.)*
 - [ ] **Offen:** Die Bestätigung spart Bytes, aber keine Rechenzeit — der Projektionsbau
       läuft auch für sie. Siehe Etappe **S9**.
 
