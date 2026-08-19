@@ -13,6 +13,7 @@ import {
   vereinigen,
   undoSchnitt,
   istZurueckgenommen,
+  ankerNachBuchung,
   neueKennung,
 } from "../src/io/matchEvents.mjs";
 
@@ -121,6 +122,33 @@ const ev = (id, set, afterN, seq, kind = "card_yellow") => ({
   assert.deepEqual(undoSchnitt(mitRuecknahme, 1, 5), ["b2"]);
   assert.ok(istZurueckgenommen(mitRuecknahme, "c3"));
   assert.ok(!istZurueckgenommen(mitRuecknahme, "b2"));
+}
+
+// ── Anker über eine Satzgrenze (Review-Befund E6) ─────────────────────
+{
+  // Der gefährliche Fall: Die rote Karte gewinnt den SATZ. Das Tablet
+  // schaltet dann sofort weiter — ein nachher gelesener Anker zeigte auf
+  // den nächsten, noch nicht begonnenen Satz.
+  const vorPunkt = { set: 1, afterN: 38 };
+  const richtig = ankerNachBuchung(vorPunkt);
+  assert.deepEqual(richtig, { set: 1, afterN: 39 });
+
+  // So sah es aus, als der Anker NACH der Buchung gelesen wurde.
+  const falsch = { set: 2, afterN: 0 };
+
+  const karte = { id: "cc", ...richtig, seq: 1, kind: "card_red" };
+  const karteFalsch = { id: "cc", ...falsch, seq: 1, kind: "card_red" };
+
+  // Undo dreht auf den Stand vor dem Punkt zurück und schneidet dort.
+  // Mit richtigem Anker findet der Schnitt die Karte …
+  assert.deepEqual(undoSchnitt([karte], vorPunkt.set, vorPunkt.afterN), ["cc"]);
+  // … mit dem falschen NICHT: Sie liegt in einem anderen Satz und
+  // überlebte das Undo für immer.
+  assert.deepEqual(undoSchnitt([karteFalsch], vorPunkt.set, vorPunkt.afterN), []);
+
+  // Auch mitten im Satz muss die Regel gelten.
+  assert.deepEqual(ankerNachBuchung({ set: 2, afterN: 0 }), { set: 2, afterN: 1 });
+  assert.deepEqual(ankerNachBuchung({ set: 3 }), { set: 3, afterN: 1 });
 }
 
 // ── Kennungen ─────────────────────────────────────────────────────────

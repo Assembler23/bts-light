@@ -97,6 +97,24 @@ export function istZurueckgenommen(events, id) {
 }
 
 /**
+ * Der Anker eines Ereignisses, dessen Punkt gerade gebucht wurde.
+ *
+ * Klingt nach `afterN + 1` und ist es auch — aber die Stelle ist eine
+ * Falle: Beendet der Punkt den Satz, hat das Tablet den Satz schon
+ * weitergeschaltet, und ein *nachher* gelesener Anker zeigte auf den
+ * nächsten, noch nicht begonnenen Satz mit `afterN = 0`. Die Karte
+ * markierte dann einen Ballwechsel, den es nicht gibt, und der
+ * Undo-Schnitt fand sie nie wieder, weil er im alten Satz sucht.
+ * Deshalb: Anker VOR der Buchung nehmen und hier fortschreiben.
+ */
+export function ankerNachBuchung(ankerVorher) {
+  return {
+    set: ankerVorher.set,
+    afterN: (ankerVorher.afterN || 0) + 1,
+  };
+}
+
+/**
  * Eine Kennung: 12 Hex-Ziffern.
  *
  * Der Host verlangt eine reine Hex-Folge (sie wird verglichen, sortiert

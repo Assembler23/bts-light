@@ -334,6 +334,15 @@
     /* Modal-Inhalt liegt auf einer hellen Karte (der Scrim dunkelt nur den
        Hintergrund ab). Titel/Optionen erben --text. */
     .modal.visible { display: flex; color: var(--text); }
+/* Das Ereignis-Modal liegt ÜBER dem Pausen-Overlay (z 15).
+   Die Spec sah zunächst „darunter" vor, damit es „Weiterspielen" nie
+   verdeckt — das war aber unvereinbar damit, dass Ereignisse GERADE in
+   Pausen erfassbar sein sollen: Unter dem Overlay ist das Modal
+   vollständig verdeckt und unbedienbar, jeder Tipp landet auf dem
+   Overlay. Also darüber, und die ursprüngliche Absicht anders
+   eingelöst: Es hat immer ein sichtbares „Abbrechen", und `endBreak`
+   schließt es selbst (Review-Befund E6). */
+#card-modal.visible { z-index: 18; }
 /* Rot deaktiviert, wenn der Punkt nicht buchbar wäre — sichtbar
    ausgegraut statt still wirkungslos. */
 .modal .opt.disabled { opacity: .38; pointer-events: none; }
@@ -1693,6 +1702,11 @@ function startBreak(kind, skipCommit) {
 
 function endBreak() {
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  // Selbstschluss (Spec): Ein Ereignis-Modal, das noch aus der Pause
+  // offen steht, poppt sonst über das wieder laufende Spiel — und die
+  // rote Karte darin wäre inzwischen ohnehin wieder erlaubt, ohne dass
+  // der Schiedsrichter das gewollt hätte.
+  if (els.cardModal && els.cardModal.classList.contains('visible')) closeCardModal();
   if (STATE.pause) {
     tlog('info', 'break_end', { kind: STATE.pause.kind });
     // Behandlungspause beendet → Verletzungs-Meldung zurücknehmen.
@@ -3839,6 +3853,10 @@ function meIstZurueckgenommen(events, id) {
   return (events || []).some(e => e.kind === 'retract' && e.retracts === id);
 }
 
+function meAnkerNachBuchung(ankerVorher) {
+  return { set: ankerVorher.set, afterN: (ankerVorher.afterN || 0) + 1 };
+}
+
 function meNeueKennung() {
   const bytes = new Uint8Array(6);
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
@@ -3880,7 +3898,14 @@ function erfasseEreignis(kind, opts) {
     return null;
   }
   const o = opts || {};
-  const anker = eventAnker();
+  // Der Anker darf VORGEGEBEN werden. Das ist kein Komfort, sondern
+  // notwendig: Gewinnt der Punkt einer roten Karte den Satz, hat
+  // addPointOnSide den Satz schon nach setsCompleted geschoben und
+  // currentSet zurückgesetzt — eventAnker() zeigte dann auf den NÄCHSTEN,
+  // noch nicht begonnenen Satz mit afterN 0. Die Karte markierte einen
+  // Ballwechsel, den es nicht gibt, und undo() fand sie nie wieder, weil
+  // sein Schnitt im alten Satz sucht (Review-Befund E6).
+  const anker = o.anker || eventAnker();
   STATE.eventSeq = (STATE.eventSeq || 0) + 1;
   const e = {
     id: meNeueKennung(),
@@ -4071,19 +4096,35 @@ function applyCard(color) {
   }
   const { teamKey, index, name } = cardPending;
   closeCardModal();
+  // Anker UND Phase VOR der Mutation festhalten: `addPointOnSide` kann
+  // den Satz beenden (setsCompleted wächst, currentSet wird
+  // zurückgesetzt) oder das Match (STATE.finished). Danach gelesen,
+  // zeigte der Anker auf den nächsten Satz und die Phase auf
+  // „post_match" — die Karte markierte einen Ballwechsel, den es nicht
+  // gibt, und das Undo fand sie nie wieder (Review-Befund E6).
+  const ankerVorPunkt = eventAnker();
+  const phaseVorPunkt = eventPhase();
   // Rote Karte: der Gegner bekommt einen Punkt (zählt als regulärer Punkt,
   // inkl. Aufschlag-Update / ggf. Satz-/Matchende über addPointOnSide).
-  // Erst der Punkt, dann das Ereignis — nur in dieser Reihenfolge zeigt
-  // `afterN` auf genau den Ballwechsel, den die Karte erzeugt hat, und
-  // die Projektion setzt den Marker in die richtige Zelle.
+  let punktGebucht = false;
   if (color === 'red') {
     const oppTeam = teamKey === 'a' ? 'b' : 'a';
     const oppSide = STATE.teamOnSide ? STATE.teamOnSide[oppTeam] : null;
-    if (oppSide) addPointOnSide(oppSide);
+    if (oppSide) {
+      addPointOnSide(oppSide);
+      punktGebucht = true;
+    }
   }
   erfasseEreignis(
     color === 'yellow' ? 'card_yellow' : color === 'red' ? 'card_red' : 'card_black',
-    { team: teamKey === 'a' ? 0 : 1, player: index },
+    {
+      team: teamKey === 'a' ? 0 : 1,
+      player: index,
+      phase: phaseVorPunkt,
+      // Die rote Karte gehört an den Ballwechsel, den sie erzeugt hat —
+      // also einen weiter als der Stand davor.
+      anker: punktGebucht ? meAnkerNachBuchung(ankerVorPunkt) : ankerVorPunkt,
+    },
   );
   const stand = umpScoreSpoken();
   const txt = color === 'yellow'

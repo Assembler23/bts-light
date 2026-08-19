@@ -21,4 +21,8 @@ export declare function istZurueckgenommen(
   events: readonly MatchEventLike[] | undefined,
   id: string,
 ): boolean;
+export declare function ankerNachBuchung(ankerVorher: { set: number; afterN?: number }): {
+  set: number;
+  afterN: number;
+};
 export declare function neueKennung(zufall?: (bytes: Uint8Array) => void): string;
