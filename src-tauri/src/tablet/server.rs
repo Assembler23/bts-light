@@ -972,7 +972,18 @@ async fn health(
     let cfg = ctx.app_config_arc();
     let ct = &cfg.call_timer;
     let jetzt = monitor::now_ms();
-    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt);
+    // Über `serde_json` statt von Hand: Die Minuten sind `f64`, und
+    // `format!("{}", f64::INFINITY)` schriebe `inf` — kein gültiges JSON,
+    // womit die ganze Antwort unlesbar wäre. `serde_json` macht daraus
+    // `null`, wie schon vor dem Umbau auf den handgebauten Umschlag
+    // (Review-Fund 19.08.2026).
+    let call_timer_json = serde_json::json!({
+        "enabled": ct.enabled,
+        "secondCallMinutes": ct.second_call_minutes,
+        "thirdCallMinutes": ct.third_call_minutes,
+    })
+    .to_string();
+    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json);
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
     // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
@@ -999,8 +1010,7 @@ async fn health(
         // `callTimer` (camelCase wie im MonitorState), damit die
         // Multifeld-Übersicht „Zeit seit Aufruf" gleich gaten kann (Plan 4).
         "{{\"ok\":true,\"courts\":{courts_json},\"serverNowMs\":{jetzt},\
-         \"callTimer\":{{\"enabled\":{},\"secondCallMinutes\":{},\"thirdCallMinutes\":{}}}}}",
-        ct.enabled, ct.second_call_minutes, ct.third_call_minutes,
+         \"callTimer\":{call_timer_json}}}"
     );
     ctx.tablet
         .perf()
@@ -1025,7 +1035,12 @@ async fn health(
 /// Die TTL ist das Sicherheitsnetz gegen eine Quelle, an die niemand
 /// gedacht hat: Schlimmstenfalls ist die Anzeige eine Viertelsekunde alt,
 /// statt bis zum nächsten Ereignis falsch zu bleiben.
-fn uebersicht_json(ctx: &ServerCtx, cfg: &AppConfig, jetzt: u64) -> (String, String) {
+fn uebersicht_json(
+    ctx: &ServerCtx,
+    cfg: &AppConfig,
+    jetzt: u64,
+    call_timer_json: &str,
+) -> (String, String) {
     let rev = ctx.tablet.overview_rev();
     if let Some(c) = ctx.tablet.overview_cache() {
         if c.rev == rev && jetzt.saturating_sub(c.gebaut_ms) < OVERVIEW_CACHE_TTL_MS {
@@ -1050,7 +1065,12 @@ fn uebersicht_json(ctx: &ServerCtx, cfg: &AppConfig, jetzt: u64) -> (String, Str
     //
     // Der Hash läuft nur beim **Neubau**, nicht bei jedem Abruf; gegen die
     // Rechnung, die ihn erzeugt hat, fällt er nicht ins Gewicht.
-    let etag = inhalts_marke(ctx.tablet.process_tag(), &courts_json);
+    // Der Aufruf-Timer gehört in die Marke, obwohl er nicht im Cache steckt:
+    // Er reist im Umschlag mit, und die Anzeige übernimmt ihn NUR aus einer
+    // vollen Antwort. Ohne ihn bekäme eine Seite nach einer geänderten
+    // Schwelle so lange „nichts Neues", bis sich zufällig ein Feld ändert —
+    // und rechnete bis dahin mit den alten Minuten (Review-Fund 19.08.2026).
+    let etag = inhalts_marke(ctx.tablet.process_tag(), &courts_json, call_timer_json);
     ctx.tablet
         .set_overview_cache(rev, etag.clone(), courts_json.clone(), jetzt);
     (courts_json, etag)
@@ -1730,20 +1750,31 @@ async fn ad_image(
 /// und kurz genug, dass ein ausgetauschtes Bild zeitnah durchschlägt.
 const AD_CACHE_CONTROL: &str = "public, max-age=300";
 
+/// Marke der `/health`-Antwort, gebildet über ihren **Inhalt** (Spec
+/// monitor-livestand-push, S1). Die Prozess-Kennung kommt hinzu, damit zwei
+/// Läufe mit zufällig gleichem Hash nicht verwechselt werden können.
+///
+/// Beide veränderlichen Teile der Antwort gehen ein: die Feld-Liste **und**
+/// der Aufruf-Timer aus der Konfiguration. Nur `serverNowMs` bleibt außen
+/// vor — es ändert sich bei jedem Abruf und würde jede Bestätigung
+/// verhindern.
+fn inhalts_marke(prozess: u64, courts_json: &str, call_timer_json: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    courts_json.hash(&mut hasher);
+    call_timer_json.hash(&mut hasher);
+    format!(
+        "\"ov-{}-{}-{:x}\"",
+        prozess,
+        courts_json.len(),
+        hasher.finish()
+    )
+}
+
 /// Marke eines Bildes: Länge plus ein Streuwert über den Inhalt. Muss nur
 /// innerhalb eines Programmlaufs stabil sein und sich bei anderem Inhalt
 /// ändern — beides leistet der Standard-Streuer. Gleiches Format wie im
 /// Relay (`bild_marke` dort), damit beide Betriebsarten gleich aussehen.
-/// Marke der Feld-Liste, gebildet über ihren **Inhalt** (Spec
-/// monitor-livestand-push, S1). Die Prozess-Kennung kommt hinzu, damit zwei
-/// Läufe mit zufällig gleichem Hash nicht verwechselt werden können.
-fn inhalts_marke(prozess: u64, json: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    json.hash(&mut hasher);
-    format!("\"ov-{}-{}-{:x}\"", prozess, json.len(), hasher.finish())
-}
-
 fn bild_marke(bytes: &[u8]) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -5398,6 +5429,35 @@ mod tests {
             .await
             .into_response();
         assert_eq!(dritt.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn die_marke_deckt_auch_den_aufruf_timer_ab() {
+        // Der Aufruf-Timer reist im Umschlag mit, steckt aber nicht im
+        // Cache. Fehlte er in der Marke, bekäme eine Anzeige nach einer
+        // geänderten Schwelle so lange „nichts Neues", bis sich zufällig ein
+        // Feld ändert — und rechnete bis dahin mit den alten Minuten. Die
+        // Anzeige übernimmt `callTimer` nur aus einer vollen Antwort
+        // (Review-Fund 19.08.2026).
+        let felder = r#"[{"court_id":1}]"#;
+        let timer_an = r#"{"enabled":true,"secondCallMinutes":2.0}"#;
+        let timer_aus = r#"{"enabled":false,"secondCallMinutes":2.0}"#;
+
+        assert_eq!(
+            inhalts_marke(7, felder, timer_an),
+            inhalts_marke(7, felder, timer_an),
+            "gleiche Eingaben, gleiche Marke"
+        );
+        assert_ne!(
+            inhalts_marke(7, felder, timer_an),
+            inhalts_marke(7, felder, timer_aus),
+            "ein geänderter Aufruf-Timer muss die Marke wechseln"
+        );
+        assert_ne!(
+            inhalts_marke(7, felder, timer_an),
+            inhalts_marke(7, r#"[{"court_id":2}]"#, timer_an),
+            "und eine geänderte Feld-Liste erst recht"
+        );
     }
 
     #[tokio::test]

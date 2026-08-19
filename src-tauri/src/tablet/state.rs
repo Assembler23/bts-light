@@ -644,6 +644,16 @@ pub struct TabletState {
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
+    /// Steht ein Schreibvorgang der `live-scores.json` aus (Spec
+    /// monitor-livestand-push, S2)? Gesetzt von jedem Punkt, geleert vom
+    /// Flush. Ein `AtomicBool` genügt: Es gibt nur einen Zustand („es hat
+    /// sich etwas geändert"), und die Daten selbst liegen ohnehin in
+    /// `courts`.
+    scores_dirty: AtomicBool,
+    /// Fingerabdruck des zuletzt **geschriebenen** Standes. Verhindert, dass
+    /// ein Flush eine inhaltsgleiche Datei erneut schreibt — bei 20 ms je
+    /// Schreibvorgang (gemessen in S0) lohnt sich der Hash.
+    scores_fingerprint: AtomicU64,
     /// Revision des Anzeige-Zustands für den `/health`-Antwortcache (Spec
     /// monitor-livestand-push, S1). Steigt bei jedem Ereignis, das die
     /// Übersicht verändern kann: Nudge, neuer BTP-Schnappschuss,
@@ -2092,8 +2102,11 @@ impl TabletState {
             session.match_id = match_id;
             session.sets = sets;
         }
-        // Stand auf Platte sichern, damit ein App-Neustart ihn behält.
-        self.persist_scores();
+        // Nur vormerken (Spec monitor-livestand-push, S2): Der Sekundentakt
+        // im Sync-Loop schreibt. Ein gezählter Punkt ist das häufigste
+        // Ereignis im Turnier und kostete hier gemessene 20 ms Plattenzeit —
+        // synchron, mitten im Tablet-Handler.
+        self.mark_scores_dirty();
         // Niedrig-latente Anzeige (A1, ADR 0016): Court-Monitor + Feld-
         // Übersicht sofort anstoßen, statt auf ihren nächsten Poll zu warten.
         self.notify_monitor(court_id);
@@ -2156,18 +2169,40 @@ impl TabletState {
                 .collect()
         };
         if let Ok(json) = serde_json::to_string(&data) {
-            // Messung (Spec monitor-livestand-push, S0): Dieser Vorgang
-            // läuft heute JE PUNKT und synchron im async-Handler — er ist
-            // der Posten, den S2 entprellt. Erst die Zahl, dann der Umbau.
+            // Inhaltsgleiches nicht erneut schreiben (Spec
+            // monitor-livestand-push, S2). Der Sekundentakt fragt sonst einen
+            // ganzen Turniertag lang die Platte, obwohl sich nur zwischen den
+            // Ballwechseln etwas tut — und ein Schreibvorgang kostet gemessene
+            // 20 ms. Der Hash über die fertige Zeichenkette ist dagegen nichts.
+            let abdruck = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                json.hash(&mut hasher);
+                hasher.finish()
+            };
+            if self.scores_fingerprint.load(Ordering::Relaxed) == abdruck {
+                return;
+            }
             let bytes = json.len() as u64;
             let begonnen = std::time::Instant::now();
             // Atomar schreiben: erst in eine Temp-Datei, dann umbenennen –
             // so liegt nie eine halb geschriebene live-scores.json vor (ein
             // Absturz mitten im Schreiben würde sie sonst korrumpieren).
             let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
+            let geschrieben =
+                std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_ok();
+            // **Erst nach dem geglückten Umbenennen vermerken.** Sonst
+            // behauptete der Fingerabdruck nach einem fehlgeschlagenen
+            // Schreibvorgang (volle Platte, Virenscanner auf der Temp-Datei,
+            // Verzeichnis weg), der Inhalt liege auf Platte — und jeder
+            // spätere Flush mit demselben Stand kehrte sofort zurück. Die
+            // Datei bliebe für den Rest des Laufs veraltet, obwohl vorher
+            // jeder Punkt es erneut versucht hätte (Review-Fund 19.08.2026).
+            if geschrieben {
+                self.scores_fingerprint.store(abdruck, Ordering::Relaxed);
             }
+            // Messung (Spec monitor-livestand-push, S0): der Posten, den
+            // diese Etappe entprellt — die Zahl belegt die Wirkung.
             self.perf
                 .note_persist(begonnen.elapsed().as_nanos() as u64, bytes);
         }
@@ -2358,6 +2393,32 @@ impl TabletState {
     /// Erkennungstakt noch nichts abgelegt hat.
     pub fn tl_state_cache(&self) -> Option<TlStateCache> {
         self.tl_state_cache.read().unwrap().clone()
+    }
+
+    /// Meldet, dass sich der Live-Stand geändert hat (Spec
+    /// monitor-livestand-push, S2). Schreibt **nicht** — das tut der
+    /// Sekundentakt oder ein Pfad, der auf Nummer sicher gehen muss.
+    ///
+    /// Bewusst akzeptiert: Stürzt die App zwischen zwei Takten ab, fehlt bis
+    /// zu einer Sekunde auf Platte. Die Tablets sind die Wahrheit und
+    /// stellen den Stand beim Wiederverbinden per `state_sync` her — dafür
+    /// kostet ein gezählter Punkt keine 20 ms Plattenzeit mehr im
+    /// async-Handler.
+    pub fn mark_scores_dirty(&self) {
+        self.scores_dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// Schreibt den Live-Stand, falls seit dem letzten Schreibvorgang etwas
+    /// passiert ist. Synchron: Die kritischen Pfade (Ergebnis, Räumung,
+    /// Stoppen, App-Ende) dürfen erst zurückkehren, wenn die Datei steht.
+    pub fn flush_scores(&self) {
+        // Das Flag wird VOR dem Schreiben geleert: Eine Änderung, die
+        // währenddessen eintrifft, setzt es erneut und wird beim nächsten
+        // Takt geschrieben. Andersherum ginge sie verloren.
+        if !self.scores_dirty.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        self.persist_scores();
     }
 
     /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
@@ -3072,7 +3133,12 @@ impl TabletState {
                 .unwrap()
                 .insert(to_court_id, state);
         }
-        self.persist_scores();
+        // Synchron (Spec monitor-livestand-push, S2): Ein Feldwechsel ist
+        // kein Ballwechsel, sondern ein seltener Eingriff — und ginge er bei
+        // einem Absturz verloren, stünde der Stand beim Neustart auf dem
+        // falschen Feld.
+        self.mark_scores_dirty();
+        self.flush_scores();
         // Der Stand wandert von Quell- auf Zielfeld — BEIDE Anzeigen sind
         // betroffen (Quellfeld wird leer, Zielfeld zeigt den Stand). Sonst
         // hinge jeder TV bis zu seinem nächsten Poll (A1, ADR 0016). Erst hier,
@@ -3095,8 +3161,12 @@ impl TabletState {
         // dieses Feld mit „hat gerade jemand anderes belegt" ab — obwohl es
         // sichtbar leer ist.
         self.release_court_claim(court_id);
-        // Entfernten Stand auch aus der Datei nehmen.
-        self.persist_scores();
+        // Entfernten Stand auch aus der Datei nehmen — **synchron** (Spec
+        // monitor-livestand-push, S2): Die Räumung folgt dem Ergebnis, und
+        // ein danach neu verbundenes Tablet darf den beendeten Stand nicht
+        // aus der Datei zurückbekommen.
+        self.mark_scores_dirty();
+        self.flush_scores();
         // Match-Räumung ist am Monitor sichtbar (Feld wird leer) → anstoßen.
         self.notify_monitor(court_id);
     }
@@ -4471,6 +4541,11 @@ mod tests {
         let st = TabletState::default();
         st.set_scores_path(path.clone());
         st.record_score(101, 7, vec![(21, 5), (2, 9)]);
+        // Seit der Entprellung (Spec monitor-livestand-push, S2) schreibt der
+        // Punkt nicht mehr selbst — im Betrieb tut es der Sekundentakt des
+        // Sync-Loops, hier der ausdrückliche Flush.
+        assert!(!path.exists(), "der Punkt allein schreibt nicht");
+        st.flush_scores();
         assert!(path.exists());
 
         // „Neustart": frische Instanz, gleiches Match noch OnCourt.
@@ -6315,9 +6390,13 @@ mod tests {
     #[test]
     fn ein_gezaehlter_punkt_vermerkt_schreibvorgang_und_nudge() {
         // Die beiden Posten, die die Analyse als eigentliche Last benannt
-        // hat: der Vollschreibvorgang der live-scores.json JE PUNKT und der
-        // Nudge-Fan-out. Ohne diese Zahlen ließe sich nach S2/S3 nicht
-        // belegen, dass sie kleiner geworden sind.
+        // hat: der Vollschreibvorgang der live-scores.json und der
+        // Nudge-Fan-out.
+        //
+        // **Bis S2 stand hier `persist_calls == 3` — ein Schreibvorgang je
+        // Punkt.** Dass daraus einer geworden ist, ist der Beleg jener
+        // Etappe; die Gegenprobe führt
+        // `drei_punkte_in_einer_sekunde_ergeben_einen_schreibvorgang`.
         let dir = tempfile::tempdir().unwrap();
         let st = TabletState::default();
         st.set_scores_path(dir.path().join("live-scores.json"));
@@ -6325,9 +6404,10 @@ mod tests {
         st.record_score(101, 7, vec![(5, 3)]);
         st.record_score(101, 7, vec![(6, 3)]);
         st.record_score(101, 7, vec![(7, 3)]);
+        st.flush_scores();
 
         let s = st.perf().snapshot();
-        assert_eq!(s.persist_calls, 3, "heute schreibt JEDER Punkt");
+        assert_eq!(s.persist_calls, 1, "drei Punkte, ein Schreibvorgang");
         assert!(s.persist_bytes > 0, "die geschriebene Größe wird vermerkt");
         assert!(s.persist_ns > 0, "die Schreibdauer wird vermerkt");
         assert_eq!(s.nudges_sent, 3, "jeder Punkt weckt die Anzeigen");
@@ -6342,6 +6422,180 @@ mod tests {
         let s = st.perf().snapshot();
         assert_eq!(s.persist_calls, 0);
         assert_eq!(s.nudges_sent, 1);
+    }
+
+    // ── Entprellter Schreibvorgang (Spec monitor-livestand-push, S2) ───────
+
+    #[test]
+    fn ein_gezaehlter_punkt_schreibt_nicht_mehr_sofort() {
+        // Der teuerste Einzelposten der Vorher-Messung: 20 ms je Punkt,
+        // synchron im async-Handler. Der Punkt meldet jetzt nur noch, dass
+        // etwas zu schreiben ist.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_scores_path(dir.path().join("live-scores.json"));
+
+        st.record_score(101, 7, vec![(5, 3)]);
+
+        assert_eq!(
+            st.perf().snapshot().persist_calls,
+            0,
+            "der Punkt selbst schreibt nicht mehr"
+        );
+    }
+
+    #[test]
+    fn drei_punkte_in_einer_sekunde_ergeben_einen_schreibvorgang() {
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.record_score(101, 7, vec![(6, 3)]);
+        st.record_score(101, 7, vec![(7, 3)]);
+        st.flush_scores();
+
+        assert_eq!(st.perf().snapshot().persist_calls, 1);
+        // Und es steht der NEUESTE Stand in der Datei, nicht der erste.
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(7, 3)]);
+    }
+
+    /// Die Sätze eines Felds, wie der Zustand sie im Speicher hält.
+    fn gehaltene_saetze(st: &TabletState, court_id: i64) -> Vec<(i64, i64)> {
+        st.courts
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .map(|s| s.sets.clone())
+            .unwrap_or_default()
+    }
+
+    /// Die Sätze eines Felds, wie sie in der `live-scores.json` stehen.
+    fn gespeicherte_saetze(pfad: &Path, court_id: i64) -> Vec<(i64, i64)> {
+        let Ok(roh) = std::fs::read_to_string(pfad) else {
+            return Vec::new();
+        };
+        serde_json::from_str::<HashMap<i64, PersistedScore>>(&roh)
+            .ok()
+            .and_then(|d| d.get(&court_id).map(|s| s.sets.clone()))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn ein_inhaltsgleicher_stand_schreibt_gar_nicht() {
+        // Ein Flush ohne Änderung darf die Platte nicht anfassen — sonst
+        // schriebe der Sekundentakt einen ganzen Turniertag lang durch.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_scores_path(dir.path().join("live-scores.json"));
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert_eq!(st.perf().snapshot().persist_calls, 1);
+
+        st.flush_scores();
+        st.flush_scores();
+        assert_eq!(
+            st.perf().snapshot().persist_calls,
+            1,
+            "ohne neue Änderung wird nicht geschrieben"
+        );
+
+        // Auch ein Punkt, der denselben Stand erzeugt, schreibt nicht.
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert_eq!(
+            st.perf().snapshot().persist_calls,
+            1,
+            "gleicher Inhalt = kein Schreibvorgang"
+        );
+    }
+
+    #[test]
+    fn eine_match_raeumung_schreibt_synchron() {
+        // Räumung, Ergebnis und Stoppen dürfen erst zurückkehren, wenn die
+        // Datei steht — hier darf nichts im Puffer hängen bleiben.
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+        st.record_score(101, 7, vec![(21, 19)]);
+        st.flush_scores();
+
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(21, 19)]);
+
+        st.clear_court(101);
+
+        assert!(
+            gespeicherte_saetze(&pfad, 101).is_empty(),
+            "der geräumte Stand ist sofort aus der Datei verschwunden"
+        );
+    }
+
+    #[test]
+    fn ein_verlorener_puffer_wird_vom_tablet_geheilt() {
+        // Der bewusst akzeptierte Preis der Entprellung: Stürzt die App
+        // zwischen zwei Takten ab, fehlt bis zu eine Sekunde auf Platte.
+        // Tragfähig ist das nur, weil die Tablets die Wahrheit sind und
+        // ihren Stand beim Wiederverbinden erneut schicken.
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+        st.record_score(101, 7, vec![(15, 12)]);
+        st.flush_scores(); // dieser Stand ist gesichert
+        st.record_score(101, 7, vec![(16, 12)]);
+        // …und hier stürzt die App ab: kein Flush mehr.
+        assert_eq!(
+            gespeicherte_saetze(&pfad, 101),
+            vec![(15, 12)],
+            "der letzte Punkt fehlt auf Platte — genau der akzeptierte Verlust"
+        );
+
+        // Neustart: Die Instanz lädt den gesicherten Stand …
+        let neu = TabletState::default();
+        neu.set_scores_path(pfad.clone());
+        neu.load_scores(&pfad);
+        assert_eq!(gehaltene_saetze(&neu, 101), vec![(15, 12)]);
+
+        // … und das wiederverbundene Tablet schickt seinen Stand erneut.
+        neu.record_score(101, 7, vec![(16, 12)]);
+        neu.flush_scores();
+        assert_eq!(gehaltene_saetze(&neu, 101), vec![(16, 12)]);
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(16, 12)]);
+    }
+
+    #[test]
+    fn die_datei_bleibt_neustartfest_lesbar() {
+        // Das Plattenformat ändert sich in dieser Etappe NICHT (Rollback
+        // muss zustandsfrei bleiben, siehe Spec).
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+        st.record_score(101, 7, vec![(21, 5), (2, 9)]);
+        st.record_score(102, 8, vec![(11, 11)]);
+        st.flush_scores();
+
+        let roh = std::fs::read_to_string(&pfad).expect("Datei steht");
+        let daten: std::collections::HashMap<i64, PersistedScore> =
+            serde_json::from_str(&roh).expect("unverändertes Format");
+        assert_eq!(daten.len(), 2);
+
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(21, 5), (2, 9)]);
+        assert_eq!(gespeicherte_saetze(&pfad, 102), vec![(11, 11)]);
+        // Und eine frische Instanz liest ihn wie vor der Änderung.
+        let st2 = TabletState::default();
+        st2.load_scores(&pfad);
+        st2.set_snapshot(snapshot(
+            vec![match_on(7, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert_eq!(st2.monitor_court(101).sets, vec![(21, 5), (2, 9)]);
+        // Keine Temp-Datei bleibt liegen (atomar: schreiben, dann umbenennen).
+        assert!(!pfad.with_extension("json.tmp").exists());
     }
 
     // ── Antwortcache der Übersicht (Spec monitor-livestand-push, S1) ───────
