@@ -705,10 +705,6 @@ fn schlanker_anzeige_stand(state: &str) -> String {
     serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
 }
 
-/// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
-/// serialisierte Zustands-Antwort samt ETag, wie der LAN-Handler sie
-/// ausliefert. `gebaut_ms` entscheidet über Frische (Handler akzeptiert
-/// nur junge Einträge, sonst rechnet er selbst).
 /// Ein Eintrag des `/health`-Antwortcaches (Spec monitor-livestand-push, S1).
 /// Gehalten wird **nur die Feld-Liste**, nicht die ganze Antwort: Der
 /// Umschlag trägt `serverNowMs` und ist bei jedem Abruf ein anderer.
@@ -720,6 +716,10 @@ pub struct OverviewCache {
     pub gebaut_ms: u64,
 }
 
+/// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
+/// serialisierte Zustands-Antwort samt ETag, wie der LAN-Handler sie
+/// ausliefert. `gebaut_ms` entscheidet über Frische (Handler akzeptiert
+/// nur junge Einträge, sonst rechnet er selbst).
 #[derive(Debug, Clone)]
 pub struct TlStateCache {
     pub rev: u64,
@@ -1053,13 +1053,6 @@ impl From<PersistedBtpEntry> for PendingBtpWrite {
 impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
-        // S1 (Spec monitor-livestand-push): Ein neuer BTP-Stand kann jedes
-        // Feld verändern — Zuweisung, Räumung, Ergebnis, Satzstand. Der
-        // Antwortcache der Übersicht ist damit in jedem Fall überholt.
-        // Bewusst unbedingt und ohne Vergleich: Ein übersehener Unterschied
-        // wäre ein falscher Stand auf allen Anzeigen, ein überflüssiger
-        // Neubau kostet eine Millisekunde.
-        self.bump_overview_rev();
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
         self.timeline.set_tournament(&snapshot.tournament_name);
@@ -1095,6 +1088,22 @@ impl TabletState {
             self.load_btp_retry();
         }
         *self.snapshot.write().unwrap() = Some(snapshot);
+        // S1 (Spec monitor-livestand-push): Ein neuer BTP-Stand kann jedes
+        // Feld verändern — Zuweisung, Räumung, Ergebnis, Satzstand. Der
+        // Antwortcache der Übersicht ist damit in jedem Fall überholt.
+        //
+        // **Nach** dem Ablegen des Snapshots, nicht davor: Ein `/health`,
+        // das dazwischen fiele, läse schon die neue Revision, baute aber
+        // noch aus dem alten Stand — und legte ihn unter der neuen Revision
+        // ab. Bis zum nächsten Sync-Zyklus lieferte der Server dann den
+        // alten Stand, ETag-Abrufer bekämen sogar „nichts Neues"
+        // (Review-Fund 19.08.2026; `notify_monitor` macht es ebenso: erst
+        // schreiben, dann melden).
+        //
+        // Bewusst unbedingt und ohne Vergleich: Ein übersehener Unterschied
+        // wäre ein falscher Stand auf allen Anzeigen, ein überflüssiger
+        // Neubau kostet eine Millisekunde.
+        self.bump_overview_rev();
     }
 
     /// Der Punktverlauf-Speicher (geteilt von LAN-Server, Relay-Client

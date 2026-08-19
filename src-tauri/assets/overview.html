@@ -667,7 +667,12 @@ main {
   var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    // `src=check` statt `push`/`poll`: Dieser Abruf ist KEINE Anzeige-
+    // Aktualisierung, sondern die sekündliche Frage „bin ich noch diesem
+    // Ziel zugewiesen?". Ohne eigene Kennzeichnung liefe er in den
+    // Court-Monitor-Zähler und verfälschte die Messung, an der alle
+    // Folge-Etappen hängen (Review-Fund 19.08.2026).
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
@@ -784,11 +789,16 @@ main {
     var kopf = letzteMarke ? { 'If-None-Match': letzteMarke } : undefined;
     fetch(healthUrl(quelle), { cache: 'no-store', headers: kopf })
       .then(function (r) {
+        // Erst prüfen, DANN entwarnen: Ein dauerhaft fehlerhafter Status
+        // (Relay-404 bei unbekanntem Namespace, 502/503) setzte sonst bei
+        // jeder Antwort den Fehlerzähler zurück, bevor er geworfen wird —
+        // die Schwelle für die Offline-Blende wäre nie erreicht und der TV
+        // zeigte endlos den eingefrorenen Stand (Review-Fund 19.08.2026).
+        if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
         errorCount = 0; backoffUntil = 0; showOffline(false);
         // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
         // nichts zu rendern — und kein Grund, „offline" zu melden.
         if (r.status === 304) { pollDone(); return null; }
-        if (!r.ok) throw new Error('HTTP ' + r.status);
         var marke = r.headers.get('ETag');
         if (marke) letzteMarke = marke;
         return r.json();
@@ -876,8 +886,17 @@ main {
   setInterval(function () {
     if (!callTimer || !callTimer.enabled || !lastData) return;
     var courts = (lastData && lastData.courts) || [];
+    // Dieselbe Bedingung wie `renderCourt`: Der Chip erscheint NUR in der
+    // Wartephase (aufgerufen, noch nicht am Zählen). `on_court_since_ms`
+    // allein zu prüfen genügt nicht — es bleibt auch am laufenden Spiel
+    // gesetzt, und in einer Halle, in der überall gezählt wird, baute die
+    // Seite dann jede Sekunde das ganze Board neu, ohne dass sich etwas
+    // ändert: genau der Posten, den diese Etappe einsparen soll
+    // (Review-Fund 19.08.2026).
     var hatUhr = courts.some(function (c) {
-      return typeof c.on_court_since_ms === 'number' && c.on_court_since_ms > 0;
+      if (typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return false;
+      var isPause = !!(c.injury || c.official_call);
+      return !isPause && !hasStarted(c);
     });
     if (hatUhr) render(lastData);
   }, 1000);

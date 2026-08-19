@@ -31,8 +31,8 @@ Etappe S0):
 ```
 Perf-Anzeigen (10 s): /health 40 push + 800 poll = 84.0/s, 1.63 MB/s ·
 /court/state 12 push + 0 poll, 0.01 MB/s · overview 840 Bauten (84.0/s),
-p95 1.05 ms, max 4.19 ms · live-scores 210 Schreibvorgänge (21.0/s,
-0.04 MB/s, Ø 0.51 ms) · 210 Nudges (21.0/s)
+p95 4.19 ms / max 16.73 ms (seit Start) · live-scores 210 Schreibvorgänge
+(21.0/s, 0.04 MB/s, Ø 20.00 ms) · 210 Nudges (21.0/s)
 ```
 
 Drei Dinge dazu:

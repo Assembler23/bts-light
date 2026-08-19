@@ -494,7 +494,7 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
   }
   function checkReassignment() {
     if (!deviceId) return;
-    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    fetch('/monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;

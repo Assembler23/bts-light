@@ -442,10 +442,6 @@ impl ServerCtx {
                 format!("Konfiguration nicht schreibbar: {e}"),
             )
         })?;
-        // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
-        // (Hallen-Farben, Aufruf-Timer) — nach einem Schreibvorgang ist er
-        // überholt (Spec monitor-livestand-push, S1).
-        self.tablet.bump_overview_rev();
         // Gemerkte Fassung verwerfen: Der Datei-Stempel ist zwar frisch,
         // aber eine Änderung innerhalb derselben Zeitstempel-Auflösung
         // (gleiche Größe, gleiche Zeit) würde sonst übersehen. Bei einem
@@ -456,6 +452,15 @@ impl ServerCtx {
             .lock()
             .expect("Config-Cache nicht vergiftet") = None;
         *guard = config;
+        // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+        // (Hallen-Farben, Aufruf-Timer) — nach einem Schreibvorgang ist er
+        // überholt (Spec monitor-livestand-push, S1).
+        //
+        // **Zuletzt**, nach dem Verwerfen der gemerkten Fassung: Ein
+        // gleichzeitiges `/health` sähe sonst die neue Revision und über
+        // `app_config_arc()` noch die alte Konfiguration — und legte deren
+        // Hallen-Farben unter der neuen Revision ab (Review-Fund 19.08.2026).
+        self.tablet.bump_overview_rev();
         Ok(result)
     }
 
@@ -1032,10 +1037,20 @@ fn uebersicht_json(ctx: &ServerCtx, cfg: &AppConfig, jetzt: u64) -> (String, Str
     let mut courts = ctx.tablet.overview();
     crate::hall_colors::paint(&mut courts, cfg, &ctx.tablet.hall_names());
     let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
-    // Prozess-Kennung in der Marke: Nach einem Neustart beginnt die Revision
-    // wieder bei null, und eine Anzeige mit gemerkter Marke bekäme sonst ein
-    // 304 auf einen ganz anderen Zustand (Muster `tl_state`).
-    let etag = format!("\"ov-{}-{}\"", ctx.tablet.process_tag(), rev);
+    // **Die Marke hängt am Inhalt, nicht an der Revision.** Sonst hinge der
+    // 304-Pfad an derselben Annahme wie der Cache — nur ohne dessen
+    // Sicherheitsnetz: Die Hart-TTL erzwingt zwar einen Neubau, aber bei
+    // unveränderter Revision bliebe die Marke gleich, und ein Abrufer mit
+    // gemerkter Marke bekäme auf einen geänderten Stand dauerhaft „nichts
+    // Neues". Dieselbe Falle wie beim Bild-Caching (Review 18.08.2026).
+    //
+    // Angenehme Nebenwirkung: Ein Ereignis, das die Anzeige gar nicht
+    // verändert (Nudge ohne sichtbare Folge), lässt die Marke stehen — die
+    // Anzeige spart sich dann sogar die Nutzdaten.
+    //
+    // Der Hash läuft nur beim **Neubau**, nicht bei jedem Abruf; gegen die
+    // Rechnung, die ihn erzeugt hat, fällt er nicht ins Gewicht.
+    let etag = inhalts_marke(ctx.tablet.process_tag(), &courts_json);
     ctx.tablet
         .set_overview_cache(rev, etag.clone(), courts_json.clone(), jetzt);
     (courts_json, etag)
@@ -1719,6 +1734,16 @@ const AD_CACHE_CONTROL: &str = "public, max-age=300";
 /// innerhalb eines Programmlaufs stabil sein und sich bei anderem Inhalt
 /// ändern — beides leistet der Standard-Streuer. Gleiches Format wie im
 /// Relay (`bild_marke` dort), damit beide Betriebsarten gleich aussehen.
+/// Marke der Feld-Liste, gebildet über ihren **Inhalt** (Spec
+/// monitor-livestand-push, S1). Die Prozess-Kennung kommt hinzu, damit zwei
+/// Läufe mit zufällig gleichem Hash nicht verwechselt werden können.
+fn inhalts_marke(prozess: u64, json: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.hash(&mut hasher);
+    format!("\"ov-{}-{}-{:x}\"", prozess, json.len(), hasher.finish())
+}
+
 fn bild_marke(bytes: &[u8]) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -5267,6 +5292,24 @@ mod tests {
     #[tokio::test]
     async fn ein_unveraenderter_stand_wird_mit_304_bestaetigt() {
         let ctx = Arc::new(make_ctx(1));
+        // Wie im Marken-Test: ohne `court_infos` wäre die Feld-Liste leer und
+        // könnte sich nicht ändern.
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "Feld 1".into(),
+                location_id: None,
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
         let erst = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
             .await
             .into_response();
@@ -5284,8 +5327,73 @@ mod tests {
             .into_response();
         assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
 
-        // Nach einer Änderung gilt die alte Marke nicht mehr.
-        ctx.tablet.notify_monitor(101);
+        // Nach einer **echten** Änderung gilt die alte Marke nicht mehr.
+        // Bewusst ein gezählter Punkt und nicht bloß ein Nudge: Die Marke
+        // hängt am Inhalt (siehe `die_marke_haengt_am_inhalt_nicht_an_der_revision`).
+        ctx.tablet.record_score(101, 42, vec![(5, 3)]);
+        let dritt = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(dritt.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn die_marke_haengt_am_inhalt_nicht_an_der_revision() {
+        // Wäre die Marke aus der Revision gebildet, hinge der 304-Pfad an
+        // derselben Annahme wie der Cache — nur ohne dessen Sicherheitsnetz:
+        // Die Hart-TTL erzwingt zwar einen Neubau, aber bei unveränderter
+        // Revision bliebe die Marke gleich, und ein Abrufer mit gemerkter
+        // Marke bekäme auf einen **geänderten** Stand dauerhaft „nichts
+        // Neues". Dieselbe Falle wie beim Bild-Caching (Review 18.08.2026):
+        // Eine Marke, die zugleich Cache-Schlüssel ist, muss am Inhalt hängen.
+        //
+        // Die Gegenprobe hier ist die angenehme Richtung derselben Regel:
+        // Ein Ereignis, das die Anzeige gar nicht verändert, darf die Marke
+        // nicht wechseln — die Anzeige spart sich dann sogar den Inhalt.
+        let ctx = Arc::new(make_ctx(1));
+        // Das Fixture von `make_ctx` trägt keine `court_infos` — dann ist die
+        // Feld-Liste leer und könnte sich gar nicht ändern. Hier braucht es
+        // ein echtes Feld.
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "Feld 1".into(),
+                location_id: None,
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let erst = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // Revision hochzählen, ohne irgendetwas an der Anzeige zu ändern.
+        ctx.tablet.bump_overview_rev();
+        let zweit = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::NOT_MODIFIED,
+            "gleicher Inhalt = gleiche Marke, auch bei neuer Revision"
+        );
+
+        // Und andersherum: Ändert sich der Zustand wirklich, wechselt sie.
+        ctx.tablet.record_score(101, 42, vec![(5, 3)]);
         let dritt = health(State(ctx.clone()), takt(None), if_none_match(&marke))
             .await
             .into_response();
