@@ -1527,6 +1527,7 @@ async fn overview_health(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
     Query(q): Query<OverviewQuery>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
@@ -1656,17 +1657,61 @@ async fn overview_health(
             serde_json::Value::Bool(push_fallback_slow),
         );
     }
+    // Bestätigung „nichts Neues" (Spec monitor-livestand-push, S8). Die Marke
+    // hängt am **ausgelieferten Inhalt** — Feld-Liste plus Umschlag-Teile, die
+    // die Anzeige übernimmt. Bewusst NICHT an den Ordnungszahlen: Sie steigen
+    // bei jedem Anstoß, auch bei einem ohne sichtbare Folge, und die Marke
+    // wechselte dann jedes Mal. Dieselbe Überlegung wie im LAN, wo `seqs`
+    // deshalb neben der Feld-Liste steht und nicht darin.
+    //
+    // Ein Zwischenspeicher ist hier nicht nötig: Der Relay hält seinen Zustand
+    // ohnehin im Speicher und rechnet nur die Projektion; die Ersparnis liegt
+    // allein in den Bytes, die nicht über die Leitung gehen. Gemessen am
+    // 19.08.2026: 0,61 MB/s gegen 0,01 MB/s im LAN, bei identischem Bild.
+    let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
+    let ct_text = call_timer_json.to_string();
+    let etag = uebersicht_marke(&courts_json, &ct_text);
+    if marke_passt(&headers, &etag) {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, "no-store"),
+                (header::ETAG, etag.as_str()),
+            ],
+            String::new(),
+        )
+            .into_response();
+    }
+    // Von Hand zusammengesetzt statt über `json!`, damit die eben
+    // serialisierte Feld-Liste nicht erneut durch `serde_json` läuft.
+    let seqs_json = serde_json::to_string(&seqs).unwrap_or_else(|_| "{}".to_string());
+    let rumpf = format!(
+        "{{\"courts\":{courts_json},\"seqs\":{seqs_json},\"serverNowMs\":{},\"callTimer\":{ct_text}}}",
+        now_ms()
+    );
     (
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(serde_json::json!({
-            "courts": courts,
-            // Gleiche Form wie in der LAN-Antwort: CourtID → Ordnungszahl.
-            "seqs": seqs,
-            "serverNowMs": now_ms(),
-            "callTimer": call_timer_json,
-        })),
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ETAG, etag.as_str()),
+        ],
+        rumpf,
     )
         .into_response()
+}
+
+/// Marke der Cloud-Übersicht (Spec monitor-livestand-push, S8) — Länge plus
+/// Streuwert über das, was die Anzeige tatsächlich übernimmt.
+///
+/// Muss nur innerhalb eines Relay-Laufs stabil sein; nach einem Neustart darf
+/// sie sich ändern, dann kommt eben einmal der volle Rumpf. Gleiches Muster
+/// wie `bild_marke` und wie `inhalts_marke` am Turnier-PC.
+fn uebersicht_marke(courts_json: &str, call_timer_json: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    courts_json.hash(&mut hasher);
+    call_timer_json.hash(&mut hasher);
+    format!("\"ov-{}-{:x}\"", courts_json.len(), hasher.finish())
 }
 
 /// Der „In Vorbereitung"-Info-Monitor im Cloud-Modus (HTML). Dieselbe Datei wie
@@ -5572,9 +5617,14 @@ mod tests {
         }
         register_host(&broker, NS, &host).await;
 
-        let resp = overview_health(State(broker.clone()), Path(NS.into()), leer_query())
-            .await
-            .into_response();
+        let resp = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(resp.into_body(), 8192).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -5629,9 +5679,14 @@ mod tests {
         );
 
         // Unbekannter Namespace → 404, kein Datenleck.
-        let miss = overview_health(State(broker.clone()), Path("nope".into()), leer_query())
-            .await
-            .into_response();
+        let miss = overview_health(
+            State(broker.clone()),
+            Path("nope".into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(miss.status(), StatusCode::NOT_FOUND);
     }
 
@@ -5676,17 +5731,27 @@ mod tests {
         }
         register_host(&broker, NS, &host).await;
 
-        let voll = overview_health(State(broker.clone()), Path(NS.into()), leer_query())
-            .await
-            .into_response();
+        let voll = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         let v: serde_json::Value =
             serde_json::from_slice(&axum::body::to_bytes(voll.into_body(), 8192).await.unwrap())
                 .unwrap();
         assert_eq!(v["courts"].as_array().unwrap().len(), 2);
 
-        let schmal = overview_health(State(broker.clone()), Path(NS.into()), feld_query("102"))
-            .await
-            .into_response();
+        let schmal = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            feld_query("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(schmal.status(), StatusCode::OK);
         let s: serde_json::Value = serde_json::from_slice(
             &axum::body::to_bytes(schmal.into_body(), 8192)
@@ -5736,9 +5801,14 @@ mod tests {
         register_host(&broker, NS, &host).await;
 
         for eingabe in ["999", "-5", "abc", "", "1e3"] {
-            let r = overview_health(State(broker.clone()), Path(NS.into()), feld_query(eingabe))
-                .await
-                .into_response();
+            let r = overview_health(
+                State(broker.clone()),
+                Path(NS.into()),
+                feld_query(eingabe),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
             assert_eq!(r.status(), StatusCode::OK, "Eingabe {eingabe}");
             let v: serde_json::Value =
                 serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 8192).await.unwrap())
@@ -5746,6 +5816,218 @@ mod tests {
             assert_eq!(v["courts"], serde_json::json!([]), "Eingabe {eingabe}");
             assert_eq!(v["seqs"], serde_json::json!({}), "Eingabe {eingabe}");
         }
+    }
+
+    #[tokio::test]
+    async fn die_cloud_uebersicht_bestaetigt_unveraenderten_stand() {
+        // Spec monitor-livestand-push, S8. Der Befund der Nachmessung vom
+        // 19.08.2026: Im LAN sind 99 % der Antworten eine leere Bestätigung,
+        // in der Cloud **null** — 0,61 gegen 0,01 MB/s bei identischem Bild.
+        // S1 war ausdrücklich nur für den Turnier-PC spezifiziert, und im
+        // Cloud-Betrieb (den viele Turniere wegen der Firmen-Firewalls
+        // fahren) blieb die größte Einsparung der Reihe damit ungenutzt.
+        const NS: &str = "66666666-6666-6666-6666-666666666666";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "1".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            ns.court_matches.insert(101, brief(7));
+            ns.monitor_seq.insert(101, 4);
+        }
+        register_host(&broker, NS, &host).await;
+
+        let erst = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // Unveränderter Stand → leere Bestätigung.
+        let zweit = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            if_none_match_h(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+        let leer = axum::body::to_bytes(zweit.into_body(), 8192).await.unwrap();
+        assert!(leer.is_empty(), "die Bestätigung trägt keine Nutzdaten");
+
+        // Geänderter Satzstand → wieder voller Rumpf, andere Marke.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut(NS).unwrap();
+            ns.court_scores.insert(101, vec![SetAb { a: 11, b: 3 }]);
+        }
+        let dritt = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            if_none_match_h(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(dritt.status(), StatusCode::OK, "neuer Stand kommt durch");
+        assert_ne!(
+            dritt.headers().get(header::ETAG).unwrap().to_str().unwrap(),
+            marke
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen() {
+        // Die Marke hängt am **ausgelieferten Inhalt**, nicht an der
+        // Ordnungszahl. Sonst wechselte sie bei jedem Anstoß — auch bei
+        // einem ohne sichtbare Folge — und die Bestätigung wäre wirkungslos.
+        // Dieselbe Überlegung wie im LAN, wo `seqs` bewusst neben der Liste
+        // steht und nicht in die Marke eingeht.
+        const NS: &str = "77777777-7777-7777-7777-777777777777";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "1".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            ns.monitor_seq.insert(101, 1);
+        }
+        register_host(&broker, NS, &host).await;
+
+        let erst = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut(NS).unwrap().monitor_seq.insert(101, 99);
+        }
+        let zweit = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            if_none_match_h(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::NOT_MODIFIED,
+            "nur die Ordnungszahl bewegt sich — das ist kein neuer Inhalt"
+        );
+    }
+
+    #[tokio::test]
+    async fn der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke() {
+        // Sonst bekäme ein Feld-Monitor die Bestätigung auf die Marke der
+        // ganzen Halle — und umgekehrt.
+        const NS: &str = "88888888-8888-8888-8888-888888888888";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![
+                relay_proto::CourtBrief {
+                    id: 101,
+                    label: "1".into(),
+                    hall: String::new(),
+                    hall_color: None,
+                },
+                relay_proto::CourtBrief {
+                    id: 102,
+                    label: "2".into(),
+                    hall: String::new(),
+                    hall_color: None,
+                },
+            ];
+        }
+        register_host(&broker, NS, &host).await;
+
+        let voll = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let m_voll = voll
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let schmal = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            feld_query("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let m_schmal = schmal
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(m_voll, m_schmal);
+
+        // Und die eigene Marke bestätigt auch.
+        let wieder = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            feld_query("101"),
+            if_none_match_h(&m_schmal),
+        )
+        .await
+        .into_response();
+        assert_eq!(wieder.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    /// `If-None-Match`-Kopf für die Übersichts-Tests.
+    fn if_none_match_h(marke: &str) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert(header::IF_NONE_MATCH, marke.parse().unwrap());
+        h
     }
 
     #[tokio::test]
@@ -5776,19 +6058,28 @@ mod tests {
         }
         register_host(&broker, NS, &host).await;
 
-        let verwaist = overview_health(State(broker.clone()), Path(NS.into()), feld_query("777"))
-            .await
-            .into_response();
+        let verwaist = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            feld_query("777"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         let v: serde_json::Value = serde_json::from_slice(
             &axum::body::to_bytes(verwaist.into_body(), 8192)
                 .await
                 .unwrap(),
         )
         .unwrap();
-        let nie_dagewesen =
-            overview_health(State(broker.clone()), Path(NS.into()), feld_query("888"))
-                .await
-                .into_response();
+        let nie_dagewesen = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            feld_query("888"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         let n: serde_json::Value = serde_json::from_slice(
             &axum::body::to_bytes(nie_dagewesen.into_body(), 8192)
                 .await
@@ -5835,9 +6126,14 @@ mod tests {
         register_host(&broker, NS_A, &host_a).await;
         register_host(&broker, NS_B, &host_b).await;
 
-        let r = overview_health(State(broker.clone()), Path(NS_A.into()), feld_query("101"))
-            .await
-            .into_response();
+        let r = overview_health(
+            State(broker.clone()),
+            Path(NS_A.into()),
+            feld_query("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         let v: serde_json::Value =
             serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 8192).await.unwrap())
                 .unwrap();
