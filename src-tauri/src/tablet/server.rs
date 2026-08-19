@@ -3296,6 +3296,12 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     }
                                 }
                             }
+                            // Zettel-Ereignisse (ADR 0037): Wire steht ab
+                            // E1, der Ingest kommt in E3 der Spec
+                            // schiedsrichterzettel-druck. Bis dahin still
+                            // verworfen — wie von jedem älteren Host.
+                            Ok(TabletMsg::MatchEvent { .. })
+                            | Ok(TabletMsg::MatchEventSync { .. }) => {}
                             Err(_) => {}
                         }
                     }

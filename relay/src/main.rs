@@ -2024,6 +2024,14 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                 // sofort Pong zurück, ohne bts-light zu behelligen.
                                 let _ = tx.send(text(&ServerMsg::Pong));
                             }
+                            // Zettel-Ereignisse (ADR 0037): Die Wire-Typen
+                            // stehen, die Durchleitung kommt in Etappe E3 der
+                            // Spec schiedsrichterzettel-druck. Bis dahin
+                            // verwirft dieser Relay sie still — genau so
+                            // verhält sich auch jeder noch nicht aktualisierte
+                            // Relay, deshalb gilt: E3 mergen, Relay ausrollen,
+                            // dann erst den App-Tag setzen.
+                            Ok(TabletMsg::MatchEvent { .. }) | Ok(TabletMsg::MatchEventSync { .. }) => {}
                             Err(_) => {}
                         }
                     }
@@ -4053,7 +4061,6 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 let _ = pending.send(response);
             }
         }
-        // Punktverlauf-Antwort des Hosts → an den wartenden Abruf. Der
         HostFrame::OfficialDetail { req_id, json } => {
             if let Some(pending) = namespace.official_pending.remove(&req_id) {
                 // Größen-Deckel wie beim Verlauf: Eine überlange Antwort
@@ -4081,6 +4088,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 });
             }
         }
+        // Zettel-Antwort (ADR 0039), Geschwister der TimelineData-Antwort
+        // darüber: Leseweg und Pending-Map kommen in Etappe E5 der Spec
+        // schiedsrichterzettel-druck. Bis dahin wartet kein Abruf darauf.
+        HostFrame::ScoresheetData { .. } => {}
     }
     true
 }

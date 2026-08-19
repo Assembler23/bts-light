@@ -556,6 +556,11 @@ async fn handle_frame(
         // On-Demand-Abruf der TL-Oberfläche (AK-5): Antwort direkt aus dem
         // Store — winzige Payload, kein BTP-Zugriff, deshalb anders als
         // TlCommand ohne eigenen Task.
+        // Zettel (ADR 0037/0039): Ingest kommt in E3, der Leseweg in E5
+        // der Spec schiedsrichterzettel-druck.
+        RelayFrame::MatchEvent { .. }
+        | RelayFrame::MatchEventSync { .. }
+        | RelayFrame::ScoresheetRequest { .. } => {}
         RelayFrame::TimelineRequest { req_id, match_id } => {
             let json = ctx.tablet.timeline_store().timeline_json(match_id);
             let _ = tx.send(text(&HostFrame::TimelineData {

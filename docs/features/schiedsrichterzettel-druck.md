@@ -58,22 +58,24 @@ Erfolgskriterien:
   Punktverlauf-Block) · **neu** `src-tauri/src/tablet/sheet.rs` (`SheetStore`) · **neu**
   `src-tauri/src/tablet/scoresheet.rs` (Projektion + HTML) · Ingest in
   `tablet/server.rs` + `tablet/relay_client.rs` · `relay/src/main.rs` (Durchleitung + Route) ·
-  `commands.rs` (`match_scoresheet_html`) · `assets/tablet.html` (Erfassung) ·
-  **neu** `src/io/matchEvents.mjs` · `assets/tl.html` + `pages/FieldOverviewPage.tsx` (Knöpfe).
-- **Architekturregeln:**
-  **R1** — der Desktop holt den Zettel ausschließlich über den Tauri-Command
+  `commands.rs` (`match_scoresheet_html`) · `src-tauri/assets/tablet.html` (Erfassung) ·
+  **neu** `src/io/matchEvents.mjs` · `src-tauri/assets/tl.html` + `src/pages/FieldOverviewPage.tsx` (Knöpfe).
+- **Architekturregeln** (feature-lokal, mit **S-** vorangestellt — es sind **nicht** die
+  R1–R6 der `CLAUDE.md`, wo R1 „Frontend spricht den Kern nur über Tauri-Commands" und
+  R2 „BTP ist die Wahrheit" heißt):
+  **S-R1** — der Desktop holt den Zettel ausschließlich über den Tauri-Command
   `match_scoresheet_html`; kein `fetch` aus React auf `127.0.0.1:8088` (das bräche zusätzlich den
   Cloud-Only-Betrieb).
-  **R2** — der Zettel ist reine Druckform; kein Ereignis erzeugt eine Court→Match-Zuordnung oder
+  **S-R2** — der Zettel ist reine Druckform; kein Ereignis erzeugt eine Court→Match-Zuordnung oder
   ein Ergebnis. Die schwarze Karte bleibt ohne Ergebnisweg, die Wertung läuft weiter über
   `disqualify_match`.
-  **R3** — Ingest über **beide** WS-Wege; Leseroute unter **identischem Pfad** am eingebetteten
+  **S-R3** — Ingest über **beide** WS-Wege; Leseroute unter **identischem Pfad** am eingebetteten
   Server und am Relay. In einer fernen Halle hinter `slave_bridge.rs` gilt nur der Cloud-Pfad;
   wie beim Punktverlauf gibt es **keine Slave-Persistenz**.
-  **R4** — der Ereignis-Ingest benutzt denselben Halter-Filter wie `Rally`.
-  **R5** — **kein neuer Schreibweg.** Ereignisse gehen nie nach BTP, `process_result` bleibt der
+  **S-R4** — der Ereignis-Ingest benutzt denselben Halter-Filter wie `Rally`.
+  **S-R5** — **kein neuer Schreibweg.** Ereignisse gehen nie nach BTP, `process_result` bleibt der
   einzige Ergebnispfad und wird nicht angefasst.
-  **R6** — unberührt.
+  **S-R6** — unberührt.
 - **Konfiguration:** **keine neuen Felder.** Der Gate ist der bestehende PIN-Schiri-Modus
   (`STATE.umpireMode`, je Tablet im `localStorage`).
 - **Datenschutz:** Der Zettel trägt Spielernamen und optional Verein — das ist sein Zweck.
@@ -172,7 +174,10 @@ A4 quer, Satzspiegel 281 × 194 mm.
 - [ ] Abruf für ein Match ohne Aufzeichnung und für ein Match außerhalb des aktuellen
       Turnier-Snapshots liefert 404.
 - [ ] Stapel: drei IDs ergeben drei Abschnitte mit Seitenumbruch; 41 IDs werden abgewiesen.
-- [ ] Am Relay: fremder Bearer → 401, Host offline → 503.
+- [ ] Am Relay die Statuscodes des Punktverlaufs: **401 nur bei verbundenem Host mit unbekanntem
+      Token**; ohne `tl_index`-Eintrag oder ohne Host bewusst **503** — „ein Netzwackler kostete
+      sonst jedes Gerät seine Kopplung" (`relay/src/main.rs`, `tl_access_state`). Vorbild-Test:
+      `timeline_without_recording_yields_404_and_foreign_token_is_rejected`.
 - [ ] **`sanktionsdaten_erreichen_den_anzeige_zustand_nie`**: Der Wächter-Test weist zuerst nach,
       dass der Fixture wirklich Karten trägt, und dann, dass weder Text noch Struktur des
       `TlState` sie enthält.
@@ -229,10 +234,28 @@ Lesepfade · E6 Tablet-Erfassung · E7 Ausgabewege · E8 Advisories, Doku, ADRs,
 Karte bleibt Protokollnotiz ohne Ergebnisweg; `SheetStore` bekommt wie `TimelineStore` nur am
 Master ein Verzeichnis; `docs/adr/README.md` wird nachgezogen (führt den Index nur bis 0013).
 
+**In E3 mitzuerledigen (Befunde aus Code- und Security-Review von E1, 19.08.2026):**
+
+- **Die Deckel brauchen Aufrufer.** `match_events_valid` (Zahl der Ereignisse) und
+  `MAX_SHEET_LEN` haben nach E1 **außerhalb der Tests keine Aufrufstelle** — in E1 korrekt, weil
+  jeder Frame verworfen wird, ab E3 aber eine Lücke. Der Ingest in `server.rs`,
+  `relay_client.rs` und `relay/src/main.rs` muss beide **tatsächlich aufrufen**; ein Deckel neben
+  dem ungeschützten Pfad ist keiner. Ein Test je Weg hält es fest.
+- **`seq` und `ts_ms` sind nur halb gedeckelt.** `seq` ist auf `>= 0` geprüft, `ts_ms` gar nicht.
+  Bewusst **keine erfundene Obergrenze im Wire-Typ**: Ein zu enger Deckel würde ein legitimes
+  spätes Ereignis mitten im Turnier verwerfen, und beide Werte sind reine Anzeige-Größen ohne
+  Arithmetik. Stattdessen: In E5 zeigt die Protokollzeile einen unplausiblen Zeitstempel als
+  „—" statt als Unsinn — mit Test.
+- `MAX_SHEETS_PER_DOC` wird in **E5** an der Leseroute durchgesetzt, **bevor** je Kennung
+  gearbeitet wird (AK „41 IDs werden abgewiesen").
+
 ## Version und Auslieferung
 
-Bump **0.9.239 → 0.9.240** gemeinsam in `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` und
-`package.json`, erst im letzten Etappen-PR. **Reihenfolge zwingend Relay vor App:** die neuen
+Bump gegen den **dann aktuellen** main-Stand, gemeinsam in `src-tauri/Cargo.toml`,
+`src-tauri/tauri.conf.json` und
+`package.json`, erst im letzten Etappen-PR. (Die Spec schrieb ursprünglich 0.9.239 → 0.9.240;
+main stand beim Umsetzungsstart schon auf **0.9.243** und zieht während der acht Etappen weiter —
+die Zahl wird deshalb erst in E8 festgelegt.) **Reihenfolge zwingend Relay vor App:** die neuen
 Tablet-Frames sind eine Wire-Erweiterung, ein alter Relay verwirft sie still. Also E3 mergen,
 Relay deployen, dann den Tag setzen.
 
@@ -262,7 +285,7 @@ ausgesprochene Datenschutz-Zusage streicht.
 ## Doku-Pflicht im selben Commit
 
 **Neue CLAUDE.md-Zeile** für dieses Feature **und** die heute fehlende Zeile für den Schiri-Modus
-(`assets/tablet.html` `STATE.umpireMode`/`openCardModal`/`applyCard` → `docs/umpire-mode.md`).
+(`src-tauri/assets/tablet.html` `STATE.umpireMode`/`openCardModal`/`applyCard` → `docs/umpire-mode.md`).
 
 Neu: `docs/schiedsrichterzettel.md` (Bedienung). Zu ändern: **`docs/umpire-mode.md`** — der Satz
 „Bewusst nicht gebaut: Spielzettel-Export" wird gestrichen **und** die Zusage „Karten werden nur

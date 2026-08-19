@@ -843,6 +843,34 @@ pub enum TabletMsg {
         #[serde(default)]
         timeline: MatchTimeline,
     },
+    /// Ein Zettel-Ereignis (Schiedsrichterzettel, ADR 0037) — eigener
+    /// Strom **neben** dem Punktverlauf, weil Karten personenbezogene
+    /// Sanktionsdaten sind und [`MatchTimeline`] personenbezugsfrei
+    /// bleiben muss (ADR 0015).
+    ///
+    /// Gefiltert wie `rally`: nur vom aktiven Halter des Feldes und nur
+    /// für dessen Match.
+    #[serde(rename = "match_event")]
+    MatchEvent {
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        event: MatchEvent,
+    },
+    /// Kompletter Ereignis-Abgleich (ADR 0038): **vereinigt**, ersetzt
+    /// nicht — anders als [`TabletMsg::RallySync`].
+    ///
+    /// Für die Ereignisse hält der Host die Wahrheit. Ein übernehmendes
+    /// Ersatz-Tablet kennt die Karten seines Vorgängers nicht; ein
+    /// ersetzender Sync löschte sie beim ersten Abgleich. Die Vereinigung
+    /// ist idempotent und kommutativ, deshalb bringt ein Tablet, das
+    /// offline war, seine Ereignisse beim Reconnect einfach nach.
+    #[serde(rename = "match_event_sync")]
+    MatchEventSync {
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        #[serde(default)]
+        events: Vec<MatchEvent>,
+    },
 }
 
 // ─────────────────────────── Punktverlauf ──────────────────────────────
@@ -926,6 +954,240 @@ impl MatchTimeline {
     pub fn is_valid(&self) -> bool {
         self.sets.len() <= MAX_TIMELINE_SETS && self.sets.iter().all(TimelineSet::is_valid)
     }
+}
+
+// ─────────────────────── Schiedsrichterzettel ──────────────────────────
+//
+// Eigener Strom **neben** dem Punktverlauf (ADR 0037). Karten sind
+// personenbezogene Sanktionsdaten; sie in [`MatchTimeline`] zu legen würde
+// deren Begründung kippen, personenbezugsfrei und badhub-tauglich zu sein
+// (ADR 0015). Eigener Typ, eigene Datei, eigene Route, eigene Deckel.
+
+/// Höchstzahl Ereignisse je Match, die Host und Relay annehmen.
+///
+/// Realistisch sind ≈ 20 je Spiel (fünf `serve_start`, einige Karten, zwei
+/// bis vier Verletzungseinträge, Rücknahmen). Der Deckel zählt **auch die
+/// Rücknahmen** mit — der Bestand wächst monoton (ADR 0038) — und ist wie
+/// beim Punktverlauf ein harter Cloud-DoS-Riegel: Weiteres wird verworfen,
+/// nie gespeichert.
+pub const MAX_EVENTS_PER_MATCH: usize = 64;
+
+/// Höchstgröße eines serialisierten Ereignis-Bestands in Bytes
+/// (Sync + Abruf). Geteilt, damit Host und Relay dieselbe Grenze
+/// durchsetzen.
+///
+/// Bewusst **neben** [`MAX_TIMELINE_LEN`] statt darin (ADR 0037): Ein
+/// Ereignis-Schwall kann den Punktverlauf strukturell nicht mehr
+/// verdrängen, weil beide Ströme getrennt gedeckelt sind.
+pub const MAX_SHEET_LEN: usize = 16 * 1024;
+
+/// Höchstlänge einer Ereignis-Kennung.
+///
+/// Die Kennung kommt vom Tablet und ist der Dedupe-Schlüssel des Bestands
+/// — deshalb kurz und auf Hex-Ziffern beschränkt (siehe
+/// [`MatchEvent::is_valid`]): sie darf niemals in einen Dateinamen oder
+/// eine Ausgabe geraten können.
+pub const MAX_EVENT_ID_LEN: usize = 32;
+
+/// Höchstzahl Zettel in einem Druckauftrag (Stapeldruck einer Runde).
+pub const MAX_SHEETS_PER_DOC: usize = 40;
+
+/// Art eines Zettel-Ereignisses.
+///
+/// **Kein Freitextfeld** (Spec): Texte und Symbole entstehen erst beim
+/// Rendern aus dieser Art. Das nimmt Größen-Explosion, HTML-Injection und
+/// unkontrollierten Personenbezug in einem Zug weg.
+///
+/// Bewusst **ohne** Catch-All-Variante: Eine unbekannte Art ist ein
+/// Deserialisierungs-Fehler, der den ganzen Frame verwirft — verwerfen
+/// statt raten (ADR 0014).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    /// Aufschlagfolge zu Satz- oder Spielbeginn: `team`/`player` ist der
+    /// Aufschläger, `receiver_team`/`receiver_player` der Empfänger.
+    ///
+    /// Die Aufschlagfolge ist ein **Ereignis, kein Feld** (ADR 0037) —
+    /// sonst müsste [`TimelineSet`] wachsen und die Graph-Sicht wäre
+    /// nicht mehr byte-gleich zu älteren Seiten.
+    ServeStart,
+    /// Verwarnung — kein Punkt.
+    CardYellow,
+    /// Fehler wegen unsportlichen Verhaltens — der Gegner bekommt einen
+    /// regulären Punkt. Der Punkt entsteht am Tablet über den normalen
+    /// Zählweg, nicht aus diesem Ereignis.
+    CardRed,
+    /// Disqualifikation. Bleibt **Protokollnotiz ohne Ergebnisweg**: die
+    /// Wertung läuft weiter über `disqualify_match`.
+    CardBlack,
+    InjuryStart,
+    InjuryEnd,
+    Suspension,
+    Overrule,
+    RefereeCall,
+    Retired,
+    Disqualified,
+    /// Rücknahme eines früheren Ereignisses (`retracts` nennt dessen
+    /// Kennung). Der Bestand ist append-only — nichts wird gelöscht
+    /// (ADR 0038); der Zettel druckt Zurückgenommenes durchgestrichen in
+    /// der Protokollzeile, aber nicht im Raster.
+    Retract,
+}
+
+impl EventKind {
+    /// Sanktionsdaten im Sinne des Datenschutz-Abschnitts der Spec —
+    /// diese Arten dürfen ausschließlich auf dem Zettel erscheinen, nie im
+    /// Anzeige-Zustand, nie im Punktverlauf, nie im badhub-Push.
+    pub fn is_sanction(self) -> bool {
+        matches!(
+            self,
+            EventKind::CardYellow
+                | EventKind::CardRed
+                | EventKind::CardBlack
+                | EventKind::Disqualified
+        )
+    }
+}
+
+/// Spielabschnitt, in dem ein Ereignis erfasst wurde.
+///
+/// Ereignisse mit `phase != Play` haben keinen Trägerballwechsel (eine
+/// Karte in der Satzpause) — sie erscheinen auf dem Zettel als
+/// Marker-Spalte am Blockrand statt in einer Rasterzelle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    #[default]
+    Play,
+    BreakEleven,
+    BreakGame,
+    BreakInjury,
+    PreMatch,
+    PostMatch,
+}
+
+/// Ein Ereignis für den Schiedsrichterzettel.
+///
+/// **Bewusst ohne Namen** (Datenschutz, wie [`MatchTimeline`] nach
+/// ADR 0015): nur `team`/`player` als Koordinaten. Die Namen kommen zur
+/// Laufzeit aus dem BTP-Snapshot und stehen nur auf dem gedruckten Zettel.
+///
+/// Der Anker ist eine **Schnittposition, keine Kennung** (ADR 0038):
+/// `(set, after_n)` sagt „nach so vielen aufgezeichneten Ballwechseln
+/// dieses Satzes", `score_a`/`score_b` sind Plausibilitätsanker. Nach
+/// einem Undo existiert die Position semantisch nicht mehr — die
+/// betroffenen Ereignisse werden ausdrücklich zurückgenommen, statt sich
+/// stillschweigend zu verschieben.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatchEvent {
+    /// Kennung, am Tablet erzeugt (12 Hex) — **Dedupe-Schlüssel** der
+    /// Vereinigung: dasselbe Ereignis zweimal empfangen ändert den
+    /// Bestand nicht.
+    #[serde(default)]
+    pub id: String,
+    /// Erfassungs-Reihenfolge am Tablet. Nur Sortier-Kriterium dritter
+    /// Ordnung hinter `(set, after_n)` — nie eine Identität.
+    #[serde(default)]
+    pub seq: i64,
+    /// Satz-Nummer, 1-basiert.
+    #[serde(default)]
+    pub set: i64,
+    /// Zahl der aufgezeichneten Ballwechsel des Satzes zum Zeitpunkt der
+    /// Erfassung; `0` = vor dem ersten Ballwechsel.
+    #[serde(rename = "afterN", default)]
+    pub after_n: i64,
+    /// Stand zum Zeitpunkt der Erfassung — Plausibilitätsanker, damit ein
+    /// verschobenes Ereignis auffällt statt still falsch zu stehen.
+    #[serde(rename = "scoreA", default)]
+    pub score_a: i64,
+    #[serde(rename = "scoreB", default)]
+    pub score_b: i64,
+    /// Erfassungszeitpunkt in Millisekunden seit Epoch (Uhrzeit in der
+    /// Protokollzeile des Zettels).
+    #[serde(rename = "tsMs", default)]
+    pub ts_ms: u64,
+    /// Art des Ereignisses. **Pflichtfeld**: ohne sie ist der Frame
+    /// bedeutungslos, und ein Default wäre geraten statt gelesen.
+    pub kind: EventKind,
+    /// Betroffene Mannschaft (`0` = A, `1` = B). Ohne Personenbezug
+    /// (`suspension`, `overrule`, `referee_call`) bedeutungslos — der
+    /// Renderer entscheidet nach `kind`, ob er sie zeigt.
+    #[serde(default)]
+    pub team: i64,
+    /// Betroffener Spieler innerhalb der Mannschaft (`0`/`1`; im Einzel
+    /// immer `0`).
+    #[serde(default)]
+    pub player: i64,
+    /// Nur bei [`EventKind::ServeStart`]: Empfänger. Im Doppel ist er der
+    /// diagonal gegenüberstehende Gegner und lässt sich aus dem Aufschläger
+    /// allein nicht ableiten — deshalb ein eigenes Feld.
+    #[serde(rename = "receiverTeam", default)]
+    pub receiver_team: i64,
+    #[serde(rename = "receiverPlayer", default)]
+    pub receiver_player: i64,
+    /// Spielabschnitt der Erfassung.
+    #[serde(default)]
+    pub phase: Phase,
+    /// Nur bei [`EventKind::Retract`]: Kennung des zurückgenommenen
+    /// Ereignisses; sonst leer.
+    ///
+    /// `skip_serializing_if` — anders als im Punktverlauf-Block, wo kein
+    /// Feld es benutzt: Das Feld ist bei fast jedem Ereignis leer, und bei
+    /// [`MAX_EVENTS_PER_MATCH`] Ereignissen kostete es rund ein Kilobyte
+    /// gegen [`MAX_SHEET_LEN`], ohne etwas zu sagen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub retracts: String,
+}
+
+impl MatchEvent {
+    /// Gültigkeit eines einzelnen Ereignisses.
+    ///
+    /// Host **und** Relay verwerfen Ungültiges komplett, statt es zu
+    /// beschneiden — ein halb übernommenes Ereignis wäre eine stille Lüge
+    /// auf einem Archivbeleg.
+    pub fn is_valid(&self) -> bool {
+        // Kennungen sind nicht-leere Hex-Ziffernfolgen im Deckel: Sie
+        // werden verglichen, sortiert und protokolliert — alles andere
+        // hätte hier nichts zu suchen.
+        fn kennung(s: &str) -> bool {
+            !s.is_empty() && s.len() <= MAX_EVENT_ID_LEN && s.bytes().all(|b| b.is_ascii_hexdigit())
+        }
+        // `team`/`player` sind Koordinaten in einem 2×2-Raster.
+        fn seite(v: i64) -> bool {
+            v == 0 || v == 1
+        }
+
+        kennung(&self.id)
+            // Eine Rücknahme MUSS ihr Ziel nennen, alles andere darf es
+            // nicht — sonst gäbe es Rücknahmen ins Leere und stille
+            // Verweise, die der Renderer verschieden deuten könnte.
+            && match self.kind {
+                // Eine Rücknahme, die sich selbst zurücknimmt, ist ein
+                // Zirkel: Die Projektion in E4 müsste entscheiden, ob sie
+                // im Raster steht oder nicht, und beide Antworten wären
+                // falsch.
+                EventKind::Retract => kennung(&self.retracts) && self.retracts != self.id,
+                _ => self.retracts.is_empty(),
+            }
+            && self.seq >= 0
+            && (1..=MAX_TIMELINE_SETS as i64).contains(&self.set)
+            && (0..=MAX_RALLIES_PER_SET as i64).contains(&self.after_n)
+            && (0..=MAX_START_SCORE).contains(&self.score_a)
+            && (0..=MAX_START_SCORE).contains(&self.score_b)
+            && seite(self.team)
+            && seite(self.player)
+            && seite(self.receiver_team)
+            && seite(self.receiver_player)
+    }
+}
+
+/// Gültigkeit eines ganzen Ereignis-Bestands: Zahl **und** Inhalt.
+///
+/// Freie Funktion statt Methode, weil der Bestand auf dem Draht ein
+/// schlichtes `Vec` ist — Host, Relay und Store prüfen damit dieselbe
+/// Grenze.
+pub fn match_events_valid(events: &[MatchEvent]) -> bool {
+    events.len() <= MAX_EVENTS_PER_MATCH && events.iter().all(MatchEvent::is_valid)
 }
 
 /// Nachrichten vom Server an das Tablet.
@@ -1954,6 +2216,21 @@ pub enum HostFrame {
         #[serde(default)]
         json: String,
     },
+    /// Antwort auf einen [`RelayFrame::ScoresheetRequest`]: der fertige
+    /// Schiedsrichterzettel als **opakes HTML-Dokument** (Muster
+    /// [`HostFrame::TimelineData`]) — der Relay liefert es unverändert
+    /// aus, die Form bestimmt allein der Host.
+    ///
+    /// `found: false` = zu keinem der angefragten Spiele liegt eine
+    /// Aufzeichnung vor (Papier-Ergebnis).
+    ScoresheetData {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(default)]
+        found: bool,
+        #[serde(default)]
+        html: String,
+    },
 }
 
 /// Höchstzahl der Turnierleitungs-Geräte, die der Relay spiegelt.
@@ -2313,6 +2590,40 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "officialId")]
         official_id: i64,
+    },
+    /// Ein Zettel-Ereignis von einem Tablet (ADR 0037) — vom Relay 1:1
+    /// durchgereicht, Interpretation allein beim Host.
+    MatchEvent {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        event: MatchEvent,
+    },
+    /// Kompletter Ereignis-Abgleich eines Tablets (siehe
+    /// [`TabletMsg::MatchEventSync`]) — der Relay prüft nur Gültigkeit
+    /// und Größe.
+    MatchEventSync {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        #[serde(default)]
+        events: Vec<MatchEvent>,
+    },
+    /// Ein TL-Gerät möchte Schiedsrichterzettel drucken — Request/Response
+    /// über `req_id` wie beim Punktverlauf (die Antwort ist
+    /// [`HostFrame::ScoresheetData`]).
+    ///
+    /// Mehrere Kennungen ergeben einen Stapeldruck (eine ganze Runde in
+    /// einem Auftrag), gedeckelt auf [`MAX_SHEETS_PER_DOC`]. Der Relay
+    /// bleibt Briefträger: Er hält **keine** Zettel vor — sie tragen
+    /// Sanktionsdaten.
+    ScoresheetRequest {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(rename = "matchIds")]
+        match_ids: Vec<i64>,
     },
 }
 
@@ -4155,5 +4466,287 @@ mod tests {
         assert!(MatchTimeline::default().is_valid());
         // Leere Timeline ist gültig (Match ohne gezählten Ballwechsel).
         assert!(MatchTimeline::default().is_valid());
+    }
+
+    // ── Schiedsrichterzettel (ADR 0037/0038/0039) ──────────────────────
+
+    fn beispiel_ereignis() -> MatchEvent {
+        MatchEvent {
+            id: "a1b2c3d4e5f6".to_string(),
+            seq: 3,
+            set: 2,
+            after_n: 17,
+            score_a: 11,
+            score_b: 6,
+            ts_ms: 1_755_600_000_000,
+            kind: EventKind::CardYellow,
+            team: 1,
+            player: 0,
+            receiver_team: 0,
+            receiver_player: 0,
+            phase: Phase::Play,
+            retracts: String::new(),
+        }
+    }
+
+    /// Der Punktverlauf darf sich durch den zweiten Strom **nicht** ändern
+    /// (ADR 0037). Ein Golden-String friert die Graph-Antwort ein: Wer
+    /// `MatchTimeline` oder `TimelineSet` anfasst, bricht hier, nicht erst
+    /// auf einer älteren `tl.html` im Turnier.
+    #[test]
+    fn graph_dto_bleibt_byte_gleich() {
+        let json = serde_json::to_string(&beispiel_timeline()).unwrap();
+        assert_eq!(
+            json,
+            r#"{"sets":[{"startA":0,"startB":0,"points":"AABBA"},{"startA":7,"startB":5,"points":"BA"}],"midGame":true,"retired":false,"finished":false}"#
+        );
+        // Und die leere Fassung, die `tl_timeline` bei einem Match ohne
+        // Aufzeichnung ausliefert.
+        assert_eq!(
+            serde_json::to_string(&MatchTimeline::default()).unwrap(),
+            r#"{"sets":[],"midGame":false,"retired":false,"finished":false}"#
+        );
+    }
+
+    #[test]
+    fn zettel_frames_roundtrip() {
+        roundtrip(&TabletMsg::MatchEvent {
+            match_id: 42,
+            event: beispiel_ereignis(),
+        });
+        roundtrip(&TabletMsg::MatchEventSync {
+            match_id: 42,
+            events: vec![beispiel_ereignis()],
+        });
+        roundtrip(&RelayFrame::MatchEvent {
+            court_id: 3,
+            match_id: 42,
+            event: beispiel_ereignis(),
+        });
+        roundtrip(&RelayFrame::MatchEventSync {
+            court_id: 3,
+            match_id: 42,
+            events: vec![beispiel_ereignis()],
+        });
+        roundtrip(&RelayFrame::ScoresheetRequest {
+            req_id: 7,
+            match_ids: vec![41, 42, 43],
+        });
+        roundtrip(&HostFrame::ScoresheetData {
+            req_id: 7,
+            found: true,
+            html: "<!doctype html><html></html>".to_string(),
+        });
+    }
+
+    /// Alle Ereignis-Felder außer `kind` tragen `default` — ein Frame von
+    /// einem älteren Tablet bleibt lesbar. `kind` ist Pflicht: Ohne sie
+    /// wäre das Ereignis bedeutungslos, und ein Default wäre geraten
+    /// statt gelesen.
+    #[test]
+    fn ereignis_ohne_optionale_felder_bleibt_lesbar() {
+        let mager: MatchEvent = serde_json::from_str(r#"{"kind":"overrule"}"#).unwrap();
+        assert_eq!(mager.kind, EventKind::Overrule);
+        assert_eq!(mager.phase, Phase::Play);
+        assert!(mager.retracts.is_empty());
+        assert_eq!(mager.set, 0);
+
+        let ohne_kind: Result<MatchEvent, _> = serde_json::from_str(r#"{"id":"ab"}"#);
+        assert!(ohne_kind.is_err());
+    }
+
+    /// Eine unbekannte Art ist ein Fehler, kein Panic und keine Annahme —
+    /// der Empfänger verwirft den Frame still (`if let Ok(..)`), das setzt
+    /// ein `Err` voraus.
+    #[test]
+    fn unbekannte_ereignisart_liefert_fehler_statt_panik() {
+        let parsed: Result<MatchEvent, _> =
+            serde_json::from_str(r#"{"kind":"card_purple","id":"ab"}"#);
+        assert!(parsed.is_err());
+        let phase: Result<MatchEvent, _> =
+            serde_json::from_str(r#"{"kind":"overrule","phase":"break_lunch"}"#);
+        assert!(phase.is_err());
+        let frame: Result<TabletMsg, _> = serde_json::from_str(r#"{"type":"match_event_v99"}"#);
+        assert!(frame.is_err());
+    }
+
+    /// Das leere `retracts` wird nicht mitgeschrieben: Bei
+    /// [`MAX_EVENTS_PER_MATCH`] Ereignissen kostete es rund ein Kilobyte
+    /// gegen [`MAX_SHEET_LEN`], ohne etwas zu sagen.
+    #[test]
+    fn leeres_retracts_steht_nicht_auf_dem_draht() {
+        let json = serde_json::to_string(&beispiel_ereignis()).unwrap();
+        assert!(!json.contains("retracts"), "{json}");
+
+        let zurueck = MatchEvent {
+            id: "ff00ff00".to_string(),
+            kind: EventKind::Retract,
+            retracts: "a1b2c3d4e5f6".to_string(),
+            ..beispiel_ereignis()
+        };
+        let json = serde_json::to_string(&zurueck).unwrap();
+        assert!(json.contains(r#""retracts":"a1b2c3d4e5f6""#), "{json}");
+    }
+
+    #[test]
+    fn ereignis_validierung_weist_unfug_ab() {
+        assert!(beispiel_ereignis().is_valid());
+
+        // Kennung: nicht leer, Hex-Whitelist, gedeckelt. Sie wird
+        // verglichen, sortiert und protokolliert.
+        let leer = MatchEvent {
+            id: String::new(),
+            ..beispiel_ereignis()
+        };
+        assert!(!leer.is_valid());
+        let fremd = MatchEvent {
+            id: "../../etc".to_string(),
+            ..beispiel_ereignis()
+        };
+        assert!(!fremd.is_valid());
+        let lang = MatchEvent {
+            id: "a".repeat(MAX_EVENT_ID_LEN + 1),
+            ..beispiel_ereignis()
+        };
+        assert!(!lang.is_valid());
+
+        // team/player sind Koordinaten in einem 2×2-Raster.
+        for kaputt in [
+            MatchEvent {
+                team: 2,
+                ..beispiel_ereignis()
+            },
+            MatchEvent {
+                player: -1,
+                ..beispiel_ereignis()
+            },
+            MatchEvent {
+                receiver_team: 7,
+                ..beispiel_ereignis()
+            },
+            MatchEvent {
+                receiver_player: i64::MAX,
+                ..beispiel_ereignis()
+            },
+        ] {
+            assert!(!kaputt.is_valid(), "{kaputt:?}");
+        }
+
+        // Anker und Stand bleiben in den Deckeln des Punktverlaufs.
+        let zu_spaet = MatchEvent {
+            after_n: MAX_RALLIES_PER_SET as i64 + 1,
+            ..beispiel_ereignis()
+        };
+        assert!(!zu_spaet.is_valid());
+        let zu_viele_saetze = MatchEvent {
+            set: MAX_TIMELINE_SETS as i64 + 1,
+            ..beispiel_ereignis()
+        };
+        assert!(!zu_viele_saetze.is_valid());
+        let ohne_satz = MatchEvent {
+            set: 0,
+            ..beispiel_ereignis()
+        };
+        assert!(!ohne_satz.is_valid());
+        let absurd = MatchEvent {
+            score_b: i64::MAX - 1,
+            ..beispiel_ereignis()
+        };
+        assert!(!absurd.is_valid());
+    }
+
+    /// Rücknahme und Ziel gehören zusammen (ADR 0038): Ohne die Kopplung
+    /// gäbe es Rücknahmen ins Leere und stille Verweise an Ereignissen,
+    /// die gar keine Rücknahme sind.
+    #[test]
+    fn ruecknahme_ohne_ziel_und_ziel_ohne_ruecknahme_sind_ungueltig() {
+        let ohne_ziel = MatchEvent {
+            kind: EventKind::Retract,
+            retracts: String::new(),
+            ..beispiel_ereignis()
+        };
+        assert!(!ohne_ziel.is_valid());
+
+        let ziel_ohne_ruecknahme = MatchEvent {
+            kind: EventKind::CardRed,
+            retracts: "a1b2c3d4e5f6".to_string(),
+            ..beispiel_ereignis()
+        };
+        assert!(!ziel_ohne_ruecknahme.is_valid());
+
+        let ziel_kein_hex = MatchEvent {
+            kind: EventKind::Retract,
+            retracts: "zzz".to_string(),
+            ..beispiel_ereignis()
+        };
+        assert!(!ziel_kein_hex.is_valid());
+
+        // Selbstbezug: ein Zirkel, den die Projektion nicht auflösen
+        // könnte (steht das Ereignis nun im Raster oder nicht?).
+        let sich_selbst = MatchEvent {
+            id: "ff00".to_string(),
+            kind: EventKind::Retract,
+            retracts: "ff00".to_string(),
+            ..beispiel_ereignis()
+        };
+        assert!(!sich_selbst.is_valid());
+
+        let gut = MatchEvent {
+            id: "ff00".to_string(),
+            kind: EventKind::Retract,
+            retracts: "a1b2c3d4e5f6".to_string(),
+            ..beispiel_ereignis()
+        };
+        assert!(gut.is_valid());
+    }
+
+    /// Der Bestands-Deckel zählt **auch die Rücknahmen** mit — der Bestand
+    /// wächst monoton (ADR 0038).
+    #[test]
+    fn bestandsdeckel_gilt_fuer_zahl_und_inhalt() {
+        let voll = vec![beispiel_ereignis(); MAX_EVENTS_PER_MATCH];
+        assert!(match_events_valid(&voll));
+
+        let zu_viele = vec![beispiel_ereignis(); MAX_EVENTS_PER_MATCH + 1];
+        assert!(!match_events_valid(&zu_viele));
+
+        let mit_unfug = vec![
+            beispiel_ereignis(),
+            MatchEvent {
+                team: 9,
+                ..beispiel_ereignis()
+            },
+        ];
+        assert!(!match_events_valid(&mit_unfug));
+
+        assert!(match_events_valid(&[]));
+    }
+
+    /// Die Sanktions-Arten sind der Grund für den eigenen Strom, die
+    /// eigene Datei und die eigene Route — sie stehen namentlich fest,
+    /// damit der Wächter-Test in `tl.rs` etwas Strukturelles zu prüfen hat
+    /// statt einer Textregel.
+    #[test]
+    fn sanktionsarten_sind_benannt() {
+        for art in [
+            EventKind::CardYellow,
+            EventKind::CardRed,
+            EventKind::CardBlack,
+            EventKind::Disqualified,
+        ] {
+            assert!(art.is_sanction(), "{art:?}");
+        }
+        for art in [
+            EventKind::ServeStart,
+            EventKind::InjuryStart,
+            EventKind::InjuryEnd,
+            EventKind::Suspension,
+            EventKind::Overrule,
+            EventKind::RefereeCall,
+            EventKind::Retired,
+            EventKind::Retract,
+        ] {
+            assert!(!art.is_sanction(), "{art:?}");
+        }
     }
 }
