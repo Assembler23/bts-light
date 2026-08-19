@@ -918,12 +918,15 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
-    // Nur am MASTER (Spec, E8): Der Slave bekommt gar keine Ereignisse —
-    // in der fernen Halle läuft kein LAN-Tablet-Server, und die Geräte
-    // hängen direkt am Master-Relay (`slave_bridge.rs`). Ein Verzeichnis
-    // dort erzeugte nur leere Dateien und den falschen Eindruck, es gäbe
-    // dort einen Bestand. Beim Punktverlauf ist das historisch anders
-    // gelöst (er setzt das Verzeichnis unbedingt) — hier bewusst enger.
+    // Nur am MASTER (Spec, E8). Der Slave bekommt gar keine Aufzeichnung:
+    // In der fernen Halle läuft kein LAN-Tablet-Server, und die Geräte
+    // hängen direkt am Master-Relay (`slave_bridge.rs`) — beide
+    // Schreibpfade (`tablet::server`, `relay_client`) werden dort schon
+    // gar nicht erst gestartet. Ein Verzeichnis erzeugte deshalb nur
+    // leere Dateien und den falschen Eindruck, es gäbe dort einen
+    // Bestand. Der Punktverlauf setzte seines bisher unbedingt; das war
+    // im Slave-Betrieb totes Gepäck, kein Unterschied im Verhalten —
+    // beide sind jetzt gleich behandelt (verifiziert im Review zu E8).
     if !config.slave_mode {
         if let Ok(dir) = app.path().app_data_dir() {
             tablet.timeline_store().set_dir(dir.join("punktverlauf"));
