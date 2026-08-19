@@ -441,18 +441,27 @@ Karte, die dauerhaft etwas Falsches zeigt — und das fällt im Turnier niemande
 nicht weiß. Deshalb gehen auch Spielernamen und Nationen in den Vergleich ein, obwohl sie
 sich bei gleicher Match-ID nicht ändern *sollten*.
 
-**Gesundheit und Fallback (S6)**
-- [ ] Bei gesetztem `push_fallback_slow` und gesundem Kanal beträgt der Fallback-Takt 4 s.
-- [ ] Eine ruhige Halle ohne jeden Punkt bleibt dank Heartbeat gesund — die Anzeige friert nicht.
-- [ ] Bleibt der Heartbeat länger als 25 s aus, gilt der Kanal als tot: Takt sofort 250 ms und
-      aktiver Reconnect.
-- [ ] Ein **einziger** fehlgeschlagener Abruf schaltet sofort auf 250 ms.
-- [ ] Der Server sendet den Heartbeat mindestens alle 10 s; das Frame enthält **kein**
+**Gesundheit und Fallback (S6)** — umgesetzt v0.9.241
+- [x] Bei gesetztem `push_fallback_slow` und gesundem Kanal beträgt der Fallback-Takt 4 s.
+      *(`fallbackTakt` in `src/io/pushHealth.mjs`, Prüfung „gesund + Schalter an = 4 s".)*
+- [x] Eine ruhige Halle ohne jeden Punkt bleibt dank Heartbeat gesund — die Anzeige friert nicht.
+      *(Prüfungen „ruhige Halle mit Herzschlag vor 11 s" und „vor 24 s = noch gesund".)*
+- [x] Bleibt der Heartbeat länger als 25 s aus, gilt der Kanal als tot: Takt sofort 250 ms und
+      aktiver Reconnect. *(`kanalIstTot`; beide Seiten schließen den Socket aktiv, damit der
+      bestehende Reconnect-Pfad greift.)*
+- [x] Ein **einziger** fehlgeschlagener Abruf schaltet sofort auf 250 ms.
+      *(`lastFetchOk`/`failures` in `pushGesund`; beide Assets setzen beides im Erfolgs- und
+      im Fehlerzweig ihres Abrufs.)*
+- [x] Der Server sendet den Heartbeat mindestens alle 10 s; das Frame enthält **kein**
       `court`-Feld, damit alte Seiten es folgenlos verwerfen.
-- [ ] Default `push_fallback_slow = false`: eine frisch aktualisierte Installation verhält sich
-      exakt wie vorher.
-- [ ] Das Monitor-Lebenszeichen (`MONITOR_ONLINE_WINDOW_MS = 20 s`) bleibt auch bei 4-s-Takt
-      erhalten — kein Gerät erscheint fälschlich offline.
+      *(`monitor_heartbeat_frame`, Host `monitor_socket` und Relay `monitor_conn`;
+      `der_herzschlag_traegt_kein_court_feld`.)*
+- [x] Default `push_fallback_slow = false`: eine frisch aktualisierte Installation verhält sich
+      exakt wie vorher. *(`CourtMonitorConfig::default`, `MonitorConfig::default`,
+      `der_langsame_fallback_schalter_erreicht_die_anzeige`.)*
+- [x] Das Monitor-Lebenszeichen (`MONITOR_ONLINE_WINDOW_MS = 20 s`) bleibt auch bei 4-s-Takt
+      erhalten — kein Gerät erscheint fälschlich offline. *(`record_monitor_poll` hängt am
+      Abruf des Monitors; 4 s liegen mit fünffachem Abstand unter dem 20-s-Fenster.)*
 
 **Schmaler Abruf (S7)**
 - [ ] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der
@@ -487,7 +496,7 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 | S2 | `record_score_schreibt_nicht_sofort` · `flush_schreibt_genau_einmal_fuer_drei_punkte` · `inhaltsgleicher_stand_schreibt_nicht` · `ergebnis_eintrag_flusht_synchron` · `stop_flusht` · `datei_bleibt_atomar_temp_dann_rename` |
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
-| S6 | `monitor_ws_sendet_heartbeat_alle_10s` · `heartbeat_frame_hat_kein_court_feld` · `relay_monitor_conn_sendet_heartbeat` · `push_fallback_slow_default_false` |
+| S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
 | S7 | `health_mit_court_liefert_genau_ein_feld` · `health_mit_unbekanntem_court_liefert_leere_liste` · `health_ohne_court_unveraendert` · `nicht_numerischer_court_wird_abgewiesen_ohne_leck` · `relay_health_mit_court_respektiert_namespace_isolation` |
 
 **Client-Tests.** Es gibt keinen JS-Testrahmen; das Haus-Muster ist: kanonische Fassung in

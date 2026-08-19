@@ -802,13 +802,59 @@ main {
   // Renderpfad → kein Flackern. Der Monitor-WS-Nudge (irgendein Feld hat sich
   // geändert) löst den Fetch niedrig-latent aus; der 250-ms-Poll ist nur noch
   // der Stille-/Ausfall-Fallback und pausiert, solange frische Nudges kommen.
-  var FALLBACK_MS = 250;      // Fallback-Poll-Takt (früher POLL_OK_MS = 5000)
   var FAIL_MS = 2000;         // nach Fehler kurz ruhiger (früher POLL_FAIL_MS = 8000)
-  var PUSH_FRESH_MS = 1200;   // so lange nach dem letzten Nudge gilt Push als „frisch"
   var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
   var errorCount = 0;
-  var lastNudgeAt = 0;
   var mwsOpen = false;
+
+  // ── Gesundheit des Push-Kanals (Spec monitor-livestand-push, S6) ────────
+  //
+  // Die alte Regel („Socket offen UND letzter Anstoß < 1,2 s her")
+  // verwechselte „der Kanal lebt" mit „es passiert gerade etwas". Solange
+  // der Fallback viermal je Sekunde lief, fiel das nicht auf; mit dem
+  // langsameren Takt schon: Eine ruhige Halle zwischen zwei Ballwechseln
+  // sähe aus wie ein toter Kanal — und ein halbtoter Socket meldet umgekehrt
+  // minutenlang OPEN, ohne dass je etwas ankommt.
+  //
+  // Deshalb zählt jetzt JEDES Frame vom Server, auch der Herzschlag alle
+  // zehn Sekunden.
+  //
+  // **Inline-Kopie von `src/io/pushHealth.mjs`** — dort steht die kanonische
+  // Fassung samt Test (`scripts/test-push-health.mjs`, eigener CI-Schritt).
+  // Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+  // `monitor.html`.
+  var HERZSCHLAG_STILL_MS = 25000;
+  var FALLBACK_LANGSAM_MS = 4000;
+  var FALLBACK_SCHNELL_MS = 250;
+  var lastServerFrameAt = 0;  // letztes Frame: Anstoß ODER Herzschlag
+  var lastFetchOk = true;
+  var langsamErlaubt = false; // aus der Konfiguration (`pushFallbackSlow`)
+  function pushGesund(z, nowMs) {
+    if (!z || !z.wsOpen) return false;
+    if (z.lastFetchOk === false) return false;
+    if ((z.failures || 0) > 0) return false;
+    var letztes = z.lastServerFrameMs || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes < HERZSCHLAG_STILL_MS;
+  }
+  function fallbackTakt(gesund, erlaubt) {
+    return gesund && erlaubt ? FALLBACK_LANGSAM_MS : FALLBACK_SCHNELL_MS;
+  }
+  function kanalIstTot(wsOffen, letztesFrame, nowMs) {
+    if (!wsOffen) return false;
+    var letztes = letztesFrame || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes >= HERZSCHLAG_STILL_MS;
+  }
+  /** Der Zustand, wie ihn die Regel erwartet. */
+  function kanalZustand() {
+    return {
+      wsOpen: mwsOpen,
+      lastServerFrameMs: lastServerFrameAt,
+      lastFetchOk: lastFetchOk,
+      failures: errorCount,
+    };
+  }
   var fetching = false, refetchQueued = false;
   var backoffUntil = 0;                 // nach einem Fehler kurz zurückhalten
   var coalesceTimer = null, lastFetchStart = 0;
@@ -1005,6 +1051,7 @@ main {
         // zeigte endlos den eingefrorenen Stand (Review-Fund 19.08.2026).
         if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
         errorCount = 0; backoffUntil = 0; showOffline(false);
+        lastFetchOk = true;
         // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
         // nichts zu rendern — und kein Grund, „offline" zu melden.
         if (r.status === 304) { pollDone(); return null; }
@@ -1029,6 +1076,10 @@ main {
         // der neue Stand angewendet wird. Bis dahin ist das Mitführen die
         // Vorbereitung — und schon jetzt der Grund, warum ein überholter
         // Nudge keinen zweiten Abruf auslöst.
+        // Schalter aus der Konfiguration (Spec monitor-livestand-push, S6).
+        // Fehlt er (älterer Server), bleibt es beim schnellen Takt — der
+        // Schalter kann nur entlasten, nie etwas kaputt machen.
+        langsamErlaubt = !!(data.callTimer && data.callTimer.pushFallbackSlow);
         var seqs = data.seqs || {};
         Object.keys(seqs).forEach(function (id) {
           var wert = seqs[id];
@@ -1044,6 +1095,11 @@ main {
       })
       .catch(function () {
         errorCount++;
+        // Ein EINZIGER Fehlversuch macht den Kanal ungesund und schaltet
+        // sofort auf den schnellen Takt zurück (Spec
+        // monitor-livestand-push, S6). Lieber ein paar überflüssige Abrufe
+        // als eine Anzeige, die einen Ausfall verschläft.
+        lastFetchOk = false;
         if (errorCount >= 2) showOffline(true);
         backoffUntil = Date.now() + FAIL_MS; // moderat: nach Fehler kurz warten
         pollDone();
@@ -1067,10 +1123,10 @@ main {
       }, wait);
     }
   }
-  // Push gilt als „frisch", solange die WS offen ist UND kürzlich ein Nudge
-  // (irgendein Feld) kam. Dann pausiert der Fallback-Poll.
+  // Solange der Kanal gesund ist, pausiert der Sicherheits-Poll bzw. läuft
+  // langsam. Siehe `pushGesund` oben.
   function pushHealthy() {
-    return mwsOpen && (Date.now() - lastNudgeAt) < PUSH_FRESH_MS;
+    return pushGesund(kanalZustand(), Date.now());
   }
   // Sponsor-Leiste (Turnierlogo + als „in Leiste" markierte Werbebilder) —
   // unabhängig vom Health-Poll, selten aktualisiert (Bilder ändern sich kaum).
@@ -1098,10 +1154,34 @@ main {
 
   // ── Poll-Fallback + Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────
   requestPoll();
-  // Fallback-Takt: nur pollen, wenn KEIN frischer Push da ist. Solange Nudges
-  // (irgendein Feld) kommen, ist der Poll pausiert; nach >~1,2 s Stille ODER
-  // bei WS-Abriss (mwsOpen=false) läuft er sofort wieder.
-  setInterval(function () { if (!pushHealthy()) requestPoll(); }, FALLBACK_MS);
+  // Sicherheits-Poll (Spec monitor-livestand-push, S6). Er läuft im
+  // 250-ms-Raster und entscheidet bei jedem Tick neu:
+  //
+  // - Kanal **nicht** gesund → abrufen (wie bisher, viermal je Sekunde).
+  // - Kanal gesund und der Schalter gesetzt → höchstens alle vier Sekunden.
+  // - Kanal gesund, Schalter aus → gar nicht abrufen; die Anstöße reichen.
+  //   (Das ist das Verhalten vor dieser Etappe.)
+  //
+  // Bleibt der Herzschlag länger als 25 s aus, gilt der Kanal als tot: Der
+  // Socket wird aktiv geschlossen, damit der Reconnect-Wächter greift.
+  // Bewusste Umkehr des früheren „kein Force-Close bei Stille" — das galt
+  // nur, weil der schnelle Poll ohnehin alles auffing.
+  var letzterLangsamerPoll = 0;
+  setInterval(function () {
+    var jetzt = Date.now();
+    if (kanalIstTot(mwsOpen, lastServerFrameAt, jetzt)) {
+      mlog('warn', 'mws_stale_close', { stillMs: jetzt - lastServerFrameAt });
+      try { if (mws) mws.close(); } catch (e) { /* onclose plant den Reconnect */ }
+      mwsOpen = false;
+    }
+    var gesund = pushGesund(kanalZustand(), jetzt);
+    if (!gesund) { requestPoll(); return; }
+    if (fallbackTakt(true, langsamErlaubt) === FALLBACK_LANGSAM_MS
+        && jetzt - letzterLangsamerPoll >= FALLBACK_LANGSAM_MS) {
+      letzterLangsamerPoll = jetzt;
+      requestPoll();
+    }
+  }, FALLBACK_SCHNELL_MS);
 
   // Sekundentakt der Aufruf-Uhr. Bis zum Antwortcache (Spec
   // monitor-livestand-push, S1) lief sie beiläufig mit: Viermal je Sekunde
@@ -1158,13 +1238,16 @@ main {
     mws.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      // **Jedes** Frame vom Server beweist, dass der Kanal lebt — auch der
+      // Herzschlag, der gar keine Nachricht über ein Feld ist (Spec
+      // monitor-livestand-push, S6).
+      lastServerFrameAt = Date.now();
       if (typeof msg.court !== 'number' || typeof msg.seq !== 'number') return;
       // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
       if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, 'push')) return;
       lastSeqByCourt[msg.court] = msg.seq;
-      // Jedes gültige Nudge beweist: der Push-Kanal lebt → Poll pausieren und
-      // den Voll-Stand niedrig-latent holen (coalesct).
-      lastNudgeAt = Date.now();
+      // Ein gültiger Anstoß heißt: Es hat sich etwas geändert → den
+      // Voll-Stand niedrig-latent holen (coalesct).
       naechsteQuelle = 'push';
       requestPoll();
     };

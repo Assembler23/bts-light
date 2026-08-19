@@ -1512,7 +1512,7 @@ async fn overview_health(
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let (courts, call_timer, seqs) = {
+    let (courts, call_timer, seqs, push_fallback_slow) = {
         let map = broker.namespaces.lock().await;
         match map.get(&ns) {
             Some(n) => {
@@ -1580,15 +1580,34 @@ async fn overview_health(
                     .as_ref()
                     .map(|mo| mo.call_timer.clone())
                     .unwrap_or_default();
-                (courts, ct, seqs)
+                // Fallback-Schalter aus der hochgeladenen Anzeige-Konfiguration
+                // (Spec monitor-livestand-push, S6).
+                let slow = n
+                    .monitor
+                    .as_ref()
+                    .map(|mo| mo.config.push_fallback_slow)
+                    .unwrap_or(false);
+                (courts, ct, seqs, slow)
             }
             None => (
                 Vec::new(),
                 relay_proto::CallTimerView::default(),
                 std::collections::HashMap::new(),
+                false,
             ),
         }
     };
+    // Der Schalter reist im `callTimer`-Umschlag mit — genau wie in der
+    // LAN-Antwort, damit `overview.html` in beiden Betriebsarten an derselben
+    // Stelle nachsieht.
+    let mut call_timer_json =
+        serde_json::to_value(&call_timer).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = call_timer_json.as_object_mut() {
+        obj.insert(
+            "pushFallbackSlow".to_string(),
+            serde_json::Value::Bool(push_fallback_slow),
+        );
+    }
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::json!({
@@ -1596,7 +1615,7 @@ async fn overview_health(
             // Gleiche Form wie in der LAN-Antwort: CourtID → Ordnungszahl.
             "seqs": seqs,
             "serverNowMs": now_ms(),
-            "callTimer": call_timer,
+            "callTimer": call_timer_json,
         })),
     )
         .into_response()
@@ -1986,7 +2005,11 @@ async fn monitor_ws(
 async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: Option<i64>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     subscribe_monitor(&broker, &ns, court, &tx).await;
-    let mut ping = tokio::time::interval(HEARTBEAT);
+    // Kürzerer Takt als bei den übrigen WS-Verbindungen (Spec
+    // monitor-livestand-push, S6): Hier hängt nicht nur die Leitung daran,
+    // sondern die Anzeige entscheidet an diesem Herzschlag, ob ihr
+    // Push-Kanal lebt — und schaltet sonst auf den schnellen Poll zurück.
+    let mut ping = tokio::time::interval(Duration::from_millis(relay_proto::MONITOR_HEARTBEAT_MS));
     loop {
         tokio::select! {
             outgoing = rx.recv() => {
@@ -2005,6 +2028,11 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
             }
             _ = ping.tick() => {
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
+                // Sichtbarer Herzschlag für die Anzeige (S6) — ohne
+                // `court`-Feld, damit eine Seite aus einem älteren Stand ihn
+                // folgenlos verwirft.
+                let hb = relay_proto::monitor_heartbeat_frame(now_ms());
+                if socket.send(Message::Text(hb.into())).await.is_err() { break }
             }
         }
     }
@@ -5333,7 +5361,14 @@ mod tests {
             // Cloud-Betrieb nicht zueinander ordnen.
             ns.monitor_seq.insert(101, 1_787_000_000_042);
             ns.monitor = Some(MonitorBundle {
-                config: MonitorConfig::default(),
+                // Schalter gesetzt (Spec monitor-livestand-push, S6): Die
+                // Cloud-Übersicht muss ihn genauso erfahren wie die
+                // LAN-Übersicht, sonst bliebe die Entlastung ausgerechnet
+                // dort aus, wo die Anzeigen über fremde Netze hängen.
+                config: MonitorConfig {
+                    push_fallback_slow: true,
+                    ..Default::default()
+                },
                 tournament_name: String::new(),
                 ads: Vec::new(),
                 call_timer: relay_proto::CallTimerView {
@@ -5394,6 +5429,13 @@ mod tests {
         // Aufruf-Timer in camelCase, wie die LAN-`/health` ihn liefert.
         assert_eq!(v["callTimer"]["enabled"], serde_json::json!(true));
         assert_eq!(v["callTimer"]["secondCallMinutes"], serde_json::json!(2.0));
+        // Und im selben Umschlag der Fallback-Schalter (S6) — die
+        // Cloud-Übersicht liest ihn an derselben Stelle wie die LAN-Übersicht.
+        assert_eq!(
+            v["callTimer"]["pushFallbackSlow"],
+            serde_json::json!(true),
+            "Schalter erreicht auch die Cloud-Übersicht"
+        );
 
         // Unbekannter Namespace → 404, kein Datenleck.
         let miss = overview_health(State(broker.clone()), Path("nope".into()))
