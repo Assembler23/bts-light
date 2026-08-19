@@ -170,8 +170,108 @@ export function tauriVersion(inhalt) {
   }
 }
 
+/**
+ * Wird DIESE Datei gerade direkt aufgerufen (statt importiert)?
+ *
+ * Der naheliegende Vergleich `import.meta.url === \`file://${process.argv[1]}\``
+ * geht nur auf POSIX auf ("/home/…" liefert den dritten Slash selbst). Auf
+ * **Windows** ist `argv[1]` ein "C:\…"-Pfad mit Backslashes, die URL aber
+ * "file:///C:/…" — der Vergleich schlaegt immer fehl, das Skript tut nichts
+ * und endet mit exit 0. Genau die stille gruene Meldung, gegen die dieser
+ * Check gebaut wurde, und der lokale Aufruf aus docs/release.md laeuft auf
+ * einem Windows-Rechner.
+ *
+ * Deshalb beide Seiten auf dieselbe Form bringen: URL-Praefix weg,
+ * Prozentzeichen aufloesen, Backslashes zu Slashes, fuehrenden Slash vor dem
+ * Laufwerksbuchstaben entfernen.
+ */
+export function istHauptmodul(metaUrl, argv1) {
+  if (!metaUrl || !argv1) return false;
+  const norm = (s) => {
+    let p = String(s);
+    try {
+      p = decodeURIComponent(p);
+    } catch {
+      // Kaputtes Encoding: unveraendert weiterverwenden.
+    }
+    return p
+      .replace(/^file:\/\//, "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "/")
+      .replace(/^\/([a-zA-Z]:)/, "$1");
+  };
+  return norm(metaUrl) === norm(argv1);
+}
+
+/**
+ * Referenz, gegen die geprueft wird: `origin/main`, sonst das lokale `main`.
+ *
+ * `execFileSync` **wirft** bei einem git-Exit ≠ 0, ein Ausdruck wie
+ * `git(…).length ? "origin/main" : "main"` kann seinen false-Zweig also nie
+ * nehmen — der Fallback war toter Code, und ein Klon ohne `origin/main`
+ * (frischer Worktree, anders benanntes Remote) starb mit rohem Stacktrace
+ * statt auf `main` auszuweichen.
+ */
+export function hauptReferenz(git) {
+  try {
+    git("rev-parse", "--verify", "origin/main");
+    return "origin/main";
+  } catch {
+    return "main";
+  }
+}
+
+/**
+ * Sammelt die unveroeffentlichten Commits des Bereichs und die darin
+ * enthaltenen Versionsspruenge. `git` wird hereingereicht, damit die Logik
+ * ohne echtes Repo testbar bleibt.
+ *
+ * **Merge-Commits:** `git show --name-only` gibt fuer einen Merge KEINE
+ * Dateien aus (er waere als "reine Doku" durchgerutscht) und `git show -U0`
+ * einen combined diff, dessen "++version"-Zeilen `/^\+version/` nie trifft —
+ * ein per Merge-Commit gelandeter Versionssprung fehlte also in beiden
+ * Zaehlungen und der Check bliebe gruen. Heute mergt das Repo per Squash;
+ * die Zaehlung darf davon aber nicht abhaengen. Darum `--first-parent` plus
+ * `git diff sha^ sha` (bei einem Merge = was er auf main gebracht hat).
+ *
+ * @returns {{offen: {sha:string,titel:string,alterStunden:number}[], spruenge: string[]}}
+ */
+export function sammleOffene(git, bereich, jetzt = Date.now()) {
+  const rohe = git("log", "--first-parent", "--format=%h%x09%cI%x09%s", bereich)
+    .split("\n")
+    .filter(Boolean);
+
+  const offen = [];
+  const spruenge = [];
+  for (const zeile of rohe) {
+    const [sha, iso, titel] = zeile.split("\t");
+    let dateien = [];
+    try {
+      dateien = git("diff", "--name-only", `${sha}^`, sha).split("\n").filter(Boolean);
+    } catch {
+      continue; // z. B. Root-Commit ohne Elternteil
+    }
+    if (!dateien.some(istAuslieferbar)) continue; // reine Doku/Tests
+    offen.push({ sha, titel, alterStunden: (jetzt - Date.parse(iso)) / 3_600_000 });
+
+    // Versionsspruenge: jede Version, die im offenen Bereich erstmals in
+    // Cargo.toml auftaucht — der Maszstab "es hat sich gestapelt".
+    if (!dateien.includes("src-tauri/Cargo.toml")) continue;
+    let diff = "";
+    try {
+      diff = git("diff", "-U0", `${sha}^`, sha, "--", "src-tauri/Cargo.toml");
+    } catch {
+      continue;
+    }
+    for (const m of diff.matchAll(/^\+version\s*=\s*"([^"]+)"/gm)) {
+      if (!spruenge.includes(m[1])) spruenge.push(m[1]);
+    }
+  }
+  return { offen, spruenge };
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (istHauptmodul(import.meta.url, process.argv[1])) {
   const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 
   const cargo = cargoVersion(readFileSync("src-tauri/Cargo.toml", "utf8"));
@@ -179,9 +279,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   // Referenz ist immer main, nicht der ausgecheckte Branch — der Check soll
   // dasselbe sagen, egal von wo er läuft.
-  const main = git("rev-parse", "--verify", "origin/main").length
-    ? "origin/main"
-    : "main";
+  const main = hauptReferenz(git);
 
   let letzterTag = null;
   try {
@@ -191,32 +289,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   const bereich = letzterTag ? `${letzterTag}..${main}` : main;
-  const rohe = git("log", "--format=%h%x09%cI%x09%s", bereich).split("\n").filter(Boolean);
-
-  const offen = [];
-  for (const zeile of rohe) {
-    const [sha, iso, titel] = zeile.split("\t");
-    const dateien = git("show", "--name-only", "--format=", sha).split("\n").filter(Boolean);
-    if (!dateien.some(istAuslieferbar)) continue; // reine Doku/Tests
-    offen.push({ sha, titel, alterStunden: (Date.now() - Date.parse(iso)) / 3_600_000 });
-  }
-
-  // Unveroeffentlichte Versionsspruenge: jede Version, die im offenen Bereich
-  // erstmals in Cargo.toml auftaucht. Das ist der Maßstab "es hat sich
-  // gestapelt", unabhaengig davon, wie schnell die Spruenge kamen.
-  const spruenge = [];
-  for (const zeile of rohe) {
-    const sha = zeile.split("\t")[0];
-    let diff = "";
-    try {
-      diff = git("show", "--format=", "-U0", sha, "--", "src-tauri/Cargo.toml");
-    } catch {
-      continue;
-    }
-    for (const m of diff.matchAll(/^\+version\s*=\s*"([^"]+)"/gm)) {
-      if (!spruenge.includes(m[1])) spruenge.push(m[1]);
-    }
-  }
+  const { offen, spruenge } = sammleOffene(git, bereich);
 
   const u = bewerte({ cargo, tauri, letzterTag, offen, spruenge });
   console.log(

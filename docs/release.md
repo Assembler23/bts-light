@@ -161,6 +161,11 @@ Lokal nachsehen:
 node scripts/check-version-tagged.mjs   # exit 0 = nichts fällig
 ```
 
+Der Check misst gegen `origin/main` (fehlt die Ref, gegen das lokale `main`)
+und zählt entlang `--first-parent` mit `git diff <sha>^ <sha>` — so zählt auch
+ein per Merge-Commit gelandeter Versionssprung mit, nicht nur die heute
+üblichen Squash-Commits.
+
 **Kein Auto-Tag, bewusst:** Der Tag löst ein Auto-Update auf allen laufenden
 Turnier-PCs aus. Ob das gerade passt, weiß nur ein Mensch — deshalb bleibt der
 Ablauf, wie er ist: Tilo meldet, wann getaggt wird, der Check ist nur das Netz.

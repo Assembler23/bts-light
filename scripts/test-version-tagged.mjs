@@ -14,6 +14,9 @@ import {
   cargoVersion,
   tauriVersion,
   istAuslieferbar,
+  istHauptmodul,
+  hauptReferenz,
+  sammleOffene,
   GRENZE_STUNDEN,
 } from "./check-version-tagged.mjs";
 
@@ -128,6 +131,94 @@ eq(
 eq("cargoVersion ohne Treffer → null", cargoVersion('[package]\nname = "bts"'), null);
 eq("tauriVersion liest JSON", tauriVersion('{"productName":"BTS","version":"0.9.199"}'), "0.9.199");
 eq("tauriVersion bei kaputtem JSON → null", tauriVersion("{nicht json"), null);
+
+// ── CLI-Erkennung: laeuft der Check ueberhaupt? ────────────────────────────
+// Der urspruengliche Guard verglich `import.meta.url` mit `file://${argv[1]}`.
+// Auf POSIX geht das auf ("/home/…" ergaenzt den dritten Slash selbst), auf
+// **Windows nie**: argv[1] ist "C:\…" mit Backslashes, die URL "file:///C:/…".
+// Der lokale Aufruf aus docs/release.md lief damit stumm durch und meldete
+// exit 0 — "nichts faellig", obwohl gestapelt war. Genau die stille gruene
+// Variante, gegen die dieser Check gebaut wurde.
+eq(
+  "Windows: Aufruf des Skripts erkannt",
+  istHauptmodul(
+    "file:///C:/Users/t/repos/bts-light/scripts/check-version-tagged.mjs",
+    "C:\\Users\\t\\repos\\bts-light\\scripts\\check-version-tagged.mjs",
+  ),
+  true,
+);
+eq(
+  "POSIX: Aufruf des Skripts erkannt",
+  istHauptmodul(
+    "file:///home/runner/work/bts-light/scripts/check-version-tagged.mjs",
+    "/home/runner/work/bts-light/scripts/check-version-tagged.mjs",
+  ),
+  true,
+);
+eq(
+  "importiert (Testdatei laeuft) → kein CLI",
+  istHauptmodul(
+    "file:///C:/repo/scripts/check-version-tagged.mjs",
+    "C:\\repo\\scripts\\test-version-tagged.mjs",
+  ),
+  false,
+);
+eq(
+  "Pfad mit Leerzeichen (%20 in der URL)",
+  istHauptmodul("file:///C:/Mein%20Repo/scripts/check.mjs", "C:\\Mein Repo\\scripts\\check.mjs"),
+  true,
+);
+
+// ── Referenz-Ermittlung: origin/main mit echtem Fallback ───────────────────
+// `git rev-parse` WIRFT bei unbekannter Ref (execFileSync, exit 128) — der
+// alte `.length ? … : "main"`-Ausdruck konnte seinen false-Zweig nie nehmen,
+// der Fallback war toter Code und das Skript starb mit rohem Stacktrace.
+eq(
+  "origin/main vorhanden → origin/main",
+  hauptReferenz(() => "3d1e264aa"),
+  "origin/main",
+);
+eq(
+  "ohne origin/main → Fallback auf main",
+  hauptReferenz(() => {
+    throw new Error("fatal: Needed a single revision");
+  }),
+  "main",
+);
+
+// ── Merge-Commits: weder Dateien noch Versionssprung verschlucken ──────────
+// `git show --name-only` gibt fuer einen Merge-Commit KEINE Dateien aus (er
+// waere als "reine Doku" durchgerutscht), und `git show -U0` liefert einen
+// combined diff mit "++"-Praefix, den /^\+version/ nie trifft. Wird auf main
+// je per Merge-Commit statt Squash gemergt, zaehlt der Check zu niedrig und
+// bleibt gruen — genau der Stapel, den er fangen soll. Deshalb
+// `--first-parent` plus `git diff sha^ sha`.
+const gitFake = (protokoll) => (...args) => {
+  protokoll.push(args.join(" "));
+  if (args[0] === "log") return "aaa1111\t2026-08-13T09:00:00Z\tMerge pull request #99";
+  if (args[0] === "diff" && args.includes("--name-only")) return "src-tauri/src/main.rs\nsrc-tauri/Cargo.toml";
+  if (args[0] === "diff") return '@@ -3 +3 @@\n-version = "0.9.199"\n+version = "0.9.200"';
+  throw new Error(`unerwartet: ${args.join(" ")}`);
+};
+const protokoll = [];
+const gesammelt = sammleOffene(gitFake(protokoll), "v0.9.199..origin/main", Date.parse("2026-08-13T21:00:00Z"));
+eq("Merge-Commit zaehlt als auslieferbar", gesammelt.offen.length, 1);
+eq("… mit korrektem Alter", Math.round(gesammelt.offen[0].alterStunden), 12);
+eq("Merge-Commit: Versionssprung erkannt", gesammelt.spruenge.join(","), "0.9.200");
+eq("log laeuft mit --first-parent", protokoll.some((z) => z.startsWith("log ") && z.includes("--first-parent")), true);
+eq("Diff gegen den ersten Elternteil (sha^)", protokoll.some((z) => z.includes("aaa1111^ aaa1111")), true);
+
+// Reine Doku bleibt reine Doku (die Auslieferbarkeits-Regel gilt weiter).
+const nurDoku = sammleOffene(
+  (...args) => {
+    if (args[0] === "log") return "bbb2222\t2026-08-13T09:00:00Z\tDoku";
+    if (args.includes("--name-only")) return "docs/release.md";
+    return "";
+  },
+  "v0.9.199..main",
+  Date.parse("2026-08-13T21:00:00Z"),
+);
+eq("reiner Doku-Commit zaehlt nicht", nurDoku.offen.length, 0);
 
 if (failures > 0) {
   console.error(`\n✗ Release-Faellig-Test: ${failures} Fehler.`);
