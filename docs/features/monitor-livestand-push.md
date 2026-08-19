@@ -181,6 +181,21 @@ Marke über den ausgelieferten Inhalt, `If-None-Match` → 304. Ein Zwischenspei
 **nicht** nötig — der Relay hält seinen Zustand ohnehin im Speicher, die Ersparnis liegt
 allein in den nicht gesendeten Bytes.
 
+**S9 — Antwortcache auch am Relay.** *(Offen; aus dem Sicherheits-Review zu S8.)* Die
+Bestätigung aus S8 ist nur **auf der Leitung** billig, nicht auf der CPU: Der
+Projektionsbau in `overview_health` läuft auch für sie, samt des globalen Schlosses über
+**alle** Namespaces. Vorher deckelte sich eine Flut selbst, weil der Angreifer je Anfrage
+8 kB Rückweg mittragen musste; jetzt bekommt er 0 Byte zurück, während der Relay dieselbe
+Arbeit leistet — mit einer Namespace-UUID (die jeder Helfer und jede weitergereichte
+Monitor-URL trägt) trifft das **alle** Turniere auf derselben Instanz.
+
+Am Turnier-PC löst das der Antwortcache aus S1. Am Relay fehlt dafür die Voraussetzung: Es
+führt **keine Revision**, an der sich ein Cache verlässlich invalidieren ließe, und ein
+reiner Zeit-Cache verzögerte den Anstoß-Weg — also genau die Latenz, um die es der Spec
+geht (gemessen p50 15 ms). Nötig wäre zuerst ein `overview_rev` je Namespace, erhöht dort,
+wo heute `notify_monitor` läuft. Zusätzlich oder als Sofortmaßnahme: ein
+Concurrency-Limit auf der Route.
+
 **S7 — Schmaler Abruf je Feld.** `GET /health?court=<id>` am Host und
 `GET /{ns}/health?court=<id>` am Relay: dieselbe Struktur, nur das eine Feld, aus dem Cache.
 Der Nudge bleibt datenlos. Unbekannte oder ungültige ID → `courts: []`, HTTP 200.
@@ -655,9 +670,13 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       *(`der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke`.)*
 - [x] Ein geänderter Stand kommt durch — gleiche Marke nur bei gleichem Inhalt.
       *(Dritter Teil des ersten Tests: Satzstand geändert → HTTP 200 mit neuer Marke.)*
-- [x] Kein Zwischenspeicher nötig. *(Der Relay hält seinen Zustand ohnehin im Speicher und
-      rechnet nur die Projektion; die Ersparnis liegt allein in den nicht gesendeten Bytes.
-      Ein Cache wäre zusätzliche Invalidierungs-Fläche ohne Gegenwert.)*
+- [x] Die Marke verrät nicht, ob es den Namespace gibt.
+      *(`die_marke_verraet_nicht_ob_es_den_namespace_gibt` — Wächter aus dem
+      Sicherheits-Review: Der `None`-Arm speist dieselben Eingaben in die Marke wie ein
+      leerer Namespace, beide tragen dieselbe. Der Test hält das fest, damit eine spätere
+      „Härtung" daraus kein Existenz-Orakel macht.)*
+- [ ] **Offen:** Die Bestätigung spart Bytes, aber keine Rechenzeit — der Projektionsbau
+      läuft auch für sie. Siehe Etappe **S9**.
 
 **Verträglichkeit (alle Etappen)**
 - [ ] Alter Relay + neue Seite: datenloser Nudge, kein Heartbeat, `?court=` ignoriert → die
@@ -687,7 +706,7 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
 | S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
-| S8 | `die_cloud_uebersicht_bestaetigt_unveraenderten_stand` · `ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen` · `der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke` |
+| S8 | `die_marke_verraet_nicht_ob_es_den_namespace_gibt` · `die_cloud_uebersicht_bestaetigt_unveraenderten_stand` · `ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen` · `der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke` |
 | S7 | Host: `health_mit_court_liefert_genau_ein_feld` · `health_ohne_court_bleibt_unveraendert` · `ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` · `der_schmale_abruf_hat_eine_eigene_marke` · `zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`. Relay: `cloud_health_mit_court_liefert_genau_ein_feld` · `cloud_health_mit_unbrauchbarem_court_leakt_nichts` · `cloud_health_mit_court_bleibt_im_eigenen_namespace` |
 
 **Client-Tests.** Es gibt keinen JS-Testrahmen; das Haus-Muster ist: kanonische Fassung in

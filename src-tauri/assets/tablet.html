@@ -1627,7 +1627,12 @@ function syncServerClock() {
   // Uhr-Synchronisation. Ohne die Kennzeichnung landeten bei zwanzig
   // Tablets rund 0,7 Abrufe je Sekunde samt vollem Rumpf in der
   // Anzeige-Messung (Spec monitor-livestand-push, S0).
-  fetch('/health?src=check', { cache: 'no-store' })
+  // **Mit `BASE_PATH`**, wie jeder andere Abruf dieser Seite: Absolut
+  // geschrieben landete er im Cloud-Modus auf `badhub.de/health` statt am
+  // Relay unter `/bts-relay/<id>/health` — der Uhr-Abgleich fand dort also
+  // gar nicht statt, und die Pausen-Enden (die in Server-Zeit reisen) liefen
+  // gegen die ungeprüfte Tablet-Uhr (Review-Fund 19.08.2026).
+  fetch(BASE_PATH + '/health?src=check', { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       if (d && typeof d.serverNowMs === 'number' && d.serverNowMs > 0) {
