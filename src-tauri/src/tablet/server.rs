@@ -442,6 +442,10 @@ impl ServerCtx {
                 format!("Konfiguration nicht schreibbar: {e}"),
             )
         })?;
+        // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+        // (Hallen-Farben, Aufruf-Timer) — nach einem Schreibvorgang ist er
+        // überholt (Spec monitor-livestand-push, S1).
+        self.tablet.bump_overview_rev();
         // Gemerkte Fassung verwerfen: Der Datei-Stempel ist zwar frisch,
         // aber eine Änderung innerhalb derselben Zeitstempel-Auflösung
         // (gleiche Größe, gleiche Zeit) würde sonst übersehen. Bei einem
@@ -941,11 +945,18 @@ fn note_heartbeat(ctx: &ServerCtx, q: &DeviceHeartbeat) {
     }
 }
 
+/// Höchstalter des `/health`-Antwortcaches (Spec monitor-livestand-push,
+/// S1). Kurz genug, dass eine übersehene Änderungsquelle nur eine
+/// Viertelsekunde durchschlägt — und lang genug, dass bei zwanzig Anzeigen
+/// im 250-ms-Takt aus rund siebzig Bauten je Sekunde vier werden.
+const OVERVIEW_CACHE_TTL_MS: u64 = 250;
+
 /// Status-Schnappschuss für die bts-light-Oberfläche. Optional
 /// `?device=<id>` als Lebenszeichen-Markierung von der Info-Page.
 async fn health(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<DeviceHeartbeat>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
     // Ohne Kopie: Diese Route ist der Zustands-Abruf der Feld-Übersicht
@@ -955,36 +966,79 @@ async fn health(
     // 18.08.2026).
     let cfg = ctx.app_config_arc();
     let ct = &cfg.call_timer;
-    // Hallen-Farben (Spec hallen-farben) für die Multifeld-Übersicht —
-    // gleiche kanonische Hallenliste wie Desktop und TL-Web.
-    let mut courts = ctx.tablet.overview();
-    crate::hall_colors::paint(&mut courts, &cfg, &ctx.tablet.hall_names());
-    let body = serde_json::json!({
-        "ok": true,
-        "courts": courts,
-        // Server-Zeit, damit das Tablet seinen Uhr-Offset zum Server
-        // bestimmen kann und Pausen-`endsAt` in Server-Zeit setzt — so
-        // zeigen Tablet und TV denselben Countdown (sonst Drift durch
-        // abweichende Geraeteuhren). v0.9.32.
-        "serverNowMs": monitor::now_ms(),
-        // Aufruf-Timer-Konfiguration (camelCase wie im MonitorState), damit
-        // die Multifeld-Übersicht (overview.html) „Zeit seit Aufruf" je Feld
-        // gleich wie die Einzelanzeige gaten und beschriften kann (Plan 4).
-        "callTimer": {
-            "enabled": ct.enabled,
-            "secondCallMinutes": ct.second_call_minutes,
-            "thirdCallMinutes": ct.third_call_minutes,
-        },
-    });
-    // Selbst serialisieren statt `Json(..)`: Nur so ist die tatsächliche
-    // Antwortgröße bekannt — und genau die ist die Kennzahl, um die es in
-    // dieser Etappe geht (Bytes/s, Spec monitor-livestand-push S0). Die
-    // Serialisierung fällt ohnehin an, sie wandert nur eine Ebene nach oben.
-    let json = serde_json::to_string(&body).unwrap_or_else(|_| "{\"ok\":false}".to_string());
+    let jetzt = monitor::now_ms();
+    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt);
+
+    // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
+    // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
+    // die Anzeige zeigt einfach weiter, was sie hat.
+    if marke_bekannt(&headers, &etag) {
+        ctx.tablet
+            .perf()
+            .note_health(perf::Quelle::aus_query(q.src.as_deref()), 0);
+        return (
+            StatusCode::NOT_MODIFIED,
+            [(header::ETAG, etag.as_str())],
+            String::new(),
+        )
+            .into_response();
+    }
+
+    // Umschlag je Abruf: `serverNowMs` ist bei jedem Abruf ein anderer und
+    // gehört deshalb nicht in den Cache. Von Hand zusammengesetzt statt über
+    // `serde_json::json!`, damit die zwischengespeicherte Feld-Liste nicht
+    // erst wieder geparst und neu serialisiert werden muss.
+    let json = format!(
+        // Server-Zeit für den Uhr-Offset des Tablets (Pausen-`endsAt` in
+        // Server-Zeit, sonst Drift durch abweichende Geräteuhren, v0.9.32);
+        // `callTimer` (camelCase wie im MonitorState), damit die
+        // Multifeld-Übersicht „Zeit seit Aufruf" gleich gaten kann (Plan 4).
+        "{{\"ok\":true,\"courts\":{courts_json},\"serverNowMs\":{jetzt},\
+         \"callTimer\":{{\"enabled\":{},\"secondCallMinutes\":{},\"thirdCallMinutes\":{}}}}}",
+        ct.enabled, ct.second_call_minutes, ct.third_call_minutes,
+    );
     ctx.tablet
         .perf()
         .note_health(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
-    ([(header::CONTENT_TYPE, "application/json")], json)
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ETAG, etag.as_str()),
+        ],
+        json,
+    )
+        .into_response()
+}
+
+/// Die Feld-Liste als fertiges JSON samt ihrer Marke — aus dem Antwortcache,
+/// wenn er zur aktuellen Revision passt und jung genug ist, sonst frisch
+/// gebaut (Spec monitor-livestand-push, S1).
+///
+/// Der Cache ist **Beschleuniger, nicht Wahrheit**: Jeder Zweifel führt zum
+/// Direktbau. Zwei Bedingungen müssen stimmen — die Revision (steigt bei
+/// Nudge, neuem BTP-Stand und Config-Schreibvorgang) **und** die Hart-TTL.
+/// Die TTL ist das Sicherheitsnetz gegen eine Quelle, an die niemand
+/// gedacht hat: Schlimmstenfalls ist die Anzeige eine Viertelsekunde alt,
+/// statt bis zum nächsten Ereignis falsch zu bleiben.
+fn uebersicht_json(ctx: &ServerCtx, cfg: &AppConfig, jetzt: u64) -> (String, String) {
+    let rev = ctx.tablet.overview_rev();
+    if let Some(c) = ctx.tablet.overview_cache() {
+        if c.rev == rev && jetzt.saturating_sub(c.gebaut_ms) < OVERVIEW_CACHE_TTL_MS {
+            return (c.courts_json, c.etag);
+        }
+    }
+    // Hallen-Farben (Spec hallen-farben) für die Multifeld-Übersicht —
+    // gleiche kanonische Hallenliste wie Desktop und TL-Web.
+    let mut courts = ctx.tablet.overview();
+    crate::hall_colors::paint(&mut courts, cfg, &ctx.tablet.hall_names());
+    let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
+    // Prozess-Kennung in der Marke: Nach einem Neustart beginnt die Revision
+    // wieder bei null, und eine Anzeige mit gemerkter Marke bekäme sonst ein
+    // 304 auf einen ganz anderen Zustand (Muster `tl_state`).
+    let etag = format!("\"ov-{}-{}\"", ctx.tablet.process_tag(), rev);
+    ctx.tablet
+        .set_overview_cache(rev, etag.clone(), courts_json.clone(), jetzt);
+    (courts_json, etag)
 }
 
 /// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
@@ -5059,10 +5113,10 @@ mod tests {
         // Die Trennung ist der Kern der Vorher-Messung: Wie viel Last
         // erzeugt der Nudge-Weg, wie viel der Fallback-Takt?
         let ctx = Arc::new(make_ctx(1));
-        let _ = health(State(ctx.clone()), takt(Some("push"))).await;
-        let _ = health(State(ctx.clone()), takt(Some("poll"))).await;
+        let _ = health(State(ctx.clone()), takt(Some("push")), axum::http::HeaderMap::new()).await;
+        let _ = health(State(ctx.clone()), takt(Some("poll")), axum::http::HeaderMap::new()).await;
         // Eine Seite aus einem älteren Stand kennt `src` nicht.
-        let _ = health(State(ctx.clone()), takt(None)).await;
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
 
         let s = ctx.tablet.perf().snapshot();
         assert_eq!(s.health_push, 1);
@@ -5091,6 +5145,143 @@ mod tests {
         assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
     }
 
+    // ── Antwortcache für /health (Spec monitor-livestand-push, S1) ─────────
+
+    /// Körper einer Antwort als geparstes JSON.
+    async fn koerper(antwort: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(antwort.into_body(), 1024 * 1024)
+            .await
+            .expect("Antwort lesbar");
+        serde_json::from_slice(&bytes).expect("JSON")
+    }
+
+    #[tokio::test]
+    async fn zwei_abrufe_ohne_aenderung_bauen_den_zustand_nur_einmal() {
+        // Der Kern von S1. Gemessen mit dem Zähler aus S0 — die Messung
+        // dieser Etappe belegt die nächste.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        let nach_erstem = ctx.tablet.perf().snapshot().overview_builds;
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        let nach_zweitem = ctx.tablet.perf().snapshot().overview_builds;
+
+        assert_eq!(nach_erstem, 1, "der erste Abruf baut");
+        assert_eq!(nach_zweitem, 1, "der zweite bedient sich am Cache");
+    }
+
+    #[tokio::test]
+    async fn die_cache_antwort_traegt_dieselben_felder_wie_der_direktbau() {
+        // Der Cache ist Beschleuniger, nicht Wahrheit: Was er ausliefert,
+        // muss Zeichen für Zeichen das sein, was der Direktbau geliefert
+        // hätte. (Nur `serverNowMs` im Umschlag ist naturgemäß neu.)
+        let ctx = Arc::new(make_ctx(1));
+        let kalt = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        let warm = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(kalt["courts"], warm["courts"]);
+        assert_eq!(kalt["callTimer"], warm["callTimer"]);
+        assert_eq!(kalt["ok"], warm["ok"]);
+    }
+
+    #[tokio::test]
+    async fn ein_nudge_macht_den_cache_ungueltig() {
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        ctx.tablet.notify_monitor(101);
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            2,
+            "nach einem Nudge muss neu gebaut werden"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_neuer_btp_stand_macht_den_cache_ungueltig() {
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(ctx.tablet.perf().snapshot().overview_builds, 2);
+    }
+
+    #[tokio::test]
+    async fn eine_gemeldete_config_aenderung_macht_den_cache_ungueltig() {
+        // Die Hallen-Farben stecken in der Konfiguration und reisen in der
+        // Feld-Liste mit — ein Cache, der das überlebt, zeigte alte Farben.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        ctx.tablet.bump_overview_rev();
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(ctx.tablet.perf().snapshot().overview_builds, 2);
+    }
+
+    #[tokio::test]
+    async fn nach_der_hart_ttl_wird_trotzdem_neu_gebaut() {
+        // Sicherheitsnetz gegen eine vergessene Invalidierungs-Quelle: Auch
+        // ohne jedes Ereignis ist der Cache nach 250 ms abgestanden.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        let c = ctx.tablet.overview_cache().expect("Cache steht");
+        // Denselben Eintrag um 300 ms zurückdatieren — schneller und
+        // verlässlicher als 300 ms zu warten.
+        ctx.tablet.set_overview_cache(
+            c.rev,
+            c.etag.clone(),
+            c.courts_json.clone(),
+            c.gebaut_ms.saturating_sub(300),
+        );
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(ctx.tablet.perf().snapshot().overview_builds, 2);
+    }
+
+    #[tokio::test]
+    async fn ein_unveraenderter_stand_wird_mit_304_bestaetigt() {
+        let ctx = Arc::new(make_ctx(1));
+        let erst = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Antwort trägt eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+
+        // Nach einer Änderung gilt die alte Marke nicht mehr.
+        ctx.tablet.notify_monitor(101);
+        let dritt = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(dritt.status(), StatusCode::OK);
+    }
+
     #[tokio::test]
     async fn auch_der_geraete_monitor_zaehlt_seinen_abruf() {
         // `monitor.html` im Geräte-Modus fragt `/monitor/state` statt
@@ -5117,8 +5308,8 @@ mod tests {
         // Die Ableseroute der Vorher-Messung: Sie gibt aus, was die Zähler
         // stehen haben — und ausschließlich Zahlen (Wächter in `perf.rs`).
         let ctx = Arc::new(make_ctx(1));
-        let _ = health(State(ctx.clone()), takt(Some("push"))).await;
-        let _ = health(State(ctx.clone()), takt(None)).await;
+        let _ = health(State(ctx.clone()), takt(Some("push")), axum::http::HeaderMap::new()).await;
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
 
         let antwort = debug_perf(State(ctx.clone())).await.into_response();
         assert_eq!(antwort.status(), StatusCode::OK);
@@ -5129,9 +5320,14 @@ mod tests {
 
         assert_eq!(v["health_push"], 1);
         assert_eq!(v["health_poll"], 1);
-        assert!(
-            v["overview_builds"].as_u64().unwrap() >= 2,
-            "jeder Abruf baut heute neu: {v}"
+        // Seit S1 bauen zwei aufeinanderfolgende Abrufe nur EINMAL — dieser
+        // Test hielt bis dahin `>= 2` fest, und dass er umgeschrieben werden
+        // musste, ist der Beleg der Etappe. Die Gegenprobe dazu führt
+        // `zwei_abrufe_ohne_aenderung_bauen_den_zustand_nur_einmal`.
+        assert_eq!(
+            v["overview_builds"].as_u64().unwrap(),
+            1,
+            "der zweite Abruf bedient sich am Antwortcache: {v}"
         );
         // Die Uhrzeit gehört dazu, sonst ist keine Rate zu bilden.
         assert!(v["serverNowMs"].as_u64().unwrap_or(0) > 0);

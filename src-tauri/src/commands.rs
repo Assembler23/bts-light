@@ -315,6 +315,10 @@ pub fn save_config(
         .officials_store()
         .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
+    // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+    // (Hallen-Farben, Aufruf-Timer) — nach dem Speichern ist er überholt
+    // (Spec monitor-livestand-push, S1).
+    state.tablet.bump_overview_rev();
     if logo_changed {
         push_logo_to_badhub(&state);
     }
@@ -2836,7 +2840,13 @@ fn mutate_config<F>(
 where
     F: FnOnce(&mut AppConfig) -> Result<(), String>,
 {
-    mutate_config_at(&config_path(app), &state.config, aendern)
+    let ergebnis = mutate_config_at(&config_path(app), &state.config, aendern);
+    // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+    // (Hallen-Farben, Aufruf-Timer) — nach einem Schreibvorgang ist er
+    // überholt (Spec monitor-livestand-push, S1). Auch bei einem Fehlschlag
+    // gemeldet: Dann ist im Zweifel schon geschrieben worden.
+    state.tablet.bump_overview_rev();
+    ergebnis
 }
 
 /// Kernlogik von [`mutate_config`], ohne `AppHandle`/`State` — dieselbe
