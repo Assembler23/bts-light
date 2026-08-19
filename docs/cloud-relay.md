@@ -131,6 +131,27 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    interpretiert wird allein beim Host. Der Abruf für die TL-Oberfläche
    läuft als Request/Response `timeline_request`/`timeline_data` über die
    host-ws (Muster TL-Kommando) — der Relay hält keine Verläufe vor.
+
+   Seit dem Schiedsrichterzettel ([Spec](features/schiedsrichterzettel-druck.md),
+   ADR 0037/0038/0039) kommt ein **zweiter, eigener Strom** daneben:
+   `match_event` je erfasstem Ereignis (Karte, Verletzung, Unterbrechung,
+   Überstimmung, Aufschlagfolge) und `match_event_sync` als Abgleich.
+   Getrennt vom Punktverlauf, weil Karten personenbezogene
+   Sanktionsdaten sind und `MatchTimeline` personenbezugsfrei bleiben
+   muss (ADR 0015) — mit eigenen Deckeln (`MAX_EVENTS_PER_MATCH`,
+   `MAX_SHEET_LEN`, `MAX_EVENT_ID_LEN`), damit ein Ereignis-Schwall den
+   Punktverlauf strukturell nicht verdrängen kann. **Wichtiger
+   Unterschied zu `rally_sync`:** der Abgleich **vereinigt**, er ersetzt
+   nicht (ADR 0038) — ein übernehmendes Ersatz-Tablet kennt die Karten
+   seines Vorgängers nicht und würde sie sonst löschen. Der Druckabruf
+   läuft als `scoresheet_request`/`scoresheet_data` über die host-ws; der
+   Relay hält auch **keine Zettel** vor.
+
+   > **Stand:** Die Wire-Typen stehen (Etappe E1). Durchleitung und
+   > Ingest folgen in E3, der Leseweg in E5. Bis dahin verwerfen Relay
+   > und Host die neuen Frames still — genau wie es jeder noch nicht
+   > aktualisierte Relay tut. Daraus folgt die Ausrollreihenfolge:
+   > **erst den Relay ausrollen, dann den App-Tag setzen.**
 5. „Ergebnis übermitteln" → `POST …/result` → Relay reicht es per
    WebSocket-Frame an den Host → bts-light schreibt per `SENDUPDATE` nach
    BTP und antwortet mit `ResultAck`. Der Relay wartet auf die `ResultAck` nur
