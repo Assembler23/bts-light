@@ -422,6 +422,11 @@ struct MonitorNudge {
 /// Poll-Fallback zurück (kein Regress).
 const MAX_MONITOR_SUBS: usize = 256;
 
+/// Obergrenze der Feld-Liste je Namespace. Das größte je gefahrene Turnier
+/// hatte 26 Felder; 512 ist reichlich Luft und begrenzt zugleich, wie groß
+/// die Übersicht — und damit ihr Zwischenspeicher (S9) — werden kann.
+const MAX_COURTS_PER_NS: usize = 512;
+
 /// Obergrenze der TL-Push-Abonnenten je Namespace (Spec tl-web-push):
 /// das Doppelte des 8-Geräte-Caps — Reserve für Reconnect-Überlappung,
 /// aber kein offenes Scheunentor. Darüber bleibt die Verbindung still und
@@ -1620,10 +1625,19 @@ async fn overview_health(
     // er, ist der ganze Projektionsbau unten überflüssig — samt des globalen
     // Schlosses, das er hält. Nur für die **volle** Antwort; der schmale Abruf
     // filtert ohnehin schon vor dem Bau auf ein Feld.
-    let jetzt = now_ms();
     let mut aus_cache: Option<(String, String, String, String)> = None;
+    // Die Revision, aus der wirklich gebaut wurde. `None` heißt: Es gab beim
+    // Bau keinen Namespace — dann darf die leere Projektion später auch nicht
+    // unter einer inzwischen frischen Revision festgenagelt werden.
+    let mut rev_beim_bau: Option<u64> = None;
     let (courts, call_timer, seqs, push_fallback_slow) = {
         let mut map = broker.namespaces.lock().await;
+        // **Die Uhr erst hinter dem Schloss lesen.** Davor gelesen, fehlte der
+        // Frist genau die Wartezeit an der Warteschlange: Wer 300 ms auf das
+        // Schloss gewartet hat, hielte einen 500 ms alten Eintrag für frisch —
+        // und der Fehler wächst mit der Last, also ausgerechnet dort, wo die
+        // Frist gebraucht wird (Sicherheits-Review 20.08.2026).
+        let jetzt = now_ms();
         if wunsch.is_none() {
             if let Some(n) = map.get(&ns) {
                 if let Some(c) = &n.overview_cache {
@@ -1743,6 +1757,7 @@ async fn overview_health(
                         .as_ref()
                         .map(|mo| mo.config.push_fallback_slow)
                         .unwrap_or(false);
+                    rev_beim_bau = Some(n.overview_rev);
                     (courts, ct, seqs, slow)
                 }
                 None => (
@@ -1757,14 +1772,6 @@ async fn overview_health(
     // Der Schalter reist im `callTimer`-Umschlag mit — genau wie in der
     // LAN-Antwort, damit `overview.html` in beiden Betriebsarten an derselben
     // Stelle nachsieht.
-    let mut call_timer_json =
-        serde_json::to_value(&call_timer).unwrap_or_else(|_| serde_json::json!({}));
-    if let Some(obj) = call_timer_json.as_object_mut() {
-        obj.insert(
-            "pushFallbackSlow".to_string(),
-            serde_json::Value::Bool(push_fallback_slow),
-        );
-    }
     // Bestätigung „nichts Neues" (Spec monitor-livestand-push, S8). Die Marke
     // hängt am **ausgelieferten Inhalt** — Feld-Liste plus Umschlag-Teile, die
     // die Anzeige übernimmt. Bewusst NICHT an den Ordnungszahlen: Sie steigen
@@ -1775,40 +1782,58 @@ async fn overview_health(
     // Gemessen am 19.08.2026: 0,61 MB/s gegen 0,01 MB/s im LAN, bei identischem
     // Bild.
     //
-    // **Die Bestätigung ist nur auf der Leitung billig, nicht auf der CPU.**
-    // Der Projektionsbau oben läuft auch für sie — samt globalem Schloss über
-    // alle Namespaces. Ein Angreifer, der eine Namespace-UUID kennt, zahlt für
-    // eine Flut jetzt nicht mehr die 8 kB Rückweg mit, während der Relay
-    // dieselbe Arbeit leistet (Sicherheits-Review 19.08.2026). Der
-    // Turnier-PC hat dafür seinen Antwortcache aus S1; hier fehlt er, weil das
-    // Relay keine Revision führt, an der sich ein Cache verlässlich
-    // invalidieren ließe — ein reiner Zeit-Cache verzögerte den Anstoß-Weg und
-    // damit genau die Latenz, um die es der Spec geht. Das ist eine eigene
-    // Etappe wert (S9), keine Beiläufigkeit.
+    // **Die Bestätigung war zunächst nur auf der Leitung billig, nicht auf der
+    // CPU** — der Projektionsbau oben lief auch für sie, samt globalem Schloss
+    // über alle Namespaces (Sicherheits-Review 19.08.2026). Seit S9 fängt der
+    // Zwischenspeicher oben das ab; hier bleibt nur noch der Miss-Fall.
     let (courts_json, seqs_json, ct_text, etag) = match aus_cache {
         Some(fertig) => fertig,
         None => {
+            // Erst hier zusammenbauen: Bei einem Treffer wäre das eine
+            // überflüssige Allokation auf genau dem Pfad, den S9 entlasten soll.
+            let mut call_timer_json =
+                serde_json::to_value(&call_timer).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(obj) = call_timer_json.as_object_mut() {
+                obj.insert(
+                    "pushFallbackSlow".to_string(),
+                    serde_json::Value::Bool(push_fallback_slow),
+                );
+            }
             let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
             let seqs_json = serde_json::to_string(&seqs).unwrap_or_else(|_| "{}".to_string());
             let ct_text = call_timer_json.to_string();
             let etag = uebersicht_marke(&courts_json, &ct_text);
-            // Ablegen, solange die Revision noch dieselbe ist, aus der gebaut
-            // wurde. Ein Anstoß, der zwischen Bau und Ablage eintrifft, hebt
-            // sie — dann wird nichts abgelegt und der nächste Abruf baut neu.
+            // Ablegen **nur**, solange die Revision noch dieselbe ist, aus der
+            // gebaut wurde.
+            //
+            // Zwischen Bau und Ablage ist das Schloss frei — genau dafür wurde
+            // die teure Serialisierung herausgezogen. In diesem Fenster kann
+            // ein gezählter Punkt eintreffen: Er schreibt seinen Stand, hebt
+            // die Revision und weckt alle Anzeigen. Stempelten wir hier blind
+            // die **aktuelle** Revision auf unseren Vor-Punkt-Stand, holten
+            // die geweckten Anzeigen genau ihn — und bekämen wegen der
+            // inhaltsgleichen Marke sogar „nichts Neues". Der Punkt fehlte
+            // dann nicht eine Viertelsekunde, sondern bis zum nächsten Anstoß
+            // (Review-Fund 20.08.2026).
+            //
             // Lieber ein überflüssiger Bau als ein Eintrag, der einen
             // überholten Stand festhält.
-            if wunsch.is_none() {
+            {
                 let mut map = broker.namespaces.lock().await;
                 if let Some(n) = map.get_mut(&ns) {
+                    // Jeder Bau zählt — auch der schmale Abruf geht durch
+                    // dieselbe Schleife, nur mit vorgeschaltetem Filter.
                     n.overview_builds = n.overview_builds.saturating_add(1);
-                    n.overview_cache = Some(OverviewCache {
-                        rev: n.overview_rev,
-                        gebaut_ms: jetzt,
-                        courts_json: courts_json.clone(),
-                        seqs_json: seqs_json.clone(),
-                        ct_text: ct_text.clone(),
-                        etag: etag.clone(),
-                    });
+                    if wunsch.is_none() && rev_beim_bau == Some(n.overview_rev) {
+                        n.overview_cache = Some(OverviewCache {
+                            rev: n.overview_rev,
+                            gebaut_ms: now_ms(),
+                            courts_json: courts_json.clone(),
+                            seqs_json: seqs_json.clone(),
+                            ct_text: ct_text.clone(),
+                            etag: etag.clone(),
+                        });
+                    }
                 }
             }
             (courts_json, seqs_json, ct_text, etag)
@@ -2896,12 +2921,22 @@ async fn forward_score(
         a: score_a,
         b: score_b,
     });
+    // Nur bei echter Änderung anstoßen. Ein Tablet, das denselben Stand erneut
+    // meldet — nach einem Reconnect, oder weil es seinen Zustand periodisch
+    // spiegelt —, weckte sonst alle Anzeigen der Halle und verwarf ihren
+    // Zwischenspeicher, ohne dass sich ein einziges Zeichen geändert hätte.
+    // Damit ließe sich der Gewinn aus S9 gezielt aushebeln (Sicherheits-Review
+    // 20.08.2026). Die Arme `MatchAssigned`/`MatchCleared` prüfen aus demselben
+    // Grund längst auf einen sichtbaren Wechsel.
+    let neu = namespace.court_scores.get(&court_id) != Some(&sets);
     namespace.court_scores.insert(court_id, sets);
     // Niedrig-latente Anzeige (A1, ADR 0016): Court-Monitor + Feld-Übersicht
     // dieses Namespace sofort anstoßen, statt auf ihren nächsten Poll zu
     // warten. Muss NACH dem Cache-Insert stehen, damit der ausgelöste
     // Poll-`fetch` bereits den neuen Stand sieht.
-    notify_monitor(namespace, court_id);
+    if neu {
+        notify_monitor(namespace, court_id);
+    }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
         let _ = host.send(text(&RelayFrame::ScoreUpdate {
@@ -4149,6 +4184,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             let vorher_brief = namespace.court_matches.get(&court_id).cloned();
             let vorher_label = namespace.court_labels.get(&court_id).cloned();
             let vorher_hall = namespace.court_hall.get(&court_id).cloned();
+            // Der 1.-Aufruf-Zeitpunkt steht als `on_court_since_ms` in der
+            // Übersicht und speist dort die Aufruf-Uhr — er gehört also in den
+            // Vergleich (Review-Fund 20.08.2026). Ein erneutes `MatchAssigned`
+            // mit korrigiertem Stempel ließ die Uhr sonst bis zur Hart-Frist
+            // auf dem alten Wert stehen.
+            let vorher_since = namespace.court_on_court_since.get(&court_id).copied();
             // Feldname (Anzeige) merken – der Monitor liest ihn.
             if !court_label.is_empty() {
                 namespace.court_labels.insert(court_id, court_label);
@@ -4199,7 +4240,8 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 || vorher_label.as_deref()
                     != namespace.court_labels.get(&court_id).map(|s| s.as_str())
                 || vorher_hall.as_deref()
-                    != namespace.court_hall.get(&court_id).map(|s| s.as_str());
+                    != namespace.court_hall.get(&court_id).map(|s| s.as_str())
+                || vorher_since != namespace.court_on_court_since.get(&court_id).copied();
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
             }
@@ -4305,6 +4347,14 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // Azure-Vererbung zu transportieren, solange BTP noch kein
             // Turnier geladen hat — sie darf eine gültige Liste nicht wischen.
             if !courts.is_empty() {
+                // Gedeckelt wie die Vorbereitungs-Liste daneben: Seit S9 hält
+                // der Relay eine zweite, JSON-aufgeblähte Kopie der Feldliste
+                // im Zwischenspeicher, die ein einziger Abruf entstehen lässt.
+                // Ein bösartiger Host könnte damit Speicher binden
+                // (Sicherheits-Review 20.08.2026). Kein echtes Turnier kommt
+                // auch nur in die Nähe.
+                let mut courts = courts;
+                courts.truncate(MAX_COURTS_PER_NS);
                 namespace.courts = courts;
                 // Neue Feldliste = neue Übersicht; auch dieser Weg stößt nicht
                 // an (Spec S9). Nach dem Schreiben gemeldet, nie davor.
@@ -6535,15 +6585,37 @@ mod tests {
         // ohne eigene Meldung bliebe eine umbenannte oder neu geordnete Halle
         // bis zur Hart-Frist stehen.
         const NS: &str = "c0000000-0000-0000-0000-000000000003";
-        let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
+        let (broker, host, _rx) = broker_mit_uebersicht(NS).await;
         let _ = hole(&broker, NS).await;
 
-        {
-            let mut map = broker.namespaces.lock().await;
-            let n = map.get_mut(NS).unwrap();
-            n.courts[0].label = "Feld 1 neu".into();
-            n.bump_overview_rev();
-        }
+        // Über den ECHTEN Weg, nicht mit einem Handstempel: Sonst bliebe die
+        // Suite grün, wenn jemand die Meldung im `Courts`-Arm entfernt — und
+        // genau das ist die Regression, gegen die S9 absichern muss
+        // (Review-Fund 20.08.2026).
+        handle_host_frame(
+            &broker,
+            NS,
+            HostFrame::Courts {
+                courts: vec![
+                    relay_proto::CourtBrief {
+                        id: 101,
+                        label: "Feld 1 neu".into(),
+                        hall: String::new(),
+                        hall_color: None,
+                    },
+                    relay_proto::CourtBrief {
+                        id: 102,
+                        label: "2".into(),
+                        hall: String::new(),
+                        hall_color: None,
+                    },
+                ],
+                azure_tts: None,
+                reconnect_legacy_rev: false,
+            },
+            &host,
+        )
+        .await;
         let neu = hole(&broker, NS).await;
         assert_eq!(bauten(&broker, NS).await, 2);
         assert_eq!(neu["courts"][0]["court"], serde_json::json!("Feld 1 neu"));
@@ -6558,17 +6630,123 @@ mod tests {
         let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
         let _ = hole(&broker, NS).await;
 
-        {
-            let mut map = broker.namespaces.lock().await;
-            let n = map.get_mut(NS).unwrap();
-            n.monitor.as_mut().unwrap().call_timer.second_call_minutes = 9.0;
-            n.bump_overview_rev();
-        }
+        // Über den ECHTEN Weg (`monitor_upload`), damit die Suite rot wird,
+        // wenn jemand die Meldung dort entfernt (Review-Fund 20.08.2026).
+        let upload = relay_proto::MonitorUpload {
+            config: MonitorConfig::default(),
+            tournament_name: String::new(),
+            ads: Vec::new(),
+            call_timer: relay_proto::CallTimerView {
+                enabled: true,
+                second_call_minutes: 9.0,
+                third_call_minutes: 5.0,
+            },
+            logo: None,
+        };
+        let resp = monitor_upload(State(broker.clone()), Path(NS.into()), axum::Json(upload))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+
         let neu = hole(&broker, NS).await;
         assert_eq!(bauten(&broker, NS).await, 2);
         assert_eq!(
             neu["callTimer"]["secondCallMinutes"],
             serde_json::json!(9.0)
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_anstoss_zwischen_bau_und_ablage_verhindert_die_ablage() {
+        // Die Invariante hinter dem schwersten Fund dieser Etappe: Der
+        // abgelegte Eintrag trägt die Revision, aus der er GEBAUT wurde — nicht
+        // die, die beim Ablegen gerade gilt.
+        //
+        // Zwischen Bau und Ablage ist das Schloss frei. Trifft dort ein
+        // gezählter Punkt ein, stempelte die alte Fassung den Vor-Punkt-Stand
+        // unter die neue Revision; die vom Anstoß geweckten Anzeigen holten
+        // genau ihn und bekamen wegen der inhaltsgleichen Marke sogar „nichts
+        // Neues". Der Punkt fehlte dann bis zum nächsten Anstoß.
+        //
+        // Nachgestellt wird das Fenster durch einen Anstoß NACH dem Abruf: Der
+        // Eintrag aus dem Abruf darf danach nicht mehr gelten.
+        const NS: &str = "c0000000-0000-0000-0000-000000000007";
+        let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
+        let _ = hole(&broker, NS).await;
+
+        let (rev_danach, cache_rev) = {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(NS).unwrap();
+            (n.overview_rev, n.overview_cache.as_ref().map(|c| c.rev))
+        };
+        assert_eq!(
+            cache_rev,
+            Some(rev_danach),
+            "der frische Eintrag trägt die Revision, aus der er gebaut wurde"
+        );
+
+        // Jetzt der Anstoß — der Eintrag muss dadurch verfallen.
+        {
+            let mut map = broker.namespaces.lock().await;
+            notify_monitor(map.get_mut(NS).unwrap(), 101);
+        }
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(NS).unwrap();
+            assert_ne!(
+                n.overview_cache.as_ref().map(|c| c.rev),
+                Some(n.overview_rev),
+                "nach dem Anstoß passt der Eintrag nicht mehr zur Revision"
+            );
+        }
+        let _ = hole(&broker, NS).await;
+        assert_eq!(bauten(&broker, NS).await, 2);
+    }
+
+    #[tokio::test]
+    async fn ein_unveraenderter_satzstand_stoesst_nicht_an() {
+        // Ein Tablet, das denselben Stand erneut meldet — nach einem
+        // Reconnect, oder weil es seinen Zustand periodisch spiegelt —, weckte
+        // sonst alle Anzeigen der Halle und verwarf ihren Zwischenspeicher,
+        // ohne dass sich ein Zeichen geändert hätte. Damit ließe sich der
+        // Gewinn aus S9 gezielt aushebeln (Sicherheits-Review 20.08.2026).
+        let (broker, _tablet_rx, _host) = broker_with_tablet(101).await;
+        // Eigener Host mit Empfänger — der Helfer verwirft seinen.
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let tx = {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut("ns1").unwrap();
+            n.host = Some(host_tx);
+            n.tablets.get(&101).unwrap().clone()
+        };
+        // Abonnent, der die Anstöße mitzählt.
+        let (mon, mut mon_rx) = mpsc::unbounded_channel();
+        assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
+
+        forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, &tx).await;
+        assert!(mon_rx.try_recv().is_ok(), "der erste Stand stößt an");
+
+        forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, &tx).await;
+        assert!(
+            mon_rx.try_recv().is_err(),
+            "derselbe Stand noch einmal: kein Anstoß"
+        );
+
+        forward_score(&broker, "ns1", 101, 6, 3, Vec::new(), 0, &tx).await;
+        assert!(
+            mon_rx.try_recv().is_ok(),
+            "ein echter Punkt stößt wieder an"
+        );
+
+        // Der Host bekommt weiterhin JEDEN Frame — er führt die
+        // Liveticker-Strecke und darf keinen verpassen.
+        let mut host_frames = 0;
+        while host_rx.try_recv().is_ok() {
+            host_frames += 1;
+        }
+        assert!(
+            host_frames >= 3,
+            "alle drei Meldungen erreichen den Host, auch die unveränderte"
         );
     }
 
@@ -7219,12 +7397,16 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
-            // Vollständiger Ausgangsstand: Match, Feldname UND Halle. Fehlte
-            // eines davon, wäre schon dessen Hinzukommen eine echte
-            // Anzeige-Änderung — der Test prüfte dann nicht, was er soll.
+            // Vollständiger Ausgangsstand: Match, Feldname, Halle UND
+            // Aufruf-Zeitpunkt. Fehlte eines davon, wäre schon dessen
+            // Hinzukommen eine echte Anzeige-Änderung — der Test prüfte dann
+            // nicht, was er soll. (Der Zeitstempel kam am 20.08.2026 dazu: Er
+            // speist die Aufruf-Uhr der Übersicht und gehört deshalb in den
+            // Vergleich.)
             ns.court_matches.insert(101, brief(7));
             ns.court_labels.insert(101, "Feld 1".into());
             ns.court_hall.insert(101, String::new());
+            ns.court_on_court_since.insert(101, 1000);
         }
         register_host(&broker, "ns1", &host).await;
         let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;

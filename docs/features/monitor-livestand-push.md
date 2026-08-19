@@ -708,10 +708,34 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       dazwischen die neue Revision, baute aus dem alten Zustand und legte ihn darunter ab —
       bis zur Hart-Frist bekämen alle Anzeigen den überholten Stand. Dieselbe Falle wie im
       Hallennetz, wo sie ein Review gefunden hat.)*
-- [x] Ein Anstoß zwischen Bau und Ablage verhindert die Ablage. *(Der Eintrag trägt die
-      Revision, die beim **Ablegen** gilt; ist sie inzwischen weitergezogen, verfällt er beim
-      nächsten Abruf sofort. Lieber ein überflüssiger Bau als ein festgehaltener alter
-      Stand.)*
+- [x] Ein Anstoß zwischen Bau und Ablage verhindert die Ablage.
+      *(`ein_anstoss_zwischen_bau_und_ablage_verhindert_die_ablage`. **Der erste Wurf hielt
+      diese Zusage nicht** — er stempelte die Revision, die beim *Ablegen* galt, statt der,
+      aus der gebaut wurde; beide Reviews haben das gefunden. Damit landete ein
+      Vor-Punkt-Stand unter der frischen Revision, die vom Anstoß geweckten Anzeigen holten
+      genau ihn und bekamen wegen der inhaltsgleichen Marke sogar „nichts Neues" — der Punkt
+      fehlte dann nicht eine Viertelsekunde, sondern bis zum nächsten Anstoß. Jetzt wird die
+      Bau-Revision mitgeführt und verglichen; lieber ein überflüssiger Bau als ein
+      festgehaltener alter Stand.)*
+- [x] Die Hart-Frist wird **hinter** dem Schloss gemessen. *(Davor gelesen, fehlte ihr die
+      Wartezeit an der Warteschlange: Wer 300 ms auf das Schloss gewartet hatte, hielte einen
+      500 ms alten Eintrag für frisch — und der Fehler wüchse mit der Last, also ausgerechnet
+      dort, wo die Frist gebraucht wird.)*
+- [x] Ein unveränderter Satzstand stößt nicht an.
+      *(`ein_unveraenderter_satzstand_stoesst_nicht_an` — `forward_score` weckte bisher
+      bedingungslos. Ein Tablet, das denselben Stand erneut meldet, verwarf damit den
+      Zwischenspeicher der ganzen Halle, ohne dass sich ein Zeichen geändert hätte; damit
+      ließe sich der Gewinn dieser Etappe gezielt aushebeln. Die Arme
+      `MatchAssigned`/`MatchCleared` prüfen aus demselben Grund längst auf einen sichtbaren
+      Wechsel. Der Host bekommt weiterhin **jeden** Frame — er führt die Liveticker-Strecke.)*
+- [x] Der Aufruf-Zeitpunkt gehört in den Anzeige-Vergleich. *(Er steht als
+      `on_court_since_ms` in der Übersicht und speist die Aufruf-Uhr; ein erneutes
+      `MatchAssigned` mit korrigiertem Stempel ließ sie bis zur Hart-Frist auf dem alten Wert
+      stehen.)*
+- [x] Die Feld-Liste ist gedeckelt (`MAX_COURTS_PER_NS = 512`). *(Der Zwischenspeicher hält
+      eine zweite, JSON-aufgeblähte Kopie, die ein einziger Abruf entstehen lässt — ein
+      bösartiger Host könnte damit Speicher binden. Kein echtes Turnier kommt in die Nähe;
+      das größte hatte 26 Felder.)*
 
 **Verträglichkeit (alle Etappen)**
 - [ ] Alter Relay + neue Seite: datenloser Nudge, kein Heartbeat, `?court=` ignoriert → die
@@ -741,7 +765,7 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
 | S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
-| S9 | `zwei_abrufe_ohne_aenderung_bauen_die_uebersicht_nur_einmal` · `ein_anstoss_macht_den_zwischenspeicher_ungueltig` · `eine_neue_feldliste_macht_den_zwischenspeicher_ungueltig` · `ein_neuer_monitor_datensatz_macht_den_zwischenspeicher_ungueltig` · `die_hart_frist_erzwingt_einen_neubau` · `der_schmale_abruf_nutzt_den_zwischenspeicher_nicht` |
+| S9 | `ein_anstoss_zwischen_bau_und_ablage_verhindert_die_ablage` · `ein_unveraenderter_satzstand_stoesst_nicht_an` · `zwei_abrufe_ohne_aenderung_bauen_die_uebersicht_nur_einmal` · `ein_anstoss_macht_den_zwischenspeicher_ungueltig` · `eine_neue_feldliste_macht_den_zwischenspeicher_ungueltig` · `ein_neuer_monitor_datensatz_macht_den_zwischenspeicher_ungueltig` · `die_hart_frist_erzwingt_einen_neubau` · `der_schmale_abruf_nutzt_den_zwischenspeicher_nicht` |
 | S8 | `die_marke_verraet_nicht_ob_es_den_namespace_gibt` · `die_cloud_uebersicht_bestaetigt_unveraenderten_stand` · `ein_anstoss_ohne_sichtbare_folge_laesst_die_marke_stehen` · `der_schmale_abruf_hat_in_der_cloud_eine_eigene_marke` |
 | S7 | Host: `health_mit_court_liefert_genau_ein_feld` · `health_ohne_court_bleibt_unveraendert` · `ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` · `der_schmale_abruf_hat_eine_eigene_marke` · `zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`. Relay: `cloud_health_mit_court_liefert_genau_ein_feld` · `cloud_health_mit_unbrauchbarem_court_leakt_nichts` · `cloud_health_mit_court_bleibt_im_eigenen_namespace` |
 
