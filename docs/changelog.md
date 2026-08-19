@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.234
+
+- **Das Turnierlogo wird nur noch bei Änderung übertragen.** Bisher reiste
+  es als Base64 — bis zu 2,7 MB — in **jedem** vollen Turnier-Stand mit,
+  also mindestens jede Minute und bei vielen Feldern alle paar Sekunden.
+  Jetzt geht es hinaus, wenn es sich geändert hat, das Turnier gewechselt
+  hat oder der Turnier-PC neu gestartet wurde; ansonsten höchstens alle
+  zehn Minuten einmal zur Sicherheit. Auf einem Turniertag spart das
+  leicht mehrere Gigabyte.
+- Ein **fehlgeschlagener** Push zählt dabei nicht als übertragen: Kommt
+  der Stand nicht an, reist das Logo im nächsten Anlauf wieder mit.
+- ⚠️ **Setzt badhub-PR #473 voraus** (Vertrag „weggelassen heißt
+  unverändert"). Ohne diesen Stand auf badhub-Seite würde ein
+  weggelassenes Logo dort als „kein Logo" gelten und der Liveticker das
+  Bild ausblenden.
+
 ## v0.9.232
 
 - **Die Zähltafelbedienung lässt sich jetzt nachrufen.** Kommt sie nicht ans
