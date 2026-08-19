@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.237
+
+- **Ein gezählter Punkt schreibt nicht mehr auf die Festplatte.** Bisher
+  sicherte der Turnier-PC bei **jedem** Punkt den kompletten Spielstand
+  aller Felder — und wartete dabei, gemessene 20 Millisekunden, mitten in
+  der Verarbeitung des Tablet-Signals. Jetzt merkt er sich nur, dass etwas
+  zu sichern ist; geschrieben wird einmal pro Sekunde im Hintergrund.
+- **An den kritischen Stellen wird weiterhin sofort gesichert**, bevor
+  irgendetwas weitergeht: beim Eintragen eines Ergebnisses, beim Freigeben
+  eines Feldes, beim Stoppen der Übertragung und beim Beenden der App.
+- **Unverändertes wird gar nicht mehr geschrieben.** Läuft gerade kein
+  Spiel, bleibt die Platte still.
+- Bewusst in Kauf genommen: Stürzt der PC zwischen zwei Sekunden ab, fehlt
+  der letzte Punkt in der Datei. Die Tablets sind die Wahrheit — sie
+  schicken ihren Stand beim Wiederverbinden erneut, und der Stand ist
+  sofort wieder da.
+- Dritte von sieben Etappen der Spec `monitor-livestand-push`. Es war der
+  teuerste Einzelposten der Messung aus v0.9.235.
+
 ## v0.9.236
 
 - **Der Turnier-PC rechnet für die Anzeigen nur noch, wenn sich etwas

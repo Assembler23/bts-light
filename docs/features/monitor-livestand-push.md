@@ -306,15 +306,33 @@ Der Relay bleibt in dieser Etappe unberührt: Er beantwortet `/health` im Cloud-
 selbst und kennt weder Marke noch Cache. Eine Seite, die `If-None-Match` schickt, bekommt
 dort weiterhin die volle Antwort ohne Marke und verhält sich wie bisher.
 
-**Entprellung (S2)**
-- [ ] Drei Punkte innerhalb einer Sekunde erzeugen genau einen Schreibvorgang.
-- [ ] Ein Ergebnis-Eintrag, eine Match-Räumung und das Stoppen der Übertragung schreiben
+**Entprellung (S2)** — umgesetzt v0.9.237
+- [x] Drei Punkte innerhalb einer Sekunde erzeugen genau einen Schreibvorgang.
+      *(`drei_punkte_in_einer_sekunde_ergeben_einen_schreibvorgang`; der Punkt selbst
+      schreibt gar nicht mehr — `ein_gezaehlter_punkt_schreibt_nicht_mehr_sofort`.)*
+- [x] Ein Ergebnis-Eintrag, eine Match-Räumung und das Stoppen der Übertragung schreiben
       **synchron**, bevor sie zurückkehren.
-- [ ] Ein inhaltsgleicher Stand schreibt gar nicht.
-- [ ] `live-scores.json` wird weiterhin atomar geschrieben (Temp-Datei, dann Rename) und ist
+      *(`eine_match_raeumung_schreibt_synchron`; alle Ergebnis-Pfade — `enter_result`,
+      `disqualify_match`, der Tablet-Weg in `server.rs` und der TL-Weg in `tl.rs` —
+      laufen über `clear_court`. `stop_sync` flusht **vor** dem Abbrechen des
+      Sync-Tasks, das App-Ende über `beenden()` in `lib.rs`.)*
+- [x] Ein inhaltsgleicher Stand schreibt gar nicht.
+      *(`ein_inhaltsgleicher_stand_schreibt_gar_nicht` — Fingerabdruck über das fertige
+      JSON; ohne ihn schriebe der Sekundentakt einen ganzen Turniertag durch.)*
+- [x] `live-scores.json` wird weiterhin atomar geschrieben (Temp-Datei, dann Rename) und ist
       nach einem App-Neustart bitgleich lesbar wie vor der Änderung.
-- [ ] Nach einem simulierten Absturz mit verlorenem Puffer stellt der Tablet-Reconnect
+      *(`die_datei_bleibt_neustartfest_lesbar` — Format unverändert, keine Temp-Datei
+      bleibt liegen. Rollback bleibt damit zustandsfrei.)*
+- [x] Nach einem simulierten Absturz mit verlorenem Puffer stellt der Tablet-Reconnect
       (`state_sync`) den Stand wieder her.
+      *(`ein_verlorener_puffer_wird_vom_tablet_geheilt` — der Test hält den akzeptierten
+      Verlust ausdrücklich fest und zeigt die Heilung.)*
+
+**Wo der Takt sitzt:** im Sync-Loop (`commands.rs`), der die Wartezeit bis zum nächsten
+BTP-Abruf in Sekundenschritten absitzt und nach jedem Schritt flusht. Dort statt in
+`run_once`, weil dieser Loop in **beiden** Betriebsarten läuft und der Takt so unabhängig
+von den BTP-Frühausstiegen bleibt. Geschrieben wird in `spawn_blocking`, damit die
+gemessenen 20 ms keinen Async-Worker belegen.
 
 **Zuweisungs-Nudge (S3)**
 - [ ] Eine neue Court→Match-Zuordnung nudgt genau das betroffene Feld, kein anderes.

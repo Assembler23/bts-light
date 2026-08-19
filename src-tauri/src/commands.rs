@@ -948,7 +948,20 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                 .status
                 .lock()
                 .expect("Status-Mutex nicht vergiftet") = status;
-            tokio::time::sleep(POLL_INTERVAL).await;
+            // Sekundentakt für den Live-Stand (Spec monitor-livestand-push,
+            // S2). Die Wartezeit bis zum nächsten BTP-Abruf wird in
+            // Sekunden-Schritten abgesessen; nach jedem Schritt geht ein
+            // aufgelaufener Stand auf die Platte.
+            //
+            // Hier statt in `run_once`, weil dieser Loop in **beiden**
+            // Betriebsarten läuft und den Takt unabhängig von den
+            // BTP-Frühausstiegen hält. `spawn_blocking`, damit der
+            // Schreibvorgang (gemessene 20 ms) keinen Async-Worker belegt.
+            for _ in 0..POLL_INTERVAL.as_secs().max(1) {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let tab = sync_tablet.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || tab.flush_scores()).await;
+            }
         }
     });
     *slot = Some(handle);
@@ -1078,6 +1091,11 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 /// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.
 #[tauri::command]
 pub fn stop_sync(state: State<'_, AppState>) {
+    // **Zuerst** den aufgelaufenen Live-Stand sichern (Spec
+    // monitor-livestand-push, S2): Der Sekundentakt hängt am Sync-Task, den
+    // die nächste Zeile abbricht — danach schreibt niemand mehr. Synchron,
+    // damit dieser Aufruf erst zurückkehrt, wenn die Datei steht.
+    state.tablet.flush_scores();
     if let Some(handle) = state
         .sync_task
         .lock()

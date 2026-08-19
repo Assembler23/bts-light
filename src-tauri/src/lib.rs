@@ -220,14 +220,26 @@ pub fn run() {
                         ))
                         .show(move |confirmed| {
                             if confirmed {
-                                app_for_dialog.exit(0);
+                                beenden(&app_for_dialog);
                             }
                         });
                 } else {
-                    app.exit(0);
+                    beenden(&app);
                 }
             }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Beendet die App — aber erst, nachdem der aufgelaufene Live-Stand auf der
+/// Platte steht (Spec `monitor-livestand-push`, S2).
+///
+/// Seit der Entprellung schreibt nicht mehr jeder gezählte Punkt selbst,
+/// sondern ein Sekundentakt. Ohne diesen letzten Schreibvorgang gingen beim
+/// Beenden bis zu einer Sekunde Spielstand verloren — und anders als bei
+/// einem Absturz gibt es hier keinen Grund, das hinzunehmen.
+fn beenden(app: &tauri::AppHandle) {
+    app.state::<commands::AppState>().tablet.flush_scores();
+    app.exit(0);
 }
