@@ -37,6 +37,7 @@ use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
 use crate::tablet::assets::{self, TABLET_HTML};
 use crate::tablet::monitor;
+use crate::tablet::perf;
 use crate::tablet::state::{reconnect_decision, ReconnectDecision, TabletState};
 
 /// Fester Port des Tablet-Servers im Hallen-LAN.
@@ -486,6 +487,9 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/flags/{file}", get(flag_route))
         .route("/ads/{file}", get(ad_image))
         .route("/health", get(health))
+        // Ablesestand der Perf-Zähler (Spec monitor-livestand-push, S0) —
+        // nur hier, nicht am Relay (siehe `debug_perf`).
+        .route("/debug/perf", get(debug_perf))
         .route("/info/overview", get(info_overview_page))
         .route("/info/preparation", get(info_preparation_page))
         .route("/info/preparation/state", get(info_preparation_state))
@@ -916,6 +920,12 @@ async fn qr_svg(Path(court_id): Path<i64>) -> impl IntoResponse {
 struct DeviceHeartbeat {
     #[serde(default)]
     device: Option<String>,
+    /// Was den Abruf ausgelöst hat: `push` (ein Nudge kam) oder `poll`
+    /// (Fallback-Takt). **Additiv** angehängt (Spec monitor-livestand-push,
+    /// S0) — eine Seite aus einem älteren Stand sendet ihn nicht, und ihr
+    /// Abruf zählt dann als `poll`, was er auch ist.
+    #[serde(default)]
+    src: Option<String>,
 }
 
 /// Markiert das Geraet als „gesehen", falls eine Device-ID im Query
@@ -936,7 +946,7 @@ fn note_heartbeat(ctx: &ServerCtx, q: &DeviceHeartbeat) {
 async fn health(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<DeviceHeartbeat>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
     // Ohne Kopie: Diese Route ist der Zustands-Abruf der Feld-Übersicht
     // und der Kombi-Anzeigen — sie kommt im 250-ms-Takt je Gerät und war
@@ -949,7 +959,7 @@ async fn health(
     // gleiche kanonische Hallenliste wie Desktop und TL-Web.
     let mut courts = ctx.tablet.overview();
     crate::hall_colors::paint(&mut courts, &cfg, &ctx.tablet.hall_names());
-    Json(serde_json::json!({
+    let body = serde_json::json!({
         "ok": true,
         "courts": courts,
         // Server-Zeit, damit das Tablet seinen Uhr-Offset zum Server
@@ -965,7 +975,34 @@ async fn health(
             "secondCallMinutes": ct.second_call_minutes,
             "thirdCallMinutes": ct.third_call_minutes,
         },
-    }))
+    });
+    // Selbst serialisieren statt `Json(..)`: Nur so ist die tatsächliche
+    // Antwortgröße bekannt — und genau die ist die Kennzahl, um die es in
+    // dieser Etappe geht (Bytes/s, Spec monitor-livestand-push S0). Die
+    // Serialisierung fällt ohnehin an, sie wandert nur eine Ebene nach oben.
+    let json = serde_json::to_string(&body).unwrap_or_else(|_| "{\"ok\":false}".to_string());
+    ctx.tablet
+        .perf()
+        .note_health(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
+    ([(header::CONTENT_TYPE, "application/json")], json)
+}
+
+/// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
+/// monitor-livestand-push, S0).
+///
+/// **Bewusst nur am LAN-Server.** Der Relay steht im Internet; dort hätte
+/// eine parameterlose, unauthentifizierte Route, die Lastdaten aller
+/// Namespaces zusammenfasst, nichts zu suchen. Im LAN ist sie das
+/// Ablesegerät für den Messlauf — und trägt ausschließlich Zahlen
+/// (Wächter-Test `debug_perf_enthaelt_keine_personendaten` in `perf.rs`).
+async fn debug_perf(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let s = ctx.tablet.perf().snapshot();
+    let mut v = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = v.as_object_mut() {
+        // Ohne Uhrzeit ist aus zwei Abrufen keine Rate zu bilden.
+        obj.insert("serverNowMs".into(), monitor::now_ms().into());
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Json(v))
 }
 
 // ─────────────────────────────── Court-Monitor ────────────────────────────
@@ -1003,6 +1040,7 @@ async fn monitor_device_page() -> impl IntoResponse {
 async fn monitor_state(
     State(ctx): State<Arc<ServerCtx>>,
     Path(court_id): Path<i64>,
+    Query(q): Query<DeviceHeartbeat>,
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
     let court = ctx.tablet.monitor_court(court_id);
@@ -1019,7 +1057,19 @@ async fn monitor_state(
         &cfg.call_timer,
         ctx.ads(),
     );
-    ([(header::CACHE_CONTROL, "no-store")], Json(state))
+    // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
+    // (Spec monitor-livestand-push, S0).
+    let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+    ctx.tablet
+        .perf()
+        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        json,
+    )
 }
 
 /// Effektive Hallen-Farbe des Felds (Spec hallen-farben) — über die
@@ -1037,6 +1087,10 @@ fn hall_color_for(ctx: &ServerCtx, config: &AppConfig, court_id: i64) -> Option<
 #[derive(serde::Deserialize)]
 struct DeviceQuery {
     device: String,
+    /// Wie bei [`DeviceHeartbeat`]: was den Abruf ausgelöst hat (Spec
+    /// monitor-livestand-push, S0). Fehlt er, zählt der Abruf als `poll`.
+    #[serde(default)]
+    src: Option<String>,
 }
 
 /// Anzeige-Zustand für ein Monitor-Gerät: löst die Feld-Zuweisung auf,
@@ -1093,7 +1147,20 @@ async fn monitor_device_state(
     };
     state.command = command;
     state.device_code = device_code(&device);
-    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+    // Wie `monitor_state` selbst serialisiert, um die Antwortgröße zu
+    // kennen (Spec monitor-livestand-push, S0).
+    let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+    ctx.tablet
+        .perf()
+        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        json,
+    )
+        .into_response()
 }
 
 // ─────────────────────────────── Info-Monitore ────────────────────────────
@@ -4975,5 +5042,98 @@ mod tests {
             .await
             .into_response();
         assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    // ── Perf-Messung der Anzeige-Strecke (Spec monitor-livestand-push, S0) ──
+
+    /// Query wie ihn eine Anzeige schickt.
+    fn takt(src: Option<&str>) -> Query<DeviceHeartbeat> {
+        Query(DeviceHeartbeat {
+            device: None,
+            src: src.map(|s| s.to_string()),
+        })
+    }
+
+    #[tokio::test]
+    async fn health_zaehlt_push_und_poll_getrennt_mit_bytes() {
+        // Die Trennung ist der Kern der Vorher-Messung: Wie viel Last
+        // erzeugt der Nudge-Weg, wie viel der Fallback-Takt?
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(Some("push"))).await;
+        let _ = health(State(ctx.clone()), takt(Some("poll"))).await;
+        // Eine Seite aus einem älteren Stand kennt `src` nicht.
+        let _ = health(State(ctx.clone()), takt(None)).await;
+
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.health_push, 1);
+        assert_eq!(s.health_poll, 2, "ohne `src` zählt der Abruf als Poll");
+        assert!(
+            s.health_push_bytes > 0 && s.health_poll_bytes > 0,
+            "die Antwortgröße ist die Kennzahl, um die es geht (Bytes/s)"
+        );
+        assert!(
+            s.health_poll_bytes > s.health_push_bytes,
+            "zwei Poll-Antworten wiegen mehr als eine Push-Antwort"
+        );
+    }
+
+    #[tokio::test]
+    async fn court_state_zaehlt_seinen_abruf() {
+        // Der feste Court-Monitor ist der billige Fall — gezählt wird er
+        // trotzdem, sonst fehlte der Vergleich zur teuren Übersicht.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = monitor_state(State(ctx.clone()), Path(101), takt(Some("push"))).await;
+        let _ = monitor_state(State(ctx.clone()), Path(101), takt(None)).await;
+
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.court_state_push, 1);
+        assert_eq!(s.court_state_poll, 1);
+        assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn auch_der_geraete_monitor_zaehlt_seinen_abruf() {
+        // `monitor.html` im Geräte-Modus fragt `/monitor/state` statt
+        // `/court/{id}/state`. Ohne diese Zählung fehlte in der Messung
+        // genau die Bauform, die im Verleih-Set auf den Pis läuft.
+        let ctx = Arc::new(make_ctx(1));
+        let q = |src: Option<&str>| {
+            Query(DeviceQuery {
+                device: "pi-1".to_string(),
+                src: src.map(|s| s.to_string()),
+            })
+        };
+        let _ = monitor_device_state(State(ctx.clone()), q(Some("push"))).await;
+        let _ = monitor_device_state(State(ctx.clone()), q(None)).await;
+
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.court_state_push, 1);
+        assert_eq!(s.court_state_poll, 1);
+        assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn debug_perf_liefert_die_zaehler_als_zahlen() {
+        // Die Ableseroute der Vorher-Messung: Sie gibt aus, was die Zähler
+        // stehen haben — und ausschließlich Zahlen (Wächter in `perf.rs`).
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(Some("push"))).await;
+        let _ = health(State(ctx.clone()), takt(None)).await;
+
+        let antwort = debug_perf(State(ctx.clone())).await.into_response();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .expect("Antwort lesbar");
+        let v: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+
+        assert_eq!(v["health_push"], 1);
+        assert_eq!(v["health_poll"], 1);
+        assert!(
+            v["overview_builds"].as_u64().unwrap() >= 2,
+            "jeder Abruf baut heute neu: {v}"
+        );
+        // Die Uhrzeit gehört dazu, sonst ist keine Rate zu bilden.
+        assert!(v["serverNowMs"].as_u64().unwrap_or(0) > 0);
     }
 }

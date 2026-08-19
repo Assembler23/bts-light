@@ -181,14 +181,97 @@ Pi verliert mehr als 10 Frames/min. Dann als eigener ADR, mit der Vorgabe, die N
 Sender** aus derselben Quelle abzuleiten, aus der die Voll-Route liest (im Relay also erst nach
 Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
 
+## Vorher-Messung (S0)
+
+**Erster Lauf: 19.08.2026**, v0.9.235, LAN, laufende Übertragung mit belegten Feldern
+(26 Felder, Antwortgröße 15,9 KB), 20 simulierte Feld-Übersichten, 61 s, `--trocken`.
+
+| Kennzahl | Gemessen | Bemerkung |
+|---|---|---|
+| `/health`-Abrufe/s (20 Anzeigen) | **72,7/s** | 3,6/s je Anzeige — der 250-ms-Fallback, praktisch ungebremst |
+| `/health`-Bytes/s | **1,13 MB/s** | 69 MB in 61 s |
+| Antwortgröße | **15,9 KB** | Schätzung war 10–30 KB — trifft |
+| `overview`-Bauten/s | **74,0/s** | 4524 Bauten, davon 76 **nicht** von `/health` (Desktop, Kombi) |
+| `overview_build_ns` Ø / p95 / max | **1,20 ms / 4,19 ms / 16,7 ms** | je Abruf, jedes Mal neu |
+| `persist_scores` Ø | **20,0 ms** | je Punkt, **synchron im async-Handler** |
+| `health_push` / Latenz Punkt → Anzeige | — | Trockenlauf, siehe unten |
+
+**Was die Zahlen tragen — und was nicht:**
+
+- Die Kernaussage der Spec ist belegt: Zwanzig Anzeigen kosten **1,13 MB/s und 74
+  Vollberechnungen je Sekunde** für eine Information, die sich um wenige Byte ändert.
+  Der Antwortcache (S1) zielt genau auf die 74 Bauten, der schmale Abruf (S7) auf die
+  15,9 KB.
+- **`persist_scores` ist mit 20 ms je Punkt der teuerste Einzelposten** und läuft
+  synchron im async-Handler — die Annahme hinter S2 ist damit bestätigt, sogar
+  deutlicher als erwartet.
+- ⚠️ **Debug-Build.** Gemessen wurde ein `tauri dev`-Lauf; ein Release-Build ist bei
+  Rust typisch um ein Vielfaches schneller. Die **Zeiten** (1,20 ms Bau, 20 ms
+  Schreibvorgang) sind deshalb pessimistisch, die **Zählwerte** (Abrufe, Bytes,
+  Bauten) nicht — die hängen nicht am Optimierungsgrad. Die Nachmessung muss im
+  selben Modus laufen, sonst vergleicht sie zwei verschiedene Dinge.
+- ⚠️ **Trockenlauf, deshalb keine Push-Spalte.** Es war kein simuliertes Tablet
+  verbunden (das hätte Felder belegt und erfundene Stände in den öffentlichen
+  Liveticker geschrieben). Damit fehlen `health_push`, die Nudge-Rate und die
+  Latenz Punkt → Anzeige. Sie brauchen einen **Probeaufbau ohne Liveticker**.
+- ⚠️ **Loopback, kein WLAN.** Die 1,13 MB/s sind gerechnet, nicht im Hallen-Funk
+  gemessen; die Sättigung aus dem Zielbild bleibt offen.
+
+Ablauf für den nächsten (vollen) Messlauf:
+
+1. bts-light starten, BTP verbinden, Übertragung starten, Felder belegen lassen.
+2. `node scripts/last-monitor.mjs --base http://<turnier-pc>:8088/ --dauer 120`
+   (LAN) und einmal gegen `https://badhub.de/bts-relay/<install-id>/` (Cloud).
+3. Auf einem Pi zusätzlich `localStorage.ovRenderMessen = "1"` setzen und die
+   Konsolen-Sammelzeile mitschreiben.
+4. Die Werte unten eintragen — Client-Sicht aus der Skript-Zusammenfassung,
+   Server-Sicht aus `/debug/perf` bzw. der Log-Zeile `Perf-Anzeigen (…)`.
+
+| Kennzahl | LAN vorher | Cloud vorher | Quelle |
+|---|---|---|---|
+| `/health`-Abrufe/s gesamt | **72,7** (20 Anz., Debug) | | LAN: `/debug/perf` · Cloud: **nur** Skript |
+| davon `push` / `poll` | 0 / 72,7 *(Trockenlauf)* | | LAN: `/debug/perf` · Cloud: — |
+| `/health`-Bytes/s | **1,13 MB/s** | | Skript (beide) |
+| `/court/{id}/state`-Abrufe/s | 0 *(keine Court-Monitore)* | | LAN: `court_state_*` · Cloud: **nur** Skript |
+| `overview_build_ns` p95 | **4,19 ms** (Ø 1,20, max 16,7) | | `/debug/perf` (beide) |
+| `persist_calls`/s | Ø **20,0 ms** je Vorgang | | `/debug/perf` (beide) |
+| Nudges/s | *(Trockenlauf)* | | `nudges_sent` (beide) |
+| Latenz Punkt → Anzeige p50/p95 | *(Trockenlauf)* | | Skript (beide) |
+| Pi: Renders/s, Ø, über 16 ms | | | `ovRenderMessen` |
+
+**Grenze der Host-Zähler im Cloud-Betrieb:** Dort bedient der Relay `/health` und
+`/court/{id}/state`, nicht der Turnier-PC — `health_*` und `court_state_*` bleiben
+strukturell null, während `nudges_sent`, `persist_calls` und `overview_builds` normal
+weiterzählen. Die Cloud-Spalte dieser beiden Zeilen füllt deshalb **nur** das Lastskript
+(Client-Sicht, gegen die Relay-Adresse gefahren). Den Relay selbst zu instrumentieren ist
+bewusst nicht Teil von S0; sollte sich die Cloud-Seite als der interessantere Fall
+erweisen, wäre das eine eigene kleine Etappe.
+
+Beim Ablesen zu beachten: `overview_builds` ist absichtlich **größer** als die Zahl der
+`/health`-Abrufe — `overview()` speist auch die Kombi-Anzeige (`/combo/state`), die
+Desktop-Oberfläche (`tablet_info`) und die Hallen-Kurzlinks. Kein Messfehler, sondern
+der Punkt: Der Antwortcache aus S1 entlastet all diese Aufrufer, nicht nur `/health`.
+
+Ergibt der Lauf ein deutlich anderes Bild als die Schätzung (4–7 Punkte/s turnierweit,
+10–30 KB je `/health`-Antwort), werden die Zielwerte oben einmalig nachgezogen und die
+Änderung hier vermerkt — so in „Offene Punkte / Annahmen" festgelegt.
+
 ## Akzeptanzkriterien
 
 **Messung (S0)**
-- [ ] Die Vorher-Messung liegt als Tabelle in dieser Spec vor, getrennt nach `health_push`,
+- [x] Die Vorher-Messung liegt als Tabelle in dieser Spec vor, getrennt nach `health_push`,
       `health_poll`, `overview_build_ns` p95, `persist_calls`/s, Bytes/s und Latenz p50/p95.
-- [ ] Ein Abruf ohne `src`-Parameter (alte Seite) wird als `poll` gezählt, nie als `push`.
-- [ ] `/debug/perf` enthält ausschließlich Zahlen — keine Namen, keine Match- oder Spielerdaten.
-- [ ] `/debug/perf` existiert nur am LAN-Server, nicht am Relay.
+      *(Lauf vom 19.08.2026, LAN. Offen bleiben die vier Werte, die ein sendendes Tablet
+      brauchen — `health_push`, Nudge-Rate, Latenz — sowie die Cloud-Spalte und die
+      Pi-Zeile; sie brauchen einen Probeaufbau ohne Liveticker.)*
+- [x] Ein Abruf ohne `src`-Parameter (alte Seite) wird als `poll` gezählt, nie als `push`.
+      *(`Quelle::aus_query`, Test `zaehler_ohne_src_zaehlt_als_poll`; auch `""` und
+      Unbekanntes zählen als `poll`.)*
+- [x] `/debug/perf` enthält ausschließlich Zahlen — keine Namen, keine Match- oder Spielerdaten.
+      *(Wächter `debug_perf_enthaelt_keine_personendaten` prüft die Struktur des
+      serialisierten Snapshots; mit einem eingebauten Textfeld gegengeprüft.)*
+- [x] `/debug/perf` existiert nur am LAN-Server, nicht am Relay.
+      *(Route nur in `tablet/server.rs`; an `relay/` wurde nichts geändert.)*
 
 **Antwortcache (S1)**
 - [ ] Zwei `/health`-Abrufe ohne dazwischenliegende Änderung bauen den Zustand genau einmal.

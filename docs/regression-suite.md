@@ -96,6 +96,22 @@ anpassen:
   **manuelle 36-Geräte-Messung** im echten WLAN ab. Ein volles E2E-WS-Harness
   ist bewusst zurückgestellt. Ebenso offen: **LAN-Server-Last**
   (`tablet/state.rs`, blockierender `std::sync::RwLock`) als Folge-Erweiterung.
+- **Last der Anzeige-Strecke** (Spec
+  [features/monitor-livestand-push.md](features/monitor-livestand-push.md),
+  Etappe S0): **manueller Lauf**, kein CI-Schritt — Muster ADR 0019.
+  `node scripts/last-monitor.mjs --base http://<turnier-pc>:8088/` fährt
+  zwanzig zählende Tablets, zwanzig Feld-Übersichten und wahlweise feste
+  Court-Monitore gegen einen **laufenden** Turnier-PC (LAN) bzw. gegen den
+  Relay (Cloud) und meldet Abrufe, Bytes und die Latenz Punkt → Anzeige.
+  Braucht **belegte Felder**: Ohne gültige Match-ID verwirft `handle_score`
+  den Stand, es entstünde weder Schreibvorgang noch Nudge. ⚠️ **Nur am
+  Probeaufbau, nie im echten Turnier** — das Skript belegt Felder und
+  seine erfundenen Stände laufen bis in den öffentlichen Liveticker;
+  `--trocken` verbindet kein Tablet und misst nur die Anzeige-Seite. Vor **und** nach
+  jeder Etappe der Spec fahren; die Server-Sicht dazu liefern
+  `GET /debug/perf` und die 10-Sekunden-Zeile im Diagnose-Log. Das
+  Zählwerk selbst (`tablet/perf.rs`) ist mit elf Unit-Tests abgedeckt,
+  darunter ein Wächter gegen Personenbezug im Bericht.
 
 ## Abgleich mit Tilos Original-BTS
 
