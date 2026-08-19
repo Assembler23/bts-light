@@ -420,23 +420,18 @@ impl Namespace {
     /// technisch offen und bekäme nie wieder einen Anstoß, während die
     /// Seite sich für „live" hielte (Review-Fund 18.08.2026).
     ///
-    /// **Monitor-Abonnenten seit v0.9.241 ebenso** (Sicherheits-Review zu
-    /// Spec monitor-livestand-push, S6): derselbe Fehler, nur eine Etappe
-    /// später scharf geworden. Bis S6 fiel eine verwaiste Anzeige mangels
-    /// Anstößen von selbst auf den schnellen Poll zurück; seither erklärt
-    /// der verbindungslokale Herzschlag ihren Kanal für gesund, und sie
-    /// bliebe dauerhaft hinterher.
-    ///
-    /// Ein Zombie-Namespace entsteht dadurch nicht: Weder `tl_ws_conn` noch
-    /// `subscribe_monitor` legen einen an, und beide tragen sich am
-    /// Verbindungsende wieder aus — mit anschließendem Aufräumen.
+    /// **Monitor-Abonnenten zählen bewusst NICHT mit** — anders als die
+    /// TL-Zuhörer. Ein Relay ohne Host hat den Anzeigen nichts mehr zu
+    /// sagen; bliebe der Namespace ihretwegen stehen, bekämen sie weiter
+    /// eine 200er-Antwort mit dem eingefrorenen Stand von vorhin, statt in
+    /// die Offline-Blende zu fallen (Review-Fund 19.08.2026). Damit sie
+    /// dabei nicht **still** verwaisen, verabschiedet
+    /// [`namespace_aufraeumen`] sie mit einem Close.
     fn is_empty(&self) -> bool {
         self.host.is_none()
             && self.tablets.is_empty()
             && self.pending.is_empty()
             && self.tl_subs.is_empty()
-            && self.monitor_subs.is_empty()
-            && self.monitor_subs_all.is_empty()
     }
 }
 
@@ -2061,6 +2056,37 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
     unsubscribe_monitor(&broker, &ns, court, &tx).await;
 }
 
+/// Räumt einen Namespace weg, an dem nichts mehr hängt — und verabschiedet
+/// dabei die Anzeigen, die noch daran hingen.
+///
+/// Ohne das Close blieben ihre Sende-Enden **still** in der verworfenen
+/// Fassung liegen: Die Leitung wäre technisch offen, bekäme aber nie wieder
+/// einen Anstoß, während der verbindungslokale Herzschlag sie für gesund
+/// erklärt (Sicherheits-Review zu Spec monitor-livestand-push, S6). Vor S6
+/// fiel so eine Anzeige mangels Anstößen von selbst auf den schnellen Poll
+/// zurück, der Fehler blieb also folgenlos.
+///
+/// Das Close bringt sie über ihren Reconnect-Wächter zurück, sobald der Host
+/// wieder da ist; bis dahin pollt sie und zeigt die Offline-Blende.
+fn namespace_aufraeumen(map: &mut HashMap<String, Namespace>, ns: &str) {
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !namespace.is_empty() {
+        return;
+    }
+    let tschuess = Message::Close(None);
+    for tx in namespace
+        .monitor_subs
+        .values()
+        .flatten()
+        .chain(namespace.monitor_subs_all.iter())
+    {
+        let _ = tx.send(tschuess.clone());
+    }
+    map.remove(ns);
+}
+
 /// Trägt eine Monitor-Verbindung als Nudge-Abonnent ein (A1). Legt den
 /// Namespace **nicht** an, falls er fehlt: Ohne Host gibt es nichts zu
 /// melden, und ein von Zuschauer-TVs erzeugter Namespace hätte keinen
@@ -2115,9 +2141,7 @@ async fn unsubscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: 
         }
         None => namespace.monitor_subs_all.retain(|t| !t.same_channel(tx)),
     }
-    if namespace.is_empty() {
-        map.remove(ns);
-    }
+    namespace_aufraeumen(&mut map, ns);
 }
 
 /// Weckt die Monitor-Abonnenten eines Felds (A1, ADR 0016): erhöht die
@@ -2275,9 +2299,7 @@ async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
     let mut map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get_mut(&ns) {
         namespace.tl_subs.retain(|t| !t.same_channel(&tx));
-        if namespace.is_empty() {
-            map.remove(&ns);
-        }
+        namespace_aufraeumen(&mut map, &ns);
     }
 }
 
@@ -2566,9 +2588,7 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
             }));
         }
     }
-    if namespace.is_empty() {
-        map.remove(ns);
-    }
+    namespace_aufraeumen(&mut map, ns);
 }
 
 /// Passt die vom Tablet gemeldete Match-ID zum aktuellen Court-Match?
@@ -2944,9 +2964,7 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             for (_, pending) in namespace.pending.drain() {
                 let _ = pending.send(ResultResponse::err("Verbindung zu bts-light verloren."));
             }
-            if namespace.is_empty() {
-                map.remove(&ns);
-            }
+            namespace_aufraeumen(&mut map, &ns);
         }
     }
     tracing::info!("Host getrennt für Namespace '{ns}'");
@@ -4377,38 +4395,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ein_haengender_monitor_haelt_den_namespace() {
-        // Zweiter Sicherheits-Review-Fund zu S6, wörtlich derselbe Fehler,
-        // der am 18.08.2026 für `tl_subs` behoben wurde: Ein kurzer
-        // Host-Abriss räumte den Namespace weg, während Anzeigen noch daran
-        // hingen. Ihre Sende-Enden lägen dann in der verworfenen Fassung —
-        // die Leitung bliebe technisch offen und bekäme nie wieder einen
-        // Anstoß, während der Herzschlag (verbindungslokal!) sie weiter für
-        // gesund erklärt.
+    async fn ein_verwaister_monitor_wird_verabschiedet() {
+        // Zweiter Sicherheits-Review-Fund zu S6: Fällt der letzte Host weg,
+        // verschwindet der Namespace — und die Sende-Enden hängender
+        // Anzeigen lagen bisher **still** in der verworfenen Fassung. Die
+        // Leitung blieb technisch offen und bekam nie wieder einen Anstoß,
+        // während der verbindungslokale Herzschlag sie für gesund erklärte.
         //
-        // Einen Zombie-Namespace kann das nicht erzeugen: `subscribe_monitor`
-        // legt selbst keinen an, und `unsubscribe_monitor` räumt hinter der
-        // letzten Verbindung auf.
+        // Der Namespace darf trotzdem nicht bleiben: Ein Relay ohne Host hat
+        // nichts zu melden, und eine Anzeige, die weiter 200 mit dem alten
+        // Stand bekäme, zeigte beliebig lange ein Spiel von vorhin, statt in
+        // die Offline-Blende zu fallen (Review-Fund 19.08.2026). Also
+        // aufräumen **und** verabschieden — das Close bringt die Anzeige über
+        // ihren Reconnect-Wächter zurück, sobald der Host wieder da ist.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let (host_tx, _host_rx) = mpsc::unbounded_channel();
         register_host(&broker, "ns1", &host_tx).await;
-        let (tx, _rx) = mpsc::unbounded_channel();
-        assert!(subscribe_monitor(&broker, "ns1", None, &tx).await);
+        let (tx_all, mut rx_all) = mpsc::unbounded_channel();
+        let (tx_feld, mut rx_feld) = mpsc::unbounded_channel();
+        assert!(subscribe_monitor(&broker, "ns1", None, &tx_all).await);
+        assert!(subscribe_monitor(&broker, "ns1", Some(3), &tx_feld).await);
 
-        // Host fällt weg — der Namespace muss bleiben, solange die Anzeige hängt.
+        // Host fällt weg.
         {
             let mut map = broker.namespaces.lock().await;
-            let n = map.get_mut("ns1").expect("Namespace da");
-            n.host = None;
-            assert!(!n.is_empty(), "eine hängende Anzeige hält den Namespace");
+            map.get_mut("ns1").expect("Namespace da").host = None;
+            namespace_aufraeumen(&mut map, "ns1");
         }
 
-        // Erst mit ihrem Abgang ist er weg.
-        unsubscribe_monitor(&broker, "ns1", None, &tx).await;
         assert!(
             broker.namespaces.lock().await.get("ns1").is_none(),
-            "nach dem Austragen aufgeräumt — kein Zombie"
+            "ohne Host bleibt nichts stehen — die Anzeige soll offline gehen"
         );
+        assert!(
+            matches!(rx_all.try_recv(), Ok(Message::Close(_))),
+            "die Übersicht wird verabschiedet"
+        );
+        assert!(
+            matches!(rx_feld.try_recv(), Ok(Message::Close(_))),
+            "der feste Feld-Monitor auch"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_lebender_namespace_bleibt_beim_aufraeumen_unberuehrt() {
+        // Gegenprobe: Solange ein Host da ist, wird nichts verabschiedet —
+        // sonst risse jeder Tablet-Abgang die Anzeigen einer ganzen Halle
+        // aus der Leitung.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &host_tx).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        assert!(subscribe_monitor(&broker, "ns1", None, &tx).await);
+
+        {
+            let mut map = broker.namespaces.lock().await;
+            namespace_aufraeumen(&mut map, "ns1");
+        }
+
+        assert!(broker.namespaces.lock().await.get("ns1").is_some());
+        assert!(rx.try_recv().is_err(), "kein Close bei lebendem Host");
     }
 
     // ───────────────── Turnierleitungs-Oberfläche (TL-Web) ─────────────────

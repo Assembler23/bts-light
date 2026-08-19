@@ -127,6 +127,13 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   „es passiert gerade nichts" unterscheiden: In einer ruhigen Halle vergehen
   zwischen zwei Ballwechseln Minuten, und ein halbtoter Socket meldet
   stundenlang `OPEN`, ohne je etwas zu liefern.
+- **Der Relay verabschiedet Anzeigen aktiv** (ebenfalls seit v0.9.241): Kann
+  er eine Verbindung nicht eintragen (Host noch nicht da, oder Fan-out-Deckel
+  erreicht), schließt er sie sofort statt sie still offen zu lassen — der
+  Herzschlag hielte sie sonst für gesund, obwohl nie ein Anstoß käme. Ebenso
+  beim Aufräumen eines Namespace, dessen Host weg ist. Die Anzeige fällt
+  dadurch auf den Poll und in die Offline-Blende und verbindet sich über
+  ihren Reconnect-Wächter neu, sobald der Turnier-PC wieder da ist.
 - **Poll bleibt Fallback:** Der Sicherheits-Poll läuft **durchgehend** weiter
   (seit v0.9.241 nicht mehr pausierend) — im 250-ms-Takt, und nur bei
   **gesundem** Kanal und gesetztem Schalter im 4-s-Takt. Er hört **nie ganz**

@@ -104,6 +104,15 @@ ok("still seit 25 s = Kanal tot", kanalIstTot(true, JETZT - HERZSCHLAG_STILL_MS,
 ok("still seit 24 s = noch nicht", kanalIstTot(true, JETZT - 24000, JETZT), false);
 ok("geschlossener Socket: kein Force-Close", kanalIstTot(false, JETZT - 60000, JETZT), false);
 ok("noch nie ein Frame: erst abwarten", kanalIstTot(true, 0, JETZT), false);
+// „Erst abwarten" darf nicht „ewig abwarten" heißen: Bricht die Leitung
+// direkt nach dem Handschlag weg (WLAN-Roam), kommt nie ein Frame und die
+// Seite hinge dauerhaft im schnellen Takt. Die Anzeige-Seiten reichen
+// deshalb den Zeitpunkt des Verbindens als Ersatz-Bezug herein.
+ok(
+  "verbunden seit 25 s ohne ein einziges Frame = tot",
+  kanalIstTot(true, JETZT - HERZSCHLAG_STILL_MS, JETZT),
+  true,
+);
 
 // ── Zusammenspiel der beiden Grenzen ──────────────────────────────────────
 // „Nicht mehr gesund" und „tot" fallen bewusst zusammen: Sobald die Anzeige

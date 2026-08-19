@@ -477,9 +477,18 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 - [x] Der Relay weist eine Anzeige ab, die er nicht eintragen kann. *(Sicherheits-Review:
       `subscribe_monitor` liefert `bool`, `monitor_conn` schließt bei `false` — ohne
       Namespace oder über `MAX_MONITOR_SUBS` blieb die Verbindung sonst still offen und
-      der Herzschlag bescheinigte ihr Gesundheit, obwohl nie ein Anstoß käme. Dazu zählen
-      Monitor-Abonnenten jetzt in `Namespace::is_empty` mit, damit ein kurzer Host-Abriss
-      den Namespace nicht unter ihnen wegräumt.)*
+      der Herzschlag bescheinigte ihr Gesundheit, obwohl nie ein Anstoß käme.)*
+- [x] Eine Anzeige verwaist nicht still, wenn ihr Namespace verschwindet. *(`namespace_aufraeumen`
+      schickt beim Aufräumen jedem Monitor-Abo ein Close. **Bewusst so und nicht anders:**
+      Der erste Versuch ließ die Anzeigen den Namespace am Leben halten — dann bekämen sie
+      weiter eine 200er-Antwort mit dem eingefrorenen Stand von vorhin, statt in die
+      Offline-Blende zu fallen. Ein Relay ohne Host hat ihnen nichts zu sagen; das Close
+      bringt sie über ihren Reconnect-Wächter zurück, sobald der Host wieder da ist.)*
+- [x] Eine Leitung, die nie ein Frame liefert, wird trotzdem erneuert. *(Bricht sie direkt
+      nach dem Handschlag weg, bliebe `lastServerFrameAt` auf 0 — und 0 heißt „noch nicht
+      bewährt", also niemals tot. Die Seiten reichen deshalb `mwsOffenSeitMs` als
+      Ersatz-Bezug herein; sonst hinge die Anzeige dauerhaft im schnellen Takt, also
+      ausgerechnet in der Last, die diese Etappe loswerden will.)*
 
 **Schmaler Abruf (S7)**
 - [ ] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der

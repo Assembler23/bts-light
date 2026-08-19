@@ -806,6 +806,7 @@ main {
   var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
   var errorCount = 0;
   var mwsOpen = false;
+  var mwsOffenSeitMs = 0;     // seit wann die aktuelle Leitung steht (S6)
 
   // ── Gesundheit des Push-Kanals (Spec monitor-livestand-push, S6) ────────
   //
@@ -1180,8 +1181,13 @@ main {
   // schnelle Poll ohnehin alles auffing.
   setInterval(function () {
     var jetzt = Date.now();
-    if (kanalIstTot(mwsOpen, lastServerFrameAt, jetzt)) {
-      mlog('warn', 'mws_stale_close', { stillMs: jetzt - lastServerFrameAt });
+    // `|| mwsOffenSeitMs`: Eine Leitung, die seit dem Verbinden NIE etwas
+    // geliefert hat (WLAN-Roam direkt nach dem Handschlag), stünde sonst für
+    // immer auf 0 — und 0 heißt „hat sich noch nicht bewährt", also niemals
+    // tot. Sie bliebe dauerhaft im schnellen Takt hängen, genau der Last,
+    // die diese Etappe loswerden will (Review-Fund 19.08.2026).
+    if (kanalIstTot(mwsOpen, lastServerFrameAt || mwsOffenSeitMs, jetzt)) {
+      mlog('warn', 'mws_stale_close', { stillMs: jetzt - (lastServerFrameAt || mwsOffenSeitMs) });
       mwsTrennen();
     }
     var takt = fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt);
@@ -1237,8 +1243,11 @@ main {
       // kein Frame" — beide Regeln lesen das als „nicht gesund, aber auch
       // nicht tot". Bliebe hier der alte, über 25 s alte Zeitpunkt stehen,
       // erklärte der nächste Tick den eben verbundenen Socket sofort wieder
-      // für tot (Review-Fund 19.08.2026).
+      // für tot (Review-Fund 19.08.2026). Der Zeitpunkt des Verbindens dient
+      // als Ersatz-Bezug, damit eine Leitung, die nie etwas liefert, nicht
+      // ewig als „noch nicht bewährt" durchgeht.
       lastServerFrameAt = 0;
+      mwsOffenSeitMs = Date.now();
       // Zurücksetzen je frischer Verbindung. Seit S4 startet die Sequenz
       // beim Server bei der Uhrzeit und ist über Neustarts monoton — das
       // Zurücksetzen bleibt trotzdem: Es kostet nichts, und innerhalb einer
@@ -1280,6 +1289,7 @@ main {
       try { alt.close(); } catch (e) { /* egal, die Referenz ist weg */ }
     }
     lastServerFrameAt = 0;
+    mwsOffenSeitMs = 0;
     mwsSchedule();
   }
   function mwsSchedule() {

@@ -1045,7 +1045,8 @@
   // Ausfall-Fallback und pausiert, solange frische Nudges fürs eigene Feld
   // kommen.
   var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
-  var mwsOpen = false;        // Monitor-WS gerade offen?
+  var mwsOpen = false;
+  var mwsOffenSeitMs = 0;     // seit wann die aktuelle Leitung steht (S6)        // Monitor-WS gerade offen?
 
   // ── Gesundheit des Push-Kanals (Spec monitor-livestand-push, S6) ────────
   //
@@ -1223,8 +1224,13 @@
   // die Verbindung wird aktiv getrennt, damit der Reconnect greift.
   setInterval(function () {
     var jetzt = Date.now();
-    if (kanalIstTot(mwsOpen, lastServerFrameAt, jetzt)) {
-      mlog("warn", "mws_stale_close", { stillMs: jetzt - lastServerFrameAt });
+    // `|| mwsOffenSeitMs`: Eine Leitung, die seit dem Verbinden NIE etwas
+    // geliefert hat (WLAN-Roam direkt nach dem Handschlag), stünde sonst für
+    // immer auf 0 — und 0 heißt „hat sich noch nicht bewährt", also
+    // niemals tot. Sie bliebe dauerhaft im schnellen Takt hängen
+    // (Review-Fund 19.08.2026).
+    if (kanalIstTot(mwsOpen, lastServerFrameAt || mwsOffenSeitMs, jetzt)) {
+      mlog("warn", "mws_stale_close", { stillMs: jetzt - (lastServerFrameAt || mwsOffenSeitMs) });
       mwsTrennen();
     }
     var takt = fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt);
@@ -1265,6 +1271,7 @@
       // über 25 s alte Zeitpunkt stehen, erklärte der nächste Tick den eben
       // verbundenen Socket sofort wieder für tot (Review-Fund 19.08.2026).
       lastServerFrameAt = 0;
+      mwsOffenSeitMs = Date.now();
       mlog("info", "mws_open");
     };
     mws.onmessage = function (ev) {
@@ -1305,6 +1312,7 @@
       try { alt.close(); } catch (e) { /* egal, die Referenz ist weg */ }
     }
     lastServerFrameAt = 0;
+    mwsOffenSeitMs = 0;
     mwsSchedule();
   }
   function mwsSchedule() {
