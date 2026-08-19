@@ -367,6 +367,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Ausgefüllte Schiedsrichterzettel drucken** — für jedes mit Tablet gezählte
+  Spiel ein ausgefüllter Zettel: Punktverlauf, Aufschlagfolge, Karten,
+  Verletzungen mit Beginn und Ende, Unterbrechungen, Zeiten. **Internes
+  Turnier-Archiv, kein amtlicher Beleg** (offizielle Turniere laufen weiter
+  über das Original-BTS). Der PIN-Schiri-Modus am Tablet erfasst schon heute
+  Karten — sie sterben aber im `localStorage`; das Feature verstetigt sie zum
+  Host. Ereignisse laufen als **eigener Strom neben** dem Punktverlauf, der
+  unverändert bleibt; gejoint wird erst beim Rendern. Gedruckt wird ein einmal
+  am Host erzeugtes HTML-Dokument im WebView — keine neue Abhängigkeit, keine
+  neue Tauri-Permission. Acht Etappen-PRs, Relay vor App.
+  Spec: [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md) ·
+  ADR [0037](adr/0037-zettel-ereignisse-eigener-strom.md) ·
+  [0038](adr/0038-ereignisse-append-only.md) ·
+  [0039](adr/0039-zettel-html-im-webview.md).
 - **Monitor-Livestand per Push — Etappen S0 bis S3 umgesetzt** (v0.9.235–238,
   PRs #256–#259). **S0** Messung: Zähler im Turnier-PC, 10-Sekunden-Zeile im
   Diagnose-Log, `GET /debug/perf` (nur LAN), Lastskript
@@ -520,8 +534,8 @@ mitgeändert worden:
   (ADR [0014](adr/0014-punktverlauf-expliziter-rally-frame.md),
   [0015](adr/0015-punktverlauf-datei-je-turnier.md)). Folge-Features
   (je eigene Spec, offen): badhub-Push + Anzeige auf badhub.de ·
-  **ausgefüllte Schiedsrichterzettel als PDF drucken** (Hinweis vom
-  11.08.2026; Datenbasis ist der Punktverlauf).
+  ~~**ausgefüllte Schiedsrichterzettel drucken**~~ → **spezifiziert**
+  2026-08-19, siehe unten.
 
 ## Wünsche vom 10.08.2026 (nach dem v0.9.178-Test)
 
