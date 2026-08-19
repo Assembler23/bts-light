@@ -1072,8 +1072,8 @@
    *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
    *  `overview.html`. */
   function seqAnwenden(gezeigtSeq, seq, quelle) {
-    var gezeigt = isFinite(gezeigtSeq) ? gezeigtSeq : 0;
-    var neu = isFinite(seq) ? seq : 0;
+    var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = Number.isFinite(seq) ? seq : 0;
     if (neu <= 0) return true;
     if (gezeigt <= 0) return true;
     return quelle === "push" ? neu > gezeigt : neu >= gezeigt;

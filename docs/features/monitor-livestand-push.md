@@ -2,7 +2,7 @@
 
 > Status: **abgestimmt 2026-08-18** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Idee vom 18.08.2026. Betroffene Crates: `src-tauri`, `relay`, `relay-proto`, `src/io`.
-> ADR: [0035 — Monitor-Livestand: schmaler Abruf, Ordnung über `seq`, additive Nudges](adr/0035-monitor-livestand-ordnung.md)
+> ADR: [0035 — Monitor-Livestand: schmaler Abruf, Ordnung über `seq`, additive Nudges](../adr/0035-monitor-livestand-ordnung.md)
 
 ## Kontext / Problem
 
@@ -366,9 +366,23 @@ allein der Poll-Fallback die Latenz abdeckte.
 
 **Ordnung (S4)** — umgesetzt v0.9.239
 - [x] `/health` und `/court/{id}/state` tragen je Feld ein `seq`; die Cloud-Pendants ebenso.
-      *(`die_uebersicht_traegt_die_sequenz_je_feld`, `MonitorState.seq` über `MonitorCourt`,
-      und im Relay derselbe JSON-Schlüssel in `overview_health` wie in der LAN-Antwort —
-      geprüft in `cloud_overview_health_lists_courts_with_match_and_score`.)*
+      *(`die_ordnungszahlen_stehen_neben_der_feldliste`, `MonitorState.seq` über
+      `MonitorCourt`, und im Relay dieselbe Form wie in der LAN-Antwort — geprüft in
+      `cloud_overview_health_lists_courts_with_match_and_score`.)*
+
+      **In `/health` steht die Zahl neben der Feld-Liste, nicht darin** (`seqs`:
+      CourtID → Zahl). Die Marke der Antwort ist ein Streuwert über die Liste, und die
+      Zahlen steigen bei **jedem** Anstoß — auch bei einem, der die Anzeige nicht
+      verändert (etwa ein Tablet-Abgleich mit unverändertem Anzeige-Stand). Steckten sie
+      in der Liste, wechselte die Marke jedes Mal, und die Bestätigung ohne Nutzdaten aus
+      S1 wäre wirkungslos — auf genau der Strecke, die sie entlasten soll. Ein
+      Regressionstest hält fest, dass ein Anstoß ohne Inhaltsänderung die Feld-Liste
+      zeichengleich lässt.
+
+      Gelesen werden die Zahlen **vor** dem Inhalt und im selben Bau zwischengespeichert.
+      So ist eine Zahl höchstens *älter* als der Stand, zu dem sie ausgeliefert wird —
+      die harmlose Richtung. Umgekehrt merkte sich die Anzeige eine Zahl für einen Stand,
+      den sie nie gesehen hat, und verwürfe den zugehörigen Nudge als „schon bekannt".
 - [x] Eine Voll-Antwort mit kleinerem `seq` als dem angezeigten wird verworfen.
       *(`monitor.html`: `applyState` bricht ab. In `overview.html` **noch nicht** —
       sie rendert bis S5 immer alle Felder auf einmal, eine feldweise Entscheidung ist
@@ -513,13 +527,13 @@ Fan-out über bis zu 256 Abonnenten je Namespace.
 
 ## Doku-Pflicht im selben Commit
 
-`CLAUDE.md` (neue Tabellenzeile) · [`docs/court-monitor.md`](court-monitor.md) (Heartbeat,
+`CLAUDE.md` (neue Tabellenzeile) · [`docs/court-monitor.md`](../court-monitor.md) (Heartbeat,
 Gesundheitsdefinition, Fallback, Antwortcache, `?court=`) ·
-[`docs/cloud-relay.md`](cloud-relay.md) (Heartbeat-Frame, `seq`, gefüllter Aufschlag,
-Zuweisungs-Nudge) · [`docs/adr/0035-monitor-livestand-ordnung.md`](adr/0035-monitor-livestand-ordnung.md)
-und Statuswechsel in [`0016`](adr/0016-monitor-push-transport.md) ·
+[`docs/cloud-relay.md`](../cloud-relay.md) (Heartbeat-Frame, `seq`, gefüllter Aufschlag,
+Zuweisungs-Nudge) · [`docs/adr/0035-monitor-livestand-ordnung.md`](../adr/0035-monitor-livestand-ordnung.md)
+und Statuswechsel in [`0016`](../adr/0016-monitor-push-transport.md) ·
 `docs/regression-suite.md` · `docs/changelog.md` · `docs/roadmap.md` (beide A1-TODOs streichen) ·
-[`docs/multi-hall.md`](multi-hall.md) (ferne Halle = nur Cloud) · `docs/logging.md` (Perf-Zeile).
+[`docs/multi-hall.md`](../multi-hall.md) (ferne Halle = nur Cloud) · `docs/logging.md` (Perf-Zeile).
 
 ## Offene Punkte / Annahmen
 

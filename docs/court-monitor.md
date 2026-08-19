@@ -108,9 +108,12 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   v0.9.239), damit die Zahl einen Neustart von Turnier-PC oder Relay
   übersteht — sonst hielte eine Anzeige mit gemerktem Wert danach jeden
   neuen Stand für veraltet und bliebe stehen.
-- **Seit v0.9.239 tragen auch die Voll-Antworten dieselbe Zahl**
-  (`/health` je Feld, `/court/{id}/state` fürs eigene Feld, in LAN und
-  Cloud). Damit ordnet die Anzeige Push und Abruf zueinander: Ein **Push**
+- **Seit v0.9.239 tragen auch die Voll-Antworten dieselbe Zahl** — in
+  `/health` als eigene Karte `seqs` (CourtID → Zahl) **neben** der
+  Feld-Liste, in `/court/{id}/state` als Feld `seq`; in LAN und Cloud
+  gleich. Die Karte steht bewusst neben der Liste: Die Marke der Antwort
+  hängt an der Liste, und eine Zahl darin wechselte bei jedem Anstoß —
+  damit wäre die Bestätigung ohne Nutzdaten wirkungslos. Damit ordnet die Anzeige Push und Abruf zueinander: Ein **Push**
   gilt nur bei echt größerer Zahl (ein doppelter Anstoß löste sonst einen
   Abruf ohne neuen Inhalt aus), eine **Voll-Antwort** schon bei gleicher —
   sie darf denselben Stand berichtigen, etwa wenn in BTP ein Satzstand von

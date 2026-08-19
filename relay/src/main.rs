@@ -1512,10 +1512,23 @@ async fn overview_health(
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let (courts, call_timer) = {
+    let (courts, call_timer, seqs) = {
         let map = broker.namespaces.lock().await;
         match map.get(&ns) {
             Some(n) => {
+                // Ordnungszahlen je Feld (Spec monitor-livestand-push, S4).
+                // **Vor** der Feld-Liste gelesen, damit eine Zahl höchstens
+                // älter ist als der Stand, zu dem sie ausgeliefert wird — die
+                // harmlose Richtung. Und **neben** der Liste ausgeliefert,
+                // nicht darin: In der LAN-Antwort hängt die Marke an der
+                // Liste, und steigende Zahlen darin machten die Bestätigung
+                // ohne Nutzdaten wirkungslos. Beide Betriebsarten liefern
+                // deshalb dieselbe Form (Review-Fund 19.08.2026).
+                let seqs: std::collections::HashMap<String, u64> = n
+                    .monitor_seq
+                    .iter()
+                    .map(|(id, s)| (id.to_string(), *s))
+                    .collect();
                 let names = |team: &[relay_proto::PlayerBrief]| {
                     team.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
                 };
@@ -1553,13 +1566,6 @@ async fn overview_health(
                             "team1_nationalities": m.map(|m| nats(&m.team_a)).unwrap_or_default(),
                             "team2_nationalities": m.map(|m| nats(&m.team_b)).unwrap_or_default(),
                             "sets": sets,
-                            // Ordnung für die Anzeige (Spec
-                            // monitor-livestand-push, S4) — gleicher Schlüssel
-                            // wie in der LAN-Antwort (`CourtOverview.seq`).
-                            // Prozesslokal: Der Relay zählt eigenständig
-                            // (ADR 0035); eine Anzeige spricht immer nur mit
-                            // einer Gegenstelle, damit ist das unkritisch.
-                            "seq": n.monitor_seq.get(&c.id).copied().unwrap_or(0),
                             "on_court_since_ms": n.court_on_court_since.get(&c.id).copied(),
                             // Aufschlag/Verletzung/TL-Ruf hält der Relay nicht → im
                             // Cloud konservativ weggelassen (kein Highlight/Badge).
@@ -1574,15 +1580,21 @@ async fn overview_health(
                     .as_ref()
                     .map(|mo| mo.call_timer.clone())
                     .unwrap_or_default();
-                (courts, ct)
+                (courts, ct, seqs)
             }
-            None => (Vec::new(), relay_proto::CallTimerView::default()),
+            None => (
+                Vec::new(),
+                relay_proto::CallTimerView::default(),
+                std::collections::HashMap::new(),
+            ),
         }
     };
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::json!({
             "courts": courts,
+            // Gleiche Form wie in der LAN-Antwort: CourtID → Ordnungszahl.
+            "seqs": seqs,
             "serverNowMs": now_ms(),
             "callTimer": call_timer,
         })),
@@ -5357,9 +5369,16 @@ mod tests {
         assert_eq!(c0["team1_nationalities"], serde_json::json!(["GER"]));
         assert_eq!(c0["sets"][0]["a"], serde_json::json!(21));
         assert_eq!(c0["on_court_since_ms"], serde_json::json!(1000));
-        // Ordnung für die Anzeige (Spec monitor-livestand-push, S4) —
-        // derselbe Schlüssel wie in der LAN-Antwort.
-        assert_eq!(c0["seq"], serde_json::json!(1_787_000_000_042u64));
+        // Die Ordnungszahl steht NEBEN der Feld-Liste, nicht darin (Spec
+        // monitor-livestand-push, S4): In der LAN-Antwort hängt die Marke an
+        // der Liste, und steigende Zahlen darin machten die Bestätigung ohne
+        // Nutzdaten wirkungslos. Beide Betriebsarten liefern dieselbe Form.
+        assert!(c0.get("seq").is_none(), "nicht im Feld-Objekt");
+        assert_eq!(v["seqs"]["101"], serde_json::json!(1_787_000_000_042u64));
+        assert!(
+            v["seqs"].get("102").is_none(),
+            "nie geweckt = kein Eintrag; die Anzeige liest das als 0"
+        );
         // Im Cloud (noch) nicht verfügbar → konservativ weggelassen.
         assert!(c0["serving_team"].is_null());
         assert_eq!(c0["injury"], serde_json::json!(false));
@@ -5368,9 +5387,6 @@ mod tests {
         assert_eq!(c1["court_id"], serde_json::json!(102));
         assert_eq!(c1["match_id"], serde_json::json!(0));
         assert!(c1["on_court_since_ms"].is_null());
-        // Nie geweckt = keine Ordnung bekannt; die Anzeige behandelt 0 wie
-        // vor der Etappe (kein Blockieren).
-        assert_eq!(c1["seq"], serde_json::json!(0));
         assert!(
             c1["hall_color"].is_null(),
             "alter Host ohne Farbe → farblos"

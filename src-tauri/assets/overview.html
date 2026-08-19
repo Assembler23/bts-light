@@ -640,8 +640,8 @@ main {
    *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
    *  `monitor.html`. */
   function seqAnwenden(gezeigtSeq, seq, quelle) {
-    var gezeigt = isFinite(gezeigtSeq) ? gezeigtSeq : 0;
-    var neu = isFinite(seq) ? seq : 0;
+    var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = Number.isFinite(seq) ? seq : 0;
     if (neu <= 0) return true;
     if (gezeigt <= 0) return true;
     return quelle === 'push' ? neu > gezeigt : neu >= gezeigt;
@@ -832,15 +832,22 @@ main {
           callOffset = data.serverNowMs - Date.now();
         }
         // Ordnungszahlen je Feld fortschreiben (Spec monitor-livestand-push,
-        // S4). Die Übersicht rendert heute immer alles auf einmal; sobald sie
-        // mit S5 einzelne Karten patcht, entscheidet `seqAnwenden` je Feld,
-        // ob der neue Stand angewendet wird. Bis dahin ist das Mitführen die
+        // S4). Sie stehen NEBEN der Feld-Liste (`seqs`: CourtID → Zahl),
+        // nicht darin — sonst wechselte die Marke der Antwort bei jedem
+        // Anstoß und die Bestätigung ohne Nutzdaten wäre wirkungslos.
+        //
+        // Die Übersicht rendert heute immer alles auf einmal; sobald sie mit
+        // S5 einzelne Karten patcht, entscheidet `seqAnwenden` je Feld, ob
+        // der neue Stand angewendet wird. Bis dahin ist das Mitführen die
         // Vorbereitung — und schon jetzt der Grund, warum ein überholter
         // Nudge keinen zweiten Abruf auslöst.
-        (data.courts || []).forEach(function (c) {
-          if (typeof c.court_id !== 'number' || typeof c.seq !== 'number' || !c.seq) return;
-          var gezeigt = lastSeqByCourt[c.court_id] || 0;
-          if (c.seq > gezeigt) lastSeqByCourt[c.court_id] = c.seq;
+        var seqs = data.seqs || {};
+        Object.keys(seqs).forEach(function (id) {
+          var wert = seqs[id];
+          if (!Number.isFinite(wert) || wert <= 0) return;
+          var feld = Number(id);
+          if (!Number.isFinite(feld)) return;
+          if (wert > (lastSeqByCourt[feld] || 0)) lastSeqByCourt[feld] = wert;
         });
         render(data);
         // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —

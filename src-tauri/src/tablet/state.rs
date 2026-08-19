@@ -218,12 +218,6 @@ pub struct CourtOverview {
     /// eine Auswahl über den Namen träfe dann den Falschen.
     pub sr_id: i64,
     pub ar_id: i64,
-    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
-    /// dieselbe Zahl, die der Nudge auf der Monitor-WS trägt. Die Anzeige
-    /// ordnet damit Push und Voll-Abruf zueinander: Push bei `seq > gezeigt`,
-    /// Voll-Antwort bei `seq >= gezeigt`.
-    #[serde(default)]
-    pub seq: u64,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -750,6 +744,12 @@ pub struct OverviewCache {
     pub rev: u64,
     pub etag: String,
     pub courts_json: String,
+    /// Ordnungszahlen je Feld als fertiges JSON-Objekt (Spec
+    /// monitor-livestand-push, S4). Gehören zum **selben Bau** wie
+    /// `courts_json` — sonst könnte eine gecachte Liste mit frisch gelesenen
+    /// Zahlen ausgeliefert werden, und die wären neuer als der Inhalt.
+    /// Fließen bewusst **nicht** in `etag` ein (siehe `monitor_seqs`).
+    pub seqs_json: String,
     pub gebaut_ms: u64,
 }
 
@@ -2536,6 +2536,20 @@ impl TabletState {
             .unwrap_or(0)
     }
 
+    /// Alle Ordnungszahlen auf einmal — die Karte, die `/health` neben der
+    /// Feld-Liste ausliefert (Spec monitor-livestand-push, S4).
+    ///
+    /// **Sie steht bewusst NEBEN der Feld-Liste und nicht darin:** Die Marke
+    /// der Antwort ist ein Streuwert über die Feld-Liste, und die Zahlen
+    /// steigen bei jedem Anstoß — auch bei einem, der die Anzeige gar nicht
+    /// verändert (etwa ein Tablet-Abgleich mit unverändertem Anzeige-Stand).
+    /// Steckten sie in der Liste, wechselte die Marke jedes Mal und die
+    /// Bestätigung ohne Nutzdaten aus S1 wäre wirkungslos — auf genau der
+    /// Strecke, die sie entlasten soll (Review-Fund 19.08.2026).
+    pub fn monitor_seqs(&self) -> HashMap<i64, u64> {
+        self.monitor_seq.read().unwrap().clone()
+    }
+
     /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
     pub fn overview_rev(&self) -> u64 {
         self.overview_rev.load(Ordering::Relaxed)
@@ -2546,12 +2560,21 @@ impl TabletState {
         self.overview_rev.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Legt die gebaute Feld-Liste als Antwortcache ab.
-    pub fn set_overview_cache(&self, rev: u64, etag: String, courts_json: String, ms: u64) {
+    /// Legt die gebaute Feld-Liste samt ihrer Ordnungszahlen als Antwortcache
+    /// ab.
+    pub fn set_overview_cache(
+        &self,
+        rev: u64,
+        etag: String,
+        courts_json: String,
+        seqs_json: String,
+        ms: u64,
+    ) {
         *self.overview_cache.write().unwrap() = Some(OverviewCache {
             rev,
             etag,
             courts_json,
+            seqs_json,
             gebaut_ms: ms,
         });
     }
@@ -3777,9 +3800,6 @@ impl TabletState {
                 let official_ids = self.court_official_ids(m);
                 CourtOverview {
                     court_id: court.id,
-                    // Ordnung für die Anzeige (Spec monitor-livestand-push,
-                    // S4) — dieselbe Zahl wie im Nudge dieses Felds.
-                    seq: self.monitor_seq_of(court.id),
                     court: court.name.clone(),
                     // Hallenname nur bei Mehr-Hallen-Turnieren; sonst leer.
                     location: snap.court_location_name(court.id),
@@ -3909,6 +3929,15 @@ impl TabletState {
     }
 
     pub fn monitor_court(&self, court_id: i64) -> MonitorCourt {
+        // Ordnungszahl **zuerst** (Spec monitor-livestand-push, S4): Wird sie
+        // nach dem Inhalt gelesen, kann sie neuer sein als er — die Anzeige
+        // merkte sich dann eine Zahl, die zu einem Stand gehört, den sie nie
+        // gesehen hat, und verwürfe den zugehörigen Nudge als „schon
+        // bekannt". Der Punkt erschiene erst beim nächsten Fallback-Poll.
+        // In dieser Reihenfolge ist die Zahl höchstens ÄLTER als der Inhalt,
+        // und das ist harmlos: Der nächste Nudge holt ihn nach
+        // (Review-Fund 19.08.2026).
+        let seq = self.monitor_seq_of(court_id);
         let guard = self.snapshot.read().unwrap();
         let tournament_name = guard
             .as_ref()
@@ -3946,9 +3975,8 @@ impl TabletState {
             // Aufgabe und Startzeit — nie den Wiedergabe-Verlauf.
             court_state: self.display_court_state(court_id),
             on_court_since_ms,
-            // Ordnung für die Anzeige (Spec monitor-livestand-push, S4):
-            // dieselbe Zahl, die der letzte Nudge dieses Felds trug.
-            seq: self.monitor_seq_of(court_id),
+            // Ordnung für die Anzeige — oben vor dem Inhalt gelesen.
+            seq,
         }
     }
 
@@ -6606,7 +6634,13 @@ mod tests {
     }
 
     #[test]
-    fn die_uebersicht_traegt_die_sequenz_je_feld() {
+    fn die_ordnungszahlen_stehen_neben_der_feldliste() {
+        // Sie gehören **nicht** in `CourtOverview`: Die Marke der
+        // `/health`-Antwort ist ein Streuwert über die Feld-Liste, und die
+        // Zahlen steigen bei jedem Anstoß — auch bei einem ohne sichtbare
+        // Folge. Steckten sie in der Liste, wechselte die Marke jedes Mal und
+        // die Bestätigung ohne Nutzdaten aus S1 wäre wirkungslos
+        // (Review-Fund 19.08.2026).
         let st = TabletState::default();
         st.set_snapshot(snapshot(
             vec![match_on(1, Some(101), MatchStatus::OnCourt)],
@@ -6614,15 +6648,26 @@ mod tests {
         ));
         st.notify_monitor(101);
 
-        let ov = st.overview();
-        let feld1 = ov.iter().find(|c| c.court_id == 101).expect("Feld 101");
-        let feld2 = ov.iter().find(|c| c.court_id == 102).expect("Feld 102");
+        let seqs = st.monitor_seqs();
         assert_eq!(
-            feld1.seq,
-            st.monitor_seq_of(101),
+            seqs.get(&101).copied(),
+            Some(st.monitor_seq_of(101)),
             "dieselbe Zahl wie im Nudge"
         );
-        assert_eq!(feld2.seq, 0, "unberührtes Feld trägt 0");
+        assert!(
+            !seqs.contains_key(&102),
+            "unberührtes Feld hat keinen Eintrag (die Anzeige liest das als 0)"
+        );
+
+        // Gegenprobe: Die Feld-Liste selbst bleibt von der Zählung unberührt.
+        // Zwei Bauten um einen Anstoß herum müssen zeichengleich sein.
+        let vorher = serde_json::to_string(&st.overview()).unwrap();
+        st.notify_monitor(101);
+        let nachher = serde_json::to_string(&st.overview()).unwrap();
+        assert_eq!(
+            vorher, nachher,
+            "ein Anstoß ohne Inhaltsänderung darf die Feld-Liste nicht ändern"
+        );
     }
 
     // ── Zuweisungs-Nudge (Spec monitor-livestand-push, S3) ─────────────────
@@ -6950,11 +6995,20 @@ mod tests {
     fn der_uebersichts_cache_gibt_zurueck_was_er_bekam() {
         let st = TabletState::default();
         assert!(st.overview_cache().is_none(), "kalt = kein Cache");
-        st.set_overview_cache(7, "\"tag-7\"".into(), "[{\"court_id\":1}]".into(), 5_000);
+        st.set_overview_cache(
+            7,
+            "\"tag-7\"".into(),
+            "[{\"court_id\":1}]".into(),
+            "{\"1\":42}".into(),
+            5_000,
+        );
         let c = st.overview_cache().expect("gerade abgelegt");
         assert_eq!(c.rev, 7);
         assert_eq!(c.etag, "\"tag-7\"");
         assert_eq!(c.courts_json, "[{\"court_id\":1}]");
+        // Die Ordnungszahlen liegen mit im Cache — sie gehören zum selben
+        // Bau wie die Feld-Liste (Spec monitor-livestand-push, S4).
+        assert_eq!(c.seqs_json, "{\"1\":42}");
         assert_eq!(c.gebaut_ms, 5_000);
     }
 

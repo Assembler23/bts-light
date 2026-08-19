@@ -992,7 +992,7 @@ async fn health(
         "thirdCallMinutes": ct.third_call_minutes,
     })
     .to_string();
-    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
+    let (courts_json, etag, seqs_json) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
     // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
@@ -1018,8 +1018,11 @@ async fn health(
         // Server-Zeit, sonst Drift durch abweichende Geräteuhren, v0.9.32);
         // `callTimer` (camelCase wie im MonitorState), damit die
         // Multifeld-Übersicht „Zeit seit Aufruf" gleich gaten kann (Plan 4).
-        "{{\"ok\":true,\"courts\":{courts_json},\"serverNowMs\":{jetzt},\
-         \"callTimer\":{call_timer_json}}}"
+        // `seqs` (Spec monitor-livestand-push, S4): Ordnungszahl je Feld,
+        // CourtID → Zahl. Neben der Feld-Liste statt darin, damit die Marke
+        // der Antwort stabil bleibt, solange sich die Anzeige nicht ändert.
+        "{{\"ok\":true,\"courts\":{courts_json},\"seqs\":{seqs_json},\
+         \"serverNowMs\":{jetzt},\"callTimer\":{call_timer_json}}}"
     );
     ctx.tablet
         .perf()
@@ -1050,12 +1053,25 @@ fn uebersicht_json(
     jetzt: u64,
     call_timer_json: &str,
     rev: u64,
-) -> (String, String) {
+) -> (String, String, String) {
     if let Some(c) = ctx.tablet.overview_cache() {
         if c.rev == rev && jetzt.saturating_sub(c.gebaut_ms) < OVERVIEW_CACHE_TTL_MS {
-            return (c.courts_json, c.etag);
+            return (c.courts_json, c.etag, c.seqs_json);
         }
     }
+    // Ordnungszahlen **vor** dem Inhalt lesen (Spec monitor-livestand-push,
+    // S4): So ist eine Zahl höchstens älter als der Stand, zu dem sie
+    // ausgeliefert wird — und das ist die harmlose Richtung. Umgekehrt
+    // merkte sich die Anzeige eine Zahl für einen Stand, den sie nie
+    // gesehen hat, und verwürfe den zugehörigen Nudge als „schon bekannt".
+    //
+    // Sie wandern **neben** die Feld-Liste, nicht hinein: Die Marke ist ein
+    // Streuwert über die Liste, und die Zahlen steigen bei jedem Anstoß —
+    // auch bei einem ohne sichtbare Folge. Steckten sie darin, wechselte die
+    // Marke jedes Mal und die Bestätigung ohne Nutzdaten aus S1 wäre
+    // wirkungslos (Review-Fund 19.08.2026).
+    let seqs_json =
+        serde_json::to_string(&ctx.tablet.monitor_seqs()).unwrap_or_else(|_| "{}".to_string());
     // Hallen-Farben (Spec hallen-farben) für die Multifeld-Übersicht —
     // gleiche kanonische Hallenliste wie Desktop und TL-Web.
     let mut courts = ctx.tablet.overview();
@@ -1080,9 +1096,14 @@ fn uebersicht_json(
     // Schwelle so lange „nichts Neues", bis sich zufällig ein Feld ändert —
     // und rechnete bis dahin mit den alten Minuten (Review-Fund 19.08.2026).
     let etag = inhalts_marke(ctx.tablet.process_tag(), &courts_json, call_timer_json);
-    ctx.tablet
-        .set_overview_cache(rev, etag.clone(), courts_json.clone(), jetzt);
-    (courts_json, etag)
+    ctx.tablet.set_overview_cache(
+        rev,
+        etag.clone(),
+        courts_json.clone(),
+        seqs_json.clone(),
+        jetzt,
+    );
+    (courts_json, etag, seqs_json)
 }
 
 /// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
@@ -5326,6 +5347,7 @@ mod tests {
             c.rev,
             c.etag.clone(),
             c.courts_json.clone(),
+            c.seqs_json.clone(),
             c.gebaut_ms.saturating_sub(300),
         );
         let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
