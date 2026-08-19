@@ -233,14 +233,19 @@ impl SheetStore {
         // Deckel reihenfolgeunabhängig.
         sortiere(&mut neue);
         let platz = MAX_EVENTS_PER_MATCH.saturating_sub(sheet.events.len());
-        let gekappt = neue.len() > platz;
+        let verworfen = neue.len().saturating_sub(platz);
         neue.truncate(platz);
-        if gekappt {
+        if verworfen > 0 {
+            // Die tatsächliche Zahl, nicht der Deckel: Bei einem echten
+            // Vorfall ist „3 nicht aufgenommen" eine Spur, „64" eine
+            // Sackgasse. Ereignis-Inhalte gehören nicht ins Log — es sind
+            // Sanktionsdaten.
             tracing::warn!(
-                "Zettel-Abgleich für Match {match_id}: Deckel erreicht,                  {} Ereignis(se) nicht aufgenommen",
-                MAX_EVENTS_PER_MATCH
+                "Zettel-Abgleich für Match {match_id}: Deckel erreicht, \
+                 {verworfen} Ereignis(se) nicht aufgenommen"
             );
         }
+        let gekappt = verworfen > 0;
         if neue.is_empty() {
             return false; // Deckel war schon voll — nichts ging hinein
         }
@@ -705,6 +710,43 @@ mod tests {
 
         assert_eq!(kennungen(&a, 5), kennungen(&b, 5));
         assert_eq!(kennungen(&a, 5).len(), MAX_EVENTS_PER_MATCH);
+    }
+
+    /// Auch am **Größen**-Deckel darf das Ergebnis nicht an der
+    /// Frame-Reihenfolge hängen. Dort gilt alles-oder-nichts: Passt der
+    /// deterministisch gewählte Zuwachs nicht, wird er komplett verworfen
+    /// — nie ein Teil davon, denn welcher Teil das wäre, hinge wieder an
+    /// der Reihenfolge.
+    #[test]
+    fn auch_am_groessen_deckel_entscheidet_die_menge_nicht_die_reihenfolge() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let a = store_mit_datei(dir_a.path());
+        let b = store_mit_datei(dir_b.path());
+
+        // Maximale Ereignisse: nur mit vollen Zahlenwerten reißt der
+        // Größen-Deckel vor dem Zähl-Deckel (gemessen in E2).
+        let schwer: Vec<MatchEvent> = (0..MAX_EVENTS_PER_MATCH)
+            .map(|i| {
+                let mut e = ereignis(&format!("{i:032x}"), 1, 0, i64::MAX, EventKind::Retract);
+                e.retracts = "a".repeat(MAX_EVENT_ID_LEN);
+                e.ts_ms = u64::MAX;
+                e
+            })
+            .collect();
+        assert!(
+            serde_json::to_string(&schwer).unwrap().len() > MAX_SHEET_LEN,
+            "Fixture reißt den Größen-Deckel nicht — der Test prüft den Pfad nicht"
+        );
+
+        let mut rueckwaerts = schwer.clone();
+        rueckwaerts.reverse();
+        assert!(!a.apply_event_sync(5, schwer));
+        assert!(!b.apply_event_sync(5, rueckwaerts));
+
+        // Beide verwerfen komplett — und zwar gleich.
+        assert_eq!(kennungen(&a, 5), kennungen(&b, 5));
+        assert!(kennungen(&a, 5).is_empty());
     }
 
     /// Ein Match ohne erfasstes Ereignis bekommt keinen Geister-Zettel —
