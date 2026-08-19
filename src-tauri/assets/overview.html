@@ -379,6 +379,25 @@ main {
     return sets.some(function (s) { return (setVal(s, 0) + setVal(s, 1)) > 0; });
   }
 
+  /** Die Satzstand-Spalte einer Mannschaft. Eigene Funktion, weil der
+   *  Teil-Patch (Spec monitor-livestand-push, S5) genau sie erneuert —
+   *  Aufbau und Nachbesserung müssen dasselbe Ergebnis liefern, sonst
+   *  unterschiede sich eine gepatchte Karte von einer frisch gebauten. */
+  function satzSpalte(c, selfIdx, otherIdx) {
+    var sets = Array.isArray(c.sets) ? c.sets : [];
+    var lastIdx = sets.length - 1;
+    var running = !(c.injury || c.official_call);
+    var setsEl = h('div', 'trow__sets');
+    sets.forEach(function (s, i) {
+      var mine = setVal(s, selfIdx), theirs = setVal(s, otherIdx);
+      var cls = 'sset';
+      if (i === lastIdx && running) cls += ' current';
+      else if (mine > theirs) cls += ' won';
+      setsEl.appendChild(h('span', cls, String(mine)));
+    });
+    return setsEl;
+  }
+
   function renderCourt(c) {
     var card = h('div', 'court');
     var head = h('div', 'court__head');
@@ -413,10 +432,6 @@ main {
       if (chip) card.appendChild(chip);
     }
 
-    var sets = Array.isArray(c.sets) ? c.sets : [];
-    var lastIdx = sets.length - 1;
-    var running = !isPause;
-
     // Eine Team-Zeile: bei Doppel die zwei Partner UNTEREINANDER (je Flagge +
     // Name), bei Einzel eine einzelne Zeile; Satzstand rechts.
     function teamRow(names, nats, selfIdx, otherIdx) {
@@ -430,15 +445,7 @@ main {
         nameBox.appendChild(pl);
       });
       row.appendChild(nameBox);
-      var setsEl = h('div', 'trow__sets');
-      sets.forEach(function (s, i) {
-        var mine = setVal(s, selfIdx), theirs = setVal(s, otherIdx);
-        var cls = 'sset';
-        if (i === lastIdx && running) cls += ' current';
-        else if (mine > theirs) cls += ' won';
-        setsEl.appendChild(h('span', cls, String(mine)));
-      });
-      row.appendChild(setsEl);
+      row.appendChild(satzSpalte(c, selfIdx, otherIdx));
       return row;
     }
 
@@ -463,7 +470,14 @@ main {
     // Dynamische Spaltenzahl: wenige Felder → wenige Spalten → grosse Kacheln,
     // die (zusammen mit grid-auto-rows:minmax(0,1fr)) den Schirm füllen.
     grid.style.gridTemplateColumns = 'repeat(' + gridColsFor(g.courts.length) + ', 1fr)';
-    g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
+    g.courts.forEach(function (c) {
+      var karte = renderCourt(c);
+      // Karte je Feld merken (Spec monitor-livestand-push, S5): Der
+      // Teil-Patch bessert später genau diese Elemente nach, statt das
+      // Brett neu zu bauen.
+      kartenNachFeld[c.court_id] = karte;
+      grid.appendChild(karte);
+    });
     return grid;
   }
 
@@ -504,7 +518,10 @@ main {
     if (hallTimer) return; // läuft bereits
     hallTimer = setInterval(function () {
       hallIdx += 1; // render() nimmt modulo der aktuellen Hallenzahl
-      render(lastData);
+      // Voll-Render: Die Rotation tauscht die gezeigte Halle komplett aus.
+      // (Die Sicht-Signatur erkennt das ohnehin — hier ausdrücklich, damit
+      // es beim nächsten Umbau nicht stillschweigend verloren geht.)
+      render(lastData, true);
     }, hallSeconds * 1000);
   }
 
@@ -538,14 +555,185 @@ main {
     messZahl = 0; messSumme = 0; messMax = 0; messUeber16 = 0; messSeit = jetzt;
   }
 
-  function render(data) {
+  // ── Teil-Patch statt Board-Neuaufbau (Spec monitor-livestand-push, S5) ──
+  //
+  // Bis hierher warf jeder eintreffende Stand das komplette Board weg und
+  // baute es neu — bei zwanzig Feldern rund siebzig Mal je Sekunde ein
+  // voller DOM-Neuaufbau auf jedem Pi, für eine Änderung von zwei Ziffern.
+  var kartenNachFeld = {};        // court_id → Karten-Element des letzten Baus
+  var letzterVollRender = 0;      // Zeitpunkt (ms), für den Zwangs-Neubau
+  var letzteSicht = '';           // Anordnung, die gerade auf dem Schirm steht
+  var VOLL_RENDER_SPAETESTENS_MS = 30000;
+
+  /** Darf die Karte dieses Felds nachgebessert werden?
+   *
+   *  **Inline-Kopie von `src/io/courtPatch.mjs`** — dort steht die
+   *  kanonische Fassung samt Test (`scripts/test-court-patch.mjs`, eigener
+   *  CI-Schritt). Änderungen hier und dort gemeinsam.
+   *
+   *  Die Regel ist bewusst streng: Gepatcht wird nur der Normalfall, ein
+   *  gezählter Punkt im laufenden Satz. Ein zu vorsichtiges „nein" kostet
+   *  einen Neubau, den es vorher ohnehin gab; ein zu großzügiges „ja"
+   *  hinterlässt eine Karte, die dauerhaft etwas Falsches zeigt. */
+  function istPatchbar(vorher, nachher, brettGleich, timer) {
+    if (!brettGleich || !vorher || !nachher) return false;
+    if (vorher.court_id !== nachher.court_id) return false;
+    // Beschriftung, Halle und Farbe gelten für freie wie belegte Karten.
+    if ((vorher.court || '') !== (nachher.court || '')) return false;
+    if ((vorher.location || '') !== (nachher.location || '')) return false;
+    if ((vorher.hall_color || '') !== (nachher.hall_color || '')) return false;
+    if ((vorher.match_id || 0) !== (nachher.match_id || 0)) return false;
+    var liveV = istLiveFeld(vorher), liveN = istLiveFeld(nachher);
+    if (liveV !== liveN) return false;
+    // Ein durchgehend freies Feld ist patchbar — es gibt nichts zu tun.
+    // Stünde hier `false`, wäre die ganze Etappe wirkungslos: Die Übersicht
+    // listet ALLE Felder, in jeder Halle ist ständig eines zwischen zwei
+    // Spielen, und ein einziges „nein" zwingt das ganze Brett in den Neubau.
+    if (!liveN) return true;
+    if (!!vorher.injury !== !!nachher.injury) return false;
+    if (!!vorher.official_call !== !!nachher.official_call) return false;
+    var satzZahl = function (c) { return Array.isArray(c.sets) ? c.sets.length : 0; };
+    if (satzZahl(vorher) !== satzZahl(nachher)) return false;
+    if (uhrSichtbar(vorher, timer) !== uhrSichtbar(nachher, timer)) return false;
+    if ((vorher.match_name || '') !== (nachher.match_name || '')) return false;
+    if (!listeGleich(vorher.team1, nachher.team1)) return false;
+    if (!listeGleich(vorher.team2, nachher.team2)) return false;
+    if (!listeGleich(vorher.team1_nationalities, nachher.team1_nationalities)) return false;
+    if (!listeGleich(vorher.team2_nationalities, nachher.team2_nationalities)) return false;
+    return true;
+  }
+  function istLiveFeld(c) {
+    return !!(c && c.match_id && c.match_id > 0 && c.team1 && c.team1.length);
+  }
+  /** Hat sich am Satzstand etwas geändert? Nur dann muss die Karte angefasst
+   *  werden — sonst tauschte ein Punkt auf Feld 3 die Ziffern ALLER Felder
+   *  aus und gäbe einen großen Teil der Ersparnis wieder her. */
+  function satzstandGleich(vorher, nachher) {
+    var a = Array.isArray(vorher && vorher.sets) ? vorher.sets : [];
+    var b = Array.isArray(nachher && nachher.sets) ? nachher.sets : [];
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (setVal(a[i], 0) !== setVal(b[i], 0)) return false;
+      if (setVal(a[i], 1) !== setVal(b[i], 1)) return false;
+    }
+    return true;
+  }
+  function uhrSichtbar(c, timer) {
+    if (!timer || !timer.enabled) return false;
+    if (!c || typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return false;
+    return !(c.injury || c.official_call) && !hasStarted(c);
+  }
+  function listeGleich(a, b) {
+    var x = Array.isArray(a) ? a : [], y = Array.isArray(b) ? b : [];
+    if (x.length !== y.length) return false;
+    return x.every(function (v, i) { return v === y[i]; });
+  }
+  /** Kennung der gezeigten Anordnung: Felder samt Halle, dazu der
+   *  Rotationsstand und ein etwaiger Filter. Ohne Rotationsstand hielte der
+   *  Patch das Umschalten der Halle für „nichts geändert".
+   *
+   *  Inline-Kopie von `sichtSignatur` in `src/io/courtPatch.mjs`; dort mit
+   *  Test (`scripts/test-court-patch.mjs`). Die Anzeige reicht ihre eigenen
+   *  Zustandsgrößen herein, statt sie im Modul vorauszusetzen. */
+  function sichtSignatur(courts) {
+    var list = Array.isArray(courts) ? courts : [];
+    var felder = list.map(function (c) { return c.court_id + ':' + (c.location || ''); }).join('|');
+    return felder + '#' + (hallIdx || 0) + '#' + (hallFilter || '');
+  }
+
+  /** Die Satzstände der **gezeigten** Felder erneuern, soweit sie sich
+   *  geändert haben. Gibt `false` zurück, wenn eine Karte nicht (mehr) im
+   *  Dokument steht — dann baut der Aufrufer neu.
+   *
+   *  Nur die gezeigten: Bei Hallen-Rotation und mit `?halle=` zeichnet die
+   *  Seite nur eine Gruppe, und über `MAX_COURTS` hinaus schneidet sie ab.
+   *  Liefe die Schleife über die volle Feld-Liste, fände sie für jedes nicht
+   *  gezeichnete Feld keine Karte und erzwänge dauerhaft den Neubau — genau
+   *  in den Turnieren, um die es hier geht (Review-Fund 19.08.2026). */
+  function patcheKarten(nachFeldNeu) {
+    var ids = Object.keys(kartenNachFeld);
+    for (var i = 0; i < ids.length; i++) {
+      var c = nachFeldNeu[ids[i]];
+      if (!c) return false;              // gezeigtes Feld fehlt jetzt → Neubau
+      if (!istLiveFeld(c)) continue;     // freie Karte hat keine Satz-Zeilen
+      var karte = kartenNachFeld[ids[i]];
+      if (!karte || !karte.isConnected) return false;
+      var zeilen = karte.querySelectorAll('.trow');
+      if (zeilen.length !== 2) return false;
+      for (var t = 0; t < 2; t++) {
+        var alt = zeilen[t].querySelector('.trow__sets');
+        if (!alt) return false;
+        zeilen[t].replaceChild(satzSpalte(c, t, 1 - t), alt);
+      }
+    }
+    return true;
+  }
+
+  /** `voll = true` erzwingt den Neubau — für Aufrufer, die etwas anderes als
+   *  die Satzstände ändern (der Sekundentakt der Aufruf-Uhr). */
+  function render(data, voll) {
     // Die Messung umschließt den ganzen Aufbau — `renderIntern` kehrt an
     // mehreren Stellen zurück (Leerstand, Hallen-Rotation), eine Messung im
     // Rumpf träfe deshalb nur einen Teil der Fälle.
-    if (renderMessen === '0') return renderIntern(data);
+    if (renderMessen === '0') return renderMitPatch(data, voll);
     var start = performance.now();
-    try { return renderIntern(data); }
+    try { return renderMitPatch(data, voll); }
     finally { messVermerken(performance.now() - start); }
+  }
+
+  /** Nachbessern, wo es reicht — sonst neu bauen. */
+  function renderMitPatch(data, voll) {
+    var jetzt = Date.now();
+    var alt = lastData;
+    var neueCourts = Array.isArray(data && data.courts) ? data.courts : [];
+    var alteCourts = Array.isArray(alt && alt.courts) ? alt.courts : [];
+    // Zwangs-Neubau spätestens alle 30 s: Der Patch fasst nur die Ziffern an;
+    // hat sich unbemerkt etwas anderes verschoben (fehlende Karte, Fehler in
+    // der Regel), heilt sich die Anzeige so von selbst, statt bis zum
+    // nächsten Match-Wechsel falsch zu bleiben.
+    var faellig = voll || jetzt - letzterVollRender >= VOLL_RENDER_SPAETESTENS_MS;
+    var timer = (data && data.callTimer) || null;
+    // Gegen die Sicht des letzten BAUS vergleichen, nicht gegen eine frisch
+    // gebildete: Beim Umschalten der Hallen-Rotation sind die Felder
+    // dieselben, nur `hallIdx` ist weiter — würden beide Signaturen jetzt
+    // gebildet, wären sie gleich und die Rotation bliebe stehen.
+    var jetztSicht = sichtSignatur(neueCourts);
+    var brettGleich = letzteSicht !== '' && letzteSicht === jetztSicht
+      && alteCourts.length > 0
+      // Ein Wechsel der Aufruf-Timer-Einstellung ändert Chips auf allen Karten.
+      && JSON.stringify((alt && alt.callTimer) || null) === JSON.stringify(timer);
+
+    if (!faellig && brettGleich) {
+      var alteNachFeld = {}, neueNachFeld = {};
+      alteCourts.forEach(function (c) { alteNachFeld[c.court_id] = c; });
+      neueCourts.forEach(function (c) { neueNachFeld[c.court_id] = c; });
+      // Geprüft wird nur, was auch auf dem Schirm steht — bei Rotation oder
+      // `?halle=` ist das eine Teilmenge.
+      var gezeigt = Object.keys(kartenNachFeld);
+      var allePatchbar = gezeigt.length > 0 && gezeigt.every(function (id) {
+        return istPatchbar(alteNachFeld[id], neueNachFeld[id], true, timer);
+      });
+      // Hat sich an keinem gezeigten Feld der Satzstand geändert, ist gar
+      // nichts zu tun (etwa ein Anstoß, der nur eine Meldung betraf).
+      var etwasNeu = gezeigt.some(function (id) {
+        return !satzstandGleich(alteNachFeld[id], neueNachFeld[id]);
+      });
+      if (allePatchbar && (!etwasNeu || patcheKarten(neueNachFeld))) {
+        // `lastData` fortschreiben, auch wenn nicht neu gebaut wurde: Die
+        // Hallen-Rotation und der Uhr-Takt zeichnen später aus diesen Daten.
+        lastData = data;
+        return;
+      }
+    }
+    letzterVollRender = jetzt;
+    kartenNachFeld = {};
+    renderIntern(data);
+    // **Nach** dem Bauen: `renderIntern` kann `stopHallRotation()` aufrufen
+    // und dabei `hallIdx` zurücksetzen. Vorher gemerkt, beschriebe der
+    // Schlüssel eine Sicht, die so nie gezeichnet wurde — und der nächste
+    // unveränderte Abruf löste einen überflüssigen Neubau aus
+    // (Review-Fund 19.08.2026).
+    letzteSicht = sichtSignatur(neueCourts);
   }
 
   function renderIntern(data) {
@@ -937,7 +1125,9 @@ main {
       var isPause = !!(c.injury || c.official_call);
       return !isPause && !hasStarted(c);
     });
-    if (hatUhr) render(lastData);
+    // Voll-Render erzwingen: Der Teil-Patch fasst nur die Satzstände an, die
+    // Uhr steht im Kopf der Karte — sie bliebe sonst stehen.
+    if (hatUhr) render(lastData, true);
   }, 1000);
 
   // Der Server schickt über den Monitor-WS nur „Feld X geändert, seq N" (keine

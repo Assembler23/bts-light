@@ -320,6 +320,29 @@ Sie rechnet jetzt aus einem gemerkten Zeitversatz zur Server-Uhr und hat
 einen eigenen Sekundentakt, der nur läuft, solange überhaupt eine Uhr
 sichtbar ist.
 
+## Feld-Übersicht: nur noch die Ziffern neu (seit v0.9.240)
+
+Die Übersicht (`overview.html`) warf bei jedem eintreffenden Stand das
+komplette Board weg und baute alle Kacheln neu — bei zwanzig Feldern rund
+siebzig Mal je Sekunde, für eine Änderung von zwei Ziffern. Genau das
+ruckelte auf schwächeren Pis.
+
+Jetzt tauscht sie im Normalfall nur die Satzstand-Spalten der betroffenen
+Karten aus. **Neu gebaut wird**, sobald sich mehr ändert als der
+Punktestand: neuer Satz, anderes Spiel, Feld wird frei oder belegt,
+Behandlungspause, Turnierleitung gerufen, andere Feld-Menge oder
+-Reihenfolge, andere Halle oder Hallen-Farbe, geänderte Namen oder Nationen,
+gewechselte Sichtbarkeit der Aufruf-Uhr — und beim Umschalten der
+Hallen-Rotation. **Spätestens alle 30 Sekunden** ohnehin einmal komplett:
+Sollte sich je etwas verschoben haben, richtet sich die Anzeige damit von
+selbst wieder ein.
+
+Die Zuständigkeitsgrenze steht als `src/io/courtPatch.mjs` mit eigenem
+CI-Schritt (32 Prüfungen); `overview.html` trägt eine Inline-Kopie.
+
+Der **Einzelfeld-Monitor bleibt unverändert** — er hat nie ein ganzes Bild
+weggeworfen, sondern setzt seine Texte an bestehenden Elementen.
+
 ## Messen, was die Anzeigen kosten (seit v0.9.235)
 
 Erste Etappe der Spec

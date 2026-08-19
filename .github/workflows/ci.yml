@@ -123,6 +123,12 @@ jobs:
       - name: Anzeige-Ordnung seq (JS)
         run: node scripts/test-monitor-seq.mjs
 
+      # Zuständigkeitsgrenze des Teil-Patches der Feld-Übersicht: Gepatcht
+      # wird nur der gezählte Punkt im laufenden Satz. Eine zu großzügige
+      # Regel hinterlässt eine Karte, die dauerhaft Falsches zeigt.
+      - name: Teil-Patch der Übersicht (JS)
+        run: node scripts/test-court-patch.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)
