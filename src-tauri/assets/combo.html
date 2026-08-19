@@ -547,7 +547,7 @@ body.vertical .vset.current { color: #fbbf24; }
   var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch('/monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    fetch('/monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;

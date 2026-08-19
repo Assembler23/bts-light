@@ -273,13 +273,38 @@ Ergibt der Lauf ein deutlich anderes Bild als die Schätzung (4–7 Punkte/s tur
 - [x] `/debug/perf` existiert nur am LAN-Server, nicht am Relay.
       *(Route nur in `tablet/server.rs`; an `relay/` wurde nichts geändert.)*
 
-**Antwortcache (S1)**
-- [ ] Zwei `/health`-Abrufe ohne dazwischenliegende Änderung bauen den Zustand genau einmal.
-- [ ] Die Cache-Antwort ist zeichengleich mit dem Direktbau.
-- [ ] Ein Nudge, ein neuer BTP-Snapshot und ein Config-Schreibvorgang invalidieren je sofort.
-- [ ] Nach 250 ms ohne Invalidierung wird trotzdem neu gebaut (Hart-TTL).
-- [ ] Bei kaltem Cache liefert `/health` denselben Inhalt wie heute (kein Leerstand, kein Fehler).
-- [ ] Ein unveränderter Zustand beantwortet den Fallback-Poll mit HTTP 304.
+**Antwortcache (S1)** — umgesetzt v0.9.236
+- [x] Zwei `/health`-Abrufe ohne dazwischenliegende Änderung bauen den Zustand genau einmal.
+      *(`zwei_abrufe_ohne_aenderung_bauen_den_zustand_nur_einmal`, gemessen über den
+      S0-Zähler `overview_builds`; mit abgeschalteter TTL gegengeprüft.)*
+- [x] Die Cache-Antwort ist zeichengleich mit dem Direktbau.
+      *(`die_cache_antwort_traegt_dieselben_felder_wie_der_direktbau` — beide Wege bauen
+      denselben Umschlag, nur `serverNowMs` ist naturgemäß neu.)*
+- [x] Ein Nudge, ein neuer BTP-Snapshot und ein Config-Schreibvorgang invalidieren je sofort.
+      *(je ein Test; die Config-Quelle meldet an drei Stellen — `ServerCtx::mutate_app_config`,
+      `commands::mutate_config`, `save_config`.)*
+- [x] Nach 250 ms ohne Invalidierung wird trotzdem neu gebaut (Hart-TTL).
+- [x] Bei kaltem Cache liefert `/health` denselben Inhalt wie heute (kein Leerstand, kein Fehler).
+      *(der kalte Weg **ist** der Direktbau — der Cache sitzt davor, nicht dazwischen.)*
+- [x] Ein unveränderter Zustand beantwortet den Fallback-Poll mit HTTP 304.
+      *(`ein_unveraenderter_stand_wird_mit_304_bestaetigt`, samt Gegenprobe: nach einem
+      Nudge gilt die alte Marke nicht mehr.)*
+
+**Zwei Dinge, die an S1 hingen und in derselben Etappe mitkamen:**
+
+- **Der Uhr-Versatz wird beim Empfang gesetzt, nicht im Render.** `render` läuft auch mit
+  gemerkten Daten (Hallen-Rotation), deren `serverNowMs` längst alt ist — der Versatz
+  liefe sonst mit jedem solchen Render weiter zurück.
+- **Die Aufruf-Uhr bekam einen eigenen Sekundentakt.** Sie lief bisher beiläufig mit,
+  weil viermal je Sekunde ein voller Stand kam und die Seite komplett neu zeichnete.
+  Sobald ein unveränderter Stand mit `304` beantwortet wird, gibt es keinen Anlass mehr
+  zu zeichnen — die Minutenzahl wäre stehengeblieben. Der Takt läuft nur, solange
+  überhaupt eine Uhr sichtbar ist, und ein Render je Sekunde bleibt deutlich sparsamer
+  als die vier davor.
+
+Der Relay bleibt in dieser Etappe unberührt: Er beantwortet `/health` im Cloud-Betrieb
+selbst und kennt weder Marke noch Cache. Eine Seite, die `If-None-Match` schickt, bekommt
+dort weiterhin die volle Antwort ohne Marke und verhält sich wie bisher.
 
 **Entprellung (S2)**
 - [ ] Drei Punkte innerhalb einer Sekunde erzeugen genau einen Schreibvorgang.

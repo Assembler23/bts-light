@@ -286,7 +286,15 @@ main {
   var hallTimer = null;
   // Aufruf-Timer: Server-Zeit + Config aus dem letzten /health-Poll (Plan 4),
   // damit renderCourt „Zeit seit Aufruf" relativ zur Server-Uhr rechnen kann.
-  var callNow = 0;
+  //
+  // Gemerkt wird der **Versatz** zur eigenen Uhr, nicht der Zeitpunkt: Seit
+  // dem Antwortcache (Spec monitor-livestand-push, S1) beantwortet der Server
+  // einen unveränderten Stand mit einer leeren Bestätigung — dann kommt keine
+  // neue Server-Zeit, und eine gemerkte Uhrzeit stünde still. Der Versatz
+  // dagegen bleibt gültig; die Uhr läuft aus der lokalen Zeit weiter und
+  // bleibt trotzdem an der Server-Uhr ausgerichtet (gegen Geräte-Drift).
+  var callOffset = 0;
+  function serverJetzt() { return Date.now() + callOffset; }
   var callTimer = null;
 
   // Anzeige-Cap bei sehr großen Turnieren (sollte nicht greifen, dient
@@ -348,7 +356,7 @@ main {
   function callChip(c) {
     if (!callTimer || !callTimer.enabled) return null;
     if (typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return null;
-    var sec = Math.max(0, Math.floor((callNow - c.on_court_since_ms) / 1000));
+    var sec = Math.max(0, Math.floor((serverJetzt() - c.on_court_since_ms) / 1000));
     var min = sec / 60;
     var label = '1. Aufruf', tone = 'ok';
     if (typeof callTimer.thirdCallMinutes === 'number' && callTimer.thirdCallMinutes > 0
@@ -542,9 +550,10 @@ main {
 
   function renderIntern(data) {
     lastData = data;
-    // Aufruf-Timer-Bezug aus dem Poll übernehmen (Server-Uhr gegen Geräte-Drift).
-    callNow = (data && typeof data.serverNowMs === 'number' && data.serverNowMs > 0)
-      ? data.serverNowMs : Date.now();
+    // Der Uhr-Versatz wird NICHT hier gesetzt, sondern beim Empfang der
+    // Antwort: `render` läuft auch mit gemerkten Daten (Hallen-Rotation,
+    // Uhr-Takt), und deren `serverNowMs` ist dann längst alt — der Versatz
+    // liefe mit jedem solchen Render weiter zurück.
     callTimer = (data && data.callTimer) || null;
     var board = document.getElementById('board');
     board.textContent = '';
@@ -658,7 +667,12 @@ main {
   var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    // `src=check` statt `push`/`poll`: Dieser Abruf ist KEINE Anzeige-
+    // Aktualisierung, sondern die sekündliche Frage „bin ich noch diesem
+    // Ziel zugewiesen?". Ohne eigene Kennzeichnung liefe er in den
+    // Court-Monitor-Zähler und verfälschte die Messung, an der alle
+    // Folge-Etappen hängen (Review-Fund 19.08.2026).
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
@@ -758,6 +772,13 @@ main {
   // Der eigentliche Health-Fetch (ohne eigene Terminierung). In-Flight-Schutz:
   // Nudge und Fallback teilen sich diesen Fetch; läuft schon einer, wird EIN
   // Nachschlag gemerkt, damit am Ende sicher der neueste Stand geholt wird.
+  // Marke der zuletzt empfangenen Antwort. Damit fragt der Fallback-Poll
+  // „hat sich etwas geändert?" statt „gib mir alles" — bei unverändertem
+  // Stand kommt eine leere Bestätigung (HTTP 304) statt rund 16 KB
+  // (Spec monitor-livestand-push, S1). Der Browser fragt nicht von selbst
+  // bedingt nach: `cache: 'no-store'` schaltet seinen eigenen Zwischen-
+  // speicher ab, deshalb setzen wir den Kopf hier von Hand.
+  var letzteMarke = null;
   function pollHealth() {
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
@@ -765,13 +786,30 @@ main {
     // der jetzt noch eintrifft, gehört zum NÄCHSTEN Abruf, nicht zu diesem.
     var quelle = naechsteQuelle;
     naechsteQuelle = 'poll';
-    fetch(healthUrl(quelle), { cache: 'no-store' })
+    var kopf = letzteMarke ? { 'If-None-Match': letzteMarke } : undefined;
+    fetch(healthUrl(quelle), { cache: 'no-store', headers: kopf })
       .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        // Erst prüfen, DANN entwarnen: Ein dauerhaft fehlerhafter Status
+        // (Relay-404 bei unbekanntem Namespace, 502/503) setzte sonst bei
+        // jeder Antwort den Fehlerzähler zurück, bevor er geworfen wird —
+        // die Schwelle für die Offline-Blende wäre nie erreicht und der TV
+        // zeigte endlos den eingefrorenen Stand (Review-Fund 19.08.2026).
+        if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
+        errorCount = 0; backoffUntil = 0; showOffline(false);
+        // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
+        // nichts zu rendern — und kein Grund, „offline" zu melden.
+        if (r.status === 304) { pollDone(); return null; }
+        var marke = r.headers.get('ETag');
+        if (marke) letzteMarke = marke;
         return r.json();
       })
       .then(function (data) {
-        errorCount = 0; backoffUntil = 0; showOffline(false);
+        if (!data) return;   // war ein 304
+        // Uhr-Versatz genau hier — nur eine frisch empfangene Antwort trägt
+        // eine gültige Server-Zeit (siehe Kommentar in `renderIntern`).
+        if (typeof data.serverNowMs === 'number' && data.serverNowMs > 0) {
+          callOffset = data.serverNowMs - Date.now();
+        }
         render(data);
         // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —
         // erstmal leer lassen, kein Drama für die Funktionalität.
@@ -837,6 +875,31 @@ main {
   // (irgendein Feld) kommen, ist der Poll pausiert; nach >~1,2 s Stille ODER
   // bei WS-Abriss (mwsOpen=false) läuft er sofort wieder.
   setInterval(function () { if (!pushHealthy()) requestPoll(); }, FALLBACK_MS);
+
+  // Sekundentakt der Aufruf-Uhr. Bis zum Antwortcache (Spec
+  // monitor-livestand-push, S1) lief sie beiläufig mit: Viermal je Sekunde
+  // kam ein voller Stand und die Seite zeichnete komplett neu. Seit ein
+  // unveränderter Stand mit einer leeren Bestätigung beantwortet wird, gäbe
+  // es ohne diesen Takt keinen Anlass mehr zu zeichnen — die Minutenzahl
+  // stünde still. Er läuft nur, solange überhaupt eine Uhr sichtbar ist,
+  // und ein Render je Sekunde bleibt deutlich sparsamer als die vier davor.
+  setInterval(function () {
+    if (!callTimer || !callTimer.enabled || !lastData) return;
+    var courts = (lastData && lastData.courts) || [];
+    // Dieselbe Bedingung wie `renderCourt`: Der Chip erscheint NUR in der
+    // Wartephase (aufgerufen, noch nicht am Zählen). `on_court_since_ms`
+    // allein zu prüfen genügt nicht — es bleibt auch am laufenden Spiel
+    // gesetzt, und in einer Halle, in der überall gezählt wird, baute die
+    // Seite dann jede Sekunde das ganze Board neu, ohne dass sich etwas
+    // ändert: genau der Posten, den diese Etappe einsparen soll
+    // (Review-Fund 19.08.2026).
+    var hatUhr = courts.some(function (c) {
+      if (typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return false;
+      var isPause = !!(c.injury || c.official_call);
+      return !isPause && !hasStarted(c);
+    });
+    if (hatUhr) render(lastData);
+  }, 1000);
 
   // Der Server schickt über den Monitor-WS nur „Feld X geändert, seq N" (keine
   // Score-Daten); wir lösen daraufhin den bestehenden Health-Fetch aus. Die

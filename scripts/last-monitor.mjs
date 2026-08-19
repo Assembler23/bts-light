@@ -76,6 +76,7 @@ const stat = {
   healthAbrufe: 0,
   healthBytes: 0,
   healthFehler: 0,
+  health304: 0,
   courtAbrufe: 0,
   courtBytes: 0,
   courtFehler: 0,
@@ -135,6 +136,7 @@ function starteUebersicht(nr) {
   let letzterStart = 0;
   let coalesceTimer = null;
   let quelle = "poll";
+  let marke = null; // zuletzt empfangener ETag (Spec S1)
   const istMessend = nr === 0; // nur eine Übersicht prüft die Latenz
 
   async function hole() {
@@ -146,10 +148,23 @@ function starteUebersicht(nr) {
     const src = quelle;
     quelle = "poll";
     try {
-      const r = await fetch(`${BASE}health?src=${src}`, { cache: "no-store" });
-      const text = await r.text();
+      // Marke mitschicken wie die echte Anzeige (Spec S1): Ohne sie käme
+      // jeder Abruf mit vollem Rumpf zurück, und eine Nachher-Messung
+      // zeigte die Entlastung durch den Antwortcache gar nicht.
+      const kopf = marke ? { "If-None-Match": marke } : undefined;
+      const r = await fetch(`${BASE}health?src=${src}`, { cache: "no-store", headers: kopf });
       stat.healthAbrufe++;
-      stat.healthBytes += text.length;
+      if (r.status === 304) {
+        stat.health304++;
+        return;
+      }
+      const neueMarke = r.headers.get("etag");
+      if (neueMarke) marke = neueMarke;
+      const text = await r.text();
+      // Echte Bytes, nicht UTF-16-Codeunits: Umlaute in Spieler- und
+      // Hallennamen wären sonst als ein Byte gezählt, während der Server
+      // daneben `json.len()` meldet.
+      stat.healthBytes += Buffer.byteLength(text, "utf8");
       if (istMessend) {
         try {
           pruefeLatenz(JSON.parse(text).courts);
@@ -421,6 +436,11 @@ async function main() {
   console.log(
     `/health                  ${stat.healthAbrufe} Abrufe (${(stat.healthAbrufe / s).toFixed(1)}/s), ` +
       `${mb(stat.healthBytes)} MB/s`,
+  );
+  console.log(
+    `davon „nichts Neues"     ${stat.health304} (${
+      stat.healthAbrufe > 0 ? ((stat.health304 * 100) / stat.healthAbrufe).toFixed(0) : 0
+    } %) — HTTP 304, ohne Nutzdaten`,
   );
   console.log(
     `/court/{id}/state        ${stat.courtAbrufe} Abrufe (${(stat.courtAbrufe / s).toFixed(1)}/s), ` +

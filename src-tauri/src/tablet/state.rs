@@ -644,6 +644,22 @@ pub struct TabletState {
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
+    /// Revision des Anzeige-Zustands für den `/health`-Antwortcache (Spec
+    /// monitor-livestand-push, S1). Steigt bei jedem Ereignis, das die
+    /// Übersicht verändern kann: Nudge, neuer BTP-Schnappschuss,
+    /// Config-Schreibvorgang.
+    ///
+    /// Bewusst **kein** Fingerabdruck wie bei `tl_state_rev`: Diese Zahl
+    /// muss nur „hat sich etwas geändert" beantworten, und sie wird auf dem
+    /// heißesten Pfad gelesen. Ein zu häufiges Hochzählen kostet einen
+    /// überflüssigen Neubau — ein zu seltenes zeigte einen alten Stand.
+    /// Deshalb im Zweifel hochzählen, plus die Hart-TTL im Handler.
+    overview_rev: AtomicU64,
+    /// Die zuletzt gebaute Feld-Liste als fertiges JSON (Spec
+    /// monitor-livestand-push, S1). Reiner **Beschleuniger, keine
+    /// Wahrheit**: Ist er kalt oder abgestanden, baut der Handler direkt,
+    /// genau wie vorher.
+    overview_cache: RwLock<Option<OverviewCache>>,
     /// Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
     /// Reine Messgrößen — sie beeinflussen nichts, sie beschreiben nur, was
     /// die Anzeigen kosten. Ohne diese Vorher-Zahlen wird laut Spec keine
@@ -687,6 +703,17 @@ fn schlanker_anzeige_stand(state: &str) -> String {
     obj.remove("history");
     obj.remove("rallyLog");
     serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
+}
+
+/// Ein Eintrag des `/health`-Antwortcaches (Spec monitor-livestand-push, S1).
+/// Gehalten wird **nur die Feld-Liste**, nicht die ganze Antwort: Der
+/// Umschlag trägt `serverNowMs` und ist bei jedem Abruf ein anderer.
+#[derive(Debug, Clone)]
+pub struct OverviewCache {
+    pub rev: u64,
+    pub etag: String,
+    pub courts_json: String,
+    pub gebaut_ms: u64,
 }
 
 /// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
@@ -1061,6 +1088,22 @@ impl TabletState {
             self.load_btp_retry();
         }
         *self.snapshot.write().unwrap() = Some(snapshot);
+        // S1 (Spec monitor-livestand-push): Ein neuer BTP-Stand kann jedes
+        // Feld verändern — Zuweisung, Räumung, Ergebnis, Satzstand. Der
+        // Antwortcache der Übersicht ist damit in jedem Fall überholt.
+        //
+        // **Nach** dem Ablegen des Snapshots, nicht davor: Ein `/health`,
+        // das dazwischen fiele, läse schon die neue Revision, baute aber
+        // noch aus dem alten Stand — und legte ihn unter der neuen Revision
+        // ab. Bis zum nächsten Sync-Zyklus lieferte der Server dann den
+        // alten Stand, ETag-Abrufer bekämen sogar „nichts Neues"
+        // (Review-Fund 19.08.2026; `notify_monitor` macht es ebenso: erst
+        // schreiben, dann melden).
+        //
+        // Bewusst unbedingt und ohne Vergleich: Ein übersehener Unterschied
+        // wäre ein falscher Stand auf allen Anzeigen, ein überflüssiger
+        // Neubau kostet eine Millisekunde.
+        self.bump_overview_rev();
     }
 
     /// Der Punktverlauf-Speicher (geteilt von LAN-Server, Relay-Client
@@ -2233,6 +2276,11 @@ impl TabletState {
         // Zahl beantwortet „wie oft wird geweckt", die Frage nach „wie viele
         // Anzeigen holen daraufhin was" beantworten die `health_*`-Zähler.
         self.perf.note_nudge();
+        // S1: Ein Nudge heißt „dieses Feld hat sich geändert" — der
+        // Antwortcache der Übersicht ist damit überholt. MUSS vor dem
+        // Verschicken stehen: Die geweckte Anzeige holt sofort, und sie darf
+        // nicht den Stand bekommen, der den Nudge gerade ausgelöst hat.
+        self.bump_overview_rev();
         let seq = {
             let mut seqs = self.monitor_seq.write().unwrap();
             let s = seqs.entry(court_id).or_insert(0);
@@ -2310,6 +2358,31 @@ impl TabletState {
     /// Erkennungstakt noch nichts abgelegt hat.
     pub fn tl_state_cache(&self) -> Option<TlStateCache> {
         self.tl_state_cache.read().unwrap().clone()
+    }
+
+    /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
+    pub fn overview_rev(&self) -> u64 {
+        self.overview_rev.load(Ordering::Relaxed)
+    }
+
+    /// Meldet eine Änderung, die die Übersicht betreffen kann.
+    pub fn bump_overview_rev(&self) {
+        self.overview_rev.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Legt die gebaute Feld-Liste als Antwortcache ab.
+    pub fn set_overview_cache(&self, rev: u64, etag: String, courts_json: String, ms: u64) {
+        *self.overview_cache.write().unwrap() = Some(OverviewCache {
+            rev,
+            etag,
+            courts_json,
+            gebaut_ms: ms,
+        });
+    }
+
+    /// Der abgelegte Antwortcache — `None`, solange nichts gebaut wurde.
+    pub fn overview_cache(&self) -> Option<OverviewCache> {
+        self.overview_cache.read().unwrap().clone()
     }
 
     /// Die Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
@@ -6269,6 +6342,48 @@ mod tests {
         let s = st.perf().snapshot();
         assert_eq!(s.persist_calls, 0);
         assert_eq!(s.nudges_sent, 1);
+    }
+
+    // ── Antwortcache der Übersicht (Spec monitor-livestand-push, S1) ───────
+
+    #[test]
+    fn die_anzeige_revision_steigt_bei_jedem_aenderungs_ereignis() {
+        // Der Cache-Schlüssel. Steigt er nicht, zeigte eine Anzeige bis zum
+        // Ablauf der Hart-TTL einen überholten Stand.
+        let st = TabletState::default();
+        let start = st.overview_rev();
+
+        st.notify_monitor(101);
+        let nach_nudge = st.overview_rev();
+        assert!(nach_nudge > start, "ein Nudge ändert die Anzeige");
+
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        let nach_snapshot = st.overview_rev();
+        assert!(
+            nach_snapshot > nach_nudge,
+            "ein neuer BTP-Stand ändert die Anzeige"
+        );
+
+        st.bump_overview_rev();
+        assert!(
+            st.overview_rev() > nach_snapshot,
+            "und jede weitere gemeldete Änderung (z. B. Config) ebenso"
+        );
+    }
+
+    #[test]
+    fn der_uebersichts_cache_gibt_zurueck_was_er_bekam() {
+        let st = TabletState::default();
+        assert!(st.overview_cache().is_none(), "kalt = kein Cache");
+        st.set_overview_cache(7, "\"tag-7\"".into(), "[{\"court_id\":1}]".into(), 5_000);
+        let c = st.overview_cache().expect("gerade abgelegt");
+        assert_eq!(c.rev, 7);
+        assert_eq!(c.etag, "\"tag-7\"");
+        assert_eq!(c.courts_json, "[{\"court_id\":1}]");
+        assert_eq!(c.gebaut_ms, 5_000);
     }
 
     #[test]

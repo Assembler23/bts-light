@@ -32,6 +32,16 @@ pub enum Quelle {
     Push,
     /// Fallback-Takt — oder eine alte Seite, die noch kein `src` sendet.
     Poll,
+    /// **Keine Anzeige-Aktualisierung** (`&src=check`): die sekündliche
+    /// Frage der Info-Seiten „bin ich noch diesem Ziel zugewiesen?".
+    ///
+    /// Sie trifft dieselbe Route wie der Court-Monitor, hat aber nichts mit
+    /// der Anzeige-Last zu tun. Ohne eigene Kennzeichnung stünden bei zwanzig
+    /// Info-Displays zwanzig Abrufe je Sekunde im Court-Monitor-Zähler,
+    /// obwohl kein einziger Court-Monitor hängt — die Vorher-Messung, auf
+    /// der alle Folge-Etappen aufsetzen, mäße zwei verschiedene Dinge in
+    /// einem Wert (Review-Fund 19.08.2026).
+    Pruefung,
 }
 
 impl Quelle {
@@ -43,6 +53,7 @@ impl Quelle {
     pub fn aus_query(src: Option<&str>) -> Self {
         match src {
             Some("push") => Quelle::Push,
+            Some("check") => Quelle::Pruefung,
             _ => Quelle::Poll,
         }
     }
@@ -87,6 +98,7 @@ impl PerfCounters {
         let (n, b) = match quelle {
             Quelle::Push => (&self.health_push, &self.health_push_bytes),
             Quelle::Poll => (&self.health_poll, &self.health_poll_bytes),
+            Quelle::Pruefung => return,
         };
         n.fetch_add(1, Ordering::Relaxed);
         b.fetch_add(bytes, Ordering::Relaxed);
@@ -97,6 +109,7 @@ impl PerfCounters {
         let (n, b) = match quelle {
             Quelle::Push => (&self.court_state_push, &self.court_state_push_bytes),
             Quelle::Poll => (&self.court_state_poll, &self.court_state_poll_bytes),
+            Quelle::Pruefung => return,
         };
         n.fetch_add(1, Ordering::Relaxed);
         b.fetch_add(bytes, Ordering::Relaxed);
@@ -390,6 +403,24 @@ mod tests {
         assert_eq!(Quelle::aus_query(Some("irgendwas")), Quelle::Poll);
         assert_eq!(Quelle::aus_query(Some("poll")), Quelle::Poll);
         assert_eq!(Quelle::aus_query(Some("push")), Quelle::Push);
+        assert_eq!(Quelle::aus_query(Some("check")), Quelle::Pruefung);
+    }
+
+    #[test]
+    fn ein_zuweisungs_check_zaehlt_gar_nicht() {
+        // Die Info-Seiten fragen sekündlich „bin ich noch zugewiesen?" über
+        // dieselbe Route wie der Court-Monitor. Zwanzig Info-Displays
+        // stünden sonst als zwanzig Court-Monitor-Abrufe je Sekunde in der
+        // Messung, obwohl kein einziger Court-Monitor hängt.
+        let p = PerfCounters::default();
+        p.note_court_state(Quelle::Pruefung, 500);
+        p.note_health(Quelle::Pruefung, 500);
+        let s = p.snapshot();
+        assert_eq!(s.court_state_poll, 0);
+        assert_eq!(s.court_state_push, 0);
+        assert_eq!(s.court_state_poll_bytes, 0);
+        assert_eq!(s.health_poll, 0);
+        assert_eq!(s.health_push, 0);
     }
 
     #[test]

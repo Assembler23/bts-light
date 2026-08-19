@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.236
+
+- **Der Turnier-PC rechnet für die Anzeigen nur noch, wenn sich etwas
+  geändert hat.** Bisher berechnete er bei jedem Abruf jeder Anzeige den
+  Zustand **aller** Felder neu — bei zwanzig Anzeigen rund siebzig Mal je
+  Sekunde für eine Information, die sich alle paar Sekunden um ein paar
+  Punkte ändert. Jetzt rechnet er einmal und gibt das Ergebnis aus, bis ein
+  Punkt fällt, BTP etwas Neues meldet oder eine Einstellung gespeichert
+  wird. Spätestens nach einer Viertelsekunde rechnet er ohnehin neu.
+- **Hat sich nichts geändert, kommt auch nichts über die Leitung.** Die
+  Anzeige fragt „ist es noch dasselbe?" und bekommt eine leere Bestätigung
+  statt rund 16 Kilobyte. Für die Turnierleitung ändert sich nichts: Die
+  Anzeigen reagieren genauso schnell wie vorher.
+- Zwei Dinge im Hintergrund, damit das nicht auffällt: Die Uhr „Zeit seit
+  Aufruf" läuft jetzt aus einem gemerkten Zeitversatz weiter, statt bei
+  jedem Abruf neu gestellt zu werden — sonst wäre sie stehengeblieben,
+  sobald nichts mehr übertragen wird.
+- Zweite von sieben Etappen der Spec `monitor-livestand-push`. Die
+  Vorher-Messung aus v0.9.235 hatte 74 Berechnungen je Sekunde und
+  1,13 MB/s gezeigt.
+
 ## v0.9.235
 
 - **Der Turnier-PC misst jetzt, was seine Anzeigen kosten.** Für die
