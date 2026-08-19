@@ -334,6 +334,19 @@
     /* Modal-Inhalt liegt auf einer hellen Karte (der Scrim dunkelt nur den
        Hintergrund ab). Titel/Optionen erben --text. */
     .modal.visible { display: flex; color: var(--text); }
+/* Das Ereignis-Modal liegt ÜBER dem Pausen-Overlay (z 15).
+   Die Spec sah zunächst „darunter" vor, damit es „Weiterspielen" nie
+   verdeckt — das war aber unvereinbar damit, dass Ereignisse GERADE in
+   Pausen erfassbar sein sollen: Unter dem Overlay ist das Modal
+   vollständig verdeckt und unbedienbar, jeder Tipp landet auf dem
+   Overlay. Also darüber, und die ursprüngliche Absicht anders
+   eingelöst: Es hat immer ein sichtbares „Abbrechen", und `endBreak`
+   schließt es selbst (Review-Befund E6). */
+#card-modal.visible { z-index: 18; }
+/* Rot deaktiviert, wenn der Punkt nicht buchbar wäre — sichtbar
+   ausgegraut statt still wirkungslos. */
+.modal .opt.disabled { opacity: .38; pointer-events: none; }
+.modal .hinweis { font-size: .82rem; opacity: .8; margin: .4rem .6rem 0; text-align: center; }
     .modal .title { font-size: 1.6rem; font-weight: 800; color: #fff; }
     .modal .subtitle { font-size: 1rem; color: #e2e8f0; margin-top: -.8rem; }
     .modal .options {
@@ -876,7 +889,22 @@
 
 <!-- Schiri-Modus: Karte/Verwarnung vergeben (Spieler → Farbe). -->
 <div class="modal" id="card-modal">
-  <div class="settings-view" id="card-player-view">
+  <!-- Erste Ansicht: Art des Vorgangs. Karten brauchen einen Spieler,
+       Unterbrechungen und Überstimmungen nicht — deshalb die Verzweigung
+       hier und nicht erst nach der Spielerwahl. -->
+  <div class="settings-view" id="card-kind-view">
+    <div class="title">Vorgang festhalten</div>
+    <div class="options">
+      <div class="opt" data-kind="card">🟨🟥 Karte / Verwarnung</div>
+      <div class="opt" data-kind="injury_start">🩹 Behandlung beginnt</div>
+      <div class="opt" data-kind="injury_end">🩹 Behandlung endet</div>
+      <div class="opt" data-kind="suspension">⏸ Unterbrechung</div>
+      <div class="opt" data-kind="overrule">↩ Überstimmung</div>
+      <div class="opt" data-kind="referee_call">📣 Oberschiedsrichter gerufen</div>
+    </div>
+    <div class="opt settings-wide" id="card-kind-cancel">Abbrechen</div>
+  </div>
+  <div class="settings-view" id="card-player-view" hidden>
     <div class="title">Karte / Verwarnung</div>
     <div class="subtitle">Spieler wählen</div>
     <div class="options" id="card-player-list"></div>
@@ -888,6 +916,9 @@
       <div class="opt card-yellow" id="card-yellow">🟨 Gelb – Verwarnung</div>
       <div class="opt card-red" id="card-red">🟥 Rot – Fehler (Gegner +1)</div>
       <div class="opt card-black" id="card-black">⬛ Schwarz – Disqualifikation</div>
+    </div>
+    <div class="hinweis" id="card-red-hint" hidden>
+      Rot ist gerade nicht möglich: Der Punkt ließe sich nicht buchen.
     </div>
     <div class="opt settings-wide" id="card-back">Zurück</div>
   </div>
@@ -1085,6 +1116,13 @@ const STATE = {
   lastEvent: /** @type {null | {type:string, [k:string]:any}} */ (null),
   // Karten/Verwarnungen (Phase 2), lokal: {team,index,name,color,ts,score}.
   cards: /** @type {object[]} */ ([]),
+  // Zettel-Ereignisse (Spec schiedsrichterzettel-druck, ADR 0037/0038):
+  // Karten, Verletzungen, Unterbrechungen, Überstimmungen, Aufschlagfolge.
+  // Anders als STATE.cards reisen sie zum Host — aber nie zu badhub und
+  // nie in den Liveticker. Der Bestand ist append-only: Eine Rücknahme ist
+  // ein zusätzlicher Eintrag, gelöscht wird nichts.
+  events: /** @type {object[]} */ ([]),
+  eventSeq: 0,
 
   // Punktverlauf (Spec punktverlauf-graph, ADR 0014): je Satz die
   // Ballwechsel-Folge in Team-A/B-Koordinaten. `sets[i]` = { startA,
@@ -1224,6 +1262,9 @@ const els = {
   umpireCards: document.getElementById('umpire-cards'),
   umpireCardBtn: document.getElementById('umpire-card-btn'),
   cardModal: document.getElementById('card-modal'),
+  cardKindView: document.getElementById('card-kind-view'),
+  cardKindCancel: document.getElementById('card-kind-cancel'),
+  cardRedHint: document.getElementById('card-red-hint'),
   cardPlayerView: document.getElementById('card-player-view'),
   cardColorView: document.getElementById('card-color-view'),
   cardPlayerList: document.getElementById('card-player-list'),
@@ -1287,6 +1328,7 @@ function connect() {
     // Verlauf komplett nachziehen: Offline gezählte Ballwechsel haben den
     // Host nie erreicht — der Resync ersetzt seinen Stand (AK-2/AK-14).
     sendRallySync();
+    sendMatchEventSync();
     render();
   };
   ws.onmessage = (ev) => {
@@ -1353,6 +1395,7 @@ function connect() {
               persistState(true);
               sendScoreUpdate();
               sendRallySync();
+              sendMatchEventSync();
               render();
             } else {
               // Ein anderer Halter hat legitim weitergezählt ODER das Match ist
@@ -1362,6 +1405,7 @@ function connect() {
               applyPersistedState(p);
               persistState(true);
               sendRallySync();
+              sendMatchEventSync();
               render();
             }
           } else {
@@ -1382,6 +1426,7 @@ function connect() {
               persistState(true); // repariert den Server-Cache mit unserem Stand
               sendScoreUpdate();  // Liveticker/TV ziehen nach
               sendRallySync();    // … und der Punktverlauf ebenso
+              sendMatchEventSync();
               render();
             } else {
               tlog('info', 'state_restore_applied', { localRev, incomingRev });
@@ -1390,6 +1435,7 @@ function connect() {
               // Übernahme/Restore: der geerbte Verlauf wird die Wahrheit des
               // Hosts — das übernehmende Gerät zeichnet nahtlos weiter (AK-10).
               sendRallySync();
+              sendMatchEventSync();
               render();
             }
           }
@@ -1656,6 +1702,11 @@ function startBreak(kind, skipCommit) {
 
 function endBreak() {
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  // Selbstschluss (Spec): Ein Ereignis-Modal, das noch aus der Pause
+  // offen steht, poppt sonst über das wieder laufende Spiel — und die
+  // rote Karte darin wäre inzwischen ohnehin wieder erlaubt, ohne dass
+  // der Schiedsrichter das gewollt hätte.
+  if (els.cardModal && els.cardModal.classList.contains('visible')) closeCardModal();
   if (STATE.pause) {
     tlog('info', 'break_end', { kind: STATE.pause.kind });
     // Behandlungspause beendet → Verletzungs-Meldung zurücknehmen.
@@ -1915,6 +1966,8 @@ function persistState(fromRestore) {
     // mit (state_sync → state_restore) — das neue Gerät zeichnet nahtlos
     // weiter und resynct den Host (AK-10).
     rallyLog: STATE.rallyLog,
+    events: STATE.events,
+    eventSeq: STATE.eventSeq,
   };
   const json = JSON.stringify(snap);
   try { localStorage.setItem(PERSIST_KEY, json); } catch { /* QuotaExceeded o.ä. */ }
@@ -1978,6 +2031,12 @@ function applyPersistedState(p) {
   // Punktverlauf: fehlt er (alter Stand), beginnt die Aufzeichnung beim
   // nächsten Ballwechsel ehrlich „ab Zwischenstand" statt zu raten.
   STATE.rallyLog = p.rallyLog ?? null;
+  // Zettel-Ereignisse VEREINIGEN, nicht ersetzen (ADR 0038): Übernimmt
+  // dieses Gerät ein laufendes Spiel, bringt es womöglich eigene
+  // Ereignisse mit — und der übernommene Stand darf sie nicht
+  // auslöschen, so wenig wie umgekehrt.
+  STATE.events = meVereinigen(STATE.events, p.events || []);
+  STATE.eventSeq = Math.max(STATE.eventSeq || 0, p.eventSeq || 0);
   // Lief die Satzpause während eines Reloads/einer Übernahme ab, wird endBreak
   // nie durchlaufen → die fällige Per-Satz-Aufschlagwahl hier nachholen.
   maybeOpenServeReprompt();
@@ -2000,6 +2059,10 @@ function loadMatch(match) {
   // mit derselben matchId schickt, behalten wir unseren bestehenden Stand
   // (sonst würde nach jedem WS-Drop der Zähl-Stand auf 0:0 zurückspringen).
   if (STATE.match && STATE.match.matchId === match.matchId) return;
+  // Neues Spiel → eigener Zettel. Die Ereignisse hängen am Match, nicht
+  // am Gerät.
+  STATE.events = [];
+  STATE.eventSeq = 0;
   STATE.match = match;
   STATE.setsCompleted = [];
   STATE.currentSet = { left: 0, right: 0 };
@@ -2157,6 +2220,23 @@ function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
   STATE.midGameSetup = false;
   // Spieldauer ab jetzt zählen (nur beim ersten Setup setzen).
   if (!STATE.startedAt) STATE.startedAt = Date.now();
+  // Aufschlagfolge als EREIGNIS festhalten (ADR 0037) — nicht als Feld in
+  // TimelineSet, sonst wäre die Graph-Sicht nicht mehr byte-gleich zu
+  // älteren Seiten. Ohne diesen Eintrag fällt der gedruckte Zettel im
+  // Doppel auf zwei Zeilen zurück, weil die Rotation nicht rekonstruierbar
+  // ist. In TEAM-Koordinaten, nicht in Seiten.
+  const spielerIndex = (teamKey, spieler) => {
+    const arr = STATE.match[teamKey === 'a' ? 'teamA' : 'teamB'] || [];
+    const i = arr.findIndex(p => p.id === spieler.id);
+    return i < 0 ? 0 : i;
+  };
+  erfasseEreignis('serve_start', {
+    team: serverTeamKey === 'a' ? 0 : 1,
+    player: spielerIndex(serverTeamKey, server),
+    receiverTeam: receiverTeamKey === 'a' ? 0 : 1,
+    receiverPlayer: spielerIndex(receiverTeamKey, receiver),
+    phase: 'pre_match',
+  });
   persistState();
   render();
   sendScoreUpdate();
@@ -2192,6 +2272,11 @@ function snapshot() {
     // Punktverlauf mitsichern: undo/reopen über eine Satzgrenze muss auch
     // den Verlauf exakt zurückdrehen (klein: ≤5 Sätze, ≤120 Zeichen je Satz).
     rallyLog: STATE.rallyLog ? JSON.parse(JSON.stringify(STATE.rallyLog)) : null,
+    // Zettel-Ereignisse mitsichern (ADR 0038, Muster rallyLog). Ohne das
+    // nähme ein Undo nach einer roten Karte den Punkt zurück und ließe
+    // die Karte stehen — genau der Fehler, den STATE.cards heute hat.
+    events: STATE.events ? JSON.parse(JSON.stringify(STATE.events)) : [],
+    eventSeq: STATE.eventSeq || 0,
   };
 }
 
@@ -2228,6 +2313,12 @@ function restoreSnapshot(snap) {
   STATE.rallyLog = snap.rallyLog
     ? JSON.parse(JSON.stringify(snap.rallyLog))
     : null;
+  // Zettel-Ereignisse NICHT zurückrollen: Der Bestand ist append-only
+  // (ADR 0038). Was jenseits des Schnitts liegt, nimmt `undo()`
+  // ausdrücklich zurück — der Zettel zeigt die Korrektur, statt sie
+  // verschwinden zu lassen. Nur der Zähler wandert mit, damit neue
+  // Ereignisse nicht dieselbe `seq` bekommen.
+  STATE.eventSeq = Math.max(STATE.eventSeq || 0, snap.eventSeq || 0);
   // Undo/Korrektur führt zurück ins laufende Spiel (setup='playing') — eine
   // ggf. anstehende Per-Satz-Aufschlagwahl ist damit hinfällig.
   STATE.serveSetupTeam = null;
@@ -2432,6 +2523,7 @@ function sendRally(rally) {
   const s = log && log.sets[rally.set - 1];
   if (rally.n === 1 && s && (s.startA !== 0 || s.startB !== 0 || log.midGame)) {
     sendRallySync();
+    sendMatchEventSync();
     return;
   }
   ws.send(JSON.stringify({
@@ -2630,12 +2722,22 @@ function undo() {
     return;
   }
   restoreSnapshot(STATE.history.pop());
+  // Ereignisse jenseits des neuen Schnitts zurücknehmen (ADR 0038): Der
+  // Anker (set, afterN) ist eine POSITION, keine Kennung — nach dem Undo
+  // wird dieselbe Nummer neu vergeben, ein Ereignis „nach Ballwechsel 19"
+  // zeigte danach auf einen anderen Ballwechsel. Also ausdrücklich
+  // zurücknehmen statt stillschweigend verschieben lassen.
+  const schnitt = eventAnker();
+  for (const id of meUndoSchnitt(STATE.events, schnitt.set, schnitt.afterN)) {
+    nimmZurueck(id);
+  }
   STATE.lastEvent = null; // nach Undo neutralen Stand ansagen (kein „Aufschlagwechsel")
   commitScoreView();
   // Undo korrigiert den Verlauf (Spec-Entscheidung): der Host bekommt den
   // gekürzten Stand komplett — nicht ein „Lösch-Frame", das verloren
   // gehen könnte.
   sendRallySync();
+  sendMatchEventSync();
 }
 
 function finishManually() {
@@ -2974,6 +3076,7 @@ function reopen() {
   // Wiedereröffnung dreht auch den Verlauf zurück (finished weg, ggf.
   // letzter Satz wieder offen) — den Host komplett nachziehen.
   sendRallySync();
+  sendMatchEventSync();
 }
 
 // ─────────────────────────── Ergebnis-Übermittlung ────────────────────
@@ -3706,12 +3809,208 @@ function renderUmpireBar() {
   els.umpireBadge.textContent = a.badge || '';
   els.umpireBadge.hidden = !a.badge;
   renderCards();
-  els.umpireCardBtn.hidden = !(STATE.setup === 'playing' && !STATE.finished && !STATE.pause);
+  // Auch in der Satzpause, im 60-s-Intervall, in der Behandlungspause und
+  // vor dem ersten Ballwechsel erfassbar (Spec) — dort passieren die
+  // meisten Verletzungs- und Unterbrechungs-Ereignisse.
+  els.umpireCardBtn.hidden = STATE.finished || !STATE.match;
+}
+
+// ─── Zettel-Ereignisse (Spec schiedsrichterzettel-druck) ───────────────
+/** INLINE-KOPIE von `src/io/matchEvents.mjs` — dort steht die kanonische
+ *  Fassung samt Test (`scripts/test-match-events.mjs`, eigener CI-Schritt).
+ *  Änderungen hier und dort gemeinsam. Die Assets durchlaufen keinen Build
+ *  und können keine Module laden, deshalb die Kopie. */
+const ME_MAX_EVENTS = 64;
+
+function meSortiere(events) {
+  return [...events].sort((a, b) =>
+    (a.set || 0) - (b.set || 0) ||
+    (a.afterN || 0) - (b.afterN || 0) ||
+    (a.seq || 0) - (b.seq || 0) ||
+    String(a.id).localeCompare(String(b.id)));
+}
+
+function meVereinigen(vorhanden, neu) {
+  const bekannt = new Set((vorhanden || []).map(e => e.id));
+  const frisch = [];
+  for (const e of neu || []) {
+    if (!e || !e.id || bekannt.has(e.id)) continue;
+    bekannt.add(e.id);
+    frisch.push(e);
+  }
+  const platz = Math.max(0, ME_MAX_EVENTS - (vorhanden || []).length);
+  return meSortiere([...(vorhanden || []), ...meSortiere(frisch).slice(0, platz)]);
+}
+
+function meUndoSchnitt(events, set, afterN) {
+  const zurueck = new Set((events || []).filter(e => e.kind === 'retract').map(e => e.retracts));
+  return (events || [])
+    .filter(e => e.kind !== 'retract' && !zurueck.has(e.id) && (e.set || 0) === set && (e.afterN || 0) > afterN)
+    .map(e => e.id);
+}
+
+function meIstZurueckgenommen(events, id) {
+  return (events || []).some(e => e.kind === 'retract' && e.retracts === id);
+}
+
+function meAnkerNachBuchung(ankerVorher) {
+  return { set: ankerVorher.set, afterN: (ankerVorher.afterN || 0) + 1 };
+}
+
+function meNeueKennung() {
+  const bytes = new Uint8Array(6);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+/* Ende der Inline-Kopie. */
+
+/** Aktueller Satz (1-basiert) und Zahl der aufgezeichneten Ballwechsel.
+ *  `afterN` ist der Anker des Ereignisses — eine Schnittposition, keine
+ *  Kennung (ADR 0038). */
+function eventAnker() {
+  const satz = (STATE.setsCompleted ? STATE.setsCompleted.length : 0) + 1;
+  const log = STATE.rallyLog;
+  const s = log && log.sets ? log.sets[satz - 1] : null;
+  return { set: satz, afterN: s && s.points ? s.points.length : 0 };
+}
+
+/** Spielabschnitt für das Ereignis. */
+function eventPhase() {
+  if (STATE.finished) return 'post_match';
+  if (STATE.pause) {
+    return STATE.pause.kind === 'eleven' ? 'break_eleven'
+      : STATE.pause.kind === 'game' ? 'break_game' : 'break_injury';
+  }
+  if (STATE.setup !== 'playing') return 'pre_match';
+  const a = eventAnker();
+  return a.afterN === 0 && a.set === 1 ? 'pre_match' : 'play';
+}
+
+/** Ein Ereignis erfassen: anlegen, vereinigen, senden.
+ *
+ *  Erfassen ist `push` + `send` ohne `await` und ruft NIE in die
+ *  Zähl-Logik — ein Ereignis darf das Zählen niemals aufhalten. */
+function erfasseEreignis(kind, opts) {
+  if (!STATE.match) return null;
+  if (STATE.events.length >= ME_MAX_EVENTS) {
+    tlog('warn', 'zettel_deckel', { kind });
+    return null;
+  }
+  const o = opts || {};
+  // Der Anker darf VORGEGEBEN werden. Das ist kein Komfort, sondern
+  // notwendig: Gewinnt der Punkt einer roten Karte den Satz, hat
+  // addPointOnSide den Satz schon nach setsCompleted geschoben und
+  // currentSet zurückgesetzt — eventAnker() zeigte dann auf den NÄCHSTEN,
+  // noch nicht begonnenen Satz mit afterN 0. Die Karte markierte einen
+  // Ballwechsel, den es nicht gibt, und undo() fand sie nie wieder, weil
+  // sein Schnitt im alten Satz sucht (Review-Befund E6).
+  const anker = o.anker || eventAnker();
+  STATE.eventSeq = (STATE.eventSeq || 0) + 1;
+  const e = {
+    id: meNeueKennung(),
+    seq: STATE.eventSeq,
+    set: anker.set,
+    afterN: anker.afterN,
+    scoreA: 0,
+    scoreB: 0,
+    tsMs: Date.now(),
+    kind,
+    team: o.team || 0,
+    player: o.player || 0,
+    receiverTeam: o.receiverTeam || 0,
+    receiverPlayer: o.receiverPlayer || 0,
+    phase: o.phase || eventPhase(),
+  };
+  if (o.retracts) e.retracts = o.retracts;
+  // Stand als Plausibilitätsanker — in Team-Koordinaten, nicht in Seiten.
+  if (STATE.teamOnSide && STATE.currentSet) {
+    e.scoreA = STATE.currentSet[STATE.teamOnSide.a] || 0;
+    e.scoreB = STATE.currentSet[STATE.teamOnSide.b] || 0;
+  }
+  STATE.events = meVereinigen(STATE.events, [e]);
+  sendMatchEvent(e);
+  persistState();
+  return e;
+}
+
+/** Ein Ereignis zurücknehmen — als zusätzlicher Eintrag (ADR 0038). */
+function nimmZurueck(id) {
+  if (!id || meIstZurueckgenommen(STATE.events, id)) return;
+  erfasseEreignis('retract', { retracts: id });
+}
+
+function sendMatchEvent(e) {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !STATE.match) return;
+  if (STATE.locked || STATE.occupied) return; // nur der aktive Zähler
+  ws.send(JSON.stringify({ type: 'match_event', matchId: STATE.match.matchId, event: e }));
+}
+
+/** Kompletter Abgleich. Anders als `rally_sync` ERSETZT er beim Host
+ *  nicht, er VEREINIGT (ADR 0038) — ein Ersatz-Tablet kann damit nichts
+ *  wegnehmen, was es nicht kennt. Deshalb ist es unschädlich, ihn bei
+ *  jeder Gelegenheit zu schicken. */
+function sendMatchEventSync() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !STATE.match) return;
+  if (STATE.locked || STATE.occupied) return;
+  if (!STATE.events || !STATE.events.length) return;
+  ws.send(JSON.stringify({
+    type: 'match_event_sync',
+    matchId: STATE.match.matchId,
+    events: STATE.events,
+  }));
 }
 
 // ─── Karten / Verwarnungen (Phase 2, nur lokal protokolliert) ──────────
+/** Kann eine rote Karte ihren Punkt gerade wirklich verbuchen?
+ *
+ *  Bis hierher hatte `applyCard` die Guards von `addPointOnSide` NICHT
+ *  geprüft — der Punkt konnte damit still verschluckt werden (Pause,
+ *  Spielende, fehlende Aufstellung, 700-ms-Cooldown), die Karte wurde
+ *  aber trotzdem protokolliert. Auf dem Zettel stünde dann eine rote
+ *  Karte ohne den Punkt, den sie erzeugt. Also: Nie eine Karte, deren
+ *  Punkt still verschwindet — lieber deaktiviert mit Hinweis. */
+function roteKarteMoeglich() {
+  if (!STATE.match || STATE.pause || STATE.finished) return false;
+  if (STATE.setup !== 'playing' || !STATE.positions) return false;
+  return Date.now() >= scoreCooldownUntil;
+}
+
 let cardPending = null;
 function cardSymbol(color) { return color === 'yellow' ? '🟨' : color === 'red' ? '🟥' : '⬛'; }
+/** Einmalige Übernahme der alten, nur lokal protokollierten Karten.
+ *
+ *  Vor dieser Etappe lagen Karten ausschließlich unter `CARDS_KEY` im
+ *  localStorage und erreichten den Host nie. Wer mitten im Turnier
+ *  aktualisiert, soll die schon vergebenen Karten nicht verlieren —
+ *  sie wandern einmalig in den Ereignis-Bestand. Ohne Anker-Wissen
+ *  landen sie am Satzanfang; das ist ehrlicher als ein geratener
+ *  Ballwechsel. */
+function uebernehmeAlteKarten() {
+  if (!STATE.match || !STATE.cards || !STATE.cards.length) return;
+  if (STATE.events.some(e => e.kind && e.kind.startsWith('card_'))) return;
+  const uebernommen = STATE.cards.map((c, i) => ({
+    id: meNeueKennung(),
+    seq: i + 1,
+    set: 1,
+    afterN: 0,
+    scoreA: 0,
+    scoreB: 0,
+    tsMs: c.ts || Date.now(),
+    kind: c.color === 'yellow' ? 'card_yellow' : c.color === 'red' ? 'card_red' : 'card_black',
+    team: c.team === 'a' ? 0 : 1,
+    player: c.index || 0,
+    receiverTeam: 0,
+    receiverPlayer: 0,
+    phase: 'pre_match',
+  }));
+  if (!uebernommen.length) return;
+  STATE.events = meVereinigen(STATE.events, uebernommen);
+  STATE.eventSeq = Math.max(STATE.eventSeq || 0, uebernommen.length);
+  tlog('info', 'zettel_uebernahme', { anzahl: uebernommen.length });
+  persistState();
+}
+
 function ensureCardsLoaded() {
   if (!STATE.match) { cardsMatchId = null; return; }
   if (cardsMatchId === STATE.match.matchId) return;
@@ -3730,6 +4029,7 @@ function saveCards() {
 }
 function renderCards() {
   ensureCardsLoaded();
+  uebernehmeAlteKarten();
   els.umpireCards.textContent = '';
   STATE.cards.forEach(c => {
     const chip = document.createElement('span');
@@ -3738,8 +4038,18 @@ function renderCards() {
     els.umpireCards.appendChild(chip);
   });
 }
+/** Erste Ansicht: Art des Vorgangs. */
 function openCardModal() {
-  if (!STATE.match || STATE.setup !== 'playing' || STATE.finished || STATE.pause) return;
+  if (!STATE.match || STATE.finished) return;
+  els.cardKindView.hidden = false;
+  els.cardPlayerView.hidden = true;
+  els.cardColorView.hidden = true;
+  els.cardModal.classList.add('visible');
+}
+
+/** Zweite Ansicht: Spieler wählen (nur für Karten). */
+function openCardPlayerView() {
+  if (!STATE.match) return;
   els.cardPlayerList.textContent = '';
   const sideLabel = (teamKey) =>
     !STATE.teamOnSide ? '' : (STATE.teamOnSide[teamKey] === 'left' ? 'links' : 'rechts');
@@ -3754,10 +4064,16 @@ function openCardModal() {
         els.cardPlayerName.textContent = p.name;
         els.cardPlayerView.hidden = true;
         els.cardColorView.hidden = false;
+        // Rot nur, wenn der Punkt auch zählen kann — sonst deaktiviert
+        // mit Hinweis. Nie eine Karte, deren Punkt still verschluckt wird.
+        const rotGeht = roteKarteMoeglich();
+        els.cardRed.classList.toggle('disabled', !rotGeht);
+        els.cardRedHint.hidden = rotGeht;
       });
       els.cardPlayerList.appendChild(b);
     });
   });
+  els.cardKindView.hidden = true;
   els.cardPlayerView.hidden = false;
   els.cardColorView.hidden = true;
   els.cardModal.classList.add('visible');
@@ -3767,19 +4083,49 @@ function closeCardModal() {
   cardPending = null;
 }
 function applyCard(color) {
-  if (!cardPending || !STATE.match || STATE.setup !== 'playing' || STATE.finished || STATE.pause) {
+  // Karten sind jetzt auch in Pausen und vor dem ersten Aufschlag
+  // erfassbar (Spec): Eine Verwarnung in der Satzpause ist ein normaler
+  // Vorgang. Nur die ROTE Karte braucht einen buchbaren Punkt.
+  if (!cardPending || !STATE.match) {
+    closeCardModal();
+    return;
+  }
+  if (color === 'red' && !roteKarteMoeglich()) {
     closeCardModal();
     return;
   }
   const { teamKey, index, name } = cardPending;
   closeCardModal();
+  // Anker UND Phase VOR der Mutation festhalten: `addPointOnSide` kann
+  // den Satz beenden (setsCompleted wächst, currentSet wird
+  // zurückgesetzt) oder das Match (STATE.finished). Danach gelesen,
+  // zeigte der Anker auf den nächsten Satz und die Phase auf
+  // „post_match" — die Karte markierte einen Ballwechsel, den es nicht
+  // gibt, und das Undo fand sie nie wieder (Review-Befund E6).
+  const ankerVorPunkt = eventAnker();
+  const phaseVorPunkt = eventPhase();
   // Rote Karte: der Gegner bekommt einen Punkt (zählt als regulärer Punkt,
   // inkl. Aufschlag-Update / ggf. Satz-/Matchende über addPointOnSide).
+  let punktGebucht = false;
   if (color === 'red') {
     const oppTeam = teamKey === 'a' ? 'b' : 'a';
     const oppSide = STATE.teamOnSide ? STATE.teamOnSide[oppTeam] : null;
-    if (oppSide) addPointOnSide(oppSide);
+    if (oppSide) {
+      addPointOnSide(oppSide);
+      punktGebucht = true;
+    }
   }
+  erfasseEreignis(
+    color === 'yellow' ? 'card_yellow' : color === 'red' ? 'card_red' : 'card_black',
+    {
+      team: teamKey === 'a' ? 0 : 1,
+      player: index,
+      phase: phaseVorPunkt,
+      // Die rote Karte gehört an den Ballwechsel, den sie erzeugt hat —
+      // also einen weiter als der Stand davor.
+      anker: punktGebucht ? meAnkerNachBuchung(ankerVorPunkt) : ankerVorPunkt,
+    },
+  );
   const stand = umpScoreSpoken();
   const txt = color === 'yellow'
     ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
@@ -3808,12 +4154,27 @@ document.addEventListener('keydown', (ev) => {
 
 els.umpireCardBtn.addEventListener('click', openCardModal);
 els.cardCancel.addEventListener('click', closeCardModal);
+els.cardKindCancel.addEventListener('click', closeCardModal);
+els.cardKindView.querySelectorAll('[data-kind]').forEach(opt => {
+  opt.addEventListener('click', () => {
+    const kind = opt.getAttribute('data-kind');
+    if (kind === 'card') { openCardPlayerView(); return; }
+    // Ereignisse ohne Personenbezug: direkt erfassen. Der Renderer
+    // entscheidet nach `kind`, ob er eine Mannschaft zeigt.
+    erfasseEreignis(kind);
+    closeCardModal();
+    render();
+  });
+});
 els.cardBack.addEventListener('click', () => {
   els.cardColorView.hidden = true;
   els.cardPlayerView.hidden = false;
 });
 els.cardYellow.addEventListener('click', () => applyCard('yellow'));
-els.cardRed.addEventListener('click', () => applyCard('red'));
+els.cardRed.addEventListener('click', () => {
+  if (!roteKarteMoeglich()) return;
+  applyCard('red');
+});
 els.cardBlack.addEventListener('click', () => applyCard('black'));
 
 function toggleUmpireMode() {
