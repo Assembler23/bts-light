@@ -506,6 +506,14 @@ pub struct TabletState {
     /// Er hängt hier, weil LAN-Server, Relay-Client und Tauri-Commands
     /// denselben Stand sehen müssen — wie beim übrigen Tablet-Zustand.
     timeline: crate::tablet::timeline::TimelineStore,
+    /// Zettel-Ereignisse je Match (Spec `schiedsrichterzettel-druck`,
+    /// ADR 0037): Karten, Verletzungen, Unterbrechungen, Aufschlagfolge.
+    /// **Eigener Store neben dem Punktverlauf**, weil das personenbezogene
+    /// Sanktionsdaten sind und `MatchTimeline` personenbezugsfrei bleiben
+    /// muss (ADR 0015). Hängt aus demselben Grund hier wie der
+    /// Punktverlauf: LAN-Server, Relay-Client und Tauri-Commands müssen
+    /// denselben Stand sehen.
+    sheet: crate::tablet::sheet::SheetStore,
     /// Schiedsrichter-Roster (Spec `schiedsrichter-management`, ADR 0022):
     /// Rotationsreihenfolge, Pausen, Sperrlisten, feldweise Schalter und
     /// lokale SR/AR-Zuweisungen — turniergebunden persistiert. Er hängt hier,
@@ -1148,6 +1156,9 @@ impl TabletState {
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
         self.timeline.set_tournament(&snapshot.tournament_name);
+        // Die Zettel-Ereignisse folgen demselben Turnier — eigene Datei,
+        // eigener Wechsel (ADR 0037).
+        self.sheet.set_tournament(&snapshot.tournament_name);
         // Schiedsrichter-Roster ebenso (ADR 0022) — und danach die
         // BTP-Officials-Liste in die Rotationsreihenfolge aufnehmen: neue
         // hinten dran, bekannte auf ihrem Platz. Reihenfolge der beiden
@@ -1215,6 +1226,11 @@ impl TabletState {
     /// und Tauri-Commands).
     pub fn timeline_store(&self) -> &crate::tablet::timeline::TimelineStore {
         &self.timeline
+    }
+
+    /// Der Zettel-Ereignis-Speicher (Spec `schiedsrichterzettel-druck`).
+    pub fn sheet_store(&self) -> &crate::tablet::sheet::SheetStore {
+        &self.sheet
     }
 
     /// Der Schiedsrichter-Roster (Spec `schiedsrichter-management`).
