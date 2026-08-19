@@ -920,9 +920,15 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
     if let Ok(dir) = app.path().app_data_dir() {
         tablet.timeline_store().set_dir(dir.join("punktverlauf"));
+        // Zettel-Ereignisse: eigenes Verzeichnis neben dem Punktverlauf
+        // (ADR 0037) — getrennte Datei, getrennte Deckel, getrennte Route.
+        tablet.sheet_store().set_dir(dir.join("zettel"));
     }
     tablet
         .timeline_store()
+        .set_guid(&config.checkin.tournament_uuid);
+    tablet
+        .sheet_store()
         .set_guid(&config.checkin.tournament_uuid);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());

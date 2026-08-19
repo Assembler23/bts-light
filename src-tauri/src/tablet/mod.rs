@@ -15,6 +15,7 @@ pub mod predict;
 pub mod queue_order;
 pub mod relay_client;
 pub mod server;
+pub mod sheet;
 pub mod slave_bridge;
 pub mod state;
 pub mod timeline;

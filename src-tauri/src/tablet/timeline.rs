@@ -349,7 +349,7 @@ impl TimelineStore {
 /// transliteriert, alles andere wird `-`. Der Name kommt aus BTP (fremde
 /// Eingabe) und landet in einem Pfad — ohne Whitelist wäre das ein
 /// Path-Traversal-Kandidat.
-fn slugify(name: &str) -> String {
+pub(super) fn slugify(name: &str) -> String {
     let mut out = String::new();
     for c in name.to_lowercase().chars() {
         match c {
@@ -405,7 +405,7 @@ fn slugify(name: &str) -> String {
 }
 
 /// Heutiges Datum als `YYYY-MM-DD` (lokale Zeit — Turniere sind lokal).
-fn today() -> String {
+pub(super) fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
