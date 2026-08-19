@@ -196,6 +196,15 @@ pub struct MonitorConfig {
     /// Anzeige-Layout (`split` = „A — Geteilt").
     #[serde(default = "default_layout")]
     pub layout: String,
+    /// Darf die Anzeige ihren Sicherheits-Poll auf vier Sekunden
+    /// verlangsamen, solange ihr Push-Kanal gesund ist (Spec
+    /// monitor-livestand-push, S6)?
+    ///
+    /// `#[serde(default)]` → `false` bei einem älteren Absender, und dann
+    /// pollt die Seite wie vorher im 250-ms-Takt. Der Schalter kann also nur
+    /// entlasten, nie etwas kaputt machen, das vorher lief.
+    #[serde(rename = "pushFallbackSlow", default)]
+    pub push_fallback_slow: bool,
 }
 
 fn default_true() -> bool {
@@ -217,6 +226,9 @@ impl Default for MonitorConfig {
             show_match_clock: true,
             show_ads: true,
             layout: default_layout(),
+            // Aus: Der langsame Sicherheits-Poll ist ein bewusst zu
+            // setzender Schalter (Spec monitor-livestand-push, S6).
+            push_fallback_slow: false,
         }
     }
 }
@@ -598,6 +610,32 @@ pub struct MonitorControl {
 /// Hallen-/Verleih-WLAN sind einzelne >6-s-Aussetzer normal. Ein wirklich
 /// totes Gerät fällt weiterhin nach 20 s raus.
 pub const MONITOR_ONLINE_WINDOW_MS: u64 = 20_000;
+
+/// Abstand des **sichtbaren** Herzschlags auf der Monitor-Nudge-WS (Spec
+/// monitor-livestand-push, S6). Der daneben laufende WS-Ping ist für
+/// JavaScript unsichtbar — eine Anzeige kann daran nicht erkennen, ob ihr
+/// Kanal noch lebt.
+///
+/// Zehn Sekunden, damit die Anzeige die 25-Sekunden-Grenze
+/// ([`MONITOR_HEARTBEAT_STALE_MS`]) auch dann sicher hält, wenn zwei
+/// Herzschläge hintereinander im Netz hängenbleiben.
+pub const MONITOR_HEARTBEAT_MS: u64 = 10_000;
+
+/// Ab wann gilt der Nudge-Kanal einer Anzeige als tot (Spec
+/// monitor-livestand-push, S6)? Zweieinhalb Herzschläge — ein einzelner
+/// verlorener darf noch keinen Reconnect auslösen.
+pub const MONITOR_HEARTBEAT_STALE_MS: u64 = 25_000;
+
+/// Der sichtbare Herzschlag als fertiges Wire-Frame.
+///
+/// **Ohne `court`-Feld, und das ist die ganze Verträglichkeitszusage:** Eine
+/// Anzeige aus einem älteren Stand prüft `typeof msg.court === "number"` und
+/// verwirft alles andere folgenlos. So braucht der Kanal keine
+/// Protokollversion (ADR 0035 c) — fest verdrahtete Monitore haben keinen
+/// Reload-Kanal, über den man sie umstellen könnte.
+pub fn monitor_heartbeat_frame(now_ms: u64) -> String {
+    format!("{{\"hb\":{now_ms}}}")
+}
 
 /// Kurz-Code eines Geräts: die **letzten** vier alphanumerischen Zeichen der
 /// ID, groß – so wie der Monitor ihn auf dem TV anzeigt.
@@ -2879,6 +2917,35 @@ mod tests {
         assert_eq!(p.hall_color, None, "alter Host → farblos");
         let json = serde_json::to_string(&p).unwrap();
         assert!(!json.contains("hallColor"), "None reist nicht mit: {json}");
+    }
+
+    #[test]
+    fn der_herzschlag_traegt_kein_court_feld() {
+        // Spec monitor-livestand-push, S6. Daran hängt die ganze
+        // Verträglichkeit: Eine Anzeige aus einem älteren Stand prüft auf ein
+        // `court`-Feld und verwirft alles andere folgenlos. Käme hier eines
+        // vor, hielte sie den Herzschlag für einen Anstoß und holte bei jedem
+        // den vollen Stand — auf allen Anzeigen, alle zehn Sekunden.
+        let frame = monitor_heartbeat_frame(1_787_000_000_042);
+        let v: serde_json::Value = serde_json::from_str(&frame).expect("gültiges JSON");
+        let obj = v.as_object().expect("Objekt");
+        assert!(!obj.contains_key("court"), "kein court-Feld: {frame}");
+        assert!(!obj.contains_key("seq"), "auch keine Sequenz: {frame}");
+        assert_eq!(
+            obj.get("hb").and_then(|h| h.as_u64()),
+            Some(1_787_000_000_042)
+        );
+        assert_eq!(obj.len(), 1, "nur der Zeitstempel: {frame}");
+    }
+
+    #[test]
+    fn der_herzschlag_takt_haelt_die_stale_grenze() {
+        // Zwei Herzschläge müssen in die Grenze passen — ein einzelner
+        // verlorener darf noch keinen Reconnect auslösen. Über Variablen,
+        // damit clippy den Vergleich nicht wegoptimiert (`assertions_on_constants`).
+        let takt = MONITOR_HEARTBEAT_MS;
+        let grenze = MONITOR_HEARTBEAT_STALE_MS;
+        assert!(takt * 2 < grenze, "{takt} · 2 muss unter {grenze} liegen");
     }
 
     #[test]

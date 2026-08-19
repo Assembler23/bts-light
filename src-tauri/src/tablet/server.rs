@@ -990,6 +990,12 @@ async fn health(
         "enabled": ct.enabled,
         "secondCallMinutes": ct.second_call_minutes,
         "thirdCallMinutes": ct.third_call_minutes,
+        // Darf die Anzeige ihren Sicherheits-Poll verlangsamen (Spec
+        // monitor-livestand-push, S6)? Reist im selben Umschlag mit und geht
+        // deshalb mit in die Marke — sonst bekäme eine Seite nach dem
+        // Umlegen des Schalters so lange „nichts Neues", bis sich zufällig
+        // ein Feld ändert, und pollte weiter im alten Takt.
+        "pushFallbackSlow": cfg.court_monitor.push_fallback_slow,
     })
     .to_string();
     let (courts_json, etag, seqs_json) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
@@ -2816,10 +2822,17 @@ async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Optio
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
-    // Herzschlag: hält die Leitung wach und erkennt tote Sockets (analog zum
-    // Tablet-WS-Ping). Fällt die Verbindung weg, endet die Schleife und wir
-    // tragen das Abo unten explizit wieder aus.
-    let mut ping = tokio::time::interval(Duration::from_secs(15));
+    // Herzschlag alle 10 s (Spec monitor-livestand-push, S6): ein WS-Ping
+    // hält die Leitung wach, ein **sichtbares** Text-Frame `{"hb":…}` sagt
+    // der Anzeige, dass ihr Kanal lebt.
+    //
+    // Beides zusammen, weil der Ping für JavaScript unsichtbar ist: Eine
+    // Anzeige konnte bisher „Kanal lebt" nicht von „es passiert gerade
+    // nichts" unterscheiden — in einer ruhigen Halle sah ein toter Socket
+    // genauso aus wie eine Pause zwischen zwei Ballwechseln. Solange der
+    // Fallback-Poll viermal je Sekunde lief, fiel das nicht auf; mit dem
+    // langsameren Takt aus dieser Etappe schon.
+    let mut ping = tokio::time::interval(Duration::from_millis(relay_proto::MONITOR_HEARTBEAT_MS));
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
@@ -2843,6 +2856,13 @@ async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Optio
             }
             _ = ping.tick() => {
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+                // Sichtbarer Herzschlag für die Anzeige (S6). Ohne
+                // `court`-Feld, damit eine Seite aus einem älteren Stand ihn
+                // folgenlos verwirft.
+                let hb = relay_proto::monitor_heartbeat_frame(monitor::now_ms());
+                if socket.send(Message::Text(Utf8Bytes::from(hb))).await.is_err() {
                     break;
                 }
             }

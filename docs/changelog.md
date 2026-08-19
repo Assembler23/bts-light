@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.241
+
+- **Die Anzeigen merken jetzt zuverlässig, ob ihre Leitung noch lebt.** Der
+  Server schickt alle zehn Sekunden ein stilles Lebenszeichen über dieselbe
+  Leitung, über die auch die Spielstände angestoßen werden. Vorher schloss
+  eine Anzeige aus „es kommt gerade nichts" auf „die Leitung ist tot" — in
+  einer ruhigen Halle zwischen zwei Ballwechseln also ständig. Umgekehrt
+  konnte eine Leitung stundenlang als offen gelten, ohne dass je etwas
+  ankam.
+- **Bleibt das Lebenszeichen über 25 Sekunden aus**, baut die Anzeige die
+  Verbindung von sich aus neu auf, statt auf eine tote zu warten. Ein
+  einzelner fehlgeschlagener Abruf genügt außerdem, um sofort wieder in den
+  schnellen Sicherheitstakt zu gehen.
+- **Neuer Schalter „Sicherheitsabruf entlasten"** (in der `config.json`:
+  `push_fallback_slow`, standardmäßig **aus**). Ist er gesetzt, fragt eine
+  Anzeige mit gesunder Leitung nur noch alle vier Sekunden nach, statt
+  viermal je Sekunde — die eigentliche Entlastung dieser Reihe. Wer ihn
+  nicht setzt, merkt von dieser Version nichts.
+- Siebte Etappe (S6) der Spec `monitor-livestand-push`; offen bleibt nur
+  noch der schmale Einzelfeld-Abruf.
+
 ## v0.9.240
 
 - **Die Feld-Übersicht zeichnet bei einem Punkt nur noch die Ziffern neu.**

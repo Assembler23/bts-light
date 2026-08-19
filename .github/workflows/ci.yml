@@ -129,6 +129,12 @@ jobs:
       - name: Teil-Patch der Übersicht (JS)
         run: node scripts/test-court-patch.mjs
 
+      # Wann gilt der Push-Kanal einer Anzeige als gesund? Laut Spec das
+      # höchste Risiko des Vorhabens: Eine falsche Regel hier friert alle
+      # Anzeigen einer Halle ein.
+      - name: Gesundheit des Push-Kanals (JS)
+        run: node scripts/test-push-health.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)

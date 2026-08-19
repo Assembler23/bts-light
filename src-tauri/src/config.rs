@@ -210,6 +210,19 @@ pub struct CourtMonitorConfig {
     /// übereinander. Sinnvoll, wenn ein TV zwischen zwei Feldern steht.
     /// Hängt `&dir=v` an die Kombi-URL.
     pub combo_vertical: bool,
+    /// Darf eine Anzeige mit gesundem Push-Kanal ihren Sicherheits-Poll auf
+    /// vier Sekunden verlangsamen (Spec monitor-livestand-push, S6)?
+    ///
+    /// **Standardmäßig aus.** Der langsame Takt ist der eigentliche
+    /// Last-Gewinn der Spec — und zugleich ihr größtes Risiko: Wer sich auf
+    /// den Push verlässt, hängt daran, dass „Kanal ist gesund" wirklich
+    /// stimmt. Deshalb bleibt er ein bewusst zu setzender Schalter, und eine
+    /// frisch aktualisierte Installation verhält sich exakt wie vorher.
+    ///
+    /// `#[serde(default)]` über die ganze Struktur hält ältere
+    /// `config.json` lesbar.
+    #[serde(default)]
+    pub push_fallback_slow: bool,
 }
 
 impl Default for CourtMonitorConfig {
@@ -225,6 +238,9 @@ impl Default for CourtMonitorConfig {
             show_ads: true,
             layout: "split".to_string(),
             combo_vertical: false,
+            // Aus (Spec monitor-livestand-push, S6): Eine frisch
+            // aktualisierte Installation verhält sich exakt wie vorher.
+            push_fallback_slow: false,
         }
     }
 }
@@ -1553,6 +1569,7 @@ mod tests {
                 show_ads: false,
                 layout: "split".to_string(),
                 combo_vertical: true,
+                push_fallback_slow: true,
             },
             call_timer: CallTimerConfig {
                 enabled: true,

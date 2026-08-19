@@ -120,11 +120,45 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Hand zurückgenommen wird. Fehlt die Zahl (älterer Absender), gilt der
   Stand immer. Die Regel steht als `src/io/monitorSeq.mjs` mit eigenem
   CI-Schritt; beide Anzeige-Seiten tragen eine Inline-Kopie.
-- **Poll bleibt Fallback:** Solange Nudges eintreffen, pausiert das
-  Intervall-Poll; bei WS-Abriss (WLAN-Wechsel, Cloud-Namespace noch nicht da)
-  oder >~1 s Nudge-Stille übernimmt es sofort wieder (250 ms). Ein
-  Reconnect-Watchdog verbindet den WS mit Backoff neu. **Kein Regress** — fällt
-  der Push aus, verhält sich die Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Herzschlag alle 10 s** (seit v0.9.241, Spec `monitor-livestand-push` S6):
+  Neben dem WS-Ping — der für JavaScript unsichtbar ist — schicken Host und
+  Relay ein sichtbares `{"hb":<ms>}` **ohne** `court`-Feld, das ältere Seiten
+  folgenlos verwerfen. Erst dadurch kann eine Anzeige „die Leitung lebt" von
+  „es passiert gerade nichts" unterscheiden: In einer ruhigen Halle vergehen
+  zwischen zwei Ballwechseln Minuten, und ein halbtoter Socket meldet
+  stundenlang `OPEN`, ohne je etwas zu liefern.
+- **Der Relay verabschiedet Anzeigen aktiv** (ebenfalls seit v0.9.241): Kann
+  er eine Verbindung nicht eintragen (Host noch nicht da, oder Fan-out-Deckel
+  erreicht), schließt er sie sofort statt sie still offen zu lassen — der
+  Herzschlag hielte sie sonst für gesund, obwohl nie ein Anstoß käme. Ebenso
+  beim Aufräumen eines Namespace, dessen Host weg ist. Die Anzeige fällt
+  dadurch auf den Poll und in die Offline-Blende und verbindet sich über
+  ihren Reconnect-Wächter neu, sobald der Turnier-PC wieder da ist.
+- **Poll bleibt Fallback:** Der Sicherheits-Poll läuft **durchgehend** weiter
+  (seit v0.9.241 nicht mehr pausierend) — im 250-ms-Takt, und nur bei
+  **gesundem** Kanal und gesetztem Schalter im 4-s-Takt. Er hört **nie ganz**
+  auf, denn an ihm hängt mehr als der Spielstand: das Lebenszeichen des
+  Geräts (20-s-Fenster), seine Fernbefehle, `redirectTo`, die
+  Geräte→Feld-Zuweisung und jede Änderung, die nur die Antwort-Revision hebt,
+  ohne anzustoßen (Feld-Beschriftungen, Hallen-Zuordnung, Aufruf-Schwellen,
+  Hallen-Farben). Gemessen wird gegen den **letzten tatsächlichen Abruf** —
+  in einer regen Halle fällt dadurch kein zusätzlicher an. Gesund heißt: Socket
+  offen, letztes Frame (Anstoß **oder** Herzschlag) keine 25 s her, letzter
+  Abruf erfolgreich; ein **einziger** Fehlversuch schaltet sofort zurück.
+  Bleibt der Herzschlag über 25 s aus, schließt die Anzeige den Socket aktiv,
+  damit der Reconnect-Watchdog mit Backoff neu verbindet. Die Regel steht als
+  `src/io/pushHealth.mjs` mit eigenem CI-Schritt; beide Anzeige-Seiten tragen
+  eine Inline-Kopie. **Kein Regress** — fällt der Push aus, verhält sich die
+  Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Schalter `push_fallback_slow`** (`config.json`, Abschnitt `court_monitor`;
+  **Standard aus**): Erst er erlaubt den 4-s-Takt. Ohne ihn pollt eine frisch
+  aktualisierte Installation exakt wie vorher — die Entlastung ist der
+  eigentliche Gewinn der Spec und zugleich ihr größtes Risiko, deshalb bleibt
+  sie eine bewusste Entscheidung. Der Schalter reist als `pushFallbackSlow`
+  zur Anzeige — in `/court/{id}/state` in der `config`, in `/health` im
+  `callTimer`-Umschlag (und damit in der Marke der Antwort, sonst käme das
+  Umlegen erst mit der nächsten Feld-Änderung an). Er wirkt nach dem nächsten
+  Abruf.
 - **Auch die Feld-/Match-Zuweisung wird angestoßen** (seit v0.9.238, Spec
   `monitor-livestand-push` S3). Sie ist BTP-Snapshot-getrieben und damit kein
   Einzel-Ereignis wie ein gezählter Punkt; deshalb vergleicht der Turnier-PC
