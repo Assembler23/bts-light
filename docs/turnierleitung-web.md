@@ -663,3 +663,31 @@ bedeutet nicht, dass alle Tablets neu gescannt werden müssen.
 Im Notfall lässt sich die Oberfläche auch **serverseitig** abschalten, ohne
 die übrigen Dienste anzufassen: `BTS_RELAY_TL=off` am Relay. Genau dieses
 eine Wort schaltet ab.
+
+## Schiedsrichterzettel drucken
+
+Spec: [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md) ·
+ADR 0037/0038/0039.
+
+Im Kebab-Menü einer belegten Feldkachel steht neben „📈 Punktverlauf" jetzt
+**„🖨 Zettel"** — unter derselben Schranke: nur, wenn das Tablet wirklich etwas
+aufgezeichnet hat. Ein Papier-Ergebnis bekommt bewusst keinen Zettel; ein halb
+ausgefüllter Bogen wäre irreführender als keiner.
+
+Der Zettel öffnet sich als Vorschau; **Drucken** öffnet den Druckdialog des
+Browsers, „als PDF speichern" läuft über den Systemdialog des Druckers. Deshalb
+braucht es weder eine PDF-Bibliothek noch eine zusätzliche Datei-Berechtigung.
+
+**Anders als der Punktverlauf wird der Zettel nicht gepollt.** Er ist ein
+Abschluss-Dokument, kein Livebild — und er trägt Sanktionsdaten (Karten), die
+nicht im Zwei-Sekunden-Takt über die Leitung sollen. Beim Schließen wird er aus
+dem DOM entfernt.
+
+Der Abruf läuft über `GET /tl/api/scoresheet/{ids}` — **denselben Pfad am
+eingebetteten Server wie am Relay**, deshalb ist die Seite in beiden
+Betriebsarten identisch. Mehrere Kennungen mit Komma ergeben einen Stapeldruck
+(Deckel: 40).
+
+> **Der Relay hält keine Zettel vor.** Ist der Turnier-PC getrennt, gibt es 503
+> und kein zwischengespeichertes Dokument — beim Punktverlauf ist das eine Frage
+> des Mobilfunk-Budgets, hier zusätzlich eine des Datenschutzes.

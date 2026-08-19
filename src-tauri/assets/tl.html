@@ -1443,6 +1443,23 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
   </div>
 </div>
 
+<!-- Schiedsrichterzettel (Spec schiedsrichterzettel-druck, ADR 0039):
+     Dasselbe Overlay-Muster wie der Punktverlauf. Das Dokument kommt
+     fertig vom Turnier-PC und wird in einem iframe gezeigt; gedruckt
+     wird über den Browser, „als PDF speichern" über den Systemdialog. -->
+<div class="graph-overlay" id="zettel-overlay" hidden>
+  <div class="graph-box">
+    <div class="graph-head">
+      <span id="zettel-title">Schiedsrichterzettel</span>
+      <span>
+        <button type="button" id="zettel-print">Drucken</button>
+        <button type="button" id="zettel-close" aria-label="Zettel schließen">×</button>
+      </span>
+    </div>
+    <div class="graph-body" id="zettel-body"></div>
+  </div>
+</div>
+
 <!-- Schiedsrichter-Pflege: Sperrlisten, Verein und Einsätze kommen
      on-demand von /tl/api/officials/… — sie stehen bewusst NICHT im
      Zustand, den jedes Gerät bekommt (Personendaten). -->
@@ -3374,6 +3391,10 @@ function courtCard(c, cellStyle) {
   if (c.match_id && c.has_timeline) {
     kachelAktionen.push(`<button type="button" data-graph="${c.match_id}"
         title="Punktverlauf anzeigen">📈 Punktverlauf</button>`);
+    // Zettel unter derselben Schranke: Ohne Aufzeichnung gäbe es nichts
+    // zu drucken (Papier-Ergebnis).
+    kachelAktionen.push(`<button type="button" data-zettel="${c.match_id}"
+        title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
   }
   const kebabOffen = openKebabCourtId === c.court_id;
   const kebab = kachelAktionen.length
@@ -3619,6 +3640,19 @@ function wireCourts(box) {
   // schwebte es dank `position: fixed` hinter dem Graph-Overlay weiter
   // und läge nach dessen Schließen noch über fremden Kacheln
   // (Review-Fund 17.08.2026).
+  scopeAll(box, "button[data-zettel]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const det = btn.closest(".kebab");
+      if (det) det.open = false;
+      const c = state.courts.find((x) => String(x.match_id) === btn.dataset.zettel);
+      if (!c) return;
+      openZettel(
+        [c.match_id],
+        `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`,
+      );
+    });
+  });
   scopeAll(box, "button[data-graph]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -6817,6 +6851,58 @@ function openTimeline(matchId, label, finishedSets) {
   graphTimer = setInterval(fetchTimeline, 2000);
 }
 
+/** Schiedsrichterzettel anzeigen (Spec schiedsrichterzettel-druck).
+ *
+ *  Anders als der Punktverlauf wird NICHT gepollt: Ein Zettel ist ein
+ *  Abschluss-Dokument, kein Livebild — und er trägt Sanktionsdaten, die
+ *  nicht im 2-Sekunden-Takt über die Leitung sollen.
+ *
+ *  Der Abruf läuft über denselben Pfad wie am eingebetteten Server
+ *  (S-R3), deshalb ist dieser Code in beiden Betriebsarten identisch. */
+async function openZettel(matchIds, label) {
+  const titel = $("zettel-title");
+  const body = $("zettel-body");
+  titel.textContent = `Schiedsrichterzettel — ${label}`;
+  body.innerHTML = `<p class="graph-note">Zettel wird erzeugt …</p>`;
+  $("zettel-overlay").hidden = false;
+  try {
+    const res = await fetch(`${API}/scoresheet/${matchIds.join(",")}`, {
+      headers: { Authorization: "Bearer " + token },
+      cache: "no-store",
+    });
+    if (res.status === 404) {
+      body.innerHTML =
+        `<p class="graph-note">Zu diesem Spiel liegt keine Aufzeichnung vor — ` +
+        `ein Papier-Ergebnis bekommt bewusst keinen Zettel.</p>`;
+      return;
+    }
+    if (!res.ok) {
+      body.innerHTML = `<p class="graph-note">Zettel nicht verfügbar (${res.status}).</p>`;
+      return;
+    }
+    const html = await res.text();
+    // Das Dokument enthält bewusst kein Skript (ADR 0039); die Sandbox
+    // macht das durchsetzbar statt zugesagt. `allow-modals` bleibt nötig,
+    // damit print() den Druckdialog öffnen darf.
+    const rahmen = document.createElement("iframe");
+    rahmen.id = "zettel-frame";
+    rahmen.title = "Schiedsrichterzettel";
+    rahmen.setAttribute("sandbox", "allow-same-origin allow-modals");
+    rahmen.style.cssText = "width:100%;height:70vh;border:1px solid #ccc;background:#fff";
+    rahmen.srcdoc = html;
+    body.innerHTML = "";
+    body.appendChild(rahmen);
+  } catch {
+    body.innerHTML = `<p class="graph-note">Zettel nicht verfügbar.</p>`;
+  }
+}
+
+function closeZettel() {
+  $("zettel-overlay").hidden = true;
+  // Das Dokument nicht im DOM liegen lassen — es trägt Sanktionsdaten.
+  $("zettel-body").innerHTML = "";
+}
+
 function closeTimeline() {
   $("graph-overlay").hidden = true;
   graphCtx = null;
@@ -7377,12 +7463,22 @@ function start() {
   // Punktverlauf-Overlay: schließen per ×, Klick auf den Hintergrund
   // oder Escape (unten mit den übrigen Escape-Wegen).
   $("graph-close").addEventListener("click", closeTimeline);
+  $("zettel-close").addEventListener("click", closeZettel);
+  $("zettel-print").addEventListener("click", () => {
+    const rahmen = $("zettel-frame");
+    if (!rahmen) return;
+    rahmen.contentWindow.focus();
+    rahmen.contentWindow.print();
+  });
+  $("zettel-overlay").addEventListener("click", (ev) => {
+    if (ev.target === $("zettel-overlay")) closeZettel();
+  });
   $("graph-overlay").addEventListener("click", (ev) => {
     if (ev.target === ev.currentTarget) closeTimeline();
   });
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeProfilesOverlay(); }
+    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeZettel(); closeProfilesOverlay(); }
   });
   // Anzeige-Einstellungen (Spielnummer/Nationen/Vereine/Disziplin/Runde/
   // Gruppe) sind seit dem Panel-System Teil des aktiven Profils
