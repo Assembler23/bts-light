@@ -167,6 +167,12 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
   Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
   jeweils erst nachdem ihr Zwischenstand steht.
+- **Schmaler Abruf je Feld** (seit v0.9.242, Spec `monitor-livestand-push` S7):
+  `…/health?court=<CourtID>` liefert dieselbe Antwortform, aber nur dieses eine
+  Feld — samt seiner Ordnungszahl und **ohne** die der Nachbarfelder. In LAN
+  und Cloud gleich. Eine unbekannte, negative oder nicht-numerische Nummer
+  liefert `courts: []` mit HTTP 200; die Antwort verrät also nicht, welche
+  Felder es gibt. Ohne den Parameter ist die Antwort unverändert.
 - **Grenzen:** Der Nudge ist reine Anzeige-Beschleunigung; er ändert keine
   Ownership und keine Zählung.
 

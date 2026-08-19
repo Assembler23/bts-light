@@ -935,6 +935,14 @@ struct DeviceHeartbeat {
     /// Abruf zählt dann als `poll`, was er auch ist.
     #[serde(default)]
     src: Option<String>,
+    /// Nur dieses eine Feld liefern (Spec monitor-livestand-push, S7).
+    ///
+    /// **Bewusst `String`, nicht `i64`.** Als Zahl deklariert, beantwortete
+    /// axum ein `?court=abc` mit einem 400er — eine andere Antwort als für
+    /// ein unbekanntes Feld, und damit ein Fingerzeig darauf, was gültig
+    /// ist. So liefert alles Unbrauchbare dieselbe leere Liste.
+    #[serde(default)]
+    court: Option<String>,
 }
 
 /// Markiert das Geraet als „gesehen", falls eine Device-ID im Query
@@ -998,7 +1006,22 @@ async fn health(
         "pushFallbackSlow": cfg.court_monitor.push_fallback_slow,
     })
     .to_string();
-    let (courts_json, etag, seqs_json) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
+    let (mut courts_json, mut etag, mut seqs_json) =
+        uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
+
+    // Schmaler Abruf je Feld (Spec monitor-livestand-push, S7): Ein fester
+    // Court-Monitor zeichnet eine einzige Kachel und holt dafür bisher die
+    // ganze Halle. Geschnitten wird aus **demselben** Bau, den der
+    // Antwortcache ohnehin hält — sonst nähme S7 zurück, was S1 gebracht hat.
+    if let Some(wunsch) = q.court.as_deref() {
+        let (feld, zahl) = feld_ausschnitt(&courts_json, &seqs_json, wunsch);
+        // Eigene Marke: Sie hängt am Inhalt, und der ist hier ein anderer.
+        // Mit der Marke der ganzen Liste bekäme ein schmaler Abrufer sonst
+        // „nichts Neues" auf einen Stand, den er nie gesehen hat.
+        etag = inhalts_marke(ctx.tablet.process_tag(), &feld, &call_timer_json);
+        courts_json = feld;
+        seqs_json = zahl;
+    }
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
     // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
@@ -1110,6 +1133,47 @@ fn uebersicht_json(
         jetzt,
     );
     (courts_json, etag, seqs_json)
+}
+
+/// Schneidet ein einzelnes Feld aus der fertigen Übersicht (Spec
+/// monitor-livestand-push, S7). Liefert `(courts_json, seqs_json)` in
+/// derselben Form wie die volle Antwort — nur eben mit höchstens einem
+/// Eintrag.
+///
+/// **Alles Unbrauchbare liefert dieselbe leere Liste:** unbekannte Nummer,
+/// negative, nicht-numerische, leere. Ein 404 oder 400 für die eine und eine
+/// leere Liste für die andere wäre ein Fingerzeig darauf, welche Felder es
+/// gibt — am Relay, der im Internet steht, wäre das eine Auskunft über ein
+/// fremdes Turnier.
+///
+/// Geschnitten wird auf der JSON-Ebene, weil der Antwortcache aus S1 die
+/// Liste als fertigen String hält. Das Parsen kostet weniger als der Neubau,
+/// den es ersetzt — und vor allem bleibt es **ein** Bau für alle Felder.
+fn feld_ausschnitt(courts_json: &str, seqs_json: &str, wunsch: &str) -> (String, String) {
+    let leer = || ("[]".to_string(), "{}".to_string());
+    let Ok(id) = wunsch.parse::<i64>() else {
+        return leer();
+    };
+    let Ok(felder) = serde_json::from_str::<Vec<serde_json::Value>>(courts_json) else {
+        return leer();
+    };
+    let Some(feld) = felder
+        .into_iter()
+        .find(|c| c.get("court_id").and_then(|v| v.as_i64()) == Some(id))
+    else {
+        return leer();
+    };
+    let liste = serde_json::to_string(&[feld]).unwrap_or_else(|_| "[]".to_string());
+    // Nur die eigene Ordnungszahl: Die fremden sagen dem Feld-Monitor
+    // nichts und wären am Relay eine Auskunft über die Nachbarhalle.
+    let zahl = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(seqs_json)
+        .ok()
+        .and_then(|m| {
+            m.get(&id.to_string())
+                .map(|v| serde_json::json!({ id.to_string(): v }).to_string())
+        })
+        .unwrap_or_else(|| "{}".to_string());
+    (liste, zahl)
 }
 
 /// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
@@ -5214,6 +5278,7 @@ mod tests {
         Query(DeviceHeartbeat {
             device: None,
             src: src.map(|s| s.to_string()),
+            court: None,
         })
     }
 
@@ -5272,6 +5337,211 @@ mod tests {
             .await
             .expect("Antwort lesbar");
         serde_json::from_slice(&bytes).expect("JSON")
+    }
+
+    // ── Schmaler Abruf je Feld (Spec monitor-livestand-push, S7) ──────────
+
+    /// Query einer Anzeige mit Feld-Auswahl.
+    fn takt_feld(court: &str) -> Query<DeviceHeartbeat> {
+        Query(DeviceHeartbeat {
+            device: None,
+            src: Some("poll".to_string()),
+            court: Some(court.to_string()),
+        })
+    }
+
+    /// Testkontext mit ZWEI Feldern — sonst wäre „genau ein Feld" nicht
+    /// von „alle Felder" zu unterscheiden.
+    fn make_ctx_zwei_felder() -> ServerCtx {
+        let ctx = make_ctx(1);
+        let mut zweites = match_on_court();
+        zweites.id = 43;
+        zweites.court = Some("2".into());
+        zweites.court_id = Some(102);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court(), zweites],
+            courts: vec!["1".into(), "2".into()],
+            locations: vec![],
+            court_infos: vec![
+                crate::btp::model::BtpCourt {
+                    id: 101,
+                    name: "1".into(),
+                    location_id: None,
+                    sort_order: 1,
+                },
+                crate::btp::model::BtpCourt {
+                    id: 102,
+                    name: "2".into(),
+                    location_id: None,
+                    sort_order: 2,
+                },
+            ],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        ctx
+    }
+
+    #[tokio::test]
+    async fn health_mit_court_liefert_genau_ein_feld() {
+        // Der Kern von S7: Ein fester Court-Monitor holt heute die ganze
+        // Halle, um eine einzige Kachel zu zeichnen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let voll = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        let schmal = koerper(
+            health(
+                State(ctx.clone()),
+                takt_feld("102"),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        assert_eq!(voll["courts"].as_array().unwrap().len(), 2);
+        let felder = schmal["courts"].as_array().unwrap();
+        assert_eq!(felder.len(), 1, "genau ein Feld");
+        // **Inhaltlich identisch** zum Eintrag in der vollen Antwort — sonst
+        // zeigten zwei Anzeigen desselben Felds Verschiedenes.
+        let aus_voll = voll["courts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["court_id"] == 102)
+            .expect("Feld 102 in der vollen Antwort");
+        assert_eq!(&felder[0], aus_voll);
+        // Die Ordnungszahl reist mit, aber nur die des angefragten Felds.
+        assert!(schmal["seqs"].get("102").is_some(), "eigene Zahl");
+        assert!(
+            schmal["seqs"].get("101").is_none(),
+            "keine fremden Zahlen im schmalen Abruf"
+        );
+        // Umschlag unverändert, damit dieselbe Seite beide Formen liest.
+        assert_eq!(schmal["ok"], serde_json::json!(true));
+        assert_eq!(schmal["callTimer"], voll["callTimer"]);
+    }
+
+    #[tokio::test]
+    async fn health_ohne_court_bleibt_unveraendert() {
+        // Verträglichkeit: Die Feld-Übersicht schickt keinen Selektor.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let antwort = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(antwort["courts"].as_array().unwrap().len(), 2);
+        assert_eq!(antwort["seqs"].as_object().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck() {
+        // Kein Existenz-Leck: Die Antwort darf sich nicht danach
+        // unterscheiden, ob es das Feld gibt. Sonst könnte jemand am Relay
+        // die Feldnummern eines fremden Turniers durchprobieren.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        for eingabe in ["999", "-5", "abc", "", "1e3", "9999999999999999999999"] {
+            let antwort = health(
+                State(ctx.clone()),
+                takt_feld(eingabe),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            assert_eq!(
+                antwort.status(),
+                StatusCode::OK,
+                "Eingabe {eingabe} ist kein Fehler"
+            );
+            let v = koerper(antwort).await;
+            assert_eq!(
+                v["courts"],
+                serde_json::json!([]),
+                "Eingabe {eingabe} liefert eine leere Liste"
+            );
+            assert_eq!(
+                v["seqs"],
+                serde_json::json!({}),
+                "Eingabe {eingabe} ohne Zahlen"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn der_schmale_abruf_hat_eine_eigene_marke() {
+        // Sonst bekäme ein schmaler Abrufer die Bestätigung „nichts Neues"
+        // auf die Marke der ganzen Liste — und umgekehrt hielte ein
+        // Übersichts-TV eine Ein-Feld-Marke für seinen Stand.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let voll = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let m_voll = voll
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let schmal = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let m_schmal = schmal
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(m_voll, m_schmal, "verschiedener Inhalt, verschiedene Marke");
+
+        // Und die eigene Marke bestätigt auch: unveränderter Stand → 304.
+        let wieder = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            if_none_match(&m_schmal),
+        )
+        .await
+        .into_response();
+        assert_eq!(wieder.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn zwei_schmale_abrufe_bauen_den_zustand_nur_einmal() {
+        // S7 darf den Antwortcache aus S1 nicht aushebeln: Der schmale
+        // Abruf schneidet aus demselben Bau, statt einen eigenen anzustoßen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            1,
+            "zwei Felder, ein Bau"
+        );
     }
 
     #[tokio::test]
