@@ -115,7 +115,8 @@ Anzeigen über einen vollen Turniertag.
 ## Umsetzung in Etappen
 
 Jede Etappe ist ein eigener PR und für sich auslieferbar. Reihenfolge ist bindend:
-**S0 → S1 → S2 → S3 → S4 → S5 → S6 → Nachmessung → S7.**
+**S0 → S1 → S2 → S3 → S4 → S5 → S6 → Nachmessung → S7.** *(S8 kam nach der Nachmessung
+dazu — sie hat die Lücke erst sichtbar gemacht.)*
 
 **S0 — Messung.** (a) Perf-Zähler aus `AtomicU64` in `TabletState`: `health_push`/`health_poll`
 + Bytes, `court_state_*`, `overview_build_ns`, `persist_calls`/`_ns`/`_bytes`, `nudges_sent`.
@@ -170,6 +171,15 @@ sofort auf 250 ms zurückschaltet; (3) Heartbeat länger als 25 s aus → aktive
 Reconnect (bewusste Umkehr des heutigen „KEIN Force-Close bei Stille", der nur galt, weil der
 250-ms-Poll alles abfing). Takt: `FALLBACK_MS = gesund ? 4000 : 250`, Startwert 250 ms.
 Gesteuert über `court_monitor.push_fallback_slow`, **Default aus**.
+
+**S8 — Bestätigung „nichts Neues" auch am Relay.** *(Nachgetragen 19.08.2026, aus der
+Nachmessung.)* `GET /{ns}/health` liefert heute bei jedem Abruf den vollen Rumpf: 0,61 MB/s
+gegen 0,01 MB/s im LAN, bei identischem Bild. S1 war ausdrücklich nur für den Turnier-PC
+spezifiziert — im Cloud-Betrieb, den viele Turniere wegen der Firmen-Firewalls fahren,
+bleibt die größte Einsparung der Reihe damit ungenutzt. Nachzuholen ist dieselbe Mechanik:
+Marke über den ausgelieferten Inhalt, `If-None-Match` → 304. Ein Zwischenspeicher ist
+**nicht** nötig — der Relay hält seinen Zustand ohnehin im Speicher, die Ersparnis liegt
+allein in den nicht gesendeten Bytes.
 
 **S7 — Schmaler Abruf je Feld.** `GET /health?court=<id>` am Host und
 `GET /{ns}/health?court=<id>` am Relay: dieselbe Struktur, nur das eine Feld, aus dem Cache.
@@ -279,6 +289,24 @@ vergleichbar mit der Vorher-Messung):
 | **Latenz Punkt → Anzeige** | **p50 15 ms / p95 68 ms** | p50 14 / p95 94 ms | Zielwert der Spec: unter 300 ms |
 | `health_push` | 8531 Abrufe | 17040 kumuliert | die Spalte, die im ersten Lauf fehlte |
 
+**Cloud (Relay) — 20 Feld-Übersichten, `--trocken`, gegen
+`badhub.de/bts-relay/<ns>/`:**
+
+| Kennzahl | LAN (v0.9.242) | Cloud (v0.9.242) | |
+|---|---|---|---|
+| `/health`-Abrufe/s | 75,4 | 76,7 | gleich — derselbe Client |
+| Antwortgröße | 16,3 KB | 8,1 KB | der Relay liefert weniger Felder je Eintrag |
+| davon „nichts Neues" | **99 %** | **0 %** | ⚠️ |
+| `/health`-Bytes/s | **0,01 MB/s** | **0,61 MB/s** | ⚠️ **60-fach** |
+
+⚠️ **Befund: Der Relay kennt keine Bestätigung „nichts Neues".** Das ist kein Fehler in der
+Umsetzung, sondern eine Lücke in dieser Spec — S1 beschreibt den Antwortcache ausdrücklich
+als `OverviewCache` im `TabletState`, also nur für den Turnier-PC. Im Cloud-Betrieb, den
+viele Turniere gerade wegen der Firmen-Firewalls nutzen, bleibt die größte Einsparung der
+ganzen Reihe damit ungenutzt: 0,61 statt 0,01 MB/s bei identischem Anzeigebild. Herzschlag
+(S6) und Anstöße kommen dort korrekt an, ebenso der schmale Abruf — live geprüft: 8,1 KB
+für alle Felder gegen **590 Byte** für eines. Konsequenz: eigene Etappe, siehe unten.
+
 **Schmaler Abruf (S7) — 20 feste Feld-Monitore:**
 
 | Weg | Abrufe/s | Bytes/s |
@@ -299,9 +327,10 @@ vergleichbar mit der Vorher-Messung):
 - **Die Ausbaustufe „Nutzlast im Nudge" wird NICHT gebaut.** Ihr Auslösekriterium war
   „mehr als 20 Requests/s je Übersichts-Gerät". Gemessen sind **7,45/s** je Gerät
   (149 Abrufe/s auf 20 Anzeigen) — deutlich darunter.
+- **Die Cloud-Spalte ist nachgetragen** (siehe oben) und liefert den einzigen unerwarteten
+  Befund der ganzen Reihe: Am Relay fehlt die 304-Bestätigung.
 - ⚠️ **Loopback, ein Rechner, Debug-Build.** Netzwerk-Latenz und die Last durch echte
-  Browser fehlen; die Pi-Zeile (`ovRenderMessen`) und die Cloud-Spalte stehen weiterhin
-  aus. Die Zählwerte hängen nicht am Optimierungsgrad, die Zeiten sind pessimistisch.
+  Browser fehlen; die Pi-Zeile (`ovRenderMessen`) steht weiterhin aus. Die Zählwerte hängen nicht am Optimierungsgrad, die Zeiten sind pessimistisch.
 - ⚠️ Der 4-s-Takt wurde über die Messhilfe `--langsam` erzwungen, nicht über den
   Server-Schalter — der wirkt ohnehin nur im Client, und ein Server-Neustart kostet am
   Turnier-PC einen Handgriff an der Oberfläche. Dass der Schalter die Strecke
