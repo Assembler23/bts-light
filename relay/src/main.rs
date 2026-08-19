@@ -1186,6 +1186,10 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         court_id,
         court_label,
         hall_color: None,
+        // Leerlauf ohne Namespace-Kontext: keine Ordnung bekannt (Spec
+        // monitor-livestand-push, S4). Die Anzeige behandelt 0 wie vor der
+        // Etappe.
+        seq: 0,
         tournament_name: String::new(),
         match_info: None,
         court_state: None,
@@ -1234,6 +1238,12 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         });
     MonitorState {
         court_id,
+        // Ordnung für die Anzeige (Spec monitor-livestand-push, S4) —
+        // dieselbe Zahl, die der Nudge dieses Felds trägt. **Prozesslokal:**
+        // Der Relay zählt eigenständig, seine Zahlen sind mit denen des
+        // Hosts nicht vergleichbar (ADR 0035). Das ist unkritisch, weil eine
+        // Anzeige immer nur mit einer der beiden Gegenstellen spricht.
+        seq: namespace.monitor_seq.get(&court_id).copied().unwrap_or(0),
         court_label: namespace
             .court_labels
             .get(&court_id)
@@ -1502,10 +1512,23 @@ async fn overview_health(
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let (courts, call_timer) = {
+    let (courts, call_timer, seqs) = {
         let map = broker.namespaces.lock().await;
         match map.get(&ns) {
             Some(n) => {
+                // Ordnungszahlen je Feld (Spec monitor-livestand-push, S4).
+                // **Vor** der Feld-Liste gelesen, damit eine Zahl höchstens
+                // älter ist als der Stand, zu dem sie ausgeliefert wird — die
+                // harmlose Richtung. Und **neben** der Liste ausgeliefert,
+                // nicht darin: In der LAN-Antwort hängt die Marke an der
+                // Liste, und steigende Zahlen darin machten die Bestätigung
+                // ohne Nutzdaten wirkungslos. Beide Betriebsarten liefern
+                // deshalb dieselbe Form (Review-Fund 19.08.2026).
+                let seqs: std::collections::HashMap<String, u64> = n
+                    .monitor_seq
+                    .iter()
+                    .map(|(id, s)| (id.to_string(), *s))
+                    .collect();
                 let names = |team: &[relay_proto::PlayerBrief]| {
                     team.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
                 };
@@ -1557,15 +1580,21 @@ async fn overview_health(
                     .as_ref()
                     .map(|mo| mo.call_timer.clone())
                     .unwrap_or_default();
-                (courts, ct)
+                (courts, ct, seqs)
             }
-            None => (Vec::new(), relay_proto::CallTimerView::default()),
+            None => (
+                Vec::new(),
+                relay_proto::CallTimerView::default(),
+                std::collections::HashMap::new(),
+            ),
         }
     };
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::json!({
             "courts": courts,
+            // Gleiche Form wie in der LAN-Antwort: CourtID → Ordnungszahl.
+            "seqs": seqs,
             "serverNowMs": now_ms(),
             "callTimer": call_timer,
         })),
@@ -2040,7 +2069,13 @@ async fn unsubscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: 
 /// hält bereits den Namespace, ein Nudge verlässt ihn nie.
 fn notify_monitor(namespace: &mut Namespace, court_id: i64) {
     let seq = {
-        let s = namespace.monitor_seq.entry(court_id).or_insert(0);
+        // Erstbelegung mit der Uhrzeit statt mit 0 (Spec
+        // monitor-livestand-push, S4; gleich wie im Host): Die Zahl bleibt so
+        // über Relay-Neustarts monoton. Sonst begänne sie nach einem Deploy
+        // wieder klein, und eine Anzeige mit gemerktem `seq` verwürfe jeden
+        // neuen Stand als veraltet, bis der Zähler den alten Wert überholt
+        // hätte.
+        let s = namespace.monitor_seq.entry(court_id).or_insert_with(now_ms);
         *s += 1;
         *s
     };
@@ -4041,7 +4076,11 @@ mod tests {
 
         notify_monitor(&mut ns, 5);
 
-        assert_eq!(nudge_of(rx5.try_recv().unwrap()), (5, 1));
+        // Seit S4 startet die Sequenz bei der Uhrzeit (neustart-fest), nicht
+        // bei 1 — geprüft wird deshalb nur, dass sie gesetzt ist.
+        let (court, seq) = nudge_of(rx5.try_recv().unwrap());
+        assert_eq!(court, 5);
+        assert!(seq > 0);
         assert_eq!(nudge_of(rx_all.try_recv().unwrap()).0, 5);
         assert!(rx3.try_recv().is_err(), "Feld 3 bleibt unberührt");
     }
@@ -4049,6 +4088,10 @@ mod tests {
     #[test]
     fn monitor_seq_is_monotonic_per_court() {
         // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
+        //
+        // Seit S4 (Spec monitor-livestand-push) beginnt die Zählung bei der
+        // Uhrzeit statt bei 1, damit sie über Relay-Neustarts monoton bleibt.
+        // Geprüft wird deshalb der Abstand, nicht der absolute Wert.
         let mut ns = Namespace::new();
         let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
@@ -4059,9 +4102,24 @@ mod tests {
         notify_monitor(&mut ns, 1);
         notify_monitor(&mut ns, 2);
 
-        assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 1);
-        assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 2);
-        assert_eq!(nudge_of(rx2.try_recv().unwrap()).1, 1);
+        let erst = nudge_of(rx1.try_recv().unwrap()).1;
+        let zweit = nudge_of(rx1.try_recv().unwrap()).1;
+        assert_eq!(zweit, erst + 1, "je Anstoß genau eins weiter");
+        let feld2 = nudge_of(rx2.try_recv().unwrap()).1;
+        assert!(feld2 > 0);
+
+        // Getrennte Zählung: Ein weiterer Anstoß auf Feld 1 lässt den Wert
+        // von Feld 2 unberührt. Bewusst SO geprüft und nicht über
+        // `feld2 != zweit`: Beide Zähler starten bei der Uhrzeit, und zwei
+        // Felder können dieselbe Zahl erreichen, wenn ihre Seeds eine
+        // Millisekunde auseinanderliegen — erlaubt, weil die Zahlen je Feld
+        // gelten, machte den Test aber zufällig rot (CI-Fund 19.08.2026).
+        notify_monitor(&mut ns, 1);
+        assert_eq!(
+            ns.monitor_seq.get(&2).copied().unwrap_or(0),
+            feld2,
+            "Feld 1 rührt die Zählung von Feld 2 nicht an"
+        );
     }
 
     #[test]
@@ -5269,6 +5327,11 @@ mod tests {
             ns.court_matches.insert(101, brief(7));
             ns.court_scores.insert(101, vec![SetAb { a: 21, b: 15 }]);
             ns.court_on_court_since.insert(101, 1000);
+            // Ordnungszahl des Felds (Spec monitor-livestand-push, S4) — die
+            // Cloud-Antwort muss sie unter demselben Schlüssel tragen wie die
+            // LAN-Antwort, sonst könnte `overview.html` Push und Abruf im
+            // Cloud-Betrieb nicht zueinander ordnen.
+            ns.monitor_seq.insert(101, 1_787_000_000_042);
             ns.monitor = Some(MonitorBundle {
                 config: MonitorConfig::default(),
                 tournament_name: String::new(),
@@ -5306,6 +5369,16 @@ mod tests {
         assert_eq!(c0["team1_nationalities"], serde_json::json!(["GER"]));
         assert_eq!(c0["sets"][0]["a"], serde_json::json!(21));
         assert_eq!(c0["on_court_since_ms"], serde_json::json!(1000));
+        // Die Ordnungszahl steht NEBEN der Feld-Liste, nicht darin (Spec
+        // monitor-livestand-push, S4): In der LAN-Antwort hängt die Marke an
+        // der Liste, und steigende Zahlen darin machten die Bestätigung ohne
+        // Nutzdaten wirkungslos. Beide Betriebsarten liefern dieselbe Form.
+        assert!(c0.get("seq").is_none(), "nicht im Feld-Objekt");
+        assert_eq!(v["seqs"]["101"], serde_json::json!(1_787_000_000_042u64));
+        assert!(
+            v["seqs"].get("102").is_none(),
+            "nie geweckt = kein Eintrag; die Anzeige liest das als 0"
+        );
         // Im Cloud (noch) nicht verfügbar → konservativ weggelassen.
         assert!(c0["serving_team"].is_null());
         assert_eq!(c0["injury"], serde_json::json!(false));

@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.239
+
+- **Die Anzeigen können jetzt erkennen, welcher Stand neuer ist.** Jeder
+  Feld-Stand trägt eine laufende Nummer — dieselbe, die schon im Anstoß
+  über die Leitung geht. Damit kann eine Anzeige zwei Antworten, die sich
+  überholen, richtig einordnen statt die zweite blind anzuwenden. Für die
+  Turnierleitung ändert sich nichts; es ist die Grundlage dafür, dass die
+  Anzeigen in der nächsten Etappe nur noch die betroffene Feldkachel neu
+  zeichnen statt das ganze Bild.
+- **Die Nummer übersteht einen Neustart.** Sie beginnt bei der Uhrzeit statt
+  bei eins — sonst hätte eine Anzeige nach einem Neustart des Turnier-PCs
+  jeden neuen Stand für veraltet gehalten und wäre stehengeblieben, bis der
+  Zähler den alten Wert überholt hat.
+- Ältere Stände ohne diese Nummer werden weiterhin normal angezeigt.
+- Fünfte von sieben Etappen der Spec `monitor-livestand-push`.
+
 ## v0.9.238
 
 - **Eine Feldzuweisung erscheint jetzt sofort auf den Anzeigen.** Bisher

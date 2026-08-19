@@ -41,3 +41,11 @@ docs/features/_intake/
 
 # Session-Arbeitsdateien der Claude-Skills (nie committen)
 .superpowers/
+
+# Artefakte von Browser-Rauchtests im Arbeitsverzeichnis: Seiten-Abzüge des
+# Playwright-Werkzeugs, Bildschirmfotos und Werkzeug-Ausgaben. Sie sammeln
+# sich beim Testen an und sind einmal versehentlich in einen Commit geraten,
+# weil `git add -A` sie mitnimmt (19.08.2026).
+.playwright-mcp/
+/tl-*.png
+/*.output
