@@ -490,14 +490,65 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       Ersatz-Bezug herein; sonst hinge die Anzeige dauerhaft im schnellen Takt, also
       ausgerechnet in der Last, die diese Etappe loswerden will.)*
 
-**Schmaler Abruf (S7)**
-- [ ] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der
-      vollen Antwort.
-- [ ] `/health` ohne Parameter ist unverändert.
-- [ ] Unbekannte, negative oder nicht-numerische ID → `courts: []` mit HTTP 200; die Antwort
+**Schmaler Abruf (S7)** — umgesetzt v0.9.242
+- [x] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der
+      vollen Antwort. *(`health_mit_court_liefert_genau_ein_feld` vergleicht beide Antworten
+      Feld für Feld; am Relay `cloud_health_mit_court_liefert_genau_ein_feld`. Die
+      Ordnungszahl reist mit, aber nur die des angefragten Felds.)*
+- [x] `/health` ohne Parameter ist unverändert. *(`health_ohne_court_bleibt_unveraendert`.)*
+- [x] Unbekannte, negative oder nicht-numerische ID → `courts: []` mit HTTP 200; die Antwort
       unterscheidet sich nicht danach, ob das Feld existiert (kein Existenz-Leck).
-- [ ] Am Relay respektiert der Selektor die Namespace-Isolation: ein Feld eines fremden
-      Namespace ist nicht abrufbar.
+      *(`ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` /
+      `cloud_health_mit_unbrauchbarem_court_leakt_nichts` — je sechs Eingaben. Der Selektor ist
+      deshalb ein `String`, keine Zahl: Als Zahl deklariert, beantwortete axum ein `?court=abc`
+      mit 400 und verriete damit, was gültig ist.)*
+- [x] Am Relay respektiert der Selektor die Namespace-Isolation: ein Feld eines fremden
+      Namespace ist nicht abrufbar. *(`cloud_health_mit_court_bleibt_im_eigenen_namespace`:
+      zwei Namespaces mit je einem Feld 101. Konstruktionsbedingt — der Selektor filtert die
+      Liste, die ohnehin nur aus dem eigenen Namespace stammt.)*
+- [x] Der schmale Abruf hebelt den Antwortcache aus S1 nicht aus.
+      *(`zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`: geschnitten wird aus demselben Bau.
+      Nicht in den ursprünglichen Kriterien, aber ohne diese Zusage nähme S7 zurück, was S1
+      gebracht hat.)*
+- [x] Der schmale Abruf hat eine **eigene** Marke. *(`der_schmale_abruf_hat_eine_eigene_marke`.
+      Mit der Marke der ganzen Liste bekäme ein Feld-Abrufer „nichts Neues" auf einen Stand,
+      den er nie gesehen hat.)*
+- [x] Der Schnitt läuft **einmal je Cache-Generation**, nicht je Abruf.
+      *(`der_schnitt_laeuft_je_cache_generation_nur_einmal`. Nachgetragen nach den Reviews:
+      Der Schnitt ersetzt keinen Neubau, er kommt obendrauf — und er liegt vor der
+      Marken-Prüfung, sodass sonst selbst die fast kostenlose Bestätigung „nichts Neues" den
+      vollen Parse zahlte. Ein Gerät im Turnier-WLAN hätte mit wenigen Byte je Anfrage einen
+      billigen Hebel auf die Rechenzeit gehabt. Der Feld-Cache wird **faul** gefüllt, damit
+      ihn niemand zahlt, solange kein Client den schmalen Abruf nutzt, und ist nach der
+      **geparsten** Zahl geschlüsselt — über den Rohtext ließen sich mit `?court=0101`,
+      `00101`, … beliebig viele Schlüssel erzeugen.)*
+- [x] Der Feld-Cache ist nicht schwächer als die Quelle, aus der er geschnitten wurde.
+      *(`der_feld_cache_haengt_am_inhalt_der_vollen_antwort` — Review-Fund: Zuerst hing er
+      nur an der Revision, während der Übersichts-Cache **zweierlei** verlangt (Revision und
+      Hart-TTL). Die TTL ist das Netz gegen Änderungen, die niemand meldet, und die gibt es
+      wirklich: `attach_tablet`, `detach_tablet` und `record_battery` ändern die Anzeige
+      (`tablet_connected`, `battery`), ohne die Revision zu heben. Der volle Weg richtete
+      sich nach 250 ms von selbst, der schmale hätte den alten Ausschnitt bei stehender
+      Revision für immer geliefert — mit gemerkter Marke sogar als endloses „nichts Neues".
+      Der Schlüssel ist jetzt die **Marke der vollen Antwort**, ein Inhalts-Hash: Er deckt
+      beide Bedingungen ab und erspart den Neuschnitt, wenn ein TTL-Neubau denselben Inhalt
+      ergab. Ein Anstoß allein schneidet damit bewusst **nicht** neu — die Anzeige sieht
+      danach genauso aus, und die Ordnungszahl im Ausschnitt bleibt die des Baus, zu dem der
+      Inhalt gehört: genau die harmlose Richtung aus S4.)*
+- [x] Eine Ordnungszahl ohne zugehöriges Feld verrät nichts.
+      *(`eine_verwaiste_ordnungszahl_verraet_kein_feld` — Review-Fund: Am Relay sind
+      `monitor_seq` und `courts` zwei unabhängige Quellen. Die Zahlen entstehen aus Anstößen
+      und werden nie aufgeräumt, die Feldliste ersetzt der Host komplett. Für eine CourtID,
+      die nur noch in `monitor_seq` stand — ein Nudge vor der ersten Feldliste, oder ein
+      Turnierwechsel im selben Namespace — kam eine leere Feld-Liste mit **gefüllter**
+      Zahlen-Karte zurück, und die war der Beweis, dass es dieses Feld gab.)*
+
+> **Befund zur Auslieferung:** Die Route ist da, aber im heutigen Bestand nutzt sie **kein**
+> Client. Der feste Court-Monitor holt `/court/{id}/state`, die Kombi-Anzeige `/combo/state`,
+> und die Feld-Übersicht braucht alle Felder. Der Posten, auf den S7 laut Messung zielte
+> (15,9 KB je Antwort), entsteht bei Übersichts-TVs — die entlastet erst ein **Hallen**-Filter,
+> nicht ein Feld-Selektor. Ob und wofür der schmale Abruf gebraucht wird, entscheidet die
+> Nachmessung; die Route kostet nichts, solange sie niemand ruft.
 
 **Verträglichkeit (alle Etappen)**
 - [ ] Alter Relay + neue Seite: datenloser Nudge, kein Heartbeat, `?court=` ignoriert → die
@@ -524,7 +575,7 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
 | S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
-| S7 | `health_mit_court_liefert_genau_ein_feld` · `health_mit_unbekanntem_court_liefert_leere_liste` · `health_ohne_court_unveraendert` · `nicht_numerischer_court_wird_abgewiesen_ohne_leck` · `relay_health_mit_court_respektiert_namespace_isolation` |
+| S7 | Host: `health_mit_court_liefert_genau_ein_feld` · `health_ohne_court_bleibt_unveraendert` · `ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` · `der_schmale_abruf_hat_eine_eigene_marke` · `zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`. Relay: `cloud_health_mit_court_liefert_genau_ein_feld` · `cloud_health_mit_unbrauchbarem_court_leakt_nichts` · `cloud_health_mit_court_bleibt_im_eigenen_namespace` |
 
 **Client-Tests.** Es gibt keinen JS-Testrahmen; das Haus-Muster ist: kanonische Fassung in
 `src/io/*.mjs`, `node:assert`-Test unter `scripts/test-*.mjs`, eigener CI-Schritt,

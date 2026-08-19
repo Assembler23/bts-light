@@ -935,6 +935,14 @@ struct DeviceHeartbeat {
     /// Abruf zählt dann als `poll`, was er auch ist.
     #[serde(default)]
     src: Option<String>,
+    /// Nur dieses eine Feld liefern (Spec monitor-livestand-push, S7).
+    ///
+    /// **Bewusst `String`, nicht `i64`.** Als Zahl deklariert, beantwortete
+    /// axum ein `?court=abc` mit einem 400er — eine andere Antwort als für
+    /// ein unbekanntes Feld, und damit ein Fingerzeig darauf, was gültig
+    /// ist. So liefert alles Unbrauchbare dieselbe leere Liste.
+    #[serde(default)]
+    court: Option<String>,
 }
 
 /// Markiert das Geraet als „gesehen", falls eine Device-ID im Query
@@ -998,7 +1006,40 @@ async fn health(
         "pushFallbackSlow": cfg.court_monitor.push_fallback_slow,
     })
     .to_string();
-    let (courts_json, etag, seqs_json) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
+    let (mut courts_json, mut etag, mut seqs_json) =
+        uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
+
+    // Schmaler Abruf je Feld (Spec monitor-livestand-push, S7): Ein fester
+    // Court-Monitor zeichnet eine einzige Kachel und holt dafür bisher die
+    // ganze Halle. Geschnitten wird aus **demselben** Bau, den der
+    // Antwortcache ohnehin hält — sonst nähme S7 zurück, was S1 gebracht hat.
+    //
+    // Und geschnitten wird **einmal je Cache-Generation**, nicht je Abruf:
+    // Der Schnitt ersetzt keinen Neubau, er kommt obendrauf, und er liegt vor
+    // der Marken-Prüfung — sonst zahlte selbst die sonst fast kostenlose
+    // Bestätigung „nichts Neues" den vollen Parse (Review-Funde 19.08.2026).
+    if let Some(wunsch) = q.court.as_deref() {
+        // Über die **geparste** Zahl, nicht den Rohtext: `?court=0101` meint
+        // dasselbe Feld wie `?court=101`, und über den Rohtext ließen sich
+        // beliebig viele Cache-Schlüssel erzeugen.
+        let id = wunsch.parse::<i64>().ok();
+        let prozess = ctx.tablet.process_tag();
+        // Schlüssel ist die **Marke** der vollen Antwort, nicht die Revision:
+        // Sie ist ein Inhalts-Hash und deckt damit auch die Hart-TTL des
+        // Übersichts-Caches ab. An der Revision allein hinge der Ausschnitt
+        // fest, sobald sich die Anzeige ohne Revisions-Erhöhung ändert —
+        // `attach_tablet`, `detach_tablet` und `record_battery` tun genau das
+        // (Review-Fund 19.08.2026).
+        let (feld, zahl, marke) = ctx.tablet.feld_ausschnitt(&etag, id, || {
+            alle_feld_ausschnitte(&courts_json, &seqs_json, prozess, &call_timer_json)
+        });
+        // Eigene Marke: Sie hängt am Inhalt, und der ist hier ein anderer.
+        // Mit der Marke der ganzen Liste bekäme ein schmaler Abrufer sonst
+        // „nichts Neues" auf einen Stand, den er nie gesehen hat.
+        courts_json = feld;
+        seqs_json = zahl;
+        etag = marke;
+    }
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
     // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
@@ -1110,6 +1151,70 @@ fn uebersicht_json(
         jetzt,
     );
     (courts_json, etag, seqs_json)
+}
+
+/// Schneidet **alle** Ein-Feld-Ausschnitte aus der fertigen Übersicht (Spec
+/// monitor-livestand-push, S7): je CourtID die Feld-Liste mit einem Eintrag,
+/// die eigene Ordnungszahl und die eigene Marke — alles in derselben Form
+/// wie die volle Antwort.
+///
+/// **Jede unbrauchbare Feldnummer bekommt denselben leeren Ausschnitt:**
+/// unbekannte, negative, nicht-numerische, leere. Ein 404 oder 400 für die
+/// eine und eine leere Liste für die andere wäre ein Fingerzeig darauf,
+/// welche Felder es gibt — am Relay, der im Internet steht, wäre das eine
+/// Auskunft über ein fremdes Turnier.
+///
+/// Die Zusage gilt dem **Wert**, nicht einer kaputten Query: Ein doppeltes
+/// `?court=1&court=2` weist schon der Extractor mit 400 ab, bevor irgendein
+/// Feld angesehen wird. Das ist kein Leck (die Antwort hängt nur an der Form
+/// der Anfrage, nie am Serverzustand) und gilt für `?device=` seit jeher
+/// genauso (Sicherheits-Review 19.08.2026).
+///
+/// Geschnitten wird auf der JSON-Ebene, weil der Antwortcache aus S1 die
+/// Liste als fertigen String hält. **Der Schnitt ersetzt keinen Neubau, er
+/// kommt obendrauf** — deshalb läuft er nur einmal je Cache-Generation
+/// (`TabletState::feld_ausschnitt`) und nicht bei jedem Abruf: Sonst zahlte
+/// selbst die sonst fast kostenlose Bestätigung „nichts Neues" den vollen
+/// Parse, und ein Gerät im Turnier-WLAN hätte mit wenigen Byte je Anfrage
+/// einen billigen Hebel auf die Rechenzeit des Turnier-PCs.
+fn alle_feld_ausschnitte(
+    courts_json: &str,
+    seqs_json: &str,
+    prozess: u64,
+    call_timer_json: &str,
+) -> crate::tablet::state::FeldCache {
+    let leer_liste = "[]".to_string();
+    let leer = (
+        leer_liste.clone(),
+        "{}".to_string(),
+        inhalts_marke(prozess, &leer_liste, call_timer_json),
+    );
+    let mut cache = crate::tablet::state::FeldCache {
+        leer,
+        ..Default::default()
+    };
+    let Ok(felder) = serde_json::from_str::<Vec<serde_json::Value>>(courts_json) else {
+        return cache;
+    };
+    let zahlen = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(seqs_json)
+        .unwrap_or_default();
+    for feld in felder {
+        let Some(id) = feld.get("court_id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        let Ok(liste) = serde_json::to_string(&[feld]) else {
+            continue;
+        };
+        // Nur die eigene Ordnungszahl: Die fremden sagen dem Feld-Monitor
+        // nichts und wären am Relay eine Auskunft über die Nachbarhalle.
+        let zahl = zahlen
+            .get(&id.to_string())
+            .map(|v| serde_json::json!({ id.to_string(): v }).to_string())
+            .unwrap_or_else(|| "{}".to_string());
+        let marke = inhalts_marke(prozess, &liste, call_timer_json);
+        cache.felder.insert(id, (liste, zahl, marke));
+    }
+    cache
 }
 
 /// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
@@ -5214,6 +5319,7 @@ mod tests {
         Query(DeviceHeartbeat {
             device: None,
             src: src.map(|s| s.to_string()),
+            court: None,
         })
     }
 
@@ -5272,6 +5378,289 @@ mod tests {
             .await
             .expect("Antwort lesbar");
         serde_json::from_slice(&bytes).expect("JSON")
+    }
+
+    // ── Schmaler Abruf je Feld (Spec monitor-livestand-push, S7) ──────────
+
+    /// Query einer Anzeige mit Feld-Auswahl.
+    fn takt_feld(court: &str) -> Query<DeviceHeartbeat> {
+        Query(DeviceHeartbeat {
+            device: None,
+            src: Some("poll".to_string()),
+            court: Some(court.to_string()),
+        })
+    }
+
+    /// Testkontext mit ZWEI Feldern — sonst wäre „genau ein Feld" nicht
+    /// von „alle Felder" zu unterscheiden.
+    fn make_ctx_zwei_felder() -> ServerCtx {
+        let ctx = make_ctx(1);
+        let mut zweites = match_on_court();
+        zweites.id = 43;
+        zweites.court = Some("2".into());
+        zweites.court_id = Some(102);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court(), zweites],
+            courts: vec!["1".into(), "2".into()],
+            locations: vec![],
+            court_infos: vec![
+                crate::btp::model::BtpCourt {
+                    id: 101,
+                    name: "1".into(),
+                    location_id: None,
+                    sort_order: 1,
+                },
+                crate::btp::model::BtpCourt {
+                    id: 102,
+                    name: "2".into(),
+                    location_id: None,
+                    sort_order: 2,
+                },
+            ],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        ctx
+    }
+
+    #[tokio::test]
+    async fn health_mit_court_liefert_genau_ein_feld() {
+        // Der Kern von S7: Ein fester Court-Monitor holt heute die ganze
+        // Halle, um eine einzige Kachel zu zeichnen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let voll = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        let schmal = koerper(
+            health(
+                State(ctx.clone()),
+                takt_feld("102"),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        assert_eq!(voll["courts"].as_array().unwrap().len(), 2);
+        let felder = schmal["courts"].as_array().unwrap();
+        assert_eq!(felder.len(), 1, "genau ein Feld");
+        // **Inhaltlich identisch** zum Eintrag in der vollen Antwort — sonst
+        // zeigten zwei Anzeigen desselben Felds Verschiedenes.
+        let aus_voll = voll["courts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["court_id"] == 102)
+            .expect("Feld 102 in der vollen Antwort");
+        assert_eq!(&felder[0], aus_voll);
+        // Die Ordnungszahl reist mit, aber nur die des angefragten Felds.
+        assert!(schmal["seqs"].get("102").is_some(), "eigene Zahl");
+        assert!(
+            schmal["seqs"].get("101").is_none(),
+            "keine fremden Zahlen im schmalen Abruf"
+        );
+        // Umschlag unverändert, damit dieselbe Seite beide Formen liest.
+        assert_eq!(schmal["ok"], serde_json::json!(true));
+        assert_eq!(schmal["callTimer"], voll["callTimer"]);
+    }
+
+    #[tokio::test]
+    async fn health_ohne_court_bleibt_unveraendert() {
+        // Verträglichkeit: Die Feld-Übersicht schickt keinen Selektor.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let antwort = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(antwort["courts"].as_array().unwrap().len(), 2);
+        assert_eq!(antwort["seqs"].as_object().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck() {
+        // Kein Existenz-Leck: Die Antwort darf sich nicht danach
+        // unterscheiden, ob es das Feld gibt. Sonst könnte jemand am Relay
+        // die Feldnummern eines fremden Turniers durchprobieren.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        for eingabe in ["999", "-5", "abc", "", "1e3", "9999999999999999999999"] {
+            let antwort = health(
+                State(ctx.clone()),
+                takt_feld(eingabe),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            assert_eq!(
+                antwort.status(),
+                StatusCode::OK,
+                "Eingabe {eingabe} ist kein Fehler"
+            );
+            let v = koerper(antwort).await;
+            assert_eq!(
+                v["courts"],
+                serde_json::json!([]),
+                "Eingabe {eingabe} liefert eine leere Liste"
+            );
+            assert_eq!(
+                v["seqs"],
+                serde_json::json!({}),
+                "Eingabe {eingabe} ohne Zahlen"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn der_schmale_abruf_hat_eine_eigene_marke() {
+        // Sonst bekäme ein schmaler Abrufer die Bestätigung „nichts Neues"
+        // auf die Marke der ganzen Liste — und umgekehrt hielte ein
+        // Übersichts-TV eine Ein-Feld-Marke für seinen Stand.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let voll = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let m_voll = voll
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let schmal = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let m_schmal = schmal
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(m_voll, m_schmal, "verschiedener Inhalt, verschiedene Marke");
+
+        // Und die eigene Marke bestätigt auch: unveränderter Stand → 304.
+        let wieder = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            if_none_match(&m_schmal),
+        )
+        .await
+        .into_response();
+        assert_eq!(wieder.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn der_schnitt_laeuft_je_cache_generation_nur_einmal() {
+        // Sicherheits-Review-Fund: Der Schnitt ersetzt keinen Neubau, er kam
+        // obendrauf — und lag sogar VOR der Marken-Prüfung, sodass auch die
+        // bisher fast kostenlose Bestätigung „nichts Neues" die ganze Liste
+        // parsen musste. Bei einem Gerät im Turnier-WLAN, das die Route in
+        // Schleife ruft, ist das ein deutlich billigerer Hebel als ein
+        // normaler Abruf: wenige Byte hin, voller Parse hier.
+        //
+        // Also einmal je Cache-Generation schneiden, danach nachschlagen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        for _ in 0..5 {
+            let _ = health(
+                State(ctx.clone()),
+                takt_feld("101"),
+                axum::http::HeaderMap::new(),
+            )
+            .await;
+        }
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            1,
+            "ein Bau (S1)"
+        );
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            1,
+            "fünf Abrufe, ein Schnitt — die übrigen schlagen nach"
+        );
+
+        // Ein Anstoß allein schneidet NICHT neu: Er hebt die Revision, aber
+        // die Anzeige sieht danach genauso aus, und der Schlüssel ist die
+        // Marke — ein Inhalts-Hash. Die Ordnungszahl im Ausschnitt bleibt
+        // damit die des Baus, aus dem er stammt. Das ist die harmlose
+        // Richtung aus S4 („höchstens älter als der Stand, zu dem sie
+        // ausgeliefert wird"): Inhalt und Zahl gehören zusammen, und sobald
+        // sich wirklich etwas ändert, kommen beide gemeinsam nach.
+        ctx.tablet.notify_monitor(101);
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            1,
+            "gleicher Inhalt, kein neuer Schnitt"
+        );
+
+        // Ein geänderter Inhalt dagegen schon.
+        let mut anders = match_on_court();
+        anders.court_id = Some(101);
+        anders.sets = vec![(11, 4)];
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![anders],
+            courts: vec!["1".into(), "2".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            2,
+            "neuer Satzstand = neuer Inhalt = neuer Schnitt"
+        );
+    }
+
+    #[tokio::test]
+    async fn zwei_schmale_abrufe_bauen_den_zustand_nur_einmal() {
+        // S7 darf den Antwortcache aus S1 nicht aushebeln: Der schmale
+        // Abruf schneidet aus demselben Bau, statt einen eigenen anzustoßen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            1,
+            "zwei Felder, ein Bau"
+        );
     }
 
     #[tokio::test]

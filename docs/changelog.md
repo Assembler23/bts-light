@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.242
+
+- **Eine Anzeige kann jetzt den Stand eines einzelnen Feldes abrufen**, statt
+  immer die ganze Halle zu bekommen: `…/health?court=<Feldnummer>` liefert
+  dieselbe Antwort wie sonst, nur mit diesem einen Feld darin. Im LAN wie in
+  der Cloud.
+- Ohne den Zusatz ändert sich nichts — die Feld-Übersicht bekommt weiterhin
+  alle Felder.
+- Eine unbekannte oder unsinnige Feldnummer liefert einfach eine leere Liste.
+  Bewusst so: Wer von außen Feldnummern durchprobiert, soll an der Antwort
+  nicht ablesen können, welche es gibt.
+- Achte Etappe (S7) und damit die letzte der Spec `monitor-livestand-push`.
+  Welche Anzeige den schmalen Abruf nutzen soll, entscheidet die Nachmessung —
+  heute holt der Einzelfeld-Monitor seinen Stand über einen eigenen Weg.
+
 ## v0.9.241
 
 - **Die Anzeigen merken jetzt zuverlässig, ob ihre Leitung noch lebt.** Der

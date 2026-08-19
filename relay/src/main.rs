@@ -1503,6 +1503,18 @@ async fn overview_page(Path(ns): Path<String>) -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "no-store")], Html(OVERVIEW_HTML)).into_response()
 }
 
+/// Query der Cloud-Übersicht: optional ein einzelnes Feld (Spec
+/// monitor-livestand-push, S7).
+///
+/// **Als `String` deklariert, nicht als Zahl.** Sonst beantwortete axum ein
+/// `?court=abc` mit 400 — eine andere Antwort als für ein unbekanntes Feld,
+/// und damit am Relay ein Fingerzeig darauf, was gültig ist.
+#[derive(serde::Deserialize)]
+struct OverviewQuery {
+    #[serde(default)]
+    court: Option<String>,
+}
+
 /// Datenquelle der Cloud-Court-Übersicht (`overview.html` pollt `<BASE>health`).
 /// Baut je Feld die Anzeige-Form aus dem, was der Host schon zum Relay pusht:
 /// Feldliste (`courts`), aktuelles Match (`court_matches`), Satzstand
@@ -1514,10 +1526,19 @@ async fn overview_page(Path(ns): Path<String>) -> impl IntoResponse {
 async fn overview_health(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
+    Query(q): Query<OverviewQuery>,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
+    // Schmaler Abruf je Feld (Spec monitor-livestand-push, S7). Der Selektor
+    // wird **vor** dem Namespace-Zugriff aufgelöst und wirkt nur auf die
+    // Liste dieses einen Namespace — er kann also nie über dessen Grenze
+    // greifen. Nicht-numerische Eingaben führen zu `None`, und `None` ist
+    // hier gleichbedeutend mit „kein Feld gefunden": Alles Unbrauchbare gibt
+    // dieselbe leere Liste wie eine unbekannte Nummer, sonst ließe sich am
+    // Antwortverhalten ablesen, welche Felder es gibt.
+    let wunsch: Option<Option<i64>> = q.court.as_deref().map(|s| s.parse::<i64>().ok());
     let (courts, call_timer, seqs, push_fallback_slow) = {
         let map = broker.namespaces.lock().await;
         match map.get(&ns) {
@@ -1530,9 +1551,28 @@ async fn overview_health(
                 // Liste, und steigende Zahlen darin machten die Bestätigung
                 // ohne Nutzdaten wirkungslos. Beide Betriebsarten liefern
                 // deshalb dieselbe Form (Review-Fund 19.08.2026).
+                //
+                // Beim schmalen Abruf (S7) bleibt nur die Zahl des
+                // angefragten Felds übrig: Die der Nachbarfelder sagen einem
+                // Feld-Monitor nichts und wären hier eine Auskunft über die
+                // übrige Halle.
+                //
+                // **Und nur, wenn es das Feld auch wirklich gibt.**
+                // `monitor_seq` und `courts` sind zwei unabhängige Quellen:
+                // Die Zahlen entstehen aus Anstößen und werden nie
+                // aufgeräumt, die Feldliste ersetzt der Host komplett. Für
+                // eine CourtID, die nur noch in `monitor_seq` steht — ein
+                // Nudge vor der ersten Feldliste, oder ein Turnierwechsel im
+                // selben Namespace — käme sonst eine leere Feld-Liste mit
+                // gefüllter Zahlen-Karte zurück, und die wäre der Beweis,
+                // dass es dieses Feld einmal gab (Review-Fund 19.08.2026).
+                let bekannt: std::collections::HashSet<i64> =
+                    n.courts.iter().map(|c| c.id).collect();
                 let seqs: std::collections::HashMap<String, u64> = n
                     .monitor_seq
                     .iter()
+                    .filter(|(id, _)| bekannt.contains(id))
+                    .filter(|(id, _)| wunsch.is_none_or(|w| w == Some(**id)))
                     .map(|(id, s)| (id.to_string(), *s))
                     .collect();
                 let names = |team: &[relay_proto::PlayerBrief]| {
@@ -1550,6 +1590,8 @@ async fn overview_health(
                 let courts: Vec<serde_json::Value> = n
                     .courts
                     .iter()
+                    // Schmaler Abruf (S7): höchstens das eine Feld.
+                    .filter(|c| wunsch.is_none_or(|w| w == Some(c.id)))
                     .map(|c| {
                         let m = n.court_matches.get(&c.id);
                         // Satzstand als `Vec<SetAb>` → JSON `[{"a":…,"b":…}]`. Die
@@ -5530,7 +5572,7 @@ mod tests {
         }
         register_host(&broker, NS, &host).await;
 
-        let resp = overview_health(State(broker.clone()), Path(NS.into()))
+        let resp = overview_health(State(broker.clone()), Path(NS.into()), leer_query())
             .await
             .into_response();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -5587,10 +5629,223 @@ mod tests {
         );
 
         // Unbekannter Namespace → 404, kein Datenleck.
-        let miss = overview_health(State(broker.clone()), Path("nope".into()))
+        let miss = overview_health(State(broker.clone()), Path("nope".into()), leer_query())
             .await
             .into_response();
         assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Query ohne Feld-Auswahl (Spec monitor-livestand-push, S7).
+    fn leer_query() -> Query<OverviewQuery> {
+        Query(OverviewQuery { court: None })
+    }
+
+    /// Query mit Feld-Auswahl.
+    fn feld_query(court: &str) -> Query<OverviewQuery> {
+        Query(OverviewQuery {
+            court: Some(court.to_string()),
+        })
+    }
+
+    #[tokio::test]
+    async fn cloud_health_mit_court_liefert_genau_ein_feld() {
+        // Spec monitor-livestand-push, S7 — dieselbe Zusage wie im LAN,
+        // damit ein Court-Monitor in beiden Betriebsarten gleich arbeitet.
+        const NS: &str = "11111111-1111-1111-1111-111111111111";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![
+                relay_proto::CourtBrief {
+                    id: 101,
+                    label: "1".into(),
+                    hall: "Halle 1".into(),
+                    hall_color: None,
+                },
+                relay_proto::CourtBrief {
+                    id: 102,
+                    label: "2".into(),
+                    hall: "Halle 1".into(),
+                    hall_color: None,
+                },
+            ];
+            ns.monitor_seq.insert(101, 5);
+            ns.monitor_seq.insert(102, 7);
+        }
+        register_host(&broker, NS, &host).await;
+
+        let voll = overview_health(State(broker.clone()), Path(NS.into()), leer_query())
+            .await
+            .into_response();
+        let v: serde_json::Value =
+            serde_json::from_slice(&axum::body::to_bytes(voll.into_body(), 8192).await.unwrap())
+                .unwrap();
+        assert_eq!(v["courts"].as_array().unwrap().len(), 2);
+
+        let schmal = overview_health(State(broker.clone()), Path(NS.into()), feld_query("102"))
+            .await
+            .into_response();
+        assert_eq!(schmal.status(), StatusCode::OK);
+        let s: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(schmal.into_body(), 8192)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let felder = s["courts"].as_array().unwrap();
+        assert_eq!(felder.len(), 1);
+        assert_eq!(felder[0]["court_id"], serde_json::json!(102));
+        // Inhaltlich identisch zum Eintrag in der vollen Antwort.
+        let aus_voll = v["courts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["court_id"] == 102)
+            .unwrap();
+        assert_eq!(&felder[0], aus_voll);
+        // Nur die eigene Ordnungszahl — die der Nachbarfelder geht den
+        // Feld-Monitor nichts an.
+        assert_eq!(s["seqs"]["102"], serde_json::json!(7));
+        assert!(s["seqs"].get("101").is_none());
+        // Umschlag unverändert.
+        assert_eq!(s["callTimer"], v["callTimer"]);
+    }
+
+    #[tokio::test]
+    async fn cloud_health_mit_unbrauchbarem_court_leakt_nichts() {
+        // Am Relay ist `?court=` erstmals ein von außen gesteuerter Selektor
+        // auf einer Route, die jeder mit der Namespace-UUID erreicht. Alles
+        // Unbrauchbare muss deshalb dieselbe Antwort geben wie ein
+        // unbekanntes Feld — sonst ließen sich Feldnummern durchprobieren.
+        const NS: &str = "22222222-2222-2222-2222-222222222222";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "1".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            ns.monitor_seq.insert(101, 3);
+        }
+        register_host(&broker, NS, &host).await;
+
+        for eingabe in ["999", "-5", "abc", "", "1e3"] {
+            let r = overview_health(State(broker.clone()), Path(NS.into()), feld_query(eingabe))
+                .await
+                .into_response();
+            assert_eq!(r.status(), StatusCode::OK, "Eingabe {eingabe}");
+            let v: serde_json::Value =
+                serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 8192).await.unwrap())
+                    .unwrap();
+            assert_eq!(v["courts"], serde_json::json!([]), "Eingabe {eingabe}");
+            assert_eq!(v["seqs"], serde_json::json!({}), "Eingabe {eingabe}");
+        }
+    }
+
+    #[tokio::test]
+    async fn eine_verwaiste_ordnungszahl_verraet_kein_feld() {
+        // Review-Fund 19.08.2026: `monitor_seq` und `courts` sind zwei
+        // unabhängige Quellen. Die Zahlen entstehen aus Anstößen und werden
+        // **nie** aufgeräumt; die Feldliste ersetzt der Host komplett. Für
+        // eine CourtID, die nur noch in `monitor_seq` steht — ein Nudge vor
+        // der ersten Feldliste, oder ein Turnierwechsel im selben Namespace —
+        // antwortete der schmale Abruf mit einer leeren Liste, aber einer
+        // gefüllten `seqs`-Karte. Genau das Existenz-Signal, das die Etappe
+        // ausschließen soll.
+        const NS: &str = "55555555-5555-5555-5555-555555555555";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "1".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            // Feld 777 gibt es nicht (mehr) — seine Zahl steht aber noch da.
+            ns.monitor_seq.insert(101, 3);
+            ns.monitor_seq.insert(777, 9);
+        }
+        register_host(&broker, NS, &host).await;
+
+        let verwaist = overview_health(State(broker.clone()), Path(NS.into()), feld_query("777"))
+            .await
+            .into_response();
+        let v: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(verwaist.into_body(), 8192)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let nie_dagewesen =
+            overview_health(State(broker.clone()), Path(NS.into()), feld_query("888"))
+                .await
+                .into_response();
+        let n: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(nie_dagewesen.into_body(), 8192)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(v["courts"], serde_json::json!([]));
+        assert_eq!(
+            v["seqs"],
+            serde_json::json!({}),
+            "ohne Feld auch keine Zahl — sonst wäre sie der Beweis, dass es das Feld gab"
+        );
+        assert_eq!(v["seqs"], n["seqs"], "ununterscheidbar");
+        assert_eq!(v["courts"], n["courts"]);
+    }
+
+    #[tokio::test]
+    async fn cloud_health_mit_court_bleibt_im_eigenen_namespace() {
+        // Namespace-Isolation: Ein Feld mit derselben Nummer in einem
+        // fremden Namespace ist über den Selektor nicht erreichbar.
+        const NS_A: &str = "33333333-3333-3333-3333-333333333333";
+        const NS_B: &str = "44444444-4444-4444-4444-444444444444";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_a, _rx_a) = mpsc::unbounded_channel();
+        let (host_b, _rx_b) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let a = map.entry(NS_A.into()).or_insert_with(Namespace::new);
+            a.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "A-Feld".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            let b = map.entry(NS_B.into()).or_insert_with(Namespace::new);
+            b.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "B-Feld".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+        }
+        register_host(&broker, NS_A, &host_a).await;
+        register_host(&broker, NS_B, &host_b).await;
+
+        let r = overview_health(State(broker.clone()), Path(NS_A.into()), feld_query("101"))
+            .await
+            .into_response();
+        let v: serde_json::Value =
+            serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 8192).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            v["courts"][0]["court"],
+            serde_json::json!("A-Feld"),
+            "jeder Namespace sieht nur sein eigenes Feld 101"
+        );
     }
 
     #[tokio::test]
