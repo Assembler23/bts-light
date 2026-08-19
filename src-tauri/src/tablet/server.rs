@@ -2606,6 +2606,10 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             // Aufgabe gekennzeichnet. Ohne aufgezeichneten Verlauf
             // (Papier, Walkover) entsteht bewusst kein Eintrag.
             ctx.tablet.timeline_store().finalize(m.id, body.retired);
+            // Und der Zettel (ADR 0037) — eigener Store, eigener
+            // Abschluss, weil ein Match Ereignisse ohne Punktverlauf
+            // haben kann.
+            ctx.tablet.sheet_store().finalize(m.id, body.retired);
             ResultResponse::ok()
         }
         Err(e) => {
@@ -3296,12 +3300,31 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     }
                                 }
                             }
-                            // Zettel-Ereignisse (ADR 0037): Wire steht ab
-                            // E1, der Ingest kommt in E3 der Spec
-                            // schiedsrichterzettel-druck. Bis dahin still
-                            // verworfen — wie von jedem älteren Host.
-                            Ok(TabletMsg::MatchEvent { .. })
-                            | Ok(TabletMsg::MatchEventSync { .. }) => {}
+                            // Zettel-Ereignisse (ADR 0037): **derselbe**
+                            // Filter wie beim Punktverlauf (S-R4) — nur
+                            // vom aktiven Halter, nur fürs aktuelle
+                            // Court-Match. Karten sind Sanktionsdaten;
+                            // ein im alten Spiel hängendes Tablet darf
+                            // sie erst recht nicht fremden Matches
+                            // anhängen.
+                            Ok(TabletMsg::MatchEvent { match_id, event }) => {
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t)
+                                        && ctx.tablet.match_for_court(c).is_some_and(|m| m.id == match_id)
+                                    {
+                                        ctx.tablet.sheet_store().apply_event(match_id, event);
+                                    }
+                                }
+                            }
+                            Ok(TabletMsg::MatchEventSync { match_id, events }) => {
+                                if let (Some(c), Some(t)) = (court, my_token) {
+                                    if ctx.tablet.is_court_active(c, t)
+                                        && ctx.tablet.match_for_court(c).is_some_and(|m| m.id == match_id)
+                                    {
+                                        ctx.tablet.sheet_store().apply_event_sync(match_id, events);
+                                    }
+                                }
+                            }
                             Err(_) => {}
                         }
                     }
@@ -4452,6 +4475,50 @@ mod tests {
         );
         // Papier-Spiel ohne Aufzeichnung: finalize legt nichts an.
         assert!(ctx.tablet.timeline_store().timeline(999).is_none());
+    }
+
+    /// Der Zettel wird am selben Ergebnisweg abgeschlossen wie der
+    /// Punktverlauf — aber mit **eigenem** Store, weil ein Match
+    /// Ereignisse ohne Punktverlauf haben kann (Karte vor dem ersten
+    /// Ballwechsel, ADR 0037).
+    #[tokio::test]
+    async fn process_result_finalizes_sheet() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+
+        // Nur eine Karte, KEIN Ballwechsel — genau der Fall, den der
+        // Punktverlauf nicht abbilden kann.
+        let karte = relay_proto::MatchEvent {
+            id: "ff01".into(),
+            seq: 1,
+            set: 1,
+            after_n: 0,
+            score_a: 0,
+            score_b: 0,
+            ts_ms: 1_755_600_000_000,
+            kind: relay_proto::EventKind::CardYellow,
+            team: 1,
+            player: 0,
+            receiver_team: 0,
+            receiver_player: 0,
+            phase: relay_proto::Phase::PreMatch,
+            retracts: String::new(),
+        };
+        assert!(ctx.tablet.sheet_store().apply_event(42, karte));
+        assert!(ctx.tablet.timeline_store().timeline(42).is_none());
+
+        let mut body = body_with(&[(21, 10), (5, 2)]);
+        body.retired = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+
+        let sheet = ctx.tablet.sheet_store().sheet(42).expect("Zettel");
+        assert!(sheet.finished && sheet.retired, "finalisiert + Aufgabe");
+        assert_eq!(sheet.events.len(), 1, "das Ereignis bleibt erhalten");
+
+        // Papier-Spiel ohne Erfassung: finalize legt nichts an.
+        assert!(ctx.tablet.sheet_store().sheet(999).is_none());
     }
 
     /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt

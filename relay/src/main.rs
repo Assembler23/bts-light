@@ -2024,14 +2024,20 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                 // sofort Pong zurück, ohne bts-light zu behelligen.
                                 let _ = tx.send(text(&ServerMsg::Pong));
                             }
-                            // Zettel-Ereignisse (ADR 0037): Die Wire-Typen
-                            // stehen, die Durchleitung kommt in Etappe E3 der
-                            // Spec schiedsrichterzettel-druck. Bis dahin
-                            // verwirft dieser Relay sie still — genau so
-                            // verhält sich auch jeder noch nicht aktualisierte
-                            // Relay, deshalb gilt: E3 mergen, Relay ausrollen,
-                            // dann erst den App-Tag setzen.
-                            Ok(TabletMsg::MatchEvent { .. }) | Ok(TabletMsg::MatchEventSync { .. }) => {}
+                            // Zettel-Ereignisse (ADR 0037): 1:1 an den Host,
+                            // wie der Punktverlauf — Briefträger, nur Halter-,
+                            // Stale- und Größen-Prüfung, keine Deutung und
+                            // keine Vorhaltung.
+                            Ok(TabletMsg::MatchEvent { match_id, event }) => {
+                                if let (Some(c), true) = (court, active) {
+                                    forward_match_event(&broker, &ns, c, match_id, event, &tx).await;
+                                }
+                            }
+                            Ok(TabletMsg::MatchEventSync { match_id, events }) => {
+                                if let (Some(c), true) = (court, active) {
+                                    forward_match_event_sync(&broker, &ns, c, match_id, events, &tx).await;
+                                }
+                            }
                             Err(_) => {}
                         }
                     }
@@ -2817,6 +2823,84 @@ async fn forward_rally(
             winner,
             score_a,
             score_b,
+        }));
+    }
+}
+
+/// Ein Zettel-Ereignis an den Host durchreichen (ADR 0037).
+///
+/// Der Relay bleibt Briefträger — er prüft Gültigkeit, Halter, Stale und
+/// Größe, deutet aber nichts. Karten sind Sanktionsdaten; sie werden hier
+/// **nicht** vorgehalten und **nicht** geloggt.
+async fn forward_match_event(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    match_id: i64,
+    event: relay_proto::MatchEvent,
+    tx: &Tx,
+) {
+    if !event.is_valid() {
+        return;
+    }
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        return;
+    }
+    if let Some(host) = namespace.host.as_ref() {
+        let _ = host.send(text(&RelayFrame::MatchEvent {
+            court_id,
+            match_id,
+            event,
+        }));
+    }
+}
+
+/// Einen kompletten Ereignis-Abgleich an den Host durchreichen (ADR 0038).
+///
+/// Deckel wie beim Verlaufs-Resync, nur mit den **eigenen** Konstanten des
+/// Zettels (`MAX_EVENTS_PER_MATCH` über `match_events_valid`,
+/// `MAX_SHEET_LEN`): Ein Ereignis-Schwall darf den Punktverlauf nicht
+/// verdrängen, deshalb teilen sich die beiden Ströme keinen Deckel
+/// (ADR 0037). Ein überlanger Abgleich wird verworfen statt gekürzt.
+async fn forward_match_event_sync(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    match_id: i64,
+    events: Vec<relay_proto::MatchEvent>,
+    tx: &Tx,
+) {
+    if !relay_proto::match_events_valid(&events) {
+        return;
+    }
+    if serde_json::to_string(&events)
+        .map(|json| json.len() > relay_proto::MAX_SHEET_LEN)
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let map = broker.namespaces.lock().await;
+    let Some(namespace) = map.get(ns) else {
+        return;
+    };
+    if !is_holder(namespace, court_id, tx) {
+        return;
+    }
+    if !match_id_matches_court(namespace, court_id, match_id) {
+        return;
+    }
+    if let Some(host) = namespace.host.as_ref() {
+        let _ = host.send(text(&RelayFrame::MatchEventSync {
+            court_id,
+            match_id,
+            events,
         }));
     }
 }
@@ -6794,6 +6878,151 @@ mod tests {
                 match_id: 0,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn zettel_ereignisse_werden_verbatim_durchgereicht_und_gedeckelt() {
+        // ADR 0037: Der Relay ist auch hier nur Briefträger — er prüft
+        // Gültigkeit, Halter, Stale und die EIGENEN Deckel des Zettels,
+        // deutet aber nichts und hält nichts vor.
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(9));
+        }
+
+        let karte = relay_proto::MatchEvent {
+            id: "a1b2c3d4e5f6".into(),
+            seq: 1,
+            set: 1,
+            after_n: 7,
+            score_a: 5,
+            score_b: 3,
+            ts_ms: 1_755_600_000_000,
+            kind: relay_proto::EventKind::CardRed,
+            team: 1,
+            player: 0,
+            receiver_team: 0,
+            receiver_player: 0,
+            phase: relay_proto::Phase::Play,
+            retracts: String::new(),
+        };
+
+        // Verbatim durch, unverändert.
+        forward_match_event(&broker, "ns1", 101, 9, karte.clone(), &tablet_tx).await;
+        let Message::Text(txt) = host_rx.try_recv().expect("Ereignis erreicht den Host") else {
+            panic!("Text-Frame erwartet")
+        };
+        let parsed: RelayFrame = serde_json::from_str(txt.as_str()).unwrap();
+        assert_eq!(
+            parsed,
+            RelayFrame::MatchEvent {
+                court_id: 101,
+                match_id: 9,
+                event: karte.clone(),
+            }
+        );
+
+        // Fremdes Match (Stale, HM-03) → verworfen. Bei Sanktionsdaten
+        // wiegt das schwerer als beim Punktverlauf: eine Karte am falschen
+        // Spiel ist eine Falschbeschuldigung im Archiv.
+        forward_match_event(&broker, "ns1", 101, 7, karte.clone(), &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "Stale-Ereignis verworfen");
+
+        // Ungültiges Ereignis → verworfen, ohne den Host zu behelligen.
+        let mut kaputt = karte.clone();
+        kaputt.team = 9;
+        forward_match_event(&broker, "ns1", 101, 9, kaputt, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "ungültiges Ereignis verworfen");
+
+        // Gültiger Abgleich fließt …
+        forward_match_event_sync(&broker, "ns1", 101, 9, vec![karte.clone()], &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_ok(),
+            "gültiger Abgleich erreicht den Host"
+        );
+
+        // … ein überzähliger wird verworfen (MAX_EVENTS_PER_MATCH) …
+        let zu_viele: Vec<relay_proto::MatchEvent> = (0..=relay_proto::MAX_EVENTS_PER_MATCH)
+            .map(|i| relay_proto::MatchEvent {
+                id: format!("{i:04x}"),
+                ..karte.clone()
+            })
+            .collect();
+        forward_match_event_sync(&broker, "ns1", 101, 9, zu_viele, &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_err(),
+            "überzähliger Abgleich verworfen"
+        );
+
+        // … und ein überlanger ebenso (MAX_SHEET_LEN). Der Deckel greift
+        // erst bei absurden Zahlenwerten — mit realistischen bindet der
+        // Zähl-Deckel zuerst (gemessen in E2).
+        let zu_gross: Vec<relay_proto::MatchEvent> = (0..relay_proto::MAX_EVENTS_PER_MATCH)
+            .map(|i| relay_proto::MatchEvent {
+                id: format!("{i:032x}"),
+                seq: i64::MAX,
+                ts_ms: u64::MAX,
+                kind: relay_proto::EventKind::Retract,
+                retracts: "a".repeat(relay_proto::MAX_EVENT_ID_LEN),
+                ..karte.clone()
+            })
+            .collect();
+        assert!(
+            relay_proto::match_events_valid(&zu_gross),
+            "Fixture muss den Zähl-Deckel einhalten, sonst prüft der Größen-Deckel nichts"
+        );
+        assert!(
+            serde_json::to_string(&zu_gross).unwrap().len() > relay_proto::MAX_SHEET_LEN,
+            "Fixture reißt den Größen-Deckel nicht — der Test prüft den Pfad nicht"
+        );
+        forward_match_event_sync(&broker, "ns1", 101, 9, zu_gross, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "überlanger Abgleich verworfen");
+    }
+
+    #[tokio::test]
+    async fn nur_der_halter_darf_zettel_ereignisse_schreiben() {
+        // Sanktionsdaten dürfen erst recht nicht von einem verdrängten
+        // Tablet kommen: Der Halter-Filter ist derselbe wie beim Rally.
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (halter_tx, _halter_rx) = mpsc::unbounded_channel();
+        let (fremd_tx, _fremd_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, halter_tx.clone());
+            ns.court_matches.insert(101, brief(9));
+        }
+        let karte = relay_proto::MatchEvent {
+            id: "ff01".into(),
+            seq: 1,
+            set: 1,
+            after_n: 0,
+            score_a: 0,
+            score_b: 0,
+            ts_ms: 1,
+            kind: relay_proto::EventKind::CardYellow,
+            team: 0,
+            player: 0,
+            receiver_team: 0,
+            receiver_player: 0,
+            phase: relay_proto::Phase::Play,
+            retracts: String::new(),
+        };
+        // Das verdrängte Tablet kommt nicht durch …
+        forward_match_event(&broker, "ns1", 101, 9, karte.clone(), &fremd_tx).await;
+        forward_match_event_sync(&broker, "ns1", 101, 9, vec![karte.clone()], &fremd_tx).await;
+        assert!(host_rx.try_recv().is_err(), "Nicht-Halter abgewiesen");
+        // … der Halter schon.
+        forward_match_event(&broker, "ns1", 101, 9, karte, &halter_tx).await;
+        assert!(host_rx.try_recv().is_ok(), "Halter kommt durch");
     }
 
     #[tokio::test]

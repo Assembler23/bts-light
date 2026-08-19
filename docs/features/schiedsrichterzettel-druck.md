@@ -236,7 +236,12 @@ Master ein Verzeichnis; `docs/adr/README.md` wird nachgezogen (führt den Index 
 
 **In E3 mitzuerledigen (Befunde aus Code- und Security-Review von E1, 19.08.2026):**
 
-- **Die Deckel brauchen Aufrufer.** `match_events_valid` (Zahl der Ereignisse) und
+- ~~**Die Deckel brauchen Aufrufer.**~~ **Erledigt in E3:** `match_events_valid` **und**
+  `MAX_SHEET_LEN` werden in `forward_match_event_sync` (Relay) geprüft, der Store prüft beide
+  zusätzlich selbst — der LAN-Weg läuft an keinem Relay vorbei. Tests je Weg:
+  `zettel_ereignisse_werden_verbatim_durchgereicht_und_gedeckelt`,
+  `nur_der_halter_darf_zettel_ereignisse_schreiben` (Relay) und die Deckel-Tests in `sheet.rs`.
+  Ursprünglicher Befund: `match_events_valid` (Zahl der Ereignisse) und
   `MAX_SHEET_LEN` haben nach E1 **außerhalb der Tests keine Aufrufstelle** — in E1 korrekt, weil
   jeder Frame verworfen wird, ab E3 aber eine Lücke. Der Ingest in `server.rs`,
   `relay_client.rs` und `relay/src/main.rs` muss beide **tatsächlich aufrufen**; ein Deckel neben

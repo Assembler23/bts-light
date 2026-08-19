@@ -147,11 +147,20 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    läuft als `scoresheet_request`/`scoresheet_data` über die host-ws; der
    Relay hält auch **keine Zettel** vor.
 
-   > **Stand:** Die Wire-Typen stehen (Etappe E1). Durchleitung und
-   > Ingest folgen in E3, der Leseweg in E5. Bis dahin verwerfen Relay
-   > und Host die neuen Frames still — genau wie es jeder noch nicht
-   > aktualisierte Relay tut. Daraus folgt die Ausrollreihenfolge:
-   > **erst den Relay ausrollen, dann den App-Tag setzen.**
+   Der Relay prüft dabei **eigene** Deckel, nicht die des Punktverlaufs:
+   `match_events_valid` (Zahl, `MAX_EVENTS_PER_MATCH`) und `MAX_SHEET_LEN`
+   (Größe). Halter- und Stale-Filter sind dieselben wie beim Rally — bei
+   Sanktionsdaten wiegt das schwerer als beim Punktverlauf: eine Karte am
+   falschen Spiel wäre eine Falschbeschuldigung im Archiv.
+
+   > **Stand:** Wire (E1), Store (E2) und Ingest samt Durchleitung (E3)
+   > stehen. Der Leseweg folgt in E5, die Erfassung am Tablet in E6 —
+   > bis dahin erzeugt niemand solche Frames.
+   >
+   > **Ausrollreihenfolge, ab hier verbindlich:** Ein noch nicht
+   > aktualisierter Relay verwirft die neuen Tablet-Frames **still**.
+   > Also **erst den Relay ausrollen, dann den App-Tag setzen** — sonst
+   > erfassen Tablets Ereignisse, die unterwegs verschwinden.
 5. „Ergebnis übermitteln" → `POST …/result` → Relay reicht es per
    WebSocket-Frame an den Host → bts-light schreibt per `SENDUPDATE` nach
    BTP und antwortet mit `ResultAck`. Der Relay wartet auf die `ResultAck` nur
