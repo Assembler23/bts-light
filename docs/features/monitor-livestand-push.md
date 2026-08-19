@@ -216,6 +216,11 @@ Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
   Latenz Punkt → Anzeige. Sie brauchen einen **Probeaufbau ohne Liveticker**.
 - ⚠️ **Loopback, kein WLAN.** Die 1,13 MB/s sind gerechnet, nicht im Hallen-Funk
   gemessen; die Sättigung aus dem Zielbild bleibt offen.
+- ⚠️ **Leicht zu hoch.** Beim Messlauf sendeten `tablet.html` (Uhr-Synchronisation,
+  alle 30 s je Tablet) und `tv.html` (Hallen-Menü) noch kein `src` und landeten damit
+  samt vollem Rumpf in `health_poll` — obwohl sie keine Anzeige aktualisieren. Seit
+  v0.9.238 senden beide `src=check` und zählen gar nicht mehr mit. Bei zwanzig Tablets
+  waren das grob 0,7 Abrufe/s der oben gezeigten 72,7.
 
 Ablauf für den nächsten (vollen) Messlauf:
 
