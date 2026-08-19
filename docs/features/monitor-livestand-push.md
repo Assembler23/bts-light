@@ -194,7 +194,7 @@ Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
 | `overview`-Bauten/s | **74,0/s** | 4524 Bauten, davon 76 **nicht** von `/health` (Desktop, Kombi) |
 | `overview_build_ns` Ø / p95 / max | **1,20 ms / 4,19 ms / 16,7 ms** | je Abruf, jedes Mal neu |
 | `persist_scores` Ø | **20,0 ms** | je Punkt, **synchron im async-Handler** |
-| `health_push` / Latenz Punkt → Anzeige | — | Trockenlauf, siehe unten |
+| `health_push` / Latenz Punkt → Anzeige | — | Trockenlauf, siehe unten — **nachgeholt**, siehe „Nachmessung (nach S7)" |
 
 **Was die Zahlen tragen — und was nicht:**
 
@@ -214,6 +214,8 @@ Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
   verbunden (das hätte Felder belegt und erfundene Stände in den öffentlichen
   Liveticker geschrieben). Damit fehlen `health_push`, die Nudge-Rate und die
   Latenz Punkt → Anzeige. Sie brauchen einen **Probeaufbau ohne Liveticker**.
+  *(Am 19.08.2026 nachgeholt: Der Nutzer hat für sein Testturnier ausdrücklich
+  freigegeben, dass simulierte Tablets senden — siehe „Nachmessung (nach S7)".)*
 - ⚠️ **Loopback, kein WLAN.** Die 1,13 MB/s sind gerechnet, nicht im Hallen-Funk
   gemessen; die Sättigung aus dem Zielbild bleibt offen.
 - ⚠️ **Leicht zu hoch.** Beim Messlauf sendeten `tablet.html` (Uhr-Synchronisation,
@@ -243,6 +245,68 @@ Ablauf für den nächsten (vollen) Messlauf:
 | Nudges/s | *(Trockenlauf)* | | `nudges_sent` (beide) |
 | Latenz Punkt → Anzeige p50/p95 | *(Trockenlauf)* | | Skript (beide) |
 | Pi: Renders/s, Ø, über 16 ms | | | `ovRenderMessen` |
+
+## Nachmessung (nach S7)
+
+**Lauf: 19.08.2026**, v0.9.242, LAN, Testturnier mit **20 Feldern, alle belegt**,
+Antwortgröße 16,3 KB, je 60 s, **Debug-Build** (`tauri build --debug --no-bundle`) — also
+dasselbe Optimierungsprofil wie bei der Vorher-Messung, damit die Zahlen vergleichbar
+bleiben. Simulierte Tablets waren diesmal ausdrücklich freigegeben; damit liegen auch die
+vier Werte vor, die im ersten Lauf fehlten.
+
+**Leerlauf — 20 Feld-Übersichten, keine zählenden Tablets** (`--trocken`, direkt
+vergleichbar mit der Vorher-Messung):
+
+| Kennzahl | Vorher (v0.9.235) | Nachher (v0.9.242) | Wirkung |
+|---|---|---|---|
+| `/health`-Abrufe/s | 72,7 | 75,4 | unverändert — der Schalter ist aus, es bleibt beim 250-ms-Takt |
+| **mit `push_fallback_slow`** | — | **5,3** | **−93 %** (S6) |
+| `/health`-Bytes/s | **1,13 MB/s** | **0,01 MB/s** | **−99 %** (S1: 99 % der Antworten sind 304) |
+| `overview`-Bauten/s | **74,0** | **9,8** | **−87 %** (S1) |
+| `overview_build_ns` Ø / p95 | 1,20 / 4,19 ms | **0,63 / 2,10 ms** | halbiert |
+
+**Spielbetrieb — 20 Übersichten *und* 20 zählende Tablets**, 222 Punkte in 60 s
+(3,7 Punkte/s turnierweit, also im geschätzten Bereich):
+
+| Kennzahl | 250-ms-Takt | 4-s-Takt | Bemerkung |
+|---|---|---|---|
+| `/health`-Abrufe/s | 149,0 | 141,0 | **fast gleich** — hier bestimmen die Anstöße den Takt, nicht der Fallback |
+| davon „nichts Neues" | 51 % | 48 % | im Leerlauf 99 %, hier ändert sich ja wirklich etwas |
+| `/health`-Bytes/s | 1,16 MB/s | 1,17 MB/s | bei **doppelt so vielen** Abrufen wie vorher |
+| `overview`-Bauten/s | 13,8 | 10,2 | gegenüber 74,0 vorher |
+| `persist_scores` | **56× für 222 Punkte**, Ø **6,6 ms** | 55× | vorher: **jeder** Punkt, Ø 20,0 ms (S2) |
+| Nudges/s (gesendet) | 7,45 | 7,45 | zwei je Punkt, wie in der Analyse angenommen |
+| **Latenz Punkt → Anzeige** | **p50 15 ms / p95 68 ms** | p50 14 / p95 94 ms | Zielwert der Spec: unter 300 ms |
+| `health_push` | 8531 Abrufe | 17040 kumuliert | die Spalte, die im ersten Lauf fehlte |
+
+**Schmaler Abruf (S7) — 20 feste Feld-Monitore:**
+
+| Weg | Abrufe/s | Bytes/s |
+|---|---|---|
+| `/court/{id}/state` (heutiger Weg) | 76,7 | **0,07 MB/s** |
+| `/health?court=<id>` (S7) | 76,7 | **0,00 MB/s** (100 % 304) |
+
+**Was die Zahlen bedeuten:**
+
+- **Die Zielwerte sind erreicht.** Im Leerlauf fallen 99 % der Nutzdaten und 87 % der
+  Vollberechnungen weg; die Latenz liegt mit 15 ms weit unter der 300-ms-Grenze.
+- **Der teuerste Einzelposten ist entschärft:** `persist_scores` lief vorher bei jedem
+  Punkt mit 20 ms synchron im Handler, jetzt 56-mal für 222 Punkte mit 6,6 ms.
+- **Der Fallback-Takt ist im Spielbetrieb nicht der Kostentreiber — die Anstöße sind es.**
+  Zwischen 250 ms und 4 s liegen dort nur 149 gegen 141 Abrufe/s, weil ohnehin jeder
+  Anstoß einen Abruf auslöst. Der Schalter wirkt genau da, wo er soll: in der ruhigen
+  Halle (−93 %), nicht im laufenden Spiel.
+- **Die Ausbaustufe „Nutzlast im Nudge" wird NICHT gebaut.** Ihr Auslösekriterium war
+  „mehr als 20 Requests/s je Übersichts-Gerät". Gemessen sind **7,45/s** je Gerät
+  (149 Abrufe/s auf 20 Anzeigen) — deutlich darunter.
+- ⚠️ **Loopback, ein Rechner, Debug-Build.** Netzwerk-Latenz und die Last durch echte
+  Browser fehlen; die Pi-Zeile (`ovRenderMessen`) und die Cloud-Spalte stehen weiterhin
+  aus. Die Zählwerte hängen nicht am Optimierungsgrad, die Zeiten sind pessimistisch.
+- ⚠️ Der 4-s-Takt wurde über die Messhilfe `--langsam` erzwungen, nicht über den
+  Server-Schalter — der wirkt ohnehin nur im Client, und ein Server-Neustart kostet am
+  Turnier-PC einen Handgriff an der Oberfläche. Dass der Schalter die Strecke
+  Konfiguration → Wire → Anzeige übersteht, deckt
+  `der_langsame_fallback_schalter_erreicht_die_anzeige` ab.
 
 **Grenze der Host-Zähler im Cloud-Betrieb:** Dort bedient der Relay `/health` und
 `/court/{id}/state`, nicht der Turnier-PC — `health_*` und `court_state_*` bleiben
@@ -559,8 +623,11 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       Cloud-Anzeige der Haupthalle.
 
 **Erfolg**
-- [ ] Die Nachmessung erreicht die Zielwerte aus „Zielbild & Erfolgskriterien"; Abweichungen
-      werden in dieser Spec begründet.
+- [x] Die Nachmessung erreicht die Zielwerte aus „Zielbild & Erfolgskriterien"; Abweichungen
+      werden in dieser Spec begründet. *(Lauf vom 19.08.2026, siehe „Nachmessung (nach S7)".
+      Leerlauf: −99 % Nutzdaten, −87 % Vollberechnungen, mit Schalter −93 % Abrufe. Latenz
+      Punkt → Anzeige p50 15 ms / p95 68 ms gegen eine 300-ms-Grenze. Offen bleiben die
+      Pi-Zeile und die Cloud-Spalte.)*
 - [ ] Ein voller Turniertag ohne hängende, springende oder eingefrorene Anzeige.
 
 ## Tests
@@ -650,5 +717,8 @@ und Statuswechsel in [`0016`](../adr/0016-monitor-push-transport.md) ·
 - **Bekannte Restlücke:** `injury` und `official_call` stammen aus `record_alert` und erreichen
   den Relay überhaupt nicht; im Cloud bleiben sie `false`. Das ist Bestandsverhalten, wird von
   dieser Spec nicht behoben und ist nicht Teil des Kontrakts.
+- **Entschieden (19.08.2026): Die Ausbaustufe „Nutzlast im Nudge" wird NICHT gebaut.**
+  Ihr Auslösekriterium waren mehr als 20 Requests/s je Übersichts-Gerät; gemessen sind
+  7,45/s. Der ursprüngliche Text dazu:
 - **Offen bis zur Nachmessung:** ob die Ausbaustufe „Nutzlast im Nudge" gebaut wird. Das
   Auslösekriterium steht oben; die Entscheidung bekommt dann einen eigenen ADR.

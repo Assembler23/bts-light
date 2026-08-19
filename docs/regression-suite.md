@@ -120,7 +120,10 @@ anpassen:
   Bewusst **nicht** nachgebildet: der Force-Close nach 25 s Stille samt
   Reconnect, das Fehler-Backoff (ohne das meldet ein Lauf gegen einen
   klemmenden Server eine höhere Rate als die Wirklichkeit) und das seq-Gate
-  vor dem angestoßenen Abruf.
+  vor dem angestoßenen Abruf. `--langsam` erzwingt den 4-s-Takt, ohne dass der
+  Server `push_fallback_slow` gesetzt haben muss — der Schalter wirkt ohnehin
+  nur im Client, und ein Server-Neustart kostet am Turnier-PC einen Handgriff
+  an der Oberfläche (die Übertragung startet **nicht** von selbst).
 
 ## Abgleich mit Tilos Original-BTS
 

@@ -34,6 +34,11 @@
 //   --schmal             Court-Monitore holen `health?court=<id>` (Spec S7)
 //                        statt `/court/{id}/state` — so wird der schmale
 //                        Abruf ueberhaupt messbar
+//   --langsam            den 4-s-Sicherheitstakt erzwingen, ohne dass der
+//                        Server `push_fallback_slow` gesetzt haben muss
+//                        (Messhilfe: der Schalter wirkt ohnehin nur im
+//                        Client, und ein Server-Neustart kostet am
+//                        Turnier-PC einen Handgriff an der Oberflaeche)
 //
 // Bewusst NICHT nachgebildet (bekannte Vereinfachungen): der Force-Close nach
 // 25 s Stille samt Reconnect, das Fehler-Backoff nach einem missglueckten
@@ -80,6 +85,7 @@ const DAUER_S = argZahl("dauer", 60);
 const PUNKTE_PRO_MIN = argZahl("punkte", 12);
 const TROCKEN = argFlag("trocken");
 const SCHMAL = argFlag("schmal");
+const LANGSAM = argFlag("langsam");
 
 // Aus dem Original übernommen, sonst misst das Skript eine andere Anzeige als
 // die, die im Feld hängt (overview.html: COALESCE_MS, Fallback-Takt).
@@ -195,7 +201,7 @@ function starteUebersicht(nr) {
       // Der Schalter reist im callTimer-Umschlag mit (S6). Fehlt er (älterer
       // Server), bleibt es beim schnellen Takt.
       try {
-        langsamErlaubt = !!JSON.parse(text).callTimer?.pushFallbackSlow;
+        langsamErlaubt = LANGSAM || !!JSON.parse(text).callTimer?.pushFallbackSlow;
       } catch {
         /* unlesbare Antwort ändert den Takt nicht */
       }
@@ -337,7 +343,8 @@ function starteCourtMonitor(courtId) {
       // der Anzeige-Konfiguration (S6).
       try {
         const v = JSON.parse(text);
-        langsamErlaubt = !!(SCHMAL ? v.callTimer?.pushFallbackSlow : v.config?.pushFallbackSlow);
+        langsamErlaubt =
+          LANGSAM || !!(SCHMAL ? v.callTimer?.pushFallbackSlow : v.config?.pushFallbackSlow);
       } catch {
         /* unlesbare Antwort ändert den Takt nicht */
       }
