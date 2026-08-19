@@ -1623,7 +1623,11 @@ let breakTimer = null;
 let serverClockOffset = 0;
 function serverNow() { return Date.now() + serverClockOffset; }
 function syncServerClock() {
-  fetch('/health', { cache: 'no-store' })
+  // `src=check`: Dies ist keine Anzeige-Aktualisierung, sondern die
+  // Uhr-Synchronisation. Ohne die Kennzeichnung landeten bei zwanzig
+  // Tablets rund 0,7 Abrufe je Sekunde samt vollem Rumpf in der
+  // Anzeige-Messung (Spec monitor-livestand-push, S0).
+  fetch('/health?src=check', { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       if (d && typeof d.serverNowMs === 'number' && d.serverNowMs > 0) {

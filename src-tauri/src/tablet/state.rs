@@ -433,9 +433,15 @@ pub struct TabletState {
     /// müsste.
     scorekeeper_call_stages: RwLock<HashMap<i64, (i64, u8)>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
-    /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
-    /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
-    /// fiele der TV auf BTPs 0:0 zurück). `None` = Persistenz aus.
+    /// Start gesetzt, damit ein App-Neustart den laufenden Live-Stand nicht
+    /// verliert (sonst fiele der TV auf BTPs 0:0 zurück). `None` =
+    /// Persistenz aus.
+    ///
+    /// **Geschrieben wird seit v0.9.237 entprellt** (Spec
+    /// monitor-livestand-push, S2): Ein gezählter Punkt merkt nur vor
+    /// ([`TabletState::mark_scores_dirty`]), die Datei entsteht im
+    /// Sekundentakt des Sync-Loops. Wo ein Verlust nicht hinnehmbar ist —
+    /// Ergebnis, Räumung, Stoppen, App-Ende — wird ausdrücklich geflusht.
     scores_path: RwLock<Option<PathBuf>>,
     /// Serialisiert die Schreibvorgänge auf `live-scores.json` – mehrere
     /// Felder können (LAN, mehrere WS-Handler) gleichzeitig zählen; ohne das
@@ -2173,9 +2179,14 @@ impl TabletState {
     /// Aktuellen Live-Stand aller Felder in die Datei schreiben (best effort:
     /// Schreibfehler dürfen das Zählen nie stören). No-op, wenn kein Pfad
     /// gesetzt ist (z. B. in Tests).
-    fn persist_scores(&self) {
+    ///
+    /// Meldet `false`, wenn der Schreibvorgang **fehlgeschlagen** ist —
+    /// [`Self::flush_scores`] merkt die Arbeit dann erneut vor. Ein
+    /// inhaltsgleicher Stand und ein fehlender Pfad gelten als Erfolg: Da
+    /// gibt es nichts nachzuholen.
+    fn persist_scores(&self) -> bool {
         let Some(path) = self.scores_path.read().unwrap().clone() else {
-            return;
+            return true;
         };
         // Schreiber serialisieren: verhindert, dass zwei gleichzeitige
         // record_score den Temp-Pfad oder die Zieldatei gegenseitig zerlegen.
@@ -2209,7 +2220,7 @@ impl TabletState {
                 hasher.finish()
             };
             if self.scores_fingerprint.load(Ordering::Relaxed) == abdruck {
-                return;
+                return true;
             }
             let bytes = json.len() as u64;
             let begonnen = std::time::Instant::now();
@@ -2233,7 +2244,11 @@ impl TabletState {
             // diese Etappe entprellt — die Zahl belegt die Wirkung.
             self.perf
                 .note_persist(begonnen.elapsed().as_nanos() as u64, bytes);
+            return geschrieben;
         }
+        // Unserialisierbar wäre ein Programmfehler, kein vorübergehendes
+        // Hindernis — ein Wiederholen brächte nichts.
+        true
     }
 
     /// Akkustand des Tablets an einem Feld übernehmen.
@@ -2483,7 +2498,15 @@ impl TabletState {
         if !self.scores_dirty.swap(false, Ordering::Relaxed) {
             return;
         }
-        self.persist_scores();
+        // Schlug der Schreibvorgang fehl, bleibt es zu tun. Ohne dieses
+        // Zurücksetzen wäre der Versuch verloren: Das Flag ist leer, der
+        // Fingerabdruck unverändert — der nächste Takt kehrte sofort zurück
+        // und die Datei bliebe für den Rest des Laufs veraltet. Vor der
+        // Entprellung hätte jeder Punkt es erneut versucht
+        // (Review-Fund 19.08.2026).
+        if !self.persist_scores() {
+            self.mark_scores_dirty();
+        }
     }
 
     /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
@@ -6683,6 +6706,35 @@ mod tests {
         assert!(
             gespeicherte_saetze(&pfad, 101).is_empty(),
             "der geräumte Stand ist sofort aus der Datei verschwunden"
+        );
+    }
+
+    #[test]
+    fn ein_fehlgeschlagener_schreibvorgang_wird_nachgeholt() {
+        // Ohne dieses Nachholen wäre der Versuch verloren: Das Dirty-Flag ist
+        // geleert, der Fingerabdruck unverändert — der nächste Takt kehrte
+        // sofort zurück und die Datei bliebe für den Rest des Laufs
+        // veraltet. Vor der Entprellung hätte jeder Punkt es erneut versucht.
+        //
+        // Ein Schreibfehler wird hier erzeugt, indem der Zielpfad in einem
+        // Verzeichnis liegt, das es nicht gibt.
+        let dir = tempfile::tempdir().unwrap();
+        let fehlt = dir.path().join("gibt-es-nicht").join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(fehlt.clone());
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert!(!fehlt.exists(), "der Schreibvorgang musste scheitern");
+
+        // Jetzt ist der Weg frei — der nächste Takt muss es erneut versuchen.
+        std::fs::create_dir_all(fehlt.parent().unwrap()).unwrap();
+        st.flush_scores();
+
+        assert_eq!(
+            gespeicherte_saetze(&fehlt, 101),
+            vec![(5, 3)],
+            "der Stand ist beim nächsten Takt nachgeholt worden"
         );
     }
 

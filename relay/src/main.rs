@@ -3569,6 +3569,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             match_brief,
             on_court_since_ms,
         } => {
+            // Anzeige-Stand vor der Übernahme merken (Spec
+            // monitor-livestand-push, S3): Der Nudge unten hängt daran, ob
+            // sich für die Anzeigen wirklich etwas ändert.
+            let vorher_brief = namespace.court_matches.get(&court_id).cloned();
+            let vorher_label = namespace.court_labels.get(&court_id).cloned();
+            let vorher_hall = namespace.court_hall.get(&court_id).cloned();
             // Feldname (Anzeige) merken – der Monitor liest ihn.
             if !court_label.is_empty() {
                 namespace.court_labels.insert(court_id, court_label);
@@ -3602,6 +3608,24 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             namespace
                 .court_matches
                 .insert(court_id, match_brief.clone());
+            // Ändert sich für die Anzeigen etwas? Verglichen wird der
+            // **ganze** Anzeige-Stand, nicht nur die Match-ID: Der Host
+            // schickt `MatchAssigned` fürs selbe Match erneut, wenn sich die
+            // Schiedsrichter-Besetzung oder das Finalisiert-Kennzeichen
+            // geändert hat (`push_court` in `relay_client.rs`) — genau diese
+            // Frames hätte ein `match_id`-Vergleich verworfen, und die
+            // Änderung wäre auf den Cloud-Monitoren erst mit dem
+            // Fallback-Poll erschienen (Review-Fund 19.08.2026).
+            //
+            // `same_match` bleibt davon unberührt: Es steuert das Räumen des
+            // Satzstands und darf **nur** bei einem echten Match-Wechsel
+            // greifen — sonst löschte eine Schiedsrichter-Zuteilung mitten im
+            // Spiel den Stand.
+            let anzeige_wechsel = vorher_brief.as_ref() != Some(&match_brief)
+                || vorher_label.as_deref()
+                    != namespace.court_labels.get(&court_id).map(|s| s.as_str())
+                || vorher_hall.as_deref()
+                    != namespace.court_hall.get(&court_id).map(|s| s.as_str());
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
             }
@@ -3609,11 +3633,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // das TODO(A1) an `monitor_conn`. **Nach** dem Eintrag in
             // `court_matches`: Die geweckte Anzeige holt sofort, und sie darf
             // nicht den Stand von vor der Zuweisung bekommen.
-            //
-            // Nur bei einem echten Wechsel: Ein erneutes `MatchAssigned`
-            // fürs selbe Match (Tablet-Reconnect) ändert für die Anzeigen
-            // nichts.
-            if !same_match {
+            if anzeige_wechsel {
                 notify_monitor(namespace, court_id);
             }
         }
@@ -5611,7 +5631,12 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            // Vollständiger Ausgangsstand: Match, Feldname UND Halle. Fehlte
+            // eines davon, wäre schon dessen Hinzukommen eine echte
+            // Anzeige-Änderung — der Test prüfte dann nicht, was er soll.
             ns.court_matches.insert(101, brief(7));
+            ns.court_labels.insert(101, "Feld 1".into());
+            ns.court_hall.insert(101, String::new());
         }
         register_host(&broker, "ns1", &host).await;
         let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
@@ -5632,7 +5657,56 @@ mod tests {
 
         assert!(
             anzeige.try_recv().is_err(),
-            "gleiches Match, kein Anstoß an die Anzeigen"
+            "gleiches Match, gleicher Feldname, gleiche Halle: kein Anstoß"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_geaenderter_anzeige_stand_desselben_matches_nudgt() {
+        // Der Host schickt `MatchAssigned` fürs selbe Match erneut, wenn sich
+        // die Schiedsrichter-Besetzung oder das Finalisiert-Kennzeichen
+        // geändert hat. Ein Vergleich nur über die Match-ID hätte genau diese
+        // Frames verworfen — die Änderung erschiene auf den Cloud-Monitoren
+        // erst mit dem Fallback-Poll.
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert(101, brief(7));
+            ns.court_labels.insert(101, "Feld 1".into());
+            ns.court_hall.insert(101, String::new());
+        }
+        register_host(&broker, "ns1", &host).await;
+        let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
+
+        // Gleiches Match, aber jetzt mit Schiedsrichter-Namen.
+        let mut mit_sr = brief(7);
+        mit_sr.sr_names = vec!["Heinz Kelzenberg".into()];
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: mit_sr,
+                on_court_since_ms: Some(1000),
+            },
+            &host,
+        )
+        .await;
+
+        let (court, _) = nudge_of(anzeige.try_recv().expect("Anstoß bei geänderter Besetzung"));
+        assert_eq!(court, 101);
+
+        // Der Satzstand darf dabei NICHT geräumt werden — dafür gilt
+        // weiterhin nur der echte Match-Wechsel.
+        let map = broker.namespaces.lock().await;
+        let ns = map.get("ns1").unwrap();
+        assert!(
+            !ns.court_scores.contains_key(&101) || ns.court_scores[&101].is_empty(),
+            "hier war ohnehin kein Stand gesetzt — die Prüfung hält die Absicht fest"
         );
     }
 

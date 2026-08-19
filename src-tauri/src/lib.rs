@@ -108,6 +108,7 @@ pub fn run() {
             commands::azure_tts_speak,
             commands::start_sync,
             commands::stop_sync,
+            commands::flush_live_scores,
             commands::get_status,
             commands::wifi_status,
             commands::internet_status,

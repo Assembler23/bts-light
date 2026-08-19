@@ -8,6 +8,7 @@ import {
 } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { flushLiveScores } from "../api";
 import { Download } from "lucide-react";
 
 type Phase =
@@ -67,6 +68,12 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     setPhase("downloading");
     try {
       await update.downloadAndInstall();
+      // Live-Stand sichern, bevor der Prozess endet: `relaunch()` läuft
+      // weder über `stopSync` noch über das Fenster-Ereignis, und seit der
+      // Entprellung (Spec `monitor-livestand-push`, S2) schreibt nicht mehr
+      // jeder gezählte Punkt selbst. Ein Fehler hier darf den Neustart
+      // nicht verhindern — dann ist der Stand eben eine Sekunde alt.
+      await flushLiveScores().catch(() => {});
       await relaunch();
     } catch {
       setPhase("error");

@@ -969,6 +969,15 @@ async fn health(
     // damit die heißeste verbliebene Stelle, an der die ganze
     // Konfiguration samt Turnierlogo kopiert wurde (Review-Fund
     // 18.08.2026).
+    // **Revision zuerst.** Ein Config-Schreibvorgang setzt sie hoch, nachdem
+    // er den Config-Zwischenstand verworfen hat. Läse der Handler die
+    // Konfiguration vorher und die Revision danach, könnte er den alten
+    // Stand unter der neuen Revision ablegen — bis zur Hart-TTL bekämen alle
+    // Anzeigen die alten Hallen-Farben, ETag-Halter sogar „nichts Neues".
+    // In dieser Reihenfolge kann nur der harmlose Fall auftreten: alte
+    // Revision, neue Eingaben — der nächste Abruf baut ohnehin neu
+    // (Review-Fund 19.08.2026).
+    let rev = ctx.tablet.overview_rev();
     let cfg = ctx.app_config_arc();
     let ct = &cfg.call_timer;
     let jetzt = monitor::now_ms();
@@ -983,7 +992,7 @@ async fn health(
         "thirdCallMinutes": ct.third_call_minutes,
     })
     .to_string();
-    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json);
+    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
     // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
@@ -1040,8 +1049,8 @@ fn uebersicht_json(
     cfg: &AppConfig,
     jetzt: u64,
     call_timer_json: &str,
+    rev: u64,
 ) -> (String, String) {
-    let rev = ctx.tablet.overview_rev();
     if let Some(c) = ctx.tablet.overview_cache() {
         if c.rev == rev && jetzt.saturating_sub(c.gebaut_ms) < OVERVIEW_CACHE_TTL_MS {
             return (c.courts_json, c.etag);

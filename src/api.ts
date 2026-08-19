@@ -58,6 +58,14 @@ export const startSync = (): Promise<void> => invoke("start_sync");
 
 export const stopSync = (): Promise<void> => invoke("stop_sync");
 
+/** Sichert den aufgelaufenen Live-Stand sofort auf die Platte.
+ *
+ *  Nötig vor jedem Beenden, das nicht über `stopSync` oder das Schließen des
+ *  Fensters läuft — heute der Neustart nach einem Auto-Update. Seit der
+ *  Entprellung (Spec `monitor-livestand-push`, S2) schreibt nicht mehr jeder
+ *  gezählte Punkt selbst. */
+export const flushLiveScores = (): Promise<void> => invoke("flush_live_scores");
+
 export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 
 /** Aktuelles WLAN (SSID) des Turnier-PCs für die Kopfzeile. */

@@ -133,7 +133,10 @@
   var lastKey = null; // zuletzt gerenderte Hallenliste – Re-Render nur bei Änderung
 
   function load() {
-    fetch('/health', { cache: 'no-store' })
+    // `src=check`: Das Auswahl-Menü ist keine Anzeige — es liest nur die
+    // Hallenliste. Ohne die Kennzeichnung stünde es in der Anzeige-Messung
+    // (Spec monitor-livestand-push, S0).
+    fetch('/health?src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         var courts = (data && data.courts) || [];
