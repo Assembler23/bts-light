@@ -16,12 +16,20 @@ on:
     paths:
       - "relay/**"
       - "relay-proto/**"
+      # ALLE Seiten, die das Relay-Binary per `include_str!` einbettet
+      # (`relay/src/main.rs`, Zeilen 40–62). Fehlt eine davon hier, bleibt
+      # eine Änderung an ihr im Cloud-Betrieb unsichtbar, während sie im LAN
+      # längst wirkt — bis zufällig ein anderer Deploy läuft.
+      #
+      # Dreimal passiert: `tl.html` fehlte anfangs, und `overview.html`,
+      # `preparation.html` und `ad.html` bis v0.9.238. **Wer im Relay ein
+      # `include_str!` ergänzt, ergänzt hier den Pfad.**
       - "src-tauri/assets/tablet.html"
       - "src-tauri/assets/monitor.html"
-      # Die Turnierleitungs-Seite ist im Relay-Binary eingebettet
-      # (include_str!). Ohne diesen Pfad bliebe eine Änderung an ihr im
-      # Cloud-Betrieb unsichtbar, während sie im LAN längst wirkt.
       - "src-tauri/assets/tl.html"
+      - "src-tauri/assets/overview.html"
+      - "src-tauri/assets/preparation.html"
+      - "src-tauri/assets/ad.html"
       - ".github/workflows/relay-deploy.yml"
 
 jobs:
