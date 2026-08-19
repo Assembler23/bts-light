@@ -654,7 +654,7 @@ pub struct TabletState {
     /// Anzeigen still (das zweite offene A1-TODO). Ein Punkt **vom Tablet**
     /// steht hier nie drin: `set_snapshot` legt den rohen BTP-Stand ab,
     /// `apply_tablet_scores` arbeitet danach auf einer eigenen Kopie.
-    monitor_belegung: RwLock<HashMap<i64, (i64, Vec<(i64, i64)>)>>,
+    monitor_belegung: RwLock<HashMap<i64, CourtBelegung>>,
     /// Steht ein Schreibvorgang der `live-scores.json` aus (Spec
     /// monitor-livestand-push, S2)? Gesetzt von jedem Punkt, geleert vom
     /// Flush. Ein `AtomicBool` genügt: Es gibt nur einen Zustand („es hat
@@ -725,6 +725,10 @@ fn schlanker_anzeige_stand(state: &str) -> String {
     obj.remove("rallyLog");
     serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
 }
+
+/// Belegung eines Felds, wie die Anzeigen sie sehen: Match-ID plus
+/// Satzstand aus BTP (Spec monitor-livestand-push, S3).
+type CourtBelegung = (i64, Vec<(i64, i64)>);
 
 /// Ein Eintrag des `/health`-Antwortcaches (Spec monitor-livestand-push, S1).
 /// Gehalten wird **nur die Feld-Liste**, nicht die ganze Antwort: Der
@@ -1110,7 +1114,7 @@ impl TabletState {
         }
         // S3 (Spec monitor-livestand-push): Belegung je Feld festhalten, bevor
         // der Snapshot verschoben wird — geweckt wird gleich danach.
-        let belegung: HashMap<i64, (i64, Vec<(i64, i64)>)> = snapshot
+        let belegung: HashMap<i64, CourtBelegung> = snapshot
             .matches
             .iter()
             .filter(|m| m.status == MatchStatus::OnCourt)
@@ -2431,7 +2435,7 @@ impl TabletState {
     /// Nimmt die fertige Projektion statt des Snapshots: Der Aufrufer bildet
     /// sie, bevor er den Snapshot ablegt (der wird dabei verschoben), und
     /// spart so einen Klon des ganzen Turnierstands je Poll.
-    fn nudge_belegungs_wechsel(&self, neu: HashMap<i64, (i64, Vec<(i64, i64)>)>) {
+    fn nudge_belegungs_wechsel(&self, neu: HashMap<i64, CourtBelegung>) {
         // Betroffen ist jedes Feld, das in genau einer der beiden Fassungen
         // steht oder in beiden mit unterschiedlichem Inhalt. Die Liste wird
         // erst gesammelt und **nach** dem Freigeben des Schreib-Locks
