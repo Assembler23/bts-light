@@ -1342,25 +1342,38 @@ export function FieldOverviewPage({
           {/* Stapeldruck (ADR 0039): eine ganze Runde in einem
               Druckauftrag. Gedeckelt auf MAX_SHEETS_PER_DOC (40) — mehr
               weist der Kern ab, deshalb hier gar nicht erst anbieten. */}
-          {finished.some((m) => m.has_timeline) && (
-            <button
-              onClick={() => {
-                const ids = finished
-                  .filter((m) => m.has_timeline)
-                  .slice(0, 40)
-                  .map((m) => m.match_id);
-                setZettel({
-                  titel: `${ids.length} Spiele`,
-                  matchIds: ids,
-                });
-              }}
-              title="Alle aufgezeichneten Spiele als Stapel drucken"
-              className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
-            >
-              <Printer size={13} />
-              Zettel drucken
-            </button>
-          )}
+          {(() => {
+            const druckbar = finished.filter((m) => m.has_timeline);
+            if (druckbar.length === 0) return null;
+            const gekappt = druckbar.length > 40;
+            const ids = druckbar.slice(0, 40).map((m) => m.match_id);
+            return (
+              <button
+                onClick={() =>
+                  setZettel({
+                    // Die Kappung gehört sichtbar gemacht, nicht
+                    // verschwiegen: Sonst fehlten der Turnierleitung
+                    // ältere Spiele im Stapel, ohne dass es jemand merkt.
+                    titel: gekappt
+                      ? `${ids.length} neueste von ${druckbar.length} Spielen`
+                      : `${ids.length} Spiele`,
+                    matchIds: ids,
+                  })
+                }
+                title={
+                  gekappt
+                    ? `Die 40 neuesten von ${druckbar.length} aufgezeichneten Spielen drucken — mehr nimmt ein Auftrag nicht`
+                    : "Alle aufgezeichneten Spiele als Stapel drucken"
+                }
+                className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+              >
+                <Printer size={13} />
+                {gekappt
+                  ? `Zettel drucken (40 von ${druckbar.length})`
+                  : "Zettel drucken"}
+              </button>
+            );
+          })()}
         </div>
         {finished.length === 0 ? (
           <p className="text-sm text-slate-400">
