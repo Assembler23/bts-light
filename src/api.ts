@@ -182,6 +182,12 @@ export const finishedMatches = (): Promise<FinishedMatchRow[]> =>
   invoke("finished_matches");
 
 /** Punktverlauf eines Matches (null = kein Verlauf aufgezeichnet). */
+/** Schiedsrichterzettel als fertiges HTML (Spec schiedsrichterzettel-druck,
+ *  ADR 0039). Mehrere Kennungen ergeben einen Stapeldruck. `null` = zu
+ *  keinem der Spiele liegt eine Aufzeichnung vor. */
+export const matchScoresheetHtml = (matchIds: number[]): Promise<string | null> =>
+  invoke("match_scoresheet_html", { matchIds });
+
 export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
   invoke("match_timeline", { matchId });
 

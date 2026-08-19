@@ -14,6 +14,7 @@ import {
 import {
   Ban,
   ChartLine,
+  Printer,
   Lock,
   Megaphone,
   Pause,
@@ -34,6 +35,7 @@ import {
   freeCourt,
   hallColorsView,
   matchTimeline,
+  matchScoresheetHtml,
   noteCourtCall,
   preparationCandidates,
   removeHallColor,
@@ -136,9 +138,37 @@ export function FieldOverviewPage({
     finishedSets?: [number, number][];
   } | null>(null);
   const [graphData, setGraphData] = useState<MatchTimeline | null>(null);
+  /** Offener Zettel-Druck (Spec schiedsrichterzettel-druck): die Spiele und
+   *  das fertige HTML. `null` = zu. Der Desktop holt den Zettel
+   *  ausschließlich über den Tauri-Command (S-R1) — kein `fetch` auf
+   *  127.0.0.1:8088, das bräche zusätzlich den Cloud-Only-Betrieb. */
+  const [zettel, setZettel] = useState<{
+    titel: string;
+    matchIds: number[];
+  } | null>(null);
+  const [zettelHtml, setZettelHtml] = useState<string | null | "fehlt">(null);
 
   // Verlauf laden, solange das Overlay offen ist — laufende Spiele wachsen
   // im Poll-Takt mit; die Payload ist winzig (Command, kein Netz).
+  useEffect(() => {
+    if (!zettel) {
+      setZettelHtml(null);
+      return;
+    }
+    let alive = true;
+    setZettelHtml(null);
+    matchScoresheetHtml(zettel.matchIds)
+      .then((html) => {
+        if (alive) setZettelHtml(html ?? "fehlt");
+      })
+      .catch(() => {
+        if (alive) setZettelHtml("fehlt");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [zettel]);
+
   useEffect(() => {
     if (!graph) {
       setGraphData(null);
@@ -873,6 +903,27 @@ export function FieldOverviewPage({
                             <ChartLine size={14} />
                           </button>
                         )}
+                        {/* Schiedsrichterzettel (Spec
+                            schiedsrichterzettel-druck, ADR 0039): dieselbe
+                            Schranke wie beim Graphen — nur wenn das Tablet
+                            wirklich etwas aufgezeichnet hat, sonst wäre es
+                            ein Klick ins Leere. */}
+                        {occupied && c.has_timeline && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setZettel({
+                                titel: `${c.team1.join(" / ")} vs. ${c.team2.join(" / ")}`,
+                                matchIds: [c.match_id],
+                              });
+                            }}
+                            title="Schiedsrichterzettel drucken"
+                            aria-label="Schiedsrichterzettel drucken"
+                            className="rounded p-0.5 hover:bg-white/50"
+                          >
+                            <Printer size={14} />
+                          </button>
+                        )}
                         {/* Feld freigeben — immer griffbereit neben dem Schloss
                             (auch wenn das Feld gesperrt ist), nur wenn belegt.
                             Öffnet den Sicherheits-Dialog (Freigabe schreibt nach
@@ -1283,10 +1334,34 @@ export function FieldOverviewPage({
 
       {/* Abgeschlossene Spiele (neueste zuerst). */}
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">
-          Abgeschlossene Spiele{" "}
-          <span className="text-slate-400">({finished.length})</span>
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Abgeschlossene Spiele{" "}
+            <span className="text-slate-400">({finished.length})</span>
+          </h2>
+          {/* Stapeldruck (ADR 0039): eine ganze Runde in einem
+              Druckauftrag. Gedeckelt auf MAX_SHEETS_PER_DOC (40) — mehr
+              weist der Kern ab, deshalb hier gar nicht erst anbieten. */}
+          {finished.some((m) => m.has_timeline) && (
+            <button
+              onClick={() => {
+                const ids = finished
+                  .filter((m) => m.has_timeline)
+                  .slice(0, 40)
+                  .map((m) => m.match_id);
+                setZettel({
+                  titel: `${ids.length} Spiele`,
+                  matchIds: ids,
+                });
+              }}
+              title="Alle aufgezeichneten Spiele als Stapel drucken"
+              className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+            >
+              <Printer size={13} />
+              Zettel drucken
+            </button>
+          )}
+        </div>
         {finished.length === 0 ? (
           <p className="text-sm text-slate-400">
             Noch keine abgeschlossenen Spiele.
@@ -1371,6 +1446,21 @@ export function FieldOverviewPage({
                             <ChartLine size={14} />
                           </button>
                         )}
+                        {m.has_timeline && (
+                          <button
+                            onClick={() =>
+                              setZettel({
+                                titel: `${m.team1.join(" / ")} vs. ${m.team2.join(" / ")}`,
+                                matchIds: [m.match_id],
+                              })
+                            }
+                            title="Schiedsrichterzettel drucken"
+                            aria-label="Schiedsrichterzettel drucken"
+                            className="ml-1 rounded p-0.5 align-middle text-slate-500 hover:bg-slate-100"
+                          >
+                            <Printer size={14} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1433,6 +1523,76 @@ export function FieldOverviewPage({
               >
                 Freigeben
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zettel-Overlay (Spec schiedsrichterzettel-druck, ADR 0039): Das
+          fertige Dokument kommt als HTML vom Kern und wird in einem
+          `iframe srcdoc` gezeigt; gedruckt wird über den WebView, „als PDF
+          speichern" über den Systemdialog des Druckers. Deshalb braucht es
+          weder eine PDF-Abhängigkeit noch `dialog:allow-save`. */}
+      {zettel && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="zettel-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setZettel(null);
+          }}
+        >
+          <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <h2 id="zettel-title" className="font-semibold text-slate-800">
+                Schiedsrichterzettel — {zettel.titel}
+              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const rahmen =
+                      document.getElementById("zettel-frame") as HTMLIFrameElement | null;
+                    rahmen?.contentWindow?.focus();
+                    rahmen?.contentWindow?.print();
+                  }}
+                  disabled={typeof zettelHtml !== "string"}
+                  className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+                >
+                  Drucken
+                </button>
+                <button
+                  onClick={() => setZettel(null)}
+                  aria-label="Zettel schließen"
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden bg-slate-100 p-2">
+              {zettelHtml === null && (
+                <p className="p-4 text-sm text-slate-500">Zettel wird erzeugt …</p>
+              )}
+              {zettelHtml === "fehlt" && (
+                <p className="p-4 text-sm text-slate-500">
+                  Zu diesem Spiel liegt keine Aufzeichnung vor — ein
+                  Papier-Ergebnis bekommt bewusst keinen Zettel.
+                </p>
+              )}
+              {typeof zettelHtml === "string" && zettelHtml !== "fehlt" && (
+                <iframe
+                  id="zettel-frame"
+                  title="Schiedsrichterzettel"
+                  srcDoc={zettelHtml}
+                  /* Das Dokument enthält bewusst kein Skript (ADR 0039);
+                     die Sandbox macht das durchsetzbar statt zugesagt.
+                     `allow-modals` bleibt nötig, damit `print()` den
+                     Druckdialog öffnen darf. */
+                  sandbox="allow-same-origin allow-modals"
+                  className="h-full w-full rounded border border-slate-300 bg-white"
+                />
+              )}
             </div>
           </div>
         </div>
