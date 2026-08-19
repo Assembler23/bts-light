@@ -152,6 +152,13 @@ impl SheetStore {
     /// bekannt, Deckel erreicht). Ein bereits bekanntes Ereignis ist
     /// **kein Fehler**, sondern der Normalfall bei doppelter Zustellung —
     /// der Bestand bleibt unverändert.
+    ///
+    /// **Der Bestand wird erst angefasst, wenn das Ergebnis feststeht.**
+    /// Gerechnet wird auf einer Kopie; scheitert eine Prüfung, bleibt das
+    /// Original unberührt. Ein Zurückrollen *nach* dem Sortieren wäre
+    /// positionsbasiert und träfe womöglich ein bereits akzeptiertes
+    /// Ereignis, weil die Ordnung neue zwischen alte einsortiert
+    /// (Review-Befund 19.08.2026, zwei Datenverluste).
     pub fn apply_event(&self, match_id: i64, event: MatchEvent) -> bool {
         if match_id <= 0 || !event.is_valid() {
             return false;
@@ -166,14 +173,15 @@ impl SheetStore {
         if sheet.events.len() >= MAX_EVENTS_PER_MATCH {
             return false;
         }
-        sheet.events.push(event);
-        sortiere(&mut sheet.events);
+        let mut kandidat = sheet.events.clone();
+        kandidat.push(event);
+        sortiere(&mut kandidat);
         // Größen-Deckel auch im Store, nicht nur im Relay (Spec): Der
         // LAN-Weg läuft an keinem Relay vorbei.
-        if !passt_in_deckel(&sheet.events) {
-            sheet.events.pop();
+        if !passt_in_deckel(&kandidat) {
             return false;
         }
+        sheet.events = kandidat;
         inner.dirty = true;
         drop(inner);
         self.persist(false);
@@ -183,46 +191,73 @@ impl SheetStore {
     /// Kompletter Abgleich mit einem Tablet: **Vereinigung**, kein Ersatz
     /// (ADR 0038).
     ///
-    /// Bekannte Kennungen werden ignoriert, unbekannte angehängt, danach
-    /// wird sortiert. Die Operation ist **idempotent und kommutativ**;
-    /// ein Ersatz-Tablet kann nichts wegnehmen, und ein Tablet, das
-    /// offline war, bringt seinen Rückstand einfach nach.
+    /// Bekannte Kennungen werden ignoriert, unbekannte aufgenommen. Die
+    /// Operation ist **idempotent und kommutativ**; ein Ersatz-Tablet kann
+    /// nichts wegnehmen, und ein Tablet, das offline war, bringt seinen
+    /// Rückstand einfach nach.
     ///
-    /// `false` = der Abgleich war ungültig und wurde komplett verworfen.
-    /// Ein Abgleich, der nichts Neues bringt, ist dagegen `true`.
+    /// **Am Deckel gilt: Vorhandenes ist unantastbar.** Passt nicht alles
+    /// Neue, werden die Neuen zuerst in die kanonische Ordnung gebracht
+    /// und dann von vorn aufgenommen, so weit der Platz reicht. Damit
+    /// hängt das Ergebnis nur von der *Menge* der Ereignisse ab, nicht von
+    /// ihrer Reihenfolge im Frame — sonst endeten zwei Hosts mit
+    /// demselben Wissen bei verschiedenen Zetteln. Ein Verdrängen
+    /// vorhandener Ereignisse durch besser sortierte neue wäre die
+    /// Alternative, verstieße aber gegen ADR 0038: nichts wird gelöscht.
+    ///
+    /// `false` = ungültig und komplett verworfen, **oder** der Deckel hat
+    /// etwas abgeschnitten. Ein Abgleich, der nichts Neues bringt, ist
+    /// dagegen `true`.
     pub fn apply_event_sync(&self, match_id: i64, events: Vec<MatchEvent>) -> bool {
         if match_id <= 0 || !match_events_valid(&events) {
             return false;
         }
         let mut inner = self.inner.lock().unwrap();
         let sheet = inner.file.matches.entry(match_id).or_default();
-        let vorher = sheet.events.len();
+
+        // Nur die wirklich neuen Kennungen, jede höchstens einmal — ein
+        // Frame darf dieselbe Kennung doppelt tragen.
+        let mut neue: Vec<MatchEvent> = Vec::new();
         for event in events {
-            if sheet.events.iter().any(|e| e.id == event.id) {
-                continue;
+            let bekannt = sheet.events.iter().any(|e| e.id == event.id)
+                || neue.iter().any(|e| e.id == event.id);
+            if !bekannt {
+                neue.push(event);
             }
-            if sheet.events.len() >= MAX_EVENTS_PER_MATCH {
-                break;
-            }
-            sheet.events.push(event);
         }
-        if sheet.events.len() == vorher {
+        if neue.is_empty() {
             return true; // nichts Neues — kein Schreibvorgang nötig
         }
-        sortiere(&mut sheet.events);
-        // Reißt der Bestand den Größen-Deckel, wird der Zuwachs
-        // zurückgenommen statt der ganze Bestand verworfen: Was schon da
-        // war, hat den Deckel eingehalten und darf nicht Kollateralschaden
-        // eines überlangen Abgleichs werden.
-        if !passt_in_deckel(&sheet.events) {
-            sheet.events.truncate(vorher);
-            sortiere(&mut sheet.events);
+
+        // Kanonische Ordnung VOR der Auswahl: Sie macht die Auswahl am
+        // Deckel reihenfolgeunabhängig.
+        sortiere(&mut neue);
+        let platz = MAX_EVENTS_PER_MATCH.saturating_sub(sheet.events.len());
+        let gekappt = neue.len() > platz;
+        neue.truncate(platz);
+        if gekappt {
+            tracing::warn!(
+                "Zettel-Abgleich für Match {match_id}: Deckel erreicht,                  {} Ereignis(se) nicht aufgenommen",
+                MAX_EVENTS_PER_MATCH
+            );
+        }
+        if neue.is_empty() {
+            return false; // Deckel war schon voll — nichts ging hinein
+        }
+
+        // Auf einer Kopie rechnen: Scheitert der Größen-Deckel, bleibt der
+        // vorhandene Bestand unberührt (Review-Befund 19.08.2026).
+        let mut kandidat = sheet.events.clone();
+        kandidat.extend(neue);
+        sortiere(&mut kandidat);
+        if !passt_in_deckel(&kandidat) {
             return false;
         }
+        sheet.events = kandidat;
         inner.dirty = true;
         drop(inner);
         self.persist(true);
-        true
+        !gekappt
     }
 
     /// Match abschließen (aus dem Ergebnisweg). Ohne erfasstes Ereignis
@@ -345,7 +380,7 @@ fn passt_in_deckel(events: &[MatchEvent]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relay_proto::{EventKind, Phase};
+    use relay_proto::{EventKind, Phase, MAX_EVENT_ID_LEN};
     use std::path::Path;
 
     fn store_mit_datei(dir: &Path) -> SheetStore {
@@ -570,6 +605,106 @@ mod tests {
 
         assert_eq!(kennungen(&a, 5), kennungen(&b, 5));
         assert_eq!(kennungen(&a, 5), vec!["a1", "b2", "c3"]);
+    }
+
+    /// Regression zum Review-Befund vom 19.08.2026 (zwei Datenverluste):
+    /// Das Zurückrollen am Deckel war **positionsbasiert** (`pop`,
+    /// `truncate`) und lief **nach** dem Sortieren. Da die Ordnung neue
+    /// Ereignisse zwischen alte einsortiert, traf es womöglich ein bereits
+    /// akzeptiertes statt des neuen — auf einem Archivbeleg verschwand so
+    /// still eine rote Karte, sichtbar erst beim Druck nach dem Turnier.
+    #[test]
+    fn der_deckel_verliert_niemals_ein_vorhandenes_ereignis() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+
+        // Ein vorhandenes Ereignis, das ganz HINTEN einsortiert — genau
+        // das, was ein `pop()` nach dem Sortieren erwischt hätte.
+        let spaet = ereignis("ff", 5, 120, i64::MAX, EventKind::CardRed);
+        assert!(store.apply_event(5, spaet.clone()));
+
+        // Maximal große Ereignisse, die alle DAVOR einsortieren: volle
+        // Kennung, volle Rücknahme-Kennung, volle Zahlen. So reißt der
+        // Größen-Deckel, bevor der Zähl-Deckel greift.
+        let mut abgewiesen = 0;
+        for i in 0..MAX_EVENTS_PER_MATCH {
+            let mut e = ereignis(&format!("{i:032x}"), 1, 0, i64::MAX, EventKind::Retract);
+            e.retracts = "a".repeat(MAX_EVENT_ID_LEN);
+            e.ts_ms = u64::MAX;
+            if !store.apply_event(5, e) {
+                abgewiesen += 1;
+            }
+        }
+        // Der Zähl-Deckel allein bewiese nichts: Er greift VOR jeder
+        // Änderung am Bestand. Nur der Größen-Deckel führte in das
+        // fehlerhafte Zurückrollen — er muss also wirklich zuschlagen.
+        // Er ist knapp: 64 maximale Ereignisse wiegen 17.345 Bytes gegen
+        // einen Deckel von 16.384, mit `seq = 0` dagegen nur 16.193 —
+        // ohne volle Zahlenwerte prüfte dieser Test den kaputten Pfad nie.
+        assert!(
+            abgewiesen > 0 && kennungen(&store, 5).len() < MAX_EVENTS_PER_MATCH,
+            "Größen-Deckel nie erreicht — der Test prüft den fehlerhaften Pfad nicht \
+             (aufgenommen: {}, abgewiesen: {abgewiesen})",
+            kennungen(&store, 5).len()
+        );
+
+        // Egal wie viel abgewiesen wurde: das Vorhandene lebt.
+        let ids = kennungen(&store, 5);
+        assert!(
+            ids.contains(&spaet.id),
+            "vorhandenes Ereignis verloren: {ids:?}"
+        );
+
+        // Und dasselbe über den Abgleich statt über Einzel-Ereignisse.
+        let schwall: Vec<MatchEvent> = (0..MAX_EVENTS_PER_MATCH)
+            .map(|i| {
+                let mut e = ereignis(
+                    &format!("{:032x}", i + 1000),
+                    1,
+                    0,
+                    i64::MAX,
+                    EventKind::Retract,
+                );
+                e.retracts = "b".repeat(MAX_EVENT_ID_LEN);
+                e.ts_ms = u64::MAX;
+                e
+            })
+            .collect();
+        store.apply_event_sync(5, schwall);
+        assert!(
+            kennungen(&store, 5).contains(&spaet.id),
+            "Abgleich hat das vorhandene Ereignis verdrängt"
+        );
+    }
+
+    /// Am Deckel darf das Ergebnis nur von der **Menge** der Ereignisse
+    /// abhängen, nicht von ihrer Reihenfolge im Frame — sonst endeten zwei
+    /// Hosts mit demselben Wissen bei verschiedenen Zetteln.
+    #[test]
+    fn die_auswahl_am_deckel_haengt_nicht_an_der_frame_reihenfolge() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let a = store_mit_datei(dir_a.path());
+        let b = store_mit_datei(dir_b.path());
+
+        // Beide Stores bis knapp unter den Zähl-Deckel füllen.
+        for i in 0..(MAX_EVENTS_PER_MATCH - 2) {
+            let e = ereignis(&format!("{i:04x}"), 1, 0, i as i64, EventKind::Overrule);
+            assert!(a.apply_event(5, e.clone()));
+            assert!(b.apply_event(5, e));
+        }
+
+        // Dieselben DREI neuen Ereignisse, aber nur noch Platz für zwei.
+        let e1 = ereignis("aaaa", 2, 1, 1, EventKind::CardYellow);
+        let e2 = ereignis("bbbb", 2, 2, 2, EventKind::CardRed);
+        let e3 = ereignis("cccc", 2, 3, 3, EventKind::InjuryStart);
+
+        // Beide melden `false`: der Deckel hat etwas abgeschnitten.
+        assert!(!a.apply_event_sync(5, vec![e1.clone(), e2.clone(), e3.clone()]));
+        assert!(!b.apply_event_sync(5, vec![e3, e2, e1]));
+
+        assert_eq!(kennungen(&a, 5), kennungen(&b, 5));
+        assert_eq!(kennungen(&a, 5).len(), MAX_EVENTS_PER_MATCH);
     }
 
     /// Ein Match ohne erfasstes Ereignis bekommt keinen Geister-Zettel —

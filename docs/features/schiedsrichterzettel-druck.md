@@ -248,6 +248,11 @@ Master ein Verzeichnis; `docs/adr/README.md` wird nachgezogen (führt den Index 
   „—" statt als Unsinn — mit Test.
 - `MAX_SHEETS_PER_DOC` wird in **E5** an der Leseroute durchgesetzt, **bevor** je Kennung
   gearbeitet wird (AK „41 IDs werden abgewiesen").
+- **Gemessen in E2:** `MAX_SHEET_LEN` greift im Normalbetrieb nie — `MAX_EVENTS_PER_MATCH`
+  bindet zuerst. 64 Ereignisse wiegen mit realistischen Zahlenwerten 16.193 Bytes gegen einen
+  Deckel von 16.384; erst absurde `seq`/`ts_ms` treiben sie auf 17.345. Der Größen-Deckel ist
+  damit **der Riegel gegen absurde Zahlenwerte**, nicht gegen viele Ereignisse. Wer ihn prüft,
+  muss volle Zahlenwerte einsetzen, sonst prüft der Test einen Pfad, den er nie betritt.
 
 ## Version und Auslieferung
 
