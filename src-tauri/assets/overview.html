@@ -1035,9 +1035,24 @@ main {
   // bedingt nach: `cache: 'no-store'` schaltet seinen eigenen Zwischen-
   // speicher ab, deshalb setzen wir den Kopf hier von Hand.
   var letzteMarke = null;
+  // Spätestens jede Minute einmal voll abrufen, auch wenn sich nichts geändert
+  // hat. Der Uhr-Versatz (`callOffset`) wird NUR aus einer vollen Antwort
+  // gesetzt, und eine ruhige Halle — Rundenpause, Nachtbetrieb, leeres Feld —
+  // liefert unbegrenzt lange Bestätigungen. Verstellt sich in dieser Zeit die
+  // Uhr des Anzeige-Rechners (ein Pi-Kiosk hat keine gepufferte Uhr, NTP
+  // springt nach dem Start um Sekunden bis Stunden), zeigte „Zeit seit
+  // Aufruf" bis zur nächsten Inhaltsänderung Unsinn (Review-Fund 19.08.2026).
+  //
+  // Kosten: ein voller Abruf je Minute statt bis zu 240 — die Ersparnis aus
+  // S1/S8 bleibt praktisch vollständig erhalten.
+  var MARKE_SPAETESTENS_MS = 60000;
+  var markeGesetztAt = 0;
   function pollHealth() {
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
+    if (letzteMarke && Date.now() - markeGesetztAt >= MARKE_SPAETESTENS_MS) {
+      letzteMarke = null;
+    }
     // Quelle beim Abschicken festhalten und sofort zurücksetzen: Ein Nudge,
     // der jetzt noch eintrifft, gehört zum NÄCHSTEN Abruf, nicht zu diesem.
     var quelle = naechsteQuelle;
@@ -1057,7 +1072,7 @@ main {
         // nichts zu rendern — und kein Grund, „offline" zu melden.
         if (r.status === 304) { pollDone(); return null; }
         var marke = r.headers.get('ETag');
-        if (marke) letzteMarke = marke;
+        if (marke) { letzteMarke = marke; markeGesetztAt = Date.now(); }
         return r.json();
       })
       .then(function (data) {

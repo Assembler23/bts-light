@@ -194,7 +194,12 @@ fn marke_passt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
     else {
         return false;
     };
-    let schwach = |m: &str| m.trim().trim_start_matches("W/").to_string();
+    // Ohne Allokation je Kandidat: `/{ns}/health` ist die meistbefragte Route,
+    // und ein 8-kB-`If-None-Match` (nginx-Vorgabe) enthält Tausende Einträge
+    // (Sicherheits-Review 19.08.2026).
+    fn schwach(m: &str) -> &str {
+        m.trim().trim_start_matches("W/")
+    }
     let gesucht = schwach(etag);
     feld.split(',')
         .any(|m| m.trim() == "*" || schwach(m) == gesucht)
@@ -1678,10 +1683,19 @@ async fn overview_health(
     // wechselte dann jedes Mal. Dieselbe Überlegung wie im LAN, wo `seqs`
     // deshalb neben der Feld-Liste steht und nicht darin.
     //
-    // Ein Zwischenspeicher ist hier nicht nötig: Der Relay hält seinen Zustand
-    // ohnehin im Speicher und rechnet nur die Projektion; die Ersparnis liegt
-    // allein in den Bytes, die nicht über die Leitung gehen. Gemessen am
-    // 19.08.2026: 0,61 MB/s gegen 0,01 MB/s im LAN, bei identischem Bild.
+    // Gemessen am 19.08.2026: 0,61 MB/s gegen 0,01 MB/s im LAN, bei identischem
+    // Bild.
+    //
+    // **Die Bestätigung ist nur auf der Leitung billig, nicht auf der CPU.**
+    // Der Projektionsbau oben läuft auch für sie — samt globalem Schloss über
+    // alle Namespaces. Ein Angreifer, der eine Namespace-UUID kennt, zahlt für
+    // eine Flut jetzt nicht mehr die 8 kB Rückweg mit, während der Relay
+    // dieselbe Arbeit leistet (Sicherheits-Review 19.08.2026). Der
+    // Turnier-PC hat dafür seinen Antwortcache aus S1; hier fehlt er, weil das
+    // Relay keine Revision führt, an der sich ein Cache verlässlich
+    // invalidieren ließe — ein reiner Zeit-Cache verzögerte den Anstoß-Weg und
+    // damit genau die Latenz, um die es der Spec geht. Das ist eine eigene
+    // Etappe wert (S9), keine Beiläufigkeit.
     let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
     let ct_text = call_timer_json.to_string();
     let etag = uebersicht_marke(&courts_json, &ct_text);
@@ -1692,7 +1706,6 @@ async fn overview_health(
                 (header::CACHE_CONTROL, "no-store"),
                 (header::ETAG, etag.as_str()),
             ],
-            String::new(),
         )
             .into_response();
     }
@@ -1717,9 +1730,11 @@ async fn overview_health(
 /// Marke der Cloud-Übersicht (Spec monitor-livestand-push, S8) — Länge plus
 /// Streuwert über das, was die Anzeige tatsächlich übernimmt.
 ///
-/// Muss nur innerhalb eines Relay-Laufs stabil sein; nach einem Neustart darf
-/// sie sich ändern, dann kommt eben einmal der volle Rumpf. Gleiches Muster
-/// wie `bild_marke` und wie `inhalts_marke` am Turnier-PC.
+/// Anders als `inhalts_marke` am Turnier-PC ist sie **nicht** mit einer
+/// Prozess-Kennung gesalzen: Der Streuer arbeitet mit festen Schlüsseln, gleicher
+/// Inhalt ergibt also auch nach einem Relay-Neustart dieselbe Marke. Das ist
+/// gewollt — gleicher Inhalt, gleiche Marke — und spart den Anzeigen nach einem
+/// Deploy den ersten vollen Rumpf. Gleiches Muster wie `bild_marke`.
 fn uebersicht_marke(courts_json: &str, call_timer_json: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -6124,7 +6139,7 @@ mod tests {
             State(broker.clone()),
             Path(NS.into()),
             leer_query(),
-            if_none_match_h(&marke),
+            if_none_match(&marke),
         )
         .await
         .into_response();
@@ -6142,7 +6157,7 @@ mod tests {
             State(broker.clone()),
             Path(NS.into()),
             leer_query(),
-            if_none_match_h(&marke),
+            if_none_match(&marke),
         )
         .await
         .into_response();
@@ -6200,7 +6215,7 @@ mod tests {
             State(broker.clone()),
             Path(NS.into()),
             leer_query(),
-            if_none_match_h(&marke),
+            if_none_match(&marke),
         )
         .await
         .into_response();
@@ -6275,18 +6290,194 @@ mod tests {
             State(broker.clone()),
             Path(NS.into()),
             feld_query("101"),
-            if_none_match_h(&m_schmal),
+            if_none_match(&m_schmal),
         )
         .await
         .into_response();
         assert_eq!(wieder.status(), StatusCode::NOT_MODIFIED);
     }
 
-    /// `If-None-Match`-Kopf für die Übersichts-Tests.
-    fn if_none_match_h(marke: &str) -> axum::http::HeaderMap {
-        let mut h = axum::http::HeaderMap::new();
-        h.insert(header::IF_NONE_MATCH, marke.parse().unwrap());
-        h
+    #[test]
+    fn die_marken_pruefung_haelt_sich_an_rfc_9110() {
+        // An dieser Funktion hängt, ob S8 in Produktion überhaupt etwas tut.
+        // Vor dem Relay steht nginx, und dessen gzip-Filter **schwächt** eine
+        // starke Marke zu `W/"…"` ab. Bräche die `W/`-Behandlung oder die
+        // Listen-Zerlegung, antwortete der Relay still immer mit 200 — die
+        // Einsparung wäre lautlos weg, und niemand merkte es (Review-Fund
+        // 19.08.2026; die LAN-Zwillingsfunktion hat diese Prüfung längst).
+        let etag = "\"ov-42-abc\"";
+        assert!(marke_passt(&if_none_match(etag), etag), "die eigene Marke");
+        assert!(
+            marke_passt(&if_none_match(&format!("\"ov-9-xyz\", {etag}")), etag),
+            "eine Liste, in der sie vorkommt"
+        );
+        assert!(
+            marke_passt(&if_none_match(&format!("W/{etag}")), etag),
+            "abgeschwächt durch einen Zwischenspeicher"
+        );
+        assert!(marke_passt(&if_none_match("*"), etag), "der Joker");
+        assert!(
+            !marke_passt(&if_none_match("\"ov-9-xyz\""), etag),
+            "eine fremde Marke"
+        );
+        assert!(
+            !marke_passt(&axum::http::HeaderMap::new(), etag),
+            "gar kein Kopf"
+        );
+    }
+
+    #[tokio::test]
+    async fn eine_geaenderte_aufruf_schwelle_wechselt_die_marke() {
+        // Der `callTimer` geht mit in die Marke — sonst bekäme eine
+        // Cloud-Übersicht nach einer geänderten Schwelle so lange „nichts
+        // Neues", bis sich zufällig ein Feld ändert, und rechnete bis dahin
+        // mit den alten Minuten. Dieselbe Falle wie im LAN, wo sie ein Review
+        // gefunden hat; hier war sie im Code richtig gelöst, aber ungetestet
+        // (Review-Fund 19.08.2026). Gleiches gilt für den S6-Schalter: Auch
+        // er reist im `callTimer`-Umschlag mit.
+        const NS: &str = "bbbbbbbb-9999-9999-9999-999999999999";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "1".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            ns.monitor = Some(MonitorBundle {
+                config: MonitorConfig::default(),
+                tournament_name: String::new(),
+                ads: Vec::new(),
+                call_timer: relay_proto::CallTimerView {
+                    enabled: true,
+                    second_call_minutes: 2.0,
+                    third_call_minutes: 5.0,
+                },
+                logo: None,
+            });
+        }
+        register_host(&broker, NS, &host).await;
+
+        let erst = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // Nur die Schwelle ändern — die Feld-Liste bleibt, wie sie war.
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut(NS)
+                .unwrap()
+                .monitor
+                .as_mut()
+                .unwrap()
+                .call_timer
+                .second_call_minutes = 3.0;
+        }
+        let zweit = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            if_none_match(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::OK,
+            "die neue Schwelle muss durchkommen"
+        );
+
+        // Und dasselbe für den Fallback-Schalter aus S6.
+        let marke2 = zweit
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut(NS)
+                .unwrap()
+                .monitor
+                .as_mut()
+                .unwrap()
+                .config
+                .push_fallback_slow = true;
+        }
+        let dritt = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            if_none_match(&marke2),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            dritt.status(),
+            StatusCode::OK,
+            "der umgelegte Schalter muss durchkommen"
+        );
+    }
+
+    #[tokio::test]
+    async fn die_marke_verraet_nicht_ob_es_den_namespace_gibt() {
+        // Wächter (Sicherheits-Review 19.08.2026): Der `None`-Arm speist
+        // dieselben Eingaben in die Marke wie ein registrierter, aber leerer
+        // Namespace — leere Feld-Liste, Standard-Aufruf-Timer, Schalter aus.
+        // Beide müssen deshalb dieselbe Marke tragen.
+        //
+        // Der Test steht hier, damit eine spätere „Härtung" — etwa den
+        // Namespace mit in die Marke zu streuen — nicht versehentlich ein
+        // Existenz-Orakel daraus macht: Wer eine UUID durchprobiert, könnte
+        // sonst an der Marke ablesen, ob dahinter ein Turnier läuft.
+        //
+        // Beide Namespaces sind wohlgeformt; `valid_namespace` greift also
+        // nicht, und der 404-Pfad für Unfug bleibt davon unberührt.
+        const LEER: &str = "99999999-9999-9999-9999-999999999999";
+        const FEHLT: &str = "aaaaaaaa-9999-9999-9999-999999999999";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, LEER, &host).await;
+
+        let a = overview_health(
+            State(broker.clone()),
+            Path(LEER.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let b = overview_health(
+            State(broker.clone()),
+            Path(FEHLT.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(a.status(), b.status());
+        assert_eq!(
+            a.headers().get(header::ETAG),
+            b.headers().get(header::ETAG),
+            "gleiche Marke — sonst verriete sie die Existenz des Turniers"
+        );
     }
 
     #[tokio::test]

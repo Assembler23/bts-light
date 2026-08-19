@@ -180,6 +180,12 @@ Aufstellung:
   Der Pausen-Beginn (`startedAt`, Server-Zeit) reist im gespiegelten
   Spielzustand mit; die Behandlungspause erscheint in TL-Web als
   „Behandlung seit …".
+  Damit die Server-Zeiten gegen die richtige Uhr laufen, gleicht das Tablet
+  seine eigene alle 30 s über `…/health` ab. **Seit v0.9.243 mit dem
+  Basis-Pfad** — vorher war der Abruf absolut geschrieben und landete im
+  Cloud-Modus auf `badhub.de/health` statt am Relay; der Abgleich fand dort
+  also gar nicht statt, und die Pausen-Enden liefen gegen die ungeprüfte
+  Tablet-Uhr.
 - **Spieldauer**: läuft als MM:SS in der Kopfzeile ab Matchstart.
 - **Court-Grafik**: zeigt Aufschläger (markiert mit einem **Federball**,
   dessen Korken in Flugrichtung zum diagonal gegenüberliegenden
