@@ -954,6 +954,19 @@
   }
 
   function applyState(state) {
+    // Überholte Antwort verwerfen (Spec monitor-livestand-push, S4): Zwei
+    // Abrufe können sich überholen — der langsamere trägt dann den älteren
+    // Stand und würde die Anzeige zurückwerfen. Ein Voll-Abruf mit
+    // GLEICHER Ordnungszahl gilt dagegen: Er darf denselben Stand
+    // berichtigen, etwa wenn BTP einen Satzstand von Hand zurücknimmt.
+    //
+    // Nur für das eigene Feld — ein Wechsel des Felds (Reassignment) bringt
+    // eine fremde Zählung mit und darf nicht blockiert werden.
+    var feld = typeof state.courtId === "number" ? state.courtId : 0;
+    if (feld && feld === knownCourtId) {
+      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) return;
+      if (state.seq) lastSeqByCourt[feld] = state.seq;
+    }
     lastState = state;
     // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
     // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
@@ -1043,7 +1056,28 @@
   }
   var fixedCourtId = MODE !== "device" ? courtIdFromPath() : null;
   var knownCourtId = fixedCourtId;   // wird in applyState nachgezogen
-  var lastSeqByCourt = {};           // lastSeq-Guard je Feld (veraltete Nudges verwerfen)
+  var lastSeqByCourt = {};           // zuletzt gezeigte Ordnungszahl je Feld
+
+  /** Soll ein eintreffender Stand angewendet werden? (Spec
+   *  monitor-livestand-push, S4)
+   *
+   *  Push nur bei echt neuerer Ordnungszahl; ein Voll-Abruf darf gleichziehen
+   *  — er trägt denselben Stand, den der Nudge angekündigt hat, und darf ihn
+   *  auch dann noch berichtigen (BTP-Rückfall). `0` heißt „keine Ordnung
+   *  bekannt" (älterer Server) und blockiert nie: Eine eingefrorene Anzeige
+   *  wäre der schlimmere Fehler.
+   *
+   *  **Inline-Kopie von `src/io/monitorSeq.mjs`** — dort steht die kanonische
+   *  Fassung samt Test (`scripts/test-monitor-seq.mjs`, eigener CI-Schritt).
+   *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `overview.html`. */
+  function seqAnwenden(gezeigtSeq, seq, quelle) {
+    var gezeigt = isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = isFinite(seq) ? seq : 0;
+    if (neu <= 0) return true;
+    if (gezeigt <= 0) return true;
+    return quelle === "push" ? neu > gezeigt : neu >= gezeigt;
+  }
 
   // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
   // Fallen Nudge und Fallback-Takt zusammen, gewinnt "push": Der Abruf wäre
@@ -1157,9 +1191,8 @@
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (typeof msg.court !== "number" || typeof msg.seq !== "number") return;
-      // lastSeq-Guard je Feld: veraltete/doppelte Nudges (seq ≤ zuletzt) weg.
-      var prev = lastSeqByCourt[msg.court] || 0;
-      if (msg.seq <= prev) return;
+      // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
+      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, "push")) return;
       lastSeqByCourt[msg.court] = msg.seq;
       // Fetch, wenn es unser Feld ist ODER das Feld noch unbekannt ist. Nur
       // beim bekannten eigenen Feld pausieren wir den Poll (lastNudgeAt) –

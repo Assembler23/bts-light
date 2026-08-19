@@ -197,6 +197,9 @@ pub fn build_monitor_state(
         court_id,
         court_label,
         hall_color,
+        // Ordnung für die Anzeige (Spec monitor-livestand-push, S4) —
+        // dieselbe Zahl, die der Nudge dieses Felds trägt.
+        seq: court.seq,
         tournament_name: court.tournament_name,
         match_info,
         court_state: court.court_state,
@@ -335,6 +338,8 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         court_label: String::new(),
         // Kopplungs-Seite: kein Feld, keine Halle.
         hall_color: None,
+        // Kein Feld, also keine Ordnung — die Seite zeigt nur ihren Code.
+        seq: 0,
         tournament_name: String::new(),
         match_info: None,
         court_state: None,

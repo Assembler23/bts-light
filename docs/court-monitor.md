@@ -104,8 +104,19 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Nudges **aller** Felder (Feld-Übersicht `overview.html`); gesetzt → nur dieses
   Feld (fester Court-Monitor). Geräte-zugewiesene Monitore abonnieren alle Felder
   und filtern clientseitig auf ihr aktuelles Feld.
-- **`seq`** zählt je Feld monoton hoch; veraltete/doppelte Nudges verwirft der
-  Client (`lastSeq`-Guard).
+- **`seq`** zählt je Feld monoton hoch und **beginnt bei der Uhrzeit** (seit
+  v0.9.239), damit die Zahl einen Neustart von Turnier-PC oder Relay
+  übersteht — sonst hielte eine Anzeige mit gemerktem Wert danach jeden
+  neuen Stand für veraltet und bliebe stehen.
+- **Seit v0.9.239 tragen auch die Voll-Antworten dieselbe Zahl**
+  (`/health` je Feld, `/court/{id}/state` fürs eigene Feld, in LAN und
+  Cloud). Damit ordnet die Anzeige Push und Abruf zueinander: Ein **Push**
+  gilt nur bei echt größerer Zahl (ein doppelter Anstoß löste sonst einen
+  Abruf ohne neuen Inhalt aus), eine **Voll-Antwort** schon bei gleicher —
+  sie darf denselben Stand berichtigen, etwa wenn in BTP ein Satzstand von
+  Hand zurückgenommen wird. Fehlt die Zahl (älterer Absender), gilt der
+  Stand immer. Die Regel steht als `src/io/monitorSeq.mjs` mit eigenem
+  CI-Schritt; beide Anzeige-Seiten tragen eine Inline-Kopie.
 - **Poll bleibt Fallback:** Solange Nudges eintreffen, pausiert das
   Intervall-Poll; bei WS-Abriss (WLAN-Wechsel, Cloud-Namespace noch nicht da)
   oder >~1 s Nudge-Stille übernimmt es sofort wieder (250 ms). Ein

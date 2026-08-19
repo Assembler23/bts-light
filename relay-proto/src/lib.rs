@@ -487,6 +487,22 @@ pub struct MonitorState {
     /// `#[serde(default)]` (= aus) hält ältere Frames lesbar.
     #[serde(rename = "callTimer", default)]
     pub call_timer: CallTimerView,
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// dieselbe Zahl, die der Nudge auf der Monitor-WS trägt.
+    ///
+    /// Damit kann die Anzeige Push und Voll-Abruf zueinander ordnen, statt
+    /// beide blind anzuwenden: Ein Push gilt bei `seq > gezeigt`, eine
+    /// Voll-Antwort bei `seq >= gezeigt`. Das Gleichheitszeichen ist
+    /// Absicht — eine Voll-Antwort trägt denselben Stand, den der Nudge
+    /// angekündigt hat, und kann ihn auch dann noch berichtigen (etwa wenn
+    /// BTP einen Satzstand zurücknimmt).
+    ///
+    /// **Prozesslokal** (ADR 0035): Host und Relay zählen getrennt, die Zahl
+    /// ist nur innerhalb einer Verbindung zu derselben Gegenstelle
+    /// vergleichbar. `#[serde(default)]` → `0` bei einem älteren Absender,
+    /// und dann verhält sich die Seite wie vor dieser Etappe.
+    #[serde(default)]
+    pub seq: u64,
 }
 
 /// Aufruf-Timer-Einstellungen für die Monitor-Anzeige (gespiegelt aus der
@@ -2866,6 +2882,47 @@ mod tests {
     }
 
     #[test]
+    fn ein_monitor_state_ohne_seq_bleibt_lesbar() {
+        // Spec monitor-livestand-push, S4: `seq` ordnet Push und Voll-Abruf.
+        // Ein **alter** Relay (oder Host) schickt das Feld nicht — die Seite
+        // muss den Stand trotzdem verarbeiten und `seq = 0` sehen, damit sie
+        // sich wie vor der Etappe verhält.
+        // Frame eines alten Absenders simulieren: aktueller Zustand, aber
+        // ohne das neue Feld (Muster `monitor_state_hall_color_defaults_none`).
+        let mut json = serde_json::to_value(MonitorState {
+            court_id: 3,
+            court_label: "Feld 3".into(),
+            hall_color: None,
+            tournament_name: "T".into(),
+            match_info: None,
+            court_state: None,
+            config: MonitorConfig::default(),
+            ads: vec![],
+            command: None,
+            device_code: String::new(),
+            unassigned: false,
+            redirect_to: None,
+            server_now_ms: 0,
+            on_court_since_ms: None,
+            call_timer: CallTimerView::default(),
+            seq: 4711,
+        })
+        .expect("serialisierbar");
+        json.as_object_mut().expect("Objekt").remove("seq");
+        let state: MonitorState =
+            serde_json::from_value(json).expect("altes Frame bleibt lesbar");
+        assert_eq!(state.seq, 0, "fehlendes Feld = 0 = „keine Ordnung bekannt\"");
+
+        // Und mit Feld kommt der Wert an — hin und zurück.
+        let mut mit = state.clone();
+        mit.seq = 1_787_000_000_042;
+        let json = serde_json::to_string(&mit).expect("serialisierbar");
+        assert!(json.contains("\"seq\":1787000000042"), "{json}");
+        let zurueck: MonitorState = serde_json::from_str(&json).expect("lesbar");
+        assert_eq!(zurueck.seq, mit.seq);
+    }
+
+    #[test]
     fn monitor_state_hall_color_defaults_none() {
         // Frame eines alten Hosts/Relays simulieren: aktueller Zustand,
         // aber ohne das neue Feld.
@@ -2885,6 +2942,7 @@ mod tests {
             server_now_ms: 0,
             on_court_since_ms: None,
             call_timer: CallTimerView::default(),
+            seq: 0,
         })
         .unwrap();
         json.as_object_mut().unwrap().remove("hallColor").unwrap();
@@ -2976,6 +3034,7 @@ mod tests {
                 second_call_minutes: 2.0,
                 third_call_minutes: 4.0,
             },
+            seq: 1_787_000_000_007,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));

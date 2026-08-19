@@ -624,7 +624,28 @@ main {
   var fetching = false, refetchQueued = false;
   var backoffUntil = 0;                 // nach einem Fehler kurz zurückhalten
   var coalesceTimer = null, lastFetchStart = 0;
-  var lastSeqByCourt = {};              // lastSeq-Guard je Feld
+  var lastSeqByCourt = {};              // zuletzt gezeigte Ordnungszahl je Feld
+
+  /** Soll ein eintreffender Stand angewendet werden? (Spec
+   *  monitor-livestand-push, S4)
+   *
+   *  Push nur bei echt neuerer Ordnungszahl; ein Voll-Abruf darf gleichziehen
+   *  — er trägt denselben Stand, den der Nudge angekündigt hat, und darf ihn
+   *  auch dann noch berichtigen (BTP-Rückfall). `0` heißt „keine Ordnung
+   *  bekannt" (älterer Server) und blockiert nie: Eine eingefrorene Anzeige
+   *  wäre der schlimmere Fehler.
+   *
+   *  **Inline-Kopie von `src/io/monitorSeq.mjs`** — dort steht die kanonische
+   *  Fassung samt Test (`scripts/test-monitor-seq.mjs`, eigener CI-Schritt).
+   *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `monitor.html`. */
+  function seqAnwenden(gezeigtSeq, seq, quelle) {
+    var gezeigt = isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = isFinite(seq) ? seq : 0;
+    if (neu <= 0) return true;
+    if (gezeigt <= 0) return true;
+    return quelle === 'push' ? neu > gezeigt : neu >= gezeigt;
+  }
 
   function showOffline(show) {
     var el = document.getElementById('offline');
@@ -810,6 +831,17 @@ main {
         if (typeof data.serverNowMs === 'number' && data.serverNowMs > 0) {
           callOffset = data.serverNowMs - Date.now();
         }
+        // Ordnungszahlen je Feld fortschreiben (Spec monitor-livestand-push,
+        // S4). Die Übersicht rendert heute immer alles auf einmal; sobald sie
+        // mit S5 einzelne Karten patcht, entscheidet `seqAnwenden` je Feld,
+        // ob der neue Stand angewendet wird. Bis dahin ist das Mitführen die
+        // Vorbereitung — und schon jetzt der Grund, warum ein überholter
+        // Nudge keinen zweiten Abruf auslöst.
+        (data.courts || []).forEach(function (c) {
+          if (typeof c.court_id !== 'number' || typeof c.seq !== 'number' || !c.seq) return;
+          var gezeigt = lastSeqByCourt[c.court_id] || 0;
+          if (c.seq > gezeigt) lastSeqByCourt[c.court_id] = c.seq;
+        });
         render(data);
         // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —
         // erstmal leer lassen, kein Drama für die Funktionalität.
@@ -919,11 +951,10 @@ main {
     catch (e) { mwsSchedule(); return; }
     mws.onopen = function () {
       mwsOpen = true; mwsBackoff = 1000;
-      // Nach Server-/Relay-Neustart springt die seq wieder auf 0. Der alte
-      // lastSeq-Höchstwert würde dann JEDEN neuen Nudge als „veraltet"
-      // verwerfen, bis der Server den alten Wert überholt → Anzeige hängt.
-      // Darum je frischer Verbindung zurücksetzen (innerhalb einer Verbindung
-      // ist der Guard dank TCP-Ordnung ohnehin redundant).
+      // Zurücksetzen je frischer Verbindung. Seit S4 startet die Sequenz
+      // beim Server bei der Uhrzeit und ist über Neustarts monoton — das
+      // Zurücksetzen bleibt trotzdem: Es kostet nichts, und innerhalb einer
+      // Verbindung ist der Guard dank TCP-Ordnung ohnehin redundant.
       lastSeqByCourt = {};
       mlog('info', 'mws_open');
     };
@@ -931,9 +962,8 @@ main {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (typeof msg.court !== 'number' || typeof msg.seq !== 'number') return;
-      // lastSeq-Guard je Feld: veraltete/doppelte Nudges (seq ≤ zuletzt) weg.
-      var prev = lastSeqByCourt[msg.court] || 0;
-      if (msg.seq <= prev) return;
+      // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
+      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, 'push')) return;
       lastSeqByCourt[msg.court] = msg.seq;
       // Jedes gültige Nudge beweist: der Push-Kanal lebt → Poll pausieren und
       // den Voll-Stand niedrig-latent holen (coalesct).

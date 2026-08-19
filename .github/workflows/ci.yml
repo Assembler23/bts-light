@@ -117,6 +117,12 @@ jobs:
       - name: Bediener-Nachruf (JS)
         run: node scripts/test-scorekeeper-call-text.mjs
 
+      # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
+      # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der
+      # BTP-Rückfall-Fall). Eine falsche Regel hier friert Anzeigen ein.
+      - name: Anzeige-Ordnung seq (JS)
+        run: node scripts/test-monitor-seq.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)

@@ -1186,6 +1186,10 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         court_id,
         court_label,
         hall_color: None,
+        // Leerlauf ohne Namespace-Kontext: keine Ordnung bekannt (Spec
+        // monitor-livestand-push, S4). Die Anzeige behandelt 0 wie vor der
+        // Etappe.
+        seq: 0,
         tournament_name: String::new(),
         match_info: None,
         court_state: None,
@@ -1234,6 +1238,12 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         });
     MonitorState {
         court_id,
+        // Ordnung für die Anzeige (Spec monitor-livestand-push, S4) —
+        // dieselbe Zahl, die der Nudge dieses Felds trägt. **Prozesslokal:**
+        // Der Relay zählt eigenständig, seine Zahlen sind mit denen des
+        // Hosts nicht vergleichbar (ADR 0035). Das ist unkritisch, weil eine
+        // Anzeige immer nur mit einer der beiden Gegenstellen spricht.
+        seq: namespace.monitor_seq.get(&court_id).copied().unwrap_or(0),
         court_label: namespace
             .court_labels
             .get(&court_id)
@@ -1543,6 +1553,13 @@ async fn overview_health(
                             "team1_nationalities": m.map(|m| nats(&m.team_a)).unwrap_or_default(),
                             "team2_nationalities": m.map(|m| nats(&m.team_b)).unwrap_or_default(),
                             "sets": sets,
+                            // Ordnung für die Anzeige (Spec
+                            // monitor-livestand-push, S4) — gleicher Schlüssel
+                            // wie in der LAN-Antwort (`CourtOverview.seq`).
+                            // Prozesslokal: Der Relay zählt eigenständig
+                            // (ADR 0035); eine Anzeige spricht immer nur mit
+                            // einer Gegenstelle, damit ist das unkritisch.
+                            "seq": n.monitor_seq.get(&c.id).copied().unwrap_or(0),
                             "on_court_since_ms": n.court_on_court_since.get(&c.id).copied(),
                             // Aufschlag/Verletzung/TL-Ruf hält der Relay nicht → im
                             // Cloud konservativ weggelassen (kein Highlight/Badge).
@@ -2040,7 +2057,13 @@ async fn unsubscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: 
 /// hält bereits den Namespace, ein Nudge verlässt ihn nie.
 fn notify_monitor(namespace: &mut Namespace, court_id: i64) {
     let seq = {
-        let s = namespace.monitor_seq.entry(court_id).or_insert(0);
+        // Erstbelegung mit der Uhrzeit statt mit 0 (Spec
+        // monitor-livestand-push, S4; gleich wie im Host): Die Zahl bleibt so
+        // über Relay-Neustarts monoton. Sonst begänne sie nach einem Deploy
+        // wieder klein, und eine Anzeige mit gemerktem `seq` verwürfe jeden
+        // neuen Stand als veraltet, bis der Zähler den alten Wert überholt
+        // hätte.
+        let s = namespace.monitor_seq.entry(court_id).or_insert_with(now_ms);
         *s += 1;
         *s
     };
@@ -4041,7 +4064,11 @@ mod tests {
 
         notify_monitor(&mut ns, 5);
 
-        assert_eq!(nudge_of(rx5.try_recv().unwrap()), (5, 1));
+        // Seit S4 startet die Sequenz bei der Uhrzeit (neustart-fest), nicht
+        // bei 1 — geprüft wird deshalb nur, dass sie gesetzt ist.
+        let (court, seq) = nudge_of(rx5.try_recv().unwrap());
+        assert_eq!(court, 5);
+        assert!(seq > 0);
         assert_eq!(nudge_of(rx_all.try_recv().unwrap()).0, 5);
         assert!(rx3.try_recv().is_err(), "Feld 3 bleibt unberührt");
     }
@@ -4049,6 +4076,10 @@ mod tests {
     #[test]
     fn monitor_seq_is_monotonic_per_court() {
         // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
+        //
+        // Seit S4 (Spec monitor-livestand-push) beginnt die Zählung bei der
+        // Uhrzeit statt bei 1, damit sie über Relay-Neustarts monoton bleibt.
+        // Geprüft wird deshalb der Abstand, nicht der absolute Wert.
         let mut ns = Namespace::new();
         let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
@@ -4059,9 +4090,12 @@ mod tests {
         notify_monitor(&mut ns, 1);
         notify_monitor(&mut ns, 2);
 
-        assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 1);
-        assert_eq!(nudge_of(rx1.try_recv().unwrap()).1, 2);
-        assert_eq!(nudge_of(rx2.try_recv().unwrap()).1, 1);
+        let erst = nudge_of(rx1.try_recv().unwrap()).1;
+        let zweit = nudge_of(rx1.try_recv().unwrap()).1;
+        assert_eq!(zweit, erst + 1, "je Anstoß genau eins weiter");
+        let feld2 = nudge_of(rx2.try_recv().unwrap()).1;
+        assert!(feld2 > 0);
+        assert_ne!(feld2, zweit, "getrennte Zählung je Feld");
     }
 
     #[test]
@@ -5269,6 +5303,11 @@ mod tests {
             ns.court_matches.insert(101, brief(7));
             ns.court_scores.insert(101, vec![SetAb { a: 21, b: 15 }]);
             ns.court_on_court_since.insert(101, 1000);
+            // Ordnungszahl des Felds (Spec monitor-livestand-push, S4) — die
+            // Cloud-Antwort muss sie unter demselben Schlüssel tragen wie die
+            // LAN-Antwort, sonst könnte `overview.html` Push und Abruf im
+            // Cloud-Betrieb nicht zueinander ordnen.
+            ns.monitor_seq.insert(101, 1_787_000_000_042);
             ns.monitor = Some(MonitorBundle {
                 config: MonitorConfig::default(),
                 tournament_name: String::new(),
@@ -5306,6 +5345,9 @@ mod tests {
         assert_eq!(c0["team1_nationalities"], serde_json::json!(["GER"]));
         assert_eq!(c0["sets"][0]["a"], serde_json::json!(21));
         assert_eq!(c0["on_court_since_ms"], serde_json::json!(1000));
+        // Ordnung für die Anzeige (Spec monitor-livestand-push, S4) —
+        // derselbe Schlüssel wie in der LAN-Antwort.
+        assert_eq!(c0["seq"], serde_json::json!(1_787_000_000_042u64));
         // Im Cloud (noch) nicht verfügbar → konservativ weggelassen.
         assert!(c0["serving_team"].is_null());
         assert_eq!(c0["injury"], serde_json::json!(false));
@@ -5314,6 +5356,9 @@ mod tests {
         assert_eq!(c1["court_id"], serde_json::json!(102));
         assert_eq!(c1["match_id"], serde_json::json!(0));
         assert!(c1["on_court_since_ms"].is_null());
+        // Nie geweckt = keine Ordnung bekannt; die Anzeige behandelt 0 wie
+        // vor der Etappe (kein Blockieren).
+        assert_eq!(c1["seq"], serde_json::json!(0));
         assert!(
             c1["hall_color"].is_null(),
             "alter Host ohne Farbe → farblos"
