@@ -77,6 +77,14 @@ jobs:
       - name: Tablet-Aufschlagpositionen (JS)
         run: node scripts/test-serving.mjs
 
+      # Zettel-Ereignisse am Tablet (Spec schiedsrichterzettel-druck,
+      # ADR 0038): Vereinigung und Undo-Schnitt sind die einzige Stelle,
+      # an der ein Bedienfehler unbemerkt Daten kostet — ein Undo, das
+      # eine Karte stehen lässt, fällt erst beim gedruckten Zettel nach
+      # dem Turnier auf.
+      - name: Zettel-Ereignisse (JS)
+        run: node scripts/test-match-events.mjs
+
       # Gong-Auflöse-Timing (Plan 15) — onended-/Fallback-Pfad + done-Guard
       # der geteilten gongTiming.mjs (kein Überlappen der ersten Silbe).
       - name: Gong-Timing (JS)

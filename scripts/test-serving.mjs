@@ -143,4 +143,60 @@ if (failures > 0) {
   console.error(`\n❌ Aufschlag-Positionstest: ${failures} Fehler.`);
   process.exit(1);
 }
+// ── serve_start-Nutzlast (Spec schiedsrichterzettel-druck) ────────────
+// Das Ereignis traegt Aufschlaeger UND Empfaenger in TEAM-Koordinaten
+// (0/1) — nicht in Seiten, nicht als Spieler-IDs. Die Projektion auf dem
+// Host rekonstruiert daraus die Doppel-Rotation; steht hier links statt
+// rechts, ist das gedruckte Raster ab dem ersten Ballwechsel falsch.
+// Stilkonform mit dem Rest dieser Datei: Zaehler statt node:assert.
+function pruefe(desc, got, expected) {
+  const a = JSON.stringify(got);
+  const b = JSON.stringify(expected);
+  if (a !== b) {
+    console.error(`FAIL ${desc}: erwartet ${b}, war ${a}`);
+    failures++;
+  }
+}
+
+{
+  const teamKoordinate = (teamKey) => (teamKey === "a" ? 0 : 1);
+  const spielerIndex = (arr, spieler) => {
+    const i = arr.findIndex((p) => p.id === spieler.id);
+    return i < 0 ? 0 : i;
+  };
+  const teamA = [{ id: 11 }, { id: 12 }];
+  const teamB = [{ id: 21 }, { id: 22 }];
+
+  // Aufschlaeger A2 (Index 1) gegen Empfaenger B1 (Index 0).
+  const nutzlast = {
+    kind: "serve_start",
+    team: teamKoordinate("a"),
+    player: spielerIndex(teamA, teamA[1]),
+    receiverTeam: teamKoordinate("b"),
+    receiverPlayer: spielerIndex(teamB, teamB[0]),
+  };
+  pruefe("serve_start-Nutzlast", nutzlast, {
+    kind: "serve_start",
+    team: 0,
+    player: 1,
+    receiverTeam: 1,
+    receiverPlayer: 0,
+  });
+
+  // Alle vier Werte muessen in {0,1} liegen — der Host weist alles andere
+  // ab, und ein abgewiesenes serve_start laesst den gedruckten Zettel im
+  // Doppel auf zwei Zeilen zurueckfallen.
+  for (const feld of ["team", "player", "receiverTeam", "receiverPlayer"]) {
+    const v = nutzlast[feld];
+    if (v !== 0 && v !== 1) {
+      console.error(`FAIL ${feld} ausserhalb {0,1}: ${v}`);
+      failures++;
+    }
+  }
+
+  // Unbekannter Spieler faellt auf 0 zurueck statt auf -1 — sonst waere
+  // das Ereignis ungueltig und ginge lautlos verloren.
+  pruefe("unbekannter Spieler → 0", spielerIndex(teamA, { id: 999 }), 0);
+}
+
 console.log("✓ Aufschlag-Positionstest: 3000 Rallyes + Festfälle, keine Abweichung.");
