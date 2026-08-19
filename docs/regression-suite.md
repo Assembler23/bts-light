@@ -112,6 +112,15 @@ anpassen:
   `GET /debug/perf` und die 10-Sekunden-Zeile im Diagnose-Log. Das
   Zählwerk selbst (`tablet/perf.rs`) ist mit elf Unit-Tests abgedeckt,
   darunter ein Wächter gegen Personenbezug im Bericht.
+  Das Skript spiegelt die Anzeige-Seiten, **auch ihre Gesundheits-Regel**: Es
+  importiert `src/io/pushHealth.mjs`, zählt Herzschläge getrennt von Anstößen
+  und pollt nur so schnell, wie es die echte Seite täte (S6). Mit `--schmal`
+  holen die Court-Monitore ihren Stand über `health?court=<id>` statt über
+  `/court/{id}/state` — nur so ist der schmale Abruf aus S7 überhaupt messbar.
+  Bewusst **nicht** nachgebildet: der Force-Close nach 25 s Stille samt
+  Reconnect, das Fehler-Backoff (ohne das meldet ein Lauf gegen einen
+  klemmenden Server eine höhere Rate als die Wirklichkeit) und das seq-Gate
+  vor dem angestoßenen Abruf.
 
 ## Abgleich mit Tilos Original-BTS
 

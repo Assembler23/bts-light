@@ -513,6 +513,22 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 - [x] Der schmale Abruf hat eine **eigene** Marke. *(`der_schmale_abruf_hat_eine_eigene_marke`.
       Mit der Marke der ganzen Liste bekäme ein Feld-Abrufer „nichts Neues" auf einen Stand,
       den er nie gesehen hat.)*
+- [x] Der Schnitt läuft **einmal je Cache-Generation**, nicht je Abruf.
+      *(`der_schnitt_laeuft_je_cache_generation_nur_einmal`. Nachgetragen nach den Reviews:
+      Der Schnitt ersetzt keinen Neubau, er kommt obendrauf — und er liegt vor der
+      Marken-Prüfung, sodass sonst selbst die fast kostenlose Bestätigung „nichts Neues" den
+      vollen Parse zahlte. Ein Gerät im Turnier-WLAN hätte mit wenigen Byte je Anfrage einen
+      billigen Hebel auf die Rechenzeit gehabt. Der Feld-Cache wird **faul** gefüllt, damit
+      ihn niemand zahlt, solange kein Client den schmalen Abruf nutzt, und ist nach der
+      **geparsten** Zahl geschlüsselt — über den Rohtext ließen sich mit `?court=0101`,
+      `00101`, … beliebig viele Schlüssel erzeugen.)*
+- [x] Eine Ordnungszahl ohne zugehöriges Feld verrät nichts.
+      *(`eine_verwaiste_ordnungszahl_verraet_kein_feld` — Review-Fund: Am Relay sind
+      `monitor_seq` und `courts` zwei unabhängige Quellen. Die Zahlen entstehen aus Anstößen
+      und werden nie aufgeräumt, die Feldliste ersetzt der Host komplett. Für eine CourtID,
+      die nur noch in `monitor_seq` stand — ein Nudge vor der ersten Feldliste, oder ein
+      Turnierwechsel im selben Namespace — kam eine leere Feld-Liste mit **gefüllter**
+      Zahlen-Karte zurück, und die war der Beweis, dass es dieses Feld gab.)*
 
 > **Befund zur Auslieferung:** Die Route ist da, aber im heutigen Bestand nutzt sie **kein**
 > Client. Der feste Court-Monitor holt `/court/{id}/state`, die Kombi-Anzeige `/combo/state`,

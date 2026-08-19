@@ -687,6 +687,12 @@ pub struct TabletState {
     /// Wahrheit**: Ist er kalt oder abgestanden, baut der Handler direkt,
     /// genau wie vorher.
     overview_cache: RwLock<Option<OverviewCache>>,
+    /// Ein-Feld-Ausschnitte zur aktuellen Übersicht (Spec
+    /// monitor-livestand-push, S7) — faul gefüllt, siehe [`FeldCache`].
+    feld_cache: RwLock<Option<FeldCache>>,
+    /// Wie oft die Ausschnitte gebaut wurden. Nur Messung: Der Test hält
+    /// damit fest, dass fünf schmale Abrufe **einen** Schnitt kosten.
+    feld_schnitte: AtomicU64,
     /// Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
     /// Reine Messgrößen — sie beeinflussen nichts, sie beschreiben nur, was
     /// die Anzeigen kosten. Ohne diese Vorher-Zahlen wird laut Spec keine
@@ -751,6 +757,30 @@ pub struct OverviewCache {
     /// Fließen bewusst **nicht** in `etag` ein (siehe `monitor_seqs`).
     pub seqs_json: String,
     pub gebaut_ms: u64,
+}
+
+/// Die Ein-Feld-Ausschnitte einer Cache-Generation (Spec
+/// monitor-livestand-push, S7).
+///
+/// **Faul gefüllt.** Der Schnitt ersetzt keinen Neubau — er kommt obendrauf,
+/// und heute ruft ihn kein einziger Client. Würde er bei jedem Bau der
+/// Übersicht mitberechnet, zahlte ihn also jeder, ohne dass ihn jemand
+/// nutzt. Deshalb entsteht er erst beim ersten schmalen Abruf und gilt dann
+/// für alle weiteren derselben Generation.
+///
+/// Der Schlüssel ist die **geparste** Zahl, nicht der Rohtext: `?court=0101`
+/// und `?court=101` meinen dasselbe Feld, und über den Rohtext ließen sich
+/// beliebig viele Schlüssel erzeugen (Sicherheits-Review 19.08.2026).
+#[derive(Debug, Clone, Default)]
+pub struct FeldCache {
+    /// Zu welcher Übersicht diese Ausschnitte gehören.
+    pub rev: u64,
+    pub gebaut_ms: u64,
+    /// CourtID → (Feld-Liste mit einem Eintrag, Ordnungszahl, Marke).
+    pub felder: HashMap<i64, (String, String, String)>,
+    /// Antwort auf jede unbrauchbare Feldnummer — eine leere Liste. Auch sie
+    /// hat eine Marke, damit der Bestätigungs-Pfad für sie genauso arbeitet.
+    pub leer: (String, String, String),
 }
 
 /// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
@@ -2582,6 +2612,54 @@ impl TabletState {
     /// Der abgelegte Antwortcache — `None`, solange nichts gebaut wurde.
     pub fn overview_cache(&self) -> Option<OverviewCache> {
         self.overview_cache.read().unwrap().clone()
+    }
+
+    /// Der Ausschnitt eines Felds aus der aktuellen Übersicht (Spec
+    /// monitor-livestand-push, S7): `(Feld-Liste, Ordnungszahl, Marke)`.
+    ///
+    /// Passt der abgelegte Feld-Cache zur Revision, ist das ein Nachschlagen;
+    /// sonst baut `schneiden` die Ausschnitte einmal für **alle** Felder und
+    /// sie gelten für den Rest der Generation. Eine unbrauchbare Nummer
+    /// bekommt immer denselben leeren Ausschnitt.
+    ///
+    /// Geklont wird unter der Sperre nur das eine Tripel — die ganze Karte
+    /// herauszugeben würde den häufigen Fall (volle Antwort) verteuern.
+    pub fn feld_ausschnitt<F>(
+        &self,
+        rev: u64,
+        jetzt: u64,
+        id: Option<i64>,
+        schneiden: F,
+    ) -> (String, String, String)
+    where
+        F: FnOnce() -> FeldCache,
+    {
+        {
+            let c = self.feld_cache.read().unwrap();
+            if let Some(fc) = c.as_ref() {
+                if fc.rev == rev {
+                    return Self::aus_feld_cache(fc, id);
+                }
+            }
+        }
+        let mut neu = schneiden();
+        neu.rev = rev;
+        neu.gebaut_ms = jetzt;
+        self.feld_schnitte.fetch_add(1, Ordering::Relaxed);
+        let ergebnis = Self::aus_feld_cache(&neu, id);
+        *self.feld_cache.write().unwrap() = Some(neu);
+        ergebnis
+    }
+
+    fn aus_feld_cache(fc: &FeldCache, id: Option<i64>) -> (String, String, String) {
+        id.and_then(|i| fc.felder.get(&i))
+            .cloned()
+            .unwrap_or_else(|| fc.leer.clone())
+    }
+
+    /// Wie oft die Ein-Feld-Ausschnitte gebaut wurden (nur für Tests).
+    pub fn feld_schnitte(&self) -> u64 {
+        self.feld_schnitte.load(Ordering::Relaxed)
     }
 
     /// Die Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).

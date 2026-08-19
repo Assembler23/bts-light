@@ -1013,14 +1013,26 @@ async fn health(
     // Court-Monitor zeichnet eine einzige Kachel und holt dafür bisher die
     // ganze Halle. Geschnitten wird aus **demselben** Bau, den der
     // Antwortcache ohnehin hält — sonst nähme S7 zurück, was S1 gebracht hat.
+    //
+    // Und geschnitten wird **einmal je Cache-Generation**, nicht je Abruf:
+    // Der Schnitt ersetzt keinen Neubau, er kommt obendrauf, und er liegt vor
+    // der Marken-Prüfung — sonst zahlte selbst die sonst fast kostenlose
+    // Bestätigung „nichts Neues" den vollen Parse (Review-Funde 19.08.2026).
     if let Some(wunsch) = q.court.as_deref() {
-        let (feld, zahl) = feld_ausschnitt(&courts_json, &seqs_json, wunsch);
+        // Über die **geparste** Zahl, nicht den Rohtext: `?court=0101` meint
+        // dasselbe Feld wie `?court=101`, und über den Rohtext ließen sich
+        // beliebig viele Cache-Schlüssel erzeugen.
+        let id = wunsch.parse::<i64>().ok();
+        let prozess = ctx.tablet.process_tag();
+        let (feld, zahl, marke) = ctx.tablet.feld_ausschnitt(rev, jetzt, id, || {
+            alle_feld_ausschnitte(&courts_json, &seqs_json, prozess, &call_timer_json)
+        });
         // Eigene Marke: Sie hängt am Inhalt, und der ist hier ein anderer.
         // Mit der Marke der ganzen Liste bekäme ein schmaler Abrufer sonst
         // „nichts Neues" auf einen Stand, den er nie gesehen hat.
-        etag = inhalts_marke(ctx.tablet.process_tag(), &feld, &call_timer_json);
         courts_json = feld;
         seqs_json = zahl;
+        etag = marke;
     }
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
@@ -1135,45 +1147,68 @@ fn uebersicht_json(
     (courts_json, etag, seqs_json)
 }
 
-/// Schneidet ein einzelnes Feld aus der fertigen Übersicht (Spec
-/// monitor-livestand-push, S7). Liefert `(courts_json, seqs_json)` in
-/// derselben Form wie die volle Antwort — nur eben mit höchstens einem
-/// Eintrag.
+/// Schneidet **alle** Ein-Feld-Ausschnitte aus der fertigen Übersicht (Spec
+/// monitor-livestand-push, S7): je CourtID die Feld-Liste mit einem Eintrag,
+/// die eigene Ordnungszahl und die eigene Marke — alles in derselben Form
+/// wie die volle Antwort.
 ///
-/// **Alles Unbrauchbare liefert dieselbe leere Liste:** unbekannte Nummer,
-/// negative, nicht-numerische, leere. Ein 404 oder 400 für die eine und eine
-/// leere Liste für die andere wäre ein Fingerzeig darauf, welche Felder es
-/// gibt — am Relay, der im Internet steht, wäre das eine Auskunft über ein
-/// fremdes Turnier.
+/// **Jede unbrauchbare Feldnummer bekommt denselben leeren Ausschnitt:**
+/// unbekannte, negative, nicht-numerische, leere. Ein 404 oder 400 für die
+/// eine und eine leere Liste für die andere wäre ein Fingerzeig darauf,
+/// welche Felder es gibt — am Relay, der im Internet steht, wäre das eine
+/// Auskunft über ein fremdes Turnier.
+///
+/// Die Zusage gilt dem **Wert**, nicht einer kaputten Query: Ein doppeltes
+/// `?court=1&court=2` weist schon der Extractor mit 400 ab, bevor irgendein
+/// Feld angesehen wird. Das ist kein Leck (die Antwort hängt nur an der Form
+/// der Anfrage, nie am Serverzustand) und gilt für `?device=` seit jeher
+/// genauso (Sicherheits-Review 19.08.2026).
 ///
 /// Geschnitten wird auf der JSON-Ebene, weil der Antwortcache aus S1 die
-/// Liste als fertigen String hält. Das Parsen kostet weniger als der Neubau,
-/// den es ersetzt — und vor allem bleibt es **ein** Bau für alle Felder.
-fn feld_ausschnitt(courts_json: &str, seqs_json: &str, wunsch: &str) -> (String, String) {
-    let leer = || ("[]".to_string(), "{}".to_string());
-    let Ok(id) = wunsch.parse::<i64>() else {
-        return leer();
+/// Liste als fertigen String hält. **Der Schnitt ersetzt keinen Neubau, er
+/// kommt obendrauf** — deshalb läuft er nur einmal je Cache-Generation
+/// (`TabletState::feld_ausschnitt`) und nicht bei jedem Abruf: Sonst zahlte
+/// selbst die sonst fast kostenlose Bestätigung „nichts Neues" den vollen
+/// Parse, und ein Gerät im Turnier-WLAN hätte mit wenigen Byte je Anfrage
+/// einen billigen Hebel auf die Rechenzeit des Turnier-PCs.
+fn alle_feld_ausschnitte(
+    courts_json: &str,
+    seqs_json: &str,
+    prozess: u64,
+    call_timer_json: &str,
+) -> crate::tablet::state::FeldCache {
+    let leer_liste = "[]".to_string();
+    let leer = (
+        leer_liste.clone(),
+        "{}".to_string(),
+        inhalts_marke(prozess, &leer_liste, call_timer_json),
+    );
+    let mut cache = crate::tablet::state::FeldCache {
+        leer,
+        ..Default::default()
     };
     let Ok(felder) = serde_json::from_str::<Vec<serde_json::Value>>(courts_json) else {
-        return leer();
+        return cache;
     };
-    let Some(feld) = felder
-        .into_iter()
-        .find(|c| c.get("court_id").and_then(|v| v.as_i64()) == Some(id))
-    else {
-        return leer();
-    };
-    let liste = serde_json::to_string(&[feld]).unwrap_or_else(|_| "[]".to_string());
-    // Nur die eigene Ordnungszahl: Die fremden sagen dem Feld-Monitor
-    // nichts und wären am Relay eine Auskunft über die Nachbarhalle.
-    let zahl = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(seqs_json)
-        .ok()
-        .and_then(|m| {
-            m.get(&id.to_string())
-                .map(|v| serde_json::json!({ id.to_string(): v }).to_string())
-        })
-        .unwrap_or_else(|| "{}".to_string());
-    (liste, zahl)
+    let zahlen = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(seqs_json)
+        .unwrap_or_default();
+    for feld in felder {
+        let Some(id) = feld.get("court_id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        let Ok(liste) = serde_json::to_string(&[feld]) else {
+            continue;
+        };
+        // Nur die eigene Ordnungszahl: Die fremden sagen dem Feld-Monitor
+        // nichts und wären am Relay eine Auskunft über die Nachbarhalle.
+        let zahl = zahlen
+            .get(&id.to_string())
+            .map(|v| serde_json::json!({ id.to_string(): v }).to_string())
+            .unwrap_or_else(|| "{}".to_string());
+        let marke = inhalts_marke(prozess, &liste, call_timer_json);
+        cache.felder.insert(id, (liste, zahl, marke));
+    }
+    cache
 }
 
 /// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
@@ -5518,6 +5553,51 @@ mod tests {
         .await
         .into_response();
         assert_eq!(wieder.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn der_schnitt_laeuft_je_cache_generation_nur_einmal() {
+        // Sicherheits-Review-Fund: Der Schnitt ersetzt keinen Neubau, er kam
+        // obendrauf — und lag sogar VOR der Marken-Prüfung, sodass auch die
+        // bisher fast kostenlose Bestätigung „nichts Neues" die ganze Liste
+        // parsen musste. Bei einem Gerät im Turnier-WLAN, das die Route in
+        // Schleife ruft, ist das ein deutlich billigerer Hebel als ein
+        // normaler Abruf: wenige Byte hin, voller Parse hier.
+        //
+        // Also einmal je Cache-Generation schneiden, danach nachschlagen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        for _ in 0..5 {
+            let _ = health(
+                State(ctx.clone()),
+                takt_feld("101"),
+                axum::http::HeaderMap::new(),
+            )
+            .await;
+        }
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            1,
+            "ein Bau (S1)"
+        );
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            1,
+            "fünf Abrufe, ein Schnitt — die übrigen schlagen nach"
+        );
+
+        // Ein neuer Stand macht beides ungültig.
+        ctx.tablet.notify_monitor(101);
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            2,
+            "nach einem Nudge wird neu geschnitten"
+        );
     }
 
     #[tokio::test]

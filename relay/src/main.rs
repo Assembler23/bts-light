@@ -1556,9 +1556,22 @@ async fn overview_health(
                 // angefragten Felds übrig: Die der Nachbarfelder sagen einem
                 // Feld-Monitor nichts und wären hier eine Auskunft über die
                 // übrige Halle.
+                //
+                // **Und nur, wenn es das Feld auch wirklich gibt.**
+                // `monitor_seq` und `courts` sind zwei unabhängige Quellen:
+                // Die Zahlen entstehen aus Anstößen und werden nie
+                // aufgeräumt, die Feldliste ersetzt der Host komplett. Für
+                // eine CourtID, die nur noch in `monitor_seq` steht — ein
+                // Nudge vor der ersten Feldliste, oder ein Turnierwechsel im
+                // selben Namespace — käme sonst eine leere Feld-Liste mit
+                // gefüllter Zahlen-Karte zurück, und die wäre der Beweis,
+                // dass es dieses Feld einmal gab (Review-Fund 19.08.2026).
+                let bekannt: std::collections::HashSet<i64> =
+                    n.courts.iter().map(|c| c.id).collect();
                 let seqs: std::collections::HashMap<String, u64> = n
                     .monitor_seq
                     .iter()
+                    .filter(|(id, _)| bekannt.contains(id))
                     .filter(|(id, _)| wunsch.is_none_or(|w| w == Some(**id)))
                     .map(|(id, s)| (id.to_string(), *s))
                     .collect();
@@ -5733,6 +5746,64 @@ mod tests {
             assert_eq!(v["courts"], serde_json::json!([]), "Eingabe {eingabe}");
             assert_eq!(v["seqs"], serde_json::json!({}), "Eingabe {eingabe}");
         }
+    }
+
+    #[tokio::test]
+    async fn eine_verwaiste_ordnungszahl_verraet_kein_feld() {
+        // Review-Fund 19.08.2026: `monitor_seq` und `courts` sind zwei
+        // unabhängige Quellen. Die Zahlen entstehen aus Anstößen und werden
+        // **nie** aufgeräumt; die Feldliste ersetzt der Host komplett. Für
+        // eine CourtID, die nur noch in `monitor_seq` steht — ein Nudge vor
+        // der ersten Feldliste, oder ein Turnierwechsel im selben Namespace —
+        // antwortete der schmale Abruf mit einer leeren Liste, aber einer
+        // gefüllten `seqs`-Karte. Genau das Existenz-Signal, das die Etappe
+        // ausschließen soll.
+        const NS: &str = "55555555-5555-5555-5555-555555555555";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
+            ns.courts = vec![relay_proto::CourtBrief {
+                id: 101,
+                label: "1".into(),
+                hall: String::new(),
+                hall_color: None,
+            }];
+            // Feld 777 gibt es nicht (mehr) — seine Zahl steht aber noch da.
+            ns.monitor_seq.insert(101, 3);
+            ns.monitor_seq.insert(777, 9);
+        }
+        register_host(&broker, NS, &host).await;
+
+        let verwaist = overview_health(State(broker.clone()), Path(NS.into()), feld_query("777"))
+            .await
+            .into_response();
+        let v: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(verwaist.into_body(), 8192)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let nie_dagewesen =
+            overview_health(State(broker.clone()), Path(NS.into()), feld_query("888"))
+                .await
+                .into_response();
+        let n: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(nie_dagewesen.into_body(), 8192)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(v["courts"], serde_json::json!([]));
+        assert_eq!(
+            v["seqs"],
+            serde_json::json!({}),
+            "ohne Feld auch keine Zahl — sonst wäre sie der Beweis, dass es das Feld gab"
+        );
+        assert_eq!(v["seqs"], n["seqs"], "ununterscheidbar");
+        assert_eq!(v["courts"], n["courts"]);
     }
 
     #[tokio::test]
