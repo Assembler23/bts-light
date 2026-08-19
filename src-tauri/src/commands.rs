@@ -918,11 +918,19 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
-    if let Ok(dir) = app.path().app_data_dir() {
-        tablet.timeline_store().set_dir(dir.join("punktverlauf"));
-        // Zettel-Ereignisse: eigenes Verzeichnis neben dem Punktverlauf
-        // (ADR 0037) — getrennte Datei, getrennte Deckel, getrennte Route.
-        tablet.sheet_store().set_dir(dir.join("zettel"));
+    // Nur am MASTER (Spec, E8): Der Slave bekommt gar keine Ereignisse —
+    // in der fernen Halle läuft kein LAN-Tablet-Server, und die Geräte
+    // hängen direkt am Master-Relay (`slave_bridge.rs`). Ein Verzeichnis
+    // dort erzeugte nur leere Dateien und den falschen Eindruck, es gäbe
+    // dort einen Bestand. Beim Punktverlauf ist das historisch anders
+    // gelöst (er setzt das Verzeichnis unbedingt) — hier bewusst enger.
+    if !config.slave_mode {
+        if let Ok(dir) = app.path().app_data_dir() {
+            tablet.timeline_store().set_dir(dir.join("punktverlauf"));
+            // Zettel-Ereignisse: eigenes Verzeichnis neben dem Punktverlauf
+            // (ADR 0037) — getrennte Datei, getrennte Deckel, getrennte Route.
+            tablet.sheet_store().set_dir(dir.join("zettel"));
+        }
     }
     tablet
         .timeline_store()
@@ -1597,6 +1605,16 @@ pub async fn confirm_walkover(
         match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
             Ok(()) => {
                 written += 1;
+                // Beide Stores abschließen — bis heute tat das AUSSCHLIESSLICH
+                // dieser Weg nicht, während `enter_result`, `disqualify_match`
+                // und `process_result` es längst tun. Ein Spiel, das per
+                // Walkover gewertet wurde, nachdem es angezählt worden war,
+                // behielt so `finished = false`: Der Punktverlauf-Graph konnte
+                // seinen Abweichungs-Hinweis nie zeigen, und auf dem Zettel
+                // stand keine Ergebnisart. Ohne Aufzeichnung sind beide Aufrufe
+                // ein No-op, es entsteht also kein Geister-Eintrag.
+                tablet.timeline_store().finalize(cand.match_id, false);
+                tablet.sheet_store().finalize(cand.match_id, false);
             }
             Err(e) => {
                 // Nachschub-Queue (A5): Der Sync-Loop reicht den Walkover
@@ -1613,6 +1631,53 @@ pub async fn confirm_walkover(
         tablet.remove_walkover_proposal(&proposal_id);
     }
     Ok(WalkoverResult { written, errors })
+}
+
+#[cfg(test)]
+mod walkover_finalize_tests {
+
+    /// `confirm_walkover` schloss bis 08/2026 als EINZIGER Ergebnisweg
+    /// weder Punktverlauf noch Zettel ab. Ein angezähltes Spiel, das
+    /// danach per Walkover gewertet wurde, behielt `finished = false`:
+    /// Der Graph konnte seinen Abweichungs-Hinweis nie zeigen, und auf
+    /// dem Zettel stand keine Ergebnisart.
+    ///
+    /// Der Test prüft die Wirkung der Stores direkt — der Weg selbst
+    /// braucht BTP und ist hier nicht aufrufbar.
+    #[test]
+    fn beide_stores_schliessen_ohne_aufzeichnung_nichts_an() {
+        let tablet = crate::tablet::state::TabletState::default();
+        // Ohne Aufzeichnung ist finalize ein No-op — es entsteht KEIN
+        // Geister-Eintrag, weder hier noch beim Punktverlauf.
+        tablet.timeline_store().finalize(42, false);
+        tablet.sheet_store().finalize(42, false);
+        assert!(tablet.timeline_store().timeline(42).is_none());
+        assert!(tablet.sheet_store().sheet(42).is_none());
+
+        // Mit Aufzeichnung schließen beide ab.
+        assert!(tablet.timeline_store().apply_rally(42, 1, 1, "A", 1, 0));
+        let karte = relay_proto::MatchEvent {
+            id: "ff01".into(),
+            seq: 1,
+            set: 1,
+            after_n: 1,
+            score_a: 1,
+            score_b: 0,
+            ts_ms: 1,
+            kind: relay_proto::EventKind::CardYellow,
+            team: 0,
+            player: 0,
+            receiver_team: 1,
+            receiver_player: 0,
+            phase: relay_proto::Phase::Play,
+            retracts: String::new(),
+        };
+        assert!(tablet.sheet_store().apply_event(42, karte));
+        tablet.timeline_store().finalize(42, false);
+        tablet.sheet_store().finalize(42, false);
+        assert!(tablet.timeline_store().timeline(42).unwrap().finished);
+        assert!(tablet.sheet_store().sheet(42).unwrap().finished);
+    }
 }
 
 /// Ergebnis eines Spiels aus der **Turnierleitung** eintragen (Plan 12,

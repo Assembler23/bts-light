@@ -456,3 +456,18 @@ Server-Stand unverändert. Dieser Pfad greift, wenn `ownership_active=false`
 - Spielsystem ist fest **Best-of-3 bis 21** (BTP liefert das Format nicht
   zuverlässig im aktuellen Parser).
 - Liga-Matches (`PlayerMatches`) sind noch nicht abgedeckt.
+
+## Zettel-Ereignisse
+
+Im Schiri-Modus erfasst das Tablet neben den Ballwechseln auch Karten,
+Verletzungen, Unterbrechungen, Überstimmungen und die Aufschlagfolge. Sie gehen
+als **eigener Strom** (`match_event` / `match_event_sync`) an den Host — nie an
+badhub, nie in den Liveticker. Bedienung:
+[schiedsrichterzettel.md](schiedsrichterzettel.md).
+
+**Der Unterschied zum Punktverlauf, der leicht zu übersehen ist:** `rally_sync`
+**ersetzt** den Stand beim Host, `match_event_sync` **vereinigt** ihn. Für die
+Ereignisse hält der Host die Wahrheit — ein Tablet, das ein Feld übernimmt, kennt
+die Karten seines Vorgängers nicht und dürfte sie deshalb nie überschreiben.
+Daraus folgt: Der Abgleich ist unschädlich und wird bei jeder Gelegenheit
+mitgeschickt, an der auch `rally_sync` geht.

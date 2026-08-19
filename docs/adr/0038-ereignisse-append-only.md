@@ -1,6 +1,6 @@
 # 0038 — Zettel-Ereignisse sind append-only; eine Rücknahme ist ein Eintrag, kein Löschen
 
-- **Status:** proposed
+- **Status:** accepted (umgesetzt 19.08.2026, Etappen E1–E8)
 - **Datum:** 2026-08-19
 
 Gehört zu [docs/features/schiedsrichterzettel-druck.md](../features/schiedsrichterzettel-druck.md),

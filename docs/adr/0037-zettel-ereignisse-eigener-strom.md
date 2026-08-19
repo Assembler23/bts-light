@@ -1,6 +1,6 @@
 # 0037 — Zettel-Ereignisse: eigener Frame, eigener Store, eigene Datei
 
-- **Status:** proposed
+- **Status:** accepted (umgesetzt 19.08.2026, Etappen E1–E8)
 - **Datum:** 2026-08-19
 
 Gehört zu [docs/features/schiedsrichterzettel-druck.md](../features/schiedsrichterzettel-druck.md).

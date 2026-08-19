@@ -444,3 +444,11 @@ ihrer Halle vergeben. Spieler sehen die Halle früh auf den
 Hallen-Monitoren und im badhub-Aushang (`display=next&halle=…`); das
 konkrete Feld folgt wie bisher erst kurz vor dem Spiel. Vorverteilung und
 aktive Tages-Halle schließen sich aus.
+
+## Schiedsrichterzettel in der fernen Halle
+
+Der Slave schreibt selbst nichts (`slave_bridge.rs` leitet nur um). Es gibt dort
+deshalb **keinen Zettel-Bestand und kein Verzeichnis** — die Tablets der fernen
+Halle hängen direkt am Master-Relay, ihre Ereignisse landen im Master. Gedruckt
+wird am Master oder über die Turnierleitungs-Seite. Dasselbe gilt seit jeher für
+den Punktverlauf.
